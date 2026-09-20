@@ -213,6 +213,19 @@
 			]
 		},
 		{
+			"Name": "HyperAIStudioDialogue",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
 			"Name": "HyperAIStudioUAF",
 			"Type": "Editor",
 			"LoadingPhase": "None",

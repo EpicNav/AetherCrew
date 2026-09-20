@@ -372,6 +372,10 @@
   {
    "id": "probe.uaf_animation_graph",
    "kind": "Probe"
+  },
+  {
+   "id": "probe.dialogue_speech_service",
+   "kind": "Probe"
   }
  ],
  "packs": [
@@ -3012,6 +3016,53 @@
      "cohort": "cohort.source.hyperaistudiouaftoolset.v1",
      "safety": [
       "Read"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "dialogue_speech",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [
+    {
+     "id": "dialogue_backend",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "probe.dialogue_speech_service"
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "hyper_dialogue_inspect",
+     "cohort": "cohort.source.hyperaistudiodialoguetoolset.v1",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_dialogue_validate",
+     "cohort": "cohort.source.hyperaistudiodialoguetoolset.v1",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_dialogue_render",
+     "cohort": "cohort.source.hyperaistudiodialoguetoolset.v1",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_dialogue_apply_plan",
+     "cohort": "cohort.source.hyperaistudiodialoguetoolset.v1",
+     "safety": [
+      "Edit"
      ]
     }
    ]

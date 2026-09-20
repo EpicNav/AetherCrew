@@ -292,7 +292,11 @@ bool FHyperAIStudioExternalServices::PostJson(
 	Request->SetURL(JoinUrl(Service.BaseUrl, Path));
 	Request->SetVerb(TEXT("POST"));
 	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
-	Request->SetTimeout(FMath::Clamp(Service.TimeoutSeconds, 1, 15 * 60));
+	const float Timeout = static_cast<float>(FMath::Clamp(Service.TimeoutSeconds, 1, 15 * 60));
+	Request->SetTimeout(Timeout);
+	// A model that renders for a minute before answering sends nothing in the meantime, and the default
+	// activity timeout would abandon the request at thirty seconds with the work already under way.
+	Request->SetActivityTimeout(Timeout);
 	if (!Service.ApiKeyVariable.IsEmpty() && !Service.ApiKeyHeader.IsEmpty())
 	{
 		Request->SetHeader(Service.ApiKeyHeader, Service.ApiKeyPrefix + ReadKey(Service));

@@ -4841,7 +4841,8 @@ void BuildAgentInstructionBlocks(
 		TEXT("- Only read `.hyperai/context/` files when the prompt explicitly references them.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Domain Guides") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("- Before designing or changing an Animation Blueprint, read `.hyperai/docs/HyperAIStudio-AnimationCookbook.md`.") LINE_TERMINATOR +
-		TEXT("- Before designing or changing a UAF (Unreal Animation Framework) animation graph, read `.hyperai/docs/HyperAIStudio-UAFCookbook.md`.") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("- Before designing or changing a UAF (Unreal Animation Framework) animation graph, read `.hyperai/docs/HyperAIStudio-UAFCookbook.md`.") LINE_TERMINATOR +
+		TEXT("- Before writing or rendering character dialogue, read `.hyperai/docs/HyperAIStudio-DialogueCookbook.md`.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Shared Project Workspace") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("- Treat `.hyperai/` as the shared, Git-trackable workspace for useful agent context, prompts, plans, research, decisions, logs, and task-local scratch files.") LINE_TERMINATOR +
 		TEXT("- Do not create generic agent-work folders such as `Planning`, `Temp`, `Research`, `Notes`, or `Scripts` in the project root.") LINE_TERMINATOR +
