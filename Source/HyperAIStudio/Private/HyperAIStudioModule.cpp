@@ -33,6 +33,7 @@
 #include "HyperAIStudioDiagnosticsRegistration.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioCapabilityCatalogCounts.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioFoundationProbe.h"
@@ -965,6 +966,38 @@ private:
 				{TEXT("hyper_texture_graph_inspect"), TEXT("hyper_texture_graph_apply_plan"),
 					TEXT("hyper_texture_graph_validate")},
 				{TEXT("TextureGraph")}
+			},
+			{
+				TEXT("HyperAIStudioLighting"),
+				TEXT("lighting_lookdev"),
+				TEXT("cohort.source.hyperaistudiolightingtoolset.v1"),
+				{TEXT("hyper_lighting_inspect"), TEXT("hyper_lighting_apply_plan"),
+					TEXT("hyper_lighting_compare")},
+				{}
+			},
+			{
+				TEXT("HyperAIStudioLevelDesign"),
+				TEXT("level_design"),
+				TEXT("cohort.source.hyperaistudioleveldesigntoolset.v1"),
+				{TEXT("hyper_level_design_inspect"), TEXT("hyper_level_blockout_apply_plan"),
+					TEXT("hyper_level_design_validate")},
+				{}
+			},
+			{
+				TEXT("HyperAIStudioAnimBlueprint"),
+				TEXT("anim_blueprint"),
+				TEXT("cohort.source.hyperaistudioanimblueprinttoolset.v1"),
+				{TEXT("hyper_anim_blueprint_inspect"), TEXT("hyper_anim_blueprint_apply_plan"),
+					TEXT("hyper_anim_blueprint_validate")},
+				{}
+			},
+			{
+				TEXT("HyperAIStudioUAF"),
+				TEXT("uaf_graph"),
+				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),
+				{TEXT("hyper_uaf_inspect"), TEXT("hyper_uaf_apply_plan"),
+					TEXT("hyper_uaf_validate")},
+				{TEXT("UAF"), TEXT("UAFAnimGraph")}
 			},
 			{
 				TEXT("HyperAIStudioPCG"),
@@ -2808,7 +2841,7 @@ private:
 			TEXT("Extended Hyper Tools"),
 			TEXT("Primary"),
 			TEXT("Tools"),
-			TEXT("Epic + 109 Hyper"),
+			FString::Printf(TEXT("Epic + %d Hyper"), HyperAIStudio::CapabilityCatalog::GeneratedToolCount),
 			TEXT("3 discovery dispatchers"),
 			TEXT("Optional UE 5.8 source catalog"),
 			TEXT("Search tool name, description, or toolset"),

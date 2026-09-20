@@ -9,12 +9,23 @@
 #include "HyperAIStudioAgentChatHistory.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioAsyncJobHost.h"
+#include "HyperAIStudioResultPreview.h"
+#include "HAL/FileManager.h"
+#include "Misc/App.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "HyperAIStudioSettings.h"
 #include "Misc/AutomationTest.h"
 
 namespace HyperAIStudio::ServiceTests
 {
 	constexpr EAutomationTestFlags Flags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter;
+
+	/** Tests keep their scores out of the project's real scoreboard. */
+	FString ScratchScoreboard()
+	{
+		return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Tests/AgentScoreboard.json"));
+	}
 
 	/** Pumps the ticker the job host runs on, with real time passing for deadline checks. */
 	void Pump(const int32 Ticks)
@@ -37,6 +48,8 @@ bool FHyperAIStudioActivityLogTest::RunTest(const FString& Parameters)
 	(void)Parameters;
 	const TArray<FHyperAIStudioActivityEntry> Existing = FHyperAIStudioAgentActivityLog::GetSnapshot();
 	FHyperAIStudioAgentActivityLog::Clear();
+	// Re-recording the saved entries below would otherwise count their outcomes a second time.
+	FHyperAIStudioAgentScoreboard::SetStoragePathForTests(HyperAIStudio::ServiceTests::ScratchScoreboard());
 
 	FHyperAIStudioActivityEntry First;
 	First.ToolName = TEXT("first");
@@ -67,6 +80,7 @@ bool FHyperAIStudioActivityLogTest::RunTest(const FString& Parameters)
 	{
 		FHyperAIStudioAgentActivityLog::Record(Existing[Index]);
 	}
+	FHyperAIStudioAgentScoreboard::SetStoragePathForTests(FString());
 	return true;
 }
 
@@ -254,6 +268,32 @@ bool FHyperAIStudioAgentStateTest::RunTest(const FString& Parameters)
 	Inputs.Tail = TEXT("Here is the plan 1. Rework the emitter");
 	TestEqual(TEXT("A plan is distinguished from a permission prompt"), Evaluate(Inputs).State, EHyperAIStudioAgentState::PlanReview);
 
+	// Claude Code's plan approval, drawn inside its box with the cursor on the first option.
+	const FString PlanPrompt = FString(TEXT("Would you like to proceed?\n"))
+		+ TEXT("\u2502 \u276F 1. Yes, and use auto mode             \u2502\n")
+		+ TEXT("\u2502   2. Yes, manually approve edits         \u2502\n")
+		+ TEXT("\u2502   3. No, keep planning                   \u2502\n");
+	FHyperAIStudioPlanApprovalChoice Choice = FEval::FindPlanAutoApprovalChoice(PlanPrompt);
+	TestEqual(TEXT("The auto-mode option is found"), Choice.Digit, 1);
+	TestTrue(TEXT("The cursor on it is seen"), Choice.bCursorOnChoice);
+	Inputs.Tail = PlanPrompt;
+	Snapshot = Evaluate(Inputs);
+	TestEqual(TEXT("Claude's plan prompt is plan review, not a generic question"), Snapshot.State, EHyperAIStudioAgentState::PlanReview);
+	TestTrue(TEXT("The option is the evidence"), Snapshot.Evidence.Contains(TEXT("auto mode")));
+
+	Choice = FEval::FindPlanAutoApprovalChoice(
+		TEXT("  \u276F 1. Yes, manually approve edits\n    2. Yes, and auto-accept edits\n    3. No, keep planning\n"));
+	TestEqual(TEXT("Without auto mode, auto-accept is the fallback"), Choice.Digit, 2);
+	TestFalse(TEXT("The cursor is not on the fallback yet"), Choice.bCursorOnChoice);
+	Choice = FEval::FindPlanAutoApprovalChoice(
+		TEXT("1. Yes, and auto-accept edits\n2. Yes, and use auto mode\n"));
+	TestEqual(TEXT("Auto mode wins over auto-accept"), Choice.Digit, 2);
+	TestEqual(TEXT("An edit permission prompt is never a plan approval"),
+		FEval::FindPlanAutoApprovalChoice(TEXT("Do you want to make this edit?\n\u276F 1. Yes\n  2. Yes, allow all edits during this session\n  3. No\n")).Digit,
+		static_cast<int32>(INDEX_NONE));
+	Inputs.Tail = TEXT("? for shortcuts  \u23F8 plan mode on (shift+tab to cycle)");
+	TestNotEqual(TEXT("Claude's plan-mode footer alone is not a plan to review"), Evaluate(Inputs).State, EHyperAIStudioAgentState::PlanReview);
+
 	Inputs.Tail = TEXT("Error: usage limit reached, resets at 4pm");
 	TestEqual(TEXT("A usage limit blocks"), Evaluate(Inputs).State, EHyperAIStudioAgentState::Blocked);
 
@@ -308,6 +348,181 @@ bool FHyperAIStudioCohortMismatchTest::RunTest(const FString& Parameters)
 
 	TestFalse(TEXT("An empty declaration is refused with a reason"),
 		FRuntime::DescribeExactGeneratedCohortMismatch(FString(), Cohort, NiagaraTools).IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioResultPreviewTest,
+	"HyperAIStudio.Chat.ResultPreview",
+	HyperAIStudio::ServiceTests::Flags)
+bool FHyperAIStudioResultPreviewTest::RunTest(const FString& Parameters)
+{
+	const FString Path = FHyperAIStudioResultPreview::GetAssetPreviewPath(TEXT("/Game/FX/M_Fire.M_Fire"));
+	const FString PreviewRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Previews"));
+	TestTrue(TEXT("Previews live under Saved/HyperAIStudio/Previews"), Path.StartsWith(PreviewRoot));
+	TestTrue(TEXT("Previews are PNG files"), Path.EndsWith(TEXT(".png")));
+	TestEqual(TEXT("The path is deterministic"),
+		FHyperAIStudioResultPreview::GetAssetPreviewPath(TEXT("/Game/FX/M_Fire.M_Fire")), Path);
+	TestNotEqual(TEXT("Paths that sanitise alike still get distinct files"),
+		FHyperAIStudioResultPreview::GetAssetPreviewPath(TEXT("/Game/A_B.X")),
+		FHyperAIStudioResultPreview::GetAssetPreviewPath(TEXT("/Game/A/B.X")));
+	TestFalse(TEXT("No path separators leak into the file name"),
+		FPaths::GetCleanFilename(Path).Contains(TEXT("/")));
+
+	if (!FApp::CanEverRender())
+	{
+		AddInfo(TEXT("No renderer in this run; skipping the thumbnail render."));
+		return true;
+	}
+	UObject* Cube = LoadObject<UObject>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("Engine cube loads"), Cube))
+	{
+		return false;
+	}
+	FString Written;
+	FString Error;
+	TestTrue(TEXT("The cube renders to a preview: ") + Error,
+		FHyperAIStudioResultPreview::WriteAssetPreview(*Cube, Written, Error));
+	TArray<uint8> Bytes;
+	TestTrue(TEXT("The preview file exists"), FFileHelper::LoadFileToArray(Bytes, *Written));
+	TestTrue(TEXT("The preview is a PNG"), Bytes.Num() > 8 && Bytes[1] == 'P' && Bytes[2] == 'N' && Bytes[3] == 'G');
+	IFileManager::Get().Delete(*Written);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioActivityAttributionTest,
+	"HyperAIStudio.Chat.ActivityAttribution",
+	HyperAIStudio::ServiceTests::Flags)
+
+bool FHyperAIStudioActivityAttributionTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FHyperAIStudioAgentScoreboard::SetStoragePathForTests(HyperAIStudio::ServiceTests::ScratchScoreboard());
+	FHyperAIStudioAgentScoreboard::Reset();
+	FString WorkingAgent = TEXT("Codex");
+	FString WorkingModel = TEXT("gpt-test");
+	bool bSomeoneWorking = true;
+	FHyperAIStudioAgentActivityLog::FAgentResolver Previous = FHyperAIStudioAgentActivityLog::SetAgentResolver(
+		[&](FString& OutAgent, FString& OutModel)
+		{
+			OutAgent = WorkingAgent;
+			OutModel = WorkingModel;
+			return bSomeoneWorking;
+		});
+
+	const FString Operation = TEXT("attribution-") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString Target = TEXT("/Game/__HyperAIStudioTests/Attribution.") + Operation;
+	FHyperAIStudioActivityEntry Asked;
+	Asked.Kind = EHyperAIStudioActivityKind::ApprovalRequested;
+	Asked.PackId = TEXT("niagara_vfx");
+	Asked.ToolName = TEXT("hyper_niagara_apply_plan");
+	Asked.OperationId = Operation;
+	Asked.Target = Target;
+	FHyperAIStudioAgentActivityLog::Record(Asked);
+	TestEqual(TEXT("The working agent is credited when an operation starts"), FHyperAIStudioAgentActivityLog::GetSnapshot()[0].Agent, FString(TEXT("Codex")));
+
+	// Another tab is working by the time the edit finishes; the credit stays with the agent that asked.
+	WorkingAgent = TEXT("Claude Code");
+	WorkingModel.Reset();
+	FHyperAIStudioActivityEntry Finished;
+	Finished.Kind = EHyperAIStudioActivityKind::Completed;
+	Finished.PackId = Asked.PackId;
+	Finished.ToolName = Asked.ToolName;
+	Finished.OperationId = Operation;
+	FHyperAIStudioAgentActivityLog::Record(Finished);
+	const FHyperAIStudioActivityEntry Latest = FHyperAIStudioAgentActivityLog::GetSnapshot()[0];
+	TestEqual(TEXT("Later entries inherit the agent"), Latest.Agent, FString(TEXT("Codex")));
+	TestEqual(TEXT("and its model"), Latest.Model, FString(TEXT("gpt-test")));
+	TestEqual(TEXT("and the target"), Latest.Target, Target);
+
+	const FString Change = FHyperAIStudioAgentActivityLog::DescribeLastChange(Target);
+	TestTrue(TEXT("A stale revision names who changed the asset: ") + Change, Change.Contains(TEXT("Codex (gpt-test)")) && Change.Contains(Operation));
+	TestTrue(TEXT("Nothing is said about untouched assets"), FHyperAIStudioAgentActivityLog::DescribeLastChange(Target + TEXT("Other")).IsEmpty());
+
+	const FHyperAIStudioAgentScore Score = FHyperAIStudioAgentScoreboard::Summarize(TEXT("Codex"), TEXT("gpt-test"), {TEXT("niagara_vfx")});
+	TestEqual(TEXT("The finished operation counts for the agent that asked"), Score.Completed, 1);
+	TestEqual(TEXT("and only once"), Score.Total(), 1);
+
+	bSomeoneWorking = false;
+	FHyperAIStudioActivityEntry Unknown;
+	Unknown.OperationId = Operation + TEXT("-other");
+	FHyperAIStudioAgentActivityLog::Record(Unknown);
+	TestTrue(TEXT("With no clear agent, none is credited"), FHyperAIStudioAgentActivityLog::GetSnapshot()[0].Agent.IsEmpty());
+
+	FHyperAIStudioAgentActivityLog::SetAgentResolver(MoveTemp(Previous));
+	FHyperAIStudioAgentScoreboard::SetStoragePathForTests(FString());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAgentRoutingTest,
+	"HyperAIStudio.Chat.AgentRouting",
+	HyperAIStudio::ServiceTests::Flags)
+
+bool FHyperAIStudioAgentRoutingTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	const FString Scratch = HyperAIStudio::ServiceTests::ScratchScoreboard();
+	FHyperAIStudioAgentScoreboard::SetStoragePathForTests(Scratch);
+	FHyperAIStudioAgentScoreboard::Reset();
+	const TArray<FString> Usable = {TEXT("Codex"), TEXT("Claude Code")};
+	const TArray<FString> Vfx = {TEXT("niagara_vfx")};
+	auto Tally = [](const TCHAR* Agent, const TCHAR* Model, const EHyperAIStudioActivityKind Kind, const int32 Count)
+	{
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			FHyperAIStudioActivityEntry Entry;
+			Entry.Kind = Kind;
+			Entry.Agent = Agent;
+			Entry.Model = Model;
+			Entry.PackId = TEXT("niagara_vfx");
+			Entry.OperationId = FString::Printf(TEXT("routing-%d"), Index);
+			FHyperAIStudioAgentScoreboard::Tally(Entry);
+		}
+	};
+
+	FHyperAIStudioRouteChoice Choice = FHyperAIStudioAgentScoreboard::ChooseAgent(TEXT("Claude Code"), TEXT("smart"), Vfx, Usable, TEXT("Codex"));
+	TestTrue(TEXT("A fixed agent wins when it is set up"), Choice.Agent == TEXT("Claude Code") && Choice.Model == TEXT("smart"));
+	Choice = FHyperAIStudioAgentScoreboard::ChooseAgent(TEXT("Gemini"), FString(), Vfx, Usable, TEXT("Codex"));
+	TestEqual(TEXT("A fixed agent that is not set up falls back"), Choice.Agent, FString(TEXT("Codex")));
+	TestTrue(TEXT("and says why: ") + Choice.Reason, Choice.Reason.Contains(TEXT("Gemini is not set up")));
+	Choice = FHyperAIStudioAgentScoreboard::ChooseAgent(FString(), FString(), Vfx, Usable, TEXT("Claude Code"));
+	TestEqual(TEXT("With no records the preferred agent is used"), Choice.Agent, FString(TEXT("Claude Code")));
+
+	Tally(TEXT("Codex"), TEXT(""), EHyperAIStudioActivityKind::Completed, 4);
+	Tally(TEXT("Codex"), TEXT(""), EHyperAIStudioActivityKind::Failed, 1);
+	Tally(TEXT("Claude Code"), TEXT("opus"), EHyperAIStudioActivityKind::Completed, 2);
+	Choice = FHyperAIStudioAgentScoreboard::ChooseAgent(FString(), FString(), Vfx, Usable, TEXT("Claude Code"));
+	TestEqual(TEXT("Only an agent with enough operations can be picked"), Choice.Agent, FString(TEXT("Codex")));
+	TestTrue(TEXT("and the reason gives its record: ") + Choice.Reason, Choice.Reason.Contains(TEXT("4 of 5")));
+
+	Tally(TEXT("Claude Code"), TEXT("opus"), EHyperAIStudioActivityKind::Completed, 8);
+	Choice = FHyperAIStudioAgentScoreboard::ChooseAgent(FString(), FString(), Vfx, Usable, TEXT("Codex"));
+	TestTrue(TEXT("A better record wins, with the model that earned it"), Choice.Agent == TEXT("Claude Code") && Choice.Model == TEXT("opus"));
+	Tally(TEXT("Claude Code"), TEXT("opus"), EHyperAIStudioActivityKind::ApprovalRejected, 20);
+	Choice = FHyperAIStudioAgentScoreboard::ChooseAgent(FString(), FString(), Vfx, Usable, TEXT("Codex"));
+	TestEqual(TEXT("Plans you reject count against an agent"), Choice.Agent, FString(TEXT("Codex")));
+	Choice = FHyperAIStudioAgentScoreboard::ChooseAgent(FString(), FString(), {TEXT("pcg")}, Usable, TEXT("Codex"));
+	TestTrue(TEXT("Records on other packs do not decide"), Choice.Reason.Contains(TEXT("no agent has")));
+	Choice = FHyperAIStudioAgentScoreboard::ChooseAgent(FString(), FString(), Vfx, {TEXT("Claude Code")}, TEXT("Claude Code"));
+	TestEqual(TEXT("Only usable agents are picked"), Choice.Agent, FString(TEXT("Claude Code")));
+
+	FHyperAIStudioAgentScoreboard::SetStoragePathForTests(Scratch);
+	TestEqual(TEXT("The scoreboard persists"), FHyperAIStudioAgentScoreboard::Summarize(TEXT("Codex"), FString(), Vfx).Total(), 5);
+
+	UHyperAIStudioSettings* Settings = NewObject<UHyperAIStudioSettings>();
+	Settings->AgentTaskRoutes.Reset();
+	TestTrue(TEXT("Empty task routes are seeded"), Settings->EnsureDefaultTaskRoutes());
+	TestFalse(TEXT("but only once"), Settings->EnsureDefaultTaskRoutes());
+	const FHyperAIStudioAgentTaskRoute* VfxRoute = Settings->AgentTaskRoutes.FindByPredicate(
+		[](const FHyperAIStudioAgentTaskRoute& Route) { return Route.Category == TEXT("VFX"); });
+	TestTrue(TEXT("VFX picks by the Niagara record"), VfxRoute && VfxRoute->AgentName.IsEmpty() && VfxRoute->Packs.Contains(TEXT("niagara_vfx")));
+	const FHyperAIStudioAgentTaskRoute* PlanRoute = Settings->AgentTaskRoutes.FindByPredicate(
+		[](const FHyperAIStudioAgentTaskRoute& Route) { return Route.ModelId == UHyperAIStudioSettings::SmartModelId; });
+	TestTrue(TEXT("Planning starts Claude Code in Smart mode"), PlanRoute && PlanRoute->AgentName == TEXT("Claude Code"));
+
+	FHyperAIStudioAgentScoreboard::SetStoragePathForTests(FString());
 	return true;
 }
 

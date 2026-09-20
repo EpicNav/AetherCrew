@@ -94,6 +94,18 @@ struct FHyperAIStudioMCPServerEntry
 	bool bEnabled = false;
 };
 
+/** How agents may build material graphs. */
+UENUM()
+enum class EHyperAIStudioMaterialAuthoringMode : uint8
+{
+	/** Graph nodes only; Custom HLSL nodes are refused. */
+	Nodes,
+	/** Custom HLSL wherever the agent likes. */
+	Hlsl,
+	/** Graph nodes, with a Custom HLSL node only where nodes cannot express the math, each with a reason. */
+	Hybrid
+};
+
 /** Model choices for one HyperAI Chat agent. */
 USTRUCT()
 struct FHyperAIStudioAgentModelRoute
@@ -115,6 +127,29 @@ struct FHyperAIStudioAgentModelRoute
 	/** Empty means the agent's own configured default: no model flag is passed. */
 	UPROPERTY(Config, EditAnywhere, Category = "Models")
 	FString SelectedModel;
+};
+
+/** Which agent a new chat tab for one kind of task starts with. */
+USTRUCT()
+struct FHyperAIStudioAgentTaskRoute
+{
+	GENERATED_BODY()
+
+	/** Shown in the new-tab menu and on the tab, e.g. VFX. */
+	UPROPERTY(Config, EditAnywhere, Category = "Routing")
+	FString Category;
+
+	/** Empty picks the agent with the best record on Packs, or the preferred agent until one has a record. */
+	UPROPERTY(Config, EditAnywhere, Category = "Routing")
+	FString AgentName;
+
+	/** Empty uses the agent's selected model. Must be in that agent's model list, or smart for Claude Code. */
+	UPROPERTY(Config, EditAnywhere, Category = "Routing")
+	FString ModelId;
+
+	/** Capability packs this kind of task uses; their operation outcomes decide the automatic pick. */
+	UPROPERTY(Config, EditAnywhere, Category = "Routing")
+	TArray<FString> Packs;
 };
 
 UCLASS(Config = EditorPerProjectUserSettings, DefaultConfig, meta = (DisplayName = "HyperAIStudio"))
@@ -250,6 +285,46 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Models")
 	TArray<FHyperAIStudioAgentModelRoute> AgentModelRoutes;
 
+	/** Model Claude Code plans with when the Model menu is set to Smart. */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Models")
+	FString SmartPlanModel = TEXT("claude-fable-5-1");
+
+	/** Model Claude Code builds with once a Smart plan is accepted. */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Models")
+	FString SmartBuildModel = TEXT("claude-opus-5");
+
+	/** In Smart mode, answer Claude Code's plan approval with its auto-mode choice so building starts without you. Unreal edits still pass the approval gate. */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Models")
+	bool bAutoAcceptPlansInSmartMode = true;
+
+	/** The chat panel's new-tab menu: one entry per kind of task. Empty restores the built-in list. */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing")
+	TArray<FHyperAIStudioAgentTaskRoute> AgentTaskRoutes;
+
+	/**
+	 * During a handoff between tabs, send each prompt (plan, implement, review) as soon as the receiving agent is
+	 * idle. Off, or while that agent is busy, the prompt is only typed in for you to send.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing")
+	bool bAutoSendHandoffPrompts = true;
+
+	/**
+	 * How agents build materials. Hybrid: graph nodes, which artists can read and the compiler optimises, plus a
+	 * Custom HLSL node only for math nodes cannot express, each with a stated reason. Nodes forbids Custom HLSL;
+	 * Hlsl allows it freely.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Unreal MCP|Materials")
+	EHyperAIStudioMaterialAuthoringMode MaterialAuthoringMode = EHyperAIStudioMaterialAuthoringMode::Hybrid;
+
+	/** Model menu id for Smart: plan with SmartPlanModel, build with SmartBuildModel. */
+	static constexpr const TCHAR* SmartModelId = TEXT("smart");
+
+	/** Smart relies on Claude Code's opusplan alias, so only Claude Code offers it. */
+	static bool IsSmartModelAgent(const FString& AgentName)
+	{
+		return AgentName.Equals(TEXT("Claude Code"), ESearchCase::IgnoreCase);
+	}
+
 	/** Shows the fast local title-based comment action in Blueprint/PCG graph context menus. */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Blueprint Context Menu", meta = (
 		DisplayName = "Show Quick Auto Comment in Blueprint Menu",
@@ -314,6 +389,31 @@ public:
 		return bAdded;
 	}
 
+	/** Seeds the task routes when the list is empty. Returns true if it did. */
+	bool EnsureDefaultTaskRoutes()
+	{
+		if (!AgentTaskRoutes.IsEmpty())
+		{
+			return false;
+		}
+		auto Add = [this](const TCHAR* Category, TArray<FString> Packs, const TCHAR* Agent = TEXT(""), const TCHAR* Model = TEXT(""))
+		{
+			FHyperAIStudioAgentTaskRoute& Route = AgentTaskRoutes.AddDefaulted_GetRef();
+			Route.Category = Category;
+			Route.AgentName = Agent;
+			Route.ModelId = Model;
+			Route.Packs = MoveTemp(Packs);
+		};
+		Add(TEXT("Plan a feature"), {}, TEXT("Claude Code"), SmartModelId);
+		Add(TEXT("Materials"), {TEXT("materials_dynamic_material"), TEXT("texture_graph")});
+		Add(TEXT("VFX"), {TEXT("niagara_vfx")});
+		Add(TEXT("Lighting"), {TEXT("lighting_lookdev")});
+		Add(TEXT("Level Design"), {TEXT("level_design"), TEXT("worldbuilding_navigation"), TEXT("pcg"), TEXT("geometry_interchange")});
+		Add(TEXT("Animation"), {TEXT("anim_blueprint"), TEXT("uaf_graph"), TEXT("animation_rigging"), TEXT("character")});
+		Add(TEXT("Gameplay"), {TEXT("blueprint"), TEXT("gameplay_systems"), TEXT("gas"), TEXT("gameplay_ai"), TEXT("enhanced_input")});
+		return true;
+	}
+
 	/**
 	 * Builds the launch argument for Route's selected model. True with an empty OutArgument means "use the agent's
 	 * default". False means the route is unsafe to launch with; OutArgument stays empty and OutError says why.
@@ -329,18 +429,7 @@ public:
 			return true;
 		}
 
-		auto IsAsciiAlnum = [](TCHAR Char)
-		{
-			return (Char >= TEXT('0') && Char <= TEXT('9')) || (Char >= TEXT('a') && Char <= TEXT('z')) || (Char >= TEXT('A') && Char <= TEXT('Z'));
-		};
-		// A leading '-' would make the id read as another flag.
-		bool bModelSafe = Model.Len() <= 128 && IsAsciiAlnum(Model[0]);
-		for (const TCHAR Char : Model)
-		{
-			bModelSafe &= IsAsciiAlnum(Char) || Char == TEXT('.') || Char == TEXT('_') || Char == TEXT('-')
-				|| Char == TEXT(':') || Char == TEXT('/') || Char == TEXT('@');
-		}
-		if (!bModelSafe)
+		if (!IsSafeModelId(Model))
 		{
 			OutError = FString::Printf(TEXT("Model \"%s\" is not a plain model id, so it was not passed to the agent."), *Model);
 			return false;
@@ -370,6 +459,61 @@ public:
 
 		OutArgument = Format.Replace(TEXT("{0}"), *Model, ESearchCase::CaseSensitive);
 		return true;
+	}
+
+	/** A plain model id. It lands in a cmd.exe line, so no shell characters, and no leading '-' that would read as a flag. */
+	static bool IsSafeModelId(const FString& Model)
+	{
+		auto IsAsciiAlnum = [](TCHAR Char)
+		{
+			return (Char >= TEXT('0') && Char <= TEXT('9')) || (Char >= TEXT('a') && Char <= TEXT('z')) || (Char >= TEXT('A') && Char <= TEXT('Z'));
+		};
+		bool bSafe = !Model.IsEmpty() && Model.Len() <= 128 && IsAsciiAlnum(Model[0]);
+		for (const TCHAR Char : Model)
+		{
+			bSafe &= IsAsciiAlnum(Char) || Char == TEXT('.') || Char == TEXT('_') || Char == TEXT('-')
+				|| Char == TEXT(':') || Char == TEXT('/') || Char == TEXT('@');
+		}
+		return bSafe;
+	}
+
+	/**
+	 * Claude Code's Smart launch. The opusplan alias runs whatever `opus` names while in plan mode and whatever
+	 * `sonnet` names otherwise; these two variables re-point those names. OutPrefix goes inside the agent's own
+	 * launch parentheses so only that process sees them, and the quoted `set "NAME=value"` form keeps cmd from
+	 * storing the space before `&&` in the value.
+	 */
+	static bool TryBuildSmartModelLaunch(const FString& PlanModel, const FString& BuildModel, FString& OutPrefix, FString& OutArgument, FString& OutError)
+	{
+		OutPrefix.Reset();
+		OutArgument.Reset();
+		OutError.Reset();
+		if (!IsSafeModelId(PlanModel) || !IsSafeModelId(BuildModel))
+		{
+			OutError = FString::Printf(TEXT("Smart plan model \"%s\" and build model \"%s\" must both be plain model ids."), *PlanModel, *BuildModel);
+			return false;
+		}
+		OutPrefix = FString::Printf(
+			TEXT("set \"ANTHROPIC_DEFAULT_OPUS_MODEL=%s\" && set \"ANTHROPIC_DEFAULT_SONNET_MODEL=%s\" && "), *PlanModel, *BuildModel);
+		OutArgument = TEXT("--model opusplan");
+		return true;
+	}
+
+	/** Route's launch prefix and model argument, Smart included. Same contract as TryResolveModelArgument. */
+	bool TryResolveModelLaunch(const FHyperAIStudioAgentModelRoute& Route, FString& OutPrefix, FString& OutArgument, FString& OutError) const
+	{
+		OutPrefix.Reset();
+		if (Route.SelectedModel != SmartModelId)
+		{
+			return TryResolveModelArgument(Route, OutArgument, OutError);
+		}
+		if (!IsSmartModelAgent(Route.AgentName))
+		{
+			OutArgument.Reset();
+			OutError = FString::Printf(TEXT("Smart is only available for Claude Code, not %s."), *Route.AgentName);
+			return false;
+		}
+		return TryBuildSmartModelLaunch(SmartPlanModel, SmartBuildModel, OutPrefix, OutArgument, OutError);
 	}
 
 	bool IsBuiltInAgentEnabled(const FString& AgentName) const
