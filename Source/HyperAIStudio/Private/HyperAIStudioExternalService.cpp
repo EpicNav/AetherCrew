@@ -124,16 +124,8 @@ namespace HyperAIStudio::Services::Private
 
 TArray<FHyperAIStudioExternalServiceSettings> FHyperAIStudioExternalServices::GetServices()
 {
-	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
-	if (!Settings)
-	{
-		return {};
-	}
-	if (Settings->EnsureDefaultExternalServices())
-	{
-		Settings->SaveConfig();
-	}
-	return Settings->ExternalServices;
+	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+	return Settings ? Settings->ExternalServices : TArray<FHyperAIStudioExternalServiceSettings>();
 }
 
 bool FHyperAIStudioExternalServices::Find(const FString& Id, FHyperAIStudioExternalServiceSettings& OutService)

@@ -355,25 +355,11 @@ public:
 	bool bAutoSendHandoffPrompts = true;
 
 	/**
-	 * Services outside the editor that packs may call. Seeded with the local DramaBox speech server;
-	 * add a hosted one by naming the environment variable its key lives in, never the key itself.
+	 * Services outside the editor that packs may call: a model server on this machine, or a hosted API.
+	 * Add one by naming the environment variable its key lives in, never the key itself.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "External Services")
 	TArray<FHyperAIStudioExternalServiceSettings> ExternalServices;
-
-	/**
-	 * Folder on this machine holding the voice reference clips speech models clone from. A voice asset names
-	 * a file in it, so a clip that is missing is caught here rather than as an error from the service.
-	 */
-	UPROPERTY(Config, EditAnywhere, Category = "External Services")
-	FString VoiceReferenceFolder;
-
-	/**
-	 * The same folder as the speech service sees it. DramaBox runs in a container that mounts the folder
-	 * above at its own path, so a path from this machine means nothing to it; the plugin sends this instead.
-	 */
-	UPROPERTY(Config, EditAnywhere, Category = "External Services")
-	FString VoiceReferenceServiceFolder = TEXT("assets/voice-refs");
 
 	/**
 	 * What generated content may cost in one editor session, in whatever currency the services bill in.
@@ -381,28 +367,6 @@ public:
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "External Services", meta = (ClampMin = "0.0"))
 	float ExternalServiceSessionSpendCap = 5.0f;
-
-	/** Seeds ExternalServices with the services HyperAIStudio knows about when the list has none. */
-	bool EnsureDefaultExternalServices()
-	{
-		if (!ExternalServices.IsEmpty())
-		{
-			return false;
-		}
-		FHyperAIStudioExternalServiceSettings& DramaBox = ExternalServices.AddDefaulted_GetRef();
-		DramaBox.Id = TEXT("dramabox");
-		DramaBox.Label = TEXT("DramaBox speech (this machine)");
-		DramaBox.BaseUrl = TEXT("http://127.0.0.1:8125");
-		DramaBox.HealthPath = TEXT("/health");
-		DramaBox.ApiKeyHeader.Reset();
-		DramaBox.ApiKeyPrefix.Reset();
-		DramaBox.CostPerCall = 0.0f;
-		// One GPU slot serialises requests, so a line waits behind the queue; and a render that shares the
-		// card with the editor spends most of its time in the text encoder waiting for memory. Measured at
-		// 5 seconds with the card free and 315 for the same line with the editor open.
-		DramaBox.TimeoutSeconds = 900;
-		return true;
-	}
 
 	/** Reference images the preview panel has been pointed at, newest first. */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Preview")

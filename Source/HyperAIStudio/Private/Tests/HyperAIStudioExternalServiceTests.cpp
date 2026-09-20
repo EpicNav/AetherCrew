@@ -32,23 +32,24 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FHyperAIStudioServiceDefaultsTest::RunTest(const FString& Parameters)
 {
 	(void)Parameters;
+	using namespace HyperAIStudio::Services::Tests;
 	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
 	const TArray<FHyperAIStudioExternalServiceSettings> Restore = Settings->ExternalServices;
 	ON_SCOPE_EXIT { Settings->ExternalServices = Restore; };
 
+	// Nothing is seeded: a service is whatever the project configures, and the list starts empty.
 	Settings->ExternalServices.Reset();
-	TestTrue(TEXT("an empty list is seeded"), Settings->EnsureDefaultExternalServices());
-	TestFalse(TEXT("and seeding does not repeat"), Settings->EnsureDefaultExternalServices());
+	TestTrue(TEXT("an unconfigured project has no services"), FHyperAIStudioExternalServices::GetServices().IsEmpty());
 
-	FHyperAIStudioExternalServiceSettings DramaBox;
-	if (!TestTrue(TEXT("the local speech service is there"), FHyperAIStudioExternalServices::Find(TEXT("dramabox"), DramaBox)))
+	Settings->ExternalServices = {Paid(TEXT("local_model"), 0.0f)};
+	FHyperAIStudioExternalServiceSettings Local;
+	if (!TestTrue(TEXT("a configured service is found by id"), FHyperAIStudioExternalServices::Find(TEXT("local_model"), Local)))
 	{
 		return false;
 	}
-	TestTrue(TEXT("on this machine"), DramaBox.BaseUrl.Contains(TEXT("127.0.0.1")));
-	TestEqual(TEXT("costing nothing per line"), DramaBox.CostPerCall, 0.0f);
-	TestTrue(TEXT("with a generous timeout, because one GPU slot queues"), DramaBox.TimeoutSeconds >= 120);
-	TestTrue(TEXT("and needing no key"), FHyperAIStudioExternalServices::HasApiKey(DramaBox));
+	TestTrue(TEXT("with its url"), Local.BaseUrl.Contains(TEXT("127.0.0.1")));
+	TestTrue(TEXT("and needing no key when it names no variable"), FHyperAIStudioExternalServices::HasApiKey(Local));
+	TestTrue(TEXT("found whatever the case"), FHyperAIStudioExternalServices::Find(TEXT("LOCAL_MODEL"), Local));
 
 	FHyperAIStudioExternalServiceSettings Missing;
 	TestFalse(TEXT("an unknown id is not found"), FHyperAIStudioExternalServices::Find(TEXT("nope"), Missing));

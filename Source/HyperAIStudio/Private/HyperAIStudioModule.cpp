@@ -1003,14 +1003,6 @@ private:
 				{}
 			},
 			{
-				TEXT("HyperAIStudioDialogue"),
-				TEXT("dialogue_speech"),
-				TEXT("cohort.source.hyperaistudiodialoguetoolset.v1"),
-				{TEXT("hyper_dialogue_inspect"), TEXT("hyper_dialogue_validate"),
-					TEXT("hyper_dialogue_render"), TEXT("hyper_dialogue_apply_plan")},
-				{}
-			},
-			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),
