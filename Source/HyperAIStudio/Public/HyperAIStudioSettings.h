@@ -26,6 +26,52 @@ enum class EHyperAIStudioCapabilityDomain : uint8
 	ProjectAndPipeline UMETA(DisplayName = "Project and Pipeline")
 };
 
+/**
+ * One service outside the editor that a pack can call: a model server on this machine, or a hosted API.
+ *
+ * A key is never stored here. ApiKeyVariable names an environment variable, so a key cannot reach a config
+ * file that gets committed; the settings screen and every report say only whether one is set.
+ */
+USTRUCT(BlueprintType)
+struct FHyperAIStudioExternalServiceSettings
+{
+	GENERATED_BODY()
+
+	/** Identifier a pack asks for, e.g. dramabox. */
+	UPROPERTY(Config, EditAnywhere, Category = "External Services")
+	FString Id;
+
+	UPROPERTY(Config, EditAnywhere, Category = "External Services")
+	FString Label;
+
+	/** Scheme, host and port, with no trailing slash, e.g. http://127.0.0.1:8080. */
+	UPROPERTY(Config, EditAnywhere, Category = "External Services")
+	FString BaseUrl;
+
+	/** Path the health check asks for; empty means the base url answers it. */
+	UPROPERTY(Config, EditAnywhere, Category = "External Services")
+	FString HealthPath;
+
+	/** Environment variable holding the key. Empty for a service that needs none. */
+	UPROPERTY(Config, EditAnywhere, Category = "External Services")
+	FString ApiKeyVariable;
+
+	/** Header the key goes in, and what precedes it, e.g. Authorization and "Bearer ". */
+	UPROPERTY(Config, EditAnywhere, Category = "External Services")
+	FString ApiKeyHeader = TEXT("Authorization");
+
+	UPROPERTY(Config, EditAnywhere, Category = "External Services")
+	FString ApiKeyPrefix = TEXT("Bearer ");
+
+	/** What one call costs, for the approval summary and the session cap. Zero for a service on this machine. */
+	UPROPERTY(Config, EditAnywhere, Category = "External Services")
+	float CostPerCall = 0.0f;
+
+	/** A call that has not answered by now is abandoned; a queued GPU model needs a generous one. */
+	UPROPERTY(Config, EditAnywhere, Category = "External Services")
+	int32 TimeoutSeconds = 180;
+};
+
 UENUM()
 enum class EHyperAIStudioMCPTransport : uint8
 {
@@ -307,6 +353,40 @@ public:
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing")
 	bool bAutoSendHandoffPrompts = true;
+
+	/**
+	 * Services outside the editor that packs may call. Seeded with the local DramaBox speech server;
+	 * add a hosted one by naming the environment variable its key lives in, never the key itself.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "External Services")
+	TArray<FHyperAIStudioExternalServiceSettings> ExternalServices;
+
+	/**
+	 * What generated content may cost in one editor session, in whatever currency the services bill in.
+	 * A call that would pass this is refused rather than quietly spending more. Zero refuses every paid call.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "External Services", meta = (ClampMin = "0.0"))
+	float ExternalServiceSessionSpendCap = 5.0f;
+
+	/** Seeds ExternalServices with the services HyperAIStudio knows about when the list has none. */
+	bool EnsureDefaultExternalServices()
+	{
+		if (!ExternalServices.IsEmpty())
+		{
+			return false;
+		}
+		FHyperAIStudioExternalServiceSettings& DramaBox = ExternalServices.AddDefaulted_GetRef();
+		DramaBox.Id = TEXT("dramabox");
+		DramaBox.Label = TEXT("DramaBox speech (this machine)");
+		DramaBox.BaseUrl = TEXT("http://127.0.0.1:8080");
+		DramaBox.HealthPath = TEXT("/health");
+		DramaBox.ApiKeyHeader.Reset();
+		DramaBox.ApiKeyPrefix.Reset();
+		DramaBox.CostPerCall = 0.0f;
+		// One GPU slot serialises requests, so a line can wait behind a whole queue.
+		DramaBox.TimeoutSeconds = 300;
+		return true;
+	}
 
 	/** Reference images the preview panel has been pointed at, newest first. */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Preview")
