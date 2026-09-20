@@ -4,12 +4,12 @@
 static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatalog& OutCatalog)
 {
 	OutCatalog.Schema = TEXT("hyperai.capability-pack-catalog.v2");
-	OutCatalog.GeneratedFingerprint = TEXT("sha256:10c6a96f77a24a764e05252a922d0b5b273f00c421dc14b9678349a2ca199ffc");
+	OutCatalog.GeneratedFingerprint = TEXT("sha256:23c9285d8135e69599c57285c948b83f87c4aeb37ae58f3f6721c03721888efb");
 	OutCatalog.ApprovedPlanFingerprint = TEXT("sha256:0111a6ad1e4b2f81b6da0439a22d83ffbfd8f7ccb20f958d8494eaeee84c6d1a");
 	OutCatalog.AdmissionMatrixFingerprint = TEXT("sha256:404ea0204015fb9558cf2b5fcc092d77fb7e6dc323f0adde7032252e025c23c9");
 	OutCatalog.SourceLedgerFingerprint = TEXT("sha256:2954241d83a1a24feaf00a28c6884cae62c6b138923cd8d2deae23b7dc9c4e2e");
 	OutCatalog.SourceArtifactFingerprint = TEXT("sha256:52806e6f474cb0216a8cecb2531649612ef1b87f7381a560d023fd8389fd6f4b");
-	OutCatalog.SourceArtifactCount = 121;
+	OutCatalog.SourceArtifactCount = 124;
 
 	{
 		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
@@ -79,6 +79,11 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 	{
 		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
 		Item.Id = TEXT("module.ToolsetRegistry");
+		Item.Kind = EHyperAIStudioCapabilityPrerequisiteKind::Module;
+	}
+	{
+		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
+		Item.Id = TEXT("module.UAFAnimGraphUncookedOnly");
 		Item.Kind = EHyperAIStudioCapabilityPrerequisiteKind::Module;
 	}
 	{
@@ -263,6 +268,16 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 	}
 	{
 		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
+		Item.Id = TEXT("plugin.UAF");
+		Item.Kind = EHyperAIStudioCapabilityPrerequisiteKind::Plugin;
+	}
+	{
+		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
+		Item.Id = TEXT("plugin.UAFAnimGraph");
+		Item.Kind = EHyperAIStudioCapabilityPrerequisiteKind::Plugin;
+	}
+	{
+		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
 		Item.Id = TEXT("plugin.WorldConditions");
 		Item.Kind = EHyperAIStudioCapabilityPrerequisiteKind::Plugin;
 	}
@@ -439,6 +454,11 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 	{
 		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
 		Item.Id = TEXT("probe.texture_graph_engine");
+		Item.Kind = EHyperAIStudioCapabilityPrerequisiteKind::Probe;
+	}
+	{
+		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
+		Item.Id = TEXT("probe.uaf_animation_graph");
 		Item.Kind = EHyperAIStudioCapabilityPrerequisiteKind::Probe;
 	}
 	{
@@ -1201,6 +1221,34 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 			Group.Mode = EHyperAIStudioCapabilityRequirementMode::AllOf;
 			Group.bBlocking = true;
 			Group.PrerequisiteIds.Add(TEXT("probe.automation_controller"));
+		}
+	}
+	{
+		FHyperAIStudioCapabilityPackDefinition& Pack = OutCatalog.Packs.AddDefaulted_GetRef();
+		Pack.Id = TEXT("uaf_graph");
+		Pack.Tier = EHyperAIStudioCapabilityPackTier::Optional;
+		Pack.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Pack.bContainsExternalEffects = false;
+		Pack.DependsOnPackIds.Add(TEXT("shared_foundation"));
+		Pack.AtomicCohortIds.Add(TEXT("cohort.source.hyperaistudiouaftoolset.v1"));
+		Pack.ToolNames.Add(TEXT("hyper_uaf_inspect"));
+		Pack.ToolNames.Add(TEXT("hyper_uaf_apply_plan"));
+		Pack.ToolNames.Add(TEXT("hyper_uaf_validate"));
+		{
+			FHyperAIStudioCapabilityRequirementGroup& Group = Pack.Requirements.AddDefaulted_GetRef();
+			Group.Id = TEXT("uaf_plugin");
+			Group.Mode = EHyperAIStudioCapabilityRequirementMode::AllOf;
+			Group.bBlocking = true;
+			Group.PrerequisiteIds.Add(TEXT("plugin.UAF"));
+			Group.PrerequisiteIds.Add(TEXT("plugin.UAFAnimGraph"));
+			Group.PrerequisiteIds.Add(TEXT("module.UAFAnimGraphUncookedOnly"));
+		}
+		{
+			FHyperAIStudioCapabilityRequirementGroup& Group = Pack.Requirements.AddDefaulted_GetRef();
+			Group.Id = TEXT("uaf_backend");
+			Group.Mode = EHyperAIStudioCapabilityRequirementMode::AllOf;
+			Group.bBlocking = true;
+			Group.PrerequisiteIds.Add(TEXT("probe.uaf_animation_graph"));
 		}
 	}
 
@@ -3276,5 +3324,56 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 		Tool.ProductEvidenceRows = 0;
 		Tool.SupplementalEvidenceRows = 0;
 		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::ExternalEffect);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_uaf_inspect");
+		Tool.PackId = TEXT("uaf_graph");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudiouaftoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:eecc3f8f096b6486f51e275b07248599924d6576011b5352e0e00002336e5459");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Read);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_uaf_apply_plan");
+		Tool.PackId = TEXT("uaf_graph");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudiouaftoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:36e6381d1badd93cd2cdfdddf4d4393c08298f8409c3de5dcb99ba4f86576157");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Edit);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_uaf_validate");
+		Tool.PackId = TEXT("uaf_graph");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudiouaftoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:775359c35057a1a3763a2ed03d3449670768b6c298b94a5fe2fca88dc9e1f17e");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Read);
 	}
 }

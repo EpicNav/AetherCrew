@@ -992,6 +992,14 @@ private:
 				{}
 			},
 			{
+				TEXT("HyperAIStudioUAF"),
+				TEXT("uaf_graph"),
+				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),
+				{TEXT("hyper_uaf_inspect"), TEXT("hyper_uaf_apply_plan"),
+					TEXT("hyper_uaf_validate")},
+				{TEXT("UAF"), TEXT("UAFAnimGraph")}
+			},
+			{
 				TEXT("HyperAIStudioPCG"),
 				TEXT("pcg"),
 				TEXT("cohort.source.hyperaistudiopcgtoolset.v1"),

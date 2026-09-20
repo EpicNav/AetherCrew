@@ -213,6 +213,19 @@
 			]
 		},
 		{
+			"Name": "HyperAIStudioUAF",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
 			"Name": "HyperAIStudioPCG",
 			"Type": "Editor",
 			"LoadingPhase": "None",
@@ -410,6 +423,14 @@
 		},
 		{
 			"Name": "TextureGraph",
+			"Enabled": false
+		},
+		{
+			"Name": "UAF",
+			"Enabled": false
+		},
+		{
+			"Name": "UAFAnimGraph",
 			"Enabled": false
 		},
 		{

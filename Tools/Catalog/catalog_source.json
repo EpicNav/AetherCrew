@@ -356,6 +356,22 @@
   {
    "id": "probe.anim_blueprint_graph",
    "kind": "Probe"
+  },
+  {
+   "id": "plugin.UAF",
+   "kind": "Plugin"
+  },
+  {
+   "id": "plugin.UAFAnimGraph",
+   "kind": "Plugin"
+  },
+  {
+   "id": "module.UAFAnimGraphUncookedOnly",
+   "kind": "Module"
+  },
+  {
+   "id": "probe.uaf_animation_graph",
+   "kind": "Probe"
   }
  ],
  "packs": [
@@ -2946,6 +2962,56 @@
       0,
       0,
       0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "uaf_graph",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [
+    {
+     "id": "uaf_plugin",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "plugin.UAF",
+      "plugin.UAFAnimGraph",
+      "module.UAFAnimGraphUncookedOnly"
+     ]
+    },
+    {
+     "id": "uaf_backend",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "probe.uaf_animation_graph"
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "hyper_uaf_inspect",
+     "cohort": "cohort.source.hyperaistudiouaftoolset.v1",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_uaf_apply_plan",
+     "cohort": "cohort.source.hyperaistudiouaftoolset.v1",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_uaf_validate",
+     "cohort": "cohort.source.hyperaistudiouaftoolset.v1",
+     "safety": [
+      "Read"
      ]
     }
    ]
