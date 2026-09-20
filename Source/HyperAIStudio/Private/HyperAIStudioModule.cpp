@@ -63,6 +63,8 @@
 #include "ToolMenus.h"
 #include "UnrealEdMisc.h"
 #include "Widgets/Docking/SDockTab.h"
+#include "HyperAIStudioPreviewPanel.h"
+#include "SHyperAIStudioPreviewPanel.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -584,6 +586,14 @@ public:
 				.SetMenuType(ETabSpawnerMenuType::Hidden);
 		}
 
+		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
+			FHyperAIStudioPreviewPanel::GetTabName(),
+			FOnSpawnTab::CreateRaw(this, &FHyperAIStudioModule::SpawnPreviewTab))
+			.SetDisplayName(LOCTEXT("PreviewTabTitle", "HyperAI Preview"))
+			.SetTooltipText(LOCTEXT("PreviewTabTooltip", "Compare a reference image with what a pack produced, with the numbers behind it."))
+			.SetIcon(FSlateIcon(FHyperAIStudioStyle::GetStyleSetName(), "HyperAIStudio.TabIcon"))
+			.SetMenuType(ETabSpawnerMenuType::Hidden);
+
 		UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FHyperAIStudioModule::RegisterMenus));
 
 		CommandSetUp = MakeUnique<FAutoConsoleCommand>(
@@ -849,6 +859,7 @@ public:
 			UToolMenus::UnregisterOwner(this);
 		}
 
+		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FHyperAIStudioPreviewPanel::GetTabName());
 		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(HyperAIStudioTabName);
 		for (int32 Index = 1; Index <= MaxChatTabs; ++Index)
 		{
@@ -1236,6 +1247,21 @@ private:
 			];
 	}
 
+	TSharedRef<SDockTab> SpawnPreviewTab(const FSpawnTabArgs& Args)
+	{
+		return SNew(SDockTab)
+			.TabRole(ETabRole::NomadTab)
+			.Label(LOCTEXT("PreviewDockedTabLabel", "HyperAI Preview"))
+			[
+				SNew(SBox)
+				.MinDesiredWidth(560.0f)
+				.MinDesiredHeight(420.0f)
+				[
+					SNew(SHyperAIStudioPreviewPanel)
+				]
+			];
+	}
+
 	TSharedRef<SDockTab> CreateChatDockTab(const int32 TabIndex = 1)
 	{
 		TSharedPtr<SHyperAIStudioQuickActionWindow> ChatWidget;
@@ -1311,6 +1337,12 @@ private:
 				LOCTEXT("OpenHyperAIStudioChatTooltip", "Open the lightweight HyperAI chat panel."),
 				FSlateIcon(),
 				FUIAction(FExecuteAction::CreateRaw(this, &FHyperAIStudioModule::OpenChatTab)));
+			Section.AddMenuEntry(
+				TEXT("OpenHyperAIStudioPreview"),
+				LOCTEXT("OpenHyperAIStudioPreview", "HyperAI Preview"),
+				LOCTEXT("OpenHyperAIStudioPreviewTooltip", "Compare a reference image with what a pack produced."),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([]() { FHyperAIStudioPreviewPanel::Open(); })));
 			Section.AddMenuEntry(
 				TEXT("OpenHyperAIStudioQuickAction"),
 				LOCTEXT("OpenHyperAIStudioQuickAction", "HyperAI Chat Overlay"),
