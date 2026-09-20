@@ -54,7 +54,15 @@
    "kind": "Module"
   },
   {
+   "id": "module.TextureGraph",
+   "kind": "Module"
+  },
+  {
    "id": "module.ToolsetRegistry",
+   "kind": "Module"
+  },
+  {
+   "id": "module.UAFAnimGraphUncookedOnly",
    "kind": "Module"
   },
   {
@@ -194,7 +202,19 @@
    "kind": "Plugin"
   },
   {
+   "id": "plugin.TextureGraph",
+   "kind": "Plugin"
+  },
+  {
    "id": "plugin.ToolsetRegistry",
+   "kind": "Plugin"
+  },
+  {
+   "id": "plugin.UAF",
+   "kind": "Plugin"
+  },
+  {
+   "id": "plugin.UAFAnimGraph",
    "kind": "Plugin"
   },
   {
@@ -203,6 +223,10 @@
   },
   {
    "id": "probe.ability_system",
+   "kind": "Probe"
+  },
+  {
+   "id": "probe.anim_blueprint_graph",
    "kind": "Probe"
   },
   {
@@ -258,11 +282,23 @@
    "kind": "Probe"
   },
   {
+   "id": "probe.image_generation_model",
+   "kind": "Probe"
+  },
+  {
    "id": "probe.interchange_manager",
    "kind": "Probe"
   },
   {
    "id": "probe.landscape",
+   "kind": "Probe"
+  },
+  {
+   "id": "probe.level_design_editor_world",
+   "kind": "Probe"
+  },
+  {
+   "id": "probe.lighting_editor_world",
    "kind": "Probe"
   },
   {
@@ -326,51 +362,19 @@
    "kind": "Probe"
   },
   {
+   "id": "probe.texture_graph_engine",
+   "kind": "Probe"
+  },
+  {
+   "id": "probe.uaf_animation_graph",
+   "kind": "Probe"
+  },
+  {
    "id": "probe.widget_blueprint_editor",
    "kind": "Probe"
   },
   {
    "id": "probe.world_partition",
-   "kind": "Probe"
-  },
-  {
-   "id": "plugin.TextureGraph",
-   "kind": "Plugin"
-  },
-  {
-   "id": "module.TextureGraph",
-   "kind": "Module"
-  },
-  {
-   "id": "probe.texture_graph_engine",
-   "kind": "Probe"
-  },
-  {
-   "id": "probe.lighting_editor_world",
-   "kind": "Probe"
-  },
-  {
-   "id": "probe.level_design_editor_world",
-   "kind": "Probe"
-  },
-  {
-   "id": "probe.anim_blueprint_graph",
-   "kind": "Probe"
-  },
-  {
-   "id": "plugin.UAF",
-   "kind": "Plugin"
-  },
-  {
-   "id": "plugin.UAFAnimGraph",
-   "kind": "Plugin"
-  },
-  {
-   "id": "module.UAFAnimGraphUncookedOnly",
-   "kind": "Module"
-  },
-  {
-   "id": "probe.uaf_animation_graph",
    "kind": "Probe"
   }
  ],
@@ -3012,6 +3016,39 @@
      "cohort": "cohort.source.hyperaistudiouaftoolset.v1",
      "safety": [
       "Read"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "image_generation",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [
+    {
+     "id": "image_generation_backend",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "probe.image_generation_model"
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "hyper_image_inspect",
+     "cohort": "cohort.source.hyperaistudioimagegentoolset.v1",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_image_generate",
+     "cohort": "cohort.source.hyperaistudioimagegentoolset.v1",
+     "safety": [
+      "ExternalEffect"
      ]
     }
    ]

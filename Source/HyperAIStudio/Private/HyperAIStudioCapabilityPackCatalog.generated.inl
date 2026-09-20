@@ -4,12 +4,12 @@
 static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatalog& OutCatalog)
 {
 	OutCatalog.Schema = TEXT("hyperai.capability-pack-catalog.v2");
-	OutCatalog.GeneratedFingerprint = TEXT("sha256:23c9285d8135e69599c57285c948b83f87c4aeb37ae58f3f6721c03721888efb");
+	OutCatalog.GeneratedFingerprint = TEXT("sha256:273611ceb56bd95a34c9da6fa64452ed59130c565e55bacc5bf8aca609d9b72e");
 	OutCatalog.ApprovedPlanFingerprint = TEXT("sha256:0111a6ad1e4b2f81b6da0439a22d83ffbfd8f7ccb20f958d8494eaeee84c6d1a");
 	OutCatalog.AdmissionMatrixFingerprint = TEXT("sha256:404ea0204015fb9558cf2b5fcc092d77fb7e6dc323f0adde7032252e025c23c9");
 	OutCatalog.SourceLedgerFingerprint = TEXT("sha256:2954241d83a1a24feaf00a28c6884cae62c6b138923cd8d2deae23b7dc9c4e2e");
 	OutCatalog.SourceArtifactFingerprint = TEXT("sha256:52806e6f474cb0216a8cecb2531649612ef1b87f7381a560d023fd8389fd6f4b");
-	OutCatalog.SourceArtifactCount = 124;
+	OutCatalog.SourceArtifactCount = 126;
 
 	{
 		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
@@ -354,6 +354,11 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 	{
 		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
 		Item.Id = TEXT("probe.ik_rig");
+		Item.Kind = EHyperAIStudioCapabilityPrerequisiteKind::Probe;
+	}
+	{
+		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
+		Item.Id = TEXT("probe.image_generation_model");
 		Item.Kind = EHyperAIStudioCapabilityPrerequisiteKind::Probe;
 	}
 	{
@@ -1249,6 +1254,24 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 			Group.Mode = EHyperAIStudioCapabilityRequirementMode::AllOf;
 			Group.bBlocking = true;
 			Group.PrerequisiteIds.Add(TEXT("probe.uaf_animation_graph"));
+		}
+	}
+	{
+		FHyperAIStudioCapabilityPackDefinition& Pack = OutCatalog.Packs.AddDefaulted_GetRef();
+		Pack.Id = TEXT("image_generation");
+		Pack.Tier = EHyperAIStudioCapabilityPackTier::Optional;
+		Pack.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Pack.bContainsExternalEffects = true;
+		Pack.DependsOnPackIds.Add(TEXT("shared_foundation"));
+		Pack.AtomicCohortIds.Add(TEXT("cohort.source.hyperaistudioimagegentoolset.v1"));
+		Pack.ToolNames.Add(TEXT("hyper_image_inspect"));
+		Pack.ToolNames.Add(TEXT("hyper_image_generate"));
+		{
+			FHyperAIStudioCapabilityRequirementGroup& Group = Pack.Requirements.AddDefaulted_GetRef();
+			Group.Id = TEXT("image_generation_backend");
+			Group.Mode = EHyperAIStudioCapabilityRequirementMode::AllOf;
+			Group.bBlocking = true;
+			Group.PrerequisiteIds.Add(TEXT("probe.image_generation_model"));
 		}
 	}
 
@@ -3375,5 +3398,39 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 		Tool.ProductEvidenceRows = 0;
 		Tool.SupplementalEvidenceRows = 0;
 		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Read);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_image_inspect");
+		Tool.PackId = TEXT("image_generation");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudioimagegentoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:db712ecdd8f008db084df3fb22ebd00c1634c53abdaac003c4e07cd2c2547031");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Read);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_image_generate");
+		Tool.PackId = TEXT("image_generation");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudioimagegentoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = true;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:98f2695febf89071bc1203830d08571a34a405b7d52c885ba33a078a36495527");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::ExternalEffect);
 	}
 }

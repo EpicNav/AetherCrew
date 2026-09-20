@@ -1003,6 +1003,13 @@ private:
 				{}
 			},
 			{
+				TEXT("HyperAIStudioImageGen"),
+				TEXT("image_generation"),
+				TEXT("cohort.source.hyperaistudioimagegentoolset.v1"),
+				{TEXT("hyper_image_inspect"), TEXT("hyper_image_generate")},
+				{}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),

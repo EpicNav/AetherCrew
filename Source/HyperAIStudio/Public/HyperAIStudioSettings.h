@@ -72,6 +72,86 @@ struct FHyperAIStudioExternalServiceSettings
 	int32 TimeoutSeconds = 180;
 };
 
+/**
+ * One image model, described rather than coded.
+ *
+ * Image endpoints and model names change faster than anything else this plugin touches, and a name compiled
+ * in goes stale where nobody can correct it. So a model is a request template and a path into the reply:
+ * adding one is an edit here, not a rebuild. The cookbook has a worked example of each common shape.
+ */
+USTRUCT(BlueprintType)
+struct FHyperAIStudioImageModelSettings
+{
+	GENERATED_BODY()
+
+	/** Identifier a tool asks for, e.g. gpt_image or sdxl_local. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString Id;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString Label;
+
+	/** Which entry in External Services carries this model's url, key and cost. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString ServiceId;
+
+	/** Path under the service's base url, e.g. /v1/images/generations or /sdapi/v1/txt2img. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString Path;
+
+	/**
+	 * The request body, with {prompt}, {negative}, {width}, {height}, {seed} and {model} substituted in.
+	 * Values are JSON-escaped as they go in, so a prompt with quotes cannot break the body.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (MultiLine = "true"))
+	FString RequestTemplate;
+
+	/**
+	 * Dotted path to the base64 image in the reply: data.0.b64_json for an OpenAI-shaped one, images.0 for
+	 * an Automatic1111, candidates.0.content.parts.0.inlineData.data for a Gemini.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString ResponseImagePath;
+
+	/** Substituted for {model}. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString Model;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (ClampMin = "64", ClampMax = "4096"))
+	int32 Width = 1024;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (ClampMin = "64", ClampMax = "4096"))
+	int32 Height = 1024;
+
+	/**
+	 * True when this model runs on this machine. A local model competes with the editor for the same
+	 * graphics card, and when they do not both fit the generation crawls; the tools say so before starting.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	bool bRunsOnThisMachine = false;
+};
+
+/**
+ * A prompt with named slots. Visible and editable on purpose: a hidden prompt that "gets good results" is
+ * one nobody can tune, and matching a level to a reference needs the reference to pin the things the
+ * lighting compare measures.
+ */
+USTRUCT(BlueprintType)
+struct FHyperAIStudioImagePromptTemplateSettings
+{
+	GENERATED_BODY()
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString Id;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString Label;
+
+	/** Slots are written {like_this} and filled from the tool's slot list; an unfilled slot drops out. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (MultiLine = "true"))
+	FString Template;
+};
+
 UENUM()
 enum class EHyperAIStudioMCPTransport : uint8
 {
@@ -360,6 +440,42 @@ public:
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "External Services")
 	TArray<FHyperAIStudioExternalServiceSettings> ExternalServices;
+
+	/**
+	 * Image models available to the generation tools. Empty by default: this plugin ships no model name,
+	 * because the one it shipped would be wrong within months. The cookbook shows how to add one.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	TArray<FHyperAIStudioImageModelSettings> ImageModels;
+
+	/** Prompt templates the generation tools fill in. Seeded with one for scene references. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	TArray<FHyperAIStudioImagePromptTemplateSettings> ImagePromptTemplates;
+
+	/** Where generated reference images land, inside the project. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString ImageOutputFolder = TEXT("Content/References/Generated");
+
+	/**
+	 * Seeds the prompt templates when there are none. Templates carry no model name, so unlike a model
+	 * entry they do not go stale.
+	 */
+	bool EnsureDefaultImagePromptTemplates()
+	{
+		if (!ImagePromptTemplates.IsEmpty())
+		{
+			return false;
+		}
+		FHyperAIStudioImagePromptTemplateSettings& Scene = ImagePromptTemplates.AddDefaulted_GetRef();
+		Scene.Id = TEXT("scene_reference");
+		Scene.Label = TEXT("Scene reference for lighting");
+		// Every slot after the subject names something hyper_lighting_compare measures. A reference that
+		// leaves them to the model is one the level can chase without ever reaching.
+		Scene.Template = TEXT("{subject}. {time_of_day}, {weather}. Key light {key_light}. ")
+			TEXT("{contrast} contrast, {palette} palette, {mood} mood. Shot on {lens}. ")
+			TEXT("Photographic, no text, no watermark, no people unless asked.");
+		return true;
+	}
 
 	/**
 	 * What generated content may cost in one editor session, in whatever currency the services bill in.
