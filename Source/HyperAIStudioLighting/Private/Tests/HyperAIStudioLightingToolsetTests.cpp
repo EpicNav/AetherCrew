@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioLightingGate.h"
+#include "HyperAIStudioPreviewPanel.h"
 #include "HyperAIStudioSettings.h"
 #include "Misc/App.h"
 #include "Misc/AutomationTest.h"
@@ -90,6 +91,30 @@ bool FHyperAIStudioLightingCohortTest::RunTest(const FString& Parameters)
 		TestTrue(*FString::Printf(TEXT("%s has a description within 400 characters"), *It->GetName()), !ToolTip.IsEmpty() && ToolTip.Len() <= 400);
 	}
 	TestEqual(TEXT("AICallable functions match the manifest"), Callables, Names.Num());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioLightingPreviewSourceTest,
+	"HyperAIStudio.Lighting.Preview.SourceIsRegistered",
+	HyperAIStudio::Lighting::Tests::Flags)
+
+bool FHyperAIStudioLightingPreviewSourceTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	const FHyperAIStudioPreviewPanel::FSource* Source = FHyperAIStudioPreviewPanel::FindSource(FName(TEXT("lighting")));
+	if (!TestNotNull(TEXT("the lighting module offers the preview panel a source"), Source))
+	{
+		return false;
+	}
+	TestTrue(TEXT("which needs a reference image"), Source->bNeedsReference);
+	TestTrue(TEXT("and is bound"), Source->Refresh.IsBound());
+
+	// Without a readable reference the source reports why rather than half-filling the panel.
+	FHyperAIStudioPreviewComparison Comparison;
+	FString Error;
+	TestFalse(TEXT("a missing reference fails"), Source->Refresh.Execute(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Tests/not_here.png"), Comparison, Error));
+	TestFalse(TEXT("with a reason"), Error.IsEmpty());
 	return true;
 }
 

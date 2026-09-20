@@ -11,6 +11,7 @@
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioLightingGate.h"
+#include "HyperAIStudioPreviewPanel.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Paths.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
@@ -33,6 +34,91 @@ namespace HyperAIStudio::Lighting::Private
 	int64 EstimateBytes(const FString& Value)
 	{
 		return 16 + 2ll * Value.Len();
+	}
+
+	FText TwoDecimals(const float Value)
+	{
+		FNumberFormattingOptions Options;
+		Options.MinimumFractionalDigits = 2;
+		Options.MaximumFractionalDigits = 2;
+		return FText::AsNumber(Value, &Options);
+	}
+
+	EHyperAIStudioPreviewTone ToneFor(const float Magnitude, const float Close, const float Far)
+	{
+		if (Magnitude <= Close) return EHyperAIStudioPreviewTone::Good;
+		return Magnitude >= Far ? EHyperAIStudioPreviewTone::Warning : EHyperAIStudioPreviewTone::Neutral;
+	}
+
+	/** The panel's Lock button: the user's own click in the editor, applied as one undoable step. */
+	void LockExposureNow()
+	{
+		UWorld* World = Gate::GetEditorWorld();
+		if (!World)
+		{
+			return;
+		}
+		FHyperAILightingOp Op;
+		Op.Kind = TEXT("lock_exposure");
+		Op.Value = TEXT("0");
+		TArray<AActor*> Touched;
+		FString Error;
+		if (!Gate::ApplyOps(*World, {Op}, Touched, Error))
+		{
+			UE_LOG(LogHyperAIStudioLighting, Warning, TEXT("Could not lock exposure from the preview panel: %s"), *Error);
+		}
+	}
+
+	/** Fills the preview panel: the reference, a fresh viewport capture, and what separates them. */
+	bool RefreshPreview(const FString& ReferenceImagePath, FHyperAIStudioPreviewComparison& Out, FString& OutError)
+	{
+		FHyperAILightingCompareRequest Request;
+		Request.ReferenceImagePath = ReferenceImagePath;
+		const FHyperAILightingCompareReport Report = FHyperAIStudioLightingContracts::Compare(Request);
+		if (!Report.bOk)
+		{
+			OutError = Report.Diagnostic;
+			return false;
+		}
+		Out.ImagePathA = ReferenceImagePath;
+		Out.ImagePathB = Report.CurrentImageWrittenPath;
+		Out.LabelA = NSLOCTEXT("HyperAIStudioLightingPreview", "Reference", "Reference");
+		Out.LabelB = NSLOCTEXT("HyperAIStudioLightingPreview", "Viewport", "Level viewport");
+		Out.HistogramA = Report.Reference.Histogram;
+		Out.HistogramB = Report.Current.Histogram;
+
+		auto Add = [&Out](const FText& Label, const FText& Value, const EHyperAIStudioPreviewTone Tone)
+		{
+			Out.Stats.Add({Label, Value, Tone});
+		};
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "Distance", "Distance"), TwoDecimals(Report.HistogramDistance),
+			Report.bMatched ? EHyperAIStudioPreviewTone::Good : EHyperAIStudioPreviewTone::Warning);
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "Exposure", "Exposure"),
+			FText::Format(NSLOCTEXT("HyperAIStudioLightingPreview", "EV", "{0} EV"), TwoDecimals(Report.ExposureDeltaEV)),
+			ToneFor(FMath::Abs(Report.ExposureDeltaEV), 0.1f, 0.35f));
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "Temperature", "Temperature"),
+			FText::Format(NSLOCTEXT("HyperAIStudioLightingPreview", "Kelvin", "{0} K"),
+				FText::AsNumber(FMath::RoundToInt(Report.ColorTemperatureDeltaK))),
+			ToneFor(FMath::Abs(Report.ColorTemperatureDeltaK), 150.0f, 600.0f));
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "Contrast", "Contrast"), TwoDecimals(Report.ContrastRatioDelta),
+			ToneFor(FMath::Abs(Report.ContrastRatioDelta), 0.2f, 1.0f));
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "Saturation", "Saturation"), TwoDecimals(Report.SaturationDelta),
+			ToneFor(FMath::Abs(Report.SaturationDelta), 0.02f, 0.08f));
+		if (!Report.Suggestions.IsEmpty())
+		{
+			Add(NSLOCTEXT("HyperAIStudioLightingPreview", "Next", "Next"), FText::FromString(Report.Suggestions[0]),
+				EHyperAIStudioPreviewTone::Neutral);
+		}
+
+		if (!Report.bExposureLocked)
+		{
+			// Auto exposure re-brightens every change, so the numbers above describe the eye, not the lighting.
+			Out.Warning = NSLOCTEXT("HyperAIStudioLightingPreview", "AutoExposure",
+				"Auto exposure is on, so this comparison measures the eye adapting, not the lighting. Lock it before matching a reference.");
+			Out.WarningActionLabel = NSLOCTEXT("HyperAIStudioLightingPreview", "LockExposure", "Lock exposure");
+			Out.WarningAction = FSimpleDelegate::CreateStatic(&LockExposureNow);
+		}
+		return true;
 	}
 
 	int64 EstimateMetricsBytes(const FHyperAILightingImageMetrics& Metrics)
@@ -880,12 +966,23 @@ void FHyperAIStudioLightingRegistration::Startup()
 {
 	if (bStarted) return;
 	bStarted = true;
+	{
+		FHyperAIStudioPreviewPanel::FSource Source;
+		Source.Id = FName(TEXT("lighting"));
+		Source.Label = NSLOCTEXT("HyperAIStudioLightingPreview", "SourceLabel", "Lighting: reference vs viewport");
+		Source.Tooltip = NSLOCTEXT("HyperAIStudioLightingPreview", "SourceTooltip",
+			"Capture the level viewport and measure it against a reference image.");
+		Source.bNeedsReference = true;
+		Source.Refresh = FHyperAIStudioPreviewRefresh::CreateStatic(&HyperAIStudio::Lighting::Private::RefreshPreview);
+		FHyperAIStudioPreviewPanel::RegisterSource(MoveTemp(Source));
+	}
 	PostEngineInitHandle = FCoreDelegates::GetOnPostEngineInit().AddRaw(this, &FHyperAIStudioLightingRegistration::RegisterAfterEngineInit);
 	if (GIsRunning && GEngine && UObjectInitialized()) RegisterAfterEngineInit();
 }
 
 void FHyperAIStudioLightingRegistration::Shutdown()
 {
+	FHyperAIStudioPreviewPanel::UnregisterSource(FName(TEXT("lighting")));
 	if (PostEngineInitHandle.IsValid())
 	{
 		FCoreDelegates::GetOnPostEngineInit().Remove(PostEngineInitHandle);

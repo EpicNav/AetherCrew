@@ -308,6 +308,27 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing")
 	bool bAutoSendHandoffPrompts = true;
 
+	/** Reference images the preview panel has been pointed at, newest first. */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Preview")
+	TArray<FString> RecentPreviewReferences;
+
+	/** Moves Path to the front of the recent list, keeping it short, and saves. */
+	void RememberPreviewReference(const FString& Path)
+	{
+		if (Path.IsEmpty())
+		{
+			return;
+		}
+		RecentPreviewReferences.RemoveAll([&Path](const FString& Existing) { return Existing.Equals(Path, ESearchCase::IgnoreCase); });
+		RecentPreviewReferences.Insert(Path, 0);
+		constexpr int32 MaxRecentPreviewReferences = 8;
+		if (RecentPreviewReferences.Num() > MaxRecentPreviewReferences)
+		{
+			RecentPreviewReferences.SetNum(MaxRecentPreviewReferences);
+		}
+		SaveConfig();
+	}
+
 	/**
 	 * How agents build materials. Hybrid: graph nodes, which artists can read and the compiler optimises, plus a
 	 * Custom HLSL node only for math nodes cannot express, each with a stated reason. Nodes forbids Custom HLSL;
