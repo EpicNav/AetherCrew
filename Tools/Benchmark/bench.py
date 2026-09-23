@@ -190,11 +190,14 @@ def mirror_plugin(source=PLUGIN_ROOT):
     # other's binaries on every build. Files are compared by content and copied with a fresh timestamp:
     # a copy that kept its source's older time would look older than the objects UBT built from the
     # previous copy, so UBT would skip it (robocopy /MIR did exactly that).
+    # In a git worktree .git is a hidden file, not a folder, and Windows refuses to overwrite a hidden file.
     skip = {"Binaries", "Intermediate", ".git", "Saved", "runs", "__pycache__"}
     kept, copied, removed = set(), 0, 0
     for root, dirs, files in os.walk(source):
         dirs[:] = [d for d in dirs if d not in skip]
         for name in files:
+            if name in skip:
+                continue
             src = Path(root) / name
             dst = target / src.relative_to(source)
             kept.add(dst)
@@ -206,7 +209,7 @@ def mirror_plugin(source=PLUGIN_ROOT):
     for root, dirs, files in os.walk(target):
         dirs[:] = [d for d in dirs if d not in skip]
         for name in files:
-            if Path(root) / name not in kept:
+            if name not in skip and Path(root) / name not in kept:
                 (Path(root) / name).unlink()
                 removed += 1
     log(f"Mirror: {copied} files copied, {removed} removed.")
