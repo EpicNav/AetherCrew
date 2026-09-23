@@ -10,6 +10,7 @@
 #include "HyperAIStudioMcpSerialQueue.h"
 #include "HyperAIStudioOperationJournal.h"
 #include "HyperAIStudioProjectMemory.h"
+#include "HyperAIStudioSkills.h"
 
 #include "CoreGlobals.h"
 #include "AssetRegistry/AssetData.h"
@@ -3605,6 +3606,10 @@ bool FHyperAIStudioService::GenerateProjectFiles(FText& OutMessage) const
 		return false;
 	}
 	const FString ConfigMessage = StepMessage.ToString();
+	// Skills sit outside the transactional config write: their folders are the user's too, and the sync never
+	// overwrites a skill it did not write or one edited since.
+	HyperAIStudio::Skills::InstallBuiltIns(ProjectRoot, HyperAIStudio::Skills::BuiltInDirectory());
+	HyperAIStudio::Skills::SyncClaudeMirror(ProjectRoot);
 
 	FHyperAIStudioStatus Status = GetStatusSync();
 	WriteStatusJson(ProjectRoot, Status);

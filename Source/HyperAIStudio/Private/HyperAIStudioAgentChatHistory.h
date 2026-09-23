@@ -32,6 +32,8 @@ struct FHyperAIStudioChatSession
 	bool bUsedUnrealMcp = false;
 	/** Set while the chat is running (Claude Code only). */
 	FHyperAIStudioLiveChat Live;
+	/** The agent's own transcript file. */
+	FString Path;
 };
 
 /**

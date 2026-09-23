@@ -33,6 +33,7 @@
 #include "SHyperAIStudioActivitySidebar.h"
 #include "SHyperAIStudioChatHistorySidebar.h"
 #include "SHyperAIStudioMemoryPanel.h"
+#include "HyperAIStudioSkills.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "STerminal.h"
@@ -781,6 +782,21 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildHeader()
 		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
 		[
 			BuildRemoteToggle()
+		]
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+		[
+			SNew(SComboButton)
+			.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
+			.ToolTipText(LOCTEXT("SkillsTooltip", "Run one of this agent's skills, or save what this chat did as a new skill."))
+			.OnGetMenuContent(this, &SHyperAIStudioQuickActionWindow::BuildSkillsMenu)
+			.ButtonContent()
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("SkillsButton", "Skills"))
+			]
 		]
 		+ SHorizontalBox::Slot()
 		.AutoWidth()
@@ -2487,6 +2503,63 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildRemoteToggle()
 				})
 			]
 		];
+}
+
+TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildSkillsMenu()
+{
+	FMenuBuilder Menu(/*bInShouldCloseWindowAfterMenuSelection=*/true, nullptr);
+	const FString Agent = ActiveTerminalAgentName.IsEmpty() ? GetSelectedAgentName() : ActiveTerminalAgentName;
+	const FString Prefix = HyperAIStudio::Skills::InvocationPrefix(Agent);
+	if (Prefix.IsEmpty())
+	{
+		Menu.AddMenuEntry(LOCTEXT("SkillsUnavailable", "Skills work with Claude Code and Codex"), FText::GetEmpty(), FSlateIcon(),
+			FUIAction(FExecuteAction(), FCanExecuteAction::CreateLambda([]() { return false; })));
+		return Menu.MakeWidget();
+	}
+	const FString Root = FHyperAIStudioService::GetProjectRoot();
+	// Claude Code reads its own copies; keep them current before offering them.
+	HyperAIStudio::Skills::SyncClaudeMirror(Root);
+	const TArray<FHyperAIStudioSkill> Skills = HyperAIStudio::Skills::ListForAgent(Root, Agent);
+	auto AddSkills = [this, &Menu, &Skills, &Prefix](const bool bPersonal)
+	{
+		for (const FHyperAIStudioSkill& Skill : Skills)
+		{
+			if (Skill.Scope.StartsWith(TEXT("personal")) != bPersonal)
+			{
+				continue;
+			}
+			Menu.AddMenuEntry(
+				FText::FromString(Prefix + Skill.Name),
+				FText::FromString(Skill.Description),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateSPLambda(this, [this, Command = Prefix + Skill.Name + TEXT(" ")]()
+				{
+					InsertIntoAgentPrompt(Command, TEXT("skill"));
+				})));
+		}
+	};
+	Menu.BeginSection(NAME_None, LOCTEXT("ProjectSkills", "Project"));
+	AddSkills(false);
+	Menu.EndSection();
+	Menu.BeginSection(NAME_None, LOCTEXT("PersonalSkills", "Personal"));
+	AddSkills(true);
+	Menu.EndSection();
+	Menu.AddMenuSeparator();
+	Menu.AddMenuEntry(
+		LOCTEXT("SaveChatAsSkill", "Save Chat as Skill..."),
+		LOCTEXT("SaveChatAsSkillTooltip", "Types a request for the agent to turn what this chat did into a reusable project skill. Edit it, then send."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Plus"),
+		FUIAction(FExecuteAction::CreateSPLambda(this, [this, Prefix]()
+		{
+			InsertIntoAgentPrompt(Prefix + TEXT("make-skill Turn the workflow we just did in this chat into a reusable project skill named "),
+				TEXT("save as skill"));
+		})));
+	Menu.AddMenuEntry(
+		LOCTEXT("ManageSkills", "Manage Skills..."),
+		LOCTEXT("ManageSkillsTooltip", "Import, export and review skills in HyperAIStudio > Agents."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Settings"),
+		FUIAction(FExecuteAction::CreateSPLambda(this, [this]() { OnOpenWorkbenchClicked(); })));
+	return Menu.MakeWidget();
 }
 
 FText SHyperAIStudioQuickActionWindow::GetRemoteToolTip() const

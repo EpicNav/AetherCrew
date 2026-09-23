@@ -32,6 +32,10 @@ public:
 	UPROPERTY(Config)
 	TArray<FString> Remote;
 
+	/** Repeated workflows already offered as skills, so each is suggested once. */
+	UPROPERTY(Config)
+	TArray<FString> SuggestedWorkflows;
+
 	static FString GetTitle(const FString& SessionId);
 	static bool IsPinned(const FString& SessionId);
 	static bool IsRemote(const FString& SessionId);

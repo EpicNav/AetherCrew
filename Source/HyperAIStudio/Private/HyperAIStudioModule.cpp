@@ -53,6 +53,9 @@
 #include "SHyperAIStudioQuickActionWindow.h"
 #include "Interfaces/IMainFrameModule.h"
 #include "HyperAIStudioProjectMemory.h"
+#include "HyperAIStudioSkills.h"
+#include "HyperAIStudioAgentChatHistory.h"
+#include "HyperAIStudioChatHistoryPrefs.h"
 #include "UObject/ObjectSaveContext.h"
 #include "Misc/App.h"
 #include "Misc/CoreDelegates.h"
@@ -2193,7 +2196,60 @@ private:
 		{
 			FHyperAIStudioService::RefreshMemoryInstructions();
 		}
+		if (Settings && Settings->bRefreshAgentInstructionsOnStartup && bSetUp)
+		{
+			const FString Root = FHyperAIStudioService::GetProjectRoot();
+			HyperAIStudio::Skills::InstallBuiltIns(Root, HyperAIStudio::Skills::BuiltInDirectory());
+			for (const FString& Note : HyperAIStudio::Skills::SyncClaudeMirror(Root).Notes)
+			{
+				UE_LOG(LogHyperAIStudio, Display, TEXT("Skills: %s"), *Note);
+			}
+			SuggestRepeatedWorkflow(Root);
+		}
 		return false;
+	}
+
+	/** Reads recent chats off the game thread; a run of calls seen in three of them is offered as a skill, once. */
+	static void SuggestRepeatedWorkflow(const FString& Root)
+	{
+		Async(EAsyncExecution::ThreadPool, [Root]()
+		{
+			TArray<TArray<FString>> Sequences;
+			for (const FHyperAIStudioChatSession& Session : HyperAIStudio::ChatHistory::ListSessions(Root, 30))
+			{
+				// The first 2 MB of a chat is plenty to see its workflow.
+				TArray<uint8> Bytes;
+				const TUniquePtr<FArchive> Reader(IFileManager::Get().CreateFileReader(*Session.Path, FILEREAD_AllowWrite));
+				if (Reader)
+				{
+					Bytes.SetNumUninitialized(static_cast<int32>(FMath::Min<int64>(Reader->TotalSize(), 2 * 1024 * 1024)));
+					Reader->Serialize(Bytes.GetData(), Bytes.Num());
+				}
+				const FUTF8ToTCHAR Text(reinterpret_cast<const ANSICHAR*>(Bytes.GetData()), Bytes.Num());
+				Sequences.Add(HyperAIStudio::Skills::ToolSequence(FString(Text.Length(), Text.Get())));
+			}
+			AsyncTask(ENamedThreads::GameThread, [Runs = HyperAIStudio::Skills::RepeatedWorkflows(Sequences)]()
+			{
+				UHyperAIStudioChatHistoryPrefs* Prefs = GetMutableDefault<UHyperAIStudioChatHistoryPrefs>();
+				for (const FString& Run : Runs)
+				{
+					if (Prefs->SuggestedWorkflows.Contains(Run))
+					{
+						continue;
+					}
+					Prefs->SuggestedWorkflows.Add(Run);
+					Prefs->SaveConfig();
+					const FString Prompt = FString::Printf(
+						TEXT("Use the make-skill skill to turn this workflow, which I keep repeating, into a project skill: %s"), *Run);
+					FNotificationInfo Info(FText::FromString(FString::Printf(TEXT("Agents repeated %s in several chats. Make it a skill?"), *Run)));
+					Info.ExpireDuration = 20.0f;
+					Info.HyperlinkText = LOCTEXT("CopyMakeSkillPrompt", "Copy a make-skill prompt for your agent");
+					Info.Hyperlink = FSimpleDelegate::CreateLambda([Prompt]() { FPlatformApplicationMisc::ClipboardCopy(*Prompt); });
+					FSlateNotificationManager::Get().AddNotification(Info);
+					return;
+				}
+			});
+		});
 	}
 
 	bool RunWelcomePromptTicker(float DeltaTime)

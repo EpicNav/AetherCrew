@@ -162,6 +162,7 @@ namespace
 			}
 			Out.Add({TEXT("Claude Code"), SessionId, Title, IFileManager::Get().GetTimeStamp(*Path),
 				MentionsUnrealMcpCall(Text)});
+			Out.Last().Path = Path;
 			if (++Found >= MaxSessions)
 			{
 				return;
@@ -214,6 +215,7 @@ namespace
 				continue;
 			}
 			Out.Add({TEXT("Codex"), Id, Title, IFileManager::Get().GetTimeStamp(*Path), MentionsUnrealMcpCall(Head)});
+			Out.Last().Path = Path;
 			if (++Found >= MaxSessions)
 			{
 				return;

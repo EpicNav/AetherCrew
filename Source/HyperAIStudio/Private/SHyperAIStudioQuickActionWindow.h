@@ -126,6 +126,8 @@ private:
 	/** The agent is producing output, or is stopped at a question or a plan. */
 	bool IsTurnActive() const;
 	TSharedRef<SWidget> BuildRemoteToggle();
+	/** This agent's skills: picking one types its command into the prompt. */
+	TSharedRef<SWidget> BuildSkillsMenu();
 	FText GetRemoteToolTip() const;
 
 	FString GetSelectedAgentName() const;
