@@ -195,47 +195,20 @@ bool FHyperAIStudioApprovalGate::Approve(const FString& OperationId, FString& Ou
 		OnChanged().Broadcast();
 	};
 
-	const TSharedPtr<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host =
-		HyperAIStudio::TrustedExecution::Private::GetCoreHost();
-	if (!Host.IsValid())
+	// Staging happens when the plan reaches the lane, not when the agent asked, so the stage lifetime covers only
+	// the run. A plan the user took longer than its seal to approve is prepared again from the same inputs, and a
+	// risky plan's grant is issued then, for this click only.
+	FString Status;
+	if (!HyperAIStudio::TrustedExecution::Private::SubmitUserApproved(Item.Prepared, OperationId, Status, OutError))
 	{
-		OutError = TEXT("The trusted execution host is unavailable.");
-		Fail(TEXT("host_unavailable"), OutError);
-		return false;
-	}
-
-	// Staging happens now, not when the agent asked, so the stage lifetime covers only the run itself.
-	FHyperAIStudioTypedArtifactStageReceipt Receipt;
-	FHyperAIStudioTrustedExecutionDiagnostic Status;
-	if (!Host->StageExact(Item.Prepared, OperationId, Receipt, Status, OutError))
-	{
-		if (OutError.IsEmpty()) OutError = Status.Diagnostic;
-		Fail(Status.StatusCode.IsEmpty() ? FString(TEXT("stage_failed")) : Status.StatusCode, OutError);
-		return false;
-	}
-
-	FString AuthorizationToken;
-	if (Item.Pending.Summary.Safety != EHyperAIStudioDomainSafety::Edit)
-	{
-		// The grant is the click: core issues it here and nowhere else.
-		if (!HyperAIStudio::TrustedExecution::Private::IssueCoreUiAuthorizationGrant(Receipt, AuthorizationToken, OutError))
-		{
-			Fail(TEXT("authorization_not_issued"), OutError);
-			return false;
-		}
-	}
-
-	FHyperAIStudioTypedArtifactSubmissionReceipt Submission;
-	if (!Host->SubmitExact(Receipt, AuthorizationToken, Submission, Status, OutError))
-	{
-		if (OutError.IsEmpty()) OutError = Status.Diagnostic;
-		Fail(Status.StatusCode.IsEmpty() ? FString(TEXT("submit_failed")) : Status.StatusCode, OutError);
+		Fail(Status, OutError);
 		return false;
 	}
 
 	FHyperAIStudioActivityEntry Entry = MakeEntry(EHyperAIStudioActivityKind::ApprovalApproved, Item.Pending.Summary, OperationId);
-	Entry.StatusCode = TEXT("submitted");
-	Entry.Detail = TEXT("Approved; the edit is running.");
+	Entry.StatusCode = Status;
+	Entry.Detail = Status == TEXT("queued")
+		? TEXT("Approved; it runs when the edits ahead of it finish.") : TEXT("Approved; the edit is running.");
 	FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
 	UE_LOG(LogHyperAIStudioApproval, Log, TEXT("Approved %s on %s (%s)."),
 		*Item.Pending.Summary.ToolName, *Item.Pending.Summary.EffectTarget, *OperationId);

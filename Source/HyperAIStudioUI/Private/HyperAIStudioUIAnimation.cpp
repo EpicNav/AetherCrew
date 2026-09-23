@@ -10,6 +10,7 @@
 #include "Editor.h"
 #include "FileHelpers.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -645,25 +646,18 @@ namespace HyperAIStudio::UI::Animation
 			Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
 			return Report;
 		}
-		FHyperAIStudioTypedArtifactStageReceipt Receipt;
-		FHyperAIStudioTrustedExecutionDiagnostic StageStatus;
-		if (!FHyperAIStudioTrustedExecutionFacade::StageExact(Prepared, Request.OperationId, Receipt, StageStatus, Error))
+		// Another agent's edit may own the project lane; then this one waits its turn, and hyper_operation_wait
+		// waits through the queue as well as the edit.
+		FString QueueStatus;
+		FString QueueError;
+		if (!FHyperAIStudioExecutionQueue::Submit(Prepared, Request.OperationId, QueueStatus, QueueError))
 		{
-			return Reject(StageStatus.StatusCode.IsEmpty() ? TEXT("stage_failed") : *StageStatus.StatusCode, Error.IsEmpty() ? StageStatus.Diagnostic : Error);
+			return Reject(*QueueStatus, QueueError);
 		}
-		Report.bStaged = true;
-		FHyperAIStudioTypedArtifactSubmissionReceipt Submission;
-		FHyperAIStudioTrustedExecutionDiagnostic SubmitStatus;
-		// Edit is tokenless; only risky safety classes need a server-issued grant.
-		if (!FHyperAIStudioTrustedExecutionFacade::SubmitExact(Receipt, FString(), Submission, SubmitStatus, Error))
-		{
-			Report.Status = SubmitStatus.StatusCode.IsEmpty() ? FString(TEXT("submit_failed")) : SubmitStatus.StatusCode;
-			Report.Diagnostic = (Error.IsEmpty() ? SubmitStatus.Diagnostic : Error).Left(1024);
-			return Report;
-		}
-		Report.bExecutionSubmitted = true;
+		Report.bStaged = QueueStatus == TEXT("submitted");
+		Report.bExecutionSubmitted = Report.bStaged;
 		Report.bOk = true;
-		Report.Status = TEXT("submitted");
+		Report.Status = QueueStatus;
 		Report.Diagnostic = FString::Join(Notes, TEXT("; "))
 			+ TEXT(". The edit, compile and save run over the next editor ticks. Call hyper_operation_wait with operation_id.");
 		return Report;

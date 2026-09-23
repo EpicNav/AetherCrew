@@ -35,6 +35,7 @@
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioCapabilityCatalogCounts.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioFoundationProbe.h"
 #include "HyperAIStudioNativeReadToolset.h"
@@ -53,6 +54,7 @@
 #include "SHyperAIStudioQuickActionWindow.h"
 #include "Interfaces/IMainFrameModule.h"
 #include "HyperAIStudioProjectMemory.h"
+#include "HyperAIStudioAgents.h"
 #include "HyperAIStudioSkills.h"
 #include "HyperAIStudioAgentChatHistory.h"
 #include "HyperAIStudioChatHistoryPrefs.h"
@@ -934,6 +936,7 @@ public:
 		}
 		// Jobs hold pack callbacks and pending approvals hold prepared plans; neither may outlive the host.
 		FHyperAIStudioAsyncJobHost::Shutdown();
+		FHyperAIStudioExecutionQueue::Clear();
 		FHyperAIStudioApprovalGate::Clear();
 		if (FoundationProbe)
 		{
@@ -1302,6 +1305,9 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 		HyperAIStudio::BenchmarkInstrumentation::Shutdown();
 #endif
+		// Waiting plans keep their packs' objects alive, so they go before the packs unregister.
+		FHyperAIStudioExecutionQueue::Clear();
+		FHyperAIStudioApprovalGate::Clear();
 		HyperAIStudio::TrustedExecution::Private::BeginEnginePreExit();
 		FHyperAIStudioPlanExecutionService::Shutdown();
 		FHyperAIStudioPIEPlaytestService::Shutdown();
@@ -2203,6 +2209,12 @@ private:
 			for (const FString& Note : HyperAIStudio::Skills::SyncClaudeMirror(Root).Notes)
 			{
 				UE_LOG(LogHyperAIStudio, Display, TEXT("Skills: %s"), *Note);
+			}
+			// An installed gameplay team takes plugin updates; a project without one gets nothing new.
+			HyperAIStudio::Agents::InstallTeam(Root, /*bUpdateOnly=*/true);
+			for (const FString& Note : HyperAIStudio::Agents::Sync(Root).Notes)
+			{
+				UE_LOG(LogHyperAIStudio, Display, TEXT("Subagents: %s"), *Note);
 			}
 			SuggestRepeatedWorkflow(Root);
 		}
@@ -3348,7 +3360,7 @@ private:
 			&& AgentsText.Contains(TEXT("Fast Paths"))
 			&& AgentsText.Contains(TEXT("get_current_level"))
 			&& AgentsText.Contains(TEXT("find_actors"))
-			&& AgentsText.Contains(TEXT("Do not overlap Unreal MCP calls"))
+			&& AgentsText.Contains(TEXT("HyperAI edits wait their turn"))
 			&& AgentsText.Contains(TEXT("Context Packs"))
 			&& AgentsText.Contains(TEXT("Shared Project Workspace"))
 			&& AgentsText.Contains(TEXT(".hyperai/work/YYYY-MM-DD-<clear-context-name>/"))

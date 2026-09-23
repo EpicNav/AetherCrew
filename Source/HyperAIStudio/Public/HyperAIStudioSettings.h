@@ -288,6 +288,10 @@ struct FHyperAIStudioAgentTaskRoute
 	/** Capability packs this kind of task uses; their operation outcomes decide the automatic pick. */
 	UPROPERTY(Config, EditAnywhere, Category = "Routing")
 	TArray<FString> Packs;
+
+	/** Claude Code only: the tab starts as this subagent from .hyperai/agents or .claude/agents, e.g. blueprint-builder. */
+	UPROPERTY(Config, EditAnywhere, Category = "Routing")
+	FString Subagent;
 };
 
 UCLASS(Config = EditorPerProjectUserSettings, DefaultConfig, meta = (DisplayName = "HyperAIStudio"))

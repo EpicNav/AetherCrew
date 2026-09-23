@@ -68,7 +68,8 @@ private:
 	bool DeliverHandoffPrompt(const FString& Text, const FString& Label);
 	TSharedRef<SWidget> BuildNewTabMenu();
 	TSharedRef<SWidget> BuildHandoffMenu();
-	void OpenRoutedTab(const FString& Category, const FHyperAIStudioRouteChoice& Choice);
+	/** Subagent, when set, starts a Claude Code tab as that subagent. */
+	void OpenRoutedTab(const FString& Category, const FHyperAIStudioRouteChoice& Choice, const FString& Subagent = FString());
 	void StartHandoff(TWeakPtr<SHyperAIStudioQuickActionWindow> Builder);
 	/**
 	 * Moves a running handoff along: plan file written, then result file written, then review asked for. Runs on
@@ -197,6 +198,8 @@ private:
 	double PlanAutoAcceptSentTime = 0.0;
 	/** Kind of task this tab was opened for from the new-tab menu; shown on the tab. */
 	FString RouteCategory;
+	/** Claude Code subagent this tab's new chats start as (claude --agent). */
+	FString TabSubagent;
 	/** Model chosen in this tab (or by its route) for TabModelAgent; other tabs keep their own. */
 	FString TabModel;
 	FString TabModelAgent;

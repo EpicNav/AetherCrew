@@ -17,6 +17,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "SHyperAIStudioQuickActionWindow.h"
+#include "SHyperAIStudioAgentsPanel.h"
 #include "SHyperAIStudioMemoryPanel.h"
 #include "SHyperAIStudioSkillsPanel.h"
 #include "Styling/AppStyle.h"
@@ -1302,6 +1303,10 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildAgentsTab()
 		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 22.0f, 0.0f, 0.0f)
 		[
 			SNew(SHyperAIStudioSkillsPanel)
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 22.0f, 0.0f, 0.0f)
+		[
+			SNew(SHyperAIStudioAgentsPanel)
 		];
 }
 

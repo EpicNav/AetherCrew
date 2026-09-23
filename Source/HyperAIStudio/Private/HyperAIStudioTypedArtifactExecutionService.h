@@ -70,6 +70,8 @@ public:
 		FHyperAIStudioTypedArtifactOperationStatus& OutStatus,
 		FString& OutError);
 	int32 NumStaged() const;
+	/** True while an operation owns the one lane or is being admitted to it. */
+	bool IsBusy() const;
 	bool IsQuiescing() const;
 	bool CanShutdownSafely() const;
 	void Shutdown();

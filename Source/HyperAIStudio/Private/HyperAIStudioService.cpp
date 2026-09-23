@@ -10,6 +10,7 @@
 #include "HyperAIStudioMcpSerialQueue.h"
 #include "HyperAIStudioOperationJournal.h"
 #include "HyperAIStudioProjectMemory.h"
+#include "HyperAIStudioAgents.h"
 #include "HyperAIStudioSkills.h"
 
 #include "CoreGlobals.h"
@@ -3610,6 +3611,8 @@ bool FHyperAIStudioService::GenerateProjectFiles(FText& OutMessage) const
 	// overwrites a skill it did not write or one edited since.
 	HyperAIStudio::Skills::InstallBuiltIns(ProjectRoot, HyperAIStudio::Skills::BuiltInDirectory());
 	HyperAIStudio::Skills::SyncClaudeMirror(ProjectRoot);
+	HyperAIStudio::Agents::InstallTeam(ProjectRoot, /*bUpdateOnly=*/true);
+	HyperAIStudio::Agents::Sync(ProjectRoot);
 
 	FHyperAIStudioStatus Status = GetStatusSync();
 	WriteStatusJson(ProjectRoot, Status);
@@ -4838,7 +4841,7 @@ void BuildAgentInstructionBlocks(
 		TEXT("- After readiness, use native `unreal-mcp` tools when the current agent client exposes them. If it still does not, continue work that does not require Unreal tools; only ask for an MCP reload or project-root reopen when the requested task actually requires those tools.") LINE_TERMINATOR +
 		TEXT("- Never ask for a new agent session merely to start Unreal Editor, and never claim that editor startup failed only because native tools are absent from the current session.") LINE_TERMINATOR +
 		TEXT("- Use normal filesystem tools for source files.") LINE_TERMINATOR +
-		TEXT("- Do not overlap Unreal MCP calls.") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("- Parallel agents can share this editor: reads run side by side, and HyperAI edits wait their turn (status `queued`; `hyper_operation_wait` waits through it). Give each agent its own assets; two agents editing one asset still conflict.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Fast Paths") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("- Before your first Unreal call, read `.hyperai/docs/HyperAIStudio-ToolGuide.md`. It lists every HyperAIStudio toolset, tool, and field, so you can `call_tool` directly.") LINE_TERMINATOR +
 		TEXT("- Edit in one call: a pack's `*_apply_plan` with `bDryRun: false` and a fresh `operationId` (`expectedPlanHash` is optional), then `hyper_operation_wait` with that `operationId`, then the pack's validate tool.") LINE_TERMINATOR +
@@ -4869,7 +4872,7 @@ void BuildAgentInstructionBlocks(
 	OutClaudeBlock =
 		FString(TEXT("@AGENTS.md") LINE_TERMINATOR LINE_TERMINATOR) +
 		FString(TEXT("# Claude Code HyperAIStudio Notes") LINE_TERMINATOR LINE_TERMINATOR) +
-		FString::Printf(TEXT("- Project root: `%s`%s- Native MCP: `unreal-mcp` at `%s`%s- Follow the user's requested intent first. If asked to start, open, or reconnect the project, run `.hyperai/scripts/Start-HyperAIStudioEditor.ps1`, wait for MCP readiness, and continue.%s- Missing native MCP tools do not prove that the working directory is wrong. Start and verify Unreal first.%s- Use native `unreal-mcp` tools when this client exposes them. Only request an MCP reload or project-root reopen if the endpoint is ready and the requested task actually requires unavailable Unreal tools.%s- Never ask for a new agent session merely to start Unreal Editor.%s- Use generated Start/Wait helpers for lifecycle and readiness checks; do not hand-roll MCP protocol calls.%s- Fast paths: current level = `SceneTools.get_current_level`; actors = `SceneTools.find_actors` via `call_tool`.%s- Only read `.hyperai/context/` files when the prompt explicitly references them.%s- Do not overlap Unreal MCP calls."),
+		FString::Printf(TEXT("- Project root: `%s`%s- Native MCP: `unreal-mcp` at `%s`%s- Follow the user's requested intent first. If asked to start, open, or reconnect the project, run `.hyperai/scripts/Start-HyperAIStudioEditor.ps1`, wait for MCP readiness, and continue.%s- Missing native MCP tools do not prove that the working directory is wrong. Start and verify Unreal first.%s- Use native `unreal-mcp` tools when this client exposes them. Only request an MCP reload or project-root reopen if the endpoint is ready and the requested task actually requires unavailable Unreal tools.%s- Never ask for a new agent session merely to start Unreal Editor.%s- Use generated Start/Wait helpers for lifecycle and readiness checks; do not hand-roll MCP protocol calls.%s- Fast paths: current level = `SceneTools.get_current_level`; actors = `SceneTools.find_actors` via `call_tool`.%s- Only read `.hyperai/context/` files when the prompt explicitly references them.%s- Parallel agents can share this editor: HyperAI edits wait their turn (status `queued`), so give each agent its own assets."),
 			*ProjectRoot, LINE_TERMINATOR,
 			*Endpoint, LINE_TERMINATOR,
 			LINE_TERMINATOR,

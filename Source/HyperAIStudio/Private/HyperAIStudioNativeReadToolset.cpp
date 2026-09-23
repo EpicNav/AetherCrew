@@ -16,6 +16,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityInventoryClient.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
@@ -1770,6 +1771,24 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 		return Report;
 	}
 
+	int32 QueuePosition = 0;
+	FString QueueFailure;
+	FString QueueDiagnostic;
+	const bool bQueueKnows = FHyperAIStudioExecutionQueue::Query(OperationId, QueuePosition, QueueFailure, QueueDiagnostic);
+	if (QueuePosition > 0)
+	{
+		Report.bOk = true;
+		Report.bFound = true;
+		Report.Status = TEXT("queued");
+		Report.State = Report.Status;
+		Report.StatusCode = Report.Status;
+		Report.Diagnostic = FString::Printf(
+			TEXT("Waiting for another edit to finish; %d more queued ahead of it. Nothing has run yet."), QueuePosition - 1);
+		Report.NextAction = TEXT("Call hyper_operation_wait: it waits through the queue and the edit.");
+		Report.JournalAccessMode = TEXT("edit_queue");
+		return Report;
+	}
+
 	FHyperAIStudioPlanExecutionStatus LiveStatus;
 	if (FHyperAIStudioPlanExecutionService::QueryStatus(OperationId, LiveStatus))
 	{
@@ -1830,6 +1849,22 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 		Report.NextAction = !Report.bTerminal ? TEXT("Still running; call hyper_operation_wait to wait for it.")
 			: Report.bNeedsReconciliation ? TEXT("The outcome is unknown; inspect the target before retrying.")
 			: TEXT("Validate the result with the pack's validate tool.");
+		return Report;
+	}
+
+	// An edit that waited in the queue and then could not start was never journaled.
+	if (bQueueKnows && !QueueFailure.IsEmpty())
+	{
+		Report.bOk = true;
+		Report.bFound = true;
+		Report.bTerminal = true;
+		Report.Status = TEXT("failed");
+		Report.State = Report.Status;
+		Report.StatusCode = QueueFailure;
+		Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(
+			QueueDiagnostic, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+		Report.NextAction = TEXT("Nothing ran. The target may have changed while it waited: dry-run the plan again.");
+		Report.JournalAccessMode = TEXT("edit_queue");
 		return Report;
 	}
 
@@ -1937,7 +1972,7 @@ namespace HyperAIStudio::NativeReadTools::Wait
 		bool bWaitThroughApproval = false;
 	};
 
-	constexpr int32 MaxWaiters = 8;
+	constexpr int32 MaxWaiters = 32;
 	constexpr float PollSeconds = 0.2f;
 
 	TArray<FWaiter>& Waiters()

@@ -130,6 +130,22 @@ public:
 		const FString& OperationId,
 		FHyperAIStudioTypedArtifactOperationStatus& OutStatus) const;
 
+	/**
+	 * Prepare a held plan again from the same request, payload and verifier. A preparation's authority seal
+	 * lasts seconds, while an approval or the edit queue can hold a plan for minutes.
+	 */
+	bool Reprepare(
+		const FHyperAIStudioTrustedPreparedArtifact& Held,
+		FHyperAIStudioTrustedPreparedArtifact& OutFresh,
+		FHyperAIStudioTrustedExecutionDiagnostic& OutStatus,
+		FString& OutError);
+	/** The request a preparation was made from, for the edit queue's activity entries. */
+	bool DescribePrepared(
+		const FHyperAIStudioTrustedPreparedArtifact& Prepared,
+		FHyperAIStudioTrustedArtifactRequest& OutRequest) const;
+	/** True while an operation owns the project's one execution lane or is being admitted to it. */
+	bool IsLaneBusy() const;
+
 private:
 	TSharedPtr<FHyperAIStudioTrustedExecutionHostState, ESPMode::ThreadSafe> State;
 };
@@ -146,4 +162,17 @@ namespace HyperAIStudio::TrustedExecution::Private
 		const FHyperAIStudioTypedArtifactStageReceipt& Receipt,
 		FString& OutAuthorizationToken,
 		FString& OutError);
+	/**
+	 * The approval gate's route onto the edit queue (HyperAIStudioExecutionQueue.cpp). A risky plan's grant is
+	 * issued when its turn comes; deliberately absent from the exported queue API.
+	 */
+	bool SubmitUserApproved(
+		const FHyperAIStudioTrustedPreparedArtifact& Prepared,
+		const FString& OperationId,
+		FString& OutStatus,
+		FString& OutError);
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Points the edit queue at a test host instead of the core one; nullptr restores the core host. */
+	void SetQueueHostForTests(const TSharedPtr<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe>& Host);
+#endif
 }

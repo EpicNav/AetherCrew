@@ -14,7 +14,9 @@ enum class EHyperAIStudioActivityKind : uint8
 	JobStarted,
 	JobFinished,
 	Completed,
-	Failed
+	Failed,
+	/** Waiting behind another edit for the project's one execution lane. */
+	Queued
 };
 
 /** One line of what an agent did, or asked to do, in this editor session. */

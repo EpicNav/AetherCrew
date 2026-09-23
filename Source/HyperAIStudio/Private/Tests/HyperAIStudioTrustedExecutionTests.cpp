@@ -5,6 +5,9 @@
 #include "HyperAIStudioTrustedExecutionInternal.h"
 
 #include "Async/Async.h"
+#include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioExecutionQueue.h"
+#include "HyperAIStudioNativeReadToolset.h"
 #include "Containers/Ticker.h"
 #include "HAL/Event.h"
 #include "HAL/FileManager.h"
@@ -1096,6 +1099,142 @@ bool FHyperAIStudioTrustedNoPumpTerminalReconcileTest::RunTest(const FString& Pa
 	TestTrue(TEXT("all serial operations eventually dispatched"), Adapter->ExecuteCount >= 33);
 	TestEqual(TEXT("terminal contexts reconcile without any client QueryStatus polling"),
 		Host.UnregisterAdapter(Handle, Error), EHyperAIStudioDomainUnregisterResult::Removed);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioTrustedEditQueueTest,
+	"HyperAIStudio.NativeTools.TrustedExecution.EditQueue",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioTrustedEditQueueTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::TrustedExecution::Tests;
+	const FString Root = MakeProjectRoot();
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Root, false, true); };
+	const TSharedRef<FTestClock, ESPMode::ThreadSafe> Clock = MakeShared<FTestClock, ESPMode::ThreadSafe>();
+	const TSharedRef<FTestEnvironment, ESPMode::ThreadSafe> Environment =
+		MakeShared<FTestEnvironment, ESPMode::ThreadSafe>();
+	const TSharedRef<FTestCatalogAuthority, ESPMode::ThreadSafe> Catalog =
+		MakeShared<FTestCatalogAuthority, ESPMode::ThreadSafe>(
+			MakeCatalog(EHyperAIStudioCapabilityAdmissionState::Admitted, false));
+	const TSharedRef<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host =
+		MakeShared<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe>(Root, Catalog, Environment, Clock);
+	FHyperAIStudioExecutionQueue::Clear();
+	HyperAIStudio::TrustedExecution::Private::SetQueueHostForTests(Host);
+	ON_SCOPE_EXIT
+	{
+		FHyperAIStudioExecutionQueue::Clear();
+		FHyperAIStudioApprovalGate::Clear();
+		HyperAIStudio::TrustedExecution::Private::SetQueueHostForTests(nullptr);
+		Host->Shutdown();
+	};
+	FString Error;
+	TestTrue(TEXT("host starts"), Host->Startup(Error));
+	const TSharedRef<FTestAdapter, ESPMode::ThreadSafe> Adapter =
+		MakeShared<FTestAdapter, ESPMode::ThreadSafe>(
+			MakeDescriptor(TEXT("adapter.test.queue"), BaseTool, false));
+	TArray<FString> Applied;
+	Adapter->OnExecute = [&Applied](const FHyperAIStudioDomainDispatchContext& Context, int32)
+	{
+		if (Context.ActionKind == EHyperAIStudioDomainExecutionActionKind::Apply)
+		{
+			Applied.Add(Context.OperationId);
+		}
+	};
+	FHyperAIStudioDomainRegistrationHandle Handle;
+	TestTrue(TEXT("adapter registers"), Host->RegisterAdapter(Adapter, Handle, Error));
+	auto PrepareOne = [&](FHyperAIStudioTrustedPreparedArtifact& Out)
+	{
+		FHyperAIStudioTrustedPrepareReport Report;
+		return Prepare(*Host, Adapter->Descriptor, BaseTool, Out, Report, Error);
+	};
+	auto PumpUntilIdle = [&]()
+	{
+		for (int32 Tick = 0; Tick < 400 && (FHyperAIStudioExecutionQueue::Num() > 0 || Host->IsLaneBusy()); ++Tick)
+		{
+			FTSTicker::GetCoreTicker().Tick(0.2f);
+		}
+	};
+
+	FHyperAIStudioTrustedPreparedArtifact First;
+	FHyperAIStudioTrustedPreparedArtifact Second;
+	FHyperAIStudioTrustedPreparedArtifact Third;
+	TestTrue(TEXT("three plans prepare"), PrepareOne(First) && PrepareOne(Second) && PrepareOne(Third));
+	// Every plan waits past its authority seal, as an approval or a long queue does.
+	Clock->AdvanceMonotonic(FHyperAIStudioTrustedExecutionLimits::ProbeFreshnessMs + 1);
+
+	FString Status;
+	TestTrue(TEXT("first edit submits"), FHyperAIStudioExecutionQueue::Submit(First, TEXT("queue-first"), Status, Error));
+	TestEqual(TEXT("an idle lane runs a stale plan at once, prepared again"), Status, FString(TEXT("submitted")));
+	TestTrue(TEXT("second edit is accepted"), FHyperAIStudioExecutionQueue::Submit(Second, TEXT("queue-second"), Status, Error));
+	TestEqual(TEXT("a busy lane queues the second edit instead of failing"), Status, FString(TEXT("queued")));
+	TestTrue(TEXT("a repeated submit of a waiting edit stays queued"),
+		FHyperAIStudioExecutionQueue::Submit(Second, TEXT("queue-second"), Status, Error) && Status == TEXT("queued"));
+	int32 Position = 0;
+	FString Failure;
+	FString Diagnostic;
+	TestTrue(TEXT("the waiting edit is first in line"),
+		FHyperAIStudioExecutionQueue::Query(TEXT("queue-second"), Position, Failure, Diagnostic) && Position == 1);
+	TestEqual(TEXT("operation status reports the wait"),
+		UHyperAIStudioNativeReadToolset::hyper_operation_status(TEXT("queue-second")).Status, FString(TEXT("queued")));
+
+	FHyperAIStudioApprovalSummary Summary;
+	Summary.PackId = PackId;
+	Summary.ToolName = BaseTool;
+	Summary.EffectTarget = TEXT("test:/trusted-target");
+	TestTrue(TEXT("third edit waits for approval"),
+		FHyperAIStudioApprovalGate::Request(Third, TEXT("queue-third"), Summary, Error));
+	TestTrue(TEXT("approving it after its seal lapsed succeeds"), FHyperAIStudioApprovalGate::Approve(TEXT("queue-third"), Error));
+	TestTrue(TEXT("the approved edit queues behind the second"),
+		FHyperAIStudioExecutionQueue::Query(TEXT("queue-third"), Position, Failure, Diagnostic) && Position == 2);
+
+	PumpUntilIdle();
+	TestTrue(TEXT("all three edits ran, first come first served"),
+		Applied == TArray<FString>{TEXT("queue-first"), TEXT("queue-second"), TEXT("queue-third")});
+	for (const TCHAR* OperationId : {TEXT("queue-first"), TEXT("queue-second"), TEXT("queue-third")})
+	{
+		FHyperAIStudioTypedArtifactOperationStatus Typed;
+		TestTrue(FString::Printf(TEXT("%s completed"), OperationId),
+			Host->QueryLiveStatus(OperationId, Typed) && Typed.bTerminal && Typed.Status == TEXT("completed"));
+	}
+
+	// A plan that cannot be prepared again when its turn comes fails with a reason the agent can read.
+	FHyperAIStudioTrustedPreparedArtifact Fourth;
+	FHyperAIStudioTrustedPreparedArtifact Fifth;
+	TestTrue(TEXT("two more plans prepare"), PrepareOne(Fourth) && PrepareOne(Fifth));
+	TestTrue(TEXT("fourth edit submits"), FHyperAIStudioExecutionQueue::Submit(Fourth, TEXT("queue-fourth"), Status, Error));
+	TestTrue(TEXT("fifth edit queues"),
+		FHyperAIStudioExecutionQueue::Submit(Fifth, TEXT("queue-fifth"), Status, Error) && Status == TEXT("queued"));
+	Environment->bModuleLoaded = false;
+	Clock->AdvanceMonotonic(FHyperAIStudioTrustedExecutionLimits::ProbeFreshnessMs + 1);
+	PumpUntilIdle();
+	Environment->bModuleLoaded = true;
+	TestTrue(TEXT("the failed wait is reported"),
+		FHyperAIStudioExecutionQueue::Query(TEXT("queue-fifth"), Position, Failure, Diagnostic) && Position == 0 && !Failure.IsEmpty());
+	TestEqual(TEXT("operation status reports it as failed"),
+		UHyperAIStudioNativeReadToolset::hyper_operation_status(TEXT("queue-fifth")).Status, FString(TEXT("failed")));
+
+	FHyperAIStudioTrustedPreparedArtifact Sixth;
+	FHyperAIStudioTrustedPreparedArtifact Seventh;
+	TestTrue(TEXT("two last plans prepare"), PrepareOne(Sixth) && PrepareOne(Seventh));
+	TestTrue(TEXT("sixth edit submits"), FHyperAIStudioExecutionQueue::Submit(Sixth, TEXT("queue-sixth"), Status, Error));
+	TestTrue(TEXT("seventh edit queues"), FHyperAIStudioExecutionQueue::Submit(Seventh, TEXT("queue-seventh"), Status, Error));
+	FHyperAIStudioExecutionQueue::Clear();
+	TestEqual(TEXT("clear drops waiting edits"), FHyperAIStudioExecutionQueue::Num(), 0);
+	PumpUntilIdle();
+	TestFalse(TEXT("a dropped edit never runs"), Applied.Contains(TEXT("queue-seventh")));
+
+	First.Reset();
+	Second.Reset();
+	Third.Reset();
+	Fourth.Reset();
+	Fifth.Reset();
+	Sixth.Reset();
+	Seventh.Reset();
+	Clock->AdvanceMonotonic(20000);
+	TestEqual(TEXT("held plans release their adapter pins"),
+		Host->UnregisterAdapter(Handle, Error), EHyperAIStudioDomainUnregisterResult::Removed);
 	return true;
 }
 

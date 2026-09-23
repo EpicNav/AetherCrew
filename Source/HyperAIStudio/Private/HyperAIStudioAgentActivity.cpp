@@ -183,6 +183,7 @@ const TCHAR* FHyperAIStudioAgentActivityLog::LexToString(const EHyperAIStudioAct
 	case EHyperAIStudioActivityKind::JobStarted: return TEXT("Started");
 	case EHyperAIStudioActivityKind::JobFinished: return TEXT("Finished");
 	case EHyperAIStudioActivityKind::Completed: return TEXT("Completed");
+	case EHyperAIStudioActivityKind::Queued: return TEXT("Queued");
 	default: return TEXT("Failed");
 	}
 }

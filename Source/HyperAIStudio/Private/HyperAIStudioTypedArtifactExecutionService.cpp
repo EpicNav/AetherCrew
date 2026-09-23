@@ -1333,6 +1333,12 @@ int32 FHyperAIStudioTypedArtifactExecutionService::NumStaged() const
 	return State->Store->NumStaged();
 }
 
+bool FHyperAIStudioTypedArtifactExecutionService::IsBusy() const
+{
+	FScopeLock Lock(&State->Mutex);
+	return State->Active.IsValid() || State->bAdmissionInProgress;
+}
+
 bool FHyperAIStudioTypedArtifactExecutionService::IsQuiescing() const
 {
 	FScopeLock Lock(&State->Mutex);

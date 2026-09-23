@@ -33,6 +33,7 @@
 #include "SHyperAIStudioActivitySidebar.h"
 #include "SHyperAIStudioChatHistorySidebar.h"
 #include "SHyperAIStudioMemoryPanel.h"
+#include "HyperAIStudioAgents.h"
 #include "HyperAIStudioSkills.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -239,6 +240,7 @@ namespace HyperAIStudio::QuickAction
 	{
 		FString Category;
 		FHyperAIStudioRouteChoice Choice;
+		FString Subagent;
 	};
 
 	/** Set just before a routed tab opens, and taken by the tab it opens. */
@@ -303,6 +305,7 @@ void SHyperAIStudioQuickActionWindow::Construct(const FArguments& InArgs)
 		const HyperAIStudio::QuickAction::FPendingRoute Route = Pending.GetValue();
 		Pending.Reset();
 		RouteCategory = Route.Category;
+		TabSubagent = Route.Subagent;
 		for (const TSharedPtr<FString>& Agent : AgentOptions)
 		{
 			if (Agent.IsValid() && Agent->Equals(Route.Choice.Agent, ESearchCase::IgnoreCase))
@@ -1226,10 +1229,34 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildNewTabMenu()
 			FText::FromString(ToolTip),
 			FSlateIcon(),
 			FUIAction(
-				FExecuteAction::CreateSPLambda(this, [this, Category = Route.Category, Choice]() { OpenRoutedTab(Category, Choice); }),
+				FExecuteAction::CreateSPLambda(this, [this, Category = Route.Category, Choice, Subagent = Route.Subagent]()
+				{
+					const bool bClaude = HyperAIStudio::QuickAction::IsClaudeAgent(Choice.Agent) && HyperAIStudio::Skills::IsValidName(Subagent);
+					OpenRoutedTab(Category, Choice, bClaude ? Subagent : FString());
+				}),
 				FCanExecuteAction::CreateLambda([bHasAgent = !Choice.Agent.IsEmpty()]() { return bHasAgent; })));
 	}
 	Menu.EndSection();
+	// A subagent becomes the whole chat: its instructions, tools and model replace the defaults (claude --agent).
+	const FString* Claude = Usable.FindByPredicate([](const FString& Agent) { return HyperAIStudio::QuickAction::IsClaudeAgent(Agent); });
+	const TArray<FHyperAIStudioAgentDefinition> Subagents = Claude
+		? HyperAIStudio::Agents::List(FHyperAIStudioService::GetProjectRoot()) : TArray<FHyperAIStudioAgentDefinition>();
+	if (!Subagents.IsEmpty())
+	{
+		Menu.BeginSection(NAME_None, LOCTEXT("SubagentTabHeading", "Claude Code as a subagent"));
+		for (const FHyperAIStudioAgentDefinition& Subagent : Subagents)
+		{
+			FHyperAIStudioRouteChoice Choice;
+			Choice.Agent = *Claude;
+			Choice.Reason = FString::Printf(TEXT("Started as the subagent %s."), *Subagent.Name);
+			Menu.AddMenuEntry(
+				FText::FromString(Subagent.Name),
+				FText::FromString(Subagent.Description),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateSPLambda(this, [this, Name = Subagent.Name, Choice]() { OpenRoutedTab(Name, Choice, Name); })));
+		}
+		Menu.EndSection();
+	}
 	Menu.AddMenuSeparator();
 	Menu.AddMenuEntry(
 		LOCTEXT("EditRouting", "Edit Task Routing..."),
@@ -1239,10 +1266,10 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildNewTabMenu()
 	return Menu.MakeWidget();
 }
 
-void SHyperAIStudioQuickActionWindow::OpenRoutedTab(const FString& Category, const FHyperAIStudioRouteChoice& Choice)
+void SHyperAIStudioQuickActionWindow::OpenRoutedTab(const FString& Category, const FHyperAIStudioRouteChoice& Choice, const FString& Subagent)
 {
 	TOptional<HyperAIStudio::QuickAction::FPendingRoute>& Pending = HyperAIStudio::QuickAction::PendingRoute();
-	Pending = HyperAIStudio::QuickAction::FPendingRoute{Category, Choice};
+	Pending = HyperAIStudio::QuickAction::FPendingRoute{Category, Choice, Subagent};
 	OnNewAgentTab.ExecuteIfBound();
 	if (Pending.IsSet())
 	{
@@ -2374,6 +2401,9 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 	ActiveChatSessionId = SessionId;
 	const FString RemoteArguments = bRemote ? BuildClaudeRemoteArguments(FApp::GetProjectName(), ActiveChatTitle) : FString();
 	FString ForegroundArguments = (bExists ? TEXT("--resume ") : TEXT("--session-id ")) + SessionId;
+	// A resumed chat keeps what it started as; a new one in a subagent tab starts as that subagent.
+	const FString SubagentArgument = !bExists && HyperAIStudio::Skills::IsValidName(TabSubagent) ? TEXT(" --agent ") + TabSubagent : FString();
+	ForegroundArguments += SubagentArgument;
 	if (bRemote)
 	{
 		ForegroundArguments += TEXT(" ") + RemoteArguments;
@@ -2388,7 +2418,7 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 	FString ModelPrefix;
 	FString ModelArgument;
 	GetTerminalLaunchCommandForAgent(AgentName, FString(), &ModelPrefix, &ModelArgument);
-	FString BackgroundArguments = bExists ? TEXT("--resume ") + SessionId + TEXT(" ") + RemoteArguments : RemoteArguments;
+	FString BackgroundArguments = (bExists ? TEXT("--resume ") + SessionId + TEXT(" ") + RemoteArguments : RemoteArguments) + SubagentArgument;
 	if (!ModelArgument.IsEmpty())
 	{
 		BackgroundArguments += TEXT(" ") + ModelArgument;

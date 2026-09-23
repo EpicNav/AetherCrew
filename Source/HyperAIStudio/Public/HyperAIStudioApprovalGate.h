@@ -70,7 +70,10 @@ public:
 	static TArray<FHyperAIStudioPendingApproval> GetPending();
 	static bool HasPending(const FString& OperationId);
 
-	/** Stage and submit the held plan. On failure the request is dropped and OutError explains why. */
+	/**
+	 * Run the held plan, or queue it behind the edit that owns the project lane. On failure the request is
+	 * dropped and OutError explains why.
+	 */
 	static bool Approve(const FString& OperationId, FString& OutError);
 	static void Reject(const FString& OperationId, const FString& Reason);
 	static void Clear();
