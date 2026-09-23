@@ -150,6 +150,8 @@ public:
 	bool StopUnrealMCP(FText& OutMessage) const;
 	bool RestartUnrealMCP(FText& OutMessage) const;
 	bool GenerateProjectFiles(FText& OutMessage) const;
+	/** False when AGENTS.md or CLAUDE.md holds a HyperAIStudio block other than the one this build writes. */
+	bool AreAgentInstructionsCurrent() const;
 	bool CreateQuickConnectPromptPackage(const FString& AgentName, FHyperAIStudioPromptPackage& OutPackage, FText& OutMessage) const;
 	bool CreatePromptPackage(const FString& UserIntent, const FString& AgentName, FHyperAIStudioPromptPackage& OutPackage, FText& OutMessage) const;
 	bool CreatePromptPackageForAssets(const FString& UserIntent, const FString& AgentName, const TArray<FAssetData>& SelectedAssets, FHyperAIStudioPromptPackage& OutPackage, FText& OutMessage) const;

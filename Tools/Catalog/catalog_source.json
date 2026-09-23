@@ -466,6 +466,14 @@
      ]
     },
     {
+     "name": "hyper_operation_wait",
+     "cohort": "cohort.source.hyperaistudionativereadtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
      "name": "hyper_batch_query",
      "cohort": "cohort.source.hyperaistudiocontextsearchtoolsets.v1",
      "admission": "SourceCandidate",
@@ -873,30 +881,13 @@
       0,
       0
      ]
-    },
-    {
-     "name": "hyper_viewport_capture",
-     "cohort": "cohort.source.hyperaistudioviewportcapturetoolset.v1",
-     "admission": "SourceCandidate",
-     "safety": [
-      "ExternalEffect"
-     ],
-     "sourceArtifactCount": 1,
-     "sourceArtifactFingerprint": "sha256:0ab0b4f9df6f5f7ad10eaef4e65b826cef2cce3e36af04aad4fa39f2800b4485",
-     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-     "evidence": [
-      0,
-      0,
-      0
-     ]
     }
    ],
    "cohortOrder": [
     "cohort.source.hyperaistudioaudittoolset.v1",
     "cohort.source.hyperaistudiodependencygraphtoolset.v1",
     "cohort.source.hyperaistudiodiagnosetoolset.v1",
-    "cohort.source.hyperaistudiologtailtoolset.v1",
-    "cohort.source.hyperaistudioviewportcapturetoolset.v1"
+    "cohort.source.hyperaistudiologtailtoolset.v1"
    ]
   },
   {
@@ -1884,6 +1875,13 @@
     },
     {
      "name": "hyper_lighting_compare",
+     "cohort": "cohort.source.hyperaistudiolightingtoolset.v1",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_capture_view",
      "cohort": "cohort.source.hyperaistudiolightingtoolset.v1",
      "safety": [
       "Read"

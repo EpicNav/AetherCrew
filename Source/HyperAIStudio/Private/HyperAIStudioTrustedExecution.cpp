@@ -2931,6 +2931,13 @@ bool FHyperAIStudioTrustedExecutionHost::InspectCoreAuthorizationGrantForTests(
 }
 #endif
 
+bool FHyperAIStudioTrustedExecutionHost::QueryLiveStatus(
+	const FString& OperationId,
+	FHyperAIStudioTypedArtifactOperationStatus& OutStatus) const
+{
+	return State->Service->QueryLiveStatus(OperationId, OutStatus);
+}
+
 bool FHyperAIStudioTrustedExecutionHost::QueryStatus(
 	const FString& OperationId,
 	FHyperAIStudioTypedArtifactOperationStatus& OutStatus,
@@ -3206,6 +3213,16 @@ bool FHyperAIStudioTrustedExecutionFacade::SubmitExact(
 		return false;
 	}
 	return Host->SubmitExact(Receipt, AuthorizationToken, OutSubmission, OutStatus, OutError);
+}
+
+bool FHyperAIStudioTrustedExecutionFacade::QueryLiveStatus(
+	const FString& OperationId,
+	FHyperAIStudioTypedArtifactOperationStatus& OutStatus)
+{
+	const TSharedPtr<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host =
+		HyperAIStudio::TrustedExecution::Private::GetCoreHost();
+	OutStatus = FHyperAIStudioTypedArtifactOperationStatus{};
+	return Host.IsValid() && Host->QueryLiveStatus(OperationId, OutStatus);
 }
 
 bool FHyperAIStudioTrustedExecutionFacade::QueryStatus(

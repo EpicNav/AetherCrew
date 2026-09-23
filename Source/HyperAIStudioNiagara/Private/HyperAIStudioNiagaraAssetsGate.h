@@ -45,6 +45,12 @@ namespace HyperAIStudio::Niagara::AssetsGate
 	 */
 	FHyperAINiagaraValidateReport RunCapturePolicy(const FHyperAINiagaraValidateRequest& Request);
 
+	/**
+	 * validate policy runtime_probe: simulates the System in its own preview world and reports every emitter's
+	 * execution state and live particle count. Synchronous and bounded by the request's game-thread budget.
+	 */
+	FHyperAINiagaraValidateReport RunRuntimeProbe(const FHyperAINiagaraValidateRequest& Request);
+
 	/** Content key of the System a capture came from, for the bake check; empty for an unknown capture. */
 	FString GetCaptureSystemKey(const FString& CaptureId);
 }

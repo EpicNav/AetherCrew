@@ -14,7 +14,6 @@
 #include "HyperAIStudioPIEPlaytestToolset.h"
 #include "HyperAIStudioPlanExecuteToolset.h"
 #include "HyperAIStudioPlanValidateToolset.h"
-#include "HyperAIStudioViewportCaptureToolset.h"
 #include "Misc/ScopeLock.h"
 #include "ToolsetRegistry/Toolset.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
@@ -216,7 +215,6 @@ namespace HyperAIStudio::CapabilityRuntimeIndex::Private
 			{ UHyperAIStudioDiagnoseToolset::StaticClass() },
 			{ UHyperAIStudioAuditToolset::StaticClass() },
 			{ UHyperAIStudioLogTailToolset::StaticClass() },
-			{ UHyperAIStudioViewportCaptureToolset::StaticClass() },
 			{ UHyperAIStudioPIEPlaytestToolset::StaticClass() }
 		};
 	}

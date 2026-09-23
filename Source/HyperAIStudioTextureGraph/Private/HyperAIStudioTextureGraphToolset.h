@@ -218,7 +218,7 @@ struct FHyperAITextureGraphApplyPlanRequest
 	GENERATED_BODY()
 
 	UPROPERTY() bool bDryRun = true;
-	/** Non-dry only: a fresh operation id, later passed to hyper_operation_status. */
+	/** Non-dry only: a fresh operation id, later passed to hyper_operation_wait. */
 	UPROPERTY() FString OperationId;
 	/** Non-dry only: the plan_hash the dry run returned. */
 	UPROPERTY() FString ExpectedPlanHash;
@@ -288,7 +288,7 @@ public:
 	static FHyperAITextureGraphInspectReport hyper_texture_graph_inspect(
 		const FHyperAITextureGraphInspectRequest& Request);
 
-	/** Create or edit a Texture Graph as one undo step: nodes, connections, pin values, outputs, then save and export. Dry-run, resubmit with operation_id and plan_hash, poll hyper_operation_status. */
+	/** Create or edit a Texture Graph as one undo step: nodes, connections, pin values, outputs, then save and export. Submit with bDryRun false and an operation_id (plan hash optional), then call hyper_operation_wait. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|TextureGraph")
 	static FHyperAITextureGraphApplyPlanReport hyper_texture_graph_apply_plan(
 		const FHyperAITextureGraphApplyPlanRequest& Request);

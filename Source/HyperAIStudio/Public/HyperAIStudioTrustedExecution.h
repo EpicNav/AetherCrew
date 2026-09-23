@@ -195,4 +195,9 @@ public:
 		const FString& OperationId,
 		FHyperAIStudioTypedArtifactOperationStatus& OutStatus,
 		FString& OutError);
+
+	/** Live phase and progress of an operation this editor process knows. Never loads the journal. */
+	static bool QueryLiveStatus(
+		const FString& OperationId,
+		FHyperAIStudioTypedArtifactOperationStatus& OutStatus);
 };

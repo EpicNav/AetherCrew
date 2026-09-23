@@ -388,7 +388,15 @@ struct FHyperAIMaterialNodeSpec
 {
 	GENERATED_BODY()
 
-	/** constant, scalar_parameter, vector_parameter, add, multiply, function_input, function_output. */
+	/**
+	 * Values: constant, constant2, constant3, constant4, scalar_parameter, vector_parameter,
+	 * static_switch_parameter, texture_parameter, texture_sample. Coordinates and time: texcoord, panner,
+	 * rotator, time. Math: add, subtract, multiply, divide, min, max, lerp, clamp, power, sine, cosine,
+	 * one_minus, saturate, abs, frac, floor, ceil, square_root, normalize, dot, cross, distance, append,
+	 * component_mask, desaturation. Surface: fresnel, world_position, object_position, vertex_color,
+	 * camera_vector, pixel_normal_ws. Other: function_call, custom_hlsl, function_input, function_output.
+	 * Set per-kind keys (such as time.period or panner.speed_x) through Properties.
+	 */
 	UPROPERTY() FString Kind;
 	/** Plan-local stable identifier; not a UObject name or class name. */
 	UPROPERTY() FString NodeId;
@@ -559,7 +567,7 @@ public:
 	 * create_material_instance, set_instance_parameters. Prefer graph nodes; the Materials authoring mode decides
 	 * whether custom_hlsl is refused (Nodes), needs a justification for math nodes cannot express (Hybrid), or is
 	 * free (Hlsl). Dry-run first, then resubmit with bDryRun false, an operation_id and expected_plan_hash =
-	 * plan_hash. Poll hyper_operation_status, then hyper_material_validate for compile errors, instruction counts
+	 * plan_hash. Call hyper_operation_wait, then hyper_material_validate for compile errors, instruction counts
 	 * and the preview PNG (open it to see the result). Close the material's editor tab before editing.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Materials")

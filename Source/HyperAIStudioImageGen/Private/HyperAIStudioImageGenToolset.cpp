@@ -447,9 +447,9 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 	{
 		return Reject(TEXT("unexpected_submission_fields"), TEXT("A dry run takes no operation_id or expected_plan_hash."));
 	}
-	if (!Request.bDryRun && (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId) || !IsCanonicalSha256(Request.ExpectedPlanHash)))
+	if (!Request.bDryRun && (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId) || !FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(Request.ExpectedPlanHash)))
 	{
-		return Reject(TEXT("invalid_submission_fields"), TEXT("A non-dry submission needs a valid operation_id and the plan_hash its dry run returned."));
+		return Reject(TEXT("invalid_submission_fields"), FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage());
 	}
 	if (Request.MaxOutputBytes < MinOutputBytes || Request.MaxOutputBytes > MaxOutputBytes)
 	{
@@ -614,7 +614,7 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 		}
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Payload->SemanticFingerprint)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("plan_hash_mismatch"), TEXT("The plan changed since its dry run. Dry-run again and read the composed prompt."));
 	}
@@ -642,7 +642,7 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 	Report.Status = TEXT("awaiting_user_approval");
 	Report.Diagnostic = FString::Printf(
 		TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing has been sent or spent.%s ")
-		TEXT("Poll hyper_operation_status with operation_id; once approved, watch the batch with hyper_image_inspect."), SlowWarning);
+		TEXT("Call hyper_operation_wait with operation_id and bWaitThroughApproval true; once approved, watch the batch with hyper_image_inspect."), SlowWarning);
 	return Report;
 }
 

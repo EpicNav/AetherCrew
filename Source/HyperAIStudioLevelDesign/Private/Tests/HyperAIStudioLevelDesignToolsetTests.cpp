@@ -367,4 +367,58 @@ bool FHyperAIStudioLevelDesignEndToEndTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioLevelDesignSymmetryTest,
+	"HyperAIStudio.LevelDesign.Validate.MirrorSymmetry",
+	HyperAIStudio::LevelDesign::Tests::Flags)
+
+bool FHyperAIStudioLevelDesignSymmetryTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::LevelDesign::Tests;
+	namespace Gate = HyperAIStudio::LevelDesign::Gate;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAILevelDesignSymmetryWorld"));
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+	FHyperAIPlayerMetrics Metrics;
+	FString Error;
+	Gate::MeasurePlayer(*World, TEXT("/Script/Engine.Character"), Metrics, Error);
+	int32 Changed = 0;
+	// A courtyard mirrored across X = 0: a centred floor and pylon, and walls in pairs.
+	TestTrue(TEXT("the courtyard builds: ") + Error, Gate::ApplyOps(*World, {
+		Op(TEXT("add_block"), TEXT("Floor"), TEXT("floor"), TEXT("0,0,-20"), TEXT("3000,3000,20")),
+		Op(TEXT("add_block"), TEXT("Pylon"), TEXT("pillar"), TEXT("0,0,0"), TEXT("200,200,600")),
+		Op(TEXT("add_block"), TEXT("WallEast"), TEXT("wall"), TEXT("1400,0,0"), TEXT("100,3000,400")),
+		Op(TEXT("add_block"), TEXT("WallWest"), TEXT("wall"), TEXT("-1400,0,0"), TEXT("100,3000,400"))},
+		Metrics.MaxStepHeight, Metrics.MaxWalkableSlopeDegrees, Changed, Error));
+
+	FHyperAILevelDesignValidateReport Report;
+	Gate::CheckSymmetry(*World, TEXT("x"), 0.0f, 30.0f, Report);
+	TestEqual(TEXT("four mesh actors are checked"), Report.Symmetry.ActorsChecked, 4);
+	TestEqual(TEXT("the walls pair up"), Report.Symmetry.MatchedPairs, 1);
+	TestEqual(TEXT("floor and pylon straddle the plane"), Report.Symmetry.SelfSymmetric, 2);
+	TestTrue(TEXT("the courtyard is symmetric"), Report.Symmetry.bSymmetric && Report.Symmetry.Score == 1.0f);
+	TestEqual(TEXT("and raises no issue"), Report.ErrorCount, 0);
+
+	// Across Y the east and west walls straddle the plane, so they mirror onto themselves too.
+	FHyperAILevelDesignValidateReport AcrossY;
+	Gate::CheckSymmetry(*World, TEXT("y"), 0.0f, 30.0f, AcrossY);
+	TestTrue(TEXT("the courtyard is also symmetric across Y = 0"), AcrossY.Symmetry.bSymmetric && AcrossY.Symmetry.SelfSymmetric == 4);
+
+	// A lone crate on one side has no twin, and a plane off the centre breaks the walls' pairing.
+	TestTrue(TEXT("a crate is added: ") + Error, Gate::ApplyOps(*World, {
+		Op(TEXT("add_block"), TEXT("Crate"), TEXT("cover_low"), TEXT("600,500,0"), TEXT("100,100,100"))},
+		Metrics.MaxStepHeight, Metrics.MaxWalkableSlopeDegrees, Changed, Error));
+	FHyperAILevelDesignValidateReport Broken;
+	Gate::CheckSymmetry(*World, TEXT("x"), 0.0f, 30.0f, Broken);
+	TestFalse(TEXT("one crate breaks symmetry"), Broken.Symmetry.bSymmetric);
+	TestEqual(TEXT("the crate is named"), Broken.Symmetry.Unmatched.Num(), 1);
+	TestTrue(TEXT("as an asymmetric error"), HasIssue(Broken, TEXT("asymmetric")) && Broken.ErrorCount == 1);
+	TestTrue(TEXT("the score counts the rest"), FMath::IsNearlyEqual(Broken.Symmetry.Score, 0.8f, 0.001f));
+	FHyperAILevelDesignValidateReport Shifted;
+	Gate::CheckSymmetry(*World, TEXT("x"), 200.0f, 30.0f, Shifted);
+	TestTrue(TEXT("a plane at X = 200 leaves the walls unpaired"),
+		Shifted.Symmetry.Unmatched.Contains(TEXT("LD_WallEast")) && Shifted.Symmetry.Unmatched.Contains(TEXT("LD_WallWest")));
+	return true;
+}
+
 #endif

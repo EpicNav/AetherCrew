@@ -115,6 +115,37 @@ struct FHyperAINiagaraAssetRecord
 };
 
 /** A simulation capture and, when a golden cache was given, how it compares. */
+/** One emitter after a runtime probe. */
+USTRUCT(BlueprintType)
+struct FHyperAINiagaraEmitterRuntime
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString Name;
+	UPROPERTY() bool bEnabled = false;
+	/** cpu or gpu. */
+	UPROPERTY() FString SimTarget;
+	/** Active, Inactive, InactiveClear, Complete or Disabled. */
+	UPROPERTY() FString ExecutionState;
+	/** Particles alive when the probe ended. */
+	UPROPERTY() int32 NumParticles = 0;
+	UPROPERTY() int32 TotalSpawned = 0;
+	/** cpu, or gpu_estimate: GPU counts come from a latent readback an unrendered preview never triggers, so spawned stands in. */
+	UPROPERTY() FString CountSource;
+	UPROPERTY() bool bMeetsMinimum = false;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAINiagaraRuntimeProbeReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY() float SimulatedSeconds = 0.f;
+	/** Every expected emitter (or every emitter, when none were named) met min_particles_per_emitter. */
+	UPROPERTY() bool bAllLive = false;
+	UPROPERTY() TArray<FHyperAINiagaraEmitterRuntime> Emitters;
+};
+
 USTRUCT(BlueprintType)
 struct FHyperAINiagaraSimCacheReport
 {
@@ -236,6 +267,8 @@ struct FHyperAINiagaraValidateRequest
 	 * authoring fails on errors; runtime_ready also fails on warnings or an incomplete compile.
 	 * sim_cache_capture records the System's simulation frame by frame: call once to start (returns capture_id),
 	 * then again with capture_id until complete; with golden_sim_cache_path it compares against that cache.
+	 * runtime_probe simulates the System for probe_frames in a preview world and reports each emitter's live
+	 * particle count: proof that its emitters actually spawn, in one call.
 	 */
 	UPROPERTY() FString Policy = TEXT("authoring");
 	/** sim_cache_capture: the id a previous call returned. */
@@ -244,6 +277,11 @@ struct FHyperAINiagaraValidateRequest
 	UPROPERTY() float CaptureDeltaSeconds = 1.f / 60.f;
 	/** sim_cache_capture: a baked cache to compare the finished capture against. */
 	UPROPERTY() FString GoldenSimCachePath;
+	/** runtime_probe: simulated frames, 1-600, at capture_delta_seconds each. */
+	UPROPERTY() int32 ProbeFrames = 120;
+	/** runtime_probe: emitters that must be live; empty checks every enabled emitter. */
+	UPROPERTY() TArray<FString> ExpectEmitters;
+	UPROPERTY() int32 MinParticlesPerEmitter = 1;
 	UPROPERTY() float FloatTolerance = 0.01f;
 	UPROPERTY() int32 MaxIssues = 128;
 	UPROPERTY() int32 MaxGameThreadMs = 150;
@@ -274,6 +312,8 @@ struct FHyperAINiagaraValidateReport
 	UPROPERTY() TArray<FHyperAINiagaraCapabilityStatus> Capabilities;
 	/** policy sim_cache_capture only. */
 	UPROPERTY() FHyperAINiagaraSimCacheReport SimCache;
+	/** policy runtime_probe only. */
+	UPROPERTY() FHyperAINiagaraRuntimeProbeReport RuntimeProbe;
 };
 
 /** One closed edit. Addresses come from hyper_niagara_inspect with bIncludeTopology; unused fields stay empty. */
@@ -317,7 +357,7 @@ struct FHyperAINiagaraApplyPlanRequest
 	GENERATED_BODY()
 
 	UPROPERTY() bool bDryRun = true;
-	/** Non-dry only: a fresh durable operation id, later passed to hyper_operation_status. */
+	/** Non-dry only: a fresh durable operation id, later passed to hyper_operation_wait. */
 	UPROPERTY() FString OperationId;
 	/** Non-dry only: the plan_hash the dry run returned, so the reviewed plan is the one that runs. */
 	UPROPERTY() FString ExpectedPlanHash;
@@ -386,7 +426,7 @@ public:
 	static FHyperAINiagaraInspectReport hyper_niagara_inspect(
 		const FHyperAINiagaraInspectRequest& Request);
 
-	/** Batched Niagara edits as one undo step with revision check, compile, save and fresh verify. Dry-run, resubmit with operation_id and plan_hash, poll hyper_operation_status, then hyper_niagara_validate. */
+	/** Batched Niagara edits as one undo step with revision check, compile, save and fresh verify. Submit with bDryRun false and an operation_id (plan hash optional), call hyper_operation_wait, then hyper_niagara_validate. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Niagara")
 	static FHyperAINiagaraApplyPlanReport hyper_niagara_apply_plan(
 		const FHyperAINiagaraApplyPlanRequest& Request);

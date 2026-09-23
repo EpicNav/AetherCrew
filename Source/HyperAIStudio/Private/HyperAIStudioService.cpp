@@ -4832,6 +4832,8 @@ void BuildAgentInstructionBlocks(
 		TEXT("- Use normal filesystem tools for source files.") LINE_TERMINATOR +
 		TEXT("- Do not overlap Unreal MCP calls.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Fast Paths") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("- Before your first Unreal call, read `.hyperai/docs/HyperAIStudio-ToolGuide.md`. It lists every HyperAIStudio toolset, tool, and field, so you can `call_tool` directly without `list_toolsets`.") LINE_TERMINATOR +
+		TEXT("- Edit in one call: a pack's `*_apply_plan` with `bDryRun: false` and a fresh `operationId` (`expectedPlanHash` is optional), then `hyper_operation_wait` with that `operationId`, then the pack's validate tool.") LINE_TERMINATOR +
 		TEXT("- Current level: `call_tool` -> `editor_toolset.toolsets.scene.SceneTools` / `get_current_level` / `{}`.") LINE_TERMINATOR +
 		TEXT("- List actors: `call_tool` -> `editor_toolset.toolsets.scene.SceneTools` / `find_actors` / `{\"name\":\"\",\"tag\":\"\",\"collision_channels\":[]}`.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Reconnect") LINE_TERMINATOR LINE_TERMINATOR +
@@ -4869,6 +4871,43 @@ void BuildAgentInstructionBlocks(
 			LINE_TERMINATOR,
 			LINE_TERMINATOR,
 			LINE_TERMINATOR);
+}
+
+bool FHyperAIStudioService::AreAgentInstructionsCurrent() const
+{
+	using namespace HyperAIStudio::Private;
+	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+	if (!Settings)
+	{
+		return true;
+	}
+	const FString ProjectRoot = GetProjectRoot();
+	FString AgentsBlock;
+	FString ClaudeBlock;
+	BuildAgentInstructionBlocks(ProjectRoot, GetEndpoint(Settings->UnrealMCPPort, Settings->UnrealMCPUrlPath), Settings, AgentsBlock, ClaudeBlock);
+	const TPair<FString, FString> Targets[] = {
+		{ FPaths::Combine(ProjectRoot, TEXT("AGENTS.md")), MoveTemp(AgentsBlock) },
+		{ FPaths::Combine(ProjectRoot, TEXT("CLAUDE.md")), MoveTemp(ClaudeBlock) }
+	};
+	for (const TPair<FString, FString>& Target : Targets)
+	{
+		const bool bClaude = Target.Key.EndsWith(TEXT("CLAUDE.md"));
+		TArray<uint8> Original;
+		TArray<uint8> Desired;
+		bool bChanged = false;
+		FString Reason;
+		// A malformed file is Setup's to report, not a startup pass's to rewrite.
+		if (!BuildManagedBlockBytes(Target.Key, Target.Value, ManagedMarkdownBegin, ManagedMarkdownEnd,
+			bClaude ? Settings->bEnableClaudeAgent : true, Original, Desired, bChanged, Reason))
+		{
+			continue;
+		}
+		if (bChanged)
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 bool FHyperAIStudioService::GenerateManagedProjectFilesTransactional(

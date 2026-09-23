@@ -10,6 +10,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioLightingCapture.h"
 #include "HyperAIStudioLightingGate.h"
 #include "HyperAIStudioPreviewPanel.h"
 #include "Misc/CoreDelegates.h"
@@ -201,12 +202,20 @@ namespace HyperAIStudio::Lighting::Private
 				FString::Printf(TEXT("%d ops applied to %d actors."), Payload.Ops.Num(), Touched.Num()), TEXT("applied"));
 		}
 		case EHyperAIStudioDomainExecutionActionKind::Validate:
+		{
 			// Every op re-validated inside Apply; here the edited actors must still resolve.
 			if (Gate::ResolveTargets(*World, Payload.Ops).IsEmpty())
 			{
 				return Finish(EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect, TEXT("targets_missing"),
 					TEXT("The edited lighting actors no longer resolve; undo reverts the edit."));
 			}
+			FString MaterialError;
+			if (!Gate::CheckMaterialOps(*World, Payload.Ops, MaterialError))
+			{
+				return Finish(EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect, TEXT("material_not_assigned"),
+					MaterialError + TEXT(" Undo reverts the edit."));
+			}
+		}
 			return Finish(EHyperAIStudioDomainDispatchOutcome::Succeeded, TEXT("validated"), TEXT("Edited actors resolve."), TEXT("validated"));
 		case EHyperAIStudioDomainExecutionActionKind::Save:
 		{
@@ -235,7 +244,7 @@ FString FHyperAIStudioLightingContracts::GetQualifiedToolsetName()
 
 TArray<FString> FHyperAIStudioLightingContracts::GetToolNames()
 {
-	return {InspectToolName, MutationToolName, CompareToolName};
+	return {InspectToolName, MutationToolName, CompareToolName, CaptureToolName};
 }
 
 bool FHyperAIStudioLightingContracts::IsRegistrationAllowed(const bool bAllowSourceCandidateForDev)
@@ -251,8 +260,10 @@ TArray<FString> FHyperAIStudioLightingContracts::GetCapabilities()
 		TEXT("exposure_lock_state"),
 		TEXT("closed_lighting_edits_as_one_undo_step"),
 		TEXT("missing_lighting_actors_added_on_demand"),
+		TEXT("material_assignment_to_a_placed_actor_mesh_slot"),
 		TEXT("viewport_or_image_vs_reference_metrics"),
 		TEXT("ranked_next_change_suggestions"),
+		TEXT("view_captures_from_a_camera_or_transform_with_frame_to_frame_differences"),
 		TEXT("unsaved_by_default_opt_in_save_of_touched_actors"),
 		TEXT("unsupported:bounded_post_process_volumes_local_lights_lumen_settings_and_baked_lighting_builds")};
 }
@@ -305,6 +316,60 @@ FString FHyperAIStudioLightingContracts::MutationResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(TEXT("lighting.edit_ops.result.v1|phase|content_key|bounded"));
 	return Value;
+}
+
+FString FHyperAIStudioLightingContracts::CapturePayloadSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("lighting.capture.payload.v1|camera_transform_or_viewport|size|frames|world_or_material_time|warmup|diff_threshold|label"));
+	return Value;
+}
+
+FString FHyperAIStudioLightingContracts::CaptureResultSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("lighting.capture.result.v1|batch|folder|view|frames_metrics|diffs|world_time_advanced|shaders|bounded"));
+	return Value;
+}
+
+FHyperAICaptureViewReport FHyperAIStudioLightingContracts::CaptureNow(const FHyperAICaptureViewRequest& Request)
+{
+	return HyperAIStudio::Lighting::Capture::RunNow(Request);
+}
+
+FString FHyperAIStudioLightingCapturePayload::GetTypeId() const
+{
+	return FHyperAIStudioLightingContracts::CapturePayloadTypeId;
+}
+
+FString FHyperAIStudioLightingCapturePayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioLightingContracts::CapturePayloadSchemaFingerprint();
+}
+
+int32 FHyperAIStudioLightingCapturePayload::GetBoundedByteSize() const
+{
+	return 256 + 2 * (Request.CameraActorLabel.Len() + Request.Label.Len() + Request.Source.Len() + Request.TimeMode.Len())
+		+ 4 * Request.MaterialTimes.Num();
+}
+
+FString FHyperAIStudioLightingCaptureResultPayload::GetTypeId() const
+{
+	return FHyperAIStudioLightingContracts::CaptureResultTypeId;
+}
+
+FString FHyperAIStudioLightingCaptureResultPayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioLightingContracts::CaptureResultSchemaFingerprint();
+}
+
+int32 FHyperAIStudioLightingCaptureResultPayload::GetBoundedByteSize() const
+{
+	using namespace HyperAIStudio::Lighting::Private;
+	int64 Size = 512 + EstimateBytes(Report.Status) + EstimateBytes(Report.Diagnostic) + EstimateBytes(Report.Folder) + EstimateBytes(Report.BatchId);
+	for (const FHyperAICaptureFrame& Frame : Report.Frames) Size += 64 + EstimateBytes(Frame.ImagePath) + EstimateMetricsBytes(Frame.Metrics);
+	Size += 32 * Report.Diffs.Num();
+	return ClampBytes(Size);
 }
 
 FString FHyperAIStudioLightingContracts::CompareResultSchemaFingerprint()
@@ -453,6 +518,9 @@ const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioLightingContracts::Ge
 			MutationResultTypeId, MutationResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Edit});
 		Value.Variants.Add({CompareToolName, CompareVariantId, ComparePayloadTypeId, ComparePayloadSchemaFingerprint(),
 			CompareResultTypeId, CompareResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
+		// Read: a capture writes only under Saved/HyperAIStudio, like the compare tool's own capture.
+		Value.Variants.Add({CaptureToolName, CaptureVariantId, CapturePayloadTypeId, CapturePayloadSchemaFingerprint(),
+			CaptureResultTypeId, CaptureResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
 		Value.ContractFingerprint = FHyperAIStudioDomainAdapterRegistry::ComputeContractFingerprint(Value);
 		Value.AdapterFingerprint = FHyperAIStudioDomainAdapterRegistry::ComputeAdapterFingerprint(Value);
 		return Value;
@@ -624,9 +692,9 @@ FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const
 		return Reject(TEXT("unexpected_submission_fields"), TEXT("A dry run takes no operation_id or expected_plan_hash."));
 	}
 	if (!Request.bDryRun && (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId)
-		|| !IsCanonicalSha256(Request.ExpectedPlanHash)))
+		|| !FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(Request.ExpectedPlanHash)))
 	{
-		return Reject(TEXT("invalid_submission_fields"), TEXT("A non-dry submission needs a valid operation_id and the plan_hash its dry run returned."));
+		return Reject(TEXT("invalid_submission_fields"), FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage());
 	}
 	if (!IsCanonicalSha256(Request.ExpectedRevision))
 	{
@@ -721,7 +789,7 @@ FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const
 		Report.Diagnostic = TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash.");
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Payload->SemanticFingerprint)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("plan_hash_mismatch"), TEXT("The plan changed since its dry run (ops or lighting). Dry-run again and review it."));
 	}
@@ -750,7 +818,7 @@ FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Poll hyper_operation_status with operation_id: it starts once approved.");
+		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
 		return Report;
 	}
 
@@ -776,7 +844,7 @@ FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const
 	Report.bExecutionSubmitted = true;
 	Report.bOk = true;
 	Report.Status = TEXT("submitted");
-	Report.Diagnostic = TEXT("The edit runs over the next editor ticks. Poll hyper_operation_status until it is terminal, then hyper_lighting_compare.");
+	Report.Diagnostic = TEXT("The edit runs over the next editor ticks. Call hyper_operation_wait with operation_id, then hyper_lighting_compare.");
 	return Report;
 }
 
@@ -793,6 +861,11 @@ FHyperAILightingApplyPlanReport UHyperAIStudioLightingToolset::hyper_lighting_ap
 FHyperAILightingCompareReport UHyperAIStudioLightingToolset::hyper_lighting_compare(const FHyperAILightingCompareRequest& Request)
 {
 	return FHyperAIStudioLightingContracts::Compare(Request);
+}
+
+UHyperAICaptureViewResult* UHyperAIStudioLightingToolset::hyper_capture_view(const FHyperAICaptureViewRequest& Request)
+{
+	return HyperAIStudio::Lighting::Capture::Start(Request);
 }
 
 const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioLightingDomainAdapter::GetDescriptor() const
@@ -851,6 +924,14 @@ FHyperAIStudioDomainAdapterResult FHyperAIStudioLightingDomainAdapter::Execute(
 		const TSharedRef<FHyperAIStudioLightingCompareResultPayload, ESPMode::ThreadSafe> Output =
 			MakeShared<FHyperAIStudioLightingCompareResultPayload, ESPMode::ThreadSafe>();
 		Output->Report = Contracts::Compare(static_cast<const FHyperAIStudioLightingComparePayload&>(Payload).Request);
+		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
+	}
+	if (Matches(Contracts::CaptureToolName, Contracts::CaptureVariantId, EHyperAIStudioDomainSafety::Read,
+		Contracts::CapturePayloadTypeId, Contracts::CapturePayloadSchemaFingerprint()))
+	{
+		const TSharedRef<FHyperAIStudioLightingCaptureResultPayload, ESPMode::ThreadSafe> Output =
+			MakeShared<FHyperAIStudioLightingCaptureResultPayload, ESPMode::ThreadSafe>();
+		Output->Report = Contracts::CaptureNow(static_cast<const FHyperAIStudioLightingCapturePayload&>(Payload).Request);
 		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
 	}
 	if (Matches(Contracts::MutationToolName, Contracts::MutationVariantId, EHyperAIStudioDomainSafety::Edit,
@@ -982,6 +1063,7 @@ void FHyperAIStudioLightingRegistration::Startup()
 
 void FHyperAIStudioLightingRegistration::Shutdown()
 {
+	HyperAIStudio::Lighting::Capture::CancelAll();
 	FHyperAIStudioPreviewPanel::UnregisterSource(FName(TEXT("lighting")));
 	if (PostEngineInitHandle.IsValid())
 	{

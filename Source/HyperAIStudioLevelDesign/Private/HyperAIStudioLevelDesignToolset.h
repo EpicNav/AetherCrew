@@ -204,7 +204,35 @@ struct FHyperAILevelDesignValidateRequest
 	UPROPERTY() float MaxSightline = 6000.f;
 	/** Writes a top-down image: heights in grey, markers, routes and issues drawn on. */
 	UPROPERTY() bool bCapturePreview = true;
+	/**
+	 * Mirror check: x mirrors X across the plane X = symmetry_plane, y mirrors Y; empty skips it. Every visible actor
+	 * with static meshes needs a twin of the same class and meshes at its mirror image, or must straddle the plane.
+	 */
+	UPROPERTY() FString SymmetryAxis;
+	UPROPERTY() float SymmetryPlane = 0.f;
+	/** How far (cm) a mirror image may sit from its twin, and how much their bounds may differ. */
+	UPROPERTY() float SymmetryTolerance = 30.f;
 	UPROPERTY() int32 MaxOutputBytes = 65536;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAILevelDesignSymmetry
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString Axis;
+	UPROPERTY() float Plane = 0.f;
+	UPROPERTY() int32 ActorsChecked = 0;
+	UPROPERTY() int32 MatchedPairs = 0;
+	/** Actors that straddle the plane and mirror onto themselves. */
+	UPROPERTY() int32 SelfSymmetric = 0;
+	/** Share of checked actors with a mirror twin, 0-1. */
+	UPROPERTY() float Score = 0.f;
+	UPROPERTY() bool bSymmetric = false;
+	/** Labels of actors without a twin; each is also an asymmetric issue at its bounds centre. */
+	UPROPERTY() TArray<FString> Unmatched;
+	/** More actors than the check covers; the rest were skipped. */
+	UPROPERTY() bool bTruncated = false;
 };
 
 USTRUCT(BlueprintType)
@@ -222,6 +250,8 @@ struct FHyperAILevelDesignValidateReport
 	UPROPERTY() TArray<FHyperAILevelDesignIssue> Issues;
 	UPROPERTY() TArray<FHyperAILevelDesignRoute> Routes;
 	UPROPERTY() TArray<FHyperAILevelDesignSightline> Sightlines;
+	/** Filled when symmetry_axis is set. */
+	UPROPERTY() FHyperAILevelDesignSymmetry Symmetry;
 	/** False when the level has no navmesh (routes are not checked) or it is still rebuilding. */
 	UPROPERTY() bool bNavigationReady = false;
 	UPROPERTY() FString PreviewImagePath;
@@ -244,15 +274,16 @@ public:
 
 	/**
 	 * Closed blockout edits as one undo step: blocks, walkable ramps, stairs split to the player's step height, and
-	 * markers (start, goal, spawn, cover...). Dry-run, resubmit with operation_id and expected_plan_hash, poll
-	 * hyper_operation_status, then hyper_level_design_validate. Unsaved unless bSave.
+	 * markers (start, goal, spawn, cover...). Submit with bDryRun false (expected_plan_hash optional), then
+	 * hyper_operation_wait, then hyper_level_design_validate. Unsaved unless bSave.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|LevelDesign")
 	static FHyperAILevelBlockoutApplyPlanReport hyper_level_blockout_apply_plan(const FHyperAILevelBlockoutApplyPlanRequest& Request);
 
 	/**
 	 * Plays the layout against player metrics: markers on walkable floor with room to stand, navmesh routes from each
-	 * start to every goal, corridor widths, long sightlines from spawns, cover heights. Writes a top-down image of it.
+	 * start to every goal, corridor widths, long sightlines from spawns, cover heights, and mirror symmetry when
+	 * symmetry_axis is set. Writes a top-down image of it.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|LevelDesign")
 	static FHyperAILevelDesignValidateReport hyper_level_design_validate(const FHyperAILevelDesignValidateRequest& Request);

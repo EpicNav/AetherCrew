@@ -2,6 +2,8 @@
 
 #include "HyperAIStudioExtensionRuntime.h"
 
+#include "HyperAIStudioSettings.h"
+
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioDomainAdapter.h"
 #include "HyperAIStudioOperationJournal.h"
@@ -361,4 +363,36 @@ FString FHyperAIStudioExtensionRuntime::GetCanonicalProjectId()
 {
 	return FHyperAIStudioOperationJournal::MakeCanonicalProjectId(
 		FHyperAIStudioService::GetProjectRoot());
+}
+
+bool FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(const FString& ExpectedPlanHash)
+{
+	if (ExpectedPlanHash.IsEmpty())
+	{
+		const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+		return !Settings || Settings->bAllowOneShotAgentEdits;
+	}
+	if (ExpectedPlanHash.Len() != 71 || !ExpectedPlanHash.StartsWith(TEXT("sha256:"), ESearchCase::CaseSensitive))
+	{
+		return false;
+	}
+	for (int32 Index = 7; Index < ExpectedPlanHash.Len(); ++Index)
+	{
+		const TCHAR Character = ExpectedPlanHash[Index];
+		if (!((Character >= TEXT('0') && Character <= TEXT('9')) || (Character >= TEXT('a') && Character <= TEXT('f'))))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(const FString& ExpectedPlanHash, const FString& ActualPlanHash)
+{
+	return ExpectedPlanHash.IsEmpty() ? IsValidSubmissionPlanHash(ExpectedPlanHash) : ExpectedPlanHash == ActualPlanHash;
+}
+
+const TCHAR* FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage()
+{
+	return TEXT("A non-dry submission needs a valid operation_id. expected_plan_hash is optional; when given it must be the plan_hash a dry run returned.");
 }

@@ -27,8 +27,8 @@ namespace HyperAIStudio::NativeReadTools::Tests
 	constexpr int32 CurrentPlannedToolCount = 0;
 	constexpr int32 CurrentSourceCandidateToolCount = CurrentCatalogToolCount;
 	constexpr int32 CurrentAdmittedToolCount = 0;
-	constexpr int32 CurrentCoreImplementedToolCount = 27;
-	constexpr int32 CurrentCoreToolsetCount = 15;
+	constexpr int32 CurrentCoreImplementedToolCount = 26;
+	constexpr int32 CurrentCoreToolsetCount = 14;
 
 	struct FExpectedTool
 	{
@@ -59,6 +59,7 @@ namespace HyperAIStudio::NativeReadTools::Tests
 		static const TArray<FExpectedManifestTool> Tools = {
 			{ TEXT("hyper_capability_report"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
 			{ TEXT("hyper_operation_status"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
+			{ TEXT("hyper_operation_wait"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
 			{ TEXT("hyper_blueprint_debug_inspect"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
 			{ TEXT("hyper_pie_query"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
 			{ TEXT("hyper_asset_dependency_graph"), TEXT("HyperAIStudio.HyperAIStudioDependencyGraphToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate }
@@ -111,7 +112,7 @@ bool FHyperAIStudioNativeReadContractsTest::RunTest(const FString& Parameters)
 		FHyperAIStudioNativeReadContracts::GetCallableManifest();
 	const TArray<HyperAIStudio::NativeReadTools::Tests::FExpectedManifestTool>& Expected =
 		HyperAIStudio::NativeReadTools::Tests::ExpectedManifestTools();
-	TestEqual(TEXT("The native source manifest has exactly five source candidates"), Manifest.Num(), Expected.Num());
+	TestEqual(TEXT("The native source manifest has exactly the expected source candidates"), Manifest.Num(), Expected.Num());
 
 	TSet<FString> UniqueNames;
 	for (int32 Index = 0; Index < Manifest.Num() && Index < Expected.Num(); ++Index)
@@ -511,7 +512,20 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 			TestTrue(TEXT("Epic ToolsetRegistry marks each reflected callable as callable"), Callability.GetValue());
 		}
 	}
-	TestEqual(TEXT("No unmanifested AICallable function is reflected"), ReflectedCallableNames.Num(), Expected.Num());
+	// hyper_operation_wait is the one async callable: it returns a pending result object, not a DTO.
+	TestEqual(TEXT("No unmanifested AICallable function is reflected"), ReflectedCallableNames.Num(), Expected.Num() + 1);
+	if (const UFunction* Wait = ToolsetClass->FindFunctionByName(TEXT("hyper_operation_wait")))
+	{
+		const FObjectProperty* ReturnObject = CastField<FObjectProperty>(Wait->GetReturnProperty());
+		TestTrue(TEXT("hyper_operation_wait returns its async result class"),
+			ReturnObject && ReturnObject->PropertyClass == UHyperAIOperationWaitResult::StaticClass());
+		TestNotNull(TEXT("The wait result carries the full operation status"),
+			FHyperAIOperationWaitReport::StaticStruct()->FindPropertyByName(TEXT("Status")));
+	}
+	else
+	{
+		AddError(TEXT("hyper_operation_wait is not reflected."));
+	}
 
 	TSet<FString> ExpectedQualifiedNames;
 	for (const FExpectedTool& Tool : Expected)
@@ -533,6 +547,7 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 		}
 		ExpectedQualifiedNames.Add(FHyperAIStudioNativeReadContracts::GetQualifiedToolsetName() + TEXT(".") + Tool.Name);
 	}
+	ExpectedQualifiedNames.Add(FHyperAIStudioNativeReadContracts::GetQualifiedToolsetName() + TEXT(".hyper_operation_wait"));
 
 	const FString JsonSchema = UToolsetRegistry::GetToolsetJsonSchema(UHyperAIStudioNativeReadToolset::StaticClass());
 	TSharedPtr<FJsonObject> SchemaObject;
@@ -548,7 +563,7 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 		TestTrue(TEXT("Schema contains a tools array"), SchemaObject->TryGetArrayField(TEXT("tools"), Tools));
 		if (Tools)
 		{
-			TestEqual(TEXT("Schema contains exactly the reflected source-candidate tools"), Tools->Num(), Expected.Num());
+			TestEqual(TEXT("Schema contains exactly the reflected source-candidate tools"), Tools->Num(), Expected.Num() + 1);
 			TSet<FString> ActualQualifiedNames;
 			for (const TSharedPtr<FJsonValue>& ToolValue : *Tools)
 			{

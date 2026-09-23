@@ -551,9 +551,9 @@ FHyperAIUAFApplyPlanReport FHyperAIStudioUAFContracts::BuildPlan(const FHyperAIU
 	{
 		return Reject(TEXT("unexpected_submission_fields"), TEXT("A dry run takes no operation_id or expected_plan_hash."));
 	}
-	if (!Request.bDryRun && (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId) || !IsCanonicalSha256(Request.ExpectedPlanHash)))
+	if (!Request.bDryRun && (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId) || !FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(Request.ExpectedPlanHash)))
 	{
-		return Reject(TEXT("invalid_submission_fields"), TEXT("A non-dry submission needs a valid operation_id and the plan_hash its dry run returned."));
+		return Reject(TEXT("invalid_submission_fields"), FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage());
 	}
 	if (!IsCanonicalProjectObjectPath(Request.TargetPath)
 		|| (Request.bCreate ? !Request.ExpectedRevision.IsEmpty() : !IsCanonicalSha256(Request.ExpectedRevision)))
@@ -656,7 +656,7 @@ FHyperAIUAFApplyPlanReport FHyperAIStudioUAFContracts::BuildPlan(const FHyperAIU
 		Report.Diagnostic = TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash.");
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Payload->SemanticFingerprint)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("plan_hash_mismatch"), TEXT("The plan changed since its dry run (ops or graph state). Dry-run again and review it."));
 	}
@@ -687,7 +687,7 @@ FHyperAIUAFApplyPlanReport FHyperAIStudioUAFContracts::BuildPlan(const FHyperAIU
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Poll hyper_operation_status with operation_id: it starts once approved.");
+		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
 		return Report;
 	}
 
@@ -713,7 +713,7 @@ FHyperAIUAFApplyPlanReport FHyperAIStudioUAFContracts::BuildPlan(const FHyperAIU
 	Report.bExecutionSubmitted = true;
 	Report.bOk = true;
 	Report.Status = TEXT("submitted");
-	Report.Diagnostic = TEXT("The edit and compile run over the next editor ticks. Poll hyper_operation_status until it is terminal, then hyper_uaf_validate.");
+	Report.Diagnostic = TEXT("The edit and compile run over the next editor ticks. Call hyper_operation_wait with operation_id, then hyper_uaf_validate.");
 	return Report;
 }
 

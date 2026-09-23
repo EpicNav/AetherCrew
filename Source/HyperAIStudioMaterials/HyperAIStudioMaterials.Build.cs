@@ -15,6 +15,7 @@ public class HyperAIStudioMaterials : ModuleRules
 			"Engine",
 			"AssetRegistry",
 			"HyperAIStudio",
+			"Json",
 			"MaterialEditor",
 			"RHI",
 			"ToolsetRegistry",

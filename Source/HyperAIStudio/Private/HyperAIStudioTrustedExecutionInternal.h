@@ -126,6 +126,9 @@ public:
 		const FString& OperationId,
 		FHyperAIStudioTypedArtifactOperationStatus& OutStatus,
 		FString& OutError) const;
+	bool QueryLiveStatus(
+		const FString& OperationId,
+		FHyperAIStudioTypedArtifactOperationStatus& OutStatus) const;
 
 private:
 	TSharedPtr<FHyperAIStudioTrustedExecutionHostState, ESPMode::ThreadSafe> State;

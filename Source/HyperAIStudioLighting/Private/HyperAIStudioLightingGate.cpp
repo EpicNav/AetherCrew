@@ -3,6 +3,7 @@
 #include "HyperAIStudioLightingGate.h"
 
 #include "Components/DirectionalLightComponent.h"
+#include "Components/MeshComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
@@ -18,9 +19,12 @@
 #include "ImageCore.h"
 #include "ImageUtils.h"
 #include "LevelEditorViewport.h"
+#include "Materials/MaterialInterface.h"
 #include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "ScopedTransaction.h"
+#include "UObject/SoftObjectPath.h"
 #include "UnrealClient.h"
 
 #define LOCTEXT_NAMESPACE "HyperAIStudioLighting"
@@ -210,6 +214,11 @@ namespace HyperAIStudio::Lighting::Gate
 			bool bUnlock = false;
 			float Value = 0.f;
 			FLinearColor Colour = FLinearColor::White;
+			// set_actor_material: the slot on a named or the first mesh component, and the material for it.
+			UMaterialInterface* Material = nullptr;
+			FString ComponentName;
+			int32 SlotIndex = 0;
+			FName SlotName;
 		};
 
 		bool ParseNumber(const FString& Text, const float Min, const float Max, float& Out)
@@ -242,6 +251,50 @@ namespace HyperAIStudio::Lighting::Gate
 				}
 				return true;
 			}
+			if (Op.Kind == TEXT("set_actor_material"))
+			{
+				Out.Kind = TEXT("actor_material");
+				if (Op.ActorLabel.IsEmpty())
+				{
+					OutError = TEXT("set_actor_material needs actor_label: the placed actor whose mesh gets the material.");
+					return false;
+				}
+				FString Slot = Op.Property;
+				if (Slot.StartsWith(TEXT("component:")))
+				{
+					if (!Slot.RightChop(10).Split(TEXT("/"), &Out.ComponentName, &Slot))
+					{
+						Out.ComponentName = Slot.RightChop(10);
+						Slot.Reset();
+					}
+				}
+				if (!Slot.IsEmpty() && (!Slot.StartsWith(TEXT("slot:")) || Slot.Len() == 5))
+				{
+					OutError = TEXT("set_actor_material property is empty (slot 0), slot:<index or name>, or component:<name>/slot:<index or name>.");
+					return false;
+				}
+				const FString SlotValue = Slot.IsEmpty() ? FString(TEXT("0")) : Slot.RightChop(5);
+				if (SlotValue.IsNumeric())
+				{
+					Out.SlotIndex = FCString::Atoi(*SlotValue);
+				}
+				else
+				{
+					Out.SlotName = FName(*SlotValue);
+				}
+				FString MaterialPath = Op.Value.TrimStartAndEnd();
+				if (MaterialPath.StartsWith(TEXT("/")) && !MaterialPath.Contains(TEXT(".")))
+				{
+					MaterialPath += TEXT(".") + FPackageName::GetShortName(MaterialPath);
+				}
+				Out.Material = MaterialPath.StartsWith(TEXT("/")) ? Cast<UMaterialInterface>(FSoftObjectPath(MaterialPath).TryLoad()) : nullptr;
+				if (!Out.Material)
+				{
+					OutError = FString::Printf(TEXT("set_actor_material value '%s' is not a material or material instance; pass its path, e.g. /Game/Materials/M_Grid."), *Op.Value);
+					return false;
+				}
+				return true;
+			}
 			if (!Op.Kind.StartsWith(TEXT("set_")))
 			{
 				OutError = FString::Printf(TEXT("Unknown kind '%s'."), *Op.Kind);
@@ -250,7 +303,7 @@ namespace HyperAIStudio::Lighting::Gate
 			Out.Kind = Op.Kind.RightChop(4);
 			if (!ClassOf(Out.Kind))
 			{
-				OutError = FString::Printf(TEXT("Unknown kind '%s': use set_sun, set_sky_light, set_fog, set_sky_atmosphere, set_post_process, lock_exposure or unlock_exposure."), *Op.Kind);
+				OutError = FString::Printf(TEXT("Unknown kind '%s': use set_sun, set_sky_light, set_fog, set_sky_atmosphere, set_post_process, lock_exposure, unlock_exposure or set_actor_material."), *Op.Kind);
 				return false;
 			}
 			for (const FPropertySpec& Spec : PropertySpecs)
@@ -379,6 +432,52 @@ namespace HyperAIStudio::Lighting::Gate
 			}
 		}
 
+		/** The mesh component and slot a set_actor_material op names, on the one actor with that label. Never spawns. */
+		bool ResolveMaterialSlot(UWorld& World, const FString& Label, const FParsedOp& Op, UMeshComponent*& OutMesh, int32& OutSlot, FString& OutError)
+		{
+			TArray<AActor*> Matches;
+			for (TActorIterator<AActor> It(&World); It; ++It)
+			{
+				if (IsValid(*It) && !It->IsTemplate() && It->GetActorLabel() == Label) Matches.Add(*It);
+			}
+			if (Matches.Num() != 1)
+			{
+				OutError = Matches.IsEmpty() ? FString::Printf(TEXT("no actor is labelled '%s'."), *Label)
+					: FString::Printf(TEXT("%d actors are labelled '%s'; give the one to change a unique label first."), Matches.Num(), *Label);
+				return false;
+			}
+			TArray<UMeshComponent*> Meshes;
+			Matches[0]->GetComponents(Meshes);
+			// The root first, so an op without a component names the actor's main mesh.
+			const USceneComponent* Root = Matches[0]->GetRootComponent();
+			Meshes.StableSort([Root](const UMeshComponent& A, const UMeshComponent& B) { return &A == Root && &B != Root; });
+			TArray<FString> Names;
+			for (UMeshComponent* Mesh : Meshes)
+			{
+				Names.Add(Mesh->GetName());
+				if (!Op.ComponentName.IsEmpty() && Mesh->GetName() != Op.ComponentName) continue;
+				OutSlot = Op.SlotName.IsNone() ? Op.SlotIndex : Mesh->GetMaterialIndex(Op.SlotName);
+				if (OutSlot >= 0 && OutSlot < Mesh->GetNumMaterials())
+				{
+					OutMesh = Mesh;
+					return true;
+				}
+				TArray<FString> Slots;
+				const TArray<FName> SlotNames = Mesh->GetMaterialSlotNames();
+				for (int32 Index = 0; Index < Mesh->GetNumMaterials(); ++Index)
+				{
+					Slots.Add(FString::Printf(TEXT("%d '%s'"), Index, SlotNames.IsValidIndex(Index) ? *SlotNames[Index].ToString() : TEXT("")));
+				}
+				OutError = FString::Printf(TEXT("%s on '%s' has no slot %s; its slots are %s."), *Mesh->GetName(), *Label,
+					Op.SlotName.IsNone() ? *FString::FromInt(Op.SlotIndex) : *Op.SlotName.ToString(),
+					Slots.IsEmpty() ? TEXT("none (it has no mesh yet)") : *FString::Join(Slots, TEXT(", ")));
+				return false;
+			}
+			OutError = Meshes.IsEmpty() ? FString::Printf(TEXT("'%s' has no mesh component to take a material."), *Label)
+				: FString::Printf(TEXT("'%s' has no mesh component '%s'; it has %s."), *Label, *Op.ComponentName, *FString::Join(Names, TEXT(", ")));
+			return false;
+		}
+
 		AActor* SpawnKind(UWorld& World, const FString& Kind)
 		{
 			FActorSpawnParameters Params;
@@ -408,6 +507,23 @@ namespace HyperAIStudio::Lighting::Gate
 				{
 					OutError = FString::Printf(TEXT("Op %d: %s"), Index, *Error);
 					return false;
+				}
+				if (Parsed.Kind == TEXT("actor_material"))
+				{
+					UMeshComponent* Mesh = nullptr;
+					int32 Slot = INDEX_NONE;
+					if (!ResolveMaterialSlot(World, Op.ActorLabel, Parsed, Mesh, Slot, Error))
+					{
+						OutError = FString::Printf(TEXT("Op %d: %s"), Index, *Error);
+						return false;
+					}
+					if (bWrite)
+					{
+						// The Details panel's route, not a raw OverrideMaterials write: undo, render state and cleanup all follow.
+						Edit(*Mesh, FName(TEXT("OverrideMaterials")), [&] { Mesh->SetMaterial(Slot, Parsed.Material); });
+						OutTouched.AddUnique(Mesh->GetOwner());
+					}
+					continue;
 				}
 				AActor* Actor = FindActor(World, Parsed.Kind, Op.ActorLabel);
 				const bool bPlannedLabel = Op.ActorLabel == SpawnLabelOf(Parsed.Kind) && PlannedSpawns.Contains(Parsed.Kind);
@@ -786,9 +902,41 @@ namespace HyperAIStudio::Lighting::Gate
 			FParsedOp Parsed;
 			FString Error;
 			if (!ParseOp(Op, Parsed, Error)) continue;
+			UMeshComponent* Mesh = nullptr;
+			int32 Slot = INDEX_NONE;
+			if (Parsed.Kind == TEXT("actor_material"))
+			{
+				if (ResolveMaterialSlot(World, Op.ActorLabel, Parsed, Mesh, Slot, Error)) Actors.AddUnique(Mesh->GetOwner());
+				continue;
+			}
 			if (AActor* Actor = FindActor(World, Parsed.Kind, Op.ActorLabel)) Actors.AddUnique(Actor);
 		}
 		return Actors;
+	}
+
+	bool CheckMaterialOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, FString& OutError)
+	{
+		// ponytail: the last op on a slot wins, so a plan setting one slot twice checks only the second material.
+		TMap<TPair<UMeshComponent*, int32>, UMaterialInterface*> Expected;
+		for (const FHyperAILightingOp& Op : Ops)
+		{
+			FParsedOp Parsed;
+			UMeshComponent* Mesh = nullptr;
+			int32 Slot = INDEX_NONE;
+			if (!ParseOp(Op, Parsed, OutError) || Parsed.Kind != TEXT("actor_material")) continue;
+			if (!ResolveMaterialSlot(World, Op.ActorLabel, Parsed, Mesh, Slot, OutError)) return false;
+			Expected.Add(TPair<UMeshComponent*, int32>(Mesh, Slot), Parsed.Material);
+		}
+		for (const TPair<TPair<UMeshComponent*, int32>, UMaterialInterface*>& Entry : Expected)
+		{
+			if (Entry.Key.Key->GetMaterial(Entry.Key.Value) != Entry.Value)
+			{
+				OutError = FString::Printf(TEXT("%s slot %d does not hold %s."), *Entry.Key.Key->GetPathName(), Entry.Key.Value, *Entry.Value->GetPathName());
+				return false;
+			}
+		}
+		OutError.Reset();
+		return true;
 	}
 
 	TArray<UPackage*> PackagesOf(const TArray<AActor*>& Actors)

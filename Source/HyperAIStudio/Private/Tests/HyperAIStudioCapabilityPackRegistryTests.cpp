@@ -152,7 +152,7 @@ bool FHyperAIStudioCapabilityPackCatalogCoverageTest::RunTest(const FString& Par
 			Tool.PlatformEvidenceRows + Tool.ProductEvidenceRows
 				+ Tool.SupplementalEvidenceRows);
 	}
-	TestEqual(TEXT("Shared foundation contains exactly five tools"), FoundationTools, 5);
+	TestEqual(TEXT("Shared foundation contains exactly six tools"), FoundationTools, 6);
 	TestEqual(TEXT("All generated names remain unique"), ToolNames.Num(), HyperAIStudio::CapabilityCatalog::GeneratedToolCount);
 	TestEqual(
 		TEXT("Catalog source-artifact total matches the generated per-tool bindings"),
@@ -163,7 +163,7 @@ bool FHyperAIStudioCapabilityPackCatalogCoverageTest::RunTest(const FString& Par
 		ArtifactBoundSourceCandidates,
 		SourceCandidates);
 	TestEqual(TEXT("No tool is falsely claimed admitted"), Admitted, 0);
-	TestEqual(TEXT("Native-read class remains one atomic four-tool cohort"), NativeReadCohort, 4);
+	TestEqual(TEXT("Native-read class remains one atomic five-tool cohort"), NativeReadCohort, 5);
 	TestTrue(TEXT("Clean-room ledger coverage is retained"), LedgerBound > 0);
 	TestTrue(TEXT("External-effect contracts are explicitly flagged"), ExternalEffects > 0);
 	return true;

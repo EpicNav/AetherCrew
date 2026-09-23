@@ -16,9 +16,12 @@
 #include "NiagaraEffectType.h"
 #include "NiagaraEmitter.h"
 #include "NiagaraEmitterHandle.h"
+#include "NiagaraEmitterInstance.h"
 #include "NiagaraSimCache.h"
 #include "NiagaraSimCacheCompare.h"
 #include "NiagaraSystem.h"
+#include "NiagaraSystemInstance.h"
+#include "NiagaraSystemInstanceController.h"
 #include "PreviewScene.h"
 #include "UObject/Package.h"
 #include "UObject/SoftObjectPath.h"
@@ -535,6 +538,94 @@ namespace HyperAIStudio::Niagara::AssetsGate
 	{
 		const UNiagaraEffectType* EffectType = System.GetEffectType();
 		return EffectType ? EffectType->GetPathName() : FString();
+	}
+
+	FHyperAINiagaraValidateReport RunRuntimeProbe(const FHyperAINiagaraValidateRequest& Request)
+	{
+		FHyperAINiagaraValidateReport Report;
+		Report.Policy = Request.Policy;
+		auto Reject = [&Report](const TCHAR* Status, const FString& Diagnostic)
+		{
+			Report.bOk = false;
+			Report.Status = Status;
+			Report.Diagnostic = Diagnostic;
+			return Report;
+		};
+		UNiagaraSystem* System = Cast<UNiagaraSystem>(FSoftObjectPath(Request.TargetPath).TryLoad());
+		if (!System) return Reject(TEXT("target_not_found"), FString::Printf(TEXT("No Niagara System at %s."), *Request.TargetPath));
+		if (Request.ProbeFrames < 1 || Request.ProbeFrames > 600 || Request.MinParticlesPerEmitter < 0
+			|| Request.CaptureDeltaSeconds < 1.f / 240.f || Request.CaptureDeltaSeconds > 1.f / 15.f || Request.ExpectEmitters.Num() > 32)
+		{
+			return Reject(TEXT("invalid_request"), TEXT("probe_frames is 1-600, capture_delta_seconds 1/240-1/15, at most 32 expect_emitters."));
+		}
+		// Compiling first: a System mid-compile simulates nothing, which would read as dead emitters.
+		System->WaitForCompilationComplete(/*bIncludingGPUShaders=*/false, /*bShowProgress=*/false);
+
+		FPreviewScene Scene{FPreviewScene::ConstructionValues()};
+		UNiagaraComponent* Component = NewObject<UNiagaraComponent>(GetTransientPackage(), NAME_None, RF_Transient);
+		Component->SetAutoActivate(false);
+		Component->SetAsset(System);
+		Component->SetForceSolo(true);
+		Scene.AddComponent(Component, FTransform::Identity);
+		Component->Activate(/*bReset=*/true);
+		// One call should prove a System, so the probe allows at least a second although validate defaults to 150 ms.
+		const double Budget = FMath::Clamp(Request.MaxGameThreadMs, 1000, 3000) / 1000.0;
+		const double Started = FPlatformTime::Seconds();
+		int32 Simulated = 0;
+		while (Simulated < Request.ProbeFrames && FPlatformTime::Seconds() - Started < Budget)
+		{
+			const int32 Chunk = FMath::Min(10, Request.ProbeFrames - Simulated);
+			Component->AdvanceSimulation(Chunk, Request.CaptureDeltaSeconds);
+			Simulated += Chunk;
+		}
+		Report.RuntimeProbe.SimulatedSeconds = Simulated * Request.CaptureDeltaSeconds;
+
+		const FNiagaraSystemInstanceControllerPtr Controller = Component->GetSystemInstanceController();
+		const FNiagaraSystemInstance* Instance = Controller.IsValid() ? Controller->GetSystemInstance_Unsafe() : nullptr;
+		const UEnum* States = StaticEnum<ENiagaraExecutionState>();
+		bool bAllLive = Instance != nullptr;
+		if (Instance)
+		{
+			for (const FNiagaraEmitterInstanceRef& Emitter : Instance->GetEmitters())
+			{
+				FHyperAINiagaraEmitterRuntime& Record = Report.RuntimeProbe.Emitters.AddDefaulted_GetRef();
+				const FNiagaraEmitterHandle& Handle = Emitter->GetEmitterHandle();
+				Record.Name = Handle.GetName().ToString();
+				Record.bEnabled = Handle.GetIsEnabled();
+				const bool bGpu = Emitter->GetSimTarget() == ENiagaraSimTarget::GPUComputeSim;
+				Record.SimTarget = bGpu ? TEXT("gpu") : TEXT("cpu");
+				Record.ExecutionState = States ? States->GetNameStringByValue(static_cast<int64>(Emitter->GetExecutionState())) : FString();
+				Record.NumParticles = Emitter->GetNumParticles();
+				Record.TotalSpawned = Emitter->GetTotalSpawnedParticles();
+				Record.CountSource = bGpu ? TEXT("gpu_estimate") : TEXT("cpu");
+				Record.bMeetsMinimum = (bGpu ? Record.TotalSpawned : Record.NumParticles) >= FMath::Max(1, Request.MinParticlesPerEmitter);
+				const bool bExpected = Request.ExpectEmitters.IsEmpty()
+					? Record.bEnabled
+					: Request.ExpectEmitters.ContainsByPredicate([&Record](const FString& Name) { return Name.Equals(Record.Name, ESearchCase::IgnoreCase); });
+				bAllLive &= !bExpected || Record.bMeetsMinimum;
+			}
+			for (const FString& Name : Request.ExpectEmitters)
+			{
+				bAllLive &= Report.RuntimeProbe.Emitters.ContainsByPredicate(
+					[&Name](const FHyperAINiagaraEmitterRuntime& Record) { return Record.Name.Equals(Name, ESearchCase::IgnoreCase); });
+			}
+		}
+		Scene.RemoveComponent(Component);
+		Report.RuntimeProbe.bAllLive = bAllLive;
+		Report.bOk = true;
+		Report.bValid = bAllLive;
+		Report.bComplete = Simulated == Request.ProbeFrames;
+		Report.Status = bAllLive ? TEXT("live") : TEXT("not_live");
+		TArray<FString> Counts;
+		for (const FHyperAINiagaraEmitterRuntime& Record : Report.RuntimeProbe.Emitters)
+		{
+			Counts.Add(FString::Printf(TEXT("%s %d%s (%s)"), *Record.Name, Record.NumParticles,
+				Record.CountSource == TEXT("gpu_estimate") ? TEXT(" est.") : TEXT(""), *Record.ExecutionState));
+		}
+		Report.Diagnostic = FString::Printf(TEXT("After %.2f simulated seconds: %s.%s"), Report.RuntimeProbe.SimulatedSeconds,
+			Counts.IsEmpty() ? TEXT("no emitter instances") : *FString::Join(Counts, TEXT(", ")),
+			Report.bComplete ? TEXT("") : TEXT(" Stopped early at the game-thread budget; raise max_game_thread_ms."));
+		return Report;
 	}
 
 	FHyperAINiagaraValidateReport RunCapturePolicy(const FHyperAINiagaraValidateRequest& Request)

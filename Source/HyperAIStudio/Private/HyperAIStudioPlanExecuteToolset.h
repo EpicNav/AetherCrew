@@ -133,7 +133,7 @@ class HYPERAISTUDIO_API UHyperAIStudioPlanExecuteToolset final : public UToolset
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** Execute one strict, closed typed plan. Poll hyper_operation_status after acceptance. */
+	/** Execute one strict, closed typed plan. Call hyper_operation_wait after acceptance. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Workflow")
 	static FHyperAIPlanExecuteResponse hyper_plan_execute(const FString& PlanJson);
 };

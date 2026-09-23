@@ -7,6 +7,7 @@
 #include "HyperAIStudioLiveProbePublisher.h"
 #include "HyperAIStudioTrustedExecution.h"
 #include "HyperAIStudioTypedArtifactExecution.h"
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
 #include "HyperAIStudioLightingToolset.generated.h"
@@ -133,6 +134,8 @@ struct FHyperAILightingCompareReport
  *   set_sky_atmosphere: rayleigh_scale, mie_scale
  *   set_post_process: exposure_bias (EV), white_temp (K), saturation, contrast, gamma
  *   lock_exposure: value is the exposure bias in EV (default 0); unlock_exposure: no value
+ *   set_actor_material: actor_label (required) names any placed actor; property is empty (slot 0),
+ *     slot:<index or name>, or component:<name>/slot:<index or name>; value is the material's path
  * ActorLabel picks an actor; empty uses the first of its kind, adding one if the level has none.
  */
 USTRUCT(BlueprintType)
@@ -183,6 +186,101 @@ struct FHyperAILightingApplyPlanReport
 	UPROPERTY() TArray<FString> Capabilities;
 };
 
+USTRUCT(BlueprintType)
+struct FHyperAICaptureViewRequest
+{
+	GENERATED_BODY()
+
+	/** camera (a camera actor by label), transform (Location, Rotation, FovDegrees), or viewport (the level viewport's view). */
+	UPROPERTY() FString Source = TEXT("camera");
+	UPROPERTY() FString CameraActorLabel;
+	UPROPERTY() FVector Location = FVector::ZeroVector;
+	UPROPERTY() FRotator Rotation = FRotator::ZeroRotator;
+	UPROPERTY() float FovDegrees = 90.f;
+	/** Up to 1920 x 1080. */
+	UPROPERTY() int32 Width = 1280;
+	UPROPERTY() int32 Height = 720;
+	/** 1-4. With two or more, each frame is compared with the one before it. */
+	UPROPERTY() int32 FrameCount = 1;
+	/** world mode: seconds of editor world time between frames, 0.05-5. */
+	UPROPERTY() float IntervalSeconds = 0.5f;
+	/** world, or material_time: every frame renders with the material Time node forced to the matching MaterialTimes entry. */
+	UPROPERTY() FString TimeMode = TEXT("world");
+	UPROPERTY() TArray<float> MaterialTimes;
+	/** Discarded captures before the first frame, 0-8, so temporal effects settle. */
+	UPROPERTY() int32 WarmupFrames = 3;
+	/** Largest per-channel change (0-1) above which a pixel counts as changed between frames. */
+	UPROPERTY() float DiffThreshold = 0.03f;
+	/** Names the batch folder: letters, digits, - and _. */
+	UPROPERTY() FString Label;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAICaptureFrame
+{
+	GENERATED_BODY()
+
+	/** Project-relative PNG. */
+	UPROPERTY() FString ImagePath;
+	UPROPERTY() float WorldTimeSeconds = 0.f;
+	/** The forced material time, or -1 in world mode. */
+	UPROPERTY() float MaterialTime = -1.f;
+	UPROPERTY() FHyperAILightingImageMetrics Metrics;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAICaptureDiff
+{
+	GENERATED_BODY()
+
+	UPROPERTY() int32 FrameA = 0;
+	UPROPERTY() int32 FrameB = 0;
+	/** Mean absolute RGB change, 0-1. */
+	UPROPERTY() float MeanAbsDiff = 0.f;
+	/** Share of pixels whose largest channel change exceeds DiffThreshold. */
+	UPROPERTY() float ChangedPixelFraction = 0.f;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAICaptureViewReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY() bool bOk = false;
+	UPROPERTY() FString Status;
+	UPROPERTY() FString Diagnostic;
+	UPROPERTY() FString BatchId;
+	/** Project-relative folder holding the frames. */
+	UPROPERTY() FString Folder;
+	UPROPERTY() FString Source;
+	UPROPERTY() FVector ViewLocation = FVector::ZeroVector;
+	UPROPERTY() FRotator ViewRotation = FRotator::ZeroRotator;
+	UPROPERTY() float FovDegrees = 0.f;
+	UPROPERTY() TArray<FHyperAICaptureFrame> Frames;
+	UPROPERTY() TArray<FHyperAICaptureDiff> Diffs;
+	/** world mode: false means the editor world did not tick between frames, so an unchanged result proves nothing. */
+	UPROPERTY() bool bWorldTimeAdvanced = false;
+	/** True when shaders were still compiling at capture time, so some surfaces may show default materials. */
+	UPROPERTY() bool bShadersStillCompiling = false;
+	UPROPERTY() TArray<FString> Capabilities;
+};
+
+/** The pending result of hyper_capture_view; frames spread over editor ticks while the agent's call stays open. */
+UCLASS()
+class UHyperAICaptureViewResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAICaptureViewReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAICaptureViewReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAICaptureViewReport Value;
+};
+
 /** Match a level's lighting to a reference image: inspect, lock exposure, compare, adjust, compare again. */
 UCLASS()
 class HYPERAISTUDIOLIGHTING_API UHyperAIStudioLightingToolset final : public UToolsetDefinition
@@ -197,8 +295,9 @@ public:
 	static FHyperAILightingInspectReport hyper_lighting_inspect(const FHyperAILightingInspectRequest& Request);
 
 	/**
-	 * Closed lighting edits as one undo step: sun, sky light, fog, sky atmosphere, post process, and exposure lock.
-	 * Dry-run, resubmit with operation_id and expected_plan_hash = plan_hash, poll hyper_operation_status, then
+	 * Closed lighting edits as one undo step: sun, sky light, fog, sky atmosphere, post process, exposure lock, and
+	 * set_actor_material to put a material on a placed actor's mesh.
+	 * Submit with bDryRun false and an operation_id (expected_plan_hash optional), call hyper_operation_wait, then
 	 * hyper_lighting_compare. Unsaved by default; set bSave once the look matches.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
@@ -211,6 +310,14 @@ public:
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
 	static FHyperAILightingCompareReport hyper_lighting_compare(const FHyperAILightingCompareRequest& Request);
+
+	/**
+	 * Final-colour PNGs from a named camera, a transform, or the level viewport, with metrics and frame-to-frame
+	 * differences, under Saved/HyperAIStudio/Captures. To prove an animation, capture two or more frames; TimeMode
+	 * material_time samples a material's Time node at exact times. Changes nothing in the project.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
+	static UHyperAICaptureViewResult* hyper_capture_view(const FHyperAICaptureViewRequest& Request);
 };
 
 class FHyperAIStudioLightingInspectPayload final : public IHyperAIStudioDomainRequestPayload
@@ -226,6 +333,24 @@ class FHyperAIStudioLightingComparePayload final : public IHyperAIStudioDomainRe
 {
 public:
 	FHyperAILightingCompareRequest Request;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+class FHyperAIStudioLightingCapturePayload final : public IHyperAIStudioDomainRequestPayload
+{
+public:
+	FHyperAICaptureViewRequest Request;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+class FHyperAIStudioLightingCaptureResultPayload final : public IHyperAIStudioDomainResultPayload
+{
+public:
+	FHyperAICaptureViewReport Report;
 	virtual FString GetTypeId() const override;
 	virtual FString GetSchemaFingerprint() const override;
 	virtual int32 GetBoundedByteSize() const override;
@@ -317,6 +442,10 @@ public:
 	static constexpr const TCHAR* InspectResultTypeId = TEXT("hyperai.result.lighting.inspect.v1");
 	static constexpr const TCHAR* MutationResultTypeId = TEXT("hyperai.result.lighting.edit_ops.v1");
 	static constexpr const TCHAR* CompareResultTypeId = TEXT("hyperai.result.lighting.compare.v1");
+	static constexpr const TCHAR* CaptureToolName = TEXT("hyper_capture_view");
+	static constexpr const TCHAR* CaptureVariantId = TEXT("view_capture.v1");
+	static constexpr const TCHAR* CapturePayloadTypeId = TEXT("hyperai.payload.lighting.capture.v1");
+	static constexpr const TCHAR* CaptureResultTypeId = TEXT("hyperai.result.lighting.capture.v1");
 	static constexpr int32 MaxOpsPerPlan = 32;
 	static constexpr int32 MinOutputBytes = 16 * 1024;
 	static constexpr int32 MaxOutputBytes = 128 * 1024;
@@ -333,9 +462,13 @@ public:
 	static FString InspectResultSchemaFingerprint();
 	static FString MutationResultSchemaFingerprint();
 	static FString CompareResultSchemaFingerprint();
+	static FString CapturePayloadSchemaFingerprint();
+	static FString CaptureResultSchemaFingerprint();
 	static const FHyperAIStudioDomainAdapterDescriptor& GetAdapterDescriptor();
 	static FHyperAILightingInspectReport Inspect(const FHyperAILightingInspectRequest& Request);
 	static FHyperAILightingCompareReport Compare(const FHyperAILightingCompareRequest& Request);
+	/** Captures without waiting between frames: one frame, or frames at forced material times. */
+	static FHyperAICaptureViewReport CaptureNow(const FHyperAICaptureViewRequest& Request);
 	static FHyperAILightingApplyPlanReport BuildPlan(const FHyperAILightingApplyPlanRequest& Request);
 	/** Order-sensitive: the same ops in a different order are a different plan. */
 	static FString ComputeEditOpsSemanticFingerprint(const FHyperAIStudioLightingEditOpsPayload& Payload);

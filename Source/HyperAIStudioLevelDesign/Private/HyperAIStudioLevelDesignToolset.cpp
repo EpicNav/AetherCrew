@@ -180,6 +180,7 @@ TArray<FString> FHyperAIStudioLevelDesignContracts::GetCapabilities()
 		TEXT("navmesh_routes_start_to_goals_with_corridor_width"),
 		TEXT("spawn_sightlines"),
 		TEXT("top_down_preview_with_routes_markers_and_issues"),
+		TEXT("mirror_symmetry_across_an_x_or_y_plane"),
 		TEXT("unsupported:jump_route_checks_encounter_space_sizing_and_custom_meshes")};
 }
 
@@ -216,7 +217,7 @@ FString FHyperAIStudioLevelDesignContracts::EditOpsPayloadSchemaFingerprint()
 FString FHyperAIStudioLevelDesignContracts::ValidatePayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("level_design.validate.payload.v1|editor_world|pawn_class|max_sightline|preview|output_bytes"));
+		TEXT("level_design.validate.payload.v2|editor_world|pawn_class|max_sightline|preview|symmetry_axis_plane_tolerance|output_bytes"));
 	return Value;
 }
 
@@ -236,7 +237,7 @@ FString FHyperAIStudioLevelDesignContracts::MutationResultSchemaFingerprint()
 FString FHyperAIStudioLevelDesignContracts::ValidateResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("level_design.validate.result.v1|metrics|issues|routes|sightlines|navigation|preview|bounded"));
+		TEXT("level_design.validate.result.v2|metrics|issues|routes|sightlines|symmetry|navigation|preview|bounded"));
 	return Value;
 }
 
@@ -453,10 +454,14 @@ FHyperAILevelDesignValidateReport FHyperAIStudioLevelDesignContracts::Validate(c
 	{
 		return Reject(TEXT("game_thread_required"), TEXT("Level design validation runs on the game thread."));
 	}
+	const FString SymmetryAxis = Request.SymmetryAxis.ToLower();
 	if (Request.MaxOutputBytes < MinOutputBytes || Request.MaxOutputBytes > MaxOutputBytes || Request.PawnClassPath.Len() > 512
-		|| !(Request.MaxSightline >= 500.0f && Request.MaxSightline <= 100000.0f))
+		|| !(Request.MaxSightline >= 500.0f && Request.MaxSightline <= 100000.0f)
+		|| !(SymmetryAxis.IsEmpty() || SymmetryAxis == TEXT("x") || SymmetryAxis == TEXT("y"))
+		|| !(FMath::Abs(Request.SymmetryPlane) <= 1000000.0f) || !(Request.SymmetryTolerance >= 1.0f && Request.SymmetryTolerance <= 1000.0f))
 	{
-		return Reject(TEXT("invalid_bounds"), TEXT("Bounds are closed: max_output_bytes 16-128 KB, max_sightline 500-100000 cm."));
+		return Reject(TEXT("invalid_bounds"), TEXT("Bounds are closed: max_output_bytes 16-128 KB, max_sightline 500-100000 cm, ")
+			TEXT("symmetry_axis empty, x or y, symmetry_tolerance 1-1000 cm."));
 	}
 	UWorld* World = Gate::GetEditorWorld();
 	if (!World)
@@ -470,13 +475,20 @@ FHyperAILevelDesignValidateReport FHyperAIStudioLevelDesignContracts::Validate(c
 	}
 	Report.LevelPath = World->GetPathName();
 	Gate::CheckLayout(*World, Report.Metrics, Request.MaxSightline, Report);
+	FString SymmetryNote;
+	if (!SymmetryAxis.IsEmpty())
+	{
+		Gate::CheckSymmetry(*World, SymmetryAxis, Request.SymmetryPlane, Request.SymmetryTolerance, Report);
+		SymmetryNote = FString::Printf(TEXT(" Symmetry across %s=%g: %d of %d mesh actors mirrored."), *SymmetryAxis.ToUpper(),
+			Request.SymmetryPlane, 2 * Report.Symmetry.MatchedPairs + Report.Symmetry.SelfSymmetric, Report.Symmetry.ActorsChecked);
+	}
 	FString PreviewNote;
 	if (Request.bCapturePreview && !Gate::WritePreview(*World, Report, Report.PreviewImagePath, PreviewNote))
 	{
 		PreviewNote = TEXT(" No preview: ") + PreviewNote;
 	}
 	// Issues past the output budget are counted but not listed.
-	int64 Budget = 4096 + 96ll * (Report.Routes.Num() + Report.Sightlines.Num());
+	int64 Budget = 4096 + 96ll * (Report.Routes.Num() + Report.Sightlines.Num()) + 64ll * Report.Symmetry.Unmatched.Num();
 	int32 Kept = 0;
 	for (; Kept < Report.Issues.Num(); ++Kept)
 	{
@@ -490,9 +502,9 @@ FHyperAILevelDesignValidateReport FHyperAIStudioLevelDesignContracts::Validate(c
 	}
 	Report.bOk = true;
 	Report.Status = Report.ErrorCount > 0 ? TEXT("problems") : TEXT("playable");
-	Report.Diagnostic = FString::Printf(TEXT("%d errors, %d warnings, %d routes checked%s.%s"),
+	Report.Diagnostic = FString::Printf(TEXT("%d errors, %d warnings, %d routes checked%s.%s%s"),
 		Report.ErrorCount, Report.WarningCount, Report.Routes.Num(),
-		Report.bNavigationReady ? TEXT("") : TEXT(" (no ready navmesh)"), *PreviewNote);
+		Report.bNavigationReady ? TEXT("") : TEXT(" (no ready navmesh)"), *SymmetryNote, *PreviewNote);
 	return Report;
 }
 
@@ -548,9 +560,9 @@ FHyperAILevelBlockoutApplyPlanReport FHyperAIStudioLevelDesignContracts::BuildPl
 		return Reject(TEXT("unexpected_submission_fields"), TEXT("A dry run takes no operation_id or expected_plan_hash."));
 	}
 	if (!Request.bDryRun && (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId)
-		|| !IsCanonicalSha256(Request.ExpectedPlanHash)))
+		|| !FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(Request.ExpectedPlanHash)))
 	{
-		return Reject(TEXT("invalid_submission_fields"), TEXT("A non-dry submission needs a valid operation_id and the plan_hash its dry run returned."));
+		return Reject(TEXT("invalid_submission_fields"), FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage());
 	}
 	if (!IsCanonicalSha256(Request.ExpectedRevision))
 	{
@@ -653,7 +665,7 @@ FHyperAILevelBlockoutApplyPlanReport FHyperAIStudioLevelDesignContracts::BuildPl
 		Report.Diagnostic = TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash.");
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Payload->SemanticFingerprint)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("plan_hash_mismatch"), TEXT("The plan changed since its dry run (ops, blockout, or player metrics). Dry-run again and review it."));
 	}
@@ -684,7 +696,7 @@ FHyperAILevelBlockoutApplyPlanReport FHyperAIStudioLevelDesignContracts::BuildPl
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Poll hyper_operation_status with operation_id: it starts once approved.");
+		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
 		return Report;
 	}
 
@@ -710,7 +722,7 @@ FHyperAILevelBlockoutApplyPlanReport FHyperAIStudioLevelDesignContracts::BuildPl
 	Report.bExecutionSubmitted = true;
 	Report.bOk = true;
 	Report.Status = TEXT("submitted");
-	Report.Diagnostic = TEXT("The edit runs over the next editor ticks. Poll hyper_operation_status until it is terminal, then hyper_level_design_validate.");
+	Report.Diagnostic = TEXT("The edit runs over the next editor ticks. Call hyper_operation_wait with operation_id, then hyper_level_design_validate.");
 	return Report;
 }
 

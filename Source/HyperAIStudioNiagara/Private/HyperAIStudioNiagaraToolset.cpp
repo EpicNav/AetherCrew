@@ -984,7 +984,7 @@ TArray<FHyperAINiagaraCapabilityStatus> FHyperAIStudioNiagaraContracts::GetCapab
 		TEXT("runtime_simulation_screenshot_or_actor_spawn"),
 		TEXT("generic_reflection_property_dispatch")};
 	Niagara.State = TEXT("source_candidate_external_edit_ops");
-	Niagara.Remediation = TEXT("Inspect with bIncludeTopology, dry-run apply_plan, resubmit with operation_id and plan_hash, poll hyper_operation_status, then run hyper_niagara_validate once compiling finishes. Close the System's Niagara editor tab first. Planning may load referenced module scripts or emitter templates; it never loads the edited System. Removals stay on Epic's NiagaraToolsets.");
+	Niagara.Remediation = TEXT("Inspect with bIncludeTopology, then apply_plan: submit with bDryRun false and an operation_id (plan hash optional), call hyper_operation_wait, then hyper_niagara_validate. Close the System's Niagara editor tab first. Planning may load referenced module scripts or emitter templates; it never loads the edited System. Removals stay on Epic's NiagaraToolsets.");
 	return {Niagara};
 }
 
@@ -1565,10 +1565,16 @@ FHyperAINiagaraValidateReport FHyperAIStudioNiagaraContracts::Validate(
 		Capture.Capabilities = Report.Capabilities;
 		return Capture;
 	}
+	if (Request.Policy == TEXT("runtime_probe"))
+	{
+		FHyperAINiagaraValidateReport Probe = HyperAIStudio::Niagara::AssetsGate::RunRuntimeProbe(Request);
+		Probe.Capabilities = Report.Capabilities;
+		return Probe;
+	}
 	if (Request.Policy != TEXT("authoring") && Request.Policy != TEXT("runtime_ready"))
 	{
 		return Reject(TEXT("unsupported_validation_policy"),
-			TEXT("policy must be authoring, runtime_ready or sim_cache_capture."));
+			TEXT("policy must be authoring, runtime_ready, sim_cache_capture or runtime_probe."));
 	}
 	if ((!Request.ExpectedRevision.IsEmpty() && !IsCanonicalSha256(Request.ExpectedRevision))
 		|| Request.MaxIssues < 1 || Request.MaxIssues > MaxIssues
@@ -1709,10 +1715,9 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 	}
 	if (!Request.bDryRun
 		&& (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId)
-			|| !IsCanonicalSha256(Request.ExpectedPlanHash)))
+			|| !FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(Request.ExpectedPlanHash)))
 	{
-		return Reject(TEXT("invalid_submission_fields"),
-			TEXT("A non-dry submission needs a valid operation_id and the plan_hash its dry run returned."));
+		return Reject(TEXT("invalid_submission_fields"), FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage());
 	}
 	if (!IsCanonicalProjectObjectPath(Request.TargetPath)
 		|| !IsCanonicalSha256(Request.ExpectedRevision))
@@ -1890,7 +1895,7 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 		Report.Diagnostic = TEXT("Nothing changed. To apply, resubmit the same request with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash.");
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Payload->SemanticFingerprint)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("plan_hash_mismatch"),
 			TEXT("The plan changed since its dry run (ops, target state, or catalog). Dry-run again and review it."));
@@ -1919,7 +1924,7 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Poll hyper_operation_status with operation_id: it starts once approved.");
+		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
 		return Report;
 	}
 
@@ -1946,7 +1951,7 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 	Report.bExecutionSubmitted = true;
 	Report.bOk = true;
 	Report.Status = TEXT("submitted");
-	Report.Diagnostic = TEXT("The edit runs over the next editor ticks: apply, compile, validate, save, verify. Poll hyper_operation_status with operation_id until it is terminal.");
+	Report.Diagnostic = TEXT("The edit runs over the next editor ticks: apply, compile, validate, save, verify. Call hyper_operation_wait with operation_id.");
 	return Report;
 }
 

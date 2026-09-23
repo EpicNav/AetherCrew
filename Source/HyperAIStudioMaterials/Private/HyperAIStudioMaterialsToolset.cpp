@@ -1984,7 +1984,7 @@ TArray<FHyperAIMaterialCapabilityStatus> FHyperAIStudioMaterialsContracts::GetCa
 		TEXT("expression_classes_outside_the_node_catalog_created_or_configured"),
 		TEXT("target_open_in_material_editor")};
 	Material.State = TEXT("source_candidate_executable");
-	Material.Remediation = TEXT("Inspect for the revision and node ids, dry-run apply_plan, resubmit with operation_id and expected_plan_hash, poll hyper_operation_status, then hyper_material_validate for stats and the preview PNG. Close the material's editor tab first.");
+	Material.Remediation = TEXT("Inspect for the revision and node ids, then apply_plan: submit with bDryRun false and an operation_id (plan hash optional), call hyper_operation_wait, then hyper_material_validate for stats and the preview PNG. Close the material's editor tab first.");
 
 	FHyperAIMaterialCapabilityStatus Function;
 	Function.Family = TEXT("material_function");
@@ -3894,10 +3894,11 @@ FHyperAIMaterialApplyPlanReport FHyperAIStudioMaterialsContracts::BuildPlan(
 		return Reject(TEXT("invalid_request_bounds"),
 			TEXT("Operation identity/count, expected hash, deadline, game-thread budget, or output bound is invalid."));
 	}
-	if (!Request.bDryRun && (Request.OperationId.IsEmpty() || Request.ExpectedPlanHash.IsEmpty()))
+	if (!Request.bDryRun && (Request.OperationId.IsEmpty() || !FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(Request.ExpectedPlanHash)))
 	{
-		return Reject(TEXT("operation_identity_required"),
-			TEXT("Applying needs operation_id and expected_plan_hash (the plan_hash of the dry run you reviewed)."));
+		return Reject(TEXT("operation_identity_required"), Request.OperationId.IsEmpty()
+			? TEXT("Applying needs a fresh operation_id.")
+			: FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage());
 	}
 	const EHyperAIStudioMaterialAuthoringMode Mode = GetDefault<UHyperAIStudioSettings>()->MaterialAuthoringMode;
 	const double Deadline = FPlatformTime::Seconds()
@@ -4255,7 +4256,7 @@ FHyperAIMaterialApplyPlanReport FHyperAIStudioMaterialsContracts::BuildPlan(
 		Report.Diagnostic = TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash.");
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Payload->SemanticFingerprint)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("plan_hash_mismatch"),
 			TEXT("The plan changed since its dry run (operations, target state, or authoring mode). Dry-run again and review it."));
@@ -4285,7 +4286,7 @@ FHyperAIMaterialApplyPlanReport FHyperAIStudioMaterialsContracts::BuildPlan(
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Poll hyper_operation_status with operation_id: it starts once approved.");
+		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
 		return Report;
 	}
 	FHyperAIStudioTypedArtifactStageReceipt Receipt;
@@ -4310,7 +4311,7 @@ FHyperAIMaterialApplyPlanReport FHyperAIStudioMaterialsContracts::BuildPlan(
 	Report.bExecutionSubmitted = true;
 	Report.bOk = true;
 	Report.Status = TEXT("submitted");
-	Report.Diagnostic = TEXT("The edit runs over the next editor ticks: apply, compile, validate, save, verify. Poll hyper_operation_status with operation_id, then hyper_material_validate for instruction counts and the preview PNG.");
+	Report.Diagnostic = TEXT("The edit runs over the next editor ticks: apply, compile, validate, save, verify. Call hyper_operation_wait with operation_id, then hyper_material_validate for instruction counts and the preview PNG.");
 	return Report;
 }
 

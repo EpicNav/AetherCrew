@@ -8,6 +8,7 @@
 #include "HyperAIStudioOperationJournal.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioNativeReadToolset.generated.h"
 
 class FProperty;
@@ -357,6 +358,60 @@ struct FHyperAIOperationStatus
 
 	UPROPERTY()
 	FString ProjectIdentityHash;
+
+	/** The executor phase running now (apply, compile, validate, save, verify_fresh), while it runs. */
+	UPROPERTY()
+	FString Phase;
+
+	UPROPERTY()
+	int32 PhasesDone = 0;
+
+	UPROPERTY()
+	int32 PhasesTotal = 0;
+
+	/** Progress of a background job that belongs to this operation, such as a capture or a batch. */
+	UPROPERTY()
+	FString JobProgress;
+
+	/** What to do next, in one sentence. */
+	UPROPERTY()
+	FString NextAction;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIOperationWaitReport
+{
+	GENERATED_BODY()
+
+	/** The operation's status when the wait ended, exactly as hyper_operation_status reports it. */
+	UPROPERTY()
+	FHyperAIOperationStatus Status;
+
+	/** terminal, awaiting_user_approval, rejected, not_found, timeout, invalid_request or too_many_waiters. */
+	UPROPERTY()
+	FString CompletedBecause;
+
+	UPROPERTY()
+	int32 WaitedMs = 0;
+};
+
+/**
+ * The pending result of hyper_operation_wait. The MCP server holds the agent's request open until this
+ * completes, while the editor keeps ticking, so the executor finishes the very operation being waited on.
+ */
+UCLASS()
+class UHyperAIOperationWaitResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIOperationWaitReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIOperationWaitReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIOperationWaitReport Value;
 };
 
 /** PIE identity attached to a debug object or returned as a PIE world result. */
@@ -712,6 +767,17 @@ public:
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Workflow")
 	static FHyperAIOperationStatus hyper_operation_status(const FString& OperationId);
+
+	/**
+	 * Wait for one operation to finish, be rejected, or need approval, then return its status: one call
+	 * instead of polling. TimeoutMs 1000-120000, default 30000. Set bWaitThroughApproval to keep waiting
+	 * while the user decides. The editor keeps running while this waits.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Workflow")
+	static UHyperAIOperationWaitResult* hyper_operation_wait(
+		const FString& OperationId,
+		int32 TimeoutMs = 30000,
+		bool bWaitThroughApproval = false);
 
 	/** Inspect bounded Blueprint node diagnostics, breakpoints, watched pins, and the selected debug object's PIE identity. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Blueprint")

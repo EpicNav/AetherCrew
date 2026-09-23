@@ -43,6 +43,7 @@
 #include "HyperAIStudioPlanValidateToolset.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioService.h"
+#include "HyperAIStudioToolGuide.h"
 #include "HyperAIStudioStyle.h"
 #include "HyperAIStudioTrustedExecutionInternal.h"
 #if WITH_DEV_AUTOMATION_TESTS
@@ -766,6 +767,11 @@ public:
 		WelcomePromptTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateRaw(this, &FHyperAIStudioModule::RunWelcomePromptTicker),
 			2.0f);
+
+		// Late enough that the optional packs have registered, so the guide lists what is really there.
+		AgentGuidanceTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateRaw(this, &FHyperAIStudioModule::RunAgentGuidanceTicker),
+			20.0f);
 	}
 
 	virtual void ShutdownModule() override
@@ -815,6 +821,11 @@ public:
 		{
 			FTSTicker::GetCoreTicker().RemoveTicker(WelcomePromptTickerHandle);
 			WelcomePromptTickerHandle.Reset();
+		}
+		if (AgentGuidanceTickerHandle.IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(AgentGuidanceTickerHandle);
+			AgentGuidanceTickerHandle.Reset();
 		}
 
 		UnregisterGraphEditorContextMenus();
@@ -983,7 +994,7 @@ private:
 				TEXT("lighting_lookdev"),
 				TEXT("cohort.source.hyperaistudiolightingtoolset.v1"),
 				{TEXT("hyper_lighting_inspect"), TEXT("hyper_lighting_apply_plan"),
-					TEXT("hyper_lighting_compare")},
+					TEXT("hyper_lighting_compare"), TEXT("hyper_capture_view")},
 				{}
 			},
 			{
@@ -2082,6 +2093,35 @@ private:
 	FVector2D GetWelcomeContentSize() const
 	{
 		return FVector2D(620.0f, 330.0f);
+	}
+
+	/** Runs once: writes the tool guide, and refreshes agent instructions older than this build. */
+	bool RunAgentGuidanceTicker(float DeltaTime)
+	{
+		AgentGuidanceTickerHandle.Reset();
+		if (bModuleShuttingDown || IsRunningCommandlet())
+		{
+			return false;
+		}
+		if (!HyperAIStudio::ToolGuide::Ensure())
+		{
+			UE_LOG(LogHyperAIStudio, Warning, TEXT("Could not write %s."), *HyperAIStudio::ToolGuide::GetPath());
+		}
+		const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+		const FString AgentsPath = FPaths::Combine(FHyperAIStudioService::GetProjectRoot(), TEXT("AGENTS.md"));
+		FString AgentsText;
+		// Only a project that has been set up already gets refreshed; a fresh one waits for Setup.
+		const bool bSetUp = FFileHelper::LoadFileToString(AgentsText, *AgentsPath)
+			&& AgentsText.Contains(TEXT("BEGIN HYPERAISTUDIO MANAGED BLOCK"));
+		FHyperAIStudioService Service;
+		if (Settings && Settings->bRefreshAgentInstructionsOnStartup && bSetUp && !Service.AreAgentInstructionsCurrent())
+		{
+			FText Message;
+			const bool bOk = Service.GenerateProjectFiles(Message);
+			UE_LOG(LogHyperAIStudio, Display, TEXT("Agent instructions were older than this build; refresh %s: %s"),
+				bOk ? TEXT("succeeded") : TEXT("failed"), *Message.ToString());
+		}
+		return false;
 	}
 
 	bool RunWelcomePromptTicker(float DeltaTime)
@@ -6249,6 +6289,7 @@ private:
 	TWeakPtr<SHyperAIStudioQuickActionWindow> ActiveChatWidget;
 	FDelegateHandle GraphEditorContextMenuExtenderHandle;
 	FTSTicker::FDelegateHandle WelcomePromptTickerHandle;
+	FTSTicker::FDelegateHandle AgentGuidanceTickerHandle;
 	bool bWelcomePromptProbeActive = false;
 	bool bWelcomePromptShown = false;
 	bool bModuleShuttingDown = false;

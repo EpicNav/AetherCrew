@@ -466,7 +466,7 @@ TArray<FHyperAITextureGraphCapabilityStatus> FHyperAIStudioTextureGraphContracts
 		TEXT("viewport_preview_material_and_mesh_settings"),
 		TEXT("synchronous_render_to_render_targets"),
 		TEXT("export_outside_game_folder")};
-	Status.Remediation = TEXT("Inspect (bLoad if needed), dry-run apply_plan, resubmit with operation_id and plan_hash, poll hyper_operation_status, then validate. With bExport, validate with policy exported until it passes. Close the graph's editor tab first.");
+	Status.Remediation = TEXT("Inspect (bLoad if needed), then apply_plan: submit with bDryRun false and an operation_id (plan hash optional), call hyper_operation_wait, then validate. With bExport, validate with policy exported until it passes. Close the graph's editor tab first.");
 	return {Status};
 }
 
@@ -686,9 +686,9 @@ FHyperAITextureGraphApplyPlanReport FHyperAIStudioTextureGraphContracts::BuildPl
 		return Reject(TEXT("unexpected_submission_fields"), TEXT("A dry run takes no operation_id or expected_plan_hash."));
 	}
 	if (!Request.bDryRun && (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId)
-		|| !IsCanonicalSha256(Request.ExpectedPlanHash)))
+		|| !FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(Request.ExpectedPlanHash)))
 	{
-		return Reject(TEXT("invalid_submission_fields"), TEXT("A non-dry submission needs a valid operation_id and the plan_hash its dry run returned."));
+		return Reject(TEXT("invalid_submission_fields"), FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage());
 	}
 	if (!IsCanonicalProjectObjectPath(Request.TargetPath)
 		|| (Request.bCreate ? !Request.ExpectedRevision.IsEmpty() : !IsCanonicalSha256(Request.ExpectedRevision)))
@@ -850,7 +850,7 @@ FHyperAITextureGraphApplyPlanReport FHyperAIStudioTextureGraphContracts::BuildPl
 		Report.Diagnostic = TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash.");
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Payload->SemanticFingerprint)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("plan_hash_mismatch"), TEXT("The plan changed since its dry run (ops, graph state, or catalog). Dry-run again and review it."));
 	}
@@ -886,7 +886,7 @@ FHyperAITextureGraphApplyPlanReport FHyperAIStudioTextureGraphContracts::BuildPl
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Poll hyper_operation_status with operation_id: it starts once approved.");
+		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
 		return Report;
 	}
 
@@ -912,7 +912,7 @@ FHyperAITextureGraphApplyPlanReport FHyperAIStudioTextureGraphContracts::BuildPl
 	Report.bExecutionSubmitted = true;
 	Report.bOk = true;
 	Report.Status = TEXT("submitted");
-	Report.Diagnostic = TEXT("The edit runs over the next editor ticks. Poll hyper_operation_status with operation_id until it is terminal.");
+	Report.Diagnostic = TEXT("The edit runs over the next editor ticks. Call hyper_operation_wait with operation_id.");
 	return Report;
 }
 

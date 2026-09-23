@@ -442,6 +442,22 @@ public:
 	TArray<FHyperAIStudioExternalServiceSettings> ExternalServices;
 
 	/**
+	 * Let an agent apply an edit in one call, without a dry run first. The plan is still computed, sealed,
+	 * journaled and undoable, and still waits for approval when approval is on; this only drops the
+	 * round trip that asked the agent to repeat the plan's hash back.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agents")
+	bool bAllowOneShotAgentEdits = true;
+
+	/**
+	 * Rewrite the HyperAIStudio block in AGENTS.md and CLAUDE.md at startup when it is older than this
+	 * build's. Only the managed block changes; text outside it is kept. Without this, guidance added in
+	 * an update reaches agents only after someone reruns Setup.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agents")
+	bool bRefreshAgentInstructionsOnStartup = true;
+
+	/**
 	 * Image models available to the generation tools. Empty by default: this plugin ships no model name,
 	 * because the one it shipped would be wrong within months. The cookbook shows how to add one.
 	 */

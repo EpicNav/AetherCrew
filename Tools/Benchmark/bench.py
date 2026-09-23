@@ -17,6 +17,7 @@ Standard library only.
 """
 
 import argparse
+import filecmp
 import json
 import os
 import shutil
@@ -31,7 +32,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 PLUGIN_FOLDER = PLUGIN_ROOT.name
 ENGINE_ROOT = Path(os.environ.get("HYPERAI_BENCH_ENGINE", r"E:\EpicGames\UE_5.8"))
 BENCH_ROOT = Path(os.environ.get("HYPERAI_BENCH_PROJECT", r"E:\Unreal Projects\HyperAIBench"))
-BENCH_NAME = "HyperAIBench"
+BENCH_NAME = BENCH_ROOT.name
 MCP_PORT = int(os.environ.get("HYPERAI_BENCH_PORT", "8010"))
 MCP_URL = f"http://127.0.0.1:{MCP_PORT}/mcp"
 TEMPLATE = "TP_ThirdPersonBP"
@@ -174,26 +175,53 @@ def ensure_settings():
         set_ini_section(saved, "/Script/ModelContextProtocolEngine.ModelContextProtocolSettings", MCP_SETTINGS)
 
 
-def mirror_plugin():
+def source_commit(source):
+    result = subprocess.run(["git", "-C", str(source), "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
+    dirty = subprocess.run(["git", "-C", str(source), "status", "--porcelain"], capture_output=True, text=True)
+    return result.stdout.strip() + ("+dirty" if dirty.stdout.strip() else "")
+
+
+def mirror_plugin(source=PLUGIN_ROOT):
     target = BENCH_ROOT / "Plugins" / PLUGIN_FOLDER
-    log(f"Mirroring the plugin into {target}.")
+    log(f"Mirroring {source} into {target}.")
     # A copy rather than a junction: two projects building one plugin folder would overwrite each
-    # other's binaries on every build.
-    result = subprocess.run(
-        ["robocopy", str(PLUGIN_ROOT), str(target), "/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NP",
-         "/XD", "Binaries", "Intermediate", ".git", "Saved", "runs", "__pycache__"],
-        capture_output=True, text=True)
-    if result.returncode >= 8:
-        raise SystemExit(f"robocopy failed ({result.returncode}): {result.stdout[-2000:]}{result.stderr[-2000:]}")
+    # other's binaries on every build. Files are compared by content and copied with a fresh timestamp:
+    # a copy that kept its source's older time would look older than the objects UBT built from the
+    # previous copy, so UBT would skip it (robocopy /MIR did exactly that).
+    skip = {"Binaries", "Intermediate", ".git", "Saved", "runs", "__pycache__"}
+    kept, copied, removed = set(), 0, 0
+    for root, dirs, files in os.walk(source):
+        dirs[:] = [d for d in dirs if d not in skip]
+        for name in files:
+            src = Path(root) / name
+            dst = target / src.relative_to(source)
+            kept.add(dst)
+            if dst.is_file() and filecmp.cmp(src, dst, shallow=False):
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            copied += 1
+    for root, dirs, files in os.walk(target):
+        dirs[:] = [d for d in dirs if d not in skip]
+        for name in files:
+            if Path(root) / name not in kept:
+                (Path(root) / name).unlink()
+                removed += 1
+    log(f"Mirror: {copied} files copied, {removed} removed.")
+    # Runs record which source was measured, since a bench can be built from any checkout.
+    marker = BENCH_ROOT / "Saved" / "HyperAIBench"
+    marker.mkdir(parents=True, exist_ok=True)
+    (marker / "source.json").write_text(json.dumps({"path": str(source), "commit": source_commit(source)}), encoding="utf-8")
 
 
 def build_editor():
     build = ENGINE_ROOT / "Engine" / "Build" / "BatchFiles" / "Build.bat"
     log("Building the bench editor (UnrealEditor target with the bench project's plugins).")
+    # Below normal, so a build never slows an agent run on another bench (compilers inherit the class).
     result = subprocess.run(
         [str(build), "UnrealEditor", "Win64", "Development", f"-Project={uproject_path()}", "-WaitMutex",
          "-NoHotReloadFromIDE"],
-        capture_output=True, text=True)
+        capture_output=True, text=True, creationflags=getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0))
     tail = "\n".join((result.stdout + result.stderr).splitlines()[-40:])
     if result.returncode != 0:
         raise SystemExit(f"Build failed ({result.returncode}).\n{tail}")
@@ -208,7 +236,7 @@ def cmd_setup(args):
         create_project()
     ensure_plugins()
     ensure_settings()
-    mirror_plugin()
+    mirror_plugin(Path(args.source) if args.source else PLUGIN_ROOT)
     if not args.skip_build:
         build_editor()
     log("Setup done.")
@@ -732,10 +760,19 @@ def git_commit():
     return result.stdout.strip() + ("+dirty" if dirty.stdout.strip() else "")
 
 
+# Both agents get the same framing. Without it Codex reads its read-only sandbox as "I cannot create
+# assets" and stops before calling a single editing tool.
+PROMPT_PREAMBLE = (
+    "You are working in a running Unreal Editor through the unreal-mcp tools. Your own file access is "
+    "read-only by design: the MCP tools create, edit and save assets inside the editor, so make every "
+    "change through them."
+)
+
+
 def run_one(agent, task, out_dir, args):
     task_id, test, _ = task
     out_dir.mkdir(parents=True, exist_ok=True)
-    prompt = (TASKS_DIR / f"{task_id}.md").read_text(encoding="utf-8").strip()
+    prompt = PROMPT_PREAMBLE + "\n\n" + (TASKS_DIR / f"{task_id}.md").read_text(encoding="utf-8").strip()
     stop_editor()
     wipe_bench_content()
     start_editor(timeout=900)
@@ -762,7 +799,11 @@ def cmd_run(args):
     run_id = time.strftime("%Y%m%d-%H%M%S") + (f"-{args.label}" if args.label else "")
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    meta = {"run_id": run_id, "plugin_commit": git_commit(), "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+    try:
+        measured = json.loads((BENCH_ROOT / "Saved" / "HyperAIBench" / "source.json").read_text(encoding="utf-8"))["commit"]
+    except (OSError, ValueError, KeyError):
+        measured = git_commit()
+    meta = {"run_id": run_id, "plugin_commit": measured, "started": time.strftime("%Y-%m-%d %H:%M:%S"),
             "agents": agents, "tasks": [t[0] for t in tasks], "repeats": args.repeats,
             "codex_model": args.codex_model, "codex_effort": args.codex_effort,
             "claude_model": args.claude_model, "claude_effort": args.claude_effort,
@@ -872,6 +913,7 @@ def main(argv=None):
 
     setup = sub.add_parser("setup", help="create or refresh the bench project, mirror the plugin, build")
     setup.add_argument("--skip-build", action="store_true")
+    setup.add_argument("--source", help="plugin checkout to mirror (default: this one)")
     setup.set_defaults(func=cmd_setup)
 
     editor = sub.add_parser("editor", help="start, stop, or check the bench editor")

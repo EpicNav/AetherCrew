@@ -37,6 +37,8 @@ namespace HyperAIStudio::Lighting::Gate
 	bool ValidateOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, FString& OutError);
 	/** Applies ops in order as one undo step, adding a missing actor where an op needs one. */
 	bool ApplyOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, TArray<AActor*>& OutTouched, FString& OutError);
+	/** Every set_actor_material op's slot holds its material; the Validate phase's postcondition. */
+	bool CheckMaterialOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, FString& OutError);
 	/** The actors ops resolve to now, without adding any. */
 	TArray<AActor*> ResolveTargets(UWorld& World, const TArray<FHyperAILightingOp>& Ops);
 	/** Packages holding these actors: their own under One File Per Actor, otherwise the level's. */

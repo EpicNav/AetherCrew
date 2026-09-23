@@ -24,7 +24,9 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/PackageName.h"
 #include "NiagaraEditorModule.h"
+#include "NiagaraEditorUtilities.h"
 #include "NiagaraSystem.h"
+#include "NiagaraSystemFactoryNew.h"
 #include "UObject/SoftObjectPath.h"
 
 #include <type_traits>
@@ -766,6 +768,63 @@ bool FHyperAIStudioNiagaraSimCacheTest::RunTest(const FString& Parameters)
 	const FHyperAINiagaraValidateReport Changed = Capture(GoldenPath, 1.f / 30.f);
 	TestFalse(TEXT("a changed simulation no longer matches"), Changed.SimCache.bMatch);
 	TestFalse(TEXT("and the differences are listed"), Changed.SimCache.Differences.IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNiagaraRuntimeProbeTest,
+	"HyperAIStudio.Niagara.Validate.RuntimeProbeCountsLiveParticles",
+	HyperAIStudio::Niagara::Tests::Flags)
+
+bool FHyperAIStudioNiagaraRuntimeProbeTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	// Two looping emitters from Niagara's own templates, in an unsaved System under /Game.
+	UNiagaraEmitter* Fountain = LoadObject<UNiagaraEmitter>(nullptr, TEXT("/Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain"));
+	UNiagaraEmitter* Looping = LoadObject<UNiagaraEmitter>(nullptr,
+		TEXT("/Niagara/DefaultAssets/Templates/Emitters/SingleLoopingParticle.SingleLoopingParticle"));
+	if (!Fountain || !Looping)
+	{
+		AddInfo(TEXT("Skipped: Niagara's emitter templates are not available."));
+		return true;
+	}
+	const FString FixtureName = TEXT("NS_HyperAIProbe_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	UPackage* FixturePackage = CreatePackage(*(TEXT("/Game/__HyperAIStudioTests/") + FixtureName));
+	UNiagaraSystem* System = NewObject<UNiagaraSystem>(FixturePackage, FName(*FixtureName), RF_Public | RF_Standalone);
+	ON_SCOPE_EXIT { ObjectTools::ForceDeleteObjects({System}, /*ShowConfirmation=*/false); };
+	UNiagaraSystemFactoryNew::InitializeSystem(System, /*bCreateDefaultNodes=*/true);
+	for (UNiagaraEmitter* Emitter : {Fountain, Looping})
+	{
+		FNiagaraEditorUtilities::AddEmitterToSystem(*System, *Emitter, Emitter->GetExposedVersion().VersionGuid);
+	}
+	System->RequestCompile(/*bForce=*/true);
+	System->WaitForCompilationComplete(/*bIncludingGPUShaders=*/true, /*bShowProgress=*/false);
+
+	FHyperAINiagaraValidateRequest Request;
+	Request.TargetPath = System->GetPathName();
+	Request.Policy = TEXT("runtime_probe");
+	Request.ProbeFrames = 60;
+	const FHyperAINiagaraValidateReport Report = FHyperAIStudioNiagaraContracts::Validate(Request);
+	TestEqual(*FString::Printf(TEXT("both emitters are live (%s)"), *Report.Diagnostic), Report.Status, FString(TEXT("live")));
+	TestEqual(TEXT("one second simulated"), Report.RuntimeProbe.SimulatedSeconds, 1.f, 0.001f);
+	if (!TestEqual(TEXT("each emitter is reported"), Report.RuntimeProbe.Emitters.Num(), 2)) return false;
+	for (const FHyperAINiagaraEmitterRuntime& Emitter : Report.RuntimeProbe.Emitters)
+	{
+		TestEqual(Emitter.Name + TEXT(" is active"), Emitter.ExecutionState, FString(TEXT("Active")));
+		TestTrue(Emitter.Name + TEXT(" has live particles"), Emitter.NumParticles > 0 && Emitter.bMeetsMinimum);
+		TestTrue(Emitter.Name + TEXT(" says where its count came from"), Emitter.CountSource == TEXT("cpu") || Emitter.CountSource == TEXT("gpu_estimate"));
+	}
+
+	// Named emitters are checked by name, and one the System lacks is reported rather than assumed.
+	Request.ExpectEmitters = {Report.RuntimeProbe.Emitters[0].Name};
+	TestEqual(TEXT("a named live emitter passes"), FHyperAIStudioNiagaraContracts::Validate(Request).Status, FString(TEXT("live")));
+	Request.ExpectEmitters = {TEXT("NoSuchEmitter")};
+	TestEqual(TEXT("a missing emitter fails the probe"), FHyperAIStudioNiagaraContracts::Validate(Request).Status, FString(TEXT("not_live")));
+	Request.ExpectEmitters.Reset();
+	Request.MinParticlesPerEmitter = 1000000;
+	TestEqual(TEXT("an unmet minimum fails the probe"), FHyperAIStudioNiagaraContracts::Validate(Request).Status, FString(TEXT("not_live")));
+	Request.ProbeFrames = 0;
+	TestEqual(TEXT("bounds are enforced"), FHyperAIStudioNiagaraContracts::Validate(Request).Status, FString(TEXT("invalid_request")));
 	return true;
 }
 

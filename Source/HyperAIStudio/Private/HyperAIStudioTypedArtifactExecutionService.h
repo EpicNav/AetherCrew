@@ -57,6 +57,13 @@ public:
 		const FString& OperationId,
 		FHyperAIStudioTypedArtifactOperationStatus& OutStatus,
 		FString& OutError) const;
+	/**
+	 * The active, admitting or recently archived operation only. Never loads the journal, whose load can
+	 * reconcile, so a read-only caller may use it freely. False when this process does not know the id.
+	 */
+	bool QueryLiveStatus(
+		const FString& OperationId,
+		FHyperAIStudioTypedArtifactOperationStatus& OutStatus) const;
 	bool Cancel(
 		const FString& OperationId,
 		const FString& Reason,
