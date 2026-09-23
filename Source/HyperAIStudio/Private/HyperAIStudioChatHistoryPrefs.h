@@ -28,8 +28,14 @@ public:
 	UPROPERTY(Config)
 	TArray<FString> Pinned;
 
+	/** Chats that run with Claude Code Remote Control, so claude.ai and the Claude app can reach them. */
+	UPROPERTY(Config)
+	TArray<FString> Remote;
+
 	static FString GetTitle(const FString& SessionId);
 	static bool IsPinned(const FString& SessionId);
+	static bool IsRemote(const FString& SessionId);
+	static void SetRemote(const FString& SessionId, bool bRemote);
 	/** An empty or blank name clears the rename and restores the agent's own title. */
 	static void SetTitle(const FString& SessionId, const FString& Title);
 	static void TogglePinned(const FString& SessionId);

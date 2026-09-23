@@ -423,6 +423,14 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Models")
 	bool bAutoAcceptPlansInSmartMode = true;
 
+	/**
+	 * Claude Code chats with Remote on run as background sessions that the chat tab attaches to, so closing the tab
+	 * or the editor leaves them running and reachable from claude.ai/code and the Claude app. Reopen one from Chats.
+	 * Off: remote chats run inside the tab and stop with it.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Remote", meta = (DisplayName = "Keep Remote Chats Running After The Editor Closes"))
+	bool bKeepRemoteChatsRunning = true;
+
 	/** The chat panel's new-tab menu: one entry per kind of task. Empty restores the built-in list. */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing")
 	TArray<FHyperAIStudioAgentTaskRoute> AgentTaskRoutes;

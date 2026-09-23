@@ -34,6 +34,30 @@ bool UHyperAIStudioChatHistoryPrefs::IsPinned(const FString& SessionId)
 	return Prefs && Prefs->Pinned.Contains(SessionId);
 }
 
+bool UHyperAIStudioChatHistoryPrefs::IsRemote(const FString& SessionId)
+{
+	const UHyperAIStudioChatHistoryPrefs* Prefs = GetDefault<UHyperAIStudioChatHistoryPrefs>();
+	return Prefs && !SessionId.IsEmpty() && Prefs->Remote.Contains(SessionId);
+}
+
+void UHyperAIStudioChatHistoryPrefs::SetRemote(const FString& SessionId, const bool bRemote)
+{
+	UHyperAIStudioChatHistoryPrefs* Prefs = GetMutableDefault<UHyperAIStudioChatHistoryPrefs>();
+	if (!Prefs || SessionId.IsEmpty() || Prefs->Remote.Contains(SessionId) == bRemote)
+	{
+		return;
+	}
+	if (!bRemote)
+	{
+		Prefs->Remote.Remove(SessionId);
+	}
+	else if (Prefs->Remote.Num() < MaxTrackedSessions)
+	{
+		Prefs->Remote.Add(SessionId);
+	}
+	Prefs->SaveConfig();
+}
+
 void UHyperAIStudioChatHistoryPrefs::SetTitle(const FString& SessionId, const FString& Title)
 {
 	UHyperAIStudioChatHistoryPrefs* Prefs = GetMutableDefault<UHyperAIStudioChatHistoryPrefs>();

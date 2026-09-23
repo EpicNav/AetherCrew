@@ -51,6 +51,7 @@
 #endif
 #include "Interfaces/IPluginManager.h"
 #include "SHyperAIStudioQuickActionWindow.h"
+#include "Interfaces/IMainFrameModule.h"
 #include "Misc/App.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/FileHelper.h"
@@ -533,6 +534,12 @@ public:
 		FHyperAIStudioStyle::Register();
 		EnginePreExitHandle = FCoreDelegates::OnEnginePreExit.AddRaw(
 			this, &FHyperAIStudioModule::BeginEnginePreExit);
+		// Agent chats still working get a say before the editor closes.
+		if (IMainFrameModule* MainFrame = FModuleManager::LoadModulePtr<IMainFrameModule>(TEXT("MainFrame")))
+		{
+			CanCloseEditorHandle = MainFrame->RegisterCanCloseEditor(
+				IMainFrameModule::FMainFrameCanCloseEditor::CreateStatic(&SHyperAIStudioQuickActionWindow::CanCloseEditor));
+		}
 		if (FHyperAIStudioExtensionRuntime::AreExtendedHyperToolsEnabled())
 		{
 			FString TrustedExecutionError;
@@ -781,6 +788,14 @@ public:
 		{
 			FCoreDelegates::OnEnginePreExit.Remove(EnginePreExitHandle);
 			EnginePreExitHandle.Reset();
+		}
+		if (CanCloseEditorHandle.IsValid())
+		{
+			if (IMainFrameModule* MainFrame = FModuleManager::GetModulePtr<IMainFrameModule>(TEXT("MainFrame")))
+			{
+				MainFrame->UnregisterCanCloseEditor(CanCloseEditorHandle);
+			}
+			CanCloseEditorHandle.Reset();
 		}
 		if (PIEPlaytestRegistration)
 		{
@@ -6267,6 +6282,7 @@ private:
 	TUniquePtr<FHyperAIStudioPIEPlaytestRegistration> PIEPlaytestRegistration;
 	TUniquePtr<FHyperAIStudioFoundationProbe> FoundationProbe;
 	FDelegateHandle EnginePreExitHandle;
+	FDelegateHandle CanCloseEditorHandle;
 	TUniquePtr<FAutoConsoleCommand> CommandSetUp;
 	TUniquePtr<FAutoConsoleCommand> CommandGenerateFiles;
 	TUniquePtr<FAutoConsoleCommand> CommandDocsSmoke;

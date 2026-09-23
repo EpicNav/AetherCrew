@@ -5,9 +5,12 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "HyperAIStudioAgentChatHistory.h"
+#include "HAL/PlatformProcess.h"
+#include "HyperAIStudioService.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Internationalization/Regex.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHyperAIStudioAgentChatHistoryTest,
@@ -74,6 +77,115 @@ bool FHyperAIStudioAgentChatHistoryTest::RunTest(const FString& Parameters)
 	const FHyperAIStudioChatSession* Codex = Sessions.FindByPredicate([](const FHyperAIStudioChatSession& S) { return S.AgentName == TEXT("Codex"); });
 	TestTrue(TEXT("Claude chat listed with its title"), Claude && Claude->SessionId == ClaudeId && Claude->Title == TEXT("Combat polish"));
 	TestTrue(TEXT("Codex chat listed with its thread name"), Codex && Codex->SessionId == CodexId && Codex->Title == TEXT("Title screen UMG"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioRemoteChatsTest,
+	"HyperAIStudio.Chat.RemoteChats",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioRemoteChatsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ChatHistory;
+
+	// claude --session-id takes only RFC 4122 ids: version 4, variant 10xx.
+	const FString Id = NewClaudeSessionId();
+	const FRegexPattern UuidV4(TEXT("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"));
+	FRegexMatcher Matcher(UuidV4, Id);
+	TestTrue(FString::Printf(TEXT("Session id %s is a v4 UUID"), *Id), Matcher.FindNext());
+	TestNotEqual(TEXT("Session ids are random"), NewClaudeSessionId(), Id);
+	TestTrue(TEXT("Session ids pass the command-line check"), IsSafeSessionId(Id));
+
+	// Remote session names go into a quoted cmd.exe argument.
+	TestEqual(TEXT("Title names the remote session; cmd metacharacters are dropped"),
+		BuildClaudeRemoteArguments(TEXT("Aetherfall"), TEXT("Fix \"quotes\" & 100% ^pipes|")),
+		FString(TEXT("--remote-control \"Aetherfall - Fix quotes 100 pipes\"")));
+	FString Accented = TEXT("Caf");
+	Accented.AppendChar(TCHAR(0x00E9));
+	TestEqual(TEXT("Non-ASCII is dropped"), BuildClaudeRemoteArguments(TEXT("Aetherfall"), Accented),
+		FString(TEXT("--remote-control \"Aetherfall - Caf\"")));
+	TestEqual(TEXT("No title: Claude names it, prefixed with the project"), BuildClaudeRemoteArguments(TEXT("Aetherfall"), FString()),
+		FString(TEXT("--remote-control --remote-control-session-name-prefix \"Aetherfall\"")));
+	TestEqual(TEXT("Nothing usable: bare flag"), BuildClaudeRemoteArguments(TEXT("%%"), TEXT("&")), FString(TEXT("--remote-control")));
+
+	// claude --bg output, with its real middle-dot separators.
+	FString Started = TEXT("Starting background service...\nbackgrounded ");
+	Started.AppendChar(TCHAR(0x00B7));
+	Started += TEXT(" 583C0fce ");
+	Started.AppendChar(TCHAR(0x00B7));
+	Started += TEXT(" hyperai-bg (idle - send a prompt to start)\n  claude attach 583c0fce    open in this terminal\n");
+	TestEqual(TEXT("Short id after the marker, lower-cased"), ParseBackgroundedId(Started), FString(TEXT("583c0fce")));
+	TestTrue(TEXT("No marker, no id"), ParseBackgroundedId(TEXT("Error: Remote Control requires a claude.ai login\n")).IsEmpty());
+	TestTrue(TEXT("Only an eight-digit run on the marker's line counts"),
+		ParseBackgroundedId(TEXT("backgrounded - 1234567890ab - x\nattach deadbeef\n")).IsEmpty());
+
+	const FString Json = TEXT("[")
+		TEXT("{\"pid\":1,\"id\":\"f3c6bc98\",\"cwd\":\"E:\\\\Unreal Projects\\\\Aetherfall\",\"kind\":\"background\",")
+		TEXT("\"sessionId\":\"f3c6bc98-3bbb-4979-96ae-e6eb02d43ed8\",\"status\":\"busy\"},")
+		TEXT("{\"pid\":2,\"cwd\":\"E:/Unreal Projects/Aetherfall/\",\"kind\":\"interactive\",")
+		TEXT("\"sessionId\":\"7350db99-a8d7-4f9d-9c85-9b141c4163a6\",\"status\":\"idle\"},")
+		TEXT("{\"pid\":3,\"id\":\"583c0fce\",\"cwd\":\"E:/IdeaProjects/Terra\",\"kind\":\"background\",")
+		TEXT("\"sessionId\":\"583c0fce-bd17-4767-9995-ae2e2715caef\",\"status\":\"idle\"},")
+		TEXT("{\"pid\":4,\"id\":\"x & y\",\"cwd\":\"E:/Unreal Projects/Aetherfall\",\"sessionId\":\"not safe; rm\"}")
+		TEXT("]");
+	const TArray<FHyperAIStudioLiveChat> Live = ParseLiveClaudeChats(Json, TEXT("E:/Unreal Projects/Aetherfall"));
+	TestEqual(TEXT("Only this project's chats with safe ids"), Live.Num(), 2);
+	if (Live.Num() == 2)
+	{
+		TestTrue(TEXT("Background chat keeps its short id"), Live[0].ShortId == TEXT("f3c6bc98") && Live[0].IsBackground() && Live[0].IsBusy());
+		TestTrue(TEXT("Interactive chat gets its id's first eight digits"), Live[1].ShortId == TEXT("7350db99") && !Live[1].IsBackground());
+	}
+	TestEqual(TEXT("Output that is not JSON lists nothing"), ParseLiveClaudeChats(TEXT("claude: not found"), TEXT("E:/x")).Num(), 0);
+
+	TArray<FHyperAIStudioChatSession> Sessions;
+	Sessions.Add({TEXT("Claude Code"), TEXT("f3c6bc98-3bbb-4979-96ae-e6eb02d43ed8"), TEXT("Running one"), FDateTime::UtcNow(), false});
+	Sessions.Add({TEXT("Claude Code"), TEXT("0a0a0a0a-3bbb-4979-96ae-e6eb02d43ed8"), TEXT("Stopped one"), FDateTime::UtcNow(), false});
+	Sessions.Add({TEXT("Codex"), TEXT("7350db99-a8d7-4f9d-9c85-9b141c4163a6"), TEXT("Same id, other agent"), FDateTime::UtcNow(), false});
+	MergeLiveChats(Sessions, Live);
+	TestTrue(TEXT("A running chat is marked"), Sessions[0].Live.IsRunning() && Sessions[0].Live.ShortId == TEXT("f3c6bc98"));
+	TestFalse(TEXT("A stopped chat is not"), Sessions[1].Live.IsRunning());
+	TestFalse(TEXT("Only Claude Code chats are matched"), Sessions[2].Live.IsRunning());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioRemoteChatsLiveTest,
+	"HyperAIStudio.Chat.RemoteChatsLive",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioRemoteChatsLiveTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ChatHistory;
+	// Starts a real background Claude Code session (no prompt, so no model usage), finds it, and stops it.
+	if (FPlatformMisc::GetEnvironmentVariable(TEXT("HYPERAI_TEST_CLAUDE_CLI")) != TEXT("1"))
+	{
+		AddInfo(TEXT("Skipped: set HYPERAI_TEST_CLAUDE_CLI=1 to run against an installed, logged-in Claude Code."));
+		return true;
+	}
+	const FString Claude = FHyperAIStudioService::GetAgentTerminalLaunchCommand(TEXT("Claude Code"));
+	const FString Directory = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/RemoteChatTest"));
+	IFileManager::Get().MakeDirectory(*Directory, /*Tree=*/true);
+
+	FString Error;
+	const FString ShortId = StartClaudeBackgroundChat(Claude, Directory, TEXT("set \"HYPERAI_REMOTE_TEST=1\" && "),
+		TEXT("-n hyperai-remote-test"), Error);
+	if (!TestFalse(FString::Printf(TEXT("claude --bg started (%s)"), *Error), ShortId.IsEmpty()))
+	{
+		return false;
+	}
+	const TArray<FHyperAIStudioLiveChat> Live = ListLiveClaudeChats(Claude, Directory);
+	const FHyperAIStudioLiveChat* Started = Live.FindByPredicate([&ShortId](const FHyperAIStudioLiveChat& Chat) { return Chat.ShortId == ShortId; });
+	TestTrue(TEXT("The background session outlives the command that started it and is listed"), Started && Started->IsBackground());
+	TestTrue(TEXT("Its full id starts with the short id"), Started && Started->SessionId.StartsWith(ShortId));
+	TestTrue(TEXT("claude stop succeeds"), StopClaudeBackgroundChat(Claude, ShortId));
+	TestFalse(TEXT("Stopped sessions are no longer listed"),
+		ListLiveClaudeChats(Claude, Directory).ContainsByPredicate([&ShortId](const FHyperAIStudioLiveChat& Chat) { return Chat.ShortId == ShortId; }));
+
+	// Leave nothing behind in `claude agents --all`.
+	int32 ReturnCode = 0;
+	FString Output;
+	FPlatformProcess::ExecProcess(TEXT("cmd.exe"), *FString::Printf(TEXT("/d /s /c \"%s rm %s\""), *Claude, *ShortId), &ReturnCode, &Output, nullptr);
 	return true;
 }
 

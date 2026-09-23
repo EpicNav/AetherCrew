@@ -3,6 +3,7 @@
 #include "SHyperAIStudioChatHistorySidebar.h"
 
 #include "Async/Async.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "HyperAIStudioChatHistoryPrefs.h"
 #include "HyperAIStudioService.h"
 #include "HyperAIStudioStyle.h"
@@ -84,6 +85,8 @@ void SHyperAIStudioChatHistorySidebar::Construct(const FArguments& InArgs)
 	OnResumeChat = InArgs._OnResumeChat;
 	OnClose = InArgs._OnClose;
 	OnNewChat = InArgs._OnNewChat;
+	OnSetRemote = InArgs._OnSetRemote;
+	OnStopChat = InArgs._OnStopChat;
 	ActiveSessionId = InArgs._ActiveSessionId;
 
 	ChildSlot
@@ -161,6 +164,7 @@ void SHyperAIStudioChatHistorySidebar::Construct(const FArguments& InArgs)
 				.SelectionMode(ESelectionMode::Single)
 				.OnIsSelectableOrNavigable_Lambda([](FRowPtr Row) { return Row.IsValid() && Row->Session.IsValid(); })
 				.OnGenerateRow(this, &SHyperAIStudioChatHistorySidebar::GenerateRow)
+				.OnContextMenuOpening(this, &SHyperAIStudioChatHistorySidebar::BuildContextMenu)
 				.OnMouseButtonClick_Lambda([this](FRowPtr Row)
 				{
 					if (Row.IsValid() && Row->Session.IsValid())
@@ -182,9 +186,11 @@ void SHyperAIStudioChatHistorySidebar::Refresh()
 	bLoading = true;
 	// Session files can be tens of megabytes; read them off the game thread.
 	TWeakPtr<SHyperAIStudioChatHistorySidebar> WeakThis = SharedThis(this);
-	Async(EAsyncExecution::ThreadPool, [WeakThis, Root = FHyperAIStudioService::GetProjectRoot()]()
+	Async(EAsyncExecution::ThreadPool, [WeakThis, Root = FHyperAIStudioService::GetProjectRoot(),
+		Claude = FHyperAIStudioService::GetAgentTerminalLaunchCommand(TEXT("Claude Code"))]()
 	{
 		TArray<FHyperAIStudioChatSession> Loaded = HyperAIStudio::ChatHistory::ListSessions(Root);
+		HyperAIStudio::ChatHistory::MergeLiveChats(Loaded, HyperAIStudio::ChatHistory::ListLiveClaudeChats(Claude, Root));
 		AsyncTask(ENamedThreads::GameThread, [WeakThis, Loaded = MoveTemp(Loaded)]() mutable
 		{
 			if (const TSharedPtr<SHyperAIStudioChatHistorySidebar> Pinned = WeakThis.Pin())
@@ -318,7 +324,7 @@ TSharedRef<ITableRow> SHyperAIStudioChatHistorySidebar::GenerateRow(FRowPtr Row,
 			.Font(FAppStyle::GetFontStyle("SmallFont"))
 			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 		];
-	if (Session->bUsedUnrealMcp)
+	auto AddBadge = [&MetaLine](const FText& Label, const FText& ToolTip, const FSlateColor& Color)
 	{
 		MetaLine->AddSlot()
 		.AutoWidth()
@@ -327,19 +333,40 @@ TSharedRef<ITableRow> SHyperAIStudioChatHistorySidebar::GenerateRow(FRowPtr Row,
 			SNew(SBorder)
 			.BorderImage(FHyperAIStudioStyle::Get().GetBrush("HyperAIStudio.Badge"))
 			.Padding(FMargin(4.0f, 0.0f))
-			.ToolTipText(LOCTEXT("UnrealBadgeTooltip", "This chat called Unreal MCP tools."))
+			.ToolTipText(ToolTip)
 			[
 				SNew(STextBlock)
-				.Text(LOCTEXT("UnrealBadge", "Unreal"))
+				.Text(Label)
 				.Font(FAppStyle::GetFontStyle("SmallFont"))
-				.ColorAndOpacity(FSlateColor(FStyleColors::AccentGreen))
+				.ColorAndOpacity(Color)
 			]
 		];
+	};
+	if (Session->bUsedUnrealMcp)
+	{
+		AddBadge(LOCTEXT("UnrealBadge", "Unreal"), LOCTEXT("UnrealBadgeTooltip", "This chat called Unreal MCP tools."),
+			FSlateColor(FStyleColors::AccentGreen));
+	}
+	if (UHyperAIStudioChatHistoryPrefs::IsRemote(SessionId))
+	{
+		AddBadge(LOCTEXT("RemoteBadge", "Remote"),
+			LOCTEXT("RemoteBadgeTooltip", "Remote Control is on: while it runs, this chat is at claude.ai/code and in the Claude app."),
+			FSlateColor(FStyleColors::AccentBlue));
+	}
+	if (Session->Live.IsRunning())
+	{
+		AddBadge(Session->Live.IsBusy() ? LOCTEXT("WorkingBadge", "Working") : LOCTEXT("RunningBadge", "Running"),
+			Session->Live.IsBackground()
+				? LOCTEXT("BackgroundBadgeTooltip", "Running in the background. Click to open it here; right-click to stop it.")
+				: LOCTEXT("InteractiveBadgeTooltip", "Open in a terminal right now."),
+			FSlateColor(FStyleColors::AccentYellow));
 	}
 
 	return SNew(STableRow<FRowPtr>, OwnerTable)
 		.Padding(FMargin(6.0f, 5.0f))
-		.ToolTipText(FText::Format(LOCTEXT("RowTooltip", "{0}\nResume in {1}"), FText::FromString(Shown), FText::FromString(Session->AgentName)))
+		.ToolTipText(Session->Live.IsBackground()
+			? FText::Format(LOCTEXT("RowTooltipAttach", "{0}\nOpen the running {1} chat"), FText::FromString(Shown), FText::FromString(Session->AgentName))
+			: FText::Format(LOCTEXT("RowTooltip", "{0}\nResume in {1}"), FText::FromString(Shown), FText::FromString(Session->AgentName)))
 		[
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot()
@@ -354,6 +381,67 @@ TSharedRef<ITableRow> SHyperAIStudioChatHistorySidebar::GenerateRow(FRowPtr Row,
 				MetaLine
 			]
 		];
+}
+
+TSharedPtr<SWidget> SHyperAIStudioChatHistorySidebar::BuildContextMenu()
+{
+	const TArray<FRowPtr> Selected = List.IsValid() ? List->GetSelectedItems() : TArray<FRowPtr>();
+	if (Selected.Num() != 1 || !Selected[0].IsValid() || !Selected[0]->Session.IsValid())
+	{
+		return nullptr;
+	}
+	const FHyperAIStudioChatSession Session = *Selected[0]->Session;
+	const FString SessionId = Session.SessionId;
+	const bool bClaude = Session.AgentName == TEXT("Claude Code");
+	const bool bRemote = UHyperAIStudioChatHistoryPrefs::IsRemote(SessionId);
+	const bool bPinned = UHyperAIStudioChatHistoryPrefs::IsPinned(SessionId);
+
+	FMenuBuilder Menu(/*bShouldCloseWindowAfterMenuSelection=*/true, nullptr);
+	Menu.AddMenuEntry(
+		Session.Live.IsBackground() ? LOCTEXT("MenuAttach", "Open Running Chat") : LOCTEXT("MenuResume", "Resume"),
+		FText::GetEmpty(),
+		FSlateIcon(),
+		FUIAction(FExecuteAction::CreateLambda([this, Session]() { OnResumeChat.ExecuteIfBound(Session); })));
+	Menu.AddMenuEntry(
+		LOCTEXT("MenuRemote", "Remote Control"),
+		bClaude
+			? LOCTEXT("MenuRemoteTooltip", "Continue this chat at claude.ai/code or in the Claude app. Remote chats run in the background, so they keep going after the editor closes.")
+			: LOCTEXT("MenuRemoteCodex", "Per-chat Remote Control is a Claude Code feature. Codex's remote control opens every Codex chat on this PC at once, so it is not offered per chat."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.World"),
+		FUIAction(
+			FExecuteAction::CreateLambda([this, Session, bRemote]() { OnSetRemote.ExecuteIfBound(Session, !bRemote); }),
+			FCanExecuteAction::CreateLambda([bClaude]() { return bClaude; }),
+			FIsActionChecked::CreateLambda([bRemote]() { return bRemote; })),
+		NAME_None,
+		EUserInterfaceActionType::ToggleButton);
+	if (Session.Live.IsBackground())
+	{
+		Menu.AddMenuEntry(
+			LOCTEXT("MenuStop", "Stop Background Chat"),
+			LOCTEXT("MenuStopTooltip", "End the background session. The conversation is kept and can be resumed."),
+			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Toolbar.Stop"),
+			FUIAction(FExecuteAction::CreateLambda([this, Session]() { OnStopChat.ExecuteIfBound(Session); })));
+	}
+	Menu.AddMenuSeparator();
+	Menu.AddMenuEntry(
+		bPinned ? LOCTEXT("MenuUnpin", "Unpin") : LOCTEXT("MenuPin", "Pin to Top"),
+		FText::GetEmpty(),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), bPinned ? "Icons.Unpinned" : "Icons.Pinned"),
+		FUIAction(FExecuteAction::CreateLambda([this, SessionId]()
+		{
+			UHyperAIStudioChatHistoryPrefs::TogglePinned(SessionId);
+			RebuildFiltered();
+		})));
+	Menu.AddMenuEntry(
+		LOCTEXT("MenuRename", "Rename"),
+		LOCTEXT("MenuRenameTooltip", "Rename this chat here. The agent's own log is not touched."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Edit"),
+		FUIAction(FExecuteAction::CreateLambda([this, SessionId]()
+		{
+			RenamingSessionId = SessionId;
+			RebuildFiltered();
+		})));
+	return Menu.MakeWidget();
 }
 
 #undef LOCTEXT_NAMESPACE

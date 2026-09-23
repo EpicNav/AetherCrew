@@ -32,6 +32,7 @@ public class HyperAIStudio : ModuleRules
 			"Json",
 			"JsonUtilities",
 			"LevelEditor",
+			"MainFrame",
 			"ModelContextProtocol",
 			"ModelContextProtocolEngine",
 			"Projects",
@@ -41,6 +42,7 @@ public class HyperAIStudio : ModuleRules
 			"Terminal",
 			"ToolsetRegistry",
 			"ToolMenus",
+			"ToolWidgets",
 			"UnrealEd"
 		});
 	}

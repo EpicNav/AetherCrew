@@ -11,6 +11,12 @@
 #include "HyperAIStudioTerminalRawInput.h"
 #include "ISettingsModule.h"
 #include "Misc/Paths.h"
+#include "Async/Async.h"
+#include "Dialog/SCustomDialog.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "HyperAIStudioChatHistoryPrefs.h"
+#include "Misc/App.h"
+#include "Widgets/Notifications/SNotificationList.h"
 #include "Modules/ModuleManager.h"
 #include "ContentBrowserModule.h"
 #include "Dom/JsonObject.h"
@@ -266,6 +272,19 @@ namespace HyperAIStudio::QuickAction
 		}
 		return Running.Num() == 1 && Running[0]->GetRunningAgent(OutAgent, OutModel);
 	}
+
+	/** Remote Control and background sessions are Claude Code features. */
+	bool IsClaudeAgent(const FString& AgentName)
+	{
+		return AgentName.Equals(TEXT("Claude Code"), ESearchCase::IgnoreCase);
+	}
+
+	void Toast(const FText& Text)
+	{
+		FNotificationInfo Info(Text);
+		Info.ExpireDuration = 6.0f;
+		FSlateNotificationManager::Get().AddNotification(Info);
+	}
 }
 
 void SHyperAIStudioQuickActionWindow::Construct(const FArguments& InArgs)
@@ -340,10 +359,30 @@ void SHyperAIStudioQuickActionWindow::Construct(const FArguments& InArgs)
 							SAssignNew(ChatSidebar, SHyperAIStudioChatHistorySidebar)
 							.OnResumeChat(this, &SHyperAIStudioQuickActionWindow::ResumeChat)
 							.OnClose(this, &SHyperAIStudioQuickActionWindow::ToggleChatSidebar)
+							.OnSetRemote_Lambda([this](const FHyperAIStudioChatSession& Session, const bool bRemote)
+							{
+								SetChatRemote(Session.SessionId, bRemote);
+							})
+							.OnStopChat_Lambda([this](const FHyperAIStudioChatSession& Session)
+							{
+								if (Session.Live.ShortId == ActiveBackgroundId)
+								{
+									ActiveBackgroundId.Reset();
+								}
+								StopBackgroundChat(Session.Live.ShortId, [this]()
+								{
+									if (ChatSidebar.IsValid())
+									{
+										ChatSidebar->Refresh();
+									}
+								});
+							})
 							.OnNewChat_Lambda([this]()
 							{
 								ResumeAgentName.Reset();
 								ResumeSessionId.Reset();
+								ResumeTitle.Reset();
+								ResumeBackgroundId.Reset();
 								ActiveChatSessionId.Reset();
 								LastMessage = LOCTEXT("NewChatStarted", "Starting a new chat.");
 								AddTranscriptLine(LastMessage.ToString());
@@ -519,6 +558,9 @@ void SHyperAIStudioQuickActionWindow::ResumeChat(const FHyperAIStudioChatSession
 
 	ResumeAgentName = Session.AgentName;
 	ResumeSessionId = Session.SessionId;
+	const FString RenamedTitle = UHyperAIStudioChatHistoryPrefs::GetTitle(Session.SessionId);
+	ResumeTitle = RenamedTitle.IsEmpty() ? Session.Title : RenamedTitle;
+	ResumeBackgroundId = Session.Live.IsBackground() ? Session.Live.ShortId : FString();
 	LastMessage = FText::Format(LOCTEXT("ResumingChat", "Resuming {0} chat: {1}"), FText::FromString(Session.AgentName), FText::FromString(Session.Title));
 	AddTranscriptLine(LastMessage.ToString());
 	if (GetSelectedAgentName().Equals(Session.AgentName, ESearchCase::IgnoreCase))
@@ -731,6 +773,13 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildHeader()
 		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
 		[
 			BuildAgentStateBadge()
+		]
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+		[
+			BuildRemoteToggle()
 		]
 		+ SHorizontalBox::Slot()
 		.AutoWidth()
@@ -1959,6 +2008,28 @@ EActiveTimerReturnType SHyperAIStudioQuickActionWindow::RunAgentStateHeartbeat(d
 		FHyperAIStudioAgentStateEvaluator::LexToString(AgentState.State),
 		AgentState.Evidence.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (%s)"), *AgentState.Evidence)));
 	Invalidate(EInvalidateWidgetReason::Paint);
+
+	// A tab you are not looking at says when its agent needs you, or when a long turn ends.
+	const TSharedPtr<SDockTab> ShownTab = OwnerTab.Pin();
+	if (AgentState.State == EHyperAIStudioAgentState::Working)
+	{
+		WorkingSince = FPlatformTime::Seconds();
+	}
+	else if (Previous.State == EHyperAIStudioAgentState::Working && ShownTab.IsValid() && !ShownTab->IsForeground())
+	{
+		if (FHyperAIStudioAgentStateEvaluator::WantsAttention(AgentState.State))
+		{
+			HyperAIStudio::QuickAction::Toast(FText::Format(LOCTEXT("AgentNeedsYouToast", "{0}: the agent needs you."), GetTabTitle()));
+		}
+		else if (AgentState.State == EHyperAIStudioAgentState::Idle && FPlatformTime::Seconds() - WorkingSince >= 20.0)
+		{
+			HyperAIStudio::QuickAction::Toast(FText::Format(LOCTEXT("AgentFinishedToast", "{0}: the agent finished."), GetTabTitle()));
+		}
+	}
+	if (bRemoteRelaunchPending && AgentState.State == EHyperAIStudioAgentState::Idle)
+	{
+		RelaunchActiveChat();
+	}
 	return EActiveTimerReturnType::Continue;
 }
 
@@ -2098,13 +2169,10 @@ EActiveTimerReturnType SHyperAIStudioQuickActionWindow::RunDeferredTerminalStart
 			AddTranscriptLine(LastMessage.ToString());
 		}
 	}
-	TerminalWidget->ExecuteCommand(BuildTerminalBootstrapCommand(AgentName));
-	ActiveChatSessionId = ResumeAgentName.Equals(AgentName, ESearchCase::IgnoreCase) ? ResumeSessionId : FString();
-	ResumeAgentName.Reset();
-	ResumeSessionId.Reset();
 	bTerminalStartupSent = true;
 	ActiveTerminalAgentName = AgentName;
 	ActiveTerminalModel = LaunchModel;
+	LaunchChat(AgentName);
 	Invalidate(EInvalidateWidgetReason::Paint);
 	return EActiveTimerReturnType::Stop;
 }
@@ -2189,17 +2257,15 @@ void SHyperAIStudioQuickActionWindow::RecreateTerminalSession()
 	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 }
 
-FString SHyperAIStudioQuickActionWindow::GetTerminalLaunchCommandForAgent(const FString& AgentName) const
+FString SHyperAIStudioQuickActionWindow::GetTerminalLaunchCommandForAgent(const FString& AgentName, const FString& ChatArguments,
+	FString* OutModelPrefix, FString* OutModelArgument) const
 {
 	if (const HyperAIStudio::QuickAction::FAgentRoute* Route = HyperAIStudio::QuickAction::FindBuiltInRoute(AgentName))
 	{
 		FString LaunchCommand = FHyperAIStudioService::GetAgentTerminalLaunchCommand(Route->Name);
-		const FString ResumeArguments = ResumeAgentName.Equals(Route->Name, ESearchCase::IgnoreCase)
-			? HyperAIStudio::ChatHistory::BuildResumeArguments(Route->Name, ResumeSessionId)
-			: FString();
-		if (!LaunchCommand.IsEmpty() && !ResumeArguments.IsEmpty())
+		if (!LaunchCommand.IsEmpty() && !ChatArguments.IsEmpty())
 		{
-			LaunchCommand += TEXT(" ") + ResumeArguments;
+			LaunchCommand += TEXT(" ") + ChatArguments;
 		}
 		const FHyperAIStudioAgentModelRoute* SavedRoute = GetDefault<UHyperAIStudioSettings>()->FindAgentModelRoute(Route->Name);
 		FHyperAIStudioAgentModelRoute ModelRoute = SavedRoute ? *SavedRoute : FHyperAIStudioAgentModelRoute();
@@ -2211,6 +2277,14 @@ FString SHyperAIStudioQuickActionWindow::GetTerminalLaunchCommandForAgent(const 
 			&& GetDefault<UHyperAIStudioSettings>()->TryResolveModelLaunch(ModelRoute, ModelPrefix, ModelArgument, ModelError)
 			&& !ModelArgument.IsEmpty())
 		{
+			if (OutModelPrefix)
+			{
+				*OutModelPrefix = ModelPrefix;
+			}
+			if (OutModelArgument)
+			{
+				*OutModelArgument = ModelArgument;
+			}
 			LaunchCommand = ModelPrefix + LaunchCommand + TEXT(" ") + ModelArgument;
 		}
 		return LaunchCommand;
@@ -2219,11 +2293,364 @@ FString SHyperAIStudioQuickActionWindow::GetTerminalLaunchCommandForAgent(const 
 	return FString();
 }
 
-FString SHyperAIStudioQuickActionWindow::BuildTerminalBootstrapCommand(const FString& AgentName) const
+void SHyperAIStudioQuickActionWindow::RunBootstrap(const FString& AgentName, const FString& LaunchCommand)
 {
+	if (TerminalWidget.IsValid())
+	{
+		TerminalWidget->ExecuteCommand(BuildTerminalBootstrapCommandForStatus(Status, AgentName, FHyperAIStudioService::GetProjectRoot(), LaunchCommand));
+	}
+}
+
+void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
+{
+	using namespace HyperAIStudio::ChatHistory;
+	const bool bResuming = !ResumeAgentName.IsEmpty() && ResumeAgentName.Equals(AgentName, ESearchCase::IgnoreCase);
+	FString SessionId = bResuming ? ResumeSessionId : FString();
+	const FString AttachId = bResuming ? ResumeBackgroundId : FString();
+	ActiveChatTitle = bResuming ? ResumeTitle : FString();
+	ResumeAgentName.Reset();
+	ResumeSessionId.Reset();
+	ResumeTitle.Reset();
+	ResumeBackgroundId.Reset();
+	ActiveBackgroundId.Reset();
+	bRemoteRelaunchPending = false;
+	bBackgroundStarting = false;
+	const int32 Generation = ++LaunchGeneration;
+
+	if (!HyperAIStudio::QuickAction::IsClaudeAgent(AgentName))
+	{
+		ActiveChatSessionId = SessionId;
+		RunBootstrap(AgentName, GetTerminalLaunchCommandForAgent(AgentName, BuildResumeArguments(AgentName, SessionId)));
+		return;
+	}
+
 	const FString ProjectRoot = FHyperAIStudioService::GetProjectRoot();
-	const FString LaunchCommand = GetTerminalLaunchCommandForAgent(AgentName);
-	return BuildTerminalBootstrapCommandForStatus(Status, AgentName, ProjectRoot, LaunchCommand);
+	const FString Claude = FHyperAIStudioService::GetAgentTerminalLaunchCommand(AgentName);
+	if (!AttachId.IsEmpty())
+	{
+		// Already running in the background: open it here instead of starting a second copy.
+		ActiveChatSessionId = SessionId;
+		ActiveBackgroundId = AttachId;
+		RunBootstrap(AgentName, Claude + TEXT(" attach ") + AttachId);
+		return;
+	}
+
+	// A new chat gets its id up front, so Remote can be switched on before Claude writes anything. A chat Claude
+	// never wrote down (nothing was sent yet) cannot be resumed, so it starts again under a fresh id.
+	const bool bRemote = UHyperAIStudioChatHistoryPrefs::IsRemote(SessionId);
+	const bool bExists = ClaudeSessionExists(ProjectRoot, SessionId);
+	if (!bExists)
+	{
+		const FString FreshId = NewClaudeSessionId();
+		if (bRemote)
+		{
+			UHyperAIStudioChatHistoryPrefs::SetRemote(SessionId, false);
+			UHyperAIStudioChatHistoryPrefs::SetRemote(FreshId, true);
+		}
+		SessionId = FreshId;
+	}
+	ActiveChatSessionId = SessionId;
+	const FString RemoteArguments = bRemote ? BuildClaudeRemoteArguments(FApp::GetProjectName(), ActiveChatTitle) : FString();
+	FString ForegroundArguments = (bExists ? TEXT("--resume ") : TEXT("--session-id ")) + SessionId;
+	if (bRemote)
+	{
+		ForegroundArguments += TEXT(" ") + RemoteArguments;
+	}
+	if (!bRemote || !GetDefault<UHyperAIStudioSettings>()->bKeepRemoteChatsRunning)
+	{
+		RunBootstrap(AgentName, GetTerminalLaunchCommandForAgent(AgentName, ForegroundArguments));
+		return;
+	}
+
+	// Remote chats run as background sessions, so they outlive this tab and the editor; the tab attaches to one.
+	FString ModelPrefix;
+	FString ModelArgument;
+	GetTerminalLaunchCommandForAgent(AgentName, FString(), &ModelPrefix, &ModelArgument);
+	FString BackgroundArguments = bExists ? TEXT("--resume ") + SessionId + TEXT(" ") + RemoteArguments : RemoteArguments;
+	if (!ModelArgument.IsEmpty())
+	{
+		BackgroundArguments += TEXT(" ") + ModelArgument;
+	}
+	bBackgroundStarting = true;
+	LastMessage = LOCTEXT("StartingBackgroundChat", "Starting this remote chat in the background...");
+	AddTranscriptLine(LastMessage.ToString());
+	const TWeakPtr<SHyperAIStudioQuickActionWindow> WeakThis = SharedThis(this);
+	Async(EAsyncExecution::ThreadPool, [WeakThis, Generation, AgentName, Claude, ProjectRoot, ModelPrefix, BackgroundArguments,
+		SessionId, ForegroundArguments]()
+	{
+		FString Error;
+		const FString ShortId = StartClaudeBackgroundChat(Claude, ProjectRoot, ModelPrefix, BackgroundArguments, Error);
+		// --bg picks a new chat's id itself, and starts a copy when the old process is still closing: follow the real id.
+		FString StartedSessionId = SessionId;
+		if (!ShortId.IsEmpty())
+		{
+			for (const FHyperAIStudioLiveChat& Chat : ListLiveClaudeChats(Claude, ProjectRoot))
+			{
+				if (Chat.ShortId == ShortId)
+				{
+					StartedSessionId = Chat.SessionId;
+				}
+			}
+		}
+		AsyncTask(ENamedThreads::GameThread, [WeakThis, Generation, AgentName, Claude, ShortId, Error, SessionId, StartedSessionId,
+			ForegroundArguments]()
+		{
+			const TSharedPtr<SHyperAIStudioQuickActionWindow> This = WeakThis.Pin();
+			if (!This.IsValid() || This->LaunchGeneration != Generation)
+			{
+				// The tab closed or moved on meanwhile; nothing will attach, so do not leave it running.
+				if (!ShortId.IsEmpty())
+				{
+					Async(EAsyncExecution::ThreadPool, [Claude, ShortId]() { StopClaudeBackgroundChat(Claude, ShortId); });
+				}
+				return;
+			}
+			This->bBackgroundStarting = false;
+			if (ShortId.IsEmpty())
+			{
+				This->LastMessage = FText::Format(LOCTEXT("BackgroundChatFailed",
+					"The background session did not start, so this remote chat runs in the tab and stops with it. {0}"), FText::FromString(Error));
+				This->AddTranscriptLine(This->LastMessage.ToString());
+				This->RunBootstrap(AgentName, This->GetTerminalLaunchCommandForAgent(AgentName, ForegroundArguments));
+				return;
+			}
+			if (StartedSessionId != SessionId)
+			{
+				UHyperAIStudioChatHistoryPrefs::SetRemote(SessionId, false);
+				UHyperAIStudioChatHistoryPrefs::SetRemote(StartedSessionId, true);
+				This->ActiveChatSessionId = StartedSessionId;
+			}
+			This->ActiveBackgroundId = ShortId;
+			This->RunBootstrap(AgentName, Claude + TEXT(" attach ") + ShortId);
+		});
+	});
+}
+
+bool SHyperAIStudioQuickActionWindow::IsActiveChatRemote() const
+{
+	return UHyperAIStudioChatHistoryPrefs::IsRemote(ActiveChatSessionId);
+}
+
+bool SHyperAIStudioQuickActionWindow::IsTurnActive() const
+{
+	return AgentState.State == EHyperAIStudioAgentState::Working || AgentState.State == EHyperAIStudioAgentState::NeedsInput
+		|| AgentState.State == EHyperAIStudioAgentState::PlanReview;
+}
+
+TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildRemoteToggle()
+{
+	return SNew(SButton)
+		.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+		.IsEnabled_Lambda([this]()
+		{
+			return HyperAIStudio::QuickAction::IsClaudeAgent(ActiveTerminalAgentName) && bTerminalStartupSent
+				&& !ActiveChatSessionId.IsEmpty() && !bBackgroundStarting;
+		})
+		.ToolTipText_Lambda([this]() { return GetRemoteToolTip(); })
+		.OnClicked_Lambda([this]()
+		{
+			SetChatRemote(ActiveChatSessionId, !IsActiveChatRemote());
+			return FReply::Handled();
+		})
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			[
+				SNew(SImage)
+				.Image(FAppStyle::GetBrush(TEXT("Icons.World")))
+				.ColorAndOpacity_Lambda([this]()
+				{
+					return IsActiveChatRemote() ? FSlateColor(FStyleColors::AccentGreen) : FSlateColor::UseSubduedForeground();
+				})
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Text_Lambda([this]()
+				{
+					if (bRemoteRelaunchPending || bBackgroundStarting)
+					{
+						return LOCTEXT("RemoteSwitching", "Remote...");
+					}
+					return IsActiveChatRemote() ? LOCTEXT("RemoteOn", "Remote on") : LOCTEXT("RemoteOff", "Remote");
+				})
+			]
+		];
+}
+
+FText SHyperAIStudioQuickActionWindow::GetRemoteToolTip() const
+{
+	if (ActiveTerminalAgentName.Equals(TEXT("Codex"), ESearchCase::IgnoreCase))
+	{
+		return LOCTEXT("RemoteCodexTooltip", "Codex has no per-chat Remote Control: its remote control opens every Codex chat on this PC to your paired devices. To use it anyway, run `codex remote-control start` in a terminal and pair from the ChatGPT app.");
+	}
+	if (!HyperAIStudio::QuickAction::IsClaudeAgent(ActiveTerminalAgentName))
+	{
+		return LOCTEXT("RemoteUnavailableTooltip", "Remote Control is available for Claude Code chats.");
+	}
+	if (bRemoteRelaunchPending)
+	{
+		return LOCTEXT("RemotePendingTooltip", "Remote Control switches as soon as the agent finishes its current turn. Click again to cancel.");
+	}
+	if (IsActiveChatRemote())
+	{
+		return GetDefault<UHyperAIStudioSettings>()->bKeepRemoteChatsRunning
+			? LOCTEXT("RemoteOnBackgroundTooltip", "Remote Control is on: continue this chat at claude.ai/code or in the Claude app. It runs in the background, so it keeps going after this tab or the editor closes; reopen it from Chats. Click to turn it off.")
+			: LOCTEXT("RemoteOnTooltip", "Remote Control is on: continue this chat at claude.ai/code or in the Claude app while this tab is open. Click to turn it off.");
+	}
+	return LOCTEXT("RemoteOffTooltip", "Turn on Remote Control for this chat, to continue it at claude.ai/code or in the Claude app. The chat restarts on the same conversation. Needs a Claude subscription login; on Team and Enterprise plans an admin must allow Remote Control.");
+}
+
+void SHyperAIStudioQuickActionWindow::SetChatRemote(const FString& SessionId, const bool bRemote)
+{
+	if (SessionId.IsEmpty())
+	{
+		return;
+	}
+	UHyperAIStudioChatHistoryPrefs::SetRemote(SessionId, bRemote);
+	if (ChatSidebar.IsValid())
+	{
+		ChatSidebar->RebuildFiltered();
+	}
+	if (SessionId != ActiveChatSessionId || !bTerminalStartupSent)
+	{
+		LastMessage = bRemote
+			? LOCTEXT("RemoteSetLater", "Remote Control is on for that chat from the next time it starts.")
+			: LOCTEXT("RemoteClearedLater", "Remote Control is off for that chat from the next time it starts.");
+		AddTranscriptLine(LastMessage.ToString());
+		return;
+	}
+	if (bRemoteRelaunchPending)
+	{
+		// Switched back before the restart happened: the running chat already matches.
+		bRemoteRelaunchPending = false;
+		LastMessage = LOCTEXT("RemoteSwitchCancelled", "Remote Control change cancelled.");
+		AddTranscriptLine(LastMessage.ToString());
+		return;
+	}
+	HyperAIStudio::QuickAction::Toast(bRemote
+		? LOCTEXT("RemoteOnToast", "Remote Control on: this chat appears at claude.ai/code and in the Claude app.")
+		: LOCTEXT("RemoteOffToast", "Remote Control off for this chat."));
+	if (IsTurnActive())
+	{
+		bRemoteRelaunchPending = true;
+		LastMessage = LOCTEXT("RemoteWaitsForTurn", "Remote Control switches when the agent finishes its current turn.");
+		AddTranscriptLine(LastMessage.ToString());
+		return;
+	}
+	RelaunchActiveChat();
+}
+
+void SHyperAIStudioQuickActionWindow::RelaunchActiveChat()
+{
+	bRemoteRelaunchPending = false;
+	ResumeAgentName = ActiveTerminalAgentName;
+	ResumeSessionId = ActiveChatSessionId;
+	ResumeTitle = ActiveChatTitle;
+	ResumeBackgroundId.Reset();
+	const FString BackgroundId = ActiveBackgroundId;
+	if (BackgroundId.IsEmpty())
+	{
+		QueueTerminalStartup(true, true);
+		return;
+	}
+	// The background session has to end before the same conversation starts again in its new mode.
+	ActiveBackgroundId.Reset();
+	bBackgroundStarting = true;
+	StopBackgroundChat(BackgroundId, [this]() { QueueTerminalStartup(true, true); });
+}
+
+void SHyperAIStudioQuickActionWindow::StopBackgroundChat(const FString& ShortId, TFunction<void()> Then)
+{
+	const TWeakPtr<SHyperAIStudioQuickActionWindow> WeakThis = SharedThis(this);
+	const FString Claude = FHyperAIStudioService::GetAgentTerminalLaunchCommand(TEXT("Claude Code"));
+	Async(EAsyncExecution::ThreadPool, [WeakThis, ShortId, Claude, Then = MoveTemp(Then)]() mutable
+	{
+		HyperAIStudio::ChatHistory::StopClaudeBackgroundChat(Claude, ShortId);
+		AsyncTask(ENamedThreads::GameThread, [WeakThis, Then = MoveTemp(Then)]()
+		{
+			if (WeakThis.IsValid() && Then)
+			{
+				Then();
+			}
+		});
+	});
+}
+
+bool SHyperAIStudioQuickActionWindow::CanCloseEditor()
+{
+	if (FApp::IsUnattended())
+	{
+		return true;
+	}
+	int32 Stopping = 0;
+	TArray<FString> Background;
+	for (const TWeakPtr<SHyperAIStudioQuickActionWindow>& Weak : HyperAIStudio::QuickAction::LiveWindows())
+	{
+		const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = Weak.Pin();
+		if (!Window.IsValid() || !Window->IsTurnActive())
+		{
+			continue;
+		}
+		if (Window->ActiveBackgroundId.IsEmpty())
+		{
+			++Stopping;
+		}
+		else
+		{
+			Background.Add(Window->ActiveBackgroundId);
+		}
+	}
+	if (Stopping == 0 && Background.IsEmpty())
+	{
+		return true;
+	}
+
+	TArray<FText> Lines;
+	if (Stopping > 0)
+	{
+		Lines.Add(FText::Format(LOCTEXT("CloseStopsChats", "{0} {0}|plural(one=chat is,other=chats are) still working and will stop when the editor closes."), Stopping));
+	}
+	if (!Background.IsEmpty())
+	{
+		Lines.Add(FText::Format(LOCTEXT("CloseKeepsRemoteChats", "{0} remote {0}|plural(one=chat is,other=chats are) working in the background and will keep going after the editor closes. Reopen them from Chats."), Background.Num()));
+	}
+	TArray<SCustomDialog::FButton> Buttons;
+	Buttons.Add(SCustomDialog::FButton(Stopping > 0 ? LOCTEXT("CloseAnyway", "Close Anyway") : LOCTEXT("CloseKeepRunning", "Keep Running")));
+	if (!Background.IsEmpty())
+	{
+		Buttons.Add(SCustomDialog::FButton(LOCTEXT("CloseStopRemote", "Stop Them and Close")));
+	}
+	Buttons.Add(SCustomDialog::FButton(LOCTEXT("CloseCancel", "Cancel")));
+	const TSharedRef<SCustomDialog> Dialog = SNew(SCustomDialog)
+		.Title(LOCTEXT("CloseChatsTitle", "Agent Chats Are Working"))
+		.Content()
+		[
+			SNew(STextBlock)
+			.Text(FText::Join(FText::FromString(TEXT("\n\n")), Lines))
+			.AutoWrapText(true)
+		]
+		.Buttons(Buttons);
+	const int32 Choice = Dialog->ShowModal();
+	if (Choice == 0)
+	{
+		return true;
+	}
+	if (!Background.IsEmpty() && Choice == 1)
+	{
+		const FString Claude = FHyperAIStudioService::GetAgentTerminalLaunchCommand(TEXT("Claude Code"));
+		for (const FString& ShortId : Background)
+		{
+			HyperAIStudio::ChatHistory::StopClaudeBackgroundChat(Claude, ShortId);
+		}
+		return true;
+	}
+	return false;
 }
 
 FString SHyperAIStudioQuickActionWindow::BuildTerminalBootstrapCommandForStatus(const FHyperAIStudioStatus& InStatus, const FString& AgentName, const FString& ProjectRoot, const FString& LaunchCommand)

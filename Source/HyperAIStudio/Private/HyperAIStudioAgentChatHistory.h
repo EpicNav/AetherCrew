@@ -4,6 +4,22 @@
 
 #include "CoreMinimal.h"
 
+/** A Claude Code session running right now, as `claude agents --json` lists it. */
+struct FHyperAIStudioLiveChat
+{
+	/** Short id that `claude attach`, `stop` and `logs` take. */
+	FString ShortId;
+	FString SessionId;
+	/** "background", or "interactive" for a session open in some terminal. */
+	FString Kind;
+	/** "busy", "idle" or "waiting". */
+	FString Status;
+
+	bool IsRunning() const { return !ShortId.IsEmpty(); }
+	bool IsBackground() const { return Kind == TEXT("background"); }
+	bool IsBusy() const { return Status == TEXT("busy"); }
+};
+
 /** One past agent conversation that ran in the project root, where the project's MCP config connects it to Unreal. */
 struct FHyperAIStudioChatSession
 {
@@ -14,6 +30,8 @@ struct FHyperAIStudioChatSession
 	FDateTime LastActiveUtc;
 	/** An Unreal MCP tool call was found in the part of the log that was read. */
 	bool bUsedUnrealMcp = false;
+	/** Set while the chat is running (Claude Code only). */
+	FHyperAIStudioLiveChat Live;
 };
 
 /**
@@ -38,4 +56,29 @@ namespace HyperAIStudio::ChatHistory
 	FString ExtractClaudeTitle(const FString& JsonlText);
 	/** First typed prompt from Codex jsonl text, skipping injected AGENTS.md, environment and slash-command turns. */
 	FString ExtractCodexFirstPrompt(const FString& JsonlText);
+
+	/** A random RFC 4122 version 4 id for `claude --session-id`, which refuses any other shape. */
+	FString NewClaudeSessionId();
+	/** Remote Control arguments. The chat title names the remote session; a chat without one gets Claude's own name, prefixed with the project. */
+	FString BuildClaudeRemoteArguments(const FString& ProjectName, const FString& ChatTitle);
+	/** Short id from `claude --bg` output ("backgrounded, then the id"); empty when nothing started. */
+	FString ParseBackgroundedId(const FString& Output);
+	/** Sessions in `claude agents --json` output that run in ProjectRoot. */
+	TArray<FHyperAIStudioLiveChat> ParseLiveClaudeChats(const FString& Json, const FString& ProjectRoot);
+	/** Copies each running session onto its listed chat. */
+	void MergeLiveChats(TArray<FHyperAIStudioChatSession>& Sessions, const TArray<FHyperAIStudioLiveChat>& Live);
+	/** True once Claude Code has written the session's log, so `--resume` can find it. */
+	bool ClaudeSessionExists(const FString& ProjectRoot, const FString& SessionId);
+
+	/**
+	 * These run the claude CLI and block for a second or more, so call them off the game thread. ClaudeCommand is
+	 * the resolved launcher (FHyperAIStudioService::GetAgentTerminalLaunchCommand). Processes they start are not tied
+	 * to the editor, so background sessions outlive it.
+	 */
+	TArray<FHyperAIStudioLiveChat> ListLiveClaudeChats(const FString& ClaudeCommand, const FString& ProjectRoot);
+	/** Starts `claude --bg <Arguments>` in ProjectRoot and returns its short id. EnvPrefix is cmd `set` commands ending in "&& ". */
+	FString StartClaudeBackgroundChat(const FString& ClaudeCommand, const FString& ProjectRoot, const FString& EnvPrefix,
+		const FString& Arguments, FString& OutError);
+	/** `claude stop <ShortId>`: the session ends and its conversation stays resumable. */
+	bool StopClaudeBackgroundChat(const FString& ClaudeCommand, const FString& ShortId);
 }

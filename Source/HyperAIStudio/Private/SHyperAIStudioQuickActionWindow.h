@@ -41,6 +41,8 @@ public:
 	static FText GetReadinessTextForStatus(const FHyperAIStudioStatus& InStatus, bool bIsRefreshing);
 	static FText GetNextActionTextForStatus(const FHyperAIStudioStatus& InStatus, bool bIsRefreshing);
 	static FString BuildTerminalBootstrapCommandForStatus(const FHyperAIStudioStatus& InStatus, const FString& AgentName, const FString& ProjectRoot, const FString& LaunchCommand);
+	/** Editor close check: chats still working get a say, and remote chats working in the background can be stopped. */
+	static bool CanCloseEditor();
 
 	virtual FReply OnPreviewKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	/** Assets and actors dropped on the panel become object paths in the agent's prompt. */
@@ -110,8 +112,21 @@ private:
 	EActiveTimerReturnType RunQueuedVisibleTerminalCommandPoll(double CurrentTime, float DeltaTime);
 	void QueueTerminalStartup(bool bForce, bool bResetTerminal = false);
 	void RecreateTerminalSession();
-	FString GetTerminalLaunchCommandForAgent(const FString& AgentName) const;
-	FString BuildTerminalBootstrapCommand(const FString& AgentName) const;
+	/** Starts this tab's chat: picks its session id, adds Remote Control, and runs remote chats in the background. */
+	void LaunchChat(const FString& AgentName);
+	void RunBootstrap(const FString& AgentName, const FString& LaunchCommand);
+	/** Launcher, then ChatArguments (session, remote), then the model. Also returns the model's cmd prefix and argument. */
+	FString GetTerminalLaunchCommandForAgent(const FString& AgentName, const FString& ChatArguments,
+		FString* OutModelPrefix = nullptr, FString* OutModelArgument = nullptr) const;
+	/** Remote Control for a chat. The chat in this tab restarts on the same conversation now, or once the turn ends. */
+	void SetChatRemote(const FString& SessionId, bool bRemote);
+	void RelaunchActiveChat();
+	void StopBackgroundChat(const FString& ShortId, TFunction<void()> Then);
+	bool IsActiveChatRemote() const;
+	/** The agent is producing output, or is stopped at a question or a plan. */
+	bool IsTurnActive() const;
+	TSharedRef<SWidget> BuildRemoteToggle();
+	FText GetRemoteToolTip() const;
 
 	FString GetSelectedAgentName() const;
 	bool HasUsableSelectedAgent() const;
@@ -136,7 +151,7 @@ private:
 	bool bActivitySidebarOpen = false;
 	FCurveSequence ChatSidebarCurve;
 	bool bChatSidebarOpen = false;
-	/** Chat running in the terminal, if it was resumed from history. */
+	/** Chat running in the terminal: resumed from history, or a new Claude Code chat's own id. */
 	FString ActiveChatSessionId;
 	TArray<FString> TranscriptLines;
 	FSimpleDelegate OnOpenWorkbench;
@@ -156,6 +171,20 @@ private:
 	/** Chat the next agent startup resumes; cleared once that startup is sent. */
 	FString ResumeAgentName;
 	FString ResumeSessionId;
+	FString ResumeTitle;
+	/** Set when that chat already runs in the background: the startup attaches instead of starting a copy. */
+	FString ResumeBackgroundId;
+	/** Title of the chat in this tab when it came from Chats; it names the remote session. */
+	FString ActiveChatTitle;
+	/** Short id of the background session this tab's terminal is attached to; empty when the chat runs in the tab. */
+	FString ActiveBackgroundId;
+	/** Remote was switched mid-turn: restart on it once the agent is idle. */
+	bool bRemoteRelaunchPending = false;
+	/** A background session is starting or stopping; the tab attaches when that is done. */
+	bool bBackgroundStarting = false;
+	/** Bumped per launch, so a background start that finishes late never attaches to a newer chat. */
+	int32 LaunchGeneration = 0;
+	double WorkingSince = 0.0;
 	FSimpleDelegate OnNewAgentTab;
 	TWeakPtr<class SDockTab> OwnerTab;
 	int32 TabIndex = 1;

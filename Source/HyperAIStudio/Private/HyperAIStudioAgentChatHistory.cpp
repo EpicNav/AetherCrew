@@ -8,6 +8,7 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformMisc.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -251,6 +252,164 @@ FString BuildResumeArguments(const FString& AgentName, const FString& SessionId)
 	}
 	// Codex applies the root -c overrides to its resume subcommand.
 	return AgentName == TEXT("Codex") ? TEXT("resume ") + SessionId : FString();
+}
+
+FString NewClaudeSessionId()
+{
+	// ponytail: FGuid's own text order is not RFC 4122, so print its bits in UUID order with the v4 and variant bits set.
+	const FGuid Guid = FGuid::NewGuid();
+	return FString::Printf(TEXT("%08x-%04x-%04x-%04x-%04x%08x"), Guid.A, Guid.B >> 16, (Guid.B & 0x0FFFu) | 0x4000u,
+		((Guid.C >> 16) & 0x3FFFu) | 0x8000u, Guid.C & 0xFFFFu, Guid.D);
+}
+
+FString BuildClaudeRemoteArguments(const FString& ProjectName, const FString& ChatTitle)
+{
+	// The name lands inside a quoted cmd.exe argument: keep plain ASCII words, so no quote, %, ^, & or | survives.
+	auto Clean = [](const FString& Text)
+	{
+		FString Out;
+		for (const TCHAR C : Text)
+		{
+			const bool bKeep = C < 128 && (FChar::IsAlnum(C) || C == TEXT('-') || C == TEXT('_') || C == TEXT('.') || C == TEXT(','));
+			Out.AppendChar(bKeep ? C : TEXT(' '));
+		}
+		while (Out.ReplaceInline(TEXT("  "), TEXT(" ")) > 0) {}
+		Out.TrimStartAndEndInline();
+		return Out.Left(60).TrimEnd();
+	};
+	const FString Project = Clean(ProjectName);
+	const FString Title = Clean(ChatTitle);
+	if (Title.IsEmpty())
+	{
+		return Project.IsEmpty() ? TEXT("--remote-control")
+			: FString::Printf(TEXT("--remote-control --remote-control-session-name-prefix \"%s\""), *Project);
+	}
+	return FString::Printf(TEXT("--remote-control \"%s\""), *(Project.IsEmpty() ? Title : Project + TEXT(" - ") + Title));
+}
+
+FString ParseBackgroundedId(const FString& Output)
+{
+	const int32 Start = Output.Find(TEXT("backgrounded"));
+	if (Start == INDEX_NONE)
+	{
+		return FString();
+	}
+	// The first run of exactly eight hex digits after the marker; the separators around it are decoration.
+	FString Run;
+	for (int32 Index = Start + 12; Index <= Output.Len(); ++Index)
+	{
+		const TCHAR C = Index < Output.Len() ? Output[Index] : TEXT(' ');
+		if (FChar::IsHexDigit(C))
+		{
+			Run.AppendChar(C);
+			continue;
+		}
+		if (Run.Len() == 8)
+		{
+			return Run.ToLower();
+		}
+		if (C == TEXT('\n'))
+		{
+			return FString();
+		}
+		Run.Reset();
+	}
+	return FString();
+}
+
+TArray<FHyperAIStudioLiveChat> ParseLiveClaudeChats(const FString& Json, const FString& ProjectRoot)
+{
+	TArray<FHyperAIStudioLiveChat> Chats;
+	TArray<TSharedPtr<FJsonValue>> Entries;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+	if (!FJsonSerializer::Deserialize(Reader, Entries))
+	{
+		return Chats;
+	}
+	const FString Root = NormalizeRoot(ProjectRoot);
+	for (const TSharedPtr<FJsonValue>& Entry : Entries)
+	{
+		const TSharedPtr<FJsonObject> Object = Entry.IsValid() ? Entry->AsObject() : nullptr;
+		FHyperAIStudioLiveChat Chat;
+		FString Cwd;
+		if (!Object || !Object->TryGetStringField(TEXT("sessionId"), Chat.SessionId) || !IsSafeSessionId(Chat.SessionId)
+			|| !Object->TryGetStringField(TEXT("cwd"), Cwd) || !NormalizeRoot(Cwd).Equals(Root, ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+		// Interactive sessions carry no short id; attach and stop only apply to background ones, which do.
+		if (!Object->TryGetStringField(TEXT("id"), Chat.ShortId) || !IsSafeSessionId(Chat.ShortId))
+		{
+			Chat.ShortId = Chat.SessionId.Left(8);
+		}
+		Object->TryGetStringField(TEXT("kind"), Chat.Kind);
+		Object->TryGetStringField(TEXT("status"), Chat.Status);
+		Chats.Add(MoveTemp(Chat));
+	}
+	return Chats;
+}
+
+void MergeLiveChats(TArray<FHyperAIStudioChatSession>& Sessions, const TArray<FHyperAIStudioLiveChat>& Live)
+{
+	for (FHyperAIStudioChatSession& Session : Sessions)
+	{
+		const FHyperAIStudioLiveChat* Running = Session.AgentName == TEXT("Claude Code")
+			? Live.FindByPredicate([&Session](const FHyperAIStudioLiveChat& Chat) { return Chat.SessionId == Session.SessionId; })
+			: nullptr;
+		Session.Live = Running ? *Running : FHyperAIStudioLiveChat();
+	}
+}
+
+bool ClaudeSessionExists(const FString& ProjectRoot, const FString& SessionId)
+{
+	return IsSafeSessionId(SessionId) && IFileManager::Get().FileExists(*(ConfigDirectory(TEXT("CLAUDE_CONFIG_DIR"), TEXT(".claude"))
+		/ TEXT("projects") / ClaudeProjectDirectoryName(ProjectRoot) / (SessionId + TEXT(".jsonl"))));
+}
+
+namespace
+{
+	/** Runs one command line through cmd.exe, hidden and not tied to the editor's lifetime. */
+	bool RunHidden(const FString& CommandLine, const FString& WorkingDirectory, FString& OutStdOut)
+	{
+		int32 ReturnCode = -1;
+		FString StdErr;
+		const FString Params = FString::Printf(TEXT("/d /s /c \"%s\""), *CommandLine);
+		const bool bRan = FPlatformProcess::ExecProcess(TEXT("cmd.exe"), *Params, &ReturnCode, &OutStdOut, &StdErr,
+			WorkingDirectory.IsEmpty() ? nullptr : *WorkingDirectory, /*bShouldEndWithParentProcess=*/false);
+		OutStdOut += StdErr;
+		return bRan && ReturnCode == 0;
+	}
+}
+
+TArray<FHyperAIStudioLiveChat> ListLiveClaudeChats(const FString& ClaudeCommand, const FString& ProjectRoot)
+{
+	FString Output;
+	if (ClaudeCommand.IsEmpty() || !RunHidden(ClaudeCommand + TEXT(" agents --json"), ProjectRoot, Output))
+	{
+		return {};
+	}
+	// Other output (an update notice) can precede the array.
+	const int32 Start = Output.Find(TEXT("["));
+	return Start == INDEX_NONE ? TArray<FHyperAIStudioLiveChat>() : ParseLiveClaudeChats(Output.Mid(Start), ProjectRoot);
+}
+
+FString StartClaudeBackgroundChat(const FString& ClaudeCommand, const FString& ProjectRoot, const FString& EnvPrefix,
+	const FString& Arguments, FString& OutError)
+{
+	FString Output;
+	RunHidden(EnvPrefix + ClaudeCommand + TEXT(" --bg ") + Arguments, ProjectRoot, Output);
+	const FString ShortId = ParseBackgroundedId(Output);
+	if (ShortId.IsEmpty())
+	{
+		OutError = Output.TrimStartAndEnd().Left(400);
+	}
+	return ShortId;
+}
+
+bool StopClaudeBackgroundChat(const FString& ClaudeCommand, const FString& ShortId)
+{
+	FString Output;
+	return !ClaudeCommand.IsEmpty() && IsSafeSessionId(ShortId) && RunHidden(ClaudeCommand + TEXT(" stop ") + ShortId, FString(), Output);
 }
 
 bool IsSafeSessionId(const FString& SessionId)
