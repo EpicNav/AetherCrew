@@ -382,11 +382,12 @@ bool FHyperAIStudioPIEPlaytestNormalizeBoundsTest::RunTest(const FString& Parame
 	TestFalse(TEXT("Read-only plan has no destructive steps"), Plan.bHasDestructive);
 	TestFalse(TEXT("Plan hash is emitted"), Plan.PlanHash.IsEmpty());
 
+	// PIE effects end with the session, so a plan is an Edit: the user's approval setting gates it, not a token.
 	FHyperAIPIEPlaytestRequest MissingAuth = OwnedStartRequest();
 	MissingAuth.AuthorizationToken.Reset();
-	TestFalse(TEXT("Starting PIE without opaque exact-plan authorization is rejected"),
+	TestTrue(TEXT("Starting PIE needs no authorization token"),
 		FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(MissingAuth, Plan, Code, Error));
-	TestEqual(TEXT("Authorization rejection is typed"), Code, FString(TEXT("authorization_required")));
+	TestTrue(TEXT("It is still a plan with effects"), Plan.bHasEffects);
 
 	FHyperAIPIEPlaytestRequest InvalidEnum = ReadRequest();
 	InvalidEnum.Mode = static_cast<EHyperAIPIEPlaytestMode>(255);

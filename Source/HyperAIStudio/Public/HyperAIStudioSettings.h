@@ -447,6 +447,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Remote", meta = (DisplayName = "Keep Remote Chats Running After The Editor Closes"))
 	bool bKeepRemoteChatsRunning = true;
 
+	/** Actor classes a playtest may spawn into the PIE world. Nothing else can be spawned. */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Playtests", meta = (AllowAbstract = "false", MetaClass = "/Script/Engine.Actor"))
+	TArray<FSoftClassPath> PlaytestSpawnableClasses;
+
 	/**
 	 * How a memory an agent saves on its own (hyper_memory_remember) reaches future chats. A fact planted by text
 	 * the agent read would otherwise reach every later chat, so by default only its title does until you confirm it

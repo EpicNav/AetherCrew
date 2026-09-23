@@ -4,7 +4,7 @@
 static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatalog& OutCatalog)
 {
 	OutCatalog.Schema = TEXT("hyperai.capability-pack-catalog.v2");
-	OutCatalog.GeneratedFingerprint = TEXT("sha256:982bbe73eda8d1f61c13fd5d26d3f3641609f3ed1fcb2be01e49992bea3b2b63");
+	OutCatalog.GeneratedFingerprint = TEXT("sha256:d0069d62fc47bdbdbd96790f166048685c570b446b93805b08361170b55e88c4");
 	OutCatalog.ApprovedPlanFingerprint = TEXT("sha256:0111a6ad1e4b2f81b6da0439a22d83ffbfd8f7ccb20f958d8494eaeee84c6d1a");
 	OutCatalog.AdmissionMatrixFingerprint = TEXT("sha256:404ea0204015fb9558cf2b5fcc092d77fb7e6dc323f0adde7032252e025c23c9");
 	OutCatalog.SourceLedgerFingerprint = TEXT("sha256:2954241d83a1a24feaf00a28c6884cae62c6b138923cd8d2deae23b7dc9c4e2e");
@@ -596,7 +596,7 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 		Pack.Id = TEXT("pie_runtime");
 		Pack.Tier = EHyperAIStudioCapabilityPackTier::Core;
 		Pack.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
-		Pack.bContainsExternalEffects = true;
+		Pack.bContainsExternalEffects = false;
 		Pack.DependsOnPackIds.Add(TEXT("shared_foundation"));
 		Pack.AtomicCohortIds.Add(TEXT("cohort.source.hyperaistudionativereadtoolset.v1"));
 		Pack.AtomicCohortIds.Add(TEXT("cohort.source.hyperaistudiopieplaytesttoolset.v1"));
@@ -1806,7 +1806,7 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 		Tool.PackId = TEXT("pie_runtime");
 		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudiopieplaytesttoolset.v1");
 		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
-		Tool.bMayCauseExternalEffects = true;
+		Tool.bMayCauseExternalEffects = false;
 		Tool.SourceArtifactCount = 1;
 		Tool.SourceArtifactFingerprint = TEXT("sha256:14d6c69b8792d81339cc48329f222ef83b95880a327cf73862ebae517eef50ca");
 		Tool.SourceLedgerRowCount = 10;
@@ -1815,7 +1815,7 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 		Tool.PlatformEvidenceRows = 0;
 		Tool.ProductEvidenceRows = 0;
 		Tool.SupplementalEvidenceRows = 10;
-		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::ExternalEffect);
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Edit);
 	}
 	{
 		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();

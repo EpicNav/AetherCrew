@@ -31,6 +31,14 @@
 			]
 		},
 		{
+			"Name": "HyperAIStudioBot",
+			"Type": "UncookedOnly",
+			"LoadingPhase": "PreDefault",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
 			"Name": "HyperAIStudioEnhancedInput",
 			"Type": "Editor",
 			"LoadingPhase": "None",

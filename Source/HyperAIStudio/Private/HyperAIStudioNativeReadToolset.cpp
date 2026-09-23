@@ -17,6 +17,7 @@
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioExecutionQueue.h"
+#include "HyperAIStudioPIEPlaytestToolset.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityInventoryClient.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
@@ -1814,6 +1815,27 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 		Report.ProjectIdentityHash = LiveStatus.CanonicalProjectId;
 		Report.NextAction = Report.bTerminal ? TEXT("Validate the result with the pack's validate tool.")
 			: TEXT("Still running; call hyper_operation_wait to wait for it.");
+		return Report;
+	}
+
+	// Playtests run in the PIE service, outside the typed executor and the journal.
+	const FHyperAIPIEPlaytestStatusResult Playtest = FHyperAIStudioPIEPlaytestService::GetStatus(OperationId, 1, FString());
+	if (Playtest.bFound)
+	{
+		Report.bOk = true;
+		Report.bFound = true;
+		Report.Status = Playtest.Status;
+		Report.State = Playtest.State;
+		Report.StatusCode = Playtest.Status;
+		Report.bTerminal = Playtest.bTerminal;
+		Report.bNeedsReconciliation = Playtest.bOutcomeUnknown;
+		Report.PlanHash = Playtest.PlanHash;
+		Report.PhasesDone = Playtest.CompletedSteps;
+		Report.PhasesTotal = Playtest.TotalSteps;
+		Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(Playtest.Diagnostic, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+		Report.NextAction = Report.bTerminal ? TEXT("Read each step's evidence with hyper_playtest_status.")
+			: TEXT("Still running; call hyper_operation_wait to wait for it.");
+		Report.JournalAccessMode = TEXT("playtest_service");
 		return Report;
 	}
 

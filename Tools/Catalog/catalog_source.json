@@ -940,7 +940,7 @@
      "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
      "admission": "SourceCandidate",
      "safety": [
-      "ExternalEffect"
+      "Edit"
      ],
      "sourceArtifactCount": 1,
      "sourceArtifactFingerprint": "sha256:14d6c69b8792d81339cc48329f222ef83b95880a327cf73862ebae517eef50ca",

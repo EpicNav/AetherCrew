@@ -12,7 +12,15 @@
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "HAL/PlatformTime.h"
+#include "Engine/LocalPlayer.h"
+#include "EnhancedInputSubsystems.h"
+#include "GameFramework/PlayerController.h"
+#include "GenericPlatform/GenericPlatformInputDeviceMapper.h"
+#include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
+#include "HyperAIStudioSettings.h"
+#include "InputAction.h"
+#include "InputKeyEventArgs.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioLogTailToolset.h"
 #include "HyperAIStudioNativeReadToolset.h"
@@ -489,6 +497,26 @@ namespace HyperAIStudio::PIEPlaytest::Private
 			OutError = TEXT("max_items is accepted only by bounded actor/component queries.");
 			return false;
 		}
+		if (Step.Kind == EHyperAIPIEPlaytestStepKind::Bot)
+		{
+			FString BotError;
+			if (!FHyperAIBotExecutor::Validate(Step.Bot, BotError))
+			{
+				OutErrorCode = TEXT("invalid_bot_step");
+				OutError = BotError;
+				return false;
+			}
+		}
+		else
+		{
+			const FHyperAIBotStep Unset;
+			if (!FHyperAIBotStep::StaticStruct()->CompareScriptStruct(&Step.Bot, &Unset, PPF_None))
+			{
+				OutErrorCode = TEXT("irrelevant_field");
+				OutError = TEXT("bot is accepted only by steps of kind Bot.");
+				return false;
+			}
+		}
 		return true;
 	}
 
@@ -532,6 +560,12 @@ namespace HyperAIStudio::PIEPlaytest::Private
 			AppendCanonicalToken(Canonical, FString::FromInt(Step.PlayerIndex));
 			AppendCanonicalToken(Canonical, FString::FromInt(Step.MaxItems));
 			AppendCanonicalToken(Canonical, FString::FromInt(Step.TimeoutMs));
+			if (Step.Kind == EHyperAIPIEPlaytestStepKind::Bot)
+			{
+				FString BotText;
+				FHyperAIBotStep::StaticStruct()->ExportText(BotText, &Step.Bot, nullptr, nullptr, PPF_None, nullptr);
+				AppendCanonicalToken(Canonical, BotText);
+			}
 		}
 		return Canonical;
 	}
@@ -541,7 +575,7 @@ namespace HyperAIStudio::PIEPlaytest::Private
 		FString Canonical;
 		AppendCanonicalToken(Canonical, TEXT("hyperai.pie-runtime-capability.v1"));
 		for (int32 Value = static_cast<int32>(EHyperAIPIEPlaytestStepKind::WaitForWorld);
-			Value <= static_cast<int32>(EHyperAIPIEPlaytestStepKind::StopSession); ++Value)
+			Value <= static_cast<int32>(EHyperAIPIEPlaytestStepKind::Bot); ++Value)
 		{
 			AppendCanonicalToken(Canonical,
 				FHyperAIStudioPIEPlaytestContracts::StepKindToString(
@@ -771,12 +805,8 @@ bool FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(
 		OutPlan.bHasDestructive |= IsDestructiveStep(Step.Kind);
 	}
 	OutPlan.bHasEffects |= Request.Mode == EHyperAIPIEPlaytestMode::StartInProcess;
-	if (OutPlan.bHasEffects && Request.AuthorizationToken.IsEmpty())
-	{
-		OutErrorCode = TEXT("authorization_required");
-		OutError = TEXT("Runtime mutation/external effects require an opaque exact-plan authorization token.");
-		return false;
-	}
+	// Effects stay in the PIE world and end with it, so no token is needed: a plan is an Edit, and the user's
+	// approval setting decides in hyper_playtest_run whether a person approves it first.
 	OutPlan.Request = Request;
 	OutPlan.PlanHash = FHyperAIStudioPlanExecuteContracts::ComputeBoundedSha256(
 		BuildPlanCanonical(Request, false));
@@ -812,6 +842,7 @@ bool FHyperAIStudioPIEPlaytestContracts::IsEffectStep(const EHyperAIPIEPlaytestS
 	case EHyperAIPIEPlaytestStepKind::ReplayCaptureStop:
 	case EHyperAIPIEPlaytestStepKind::ReplayPlaybackCaptured:
 	case EHyperAIPIEPlaytestStepKind::StopSession:
+	case EHyperAIPIEPlaytestStepKind::Bot:
 		return true;
 	default:
 		return false;
@@ -850,6 +881,7 @@ FString FHyperAIStudioPIEPlaytestContracts::StepKindToString(const EHyperAIPIEPl
 	case EHyperAIPIEPlaytestStepKind::ReplayCaptureStop: return TEXT("replay_capture_stop");
 	case EHyperAIPIEPlaytestStepKind::ReplayPlaybackCaptured: return TEXT("replay_playback_captured");
 	case EHyperAIPIEPlaytestStepKind::StopSession: return TEXT("stop_session");
+	case EHyperAIPIEPlaytestStepKind::Bot: return TEXT("bot");
 	default: return FString();
 	}
 }
@@ -1713,6 +1745,14 @@ namespace HyperAIStudio::PIEPlaytest::Private
 				bStopRequested = true;
 				Result.Outcome = EHyperAIStudioPIEDriverOutcome::Pending;
 				return Result;
+			case EHyperAIPIEPlaytestStepKind::Bot:
+				if (!Bot.IsValid() || BotWorld.Get() != World)
+				{
+					Bot = MakeUnique<FHyperAIBotExecutor>(*World, FPaths::Combine(
+						FPaths::ProjectSavedDir(), TEXT("HyperAIStudio"), TEXT("Playtests"), Plan.Request.OperationId));
+					BotWorld = World;
+				}
+				return BotResult(Step, Bot->Begin(Step.Bot));
 			default:
 				return DriverFailure(EHyperAIStudioPIEDriverOutcome::FailedBeforeEffect,
 					TEXT("step_not_implemented"), TEXT("The closed core PIE driver has no route for this step."));
@@ -1730,6 +1770,11 @@ namespace HyperAIStudio::PIEPlaytest::Private
 			if (PendingKind == EHyperAIPIEPlaytestStepKind::WaitForWorld)
 			{
 				return ObserveWorld(Plan);
+			}
+			if (PendingKind == EHyperAIPIEPlaytestStepKind::Bot)
+			{
+				return Bot.IsValid() ? BotResult(Step, Bot->Tick())
+					: DriverFailure(EHyperAIStudioPIEDriverOutcome::OutcomeUnknown, TEXT("bot_lost"), TEXT("The playtest bot ended mid-step."));
 			}
 			if (PendingKind == EHyperAIPIEPlaytestStepKind::StopSession)
 			{
@@ -1751,6 +1796,8 @@ namespace HyperAIStudio::PIEPlaytest::Private
 			const FHyperAIStudioPIENormalizedPlan& Plan,
 			const bool bOwnsSession) override
 		{
+			// Held input and recordings stop before the session does.
+			Bot.Reset();
 			for (const auto& Pair : OptionalAdaptersUsed)
 			{
 				if (Pair.Value) { Pair.Value->Teardown(Plan); }
@@ -1813,6 +1860,7 @@ namespace HyperAIStudio::PIEPlaytest::Private
 			const FHyperAIStudioPIENormalizedPlan& Plan,
 			const bool bOwnsSession) override
 		{
+			Bot.Reset();
 			for (const auto& Pair : OptionalAdaptersUsed)
 			{
 				if (Pair.Value) { Pair.Value->Teardown(Plan); }
@@ -1836,6 +1884,37 @@ namespace HyperAIStudio::PIEPlaytest::Private
 		}
 
 	private:
+		/** A bot result as a driver result: running is pending, and a failed step's reason is the run's reason. */
+		static FHyperAIStudioPIEDriverResult BotResult(const FHyperAIPIEPlaytestStep& Step, const FHyperAIBotResult& Result)
+		{
+			if (!Result.IsDone())
+			{
+				FHyperAIStudioPIEDriverResult Pending;
+				Pending.Outcome = EHyperAIStudioPIEDriverOutcome::Pending;
+				return Pending;
+			}
+			FHyperAIStudioPIEDriverResult Driver = DriverSuccess(Step);
+			Driver.Evidence.Name = FHyperAIBotExecutor::ActionName(Step.Bot.Action);
+			Driver.Evidence.ValuePreview = Clip(Result.Detail, MaxPreviewCharacters);
+			Driver.Evidence.ObjectPath = Clip(Result.File, FHyperAIStudioPIEPlaytestContracts::MaxObjectPathCharacters);
+			Driver.Evidence.bAssertion = Step.Bot.Action == EHyperAIBotAction::WaitUntil
+				|| Step.Bot.Action == EHyperAIBotAction::UiAssert
+				|| FHyperAIBotExecutor::ActionName(Step.Bot.Action).StartsWith(TEXT("Assert"));
+			Driver.Evidence.bPassed = Result.State == FHyperAIBotResult::EState::Passed;
+			if (Result.State == FHyperAIBotResult::EState::Failed)
+			{
+				// The bot acts only inside the PIE world, so a failure is a known state, never an unknown one.
+				Driver.Outcome = EHyperAIStudioPIEDriverOutcome::FailedAfterKnownEffect;
+				Driver.Code = Result.Code;
+				Driver.Diagnostic = Clip(Result.Detail, MaxDiagnosticCharacters);
+				Driver.Evidence.Status = TEXT("failed");
+				Driver.Evidence.DiagnosticCode = Result.Code;
+			}
+			return Driver;
+		}
+
+		TUniquePtr<FHyperAIBotExecutor> Bot;
+		TWeakObjectPtr<UWorld> BotWorld;
 		TStrongObjectPtr<ULevelEditorPlaySettings> OwnedSettings;
 		TWeakObjectPtr<UWorld> ActiveWorld;
 		FHyperAIStudioPIESessionIdentity ActiveSession;
@@ -1847,6 +1926,147 @@ namespace HyperAIStudio::PIEPlaytest::Private
 		bool bStopRequested = false;
 		bool bPausedByRun = false;
 		bool bAnyRuntimeEffectAttempted = false;
+	};
+}
+
+namespace HyperAIStudio::PIEPlaytest::Private
+{
+	/**
+	 * The shipped seam. A playtest's effects stay in the PIE world and end with it, so a plan runs as an Edit:
+	 * hyper_playtest_run already asked for approval when the user requires one. Runtime targets must be PIE actors,
+	 * and only classes listed in HyperAI settings may be spawned.
+	 */
+	class FProductionPIEGate final : public IHyperAIStudioPIETrustedExecutionGate
+	{
+	public:
+		virtual EHyperAIStudioPlanJournalBegin Begin(const FHyperAIStudioPIEExecutionBinding&, FString&) override
+		{
+			// The service refuses a second plan under one operation id, and PIE effects cannot outlive the editor, so
+			// a restart leaves nothing to reconcile.
+			return EHyperAIStudioPlanJournalBegin::ProceedNew;
+		}
+		virtual bool InspectAuthorization(const FHyperAIStudioPIEExecutionBinding&, FString&) override { return true; }
+		virtual bool ConsumeAuthorization(const FHyperAIStudioPIEExecutionBinding&, FString&) override { return true; }
+		virtual bool Transition(const FHyperAIStudioPIEExecutionBinding&, const EHyperAIStudioPlanJournalTransition,
+			const FHyperAIStudioPlanOutcomeEvidence&, FString&) override
+		{
+			return true;
+		}
+		virtual bool IssueTerminalEvidence(const FHyperAIStudioPIEExecutionBinding&, const FString&, const bool bRollbackProof,
+			FHyperAIStudioPlanOutcomeEvidence& OutEvidence, FString&) override
+		{
+			// Stopping the owned session is the rollback: everything the plan changed was in that world.
+			OutEvidence.RollbackState = bRollbackProof ? EHyperAIStudioPlanRollbackState::Complete : EHyperAIStudioPlanRollbackState::NotNeeded;
+			return true;
+		}
+		virtual bool ApproveRuntimeTarget(const FHyperAIStudioPIEExecutionBinding&, const EHyperAIPIEPlaytestStepKind,
+			const AActor& Actor, FString& OutError) override
+		{
+			const UWorld* World = Actor.GetWorld();
+			if (World && World->WorldType == EWorldType::PIE)
+			{
+				return true;
+			}
+			OutError = TEXT("A playtest changes only actors in the PIE world, never the level being edited.");
+			return false;
+		}
+		virtual UClass* ResolveAllowlistedSpawnClass(const FHyperAIStudioPIEExecutionBinding&, const FString& ClassId, FString& OutError) override
+		{
+			for (const FSoftClassPath& Allowed : GetDefault<UHyperAIStudioSettings>()->PlaytestSpawnableClasses)
+			{
+				if (Allowed.ToString() == ClassId)
+				{
+					UClass* Class = Allowed.ResolveClass();
+					if (!Class)
+					{
+						OutError = FString::Printf(TEXT("%s is allowed but not loaded."), *ClassId);
+					}
+					return Class;
+				}
+			}
+			OutError = FString::Printf(TEXT("%s is not in HyperAI settings, Playtests, Spawnable Classes."), *ClassId);
+			return nullptr;
+		}
+	};
+
+	FKey ToKey(const EHyperAIPIEPlaytestKey Key)
+	{
+		switch (Key)
+		{
+		case EHyperAIPIEPlaytestKey::SpaceBar: return EKeys::SpaceBar;
+		case EHyperAIPIEPlaytestKey::W: return EKeys::W;
+		case EHyperAIPIEPlaytestKey::A: return EKeys::A;
+		case EHyperAIPIEPlaytestKey::S: return EKeys::S;
+		case EHyperAIPIEPlaytestKey::D: return EKeys::D;
+		case EHyperAIPIEPlaytestKey::Up: return EKeys::Up;
+		case EHyperAIPIEPlaytestKey::Down: return EKeys::Down;
+		case EHyperAIPIEPlaytestKey::Left: return EKeys::Left;
+		case EHyperAIPIEPlaytestKey::Right: return EKeys::Right;
+		case EHyperAIPIEPlaytestKey::Enter: return EKeys::Enter;
+		case EHyperAIPIEPlaytestKey::Escape: return EKeys::Escape;
+		case EHyperAIPIEPlaytestKey::LeftMouseButton: return EKeys::LeftMouseButton;
+		default: return EKeys::RightMouseButton;
+		}
+	}
+
+	/** InjectEnhancedAction through the local player's Enhanced Input; InjectAllowlistedKey through the player controller. */
+	class FEnhancedInputAdapter final : public IHyperAIStudioPIEOptionalVariantAdapter
+	{
+	public:
+		virtual FHyperAIStudioPIEDriverResult Begin(const FHyperAIStudioPIENormalizedPlan&, const FHyperAIPIEPlaytestStep& Step,
+			const FHyperAIStudioPIESessionIdentity& Session, const FHyperAIStudioPIEExecutionBinding&, IHyperAIStudioPIETrustedExecutionGate*) override
+		{
+			UWorld* World = FindObject<UWorld>(nullptr, *Session.WorldPath);
+			APlayerController* Controller = nullptr;
+			if (World)
+			{
+				int32 Index = 0;
+				for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It, ++Index)
+				{
+					if (Index == Step.PlayerIndex)
+					{
+						Controller = It->Get();
+						break;
+					}
+				}
+			}
+			if (!Controller)
+			{
+				return DriverFailure(EHyperAIStudioPIEDriverOutcome::FailedBeforeEffect, TEXT("player_not_found"),
+					TEXT("The PIE world has no player controller at that player_index."));
+			}
+			if (Step.Kind == EHyperAIPIEPlaytestStepKind::InjectAllowlistedKey)
+			{
+				UGameViewportClient* Client = World->GetGameViewport();
+				Controller->InputKey(FInputKeyEventArgs(Client ? Client->Viewport : nullptr, IPlatformInputDeviceMapper::Get().GetDefaultInputDevice(),
+					ToKey(Step.Key), Step.KeyEvent == EHyperAIPIEPlaytestKeyEvent::Pressed ? IE_Pressed : IE_Released, FPlatformTime::Cycles64()));
+				return DriverSuccess(Step);
+			}
+			ULocalPlayer* Player = Controller->GetLocalPlayer();
+			UEnhancedInputLocalPlayerSubsystem* Input = Player ? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(Player) : nullptr;
+			const UInputAction* Action = Cast<UInputAction>(ResolveLoadedObject(Step.SecondaryObjectPath));
+			if (!Input || !Action)
+			{
+				return DriverFailure(EHyperAIStudioPIEDriverOutcome::FailedBeforeEffect, TEXT("input_unavailable"),
+					!Action ? TEXT("secondary_object_path is not a loaded InputAction.") : TEXT("The player has no Enhanced Input subsystem."));
+			}
+			FInputActionValue Value;
+			switch (Step.Value.Type)
+			{
+			case EHyperAIPIEPlaytestValueType::Boolean: Value = FInputActionValue(Step.Value.bBoolean); break;
+			case EHyperAIPIEPlaytestValueType::Integer: Value = FInputActionValue(static_cast<float>(Step.Value.Integer)); break;
+			case EHyperAIPIEPlaytestValueType::Float: Value = FInputActionValue(static_cast<float>(Step.Value.Float)); break;
+			default: Value = FInputActionValue(Step.Value.Vector); break;
+			}
+			Input->InjectInputForAction(Action, Value, {}, {});
+			return DriverSuccess(Step);
+		}
+		virtual FHyperAIStudioPIEDriverResult Poll(const FHyperAIStudioPIENormalizedPlan&, const FHyperAIPIEPlaytestStep& Step,
+			const FHyperAIStudioPIESessionIdentity&) override
+		{
+			return DriverSuccess(Step);
+		}
+		virtual void Teardown(const FHyperAIStudioPIENormalizedPlan&) override {}
 	};
 }
 
@@ -2308,8 +2528,9 @@ void FHyperAIStudioPIEPlaytestRuntime::FinishAfterTeardown(
 		&& ActiveTrustedGate->Transition(MakeBinding(),
 			EHyperAIStudioPlanJournalTransition::RolledBack, RollbackEvidence, Error))
 	{
+		// The state says rolled back; the status keeps the reason, such as assertion_failed.
 		FinishTerminal(EHyperAIStudioPIERuntimeState::RolledBack,
-			TEXT("rolled_back"), PendingTerminalDiagnostic);
+			PendingTerminalStatus, PendingTerminalDiagnostic);
 		return;
 	}
 	FHyperAIStudioPlanOutcomeEvidence PartialEvidence;
@@ -2613,6 +2834,14 @@ void FHyperAIStudioPIEPlaytestService::Startup()
 	State.bStarted = true;
 	State.TickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 		FTickerDelegate::CreateStatic(&TickService), 0.0f);
+	if (!State.TrustedGate)
+	{
+		State.TrustedGate = MakeShared<FProductionPIEGate>();
+	}
+	if (!FHyperAIStudioPIEOptionalVariantRegistry::GetAdapter(EHyperAIStudioPIEOptionalVariant::EnhancedInput))
+	{
+		FHyperAIStudioPIEOptionalVariantRegistry::SetAdapter(EHyperAIStudioPIEOptionalVariant::EnhancedInput, MakeShared<FEnhancedInputAdapter>());
+	}
 }
 
 void FHyperAIStudioPIEPlaytestService::Shutdown()
@@ -2884,7 +3113,47 @@ void FHyperAIStudioPIEPlaytestService::ResetTrustedExecutionGate()
 FHyperAIPIEPlaytestRunResult UHyperAIStudioPIEPlaytestToolset::hyper_playtest_run(
 	const FHyperAIPIEPlaytestRequest& Request)
 {
-	return FHyperAIStudioPIEPlaytestService::Submit(Request);
+	FHyperAIStudioPIENormalizedPlan Plan;
+	FString Code;
+	FString Error;
+	if (!IsInGameThread() || !FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Request, Plan, Code, Error) || !Plan.bHasEffects
+		|| !FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::Edit))
+	{
+		return FHyperAIStudioPIEPlaytestService::Submit(Request);
+	}
+	// A plan that plays the game is an Edit, so it waits for the user when they approve edits.
+	FHyperAIStudioApprovalSummary Summary;
+	Summary.PackId = TEXT("pie_runtime");
+	Summary.ToolName = TEXT("hyper_playtest_run");
+	Summary.Safety = EHyperAIStudioDomainSafety::Edit;
+	const UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	Summary.EffectTarget = EditorWorld ? EditorWorld->GetPathName() : FString(TEXT("Play In Editor"));
+	Summary.PlanHash = Plan.PlanHash;
+	if (Request.Mode == EHyperAIPIEPlaytestMode::StartInProcess)
+	{
+		Summary.Effects.Add(TEXT("start Play In Editor, and stop it afterwards"));
+	}
+	for (const FHyperAIPIEPlaytestStep& Step : Request.Steps)
+	{
+		Summary.Effects.Add(Step.Kind == EHyperAIPIEPlaytestStepKind::Bot
+			? FString::Printf(TEXT("%s %s"), *FHyperAIBotExecutor::ActionName(Step.Bot.Action), *Step.Bot.Target).TrimEnd()
+			: FHyperAIStudioPIEPlaytestContracts::StepKindToString(Step.Kind));
+	}
+	FHyperAIPIEPlaytestRunResult Result;
+	Result.OperationId = Request.OperationId;
+	Result.PlanHash = Plan.PlanHash;
+	FString ApprovalError;
+	if (!FHyperAIStudioApprovalGate::RequestAction(Request.OperationId, Summary,
+		[Request]() { FHyperAIStudioPIEPlaytestService::Submit(Request); }, ApprovalError))
+	{
+		Result.Status = TEXT("approval_not_queued");
+		Result.Diagnostic = ApprovalError;
+		return Result;
+	}
+	Result.bOk = true;
+	Result.Status = TEXT("awaiting_user_approval");
+	Result.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel; nothing has run yet. hyper_operation_wait with bWaitThroughApproval true waits for the approval and the playtest.");
+	return Result;
 }
 
 FHyperAIPIEPlaytestStatusResult UHyperAIStudioPIEPlaytestToolset::hyper_playtest_status(

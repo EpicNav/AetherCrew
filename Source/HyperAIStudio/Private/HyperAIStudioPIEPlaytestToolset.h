@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Delegates/Delegate.h"
+#include "HyperAIStudioBot.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioTypedPlan.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
@@ -56,7 +57,9 @@ enum class EHyperAIPIEPlaytestStepKind : uint8
 	ReplayCaptureStart,
 	ReplayCaptureStop,
 	ReplayPlaybackCaptured,
-	StopSession
+	StopSession,
+	/** One playtest bot step, given in bot: move, look, jump, press, wait, capture, check. */
+	Bot
 };
 
 /** Exact key allowlist; callers never provide an arbitrary FName. */
@@ -176,6 +179,10 @@ struct FHyperAIPIEPlaytestStep
 
 	UPROPERTY()
 	int32 TimeoutMs = 5000;
+
+	/** Kind Bot only: the bot step. timeout_ms still caps it. */
+	UPROPERTY()
+	FHyperAIBotStep Bot;
 };
 
 USTRUCT(BlueprintType)
@@ -447,7 +454,15 @@ class HYPERAISTUDIO_API UHyperAIStudioPIEPlaytestToolset final : public UToolset
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** Accept one bounded typed PIE lifecycle plan and return immediately with operation_id/status. */
+	/**
+	 * Play the game in the editor and check it. mode StartInProcess starts Play In Editor and stops it after;
+	 * AttachOnly uses the session already running. Up to 32 steps run in order and the call returns at once:
+	 * follow it with hyper_operation_wait, then read the evidence with hyper_playtest_status. Steps of kind Bot
+	 * play as the player through the game's own input and movement: MoveTo, LookAt, Jump, Press, Hold, Interact,
+	 * Wait, WaitUntil, Survey, Sample, Capture (a PNG you can open), RecordStart and RecordStop, AssertProperty,
+	 * AssertNear, AssertOnScreen, AssertExists, AssertGone, UiClick, UiType and UiAssert. The first failing step
+	 * ends the run with its reason. Changes stay in the PIE world.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
 	static FHyperAIPIEPlaytestRunResult hyper_playtest_run(const FHyperAIPIEPlaytestRequest& Request);
 
