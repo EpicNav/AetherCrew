@@ -1021,6 +1021,13 @@ private:
 				{}
 			},
 			{
+				TEXT("HyperAIStudioScripting"),
+				TEXT("scripting"),
+				TEXT("cohort.source.hyperaistudioscriptingtoolset.v1"),
+				{TEXT("hyper_script_run")},
+				{TEXT("PythonScriptPlugin")}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),
@@ -1186,6 +1193,14 @@ private:
 				UE_LOG(LogHyperAIStudio, Display,
 					TEXT("Optional capability module %s is a source candidate and stays unloaded while Native Tool Channel is not Preview."),
 					*Module.ModuleName.ToString());
+				SkippedSummaries.Add(Module.ModuleName.ToString());
+				continue;
+			}
+			// The one pack with its own opt-in: agents run Python only once the user switches it on.
+			if (Module.ModuleName == FName(TEXT("HyperAIStudioScripting")) && !GetDefault<UHyperAIStudioSettings>()->bEnablePythonScripting)
+			{
+				UE_LOG(LogHyperAIStudio, Display,
+					TEXT("Python scripting is off; turn on Allow Agents To Run Python Scripts in the HyperAI Studio settings and restart to add hyper_script_run."));
 				SkippedSummaries.Add(Module.ModuleName.ToString());
 				continue;
 			}

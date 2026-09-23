@@ -57,6 +57,15 @@ public:
 		const FString& OperationId,
 		const FHyperAIStudioApprovalSummary& Summary,
 		FString& OutError);
+	/**
+	 * Queue work that is not a typed artifact, such as an agent's script, for approval. Approve runs it on the
+	 * game thread; the action records its own Completed or Failed activity entry.
+	 */
+	static bool RequestAction(
+		const FString& OperationId,
+		const FHyperAIStudioApprovalSummary& Summary,
+		TFunction<void()> Run,
+		FString& OutError);
 
 	static TArray<FHyperAIStudioPendingApproval> GetPending();
 	static bool HasPending(const FString& OperationId);

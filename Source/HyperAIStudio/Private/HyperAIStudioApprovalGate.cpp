@@ -14,6 +14,8 @@ namespace HyperAIStudio::Approval::Private
 	{
 		FHyperAIStudioPendingApproval Pending;
 		FHyperAIStudioTrustedPreparedArtifact Prepared;
+		/** Set instead of Prepared for work outside the typed executor. */
+		TFunction<void()> Action;
 	};
 
 	TArray<FHeldApproval>& Held()
@@ -105,6 +107,42 @@ bool FHyperAIStudioApprovalGate::Request(
 	return true;
 }
 
+bool FHyperAIStudioApprovalGate::RequestAction(
+	const FString& OperationId,
+	const FHyperAIStudioApprovalSummary& Summary,
+	TFunction<void()> Run,
+	FString& OutError)
+{
+	using namespace HyperAIStudio::Approval::Private;
+	OutError.Reset();
+	if (!IsInGameThread() || !Run || OperationId.IsEmpty() || Summary.EffectTarget.IsEmpty())
+	{
+		OutError = TEXT("An approval request needs the game thread, an action, an operation id and an effect target.");
+		return false;
+	}
+	if (IndexOf(OperationId) != INDEX_NONE)
+	{
+		return true;
+	}
+	if (Held().Num() >= MaxPending)
+	{
+		OutError = TEXT("Too many plans are already waiting for approval; approve or reject some first.");
+		return false;
+	}
+	FHeldApproval Item;
+	Item.Pending.OperationId = OperationId;
+	Item.Pending.Summary = Summary;
+	Item.Pending.RequestedUtc = FDateTime::UtcNow();
+	Item.Action = MoveTemp(Run);
+	Held().Add(MoveTemp(Item));
+	FHyperAIStudioActivityEntry Entry = MakeEntry(EHyperAIStudioActivityKind::ApprovalRequested, Summary, OperationId);
+	Entry.StatusCode = TEXT("awaiting_user_approval");
+	Entry.Detail = Summary.Effects.Num() > 0 ? Summary.Effects[0] : FString();
+	FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
+	OnChanged().Broadcast();
+	return true;
+}
+
 TArray<FHyperAIStudioPendingApproval> FHyperAIStudioApprovalGate::GetPending()
 {
 	TArray<FHyperAIStudioPendingApproval> Pending;
@@ -137,6 +175,16 @@ bool FHyperAIStudioApprovalGate::Approve(const FString& OperationId, FString& Ou
 	}
 	const FHeldApproval Item = Held()[Index];
 	Held().RemoveAt(Index);
+	if (Item.Action)
+	{
+		FHyperAIStudioActivityEntry Entry = MakeEntry(EHyperAIStudioActivityKind::ApprovalApproved, Item.Pending.Summary, OperationId);
+		Entry.StatusCode = TEXT("approved");
+		Entry.Detail = TEXT("Approved; running.");
+		FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
+		OnChanged().Broadcast();
+		Item.Action();
+		return true;
+	}
 
 	auto Fail = [&Item, &OperationId](const FString& Status, const FString& Diagnostic)
 	{

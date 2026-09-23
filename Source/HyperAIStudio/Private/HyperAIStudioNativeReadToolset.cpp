@@ -1832,6 +1832,23 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 			Report.JournalAccessMode = TEXT("activity_log");
 			return Report;
 		}
+		// Scripts run outside the typed executor, so their activity entries are their only status record.
+		if (Entry.PackId == TEXT("scripting") && (Entry.Kind == EHyperAIStudioActivityKind::Completed
+			|| Entry.Kind == EHyperAIStudioActivityKind::Failed || Entry.Kind == EHyperAIStudioActivityKind::ApprovalApproved))
+		{
+			Report.bOk = true;
+			Report.bFound = true;
+			Report.bTerminal = Entry.Kind != EHyperAIStudioActivityKind::ApprovalApproved;
+			Report.Status = Report.bTerminal ? Entry.StatusCode : FString(TEXT("running"));
+			Report.State = Report.Status;
+			Report.StatusCode = Report.Status;
+			Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(Entry.Detail, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+			Report.NextAction = Report.bTerminal
+				? TEXT("The script's result, output and traceback are in Saved/HyperAIStudio/Scripts/<operation_id>/result.json.")
+				: TEXT("Still running; call hyper_operation_wait to wait for it.");
+			Report.JournalAccessMode = TEXT("activity_log");
+			return Report;
+		}
 		break;
 	}
 

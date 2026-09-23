@@ -194,6 +194,10 @@
    "kind": "Plugin"
   },
   {
+   "id": "plugin.PythonScriptPlugin",
+   "kind": "Plugin"
+  },
+  {
    "id": "plugin.RemoteControl",
    "kind": "Plugin"
   },
@@ -3046,6 +3050,34 @@
      "name": "hyper_image_generate",
      "cohort": "cohort.source.hyperaistudioimagegentoolset.v1",
      "safety": [
+      "ExternalEffect"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "scripting",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [
+    {
+     "id": "python_scripting",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "plugin.PythonScriptPlugin"
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "hyper_script_run",
+     "cohort": "cohort.source.hyperaistudioscriptingtoolset.v1",
+     "safety": [
+      "Edit",
+      "Destructive",
       "ExternalEffect"
      ]
     }

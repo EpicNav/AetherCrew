@@ -458,6 +458,14 @@ public:
 	bool bRefreshAgentInstructionsOnStartup = true;
 
 	/**
+	 * Adds hyper_script_run: agents run editor Python inside one undo step that rolls back if the script
+	 * fails or runs out of time. A script that imports system modules, deletes, renames, loads levels or
+	 * writes files waits for your approval instead. Restart the editor after changing this.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agents", meta = (DisplayName = "Allow Agents To Run Python Scripts"))
+	bool bEnablePythonScripting = false;
+
+	/**
 	 * Image models available to the generation tools. Empty by default: this plugin ships no model name,
 	 * because the one it shipped would be wrong within months. The cookbook shows how to add one.
 	 */

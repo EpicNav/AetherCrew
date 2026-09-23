@@ -74,6 +74,7 @@ HYPERAI_SETTINGS = {
     "NativeExecutionMode": "Fast",
     "NativeToolChannel": "Preview",
     "CapabilityPreset": "Everything",
+    "bEnablePythonScripting": "True",
     "bGenerateCodexConfig": "True",
     "bGenerateClaudeConfig": "True",
     "bGenerateClaudeMarkdown": "True",
