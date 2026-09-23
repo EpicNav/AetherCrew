@@ -17,6 +17,7 @@ namespace HyperAIStudio::AsyncJob::Private
 	{
 		FHyperAIStudioAsyncJobStatus Status;
 		FHyperAIStudioAsyncJobHost::FPoll Poll;
+		TFunction<void()> OnCancel;
 		FTSTicker::FDelegateHandle TickerHandle;
 		int64 DeadlineMs = 0;
 		double StartedSeconds = 0.0;
@@ -64,6 +65,7 @@ namespace HyperAIStudio::AsyncJob::Private
 		}
 		// Dropping the poll releases whatever the pack captured, on the game thread.
 		Job->Poll = nullptr;
+		Job->OnCancel = nullptr;
 
 		FHyperAIStudioActivityEntry Entry;
 		Entry.Kind = State == EHyperAIStudioAsyncJobState::Completed
@@ -122,6 +124,8 @@ bool FHyperAIStudioAsyncJobHost::Start(
 	Job->Status.StartedUtc = FDateTime::UtcNow();
 	Job->Status.Progress = TEXT("started");
 	Job->Poll = MoveTemp(Poll);
+	Job->OnCancel = Request.OnCancel;
+	Job->Status.bCancellable = static_cast<bool>(Request.OnCancel);
 	Job->DeadlineMs = Request.DeadlineMs;
 	Job->StartedSeconds = FPlatformTime::Seconds();
 
@@ -165,8 +169,14 @@ bool FHyperAIStudioAsyncJobHost::Start(
 			}
 			if (Pinned->Status.ElapsedMs >= Pinned->DeadlineMs)
 			{
-				Finish(Pinned, EHyperAIStudioAsyncJobState::TimedOut,
-					FString::Printf(TEXT("Still running after %lld ms; the work may finish on its own, but nothing here waits for it."),
+				const bool bStopped = static_cast<bool>(Pinned->OnCancel);
+				if (bStopped)
+				{
+					Pinned->OnCancel();
+				}
+				Finish(Pinned, EHyperAIStudioAsyncJobState::TimedOut, bStopped
+					? FString::Printf(TEXT("Stopped after %lld ms, past its deadline."), Pinned->Status.ElapsedMs)
+					: FString::Printf(TEXT("Still running after %lld ms; the work may finish on its own, but nothing here waits for it."),
 						Pinned->Status.ElapsedMs));
 				return false;
 			}
@@ -238,6 +248,33 @@ bool FHyperAIStudioAsyncJobHost::IsRunning(const FString& OperationId)
 	return false;
 }
 
+bool FHyperAIStudioAsyncJobHost::Cancel(const FString& JobId, const FString& Reason, FString& OutError)
+{
+	using namespace HyperAIStudio::AsyncJob::Private;
+	OutError.Reset();
+	for (const TSharedPtr<FJob>& Job : Jobs())
+	{
+		if (!Job.IsValid() || Job->Status.JobId != JobId)
+		{
+			continue;
+		}
+		if (Job->Status.State != EHyperAIStudioAsyncJobState::Running || !Job->OnCancel)
+		{
+			OutError = Job->Status.State == EHyperAIStudioAsyncJobState::Running
+				? TEXT("This job cannot be cancelled.") : TEXT("This job has already finished.");
+			return false;
+		}
+		// Keep the job alive through the callback, which may change what the host holds.
+		const TSharedPtr<FJob> Keep = Job;
+		const TFunction<void()> Stop = Keep->OnCancel;
+		Stop();
+		Finish(Keep, EHyperAIStudioAsyncJobState::Cancelled, Reason);
+		return true;
+	}
+	OutError = TEXT("No job with that id is known to this editor session.");
+	return false;
+}
+
 void FHyperAIStudioAsyncJobHost::Shutdown()
 {
 	for (const TSharedPtr<HyperAIStudio::AsyncJob::Private::FJob>& Job : HyperAIStudio::AsyncJob::Private::Jobs())
@@ -247,6 +284,7 @@ void FHyperAIStudioAsyncJobHost::Shutdown()
 			FTSTicker::GetCoreTicker().RemoveTicker(Job->TickerHandle);
 			Job->TickerHandle.Reset();
 			Job->Poll = nullptr;
+			Job->OnCancel = nullptr;
 		}
 	}
 	HyperAIStudio::AsyncJob::Private::Jobs().Reset();
@@ -265,6 +303,7 @@ const TCHAR* FHyperAIStudioAsyncJobHost::LexToString(const EHyperAIStudioAsyncJo
 	case EHyperAIStudioAsyncJobState::Running: return TEXT("running");
 	case EHyperAIStudioAsyncJobState::Completed: return TEXT("completed");
 	case EHyperAIStudioAsyncJobState::TimedOut: return TEXT("timed_out");
+	case EHyperAIStudioAsyncJobState::Cancelled: return TEXT("cancelled");
 	default: return TEXT("failed");
 	}
 }

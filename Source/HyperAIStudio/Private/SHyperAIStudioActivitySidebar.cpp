@@ -375,14 +375,36 @@ TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildApprovalCard(const F
 TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildJobRow(const FHyperAIStudioAsyncJobStatus& Job)
 {
 	using namespace HyperAIStudio::ActivitySidebar;
+	const FString JobId = Job.JobId;
 	return SNew(SVerticalBox)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		[
-			SNew(STextBlock)
-			.Text(FText::Format(LOCTEXT("JobLine", "{0} - {1}"), AssetName(Job.Target), FText::FromString(Job.Progress)))
-			.ToolTipText(FText::FromString(Job.ToolName))
-			.AutoWrapText(true)
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			[
+				SNew(STextBlock)
+				.Text(FText::Format(LOCTEXT("JobLine", "{0} - {1}"), AssetName(Job.Target), FText::FromString(Job.Progress)))
+				.ToolTipText(FText::FromString(Job.ToolName))
+				.AutoWrapText(true)
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Visibility(Job.bCancellable ? EVisibility::Visible : EVisibility::Collapsed)
+				.Text(LOCTEXT("CancelJob", "Cancel"))
+				.ToolTipText(LOCTEXT("CancelJobTooltip", "Stop this job. The agent that started it sees it as cancelled."))
+				.OnClicked_Lambda([JobId]()
+				{
+					FString Error;
+					FHyperAIStudioAsyncJobHost::Cancel(JobId, TEXT("Cancelled from the Activity panel."), Error);
+					return FReply::Handled();
+				})
+			]
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()

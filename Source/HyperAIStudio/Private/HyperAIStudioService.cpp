@@ -1528,7 +1528,6 @@ namespace HyperAIStudio::Private
 			TEXT("hyper_navigation_apply_plan"),
 			TEXT("hyper_network_apply_plan"),
 			TEXT("hyper_niagara_apply_plan"),
-			TEXT("hyper_pcg_apply_plan"),
 			TEXT("hyper_physics_apply_plan"),
 			TEXT("hyper_property_animation_apply_plan"),
 			TEXT("hyper_scene_apply_plan"),

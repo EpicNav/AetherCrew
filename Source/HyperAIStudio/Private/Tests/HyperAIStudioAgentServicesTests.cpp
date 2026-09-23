@@ -195,6 +195,39 @@ bool FHyperAIStudioAsyncJobHostTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The stuck job is queryable"), FHyperAIStudioAsyncJobHost::Query(StuckId, Status, Error));
 	TestEqual(TEXT("It times out"), Status.State, EHyperAIStudioAsyncJobState::TimedOut);
 	TestFalse(TEXT("Nothing is left running"), FHyperAIStudioAsyncJobHost::IsRunning(FString()));
+	TestFalse(TEXT("A job without OnCancel is not cancellable"), Status.bCancellable);
+	TestFalse(TEXT("A finished job cannot be cancelled"), FHyperAIStudioAsyncJobHost::Cancel(StuckId, TEXT("late"), Error));
+
+	// A job with OnCancel can be stopped by the user, and is stopped when it outlives its deadline.
+	TSharedRef<int32> Stops = MakeShared<int32>(0);
+	FHyperAIStudioAsyncJobRequest Cancellable = Request;
+	Cancellable.ToolName = TEXT("cancellable_tool");
+	Cancellable.OperationId = TEXT("op-cancel-test");
+	Cancellable.OnCancel = [Stops]() { ++(*Stops); };
+	auto Forever = [](FString& OutProgress, FString&)
+	{
+		OutProgress = TEXT("generating");
+		return EHyperAIStudioAsyncJobPoll::Running;
+	};
+	FString CancelId;
+	TestTrue(TEXT("The cancellable job starts"), FHyperAIStudioAsyncJobHost::Start(Cancellable, Forever, CancelId, Error));
+	FHyperAIStudioAsyncJobHost::Query(CancelId, Status, Error);
+	TestTrue(TEXT("It says it can be cancelled"), Status.bCancellable);
+	TestTrue(TEXT("Its operation counts as running"), FHyperAIStudioAsyncJobHost::IsRunning(TEXT("op-cancel-test")));
+	TestTrue(TEXT("It cancels"), FHyperAIStudioAsyncJobHost::Cancel(CancelId, TEXT("Cancelled from the test."), Error));
+	FHyperAIStudioAsyncJobHost::Query(CancelId, Status, Error);
+	TestEqual(TEXT("It reports cancelled"), FString(FHyperAIStudioAsyncJobHost::LexToString(Status.State)), FString(TEXT("cancelled")));
+	TestEqual(TEXT("with the reason"), Status.Diagnostic, FString(TEXT("Cancelled from the test.")));
+	TestEqual(TEXT("OnCancel stopped the work once"), *Stops, 1);
+	TestFalse(TEXT("Its operation is no longer running"), FHyperAIStudioAsyncJobHost::IsRunning(TEXT("op-cancel-test")));
+
+	Cancellable.DeadlineMs = 120;
+	TestTrue(TEXT("A cancellable job with a short deadline starts"), FHyperAIStudioAsyncJobHost::Start(Cancellable, Forever, CancelId, Error));
+	Pump(20);
+	FHyperAIStudioAsyncJobHost::Query(CancelId, Status, Error);
+	TestEqual(TEXT("It times out"), Status.State, EHyperAIStudioAsyncJobState::TimedOut);
+	TestEqual(TEXT("and its work was stopped at the deadline"), *Stops, 2);
+	TestTrue(TEXT("which the diagnostic says"), Status.Diagnostic.StartsWith(TEXT("Stopped after")));
 
 	FHyperAIStudioAsyncJobHost::Shutdown();
 	return true;

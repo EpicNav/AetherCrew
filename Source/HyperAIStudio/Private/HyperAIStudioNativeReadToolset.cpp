@@ -179,7 +179,6 @@ namespace HyperAIStudio::NativeReadTools::Private
 			TEXT("hyper_navigation_apply_plan"),
 			TEXT("hyper_network_apply_plan"),
 			TEXT("hyper_niagara_apply_plan"),
-			TEXT("hyper_pcg_apply_plan"),
 			TEXT("hyper_physics_apply_plan"),
 			TEXT("hyper_property_animation_apply_plan"),
 			TEXT("hyper_scene_apply_plan"),
@@ -222,6 +221,7 @@ namespace HyperAIStudio::NativeReadTools::Private
 			TEXT("hyper_blueprint_layout"),
 			TEXT("hyper_blueprint_repair"),
 			TEXT("hyper_build_diagnose"),
+			TEXT("hyper_pcg_apply_plan"),
 			TEXT("hyper_plan_execute"),
 			TEXT("hyper_playtest_run"),
 			TEXT("hyper_profile_capture"),
@@ -1732,6 +1732,39 @@ FHyperAICapabilityReport UHyperAIStudioNativeReadToolset::hyper_capability_repor
 	return Report;
 }
 
+namespace HyperAIStudio::NativeReadTools::Private
+{
+	/**
+	 * A job the edit started, such as a PCG generation, is part of its outcome: the operation is not over while the job
+	 * runs, and a job that failed, timed out or was cancelled decides the result.
+	 */
+	void ApplyJobOutcome(FHyperAIOperationStatus& Report, const FString& OperationId)
+	{
+		for (const FHyperAIStudioAsyncJobStatus& Job : FHyperAIStudioAsyncJobHost::GetSnapshot())
+		{
+			if (Job.OperationId != OperationId)
+			{
+				continue;
+			}
+			if (Job.State == EHyperAIStudioAsyncJobState::Running)
+			{
+				Report.bTerminal = false;
+				Report.Status = TEXT("running");
+				Report.NextAction = TEXT("The edit is done and the job it started is still running (see job_progress); call hyper_operation_wait to wait for it.");
+			}
+			else if (Report.bTerminal && Job.State != EHyperAIStudioAsyncJobState::Completed)
+			{
+				Report.Status = FHyperAIStudioAsyncJobHost::LexToString(Job.State);
+				Report.State = Report.Status;
+				Report.StatusCode = Report.Status;
+				Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(Job.Diagnostic, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+				Report.NextAction = TEXT("The edit ran, but the job it started did not finish; see the diagnostic.");
+			}
+			return;
+		}
+	}
+}
+
 FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 	const FString& OperationId)
 {
@@ -1871,6 +1904,7 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 		Report.NextAction = !Report.bTerminal ? TEXT("Still running; call hyper_operation_wait to wait for it.")
 			: Report.bNeedsReconciliation ? TEXT("The outcome is unknown; inspect the target before retrying.")
 			: TEXT("Validate the result with the pack's validate tool.");
+		ApplyJobOutcome(Report, OperationId);
 		return Report;
 	}
 
@@ -1980,6 +2014,7 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 	Report.NextAction = !Report.bTerminal ? TEXT("Still running; call hyper_operation_wait to wait for it.")
 		: Report.bNeedsReconciliation ? TEXT("The outcome is unknown; inspect the target before retrying.")
 		: TEXT("Validate the result with the pack's validate tool.");
+	ApplyJobOutcome(Report, OperationId);
 	return Report;
 }
 

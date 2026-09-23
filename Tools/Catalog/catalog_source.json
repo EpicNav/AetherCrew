@@ -2036,7 +2036,7 @@
      "cohort": "cohort.source.hyperaistudiopcgtoolset.v1",
      "admission": "SourceCandidate",
      "safety": [
-      "ExternalEffect"
+      "Edit"
      ],
      "sourceArtifactCount": 1,
      "sourceArtifactFingerprint": "sha256:8be728c42721d9150f9bf7cd102c2d69ac037b4214b7ba690867307e9706d362",

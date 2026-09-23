@@ -10,7 +10,8 @@ enum class EHyperAIStudioAsyncJobState : uint8
 	Running,
 	Completed,
 	Failed,
-	TimedOut
+	TimedOut,
+	Cancelled
 };
 
 /** What one poll of a job reports. A poll must return promptly; it never blocks or waits. */
@@ -32,6 +33,8 @@ struct FHyperAIStudioAsyncJobRequest
 	/** Bounded: a job that outlives this is reported timed out, never silently abandoned. */
 	int32 DeadlineMs = 60 * 1000;
 	int32 PollIntervalMs = 250;
+	/** Stops the work. With it the user can cancel the job from the Activity panel, and a job past its deadline is stopped too. */
+	TFunction<void()> OnCancel;
 };
 
 struct FHyperAIStudioAsyncJobStatus
@@ -46,6 +49,7 @@ struct FHyperAIStudioAsyncJobStatus
 	FString Diagnostic;
 	FDateTime StartedUtc = FDateTime::MinValue();
 	int64 ElapsedMs = 0;
+	bool bCancellable = false;
 };
 
 /**
@@ -75,6 +79,8 @@ public:
 	static TArray<FHyperAIStudioAsyncJobStatus> GetSnapshot();
 	/** True while any job for this operation, or any job at all when the id is empty, is running. */
 	static bool IsRunning(const FString& OperationId);
+	/** Stops a running job through its OnCancel. False when it is not running or cannot be cancelled. */
+	static bool Cancel(const FString& JobId, const FString& Reason, FString& OutError);
 	static void Shutdown();
 
 	static FSimpleMulticastDelegate& OnChanged();

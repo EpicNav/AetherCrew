@@ -2,8 +2,16 @@
 
 #include "HyperAIStudioPCGToolset.h"
 
+#include "Containers/Ticker.h"
+#include "Elements/PCGCreatePointsGrid.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "Misc/AutomationTest.h"
+#include "PCGComponent.h"
+#include "PCGGraph.h"
+#include "PCGVolume.h"
 #include "UObject/UnrealType.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -218,7 +226,7 @@ bool FHyperAIStudioPCGManifestDelegationTest::RunTest(const FString& Parameters)
 		&& Epic.Contains(TEXT("DrawSpline")));
 	const auto Matrix = FHyperAIStudioPCGContracts::GetCapabilityMatrix();
 	TestEqual(TEXT("One truthful PCG capability row"), Matrix.Num(), 1);
-	TestFalse(TEXT("Non-dry execution is not implemented"),
+	TestTrue(TEXT("Lifecycles run as jobs"),
 		Matrix[0].bMutationExecutionImplemented);
 	TestTrue(TEXT("No-load case explicit"), Matrix[0].UnsupportedCases.Contains(
 		TEXT("asset_or_map_load_open_or_broad_asset_registry_materialization")));
@@ -229,9 +237,9 @@ bool FHyperAIStudioPCGManifestDelegationTest::RunTest(const FString& Parameters)
 	const FHyperAIStudioDomainAdapterDescriptor& Descriptor =
 		FHyperAIStudioPCGContracts::GetAdapterDescriptor();
 	TestEqual(TEXT("exact three adapter variants"), Descriptor.Variants.Num(), 3);
-	TestEqual(TEXT("lifecycle authority remains ExternalEffect"),
+	TestEqual(TEXT("A lifecycle is an edit, under the approval setting"),
 		static_cast<uint8>(Descriptor.Variants[1].Safety),
-		static_cast<uint8>(EHyperAIStudioDomainSafety::ExternalEffect));
+		static_cast<uint8>(EHyperAIStudioDomainSafety::Edit));
 	TestTrue(TEXT("PCG requirement groups are blocking"),
 		Descriptor.ApplicableNonBlockingRequirementGroupIds.IsEmpty());
 	TestEqual(TEXT("Inspect result explicitly pages both structural inventories"),
@@ -527,7 +535,7 @@ bool FHyperAIStudioPCGClonePrepareAndAdapterTest::RunTest(const FString& Paramet
 	Binding.PackId = FHyperAIStudioPCGContracts::PackId;
 	Binding.ToolName = TEXT("hyper_pcg_apply_plan");
 	Binding.VariantId = FHyperAIStudioPCGContracts::MutationVariantId;
-	Binding.ExpectedSafety = EHyperAIStudioDomainSafety::ExternalEffect;
+	Binding.ExpectedSafety = EHyperAIStudioDomainSafety::Edit;
 	Binding.CanonicalProjectId = TEXT("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 	Binding.ExpectedAdapterFingerprint = Descriptor.AdapterFingerprint;
 	Binding.ExpectedAdapterGeneration = 1;
@@ -571,15 +579,130 @@ bool FHyperAIStudioPCGClonePrepareAndAdapterTest::RunTest(const FString& Paramet
 	Context.Safety = EHyperAIStudioDomainSafety::ExternalEffect;
 	Context.ActionKind = EHyperAIStudioDomainExecutionActionKind::Apply;
 	FHyperAIStudioPCGDomainAdapter Adapter;
-	const FHyperAIStudioDomainAdapterResult Result = Adapter.Execute(Context, *PurePayload);
+	FHyperAIStudioDomainAdapterResult Result = Adapter.Execute(Context, *PurePayload);
+	TestEqual(TEXT("The old ExternalEffect binding is refused"), Result.StatusCode, FString(TEXT("typed_binding_mismatch")));
+	Context.Safety = EHyperAIStudioDomainSafety::Edit;
+	Result = Adapter.Execute(Context, *PurePayload);
 	TestEqual(TEXT("Adapter rejects before effect"),
 		static_cast<uint8>(Result.Outcome),
 		static_cast<uint8>(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect));
-	TestEqual(TEXT("Exact async continuation blocker"), Result.StatusCode,
-		FString(FHyperAIStudioPCGContracts::NonDryCallableState));
+	TestEqual(TEXT("An unloaded component is never loaded to run a lifecycle"), Result.StatusCode,
+		FString(TEXT("target_not_loaded")));
 	TestFalse(TEXT("Rejected adapter emits no result payload"), Result.Payload.IsValid());
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioPCGLifecycleJobTest,
+	"HyperAIStudio.NativeTools.PCG.LifecycleJobs",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioPCGLifecycleJobTest::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("generate ends generated"), FHyperAIStudioPCGContracts::TerminalStateFor(TEXT("generate")), FString(TEXT("generated")));
+	TestEqual(TEXT("cleanup ends clean"), FHyperAIStudioPCGContracts::TerminalStateFor(TEXT("cleanup")), FString(TEXT("clean")));
+	TestEqual(TEXT("the generation check ends clean"),
+		FHyperAIStudioPCGContracts::TerminalStateFor(TEXT("generate_validate_cleanup")), FString(TEXT("clean")));
+	TestTrue(TEXT("anything else is refused"), FHyperAIStudioPCGContracts::TerminalStateFor(TEXT("regenerate_everything")).IsEmpty());
+
+	UWorld* World = nullptr;
+	for (const FWorldContext& Context : GEngine->GetWorldContexts())
+	{
+		if (Context.WorldType == EWorldType::Editor)
+		{
+			World = Context.World();
+		}
+	}
+	if (!TestNotNull(TEXT("An editor world"), World))
+	{
+		return false;
+	}
+	// A 2x2 grid of points, like the engine's own PCG execution test.
+	UPCGGraph* Graph = NewObject<UPCGGraph>(GetTransientPackage());
+	UPCGSettings* Settings = nullptr;
+	UPCGNode* Grid = Graph->AddNodeOfType(UPCGCreatePointsGridSettings::StaticClass(), Settings);
+	if (UPCGCreatePointsGridSettings* GridSettings = Cast<UPCGCreatePointsGridSettings>(Settings))
+	{
+		GridSettings->GridExtents = FVector(100.0, 100.0, 50.0);
+		GridSettings->CellSize = FVector(100.0, 100.0, 100.0);
+		GridSettings->bCullPointsOutsideVolume = false;
+	}
+	Graph->AddLabeledEdge(Grid, PCGPinConstants::DefaultOutputLabel, Graph->GetOutputNode(), PCGPinConstants::DefaultOutputLabel);
+	APCGVolume* Volume = World->SpawnActor<APCGVolume>();
+	UPCGComponent* Component = Volume ? Volume->PCGComponent.Get() : nullptr;
+	if (!TestNotNull(TEXT("A PCG volume"), Component))
+	{
+		return false;
+	}
+	Component->SetGraphLocal(Graph);
+	const FString Path = Component->GetPathName();
+
+	auto Tick = [World]()
+	{
+		FTSTicker::GetCoreTicker().Tick(1.0f / 30.0f);
+		World->Tick(LEVELTICK_All, 1.0f / 30.0f);
+	};
+	auto Run = [&](const TCHAR* Lifecycle, FHyperAIStudioAsyncJobStatus& OutStatus)
+	{
+		FString JobId;
+		FString Error;
+		if (!FHyperAIStudioPCGContracts::StartLifecycleJob(*Component, Path, Lifecycle, /*bForceGenerate=*/true,
+			/*bRemoveGeneratedComponents=*/true, 20000, FString(), JobId, Error))
+		{
+			AddError(FString::Printf(TEXT("%s did not start: %s"), Lifecycle, *Error));
+			return false;
+		}
+		const double End = FPlatformTime::Seconds() + 30.0;
+		while (FHyperAIStudioAsyncJobHost::Query(JobId, OutStatus, Error)
+			&& OutStatus.State == EHyperAIStudioAsyncJobState::Running && FPlatformTime::Seconds() < End)
+		{
+			Tick();
+		}
+		return true;
+	};
+	auto StateOf = [](const FHyperAIStudioAsyncJobStatus& Status)
+	{
+		return FString(FHyperAIStudioAsyncJobHost::LexToString(Status.State)) + TEXT(" ") + Status.Diagnostic;
+	};
+
+	FHyperAIStudioAsyncJobStatus Status;
+	if (Run(TEXT("generate"), Status))
+	{
+		TestEqual(TEXT("generate completes"), StateOf(Status), FString(TEXT("completed Generated.")));
+		TestTrue(TEXT("and keeps its output"), Component->bGenerated);
+		TestTrue(TEXT("A generation job can be cancelled"), Status.bCancellable);
+	}
+	if (Run(TEXT("cleanup"), Status))
+	{
+		TestEqual(TEXT("cleanup completes"), StateOf(Status), FString(TEXT("completed The generated output was cleaned up.")));
+		TestFalse(TEXT("and removes the output"), Component->bGenerated);
+	}
+	if (Run(TEXT("generate_validate_cleanup"), Status))
+	{
+		TestEqual(TEXT("The generation check completes"), StateOf(Status),
+			FString(TEXT("completed The graph generated, and its output was cleaned up again.")));
+		TestFalse(TEXT("and leaves nothing behind"), Component->bGenerated);
+	}
+
+	FString JobId;
+	FString Error;
+	if (TestTrue(TEXT("A generation starts"), FHyperAIStudioPCGContracts::StartLifecycleJob(*Component, Path, TEXT("generate"),
+		/*bForceGenerate=*/true, /*bRemoveGeneratedComponents=*/true, 20000, FString(), JobId, Error)))
+	{
+		TestTrue(TEXT("It is generating"), Component->IsGenerating());
+		TestTrue(TEXT("It cancels"), FHyperAIStudioAsyncJobHost::Cancel(JobId, TEXT("Cancelled by the test."), Error));
+		FHyperAIStudioAsyncJobHost::Query(JobId, Status, Error);
+		TestEqual(TEXT("and reports cancelled"), StateOf(Status), FString(TEXT("cancelled Cancelled by the test.")));
+		for (int32 Index = 0; Index < 30 && Component->IsGenerating(); ++Index)
+		{
+			Tick();
+		}
+		TestFalse(TEXT("PCG stopped generating"), Component->IsGenerating());
+	}
+	Volume->Destroy();
+	return true;
+}
+
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHyperAIStudioPCGReflectionContractTest,

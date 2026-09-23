@@ -781,7 +781,7 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 		TEXT("hyper_geometry_apply_plan"), TEXT("hyper_interchange_apply_plan"),
 		TEXT("hyper_live_production_apply_plan"), TEXT("hyper_material_apply_plan"),
 		TEXT("hyper_navigation_apply_plan"), TEXT("hyper_network_apply_plan"),
-		TEXT("hyper_niagara_apply_plan"), TEXT("hyper_pcg_apply_plan"),
+		TEXT("hyper_niagara_apply_plan"),
 		TEXT("hyper_physics_apply_plan"), TEXT("hyper_property_animation_apply_plan"),
 		TEXT("hyper_scene_apply_plan"), TEXT("hyper_ui_apply_plan"),
 		TEXT("hyper_worldbuilding_apply_plan")
