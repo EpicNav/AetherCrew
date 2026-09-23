@@ -447,6 +447,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Remote", meta = (DisplayName = "Keep Remote Chats Running After The Editor Closes"))
 	bool bKeepRemoteChatsRunning = true;
 
+	/** Codex and Gemini chats open in HyperAI's own chat view instead of the terminal. Claude Code always uses the terminal. */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Chat", meta = (DisplayName = "Native Chat View for Codex and Gemini"))
+	bool bUseNativeChatView = false;
+
 	/** Actor classes a playtest may spawn into the PIE world. Nothing else can be spawned. */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Playtests", meta = (AllowAbstract = "false", MetaClass = "/Script/Engine.Actor"))
 	TArray<FSoftClassPath> PlaytestSpawnableClasses;

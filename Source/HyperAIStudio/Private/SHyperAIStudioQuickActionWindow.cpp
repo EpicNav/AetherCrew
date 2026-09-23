@@ -34,6 +34,8 @@
 #include "SHyperAIStudioChatHistorySidebar.h"
 #include "SHyperAIStudioMemoryPanel.h"
 #include "HyperAIStudioAgents.h"
+#include "HyperAIStudioNativeChat.h"
+#include "SHyperAIStudioNativeChatView.h"
 #include "HyperAIStudioSkills.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -791,6 +793,13 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildHeader()
 		.VAlign(VAlign_Center)
 		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
 		[
+			BuildNativeToggle()
+		]
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+		[
 			SNew(SComboButton)
 			.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
 			.ToolTipText(LOCTEXT("SkillsTooltip", "Run one of this agent's skills, or save what this chat did as a new skill."))
@@ -1116,6 +1125,13 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildContextMenu()
 bool SHyperAIStudioQuickActionWindow::InsertIntoAgentPrompt(const FString& Text, const FString& Label, const bool bFocusTerminal)
 {
 	const FString Trimmed = Text.TrimStartAndEnd();
+	if (NativeView.IsValid() && !Trimmed.IsEmpty())
+	{
+		NativeView->InsertText(Trimmed);
+		LastMessage = FText::Format(LOCTEXT("ContextInserted", "Inserted {0} into the prompt."), FText::FromString(Label));
+		AddTranscriptLine(LastMessage.ToString());
+		return true;
+	}
 	if (Trimmed.IsEmpty() || !TerminalWidget.IsValid() || !TerminalWidget->IsSessionRunning())
 	{
 		return false;
@@ -1146,6 +1162,12 @@ bool SHyperAIStudioQuickActionWindow::InsertIntoAgentPrompt(const FString& Text,
 
 bool SHyperAIStudioQuickActionWindow::GetRunningAgent(FString& OutAgent, FString& OutModel) const
 {
+	if (NativeView.IsValid() && NativeView->GetChat().IsValid() && NativeView->GetChat()->IsRunning())
+	{
+		OutAgent = ActiveTerminalAgentName;
+		OutModel = ActiveTerminalModel;
+		return true;
+	}
 	if (ActiveTerminalAgentName.IsEmpty() || !TerminalWidget.IsValid() || !TerminalWidget->IsSessionRunning())
 	{
 		return false;
@@ -2027,7 +2049,15 @@ EActiveTimerReturnType SHyperAIStudioQuickActionWindow::RunAgentStateHeartbeat(d
 	FHyperAIStudioAgentStateInputs Inputs;
 	Inputs.bSessionRunning = TerminalWidget.IsValid() && TerminalWidget->IsSessionRunning();
 	Inputs.bStartupPending = Inputs.bSessionRunning && !bTerminalStartupSent && !bTerminalStartupPaused;
-	if (Inputs.bSessionRunning && HyperAIStudio::TerminalRawInput::IsAvailable())
+	if (const TSharedPtr<FHyperAIStudioNativeChat> Native = NativeView.IsValid() ? NativeView->GetChat() : nullptr)
+	{
+		// The native chat says what it is doing; there is no screen to read.
+		Inputs.bSessionRunning = Native->IsRunning();
+		Inputs.bStartupPending = Native->IsRunning() && !Native->IsReady();
+		Inputs.bApprovalPending = Native->HasOpenApproval();
+		Inputs.SecondsSinceOutput = Native->IsBusy() ? 0.0 : 3600.0;
+	}
+	else if (Inputs.bSessionRunning && HyperAIStudio::TerminalRawInput::IsAvailable())
 	{
 		Inputs.Tail = HyperAIStudio::TerminalRawInput::ReadVisibleTail(
 			*TerminalWidget, FHyperAIStudioAgentStateEvaluator::TailRows);
@@ -2266,6 +2296,26 @@ EActiveTimerReturnType SHyperAIStudioQuickActionWindow::RunQueuedVisibleTerminal
 void SHyperAIStudioQuickActionWindow::QueueTerminalStartup(bool bForce, bool bResetTerminal)
 {
 	const FString AgentName = GetSelectedAgentName();
+	if (NativeView.IsValid())
+	{
+		if (!bForce && ActiveTerminalAgentName.Equals(AgentName, ESearchCase::IgnoreCase))
+		{
+			return;
+		}
+		if (FHyperAIStudioNativeChat::IsSupported(AgentName))
+		{
+			const FString Resume = ResumeAgentName.Equals(AgentName, ESearchCase::IgnoreCase) ? ResumeSessionId : FString();
+			ResumeAgentName.Reset();
+			ResumeSessionId.Reset();
+			ResumeTitle.Reset();
+			ResumeBackgroundId.Reset();
+			StopNativeChat();
+			StartNativeChat(Resume);
+			return;
+		}
+		// A terminal-only agent, such as Claude Code, takes the tab back to the terminal.
+		bResetTerminal = true;
+	}
 	if (!bForce && bTerminalStartupPaused)
 	{
 		return;
@@ -2289,6 +2339,7 @@ void SHyperAIStudioQuickActionWindow::QueueTerminalStartup(bool bForce, bool bRe
 
 void SHyperAIStudioQuickActionWindow::RecreateTerminalSession()
 {
+	StopNativeChat();
 	if (TerminalHost.IsValid())
 	{
 		TerminalHost->SetContent(BuildTerminalSessionWidget());
@@ -2366,6 +2417,11 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 	bBackgroundStarting = false;
 	const int32 Generation = ++LaunchGeneration;
 
+	// A native chat that cannot start falls back to the terminal.
+	if (GetDefault<UHyperAIStudioSettings>()->bUseNativeChatView && FHyperAIStudioNativeChat::IsSupported(AgentName) && StartNativeChat(SessionId))
+	{
+		return;
+	}
 	if (!HyperAIStudio::QuickAction::IsClaudeAgent(AgentName))
 	{
 		ActiveChatSessionId = SessionId;
@@ -2487,6 +2543,93 @@ bool SHyperAIStudioQuickActionWindow::IsTurnActive() const
 {
 	return AgentState.State == EHyperAIStudioAgentState::Working || AgentState.State == EHyperAIStudioAgentState::NeedsInput
 		|| AgentState.State == EHyperAIStudioAgentState::PlanReview;
+}
+
+TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildNativeToggle()
+{
+	return SNew(SCheckBox)
+		.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+		.Visibility_Lambda([this]() { return FHyperAIStudioNativeChat::IsSupported(GetSelectedAgentName()) ? EVisibility::Visible : EVisibility::Collapsed; })
+		.IsChecked_Lambda([this]() { return NativeView.IsValid() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+		.ToolTipText(LOCTEXT("NativeViewTooltip", "Show this chat in HyperAI's own view instead of the terminal: a transcript with tool calls, approvals and the plan, and a message box. New Codex and Gemini chats open the way you leave it. Switching resumes a Codex chat opened from the history or started in this view; other chats start fresh."))
+		.OnCheckStateChanged_Lambda([this](const ECheckBoxState State)
+		{
+			UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+			Settings->bUseNativeChatView = State == ECheckBoxState::Checked;
+			Settings->SaveConfig();
+			SetNativeView(Settings->bUseNativeChatView);
+		})
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("NativeView", "Native View"))
+			.Margin(FMargin(6.0f, 1.0f))
+		];
+}
+
+bool SHyperAIStudioQuickActionWindow::StartNativeChat(const FString& ResumeId)
+{
+	const FString Agent = GetSelectedAgentName();
+	const FString ChatModel = GetModelForAgent(Agent);
+	const TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(Agent, FHyperAIStudioService::GetProjectRoot(), ChatModel, ResumeId);
+	FString Error;
+	if (!Chat.IsValid() || !Chat->Start(Error))
+	{
+		LastMessage = FText::FromString(Error.IsEmpty() ? FString::Printf(TEXT("%s has no native view."), *Agent) : Error);
+		AddTranscriptLine(LastMessage.ToString());
+		return false;
+	}
+	// Replacing the terminal widget ends its session; the native chat carries the conversation from here.
+	TerminalWidget.Reset();
+	bTerminalStartupSent = true;
+	ActiveTerminalAgentName = Agent;
+	ActiveTerminalModel = ChatModel;
+	ActiveChatSessionId = ResumeId;
+	if (TerminalHost.IsValid())
+	{
+		TerminalHost->SetContent(SAssignNew(NativeView, SHyperAIStudioNativeChatView).Chat(Chat));
+		NativeView->FocusComposer();
+	}
+	LastMessage = FText::Format(LOCTEXT("NativeStarted", "{0} is running in the native view."), FText::FromString(Agent));
+	AddTranscriptLine(LastMessage.ToString());
+	return true;
+}
+
+void SHyperAIStudioQuickActionWindow::StopNativeChat()
+{
+	if (!NativeView.IsValid())
+	{
+		return;
+	}
+	if (const TSharedPtr<FHyperAIStudioNativeChat> Chat = NativeView->GetChat())
+	{
+		ActiveChatSessionId = Chat->GetSessionId();
+		Chat->Stop();
+	}
+	NativeView.Reset();
+}
+
+void SHyperAIStudioQuickActionWindow::SetNativeView(const bool bNative)
+{
+	if (bNative == NativeView.IsValid())
+	{
+		return;
+	}
+	if (bNative)
+	{
+		if (FHyperAIStudioNativeChat::IsSupported(GetSelectedAgentName()))
+		{
+			StartNativeChat(ActiveChatSessionId);
+		}
+		return;
+	}
+	// Back to the terminal, where the same conversation resumes.
+	const TSharedPtr<FHyperAIStudioNativeChat> Chat = NativeView->GetChat();
+	ResumeAgentName = GetSelectedAgentName();
+	ResumeSessionId = Chat.IsValid() ? Chat->GetSessionId() : FString();
+	ResumeTitle.Reset();
+	ResumeBackgroundId.Reset();
+	StopNativeChat();
+	QueueTerminalStartup(true, true);
 }
 
 TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildRemoteToggle()
