@@ -1,6 +1,9 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioAnimationToolset.h"
+#include "HyperAIStudioAnimationBlendSpace.h"
+#include "HyperAIStudioApprovalGate.h"
+#include "Editor.h"
 
 #include "AnimGraphNode_StateMachineBase.h"
 #include "AssetRegistry/AssetData.h"
@@ -817,11 +820,11 @@ FHyperAIStudioAnimationFacade::GetVariantDescriptors()
 			{TEXT("ordinary_animation_asset_property_crud")},
 			{TEXT("asset_disk_loading"), TEXT("preview_soft_reference_reporting"),
 				TEXT("mutation_execution_until_async_host")}},
-		{TEXT("blend_space"), {}, {TEXT("Engine")}, true, true, false,
-			{TEXT("loaded_axes_samples"), TEXT("closed_axis_sample_plan_stage")},
+		{TEXT("blend_space"), {}, {TEXT("Engine")}, true, true, true,
+			{TEXT("loaded_axes_samples"), TEXT("create_1d_or_2d_set_axes_and_replace_samples_for_one_blend_space_per_plan")},
 			{TEXT("ordinary_animation_asset_property_crud")},
-			{TEXT("asset_disk_loading"), TEXT("preview_soft_reference_reporting"),
-				TEXT("mutation_execution_until_async_host")}},
+			{TEXT("editing_a_blend_space_that_is_not_loaded"), TEXT("preview_soft_reference_reporting"),
+				TEXT("several_blend_spaces_in_one_plan")}},
 		{TEXT("pose_asset"), {}, {TEXT("Engine")}, true, true, false,
 			{TEXT("loaded_pose_curve_inspection"), TEXT("closed_source_pose_plan_stage")},
 			{TEXT("ordinary_animation_asset_property_crud")},
@@ -1179,6 +1182,34 @@ FString FHyperAIStudioAnimationContracts::ResultSchemaFingerprint()
 	return Fingerprint;
 }
 
+FString FHyperAIStudioAnimationContracts::InspectPayloadSchemaFingerprint()
+{
+	static const FString Fingerprint = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("animation.inspect.payload.v1|asset_paths|variant|details|prerequisites|page|cursor|budget|output_bytes"));
+	return Fingerprint;
+}
+
+FString FHyperAIStudioAnimationContracts::ValidatePayloadSchemaFingerprint()
+{
+	static const FString Fingerprint = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("animation.validate.payload.v1|asset_paths|variant|revision|clean|prerequisites|issues|budget|output_bytes"));
+	return Fingerprint;
+}
+
+FString FHyperAIStudioAnimationContracts::InspectResultSchemaFingerprint()
+{
+	static const FString Fingerprint = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("animation.inspect.result.v1|revision|records|issues|variants|cursor|bounded"));
+	return Fingerprint;
+}
+
+FString FHyperAIStudioAnimationContracts::ValidateResultSchemaFingerprint()
+{
+	static const FString Fingerprint = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("animation.validate.result.v1|revision|counts|issues|variants|bounded"));
+	return Fingerprint;
+}
+
 const FHyperAIStudioDomainAdapterDescriptor&
 FHyperAIStudioAnimationContracts::GetBaseAdapterDescriptor()
 {
@@ -1192,6 +1223,12 @@ FHyperAIStudioAnimationContracts::GetBaseAdapterDescriptor()
 		Value.Variants.Add({TEXT("hyper_animation_apply_plan"), MutationVariantId,
 			PayloadTypeId, PayloadSchemaFingerprint(), ResultTypeId, ResultSchemaFingerprint(),
 			EHyperAIStudioDomainSafety::Edit});
+		Value.Variants.Add({TEXT("hyper_animation_inspect"), InspectVariantId,
+			InspectPayloadTypeId, InspectPayloadSchemaFingerprint(), InspectResultTypeId, InspectResultSchemaFingerprint(),
+			EHyperAIStudioDomainSafety::Read});
+		Value.Variants.Add({TEXT("hyper_animation_validate"), ValidateVariantId,
+			ValidatePayloadTypeId, ValidatePayloadSchemaFingerprint(), ValidateResultTypeId, ValidateResultSchemaFingerprint(),
+			EHyperAIStudioDomainSafety::Read});
 		Value.ContractFingerprint =
 			FHyperAIStudioDomainAdapterRegistry::ComputeContractFingerprint(Value);
 		Value.AdapterFingerprint =
@@ -1469,8 +1506,11 @@ bool FHyperAIStudioAnimationContracts::ValidateOperationShape(
 	else if (Operation.Type == TEXT("blend_space.create"))
 	{
 		OutOperation.Kind = EHyperAIStudioAnimationOperationKind::BlendSpaceCreate;
-		if (!RequireSkeletonReference()) return Fail(TEXT("invalid_blend_space_create_shape"),
-			TEXT("blend_space.create accepts only a target and loaded Skeleton reference."));
+		// bFlag asks for a 1D blend space, which RequireSkeletonReference forbids for every other create.
+		if (Operation.ReferencePath.IsEmpty() || !NoNames() || Operation.AxisIndex != -1 || Operation.Minimum != 0.0
+			|| Operation.Maximum != 0.0 || !IsDefaultRule(Operation.TransitionRule) || !IsDefaultNotify(Operation.Notify)
+			|| !NoCollections()) return Fail(TEXT("invalid_blend_space_create_shape"),
+			TEXT("blend_space.create accepts only a target, a Skeleton reference, and bFlag true for a 1D blend space."));
 	}
 	else if (Operation.Type == TEXT("blend_space.set_axis"))
 	{
@@ -1913,13 +1953,19 @@ namespace HyperAIStudio::Animation::Private
 			UObject* Object = FindObject<UObject>(nullptr, *Path);
 			return IsValid(Object) && Object->GetPathName() == Path ? Object : nullptr;
 		};
+		// Blend space plans execute, so, like the other executing packs, they load what they reference.
+		auto LoadExact = [](const FString& Path) -> UObject*
+		{
+			if (Path.IsEmpty()) return nullptr;
+			UObject* Object = FSoftObjectPath(Path).TryLoad();
+			return IsValid(Object) && Object->GetPathName() == Path ? Object : nullptr;
+		};
 		switch (Operation.Kind)
 		{
 		case EHyperAIStudioAnimationOperationKind::AnimBlueprintCreate:
 		case EHyperAIStudioAnimationOperationKind::AnimBlueprintSetSkeleton:
 		case EHyperAIStudioAnimationOperationKind::MontageCreate:
 		case EHyperAIStudioAnimationOperationKind::CompositeCreate:
-		case EHyperAIStudioAnimationOperationKind::BlendSpaceCreate:
 		case EHyperAIStudioAnimationOperationKind::PoseAssetCreate:
 			if (!Cast<USkeleton>(FindExact(Operation.ReferencePath)))
 				return Fail(TEXT("skeleton_reference_not_loaded"),
@@ -1941,12 +1987,17 @@ namespace HyperAIStudio::Animation::Private
 						TEXT("Every composite segment sequence must already be loaded."));
 			}
 			break;
+		case EHyperAIStudioAnimationOperationKind::BlendSpaceCreate:
+			if (!Cast<USkeleton>(LoadExact(Operation.ReferencePath)))
+				return Fail(TEXT("skeleton_reference_not_found"),
+					TEXT("reference_path does not name a Skeleton asset."));
+			break;
 		case EHyperAIStudioAnimationOperationKind::BlendSpaceSetSamples:
 			for (const auto& Sample : Operation.Samples)
 			{
-				if (!Cast<UAnimSequence>(FindExact(Sample.SequencePath)))
-					return Fail(TEXT("sample_sequence_not_loaded"),
-						TEXT("Every blend-space sample sequence must already be loaded."));
+				if (!Cast<UAnimSequence>(LoadExact(Sample.SequencePath)))
+					return Fail(TEXT("sample_sequence_not_found"),
+						TEXT("Every blend-space sample needs sequence_path naming an Animation Sequence."));
 			}
 			break;
 		case EHyperAIStudioAnimationOperationKind::PoseAssetSetSource:
@@ -2089,6 +2140,12 @@ namespace HyperAIStudio::Animation::Private
 				FLogicalAnimationState Created;
 				Created.Variant = ExpectedTargetVariant(Operation.Kind);
 				Created.SkeletonPath = Operation.ReferencePath;
+				if (Operation.Kind == EHyperAIStudioAnimationOperationKind::BlendSpaceCreate)
+				{
+					// A new blend space's axes start at the engine's default range until set_axis changes them.
+					const FBlendParameter Default;
+					for (int32 Axis = 0; Axis < 3; ++Axis) Created.BlendAxes.Add(Axis, TPair<double, double>(Default.Min, Default.Max));
+				}
 				States.Add(Operation.TargetPath, MoveTemp(Created));
 				continue;
 			}
@@ -2257,6 +2314,103 @@ namespace HyperAIStudio::Animation::Private
 	}
 }
 
+namespace HyperAIStudio::Animation::Private
+{
+	/** Blend space plans run for real: prepared by the trusted executor, then queued for approval or staged and submitted. */
+	FHyperAIAnimationApplyPlanReport SubmitBlendSpacePlan(const FHyperAIAnimationApplyPlanRequest& Request,
+		const TSharedRef<FHyperAIStudioAnimationTypedPayload, ESPMode::ThreadSafe>& Payload, FHyperAIAnimationApplyPlanReport Report)
+	{
+		using Contracts = FHyperAIStudioAnimationContracts;
+		const FString Target = BlendSpace::EffectTarget(*Payload);
+		FHyperAIStudioTrustedArtifactRequest Trusted;
+		Trusted.PackId = Contracts::PackId;
+		Trusted.ToolName = TEXT("hyper_animation_apply_plan");
+		Trusted.VariantId = Contracts::MutationVariantId;
+		Trusted.Safety = EHyperAIStudioDomainSafety::Edit;
+		Trusted.ArtifactSemanticFingerprint = Payload->SemanticFingerprint;
+		Trusted.EffectTarget = Target;
+		Trusted.DeadlineMs = FHyperAIStudioTypedArtifactLimits::MaxArtifactDeadlineMs;
+		Trusted.MaxNativeOperations = FMath::Clamp(Payload->Operations.Num() + 4, 5, 128);
+		Trusted.MaxGameThreadMs = FHyperAIStudioTypedArtifactLimits::MaxArtifactGameThreadMs;
+		Trusted.MaxOutputBytes = Request.MaxOutputBytes;
+		Trusted.MaxResultBytes = 256;
+		Trusted.StageLifetimeMs = Contracts::StageLifetimeMs;
+		Trusted.bCompileOnce = false;
+		Trusted.bSaveOnce = true;
+		Trusted.bValidateOnce = true;
+		Trusted.bVerifyFreshOnce = true;
+		FHyperAIStudioTrustedPreparedArtifact Prepared;
+		FHyperAIStudioTrustedPrepareReport Prepare;
+		FString Error;
+		if (!FHyperAIStudioTrustedExecutionFacade::PrepareDryRun(Trusted, Payload,
+				MakeShared<FHyperAIStudioAnimationFreshVerifier, ESPMode::ThreadSafe>(), Prepared, Prepare, Error)
+			|| !Prepare.bPrepared)
+		{
+			Report.Status = Prepare.Status.StatusCode.IsEmpty() ? FString(TEXT("prepare_failed")) : Prepare.Status.StatusCode;
+			Report.Diagnostic = Clip(Error.IsEmpty() ? Prepare.Status.Diagnostic : Error);
+			if (!Prepare.Status.BlockingPrerequisiteIds.IsEmpty())
+			{
+				Report.Diagnostic += TEXT(" Blocking: ") + FString::Join(Prepare.Status.BlockingPrerequisiteIds, TEXT(", "));
+			}
+			return Report;
+		}
+		if (FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::Edit))
+		{
+			FHyperAIStudioApprovalSummary Summary;
+			Summary.PackId = Contracts::PackId;
+			Summary.ToolName = TEXT("hyper_animation_apply_plan");
+			Summary.VariantId = Contracts::MutationVariantId;
+			Summary.Safety = EHyperAIStudioDomainSafety::Edit;
+			Summary.EffectTarget = Target;
+			Summary.PlanHash = Report.PlanHash;
+			for (const FHyperAIStudioAnimationBackendOperation& Operation : Payload->Operations)
+			{
+				Summary.Effects.Add(Operation.Kind == EHyperAIStudioAnimationOperationKind::BlendSpaceCreate
+					? FString::Printf(TEXT("create a %s blend space for %s"), Operation.bFlag ? TEXT("1D") : TEXT("2D"),
+						*FPackageName::ObjectPathToObjectName(Operation.ReferencePath))
+					: Operation.Kind == EHyperAIStudioAnimationOperationKind::BlendSpaceSetAxis
+					? FString::Printf(TEXT("axis %d: %s from %g to %g"), Operation.AxisIndex, *Operation.Name, Operation.Minimum, Operation.Maximum)
+					: FString::Printf(TEXT("replace the samples with %d"), Operation.Samples.Num()));
+			}
+			Summary.Effects.Add(TEXT("save"));
+			Summary.Touches.Add(Target);
+			if (!FHyperAIStudioApprovalGate::Request(Prepared, Request.OperationId, Summary, Error))
+			{
+				Report.Status = TEXT("approval_not_queued");
+				Report.Diagnostic = Clip(Error);
+				return Report;
+			}
+			Report.bOk = true;
+			Report.Status = TEXT("awaiting_user_approval");
+			Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
+			return Report;
+		}
+		FHyperAIStudioTypedArtifactStageReceipt Receipt;
+		FHyperAIStudioTrustedExecutionDiagnostic StageStatus;
+		if (!FHyperAIStudioTrustedExecutionFacade::StageExact(Prepared, Request.OperationId, Receipt, StageStatus, Error))
+		{
+			Report.Status = StageStatus.StatusCode.IsEmpty() ? FString(TEXT("stage_failed")) : StageStatus.StatusCode;
+			Report.Diagnostic = Clip(Error.IsEmpty() ? StageStatus.Diagnostic : Error);
+			return Report;
+		}
+		Report.bStaged = true;
+		FHyperAIStudioTypedArtifactSubmissionReceipt Submission;
+		FHyperAIStudioTrustedExecutionDiagnostic SubmitStatus;
+		// Edit is tokenless; only risky safety classes need a server-issued grant.
+		if (!FHyperAIStudioTrustedExecutionFacade::SubmitExact(Receipt, FString(), Submission, SubmitStatus, Error))
+		{
+			Report.Status = SubmitStatus.StatusCode.IsEmpty() ? FString(TEXT("submit_failed")) : SubmitStatus.StatusCode;
+			Report.Diagnostic = Clip(Error.IsEmpty() ? SubmitStatus.Diagnostic : Error);
+			return Report;
+		}
+		Report.bExecutionSubmitted = true;
+		Report.bOk = true;
+		Report.Status = TEXT("submitted");
+		Report.Diagnostic = TEXT("The blend space edit, sample check and save run over the next editor ticks. Call hyper_operation_wait with operation_id, then hyper_animation_validate.");
+		return Report;
+	}
+}
+
 FHyperAIAnimationApplyPlanReport FHyperAIStudioAnimationContracts::BuildPlan(
 	const FHyperAIAnimationApplyPlanRequest& Request)
 {
@@ -2264,6 +2418,23 @@ FHyperAIAnimationApplyPlanReport FHyperAIStudioAnimationContracts::BuildPlan(
 	FHyperAIAnimationApplyPlanReport Report;
 	Report.bDryRun = Request.bDryRun;
 	Report.OperationId = Request.OperationId;
+	if (IsInGameThread() && Request.Operations.Num() <= MaxOperations)
+	{
+		for (const FHyperAIAnimationPlanOperation& Operation : Request.Operations)
+		{
+			if (Operation.Type == TEXT("blend_space.create") && IsCanonicalProjectObjectPath(Operation.ReferencePath))
+			{
+				FSoftObjectPath(Operation.ReferencePath).TryLoad();
+			}
+			for (const FHyperAIAnimationBlendSampleSpec& Sample : Operation.Samples)
+			{
+				if (Operation.Type == TEXT("blend_space.set_samples") && IsCanonicalProjectObjectPath(Sample.SequencePath))
+				{
+					FSoftObjectPath(Sample.SequencePath).TryLoad();
+				}
+			}
+		}
+	}
 	const double PlanDeadlineSeconds = FPlatformTime::Seconds()
 		+ static_cast<double>(FMath::Clamp(Request.MaxGameThreadMs, 1, 250)) / 1000.0;
 	if (!IsInGameThread())
@@ -2654,11 +2825,14 @@ FHyperAIAnimationApplyPlanReport FHyperAIStudioAnimationContracts::BuildPlan(
 	Report.Effects.bValidateOnce = true;
 	Report.Effects.bFreshVerifyOnce = true;
 
+	const bool bExecutable = HyperAIStudio::Animation::BlendSpace::IsExecutablePlan(Operations);
 	if (Request.bDryRun)
 	{
 		Report.bOk = true;
 		Report.Status = TEXT("valid_dry_run");
-		Report.Diagnostic = TEXT("Closed Animation/Rigging plan, loaded-state CAS, references, and typed-artifact hashes are valid without mutation.");
+		Report.Diagnostic = bExecutable
+			? TEXT("Nothing changed. To apply, resubmit with bDryRun false and an operation_id (expected_plan_hash optional), then call hyper_operation_wait.")
+			: TEXT("Closed Animation/Rigging plan, loaded-state CAS, references, and typed-artifact hashes are valid without mutation.");
 		return Report;
 	}
 	if (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId))
@@ -2667,11 +2841,15 @@ FHyperAIAnimationApplyPlanReport FHyperAIStudioAnimationContracts::BuildPlan(
 		Report.Diagnostic = TEXT("Staging requires one journal-safe operation_id.");
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Prepared.PlanHash || !IsCanonicalSha256(Request.ExpectedPlanHash))
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Prepared.PlanHash))
 	{
 		Report.Status = TEXT("expected_plan_hash_mismatch");
-		Report.Diagnostic = TEXT("Staging must echo the exact dry-run plan hash.");
+		Report.Diagnostic = FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage();
 		return Report;
+	}
+	if (bExecutable)
+	{
+		return SubmitBlendSpacePlan(Request, Payload, MoveTemp(Report));
 	}
 	FHyperAIStudioAnimationStagedArtifact Artifact;
 	Artifact.Prepared = Prepared;
@@ -3005,6 +3183,47 @@ int32 FHyperAIStudioAnimationResultPayload::GetBoundedByteSize() const
 	return 96 + 2 * (Phase.Len() + Revision.Len());
 }
 
+FString FHyperAIStudioAnimationInspectPayload::GetTypeId() const { return FHyperAIStudioAnimationContracts::InspectPayloadTypeId; }
+FString FHyperAIStudioAnimationInspectPayload::GetSchemaFingerprint() const { return FHyperAIStudioAnimationContracts::InspectPayloadSchemaFingerprint(); }
+int32 FHyperAIStudioAnimationInspectPayload::GetBoundedByteSize() const
+{
+	int64 Size = 256 + 2ll * (Request.Variant.Len() + Request.Cursor.Len());
+	for (const FString& Path : Request.AssetPaths) Size += 16 + 2ll * Path.Len();
+	return static_cast<int32>(FMath::Min<int64>(Size, MAX_int32));
+}
+
+FString FHyperAIStudioAnimationValidatePayload::GetTypeId() const { return FHyperAIStudioAnimationContracts::ValidatePayloadTypeId; }
+FString FHyperAIStudioAnimationValidatePayload::GetSchemaFingerprint() const { return FHyperAIStudioAnimationContracts::ValidatePayloadSchemaFingerprint(); }
+int32 FHyperAIStudioAnimationValidatePayload::GetBoundedByteSize() const
+{
+	int64 Size = 256 + 2ll * (Request.Variant.Len() + Request.ExpectedRevision.Len());
+	for (const FString& Path : Request.AssetPaths) Size += 16 + 2ll * Path.Len();
+	return static_cast<int32>(FMath::Min<int64>(Size, MAX_int32));
+}
+
+FString FHyperAIStudioAnimationInspectResultPayload::GetTypeId() const { return FHyperAIStudioAnimationContracts::InspectResultTypeId; }
+FString FHyperAIStudioAnimationInspectResultPayload::GetSchemaFingerprint() const { return FHyperAIStudioAnimationContracts::InspectResultSchemaFingerprint(); }
+int32 FHyperAIStudioAnimationInspectResultPayload::GetBoundedByteSize() const
+{
+	using namespace HyperAIStudio::Animation::Private;
+	int64 Size = 512 + 6ll * (Report.Status.Len() + Report.Diagnostic.Len() + Report.Revision.Len() + Report.NextCursor.Len());
+	for (const FHyperAIAnimationAssetRecord& Record : Report.Records) Size += EstimateRecordBytes(Record);
+	for (const FHyperAIAnimationIssue& Issue : Report.Issues) Size += EstimateIssueBytes(Issue);
+	for (const FHyperAIAnimationVariantStatus& Status : Report.Variants) Size += EstimateVariantBytes(Status);
+	return static_cast<int32>(FMath::Min<int64>(Size, MAX_int32));
+}
+
+FString FHyperAIStudioAnimationValidateResultPayload::GetTypeId() const { return FHyperAIStudioAnimationContracts::ValidateResultTypeId; }
+FString FHyperAIStudioAnimationValidateResultPayload::GetSchemaFingerprint() const { return FHyperAIStudioAnimationContracts::ValidateResultSchemaFingerprint(); }
+int32 FHyperAIStudioAnimationValidateResultPayload::GetBoundedByteSize() const
+{
+	using namespace HyperAIStudio::Animation::Private;
+	int64 Size = 512 + 6ll * (Report.Status.Len() + Report.Diagnostic.Len() + Report.Revision.Len());
+	for (const FHyperAIAnimationIssue& Issue : Report.Issues) Size += EstimateIssueBytes(Issue);
+	for (const FHyperAIAnimationVariantStatus& Status : Report.Variants) Size += EstimateVariantBytes(Status);
+	return static_cast<int32>(FMath::Min<int64>(Size, MAX_int32));
+}
+
 FHyperAIStudioAnimationDomainAdapter::FHyperAIStudioAnimationDomainAdapter()
 	: Descriptor(FHyperAIStudioAnimationContracts::GetBaseAdapterDescriptor())
 {
@@ -3020,8 +3239,36 @@ FHyperAIStudioDomainAdapterResult FHyperAIStudioAnimationDomainAdapter::Execute(
 	const FHyperAIStudioDomainDispatchContext& Context,
 	const IHyperAIStudioDomainRequestPayload& Payload)
 {
+	using Contracts = FHyperAIStudioAnimationContracts;
 	FHyperAIStudioDomainAdapterResult Result;
 	Result.Outcome = EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect;
+	auto IsRead = [&](const TCHAR* Tool, const TCHAR* Variant, const TCHAR* TypeId, const FString& Schema)
+	{
+		return Context.Binding.PackId == Descriptor.PackId && Context.Binding.ToolName == Tool && Context.Binding.VariantId == Variant
+			&& Context.Safety == EHyperAIStudioDomainSafety::Read && Payload.GetTypeId() == TypeId && Payload.GetSchemaFingerprint() == Schema;
+	};
+	auto Succeed = [&Result](const TSharedRef<IHyperAIStudioDomainResultPayload, ESPMode::ThreadSafe>& Output, const FString& Status, const FString& Diagnostic)
+	{
+		Result.Outcome = EHyperAIStudioDomainDispatchOutcome::Succeeded;
+		Result.StatusCode = Status.Left(FHyperAIStudioDomainLimits::MaxStatusCodeChars);
+		Result.Diagnostic = Diagnostic.Left(FHyperAIStudioDomainLimits::MaxDiagnosticChars);
+		Result.Payload = Output;
+		return Result;
+	};
+	if (IsRead(TEXT("hyper_animation_inspect"), Contracts::InspectVariantId, Contracts::InspectPayloadTypeId, Contracts::InspectPayloadSchemaFingerprint()))
+	{
+		const TSharedRef<FHyperAIStudioAnimationInspectResultPayload, ESPMode::ThreadSafe> Output =
+			MakeShared<FHyperAIStudioAnimationInspectResultPayload, ESPMode::ThreadSafe>();
+		Output->Report = UHyperAIStudioAnimationToolset::hyper_animation_inspect(static_cast<const FHyperAIStudioAnimationInspectPayload&>(Payload).Request);
+		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
+	}
+	if (IsRead(TEXT("hyper_animation_validate"), Contracts::ValidateVariantId, Contracts::ValidatePayloadTypeId, Contracts::ValidatePayloadSchemaFingerprint()))
+	{
+		const TSharedRef<FHyperAIStudioAnimationValidateResultPayload, ESPMode::ThreadSafe> Output =
+			MakeShared<FHyperAIStudioAnimationValidateResultPayload, ESPMode::ThreadSafe>();
+		Output->Report = UHyperAIStudioAnimationToolset::hyper_animation_validate(static_cast<const FHyperAIStudioAnimationValidatePayload&>(Payload).Request);
+		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
+	}
 	if (Context.Binding.PackId != Descriptor.PackId
 		|| Context.Binding.ToolName != TEXT("hyper_animation_apply_plan")
 		|| Context.Binding.VariantId != FHyperAIStudioAnimationContracts::MutationVariantId
@@ -3034,8 +3281,19 @@ FHyperAIStudioDomainAdapterResult FHyperAIStudioAnimationDomainAdapter::Execute(
 		Result.Diagnostic = TEXT("Animation adapter rejected a non-exact pack, variant, safety, or DTO binding.");
 		return Result;
 	}
+	const FHyperAIStudioAnimationTypedPayload& Typed = static_cast<const FHyperAIStudioAnimationTypedPayload&>(Payload);
+	if (HyperAIStudio::Animation::BlendSpace::IsExecutablePlan(Typed.Operations))
+	{
+		if (FHyperAIStudioAnimationContracts::ComputePayloadSemanticFingerprint(Typed.Operations, Typed.BaseRevision) != Typed.SemanticFingerprint)
+		{
+			Result.StatusCode = TEXT("typed_payload_drift");
+			Result.Diagnostic = TEXT("The sealed animation payload's semantic fingerprint drifted.");
+			return Result;
+		}
+		return HyperAIStudio::Animation::BlendSpace::ExecutePhase(Context.ActionKind, Typed);
+	}
 	Result.StatusCode = TEXT("staged_backend_required");
-	Result.Diagnostic = TEXT("Animation adapter is side-effect-free until PlanExecutionService owns the live lease, journal, transaction, compile, save, validate, and fresh-verify lifecycle.");
+	Result.Diagnostic = TEXT("Only blend space plans execute; other Animation/Rigging plans stay staged until their backends exist.");
 	return Result;
 }
 
@@ -3196,9 +3454,57 @@ void FHyperAIStudioAnimationRegistration::Shutdown()
 				TEXT("Could not unregister the owned Animation/Rigging toolset: %s"), *Error);
 		}
 	}
+	RollBackBlendSpaceBackend();
 	FHyperAIStudioAnimationStagingService::Reset();
 	bOwnsRegistration = false;
 	bStarted = false;
+}
+
+void FHyperAIStudioAnimationRegistration::RegisterBlendSpaceBackend()
+{
+	if (AdapterHandle.IsValid() || !FHyperAIStudioTrustedExecutionFacade::IsAvailable()) return;
+	FString Error;
+	Adapter = MakeShared<FHyperAIStudioAnimationDomainAdapter, ESPMode::ThreadSafe>();
+	if (!FHyperAIStudioTrustedExecutionFacade::RegisterAdapter(Adapter.ToSharedRef(), AdapterHandle, Error)
+		|| !FHyperAIStudioTrustedExecutionFacade::RegisterLiveProbe(AdapterHandle, FHyperAIStudioAnimationContracts::LiveProbeId, ProbeHandle, Error))
+	{
+		UE_LOG(LogHyperAIStudioAnimation, Warning, TEXT("Blend space plans stay staged-only: %s"), *Error);
+		RollBackBlendSpaceBackend();
+		return;
+	}
+	const auto Observe = []()
+	{
+		FHyperAIStudioTrustedProbeResult Observation;
+		Observation.bReady = GEditor != nullptr;
+		Observation.StatusCode = Observation.bReady ? TEXT("ready") : TEXT("editor_unavailable");
+		Observation.Diagnostic = Observation.bReady ? TEXT("Animation assets can be edited.") : TEXT("The editor is not running.");
+		return Observation;
+	};
+	if (!ProbePublisher.Start(ProbeHandle, Observe, Error))
+	{
+		UE_LOG(LogHyperAIStudioAnimation, Warning, TEXT("Blend space plans stay staged-only: the live probe did not start: %s"), *Error);
+		RollBackBlendSpaceBackend();
+	}
+}
+
+void FHyperAIStudioAnimationRegistration::RollBackBlendSpaceBackend()
+{
+	if (!IsInGameThread()) return;
+	ProbePublisher.Stop();
+	FString Error;
+	if (ProbeHandle.IsValid() && FHyperAIStudioTrustedExecutionFacade::UnregisterLiveProbe(ProbeHandle, Error))
+	{
+		ProbeHandle = {};
+	}
+	if (AdapterHandle.IsValid())
+	{
+		const EHyperAIStudioDomainUnregisterResult Outcome = FHyperAIStudioTrustedExecutionFacade::UnregisterAdapter(AdapterHandle, Error);
+		if (Outcome == EHyperAIStudioDomainUnregisterResult::Removed || Outcome == EHyperAIStudioDomainUnregisterResult::NotFound)
+		{
+			AdapterHandle = {};
+			Adapter.Reset();
+		}
+	}
 }
 
 bool FHyperAIStudioAnimationRegistration::IsRegistered() const
@@ -3232,4 +3538,5 @@ void FHyperAIStudioAnimationRegistration::RegisterAfterEngineInit()
 				*Error);
 		}
 	}
+	RegisterBlendSpaceBackend();
 }

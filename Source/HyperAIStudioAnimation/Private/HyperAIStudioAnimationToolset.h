@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "Delegates/Delegate.h"
 #include "HyperAIStudioDomainAdapter.h"
+#include "HyperAIStudioLiveProbePublisher.h"
+#include "HyperAIStudioTrustedExecution.h"
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
@@ -243,7 +245,8 @@ struct FHyperAIAnimationPlanOperation
 	 * Base operations: animbp.create|set_skeleton|add_state_machine|add_state|add_transition|
 	 * set_transition_rule|add_interface|add_layer|compile_repair; montage.create|add_section|
 	 * remove_section|link_sections|add_notify|remove_notify; composite.create|set_segments;
-	 * blend_space.create|set_axis|set_samples; pose_asset.create|set_source|set_pose_names;
+	 * blend_space.create|set_axis|set_samples (executable for one blend space per plan; bFlag on create makes it
+	 * 1D); pose_asset.create|set_source|set_pose_names;
 	 * sequence.add_curve|remove_curve|add_notify|remove_notify; skeleton.add_compatible|
 	 * remove_compatible. Optional ControlRig/IK/PoseSearch prefixes are recognized and fail
 	 * with variant_adapter_unavailable until their exact typed facade is linked.
@@ -338,14 +341,22 @@ class HYPERAISTUDIOANIMATION_API UHyperAIStudioAnimationToolset final : public U
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
+	/** Loaded animation assets (montages, composites, blend spaces, pose assets, sequences, skeletons) with revisions and elements. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Animation")
 	static FHyperAIAnimationInspectReport hyper_animation_inspect(
 		const FHyperAIAnimationInspectRequest& Request);
 
+	/**
+	 * Closed animation asset plans. One blend space's blend_space.create (ReferencePath = Skeleton; bFlag true for 1D),
+	 * set_axis (AxisIndex, Name, Minimum, Maximum) and set_samples (SequencePath and Position each) run for real: submit
+	 * with bDryRun false and an operation_id, then hyper_operation_wait. Other types only dry-run; use
+	 * hyper_anim_blueprint_apply_plan for Animation Blueprints.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Animation")
 	static FHyperAIAnimationApplyPlanReport hyper_animation_apply_plan(
 		const FHyperAIAnimationApplyPlanRequest& Request);
 
+	/** Fresh checks of loaded animation assets: skeletons, blend space samples, montage sections, notifies. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Animation")
 	static FHyperAIAnimationValidateReport hyper_animation_validate(
 		const FHyperAIAnimationValidateRequest& Request);
@@ -446,7 +457,44 @@ public:
 	virtual int32 GetBoundedByteSize() const override;
 };
 
-/** Base edit adapter is intentionally non-executable until the shared async host owns it. */
+/** Inspect and validate reach the adapter too: a registered adapter must cover its whole cohort. */
+class FHyperAIStudioAnimationInspectPayload final : public IHyperAIStudioDomainRequestPayload
+{
+public:
+	FHyperAIAnimationInspectRequest Request;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+class FHyperAIStudioAnimationValidatePayload final : public IHyperAIStudioDomainRequestPayload
+{
+public:
+	FHyperAIAnimationValidateRequest Request;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+class FHyperAIStudioAnimationInspectResultPayload final : public IHyperAIStudioDomainResultPayload
+{
+public:
+	FHyperAIAnimationInspectReport Report;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+class FHyperAIStudioAnimationValidateResultPayload final : public IHyperAIStudioDomainResultPayload
+{
+public:
+	FHyperAIAnimationValidateReport Report;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+/** Executes blend space plans and the two reads; every other plan stays staged-only. */
 class FHyperAIStudioAnimationDomainAdapter final : public IHyperAIStudioDomainAdapter
 {
 public:
@@ -523,10 +571,18 @@ public:
 	static constexpr const TCHAR* AtomicCohortId =
 		TEXT("cohort.source.hyperaistudioanimationtoolset.v1");
 	static constexpr const TCHAR* MutationVariantId = TEXT("base_animation_assets.v1");
+	/** The catalog's animation_backend prerequisite this pack satisfies once its blend space backend is registered. */
+	static constexpr const TCHAR* LiveProbeId = TEXT("probe.animation_editor");
 	static constexpr const TCHAR* PayloadTypeId =
 		TEXT("hyperai.payload.animation.base_animation_assets.v1");
 	static constexpr const TCHAR* ResultTypeId =
 		TEXT("hyperai.result.animation.base_animation_assets.v1");
+	static constexpr const TCHAR* InspectVariantId = TEXT("animation_inspect.v1");
+	static constexpr const TCHAR* ValidateVariantId = TEXT("animation_validate.v1");
+	static constexpr const TCHAR* InspectPayloadTypeId = TEXT("hyperai.payload.animation.inspect.v1");
+	static constexpr const TCHAR* ValidatePayloadTypeId = TEXT("hyperai.payload.animation.validate.v1");
+	static constexpr const TCHAR* InspectResultTypeId = TEXT("hyperai.result.animation.inspect.v1");
+	static constexpr const TCHAR* ValidateResultTypeId = TEXT("hyperai.result.animation.validate.v1");
 	static constexpr int32 MaxAssetPaths = 128;
 	static constexpr int32 MaxPathCharacters = 1024;
 	static constexpr int32 MaxStableIdCharacters = 2048;
@@ -550,6 +606,10 @@ public:
 	static bool IsCanonicalSha256(const FString& Value);
 	static FString PayloadSchemaFingerprint();
 	static FString ResultSchemaFingerprint();
+	static FString InspectPayloadSchemaFingerprint();
+	static FString ValidatePayloadSchemaFingerprint();
+	static FString InspectResultSchemaFingerprint();
+	static FString ValidateResultSchemaFingerprint();
 	static const FHyperAIStudioDomainAdapterDescriptor& GetBaseAdapterDescriptor();
 	static bool ValidateOperationShape(
 		const FHyperAIAnimationPlanOperation& Operation,
@@ -583,8 +643,14 @@ public:
 
 private:
 	void RegisterAfterEngineInit();
+	void RegisterBlendSpaceBackend();
+	void RollBackBlendSpaceBackend();
 
 	FDelegateHandle PostEngineInitHandle;
+	TSharedPtr<FHyperAIStudioAnimationDomainAdapter, ESPMode::ThreadSafe> Adapter;
+	FHyperAIStudioDomainRegistrationHandle AdapterHandle;
+	FHyperAIStudioTrustedProbeRegistrationHandle ProbeHandle;
+	FHyperAIStudioLiveProbePublisher ProbePublisher;
 	bool bStarted = false;
 	bool bOwnsRegistration = false;
 };

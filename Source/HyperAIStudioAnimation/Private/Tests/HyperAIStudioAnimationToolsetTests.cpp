@@ -4,9 +4,17 @@
 
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimationAsset.h"
+#include "Animation/BlendSpace1D.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Containers/Ticker.h"
 #include "Animation/Skeleton.h"
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioSettings.h"
+#include "HyperAIStudioTrustedExecution.h"
+#include "Misc/PackageName.h"
+#include "Misc/ScopeExit.h"
+#include "ObjectTools.h"
 #include "Misc/AutomationTest.h"
 #include "UObject/Package.h"
 #include "UObject/UnrealType.h"
@@ -143,6 +151,8 @@ bool FHyperAIStudioAnimationManifestAndPrerequisiteTest::RunTest(const FString& 
 		Variants[10].Variant == TEXT("pose_search_schema")
 		&& Variants[11].Variant == TEXT("pose_search_database")
 		&& Variants[10].RequiredModules.Contains(TEXT("PoseSearchEditor")));
+	TestTrue(TEXT("Blend spaces are the executable variant"),
+		Variants[3].Variant == TEXT("blend_space") && Variants[3].bApplyBackendExecutable);
 	const auto Statuses = FHyperAIStudioAnimationFacade::ResolveVariantStatuses();
 	TestEqual(TEXT("Base variants truthfully remain staged-only"), Statuses[0].State,
 		FString(TEXT("staged_backend_required")));
@@ -625,6 +635,127 @@ bool FHyperAIStudioAnimationAdapterAndStageTest::RunTest(const FString& Paramete
 	TestFalse(TEXT("Concrete stage rejects a forged semantic fingerprint"),
 		FHyperAIStudioAnimationStagingService::Stage(Forged, bReplay, Error));
 	FHyperAIStudioAnimationStagingService::Reset();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAnimationBlendSpaceTest,
+	"HyperAIStudio.NativeTools.AnimationRigging.BlendSpaceEndToEnd",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioAnimationBlendSpaceTest::RunTest(const FString& Parameters)
+{
+	// Three non-additive sequences of one skeleton under /Game; the Third Person template's Manny has them.
+	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	TArray<FAssetData> Assets;
+	Registry.GetAssetsByClass(UAnimSequence::StaticClass()->GetClassPathName(), Assets);
+	Assets.Sort([](const FAssetData& A, const FAssetData& B) { return A.PackageName.LexicalLess(B.PackageName); });
+	TMap<FString, TArray<FString>> BySkeleton;
+	FString SkeletonPath;
+	for (const FAssetData& Asset : Assets)
+	{
+		if (!Asset.PackageName.ToString().StartsWith(TEXT("/Game/")) || Asset.PackageName.ToString().StartsWith(TEXT("/Game/__"))) continue;
+		const FString Skeleton = FPackageName::ExportTextPathToObjectPath(Asset.GetTagValueRef<FString>(TEXT("Skeleton")));
+		TArray<FString>& Paths = BySkeleton.FindOrAdd(Skeleton);
+		if (Skeleton.IsEmpty() || Paths.Num() >= 3) continue;
+		const UAnimSequence* Sequence = Cast<UAnimSequence>(Asset.GetAsset());
+		if (Sequence && !Sequence->IsValidAdditive()) Paths.Add(Asset.GetObjectPathString());
+		if (Paths.Num() == 3)
+		{
+			SkeletonPath = Skeleton;
+			break;
+		}
+	}
+	if (SkeletonPath.IsEmpty())
+	{
+		AddInfo(TEXT("Skipped: no skeleton under /Game has three non-additive Animation Sequences."));
+		return true;
+	}
+	const TArray<FString>& Clips = BySkeleton[SkeletonPath];
+
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	const FString Name = TEXT("BS_HyperAITest_") + Suffix;
+	const FString Target = FString::Printf(TEXT("/Game/__HyperAIStudioTests/%s.%s"), *Name, *Name);
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
+	const bool bOneShot = Settings->bAllowOneShotAgentEdits;
+	Settings->bRequireApprovalForAgentEdits = false;
+	Settings->bAllowOneShotAgentEdits = true;
+	ON_SCOPE_EXIT
+	{
+		Settings->bRequireApprovalForAgentEdits = bApproval;
+		Settings->bAllowOneShotAgentEdits = bOneShot;
+		if (UObject* Made = FSoftObjectPath(Target).ResolveObject())
+		{
+			ObjectTools::ForceDeleteObjects({Made}, /*ShowConfirmation=*/false);
+		}
+	};
+
+	FHyperAIAnimationPlanOperation Create;
+	Create.Type = TEXT("blend_space.create");
+	Create.TargetPath = Target;
+	Create.ReferencePath = SkeletonPath;
+	Create.bFlag = true;
+	FHyperAIAnimationPlanOperation Axis;
+	Axis.Type = TEXT("blend_space.set_axis");
+	Axis.TargetPath = Target;
+	Axis.AxisIndex = 0;
+	Axis.Name = TEXT("Speed");
+	Axis.Minimum = 0.0;
+	Axis.Maximum = 500.0;
+	FHyperAIAnimationPlanOperation Samples;
+	Samples.Type = TEXT("blend_space.set_samples");
+	Samples.TargetPath = Target;
+	Samples.Samples = {{Clips[0], FVector(0.0, 0.0, 0.0)}, {Clips[1], FVector(200.0, 0.0, 0.0)}, {Clips[2], FVector(500.0, 0.0, 0.0)}};
+
+	// A missing skeleton is named in the plan's issues, not discovered while applying.
+	FHyperAIAnimationPlanOperation Missing = Create;
+	Missing.ReferencePath = TEXT("/Game/__NoSuch/SK_None.SK_None");
+	FHyperAIAnimationApplyPlanRequest Request;
+	Request.Operations = {Missing, Axis, Samples};
+	const FHyperAIAnimationApplyPlanReport Refused = UHyperAIStudioAnimationToolset::hyper_animation_apply_plan(Request);
+	TestFalse(TEXT("a plan with a missing skeleton is refused"), Refused.bOk);
+	TestTrue(TEXT("and the issue names it"), Refused.Issues.ContainsByPredicate([](const FHyperAIAnimationIssue& Issue)
+	{
+		return Issue.Code == TEXT("skeleton_reference_not_found");
+	}));
+
+	// One call: no dry run, no hash.
+	Request.Operations = {Create, Axis, Samples};
+	Request.bDryRun = false;
+	Request.OperationId = TEXT("animation-blendspace-") + Suffix;
+	const FHyperAIAnimationApplyPlanReport Submitted = UHyperAIStudioAnimationToolset::hyper_animation_apply_plan(Request);
+	FString IssueText;
+	for (const FHyperAIAnimationIssue& Issue : Submitted.Issues) IssueText += Issue.Code + TEXT(": ") + Issue.Message + TEXT(" ");
+	if (!TestEqual(*FString::Printf(TEXT("the plan is submitted (%s %s)"), *Submitted.Diagnostic, *IssueText), Submitted.Status, FString(TEXT("submitted"))))
+	{
+		return false;
+	}
+	FHyperAIStudioTypedArtifactOperationStatus Status;
+	FString StatusError;
+	const double Deadline = FPlatformTime::Seconds() + 60.0;
+	while (FPlatformTime::Seconds() < Deadline)
+	{
+		FTSTicker::GetCoreTicker().Tick(0.01f);
+		if (FHyperAIStudioTrustedExecutionFacade::QueryStatus(Request.OperationId, Status, StatusError) && Status.bTerminal) break;
+	}
+	TestEqual(*FString::Printf(TEXT("the operation completes (%s)"), *Status.Diagnostic), Status.Status, FString(TEXT("completed")));
+
+	const UBlendSpace* Space = FindObject<UBlendSpace>(nullptr, *Target);
+	if (!TestNotNull(TEXT("the blend space exists"), Space)) return false;
+	TestTrue(TEXT("bFlag made it 1D"), Space->IsA<UBlendSpace1D>());
+	TestEqual(TEXT("its skeleton"), Space->GetSkeleton() ? Space->GetSkeleton()->GetPathName() : FString(), SkeletonPath);
+	const FBlendParameter& Speed = Space->GetBlendParameter(0);
+	TestTrue(*FString::Printf(TEXT("the Speed axis runs 0 to 500 (%s %g-%g)"), *Speed.DisplayName, Speed.Min, Speed.Max),
+		Speed.DisplayName == TEXT("Speed") && Speed.Min == 0.f && Speed.Max == 500.f);
+	TestEqual(TEXT("three samples"), Space->GetNumberOfBlendSamples(), 3);
+	for (int32 Index = 0; Index < Space->GetBlendSamples().Num(); ++Index)
+	{
+		const FBlendSample& Sample = Space->GetBlendSamples()[Index];
+		TestTrue(FString::Printf(TEXT("sample %d is valid"), Index), Sample.bIsValid);
+		TestEqual(FString::Printf(TEXT("sample %d plays its clip"), Index), Sample.Animation ? Sample.Animation->GetPathName() : FString(), Clips[Index]);
+	}
+	TestFalse(TEXT("and it is saved"), Space->GetOutermost()->IsDirty());
 	return true;
 }
 
