@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioUIToolset.h"
+#include "HyperAIStudioUIAnimation.h"
 
 #include "Engine/Engine.h"
 #include "HAL/PlatformTime.h"
@@ -1271,6 +1272,11 @@ FHyperAIUIInspectReport UHyperAIStudioUIToolset::hyper_ui_inspect(
 FHyperAIUIApplyPlanReport UHyperAIStudioUIToolset::hyper_ui_apply_plan(
 	const FHyperAIUIApplyPlanRequest& Request)
 {
+	// Widget animation plans execute; everything else keeps the persisted-shadow route.
+	if (HyperAIStudio::UI::Animation::IsAnimationPlan(Request.Operations))
+	{
+		return HyperAIStudio::UI::Animation::BuildPlan(Request);
+	}
 	return FHyperAIStudioUIContracts::BuildPlan(Request);
 }
 
@@ -1335,10 +1341,12 @@ void FHyperAIStudioUIRegistration::RegisterAfterEngineInit()
 		return;
 	}
 	bOwnsToolset = true;
+	AnimationBackend.Register();
 }
 
 void FHyperAIStudioUIRegistration::RollBackRegistration()
 {
+	AnimationBackend.Unregister();
 	if (!bOwnsToolset || !IsInGameThread() || !UObjectInitialized()) return;
 	FString Error;
 	if (!FHyperAIStudioCapabilityRuntimeIndex::UnregisterOwned(

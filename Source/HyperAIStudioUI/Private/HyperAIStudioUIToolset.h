@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "HyperAIStudioDomainAdapter.h"
+#include "HyperAIStudioLiveProbePublisher.h"
+#include "HyperAIStudioTrustedExecution.h"
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "Layout/Margin.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
@@ -289,7 +291,7 @@ struct FHyperAIUIPlanOperation
 	GENERATED_BODY()
 
 	/**
-	 * animation.create|animation.rename|animation.delete,
+	 * animation.create|animation.rename|animation.delete, animation.add_float_track,
 	 * widget.set_property|widget.set_style,
 	 * binding.create_legacy|binding.update_legacy|binding.replace_legacy|binding.delete_legacy,
 	 * binding.create_mvvm|binding.update_mvvm|binding.replace_mvvm|binding.delete_mvvm.
@@ -507,12 +509,20 @@ class HYPERAISTUDIOUI_API UHyperAIStudioUIToolset final : public UToolsetDefinit
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
+	/** Loaded Widget Blueprints: widget tree, layout, animations, legacy bindings and MVVM, with persisted fingerprints. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|UI")
 	static FHyperAIUIInspectReport hyper_ui_inspect(const FHyperAIUIInspectRequest& Request);
 
+	/**
+	 * Widget Blueprint plans. animation.create (name; number_value = seconds) and animation.add_float_track
+	 * (subject_id = widget, secondary_name = animation, name = RenderOpacity, string_value = keys "0=0.3, 1=1")
+	 * run for real: submit with bDryRun false and an operation_id, then hyper_operation_wait. Other ops only dry-run;
+	 * build the widget tree with Epic's UMGToolSet.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|UI")
 	static FHyperAIUIApplyPlanReport hyper_ui_apply_plan(const FHyperAIUIApplyPlanRequest& Request);
 
+	/** Layout, accessibility, animation, binding and MVVM checks of loaded Widget Blueprints. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|UI")
 	static FHyperAIUIValidateReport hyper_ui_validate(const FHyperAIUIValidateRequest& Request);
 };
@@ -656,6 +666,22 @@ public:
 	static FHyperAIUIApplyPlanReport BuildPlan(const FHyperAIUIApplyPlanRequest& Request);
 };
 
+class FHyperAIStudioUIAnimationAdapter;
+
+/** The widget animation adapter and the widget blueprint editor probe. Best effort: the read tools work without them. */
+class FHyperAIStudioUIAnimationBackend final
+{
+public:
+	void Register();
+	void Unregister();
+
+private:
+	TSharedPtr<FHyperAIStudioUIAnimationAdapter, ESPMode::ThreadSafe> Adapter;
+	FHyperAIStudioDomainRegistrationHandle AdapterHandle;
+	FHyperAIStudioTrustedProbeRegistrationHandle ProbeHandle;
+	FHyperAIStudioLiveProbePublisher ProbePublisher;
+};
+
 class FHyperAIStudioUIRegistration final
 {
 public:
@@ -669,6 +695,7 @@ private:
 	void RollBackRegistration();
 
 	FDelegateHandle PostEngineInitHandle;
+	FHyperAIStudioUIAnimationBackend AnimationBackend;
 	bool bStarted = false;
 	bool bOwnsToolset = false;
 };

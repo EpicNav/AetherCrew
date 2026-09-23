@@ -21,6 +21,7 @@ public class HyperAIStudioUI : ModuleRules
 			"UnrealEd",
 			"SlateCore",
 			"MovieScene",
+			"MovieSceneTracks",
 			"ModelViewViewModel",
 			"ModelViewViewModelBlueprint"
 		});

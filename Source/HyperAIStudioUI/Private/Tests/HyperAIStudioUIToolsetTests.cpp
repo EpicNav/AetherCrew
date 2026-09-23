@@ -4,8 +4,25 @@
 #include "HyperAIStudioUIToolset.h"
 #include "HyperAIStudioUIValueModel.h"
 
+#include "Animation/WidgetAnimation.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetBlueprintGeneratedClass.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
+#include "Components/CanvasPanel.h"
+#include "Containers/Ticker.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioSettings.h"
+#include "HyperAIStudioTrustedExecution.h"
+#include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
+#include "MovieScene.h"
+#include "ObjectTools.h"
+#include "Sections/MovieSceneFloatSection.h"
+#include "Tracks/MovieSceneFloatTrack.h"
+#include "WidgetBlueprint.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -434,6 +451,133 @@ bool FHyperAIStudioUIShadowClonePrepareTest::RunTest(const FString& Parameters)
 		Prepare(PureDestructive, DestructivePrepared, PrepareError));
 	TestNotEqual(TEXT("Edit and destructive authority hashes differ"),
 		EditPrepared.AuthorizationPlanHash, DestructivePrepared.AuthorizationPlanHash);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioUIWidgetAnimationTest,
+	"HyperAIStudio.NativeTools.UI.WidgetAnimationEndToEnd",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioUIWidgetAnimationTest::RunTest(const FString& Parameters)
+{
+	// A Widget Blueprint with a canvas and a border named Panel, built the way the widget blueprint factory does.
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	const FString Name = TEXT("WBP_HyperAITest_") + Suffix;
+	const FString Target = FString::Printf(TEXT("/Game/__HyperAIStudioTests/%s.%s"), *Name, *Name);
+	UPackage* Package = CreatePackage(*(TEXT("/Game/__HyperAIStudioTests/") + Name));
+	UWidgetBlueprint* Blueprint = Cast<UWidgetBlueprint>(FKismetEditorUtilities::CreateBlueprint(UUserWidget::StaticClass(), Package,
+		FName(*Name), BPTYPE_Normal, UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+	if (!TestNotNull(TEXT("the fixture Widget Blueprint exists"), Blueprint)) return false;
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
+	const bool bOneShot = Settings->bAllowOneShotAgentEdits;
+	Settings->bRequireApprovalForAgentEdits = false;
+	Settings->bAllowOneShotAgentEdits = true;
+	ON_SCOPE_EXIT
+	{
+		Settings->bRequireApprovalForAgentEdits = bApproval;
+		Settings->bAllowOneShotAgentEdits = bOneShot;
+		ObjectTools::ForceDeleteObjects({Blueprint}, /*ShowConfirmation=*/false);
+	};
+	UCanvasPanel* Root = Blueprint->WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("Root"));
+	Blueprint->WidgetTree->RootWidget = Root;
+	UBorder* Panel = Blueprint->WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Panel"));
+	Root->AddChildToCanvas(Panel);
+	FAssetRegistryModule::AssetCreated(Blueprint);
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+
+	FHyperAIUIPlanOperation Create;
+	Create.Kind = TEXT("animation.create");
+	Create.Name = TEXT("Pulse");
+	Create.bHasNumberValue = true;
+	Create.NumberValue = 1.0;
+	FHyperAIUIPlanOperation Track;
+	Track.Kind = TEXT("animation.add_float_track");
+	Track.SubjectId = TEXT("Panel");
+	Track.SecondaryName = TEXT("Pulse");
+	Track.Name = TEXT("RenderOpacity");
+	Track.StringValue = TEXT("0=0.3, 1=1");
+
+	FHyperAIUIApplyPlanRequest Request;
+	Request.TargetPath = Target;
+	auto DryRun = [&](const TArray<FHyperAIUIPlanOperation>& Operations)
+	{
+		Request.Operations = Operations;
+		return UHyperAIStudioUIToolset::hyper_ui_apply_plan(Request);
+	};
+	auto Refuses = [&](const FHyperAIUIPlanOperation& Wrong, const TCHAR* Expected)
+	{
+		const FHyperAIUIApplyPlanReport Report = DryRun({Create, Wrong});
+		TestTrue(*FString::Printf(TEXT("refused with '%s' (%s: %s)"), Expected, *Report.Status, *Report.Diagnostic),
+			!Report.bOk && Report.Diagnostic.Contains(Expected));
+	};
+	FHyperAIUIPlanOperation Wrong = Track;
+	Wrong.SubjectId = TEXT("Nope");
+	Refuses(Wrong, TEXT("no widget named 'Nope'"));
+	Wrong = Track;
+	Wrong.Name = TEXT("ColorAndOpacity");
+	Refuses(Wrong, TEXT("RenderOpacity"));
+	Wrong = Track;
+	Wrong.StringValue = TEXT("0=0.3, 2=1");
+	Refuses(Wrong, TEXT("outside the animation"));
+	Wrong = Track;
+	Wrong.SecondaryName = TEXT("Missing");
+	Refuses(Wrong, TEXT("no animation named"));
+	const FHyperAIUIApplyPlanReport Planned = DryRun({Create, Track});
+	TestEqual(*FString::Printf(TEXT("the plan dry-runs (%s)"), *Planned.Diagnostic), Planned.Status, FString(TEXT("planned")));
+
+	// One call: no dry run, no hash.
+	Request.Operations = {Create, Track};
+	Request.bDryRun = false;
+	Request.OperationId = TEXT("ui-animation-") + Suffix;
+	const FHyperAIUIApplyPlanReport Submitted = UHyperAIStudioUIToolset::hyper_ui_apply_plan(Request);
+	if (!TestEqual(*FString::Printf(TEXT("the plan is submitted (%s)"), *Submitted.Diagnostic), Submitted.Status, FString(TEXT("submitted"))))
+	{
+		return false;
+	}
+	FHyperAIStudioTypedArtifactOperationStatus Status;
+	FString StatusError;
+	const double Deadline = FPlatformTime::Seconds() + 60.0;
+	while (FPlatformTime::Seconds() < Deadline)
+	{
+		FTSTicker::GetCoreTicker().Tick(0.01f);
+		if (FHyperAIStudioTrustedExecutionFacade::QueryStatus(Request.OperationId, Status, StatusError) && Status.bTerminal) break;
+	}
+	TestEqual(*FString::Printf(TEXT("the operation completes (%s)"), *Status.Diagnostic), Status.Status, FString(TEXT("completed")));
+
+	UWidgetAnimation* Pulse = nullptr;
+	for (UWidgetAnimation* Animation : Blueprint->Animations)
+	{
+		if (Animation && Animation->GetName() == TEXT("Pulse")) Pulse = Animation;
+	}
+	if (!TestNotNull(TEXT("the Pulse animation exists"), Pulse) || !TestNotNull(TEXT("with a movie scene"), Pulse->GetMovieScene())) return false;
+	const UMovieScene* Scene = Pulse->GetMovieScene();
+	const TRange<FFrameNumber> Range = Scene->GetPlaybackRange();
+	const double Seconds = Scene->GetTickResolution().AsSeconds(FFrameTime(Range.GetUpperBoundValue() - Range.GetLowerBoundValue()));
+	TestTrue(*FString::Printf(TEXT("it lasts a second (%.3f)"), Seconds), FMath::IsNearlyEqual(Seconds, 1.0, 0.01));
+	const UMovieSceneFloatSection* Section = nullptr;
+	for (const FWidgetAnimationBinding& Binding : Pulse->AnimationBindings)
+	{
+		if (Binding.WidgetName != TEXT("Panel")) continue;
+		for (UMovieSceneTrack* Each : Scene->FindTracks(UMovieSceneFloatTrack::StaticClass(), Binding.AnimationGuid))
+		{
+			const UMovieSceneFloatTrack* Float = Cast<UMovieSceneFloatTrack>(Each);
+			if (Float && Float->GetPropertyName() == TEXT("RenderOpacity") && !Float->GetAllSections().IsEmpty())
+			{
+				Section = Cast<UMovieSceneFloatSection>(Float->GetAllSections()[0]);
+			}
+		}
+	}
+	if (!TestNotNull(TEXT("Panel.RenderOpacity is animated"), Section)) return false;
+	float Start = -1.f;
+	float End = -1.f;
+	Section->GetChannel().Evaluate(FFrameTime(Range.GetLowerBoundValue()), Start);
+	Section->GetChannel().Evaluate(FFrameTime(Range.GetUpperBoundValue()), End);
+	TestTrue(*FString::Printf(TEXT("opacity runs 0.3 to 1 (%.2f to %.2f)"), Start, End), FMath::IsNearlyEqual(Start, 0.3f, 0.01f) && FMath::IsNearlyEqual(End, 1.f, 0.01f));
+	TestFalse(TEXT("the Widget Blueprint is saved"), Blueprint->GetOutermost()->IsDirty());
+	Request.OperationId = TEXT("ui-animation-again-") + Suffix;
+	TestEqual(TEXT("a second Pulse is refused"), UHyperAIStudioUIToolset::hyper_ui_apply_plan(Request).Status, FString(TEXT("invalid_op")));
 	return true;
 }
 
