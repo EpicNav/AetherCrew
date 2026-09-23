@@ -407,6 +407,12 @@ def select_tasks(spec):
     return chosen
 
 
+def copy_evidence(task_id, out_dir):
+    """The verifier's captures from the required views, kept beside the record."""
+    for image in (BENCH_ROOT / "Saved" / "HyperAIBench" / "verify").glob(f"{task_id}_*.png"):
+        shutil.copy2(image, out_dir / image.name)
+
+
 def verify(tasks, log_path, timeout=900):
     """Runs the verification tests in a fresh editor, which only knows what was saved to disk."""
     if editor_running():
@@ -786,6 +792,7 @@ def run_one(agent, task, out_dir, args):
     stop_editor()
     archive_bench_content(out_dir)
     verification = verify([task], out_dir / "verify.log")[task_id]
+    copy_evidence(task_id, out_dir)
     record.update({"task": task_id, "pass": bool(verification.get("pass")), "verification": verification, "out_dir": str(out_dir)})
     (out_dir / "record.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
     acct = record["accounting"]
@@ -830,6 +837,7 @@ def cmd_reverify(args):
         out_dir = Path(record["out_dir"])
         restore_bench_content(out_dir)
         verification = verify([task], out_dir / "reverify.log")[record["task"]]
+        copy_evidence(record["task"], out_dir)
         record["verification"] = verification
         record["pass"] = bool(verification.get("pass"))
         log(f"{record['agent']} / {record['task']}: {'PASS' if record['pass'] else 'FAIL'}")

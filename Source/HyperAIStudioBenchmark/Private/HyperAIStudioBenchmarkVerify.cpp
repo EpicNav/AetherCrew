@@ -16,6 +16,7 @@
 #include "Animation/WidgetAnimation.h"
 #include "Blueprint/WidgetTree.h"
 #include "Camera/CameraComponent.h"
+#include "Components/SceneCaptureComponent2D.h"
 #include "Channels/MovieSceneFloatChannel.h"
 #include "Components/Border.h"
 #include "Components/DirectionalLightComponent.h"
@@ -30,7 +31,10 @@
 #include "EdGraphSchema_K2.h"
 #include "Editor.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/TextureRenderTarget2D.h"
 #include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
+#include "ImageUtils.h"
 #include "FileHelpers.h"
 #include "K2Node_VariableGet.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -57,10 +61,13 @@
 #include "Sections/MovieSceneFloatSection.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "ShaderCompiler.h"
+#include "TextureResource.h"
 #include "Tracks/MovieSceneFloatTrack.h"
 #include "WidgetBlueprint.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
+#include "WorldPartition/WorldPartitionHandle.h"
 #include "WorldPartition/WorldPartitionHelpers.h"
 
 /**
@@ -242,6 +249,152 @@ namespace HyperAIStudio::Benchmark
 			for (TActorIterator<AActor> It(World); It; ++It) OutActors.Add(Describe(**It));
 		}
 		return true;
+	}
+
+	/** Holds every actor of a partitioned level loaded while it lives, so a capture sees the whole scene. */
+	struct FLoadedScene
+	{
+		TArray<FWorldPartitionReference> References;
+
+		explicit FLoadedScene(UWorld* World)
+		{
+			UWorldPartition* Partition = World ? World->GetWorldPartition() : nullptr;
+			if (!Partition) return;
+			FWorldPartitionHelpers::ForEachActorDescInstance(Partition, [this, Partition](const FWorldPartitionActorDescInstance* Desc)
+			{
+				if (Desc) References.Emplace(Partition, Desc->GetGuid());
+				return true;
+			});
+		}
+	};
+
+	constexpr int32 CaptureWidth = 320;
+	constexpr int32 CaptureHeight = 180;
+
+	/**
+	 * An independent final-colour capture through a camera actor's view: engine APIs only, so the verifier never
+	 * grades HyperAIStudio with HyperAIStudio's own capture tool. MaterialTime >= 0 forces material time.
+	 */
+	bool CaptureCamera(UWorld& World, const TCHAR* Label, const float MaterialTime, TArray<FColor>& OutPixels, FString& OutError)
+	{
+		const UCameraComponent* Camera = nullptr;
+		for (TActorIterator<AActor> It(&World); It && !Camera; ++It)
+		{
+			if (It->GetActorLabel().Equals(Label, ESearchCase::IgnoreCase)) Camera = It->FindComponentByClass<UCameraComponent>();
+		}
+		if (!Camera)
+		{
+			OutError = FString::Printf(TEXT("no camera labelled %s"), Label);
+			return false;
+		}
+		FMinimalViewInfo View;
+		const_cast<UCameraComponent*>(Camera)->GetCameraView(0.f, View);
+		UTextureRenderTarget2D* Target = NewObject<UTextureRenderTarget2D>(GetTransientPackage(), NAME_None, RF_Transient);
+		Target->RenderTargetFormat = RTF_RGBA8;
+		Target->ClearColor = FLinearColor::Black;
+		Target->InitAutoFormat(CaptureWidth, CaptureHeight);
+		Target->UpdateResourceImmediate(/*bClearRenderTarget=*/true);
+		USceneCaptureComponent2D* Capture = NewObject<USceneCaptureComponent2D>(GetTransientPackage(), NAME_None, RF_Transient);
+		Capture->CaptureSource = SCS_FinalColorLDR;
+		Capture->TextureTarget = Target;
+		Capture->bCaptureEveryFrame = false;
+		Capture->bCaptureOnMovement = false;
+		Capture->bAlwaysPersistRenderingState = true;
+		Capture->FOVAngle = View.FOV;
+		Capture->SetWorldLocationAndRotation(View.Location, View.Rotation);
+		Capture->RegisterComponentWithWorld(&World);
+		if (GShaderCompilingManager) GShaderCompilingManager->FinishAllCompilation();
+		IConsoleVariable* TimeOverride = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Test.OverrideTimeMaterialExpressions"));
+		if (TimeOverride && MaterialTime >= 0.f) TimeOverride->Set(MaterialTime, ECVF_SetByCode);
+		bool bRead = false;
+		// A few passes first, so exposure and temporal history settle.
+		for (int32 Pass = 0; Pass < 4; ++Pass)
+		{
+			World.SendAllEndOfFrameUpdates();
+			Capture->CaptureScene();
+			FTextureRenderTargetResource* Resource = Target->GameThread_GetRenderTargetResource();
+			bRead = Resource && Resource->ReadPixels(OutPixels);
+		}
+		if (TimeOverride && MaterialTime >= 0.f) TimeOverride->Set(-1.f, ECVF_SetByCode);
+		Capture->UnregisterComponent();
+		if (!bRead || OutPixels.Num() != CaptureWidth * CaptureHeight)
+		{
+			OutError = TEXT("the capture could not be read back");
+			return false;
+		}
+		return true;
+	}
+
+	struct FImageStats
+	{
+		float MeanLuma = 0.f;
+		float LumaDeviation = 0.f;
+		float BlackShare = 0.f;
+		float CyanShare = 0.f;
+		float OrangeShare = 0.f;
+	};
+
+	FImageStats Measure(const TArray<FColor>& Pixels)
+	{
+		FImageStats Stats;
+		if (Pixels.IsEmpty()) return Stats;
+		double Sum = 0.0;
+		double SumSquares = 0.0;
+		for (const FColor& Pixel : Pixels)
+		{
+			const double Luma = (0.2126 * Pixel.R + 0.7152 * Pixel.G + 0.0722 * Pixel.B) / 255.0;
+			Sum += Luma;
+			SumSquares += Luma * Luma;
+			// Hue as seen: on the display-encoded values, since linear light pushes oranges toward red.
+			const FLinearColor Hsv = FLinearColor(Pixel.R / 255.f, Pixel.G / 255.f, Pixel.B / 255.f).LinearRGBToHSV();
+			Stats.BlackShare += Hsv.B < 0.03f ? 1.f : 0.f;
+			Stats.CyanShare += Hsv.R >= 160.f && Hsv.R <= 220.f && Hsv.G > 0.25f && Hsv.B > 0.15f ? 1.f : 0.f;
+			Stats.OrangeShare += Hsv.R >= 10.f && Hsv.R <= 55.f && Hsv.G > 0.35f && Hsv.B > 0.25f ? 1.f : 0.f;
+		}
+		const double Count = Pixels.Num();
+		Stats.MeanLuma = static_cast<float>(Sum / Count);
+		Stats.LumaDeviation = static_cast<float>(FMath::Sqrt(FMath::Max(0.0, SumSquares / Count - FMath::Square(Sum / Count))));
+		Stats.BlackShare /= Count;
+		Stats.CyanShare /= Count;
+		Stats.OrangeShare /= Count;
+		return Stats;
+	}
+
+	/** Share of pixels whose largest channel moved by more than 8 of 255. */
+	float ChangedShare(const TArray<FColor>& A, const TArray<FColor>& B)
+	{
+		if (A.Num() != B.Num() || A.IsEmpty()) return 0.f;
+		int32 Changed = 0;
+		for (int32 Index = 0; Index < A.Num(); ++Index)
+		{
+			const int32 Delta = FMath::Max3(FMath::Abs(A[Index].R - B[Index].R), FMath::Abs(A[Index].G - B[Index].G), FMath::Abs(A[Index].B - B[Index].B));
+			Changed += Delta > 8 ? 1 : 0;
+		}
+		return static_cast<float>(Changed) / A.Num();
+	}
+
+	/** Evidence for the scorecard, beside the task's JSON report. */
+	FString SaveEvidence(const FString& Task, const TCHAR* View, const TArray<FColor>& Pixels)
+	{
+		TArray<FColor> Opaque = Pixels;
+		for (FColor& Pixel : Opaque) Pixel.A = 255;
+		TArray64<uint8> Png;
+		FImageUtils::PNGCompressImageArray(CaptureWidth, CaptureHeight, Opaque, Png);
+		const FString Name = FString::Printf(TEXT("%s_%s.png"), *Task, View);
+		FFileHelper::SaveArrayToFile(Png, *(FPaths::ProjectSavedDir() / TEXT("HyperAIBench") / TEXT("verify") / Name));
+		return Name;
+	}
+
+	/** A view that shows lit structure: not black, not flat, not blown out. */
+	bool ShowsLitStructure(const FImageStats& Stats)
+	{
+		return Stats.BlackShare < 0.9f && Stats.LumaDeviation > 0.02f && Stats.MeanLuma > 0.04f && Stats.MeanLuma < 0.97f;
+	}
+
+	FString Describe(const FImageStats& Stats)
+	{
+		return FString::Printf(TEXT("mean luma %.2f, deviation %.3f, %.0f%% black, %.1f%% cyan, %.1f%% orange"), Stats.MeanLuma,
+			Stats.LumaDeviation, Stats.BlackShare * 100.f, Stats.CyanShare * 100.f, Stats.OrangeShare * 100.f);
 	}
 
 	const FActorFacts* FindLabel(const TArray<FActorFacts>& Actors, const TCHAR* Label)
@@ -434,7 +587,8 @@ bool FHyperAIBenchVerifyMaterial::RunTest(const FString& Parameters)
 		const TArray<FString> Errors = Resource ? Resource->GetCompileErrors() : TArray<FString>();
 		Report.Add(TEXT("material.compiles"), Resource && Errors.IsEmpty(),
 			!Resource ? TEXT("no material resource for this platform") : Errors.IsEmpty() ? TEXT("no compile errors") : Errors[0]);
-		Report.Add(TEXT("material.animated"), IsTimeDriven(Material->GetExpressions()), TEXT("a Time or Panner node drives the graph"));
+		// A structural hint only: visual.animated is the proof, and a graph can animate through nodes this misses.
+		Report.Add(TEXT("material.animated"), IsTimeDriven(Material->GetExpressions()), TEXT("a Time or Panner node drives the graph"), /*bRequired=*/false);
 		const UMaterialEditorOnlyData* Inputs = Material->GetEditorOnlyData();
 		Report.Add(TEXT("material.outputs"), Inputs && (Inputs->EmissiveColor.IsConnected() || Inputs->BaseColor.IsConnected()),
 			TEXT("emissive or base colour is connected"));
@@ -455,6 +609,47 @@ bool FHyperAIBenchVerifyMaterial::RunTest(const FString& Parameters)
 		const FVector Target = Plane ? Plane->Bounds.GetCenter() : FVector::ZeroVector;
 		Report.Add(TEXT("level.camera"), Camera && Camera->bCamera && FacingDot(*Camera, Target) > 0.7f,
 			Camera ? FString::Printf(TEXT("CAM_Material facing %.2f"), FacingDot(*Camera, Target)) : TEXT("no camera labelled CAM_Material"));
+
+		// Visual: what CAM_Material sees at six forced material times, spread over 2.5 s so a sweep with a
+		// period of a few seconds shows up at least once.
+		Report.Stage = TEXT("structure+runtime+visual");
+		UWorld* World = GEditor->GetEditorWorldContext().World();
+		const FLoadedScene Scene(World);
+		constexpr int32 FrameCount = 6;
+		TArray<FColor> Frames[FrameCount];
+		const float Times[FrameCount] = {0.f, 0.33f, 0.66f, 1.f, 1.7f, 2.5f};
+		FString CaptureError;
+		bool bCaptured = true;
+		for (int32 Index = 0; Index < FrameCount && bCaptured; ++Index)
+		{
+			bCaptured = CaptureCamera(*World, TEXT("CAM_Material"), Times[Index], Frames[Index], CaptureError);
+		}
+		// An emissive pulse can leave one instant black, so the brightest frame is judged and kept.
+		int32 Brightest = 0;
+		for (int32 Index = 1; Index < FrameCount && bCaptured; ++Index)
+		{
+			if (Measure(Frames[Index]).MeanLuma > Measure(Frames[Brightest]).MeanLuma) Brightest = Index;
+		}
+		if (Report.Add(TEXT("visual.captured"), bCaptured, bCaptured ? SaveEvidence(TEXT("02-material"), TEXT("CAM_Material"), Frames[Brightest]) : CaptureError))
+		{
+			const FImageStats Stats = Measure(Frames[Brightest]);
+			Report.Add(TEXT("visual.nonblank"), Stats.BlackShare < 0.98f && (Stats.LumaDeviation > 0.01f || Stats.MeanLuma > 0.02f),
+				FString::Printf(TEXT("brightest frame, material time %.2f: %s"), Times[Brightest], *Describe(Stats)));
+			float Change = 0.f;
+			for (int32 Index = 1; Index < FrameCount; ++Index) Change = FMath::Max(Change, ChangedShare(Frames[0], Frames[Index]));
+			Report.Add(TEXT("visual.animated"), Change > 0.01f, FString::Printf(TEXT("up to %.1f%% of pixels change from material time 0 over 2.5 s"), Change * 100.f));
+			float Cyan = 0.f;
+			float Orange = 0.f;
+			for (const TArray<FColor>& Frame : Frames)
+			{
+				const FImageStats Each = Measure(Frame);
+				Cyan = FMath::Max(Cyan, Each.CyanShare);
+				Orange = FMath::Max(Orange, Each.OrangeShare);
+			}
+			// The task asks for a cyan grid and an orange pulse; a frame without either is not that material.
+			Report.Add(TEXT("visual.palette"), Cyan > 0.002f && Orange > 0.002f,
+				FString::Printf(TEXT("cyan up to %.1f%%, orange up to %.1f%% of pixels"), Cyan * 100.f, Orange * 100.f));
+		}
 	}
 	Report.Finish(*this);
 	return true;
@@ -492,12 +687,27 @@ bool FHyperAIBenchVerifyLevel::RunTest(const FString& Parameters)
 
 		TArray<const FActorFacts*> Props;
 		for (const FActorFacts& Facts : Actors) if (!Facts.Meshes.IsEmpty() && Facts.Bounds.IsValid) Props.Add(&Facts);
-		const bool bFloor = Props.ContainsByPredicate([](const FActorFacts* P)
+		// A floor is a wide piece whose walking surface, its top, is near Z=0; a thick slab counts as much as a plane.
+		auto IsSlab = [](const FActorFacts* P)
 		{
 			const FVector Size = P->Bounds.GetSize();
-			return Size.X >= 2000.0 && Size.Y >= 2000.0 && Size.Z <= 200.0 && FMath::Abs(P->Bounds.GetCenter().Z) < 200.0;
+			return Size.Z < 0.5 * FMath::Min(Size.X, Size.Y);
+		};
+		const bool bFloor = Props.ContainsByPredicate([&IsSlab](const FActorFacts* P)
+		{
+			const FVector Size = P->Bounds.GetSize();
+			return Size.X >= 2000.0 && Size.Y >= 2000.0 && IsSlab(P) && FMath::Abs(P->Bounds.Max.Z) < 200.0;
 		});
-		Report.Add(TEXT("layout.floor"), bFloor, TEXT("a floor at least 2000 x 2000 near Z=0"));
+		const FActorFacts* Widest = nullptr;
+		for (const FActorFacts* P : Props)
+		{
+			const FVector Size = P->Bounds.GetSize();
+			if (IsSlab(P) && (!Widest || Size.X * Size.Y > Widest->Bounds.GetSize().X * Widest->Bounds.GetSize().Y)) Widest = P;
+		}
+		Report.Add(TEXT("layout.floor"), bFloor, Widest
+			? FString::Printf(TEXT("needs one piece at least 2000 x 2000 with its top near Z=0; widest flat piece is %s, %.0f x %.0f with its top at Z=%.0f"),
+				*Widest->Label, Widest->Bounds.GetSize().X, Widest->Bounds.GetSize().Y, Widest->Bounds.Max.Z)
+			: FString(TEXT("needs one piece at least 2000 x 2000 with its top near Z=0; there is no flat piece")));
 		int32 Walls = 0;
 		for (const FActorFacts* P : Props)
 		{
@@ -534,6 +744,21 @@ bool FHyperAIBenchVerifyLevel::RunTest(const FString& Parameters)
 			Front ? FString::Printf(TEXT("CAM_Front pitch %.0f"), PitchDegrees(*Front)) : TEXT("no camera labelled CAM_Front"));
 		Report.Add(TEXT("views.top"), Top && Top->bCamera && PitchDegrees(*Top) <= -60.f,
 			Top ? FString::Printf(TEXT("CAM_Top pitch %.0f"), PitchDegrees(*Top)) : TEXT("no camera labelled CAM_Top"));
+
+		// Visual: both required views show lit structure.
+		Report.Stage = TEXT("structure+runtime+visual");
+		UWorld* World = GEditor->GetEditorWorldContext().World();
+		const FLoadedScene Scene(World);
+		for (const TCHAR* View : {TEXT("CAM_Front"), TEXT("CAM_Top")})
+		{
+			TArray<FColor> Pixels;
+			FString CaptureError;
+			const bool bCaptured = CaptureCamera(*World, View, -1.f, Pixels, CaptureError);
+			const FImageStats Stats = Measure(Pixels);
+			Report.Add(FString::Printf(TEXT("visual.%s"), View == FString(TEXT("CAM_Front")) ? TEXT("front") : TEXT("top")),
+				bCaptured && ShowsLitStructure(Stats),
+				bCaptured ? SaveEvidence(TEXT("03-level"), View, Pixels) + TEXT(": ") + Describe(Stats) : CaptureError);
+		}
 	}
 	Report.Finish(*this);
 	return true;
