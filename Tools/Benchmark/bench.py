@@ -20,6 +20,7 @@ import argparse
 import filecmp
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -582,6 +583,7 @@ def parse_claude(event, acct, state):
         state["turns"] = event.get("num_turns")
         state["cost_usd"] = event.get("total_cost_usd")
         state["agent_status"] = event.get("subtype")
+        state["is_error"] = bool(event.get("is_error"))
 
 
 def parse_codex(event, acct, state):
@@ -776,7 +778,67 @@ PROMPT_PREAMBLE = (
 )
 
 
+# A plan's usage limit can end a run early through no fault of the tools. Such a run is set aside, unverified, and
+# run again once the limit lifts, so the scorecard only counts runs that had their full chance.
+USAGE_LIMIT_PATTERN = re.compile(r"usage limit|hit your (?:\w+ )?limit|limit reached|out of extra usage", re.IGNORECASE)
+USAGE_LIMIT_MAX_WAIT = 6 * 3600
+
+
+def usage_limit_message(agent, state, out_dir):
+    """The plan's usage-limit message when that is what ended the run, else ''."""
+    if agent == "codex":
+        text = state.get("error", "") if state.get("agent_status") in ("turn.failed", "error") else ""
+    else:
+        # Claude prints the limit as its whole result: an error, or a line far shorter than any real summary.
+        final = state.get("final") or ""
+        text = final if state.get("is_error") or len(final) < 200 else ""
+    try:
+        text += "\n" + (out_dir / "stderr.txt").read_text(encoding="utf-8", errors="replace")[-2000:]
+    except OSError:
+        pass
+    return text.strip()[:500] if USAGE_LIMIT_PATTERN.search(text) else ""
+
+
+def usage_reset_time(message, now=None):
+    """When the limit lifts, read from its message (a Unix time, or a clock time such as "3:27 PM"), plus two
+    minutes; half an hour from now when the message gives neither."""
+    now = time.time() if now is None else now
+    stamp = re.search(r"\|(\d{10})\b", message)
+    if stamp:
+        return int(stamp.group(1)) + 120
+    clock = re.search(r"(?:try again at|resets?(?: at)?)\s+(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b", message, re.IGNORECASE)
+    if not clock:
+        return now + 1800
+    hour = int(clock.group(1)) % 12 + (12 if clock.group(3).lower() == "p" else 0)
+    local = time.localtime(now)
+    target = time.mktime((local.tm_year, local.tm_mon, local.tm_mday, hour, int(clock.group(2) or 0), 0, 0, 0, -1))
+    return (target if target > now else target + 86400) + 120
+
+
 def run_one(agent, task, out_dir, args):
+    """One run; when a usage limit cut it short, the attempt is kept beside it and the run starts over later."""
+    waited = 0.0
+    attempt = 1
+    while True:
+        record = run_attempt(agent, task, out_dir, args)
+        if record["stop_reason"] != "usage_limit":
+            return record
+        resume = usage_reset_time(record["usage_limit"])
+        if waited + max(0.0, resume - time.time()) > USAGE_LIMIT_MAX_WAIT:
+            log(f"{agent} / {task[0]}: the usage limit lasts past the {USAGE_LIMIT_MAX_WAIT // 3600} h wait cap; recorded as stopped by it.")
+            return record
+        shelved = out_dir.with_name(f"{out_dir.name}-usage-limit-{attempt}")
+        shutil.rmtree(shelved, ignore_errors=True)
+        out_dir.rename(shelved)
+        log(f"{agent} / {task[0]}: waiting for the {agent} usage limit to lift; retrying at "
+            f"{time.strftime('%H:%M', time.localtime(resume))}.")
+        pause = max(0.0, resume - time.time())
+        time.sleep(pause)
+        waited += pause
+        attempt += 1
+
+
+def run_attempt(agent, task, out_dir, args):
     task_id, test, _ = task
     out_dir.mkdir(parents=True, exist_ok=True)
     prompt = PROMPT_PREAMBLE + "\n\n" + (TASKS_DIR / f"{task_id}.md").read_text(encoding="utf-8").strip()
@@ -787,6 +849,14 @@ def run_one(agent, task, out_dir, args):
     log(f"{agent} / {task_id}: running (limit {TASK_SECONDS // 60} min, {MAX_STATE_CHANGING} state-changing requests).")
     record = run_agent(agent, prompt, out_dir, args)
     record["editor_log_tool_calls"] = editor_log_tool_lines(offset)
+    limit = usage_limit_message(agent, record, out_dir)
+    if limit:
+        stop_editor()
+        record.update({"task": task_id, "pass": False, "stop_reason": "usage_limit", "usage_limit": limit,
+                       "verification": {"error": "stopped by the agent's plan usage limit"}, "out_dir": str(out_dir)})
+        (out_dir / "record.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+        log(f"{agent} / {task_id}: stopped by a usage limit after {record['seconds']:.0f}s: {limit[:200]}")
+        return record
     # Work the agent submitted just before exiting still gets its editor ticks to land and save.
     time.sleep(10)
     stop_editor()
