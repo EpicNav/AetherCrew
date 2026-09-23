@@ -15,9 +15,8 @@ namespace HyperAIStudio::ImageGen
 TEXT(R"CB(# Image Generation Cookbook
 
 Written by HyperAIStudio for agents generating reference images with `hyper_image_inspect` and
-`hyper_image_generate`. Read this before the first generation in a session: this pack ships no model,
-so nothing works until one is configured, and the failure mode looks like a broken tool rather than an
-empty setting.
+`hyper_image_generate`. Read this before the first generation in a session. It ships no model of its own, so
+`hyper_image_generate` does nothing until one is configured - and section 2 may mean you never need to.
 
 ## 1. What this pack is for
 
@@ -38,7 +37,40 @@ The loop this pack is built for:
 Step 3 is why the prompt template pins time of day, key light direction, contrast and colour
 temperature. A reference whose light is beautiful but unreachable makes step 4 grind forever.
 
-## 2. Configure a model first
+## 2. First: can you already generate images yourself?
+
+Check before configuring anything here. Some agents that drive this plugin carry their own image
+generation - Codex has an `imagegen` skill, for instance - and when yours does, **use it**. It costs
+nothing beyond the subscription already running the session, there is no key to set, no endpoint to
+configure, and no model name to go stale.
+
+This pack does not care who made an image. `hyper_image_inspect`, the Preview tab and
+`hyper_lighting_compare` all take a path. So generate the image your own way and drop it in:
+
+    Content/References/Generated/<batch>/<batch>_01.png
+
+Write a sidecar beside it, same name with a `.json` extension, and `hyper_image_inspect` will list it
+alongside anything this pack generated. Only `image` is required; the rest is what makes the reference
+re-generatable in six months, which a chat-produced image otherwise is not:
+
+    {
+      "image": "<batch>_01.png",
+      "batch_id": "<batch>",
+      "prompt": "the full prompt you used",
+      "model_id": "codex_imagegen",
+      "width": 1024,
+      "height": 1024,
+      "seed": -1,
+      "generated_utc": "2026-09-20T23:40:00Z"
+    }
+
+Section 5 still applies: the prompt is the part that decides whether the level can ever match the
+reference, so compose it from the template even when you are generating the image yourself.
+
+Configure a model below only when you need something your agent cannot do: a specific checkpoint or
+style, a fixed seed you can return to, a batch of variations in one go, or a model running offline.
+
+## 3. Configure a model
 
 Run `hyper_image_inspect`. If it reports no models, nothing can generate yet.
 
@@ -103,7 +135,7 @@ If a model does not fit any of these, it fits this pack as long as it takes one 
 base64. An endpoint that queues work and needs polling - a ComfyUI graph, for instance - does not, and
 is not supported here.
 
-## 3. A local model shares your graphics card
+## 4. A local model shares your graphics card
 
 Tick `runs_on_this_machine` for anything on localhost, and `hyper_image_generate` will say so before
 starting.
@@ -116,7 +148,7 @@ has none of this problem - it is a network call and your card is idle.
 If a local generation crawls, that is the cause. Close the editor, or move the model to another
 machine, or use a hosted one.
 
-## 4. Prompts
+## 5. Prompts
 
 `hyper_image_generate` composes the prompt in this order:
 
@@ -144,7 +176,7 @@ there produce a reference the level can never match, and no amount of adjusting 
 
 Templates are editable in settings. Change the seeded one rather than working around it.
 
-## 5. Cost, approval and the spend cap
+## 6. Cost, approval and the spend cap
 
 Generating spends real money, so it is an external effect: **every generation waits for you to click
 Approve** in HyperAI Chat, Activity panel. The approval shows the exact prompt, the model, the image
@@ -154,7 +186,7 @@ Two more bounds: a per-session spend cap in settings, refused before anything is
 that costs nothing. Dry-run first - the report carries the fully composed prompt, so you can read and
 fix it for free.
 
-## 6. Output
+## 7. Output
 
 Each image lands in the project as a **file, not an asset**:
 

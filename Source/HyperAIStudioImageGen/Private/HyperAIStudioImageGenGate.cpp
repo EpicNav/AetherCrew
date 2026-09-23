@@ -337,15 +337,23 @@ namespace HyperAIStudio::ImageGen::Gate
 			{
 				continue;
 			}
+			FString ImageName;
+			if (!Object->TryGetStringField(TEXT("image"), ImageName) || ImageName.IsEmpty())
+			{
+				continue;
+			}
+			const FString ImageFile = FPaths::GetPath(Sidecar) / FPaths::GetCleanFilename(ImageName);
+			if (!IFileManager::Get().FileExists(*ImageFile))
+			{
+				continue;
+			}
 			FHyperAIImageRecord Record;
-			const FString ImageName = Object->GetStringField(TEXT("image"));
-			const FString ImageFile = FPaths::GetPath(Sidecar) / ImageName;
 			Record.File = ImageFile;
 			FPaths::MakePathRelativeTo(Record.File, *(FPaths::ProjectDir()));
-			Record.BatchId = Object->GetStringField(TEXT("batch_id"));
-			Record.Prompt = Object->GetStringField(TEXT("prompt"));
-			Record.ModelId = Object->GetStringField(TEXT("model_id"));
-			Record.GeneratedUtc = Object->GetStringField(TEXT("generated_utc"));
+			Object->TryGetStringField(TEXT("batch_id"), Record.BatchId);
+			Object->TryGetStringField(TEXT("prompt"), Record.Prompt);
+			Object->TryGetStringField(TEXT("model_id"), Record.ModelId);
+			Object->TryGetStringField(TEXT("generated_utc"), Record.GeneratedUtc);
 			Object->TryGetNumberField(TEXT("seed"), Record.Seed);
 			Object->TryGetNumberField(TEXT("width"), Record.Width);
 			Object->TryGetNumberField(TEXT("height"), Record.Height);
