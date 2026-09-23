@@ -60,6 +60,8 @@ public:
 	using FAgentResolver = TFunction<bool(FString& OutAgent, FString& OutModel)>;
 	/** Returns the resolver it replaces. */
 	static FAgentResolver SetAgentResolver(FAgentResolver Resolver);
+	/** Asks the installed resolver; false when no resolver is installed. */
+	static bool ResolveWorkingAgent(FString& OutAgent, FString& OutModel);
 
 	/**
 	 * " The last agent edit to it was ..." for a stale-revision message, so an agent learns that another tab

@@ -17,6 +17,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "SHyperAIStudioQuickActionWindow.h"
+#include "SHyperAIStudioMemoryPanel.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "UnrealEdMisc.h"
@@ -1292,6 +1293,10 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildAgentsTab()
 		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
 		[
 			BuildAgentRow(TEXT("vscode"), TEXT("VS Code/Copilot"), TEXT(".vscode/mcp.json"))
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 22.0f, 0.0f, 0.0f)
+		[
+			SNew(SHyperAIStudioMemoryPanel)
 		];
 }
 

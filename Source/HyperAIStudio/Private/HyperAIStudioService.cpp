@@ -9,6 +9,7 @@
 #include "HyperAIStudioManagedConfigMigration.h"
 #include "HyperAIStudioMcpSerialQueue.h"
 #include "HyperAIStudioOperationJournal.h"
+#include "HyperAIStudioProjectMemory.h"
 
 #include "CoreGlobals.h"
 #include "AssetRegistry/AssetData.h"
@@ -79,6 +80,8 @@ namespace HyperAIStudio::Private
 	static const TCHAR* ManagedGitIgnoreEnd = TEXT("# END HYPERAISTUDIO MANAGED RUNTIME IGNORE");
 	static const TCHAR* ManagedTomlBegin = TEXT("# BEGIN HYPERAISTUDIO MANAGED MCP");
 	static const TCHAR* ManagedTomlEnd = TEXT("# END HYPERAISTUDIO MANAGED MCP");
+	static const TCHAR* ManagedMemoryBegin = TEXT("<!-- BEGIN HYPERAISTUDIO PROJECT MEMORY -->");
+	static const TCHAR* ManagedMemoryEnd = TEXT("<!-- END HYPERAISTUDIO PROJECT MEMORY -->");
 
 	void ApplyCapabilityInventoryResult(
 		FHyperAIStudioStatus& Status,
@@ -4832,7 +4835,7 @@ void BuildAgentInstructionBlocks(
 		TEXT("- Use normal filesystem tools for source files.") LINE_TERMINATOR +
 		TEXT("- Do not overlap Unreal MCP calls.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Fast Paths") LINE_TERMINATOR LINE_TERMINATOR +
-		TEXT("- Before your first Unreal call, read `.hyperai/docs/HyperAIStudio-ToolGuide.md`. It lists every HyperAIStudio toolset, tool, and field, so you can `call_tool` directly without `list_toolsets`.") LINE_TERMINATOR +
+		TEXT("- Before your first Unreal call, read `.hyperai/docs/HyperAIStudio-ToolGuide.md`. It lists every HyperAIStudio toolset, tool, and field, so you can `call_tool` directly.") LINE_TERMINATOR +
 		TEXT("- Edit in one call: a pack's `*_apply_plan` with `bDryRun: false` and a fresh `operationId` (`expectedPlanHash` is optional), then `hyper_operation_wait` with that `operationId`, then the pack's validate tool.") LINE_TERMINATOR +
 		TEXT("- Current level: `call_tool` -> `editor_toolset.toolsets.scene.SceneTools` / `get_current_level` / `{}`.") LINE_TERMINATOR +
 		TEXT("- List actors: `call_tool` -> `editor_toolset.toolsets.scene.SceneTools` / `find_actors` / `{\"name\":\"\",\"tag\":\"\",\"collision_channels\":[]}`.") LINE_TERMINATOR LINE_TERMINATOR +
@@ -4871,6 +4874,34 @@ void BuildAgentInstructionBlocks(
 			LINE_TERMINATOR,
 			LINE_TERMINATOR,
 			LINE_TERMINATOR);
+}
+
+FString FHyperAIStudioService::BuildAgentsInstructionText()
+{
+	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+	FString AgentsBlock;
+	FString ClaudeBlock;
+	if (Settings)
+	{
+		BuildAgentInstructionBlocks(GetProjectRoot(), GetEndpoint(Settings->UnrealMCPPort, Settings->UnrealMCPUrlPath), Settings, AgentsBlock, ClaudeBlock);
+	}
+	return AgentsBlock;
+}
+
+bool FHyperAIStudioService::RefreshMemoryInstructions()
+{
+	using namespace HyperAIStudio::Private;
+	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+	const FString AgentsPath = FPaths::Combine(GetProjectRoot(), TEXT("AGENTS.md"));
+	FString Existing;
+	// Memory joins the file Setup made; it never creates AGENTS.md on its own.
+	if (!Settings || !FFileHelper::LoadFileToString(Existing, *AgentsPath) || !Existing.Contains(ManagedMarkdownBegin))
+	{
+		return false;
+	}
+	const FString Block = HyperAIStudio::Memory::BuildInstructionSection(GetProjectRoot(), Settings->AgentMemoryMode)
+		.Replace(TEXT("\n"), LINE_TERMINATOR);
+	return UpsertManagedBlock(AgentsPath, Block, ManagedMemoryBegin, ManagedMemoryEnd);
 }
 
 bool FHyperAIStudioService::AreAgentInstructionsCurrent() const

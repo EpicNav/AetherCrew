@@ -2,6 +2,9 @@
 
 #include "HyperAIStudioAgentActivity.h"
 
+#include "CoreGlobals.h"
+#include "HyperAIStudioProjectMemory.h"
+
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -139,6 +142,11 @@ void FHyperAIStudioAgentActivityLog::Record(FHyperAIStudioActivityEntry Entry)
 		}
 	}
 	FHyperAIStudioAgentScoreboard::Tally(Entry);
+	// Project memory keeps what agents changed across sessions; test runs must not write into it.
+	if (Entry.Kind == EHyperAIStudioActivityKind::Completed && !GIsAutomationTesting)
+	{
+		HyperAIStudio::Memory::RecordChange(FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()), Entry);
+	}
 	Storage.Insert(MoveTemp(Entry), 0);
 	if (Storage.Num() > MaxEntries)
 	{
@@ -177,6 +185,12 @@ const TCHAR* FHyperAIStudioAgentActivityLog::LexToString(const EHyperAIStudioAct
 	case EHyperAIStudioActivityKind::Completed: return TEXT("Completed");
 	default: return TEXT("Failed");
 	}
+}
+
+bool FHyperAIStudioAgentActivityLog::ResolveWorkingAgent(FString& OutAgent, FString& OutModel)
+{
+	const FAgentResolver& Installed = HyperAIStudio::Activity::Private::Resolver();
+	return Installed && Installed(OutAgent, OutModel);
 }
 
 FHyperAIStudioAgentActivityLog::FAgentResolver FHyperAIStudioAgentActivityLog::SetAgentResolver(FAgentResolver Resolver)

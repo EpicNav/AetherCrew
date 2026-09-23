@@ -175,6 +175,18 @@ enum class EHyperAIStudioNativeToolChannel : uint8
 	StableOnly UMETA(DisplayName = "Unreal MCP Only")
 };
 
+/** How a memory an agent saves on its own reaches future chats. Memories the user adds always apply in full. */
+UENUM()
+enum class EHyperAIStudioAgentMemoryMode : uint8
+{
+	/** Future chats see its title at once and can recall its text; the text joins every chat's instructions once you confirm it. */
+	TitleUntilReviewed UMETA(DisplayName = "Title now, full text after review"),
+	/** Straight into every future chat's instructions; review or delete it later. */
+	Automatic UMETA(DisplayName = "Fully automatic"),
+	/** Invisible to future chats until you confirm it. */
+	AfterReview UMETA(DisplayName = "Only after review")
+};
+
 USTRUCT()
 struct FHyperAIStudioMCPServerEntry
 {
@@ -430,6 +442,14 @@ public:
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Remote", meta = (DisplayName = "Keep Remote Chats Running After The Editor Closes"))
 	bool bKeepRemoteChatsRunning = true;
+
+	/**
+	 * How a memory an agent saves on its own (hyper_memory_remember) reaches future chats. A fact planted by text
+	 * the agent read would otherwise reach every later chat, so by default only its title does until you confirm it
+	 * in HyperAIStudio > Agents > Project Memory.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Memory", meta = (DisplayName = "Agent-Saved Memories"))
+	EHyperAIStudioAgentMemoryMode AgentMemoryMode = EHyperAIStudioAgentMemoryMode::TitleUntilReviewed;
 
 	/** The chat panel's new-tab menu: one entry per kind of task. Empty restores the built-in list. */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing")

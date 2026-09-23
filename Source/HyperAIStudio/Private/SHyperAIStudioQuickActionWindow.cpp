@@ -32,6 +32,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "SHyperAIStudioActivitySidebar.h"
 #include "SHyperAIStudioChatHistorySidebar.h"
+#include "SHyperAIStudioMemoryPanel.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "STerminal.h"
@@ -901,6 +902,11 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildSettingsMenu()
 		LOCTEXT("ChatSettingsEntryTooltip", "Agent models and agent options."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Edit"),
 		FUIAction(FExecuteAction::CreateLambda([]() { HyperAIStudio::QuickAction::OpenSettingsPage(GetDefault<UHyperAIStudioSettings>()); })));
+	Menu.AddMenuEntry(
+		LOCTEXT("ChatRemember", "Remember..."),
+		LOCTEXT("ChatRememberTooltip", "Add a fact to Project Memory: every agent gets it in every future chat."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Plus"),
+		FUIAction(FExecuteAction::CreateLambda([]() { SHyperAIStudioMemoryPanel::OpenFactDialog(); })));
 	Menu.AddMenuEntry(
 		LOCTEXT("TerminalAppearance", "Terminal Appearance..."),
 		LOCTEXT("TerminalAppearanceTooltip", "Font, size, colour scheme and scrollback for the embedded terminal. Changes apply the next time the agent starts."),

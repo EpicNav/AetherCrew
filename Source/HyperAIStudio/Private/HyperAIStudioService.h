@@ -152,6 +152,13 @@ public:
 	bool GenerateProjectFiles(FText& OutMessage) const;
 	/** False when AGENTS.md or CLAUDE.md holds a HyperAIStudio block other than the one this build writes. */
 	bool AreAgentInstructionsCurrent() const;
+	/**
+	 * Writes the Project Memory block into AGENTS.md, beside the main managed block and with its own markers,
+	 * once Setup has created AGENTS.md. Never touches the other managed files, so it needs no project lock.
+	 */
+	static bool RefreshMemoryInstructions();
+	/** The managed AGENTS.md block Setup would write with the current settings. */
+	static FString BuildAgentsInstructionText();
 	bool CreateQuickConnectPromptPackage(const FString& AgentName, FHyperAIStudioPromptPackage& OutPackage, FText& OutMessage) const;
 	bool CreatePromptPackage(const FString& UserIntent, const FString& AgentName, FHyperAIStudioPromptPackage& OutPackage, FText& OutMessage) const;
 	bool CreatePromptPackageForAssets(const FString& UserIntent, const FString& AgentName, const TArray<FAssetData>& SelectedAssets, FHyperAIStudioPromptPackage& OutPackage, FText& OutMessage) const;

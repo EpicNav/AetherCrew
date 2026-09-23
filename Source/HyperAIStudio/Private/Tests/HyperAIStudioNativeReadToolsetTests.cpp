@@ -49,7 +49,10 @@ namespace HyperAIStudio::NativeReadTools::Tests
 			{ TEXT("hyper_capability_report"), FHyperAICapabilityReport::StaticStruct() },
 			{ TEXT("hyper_operation_status"), FHyperAIOperationStatus::StaticStruct() },
 			{ TEXT("hyper_blueprint_debug_inspect"), FHyperAIBlueprintDebugReport::StaticStruct() },
-			{ TEXT("hyper_pie_query"), FHyperAIPIEQueryReport::StaticStruct() }
+			{ TEXT("hyper_pie_query"), FHyperAIPIEQueryReport::StaticStruct() },
+			{ TEXT("hyper_memory_recall"), FHyperAIMemoryRecallReport::StaticStruct() },
+			{ TEXT("hyper_memory_remember"), FHyperAIMemoryWriteReport::StaticStruct() },
+			{ TEXT("hyper_memory_forget"), FHyperAIMemoryWriteReport::StaticStruct() }
 		};
 		return Tools;
 	}
@@ -62,6 +65,9 @@ namespace HyperAIStudio::NativeReadTools::Tests
 			{ TEXT("hyper_operation_wait"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
 			{ TEXT("hyper_blueprint_debug_inspect"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
 			{ TEXT("hyper_pie_query"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
+			{ TEXT("hyper_memory_recall"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
+			{ TEXT("hyper_memory_remember"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
+			{ TEXT("hyper_memory_forget"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
 			{ TEXT("hyper_asset_dependency_graph"), TEXT("HyperAIStudio.HyperAIStudioDependencyGraphToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate }
 		};
 		return Tools;

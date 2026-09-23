@@ -52,6 +52,8 @@
 #include "Interfaces/IPluginManager.h"
 #include "SHyperAIStudioQuickActionWindow.h"
 #include "Interfaces/IMainFrameModule.h"
+#include "HyperAIStudioProjectMemory.h"
+#include "UObject/ObjectSaveContext.h"
 #include "Misc/App.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/FileHelper.h"
@@ -779,6 +781,35 @@ public:
 		AgentGuidanceTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateRaw(this, &FHyperAIStudioModule::RunAgentGuidanceTicker),
 			20.0f);
+
+		// Project memory: facts follow into AGENTS.md shortly after they change; saves made while an agent works
+		// join the change log, including saves through Epic's tools, which never reach the activity log.
+		MemoryChangedHandle = HyperAIStudio::Memory::OnChanged().AddRaw(this, &FHyperAIStudioModule::QueueMemoryRefresh);
+		PackageSavedHandle = UPackage::PackageSavedWithContextEvent.AddLambda(
+			[](const FString& PackageFileName, UPackage* Package, FObjectPostSaveContext Context)
+			{
+				if (Package && !Context.IsProceduralSave())
+				{
+					HyperAIStudio::Memory::NotePackageSaved(FHyperAIStudioService::GetProjectRoot(), Package->GetName());
+				}
+			});
+	}
+
+	void QueueMemoryRefresh()
+	{
+		// Debounced: a burst of memory writes becomes one AGENTS.md rewrite.
+		if (!MemoryRefreshTickerHandle.IsValid())
+		{
+			MemoryRefreshTickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([this](float)
+			{
+				MemoryRefreshTickerHandle.Reset();
+				if (!bModuleShuttingDown)
+				{
+					FHyperAIStudioService::RefreshMemoryInstructions();
+				}
+				return false;
+			}), 2.0f);
+		}
 	}
 
 	virtual void ShutdownModule() override
@@ -841,6 +872,13 @@ public:
 		{
 			FTSTicker::GetCoreTicker().RemoveTicker(AgentGuidanceTickerHandle);
 			AgentGuidanceTickerHandle.Reset();
+		}
+		HyperAIStudio::Memory::OnChanged().Remove(MemoryChangedHandle);
+		UPackage::PackageSavedWithContextEvent.Remove(PackageSavedHandle);
+		if (MemoryRefreshTickerHandle.IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(MemoryRefreshTickerHandle);
+			MemoryRefreshTickerHandle.Reset();
 		}
 
 		UnregisterGraphEditorContextMenus();
@@ -2150,6 +2188,10 @@ private:
 			const bool bOk = Service.GenerateProjectFiles(Message);
 			UE_LOG(LogHyperAIStudio, Display, TEXT("Agent instructions were older than this build; refresh %s: %s"),
 				bOk ? TEXT("succeeded") : TEXT("failed"), *Message.ToString());
+		}
+		if (bSetUp)
+		{
+			FHyperAIStudioService::RefreshMemoryInstructions();
 		}
 		return false;
 	}
@@ -6321,6 +6363,9 @@ private:
 	FDelegateHandle GraphEditorContextMenuExtenderHandle;
 	FTSTicker::FDelegateHandle WelcomePromptTickerHandle;
 	FTSTicker::FDelegateHandle AgentGuidanceTickerHandle;
+	FTSTicker::FDelegateHandle MemoryRefreshTickerHandle;
+	FDelegateHandle MemoryChangedHandle;
+	FDelegateHandle PackageSavedHandle;
 	bool bWelcomePromptProbeActive = false;
 	bool bWelcomePromptShown = false;
 	bool bModuleShuttingDown = false;

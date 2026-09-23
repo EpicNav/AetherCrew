@@ -414,6 +414,77 @@ public:
 	FHyperAIOperationWaitReport Value;
 };
 
+/** One remembered fact, as hyper_memory_recall returns it. */
+USTRUCT(BlueprintType)
+struct FHyperAIMemoryFactView
+{
+	GENERATED_BODY()
+
+	/** Pass it as Replaces to update the fact, or to hyper_memory_forget. */
+	UPROPERTY()
+	FString Name;
+
+	UPROPERTY()
+	FString Title;
+
+	/** convention, decision, fact or gotcha. */
+	UPROPERTY()
+	FString Type;
+
+	/** user or agent. */
+	UPROPERTY()
+	FString Source;
+
+	/** False for an agent's fact the user has not reviewed yet. */
+	UPROPERTY()
+	bool bConfirmed = true;
+
+	/** YYYY-MM-DD. */
+	UPROPERTY()
+	FString Updated;
+
+	UPROPERTY()
+	FString Text;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIMemoryRecallReport
+{
+	GENERATED_BODY()
+
+	/** ok or invalid_request. */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	/** Best matches first. */
+	UPROPERTY()
+	TArray<FHyperAIMemoryFactView> Facts;
+
+	/** What agents changed lately on this machine, newest first, one line each. */
+	UPROPERTY()
+	TArray<FString> RecentChanges;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIMemoryWriteReport
+{
+	GENERATED_BODY()
+
+	/** saved, forgotten, refused or invalid_request. */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	/** The fact's name. */
+	UPROPERTY()
+	FString Name;
+};
+
 /** PIE identity attached to a debug object or returned as a PIE world result. */
 USTRUCT(BlueprintType)
 struct FHyperAIPIEWorldIdentity
@@ -790,6 +861,30 @@ public:
 	/** Return one complete bounded snapshot of every matching in-process PIE world. Active multiprocess PIE fails closed because other processes are not observable. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
 	static FHyperAIPIEQueryReport hyper_pie_query(int32 PieInstance = -1);
+
+	/**
+	 * Project memory: facts about this project every agent shares, best matches first, plus what agents changed
+	 * lately. Query is a few keywords; empty returns the newest facts. Target is an asset path to narrow the
+	 * changes to, or all.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Memory")
+	static FHyperAIMemoryRecallReport hyper_memory_recall(const FString& Query, int32 Limit = 10, const FString& Target = TEXT("all"));
+
+	/**
+	 * Save a lasting fact about this project for every future chat: a convention, a decision or a gotcha, never task
+	 * progress. Title is one line; Text up to 4000 characters; Type is convention, decision, fact or gotcha. Replaces
+	 * is new, or the name of a fact you saved earlier, to update it. The user reviews what agents save.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Memory")
+	static FHyperAIMemoryWriteReport hyper_memory_remember(
+		const FString& Title,
+		const FString& Text,
+		const FString& Type = TEXT("fact"),
+		const FString& Replaces = TEXT("new"));
+
+	/** Delete a fact an agent saved, by name. Facts the user wrote stay; ask the user to remove those. */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Memory")
+	static FHyperAIMemoryWriteReport hyper_memory_forget(const FString& Name);
 };
 
 struct FHyperAIStudioNativeToolManifestEntry

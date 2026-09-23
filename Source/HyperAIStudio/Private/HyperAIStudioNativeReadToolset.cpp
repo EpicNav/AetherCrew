@@ -23,7 +23,11 @@
 #include "HyperAIStudioDependencyGraphToolset.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioPlanExecuteToolset.h"
+#include "HyperAIStudioProjectMemory.h"
 #include "HyperAIStudioService.h"
+#include "HyperAIStudioSettings.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "Widgets/Notifications/SNotificationList.h"
 #include "HyperAIStudioTrustedExecution.h"
 #include "Containers/Ticker.h"
 #include "UObject/StrongObjectPtr.h"
@@ -101,7 +105,7 @@ namespace HyperAIStudio::NativeReadTools::Private
 	FString ExpectedPackIdForNativeTool(const FString& ToolName)
 	{
 		if (ToolName == TEXT("hyper_capability_report") || ToolName == TEXT("hyper_operation_status")
-			|| ToolName == TEXT("hyper_operation_wait"))
+			|| ToolName == TEXT("hyper_operation_wait") || ToolName.StartsWith(TEXT("hyper_memory_")))
 		{
 			return TEXT("shared_foundation");
 		}
@@ -916,6 +920,27 @@ const TArray<FHyperAIStudioNativeToolManifestEntry>& FHyperAIStudioNativeReadCon
 			GetQualifiedToolsetName(),
 			TEXT("read"),
 			TEXT("Complete bounded in-process PIE world and frozen-session net-mode snapshot."),
+			FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate
+		},
+		{
+			TEXT("hyper_memory_recall"),
+			GetQualifiedToolsetName(),
+			TEXT("read"),
+			TEXT("Project memory facts by keyword, plus recent agent changes."),
+			FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate
+		},
+		{
+			TEXT("hyper_memory_remember"),
+			GetQualifiedToolsetName(),
+			TEXT("read"),
+			TEXT("Saves a project fact under .hyperai/memory for future chats; the user reviews agent facts."),
+			FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate
+		},
+		{
+			TEXT("hyper_memory_forget"),
+			GetQualifiedToolsetName(),
+			TEXT("read"),
+			TEXT("Deletes a project fact an agent saved."),
 			FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate
 		},
 		{
@@ -2379,6 +2404,117 @@ FHyperAIBlueprintDebugReport UHyperAIStudioNativeReadToolset::hyper_blueprint_de
 		: (Report.NextCursor.IsEmpty()
 			? TEXT("Blueprint debugger snapshot completed within all bounds.")
 			: TEXT("Blueprint debugger snapshot is paged; continue with next_cursor."));
+	return Report;
+}
+
+namespace HyperAIStudio::NativeRead::Memory
+{
+	FHyperAIMemoryFactView ToView(const FHyperAIStudioMemoryFact& Fact)
+	{
+		FHyperAIMemoryFactView View;
+		View.Name = Fact.Name;
+		View.Title = Fact.Title;
+		View.Type = Fact.Type;
+		View.Source = Fact.Source;
+		View.bConfirmed = Fact.bConfirmed;
+		View.Updated = Fact.Updated;
+		View.Text = Fact.Text;
+		return View;
+	}
+}
+
+FHyperAIMemoryRecallReport UHyperAIStudioNativeReadToolset::hyper_memory_recall(const FString& Query, const int32 Limit, const FString& Target)
+{
+	FHyperAIMemoryRecallReport Report;
+	if (!IsInGameThread())
+	{
+		Report.Status = TEXT("invalid_request");
+		Report.Diagnostic = TEXT("hyper_memory_recall runs on the game thread.");
+		return Report;
+	}
+	const FString Root = FHyperAIStudioService::GetProjectRoot();
+	for (const FHyperAIStudioMemoryFact& Fact : HyperAIStudio::Memory::Recall(Root, Query, Limit, GetDefault<UHyperAIStudioSettings>()->AgentMemoryMode))
+	{
+		Report.Facts.Add(HyperAIStudio::NativeRead::Memory::ToView(Fact));
+	}
+	// ponytail: Epic's schema makes a parameter with an empty-string default required, so the defaults are words (all, new).
+	const FString AssetFilter = Target.TrimStartAndEnd();
+	Report.RecentChanges = HyperAIStudio::Memory::RecentChanges(Root, FMath::Clamp(Limit, 1, 50),
+		AssetFilter.Equals(TEXT("all"), ESearchCase::IgnoreCase) ? FString() : AssetFilter);
+	Report.Status = TEXT("ok");
+	if (Report.Facts.IsEmpty())
+	{
+		Report.Diagnostic = TEXT("No saved fact matches. Save lasting project facts with hyper_memory_remember.");
+	}
+	return Report;
+}
+
+FHyperAIMemoryWriteReport UHyperAIStudioNativeReadToolset::hyper_memory_remember(
+	const FString& Title,
+	const FString& Text,
+	const FString& Type,
+	const FString& Replaces)
+{
+	FHyperAIMemoryWriteReport Report;
+	if (!IsInGameThread())
+	{
+		Report.Status = TEXT("invalid_request");
+		Report.Diagnostic = TEXT("hyper_memory_remember runs on the game thread.");
+		return Report;
+	}
+	FHyperAIStudioMemoryFact Fact;
+	Fact.Name = Replaces.TrimStartAndEnd().Equals(TEXT("new"), ESearchCase::IgnoreCase) ? FString() : Replaces.TrimStartAndEnd();
+	Fact.Title = Title;
+	Fact.Text = Text;
+	Fact.Type = Type.TrimStartAndEnd().IsEmpty() ? FString(TEXT("fact")) : Type;
+	Fact.Source = TEXT("agent");
+	FString Error;
+	Report.Name = HyperAIStudio::Memory::Remember(FHyperAIStudioService::GetProjectRoot(), Fact, Error);
+	if (Report.Name.IsEmpty())
+	{
+		Report.Status = TEXT("refused");
+		Report.Diagnostic = Error;
+		return Report;
+	}
+	Report.Status = TEXT("saved");
+	switch (GetDefault<UHyperAIStudioSettings>()->AgentMemoryMode)
+	{
+	case EHyperAIStudioAgentMemoryMode::Automatic:
+		Report.Diagnostic = TEXT("Saved. Future chats get it in full.");
+		break;
+	case EHyperAIStudioAgentMemoryMode::AfterReview:
+		Report.Diagnostic = TEXT("Saved. Future chats get it once the user confirms it.");
+		break;
+	default:
+		Report.Diagnostic = TEXT("Saved. Future chats see its title now and its text once the user confirms it.");
+		break;
+	}
+	// The user decides what agents remember, so every new agent memory is announced.
+	FNotificationInfo Info(FText::FromString(FString::Printf(
+		TEXT("An agent saved a memory: %s. Review it in HyperAIStudio > Agents > Project Memory."), *Title.Left(120))));
+	Info.ExpireDuration = 8.0f;
+	FSlateNotificationManager::Get().AddNotification(Info);
+	return Report;
+}
+
+FHyperAIMemoryWriteReport UHyperAIStudioNativeReadToolset::hyper_memory_forget(const FString& Name)
+{
+	FHyperAIMemoryWriteReport Report;
+	Report.Name = Name.TrimStartAndEnd();
+	if (!IsInGameThread())
+	{
+		Report.Status = TEXT("invalid_request");
+		Report.Diagnostic = TEXT("hyper_memory_forget runs on the game thread.");
+		return Report;
+	}
+	FString Error;
+	if (!HyperAIStudio::Memory::Forget(FHyperAIStudioService::GetProjectRoot(), Report.Name, /*bByAgent=*/true, Error))
+	{
+		Report.Status = TEXT("refused");
+		Report.Diagnostic = Error;
+		return Report;
+	}
+	Report.Status = TEXT("forgotten");
 	return Report;
 }
 
