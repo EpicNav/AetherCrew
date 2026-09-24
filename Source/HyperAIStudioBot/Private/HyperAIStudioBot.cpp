@@ -4,19 +4,25 @@
 
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
+#include "Camera/PlayerCameraManager.h"
 #include "CollisionQueryParams.h"
 #include "Components/Button.h"
 #include "Components/EditableText.h"
 #include "Components/EditableTextBox.h"
 #include "Components/MultiLineEditableTextBox.h"
 #include "Components/RichTextBlock.h"
+#include "Components/SceneCaptureComponent2D.h"
 #include "Components/TextBlock.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "EnhancedActionKeyMapping.h"
 #include "EnhancedInputSubsystems.h"
+#include "EnhancedPlayerInput.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/GameModeBase.h"
@@ -24,7 +30,10 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
+#include "GenericPlatform/GenericPlatformInputDeviceMapper.h"
 #include "HAL/FileManager.h"
+#include "HyperAIStudioBotBrain.h"
+#include "HyperAIStudioBotShared.h"
 #include "ImageUtils.h"
 #include "InputAction.h"
 #include "InputActionValue.h"
@@ -33,9 +42,13 @@
 #include "Modules/ModuleManager.h"
 #include "NavigationPath.h"
 #include "NavigationSystem.h"
+#include "TextureResource.h"
 #include "UObject/UObjectIterator.h"
 #include "UnrealClient.h"
 #include "Widgets/Input/SButton.h"
+#if WITH_EDITOR
+#include "ShaderCompiler.h"
+#endif
 
 IMPLEMENT_MODULE(FDefaultModuleImpl, HyperAIStudioBot)
 
@@ -44,8 +57,6 @@ namespace HyperAIStudio::Bot::Private
 	constexpr int32 MaxRecordFrames = 240;
 	constexpr double StuckSeconds = 3.0;
 	constexpr double WaypointReachedCm = 75.0;
-
-	using FResult = FHyperAIBotResult;
 
 	FString Vec(const FVector& Value)
 	{
@@ -67,10 +78,34 @@ namespace HyperAIStudio::Bot::Private
 		return Object->GetName();
 	}
 
-	APawn* PlayerPawn(UWorld& World)
+	APlayerController* PlayerController(UWorld& World, const int32 Index)
 	{
-		const APlayerController* Controller = World.GetFirstPlayerController();
+		int32 At = 0;
+		for (FConstPlayerControllerIterator It = World.GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* Controller = It->Get();
+			if (Controller && At++ == Index)
+			{
+				return Controller;
+			}
+		}
+		return nullptr;
+	}
+
+	APawn* PlayerPawn(UWorld& World, const int32 Index)
+	{
+		const APlayerController* Controller = PlayerController(World, Index);
 		return Controller ? Controller->GetPawn() : nullptr;
+	}
+
+	bool IsPlayerName(const FString& Name, int32& OutIndex)
+	{
+		if (Name.Len() != 7 || !Name.StartsWith(TEXT("Player"), ESearchCase::IgnoreCase) || Name[6] < TEXT('0') || Name[6] > TEXT('7'))
+		{
+			return false;
+		}
+		OutIndex = Name[6] - TEXT('0');
+		return true;
 	}
 
 	bool MatchesClass(const AActor& Actor, const FString& Name)
@@ -84,13 +119,17 @@ namespace HyperAIStudio::Bot::Private
 		return Class.Equals(Name, ESearchCase::IgnoreCase);
 	}
 
-	/** An exact name wins; otherwise the first actor with the label, then the tag, then the class. */
-	UObject* FindTarget(UWorld& World, const FString& Name)
+	UObject* FindTarget(UWorld& World, const FString& Name, const int32 PlayerIndex)
 	{
-		APlayerController* Controller = World.GetFirstPlayerController();
+		APlayerController* Controller = PlayerController(World, PlayerIndex);
+		int32 Other = 0;
+		if (IsPlayerName(Name, Other))
+		{
+			return PlayerPawn(World, Other);
+		}
 		if (Name.IsEmpty() || Name.Equals(TEXT("Player"), ESearchCase::IgnoreCase) || Name.Equals(TEXT("Pawn"), ESearchCase::IgnoreCase))
 		{
-			return PlayerPawn(World);
+			return Controller ? Controller->GetPawn() : nullptr;
 		}
 		if (Name.Equals(TEXT("PlayerController"), ESearchCase::IgnoreCase))
 		{
@@ -141,14 +180,37 @@ namespace HyperAIStudio::Bot::Private
 		return ByLabel ? ByLabel : ByTag ? ByTag : ByClass;
 	}
 
-	struct FReading
+	TArray<AActor*> FindAll(UWorld& World, const FString& Name, const int32 PlayerIndex)
 	{
-		bool bOk = false;
-		bool bNumeric = false;
-		double Number = 0.0;
-		FString Text;
-		FString Error;
-	};
+		TArray<AActor*> Found;
+		int32 Index = 0;
+		if (Name.IsEmpty() || IsPlayerName(Name, Index) || Name.Equals(TEXT("Player"), ESearchCase::IgnoreCase) || Name.Equals(TEXT("Pawn"), ESearchCase::IgnoreCase))
+		{
+			if (AActor* Actor = Cast<AActor>(FindTarget(World, Name, PlayerIndex)))
+			{
+				Found.Add(Actor);
+			}
+			return Found;
+		}
+		const FName Tag(*Name);
+		for (TActorIterator<AActor> It(&World); It && Found.Num() < 64; ++It)
+		{
+			AActor* Actor = *It;
+			if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
+			{
+				continue;
+			}
+			bool bMatch = Actor->GetName() == Name || Actor->ActorHasTag(Tag) || MatchesClass(*Actor, Name);
+#if WITH_EDITOR
+			bMatch = bMatch || Actor->GetActorLabel() == Name;
+#endif
+			if (bMatch)
+			{
+				Found.Add(Actor);
+			}
+		}
+		return Found;
+	}
 
 	FReading Numeric(const double Number, const FString& Text)
 	{
@@ -160,14 +222,14 @@ namespace HyperAIStudio::Bot::Private
 		return Reading;
 	}
 
-	FProperty* FindProperty(const UObject& Object, const FString& Name)
+	FProperty* FindProperty(const UStruct& Type, const FString& Name)
 	{
-		if (FProperty* Exact = FindFProperty<FProperty>(Object.GetClass(), FName(*Name)))
+		if (FProperty* Exact = FindFProperty<FProperty>(&Type, FName(*Name)))
 		{
 			return Exact;
 		}
 		// Blueprint variables can be authored under a friendlier name than their field.
-		for (TFieldIterator<FProperty> It(Object.GetClass()); It; ++It)
+		for (TFieldIterator<FProperty> It(&Type); It; ++It)
 		{
 			if (It->GetName().Equals(Name, ESearchCase::IgnoreCase) || It->GetAuthoredName().Equals(Name, ESearchCase::IgnoreCase))
 			{
@@ -177,7 +239,71 @@ namespace HyperAIStudio::Bot::Private
 		return nullptr;
 	}
 
-	/** Path is property names joined by dots; a part may also name one of an actor's components. */
+	UActorComponent* ComponentNamed(UObject& Object, const FString& Name)
+	{
+		if (const AActor* Owner = Cast<AActor>(&Object))
+		{
+			for (UActorComponent* Candidate : Owner->GetComponents())
+			{
+				if (Candidate && Candidate->GetName().Equals(Name, ESearchCase::IgnoreCase))
+				{
+					return Candidate;
+				}
+			}
+		}
+		return nullptr;
+	}
+
+	/** A const or pure function with no inputs that answers a number or a bool: calling it only reads. */
+	bool IsPureReader(const UFunction& Function)
+	{
+		const FProperty* Return = Function.GetReturnProperty();
+		return Return && Function.NumParms == 1 && Function.HasAnyFunctionFlags(FUNC_Const | FUNC_BlueprintPure)
+			&& (CastField<FNumericProperty>(Return) || CastField<FBoolProperty>(Return));
+	}
+
+	FReading ReadValue(const FProperty& Property, const void* Value)
+	{
+		if (const FNumericProperty* Number = CastField<FNumericProperty>(&Property); Number && !Number->IsEnum())
+		{
+			const double Read = Number->IsFloatingPoint()
+				? Number->GetFloatingPointPropertyValue(Value)
+				: static_cast<double>(Number->GetSignedIntPropertyValue(Value));
+			return Numeric(Read, Number->IsFloatingPoint() ? FString::SanitizeFloat(Read) : FString::Printf(TEXT("%lld"), static_cast<int64>(Read)));
+		}
+		// A gameplay attribute reads as its current value.
+		if (const FStructProperty* Struct = CastField<FStructProperty>(&Property))
+		{
+			if (const FProperty* Current = FindFProperty<FProperty>(Struct->Struct, TEXT("CurrentValue")); Current && CastField<FNumericProperty>(Current))
+			{
+				return ReadValue(*Current, Current->ContainerPtrToValuePtr<void>(Value));
+			}
+		}
+		FReading Out;
+		if (const FBoolProperty* Bool = CastField<FBoolProperty>(&Property))
+		{
+			Out.Text = Bool->GetPropertyValue(Value) ? TEXT("true") : TEXT("false");
+		}
+		else
+		{
+			Property.ExportTextItem_Direct(Out.Text, Value, nullptr, nullptr, PPF_None);
+		}
+		Out.bOk = true;
+		return Out;
+	}
+
+	FReading CallReader(UObject& Object, UFunction& Function)
+	{
+		TArray<uint8> Parameters;
+		Parameters.SetNumZeroed(FMath::Max<int32>(Function.ParmsSize, 1));
+		Function.InitializeStruct(Parameters.GetData());
+		Object.ProcessEvent(&Function, Parameters.GetData());
+		const FProperty* Return = Function.GetReturnProperty();
+		FReading Out = ReadValue(*Return, Return->ContainerPtrToValuePtr<void>(Parameters.GetData()));
+		Function.DestroyStruct(Parameters.GetData());
+		return Out;
+	}
+
 	FReading ReadProperty(UObject* Root, const FString& Path)
 	{
 		FReading Out;
@@ -215,65 +341,58 @@ namespace HyperAIStudio::Bot::Private
 		TArray<FString> Parts;
 		Path.ParseIntoArray(Parts, TEXT("."), /*InCullEmpty=*/true);
 		UObject* Object = Root;
+		const UStruct* Type = Root->GetClass();
+		const void* Container = Root;
 		for (int32 Index = 0; Index < Parts.Num(); ++Index)
 		{
 			const FString& Part = Parts[Index];
 			const bool bLast = Index == Parts.Num() - 1;
-			FProperty* Property = FindProperty(*Object, Part);
-			if (!Property && !bLast)
+			// Components and reading functions belong to objects, not to the structs inside them.
+			const bool bOnObject = Container == Object;
+			FProperty* Property = FindProperty(*Type, Part);
+			if (!Property && bOnObject && !bLast)
 			{
-				UObject* Component = nullptr;
-				if (const AActor* Owner = Cast<AActor>(Object))
-				{
-					for (UActorComponent* Candidate : Owner->GetComponents())
-					{
-						if (Candidate && Candidate->GetName().Equals(Part, ESearchCase::IgnoreCase))
-						{
-							Component = Candidate;
-							break;
-						}
-					}
-				}
-				if (Component)
+				if (UActorComponent* Component = ComponentNamed(*Object, Part))
 				{
 					Object = Component;
+					Type = Component->GetClass();
+					Container = Component;
 					continue;
+				}
+			}
+			if (!Property && bOnObject && bLast)
+			{
+				if (UFunction* Function = Object->FindFunction(FName(*Part)); Function && IsPureReader(*Function))
+				{
+					return CallReader(*Object, *Function);
 				}
 			}
 			if (!Property)
 			{
-				Out.Error = FString::Printf(TEXT("%s has no property or component named %s"), *Describe(Object), *Part);
+				Out.Error = FString::Printf(TEXT("%s has no property, component or reading function named %s"), *Describe(Object), *Part);
 				return Out;
 			}
-			const void* Value = Property->ContainerPtrToValuePtr<void>(Object);
-			if (!bLast)
+			const void* Value = Property->ContainerPtrToValuePtr<void>(Container);
+			if (bLast)
 			{
-				const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property);
-				UObject* Next = ObjectProperty ? ObjectProperty->GetObjectPropertyValue(Value) : nullptr;
-				if (!Next)
-				{
-					Out.Error = FString::Printf(TEXT("%s.%s is not set, or not an object"), *Describe(Object), *Part);
-					return Out;
-				}
-				Object = Next;
+				return ReadValue(*Property, Value);
+			}
+			if (const FStructProperty* Struct = CastField<FStructProperty>(Property))
+			{
+				Type = Struct->Struct;
+				Container = Value;
 				continue;
 			}
-			if (const FNumericProperty* Number = CastField<FNumericProperty>(Property); Number && !Number->IsEnum())
+			const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property);
+			UObject* Next = ObjectProperty ? ObjectProperty->GetObjectPropertyValue(Value) : nullptr;
+			if (!Next)
 			{
-				const double Read = Number->IsFloatingPoint()
-					? Number->GetFloatingPointPropertyValue(Value)
-					: static_cast<double>(Number->GetSignedIntPropertyValue(Value));
-				return Numeric(Read, Number->IsFloatingPoint() ? FString::SanitizeFloat(Read) : FString::Printf(TEXT("%lld"), static_cast<int64>(Read)));
+				Out.Error = FString::Printf(TEXT("%s.%s is not set, or not an object or a struct"), *Describe(Object), *Part);
+				return Out;
 			}
-			if (const FBoolProperty* Bool = CastField<FBoolProperty>(Property))
-			{
-				Out.Text = Bool->GetPropertyValue(Value) ? TEXT("true") : TEXT("false");
-			}
-			else
-			{
-				Property->ExportTextItem_Direct(Out.Text, Value, nullptr, nullptr, PPF_None);
-			}
-			Out.bOk = true;
+			Object = Next;
+			Type = Next->GetClass();
+			Container = Next;
 		}
 		return Out;
 	}
@@ -301,10 +420,11 @@ namespace HyperAIStudio::Bot::Private
 	}
 
 	/** Turns the player's view toward Point. */
-	bool Face(UWorld& World, const FVector& Point)
+	bool Face(UWorld& World, const int32 PlayerIndex, const FVector& Point)
 	{
-		APawn* Pawn = PlayerPawn(World);
-		AController* Controller = Pawn ? Pawn->GetController() : static_cast<AController*>(World.GetFirstPlayerController());
+		APlayerController* Player = PlayerController(World, PlayerIndex);
+		APawn* Pawn = Player ? Player->GetPawn() : nullptr;
+		AController* Controller = Pawn ? Pawn->GetController() : static_cast<AController*>(Player);
 		if (!Controller)
 		{
 			return false;
@@ -323,9 +443,9 @@ namespace HyperAIStudio::Bot::Private
 		return true;
 	}
 
-	UEnhancedInputLocalPlayerSubsystem* InputFor(UWorld& World, FString& OutCode, FString& OutError)
+	UEnhancedInputLocalPlayerSubsystem* InputFor(UWorld& World, const int32 PlayerIndex, FString& OutCode, FString& OutError)
 	{
-		APlayerController* Controller = World.GetFirstPlayerController();
+		APlayerController* Controller = PlayerController(World, PlayerIndex);
 		ULocalPlayer* Player = Controller ? Controller->GetLocalPlayer() : nullptr;
 		UEnhancedInputLocalPlayerSubsystem* Input = Player ? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(Player) : nullptr;
 		if (!Input)
@@ -466,6 +586,201 @@ namespace HyperAIStudio::Bot::Private
 			|| Action == EHyperAIBotAction::AssertOnScreen || Action == EHyperAIBotAction::AssertExists
 			|| Action == EHyperAIBotAction::AssertGone;
 	}
+
+	TArray<FString> Words(const FString& Name)
+	{
+		TArray<FString> Out;
+		FString Word;
+		auto Flush = [&Out, &Word]()
+		{
+			if (!Word.IsEmpty())
+			{
+				Out.Add(Word.ToLower());
+				Word.Reset();
+			}
+		};
+		for (int32 Index = 0; Index < Name.Len(); ++Index)
+		{
+			const TCHAR Char = Name[Index];
+			if (!FChar::IsAlnum(Char))
+			{
+				Flush();
+				continue;
+			}
+			// A capital starts a word after a small letter, or before one: ComboAttack, ADSToggle.
+			if (FChar::IsUpper(Char) && !Word.IsEmpty()
+				&& (FChar::IsLower(Word[Word.Len() - 1]) || (Index + 1 < Name.Len() && FChar::IsLower(Name[Index + 1]))))
+			{
+				Flush();
+			}
+			Word.AppendChar(Char);
+		}
+		Flush();
+		return Out;
+	}
+
+	bool LooksLikeHealth(const FString& Name)
+	{
+		static const TSet<FString> Not = {TEXT("max"), TEXT("maximum"), TEXT("regen"), TEXT("regeneration"), TEXT("rate"), TEXT("bar"),
+			TEXT("widget"), TEXT("percent"), TEXT("pct"), TEXT("ratio"), TEXT("delay"), TEXT("damage"), TEXT("bonus"), TEXT("scale"),
+			TEXT("multiplier"), TEXT("component"), TEXT("base"), TEXT("default"), TEXT("initial"), TEXT("start"), TEXT("starting"),
+			TEXT("min"), TEXT("threshold"), TEXT("low"), TEXT("critical"), TEXT("set"), TEXT("on"), TEXT("changed"), TEXT("event"),
+			TEXT("normalized"), TEXT("fraction"), TEXT("alpha")};
+		const TArray<FString> Parts = Words(Name);
+		bool bHealth = false;
+		for (int32 Index = 0; Index < Parts.Num(); ++Index)
+		{
+			if (Not.Contains(Parts[Index]))
+			{
+				return false;
+			}
+			bHealth |= Parts[Index] == TEXT("health") || Parts[Index] == TEXT("hp") || Parts[Index] == TEXT("hitpoints")
+				|| (Parts[Index] == TEXT("hit") && Parts.IsValidIndex(Index + 1) && Parts[Index + 1] == TEXT("points"));
+		}
+		return bHealth;
+	}
+
+	FString FindHealth(AActor& Actor)
+	{
+		auto IsNumber = [](const FProperty* Property)
+		{
+			const FNumericProperty* Number = CastField<FNumericProperty>(Property);
+			return Number && !Number->IsEnum();
+		};
+		auto On = [&IsNumber](UObject& Object, const FString& Prefix) -> FString
+		{
+			for (TFieldIterator<FProperty> It(Object.GetClass()); It; ++It)
+			{
+				if (!LooksLikeHealth(It->GetAuthoredName()))
+				{
+					continue;
+				}
+				if (IsNumber(*It))
+				{
+					return Prefix + It->GetAuthoredName();
+				}
+				// A gameplay attribute, or a small struct holding the number.
+				if (const FStructProperty* Struct = CastField<FStructProperty>(*It))
+				{
+					for (const TCHAR* Inner : {TEXT("CurrentValue"), TEXT("Current"), TEXT("Value")})
+					{
+						if (IsNumber(FindFProperty<FProperty>(Struct->Struct, Inner)))
+						{
+							return Prefix + It->GetAuthoredName() + TEXT(".") + Inner;
+						}
+					}
+				}
+			}
+			for (TFieldIterator<UFunction> It(Object.GetClass()); It; ++It)
+			{
+				if (LooksLikeHealth(It->GetName()) && IsPureReader(**It))
+				{
+					return Prefix + It->GetName();
+				}
+			}
+			return FString();
+		};
+		FString Found = On(Actor, FString());
+		for (UActorComponent* Component : Actor.GetComponents())
+		{
+			if (!Found.IsEmpty())
+			{
+				break;
+			}
+			if (Component)
+			{
+				Found = On(*Component, Component->GetName() + TEXT("."));
+			}
+		}
+		return Found;
+	}
+
+	const TCHAR* RoleName(const ERole Role)
+	{
+		static const TCHAR* Names[] = {TEXT("move"), TEXT("look"), TEXT("jump"), TEXT("attack"), TEXT("aim"), TEXT("reload"),
+			TEXT("crouch"), TEXT("sprint"), TEXT("dodge"), TEXT("interact"), TEXT("heal")};
+		static_assert(UE_ARRAY_COUNT(Names) == static_cast<int32>(ERole::Count), "a name for every role");
+		return Names[static_cast<int32>(Role)];
+	}
+
+	FControls ReadControls(UWorld& World, const int32 PlayerIndex)
+	{
+		FControls Out;
+		APlayerController* Controller = PlayerController(World, PlayerIndex);
+		const UEnhancedPlayerInput* Input = Controller ? Cast<UEnhancedPlayerInput>(Controller->PlayerInput) : nullptr;
+		if (!Input)
+		{
+			Out.Summary = TEXT("none: the player has no Enhanced Input");
+			return Out;
+		}
+		FString Code;
+		FString Error;
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = InputFor(World, PlayerIndex, Code, Error))
+		{
+			ApplyMappings(*Subsystem);
+		}
+		TArray<const UInputAction*> Actions;
+		TMap<const UInputAction*, TArray<FString>> Keys;
+		for (const FEnhancedActionKeyMapping& Mapping : Input->GetEnhancedActionMappingsView())
+		{
+			if (Mapping.Action)
+			{
+				Actions.AddUnique(Mapping.Action);
+				Keys.FindOrAdd(Mapping.Action).AddUnique(Mapping.Key.GetDisplayName(/*bLongDisplayName=*/false).ToString());
+			}
+		}
+		// Roles by the words games name their actions with, the likeliest word first. Moving and looking are sticks.
+		struct FRule
+		{
+			ERole Role;
+			TArray<const TCHAR*> Words;
+		};
+		static const FRule Rules[] = {
+			{ERole::Move, {TEXT("move"), TEXT("walk"), TEXT("locomotion")}},
+			{ERole::Look, {TEXT("look"), TEXT("camera"), TEXT("turn")}},
+			{ERole::Jump, {TEXT("jump")}},
+			{ERole::Attack, {TEXT("fire"), TEXT("shoot"), TEXT("attack"), TEXT("primary"), TEXT("combo"), TEXT("melee"), TEXT("punch"),
+				TEXT("swing"), TEXT("slash"), TEXT("strike")}},
+			{ERole::Aim, {TEXT("aim"), TEXT("ads"), TEXT("zoom")}},
+			{ERole::Reload, {TEXT("reload")}},
+			{ERole::Crouch, {TEXT("crouch")}},
+			{ERole::Sprint, {TEXT("sprint"), TEXT("run")}},
+			{ERole::Dodge, {TEXT("dash"), TEXT("dodge"), TEXT("roll"), TEXT("evade")}},
+			{ERole::Interact, {TEXT("interact"), TEXT("use"), TEXT("activate"), TEXT("pickup")}},
+			{ERole::Heal, {TEXT("heal")}},
+		};
+		TMap<const UInputAction*, ERole> RoleOf;
+		for (const FRule& Rule : Rules)
+		{
+			const bool bStick = Rule.Role == ERole::Move || Rule.Role == ERole::Look;
+			for (const TCHAR* Word : Rule.Words)
+			{
+				for (const UInputAction* Action : Actions)
+				{
+					if (!Out.Roles[static_cast<int32>(Rule.Role)] && !RoleOf.Contains(Action)
+						&& bStick == (Action->ValueType == EInputActionValueType::Axis2D) && Words(Action->GetName()).Contains(Word))
+					{
+						Out.Roles[static_cast<int32>(Rule.Role)] = Action;
+						RoleOf.Add(Action, Rule.Role);
+					}
+				}
+			}
+		}
+		TArray<FString> Lines;
+		for (const UInputAction* Action : Actions)
+		{
+			const TArray<FString>& Bound = Keys[Action];
+			FString KeyText = FString::Join(TArrayView<const FString>(Bound.GetData(), FMath::Min(Bound.Num(), 4)), TEXT(", "));
+			if (Bound.Num() > 4)
+			{
+				KeyText += FString::Printf(TEXT(" +%d"), Bound.Num() - 4);
+			}
+			const ERole* Role = RoleOf.Find(Action);
+			Lines.Add(FString::Printf(TEXT("%s%s = %s"), *Action->GetName(), Role ? *FString::Printf(TEXT(" (%s)"), RoleName(*Role)) : TEXT(""), *KeyText));
+		}
+		Out.Summary = Lines.IsEmpty() ? FString(TEXT("no actions mapped yet")) : FString::Join(Lines, TEXT(" | "));
+		return Out;
+	}
 }
 
 FHyperAIBotResult FHyperAIBotResult::Passed(const FString& Detail, const FString& File)
@@ -517,7 +832,8 @@ bool FHyperAIBotExecutor::Validate(const FHyperAIBotStep& Step, FString& OutErro
 	};
 	if (!Bounded(Step.Target, 256, TEXT("target")) || !Bounded(Step.Other, 256, TEXT("other")) || !Bounded(Step.Property, 256, TEXT("property"))
 		|| !Bounded(Step.Value, 512, TEXT("value")) || !Bounded(Step.InputAction, 512, TEXT("inputAction"))
-		|| !Bounded(Step.Widget, 256, TEXT("widget")) || !Bounded(Step.Text, 512, TEXT("text")))
+		|| !Bounded(Step.Widget, 256, TEXT("widget")) || !Bounded(Step.Text, 512, TEXT("text"))
+		|| !Bounded(Step.HealthProperty, 256, TEXT("healthProperty")))
 	{
 		return false;
 	}
@@ -525,6 +841,22 @@ bool FHyperAIBotExecutor::Validate(const FHyperAIBotStep& Step, FString& OutErro
 		|| !StaticEnum<EHyperAIBotAction>()->IsValidEnumValue(static_cast<int64>(Step.Until)))
 	{
 		OutError = TEXT("bot.action is not a bot action.");
+		return false;
+	}
+	if (!StaticEnum<EHyperAIBotGoal>()->IsValidEnumValue(static_cast<int64>(Step.Goal)))
+	{
+		OutError = TEXT("bot.goal is Reach, Collect, Defeat, Survive, Explore, Follow or Flee.");
+		return false;
+	}
+	if (Step.PlayerIndex < 0 || Step.PlayerIndex > 7 || !FMath::IsFinite(Step.Skill) || Step.Skill < 0.f || Step.Skill > 1.f
+		|| !FMath::IsFinite(Step.Range) || Step.Range < 0.f || Step.Range > 100000.f)
+	{
+		OutError = TEXT("bot.playerIndex must be 0 to 7, bot.skill 0 to 1, and bot.range 0 to 100000 cm.");
+		return false;
+	}
+	if (Step.bBackground && Step.Action != EHyperAIBotAction::Play && Step.Action != EHyperAIBotAction::MoveTo && Step.Action != EHyperAIBotAction::Hold)
+	{
+		OutError = TEXT("bot.bBackground works for Play, MoveTo and Hold.");
 		return false;
 	}
 	static const TSet<FString> Compares = {TEXT("=="), TEXT("!="), TEXT("<"), TEXT("<="), TEXT(">"), TEXT(">="), TEXT("contains")};
@@ -569,6 +901,23 @@ bool FHyperAIBotExecutor::Validate(const FHyperAIBotStep& Step, FString& OutErro
 	case EHyperAIBotAction::Interact:
 		if (!Require(!Step.Target.IsEmpty(), TEXT("target"))) return false;
 		break;
+	case EHyperAIBotAction::Play:
+		if ((Step.Goal == EHyperAIBotGoal::Collect || Step.Goal == EHyperAIBotGoal::Defeat) && Step.Target.IsEmpty())
+		{
+			OutError = TEXT("Play Collect and Play Defeat need target.");
+			return false;
+		}
+		if ((Step.Goal == EHyperAIBotGoal::Follow || Step.Goal == EHyperAIBotGoal::Flee) && Step.Target.IsEmpty())
+		{
+			OutError = TEXT("Play Follow and Play Flee need target.");
+			return false;
+		}
+		if (Step.Goal != EHyperAIBotGoal::Reach && Step.Goal != EHyperAIBotGoal::Collect && Step.Goal != EHyperAIBotGoal::Defeat && Step.Seconds <= 0.f)
+		{
+			OutError = TEXT("Play Survive, Explore, Follow and Flee need seconds.");
+			return false;
+		}
+		break;
 	case EHyperAIBotAction::UiType:
 		if (!Require(!Step.Text.IsEmpty(), TEXT("text"))) return false;
 		// Every UI step needs a widget.
@@ -609,6 +958,10 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 	{
 		return FResult::Failed(TEXT("step_running"), TEXT("The previous step has not finished."));
 	}
+	if (InStep.bBackground)
+	{
+		return StartBackground(InStep);
+	}
 	Step = InStep;
 	bRunning = true;
 	StartedAt = W->GetRealTimeSeconds();
@@ -622,9 +975,9 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 		break;
 	case EHyperAIBotAction::MoveTo:
 	{
-		APawn* Pawn = PlayerPawn(*W);
+		APawn* Pawn = PlayerPawn(*W, Step.PlayerIndex);
 		FVector Goal = Step.Location;
-		AActor* Target = Step.Target.IsEmpty() ? nullptr : Cast<AActor>(FindTarget(*W, Step.Target));
+		AActor* Target = Step.Target.IsEmpty() ? nullptr : Cast<AActor>(FindTarget(*W, Step.Target, Step.PlayerIndex));
 		if (!Pawn)
 		{
 			Result = FResult::Failed(TEXT("no_player"), TEXT("There is no player pawn to move."));
@@ -661,21 +1014,21 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 	}
 	case EHyperAIBotAction::LookAt:
 	{
-		AActor* Target = Step.Target.IsEmpty() ? nullptr : Cast<AActor>(FindTarget(*W, Step.Target));
+		AActor* Target = Step.Target.IsEmpty() ? nullptr : Cast<AActor>(FindTarget(*W, Step.Target, Step.PlayerIndex));
 		if (!Step.Target.IsEmpty() && !Target)
 		{
 			Result = FResult::Failed(TEXT("not_found"), FString::Printf(TEXT("No actor matches %s."), *Step.Target));
 			break;
 		}
 		const FVector Point = Target ? Target->GetActorLocation() : Step.Location;
-		Result = Face(*W, Point)
+		Result = Face(*W, Step.PlayerIndex, Point)
 			? FResult::Passed(FString::Printf(TEXT("facing %s"), Target ? *Describe(Target) : *Vec(Point)))
 			: FResult::Failed(TEXT("no_player"), TEXT("There is no player controller to turn."));
 		break;
 	}
 	case EHyperAIBotAction::Jump:
 	{
-		ACharacter* Character = Cast<ACharacter>(PlayerPawn(*W));
+		ACharacter* Character = Cast<ACharacter>(PlayerPawn(*W, Step.PlayerIndex));
 		if (!Character)
 		{
 			Result = FResult::Failed(TEXT("not_a_character"), TEXT("Only a Character can jump; the player pawn is not one."));
@@ -691,7 +1044,7 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 	case EHyperAIBotAction::Interact:
 	{
 		FString Code;
-		UEnhancedInputLocalPlayerSubsystem* Input = InputFor(*W, Code, Error);
+		UEnhancedInputLocalPlayerSubsystem* Input = InputFor(*W, Step.PlayerIndex, Code, Error);
 		if (!Input)
 		{
 			Result = FResult::Failed(Code, Error);
@@ -701,17 +1054,19 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 		FString Facing;
 		if (Step.Action == EHyperAIBotAction::Interact)
 		{
-			const AActor* Target = Cast<AActor>(FindTarget(*W, Step.Target));
+			const AActor* Target = Cast<AActor>(FindTarget(*W, Step.Target, Step.PlayerIndex));
 			if (!Target)
 			{
 				Result = FResult::Failed(TEXT("not_found"), FString::Printf(TEXT("No actor matches %s."), *Step.Target));
 				break;
 			}
-			Face(*W, Target->GetActorLocation());
-			const APawn* Pawn = PlayerPawn(*W);
+			Face(*W, Step.PlayerIndex, Target->GetActorLocation());
+			const APawn* Pawn = PlayerPawn(*W, Step.PlayerIndex);
 			Facing = FString::Printf(TEXT(" facing %s at %.0f cm"), *Describe(Target),
 				Pawn ? FVector::Dist(Pawn->GetActorLocation(), Target->GetActorLocation()) : 0.0);
-			Action = Step.InputAction.IsEmpty() ? FindInteractAction() : FindInputAction(Step.InputAction);
+			// The interact action the player's controls map, or else a loaded one named the way games name it.
+			Action = !Step.InputAction.IsEmpty() ? FindInputAction(Step.InputAction) : ReadControls(*W, Step.PlayerIndex).Get(ERole::Interact);
+			Action = Action || !Step.InputAction.IsEmpty() ? Action : FindInteractAction();
 			if (!Action)
 			{
 				Result = FResult::Failed(TEXT("no_interact_action"), Step.InputAction.IsEmpty()
@@ -749,8 +1104,8 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 		break;
 	case EHyperAIBotAction::Survey:
 	{
-		APlayerController* Controller = W->GetFirstPlayerController();
-		APawn* Pawn = PlayerPawn(*W);
+		APlayerController* Controller = PlayerController(*W, Step.PlayerIndex);
+		APawn* Pawn = PlayerPawn(*W, Step.PlayerIndex);
 		TMap<FString, int32> Classes;
 		int32 Count = 0;
 		for (TActorIterator<AActor> It(W); It; ++It)
@@ -781,9 +1136,55 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 			Detail += FString::Printf(TEXT("; camera at %s, pitch %.0f yaw %.0f"), *Vec(Camera), View.Pitch, View.Yaw);
 		}
 		Detail += FString::Printf(TEXT("; %d actors: %s"), Count, *FString::Join(Census, TEXT(", ")));
+		// What a player learns before playing: the controls, their own health, and who else is here.
+		Detail += FString::Printf(TEXT("; controls: %s"), *ReadControls(*W, Step.PlayerIndex).Summary);
+		if (Pawn)
+		{
+			const FString HealthPath = FindHealth(*Pawn);
+			const FReading Health = HealthPath.IsEmpty() ? FReading() : ReadProperty(Pawn, HealthPath);
+			Detail += Health.bOk ? FString::Printf(TEXT("; health %s = %s"), *HealthPath, *Health.Text) : FString(TEXT("; no health found on the player"));
+		}
+		TArray<TPair<double, FString>> Others;
+		for (TActorIterator<APawn> It(W); It; ++It)
+		{
+			if (*It == Pawn || !IsValid(*It))
+			{
+				continue;
+			}
+			const double Distance = Pawn ? FVector::Dist(Pawn->GetActorLocation(), It->GetActorLocation()) : 0.0;
+			const FString HealthPath = FindHealth(**It);
+			const FReading Health = HealthPath.IsEmpty() ? FReading() : ReadProperty(*It, HealthPath);
+			// In sight from the player's camera, as a player would see it, or behind something.
+			bool bInSight = false;
+			if (Controller)
+			{
+				FVector Eye;
+				FRotator Unused;
+				Controller->GetPlayerViewPoint(Eye, Unused);
+				FCollisionQueryParams Params(SCENE_QUERY_STAT(HyperAIBotSurvey), false, Pawn);
+				FHitResult Hit;
+				bInSight = !W->LineTraceSingleByChannel(Hit, Eye, It->GetActorLocation(), ECC_Pawn, Params) || Hit.GetActor() == *It;
+			}
+			Others.Emplace(Distance, FString::Printf(TEXT("%s%s %.0f cm, %s%s"), *Describe(*It), It->IsPlayerControlled() ? TEXT(" (a player)") : TEXT(""),
+				Distance, bInSight ? TEXT("in sight") : TEXT("out of sight"), Health.bOk ? *FString::Printf(TEXT(", health %s"), *Health.Text) : TEXT("")));
+		}
+		Others.Sort([](const TPair<double, FString>& A, const TPair<double, FString>& B) { return A.Key < B.Key; });
+		TArray<FString> Nearest;
+		for (int32 Index = 0; Index < Others.Num() && Index < 6; ++Index)
+		{
+			Nearest.Add(Others[Index].Value);
+		}
+		if (!Nearest.IsEmpty())
+		{
+			Detail += FString::Printf(TEXT("; other pawns: %s"), *FString::Join(Nearest, TEXT(", ")));
+		}
+		if (W->GetNumPlayerControllers() > 1)
+		{
+			Detail += FString::Printf(TEXT("; %d players"), W->GetNumPlayerControllers());
+		}
 		if (!Step.Target.IsEmpty())
 		{
-			const AActor* Target = Cast<AActor>(FindTarget(*W, Step.Target));
+			const AActor* Target = Cast<AActor>(FindTarget(*W, Step.Target, Step.PlayerIndex));
 			if (!Target)
 			{
 				Detail += FString::Printf(TEXT("; no actor matches %s"), *Step.Target);
@@ -803,7 +1204,7 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 	}
 	case EHyperAIBotAction::Sample:
 	{
-		const AActor* Target = Cast<AActor>(FindTarget(*W, Step.Target));
+		const AActor* Target = Cast<AActor>(FindTarget(*W, Step.Target, Step.PlayerIndex));
 		Samples = 0;
 		LastText.Reset();
 		SampleStart = Target ? Target->GetActorLocation() : FVector::ZeroVector;
@@ -939,6 +1340,14 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 			: FResult::Failed(TEXT("assertion_failed"), FString::Printf(TEXT("%s shows \"%s\", expected %s %s"), *Step.Widget, *Shown.Text, *Step.Compare, *Step.Value));
 		break;
 	}
+	case EHyperAIBotAction::Play:
+		Brain = MakeUnique<FHyperAIBotBrain>(*W, Step, FPaths::Combine(OutputDirectory, FString::Printf(TEXT("play-%s-p%d-%02d.png"),
+			*StaticEnum<EHyperAIBotGoal>()->GetNameStringByValue(static_cast<int64>(Step.Goal)).ToLower(), Step.PlayerIndex, ++Captures)));
+		Result = Brain->Begin();
+		break;
+	case EHyperAIBotAction::AddPlayer:
+		Result = AddPlayer();
+		break;
 	default:
 		Result = FResult::Failed(TEXT("unsupported_action"), TEXT("The bot has no route for this action."));
 		break;
@@ -946,14 +1355,16 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 	if (Result.IsDone())
 	{
 		bRunning = false;
+		Brain.Reset();
 	}
-	return Result;
+	return WithBackground(Result);
 }
 
 FHyperAIBotResult FHyperAIBotExecutor::Tick()
 {
 	using namespace HyperAIStudio::Bot::Private;
 	UWorld* W = World.Get();
+	TickBackground();
 	if (!bRunning)
 	{
 		return FResult::Failed(TEXT("no_step"), TEXT("No step is running."));
@@ -991,7 +1402,7 @@ FHyperAIBotResult FHyperAIBotExecutor::Tick()
 		break;
 	case EHyperAIBotAction::Jump:
 	{
-		ACharacter* Character = Cast<ACharacter>(PlayerPawn(*W));
+		ACharacter* Character = Cast<ACharacter>(PlayerPawn(*W, Step.PlayerIndex));
 		const UCharacterMovementComponent* Movement = Character ? Character->GetCharacterMovement() : nullptr;
 		if (!Character || !Movement)
 		{
@@ -1036,7 +1447,7 @@ FHyperAIBotResult FHyperAIBotExecutor::Tick()
 		{
 			FString Code;
 			FString Error;
-			UEnhancedInputLocalPlayerSubsystem* Input = InputFor(*W, Code, Error);
+			UEnhancedInputLocalPlayerSubsystem* Input = InputFor(*W, Step.PlayerIndex, Code, Error);
 			if (Input && Held.IsValid())
 			{
 				Input->InjectInputForAction(Held.Get(), InputValue(*Held, Step.Value), {}, {});
@@ -1046,6 +1457,9 @@ FHyperAIBotResult FHyperAIBotExecutor::Tick()
 	case EHyperAIBotAction::Sample:
 		Result = TickSample();
 		break;
+	case EHyperAIBotAction::Play:
+		Result = Brain ? Brain->Tick() : FResult::Failed(TEXT("no_step"), TEXT("The player's brain has ended."));
+		break;
 	default:
 		Result = FResult::Failed(TEXT("not_running"), TEXT("This step finished when it began."));
 		break;
@@ -1053,15 +1467,16 @@ FHyperAIBotResult FHyperAIBotExecutor::Tick()
 	if (Result.IsDone())
 	{
 		bRunning = false;
+		Brain.Reset();
 	}
-	return Result;
+	return WithBackground(Result);
 }
 
 FHyperAIBotResult FHyperAIBotExecutor::TickMove()
 {
 	using namespace HyperAIStudio::Bot::Private;
 	UWorld* W = World.Get();
-	APawn* Pawn = W ? PlayerPawn(*W) : nullptr;
+	APawn* Pawn = W ? PlayerPawn(*W, Step.PlayerIndex) : nullptr;
 	if (!Pawn || Path.IsEmpty())
 	{
 		return FResult::Failed(TEXT("no_player"), TEXT("The player pawn is gone."));
@@ -1069,7 +1484,7 @@ FHyperAIBotResult FHyperAIBotExecutor::TickMove()
 	// A moving target is followed to wherever it is now.
 	if (!Step.Target.IsEmpty())
 	{
-		if (const AActor* Target = Cast<AActor>(FindTarget(*W, Step.Target)))
+		if (const AActor* Target = Cast<AActor>(FindTarget(*W, Step.Target, Step.PlayerIndex)))
 		{
 			Path.Last() = Target->GetActorLocation();
 		}
@@ -1116,7 +1531,7 @@ FHyperAIBotResult FHyperAIBotExecutor::TickSample()
 {
 	using namespace HyperAIStudio::Bot::Private;
 	UWorld* W = World.Get();
-	UObject* Target = W ? FindTarget(*W, Step.Target) : nullptr;
+	UObject* Target = W ? FindTarget(*W, Step.Target, Step.PlayerIndex) : nullptr;
 	if (!Target)
 	{
 		return FResult::Failed(TEXT("not_found"), FString::Printf(TEXT("No actor matches %s."), Step.Target.IsEmpty() ? TEXT("Player") : *Step.Target));
@@ -1176,7 +1591,7 @@ FHyperAIBotResult FHyperAIBotExecutor::Evaluate(const EHyperAIBotAction Assertio
 		return FResult::Failed(TEXT("world_unavailable"), TEXT("The game world has ended."));
 	}
 	const FString TargetName = Step.Target.IsEmpty() ? FString(TEXT("Player")) : Step.Target;
-	UObject* Target = FindTarget(*W, Step.Target);
+	UObject* Target = FindTarget(*W, Step.Target, Step.PlayerIndex);
 	switch (Assertion)
 	{
 	case EHyperAIBotAction::AssertGone:
@@ -1214,7 +1629,7 @@ FHyperAIBotResult FHyperAIBotExecutor::Evaluate(const EHyperAIBotAction Assertio
 	}
 	if (Assertion == EHyperAIBotAction::AssertNear)
 	{
-		const AActor* Other = Step.Other.IsEmpty() ? nullptr : Cast<AActor>(FindTarget(*W, Step.Other));
+		const AActor* Other = Step.Other.IsEmpty() ? nullptr : Cast<AActor>(FindTarget(*W, Step.Other, Step.PlayerIndex));
 		if (!Step.Other.IsEmpty() && !Other)
 		{
 			return FResult::Failed(TEXT("not_found"), FString::Printf(TEXT("No actor matches %s."), *Step.Other));
@@ -1227,7 +1642,7 @@ FHyperAIBotResult FHyperAIBotExecutor::Evaluate(const EHyperAIBotAction Assertio
 			: FResult::Failed(TEXT("too_far"), FString::Printf(TEXT("%s is %.0f cm from %s, more than %.0f"), *Describe(Actor), Distance, *What, Step.Radius));
 	}
 	// AssertOnScreen: projected into the viewport, and nothing between the camera and it.
-	APlayerController* Controller = W->GetFirstPlayerController();
+	APlayerController* Controller = PlayerController(*W, Step.PlayerIndex);
 	if (!Controller)
 	{
 		return FResult::Failed(TEXT("no_player"), TEXT("There is no player camera."));
@@ -1268,13 +1683,17 @@ FHyperAIBotResult FHyperAIBotExecutor::CaptureTo(const FString& FilePath)
 	UWorld* W = World.Get();
 	UGameViewportClient* Client = W ? W->GetGameViewport() : nullptr;
 	FViewport* Viewport = Client ? Client->Viewport : nullptr;
+	FIntPoint Size = Viewport ? Viewport->GetSizeXY() : FIntPoint::ZeroValue;
+	TArray<FColor> Pixels;
 	if (!Viewport)
 	{
-		return FResult::Failed(TEXT("viewport_unavailable"), TEXT("The game has no viewport to capture; a worker without rendering cannot."));
+		// No screen, as in a verification copy: render what the player's camera sees instead.
+		if (!RenderPlayerView(Pixels, Size))
+		{
+			return FResult::Failed(TEXT("viewport_unavailable"), TEXT("The game has no viewport, and no player camera to render instead."));
+		}
 	}
-	const FIntPoint Size = Viewport->GetSizeXY();
-	TArray<FColor> Pixels;
-	if (Size.X < 1 || Size.Y < 1 || !Viewport->ReadPixels(Pixels) || Pixels.Num() != Size.X * Size.Y)
+	else if (Size.X < 1 || Size.Y < 1 || !Viewport->ReadPixels(Pixels) || Pixels.Num() != Size.X * Size.Y)
 	{
 		return FResult::Failed(TEXT("pixel_read_failed"), TEXT("The game view could not be read."));
 	}
@@ -1311,15 +1730,228 @@ void FHyperAIBotExecutor::Stop()
 {
 	StopHold();
 	StopRecording();
+	if (Brain)
+	{
+		Brain->Stop();
+		Brain.Reset();
+	}
+	for (const TUniquePtr<FHyperAIBotExecutor>& Child : Background)
+	{
+		Child->Stop();
+	}
+	Background.Reset();
+	BackgroundNotes.Reset();
+	// Unregistered while its world is still there; a world already gone took its scene with it.
+	if (SceneCapture.IsValid() && SceneCapture->IsRegistered() && World.IsValid())
+	{
+		SceneCapture->UnregisterComponent();
+	}
+	SceneCapture.Reset();
+	SceneTarget.Reset();
 	if (bRunning && Step.Action == EHyperAIBotAction::Jump)
 	{
 		if (UWorld* W = World.Get())
 		{
-			if (ACharacter* Character = Cast<ACharacter>(HyperAIStudio::Bot::Private::PlayerPawn(*W)))
+			if (ACharacter* Character = Cast<ACharacter>(HyperAIStudio::Bot::Private::PlayerPawn(*W, Step.PlayerIndex)))
 			{
 				Character->StopJumping();
 			}
 		}
 	}
 	bRunning = false;
+}
+
+FString FHyperAIBotExecutor::Label() const
+{
+	const FString What = Step.Action == EHyperAIBotAction::Play
+		? StaticEnum<EHyperAIBotGoal>()->GetNameStringByValue(static_cast<int64>(Step.Goal)) : ActionName(Step.Action);
+	return FString::Printf(TEXT("Player%d's %s"), Step.PlayerIndex, *What);
+}
+
+FString FHyperAIBotExecutor::Progress() const
+{
+	TArray<FString> Parts;
+	if (Brain)
+	{
+		Parts.Add(Brain->Progress());
+	}
+	else if (bRunning)
+	{
+		Parts.Add(Label() + TEXT(" running"));
+	}
+	for (const TUniquePtr<FHyperAIBotExecutor>& Child : Background)
+	{
+		Parts.Add(Child->Progress());
+	}
+	return FString::Join(Parts, TEXT("; "));
+}
+
+FHyperAIBotResult FHyperAIBotExecutor::StartBackground(const FHyperAIBotStep& InStep)
+{
+	FHyperAIBotStep Own = InStep;
+	Own.bBackground = false;
+	TUniquePtr<FHyperAIBotExecutor> Child = MakeUnique<FHyperAIBotExecutor>(*World.Get(), OutputDirectory);
+	// Its files are numbered apart from this executor's.
+	Child->Captures = Captures + 100 * (Background.Num() + 1);
+	const FHyperAIBotResult Started = Child->Begin(Own);
+	if (Started.IsDone())
+	{
+		return Started;
+	}
+	const FString Name = Child->Label();
+	Background.Add(MoveTemp(Child));
+	return FHyperAIBotResult::Passed(FString::Printf(TEXT("%s runs in the background"), *Name));
+}
+
+void FHyperAIBotExecutor::TickBackground()
+{
+	for (int32 Index = 0; Index < Background.Num();)
+	{
+		const FHyperAIBotResult Result = Background[Index]->Tick();
+		if (!Result.IsDone())
+		{
+			++Index;
+			continue;
+		}
+		BackgroundNotes.Add(FString::Printf(TEXT("%s %s: %s%s"), *Background[Index]->Label(),
+			Result.State == FHyperAIBotResult::EState::Passed ? TEXT("passed") : *Result.Code, *Result.Detail.Left(700),
+			Result.File.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (map %s)"), *Result.File)));
+		Background.RemoveAt(Index);
+	}
+}
+
+FHyperAIBotResult FHyperAIBotExecutor::WithBackground(FHyperAIBotResult Result)
+{
+	if (!Result.IsDone() || (BackgroundNotes.IsEmpty() && Background.IsEmpty()))
+	{
+		return Result;
+	}
+	TArray<FString> Meanwhile = MoveTemp(BackgroundNotes);
+	BackgroundNotes.Reset();
+	for (const TUniquePtr<FHyperAIBotExecutor>& Child : Background)
+	{
+		Meanwhile.Add(Child->Progress());
+	}
+	Result.Detail += TEXT("; meanwhile ") + FString::Join(Meanwhile, TEXT("; "));
+	return Result;
+}
+
+FHyperAIBotResult FHyperAIBotExecutor::AddPlayer()
+{
+	using namespace HyperAIStudio::Bot::Private;
+	UWorld* W = World.Get();
+	UGameInstance* Instance = W ? W->GetGameInstance() : nullptr;
+	if (!Instance)
+	{
+		return FResult::Failed(TEXT("no_game_instance"), TEXT("This world has no game for a player to join."));
+	}
+	const int32 Before = Instance->GetNumLocalPlayers();
+	if (Before >= 4)
+	{
+		return FResult::Failed(TEXT("too_many_players"), TEXT("A game here takes up to 4 local players."));
+	}
+	const FPlatformUserId User = IPlatformInputDeviceMapper::Get().GetPlatformUserForUserIndex(Before);
+	FString Error;
+	ULocalPlayer* Joined = nullptr;
+	if (Instance->GetGameViewportClient())
+	{
+		// Play In Editor: the new player gets its own part of the screen.
+		Joined = Instance->CreateLocalPlayer(User, Error, /*bSpawnPlayerController=*/true);
+	}
+	else
+	{
+		// A copy with no screen: what CreateLocalPlayer does, without a viewport to split.
+		Joined = NewObject<ULocalPlayer>(GEngine, GEngine->LocalPlayerClass);
+		Instance->AddLocalPlayer(Joined, User);
+		if (!Joined->SpawnPlayActor(FString(), Error, W))
+		{
+			Instance->RemoveLocalPlayer(Joined);
+			Joined = nullptr;
+		}
+	}
+	APlayerController* Controller = Joined ? Joined->GetPlayerController(W) : nullptr;
+	if (!Controller)
+	{
+		return FResult::Failed(TEXT("join_failed"), TEXT("The player could not join: ") + (Error.IsEmpty() ? FString(TEXT("the game refused it")) : Error));
+	}
+	int32 Index = 0;
+	for (FConstPlayerControllerIterator It = W->GetPlayerControllerIterator(); It && It->Get() != Controller; ++It)
+	{
+		++Index;
+	}
+	APawn* Pawn = Controller->GetPawn();
+	if (!Pawn)
+	{
+		return FResult::Failed(TEXT("no_pawn"), FString::Printf(TEXT("Player%d joined, but the game mode gave it no pawn; the level may need another player start."), Index));
+	}
+	if (!Step.Location.IsZero())
+	{
+		// Standing on the ground at Location.
+		float Radius = 34.f;
+		float HalfHeight = 88.f;
+		Pawn->GetSimpleCollisionCylinder(Radius, HalfHeight);
+		FVector Stand = Step.Location + FVector(0.0, 0.0, HalfHeight);
+		FHitResult Ground;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(HyperAIBotJoin), false, Pawn);
+		if (W->LineTraceSingleByChannel(Ground, Step.Location + FVector(0.0, 0.0, 200.0), Step.Location - FVector(0.0, 0.0, 1000.0), ECC_Pawn, Params))
+		{
+			Stand = Ground.ImpactPoint + FVector(0.0, 0.0, HalfHeight + 2.0);
+		}
+		Pawn->SetActorLocation(Stand, /*bSweep=*/false, nullptr, ETeleportType::TeleportPhysics);
+	}
+	Controller->SetControlRotation(Pawn->GetActorRotation());
+	return FResult::Passed(FString::Printf(TEXT("Player%d joined as %s at %s; %d players"), Index, *Describe(Pawn),
+		*Vec(Pawn->GetActorLocation()), W->GetNumPlayerControllers()));
+}
+
+bool FHyperAIBotExecutor::RenderPlayerView(TArray<FColor>& OutPixels, FIntPoint& OutSize)
+{
+	using namespace HyperAIStudio::Bot::Private;
+	constexpr int32 Width = 960;
+	constexpr int32 Height = 540;
+	UWorld* W = World.Get();
+	APlayerController* Controller = W ? PlayerController(*W, Step.PlayerIndex) : nullptr;
+	if (!W || !W->Scene || !Controller)
+	{
+		return false;
+	}
+	FVector Location;
+	FRotator Rotation;
+	Controller->GetPlayerViewPoint(Location, Rotation);
+	const bool bFirst = !SceneCapture.IsValid();
+	if (bFirst)
+	{
+		SceneTarget.Reset(NewObject<UTextureRenderTarget2D>(GetTransientPackage(), NAME_None, RF_Transient));
+		SceneTarget->RenderTargetFormat = RTF_RGBA8;
+		SceneTarget->ClearColor = FLinearColor::Black;
+		SceneTarget->InitAutoFormat(Width, Height);
+		SceneTarget->UpdateResourceImmediate(/*bClearRenderTarget=*/true);
+		SceneCapture.Reset(NewObject<USceneCaptureComponent2D>(GetTransientPackage(), NAME_None, RF_Transient));
+		SceneCapture->CaptureSource = SCS_FinalColorLDR;
+		SceneCapture->TextureTarget = SceneTarget.Get();
+		SceneCapture->bCaptureEveryFrame = false;
+		SceneCapture->bCaptureOnMovement = false;
+		// Exposure and temporal effects keep their history from one capture to the next.
+		SceneCapture->bAlwaysPersistRenderingState = true;
+		SceneCapture->RegisterComponentWithWorld(W);
+	}
+	SceneCapture->FOVAngle = Controller->PlayerCameraManager ? Controller->PlayerCameraManager->GetFOVAngle() : 90.f;
+	SceneCapture->SetWorldLocationAndRotation(Location, Rotation);
+#if WITH_EDITOR
+	if (GShaderCompilingManager)
+	{
+		GShaderCompilingManager->FinishAllCompilation();
+	}
+#endif
+	bool bRead = false;
+	// The first view renders a few times over, so exposure and temporal history settle.
+	for (int32 Pass = 0; Pass < (bFirst ? 4 : 1); ++Pass)
+	{
+		W->SendAllEndOfFrameUpdates();
+		SceneCapture->CaptureScene();
+		FTextureRenderTargetResource* Resource = SceneTarget->GameThread_GetRenderTargetResource();
+		bRead = Resource && Resource->ReadPixels(OutPixels);
+	}
+	OutSize = FIntPoint(Width, Height);
+	return bRead && OutPixels.Num() == Width * Height;
 }

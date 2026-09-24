@@ -16,8 +16,8 @@ if (!request) {
   return { status: 'nothing_to_verify' }
 }
 
-const ACTIONS = ['MoveTo', 'LookAt', 'Jump', 'Press', 'Hold', 'Interact', 'Wait', 'WaitUntil', 'Survey', 'Sample',
-  'AssertProperty', 'AssertNear', 'AssertExists', 'AssertGone']
+const ACTIONS = ['Play', 'AddPlayer', 'MoveTo', 'LookAt', 'Jump', 'Press', 'Hold', 'Interact', 'Wait', 'WaitUntil', 'Survey', 'Sample',
+  'Capture', 'AssertProperty', 'AssertNear', 'AssertExists', 'AssertGone']
 const STEP = {
   type: 'object',
   properties: {
@@ -34,9 +34,17 @@ const STEP = {
     compare: { type: 'string', enum: ['==', '!=', '<', '<=', '>', '>=', 'contains'] },
     value: { type: 'string' },
     inputAction: { type: 'string' },
+    text: { type: 'string' },
     seconds: { type: 'number' },
     radius: { type: 'number' },
     timeoutSeconds: { type: 'number' },
+    goal: { type: 'string', enum: ['Reach', 'Collect', 'Defeat', 'Survive', 'Explore', 'Follow', 'Flee'] },
+    playerIndex: { type: 'integer', minimum: 0, maximum: 7 },
+    skill: { type: 'number', minimum: 0, maximum: 1 },
+    range: { type: 'number' },
+    healthProperty: { type: 'string' },
+    seed: { type: 'integer' },
+    bBackground: { type: 'boolean' },
   },
   required: ['action'],
 }
@@ -121,7 +129,7 @@ phase('Write')
 const written = await parallel(checks.map(check => () => agent(
   `Write one hyper_verify_run test case for this check, following the unreal-playtest skill's "Verify many things at once" section. Do not run it.\n\n` +
   `Check "${check.name}": ${check.requirement}\n\nWhat the planner learned about the level:\n${plan.notes}\n\n` +
-  'The case starts where the game starts the player. Use only the listed step actions, end with an Assert step that proves the requirement, ' +
+  'The case starts where the game starts the player. Use only the listed step actions. End with a step that proves the requirement: an Assert step, or a Play step for what a player does, such as defeating enemies, collecting every pickup or reaching the exit. ' +
   'and set timeoutSeconds to the simulated seconds the case needs plus a margin (at most 55). In proves, say what a pass shows.',
   { agentType: 'playtester', phase: 'Write', label: `write:${check.name}`, schema: CASE })))
 // Each case keeps its check's name, so results and verdicts line up with the checks.
@@ -160,7 +168,8 @@ const judged = await parallel(report.cases.map(result => () => {
     `Its steps: ${JSON.stringify(written_ ? written_.steps : [])}\n\n` +
     `Its result: ${JSON.stringify(result)}\n\n` +
     'pass: the evidence shows the requirement holds. fail: the evidence shows it does not, which is a bug in the game. ' +
-    'inconclusive: the case could not tell, for example a wrong target name or a step that failed for a reason unrelated to the requirement. Quote the evidence line you relied on.',
+    'inconclusive: the case could not tell, for example a wrong target name or a step that failed for a reason unrelated to the requirement. ' +
+    'A step\'s file is a picture, a capture or a Play step\'s map of where the player went: open it when it helps. Quote the evidence line you relied on.',
     { agentType: 'playtester', phase: 'Judge', label: `judge:${result.name}`, schema: VERDICT })
 }))
 

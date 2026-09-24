@@ -76,6 +76,12 @@ namespace HyperAIStudio::Verify
 	/** Ends a running batch at once; cases still running report stopped, with the reason. */
 	void Stop(const FString& Reason);
 
+	/**
+	 * Tests only: runs in each copy once its game has started, with the copy as the play world, so a test can add its
+	 * own actors to it. It is given the copy and its case's name. An empty function clears it.
+	 */
+	void SetCaseSetupForTests(TFunction<void(UWorld& World, const FString& CaseName)> Setup);
+
 	bool IsRunning();
 
 	/** How many cases a batch may hold on this machine and level: the calibrated number, or DefaultLimit. */

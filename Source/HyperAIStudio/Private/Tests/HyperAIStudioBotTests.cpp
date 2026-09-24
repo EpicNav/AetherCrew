@@ -13,6 +13,7 @@
 #include "HyperAIStudioNativeReadToolset.h"
 #include "HyperAIStudioPIEPlaytestToolset.h"
 #include "Misc/AutomationTest.h"
+#include "Tests/HyperAIStudioBotFixtures.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 
@@ -122,6 +123,22 @@ bool FHyperAIStudioBotStepsTest::RunTest(const FString& Parameters)
 	Invalid = Make(EHyperAIBotAction::MoveTo);
 	Invalid.TimeoutSeconds = 3600.f;
 	TestFalse(TEXT("Timeouts are bounded"), FHyperAIBotExecutor::Validate(Invalid, Error));
+	Invalid = Make(EHyperAIBotAction::Play);
+	Invalid.Goal = EHyperAIBotGoal::Defeat;
+	TestFalse(TEXT("Play Defeat needs a target"), FHyperAIBotExecutor::Validate(Invalid, Error));
+	Invalid.Goal = EHyperAIBotGoal::Explore;
+	TestFalse(TEXT("Play Explore needs seconds"), FHyperAIBotExecutor::Validate(Invalid, Error));
+	Invalid.Seconds = 10.f;
+	TestTrue(TEXT("and with them it is valid"), FHyperAIBotExecutor::Validate(Invalid, Error));
+	Invalid.Skill = 2.f;
+	TestFalse(TEXT("Skill is 0 to 1"), FHyperAIBotExecutor::Validate(Invalid, Error));
+	Invalid = Make(EHyperAIBotAction::Wait);
+	Invalid.Seconds = 1.f;
+	Invalid.bBackground = true;
+	TestFalse(TEXT("Only Play, MoveTo and Hold run in the background"), FHyperAIBotExecutor::Validate(Invalid, Error));
+	Invalid.bBackground = false;
+	Invalid.PlayerIndex = 8;
+	TestFalse(TEXT("Players are 0 to 7"), FHyperAIBotExecutor::Validate(Invalid, Error));
 
 	FTestGame Game;
 	if (!TestTrue(TEXT("The test world has a possessed pawn and a target"), Game.Pawn && Game.Controller && Game.Coin && Game.Controller->GetPawn() == Game.Pawn))
@@ -151,6 +168,28 @@ bool FHyperAIStudioBotStepsTest::RunTest(const FString& Parameters)
 	Property.Property = TEXT("NoSuchProperty");
 	const FHyperAIBotResult Unreadable = Bot.Begin(Property);
 	TestEqual(TEXT("An unknown property says so"), Unreadable.Code, FString(TEXT("property_unreadable")));
+	Property.Property = TEXT("PrimaryActorTick.TickInterval");
+	Property.Compare = TEXT("==");
+	Property.Value = TEXT("0");
+	const FHyperAIBotResult InStruct = Bot.Begin(Property);
+	TestTrue(FString::Printf(TEXT("A path goes into structs: %s"), *InStruct.Detail), Passed(InStruct));
+	Property.Property = TEXT("GetActorTimeDilation");
+	Property.Value = TEXT("1");
+	const FHyperAIBotResult Called = Bot.Begin(Property);
+	TestTrue(FString::Printf(TEXT("and can end in a const function that only reads: %s"), *Called.Detail), Passed(Called));
+	Property.Property = TEXT("K2_DestroyActor");
+	TestEqual(TEXT("but never one that changes anything"), Bot.Begin(Property).Code, FString(TEXT("property_unreadable")));
+	UHyperAIStudioTestHealth* Health = NewObject<UHyperAIStudioTestHealth>(Game.Pawn, TEXT("Health"));
+	Game.Pawn->AddInstanceComponent(Health);
+	Health->RegisterComponent();
+	const FHyperAIBotResult Read = Bot.Begin(Make(EHyperAIBotAction::Survey));
+	TestTrue(FString::Printf(TEXT("Survey finds the player's health as a player reads it: %s"), *Read.Detail), Read.Detail.Contains(TEXT("health Health.Health = 100")));
+	TestEqual(TEXT("A world without a game has no one to join it"), Bot.Begin(Make(EHyperAIBotAction::AddPlayer)).Code, FString(TEXT("no_game_instance")));
+	FHyperAIBotStep Other = Make(EHyperAIBotAction::AssertExists);
+	Other.Target = TEXT("Player1");
+	TestEqual(TEXT("Player1 is a second player's pawn, and there is none"), Bot.Begin(Other).Code, FString(TEXT("not_found")));
+	Other.Target = TEXT("Player0");
+	TestTrue(TEXT("Player0 is the first"), Passed(Bot.Begin(Other)));
 	FHyperAIBotStep Near = Make(EHyperAIBotAction::AssertNear);
 	Near.Other = TEXT("Coin");
 	Near.Radius = 100.f;
@@ -210,7 +249,9 @@ bool FHyperAIStudioBotStepsTest::RunTest(const FString& Parameters)
 	FHyperAIBotStep Press = Make(EHyperAIBotAction::Press);
 	Press.InputAction = TEXT("IA_Jump");
 	TestEqual(TEXT("Input needs a local player"), Bot.Begin(Press).Code, FString(TEXT("no_local_player")));
-	TestEqual(TEXT("A capture needs a viewport"), Bot.Begin(Make(EHyperAIBotAction::Capture)).Code, FString(TEXT("viewport_unavailable")));
+	const FHyperAIBotResult Shot = Bot.Begin(Make(EHyperAIBotAction::Capture));
+	TestTrue(FString::Printf(TEXT("Without a viewport, a capture renders the player's camera: %s"), *Shot.Detail),
+		Passed(Shot) && IFileManager::Get().FileSize(*Shot.File) > 0);
 	FHyperAIBotStep Click = Make(EHyperAIBotAction::UiClick);
 	Click.Widget = TEXT("WBP_Menu.PlayButton");
 	TestEqual(TEXT("A missing widget says so"), Bot.Begin(Click).Code, FString(TEXT("widget_not_found")));
@@ -224,7 +265,7 @@ bool FHyperAIStudioBotStepsTest::RunTest(const FString& Parameters)
 		FTSTicker::GetCoreTicker().Tick(0.6f);
 	}
 	const FHyperAIBotResult Stopped = Bot.Begin(Make(EHyperAIBotAction::RecordStop));
-	TestTrue(TEXT("RecordStop reports its frames, none without a viewport"), Passed(Stopped) && Stopped.Detail.StartsWith(TEXT("0 frames")));
+	TestTrue(FString::Printf(TEXT("RecordStop reports the frames it rendered: %s"), *Stopped.Detail), Passed(Stopped) && !Stopped.Detail.StartsWith(TEXT("0 frames")));
 	TestEqual(TEXT("There is nothing left to stop"), Bot.Begin(Make(EHyperAIBotAction::RecordStop)).Code, FString(TEXT("not_recording")));
 	return true;
 }

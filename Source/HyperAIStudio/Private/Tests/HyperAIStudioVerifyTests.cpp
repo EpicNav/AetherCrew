@@ -112,8 +112,11 @@ bool FHyperAIStudioVerifyAdmissionTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("A deadline under 10 s is refused"), Admit({Good}, 5.f, 4, Error));
 	TestFalse(TEXT("A case timeout that does not fit the deadline is refused"), Admit({Case(TEXT("long"), {Wait}, 56.f)}, 60.f, 4, Error));
 	TestFalse(TEXT("A case without steps is refused"), Admit({Case(TEXT("empty"), {})}, 60.f, 4, Error));
-	TestFalse(TEXT("A capture needs a screen the copies do not have"), Admit({Case(TEXT("shot"), {Make(EHyperAIBotAction::Capture)})}, 60.f, 4, Error));
+	FHyperAIBotStep OnScreen = Make(EHyperAIBotAction::AssertOnScreen);
+	OnScreen.Target = TEXT("Player");
+	TestFalse(TEXT("An on-screen check needs a screen the copies do not have"), Admit({Case(TEXT("seen"), {OnScreen})}, 60.f, 4, Error));
 	TestTrue(TEXT("and the refusal points at the playtest tool"), Error.Contains(TEXT("hyper_playtest_run")));
+	TestTrue(TEXT("A capture is admitted: the copies render the player's camera"), Admit({Case(TEXT("shot"), {Make(EHyperAIBotAction::Capture)})}, 60.f, 4, Error));
 	TestFalse(TEXT("An invalid step is refused"), Admit({Case(TEXT("bad"), {Make(EHyperAIBotAction::Wait)})}, 60.f, 4, Error));
 
 	TestEqual(TEXT("The largest batch within the budget"), PickLimit({{1, 3.0}, {2, 5.0}, {4, 9.0}, {6, 55.0}, {8, 70.0}}, 50.0), 4);

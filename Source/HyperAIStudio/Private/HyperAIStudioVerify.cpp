@@ -77,6 +77,12 @@ namespace HyperAIStudio::Verify
 			return Batch;
 		}
 
+		TFunction<void(UWorld&, const FString&)>& CaseSetup()
+		{
+			static TFunction<void(UWorld&, const FString&)> Setup;
+			return Setup;
+		}
+
 		UWorld* EditorWorldOf()
 		{
 			return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
@@ -88,14 +94,11 @@ namespace HyperAIStudio::Verify
 			return World ? World->GetOutermost()->GetName() : FString();
 		}
 
-		/** Steps that need a game viewport or UI, which case worlds do not have. */
+		/** Steps that need a game viewport or UI, which case worlds do not have. Captures render the player's camera instead. */
 		bool NeedsViewport(const EHyperAIBotAction Action)
 		{
 			switch (Action)
 			{
-			case EHyperAIBotAction::Capture:
-			case EHyperAIBotAction::RecordStart:
-			case EHyperAIBotAction::RecordStop:
 			case EHyperAIBotAction::AssertOnScreen:
 			case EHyperAIBotAction::UiClick:
 			case EHyperAIBotAction::UiType:
@@ -172,6 +175,12 @@ namespace HyperAIStudio::Verify
 			// copies have none, so once the game has started the player keeps its controller and input but no client.
 			Player->ViewportClient = nullptr;
 			Case.Context->GameViewport = nullptr;
+			if (CaseSetup())
+			{
+				SetPlayInEditorWorld(Case.World);
+				CaseSetup()(*Case.World, Case.Outcome.Name);
+				RestoreEditorWorld(GEditor->EditorWorld);
+			}
 			Case.Bot = MakeUnique<FHyperAIBotExecutor>(*Case.World, Output / FString::FromInt(Instance));
 			return true;
 		}
@@ -197,7 +206,7 @@ namespace HyperAIStudio::Verify
 				Step.Action = FHyperAIBotExecutor::ActionName(Case.Spec.Steps[Case.NextStep].Action);
 				Step.Status = bPassed ? TEXT("passed") : TEXT("failed");
 				Step.Code = Result.Code;
-				Step.Detail = Result.Detail.Left(600);
+				Step.Detail = Result.Detail.Left(1500);
 				Step.File = Result.File;
 				Step.AtSeconds = Case.Outcome.SimulatedSeconds;
 				if (!bPassed)
@@ -696,6 +705,11 @@ namespace HyperAIStudio::Verify
 	bool IsRunning()
 	{
 		return Current().IsValid();
+	}
+
+	void SetCaseSetupForTests(TFunction<void(UWorld& World, const FString& CaseName)> Setup)
+	{
+		CaseSetup() = MoveTemp(Setup);
 	}
 
 	int32 GetLimit()

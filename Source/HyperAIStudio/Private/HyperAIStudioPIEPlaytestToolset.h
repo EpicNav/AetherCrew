@@ -499,6 +499,10 @@ struct FHyperAIVerifyStepReport
 	UPROPERTY()
 	FString Detail;
 
+	/** A picture the step wrote: a capture, or a Play step's map of where the player went. Open it and look. */
+	UPROPERTY()
+	FString File;
+
 	/** Simulated seconds into the case when the step ended. */
 	UPROPERTY()
 	float AtSeconds = 0.f;
@@ -643,8 +647,10 @@ public:
 	 * follow it with hyper_operation_wait, then read the evidence with hyper_playtest_status. Steps of kind Bot
 	 * play as the player through the game's own input and movement: MoveTo, LookAt, Jump, Press, Hold, Interact,
 	 * Wait, WaitUntil, Survey, Sample, Capture (a PNG you can open), RecordStart and RecordStop, AssertProperty,
-	 * AssertNear, AssertOnScreen, AssertExists, AssertGone, UiClick, UiType and UiAssert. The first failing step
-	 * ends the run with its reason. Changes stay in the PIE world.
+	 * AssertNear, AssertOnScreen, AssertExists, AssertGone, UiClick, UiType and UiAssert. Play plays toward a goal
+	 * the way a person would (Reach, Collect, Defeat, Survive or Explore: moving, jumping, aiming and attacking
+	 * through the game's controls) and writes a map of it; AddPlayer adds a local player, for PvP. The first failing
+	 * step ends the run with its reason. Changes stay in the PIE world.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
 	static FHyperAIPIEPlaytestRunResult hyper_playtest_run(const FHyperAIPIEPlaytestRequest& Request);
@@ -659,10 +665,11 @@ public:
 	/**
 	 * Verify many things at once: each case plays in its own copy of the open level, all at the same time, and one
 	 * call returns every case's result within DeadlineSeconds (60 at most). A case is bot steps as in
-	 * hyper_playtest_run (MoveTo, LookAt, Jump, Press, Hold, Interact, Wait, WaitUntil, Survey, Sample and the
-	 * Assert steps), but no UI, Capture, Record or AssertOnScreen steps, since the copies have no screen. Unsaved
-	 * edits are included, and nothing in the level changes. At most the limit hyper_verify_calibrate reports; a case
-	 * still running at the deadline reports timed_out.
+	 * hyper_playtest_run (Play, AddPlayer, MoveTo, LookAt, Jump, Press, Hold, Interact, Wait, WaitUntil, Survey,
+	 * Sample, Capture, RecordStart, RecordStop and the Assert steps), but no UI or AssertOnScreen steps, since the
+	 * copies have no screen; Capture renders the player's camera. Steps report any picture they wrote in file.
+	 * Unsaved edits are included, and nothing in the level changes. At most the limit hyper_verify_calibrate reports;
+	 * a case still running at the deadline reports timed_out.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
 	static UHyperAIVerifyRunResult* hyper_verify_run(const FHyperAIVerifyRequest& Request);

@@ -19,6 +19,7 @@ public class HyperAIStudioBot : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
+			"ApplicationCore",
 			"EnhancedInput",
 			"InputCore",
 			"NavigationSystem",

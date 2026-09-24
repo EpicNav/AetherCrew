@@ -51,6 +51,7 @@
 #include "Tests/HyperAIStudioBenchmarkInstrumentation.h"
 #endif
 #include "Interfaces/IPluginManager.h"
+#include "SHyperAIStudioPlaytestPanel.h"
 #include "SHyperAIStudioQuickActionWindow.h"
 #include "Interfaces/IMainFrameModule.h"
 #include "HyperAIStudioProjectMemory.h"
@@ -614,6 +615,20 @@ public:
 				.SetMenuType(ETabSpawnerMenuType::Hidden);
 		}
 
+		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(SHyperAIStudioPlaytestPanel::GetTabName(), FOnSpawnTab::CreateLambda([](const FSpawnTabArgs&)
+		{
+			return SNew(SDockTab)
+				.TabRole(ETabRole::NomadTab)
+				.Label(LOCTEXT("PlaytestTabTitle", "HyperAI Playtest"))
+				[
+					SNew(SHyperAIStudioPlaytestPanel)
+				];
+		}))
+			.SetDisplayName(LOCTEXT("PlaytestTabTitle", "HyperAI Playtest"))
+			.SetTooltipText(LOCTEXT("PlaytestTabTooltip", "Play the open level with the HyperAI bot: many cases at once, each in its own copy of the level."))
+			.SetIcon(FSlateIcon(FHyperAIStudioStyle::GetStyleSetName(), "HyperAIStudio.TabIcon"))
+			.SetMenuType(ETabSpawnerMenuType::Hidden);
+
 		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 			FHyperAIStudioPreviewPanel::GetTabName(),
 			FOnSpawnTab::CreateRaw(this, &FHyperAIStudioModule::SpawnPreviewTab))
@@ -942,6 +957,7 @@ public:
 		}
 
 		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FHyperAIStudioPreviewPanel::GetTabName());
+		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(SHyperAIStudioPlaytestPanel::GetTabName());
 		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(HyperAIStudioTabName);
 		for (int32 Index = 1; Index <= MaxChatTabs; ++Index)
 		{
@@ -1460,6 +1476,12 @@ private:
 				LOCTEXT("OpenHyperAIStudioPreviewTooltip", "Compare a reference image with what a pack produced."),
 				FSlateIcon(),
 				FUIAction(FExecuteAction::CreateLambda([]() { FHyperAIStudioPreviewPanel::Open(); })));
+			Section.AddMenuEntry(
+				TEXT("OpenHyperAIStudioPlaytest"),
+				LOCTEXT("OpenHyperAIStudioPlaytest", "HyperAI Playtest"),
+				LOCTEXT("OpenHyperAIStudioPlaytestTooltip", "Play the open level with the HyperAI bot: reach, collect, fight, survive, explore and duel, many cases at once."),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([]() { FGlobalTabmanager::Get()->TryInvokeTab(SHyperAIStudioPlaytestPanel::GetTabName()); })));
 			Section.AddMenuEntry(
 				TEXT("OpenHyperAIStudioQuickAction"),
 				LOCTEXT("OpenHyperAIStudioQuickAction", "HyperAI Chat Overlay"),

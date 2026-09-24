@@ -225,6 +225,18 @@
   },
   {
    "namespace": "FHyperAIStudioModule",
+   "key": "OpenHyperAIStudioPlaytest",
+   "source": "HyperAI Playtest",
+   "text": "HyperAI 试玩"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenHyperAIStudioPlaytestTooltip",
+   "source": "Play the open level with the HyperAI bot: reach, collect, fight, survive, explore and duel, many cases at once.",
+   "text": "让 HyperAI 机器人试玩当前关卡：抵达、收集、战斗、生存、探索和对决，多个用例同时进行。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
    "key": "OpenHyperAIStudioPreview",
    "source": "HyperAI Preview",
    "text": "HyperAI 预览"
@@ -252,6 +264,18 @@
    "key": "OpenHyperAIStudioTooltip",
    "source": "Open HyperAIStudio MCP setup and readiness checks.",
    "text": "打开 HyperAIStudio 的 MCP 设置与就绪检查。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PlaytestTabTitle",
+   "source": "HyperAI Playtest",
+   "text": "HyperAI 试玩"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PlaytestTabTooltip",
+   "source": "Play the open level with the HyperAI bot: many cases at once, each in its own copy of the level.",
+   "text": "让 HyperAI 机器人试玩当前关卡：多个用例同时进行，每个用例在各自的关卡副本中运行。"
   },
   {
    "namespace": "FHyperAIStudioModule",
@@ -2424,6 +2448,162 @@
    "key": "You",
    "source": "You",
    "text": "你"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "AddCase",
+   "source": "Add a case",
+   "text": "添加用例"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "Calibrate",
+   "source": "Calibrate",
+   "text": "校准"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "CalibrateTooltip",
+   "source": "Measure how many cases this machine plays at once on this level, in about a minute, as hyper_verify_calibrate does.",
+   "text": "测量这台机器在这个关卡上一次能同时运行多少个用例，大约需要一分钟，与 hyper_verify_calibrate 相同。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "Calibrated",
+   "source": "Up to {0} cases at once on this machine and level. {1}",
+   "text": "在这台机器和这个关卡上，一次最多运行 {0} 个用例。{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "Calibrating",
+   "source": "Measuring how many cases this machine plays at once...",
+   "text": "正在测量这台机器一次能同时运行多少个用例……"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "CaseHead",
+   "source": "{0}, {1} simulated s",
+   "text": "{0}，模拟 {1} 秒"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "CasesHint",
+   "source": "hyper_verify_run's request: a deadline and cases of bot steps.",
+   "text": "hyper_verify_run 的请求：一个截止时间和由机器人步骤组成的用例。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "CollectTooltip",
+   "source": "Pick up every actor of a kind, nearest first.",
+   "text": "拾取某一类的全部 Actor，从最近的开始。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "DefeatTooltip",
+   "source": "Find, aim at and attack every actor of a kind until each is defeated.",
+   "text": "找到、瞄准并攻击某一类的全部 Actor，直到每一个都被击败。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "Done",
+   "source": "{0} of {1} cases passed in {2} s.",
+   "text": "{1} 个用例中有 {0} 个通过，用时 {2} 秒。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "DuelTooltip",
+   "source": "A second player joins, and the two players fight each other.",
+   "text": "第二名玩家加入，两名玩家相互对战。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "Empty",
+   "source": "Results show here: each case, what every step saw, and the maps and pictures they made.",
+   "text": "结果显示在这里：每个用例、每一步看到的情况，以及它们生成的地图和图片。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "ExploreTooltip",
+   "source": "Wander toward places not yet visited; reports coverage, stuck spots and falls.",
+   "text": "朝尚未去过的地方漫游；报告覆盖范围、卡住的位置和坠落。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "Intro",
+   "source": "The HyperAI bot plays the open level the way a person would, through the game's own controls. Every case plays in its own copy of the level, all at the same time, and answers within a minute. Nothing in the level changes.",
+   "text": "HyperAI 机器人像真人一样试玩当前关卡，使用游戏自己的操作。每个用例在各自的关卡副本中运行，全部同时进行，一分钟内给出结果。关卡中的任何内容都不会改变。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "Limit",
+   "source": "Up to {0} cases at once on this machine and level.",
+   "text": "在这台机器和这个关卡上，一次最多运行 {0} 个用例。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "PictureTooltip",
+   "source": "{0}\nClick to open it in the HyperAI Preview tab.",
+   "text": "{0}\n点击在 HyperAI 预览标签页中打开。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "Play",
+   "source": "Play in copies",
+   "text": "在副本中试玩"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "PlayTooltip",
+   "source": "Play every case at once, each in its own copy of the open level, as hyper_verify_run does.",
+   "text": "同时运行所有用例，每个用例在当前关卡的各自副本中进行，与 hyper_verify_run 相同。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "Playing",
+   "source": "Playing {0} cases...",
+   "text": "正在试玩 {0} 个用例……"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "ReachTooltip",
+   "source": "Walk to a place, round what is in the way and over what can be jumped.",
+   "text": "走到某个位置，绕过挡路的东西，跳过能跳过的障碍。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "Running",
+   "source": "The cases are playing; their results show here when the batch ends.",
+   "text": "用例正在运行；批次结束后结果会显示在这里。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "StepHead",
+   "source": "{0}. {1}",
+   "text": "{0}. {1}"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "Stop",
+   "source": "Stop",
+   "text": "停止"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "SurveyTooltip",
+   "source": "What a player learns first: the controls, their health, the actors and who else is playing.",
+   "text": "玩家首先了解的信息：操作方式、自己的生命值、场景中的 Actor，以及还有谁在玩。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "SurviveTooltip",
+   "source": "Stay alive for a while, keeping away from threats and dodging them.",
+   "text": "在一段时间内存活，远离威胁并躲避攻击。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "Title",
+   "source": "Playtest",
+   "text": "试玩"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",

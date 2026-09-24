@@ -3193,6 +3193,7 @@ namespace HyperAIStudio::PIEPlaytest::VerifyTools
 				OutStep.Status = Step.Status;
 				OutStep.Code = Step.Code;
 				OutStep.Detail = Step.Detail;
+				OutStep.File = Step.File;
 				OutStep.AtSeconds = Step.AtSeconds;
 			}
 			Report.Passed += Case.Status == TEXT("passed");

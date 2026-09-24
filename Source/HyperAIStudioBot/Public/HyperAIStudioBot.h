@@ -4,11 +4,15 @@
 
 #include "CoreMinimal.h"
 #include "Containers/Ticker.h"
+#include "UObject/StrongObjectPtr.h"
 #include "UObject/WeakObjectPtr.h"
 
 #include "HyperAIStudioBot.generated.h"
 
+class FHyperAIBotBrain;
 class UInputAction;
+class USceneCaptureComponent2D;
+class UTextureRenderTarget2D;
 class UWorld;
 
 /** What one bot step does. */
@@ -31,7 +35,7 @@ enum class EHyperAIBotAction : uint8
 	Hold,
 	/** Face Target, then press InputAction, or the game's action named like Interact or Use. */
 	Interact,
-	/** Save the game view as a PNG named after Text. */
+	/** Save the game view as a PNG named after Text. Without a screen, as in verification copies, it renders the player's camera. */
 	Capture,
 	/** The player, the camera and a census of the world; with Target, whether the player can reach it. */
 	Survey,
@@ -55,7 +59,35 @@ enum class EHyperAIBotAction : uint8
 	/** Type Text into the UI text box named Widget. */
 	UiType,
 	/** The UI widget named Widget is visible; with Value, its text compared with Value. */
-	UiAssert
+	UiAssert,
+	/**
+	 * Play for Goal the way a person plays: read the game's controls, move with its move input relative to the camera,
+	 * look where it goes, steer round what blocks the way and jump what it can, and aim with a person's reaction time,
+	 * turn speed and settling aim before pressing the game's attack. Reports what happened and writes a map of it.
+	 */
+	Play,
+	/** Another local player joins, with the controller and pawn the game mode gives it; standing at Location when set. Later steps act as it with PlayerIndex. */
+	AddPlayer
+};
+
+/** What a Play step plays for. */
+UENUM(BlueprintType)
+enum class EHyperAIBotGoal : uint8
+{
+	/** Get to Target or Location, round obstacles and over low ones. Passes within Radius. */
+	Reach,
+	/** Pick up every actor matching Target, nearest first; presses the interact action when walking onto one is not enough. */
+	Collect,
+	/** Defeat every actor matching Target: get within Range, keep moving, aim and attack until its health reaches 0 or it is gone. Target Player1 plays PvP. */
+	Defeat,
+	/** Stay alive for Seconds, keeping away from and dodging whatever matches Target. */
+	Survive,
+	/** Wander for Seconds toward places not yet visited; reports coverage, stuck spots and falls. */
+	Explore,
+	/** Keep within Radius of Target for Seconds, as a teammate or an escort would; sprints to catch up. */
+	Follow,
+	/** Run from whatever matches Target, sprinting, until at least Range away (1500 cm unless set), and stay away for Seconds. */
+	Flee
 };
 
 /** One step of the playtest bot. Fields a step does not use stay empty. */
@@ -79,7 +111,7 @@ struct HYPERAISTUDIOBOT_API FHyperAIBotStep
 	UPROPERTY()
 	FString Other;
 
-	/** A world location, for MoveTo and LookAt without a Target and AssertNear without Other. */
+	/** A world location, for MoveTo, LookAt and Play Reach without a Target, AssertNear without Other, and where AddPlayer's player stands. */
 	UPROPERTY()
 	FVector Location = FVector::ZeroVector;
 
@@ -95,7 +127,7 @@ struct HYPERAISTUDIOBOT_API FHyperAIBotStep
 	UPROPERTY()
 	FString Value;
 
-	/** An InputAction's asset path, or a loaded action's name such as IA_Jump. */
+	/** An InputAction's asset path, or a loaded action's name such as IA_Jump. For Play, the attack to use instead of the one it finds. */
 	UPROPERTY()
 	FString InputAction;
 
@@ -107,7 +139,7 @@ struct HYPERAISTUDIOBOT_API FHyperAIBotStep
 	UPROPERTY()
 	FString Text;
 
-	/** Wait, Hold and Sample length; RecordStart's interval. */
+	/** Wait, Hold and Sample length; RecordStart's interval; how long Play Survive and Explore play. */
 	UPROPERTY()
 	float Seconds = 0.f;
 
@@ -115,9 +147,37 @@ struct HYPERAISTUDIOBOT_API FHyperAIBotStep
 	UPROPERTY()
 	float Radius = 100.f;
 
-	/** MoveTo, Jump and WaitUntil give up after this many seconds. */
+	/** MoveTo, Jump, WaitUntil and Play Reach, Collect and Defeat give up after this many seconds. */
 	UPROPERTY()
 	float TimeoutSeconds = 10.f;
+
+	/** Play only: what to play for. */
+	UPROPERTY()
+	EHyperAIBotGoal Goal = EHyperAIBotGoal::Reach;
+
+	/** The local player who acts: 0 is the first, and AddPlayer adds more. Targets Player0, Player1... name each player's pawn. */
+	UPROPERTY()
+	int32 PlayerIndex = 0;
+
+	/** Play only: 0 plays like a new player, slow to react with loose aim; 1 like a skilled one. */
+	UPROPERTY()
+	float Skill = 0.5f;
+
+	/** Play only, in cm: Defeat's attack distance, 1500 unless set, closing in when hits from there do nothing; Survive's distance to keep, 2500 unless set; Flee's distance to get away, 1500 unless set. */
+	UPROPERTY()
+	float Range = 0.f;
+
+	/** Play only: the property path to read health from, on the player and its targets. Empty finds one named like Health or HP. */
+	UPROPERTY()
+	FString HealthProperty;
+
+	/** Play only: the same seed plays the same way. */
+	UPROPERTY()
+	int32 Seed = 0;
+
+	/** Play, MoveTo and Hold: keep running while the next steps run, such as the other player of a duel. Later results say how it went. */
+	UPROPERTY()
+	bool bBackground = false;
 };
 
 /** How a step went, in words an agent or a person can act on. */
@@ -164,6 +224,9 @@ public:
 	/** Ends the running step and anything left running. */
 	void Stop();
 
+	/** How the running step and any background steps are going, for another step's report; empty when nothing runs. */
+	FString Progress() const;
+
 	/** Checks a step from outside before it runs; OutError says what is wrong. */
 	static bool Validate(const FHyperAIBotStep& Step, FString& OutError);
 	static FString ActionName(EHyperAIBotAction Action);
@@ -173,6 +236,13 @@ private:
 	FHyperAIBotResult TickMove();
 	FHyperAIBotResult TickSample();
 	FHyperAIBotResult CaptureTo(const FString& Path);
+	bool RenderPlayerView(TArray<FColor>& OutPixels, FIntPoint& OutSize);
+	FHyperAIBotResult AddPlayer();
+	FHyperAIBotResult StartBackground(const FHyperAIBotStep& InStep);
+	void TickBackground();
+	/** A finished result, with what the background steps did meanwhile. */
+	FHyperAIBotResult WithBackground(FHyperAIBotResult Result);
+	FString Label() const;
 	void StopHold();
 	void StopRecording();
 
@@ -209,4 +279,15 @@ private:
 	FTSTicker::FDelegateHandle Recorder;
 	FString RecordFolder;
 	int32 RecordFrames = 0;
+
+	/** Renders the player's camera when the game has no screen. */
+	TStrongObjectPtr<USceneCaptureComponent2D> SceneCapture;
+	TStrongObjectPtr<UTextureRenderTarget2D> SceneTarget;
+
+	/** A Play step's player. */
+	TUniquePtr<FHyperAIBotBrain> Brain;
+	/** Steps running alongside, each with its own executor. */
+	TArray<TUniquePtr<FHyperAIBotExecutor>> Background;
+	/** What background steps did since a result last reported it. */
+	TArray<FString> BackgroundNotes;
 };
