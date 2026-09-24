@@ -150,6 +150,10 @@
    "kind": "Plugin"
   },
   {
+   "id": "plugin.MeshPartition",
+   "kind": "Plugin"
+  },
+  {
    "id": "plugin.MetaHumanGenerator",
    "kind": "Plugin"
   },
@@ -319,6 +323,10 @@
   },
   {
    "id": "probe.material_editor",
+   "kind": "Probe"
+  },
+  {
+   "id": "probe.mesh_terrain",
    "kind": "Probe"
   },
   {
@@ -1951,6 +1959,50 @@
     {
      "name": "hyper_level_design_validate",
      "cohort": "cohort.source.hyperaistudioleveldesigntoolset.v1",
+     "safety": [
+      "Read"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "mesh_terrain",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [
+    {
+     "id": "mesh_terrain",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "plugin.MeshPartition",
+      "probe.mesh_terrain"
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "hyper_mesh_terrain_inspect",
+     "cohort": "cohort.source.hyperaistudiomeshterraintoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_mesh_terrain_apply_plan",
+     "cohort": "cohort.source.hyperaistudiomeshterraintoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_mesh_terrain_validate",
+     "cohort": "cohort.source.hyperaistudiomeshterraintoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Read"
      ]

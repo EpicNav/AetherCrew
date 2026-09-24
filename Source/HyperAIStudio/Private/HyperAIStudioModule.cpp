@@ -1065,6 +1065,14 @@ private:
 				{}
 			},
 			{
+				TEXT("HyperAIStudioMeshTerrain"),
+				TEXT("mesh_terrain"),
+				TEXT("cohort.source.hyperaistudiomeshterraintoolset.v1"),
+				{TEXT("hyper_mesh_terrain_inspect"), TEXT("hyper_mesh_terrain_apply_plan"),
+					TEXT("hyper_mesh_terrain_validate")},
+				{TEXT("MeshPartition")}
+			},
+			{
 				TEXT("HyperAIStudioAnimBlueprint"),
 				TEXT("anim_blueprint"),
 				TEXT("cohort.source.hyperaistudioanimblueprinttoolset.v1"),

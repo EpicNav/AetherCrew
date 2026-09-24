@@ -221,6 +221,7 @@ namespace HyperAIStudio::NativeReadTools::Private
 			TEXT("hyper_blueprint_layout"),
 			TEXT("hyper_blueprint_repair"),
 			TEXT("hyper_build_diagnose"),
+			TEXT("hyper_mesh_terrain_apply_plan"),
 			TEXT("hyper_pcg_apply_plan"),
 			TEXT("hyper_plan_execute"),
 			TEXT("hyper_playtest_run"),

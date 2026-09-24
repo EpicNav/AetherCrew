@@ -208,6 +208,19 @@
 			]
 		},
 		{
+			"Name": "HyperAIStudioMeshTerrain",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
 			"Name": "HyperAIStudioAnimBlueprint",
 			"Type": "Editor",
 			"LoadingPhase": "None",
@@ -461,6 +474,10 @@
 		},
 		{
 			"Name": "PCG",
+			"Enabled": false
+		},
+		{
+			"Name": "MeshPartition",
 			"Enabled": false
 		},
 		{
