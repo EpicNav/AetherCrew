@@ -4,6 +4,11 @@
 
 #include "HyperAIStudioImageGenToolset.h"
 
+#include "Containers/Ticker.h"
+#include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
+#include "HyperAIStudioAgentImage.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioImageGenCookbook.h"
 #include "HyperAIStudioImageGenGate.h"
@@ -11,6 +16,8 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/Base64.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/UnrealType.h"
 
@@ -387,6 +394,126 @@ bool FHyperAIStudioImageGenFrontDoorTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("reporting it"), Seen.Models.ContainsByPredicate(
 		[](const FHyperAIImageModelInfo& Info) { return Info.Id == TEXT("test_model"); }));
 	TestFalse(TEXT("and naming where images land"), Seen.OutputFolder.IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioImageGenAgentModelsTest,
+	"HyperAIStudio.ImageGen.AgentModels.CodexDrawsForAgentsWithout",
+	HyperAIStudio::ImageGen::Tests::Flags)
+
+bool FHyperAIStudioImageGenAgentModelsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::ImageGen;
+
+	FHyperAIImageInspectRequest Inspect;
+	Inspect.bIncludeGenerated = false;
+	const FHyperAIImageInspectReport Seen = UHyperAIStudioImageGenToolset::hyper_image_inspect(Inspect);
+	const FHyperAIImageModelInfo* Codex = Seen.Models.FindByPredicate([](const FHyperAIImageModelInfo& Info) { return Info.Id == TEXT("codex_image_gen"); });
+	const FHyperAIImageModelInfo* Gemini = Seen.Models.FindByPredicate([](const FHyperAIImageModelInfo& Info) { return Info.Id == TEXT("gemini_image_gen"); });
+	if (!TestTrue(TEXT("Both agent generators are listed with nothing configured"), Codex && Gemini))
+	{
+		return false;
+	}
+	FString Issue;
+	const bool bCodexDraws = FHyperAIStudioAgentImage::CanDraw(TEXT("codex"), Issue);
+	TestEqual(TEXT("Codex's health says whether this machine can draw with it"), Codex->Health, FString(bCodexDraws ? TEXT("ready") : TEXT("unavailable")));
+	TestEqual(TEXT("It costs nothing here: it spends the user's own plan"), Codex->CostPerCall, 0.0f);
+
+	FHyperAIImageGenerateRequest Request;
+	Request.ModelId = TEXT("codex_image_gen");
+	Request.BatchName = TEXT("agent_plan_check");
+	Request.Prompt = TEXT("a lighthouse at dusk");
+	const FHyperAIImageGenerateReport Plan = UHyperAIStudioImageGenToolset::hyper_image_generate(Request);
+	if (bCodexDraws)
+	{
+		TestTrue(TEXT("A dry run with Codex plans"), Plan.bOk && Plan.Status == TEXT("planned"));
+		TestEqual(TEXT("costing nothing here"), Plan.EstimatedCost, 0.0f);
+		TestTrue(TEXT("and says whose plan it spends"), Plan.Diagnostic.Contains(TEXT("your own Codex plan")));
+	}
+	else
+	{
+		TestEqual(TEXT("Without Codex the dry run says so"), Plan.Status, FString(TEXT("agent_unavailable")));
+	}
+	if (!FHyperAIStudioAgentImage::CanDraw(TEXT("gemini"), Issue))
+	{
+		Request.ModelId = TEXT("gemini_image_gen");
+		const FHyperAIImageGenerateReport GeminiPlan = UHyperAIStudioImageGenToolset::hyper_image_generate(Request);
+		TestEqual(TEXT("Gemini without its image extension is refused before anything runs"), GeminiPlan.Status, FString(TEXT("agent_unavailable")));
+		TestTrue(TEXT("pointing at codex_image_gen"), GeminiPlan.Diagnostic.Contains(TEXT("codex_image_gen")) || GeminiPlan.Diagnostic.Contains(TEXT("not installed")));
+	}
+
+	// A batch drawn by a stand-in, straight through the gate; the approval in front of it is SpendingNeedsAClick's business.
+	int32 Code = -1;
+	FPlatformProcess::ExecProcess(TEXT("python"), TEXT("--version"), &Code, nullptr, nullptr);
+	if (Code != 0)
+	{
+		AddWarning(TEXT("python is not on PATH, so the Codex stand-in cannot draw."));
+		return true;
+	}
+	const FString Dir = FPaths::ConvertRelativePathToFull(FPaths::AutomationTransientDir()) / (TEXT("ImageGenAgent-") + FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	const FString BatchId = TEXT("agent_test_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8);
+	ON_SCOPE_EXIT
+	{
+		FHyperAIStudioAgentImage::SetCommandForTests(FString());
+		IFileManager::Get().DeleteDirectory(*Dir, false, true);
+		IFileManager::Get().DeleteDirectory(*(Gate::OutputRootOnDisk() / BatchId), false, true);
+	};
+	const FString Script = Dir / TEXT("fake_codex.py");
+	FFileHelper::SaveStringToFile(TEXT(R"PY(import json, sys, os, zlib, struct
+HERE = os.path.dirname(os.path.abspath(__file__))
+def png(path):
+    raw = b"".join(b"\x00" + bytes((30, 90, 200)) * 6 for _ in range(4))
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+    open(path, "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 6, 4, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+def send(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+for line in iter(sys.stdin.readline, ""):
+    m = json.loads(line); method = m.get("method"); i = m.get("id")
+    if method == "initialize":
+        send({"id": i, "result": {}})
+    elif method == "thread/start":
+        send({"id": i, "result": {"thread": {"id": "t"}}} if m["params"].get("ephemeral") else {"id": i, "error": {"message": "not headless"}})
+    elif method == "turn/start":
+        saved = os.path.join(HERE, "drawn_%d.png" % len(os.listdir(HERE))); png(saved)
+        send({"id": i, "result": {"turn": {"id": "u"}}})
+        send({"method": "item/completed", "params": {"item": {"type": "imageGeneration", "id": "g", "status": "completed", "revisedPrompt": "r", "result": "", "savedPath": saved}}})
+        send({"method": "turn/completed", "params": {"turn": {"id": "u", "status": "completed"}}})
+)PY"), *Script, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	FHyperAIStudioAgentImage::SetCommandForTests(FString::Printf(TEXT("python -u \"%s\""), *Script));
+
+	FHyperAIStudioImageModelSettings Model;
+	if (!TestTrue(TEXT("codex_image_gen resolves without settings"), Gate::FindModel(TEXT("codex_image_gen"), Model)))
+	{
+		return false;
+	}
+	FString Error;
+	if (!TestTrue(TEXT("A two-picture batch starts"), Gate::StartBatch(BatchId, Model, FString(), TEXT("a red cube"), TEXT("text"), 2, 1024, 768, -1, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	FHyperAIImageBatchInfo Info;
+	const double End = FPlatformTime::Seconds() + 60.0;
+	while (Gate::FindBatch(BatchId, Info) && Info.State == TEXT("running") && FPlatformTime::Seconds() < End)
+	{
+		FTSTicker::GetCoreTicker().Tick(0.05f);
+		FPlatformProcess::Sleep(0.02f);
+	}
+	TestEqual(TEXT("The batch completes"), Info.State, FString(TEXT("complete")));
+	if (!Info.Diagnostic.IsEmpty())
+	{
+		AddInfo(TEXT("Batch said: ") + Info.Diagnostic);
+	}
+	const TArray<FHyperAIImageRecord> Records = Gate::ReadGenerated(BatchId, 8);
+	TestEqual(TEXT("Both pictures landed in the project with sidecars"), Records.Num(), 2);
+	for (const FHyperAIImageRecord& Record : Records)
+	{
+		TestTrue(TEXT("each one Codex's, readable by the Preview tab and the compare tools"), Record.ModelId == TEXT("codex_image_gen")
+			&& Record.Prompt == TEXT("a red cube") && IFileManager::Get().FileExists(*(FPaths::ProjectDir() / Record.File)));
+	}
 	return true;
 }
 

@@ -46,6 +46,8 @@ public class HyperAIStudio : ModuleRules
 			"ToolsetRegistry",
 			"ToolMenus",
 			"ToolWidgets",
+			// The off-screen widget renderer the UI screenshot tests draw with.
+			"UMG",
 			"UnrealEd"
 		});
 	}

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "HyperAIStudioNativeChat.h"
+#include "HyperAIStudioPreviewImage.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
 
@@ -24,12 +25,27 @@ public:
 	/** Puts text into the composer for the user to finish; never sends it. */
 	void InsertText(const FString& Text);
 	void FocusComposer();
+	/** Adds a picture to the next message; false when it is not an image file this chat can send. */
+	bool Attach(const FString& Path);
+	const TArray<FString>& GetAttached() const { return Attached; }
+
+	virtual FReply OnDragOver(const FGeometry& Geometry, const FDragDropEvent& Event) override;
+	virtual FReply OnDrop(const FGeometry& Geometry, const FDragDropEvent& Event) override;
+
+	/** The level viewport as a PNG under the chat's image folder, for attaching; empty when there is none to read. */
+	static FString CaptureViewport(FString& OutError);
+	/** Copies a chat picture into the project's generated-images folder with a sidecar; the project-relative path. */
+	static bool SaveToProject(const FHyperAIStudioChatItem& Item, const FString& AgentName, FString& OutProjectPath, FString& OutError);
 
 private:
 	using FItemPtr = TSharedPtr<FHyperAIStudioChatItem>;
 
 	void Refresh();
 	void Submit();
+	void RebuildAttachments();
+	/** A picture scaled to fit MaxSize; Path is read as it paints, and the file reloads when it changes. */
+	TSharedRef<SWidget> Picture(TFunction<FString()> Path, const FVector2D& MaxSize);
+	TSharedRef<SWidget> ImageActions(const FItemPtr& Item);
 	TSharedRef<ITableRow> GenerateRow(FItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
 	TSharedRef<SWidget> BuildPlan();
 
@@ -38,6 +54,10 @@ private:
 	TSharedPtr<SListView<FItemPtr>> List;
 	TSharedPtr<SMultiLineEditableTextBox> Composer;
 	TSharedPtr<class SVerticalBox> PlanBox;
+	TSharedPtr<class SWrapBox> AttachmentBox;
+	TArray<FString> Attached;
+	/** What the last Save to project or capture said, shown under the composer. */
+	FString Notice;
 	/** Items whose details are open. */
 	TSet<FString> Open;
 	FDelegateHandle ChangedHandle;

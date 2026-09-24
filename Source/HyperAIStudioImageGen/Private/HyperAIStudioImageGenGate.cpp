@@ -3,6 +3,7 @@
 #include "HyperAIStudioImageGenGate.h"
 
 #include "HAL/FileManager.h"
+#include "HyperAIStudioAgentImage.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioExternalService.h"
@@ -76,7 +77,25 @@ namespace HyperAIStudio::ImageGen::Gate
 			bool bFailed = false;
 			FString Error;
 			TArray<FString> Files;
+			/** The picture an agent is drawing now, for an agent model. */
+			TSharedPtr<FHyperAIStudioAgentImage> Drawing;
 		};
+
+		/** Pictures an agent CLI draws on the user's own plan; listed whether or not settings name them. */
+		TArray<FHyperAIStudioImageModelSettings> AgentModels()
+		{
+			FHyperAIStudioImageModelSettings Codex;
+			Codex.Id = TEXT("codex_image_gen");
+			Codex.Label = TEXT("Codex image generation (uses your Codex plan)");
+			Codex.ServiceId = TEXT("agent:codex");
+			Codex.Width = 1024;
+			Codex.Height = 1024;
+			FHyperAIStudioImageModelSettings Gemini = Codex;
+			Gemini.Id = TEXT("gemini_image_gen");
+			Gemini.Label = TEXT("Gemini with its image extension");
+			Gemini.ServiceId = TEXT("agent:gemini");
+			return {Codex, Gemini};
+		}
 
 		TMap<FString, TSharedPtr<FBatch>>& Batches()
 		{
@@ -127,6 +146,58 @@ namespace HyperAIStudio::ImageGen::Gate
 				*FDateTime::UtcNow().ToIso8601());
 			const FString SidecarFile = FPaths::ChangeExtension(ImageFile, TEXT("json"));
 			FFileHelper::SaveStringToFile(Json, *SidecarFile, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+		}
+
+		/** For an agent model: start the next picture, or take the one being drawn once it is done. */
+		void DrawNextImage(const TSharedPtr<FBatch>& Batch)
+		{
+			if (Batch->Drawing.IsValid())
+			{
+				if (!Batch->Drawing->IsDone())
+				{
+					return;
+				}
+				const TSharedPtr<FHyperAIStudioAgentImage> Drawn = MoveTemp(Batch->Drawing);
+				Batch->Drawing.Reset();
+				Batch->bInFlight = false;
+				if (Drawn->GetImagePath().IsEmpty())
+				{
+					Batch->bFailed = true;
+					Batch->Error = Drawn->GetError();
+					return;
+				}
+				const int32 Index = Batch->Done;
+				const FString Extension = FPaths::GetExtension(Drawn->GetImagePath()).ToLower();
+				const FString File = Batch->FolderOnDisk / (ImageStem(*Batch, Index) + TEXT(".") + (Extension.IsEmpty() ? FString(TEXT("png")) : Extension));
+				if (IFileManager::Get().Copy(*File, *Drawn->GetImagePath()) != COPY_OK)
+				{
+					Batch->bFailed = true;
+					Batch->Error = FString::Printf(TEXT("Could not copy the picture to %s."), *File);
+					return;
+				}
+				WriteSidecar(*Batch, Index, File);
+				Batch->Files.Add(File);
+				++Batch->Done;
+				return;
+			}
+			if (Batch->Sent >= Batch->Count)
+			{
+				return;
+			}
+			FString Agent;
+			IsAgentModel(Batch->Model, Agent);
+			FString StartError;
+			// These generators take no negative prompt, so it goes into the description.
+			const FString Prompt = Batch->Negative.IsEmpty() ? Batch->Prompt : Batch->Prompt + TEXT(" Avoid: ") + Batch->Negative;
+			Batch->Drawing = FHyperAIStudioAgentImage::Start(Agent, Prompt, FIntPoint(Batch->Width, Batch->Height), StartError);
+			if (!Batch->Drawing.IsValid())
+			{
+				Batch->bFailed = true;
+				Batch->Error = StartError;
+				return;
+			}
+			Batch->bInFlight = true;
+			++Batch->Sent;
 		}
 
 		void SendNextImage(const TSharedPtr<FBatch>& Batch)
@@ -208,7 +279,25 @@ namespace HyperAIStudio::ImageGen::Gate
 				return true;
 			}
 		}
+		for (const FHyperAIStudioImageModelSettings& Model : AgentModels())
+		{
+			if (Model.Id.Equals(Id, ESearchCase::IgnoreCase))
+			{
+				OutModel = Model;
+				return true;
+			}
+		}
 		return false;
+	}
+
+	bool IsAgentModel(const FHyperAIStudioImageModelSettings& Model, FString& OutAgent)
+	{
+		if (!Model.ServiceId.StartsWith(TEXT("agent:")))
+		{
+			return false;
+		}
+		OutAgent = Model.ServiceId.RightChop(6);
+		return true;
 	}
 
 	TArray<FHyperAIImageModelInfo> ReadModels()
@@ -250,6 +339,25 @@ namespace HyperAIStudio::ImageGen::Gate
 					Info.Issue = TEXT("This model has no path, request_template or response_image_path; see the cookbook.");
 				}
 			}
+			Infos.Add(MoveTemp(Info));
+		}
+		for (const FHyperAIStudioImageModelSettings& Model : AgentModels())
+		{
+			if (Infos.ContainsByPredicate([&Model](const FHyperAIImageModelInfo& Info) { return Info.Id.Equals(Model.Id, ESearchCase::IgnoreCase); }))
+			{
+				continue;
+			}
+			FHyperAIImageModelInfo Info;
+			Info.Id = Model.Id;
+			Info.Label = Model.Label;
+			Info.ServiceId = Model.ServiceId;
+			Info.Width = Model.Width;
+			Info.Height = Model.Height;
+			// No key: the agent is signed in already, and it spends the user's own plan rather than money here.
+			Info.bHasApiKey = true;
+			FString Agent;
+			IsAgentModel(Model, Agent);
+			Info.Health = FHyperAIStudioAgentImage::CanDraw(Agent, Info.Issue) ? TEXT("ready") : TEXT("unavailable");
 			Infos.Add(MoveTemp(Info));
 		}
 		return Infos;
@@ -651,9 +759,21 @@ namespace HyperAIStudio::ImageGen::Gate
 		Job.PollIntervalMs = 250;
 
 		const TSharedPtr<FBatch> Kept = Batch;
+		FString Agent;
+		const bool bAgent = IsAgentModel(Model, Agent);
+		if (bAgent)
+		{
+			// Dropping the drawing stops the agent's CLI.
+			Job.OnCancel = [Kept]()
+			{
+				Kept->Drawing.Reset();
+				Kept->bFailed = true;
+				Kept->Error = TEXT("Cancelled.");
+			};
+		}
 		FString JobId;
 		const bool bStarted = FHyperAIStudioAsyncJobHost::Start(Job,
-			[Kept](FString& OutProgress, FString& OutDiagnostic)
+			[Kept, bAgent](FString& OutProgress, FString& OutDiagnostic)
 			{
 				OutProgress = FString::Printf(TEXT("%d of %d images"), Kept->Done, Kept->Count);
 				if (Kept->bFailed)
@@ -668,7 +788,11 @@ namespace HyperAIStudio::ImageGen::Gate
 				}
 				// ponytail: one request at a time. A local model owns the card, and a hosted one rate-limits;
 				// parallel requests would help neither, and this keeps a failure attributable to one image.
-				if (!Kept->bInFlight && Kept->Sent < Kept->Count)
+				if (bAgent)
+				{
+					DrawNextImage(Kept);
+				}
+				else if (!Kept->bInFlight && Kept->Sent < Kept->Count)
 				{
 					SendNextImage(Kept);
 				}

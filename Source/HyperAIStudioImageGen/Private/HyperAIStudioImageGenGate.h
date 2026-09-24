@@ -10,6 +10,11 @@
 namespace HyperAIStudio::ImageGen::Gate
 {
 	bool FindModel(const FString& Id, FHyperAIStudioImageModelSettings& OutModel);
+	/**
+	 * True for a model an agent CLI draws on the user's own plan, codex_image_gen or gemini_image_gen, rather than
+	 * an external service; OutAgent is codex or gemini. These are built in, so they are there without settings.
+	 */
+	bool IsAgentModel(const FHyperAIStudioImageModelSettings& Model, FString& OutAgent);
 	TArray<FHyperAIImageModelInfo> ReadModels();
 	TArray<FHyperAIImageTemplateInfo> ReadTemplates();
 	/** Slot names a template takes, in the order they first appear. */

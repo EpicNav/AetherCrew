@@ -1911,6 +1911,36 @@
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
+   "key": "AttachImage",
+   "source": "Image...",
+   "text": "图片..."
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "AttachImageTitle",
+   "source": "Attach an image",
+   "text": "附加图片"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "AttachImageTooltip",
+   "source": "Attach a picture for the agent to look at. Dropping image files onto the chat does the same.",
+   "text": "附加一张图片供智能体查看。将图片文件拖到聊天中也可以。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "AttachViewport",
+   "source": "Viewport",
+   "text": "视口"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "AttachViewportTooltip",
+   "source": "Attach what the level viewport shows now.",
+   "text": "附加关卡视口当前显示的画面。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
    "key": "ComposerHint",
    "source": "Message {0}. Enter sends; Shift+Enter starts a new line.",
    "text": "给 {0} 发消息。Enter 发送；Shift+Enter 换行。"
@@ -1929,6 +1959,12 @@
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
+   "key": "KindImage",
+   "source": "Image",
+   "text": "图片"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
    "key": "KindThinking",
    "source": "Thinking",
    "text": "思考"
@@ -1941,9 +1977,39 @@
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
+   "key": "OpenInPreview",
+   "source": "Open in Preview",
+   "text": "在预览中打开"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "OpenInPreviewTooltip",
+   "source": "Show it in the HyperAI Preview tab, beside what the level looks like.",
+   "text": "在 HyperAI 预览标签页中显示，与关卡当前的样子并排对比。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
    "key": "Queue",
    "source": "Queue",
    "text": "排队"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "RemoveAttachment",
+   "source": "Remove",
+   "text": "移除"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "SaveToProject",
+   "source": "Save to project",
+   "text": "保存到项目"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "SaveToProjectTooltip",
+   "source": "Copy it into the project's generated images, where the Images tab and the image tools find it.",
+   "text": "复制到项目的生成图片文件夹中，图片标签页和图片工具会在那里找到它。"
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
@@ -1956,6 +2022,18 @@
    "key": "SendTooltip",
    "source": "Send now, or after the running turn.",
    "text": "立即发送，或在当前回合结束后发送。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ShowInFolder",
+   "source": "Show in folder",
+   "text": "在文件夹中显示"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ShowInFolderTooltip",
+   "source": "Open the folder the picture is in.",
+   "text": "打开图片所在的文件夹。"
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",

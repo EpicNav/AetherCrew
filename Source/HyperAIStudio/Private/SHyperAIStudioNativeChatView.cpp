@@ -2,15 +2,33 @@
 
 #include "SHyperAIStudioNativeChatView.h"
 
+#include "DesktopPlatformModule.h"
+#include "Dom/JsonObject.h"
+#include "Editor.h"
 #include "Framework/Application/SlateApplication.h"
+#include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
+#include "HyperAIStudioPreviewPanel.h"
+#include "HyperAIStudioSettings.h"
+#include "IDesktopPlatform.h"
+#include "ImageUtils.h"
+#include "Input/DragAndDrop.h"
+#include "LevelEditorViewport.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/StyleColors.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
@@ -66,6 +84,12 @@ namespace HyperAIStudio::NativeChatView
 			return FSlateColor(FStyleColors::AccentRed);
 		}
 		return FSlateColor::UseSubduedForeground();
+	}
+
+	bool IsPictureFile(const FString& Path)
+	{
+		const FString Extension = FPaths::GetExtension(Path).ToLower();
+		return Extension == TEXT("png") || Extension == TEXT("jpg") || Extension == TEXT("jpeg") || Extension == TEXT("webp");
 	}
 
 	FText KindLabel(const EKind Kind)
@@ -159,6 +183,15 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 		.AutoHeight()
 		.Padding(0.0f, 8.0f, 0.0f, 0.0f)
 		[
+			SAssignNew(AttachmentBox, SWrapBox)
+			.UseAllottedSize(true)
+			.InnerSlotPadding(FVector2D(6.0f, 6.0f))
+			.Visibility_Lambda([this]() { return Attached.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 8.0f, 0.0f, 0.0f)
+		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot()
 			.FillWidth(1.0f)
@@ -186,6 +219,50 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
 			[
 				SNew(SButton)
+				.Text(LOCTEXT("AttachImage", "Image..."))
+				.ToolTipText(LOCTEXT("AttachImageTooltip", "Attach a picture for the agent to look at. Dropping image files onto the chat does the same."))
+				.OnClicked_Lambda([this]()
+				{
+					IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
+					TArray<FString> Files;
+					if (Desktop && Desktop->OpenFileDialog(FSlateApplication::Get().FindBestParentWindowHandleForDialogs(AsShared()),
+						LOCTEXT("AttachImageTitle", "Attach an image").ToString(), FPaths::ProjectDir(), FString(),
+						TEXT("Images (*.png;*.jpg;*.jpeg;*.webp)|*.png;*.jpg;*.jpeg;*.webp"), EFileDialogFlags::Multiple, Files))
+					{
+						for (const FString& File : Files)
+						{
+							Attach(FPaths::ConvertRelativePathToFull(File));
+						}
+					}
+					return FReply::Handled();
+				})
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Bottom)
+			.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("AttachViewport", "Viewport"))
+				.ToolTipText(LOCTEXT("AttachViewportTooltip", "Attach what the level viewport shows now."))
+				.OnClicked_Lambda([this]()
+				{
+					FString Error;
+					const FString File = CaptureViewport(Error);
+					Notice = File.IsEmpty() ? Error : FString();
+					if (!File.IsEmpty())
+					{
+						Attach(File);
+					}
+					return FReply::Handled();
+				})
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Bottom)
+			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
 				.Text_Lambda([this]() { return Chat->IsBusy() || !Chat->IsReady() ? LOCTEXT("Queue", "Queue") : LOCTEXT("Send", "Send"); })
 				.ToolTipText(LOCTEXT("SendTooltip", "Send now, or after the running turn."))
 				.OnClicked_Lambda([this]()
@@ -194,6 +271,17 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 					return FReply::Handled();
 				})
 			]
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 4.0f, 0.0f, 0.0f)
+		[
+			SNew(STextBlock)
+			.AutoWrapText(true)
+			.Font(FAppStyle::GetFontStyle("SmallFont"))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			.Visibility_Lambda([this]() { return Notice.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+			.Text_Lambda([this]() { return FText::FromString(Notice); })
 		]
 	];
 	ChangedHandle = Chat->OnChanged.AddSP(this, &SHyperAIStudioNativeChatView::Refresh);
@@ -234,7 +322,239 @@ void SHyperAIStudioNativeChatView::Submit()
 		return;
 	}
 	Composer->SetText(FText::GetEmpty());
-	Chat->Send(Text);
+	Chat->Send(Text, Attached);
+	Attached.Reset();
+	RebuildAttachments();
+}
+
+bool SHyperAIStudioNativeChatView::Attach(const FString& Path)
+{
+	using namespace HyperAIStudio::NativeChatView;
+	const FString Full = FPaths::ConvertRelativePathToFull(Path);
+	if (!IsPictureFile(Full) || !IFileManager::Get().FileExists(*Full))
+	{
+		Notice = FString::Printf(TEXT("%s is not a PNG, JPG or WebP file."), *FPaths::GetCleanFilename(Path));
+		return false;
+	}
+	Attached.AddUnique(Full);
+	Notice.Reset();
+	RebuildAttachments();
+	FocusComposer();
+	return true;
+}
+
+void SHyperAIStudioNativeChatView::RebuildAttachments()
+{
+	if (!AttachmentBox.IsValid())
+	{
+		return;
+	}
+	AttachmentBox->ClearChildren();
+	for (const FString& Path : Attached)
+	{
+		AttachmentBox->AddSlot()
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				Picture([Path]() { return Path; }, FVector2D(96.0f, 72.0f))
+			]
+			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+			[
+				SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+				.Text(LOCTEXT("RemoveAttachment", "Remove"))
+				.ToolTipText(FText::FromString(Path))
+				.OnClicked_Lambda([this, Path]()
+				{
+					Attached.Remove(Path);
+					RebuildAttachments();
+					return FReply::Handled();
+				})
+			]
+		];
+	}
+}
+
+FReply SHyperAIStudioNativeChatView::OnDragOver(const FGeometry& Geometry, const FDragDropEvent& Event)
+{
+	const TSharedPtr<FExternalDragOperation> Files = Event.GetOperationAs<FExternalDragOperation>();
+	return Files.IsValid() && Files->HasFiles() && Files->GetFiles().ContainsByPredicate(&HyperAIStudio::NativeChatView::IsPictureFile)
+		? FReply::Handled() : FReply::Unhandled();
+}
+
+FReply SHyperAIStudioNativeChatView::OnDrop(const FGeometry& Geometry, const FDragDropEvent& Event)
+{
+	const TSharedPtr<FExternalDragOperation> Files = Event.GetOperationAs<FExternalDragOperation>();
+	if (!Files.IsValid() || !Files->HasFiles())
+	{
+		// Assets and actors belong to the chat tab, which puts their paths in the prompt.
+		return FReply::Unhandled();
+	}
+	bool bAny = false;
+	for (const FString& File : Files->GetFiles())
+	{
+		bAny |= HyperAIStudio::NativeChatView::IsPictureFile(File) && Attach(File);
+	}
+	return bAny ? FReply::Handled() : FReply::Unhandled();
+}
+
+FString SHyperAIStudioNativeChatView::CaptureViewport(FString& OutError)
+{
+	FViewport* Viewport = GCurrentLevelEditingViewportClient ? GCurrentLevelEditingViewportClient->Viewport : nullptr;
+	if (!Viewport && GEditor)
+	{
+		Viewport = GEditor->GetActiveViewport();
+	}
+	const FIntPoint Size = Viewport ? Viewport->GetSizeXY() : FIntPoint::ZeroValue;
+	TArray<FColor> Pixels;
+	if (Size.X < 1 || Size.Y < 1 || !Viewport->ReadPixels(Pixels) || Pixels.Num() != Size.X * Size.Y)
+	{
+		OutError = TEXT("There is no level viewport to capture, or it could not be read.");
+		return FString();
+	}
+	for (FColor& Pixel : Pixels)
+	{
+		Pixel.A = 255;
+	}
+	TArray64<uint8> Png;
+	FImageUtils::PNGCompressImageArray(Size.X, Size.Y, TArrayView64<const FColor>(Pixels.GetData(), Pixels.Num()), Png);
+	IFileManager::Get().MakeDirectory(*FHyperAIStudioNativeChat::ImageFolder(), /*Tree=*/true);
+	const FString File = FHyperAIStudioNativeChat::ImageFolder() / FString::Printf(TEXT("viewport-%s.png"), *FDateTime::Now().ToString(TEXT("%Y%m%d-%H%M%S")));
+	if (Png.IsEmpty() || !FFileHelper::SaveArrayToFile(Png, *File))
+	{
+		OutError = FString::Printf(TEXT("Could not write %s."), *File);
+		return FString();
+	}
+	return File;
+}
+
+bool SHyperAIStudioNativeChatView::SaveToProject(const FHyperAIStudioChatItem& Item, const FString& AgentName, FString& OutProjectPath, FString& OutError)
+{
+	const FString Source = Item.Images.IsEmpty() ? FString() : Item.Images[0];
+	if (Source.IsEmpty() || !IFileManager::Get().FileExists(*Source))
+	{
+		OutError = TEXT("The picture is no longer on disk.");
+		return false;
+	}
+	FString Folder = GetDefault<UHyperAIStudioSettings>()->ImageOutputFolder;
+	if (Folder.IsEmpty())
+	{
+		Folder = TEXT("Content/References/Generated");
+	}
+	const FString Batch = FString::Printf(TEXT("chat_%s"), *FDateTime::Now().ToString(TEXT("%Y%m%d")));
+	const FString Directory = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / Folder / Batch);
+	IFileManager::Get().MakeDirectory(*Directory, /*Tree=*/true);
+	FString Target;
+	for (int32 Index = 1; Target.IsEmpty() || IFileManager::Get().FileExists(*Target); ++Index)
+	{
+		Target = Directory / FString::Printf(TEXT("%s_%02d.%s"), *Batch, Index, *FPaths::GetExtension(Source).ToLower());
+	}
+	if (IFileManager::Get().Copy(*Target, *Source) != COPY_OK)
+	{
+		OutError = FString::Printf(TEXT("Could not copy the picture to %s."), *Target);
+		return false;
+	}
+	// ponytail: the same sidecar fields the image tools' batches write, so the Images tab and hyper_image_inspect
+	// list it; share a writer if a third place ever needs one.
+	const TSharedRef<FJsonObject> Sidecar = MakeShared<FJsonObject>();
+	Sidecar->SetStringField(TEXT("image"), FPaths::GetCleanFilename(Target));
+	Sidecar->SetStringField(TEXT("batch_id"), Batch);
+	Sidecar->SetStringField(TEXT("prompt"), Item.Text);
+	Sidecar->SetStringField(TEXT("model_id"), AgentName.ToLower() + TEXT("_chat"));
+	Sidecar->SetStringField(TEXT("service_id"), TEXT("agent:") + AgentName.ToLower());
+	Sidecar->SetNumberField(TEXT("seed"), -1);
+	Sidecar->SetStringField(TEXT("generated_utc"), FDateTime::UtcNow().ToIso8601());
+	FString Json;
+	FJsonSerializer::Serialize(Sidecar, TJsonWriterFactory<>::Create(&Json));
+	FFileHelper::SaveStringToFile(Json, *FPaths::ChangeExtension(Target, TEXT("json")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	OutProjectPath = Target;
+	FPaths::MakePathRelativeTo(OutProjectPath, *FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()));
+	return true;
+}
+
+TSharedRef<SWidget> SHyperAIStudioNativeChatView::Picture(TFunction<FString()> Path, const FVector2D& MaxSize)
+{
+	// Read every paint, so a row made before its picture arrived shows it once it does.
+	const TSharedRef<FHyperAIStudioPreviewImage> Image = MakeShared<FHyperAIStudioPreviewImage>();
+	return SNew(SBox)
+		.MaxDesiredWidth(MaxSize.X)
+		.MaxDesiredHeight(MaxSize.Y)
+		.ToolTipText_Lambda([Path]() { return FText::FromString(Path()); })
+		[
+			SNew(SScaleBox)
+			.Stretch(EStretch::ScaleToFit)
+			[
+				SNew(SImage).Image_Lambda([Image, Path]() { return Image->Get(Path()); })
+			]
+		];
+}
+
+TSharedRef<SWidget> SHyperAIStudioNativeChatView::ImageActions(const FItemPtr& Item)
+{
+	auto Action = [](const FText& Label, const FText& Tooltip, TFunction<void()> Run)
+	{
+		return SNew(SButton)
+			.Text(Label)
+			.ToolTipText(Tooltip)
+			.OnClicked_Lambda([Run]()
+			{
+				Run();
+				return FReply::Handled();
+			});
+	};
+	const TWeakPtr<FHyperAIStudioChatItem> Weak = Item;
+	return SNew(SHorizontalBox)
+		.Visibility_Lambda([Item]() { return Item->Images.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+		+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 6.0f, 0.0f)
+		[
+			Action(LOCTEXT("OpenInPreview", "Open in Preview"), LOCTEXT("OpenInPreviewTooltip", "Show it in the HyperAI Preview tab, beside what the level looks like."),
+				[this, Weak]()
+				{
+					const TSharedPtr<FHyperAIStudioChatItem> Pinned = Weak.Pin();
+					if (!Pinned.IsValid() || Pinned->Images.IsEmpty())
+					{
+						return;
+					}
+					// The Preview tab only opens pictures inside the project, and Codex keeps its own elsewhere.
+					FString Path = Pinned->Images[0];
+					if (!FPaths::IsUnderDirectory(FPaths::ConvertRelativePathToFull(Path), FPaths::ConvertRelativePathToFull(FPaths::ProjectDir())))
+					{
+						const FString Copy = FHyperAIStudioNativeChat::ImageFolder() / FPaths::GetCleanFilename(Path);
+						IFileManager::Get().MakeDirectory(*FHyperAIStudioNativeChat::ImageFolder(), /*Tree=*/true);
+						if (IFileManager::Get().Copy(*Copy, *Path) == COPY_OK)
+						{
+							Path = Copy;
+						}
+					}
+					FHyperAIStudioPreviewPanel::Open(NAME_None, Path);
+				})
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 6.0f, 0.0f)
+		[
+			Action(LOCTEXT("SaveToProject", "Save to project"), LOCTEXT("SaveToProjectTooltip", "Copy it into the project's generated images, where the Images tab and the image tools find it."),
+				[this, Weak]()
+				{
+					const TSharedPtr<FHyperAIStudioChatItem> Pinned = Weak.Pin();
+					FString Saved;
+					FString Error;
+					if (Pinned.IsValid())
+					{
+						Notice = SaveToProject(*Pinned, Chat->GetAgentName(), Saved, Error) ? TEXT("Saved to ") + Saved : Error;
+					}
+				})
+		]
+		+ SHorizontalBox::Slot().AutoWidth()
+		[
+			Action(LOCTEXT("ShowInFolder", "Show in folder"), LOCTEXT("ShowInFolderTooltip", "Open the folder the picture is in."),
+				[Weak]()
+				{
+					if (const TSharedPtr<FHyperAIStudioChatItem> Pinned = Weak.Pin(); Pinned.IsValid() && !Pinned->Images.IsEmpty())
+					{
+						FPlatformProcess::ExploreFolder(*Pinned->Images[0]);
+					}
+				})
+		];
 }
 
 void SHyperAIStudioNativeChatView::Refresh()
@@ -293,6 +613,12 @@ TSharedRef<ITableRow> SHyperAIStudioNativeChatView::GenerateRow(FItemPtr Item, c
 	switch (Item->Kind)
 	{
 	case EKind::User:
+	{
+		TSharedRef<SWrapBox> Attachments = SNew(SWrapBox).UseAllottedSize(true).InnerSlotPadding(FVector2D(6.0f, 6.0f));
+		for (const FString& Path : Item->Images)
+		{
+			Attachments->AddSlot()[Picture([Path]() { return Path; }, FVector2D(160.0f, 120.0f))];
+		}
 		Content = SNew(SBorder)
 			.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
 			.Padding(FMargin(8.0f, 6.0f))
@@ -306,8 +632,13 @@ TSharedRef<ITableRow> SHyperAIStudioNativeChatView::GenerateRow(FItemPtr Item, c
 				[
 					LiveText(Item)
 				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
+				[
+					Attachments
+				]
 			];
 		break;
+	}
 	case EKind::Agent:
 		Content = LiveText(Item);
 		break;
@@ -396,6 +727,58 @@ TSharedRef<ITableRow> SHyperAIStudioNativeChatView::GenerateRow(FItemPtr Item, c
 			];
 		break;
 	}
+	case EKind::Image:
+		Content = SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("KindImage", "Image"))
+					.Font(FAppStyle::GetFontStyle("SmallFontBold"))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				]
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
+				.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock).Text_Lambda([Item]() { return FText::FromString(Item->Title); })
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.Font(FAppStyle::GetFontStyle("SmallFont"))
+					.Text_Lambda([Item]() { return FText::FromString(Item->Status == TEXT("running") ? TEXT("drawing...") : Item->Status); })
+					.ColorAndOpacity_Lambda([Item]() { return StatusColor(Item->Status); })
+				]
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 4.0f, 0.0f, 0.0f)
+			[
+				Picture([Item]() { return Item->Images.IsEmpty() ? FString() : Item->Images[0]; }, FVector2D(420.0f, 300.0f))
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 4.0f, 0.0f, 0.0f)
+			[
+				LiveText(Item, /*bMono=*/false, /*bMuted=*/true)
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 4.0f, 0.0f, 0.0f)
+			[
+				ImageActions(Item)
+			];
+		break;
 	case EKind::Approval:
 	{
 		TSharedRef<SHorizontalBox> Buttons = SNew(SHorizontalBox);

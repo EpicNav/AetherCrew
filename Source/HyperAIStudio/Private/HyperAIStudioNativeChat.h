@@ -20,7 +20,9 @@ struct FHyperAIStudioChatItem
 		FileChange,
 		Approval,
 		Error,
-		Notice
+		Notice,
+		/** A picture the agent made or looked at; Images holds its file. */
+		Image
 	};
 
 	FString Id;
@@ -35,6 +37,8 @@ struct FHyperAIStudioChatItem
 	TArray<FString> Choices;
 	TArray<FString> ChoiceIds;
 	bool bAnswered = false;
+	/** Image files on disk: what the user attached, or the picture an Image item shows. */
+	TArray<FString> Images;
 };
 
 struct FHyperAIStudioChatPlanStep
@@ -63,10 +67,16 @@ public:
 
 	virtual ~FHyperAIStudioNativeChat();
 
+	/**
+	 * Before Start: run with no one watching, for a tool that wants one answer, such as a picture. Codex gets an
+	 * ephemeral read-only thread that never asks for approval, with Instructions as its developer instructions.
+	 * Gemini's permission requests are answered by the chat itself, and only image tools are allowed.
+	 */
+	void SetHeadless(const FString& Instructions);
 	bool Start(FString& OutError);
 	void Stop();
-	/** Sends now, or once the running turn ends. */
-	void Send(const FString& Text);
+	/** Sends now, or once the running turn ends. Images are files the agent sees with the text. */
+	void Send(const FString& Text, const TArray<FString>& Images = {});
 	void Interrupt();
 	/** Answers an open approval with one of its choices. */
 	void Answer(const FString& ItemId, int32 Choice);
@@ -84,6 +94,8 @@ public:
 	const TArray<FHyperAIStudioChatPlanStep>& GetPlan() const { return Plan; }
 	/** Token and rate-limit use, as one line. */
 	const FString& GetUsage() const { return Usage; }
+	/** Where pictures an agent sends as data are written. */
+	static FString ImageFolder();
 
 	/** After any change to the transcript, the plan, the usage or the state. */
 	FSimpleMulticastDelegate OnChanged;
@@ -96,7 +108,7 @@ protected:
 	virtual bool WritesJsonRpcVersion() const = 0;
 	/** Begins the handshake; call Ready once the chat can take a message. */
 	virtual void Handshake() = 0;
-	virtual void SendNow(const FString& Text) = 0;
+	virtual void SendNow(const FString& Text, const TArray<FString>& Images) = 0;
 	virtual void InterruptNow() = 0;
 	virtual void HandleMessage(const FString& Method, const TSharedPtr<FJsonObject>& Params, const TSharedPtr<FJsonValue>& RequestId) = 0;
 	virtual TSharedRef<FJsonObject> AnswerPayload(const FHyperAIStudioChatItem& Item, int32 Choice) = 0;
@@ -117,6 +129,8 @@ protected:
 	void AskApproval(const TSharedPtr<FJsonValue>& RequestId, const FString& Id, const FString& Title, const FString& Text,
 		const TArray<FString>& Choices, const TArray<FString>& ChoiceIds);
 	void Changed();
+	/** Writes an agent's base64 picture under ImageFolder and returns the file; empty when it is not an image. */
+	static FString SaveImageData(const FString& Base64, const FString& Name);
 
 	FString AgentName;
 	FString ProjectRoot;
@@ -125,8 +139,16 @@ protected:
 	FString SessionId;
 	FString Usage;
 	TArray<FHyperAIStudioChatPlanStep> Plan;
+	bool bHeadless = false;
+	FString HeadlessInstructions;
 
 private:
+	struct FQueuedMessage
+	{
+		FString Text;
+		TArray<FString> Images;
+	};
+
 	bool Pump(float DeltaTime);
 	void Dispatch(const FString& Line);
 	void Write(const TSharedRef<FJsonObject>& Message);
@@ -142,7 +164,7 @@ private:
 	TMap<int64, FOnResult> Waiting;
 	TMap<FString, TSharedPtr<FJsonValue>> OpenApprovals;
 	TArray<TSharedPtr<FHyperAIStudioChatItem>> Items;
-	TArray<FString> Queued;
+	TArray<FQueuedMessage> Queued;
 	FTSTicker::FDelegateHandle Ticker;
 	bool bReady = false;
 	bool bBusy = false;

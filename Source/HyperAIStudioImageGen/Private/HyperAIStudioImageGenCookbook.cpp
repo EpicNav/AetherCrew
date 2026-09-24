@@ -67,8 +67,15 @@ re-generatable in six months, which a chat-produced image otherwise is not:
 Section 5 still applies: the prompt is the part that decides whether the level can ever match the
 reference, so compose it from the template even when you are generating the image yourself.
 
-Configure a model below only when you need something your agent cannot do: a specific checkpoint or
-style, a fixed seed you can return to, a batch of variations in one go, or a model running offline.
+**No generator of your own?** Claude Code has none, for one. Then ask for `model_id: codex_image_gen`:
+HyperAI has Codex draw the picture, headless, on the user's own Codex plan, and puts the PNG and its
+sidecar in the project like any batch. Nothing to configure; `hyper_image_inspect` shows whether this
+machine can (Codex CLI installed). It still waits for the user's approval, because it spends their plan.
+Then open the PNG it names with your own image reader and look at it. `gemini_image_gen` works the same
+way, but only with Gemini's nanobanana extension installed, since Gemini CLI has no generator of its own.
+
+Configure a model below only when you need something no agent can do: a specific checkpoint or
+style, a fixed seed you can return to, or a model running offline.
 
 ## 3. Configure a model
 

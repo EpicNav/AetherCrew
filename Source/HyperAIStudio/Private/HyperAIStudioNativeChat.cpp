@@ -2,8 +2,11 @@
 
 #include "HyperAIStudioNativeChat.h"
 
+#include "HAL/FileManager.h"
 #include "HyperAIStudioService.h"
 #include "Interfaces/IPluginManager.h"
+#include "Misc/Base64.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
@@ -105,6 +108,39 @@ namespace HyperAIStudio::NativeChat::Private
 		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("HyperAIStudio"));
 		return Plugin.IsValid() ? Plugin->GetDescriptor().VersionName : FString(TEXT("1.0"));
 	}
+
+	/** png, jpg or webp from the leading bytes; null when they are not a picture. */
+	const TCHAR* ImageExtension(const TArray<uint8>& Bytes)
+	{
+		if (Bytes.Num() >= 8 && Bytes[0] == 0x89 && Bytes[1] == 'P' && Bytes[2] == 'N' && Bytes[3] == 'G')
+		{
+			return TEXT("png");
+		}
+		if (Bytes.Num() >= 3 && Bytes[0] == 0xFF && Bytes[1] == 0xD8 && Bytes[2] == 0xFF)
+		{
+			return TEXT("jpg");
+		}
+		if (Bytes.Num() >= 12 && Bytes[0] == 'R' && Bytes[1] == 'I' && Bytes[2] == 'F' && Bytes[3] == 'F'
+			&& Bytes[8] == 'W' && Bytes[9] == 'E' && Bytes[10] == 'B' && Bytes[11] == 'P')
+		{
+			return TEXT("webp");
+		}
+		return nullptr;
+	}
+
+	FString MimeType(const FString& Path)
+	{
+		const FString Extension = FPaths::GetExtension(Path).ToLower();
+		return Extension == TEXT("jpg") || Extension == TEXT("jpeg") ? FString(TEXT("image/jpeg"))
+			: Extension == TEXT("webp") ? FString(TEXT("image/webp")) : FString(TEXT("image/png"));
+	}
+
+	/** An attachment the agent can be sent: a picture file that is there, and small enough to go as data. */
+	bool IsSendableImage(const FString& Path)
+	{
+		const int64 Size = IFileManager::Get().FileSize(*Path);
+		return Size > 0 && Size <= 20 * 1024 * 1024;
+	}
 }
 
 // ---------------------------------------------------------------------------------------------------------------- base
@@ -121,6 +157,38 @@ FHyperAIStudioNativeChat::FHyperAIStudioNativeChat(const FString& InAgentName, c
 FHyperAIStudioNativeChat::~FHyperAIStudioNativeChat()
 {
 	Stop();
+}
+
+void FHyperAIStudioNativeChat::SetHeadless(const FString& Instructions)
+{
+	bHeadless = true;
+	HeadlessInstructions = Instructions;
+}
+
+FString FHyperAIStudioNativeChat::ImageFolder()
+{
+	return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio") / TEXT("ChatImages"));
+}
+
+FString FHyperAIStudioNativeChat::SaveImageData(const FString& Base64, const FString& Name)
+{
+	using namespace HyperAIStudio::NativeChat::Private;
+	FString Data = Base64;
+	int32 Comma = INDEX_NONE;
+	if (Data.StartsWith(TEXT("data:")) && Data.FindChar(TEXT(','), Comma))
+	{
+		Data.RightChopInline(Comma + 1);
+	}
+	TArray<uint8> Bytes;
+	const TCHAR* Extension = FBase64::Decode(Data, Bytes) ? ImageExtension(Bytes) : nullptr;
+	if (!Extension)
+	{
+		return FString();
+	}
+	IFileManager::Get().MakeDirectory(*ImageFolder(), /*Tree=*/true);
+	const FString File = ImageFolder() / FString::Printf(TEXT("%s-%s.%s"), *FPaths::MakeValidFileName(Name.Left(48), TEXT('_')),
+		*FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8), Extension);
+	return FFileHelper::SaveArrayToFile(Bytes, *File) ? File : FString();
 }
 
 bool FHyperAIStudioNativeChat::Start(FString& OutError)
@@ -195,22 +263,27 @@ bool FHyperAIStudioNativeChat::IsRunning() const
 	return !bStopped && Process.IsValid() && FPlatformProcess::IsProcRunning(const_cast<FProcHandle&>(Process));
 }
 
-void FHyperAIStudioNativeChat::Send(const FString& Text)
+void FHyperAIStudioNativeChat::Send(const FString& Text, const TArray<FString>& Images)
 {
-	const FString Trimmed = Text.TrimStartAndEnd();
+	TArray<FString> Sendable = Images.FilterByPredicate(&HyperAIStudio::NativeChat::Private::IsSendableImage);
+	FString Trimmed = Text.TrimStartAndEnd();
+	if (Trimmed.IsEmpty() && !Sendable.IsEmpty())
+	{
+		Trimmed = TEXT("Look at the attached image.");
+	}
 	if (Trimmed.IsEmpty() || bStopped)
 	{
 		return;
 	}
 	if (!bReady || bBusy)
 	{
-		Queued.Add(Trimmed);
+		Queued.Add({Trimmed, MoveTemp(Sendable)});
 		Changed();
 		return;
 	}
-	AddItem(FHyperAIStudioChatItem::EKind::User, FString(), FString(), Trimmed);
+	AddItem(FHyperAIStudioChatItem::EKind::User, FString(), FString(), Trimmed)->Images = Sendable;
 	TurnStarted();
-	SendNow(Trimmed);
+	SendNow(Trimmed, Sendable);
 }
 
 void FHyperAIStudioNativeChat::Interrupt()
@@ -245,9 +318,9 @@ void FHyperAIStudioNativeChat::Ready(const FString& InSessionId)
 	AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(), FString::Printf(TEXT("%s is ready."), *AgentName));
 	if (!Queued.IsEmpty())
 	{
-		const FString Next = Queued[0];
+		const FQueuedMessage Next = Queued[0];
 		Queued.RemoveAt(0);
-		Send(Next);
+		Send(Next.Text, Next.Images);
 	}
 }
 
@@ -270,9 +343,9 @@ void FHyperAIStudioNativeChat::TurnFinished()
 	}
 	if (!Queued.IsEmpty() && bReady)
 	{
-		const FString Next = Queued[0];
+		const FQueuedMessage Next = Queued[0];
 		Queued.RemoveAt(0);
-		Send(Next);
+		Send(Next.Text, Next.Images);
 		return;
 	}
 	Changed();
@@ -529,6 +602,14 @@ namespace HyperAIStudio::NativeChat::Private
 			{
 				Params->SetStringField(TEXT("model"), Model);
 			}
+			if (bHeadless)
+			{
+				// Nobody is there to answer a question, and nothing this thread does should last.
+				Params->SetBoolField(TEXT("ephemeral"), true);
+				Params->SetStringField(TEXT("approvalPolicy"), TEXT("never"));
+				Params->SetStringField(TEXT("sandbox"), TEXT("read-only"));
+				Params->SetStringField(TEXT("developerInstructions"), HeadlessInstructions);
+			}
 			if (bResume)
 			{
 				Params->SetStringField(TEXT("threadId"), ResumeSessionId);
@@ -551,11 +632,16 @@ namespace HyperAIStudio::NativeChat::Private
 			});
 		}
 
-		virtual void SendNow(const FString& Text) override
+		virtual void SendNow(const FString& Text, const TArray<FString>& Images) override
 		{
-			const TSharedRef<FJsonObject> Input = Object({
-				{TEXT("type"), Str(TEXT("text"))}, {TEXT("text"), Str(Text)}, {TEXT("text_elements"), Arr({})}});
-			const TSharedRef<FJsonObject> Params = Object({{TEXT("threadId"), Str(SessionId)}, {TEXT("input"), Arr({Obj(Input)})}});
+			TArray<TSharedPtr<FJsonValue>> Input = {Obj(Object({
+				{TEXT("type"), Str(TEXT("text"))}, {TEXT("text"), Str(Text)}, {TEXT("text_elements"), Arr({})}}))};
+			for (const FString& Image : Images)
+			{
+				// Codex reads the file itself.
+				Input.Add(Obj(Object({{TEXT("type"), Str(TEXT("localImage"))}, {TEXT("path"), Str(Image)}})));
+			}
+			const TSharedRef<FJsonObject> Params = Object({{TEXT("threadId"), Str(SessionId)}, {TEXT("input"), Arr(Input)}});
 			Request(TEXT("turn/start"), Params, [this](const TSharedPtr<FJsonObject>& Result, const FString& Error)
 			{
 				if (!Error.IsEmpty())
@@ -579,6 +665,21 @@ namespace HyperAIStudio::NativeChat::Private
 		static FString StatusOf(const FString& Status)
 		{
 			return Status == TEXT("inProgress") ? FString(TEXT("running")) : Status;
+		}
+
+		/** Codex's failure for a spent image allowance, as a sentence with the time it comes back. */
+		static FString LimitText(const TSharedPtr<FJsonObject>& Failure)
+		{
+			double ResetsAt = 0.0;
+			Failure->TryGetNumberField(TEXT("resetsAt"), ResetsAt);
+			if (ResetsAt > 1e11)
+			{
+				ResetsAt /= 1000.0;
+			}
+			return ResetsAt > 0.0
+				? FString::Printf(TEXT("Codex's image generation limit is used up until %s."),
+					*FDateTime::FromUnixTimestamp(static_cast<int64>(ResetsAt)).ToString(TEXT("%Y-%m-%d %H:%M UTC")))
+				: FString(TEXT("Codex's image generation limit is used up."));
 		}
 
 		void UpdateItem(const TSharedPtr<FJsonObject>& Item, const bool bCompleted)
@@ -680,6 +781,42 @@ namespace HyperAIStudio::NativeChat::Private
 			{
 				Ensure(FHyperAIStudioChatItem::EKind::Tool, TEXT("Web search: ") + StringField(Item, TEXT("query")));
 				Existing->Status = bCompleted ? TEXT("completed") : TEXT("running");
+			}
+			else if (Type == TEXT("imageGeneration"))
+			{
+				Ensure(FHyperAIStudioChatItem::EKind::Image, TEXT("Generated image"));
+				const FString Revised = StringField(Item, TEXT("revisedPrompt"));
+				if (!Revised.IsEmpty())
+				{
+					Existing->Text = Clip(Revised);
+				}
+				FString Saved = StringField(Item, TEXT("savedPath"));
+				const FString Data = StringField(Item, TEXT("result"));
+				if (Saved.IsEmpty() && bCompleted && !Data.IsEmpty())
+				{
+					Saved = SaveImageData(Data, TEXT("codex-") + Id);
+				}
+				if (!Saved.IsEmpty())
+				{
+					Existing->Images = {Saved};
+				}
+				if (const TSharedPtr<FJsonObject> Failure = ObjectField(Item, TEXT("failure")); Failure.IsValid())
+				{
+					Existing->Status = TEXT("failed");
+					Existing->Text = LimitText(Failure);
+				}
+				else
+				{
+					Existing->Status = !bCompleted ? FString(TEXT("running")) : Existing->Images.IsEmpty() ? FString(TEXT("failed")) : FString(TEXT("completed"));
+				}
+			}
+			else if (Type == TEXT("imageView"))
+			{
+				Ensure(FHyperAIStudioChatItem::EKind::Image, TEXT("Looked at an image"));
+				const FString Path = StringField(Item, TEXT("path"));
+				Existing->Images = {Path};
+				Existing->Text = Path;
+				Existing->Status = TEXT("completed");
 			}
 			else if (Type == TEXT("contextCompaction") && bCompleted)
 			{
@@ -880,6 +1017,10 @@ namespace HyperAIStudio::NativeChat::Private
 				if (const TSharedPtr<FJsonObject> Capabilities = ObjectField(Result, TEXT("agentCapabilities")))
 				{
 					Capabilities->TryGetBoolField(TEXT("loadSession"), bCanLoad);
+					if (const TSharedPtr<FJsonObject> Prompt = ObjectField(Capabilities, TEXT("promptCapabilities")))
+					{
+						Prompt->TryGetBoolField(TEXT("image"), bTakesImages);
+					}
 				}
 				OpenSession(bCanLoad && !ResumeSessionId.IsEmpty());
 			});
@@ -910,12 +1051,30 @@ namespace HyperAIStudio::NativeChat::Private
 			});
 		}
 
-		virtual void SendNow(const FString& Text) override
+		virtual void SendNow(const FString& Text, const TArray<FString>& Images) override
 		{
 			CurrentAgent.Reset();
 			CurrentThought.Reset();
-			const TSharedRef<FJsonObject> Block = Object({{TEXT("type"), Str(TEXT("text"))}, {TEXT("text"), Str(Text)}});
-			Request(TEXT("session/prompt"), Object({{TEXT("sessionId"), Str(SessionId)}, {TEXT("prompt"), Arr({Obj(Block)})}}),
+			TArray<TSharedPtr<FJsonValue>> Blocks = {Obj(Object({{TEXT("type"), Str(TEXT("text"))}, {TEXT("text"), Str(Text)}}))};
+			int32 LeftOut = 0;
+			for (const FString& Image : Images)
+			{
+				TArray<uint8> Bytes;
+				if (!bTakesImages || !FFileHelper::LoadFileToArray(Bytes, *Image))
+				{
+					++LeftOut;
+					continue;
+				}
+				Blocks.Add(Obj(Object({{TEXT("type"), Str(TEXT("image"))}, {TEXT("mimeType"), Str(MimeType(Image))},
+					{TEXT("data"), Str(FBase64::Encode(Bytes))}})));
+			}
+			if (LeftOut > 0)
+			{
+				AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(), bTakesImages
+					? FString(TEXT("An attached picture could not be read, so it was left out."))
+					: FString(TEXT("Gemini did not say it takes pictures, so only the text went.")));
+			}
+			Request(TEXT("session/prompt"), Object({{TEXT("sessionId"), Str(SessionId)}, {TEXT("prompt"), Arr(Blocks)}}),
 				[this](const TSharedPtr<FJsonObject>& Result, const FString& Error)
 			{
 				const FString StopReason = StringField(Result, TEXT("stopReason"));
@@ -970,7 +1129,14 @@ namespace HyperAIStudio::NativeChat::Private
 			{
 				const TSharedPtr<FJsonObject> Update = ObjectField(Params, TEXT("update"));
 				const FString Kind = StringField(Update, TEXT("sessionUpdate"));
-				if (Kind == TEXT("agent_message_chunk") || Kind == TEXT("agent_thought_chunk"))
+				const TSharedPtr<FJsonObject> Content = ObjectField(Update, TEXT("content"));
+				if (Kind == TEXT("agent_message_chunk") && StringField(Content, TEXT("type")) == TEXT("image"))
+				{
+					AddPicture(StringField(Content, TEXT("data")), FString());
+					// Text after a picture is a new message.
+					CurrentAgent.Reset();
+				}
+				else if (Kind == TEXT("agent_message_chunk") || Kind == TEXT("agent_thought_chunk"))
 				{
 					const bool bThought = Kind == TEXT("agent_thought_chunk");
 					TSharedPtr<FHyperAIStudioChatItem>& Current = bThought ? CurrentThought : CurrentAgent;
@@ -1007,6 +1173,15 @@ namespace HyperAIStudio::NativeChat::Private
 					{
 						Item->Text = Clip(Text);
 					}
+					int32 Picture = 0;
+					for (const TSharedPtr<FJsonValue>& Value : ArrayField(Update, TEXT("content")))
+					{
+						const TSharedPtr<FJsonObject> Block = ObjectField(Value->AsObject(), TEXT("content"));
+						if (StringField(Block, TEXT("type")) == TEXT("image"))
+						{
+							AddPicture(StringField(Block, TEXT("data")), FString::Printf(TEXT("%s#image%d"), *Id, Picture++));
+						}
+					}
 					// Text after a tool call is a new message.
 					CurrentAgent.Reset();
 				}
@@ -1020,6 +1195,26 @@ namespace HyperAIStudio::NativeChat::Private
 					}
 				}
 				Changed();
+			}
+			else if (Method == TEXT("session/request_permission") && RequestId.IsValid() && bHeadless)
+			{
+				// Nobody is watching, so the chat answers: a picture tool may run, and nothing else.
+				const FString Title = StringField(ObjectField(Params, TEXT("toolCall")), TEXT("title"));
+				const bool bPictureTool = Title.Contains(TEXT("image"), ESearchCase::IgnoreCase);
+				FString Picked;
+				for (const TSharedPtr<FJsonValue>& Option : ArrayField(Params, TEXT("options")))
+				{
+					if (StringField(Option->AsObject(), TEXT("kind")) == (bPictureTool ? TEXT("allow_once") : TEXT("reject_once")))
+					{
+						Picked = StringField(Option->AsObject(), TEXT("optionId"));
+						break;
+					}
+				}
+				Respond(RequestId, Object({{TEXT("outcome"), Obj(Picked.IsEmpty()
+					? Object({{TEXT("outcome"), Str(TEXT("cancelled"))}})
+					: Object({{TEXT("outcome"), Str(TEXT("selected"))}, {TEXT("optionId"), Str(Picked)}}))}}));
+				AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(),
+					FString::Printf(TEXT("%s %s, with nobody watching."), bPictureTool ? TEXT("Allowed") : TEXT("Refused"), *Title));
 			}
 			else if (Method == TEXT("session/request_permission") && RequestId.IsValid())
 			{
@@ -1046,8 +1241,23 @@ namespace HyperAIStudio::NativeChat::Private
 		}
 
 	private:
+		/** A picture Gemini sent as data, shown as its own item; Id keeps a repeated update from adding it twice. */
+		void AddPicture(const FString& Data, const FString& Id)
+		{
+			if (!Id.IsEmpty() && FindItem(Id).IsValid())
+			{
+				return;
+			}
+			const FString File = SaveImageData(Data, TEXT("gemini"));
+			if (!File.IsEmpty())
+			{
+				AddItem(FHyperAIStudioChatItem::EKind::Image, Id, TEXT("Image"), FString(), TEXT("completed"))->Images = {File};
+			}
+		}
+
 		TSharedPtr<FHyperAIStudioChatItem> CurrentAgent;
 		TSharedPtr<FHyperAIStudioChatItem> CurrentThought;
+		bool bTakesImages = false;
 	};
 }
 

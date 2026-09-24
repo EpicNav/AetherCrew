@@ -4,6 +4,7 @@
 
 #include "Editor.h"
 #include "HAL/FileManager.h"
+#include "HyperAIStudioAgentImage.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
@@ -390,12 +391,13 @@ FHyperAIImageInspectReport FHyperAIStudioImageGenContracts::Inspect(const FHyper
 		[](const FHyperAIImageModelInfo& Model) { return Model.Issue.IsEmpty(); }).Num();
 	Report.bOk = true;
 	Report.Status = Report.bTruncated ? TEXT("truncated") : TEXT("captured");
-	Report.Diagnostic = Report.Models.IsEmpty()
-		? FString(TEXT("No image model is configured, so nothing can be generated yet. ")
-			TEXT("Read .hyperai/docs/HyperAIStudio-ImageGenCookbook.md: it has three worked configurations."))
-		: FString::Printf(TEXT("%d of %d models usable, %d templates, %d images generated, %d batches this session, %.2f of %.2f spent."),
-			Usable, Report.Models.Num(), Report.Templates.Num(), Report.Images.Num(), Report.Batches.Num(),
-			Report.SessionSpend, Report.SessionSpendCap);
+	Report.Diagnostic = FString::Printf(TEXT("%d of %d models usable, %d templates, %d images generated, %d batches this session, %.2f of %.2f spent."),
+		Usable, Report.Models.Num(), Report.Templates.Num(), Report.Images.Num(), Report.Batches.Num(),
+		Report.SessionSpend, Report.SessionSpendCap);
+	if (const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>(); Settings && Settings->ImageModels.IsEmpty())
+	{
+		Report.Diagnostic += TEXT(" Only the built-in agent generators are listed; .hyperai/docs/HyperAIStudio-ImageGenCookbook.md configures a service model.");
+	}
 	return Report;
 }
 
@@ -471,27 +473,40 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 	FHyperAIStudioImageModelSettings Model;
 	if (!Gate::FindModel(Request.ModelId, Model))
 	{
-		const bool bAny = !Gate::ReadModels().IsEmpty();
-		return Reject(TEXT("model_not_found"), bAny
-			? FString::Printf(TEXT("No image model with id %s; hyper_image_inspect lists them."), *Request.ModelId.Left(48))
-			: FString(TEXT("No image model is configured. Read .hyperai/docs/HyperAIStudio-ImageGenCookbook.md, which has three worked configurations.")));
+		return Reject(TEXT("model_not_found"), FString::Printf(
+			TEXT("No image model with id %s. codex_image_gen is built in (Codex draws it on your own plan); hyper_image_inspect lists ")
+			TEXT("every model, and .hyperai/docs/HyperAIStudio-ImageGenCookbook.md configures a service."), *Request.ModelId.Left(48)));
 	}
+	FString Agent;
+	const bool bAgent = Gate::IsAgentModel(Model, Agent);
+	const FString AgentLabel = Agent.Equals(TEXT("gemini"), ESearchCase::IgnoreCase) ? TEXT("Gemini") : TEXT("Codex");
 	FHyperAIStudioExternalServiceSettings Service;
-	if (!FHyperAIStudioExternalServices::Find(Model.ServiceId, Service))
+	if (bAgent)
 	{
-		return Reject(TEXT("service_not_found"), FString::Printf(
-			TEXT("Model %s names external service %s, which is not configured."), *Model.Id, *Model.ServiceId));
+		FString Issue;
+		if (!FHyperAIStudioAgentImage::CanDraw(Agent, Issue))
+		{
+			return Reject(TEXT("agent_unavailable"), Issue);
+		}
 	}
-	if (!FHyperAIStudioExternalServices::HasApiKey(Service))
+	else
 	{
-		return Reject(TEXT("api_key_missing"), FString::Printf(
-			TEXT("Set the %s environment variable and restart the editor; the key is never read from a config file."),
-			*Service.ApiKeyVariable));
-	}
-	const FHyperAIStudioServiceStatus Health = FHyperAIStudioExternalServices::QueryHealth(Model.ServiceId);
-	if (Health.Health == EHyperAIStudioServiceHealth::Unreachable)
-	{
-		return Reject(TEXT("service_unreachable"), Health.Diagnostic);
+		if (!FHyperAIStudioExternalServices::Find(Model.ServiceId, Service))
+		{
+			return Reject(TEXT("service_not_found"), FString::Printf(
+				TEXT("Model %s names external service %s, which is not configured."), *Model.Id, *Model.ServiceId));
+		}
+		if (!FHyperAIStudioExternalServices::HasApiKey(Service))
+		{
+			return Reject(TEXT("api_key_missing"), FString::Printf(
+				TEXT("Set the %s environment variable and restart the editor; the key is never read from a config file."),
+				*Service.ApiKeyVariable));
+		}
+		const FHyperAIStudioServiceStatus Health = FHyperAIStudioExternalServices::QueryHealth(Model.ServiceId);
+		if (Health.Health == EHyperAIStudioServiceHealth::Unreachable)
+		{
+			return Reject(TEXT("service_unreachable"), Health.Diagnostic);
+		}
 	}
 
 	const int32 Width = Request.Width > 0 ? Request.Width : Model.Width;
@@ -512,14 +527,14 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 	Report.ComposedPrompt = Prompt;
 
 	// Built here as well as when sending, so a request template that cannot produce valid JSON is caught on
-	// the dry run rather than after the user has approved a spend.
+	// the dry run rather than after the user has approved a spend. An agent takes the prompt as it is.
 	FString Body;
 	FString BodyError;
-	if (!Gate::BuildRequestBody(Model, Prompt, Request.Negative, Width, Height, Seed, Body, BodyError))
+	if (!bAgent && !Gate::BuildRequestBody(Model, Prompt, Request.Negative, Width, Height, Seed, Body, BodyError))
 	{
 		return Reject(TEXT("invalid_request_template"), BodyError);
 	}
-	if (Model.ResponseImagePath.IsEmpty())
+	if (!bAgent && Model.ResponseImagePath.IsEmpty())
 	{
 		return Reject(TEXT("invalid_response_path"), FString::Printf(
 			TEXT("Model %s has no response_image_path; see the cookbook."), *Model.Id));
@@ -596,9 +611,12 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 	Report.PlanHash = Payload->SemanticFingerprint;
 	Report.AuthorizationPlanHash = Prepare.PlanHash;
 
-	const TCHAR* const SlowWarning = Model.bRunsOnThisMachine
-		? TEXT(" This model runs on this machine, so it shares the graphics card with the editor and can take many times longer than it would alone; close the editor if it crawls.")
-		: TEXT("");
+	const FString SlowWarning = bAgent
+		? FString::Printf(TEXT(" %s draws these on your own %s plan, about a minute each; it picks the nearest size it can make and takes no seed."),
+			*AgentLabel, *AgentLabel)
+		: Model.bRunsOnThisMachine
+		? FString(TEXT(" This model runs on this machine, so it shares the graphics card with the editor and can take many times longer than it would alone; close the editor if it crawls."))
+		: FString();
 	if (Request.bDryRun)
 	{
 		Report.bOk = true;
@@ -606,7 +624,7 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 		Report.Diagnostic = FString::Printf(
 			TEXT("Nothing was sent and nothing was spent. Read composed_prompt before resubmitting: %d image%s at %dx%d from %s, about %.2f.%s ")
 			TEXT("To generate, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash."),
-			Request.Count, Request.Count == 1 ? TEXT("") : TEXT("s"), Width, Height, *Model.Id, Report.EstimatedCost, SlowWarning);
+			Request.Count, Request.Count == 1 ? TEXT("") : TEXT("s"), Width, Height, *Model.Id, Report.EstimatedCost, *SlowWarning);
 		if (!Report.UnfilledSlots.IsEmpty())
 		{
 			Report.Diagnostic += FString::Printf(TEXT(" Unfilled template slots dropped out of the prompt: %s."),
@@ -627,8 +645,11 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 	Summary.Safety = EHyperAIStudioDomainSafety::ExternalEffect;
 	Summary.EffectTarget = Folder;
 	Summary.PlanHash = Payload->SemanticFingerprint;
-	Summary.Effects.Add(FString::Printf(TEXT("generate %d image%s at %dx%d with %s, about %.2f"),
-		Request.Count, Request.Count == 1 ? TEXT("") : TEXT("s"), Width, Height, *Model.Id, Report.EstimatedCost));
+	Summary.Effects.Add(bAgent
+		? FString::Printf(TEXT("generate %d image%s with %s, drawn by %s on your own plan"),
+			Request.Count, Request.Count == 1 ? TEXT("") : TEXT("s"), *Model.Id, *AgentLabel)
+		: FString::Printf(TEXT("generate %d image%s at %dx%d with %s, about %.2f"),
+			Request.Count, Request.Count == 1 ? TEXT("") : TEXT("s"), Width, Height, *Model.Id, Report.EstimatedCost));
 	Summary.Effects.Add(TEXT("prompt: ") + Prompt);
 	if (!Request.Negative.IsEmpty()) Summary.Effects.Add(TEXT("negative: ") + Request.Negative);
 	Summary.Effects.Add(FString::Printf(TEXT("write %d PNG files and their sidecars into %s"), Request.Count, *Folder));
@@ -642,7 +663,7 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 	Report.Status = TEXT("awaiting_user_approval");
 	Report.Diagnostic = FString::Printf(
 		TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing has been sent or spent.%s ")
-		TEXT("Call hyper_operation_wait with operation_id and bWaitThroughApproval true; once approved, watch the batch with hyper_image_inspect."), SlowWarning);
+		TEXT("Call hyper_operation_wait with operation_id and bWaitThroughApproval true; once approved, watch the batch with hyper_image_inspect."), *SlowWarning);
 	return Report;
 }
 
