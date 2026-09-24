@@ -7,10 +7,10 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerStart.h"
+#include "HyperAIStudioMarkdown.h"
 #include "HyperAIStudioPIEPlaytestToolset.h"
-#include "HyperAIStudioPreviewImage.h"
-#include "HyperAIStudioPreviewPanel.h"
 #include "JsonObjectConverter.h"
+#include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -102,17 +102,15 @@ namespace HyperAIStudio::PlaytestPanel
 		return Text;
 	}
 
-	FSlateColor StatusColor(const FString& Status)
+	/** Text for a table cell: a pipe would end the cell, and a new line the row. */
+	FString Cell(const FString& Text)
 	{
-		if (Status == TEXT("passed"))
-		{
-			return FLinearColor(0.25f, 0.8f, 0.4f);
-		}
-		if (Status == TEXT("failed"))
-		{
-			return FLinearColor(0.95f, 0.35f, 0.3f);
-		}
-		return Status == TEXT("timed_out") ? FSlateColor(FLinearColor(0.95f, 0.65f, 0.2f)) : FSlateColor::UseSubduedForeground();
+		return Text.Replace(TEXT("|"), TEXT("\\|")).Replace(TEXT("\r"), TEXT(" ")).Replace(TEXT("\n"), TEXT(" ")).TrimStartAndEnd();
+	}
+
+	FString Seconds(const double Value)
+	{
+		return FString::Printf(TEXT("%.1f s"), Value);
 	}
 }
 
@@ -375,17 +373,69 @@ bool SHyperAIStudioPlaytestPanel::Run(FString& OutError)
 	return true;
 }
 
-void SHyperAIStudioPlaytestPanel::Rebuild()
+FString SHyperAIStudioPlaytestPanel::BuildReport(const HyperAIStudio::Verify::FBatchOutcome& Batch)
 {
 	using namespace HyperAIStudio::PlaytestPanel;
+	int32 Passed = 0;
+	for (const Verify::FCaseOutcome& Case : Batch.Cases)
+	{
+		Passed += Case.Status == TEXT("passed") ? 1 : 0;
+	}
+	const FString Level = Batch.Map.IsEmpty() ? FString(TEXT("the level")) : FPaths::GetBaseFilename(Batch.Map);
+	FString Out = TEXT("## ") + FText::Format(LOCTEXT("ReportTitle", "Playtest: {0}"), FText::FromString(Level)).ToString() + TEXT("\n\n");
+	// What happened in one sentence, then the results.
+	Out += FText::Format(LOCTEXT("ReportLead", "{0} of {1} {1}|plural(one=case,other=cases) passed, each in its own copy of the level, in {2}."),
+		Passed, Batch.Cases.Num(), FText::FromString(Seconds(Batch.WallSeconds))).ToString();
+	if (!Batch.Diagnostic.IsEmpty() && Batch.Status != TEXT("passed"))
+	{
+		Out += TEXT(" ") + Batch.Diagnostic.TrimStartAndEnd();
+	}
+	Out += TEXT("\n\n| ") + LOCTEXT("ReportCase", "Case").ToString() + TEXT(" | ") + LOCTEXT("ReportResult", "Result").ToString() + TEXT(" | ")
+		+ LOCTEXT("ReportTime", "Simulated").ToString() + TEXT(" |\n|---|---|---|\n");
+	for (const Verify::FCaseOutcome& Case : Batch.Cases)
+	{
+		Out += FString::Printf(TEXT("| %s | %s %s | %s |\n"), *Cell(Case.Name), *Case.Status.ToUpper(), *Cell(Case.Diagnostic.Left(240)), *Seconds(Case.SimulatedSeconds));
+	}
+	for (const Verify::FCaseOutcome& Case : Batch.Cases)
+	{
+		Out += TEXT("\n### ") + Case.Name + TEXT("\n\n| # | ") + LOCTEXT("ReportStep", "Step").ToString() + TEXT(" | ")
+			+ LOCTEXT("ReportSaw", "What it saw").ToString() + TEXT(" |\n|---|---|---|\n");
+		TArray<FString> Pictures;
+		for (int32 Index = 0; Index < Case.Steps.Num(); ++Index)
+		{
+			const Verify::FStepOutcome& Step = Case.Steps[Index];
+			const FString Saw = Step.Status == TEXT("passed") || Step.Code.IsEmpty() ? Step.Detail : Step.Code + TEXT(": ") + Step.Detail;
+			Out += FString::Printf(TEXT("| %d | %s | %s %s |\n"), Index + 1, *Cell(Step.Action), *Step.Status.ToUpper(), *Cell(Saw.Left(400)));
+			if (Step.File.EndsWith(TEXT(".png")))
+			{
+				Pictures.Add(Step.File.Replace(TEXT("\\"), TEXT("/")));
+			}
+		}
+		for (const FString& Picture : Pictures)
+		{
+			Out += TEXT("\n![") + FPaths::GetBaseFilename(Picture) + TEXT("](") + Picture + TEXT(")");
+		}
+		Out += TEXT("\n");
+	}
+	return Out;
+}
+
+void SHyperAIStudioPlaytestPanel::ShowOutcome(const HyperAIStudio::Verify::FBatchOutcome& InOutcome)
+{
+	Outcome = InOutcome;
+	Rebuild();
+}
+
+void SHyperAIStudioPlaytestPanel::Rebuild()
+{
 	if (!Results.IsValid())
 	{
 		return;
 	}
 	Results->ClearChildren();
-	Thumbnails.Reset();
 	if (!Outcome.IsSet())
 	{
+		Report.Reset();
 		Results->AddSlot().AutoHeight()
 		[
 			SNew(STextBlock)
@@ -396,101 +446,17 @@ void SHyperAIStudioPlaytestPanel::Rebuild()
 		];
 		return;
 	}
-	for (const Verify::FCaseOutcome& Case : Outcome->Cases)
-	{
-		const TSharedRef<SWrapBox> Pictures = SNew(SWrapBox).UseAllottedSize(true).InnerSlotPadding(FVector2D(6.0f, 6.0f));
-		const TSharedRef<SVerticalBox> Steps = SNew(SVerticalBox);
-		for (int32 Index = 0; Index < Case.Steps.Num(); ++Index)
-		{
-			const Verify::FStepOutcome& Step = Case.Steps[Index];
-			Steps->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 6.0f, 0.0f)
-				[
-					SNew(STextBlock)
-					.Text(FText::Format(LOCTEXT("StepHead", "{0}. {1}"), Index + 1, FText::FromString(Step.Action)))
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-					.ColorAndOpacity(StatusColor(Step.Status))
-				]
-				+ SHorizontalBox::Slot().FillWidth(1.0f)
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(Step.Status == TEXT("passed") ? Step.Detail : FString::Printf(TEXT("%s: %s"), *Step.Code, *Step.Detail)))
-					.Font(FAppStyle::GetFontStyle("SmallFont"))
-					.AutoWrapText(true)
-				]
-			];
-			if (Step.File.EndsWith(TEXT(".png")))
-			{
-				const TSharedPtr<FHyperAIStudioPreviewImage> Image = Thumbnails.Add_GetRef(MakeShared<FHyperAIStudioPreviewImage>());
-				const FString Path = Step.File;
-				Pictures->AddSlot()
-				[
-					SNew(SButton)
-					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-					.ToolTipText(FText::Format(LOCTEXT("PictureTooltip", "{0}\nClick to open it in the HyperAI Preview tab."), FText::FromString(Path)))
-					.OnClicked_Lambda([Path]()
-					{
-						FHyperAIStudioPreviewPanel::Open(NAME_None, Path);
-						return FReply::Handled();
-					})
-					[
-						SNew(SBox).WidthOverride(176.0f).HeightOverride(110.0f)
-						[
-							SNew(SScaleBox)
-							.Stretch(EStretch::ScaleToFit)
-							[
-								SNew(SImage).Image_Lambda([Image, Path]() { return Image->Get(Path); })
-							]
-						]
-					]
-				];
-			}
-		}
-		Results->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 10.0f)
-		[
-			SNew(SBorder)
-			.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
-			.Padding(8.0f)
-			[
-				SNew(SVerticalBox)
-				+ SVerticalBox::Slot().AutoHeight()
-				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)
-					[
-						SNew(STextBlock)
-						.Text(FText::FromString(Case.Status.ToUpper()))
-						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-						.ColorAndOpacity(StatusColor(Case.Status))
-					]
-					+ SHorizontalBox::Slot().FillWidth(1.0f)
-					[
-						SNew(STextBlock)
-						.Text(FText::Format(LOCTEXT("CaseHead", "{0}, {1} simulated s"), FText::FromString(Case.Name), FText::AsNumber(FMath::RoundToInt(Case.SimulatedSeconds * 10.0f) / 10.0f)))
-						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-					]
-				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 4.0f)
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(Case.Diagnostic))
-					.Font(FAppStyle::GetFontStyle("SmallFont"))
-					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-					.AutoWrapText(true)
-				]
-				+ SVerticalBox::Slot().AutoHeight()
-				[
-					Steps
-				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
-				[
-					Pictures
-				]
-			]
-		];
-	}
+	Report = BuildReport(Outcome.GetValue());
+	Results->AddSlot().AutoHeight().HAlign(HAlign_Right)
+	[
+		HyperAIStudio::Markdown::ReportActions(
+			[this]() { return Outcome.IsSet() ? TEXT("Playtest ") + FPaths::GetBaseFilename(Outcome->Map) : FString(TEXT("Playtest")); },
+			[this]() { return Report; })
+	];
+	Results->AddSlot().AutoHeight()
+	[
+		SNew(SHyperAIStudioMarkdown).Markdown(Report)
+	];
 }
 
 #undef LOCTEXT_NAMESPACE

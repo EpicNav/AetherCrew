@@ -117,7 +117,8 @@ void FHyperAIStudioStyle::Register()
 
 	// Icons: a set for the navigation, drawn white and tinted by the theme; the logo in its own colours.
 	for (const TCHAR* Icon : {TEXT("Home"), TEXT("Chat"), TEXT("Images"), TEXT("Match"), TEXT("Playtest"), TEXT("Memory"), TEXT("Skills"),
-		TEXT("Agents"), TEXT("Tools"), TEXT("Activity"), TEXT("Settings"), TEXT("Menu"), TEXT("Report")})
+		TEXT("Agents"), TEXT("Tools"), TEXT("Activity"), TEXT("Settings"), TEXT("Menu"), TEXT("Report"), TEXT("Terminal"), TEXT("Thinking"),
+		TEXT("File")})
 	{
 		Style->Set(FName(*FString::Printf(TEXT("HyperAIStudio.Icon.%s"), Icon)),
 			new FSlateVectorImageBrush(Style->RootToContentDir(FString::Printf(TEXT("Icons/%s"), Icon), TEXT(".svg")), FVector2f(16.0f, 16.0f)));

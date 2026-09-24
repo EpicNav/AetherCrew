@@ -40,9 +40,15 @@ public:
 	void Run();
 	bool IsRunning() const { return Pending.IsValid(); }
 	const FString& GetAnswer() const { return Answer; }
+	/** The answer as a report: its summary, its fields as tables, and its pictures. Empty when it is not JSON. */
+	const FString& GetReport() const { return Report; }
+	/** The answer as a report, or as the JSON it is. */
+	void ShowJson(bool bJson) { bShowJson = bJson; }
 	bool HasReflectedForm() const { return Function != nullptr; }
 
 private:
+	/** The JSON shows when asked for, and whenever the answer has no report (before a run, or plain text). */
+	bool IsJsonShown() const { return bShowJson || Report.IsEmpty(); }
 	/** Picture files named anywhere in the answer, so they can be shown. */
 	void FindImages(const TSharedPtr<class FJsonValue>& Value);
 	void RebuildImages();
@@ -60,6 +66,8 @@ private:
 	TStrongObjectPtr<UToolCallAsyncResultString> Pending;
 	double StartedAt = 0.0;
 	FString Answer;
+	FString Report;
+	bool bShowJson = false;
 	FString Status;
 	bool bStatusIsError = false;
 	bool bAwaitingApproval = false;

@@ -6,7 +6,6 @@
 #include "HyperAIStudioVerify.h"
 #include "Widgets/SCompoundWidget.h"
 
-class FHyperAIStudioPreviewImage;
 class SMultiLineEditableTextBox;
 class SVerticalBox;
 
@@ -33,6 +32,14 @@ public:
 	bool Run(FString& OutError);
 	bool IsRunning() const { return bRunning; }
 	const TOptional<HyperAIStudio::Verify::FBatchOutcome>& GetOutcome() const { return Outcome; }
+	/** Shows a batch's results, as the end of a run does. */
+	void ShowOutcome(const HyperAIStudio::Verify::FBatchOutcome& InOutcome);
+
+	/**
+	 * A batch as a report: how many cases passed and how long it took, a table of the cases, then each case's steps
+	 * and the maps and pictures they made.
+	 */
+	static FString BuildReport(const HyperAIStudio::Verify::FBatchOutcome& Batch);
 
 private:
 	void Rebuild();
@@ -42,7 +49,7 @@ private:
 	FText Status;
 	bool bRunning = false;
 	TOptional<HyperAIStudio::Verify::FBatchOutcome> Outcome;
-	TArray<TSharedPtr<FHyperAIStudioPreviewImage>> Thumbnails;
+	FString Report;
 	/** The batch answers on a later frame, and the tab may have closed by then. */
 	TSharedRef<bool> bAlive = MakeShared<bool>(true);
 };

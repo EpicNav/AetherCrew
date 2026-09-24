@@ -226,6 +226,52 @@ for line in iter(sys.stdin.readline, ""):
         send({"method": "turn/completed", "params": {"turn": {"id": "turn-1", "status": "completed", "items": []}}})
 )PY");
 
+	/**
+	 * Codex checking a level: a thought, an Unreal MCP tool call that answers JSON, a shell command, and a reply that
+	 * streams in as a report with a table, code and a picture.
+	 */
+	const TCHAR* const FakeCodexReport = TEXT(R"PY(import json, sys, os
+HERE = os.path.dirname(os.path.abspath(__file__))
+def send(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+def done(item):
+    send({"method": "item/completed", "params": {"item": item}})
+REPORT = """Checked the arena for the three things you asked about; one needs a fix.
+
+| Check | Result |
+|---|---|
+| Player start above the floor | PASS 96 cm clear |
+| Lights cast shadows | PASS 4 of 4 |
+| Nav mesh covers the arena | FAIL 2 areas cannot be reached |
+
+```json
+{ "unreachable": 2, "area_m2": 14.5 }
+```
+
+![The arena from above](SCENE)
+"""
+for line in iter(sys.stdin.readline, ""):
+    m = json.loads(line); method = m.get("method"); i = m.get("id")
+    if method == "initialize":
+        send({"id": i, "result": {"userAgent": "fake"}})
+    elif method == "thread/start":
+        send({"id": i, "result": {"thread": {"id": "thread-report"}, "model": "gpt-5-codex"}})
+    elif method == "turn/start":
+        send({"id": i, "result": {"turn": {"id": "turn-1", "status": "inProgress", "items": []}}})
+        done({"type": "reasoning", "id": "r1", "summary": ["Check the player start, the lights and the nav mesh, then report."]})
+        args = {"toolset_name": "editor_toolset.toolsets.scene.SceneTools", "tool_name": "find_actors", "arguments": {"name": "PlayerStart"}}
+        answer = {"returnValue": {"summary": "Found 1 actor named PlayerStart.", "count": 1, "actors": [{"name": "PlayerStart", "class": "PlayerStart", "location": "X=0 Y=0 Z=96"}]}}
+        done({"type": "mcpToolCall", "id": "t1", "server": "unreal-mcp", "tool": "call_tool", "status": "completed", "arguments": args,
+              "result": {"content": [{"type": "text", "text": json.dumps(answer)}]}})
+        done({"type": "commandExecution", "id": "c1", "command": "git status --short", "status": "completed", "aggregatedOutput": " M Content/Maps/Arena.umap\n", "exitCode": 0})
+        send({"method": "item/started", "params": {"item": {"type": "agentMessage", "id": "m1", "text": ""}}})
+        text = REPORT.replace("SCENE", os.path.join(HERE, "scene.png").replace("\\", "/"))
+        for k in range(0, len(text), 48):
+            send({"method": "item/agentMessage/delta", "params": {"itemId": "m1", "delta": text[k:k + 48]}})
+        done({"type": "agentMessage", "id": "m1", "text": text})
+        send({"method": "turn/completed", "params": {"turn": {"id": "turn-1", "status": "completed", "items": []}}})
+)PY");
+
 	void WritePng(const FString& Path)
 	{
 		TArray<FColor> Pixels;
@@ -589,6 +635,74 @@ bool FHyperAIStudioScreensNativeChatImagesTest::RunTest(const FString& Parameter
 		AddWarning(TEXT("This editor cannot render, so no screenshot was taken."));
 	}
 	else
+	{
+		AddInfo(TEXT("Screenshot: ") + Shot);
+	}
+	Chat->Stop();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioScreensChatReportTest,
+	"HyperAIStudio.Screens.ChatReport",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioScreensChatReportTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::NativeChatTests;
+	if (!HasPython())
+	{
+		AddWarning(TEXT("python is not on PATH, so the scripted Codex stand-in cannot run."));
+		return true;
+	}
+	const FScratch Scratch;
+	HyperAIStudio::Tests::WriteScenePng(FPaths::Combine(Scratch.Dir, TEXT("scene.png")), FIntPoint(480, 300),
+		FLinearColor(0.45f, 0.6f, 0.9f), FLinearColor(0.2f, 0.3f, 0.2f));
+	UseStandIn(Scratch.Dir, FakeCodexReport, TEXT("fake_codex_report.py"));
+
+	const TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(TEXT("Codex"), Scratch.Dir, FString(), FString());
+	FString Error;
+	if (!TestTrue(TEXT("The Codex chat starts"), Chat.IsValid() && Chat->Start(Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	TestTrue(TEXT("It becomes ready"), PumpUntil([&Chat]() { return Chat->IsReady(); }));
+	const TSharedRef<SHyperAIStudioNativeChatView> View = SNew(SHyperAIStudioNativeChatView).Chat(Chat);
+	Chat->Send(TEXT("Check the arena: player start, shadows and nav mesh. Tell me what needs fixing."));
+	TestTrue(TEXT("The turn completes"), PumpUntil([&Chat]() { return !Chat->IsBusy(); }));
+
+	const TSharedPtr<FHyperAIStudioChatItem> Tool = FindKind(*Chat, FHyperAIStudioChatItem::EKind::Tool);
+	const TSharedPtr<FHyperAIStudioChatItem> Command = FindKind(*Chat, FHyperAIStudioChatItem::EKind::Command);
+	const TSharedPtr<FHyperAIStudioChatItem> Reply = FindKind(*Chat, FHyperAIStudioChatItem::EKind::Agent);
+	if (!TestTrue(TEXT("The thought, the tool call, the command and the reply all arrive"), Tool.IsValid() && Command.IsValid() && Reply.IsValid()))
+	{
+		Chat->Stop();
+		return false;
+	}
+	TestTrue(TEXT("The reply streamed in whole"), Reply->Text.Contains(TEXT("| Nav mesh covers the arena | FAIL")) && Reply->Text.Contains(TEXT("scene.png")));
+
+	// A tool's JSON answer reads as a report: its summary first, then its fields and records as tables.
+	const FString ToolDetails = SHyperAIStudioNativeChatView::StepMarkdown(*Tool);
+	AddInfo(TEXT("Tool details: ") + ToolDetails.Left(400).Replace(TEXT("\n"), TEXT(" / ")));
+	TestTrue(TEXT("The tool's answer leads with its summary"), ToolDetails.StartsWith(TEXT("Found 1 actor named PlayerStart.")));
+	TestTrue(TEXT("its records become a table"), ToolDetails.Contains(TEXT("| Name | Class | Location |")) && ToolDetails.Contains(TEXT("| PlayerStart | PlayerStart |")));
+	TestTrue(TEXT("and the arguments follow as JSON"), ToolDetails.Contains(TEXT("```json")) && ToolDetails.Contains(TEXT("\"tool_name\": \"find_actors\"")));
+	TestTrue(TEXT("A command's output is a code block"), SHyperAIStudioNativeChatView::StepMarkdown(*Command).StartsWith(TEXT("```\n M Content/Maps/Arena.umap")));
+
+	// The transcript follows the reply as it grows, and stays at its end.
+	View->SetOpen(Tool->Id, true);
+	HyperAIStudio::Tests::SaveWidgetShot(View, FIntPoint(900, 560), TEXT("step15-chat-follow-1"), 10);
+	TestTrue(TEXT("It follows the conversation"), View->IsFollowing() && View->IsAtEnd());
+	Reply->Text += TEXT("\n\nOne more thing: the east ramp is 3 degrees too steep for the bot to climb.\n\n- Lower it to 35 degrees.\n- Or add steps.");
+	Chat->OnChanged.Broadcast();
+	// A reply is read again a few times a second as it streams; give it that long, as the editor's frames would.
+	FPlatformProcess::Sleep(0.15f);
+	HyperAIStudio::Tests::SaveWidgetShot(View, FIntPoint(900, 560), TEXT("step15-chat-follow-2"), 10);
+	TestTrue(TEXT("Text added to the last reply stays in view"), View->IsAtEnd());
+
+	const FString Shot = HyperAIStudio::Tests::SaveWidgetShot(View, FIntPoint(900, 1200), TEXT("step15-chat-report"), 10);
+	if (!Shot.IsEmpty())
 	{
 		AddInfo(TEXT("Screenshot: ") + Shot);
 	}

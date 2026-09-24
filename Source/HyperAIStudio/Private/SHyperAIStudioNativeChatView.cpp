@@ -8,8 +8,10 @@
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
+#include "HyperAIStudioMarkdown.h"
 #include "HyperAIStudioPreviewPanel.h"
 #include "HyperAIStudioSettings.h"
+#include "HyperAIStudioWidgets.h"
 #include "IDesktopPlatform.h"
 #include "ImageUtils.h"
 #include "Input/DragAndDrop.h"
@@ -32,7 +34,6 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
-#include "Widgets/Views/STableRow.h"
 
 #define LOCTEXT_NAMESPACE "SHyperAIStudioNativeChatView"
 
@@ -101,6 +102,91 @@ namespace HyperAIStudio::NativeChatView
 		case EKind::Reasoning: return LOCTEXT("KindThinking", "Thinking");
 		default: return LOCTEXT("KindTool", "Tool");
 		}
+	}
+
+	FName KindIcon(const EKind Kind)
+	{
+		switch (Kind)
+		{
+		case EKind::Command: return TEXT("HyperAIStudio.Icon.Terminal");
+		case EKind::FileChange: return TEXT("HyperAIStudio.Icon.File");
+		case EKind::Reasoning: return TEXT("HyperAIStudio.Icon.Thinking");
+		default: return TEXT("HyperAIStudio.Icon.Tools");
+		}
+	}
+
+	HyperAIStudio::UI::EStatus StepStatus(const FString& Status)
+	{
+		using HyperAIStudio::UI::EStatus;
+		if (Status == TEXT("completed"))
+		{
+			return EStatus::Good;
+		}
+		if (Status == TEXT("failed") || Status == TEXT("declined") || Status.StartsWith(TEXT("exit code")))
+		{
+			return EStatus::Error;
+		}
+		return Status == TEXT("running") || Status == TEXT("inProgress") ? EStatus::Busy : EStatus::Neutral;
+	}
+
+	FString PrettyJson(const FString& Json)
+	{
+		TSharedPtr<FJsonValue> Value;
+		if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Value) || !Value.IsValid())
+		{
+			return Json;
+		}
+		FString Out;
+		FJsonSerializer::Serialize(Value, FString(), TJsonWriterFactory<>::Create(&Out));
+		return Out;
+	}
+
+	/** A tool's details, as the chat keeps them: "Arguments: {...}", then an error, then what it answered. */
+	FString ToolMarkdown(const FString& Text)
+	{
+		FString Rest = Text;
+		FString Arguments;
+		if (Rest.StartsWith(TEXT("Arguments: ")))
+		{
+			const int32 Split = Rest.Find(TEXT("\n\n"));
+			Arguments = Split == INDEX_NONE ? Rest.Mid(11) : Rest.Mid(11, Split - 11);
+			Rest = Split == INDEX_NONE ? FString() : Rest.Mid(Split + 2);
+		}
+		FString Out;
+		if (Rest.StartsWith(TEXT("Error: ")))
+		{
+			const int32 Split = Rest.Find(TEXT("\n\n"));
+			const FString Error = Split == INDEX_NONE ? Rest.Mid(7) : Rest.Mid(7, Split - 7);
+			Out += TEXT("> **") + LOCTEXT("ToolError", "Error").ToString() + TEXT(":** ") + Error.Replace(TEXT("\n"), TEXT(" ")) + TEXT("\n\n");
+			Rest = Split == INDEX_NONE ? FString() : Rest.Mid(Split + 2);
+		}
+		// What it answered comes first; a JSON answer reads as a report.
+		if (!Rest.TrimStartAndEnd().IsEmpty())
+		{
+			const FString Report = HyperAIStudio::Markdown::FromJson(Rest);
+			Out += (Report.IsEmpty() ? Rest.TrimStartAndEnd() : Report) + TEXT("\n\n");
+		}
+		if (!Arguments.IsEmpty() && Arguments != TEXT("{}") && Arguments != TEXT("null"))
+		{
+			Out += TEXT("**") + LOCTEXT("ToolArguments", "Arguments").ToString() + TEXT("**\n\n```json\n") + PrettyJson(Arguments) + TEXT("\n```\n");
+		}
+		return Out.TrimEnd();
+	}
+}
+
+FString SHyperAIStudioNativeChatView::StepMarkdown(const FHyperAIStudioChatItem& Item)
+{
+	using namespace HyperAIStudio::NativeChatView;
+	switch (Item.Kind)
+	{
+	case EKind::Reasoning:
+		return Item.Text;
+	case EKind::Command:
+		return Item.Text.IsEmpty() ? FString() : TEXT("```\n") + Item.Text.TrimEnd() + TEXT("\n```");
+	case EKind::FileChange:
+		return Item.Text.IsEmpty() ? FString() : TEXT("```diff\n") + Item.Text.TrimEnd() + TEXT("\n```");
+	default:
+		return ToolMarkdown(Item.Text);
 	}
 }
 
@@ -174,10 +260,16 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 		+ SVerticalBox::Slot()
 		.FillHeight(1.0f)
 		[
-			SAssignNew(List, SListView<FItemPtr>)
-			.ListItemsSource(&Rows)
-			.SelectionMode(ESelectionMode::None)
-			.OnGenerateRow(this, &SHyperAIStudioNativeChatView::GenerateRow)
+			SAssignNew(Scroll, SScrollBox)
+			.OnUserScrolled_Lambda([this](const float Offset)
+			{
+				// Reading back up stops following the conversation; scrolling to its end picks it up again.
+				bFollow = Scroll.IsValid() && Offset >= Scroll->GetScrollOffsetOfEnd() - 4.0f;
+			})
+			+ SScrollBox::Slot()
+			[
+				SAssignNew(Transcript, SVerticalBox)
+			]
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -322,6 +414,7 @@ void SHyperAIStudioNativeChatView::Submit()
 		return;
 	}
 	Composer->SetText(FText::GetEmpty());
+	bFollow = true;
 	Chat->Send(Text, Attached);
 	Attached.Reset();
 	RebuildAttachments();
@@ -557,16 +650,54 @@ TSharedRef<SWidget> SHyperAIStudioNativeChatView::ImageActions(const FItemPtr& I
 		];
 }
 
+void SHyperAIStudioNativeChatView::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
+{
+	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	// Rows grow as text streams in, so following is checked every frame, not only when a row arrives.
+	if (bFollow && Scroll.IsValid() && Scroll->GetScrollOffset() < Scroll->GetScrollOffsetOfEnd())
+	{
+		Scroll->ScrollToEnd();
+	}
+}
+
+bool SHyperAIStudioNativeChatView::IsAtEnd() const
+{
+	return Scroll.IsValid() && Scroll->GetScrollOffset() >= Scroll->GetScrollOffsetOfEnd() - 1.0f;
+}
+
+void SHyperAIStudioNativeChatView::SetOpen(const FString& ItemId, const bool bOpen)
+{
+	if (bOpen)
+	{
+		Open.Add(ItemId);
+	}
+	else
+	{
+		Open.Remove(ItemId);
+	}
+}
+
 void SHyperAIStudioNativeChatView::Refresh()
 {
-	const int32 Previous = Rows.Num();
-	Rows = Chat->GetItems();
-	if (List.IsValid())
+	// Items are only ever added to a transcript; anything else is a new one, built again.
+	const TArray<FItemPtr>& Items = Chat->GetItems();
+	if (Items.Num() < Rows.Num() || (!Rows.IsEmpty() && Items[Rows.Num() - 1] != Rows.Last()))
 	{
-		List->RequestListRefresh();
-		if (Rows.Num() != Previous)
+		Rows.Reset();
+		if (Transcript.IsValid())
 		{
-			List->ScrollToBottom();
+			Transcript->ClearChildren();
+		}
+	}
+	for (int32 Index = Rows.Num(); Index < Items.Num(); ++Index)
+	{
+		Rows.Add(Items[Index]);
+		if (Transcript.IsValid())
+		{
+			Transcript->AddSlot().AutoHeight().Padding(FMargin(2.0f, 5.0f))
+			[
+				MakeRow(Items[Index])
+			];
 		}
 	}
 	// The plan is small and changes rarely; rebuilding it whole is simpler than diffing it.
@@ -605,7 +736,90 @@ void SHyperAIStudioNativeChatView::Refresh()
 	}
 }
 
-TSharedRef<ITableRow> SHyperAIStudioNativeChatView::GenerateRow(FItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
+TSharedRef<SWidget> SHyperAIStudioNativeChatView::MakeStep(const FItemPtr& Item)
+{
+	using namespace HyperAIStudio::NativeChatView;
+	using namespace HyperAIStudio::UI;
+	const FString Id = Item->Id;
+	const bool bReasoning = Item->Kind == EKind::Reasoning;
+	return SNew(SBorder)
+		.BorderImage(Style().GetBrush("HyperAIStudio.Card"))
+		.Padding(FMargin(8.0f, 4.0f))
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+				.ContentPadding(FMargin(0.0f, 2.0f))
+				.ToolTipText(LOCTEXT("ToggleDetails", "Show or hide the details."))
+				.OnClicked_Lambda([this, Id]()
+				{
+					SetOpen(Id, !Open.Contains(Id));
+					return FReply::Handled();
+				})
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
+						SNew(SImage)
+						.Image_Lambda([this, Id]() { return FAppStyle::GetBrush(Open.Contains(Id) ? "Icons.ChevronDown" : "Icons.ChevronRight"); })
+						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(4.0f, 0.0f, 0.0f, 0.0f))
+					[
+						SNew(SImage)
+						.Image(HyperAIStudio::UI::Icon(KindIcon(Item->Kind)))
+						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(6.0f, 0.0f, 0.0f, 0.0f))
+					[
+						SNew(STextBlock)
+						.Text(KindLabel(Item->Kind))
+						.TextStyle(&Style(), "HyperAIStudio.Text.Caption")
+					]
+					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(FMargin(8.0f, 0.0f, 0.0f, 0.0f))
+					[
+						SNew(STextBlock)
+						.Font(bReasoning ? FCoreStyle::GetDefaultFontStyle("Italic", 9) : Mono())
+						.ColorAndOpacity(bReasoning ? FSlateColor::UseSubduedForeground() : FSlateColor::UseForeground())
+						.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+						.Text_Lambda([Item, bReasoning]()
+						{
+							const FString& Source = bReasoning ? Item->Text : Item->Title;
+							int32 Newline = INDEX_NONE;
+							return FText::FromString((Source.FindChar(TEXT('\n'), Newline) ? Source.Left(Newline) : Source).Left(200));
+						})
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(8.0f, 0.0f, 2.0f, 0.0f))
+					[
+						SNew(SBox)
+						.Visibility_Lambda([Item]() { return Item->Status.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+						[
+							Chip(TAttribute<FText>::CreateLambda([Item]() { return FText::FromString(Item->Status); }),
+								TAttribute<FSlateColor>::CreateLambda([Item]() { return StatusColor(StepStatus(Item->Status)); }))
+						]
+					]
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(22.0f, 4.0f, 2.0f, 4.0f))
+			[
+				SNew(SBox)
+				.MaxDesiredHeight(340.0f)
+				.Visibility_Lambda([this, Id]() { return Open.Contains(Id) ? EVisibility::Visible : EVisibility::Collapsed; })
+				[
+					SNew(SScrollBox)
+					+ SScrollBox::Slot()
+					[
+						SNew(SHyperAIStudioMarkdown)
+						.Markdown_Lambda([Item]() { return StepMarkdown(*Item); })
+					]
+				]
+			]
+		];
+}
+
+TSharedRef<SWidget> SHyperAIStudioNativeChatView::MakeRow(const FItemPtr& Item)
 {
 	using namespace HyperAIStudio::NativeChatView;
 	TSharedRef<SWidget> Content = SNullWidget::NullWidget;
@@ -621,12 +835,12 @@ TSharedRef<ITableRow> SHyperAIStudioNativeChatView::GenerateRow(FItemPtr Item, c
 		}
 		Content = SNew(SBorder)
 			.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
-			.Padding(FMargin(8.0f, 6.0f))
+			.Padding(FMargin(10.0f, 7.0f))
 			[
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight()
 				[
-					SNew(STextBlock).Text(LOCTEXT("You", "You")).Font(FAppStyle::GetFontStyle("SmallFontBold"))
+					SNew(STextBlock).Text(LOCTEXT("You", "You")).TextStyle(&HyperAIStudio::UI::Style(), "HyperAIStudio.Text.Caption")
 				]
 				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 0.0f)
 				[
@@ -640,93 +854,34 @@ TSharedRef<ITableRow> SHyperAIStudioNativeChatView::GenerateRow(FItemPtr Item, c
 		break;
 	}
 	case EKind::Agent:
-		Content = LiveText(Item);
+		// The reply as a report: headings, tables with status chips, code and pictures, as it streams in.
+		Content = SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SHyperAIStudioMarkdown)
+				.Markdown_Lambda([Item]() { return Item->Text; })
+			]
+			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left).Padding(FMargin(0.0f, 3.0f, 0.0f, 0.0f))
+			[
+				SNew(SBox)
+				.Visibility_Lambda([this, Item]()
+				{
+					const bool bStreaming = Chat->IsBusy() && !Rows.IsEmpty() && Rows.Last() == Item;
+					return bStreaming || Item->Text.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
+				})
+				[
+					HyperAIStudio::Markdown::ReportActions(
+						[this]() { return FText::Format(LOCTEXT("ReplyTitle", "{0} reply"), FText::FromString(Chat->GetAgentName())).ToString(); },
+						[Item]() { return Item->Text; })
+				]
+			];
 		break;
 	case EKind::Reasoning:
 	case EKind::Tool:
 	case EKind::Command:
 	case EKind::FileChange:
-	{
-		const bool bReasoning = Item->Kind == EKind::Reasoning;
-		Content = SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(SButton)
-				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-				.ToolTipText(LOCTEXT("ToggleDetails", "Show or hide the details."))
-				.OnClicked_Lambda([this, Id]()
-				{
-					if (Open.Remove(Id) == 0)
-					{
-						Open.Add(Id);
-					}
-					return FReply::Handled();
-				})
-				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					[
-						SNew(STextBlock)
-						.Text_Lambda([this, Id]() { return FText::FromString(Open.Contains(Id) ? TEXT("v") : TEXT(">")); })
-						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-					]
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					.Padding(6.0f, 0.0f, 0.0f, 0.0f)
-					[
-						SNew(STextBlock)
-						.Text(KindLabel(Item->Kind))
-						.Font(FAppStyle::GetFontStyle("SmallFontBold"))
-						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-					]
-					+ SHorizontalBox::Slot()
-					.FillWidth(1.0f)
-					.VAlign(VAlign_Center)
-					.Padding(6.0f, 0.0f, 0.0f, 0.0f)
-					[
-						SNew(STextBlock)
-						.Font(bReasoning ? FCoreStyle::GetDefaultFontStyle("Italic", 9) : Mono())
-						.ColorAndOpacity(bReasoning ? FSlateColor::UseSubduedForeground() : FSlateColor::UseForeground())
-						.Text_Lambda([Item, bReasoning]()
-						{
-							const FString& Source = bReasoning ? Item->Text : Item->Title;
-							int32 Newline = INDEX_NONE;
-							return FText::FromString((Source.FindChar(TEXT('\n'), Newline) ? Source.Left(Newline) : Source).Left(160));
-						})
-					]
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					.Padding(6.0f, 0.0f, 0.0f, 0.0f)
-					[
-						SNew(STextBlock)
-						.Font(FAppStyle::GetFontStyle("SmallFont"))
-						.Text_Lambda([Item]() { return FText::FromString(Item->Status); })
-						.ColorAndOpacity_Lambda([Item]() { return StatusColor(Item->Status); })
-					]
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(18.0f, 2.0f, 0.0f, 0.0f)
-			[
-				SNew(SBox)
-				.MaxDesiredHeight(260.0f)
-				.Visibility_Lambda([this, Id]() { return Open.Contains(Id) ? EVisibility::Visible : EVisibility::Collapsed; })
-				[
-					SNew(SScrollBox)
-					+ SScrollBox::Slot()
-					[
-						LiveText(Item, !bReasoning, bReasoning)
-					]
-				]
-			];
+		Content = MakeStep(Item);
 		break;
-	}
 	case EKind::Image:
 		Content = SNew(SVerticalBox)
 			+ SVerticalBox::Slot()
@@ -840,12 +995,7 @@ TSharedRef<ITableRow> SHyperAIStudioNativeChatView::GenerateRow(FItemPtr Item, c
 			.Text_Lambda([Item]() { return FText::FromString(Item->Text); });
 		break;
 	}
-	return SNew(STableRow<FItemPtr>, OwnerTable)
-		.ShowSelection(false)
-		.Padding(FMargin(2.0f, 4.0f))
-		[
-			Content
-		];
+	return Content;
 }
 
 #undef LOCTEXT_NAMESPACE

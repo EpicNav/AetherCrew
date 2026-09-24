@@ -855,9 +855,81 @@
   },
   {
    "namespace": "HyperAIStudioMarkdown",
+   "key": "CopyReport",
+   "source": "Copy as Markdown",
+   "text": "复制为 Markdown"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "JsonAndMore",
+   "source": "and {0} more",
+   "text": "以及另外 {0} 个"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "JsonField",
+   "source": "Field",
+   "text": "字段"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "JsonMore",
+   "source": "{0} more not shown.",
+   "text": "还有 {0} 项未显示。"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "JsonNo",
+   "source": "no",
+   "text": "否"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "JsonNone",
+   "source": "none",
+   "text": "无"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "JsonValue",
+   "source": "Value",
+   "text": "值"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "JsonYes",
+   "source": "yes",
+   "text": "是"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "OpenReport",
+   "source": "Open it",
+   "text": "打开"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
    "key": "PictureTooltip",
    "source": "{0}\nClick to open it in Preview.",
    "text": "{0}\n点击在预览中打开。"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "ReportFailed",
+   "source": "The report could not be saved.",
+   "text": "无法保存报告。"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "ReportSaved",
+   "source": "Saved the report as {0}",
+   "text": "报告已保存为 {0}"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "SaveReport",
+   "source": "Save as an HTML report, to share or keep.",
+   "text": "另存为 HTML 报告，便于分享或保留。"
   },
   {
    "namespace": "HyperAIStudioMaterials",
@@ -2793,6 +2865,12 @@
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ReplyTitle",
+   "source": "{0} reply",
+   "text": "{0} 的回复"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
    "key": "SaveToProject",
    "source": "Save to project",
    "text": "保存到项目"
@@ -2877,6 +2955,18 @@
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ToolArguments",
+   "source": "Arguments",
+   "text": "参数"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ToolError",
+   "source": "Error",
+   "text": "错误"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
    "key": "You",
    "source": "You",
    "text": "你"
@@ -2910,12 +3000,6 @@
    "key": "Calibrating",
    "source": "Measuring how many cases this machine plays at once...",
    "text": "正在测量这台机器一次能同时运行多少个用例……"
-  },
-  {
-   "namespace": "SHyperAIStudioPlaytestPanel",
-   "key": "CaseHead",
-   "source": "{0}, {1} simulated s",
-   "text": "{0}，模拟 {1} 秒"
   },
   {
    "namespace": "SHyperAIStudioPlaytestPanel",
@@ -2973,12 +3057,6 @@
   },
   {
    "namespace": "SHyperAIStudioPlaytestPanel",
-   "key": "PictureTooltip",
-   "source": "{0}\nClick to open it in the HyperAI Preview tab.",
-   "text": "{0}\n点击在 HyperAI 预览标签页中打开。"
-  },
-  {
-   "namespace": "SHyperAIStudioPlaytestPanel",
    "key": "Play",
    "source": "Play in copies",
    "text": "在副本中试玩"
@@ -3003,15 +3081,51 @@
   },
   {
    "namespace": "SHyperAIStudioPlaytestPanel",
-   "key": "Running",
-   "source": "The cases are playing; their results show here when the batch ends.",
-   "text": "用例正在运行；批次结束后结果会显示在这里。"
+   "key": "ReportCase",
+   "source": "Case",
+   "text": "用例"
   },
   {
    "namespace": "SHyperAIStudioPlaytestPanel",
-   "key": "StepHead",
-   "source": "{0}. {1}",
-   "text": "{0}. {1}"
+   "key": "ReportLead",
+   "source": "{0} of {1} {1}|plural(one=case,other=cases) passed, each in its own copy of the level, in {2}.",
+   "text": "{1} 个用例中有 {0} 个通过，每个都在自己的关卡副本中运行，用时 {2}。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "ReportResult",
+   "source": "Result",
+   "text": "结果"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "ReportSaw",
+   "source": "What it saw",
+   "text": "观察到的情况"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "ReportStep",
+   "source": "Step",
+   "text": "步骤"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "ReportTime",
+   "source": "Simulated",
+   "text": "模拟时间"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "ReportTitle",
+   "source": "Playtest: {0}",
+   "text": "试玩：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "Running",
+   "source": "The cases are playing; their results show here when the batch ends.",
+   "text": "用例正在运行；批次结束后结果会显示在这里。"
   },
   {
    "namespace": "SHyperAIStudioPlaytestPanel",
@@ -4326,6 +4440,18 @@
    "key": "JsonHint",
    "source": "This tool has no reflected fields; write its arguments as JSON.",
    "text": "此工具没有可反射的字段；请用 JSON 填写它的参数。"
+  },
+  {
+   "namespace": "SHyperAIStudioToolForm",
+   "key": "JsonView",
+   "source": "JSON",
+   "text": "JSON"
+  },
+  {
+   "namespace": "SHyperAIStudioToolForm",
+   "key": "ReportView",
+   "source": "Report",
+   "text": "报告"
   },
   {
    "namespace": "SHyperAIStudioToolForm",

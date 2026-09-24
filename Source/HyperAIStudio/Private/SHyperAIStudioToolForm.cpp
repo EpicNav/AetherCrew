@@ -8,6 +8,7 @@
 #include "HAL/PlatformApplicationMisc.h"
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioMarkdown.h"
 #include "HyperAIStudioPreviewImage.h"
 #include "HyperAIStudioPreviewPanel.h"
 #include "IDetailsView.h"
@@ -28,10 +29,12 @@
 #include "UObject/UObjectIterator.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScaleBox.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/SBoxPanel.h"
@@ -241,12 +244,60 @@ void SHyperAIStudioToolForm::Construct(const FArguments& InArgs)
 						})
 					]
 				]
+				// The answer as a report, or as the JSON it is.
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+				[
+					SNew(SHorizontalBox)
+					.Visibility_Lambda([this]() { return Report.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SCheckBox)
+						.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+						.IsChecked_Lambda([this]() { return bShowJson ? ECheckBoxState::Unchecked : ECheckBoxState::Checked; })
+						.OnCheckStateChanged_Lambda([this](ECheckBoxState) { bShowJson = false; })
+						[
+							SNew(STextBlock).Text(LOCTEXT("ReportView", "Report")).Margin(FMargin(8.0f, 1.0f))
+						]
+					]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f, 0.0f, 0.0f, 0.0f)
+					[
+						SNew(SCheckBox)
+						.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+						.IsChecked_Lambda([this]() { return bShowJson ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+						.OnCheckStateChanged_Lambda([this](ECheckBoxState) { bShowJson = true; })
+						[
+							SNew(STextBlock).Text(LOCTEXT("JsonView", "JSON")).Margin(FMargin(8.0f, 1.0f))
+						]
+					]
+					+ SHorizontalBox::Slot().FillWidth(1.0f)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
+						HyperAIStudio::Markdown::ReportActions(
+							[this]() { return Tool; },
+							[this]() { return FString::Printf(TEXT("# %s\n\n%s"), *Tool, *Report); })
+					]
+				]
 				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
 				[
 					SAssignNew(ImageBox, SWrapBox)
 					.UseAllottedSize(true)
 					.InnerSlotPadding(FVector2D(6.0f, 6.0f))
-					.Visibility_Lambda([this]() { return Images.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+					.Visibility_Lambda([this]() { return Images.IsEmpty() || !IsJsonShown() ? EVisibility::Collapsed : EVisibility::Visible; })
+				]
+				+ SVerticalBox::Slot().FillHeight(1.0f)
+				[
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
+					.Padding(FMargin(10.0f, 8.0f))
+					.Visibility_Lambda([this]() { return IsJsonShown() ? EVisibility::Collapsed : EVisibility::Visible; })
+					[
+						SNew(SScrollBox)
+						+ SScrollBox::Slot()
+						[
+							SNew(SHyperAIStudioMarkdown)
+							.Markdown_Lambda([this]() { return Report; })
+						]
+					]
 				]
 				+ SVerticalBox::Slot().FillHeight(1.0f)
 				[
@@ -255,6 +306,7 @@ void SHyperAIStudioToolForm::Construct(const FArguments& InArgs)
 					.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
 					.HintText(LOCTEXT("AnswerHint", "The tool's answer shows here."))
 					.Text_Lambda([this]() { return FText::FromString(Answer); })
+					.Visibility_Lambda([this]() { return IsJsonShown() ? EVisibility::Visible : EVisibility::Collapsed; })
 				]
 			]
 		]
@@ -390,6 +442,7 @@ void SHyperAIStudioToolForm::Run()
 		return;
 	}
 	Answer.Reset();
+	Report.Reset();
 	Images.Reset();
 	RebuildImages();
 	bAwaitingApproval = false;
@@ -432,6 +485,7 @@ void SHyperAIStudioToolForm::Tick(const FGeometry& AllottedGeometry, const doubl
 			Value = MakeShared<FJsonValueObject>(*Wrapped);
 		}
 		Answer = Value.IsValid() ? Pretty(Value) : Pending->Value;
+		Report = HyperAIStudio::Markdown::FromJson(Answer);
 		FindImages(Value);
 		RebuildImages();
 		const FString ToolStatus = StringField(Value, TEXT("status"));

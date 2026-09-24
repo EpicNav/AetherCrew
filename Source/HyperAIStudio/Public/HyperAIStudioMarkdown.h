@@ -62,6 +62,18 @@ namespace HyperAIStudio::Markdown
 
 	/** A table cell's leading status (pass, fail, warn, info), or empty; OutRest is the text after it. */
 	HYPERAISTUDIO_API FString CellStatus(const FString& Cell, FString& OutRest);
+
+	/**
+	 * A tool's JSON answer as a report: its summary or message as a sentence, then its fields as a table, lists of
+	 * records as tables of their own, and the pictures it names. Empty when Json is not JSON.
+	 */
+	HYPERAISTUDIO_API FString FromJson(const FString& Json);
+
+	/** Saves Markdown as an HTML report, says so with a notification that opens it, and returns the file. */
+	HYPERAISTUDIO_API FString ExportReport(const FString& Title, const FString& Markdown);
+
+	/** Copy and Save as HTML buttons for a report; Title and Markdown are read when one is clicked. */
+	HYPERAISTUDIO_API TSharedRef<SWidget> ReportActions(TFunction<FString()> Title, TFunction<FString()> Markdown);
 }
 
 /**
@@ -73,22 +85,27 @@ class HYPERAISTUDIO_API SHyperAIStudioMarkdown : public SCompoundWidget
 {
 public:
 	SLATE_BEGIN_ARGS(SHyperAIStudioMarkdown) {}
-		SLATE_ARGUMENT(FString, Markdown)
+		/** The markdown. Bound to a function, it is read again a few times a second, for text that streams in. */
+		SLATE_ATTRIBUTE(FString, Markdown)
 		/** The body's text style in the plugin style set; Md.Body unless set. */
 		SLATE_ARGUMENT(FName, BodyStyle)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
 
 	void SetMarkdown(const FString& InMarkdown);
 	const FString& GetMarkdown() const { return Markdown; }
 
 private:
+	void Show(const FString& InMarkdown);
 	void Rebuild();
 	TSharedRef<SWidget> MakeTable(const HyperAIStudio::Markdown::FBlock& Block) const;
 	TSharedRef<SWidget> MakeCode(const HyperAIStudio::Markdown::FBlock& Block) const;
 	TSharedRef<SWidget> MakeImage(const HyperAIStudio::Markdown::FBlock& Block);
 
+	TAttribute<FString> Source;
+	double NextRead = 0.0;
 	FString Markdown;
 	FName BodyStyle;
 	bool bBuilt = false;

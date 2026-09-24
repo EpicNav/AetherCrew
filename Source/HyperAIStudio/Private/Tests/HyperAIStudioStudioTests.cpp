@@ -11,15 +11,19 @@
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioMarkdown.h"
 #include "HyperAIStudioPreviewPanel.h"
+#include "HyperAIStudioService.h"
 #include "HyperAIStudioShell.h"
+#include "HyperAIStudioVerify.h"
 #include "HyperAIStudioWidgetShot.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
+#include "SHyperAIStudioPlaytestPanel.h"
 #include "SHyperAIStudioSettingsPage.h"
 #include "SHyperAIStudioShell.h"
+#include "SHyperAIStudioToolForm.h"
 #include "SHyperAIStudioToolsPage.h"
 #include "ToolMenus.h"
 #include "Widgets/Docking/SDockTab.h"
@@ -369,6 +373,136 @@ bool FHyperAIStudioMarkdownTest::RunTest(const FString& Parameters)
 	}
 	View->SetMarkdown(TEXT("Just a line."));
 	TestEqual(TEXT("The view shows new markdown"), View->GetMarkdown(), FString(TEXT("Just a line.")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioJsonReportTest,
+	"HyperAIStudio.Studio.JsonReport",
+	HyperAIStudio::StudioTests::Flags)
+
+bool FHyperAIStudioJsonReportTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::Markdown;
+	const FString Picture = FPaths::ConvertRelativePathToFull(FPaths::AutomationTransientDir() / TEXT("JsonReport") / TEXT("side-by-side.png"));
+	HyperAIStudio::Tests::WriteScenePng(Picture, FIntPoint(64, 40));
+	const FString Json = FString::Printf(TEXT(R"({"returnValue": {"status": "completed", "summary": "Scored 72 of 100: close; the sky is too blue.",
+		"bestScore": 72, "MCPPort": 8020, "sessionId": "abc", "passed": false, "tags": ["sky", "tone"], "sideBySidePath": "%s",
+		"cells": [{"row": 0, "col": 1, "delta": 0.21}, {"row": 2, "col": 3, "delta": 0.125}], "detail": {"palette": 80, "tone": 64}}})"),
+		*Picture.Replace(TEXT("\\"), TEXT("/")));
+	const FString Report = FromJson(Json);
+	AddInfo(TEXT("Report: ") + Report.Replace(TEXT("\n"), TEXT(" / ")));
+	TestTrue(TEXT("It leads with the summary"), Report.StartsWith(TEXT("Scored 72 of 100: close; the sky is too blue.")));
+	TestTrue(TEXT("Fields read as words"), Report.Contains(TEXT("| Best score | 72 |")) && Report.Contains(TEXT("| MCP port | 8020 |"))
+		&& Report.Contains(TEXT("| Session ID | abc |")) && Report.Contains(TEXT("| Passed | no |")));
+	TestTrue(TEXT("A status field keeps its word, which a table shows as a chip"), Report.Contains(TEXT("| Status | completed |")));
+	TestTrue(TEXT("A list of words is one cell"), Report.Contains(TEXT("| Tags | sky, tone |")));
+	TestTrue(TEXT("Records become a table of their own"), Report.Contains(TEXT("## Cells (2)")) && Report.Contains(TEXT("| Row | Col | Delta |"))
+		&& Report.Contains(TEXT("| 0 | 1 | 0.21 |")) && Report.Contains(TEXT("| 2 | 3 | 0.125 |")));
+	TestTrue(TEXT("A nested object gets a heading"), Report.Contains(TEXT("## Detail")) && Report.Contains(TEXT("| Palette | 80 |")));
+	TestTrue(TEXT("A picture on disk is linked and shown"), Report.Contains(TEXT("[side-by-side.png](")) && Report.Contains(TEXT("![side-by-side.png](")));
+	TestTrue(TEXT("Not JSON gives nothing, so callers show the text"), FromJson(TEXT("plain words")).IsEmpty() && FromJson(TEXT("{broken")).IsEmpty());
+	TestTrue(TEXT("A list of values is a one-column table"), FromJson(TEXT("[1, 2]")).Contains(TEXT("| 1 |")));
+	TestTrue(TEXT("Marks in values are escaped"), FromJson(TEXT(R"({"name": "IA_Move|*x*"})")).Contains(TEXT("IA\\_Move\\|\\*x\\*")));
+
+	FString Rest;
+	TestEqual(TEXT("\"completed\" alone is a pass"), CellStatus(TEXT("completed"), Rest), FString(TEXT("pass")));
+	TestEqual(TEXT("\"running\" alone is info"), CellStatus(TEXT("running"), Rest), FString(TEXT("info")));
+	TestEqual(TEXT("but a sentence starting with Success is not a status"), CellStatus(TEXT("Success rate is 50%"), Rest), FString());
+
+	// Agents are asked for replies that read this way.
+	const FString Agents = FHyperAIStudioService::BuildAgentsInstructionText();
+	TestTrue(TEXT("AGENTS.md asks for a brief explanation, then results"), Agents.Contains(TEXT("## Replies"))
+		&& Agents.Contains(TEXT("Start with what happened")) && Agents.Contains(TEXT("`PASS`")) && Agents.Contains(TEXT("![caption](absolute/path.png)")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioScreensResultReportsTest,
+	"HyperAIStudio.Screens.ResultReports",
+	HyperAIStudio::StudioTests::Flags)
+
+bool FHyperAIStudioScreensResultReportsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::StudioTests;
+	namespace Verify = HyperAIStudio::Verify;
+	const FString Folder = FPaths::ConvertRelativePathToFull(FPaths::AutomationTransientDir() / TEXT("ResultReports"));
+	const FString Reference = Folder / TEXT("reference.png");
+	const FString Attempt = Folder / TEXT("attempt.png");
+	HyperAIStudio::Tests::WriteScenePng(Reference, FIntPoint(480, 300));
+	HyperAIStudio::Tests::WriteScenePng(Attempt, FIntPoint(480, 300), FLinearColor(0.8f, 0.55f, 0.35f), FLinearColor(0.3f, 0.2f, 0.4f));
+
+	// A tool's answer as a report, beside its JSON.
+	const TSharedRef<SHyperAIStudioToolForm> Form = SNew(SHyperAIStudioToolForm)
+		.Toolset(TEXT("HyperAIStudioLighting.HyperAIStudioLightingToolset"))
+		.Tool(TEXT("hyper_image_compare"))
+		.Description(TEXT("How close an attempt is to a reference image, for scenes, materials, effects and UI."));
+	FString Error;
+	Form->SetArguments(FString::Printf(TEXT("{\"request\": {\"referenceImagePath\": \"%s\", \"candidateImagePath\": \"%s\", \"mode\": \"look\", \"targetScore\": 80, \"grid\": 4}}"),
+		*Reference.Replace(TEXT("\\"), TEXT("/")), *Attempt.Replace(TEXT("\\"), TEXT("/"))), Error);
+	Form->Run();
+	const double End = FPlatformTime::Seconds() + 30.0;
+	while (Form->IsRunning() && FPlatformTime::Seconds() < End)
+	{
+		Form->Tick(FGeometry(), 0.0, 0.05f);
+		FTSTicker::GetCoreTicker().Tick(0.02f);
+		FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+	}
+	Form->Tick(FGeometry(), 0.0, 0.05f);
+	AddInfo(TEXT("Tool report: ") + Form->GetReport().Left(500).Replace(TEXT("\n"), TEXT(" / ")));
+	TestTrue(TEXT("The answer reads as a report with its score and pictures"), Form->GetReport().Contains(TEXT("| Score |")) && Form->GetReport().Contains(TEXT("![")));
+	HyperAIStudio::Tests::SaveWidgetShot(Form, FIntPoint(900, 1180), TEXT("step15-tool-report"), 10);
+	Form->ShowJson(true);
+	HyperAIStudio::Tests::SaveWidgetShot(Form, FIntPoint(900, 700), TEXT("step15-tool-json"), 4);
+
+	// A playtest batch as a report: one sentence, the cases, then each case's steps and pictures.
+	Verify::FBatchOutcome Batch;
+	Batch.Status = TEXT("failed");
+	Batch.Map = TEXT("/Game/Maps/Lvl_Arena");
+	Batch.WallSeconds = 21.4;
+	Batch.Limit = 4;
+	auto Step = [](const TCHAR* Action, const TCHAR* Status, const TCHAR* Code, const TCHAR* Detail, const FString& File = FString())
+	{
+		Verify::FStepOutcome Out;
+		Out.Action = Action;
+		Out.Status = Status;
+		Out.Code = Code;
+		Out.Detail = Detail;
+		Out.File = File;
+		return Out;
+	};
+	Verify::FCaseOutcome& Reach = Batch.Cases.AddDefaulted_GetRef();
+	Reach.Name = TEXT("reach-around-wall");
+	Reach.Status = TEXT("passed");
+	Reach.Diagnostic = TEXT("reached the goal round a 7 m wall");
+	Reach.SimulatedSeconds = 4.2f;
+	Reach.Steps = {Step(TEXT("Play"), TEXT("passed"), TEXT(""), TEXT("Reach: within 150 cm of the goal after 4.2 s, 11.8 m walked, 1 jump."), Reference),
+		Step(TEXT("Capture"), TEXT("passed"), TEXT(""), TEXT("reached"), Attempt)};
+	Verify::FCaseOutcome& Duel = Batch.Cases.AddDefaulted_GetRef();
+	Duel.Name = TEXT("duel");
+	Duel.Status = TEXT("failed");
+	Duel.Diagnostic = TEXT("Player0 lost 2-3 to a skill 0.9 opponent");
+	Duel.SimulatedSeconds = 30.0f;
+	Duel.FailedStep = 2;
+	Duel.Steps = {Step(TEXT("AddPlayer"), TEXT("passed"), TEXT(""), TEXT("Player1 joined at the far end.")),
+		Step(TEXT("Play"), TEXT("failed"), TEXT("goal_not_met"), TEXT("Player1 won with 40 health left; Player0 fired 23 shots, 9 hits."))};
+	Verify::FCaseOutcome& Explore = Batch.Cases.AddDefaulted_GetRef();
+	Explore.Name = TEXT("explore");
+	Explore.Status = TEXT("timed_out");
+	Explore.Diagnostic = TEXT("71% of the floor seen before the case's 20 s ran out");
+	Explore.SimulatedSeconds = 20.0f;
+	Explore.Steps = {Step(TEXT("Play"), TEXT("timed_out"), TEXT("timeout"), TEXT("Explore: 35 squares of 4 m visited."))};
+	const FString BatchReport = SHyperAIStudioPlaytestPanel::BuildReport(Batch);
+	AddInfo(TEXT("Playtest report: ") + BatchReport.Left(600).Replace(TEXT("\n"), TEXT(" / ")));
+	TestTrue(TEXT("It says what happened first"), BatchReport.Contains(TEXT("## Playtest: Lvl_Arena")) && BatchReport.Contains(TEXT("1 of 3 cases passed")));
+	TestTrue(TEXT("then the cases, with their results"), BatchReport.Contains(TEXT("| reach-around-wall | PASSED reached the goal round a 7 m wall | 4.2 s |"))
+		&& BatchReport.Contains(TEXT("| duel | FAILED")) && BatchReport.Contains(TEXT("| explore | TIMED_OUT")));
+	TestTrue(TEXT("then each case's steps, with why one failed"), BatchReport.Contains(TEXT("### duel")) && BatchReport.Contains(TEXT("FAILED goal_not_met: Player1 won")));
+	TestTrue(TEXT("and the pictures its steps made"), BatchReport.Contains(TEXT("![reference](")) && BatchReport.Contains(TEXT("![attempt](")));
+	const TSharedRef<SHyperAIStudioPlaytestPanel> Panel = SNew(SHyperAIStudioPlaytestPanel);
+	Panel->ShowOutcome(Batch);
+	HyperAIStudio::Tests::SaveWidgetShot(Panel, FIntPoint(1400, 1000), TEXT("step15-playtest-report"), 10);
+	TestTrue(TEXT("The report saves as an HTML page"), !HyperAIStudio::Markdown::SaveReport(TEXT("Playtest Lvl_Arena"), BatchReport).IsEmpty());
 	return true;
 }
 

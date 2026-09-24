@@ -4846,6 +4846,11 @@ void BuildAgentInstructionBlocks(
 		TEXT("- Edit in one call: a pack's `*_apply_plan` with `bDryRun: false` and a fresh `operationId` (`expectedPlanHash` is optional), then `hyper_operation_wait` with that `operationId`, then the pack's validate tool.") LINE_TERMINATOR +
 		TEXT("- Current level: `call_tool` -> `editor_toolset.toolsets.scene.SceneTools` / `get_current_level` / `{}`.") LINE_TERMINATOR +
 		TEXT("- List actors: `call_tool` -> `editor_toolset.toolsets.scene.SceneTools` / `find_actors` / `{\"name\":\"\",\"tag\":\"\",\"collision_channels\":[]}`.") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("## Replies") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("- Start with what happened in a sentence or two, then the results. Skip preamble and do not restate the request.") LINE_TERMINATOR +
+		TEXT("- Write Markdown: HyperAI Studio shows replies as reports and can save them as HTML pages. For several results use a table, with `PASS`, `FAIL`, `WARN` or `INFO` as the first word of a status cell.") LINE_TERMINATOR +
+		TEXT("- Show a picture on its own line as `![caption](absolute/path.png)`; it opens in the Match page.") LINE_TERMINATOR +
+		TEXT("- Keep code, commands and JSON short, in fenced blocks with a language. End with the next step only when there is one.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Reconnect") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("- If Unreal is closed or disconnected, run `.hyperai/scripts/Start-HyperAIStudioEditor.ps1`; this also waits for MCP readiness.") LINE_TERMINATOR +
 		TEXT("- Use `.hyperai/scripts/Wait-HyperAIStudioMCP.ps1 -TimeoutSeconds 90` for a readiness-only retry, then continue the requested task.") LINE_TERMINATOR LINE_TERMINATOR +

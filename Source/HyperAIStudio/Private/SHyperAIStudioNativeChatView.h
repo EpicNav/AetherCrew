@@ -6,7 +6,6 @@
 #include "HyperAIStudioNativeChat.h"
 #include "HyperAIStudioPreviewImage.h"
 #include "Widgets/SCompoundWidget.h"
-#include "Widgets/Views/SListView.h"
 
 class SMultiLineEditableTextBox;
 
@@ -20,6 +19,7 @@ public:
 
 	void Construct(const FArguments& InArgs);
 	virtual ~SHyperAIStudioNativeChatView() override;
+	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
 
 	TSharedPtr<FHyperAIStudioNativeChat> GetChat() const { return Chat; }
 	/** Puts text into the composer for the user to finish; never sends it. */
@@ -37,6 +37,15 @@ public:
 	/** Copies a chat picture into the project's generated-images folder with a sidecar; the project-relative path. */
 	static bool SaveToProject(const FHyperAIStudioChatItem& Item, const FString& AgentName, FString& OutProjectPath, FString& OutError);
 
+	/** What a tool, command, file edit or thought shows when opened: its result as a report, then what it was asked. */
+	static FString StepMarkdown(const FHyperAIStudioChatItem& Item);
+	/** Whether the transcript keeps the newest text in view: until the user scrolls up to read, and again at the end. */
+	bool IsFollowing() const { return bFollow; }
+	/** Whether the transcript is scrolled to its end, as last laid out. */
+	bool IsAtEnd() const;
+	/** Opens or closes a step's details, as clicking its row does. */
+	void SetOpen(const FString& ItemId, bool bOpen);
+
 private:
 	using FItemPtr = TSharedPtr<FHyperAIStudioChatItem>;
 
@@ -46,12 +55,16 @@ private:
 	/** A picture scaled to fit MaxSize; Path is read as it paints, and the file reloads when it changes. */
 	TSharedRef<SWidget> Picture(TFunction<FString()> Path, const FVector2D& MaxSize);
 	TSharedRef<SWidget> ImageActions(const FItemPtr& Item);
-	TSharedRef<ITableRow> GenerateRow(FItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
+	TSharedRef<SWidget> MakeRow(const FItemPtr& Item);
+	/** A tool call, command, file edit or thought: one line with its state, opening to the details. */
+	TSharedRef<SWidget> MakeStep(const FItemPtr& Item);
 	TSharedRef<SWidget> BuildPlan();
 
 	TSharedPtr<FHyperAIStudioNativeChat> Chat;
 	TArray<FItemPtr> Rows;
-	TSharedPtr<SListView<FItemPtr>> List;
+	TSharedPtr<class SScrollBox> Scroll;
+	TSharedPtr<class SVerticalBox> Transcript;
+	bool bFollow = true;
 	TSharedPtr<SMultiLineEditableTextBox> Composer;
 	TSharedPtr<class SVerticalBox> PlanBox;
 	TSharedPtr<class SWrapBox> AttachmentBox;

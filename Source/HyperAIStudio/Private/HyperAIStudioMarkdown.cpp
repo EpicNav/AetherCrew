@@ -2,17 +2,25 @@
 
 #include "HyperAIStudioMarkdown.h"
 
+#include "Dom/JsonObject.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/Notifications/NotificationManager.h"
 #include "Framework/Text/SlateHyperlinkRun.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "HyperAIStudioPreviewImage.h"
 #include "HyperAIStudioPreviewPanel.h"
 #include "HyperAIStudioStyle.h"
+#include "HyperAIStudioWidgets.h"
 #include "Misc/Base64.h"
 #include "Misc/DateTime.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/StyleColors.h"
@@ -23,6 +31,7 @@
 #include "Widgets/Layout/SGridPanel.h"
 #include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/Layout/SSeparator.h"
+#include "Widgets/Notifications/SNotificationList.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/SRichTextBlock.h"
@@ -618,8 +627,390 @@ namespace HyperAIStudio::Markdown
 				return Word.Status;
 			}
 		}
+		// Words a status field holds on its own, such as a tool's "completed". Only a whole cell counts, so a sentence
+		// that starts with "Success" stays a sentence.
+		static const FWord Whole[] = {
+			{TEXT("COMPLETED"), TEXT("pass")}, {TEXT("SUCCEEDED"), TEXT("pass")}, {TEXT("SUCCESS"), TEXT("pass")}, {TEXT("DONE"), TEXT("pass")},
+			{TEXT("FAILURE"), TEXT("fail")}, {TEXT("DECLINED"), TEXT("fail")}, {TEXT("CANCELLED"), TEXT("warn")}, {TEXT("CANCELED"), TEXT("warn")},
+			{TEXT("RUNNING"), TEXT("info")}, {TEXT("QUEUED"), TEXT("info")}, {TEXT("PENDING"), TEXT("info")}};
+		for (const FWord& Word : Whole)
+		{
+			if (Trimmed.Equals(Word.Word, ESearchCase::IgnoreCase))
+			{
+				OutRest.Reset();
+				return Word.Status;
+			}
+		}
 		OutRest = Trimmed;
 		return FString();
+	}
+
+	namespace
+	{
+		/** A JSON key as words in sentence case: bestScore and best_score read "Best score"; a bool's b goes. */
+		FString Humanize(const FString& Key)
+		{
+			FString Name = Key;
+			if (Name.Len() > 1 && Name[0] == TEXT('b') && FChar::IsUpper(Name[1]))
+			{
+				Name.RightChopInline(1);
+			}
+			FString Words;
+			for (int32 Index = 0; Index < Name.Len(); ++Index)
+			{
+				const TCHAR C = Name[Index];
+				if (C == TEXT('_') || C == TEXT('-') || C == TEXT('.'))
+				{
+					Words.AppendChar(TEXT(' '));
+					continue;
+				}
+				const bool bPreviousUpper = Index > 0 && FChar::IsUpper(Name[Index - 1]);
+				const bool bNextLower = Index + 1 < Name.Len() && FChar::IsLower(Name[Index + 1]);
+				const bool bStartsWord = Index > 0 && FChar::IsUpper(C)
+					&& (FChar::IsLower(Name[Index - 1]) || FChar::IsDigit(Name[Index - 1]) || (bPreviousUpper && bNextLower));
+				if (bStartsWord)
+				{
+					Words.AppendChar(TEXT(' '));
+				}
+				// Capitals in a run, such as MCP, stay; one that only starts a word is lowered.
+				const bool bInRun = (Index + 1 < Name.Len() && FChar::IsUpper(Name[Index + 1])) || (bPreviousUpper && !bStartsWord);
+				Words.AppendChar(FChar::IsUpper(C) && !bInRun ? FChar::ToLower(C) : C);
+			}
+			TArray<FString> Parts;
+			Words.ParseIntoArray(Parts, TEXT(" "));
+			for (FString& Part : Parts)
+			{
+				if (Part == TEXT("id") || Part == TEXT("url") || Part == TEXT("ui") || Part == TEXT("uri"))
+				{
+					Part = Part.ToUpper();
+				}
+			}
+			FString Out = FString::Join(Parts, TEXT(" "));
+			if (!Out.IsEmpty())
+			{
+				Out[0] = FChar::ToUpper(Out[0]);
+			}
+			return Out;
+		}
+
+		/** Marks escaped, so a name or path in a value shows as written; a value stays on its table row. */
+		FString EscapeMarkdown(const FString& Text)
+		{
+			FString Out;
+			Out.Reserve(Text.Len());
+			for (const TCHAR C : Text)
+			{
+				if (C == TEXT('\\') || C == TEXT('`') || C == TEXT('*') || C == TEXT('_') || C == TEXT('[') || C == TEXT(']') || C == TEXT('|'))
+				{
+					Out.AppendChar(TEXT('\\'));
+				}
+				Out.AppendChar(C == TEXT('\n') || C == TEXT('\r') || C == TEXT('\t') ? TEXT(' ') : C);
+			}
+			return Out;
+		}
+
+		FString NumberText(const double Value)
+		{
+			if (FMath::Abs(Value) < 1e15 && FMath::IsNearlyEqual(Value, FMath::RoundToDouble(Value)))
+			{
+				return FString::Printf(TEXT("%lld"), static_cast<long long>(FMath::RoundToDouble(Value)));
+			}
+			FString Text = FString::Printf(TEXT("%.3f"), Value);
+			while (Text.EndsWith(TEXT("0")))
+			{
+				Text.LeftChopInline(1);
+			}
+			Text.RemoveFromEnd(TEXT("."));
+			return Text;
+		}
+
+		bool IsScalar(const TSharedPtr<FJsonValue>& Value)
+		{
+			return Value.IsValid() && Value->Type != EJson::Object && Value->Type != EJson::Array;
+		}
+
+		FString CompactJson(const TSharedPtr<FJsonValue>& Value)
+		{
+			FString Out;
+			const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer = TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Out);
+			FJsonSerializer::Serialize(Value, FString(), Writer);
+			return Out;
+		}
+
+		/** A value as a table cell; a picture on disk becomes a link that opens it, and is kept to show below. */
+		FString CellText(const TSharedPtr<FJsonValue>& Value, TArray<FString>& Pictures)
+		{
+			if (!Value.IsValid() || Value->Type == EJson::Null || Value->Type == EJson::None)
+			{
+				return LOCTEXT("JsonNone", "none").ToString();
+			}
+			if (Value->Type == EJson::Boolean)
+			{
+				return Value->AsBool() ? LOCTEXT("JsonYes", "yes").ToString() : LOCTEXT("JsonNo", "no").ToString();
+			}
+			if (Value->Type == EJson::Number)
+			{
+				return NumberText(Value->AsNumber());
+			}
+			if (Value->Type == EJson::String)
+			{
+				const FString Text = Value->AsString();
+				const FString File = IsPicture(Text) ? LocalFile(Text).Replace(TEXT("\\"), TEXT("/")) : FString();
+				if (!File.IsEmpty())
+				{
+					Pictures.AddUnique(File);
+					return FString::Printf(TEXT("[%s](%s)"), *EscapeMarkdown(FPaths::GetCleanFilename(File)), *File);
+				}
+				return EscapeMarkdown(Text.Len() > 300 ? Text.Left(300) + TEXT("...") : Text);
+			}
+			const FString Json = CompactJson(Value);
+			return TEXT("`") + (Json.Len() > 200 ? Json.Left(200) + TEXT("...") : Json).Replace(TEXT("`"), TEXT("'")).Replace(TEXT("|"), TEXT("/")) + TEXT("`");
+		}
+
+		void AppendTable(FString& Out, const TArray<FString>& Head, const TArray<TArray<FString>>& Rows)
+		{
+			Out += TEXT("| ") + FString::Join(Head, TEXT(" | ")) + TEXT(" |\n|");
+			for (int32 Index = 0; Index < Head.Num(); ++Index)
+			{
+				Out += TEXT("---|");
+			}
+			Out += TEXT("\n");
+			for (const TArray<FString>& Row : Rows)
+			{
+				Out += TEXT("| ") + FString::Join(Row, TEXT(" | ")) + TEXT(" |\n");
+			}
+			Out += TEXT("\n");
+		}
+
+		/** A list of records as one table: a column for each simple field the first records have, six at most. */
+		void AppendRecords(FString& Out, const TArray<TSharedPtr<FJsonValue>>& Items, TArray<FString>& Pictures)
+		{
+			constexpr int32 MaxRows = 40;
+			TArray<FString> Columns;
+			for (int32 Index = 0; Index < FMath::Min(Items.Num(), 20); ++Index)
+			{
+				if (Items[Index].IsValid() && Items[Index]->Type == EJson::Object)
+				{
+					for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Items[Index]->AsObject()->Values)
+					{
+						if (IsScalar(Pair.Value) && (Columns.Num() < 6 || Columns.Contains(Pair.Key)))
+						{
+							Columns.AddUnique(Pair.Key);
+						}
+					}
+				}
+			}
+			TArray<FString> Head;
+			for (const FString& Column : Columns)
+			{
+				Head.Add(Humanize(Column));
+			}
+			if (Head.IsEmpty())
+			{
+				Head.Add(LOCTEXT("JsonValue", "Value").ToString());
+			}
+			TArray<TArray<FString>> Rows;
+			for (int32 Index = 0; Index < FMath::Min(Items.Num(), MaxRows); ++Index)
+			{
+				TArray<FString>& Row = Rows.AddDefaulted_GetRef();
+				const TSharedPtr<FJsonObject> Object = Items[Index].IsValid() && Items[Index]->Type == EJson::Object ? Items[Index]->AsObject() : nullptr;
+				if (!Object.IsValid() || Columns.IsEmpty())
+				{
+					Row.Add(CellText(Items[Index], Pictures));
+					continue;
+				}
+				for (const FString& Column : Columns)
+				{
+					const TSharedPtr<FJsonValue> Field = Object->TryGetField(Column);
+					Row.Add(Field.IsValid() ? CellText(Field, Pictures) : FString());
+				}
+				// A picture a record names in a field without a column is still shown.
+				for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Object->Values)
+				{
+					if (!Columns.Contains(Pair.Key) && Pair.Value.IsValid() && Pair.Value->Type == EJson::String)
+					{
+						CellText(Pair.Value, Pictures);
+					}
+				}
+			}
+			AppendTable(Out, Head, Rows);
+			if (Items.Num() > MaxRows)
+			{
+				Out += FText::Format(LOCTEXT("JsonMore", "{0} more not shown."), Items.Num() - MaxRows).ToString() + TEXT("\n\n");
+			}
+		}
+
+		void AppendObject(FString& Out, const TSharedPtr<FJsonObject>& Object, const int32 Depth, TArray<FString>& Pictures, const bool bLead)
+		{
+			// What happened, in the tool's own words, comes first.
+			FString LeadKey;
+			if (bLead)
+			{
+				for (const TCHAR* Key : {TEXT("summary"), TEXT("message"), TEXT("diagnostic"), TEXT("detail"), TEXT("description"), TEXT("error")})
+				{
+					for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Object->Values)
+					{
+						if (Pair.Key.Equals(Key, ESearchCase::IgnoreCase) && Pair.Value.IsValid() && Pair.Value->Type == EJson::String
+							&& !Pair.Value->AsString().TrimStartAndEnd().IsEmpty())
+						{
+							LeadKey = Pair.Key;
+							Out += EscapeMarkdown(Pair.Value->AsString().TrimStartAndEnd()) + TEXT("\n\n");
+							break;
+						}
+					}
+					if (!LeadKey.IsEmpty())
+					{
+						break;
+					}
+				}
+			}
+			TArray<TArray<FString>> Rows;
+			TArray<TPair<FString, TSharedPtr<FJsonValue>>> Nested;
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Object->Values)
+			{
+				if (Pair.Key == LeadKey || !Pair.Value.IsValid())
+				{
+					continue;
+				}
+				if (IsScalar(Pair.Value))
+				{
+					Rows.Add({Humanize(Pair.Key), CellText(Pair.Value, Pictures)});
+					continue;
+				}
+				if (Pair.Value->Type == EJson::Array)
+				{
+					const TArray<TSharedPtr<FJsonValue>>& Items = Pair.Value->AsArray();
+					if (Items.IsEmpty())
+					{
+						Rows.Add({Humanize(Pair.Key), LOCTEXT("JsonNone", "none").ToString()});
+						continue;
+					}
+					if (Items.ContainsByPredicate([](const TSharedPtr<FJsonValue>& Item) { return !IsScalar(Item); }))
+					{
+						Nested.Add(Pair);
+						continue;
+					}
+					TArray<FString> Values;
+					for (int32 Index = 0; Index < FMath::Min(Items.Num(), 12); ++Index)
+					{
+						Values.Add(CellText(Items[Index], Pictures));
+					}
+					if (Items.Num() > 12)
+					{
+						Values.Add(FText::Format(LOCTEXT("JsonAndMore", "and {0} more"), Items.Num() - 12).ToString());
+					}
+					Rows.Add({Humanize(Pair.Key), FString::Join(Values, TEXT(", "))});
+					continue;
+				}
+				Nested.Add(Pair);
+			}
+			if (!Rows.IsEmpty())
+			{
+				AppendTable(Out, {LOCTEXT("JsonField", "Field").ToString(), LOCTEXT("JsonValue", "Value").ToString()}, Rows);
+			}
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Nested)
+			{
+				const FString Heading = FString::ChrN(FMath::Min(Depth + 2, 3), TEXT('#')) + TEXT(" ") + Humanize(Pair.Key);
+				if (Pair.Value->Type == EJson::Array)
+				{
+					Out += FString::Printf(TEXT("%s (%d)\n\n"), *Heading, Pair.Value->AsArray().Num());
+					AppendRecords(Out, Pair.Value->AsArray(), Pictures);
+				}
+				else if (Depth < 2)
+				{
+					Out += Heading + TEXT("\n\n");
+					AppendObject(Out, Pair.Value->AsObject(), Depth + 1, Pictures, false);
+				}
+				else
+				{
+					Out += Heading + TEXT("\n\n```json\n") + CompactJson(Pair.Value) + TEXT("\n```\n\n");
+				}
+			}
+		}
+	}
+
+	FString FromJson(const FString& Json)
+	{
+		const FString Trimmed = Json.TrimStartAndEnd();
+		if (!Trimmed.StartsWith(TEXT("{")) && !Trimmed.StartsWith(TEXT("[")))
+		{
+			return FString();
+		}
+		TSharedPtr<FJsonValue> Root;
+		if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Trimmed), Root) || !Root.IsValid())
+		{
+			return FString();
+		}
+		// Epic's registry wraps a tool's report as {"returnValue": ...}.
+		if (Root->Type == EJson::Object && Root->AsObject()->Values.Num() == 1 && Root->AsObject()->HasField(TEXT("returnValue")))
+		{
+			Root = Root->AsObject()->TryGetField(TEXT("returnValue"));
+		}
+		FString Out;
+		TArray<FString> Pictures;
+		if (!Root.IsValid())
+		{
+			return FString();
+		}
+		if (Root->Type == EJson::Object)
+		{
+			AppendObject(Out, Root->AsObject(), 0, Pictures, /*bLead=*/true);
+		}
+		else if (Root->Type == EJson::Array)
+		{
+			AppendRecords(Out, Root->AsArray(), Pictures);
+		}
+		else
+		{
+			Out = CellText(Root, Pictures) + TEXT("\n\n");
+		}
+		for (int32 Index = 0; Index < FMath::Min(Pictures.Num(), 8); ++Index)
+		{
+			Out += FString::Printf(TEXT("![%s](%s)\n"), *FPaths::GetCleanFilename(Pictures[Index]), *Pictures[Index]);
+		}
+		return Out.TrimEnd();
+	}
+
+	FString ExportReport(const FString& Title, const FString& Markdown)
+	{
+		const FString File = SaveReport(Title, Markdown);
+		FNotificationInfo Info(File.IsEmpty() ? LOCTEXT("ReportFailed", "The report could not be saved.")
+			: FText::Format(LOCTEXT("ReportSaved", "Saved the report as {0}"), FText::FromString(FPaths::GetCleanFilename(File))));
+		Info.ExpireDuration = 6.0f;
+		if (!File.IsEmpty())
+		{
+			Info.Hyperlink = FSimpleDelegate::CreateLambda([File]() { FPlatformProcess::LaunchFileInDefaultExternalApplication(*File); });
+			Info.HyperlinkText = LOCTEXT("OpenReport", "Open it");
+		}
+		if (FSlateApplication::IsInitialized())
+		{
+			FSlateNotificationManager::Get().AddNotification(Info);
+		}
+		return File;
+	}
+
+	TSharedRef<SWidget> ReportActions(TFunction<FString()> Title, TFunction<FString()> Markdown)
+	{
+		using namespace HyperAIStudio::UI;
+		return SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				IconButton(FAppStyle::GetBrush("Icons.Clipboard"), LOCTEXT("CopyReport", "Copy as Markdown"),
+					FOnClicked::CreateLambda([Markdown]()
+					{
+						FPlatformApplicationMisc::ClipboardCopy(*Markdown());
+						return FReply::Handled();
+					}))
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(2.0f, 0.0f, 0.0f, 0.0f))
+			[
+				IconButton(Icon("HyperAIStudio.Icon.Report"), LOCTEXT("SaveReport", "Save as an HTML report, to share or keep."),
+					FOnClicked::CreateLambda([Title, Markdown]()
+					{
+						ExportReport(Title(), Markdown());
+						return FReply::Handled();
+					}))
+			];
 	}
 
 	FString ToHtml(const FString& Markdown)
@@ -664,15 +1055,17 @@ namespace HyperAIStudio::Markdown
 				for (int32 Row = 0; Row < Block.Rows.Num(); ++Row)
 				{
 					Html += TEXT("<tr>");
-					for (const FString& Cell : Block.Rows[Row])
+					for (int32 Column = 0; Column < Block.Rows[Row].Num(); ++Column)
 					{
+						const FString& Cell = Block.Rows[Row][Column];
 						if (Row == 0)
 						{
 							Html += TEXT("<th>") + InlineHtml(Cell) + TEXT("</th>");
 							continue;
 						}
+						// The first column names the row; a status is in the columns after it.
 						FString Rest;
-						const FString Status = CellStatus(Cell, Rest);
+						const FString Status = Column == 0 ? FString() : CellStatus(Cell, Rest);
 						Html += Status.IsEmpty() ? TEXT("<td>") + InlineHtml(Cell) + TEXT("</td>")
 							: FString::Printf(TEXT("<td><span class=\"chip %s\">%s</span> %s</td>"), *Status,
 								*EscapeHtml(Cell.TrimStartAndEnd().Left(Cell.TrimStartAndEnd().Len() - Rest.Len()).TrimEnd().ToUpper()), *InlineHtml(Rest));
@@ -741,10 +1134,30 @@ void SHyperAIStudioMarkdown::Construct(const FArguments& InArgs)
 	[
 		SAssignNew(Blocks, SVerticalBox)
 	];
-	SetMarkdown(InArgs._Markdown);
+	Source = InArgs._Markdown;
+	Show(Source.Get());
+}
+
+void SHyperAIStudioMarkdown::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
+{
+	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	// Text that streams in is read a few times a second, rather than rebuilt for every piece of it. The wall clock is
+	// used because a widget drawn off screen is given the same time on every frame.
+	const double Now = FPlatformTime::Seconds();
+	if (Source.IsBound() && Now >= NextRead)
+	{
+		NextRead = Now + 0.1;
+		Show(Source.Get());
+	}
 }
 
 void SHyperAIStudioMarkdown::SetMarkdown(const FString& InMarkdown)
+{
+	Source.Set(InMarkdown);
+	Show(InMarkdown);
+}
+
+void SHyperAIStudioMarkdown::Show(const FString& InMarkdown)
 {
 	if (bBuilt && InMarkdown.Equals(Markdown, ESearchCase::CaseSensitive))
 	{
@@ -906,7 +1319,8 @@ TSharedRef<SWidget> SHyperAIStudioMarkdown::MakeTable(const HyperAIStudio::Markd
 			const FString Cell = Block.Rows[Row].IsValidIndex(Column) ? Block.Rows[Row][Column] : FString();
 			TSharedRef<SWidget> Content = SNullWidget::NullWidget;
 			FString Rest;
-			const FString Status = Row == 0 ? FString() : CellStatus(Cell, Rest);
+			// The first column names the row; a status is in the columns after it.
+			const FString Status = Row == 0 || Column == 0 ? FString() : CellStatus(Cell, Rest);
 			if (Row == 0)
 			{
 				Content = Rich(Cell, TEXT("Md.TableHead"));
