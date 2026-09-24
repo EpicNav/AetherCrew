@@ -842,6 +842,48 @@
    "text": "擦除对比"
   },
   {
+   "namespace": "HyperAIStudioSandbox",
+   "key": "DiscardSandbox",
+   "source": "Discard",
+   "text": "丢弃"
+  },
+  {
+   "namespace": "HyperAIStudioSandbox",
+   "key": "DiscardSandboxTooltip",
+   "source": "Throw those held changes away; the project keeps its files as they are.",
+   "text": "丢弃这些保留的更改；项目文件保持原样。"
+  },
+  {
+   "namespace": "HyperAIStudioSandbox",
+   "key": "LeftoverSandbox",
+   "source": "HyperAI's Sandbox Mode is still holding {0} {0}|plural(one=change,other=changes) from an earlier session. Resume to keep reviewing them, or discard them.",
+   "text": "HyperAI 的沙盒模式仍保留着上一个会话的 {0} 项更改。恢复以继续审阅，或将其丢弃。"
+  },
+  {
+   "namespace": "HyperAIStudioSandbox",
+   "key": "ModeStaysOn",
+   "source": "Sandbox Mode stays on until its held changes are approved or discarded in HyperAI's Activity panel.",
+   "text": "在 HyperAI 的活动面板中批准或丢弃保留的更改之前，沙盒模式会保持开启。"
+  },
+  {
+   "namespace": "HyperAIStudioSandbox",
+   "key": "ModeStaysOnUnsaved",
+   "source": "Sandbox Mode stays on while assets have unsaved changes: closing the sandbox would reload them from disk. Save them (they are held for review) or revert them, then turn it off.",
+   "text": "资产有未保存的更改时，沙盒模式会保持开启：关闭沙盒会从磁盘重新加载这些资产。请先保存（保存后会保留待审阅）或还原它们，然后再关闭。"
+  },
+  {
+   "namespace": "HyperAIStudioSandbox",
+   "key": "ResumeSandbox",
+   "source": "Resume",
+   "text": "恢复"
+  },
+  {
+   "namespace": "HyperAIStudioSandbox",
+   "key": "ResumeSandboxTooltip",
+   "source": "Open that sandbox again; its changes show in HyperAI's Activity panel.",
+   "text": "重新打开该沙盒；其中的更改会显示在 HyperAI 的活动面板中。"
+  },
+  {
    "namespace": "HyperAIStudioScripting",
    "key": "RunScript",
    "source": "HyperAI: Run Script",
@@ -1179,6 +1221,18 @@
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ApproveAll",
+   "source": "Approve All",
+   "text": "全部批准"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ApproveAllTooltip",
+   "source": "Write every held file to the project, saving what agents left unsaved first. A new sandbox holds what is saved next.",
+   "text": "将所有保留的文件写入项目，并先保存智能体未保存的内容。之后保存的内容由新的沙盒保留。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
    "key": "ApproveTooltip",
    "source": "Run this plan now.",
    "text": "立即运行此计划。"
@@ -1206,6 +1260,24 @@
    "key": "CloseTooltip",
    "source": "Hide the Activity panel",
    "text": "隐藏活动面板"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "DiscardAll",
+   "source": "Discard All",
+   "text": "全部丢弃"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "DiscardAllConfirm",
+   "source": "Discard all {0} held {0}|plural(one=file,other=files)? Unsaved changes in any asset are reloaded from the project too. This cannot be undone.\n\n{1}",
+   "text": "要丢弃全部 {0} 个保留的文件吗？任何资产中未保存的更改也会从项目重新加载。此操作无法撤销。\n\n{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "DiscardAllTooltip",
+   "source": "Throw every held file away and reload the project's own versions. Your own saves since the sandbox opened go too.",
+   "text": "丢弃所有保留的文件，并重新加载项目自身的版本。沙盒打开后你自己保存的内容也会一并丢弃。"
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",
@@ -1269,6 +1341,12 @@
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "MoreSandboxFiles",
+   "source": "and {0} more",
+   "text": "还有 {0} 个"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
    "key": "PendingHeading",
    "source": "Waiting for you",
    "text": "等待你处理"
@@ -1296,6 +1374,24 @@
    "key": "RunningHeading",
    "source": "Running",
    "text": "运行中"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "SandboxFile",
+   "source": "{0} {1}",
+   "text": "{0} {1}"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "SandboxHeading",
+   "source": "Sandbox",
+   "text": "沙盒"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "SandboxHeld",
+   "source": "{0}: {1} {1}|plural(one=file,other=files) held for review",
+   "text": "{0}：{1} 个文件待审阅"
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",

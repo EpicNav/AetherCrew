@@ -10,6 +10,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioSandbox.h"
 #include "IPythonScriptPlugin.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/CoreDelegates.h"
@@ -154,6 +155,12 @@ namespace HyperAIStudio::Scripting::Private
 		Report.OperationId = OperationId;
 		Report.Safety = bGuarded ? TEXT("undoable") : TEXT("needs_approval");
 		Report.ScriptFolder = ProjectRelative(Folder);
+		if (!HyperAIStudio::Sandbox::CheckAgentEdit(Report.Diagnostic))
+		{
+			Report.Status = TEXT("sandbox_unavailable");
+			RecordActivity(EHyperAIStudioActivityKind::Failed, OperationId, Report.Status, Report.Diagnostic);
+			return Report;
+		}
 		const FString ResultPath = Folder / TEXT("result.json");
 		IFileManager::Get().Delete(*ResultPath, /*RequireExists=*/false, /*EvenReadOnly=*/true, /*Quiet=*/true);
 		const TSet<FString> DirtyBefore = DirtyPackageNames();

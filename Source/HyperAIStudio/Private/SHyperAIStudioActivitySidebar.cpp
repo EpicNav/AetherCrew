@@ -5,8 +5,12 @@
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "ContentBrowserModule.h"
+#include "FileHelpers.h"
 #include "HyperAIStudioStyle.h"
 #include "IContentBrowserSingleton.h"
+#include "Misc/MessageDialog.h"
+#include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "Styling/AppStyle.h"
 #include "Styling/StyleColors.h"
@@ -64,6 +68,18 @@ namespace HyperAIStudio::ActivitySidebar
 		default: return FSlateColor::UseSubduedForeground();
 		}
 	}
+
+	/** The asset a held file saves, for the Content Browser; empty for files that are not assets. */
+	FString ObjectPathOfFile(const FString& ProjectRelativePath)
+	{
+		FString PackageName;
+		const FString File = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / ProjectRelativePath);
+		if (!FPackageName::IsPackageFilename(File) || !FPackageName::TryConvertFilenameToLongPackageName(File, PackageName))
+		{
+			return FString();
+		}
+		return PackageName + TEXT(".") + FPackageName::GetShortName(PackageName);
+	}
 }
 
 void SHyperAIStudioChatActivitySidebar::Construct(const FArguments& InArgs)
@@ -74,6 +90,7 @@ void SHyperAIStudioChatActivitySidebar::Construct(const FArguments& InArgs)
 	ActivityChangedHandle = FHyperAIStudioAgentActivityLog::OnChanged().AddSP(this, &SHyperAIStudioChatActivitySidebar::Rebuild);
 	ApprovalChangedHandle = FHyperAIStudioApprovalGate::OnChanged().AddSP(this, &SHyperAIStudioChatActivitySidebar::Rebuild);
 	JobChangedHandle = FHyperAIStudioAsyncJobHost::OnChanged().AddSP(this, &SHyperAIStudioChatActivitySidebar::Rebuild);
+	SandboxChangedHandle = HyperAIStudio::Sandbox::OnChanged().AddSP(this, &SHyperAIStudioChatActivitySidebar::Rebuild);
 
 	ChildSlot
 	[
@@ -159,11 +176,13 @@ SHyperAIStudioChatActivitySidebar::~SHyperAIStudioChatActivitySidebar()
 	FHyperAIStudioAgentActivityLog::OnChanged().Remove(ActivityChangedHandle);
 	FHyperAIStudioApprovalGate::OnChanged().Remove(ApprovalChangedHandle);
 	FHyperAIStudioAsyncJobHost::OnChanged().Remove(JobChangedHandle);
+	HyperAIStudio::Sandbox::OnChanged().Remove(SandboxChangedHandle);
 }
 
 int32 SHyperAIStudioChatActivitySidebar::GetPendingApprovalCount()
 {
-	return FHyperAIStudioApprovalGate::GetPending().Num();
+	// Held sandbox files wait on the user too.
+	return FHyperAIStudioApprovalGate::GetPending().Num() + HyperAIStudio::Sandbox::GetHeldCount();
 }
 
 void SHyperAIStudioChatActivitySidebar::Rebuild()
@@ -186,6 +205,15 @@ void SHyperAIStudioChatActivitySidebar::Rebuild()
 			Row.Approval = MakeShared<FHyperAIStudioPendingApproval>(Approval);
 			Rows.Add(MakeShared<FRow>(MoveTemp(Row)));
 		}
+	}
+
+	HyperAIStudio::Sandbox::FStatus Sandbox = HyperAIStudio::Sandbox::GetStatus();
+	if (Sandbox.State != HyperAIStudio::Sandbox::EState::Off)
+	{
+		AddHeading(LOCTEXT("SandboxHeading", "Sandbox"));
+		FRow Row;
+		Row.Sandbox = MakeShared<HyperAIStudio::Sandbox::FStatus>(MoveTemp(Sandbox));
+		Rows.Add(MakeShared<FRow>(MoveTemp(Row)));
 	}
 
 	TArray<FHyperAIStudioAsyncJobStatus> Jobs = FHyperAIStudioAsyncJobHost::GetSnapshot();
@@ -250,6 +278,10 @@ TSharedRef<ITableRow> SHyperAIStudioChatActivitySidebar::GenerateRow(FRowPtr Row
 	else if (Row->Score.IsValid())
 	{
 		Content = BuildScoreRow(*Row->Score);
+	}
+	else if (Row->Sandbox.IsValid())
+	{
+		Content = BuildSandboxCard(*Row->Sandbox);
 	}
 	else
 	{
@@ -499,6 +531,140 @@ TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildScoreRow(const FHype
 			.Text(FText::Format(LOCTEXT("ScoreCount", "{0} of {1}"), Score.Completed, Score.Total()))
 			.Font(FAppStyle::GetFontStyle("SmallFont"))
 			.ColorAndOpacity(Rate >= 0.8f ? FStyleColors::AccentGreen : Rate >= 0.5f ? FStyleColors::AccentYellow : FStyleColors::AccentRed)
+		];
+}
+
+TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildSandboxCard(const HyperAIStudio::Sandbox::FStatus& Status)
+{
+	using namespace HyperAIStudio::ActivitySidebar;
+	namespace Sandbox = HyperAIStudio::Sandbox;
+	constexpr int32 ShownFiles = 12;
+
+	TSharedRef<SVerticalBox> Card = SNew(SVerticalBox)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SNew(STextBlock)
+			.Text(Status.State == Sandbox::EState::Active
+				? FText::Format(LOCTEXT("SandboxHeld", "{0}: {1} {1}|plural(one=file,other=files) held for review"),
+					FText::FromString(Status.SandboxName), Status.Changes.Num())
+				: FText::FromString(Status.SandboxName))
+			.Visibility(Status.SandboxName.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+			.AutoWrapText(true)
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 2.0f, 0.0f, 4.0f)
+		[
+			SNew(STextBlock)
+			.Text(FText::FromString(Status.Diagnostic))
+			.AutoWrapText(true)
+			.Font(FAppStyle::GetFontStyle("SmallFont"))
+			.ColorAndOpacity(Status.State == Sandbox::EState::Foreign ? FSlateColor(FStyleColors::AccentYellow) : FSlateColor::UseSubduedForeground())
+		];
+
+	for (int32 Index = 0; Index < Status.Changes.Num() && Index < ShownFiles; ++Index)
+	{
+		const Sandbox::FChange& Change = Status.Changes[Index];
+		const FString ObjectPath = ObjectPathOfFile(Change.Path);
+		Card->AddSlot()
+		.AutoHeight()
+		[
+			SNew(SButton)
+			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+			.HAlign(HAlign_Left)
+			.ContentPadding(FMargin(0.0f, 1.0f))
+			.IsEnabled(!ObjectPath.IsEmpty())
+			.ToolTipText(FText::FromString(Change.Path))
+			.OnClicked_Lambda([ObjectPath]()
+			{
+				ShowTargetInContentBrowser(ObjectPath);
+				return FReply::Handled();
+			})
+			[
+				SNew(STextBlock)
+				.Text(FText::Format(LOCTEXT("SandboxFile", "{0} {1}"), FText::FromString(Change.Kind), FText::FromString(FPaths::GetCleanFilename(Change.Path))))
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+				.ColorAndOpacity(Change.Kind == TEXT("removed") ? FStyleColors::AccentRed : FStyleColors::AccentBlue)
+			]
+		];
+	}
+	if (Status.Changes.Num() > ShownFiles)
+	{
+		Card->AddSlot()
+		.AutoHeight()
+		[
+			SNew(STextBlock)
+			.Text(FText::Format(LOCTEXT("MoreSandboxFiles", "and {0} more"), Status.Changes.Num() - ShownFiles))
+			.Font(FAppStyle::GetFontStyle("SmallFont"))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+		];
+	}
+
+	if (Status.State == Sandbox::EState::Active && !Status.Changes.IsEmpty())
+	{
+		TArray<FString> Files;
+		for (const Sandbox::FChange& Change : Status.Changes)
+		{
+			Files.Add(Change.Kind + TEXT(" ") + Change.Path);
+		}
+		const auto Report = [](const bool bDone, const FString& Error)
+		{
+			if (!bDone)
+			{
+				FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Error));
+			}
+		};
+		Card->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("ApproveAll", "Approve All"))
+				.ToolTipText(LOCTEXT("ApproveAllTooltip", "Write every held file to the project, saving what agents left unsaved first. A new sandbox holds what is saved next."))
+				.OnClicked_Lambda([Report]()
+				{
+					// Closing the sandbox reloads unsaved assets from disk, so unsaved work is offered for saving first, as a map load does.
+					FEditorFileUtils::SaveDirtyPackages(/*bPromptUserToSave=*/true, /*bSaveMapPackages=*/true, /*bSaveContentPackages=*/true,
+						/*bFastSave=*/false, /*bNotifyNoPackagesSaved=*/false, /*bCanBeDeclined=*/false);
+					FString Error;
+					Report(HyperAIStudio::Sandbox::ApproveAll(Error), Error);
+					return FReply::Handled();
+				})
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("DiscardAll", "Discard All"))
+				.ToolTipText(LOCTEXT("DiscardAllTooltip", "Throw every held file away and reload the project's own versions. Your own saves since the sandbox opened go too."))
+				.OnClicked_Lambda([Report, Files]()
+				{
+					const FText Question = FText::Format(LOCTEXT("DiscardAllConfirm",
+						"Discard all {0} held {0}|plural(one=file,other=files)? Unsaved changes in any asset are reloaded from the project too. This cannot be undone.\n\n{1}"),
+						Files.Num(), FText::FromString(FString::Join(TArrayView<const FString>(Files).Left(20), TEXT("\n"))
+							+ (Files.Num() > 20 ? FString::Printf(TEXT("\n... and %d more"), Files.Num() - 20) : FString())));
+					if (FMessageDialog::Open(EAppMsgType::YesNo, EAppReturnType::No, Question) == EAppReturnType::Yes)
+					{
+						FString Error;
+						Report(HyperAIStudio::Sandbox::DiscardAll(Error), Error);
+					}
+					return FReply::Handled();
+				})
+			]
+		];
+	}
+
+	return SNew(SBorder)
+		.BorderImage(FHyperAIStudioStyle::Get().GetBrush("HyperAIStudio.Badge"))
+		.Padding(FMargin(8.0f, 6.0f))
+		[
+			Card
 		];
 }
 

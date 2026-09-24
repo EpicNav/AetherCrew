@@ -30,6 +30,8 @@ public:
 	 */
 	static bool Query(const FString& OperationId, int32& OutPosition, FString& OutFailure, FString& OutDiagnostic);
 	static int32 Num();
+	/** True while an edit runs on the lane. */
+	static bool IsRunning();
 	/** Drops every waiting edit without running it. */
 	static void Clear();
 };

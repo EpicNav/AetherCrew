@@ -462,6 +462,13 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Remote", meta = (DisplayName = "Keep Remote Chats Running After The Editor Closes"))
 	bool bKeepRemoteChatsRunning = true;
 
+	/**
+	 * While on, everything saved in the editor lands in a UE File Sandbox until you approve or discard all of it in HyperAI's
+	 * Activity panel: agent edits, Epic's tools, scripts, and your own saves too. Agents cannot approve or discard.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Sandbox", meta = (DisplayName = "Sandbox Mode"))
+	bool bSandboxMode = false;
+
 	/** Codex and Gemini chats open in HyperAI's own chat view instead of the terminal. Claude Code always uses the terminal. */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Chat", meta = (DisplayName = "Native Chat View for Codex and Gemini"))
 	bool bUseNativeChatView = false;

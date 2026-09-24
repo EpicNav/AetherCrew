@@ -26,6 +26,7 @@
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioPlanExecuteToolset.h"
 #include "HyperAIStudioProjectMemory.h"
+#include "HyperAIStudioSandbox.h"
 #include "HyperAIStudioService.h"
 #include "HyperAIStudioSettings.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -107,7 +108,8 @@ namespace HyperAIStudio::NativeReadTools::Private
 	FString ExpectedPackIdForNativeTool(const FString& ToolName)
 	{
 		if (ToolName == TEXT("hyper_capability_report") || ToolName == TEXT("hyper_operation_status")
-			|| ToolName == TEXT("hyper_operation_wait") || ToolName.StartsWith(TEXT("hyper_memory_")))
+			|| ToolName == TEXT("hyper_operation_wait") || ToolName.StartsWith(TEXT("hyper_memory_"))
+			|| ToolName == TEXT("hyper_sandbox_status"))
 		{
 			return TEXT("shared_foundation");
 		}
@@ -947,6 +949,13 @@ const TArray<FHyperAIStudioNativeToolManifestEntry>& FHyperAIStudioNativeReadCon
 			FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate
 		},
 		{
+			TEXT("hyper_sandbox_status"),
+			GetQualifiedToolsetName(),
+			TEXT("read"),
+			TEXT("Whether Sandbox Mode holds saved edits for the user's review, and which files."),
+			FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate
+		},
+		{
 			TEXT("hyper_asset_dependency_graph"),
 			GetDependencyGraphQualifiedToolsetName(),
 			TEXT("read"),
@@ -1775,6 +1784,7 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 	Report.OperationId = FHyperAIStudioNativeReadContracts::ClipText(OperationId, 128);
 	Report.JournalAccessMode = TEXT("read_only_generation_snapshot");
 	Report.bJournalLoadMayReconcile = false;
+	Report.bSandboxed = IsInGameThread() && HyperAIStudio::Sandbox::IsHoldingEdits();
 	if (!FHyperAIStudioOperationJournal::IsValidOperationId(OperationId))
 	{
 		Report.Status = TEXT("invalid_operation_id");
@@ -2608,6 +2618,37 @@ FHyperAIMemoryWriteReport UHyperAIStudioNativeReadToolset::hyper_memory_forget(c
 		return Report;
 	}
 	Report.Status = TEXT("forgotten");
+	return Report;
+}
+
+FHyperAISandboxStatusReport UHyperAIStudioNativeReadToolset::hyper_sandbox_status()
+{
+	namespace Sandbox = HyperAIStudio::Sandbox;
+	FHyperAISandboxStatusReport Report;
+	if (!IsInGameThread())
+	{
+		Report.Status = TEXT("unavailable");
+		Report.Diagnostic = TEXT("hyper_sandbox_status runs on the game thread.");
+		return Report;
+	}
+	const Sandbox::FStatus Status = Sandbox::GetStatus();
+	switch (Status.State)
+	{
+	case Sandbox::EState::Unavailable: Report.Status = TEXT("unavailable"); break;
+	case Sandbox::EState::Waiting: Report.Status = TEXT("waiting"); break;
+	case Sandbox::EState::Active: Report.Status = TEXT("active"); break;
+	case Sandbox::EState::Foreign: Report.Status = TEXT("foreign"); break;
+	default: Report.Status = TEXT("off"); break;
+	}
+	Report.SandboxName = Status.SandboxName;
+	Report.Diagnostic = Status.State == Sandbox::EState::Off
+		? FString(TEXT("Sandbox Mode is off: saves go straight to the project."))
+		: Status.Diagnostic + TEXT(" Only the user approves or discards held files.");
+	Report.HeldCount = Status.Changes.Num();
+	for (int32 Index = 0; Index < Status.Changes.Num() && Index < 200; ++Index)
+	{
+		Report.HeldFiles.Add(Status.Changes[Index].Kind + TEXT(" ") + Status.Changes[Index].Path);
+	}
 	return Report;
 }
 

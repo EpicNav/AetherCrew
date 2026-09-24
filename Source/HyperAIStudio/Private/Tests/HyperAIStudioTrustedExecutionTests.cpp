@@ -8,6 +8,15 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioNativeReadToolset.h"
+#include "HyperAIStudioSandbox.h"
+#include "IFileSandboxCoreModule.h"
+#include "ISandboxInstance.h"
+#include "ISandboxManager.h"
+#include "Types/Manager/DeleteSandboxByDirectoryArgs.h"
+#include "Types/Manager/DeleteSandboxResult.h"
+#include "Types/Manager/LeaveSandboxResult.h"
+#include "Types/Manager/NewSandboxArgs.h"
+#include "Types/Manager/SandboxCreationResult.h"
 #include "Containers/Ticker.h"
 #include "HAL/Event.h"
 #include "HAL/FileManager.h"
@@ -1225,6 +1234,28 @@ bool FHyperAIStudioTrustedEditQueueTest::RunTest(const FString& Parameters)
 	PumpUntilIdle();
 	TestFalse(TEXT("a dropped edit never runs"), Applied.Contains(TEXT("queue-seventh")));
 
+	// Sandbox Mode cannot hold an edit while someone else's sandbox is active, so the edit is refused as it starts.
+	namespace FSC = UE::FileSandboxCore;
+	FHyperAIStudioTrustedPreparedArtifact Eighth;
+	FSC::ISandboxManager& Sandboxes = FSC::IFileSandboxCoreModule::Get().GetSandboxManager();
+	if (!Sandboxes.HasActiveSandbox()
+		&& Sandboxes.CreateNewSandbox(FSC::FNewSandboxArgs(TEXT("HyperAI queue test ") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8))).HasValue())
+	{
+		const FString ForeignRoot = Sandboxes.GetActiveSandboxInstance()->GetRootDirectory();
+		HyperAIStudio::Sandbox::SetModeForTests(true);
+		TestTrue(TEXT("an eighth plan prepares"), PrepareOne(Eighth));
+		TestFalse(TEXT("Sandbox Mode refuses the edit"), FHyperAIStudioExecutionQueue::Submit(Eighth, TEXT("queue-eighth"), Status, Error));
+		TestEqual(TEXT("and says the sandbox is why"), Status, FString(TEXT("sandbox_unavailable")));
+		TestFalse(TEXT("the refused edit never runs"), Applied.Contains(TEXT("queue-eighth")));
+		HyperAIStudio::Sandbox::SetModeForTests(TOptional<bool>());
+		Sandboxes.LeaveSandbox();
+		Sandboxes.DeleteSandbox(FSC::FDeleteSandboxByDirectoryArgs(ForeignRoot));
+	}
+	else
+	{
+		AddWarning(TEXT("A sandbox is already active; the Sandbox Mode refusal is not checked."));
+	}
+
 	First.Reset();
 	Second.Reset();
 	Third.Reset();
@@ -1232,6 +1263,7 @@ bool FHyperAIStudioTrustedEditQueueTest::RunTest(const FString& Parameters)
 	Fifth.Reset();
 	Sixth.Reset();
 	Seventh.Reset();
+	Eighth.Reset();
 	Clock->AdvanceMonotonic(20000);
 	TestEqual(TEXT("held plans release their adapter pins"),
 		Host->UnregisterAdapter(Handle, Error), EHyperAIStudioDomainUnregisterResult::Removed);

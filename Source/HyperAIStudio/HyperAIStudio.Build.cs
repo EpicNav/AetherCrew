@@ -42,6 +42,7 @@ public class HyperAIStudio : ModuleRules
 			"Settings",
 			"Sockets",
 			"Terminal",
+			"FileSandboxCore",
 			"ToolsetRegistry",
 			"ToolMenus",
 			"ToolWidgets",

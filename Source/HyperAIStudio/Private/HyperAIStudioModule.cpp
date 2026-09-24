@@ -56,6 +56,7 @@
 #include "HyperAIStudioProjectMemory.h"
 #include "HyperAIStudioAgents.h"
 #include "HyperAIStudioLocalization.h"
+#include "HyperAIStudioSandbox.h"
 #include "HyperAIStudioSkills.h"
 #include "HyperAIStudioAgentChatHistory.h"
 #include "HyperAIStudioChatHistoryPrefs.h"
@@ -542,6 +543,15 @@ public:
 		FHyperAIStudioStyle::Register();
 		// HyperAI's text in its own language setting, before any of its windows exist.
 		HyperAIStudio::Localization::Startup();
+		// Sandbox Mode needs the editor and the File Sandbox, both ready after engine init.
+		if (GIsRunning && GEditor)
+		{
+			HyperAIStudio::Sandbox::Startup();
+		}
+		else
+		{
+			FCoreDelegates::GetOnPostEngineInit().AddLambda([]() { HyperAIStudio::Sandbox::Startup(); });
+		}
 		EnginePreExitHandle = FCoreDelegates::OnEnginePreExit.AddRaw(
 			this, &FHyperAIStudioModule::BeginEnginePreExit);
 		// Agent chats still working get a say before the editor closes.
@@ -1316,6 +1326,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 		HyperAIStudio::BenchmarkInstrumentation::Shutdown();
 #endif
+		HyperAIStudio::Sandbox::Shutdown();
 		// Waiting plans keep their packs' objects alive, so they go before the packs unregister.
 		FHyperAIStudioExecutionQueue::Clear();
 		FHyperAIStudioApprovalGate::Clear();

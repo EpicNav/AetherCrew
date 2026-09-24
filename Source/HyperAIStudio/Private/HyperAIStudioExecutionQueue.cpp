@@ -4,6 +4,7 @@
 
 #include "Containers/Ticker.h"
 #include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioSandbox.h"
 #include "HyperAIStudioTrustedExecutionInternal.h"
 
 namespace HyperAIStudio::ExecutionQueue::Private
@@ -90,6 +91,12 @@ namespace HyperAIStudio::ExecutionQueue::Private
 	/** Stages and submits on a free lane. A plan that waited past its seal is prepared again from the same inputs. */
 	bool Start(FHyperAIStudioTrustedExecutionHost& Host, const FQueuedEdit& Item, FString& OutStatus, FString& OutError)
 	{
+		// Checked as the edit starts, not when it queued: the sandbox that will hold its save must be open now.
+		if (!HyperAIStudio::Sandbox::CheckAgentEdit(OutError))
+		{
+			OutStatus = TEXT("sandbox_unavailable");
+			return false;
+		}
 		FHyperAIStudioTypedArtifactStageReceipt Receipt;
 		FHyperAIStudioTrustedExecutionDiagnostic Status;
 		bool bStaged = Host.StageExact(Item.Prepared, Item.OperationId, Receipt, Status, OutError);
@@ -274,6 +281,12 @@ bool FHyperAIStudioExecutionQueue::Query(const FString& OperationId, int32& OutP
 int32 FHyperAIStudioExecutionQueue::Num()
 {
 	return HyperAIStudio::ExecutionQueue::Private::Queue().Num();
+}
+
+bool FHyperAIStudioExecutionQueue::IsRunning()
+{
+	const TSharedPtr<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host = HyperAIStudio::ExecutionQueue::Private::CurrentHost();
+	return Host.IsValid() && Host->IsLaneBusy();
 }
 
 void FHyperAIStudioExecutionQueue::Clear()

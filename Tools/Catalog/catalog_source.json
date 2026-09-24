@@ -510,6 +510,14 @@
      ]
     },
     {
+     "name": "hyper_sandbox_status",
+     "cohort": "cohort.source.hyperaistudionativereadtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
      "name": "hyper_batch_query",
      "cohort": "cohort.source.hyperaistudiocontextsearchtoolsets.v1",
      "admission": "SourceCandidate",

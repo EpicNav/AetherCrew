@@ -248,20 +248,3 @@ namespace HyperAIStudio::Localization
 #endif
 }
 
-TArray<FString> UHyperAIStudioSettings::GetLanguageOptions()
-{
-	TArray<FString> Options = {TEXT("Editor"), TEXT("en")};
-	Options.Append(HyperAIStudio::Localization::GetTranslatedCultures());
-	return Options;
-}
-
-#if WITH_EDITOR
-void UHyperAIStudioSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
-{
-	Super::PostEditChangeProperty(PropertyChangedEvent);
-	if (PropertyChangedEvent.GetMemberPropertyName() == GET_MEMBER_NAME_CHECKED(UHyperAIStudioSettings, UILanguage))
-	{
-		HyperAIStudio::Localization::Refresh();
-	}
-}
-#endif

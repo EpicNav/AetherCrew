@@ -376,6 +376,10 @@ struct FHyperAIOperationStatus
 	/** What to do next, in one sentence. */
 	UPROPERTY()
 	FString NextAction;
+
+	/** Sandbox Mode holds what is saved: the project's files change only when the user approves. */
+	UPROPERTY()
+	bool bSandboxed = false;
 };
 
 USTRUCT(BlueprintType)
@@ -483,6 +487,29 @@ struct FHyperAIMemoryWriteReport
 	/** The fact's name. */
 	UPROPERTY()
 	FString Name;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAISandboxStatusReport
+{
+	GENERATED_BODY()
+
+	/** off, unavailable, waiting, active or foreign. */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString SandboxName;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	/** Files held for the user's review, as "added|removed|edited <project-relative path>", at most 200. */
+	UPROPERTY()
+	TArray<FString> HeldFiles;
+
+	UPROPERTY()
+	int32 HeldCount = 0;
 };
 
 /** PIE identity attached to a debug object or returned as a PIE world result. */
@@ -885,6 +912,13 @@ public:
 	/** Delete a fact an agent saved, by name. Facts the user wrote stay; ask the user to remove those. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Memory")
 	static FHyperAIMemoryWriteReport hyper_memory_forget(const FString& Name);
+
+	/**
+	 * Sandbox Mode: while it is active, what you save is held in a sandbox, not the project, until the user approves
+	 * or discards all of it. Lists the held files. Only the user decides; you cannot approve or discard.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Sandbox")
+	static FHyperAISandboxStatusReport hyper_sandbox_status();
 };
 
 struct FHyperAIStudioNativeToolManifestEntry

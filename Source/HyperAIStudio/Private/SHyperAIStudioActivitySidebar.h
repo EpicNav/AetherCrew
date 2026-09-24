@@ -6,6 +6,7 @@
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioAsyncJobHost.h"
+#include "HyperAIStudioSandbox.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
 
@@ -37,6 +38,7 @@ private:
 		TSharedPtr<FHyperAIStudioAsyncJobStatus> Job;
 		TSharedPtr<FHyperAIStudioActivityEntry> Entry;
 		TSharedPtr<FHyperAIStudioAgentScore> Score;
+		TSharedPtr<HyperAIStudio::Sandbox::FStatus> Sandbox;
 		FText Heading;
 	};
 	using FRowPtr = TSharedPtr<FRow>;
@@ -47,6 +49,7 @@ private:
 	TSharedRef<SWidget> BuildJobRow(const FHyperAIStudioAsyncJobStatus& Job);
 	TSharedRef<SWidget> BuildEntryRow(const FHyperAIStudioActivityEntry& Entry);
 	TSharedRef<SWidget> BuildScoreRow(const FHyperAIStudioAgentScore& Score);
+	TSharedRef<SWidget> BuildSandboxCard(const HyperAIStudio::Sandbox::FStatus& Status);
 	static void ShowTargetInContentBrowser(const FString& Target);
 
 	FSimpleDelegate OnClose;
@@ -56,4 +59,5 @@ private:
 	FDelegateHandle ActivityChangedHandle;
 	FDelegateHandle ApprovalChangedHandle;
 	FDelegateHandle JobChangedHandle;
+	FDelegateHandle SandboxChangedHandle;
 };
