@@ -1,5 +1,6 @@
 """Self-check for the harness's pure helpers: python Tools/Benchmark/check_bench.py [archived run dirs to scan]."""
 import json
+import re
 import sys
 import tempfile
 import time
@@ -35,6 +36,31 @@ def main():
         assert bench.usage_limit_message("claude", {"final": "Claude AI usage limit reached|1790190000", "is_error": True}, out)
         summary = "Done. " + "The level is lit and saved; the courtyard is symmetric. " * 5 + "No limit reached."
         assert not bench.usage_limit_message("claude", {"final": summary, "is_error": False}, out), "a real summary is not a limit"
+
+    # Task sets: "all" stays the five comparison tasks; the Blueprint set has a three-minute target.
+    assert [t[0] for t in bench.select_tasks("all")] == ["01-niagara", "02-material", "03-level", "04-umg", "05-animbp"]
+    assert [t[0] for t in bench.select_tasks("bp")] == ["06-bp-pickup", "07-bp-door", "08-bp-health"]
+    assert [t[0] for t in bench.select_tasks("01,06")] == ["01-niagara", "06-bp-pickup"]
+    assert bench.task_seconds("06-bp-pickup") == 360 and bench.task_seconds("01-niagara") == bench.TASK_SECONDS
+    assert all((bench.TASKS_DIR / f"{t[0]}.md").is_file() for t in bench.TASKS), "every task has its prompt"
+    assert "features.memories=false" in bench.codex_command("p", None, None), "Codex runs without the user's memories"
+    assert bench.claude_memory_dir().parent.name == re.sub(r"[^A-Za-z0-9]", "-", str(bench.BENCH_ROOT))
+    with tempfile.TemporaryDirectory() as scratch:
+        run = Path(scratch)
+        def record(task, ok, seconds):
+            row = {"agent": "claude", "task": task, "pass": ok, "seconds": seconds, "stop_reason": "completed",
+                   "accounting": {"requests": 10, "state_changing": 2, "failed": 0}, "verification": {"checks": []}}
+            if task in bench.TARGET_SECONDS:
+                row.update(target_seconds=180, within_target=ok and seconds <= 180)
+            return row
+        meta = {"run_id": "check", "plugin_commit": "0", "started": "now", "limits": {"seconds": 900, "state_changing": 45},
+                "codex_model": "m", "codex_effort": "e", "claude_model": "m", "claude_effort": "e"}
+        records = [record("06-bp-pickup", True, 150), record("06-bp-pickup", True, 200), record("07-bp-door", False, 100),
+                   record("01-niagara", True, 500)]
+        (run / "results.json").write_text(json.dumps({"meta": meta, "records": records}), encoding="utf-8")
+        summary = bench.write_report(run)["claude"]
+        assert summary["targeted"] == 3 and summary["within_target"] == 1, summary
+        assert summary["median_seconds"] == 175, summary
 
     # Archived runs: replay each transcript through the parser and report what the check would have said.
     for run_dir in map(Path, sys.argv[1:]):

@@ -4852,6 +4852,7 @@ void BuildAgentInstructionBlocks(
 		TEXT("## Context Packs") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("- Only read `.hyperai/context/` files when the prompt explicitly references them.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Domain Guides") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("- To build or change a gameplay Blueprint, follow the `unreal-blueprint` skill (`.agents/skills/unreal-blueprint/SKILL.md`): the whole Blueprint in one script, with the node IDs it needs.") LINE_TERMINATOR +
 		TEXT("- Before designing or changing an Animation Blueprint, read `.hyperai/docs/HyperAIStudio-AnimationCookbook.md`.") LINE_TERMINATOR +
 		TEXT("- Before designing or changing a UAF (Unreal Animation Framework) animation graph, read `.hyperai/docs/HyperAIStudio-UAFCookbook.md`.") LINE_TERMINATOR +
 		TEXT("- Before generating a reference image, read `.hyperai/docs/HyperAIStudio-ImageGenCookbook.md`.") LINE_TERMINATOR LINE_TERMINATOR +

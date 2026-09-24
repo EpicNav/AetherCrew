@@ -78,6 +78,14 @@ again (use a new asset name, or reuse the existing Blueprint instead of `create`
   `t(B + 'find_node_types', {'graph': graph, 'type_id_filter': 'DestroyActor', 'context_pins': []})` returns IDs such as
   `Actor|DestroyActor`. Put all the lookups in one script with a dict comprehension, then write the Blueprint in the next.
 - Grammar reference, only when needed: `get_graph_dsl_docs` on `editor_toolset.toolsets.blueprint.BlueprintTools`.
+- Name bools without a `b`: a variable `bOpen` gets the node IDs `Variables|Default|GetOpen` and `SetOpen`.
+- A component is a variable: `(Variables|Default|GetDoor)` is the component named `Door`.
+- Another Blueprint's variable `X` is `Class|<its name without underscores>|GetX` and `SetX`, with the object as
+  `:self` and the value named after the variable: `(Class|BPBenchGameMode|SetScore :self mode :Score 5)`. A positional
+  argument after a named one is refused.
+- To cast to a Blueprint you just made, `compile_blueprint` it first; then `Utilities|Casting|CastTo<BP_Name>` exists.
+- `create` fails when the asset exists. A script you may run again starts with
+  `if t(S + 'exists', {'path': p}): t(S + 'delete', {'path': p})`.
 
 ## Node type IDs confirmed in UE 5.8
 
@@ -97,6 +105,10 @@ again (use a new asset name, or reuse the existing Blueprint instead of `create`
 | Clamp a float | `Math|Float|Clamp(Float)` |
 | Deal damage / the GameMode | `Game|Damage|ApplyDamage`, `Game|GetGameMode` |
 | Events named like their "AddEvent" type | `(event Game|Damage|EventAnyDamage ...)` for `AddEvent|Game|Damage|EventAnyDamage` |
+| Overlap ends | `(event Collision|EventActorEndOverlap (OtherActor) ...)` |
+| Hide it / turn its collision off | `Rendering|SetActorHiddenInGame :bNewHidden`, `Collision|SetActorEnableCollision :bNewActorEnableCollision` |
+| Move a value toward a target | `Math|Interpolation|FInterptoConstant` (Current Target DeltaTime Speed), `Math|Interpolation|RInterpTo` |
+| Turn a component | `Transformation|SetRelativeRotation :self component :NewRotation rotator` |
 
 There is no Timeline node in the DSL: animate with `EventTick`, or with a looping timer.
 
@@ -122,35 +134,51 @@ and only then write the Event Graph that calls `(CallFunction|Die)`.
 
 ## Patterns
 
-- **Pickup:** the script above. Add score to the player with a variable on the pawn class and
-  `Variables|Default|SetScore` on the cast pawn, or through the GameMode.
+The pickup, door and health patterns below pass the benchmark's runtime checks in a game world. Each is one
+`write_graph_dsl` after the components and variables exist.
+
+- **Pickup that scores** (Game Mode `BP_BenchGameMode` with `int` Score, compiled first; pickup with `int` Points):
+  ```
+  (event Collision|EventActorBeginOverlap (OtherActor)
+    (bind pawn (Utilities|Casting|CastToPawn :Object OtherActor)
+      (:then
+        (bind mode (Utilities|Casting|CastToBP_BenchGameMode :Object (Game|GetGameMode))
+          (:then
+            (Class|BPBenchGameMode|SetScore :self mode :Score (+ (Class|BPBenchGameMode|GetScore :self mode) (Variables|Default|GetPoints)))
+            (Actor|DestroyActor))
+          (:CastFailed)))
+      (:CastFailed)))
+  ```
+  Spin it with a `RotatingMovementComponent` whose `RotationRate` is `{"Pitch": 0, "Yaw": 90, "Roll": 0}`.
 - **Spawner:** a `Spawn` function graph holding
   `(fn Spawn () (Game|SpawnActorfromClass :Class "/Game/Path/BP_Thing.BP_Thing_C" :SpawnTransform (Transformation|GetActorTransform)))`,
   and `(event EventBeginPlay (Utilities|Time|SetTimerbyFunctionName :Object self :FunctionName "Spawn" :Time 2.0 :bLooping true))`.
-- **Health** (built and compiled this way):
+- **Health that dies and respawns** (`float` Health, default 100, set on the default object):
   ```
-  ; graph Die, from add_function_graph
-  (fn Die ()
-    (Development|PrintString "dead")
-    (Actor|DestroyActor))
+  ; graph Respawn, from add_function_graph
+  (fn Respawn ()
+    (Variables|Default|SetHealth 100.0)
+    (Rendering|SetActorHiddenInGame :bNewHidden false)
+    (Collision|SetActorEnableCollision :bNewActorEnableCollision true))
   ; Event Graph
   (event Game|Damage|EventAnyDamage (Damage)
     (Variables|Default|SetHealth (Math|Float|Clamp(Float) (- (Variables|Default|GetHealth) Damage) 0.0 100.0))
     (if (<= (Variables|Default|GetHealth) 0.0)
-      (CallFunction|Die)))
+      (Rendering|SetActorHiddenInGame :bNewHidden true)
+      (Collision|SetActorEnableCollision :bNewActorEnableCollision false)
+      (Utilities|Time|SetTimerbyFunctionName :Object self :FunctionName "Respawn" :Time 2.0 :bLooping false)))
   ```
   Other actors hurt it with `Game|Damage|ApplyDamage`.
-- **Door** (built and compiled this way, with `bool` IsOpening and `float` OpenYaw):
+- **Door that opens and closes** (a Static Mesh component `Door`, a Box component around it, `bool` Open,
+  `float` Yaw):
   ```
   (event Collision|EventActorBeginOverlap (OtherActor)
-    (Variables|Default|SetIsOpening true))
+    (Variables|Default|SetOpen true))
+  (event Collision|EventActorEndOverlap (OtherActor)
+    (Variables|Default|SetOpen false))
   (event EventTick (DeltaSeconds)
-    (if (and (Variables|Default|GetIsOpening) (< (Variables|Default|GetOpenYaw) 90.0))
-      (bind step (* DeltaSeconds 90.0))
-      (Transformation|AddActorLocalRotation :DeltaRotation (Math|Rotator|MakeRotator :Yaw step))
-      (Variables|Default|SetOpenYaw (+ (Variables|Default|GetOpenYaw) step))
-      (else
-        (Variables|Default|SetIsOpening false))))
+    (Variables|Default|SetYaw (Math|Interpolation|FInterptoConstant (Variables|Default|GetYaw) (select (Variables|Default|GetOpen) 90.0 0.0) DeltaSeconds 90.0))
+    (Transformation|SetRelativeRotation :self (Variables|Default|GetDoor) :NewRotation (Math|Rotator|MakeRotator :Yaw (Variables|Default|GetYaw))))
   ```
 
 After the Blueprint exists, place it with `editor_toolset.toolsets.scene.SceneTools` or a HyperAI level plan, and prove

@@ -48,7 +48,15 @@ TASKS = (
     ("03-level", "HyperAIBench.Verify.03Level", "Level"),
     ("04-umg", "HyperAIBench.Verify.04UMG", "UI"),
     ("05-animbp", "HyperAIBench.Verify.05AnimBP", "Anim"),
+    ("06-bp-pickup", "HyperAIBench.Verify.06Pickup", "BP"),
+    ("07-bp-door", "HyperAIBench.Verify.07Door", "BP"),
+    ("08-bp-health", "HyperAIBench.Verify.08Health", "BP"),
 )
+# "all" is the five tasks compared with NeoStack's pilot; "bp" is the Blueprint speed set, whose target is three
+# minutes. Its runs may take twice that, so a miss still shows by how much.
+PARITY_TASKS = TASKS[:5]
+BLUEPRINT_TASKS = TASKS[5:]
+TARGET_SECONDS = {task[0]: 3 * 60 for task in BLUEPRINT_TASKS}
 
 # HyperAIStudio lists these as optional plugin dependencies; a project has to enable them itself, or the
 # modules that need them cannot build. The toolset plugins are Epic's, which HyperAIStudio builds on.
@@ -403,7 +411,9 @@ def cmd_editor(args):
 
 def select_tasks(spec):
     if spec in (None, "", "all"):
-        return list(TASKS)
+        return list(PARITY_TASKS)
+    if spec == "bp":
+        return list(BLUEPRINT_TASKS)
     wanted = {part.strip() for part in spec.split(",")}
     chosen = [task for task in TASKS if task[0] in wanted or task[0].split("-")[0] in wanted]
     if not chosen:
@@ -461,6 +471,10 @@ def cmd_verify(args):
 
 TASK_SECONDS = 15 * 60
 MAX_STATE_CHANGING = 45
+
+
+def task_seconds(task_id):
+    return 2 * TARGET_SECONDS[task_id] if task_id in TARGET_SECONDS else TASK_SECONDS
 # Epic's tool names carry their effect in the leading verb; anything not listed here is counted as a read.
 MUTATING_VERBS = {
     "add", "apply", "append", "assign", "attach", "bake", "bind", "build", "clear", "compile", "connect",
@@ -613,8 +627,9 @@ def parse_codex(event, acct, state):
 
 
 def codex_command(prompt, model, effort):
+    # Codex's memories are the user's, across projects: a run neither reads them nor adds to them.
     command = ["codex", "exec", "--json", "--skip-git-repo-check", "-C", str(BENCH_ROOT), "-s", "read-only",
-               "-c", 'approval_policy="never"', "-c", 'web_search="disabled"',
+               "-c", 'approval_policy="never"', "-c", 'web_search="disabled"', "-c", "features.memories=false",
                "--disable", "computer_use", "--disable", "browser_use", "--disable", "in_app_browser",
                "-c", f'mcp_servers.unreal-mcp.url="{MCP_URL}"', "-c", "mcp_servers.unreal-mcp.tool_timeout_sec=300"]
     for tool in ("list_toolsets", "describe_toolset", "call_tool"):
@@ -633,6 +648,11 @@ def codex_command(prompt, model, effort):
     if effort:
         command += ["-c", f'model_reasoning_effort="{effort}"']
     return command + [prompt]
+
+
+def claude_memory_dir():
+    """Claude Code's own memory for the bench project, where a run would read what earlier runs learned."""
+    return Path.home() / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(BENCH_ROOT)) / "memory"
 
 
 def claude_executable():
@@ -663,7 +683,7 @@ def kill_tree(process):
     subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True)
 
 
-def run_agent(agent, prompt, out_dir, args):
+def run_agent(agent, prompt, out_dir, args, seconds=TASK_SECONDS):
     """Runs one agent on one task, counting as it goes, and stops it at either limit."""
     import queue
     import threading
@@ -693,7 +713,7 @@ def run_agent(agent, prompt, out_dir, args):
     threading.Thread(target=lambda: [lines.put(line) for line in process.stdout] + [lines.put(None)], daemon=True).start()
     stop_reason = "completed"
     while True:
-        if time.time() - started > TASK_SECONDS:
+        if time.time() - started > seconds:
             stop_reason = "time_limit"
             kill_tree(process)
             break
@@ -847,11 +867,17 @@ def run_attempt(agent, task, out_dir, args):
     prompt = PROMPT_PREAMBLE + "\n\n" + (TASKS_DIR / f"{task_id}.md").read_text(encoding="utf-8").strip()
     stop_editor()
     wipe_bench_content()
+    if agent == "claude":
+        # Every run starts from nothing an earlier run learned; what this one writes is kept with it below.
+        shutil.rmtree(claude_memory_dir(), ignore_errors=True)
     start_editor(timeout=900)
     offset = editor_log_size()
-    log(f"{agent} / {task_id}: running (limit {TASK_SECONDS // 60} min, {MAX_STATE_CHANGING} state-changing requests).")
-    record = run_agent(agent, prompt, out_dir, args)
+    seconds = task_seconds(task_id)
+    log(f"{agent} / {task_id}: running (limit {seconds // 60} min, {MAX_STATE_CHANGING} state-changing requests).")
+    record = run_agent(agent, prompt, out_dir, args, seconds)
     record["editor_log_tool_calls"] = editor_log_tool_lines(offset)
+    if agent == "claude" and claude_memory_dir().is_dir():
+        shutil.copytree(claude_memory_dir(), out_dir / "agent-memory", dirs_exist_ok=True)
     limit = usage_limit_message(agent, record, out_dir)
     if limit:
         stop_editor()
@@ -867,6 +893,9 @@ def run_attempt(agent, task, out_dir, args):
     verification = verify([task], out_dir / "verify.log")[task_id]
     copy_evidence(task_id, out_dir)
     record.update({"task": task_id, "pass": bool(verification.get("pass")), "verification": verification, "out_dir": str(out_dir)})
+    if task_id in TARGET_SECONDS:
+        record["target_seconds"] = TARGET_SECONDS[task_id]
+        record["within_target"] = record["pass"] and record["seconds"] <= TARGET_SECONDS[task_id]
     (out_dir / "record.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
     acct = record["accounting"]
     log(f"{agent} / {task_id}: {'PASS' if record['pass'] else 'FAIL'} in {record['seconds']:.0f}s, "
@@ -888,7 +917,8 @@ def cmd_run(args):
             "agents": agents, "tasks": [t[0] for t in tasks], "repeats": args.repeats,
             "codex_model": args.codex_model, "codex_effort": args.codex_effort,
             "claude_model": args.claude_model, "claude_effort": args.claude_effort,
-            "limits": {"seconds": TASK_SECONDS, "state_changing": MAX_STATE_CHANGING}}
+            "limits": {"seconds": TASK_SECONDS, "state_changing": MAX_STATE_CHANGING,
+                       "task_seconds": {t[0]: task_seconds(t[0]) for t in tasks}}}
     records = []
     for repeat in range(args.repeats):
         for agent in agents:
@@ -940,10 +970,15 @@ def write_report(run_dir):
             "requests": sum(requests), "median_requests": statistics.median(requests) if requests else 0,
             "failed_requests": sum(r["accounting"]["failed"] for r in mine),
             "minutes": round(sum(r["seconds"] for r in mine) / 60, 1),
+            "median_seconds": statistics.median(r["seconds"] for r in mine) if mine else 0,
+            "targeted": sum("target_seconds" in r for r in mine),
+            "within_target": sum(bool(r.get("within_target")) for r in mine),
         }
         s = summary[agent]
-        rows.append(f"<tr><td>{html.escape(agent)}</td><td>{s['passed']} / {s['tasks']}</td><td>{s['requests']}</td>"
-                    f"<td>{s['median_requests']}</td><td>{s['failed_requests']}</td><td>{s['minutes']} min</td></tr>")
+        target = f"{s['within_target']} / {s['targeted']}" if s["targeted"] else "-"
+        rows.append(f"<tr><td>{html.escape(agent)}</td><td>{s['passed']} / {s['tasks']}</td><td>{target}</td><td>{s['requests']}</td>"
+                    f"<td>{s['median_requests']}</td><td>{s['failed_requests']}</td><td>{s['minutes']} min</td>"
+                    f"<td>{s['median_seconds'] / 60:.1f} min</td></tr>")
     details = []
     for r in records:
         acct = r["accounting"]
@@ -964,7 +999,7 @@ tr.fail td:nth-child(3){{color:#b3261e;font-weight:600}}code{{background:#f3f3f3
 Limits: {meta['limits']['seconds'] // 60} minutes and {meta['limits']['state_changing']} state-changing requests per task.
 Models: Codex <code>{html.escape(str(meta['codex_model']))}</code> ({html.escape(str(meta['codex_effort']))}),
 Claude <code>{html.escape(str(meta['claude_model']))}</code> ({html.escape(str(meta['claude_effort']))}).</p>
-<table><tr><th>Agent</th><th>Tasks passed</th><th>Total requests</th><th>Median / task</th><th>Failed requests</th><th>Total time</th></tr>
+<table><tr><th>Agent</th><th>Tasks passed</th><th>Passed within target</th><th>Total requests</th><th>Median / task</th><th>Failed requests</th><th>Total time</th><th>Median time</th></tr>
 {''.join(rows)}</table>
 <h2>Per task</h2>
 <table><tr><th>Agent</th><th>Task</th><th>Result</th><th>Requests</th><th>State-changing</th><th>Failed</th><th>Time</th><th>Stopped</th><th>Why</th></tr>
@@ -981,8 +1016,10 @@ def cmd_report(args):
     run_dir = RUNS_DIR / args.run_id if args.run_id else max((p for p in RUNS_DIR.iterdir() if (p / "results.json").exists()), key=lambda p: p.stat().st_mtime)
     summary = write_report(run_dir)
     for agent, s in summary.items():
-        log(f"{agent}: {s['passed']}/{s['tasks']} passed, {s['requests']} requests (median {s['median_requests']}), "
-            f"{s['failed_requests']} failed, {s['minutes']} min")
+        log(f"{agent}: {s['passed']}/{s['tasks']} passed"
+            + (f" ({s['within_target']} within target)" if s["targeted"] else "")
+            + f", {s['requests']} requests (median {s['median_requests']}), {s['failed_requests']} failed, "
+            f"{s['minutes']} min (median {s['median_seconds'] / 60:.1f} min)")
     log(f"Scorecard: {run_dir / 'scorecard.html'}")
 
 
@@ -1009,7 +1046,7 @@ def main(argv=None):
 
     run = sub.add_parser("run", help="run agents on tasks, verify, and write a scorecard")
     run.add_argument("--agent", choices=("codex", "claude", "both"), default="both")
-    run.add_argument("--task", default="all", help="all, or a comma list such as 01,03")
+    run.add_argument("--task", default="all", help="all (the five comparison tasks), bp (the Blueprint speed tasks), or a comma list such as 01,06")
     run.add_argument("--repeats", type=int, default=1)
     run.add_argument("--label", default="")
     run.add_argument("--codex-model", default="gpt-6-sol")

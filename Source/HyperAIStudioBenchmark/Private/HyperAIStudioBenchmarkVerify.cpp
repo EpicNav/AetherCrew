@@ -16,7 +16,9 @@
 #include "Animation/WidgetAnimation.h"
 #include "Blueprint/WidgetTree.h"
 #include "Camera/CameraComponent.h"
+#include "Components/BoxComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
+#include "Components/SphereComponent.h"
 #include "Channels/MovieSceneFloatChannel.h"
 #include "Components/Border.h"
 #include "Components/DirectionalLightComponent.h"
@@ -30,13 +32,20 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraphSchema_K2.h"
 #include "Editor.h"
+#include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
 #include "ImageUtils.h"
 #include "FileHelpers.h"
+#include "GameFramework/DamageType.h"
+#include "GameFramework/DefaultPawn.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/RotatingMovementComponent.h"
 #include "K2Node_VariableGet.h"
+#include "Kismet/GameplayStatics.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "MaterialShared.h"
@@ -63,6 +72,7 @@
 #include "Serialization/JsonWriter.h"
 #include "ShaderCompiler.h"
 #include "TextureResource.h"
+#include "Tests/AutomationCommon.h"
 #include "Tracks/MovieSceneFloatTrack.h"
 #include "WidgetBlueprint.h"
 #include "WorldPartition/WorldPartition.h"
@@ -970,6 +980,280 @@ bool FHyperAIBenchVerifyAnimBP::RunTest(const FString& Parameters)
 			}
 		}
 		Report.Add(TEXT("abp.output"), bOutput, TEXT("the output pose is fed by the state machine"));
+	}
+	Report.Finish(*this);
+	return true;
+}
+
+namespace HyperAIStudio::Benchmark
+{
+	const FVector ParkedPlayer(0.0, 5000.0, 100.0);
+
+	/**
+	 * A game world ticked by hand, where Blueprint logic runs as in play (begin play, ticks, overlaps, timers and
+	 * damage) under the given game mode, with a possessed player pawn parked out of the way. No PIE and no input:
+	 * the verifier moves the pawn itself, so a check measures the Blueprint, not a player's aim. The engine's own
+	 * test world does the setup, the frame counting and the teardown.
+	 */
+	struct FGameWorld
+	{
+		FTestWorldWrapper Wrapper;
+		UWorld* World = nullptr;
+		ADefaultPawn* Player = nullptr;
+
+		explicit FGameWorld(UClass* GameMode)
+		{
+			if (!Wrapper.CreateTestWorld(EWorldType::Game)) return;
+			World = Wrapper.GetTestWorld();
+			World->GetWorldSettings()->DefaultGameMode = GameMode ? GameMode : AGameModeBase::StaticClass();
+			if (!Wrapper.BeginPlayInTestWorld()) return;
+			FActorSpawnParameters Params;
+			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			Player = World->SpawnActor<ADefaultPawn>(ParkedPlayer, FRotator::ZeroRotator, Params);
+			// The game mode gives the controller a player state, which is what makes the pawn player-controlled.
+			APlayerController* Controller = World->SpawnActor<APlayerController>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+			if (Controller && Player) Controller->Possess(Player);
+		}
+
+		~FGameWorld()
+		{
+			// Collected now, while it is whole, rather than in some later compile's garbage collection.
+			if (World) Wrapper.DestroyTestWorld(/*bForceGarbageCollect=*/true);
+		}
+
+		AActor* Spawn(UClass* Class, const FVector& Location)
+		{
+			FActorSpawnParameters Params;
+			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			return World->SpawnActor<AActor>(Class, Location, FRotator::ZeroRotator, Params);
+		}
+
+		void Run(const float Seconds)
+		{
+			constexpr float Frame = 1.f / 30.f;
+			for (float Time = 0.f; Time < Seconds; Time += Frame) Wrapper.TickTestWorld(Frame);
+		}
+
+		void MovePlayer(const FVector& Location)
+		{
+			if (Player) Player->SetActorLocation(Location, /*bSweep=*/false, nullptr, ETeleportType::TeleportPhysics);
+		}
+
+		bool Ready() const
+		{
+			return World && World->HasBegunPlay() && World->GetAuthGameMode() && Player && Player->IsPlayerControlled();
+		}
+	};
+
+	/** Loads a saved Blueprint, compiles it and checks its parent; returns its class when it compiles. */
+	UClass* CheckBlueprint(FReport& Report, const FString& Key, const FString& PackageName, const UClass* Parent)
+	{
+		UBlueprint* Blueprint = LoadSaved<UBlueprint>(PackageName);
+		const FString Name = FPackageName::GetShortName(PackageName);
+		if (!Report.Add(Key + TEXT(".saved"), Blueprint != nullptr, Name + (Blueprint ? TEXT(" loads from disk") : TEXT(" is not saved as a Blueprint"))))
+		{
+			return nullptr;
+		}
+		Report.Add(Key + TEXT(".parent"), Blueprint->ParentClass && Blueprint->ParentClass->IsChildOf(Parent),
+			Blueprint->ParentClass ? TEXT("parent ") + Blueprint->ParentClass->GetName() : FString(TEXT("no parent class")));
+		FKismetEditorUtilities::CompileBlueprint(Blueprint);
+		const bool bCompiles = Blueprint->Status != BS_Error && Blueprint->GeneratedClass;
+		Report.Add(Key + TEXT(".compiles"), bCompiles, bCompiles ? TEXT("compiles") : TEXT("compile errors"));
+		return bCompiles ? Blueprint->GeneratedClass.Get() : nullptr;
+	}
+
+	const FNumericProperty* NumberProperty(const UObject* Object, const TCHAR* Name)
+	{
+		return Object ? FindFProperty<FNumericProperty>(Object->GetClass(), Name) : nullptr;
+	}
+
+	TOptional<double> ReadNumber(const UObject* Object, const TCHAR* Name)
+	{
+		const FNumericProperty* Property = NumberProperty(Object, Name);
+		if (!Property) return {};
+		const void* Value = Property->ContainerPtrToValuePtr<void>(Object);
+		return Property->IsFloatingPoint() ? Property->GetFloatingPointPropertyValue(Value) : static_cast<double>(Property->GetSignedIntPropertyValue(Value));
+	}
+
+	bool Is(const TOptional<double>& Value, const double Expected)
+	{
+		return Value.IsSet() && FMath::IsNearlyEqual(Value.GetValue(), Expected, 0.01);
+	}
+
+	FString NumberText(const TOptional<double>& Value)
+	{
+		return Value.IsSet() ? FString::SanitizeFloat(Value.GetValue()) : FString(TEXT("no such number variable"));
+	}
+
+	template <typename T>
+	T* FindComponent(const AActor* Actor, const TCHAR* Name = nullptr)
+	{
+		TInlineComponentArray<T*> Components(Actor);
+		for (T* Component : Components)
+		{
+			if (!Name || Component->GetName() == Name) return Component;
+		}
+		return nullptr;
+	}
+
+	const UStaticMeshComponent* VisibleMesh(const AActor* Actor)
+	{
+		TInlineComponentArray<UStaticMeshComponent*> Meshes(Actor);
+		for (const UStaticMeshComponent* Mesh : Meshes)
+		{
+			if (Mesh->GetStaticMesh()) return Mesh;
+		}
+		return nullptr;
+	}
+
+	double WorldYaw(const USceneComponent& Component)
+	{
+		return FRotator::NormalizeAxis(Component.GetComponentRotation().Yaw);
+	}
+
+	bool Gone(const AActor* Actor)
+	{
+		return !IsValid(Actor) || Actor->IsActorBeingDestroyed();
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIBenchVerifyPickup, "HyperAIBench.Verify.06Pickup", HyperAIStudio::Benchmark::Flags)
+
+bool FHyperAIBenchVerifyPickup::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Benchmark;
+	FReport Report(TEXT("06-bp-pickup"));
+	UClass* GameMode = CheckBlueprint(Report, TEXT("gamemode"), TEXT("/Game/Bench/BP/BP_BenchGameMode"), AGameModeBase::StaticClass());
+	UClass* Pickup = CheckBlueprint(Report, TEXT("pickup"), TEXT("/Game/Bench/BP/BP_Pickup"), AActor::StaticClass());
+	if (GameMode)
+	{
+		const TOptional<double> Score = ReadNumber(GameMode->GetDefaultObject(), TEXT("Score"));
+		const FNumericProperty* Property = NumberProperty(GameMode->GetDefaultObject(), TEXT("Score"));
+		Report.Add(TEXT("gamemode.score"), Property && Property->IsInteger() && Is(Score, 0.0), TEXT("Score: ") + NumberText(Score));
+	}
+	if (Pickup)
+	{
+		const TOptional<double> Points = ReadNumber(Pickup->GetDefaultObject(), TEXT("Points"));
+		const FNumericProperty* Property = NumberProperty(Pickup->GetDefaultObject(), TEXT("Points"));
+		Report.Add(TEXT("pickup.points"), Property && Property->IsInteger() && Is(Points, 10.0), TEXT("Points: ") + NumberText(Points));
+	}
+	if (GameMode && Pickup)
+	{
+		FGameWorld Game(GameMode);
+		AActor* First = Game.Spawn(Pickup, FVector(0.0, 0.0, 100.0));
+		AActor* Second = Game.Spawn(Pickup, FVector(1000.0, 0.0, 100.0));
+		const UStaticMeshComponent* Mesh = First ? VisibleMesh(First) : nullptr;
+		const USphereComponent* Sphere = First ? FindComponent<USphereComponent>(First) : nullptr;
+		const URotatingMovementComponent* Spin = First ? FindComponent<URotatingMovementComponent>(First) : nullptr;
+		Report.Add(TEXT("pickup.mesh"), Mesh != nullptr, Mesh ? Mesh->GetStaticMesh()->GetName() : FString(TEXT("no Static Mesh component with a mesh")));
+		Report.Add(TEXT("pickup.sphere"), Sphere && FMath::Abs(Sphere->GetUnscaledSphereRadius() - 100.f) <= 30.f,
+			Sphere ? FString::Printf(TEXT("sphere radius %.0f"), Sphere->GetUnscaledSphereRadius()) : FString(TEXT("no Sphere collision")));
+		Report.Add(TEXT("pickup.rotating_movement"), Spin && !FMath::IsNearlyZero(Spin->RotationRate.Yaw),
+			Spin ? FString::Printf(TEXT("yaw rate %.0f"), Spin->RotationRate.Yaw) : FString(TEXT("no Rotating Movement")));
+		if (Report.Add(TEXT("runtime.world"), Game.Ready() && First && Second, TEXT("a game world with BP_BenchGameMode and a player pawn")) && Mesh)
+		{
+			const double YawBefore = WorldYaw(*Mesh);
+			Game.Run(1.f);
+			const double Turned = FMath::Abs(FRotator::NormalizeAxis(WorldYaw(*Mesh) - YawBefore));
+			Report.Add(TEXT("runtime.spins"), Turned >= 10.0, FString::Printf(TEXT("turned %.0f degrees in a second"), Turned));
+			Game.MovePlayer(First->GetActorLocation());
+			Game.Run(0.3f);
+			const AGameModeBase* Mode = Game.World->GetAuthGameMode();
+			const TOptional<double> AfterOne = ReadNumber(Mode, TEXT("Score"));
+			Report.Add(TEXT("runtime.collected"), Gone(First), Gone(First) ? TEXT("the pickup the player touched is gone") : TEXT("the pickup the player touched is still there"));
+			Report.Add(TEXT("runtime.score"), Is(AfterOne, 10.0), TEXT("Score after one pickup: ") + NumberText(AfterOne));
+			Game.MovePlayer(Second->GetActorLocation());
+			Game.Run(0.3f);
+			const TOptional<double> AfterTwo = ReadNumber(Mode, TEXT("Score"));
+			Report.Add(TEXT("runtime.adds_up"), Gone(Second) && Is(AfterTwo, 20.0), TEXT("Score after two pickups: ") + NumberText(AfterTwo));
+		}
+	}
+	Report.Finish(*this);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIBenchVerifyDoor, "HyperAIBench.Verify.07Door", HyperAIStudio::Benchmark::Flags)
+
+bool FHyperAIBenchVerifyDoor::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Benchmark;
+	FReport Report(TEXT("07-bp-door"));
+	if (UClass* Door = CheckBlueprint(Report, TEXT("door"), TEXT("/Game/Bench/BP/BP_Door"), AActor::StaticClass()))
+	{
+		FGameWorld Game(nullptr);
+		AActor* Actor = Game.Spawn(Door, FVector::ZeroVector);
+		const UStaticMeshComponent* Panel = Actor ? FindComponent<UStaticMeshComponent>(Actor, TEXT("Door")) : nullptr;
+		const UBoxComponent* Trigger = Actor ? FindComponent<UBoxComponent>(Actor) : nullptr;
+		Report.Add(TEXT("door.mesh"), Panel && Panel->GetStaticMesh(), Panel ? (Panel->GetStaticMesh() ? Panel->GetStaticMesh()->GetName() : FString(TEXT("Door has no mesh")))
+			: FString(TEXT("no Static Mesh component named Door")));
+		const FVector Extent = Trigger ? Trigger->GetUnscaledBoxExtent() : FVector::ZeroVector;
+		Report.Add(TEXT("door.trigger"), Trigger && Extent.GetMin() >= 95.0,
+			Trigger ? FString::Printf(TEXT("box extent %.0f x %.0f x %.0f"), Extent.X, Extent.Y, Extent.Z) : FString(TEXT("no Box collision")));
+		if (Report.Add(TEXT("runtime.world"), Game.Ready(), TEXT("a game world with a player pawn")) && Panel && Trigger)
+		{
+			Game.Run(0.2f);
+			const double Closed = WorldYaw(*Panel);
+			Report.Add(TEXT("runtime.starts_closed"), FMath::Abs(Closed) <= 2.0, FString::Printf(TEXT("yaw %.0f before anyone comes"), Closed));
+			Game.MovePlayer(Trigger->GetComponentLocation());
+			Game.Run(0.3f);
+			const double Opening = FMath::Abs(WorldYaw(*Panel));
+			Report.Add(TEXT("runtime.opens_smoothly"), Opening > 3.0 && Opening < 87.0, FString::Printf(TEXT("yaw %.0f 0.3 s after the player came in"), Opening));
+			Game.Run(1.5f);
+			const double Open = FMath::Abs(WorldYaw(*Panel));
+			Report.Add(TEXT("runtime.opens"), FMath::Abs(Open - 90.0) <= 5.0, FString::Printf(TEXT("yaw %.0f 1.8 s after the player came in"), Open));
+			Game.MovePlayer(ParkedPlayer);
+			Game.Run(2.f);
+			const double Shut = FMath::Abs(WorldYaw(*Panel));
+			Report.Add(TEXT("runtime.closes"), Shut <= 5.0, FString::Printf(TEXT("yaw %.0f 2 s after the player left"), Shut));
+		}
+	}
+	Report.Finish(*this);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIBenchVerifyHealth, "HyperAIBench.Verify.08Health", HyperAIStudio::Benchmark::Flags)
+
+bool FHyperAIBenchVerifyHealth::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Benchmark;
+	FReport Report(TEXT("08-bp-health"));
+	if (UClass* Target = CheckBlueprint(Report, TEXT("target"), TEXT("/Game/Bench/BP/BP_Target"), AActor::StaticClass()))
+	{
+		const TOptional<double> Start = ReadNumber(Target->GetDefaultObject(), TEXT("Health"));
+		const FNumericProperty* Property = NumberProperty(Target->GetDefaultObject(), TEXT("Health"));
+		Report.Add(TEXT("target.health"), Property && Property->IsFloatingPoint() && Is(Start, 100.0),
+			TEXT("Health: ") + NumberText(Start));
+		FGameWorld Game(nullptr);
+		AActor* Actor = Game.Spawn(Target, FVector::ZeroVector);
+		Report.Add(TEXT("target.mesh"), Actor && VisibleMesh(Actor), TEXT("a Static Mesh component with a mesh"));
+		if (Report.Add(TEXT("runtime.world"), Game.Ready() && Actor, TEXT("a game world with the target in it")))
+		{
+			Game.Run(0.1f);
+			UGameplayStatics::ApplyDamage(Actor, 30.f, nullptr, nullptr, UDamageType::StaticClass());
+			Game.Run(0.1f);
+			const TOptional<double> Hurt = ReadNumber(Actor, TEXT("Health"));
+			Report.Add(TEXT("runtime.damage"), Is(Hurt, 70.0), TEXT("Health after 30 damage: ") + NumberText(Hurt));
+			Report.Add(TEXT("runtime.alive"), !Gone(Actor) && !Actor->IsHidden() && Actor->GetActorEnableCollision(), TEXT("still visible, with collision, while Health is above 0"));
+			UGameplayStatics::ApplyDamage(Actor, 80.f, nullptr, nullptr, UDamageType::StaticClass());
+			Game.Run(0.1f);
+			if (Report.Add(TEXT("runtime.same_actor"), !Gone(Actor), Gone(Actor) ? TEXT("it was destroyed; the task hides it instead") : TEXT("the same actor dies and respawns")))
+			{
+				const TOptional<double> Dead = ReadNumber(Actor, TEXT("Health"));
+				Report.Add(TEXT("runtime.clamped"), Is(Dead, 0.0), TEXT("Health after 110 damage: ") + NumberText(Dead));
+				Report.Add(TEXT("runtime.dies"), Actor->IsHidden() && !Actor->GetActorEnableCollision(),
+					FString::Printf(TEXT("hidden %s, collision %s"), Actor->IsHidden() ? TEXT("yes") : TEXT("no"), Actor->GetActorEnableCollision() ? TEXT("on") : TEXT("off")));
+				Game.Run(1.f);
+				Report.Add(TEXT("runtime.stays_dead"), Actor->IsHidden(), TEXT("still dead a second later"));
+				Game.Run(1.5f);
+				const TOptional<double> Back = ReadNumber(Actor, TEXT("Health"));
+				Report.Add(TEXT("runtime.respawns"), Is(Back, 100.0) && !Actor->IsHidden() && Actor->GetActorEnableCollision(),
+					FString::Printf(TEXT("2.5 s after dying: Health %s, hidden %s, collision %s"), *NumberText(Back),
+						Actor->IsHidden() ? TEXT("yes") : TEXT("no"), Actor->GetActorEnableCollision() ? TEXT("on") : TEXT("off")));
+			}
+		}
 	}
 	Report.Finish(*this);
 	return true;
