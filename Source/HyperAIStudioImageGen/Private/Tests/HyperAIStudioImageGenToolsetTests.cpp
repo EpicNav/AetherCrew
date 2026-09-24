@@ -4,7 +4,9 @@
 
 #include "HyperAIStudioImageGenToolset.h"
 
+#include "Async/TaskGraphInterfaces.h"
 #include "Containers/Ticker.h"
+#include "Framework/Docking/TabManager.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
@@ -13,7 +15,9 @@
 #include "HyperAIStudioImageGenCookbook.h"
 #include "HyperAIStudioImageGenGate.h"
 #include "HyperAIStudioSettings.h"
+#include "HyperAIStudioWidgetShot.h"
 #include "Misc/AutomationTest.h"
+#include "SHyperAIStudioImagesPanel.h"
 #include "Misc/Base64.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
@@ -513,6 +517,95 @@ for line in iter(sys.stdin.readline, ""):
 	{
 		TestTrue(TEXT("each one Codex's, readable by the Preview tab and the compare tools"), Record.ModelId == TEXT("codex_image_gen")
 			&& Record.Prompt == TEXT("a red cube") && IFileManager::Get().FileExists(*(FPaths::ProjectDir() / Record.File)));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioScreensImagesPanelTest,
+	"HyperAIStudio.Screens.ImagesPanel",
+	HyperAIStudio::ImageGen::Tests::Flags)
+
+bool FHyperAIStudioScreensImagesPanelTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::ImageGen;
+	FString Issue;
+	int32 Code = -1;
+	FPlatformProcess::ExecProcess(TEXT("python"), TEXT("--version"), &Code, nullptr, nullptr);
+	if (Code != 0 || !FHyperAIStudioAgentImage::CanDraw(TEXT("codex"), Issue))
+	{
+		AddWarning(TEXT("Needs python and the Codex CLI on PATH for the scripted Codex to draw."));
+		return true;
+	}
+	// A scripted Codex that draws one of three dusk scenes, so the gallery shows pictures, not tiles.
+	const FString Dir = FPaths::ConvertRelativePathToFull(FPaths::AutomationTransientDir()) / (TEXT("ImagesPanel-") + FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	for (int32 Index = 0; Index < 3; ++Index)
+	{
+		HyperAIStudio::Tests::WriteScenePng(Dir / FString::Printf(TEXT("scene_%d.png"), Index), FIntPoint(768, 432),
+			FMath::Lerp(FLinearColor(0.95f, 0.45f, 0.18f), FLinearColor(0.55f, 0.7f, 0.95f), Index / 2.f),
+			FMath::Lerp(FLinearColor(0.25f, 0.12f, 0.35f), FLinearColor(0.9f, 0.85f, 0.7f), Index / 2.f));
+	}
+	const FString Script = Dir / TEXT("fake_codex.py");
+	FFileHelper::SaveStringToFile(TEXT(R"PY(import json, sys, os, shutil
+HERE = os.path.dirname(os.path.abspath(__file__))
+def send(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+for line in iter(sys.stdin.readline, ""):
+    m = json.loads(line); method = m.get("method"); i = m.get("id")
+    if method == "initialize":
+        send({"id": i, "result": {}})
+    elif method == "thread/start":
+        send({"id": i, "result": {"thread": {"id": "t"}}})
+    elif method == "turn/start":
+        n = len([f for f in os.listdir(HERE) if f.startswith("drawn_")])
+        saved = os.path.join(HERE, "drawn_%d.png" % n); shutil.copyfile(os.path.join(HERE, "scene_%d.png" % (n % 3)), saved)
+        send({"id": i, "result": {"turn": {"id": "u"}}})
+        send({"method": "item/completed", "params": {"item": {"type": "imageGeneration", "id": "g", "status": "completed", "revisedPrompt": "r", "result": "", "savedPath": saved}}})
+        send({"method": "turn/completed", "params": {"turn": {"id": "u", "status": "completed"}}})
+)PY"), *Script, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	FHyperAIStudioAgentImage::SetCommandForTests(FString::Printf(TEXT("python -u \"%s\""), *Script));
+	FString BatchId;
+	ON_SCOPE_EXIT
+	{
+		FHyperAIStudioAgentImage::SetCommandForTests(FString());
+		IFileManager::Get().DeleteDirectory(*Dir, false, true);
+		if (!BatchId.IsEmpty())
+		{
+			IFileManager::Get().DeleteDirectory(*(Gate::OutputRootOnDisk() / BatchId), false, true);
+		}
+	};
+
+	TestTrue(TEXT("The Images tab is registered"), FGlobalTabmanager::Get()->HasTabSpawner(SHyperAIStudioImagesPanel::GetTabName()));
+	const TSharedRef<SHyperAIStudioImagesPanel> Panel = SNew(SHyperAIStudioImagesPanel);
+	TestTrue(TEXT("The panel lists the Codex generator"), Panel->SelectModel(TEXT("codex_image_gen")));
+	Panel->SetPrompt(TEXT("A lighthouse on a rocky shore at dusk, warm sky fading to violet, calm sea, room for a title on the right."));
+	Panel->SetCount(3);
+	const FHyperAIImageGenerateReport Plan = Panel->PreviewPrompt();
+	TestTrue(TEXT("Preview prompt is the free dry run"), Plan.bOk && Plan.Status == TEXT("planned") && Plan.ComposedPrompt.Contains(TEXT("lighthouse")));
+	const FHyperAIImageGenerateReport Submitted = Panel->Generate();
+	BatchId = Submitted.BatchId;
+	TestTrue(FString::Printf(TEXT("Generate submits and the click approves it (%s: %s)"), *Submitted.Status, *Submitted.Diagnostic),
+		Submitted.bOk && Submitted.Status == TEXT("approved"));
+	// The approved plan starts the batch on a later tick, then the batch runs.
+	FHyperAIImageBatchInfo Info;
+	const double End = FPlatformTime::Seconds() + 90.0;
+	while ((!Gate::FindBatch(BatchId, Info) || Info.State == TEXT("running")) && FPlatformTime::Seconds() < End)
+	{
+		FTSTicker::GetCoreTicker().Tick(0.05f);
+		FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+		Panel->Tick(FGeometry(), 0.0, 0.05f);
+		FPlatformProcess::Sleep(0.02f);
+	}
+	TestEqual(TEXT("The batch completes"), Info.State, FString(TEXT("complete")));
+	Panel->Reload();
+	const int32 Landed = Panel->GetInspect().Images.FilterByPredicate([&BatchId](const FHyperAIImageRecord& Record) { return Record.BatchId == BatchId; }).Num();
+	TestEqual(TEXT("and its three pictures are in the gallery"), Landed, 3);
+	Panel->SelectImage(0);
+	const FString Shot = HyperAIStudio::Tests::SaveWidgetShot(Panel, FIntPoint(1280, 880), TEXT("step12-images-panel"));
+	if (!Shot.IsEmpty())
+	{
+		AddInfo(TEXT("Screenshot: ") + Shot);
 	}
 	return true;
 }

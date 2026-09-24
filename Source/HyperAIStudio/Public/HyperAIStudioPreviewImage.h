@@ -11,7 +11,7 @@ struct FSlateDynamicImageBrush;
  * One image file shown in Slate. Slate has no brush for an arbitrary file on disk, so this reads the file and
  * hands the pixels to the renderer, reloading whenever the file's timestamp moves.
  */
-class FHyperAIStudioPreviewImage
+class HYPERAISTUDIO_API FHyperAIStudioPreviewImage
 {
 public:
 	/** Longest edge kept in memory; a viewport capture is far larger than any panel that shows it. */

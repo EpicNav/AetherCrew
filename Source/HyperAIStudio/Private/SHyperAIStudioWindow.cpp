@@ -18,6 +18,7 @@
 #include "Misc/Paths.h"
 #include "SHyperAIStudioQuickActionWindow.h"
 #include "SHyperAIStudioAgentsPanel.h"
+#include "SHyperAIStudioToolForm.h"
 #include "SHyperAIStudioMemoryPanel.h"
 #include "SHyperAIStudioSkillsPanel.h"
 #include "Styling/AppStyle.h"
@@ -4233,6 +4234,18 @@ FReply SHyperAIStudioWindow::OnOpenMCPToolsClicked(FString ServerName, FString T
 									SNew(STextBlock).Text(Item->bAvailableNow
 										? LOCTEXT("ToolInventoryAvailable", "Available")
 										: LOCTEXT("ToolInventoryUnavailable", "Not loaded")).ColorAndOpacity(TextColor)
+								]
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f, 0.0f)
+								[
+									SNew(SButton)
+									.Text(LOCTEXT("ToolInventoryRun", "Run..."))
+									.ToolTipText(LOCTEXT("ToolInventoryRunTooltip", "Open this tool as a form: fill its request, run it, and read its answer."))
+									.IsEnabled(Item->bAvailableNow)
+									.OnClicked_Lambda([Item]()
+									{
+										SHyperAIStudioToolForm::OpenWindow(Item->Toolset, Item->Name, Item->Description);
+										return FReply::Handled();
+									})
 								]
 							];
 					})

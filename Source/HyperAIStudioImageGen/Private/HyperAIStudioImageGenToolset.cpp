@@ -109,7 +109,9 @@ namespace HyperAIStudio::ImageGen::Private
 			}
 			double Cost = 0.0;
 			FString SpendError;
-			if (!FHyperAIStudioExternalServices::Reserve(Model.ServiceId, Payload.Count, Cost, SpendError))
+			FString Agent;
+			// An agent draws on the user's own plan, so there is no service and nothing to reserve against the cap.
+			if (!Gate::IsAgentModel(Model, Agent) && !FHyperAIStudioExternalServices::Reserve(Model.ServiceId, Payload.Count, Cost, SpendError))
 			{
 				return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("spend_cap_reached"), SpendError);
 			}

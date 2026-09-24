@@ -1,10 +1,9 @@
 // Games by Hyper 2026.
 
-#pragma once
-
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "CoreMinimal.h"
+#include "HyperAIStudioWidgetShot.h"
+
 #include "Engine/TextureRenderTarget2D.h"
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
@@ -21,7 +20,7 @@
 namespace HyperAIStudio::Tests
 {
 	/** Where the UI screenshots go: Saved/HyperAIStudio/Screens. */
-	inline FString ScreensFolder()
+	FString ScreensFolder()
 	{
 		return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio") / TEXT("Screens"));
 	}
@@ -31,7 +30,7 @@ namespace HyperAIStudio::Tests
 	 * It is drawn a few times first, so lists, text and pictures that arrive on first paint are all there. Returns
 	 * the file, or empty when this editor cannot render.
 	 */
-	inline FString SaveWidgetShot(const TSharedRef<SWidget>& Widget, const FIntPoint Size, const FString& Name, const int32 Frames = 8)
+	FString SaveWidgetShot(const TSharedRef<SWidget>& Widget, const FIntPoint Size, const FString& Name, const int32 Frames)
 	{
 		if (!FApp::CanEverRender() || !FSlateApplication::IsInitialized())
 		{
@@ -78,8 +77,7 @@ namespace HyperAIStudio::Tests
 	}
 
 	/** A dusk-scene picture of Size, so screenshots show something that reads as an image, not a flat tile. */
-	inline void WriteScenePng(const FString& Path, const FIntPoint Size, const FLinearColor Top = FLinearColor(0.95f, 0.45f, 0.18f),
-		const FLinearColor Bottom = FLinearColor(0.25f, 0.12f, 0.35f))
+	void WriteScenePng(const FString& Path, const FIntPoint Size, const FLinearColor Top, const FLinearColor Bottom)
 	{
 		TArray<FColor> Pixels;
 		Pixels.SetNumUninitialized(Size.X * Size.Y);

@@ -10,11 +10,16 @@ public class HyperAIStudioImageGen : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
+			"ApplicationCore",
 			"Core",
 			"CoreUObject",
 			"Engine",
 			"HyperAIStudio",
+			"InputCore",
 			"Json",
+			"Slate",
+			"SlateCore",
+			"ToolMenus",
 			"ToolsetRegistry",
 			"UnrealEd"
 		});

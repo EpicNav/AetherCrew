@@ -584,6 +584,30 @@
    "text": "HyperAI：应用混合空间计划"
   },
   {
+   "namespace": "HyperAIStudioImageGenModule",
+   "key": "ImagesMenu",
+   "source": "HyperAI Images",
+   "text": "HyperAI 图片"
+  },
+  {
+   "namespace": "HyperAIStudioImageGenModule",
+   "key": "ImagesMenuTooltip",
+   "source": "Generate reference images and browse the generated ones.",
+   "text": "生成参考图片，并浏览已生成的图片。"
+  },
+  {
+   "namespace": "HyperAIStudioImageGenModule",
+   "key": "ImagesTab",
+   "source": "HyperAI Images",
+   "text": "HyperAI 图片"
+  },
+  {
+   "namespace": "HyperAIStudioImageGenModule",
+   "key": "ImagesTabTooltip",
+   "source": "Generate reference images, with Codex or a configured model, and browse the ones the project has.",
+   "text": "使用 Codex 或已配置的模型生成参考图片，并浏览项目中已有的图片。"
+  },
+  {
    "namespace": "HyperAIStudioLevelDesign",
    "key": "ApplyBlockoutPlan",
    "source": "HyperAI: Apply Blockout Plan",
@@ -1752,6 +1776,234 @@
    "key": "WorkingBadge",
    "source": "Working",
    "text": "工作中"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Batch",
+   "source": "Batch name",
+   "text": "批次名称"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "BatchTooltip",
+   "source": "Letters, digits and underscore: it names the folder the images land in.",
+   "text": "字母、数字和下划线：它就是图片存放文件夹的名称。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Batches",
+   "source": "Batches this session",
+   "text": "本次会话的批次"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Composed",
+   "source": "Will send: {0}",
+   "text": "将发送：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "CopyPath",
+   "source": "Copy path",
+   "text": "复制路径"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "CopyPathTooltip",
+   "source": "Copy its project-relative path, to paste into a chat.",
+   "text": "复制它在项目中的相对路径，以便粘贴到聊天中。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Count",
+   "source": "Count",
+   "text": "数量"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "CountTooltip",
+   "source": "Images in the batch.",
+   "text": "批次中的图片数量。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Generate",
+   "source": "Generate",
+   "text": "生成"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "GenerateButton",
+   "source": "Generate",
+   "text": "生成"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "GenerateTooltip",
+   "source": "Generate the batch. This spends money, or your agent's plan for an agent model; pressing it is the approval.",
+   "text": "生成这一批图片。这会花钱，若使用智能体模型则消耗你的智能体套餐；按下它即表示批准。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Generated",
+   "source": "Generated images ({0}), in {1}",
+   "text": "已生成的图片（{0}），位于 {1}"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Height",
+   "source": "Height",
+   "text": "高度"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Model",
+   "source": "Model",
+   "text": "模型"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "ModelShown",
+   "source": "{0} ({1})",
+   "text": "{0}（{1}）"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Negative",
+   "source": "Avoid",
+   "text": "避免"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "NegativeHint",
+   "source": "What to keep out, such as text or people.",
+   "text": "不希望出现的内容，例如文字或人物。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "NoBatches",
+   "source": "None yet.",
+   "text": "暂无。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "NoModel",
+   "source": "No image model",
+   "text": "没有图片模型"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "NoTemplate",
+   "source": "None: send the prompt as written",
+   "text": "无：按原样发送提示词"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "OpenPreview",
+   "source": "Open in Preview",
+   "text": "在预览中打开"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "OpenPreviewTooltip",
+   "source": "Measure the level viewport's lighting against it in the HyperAI Preview tab.",
+   "text": "在 HyperAI 预览标签页中，将关卡视口的光照与它对比测量。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PreviewPrompt",
+   "source": "Preview prompt",
+   "text": "预览提示词"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PreviewPromptTooltip",
+   "source": "A free dry run: the exact prompt that would be sent, and what it costs.",
+   "text": "免费试运行：将要发送的确切提示词及其花费。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Prompt",
+   "source": "Prompt",
+   "text": "提示词"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PromptHint",
+   "source": "What to draw. With a template, this is added after it.",
+   "text": "要画的内容。使用模板时，这段文字会接在模板之后。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Refresh",
+   "source": "Refresh",
+   "text": "刷新"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Reuse",
+   "source": "Reuse prompt",
+   "text": "复用提示词"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "ReuseTooltip",
+   "source": "Put its prompt, model and seed back in the form.",
+   "text": "把它的提示词、模型和种子填回表单。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Seed",
+   "source": "Seed",
+   "text": "种子"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "SeedTooltip",
+   "source": "-1 for a random seed. A fixed seed re-renders the same image, where the model takes one.",
+   "text": "-1 表示随机种子。固定种子会重新渲染同一张图片（需模型支持种子）。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "ShowFolder",
+   "source": "Show in folder",
+   "text": "在文件夹中显示"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "ShowFolderTooltip",
+   "source": "Open the folder it is in.",
+   "text": "打开它所在的文件夹。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "SizeTooltip",
+   "source": "0 for the model's own size.",
+   "text": "0 表示使用模型自己的尺寸。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Template",
+   "source": "Prompt template",
+   "text": "提示词模板"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "UseMatch",
+   "source": "Use as match reference",
+   "text": "用作匹配参考图"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "UseMatchTooltip",
+   "source": "Open the Image match source with it: score attempts against it, iteration by iteration.",
+   "text": "用它打开图像匹配来源：逐次迭代地为尝试与它的相似度打分。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Width",
+   "source": "Width",
+   "text": "宽度"
   },
   {
    "namespace": "SHyperAIStudioMemoryPanel",
@@ -3318,6 +3570,66 @@
    "key": "Title",
    "source": "Skills",
    "text": "技能"
+  },
+  {
+   "namespace": "SHyperAIStudioToolForm",
+   "key": "AnswerHint",
+   "source": "The tool's answer shows here.",
+   "text": "工具的回答会显示在这里。"
+  },
+  {
+   "namespace": "SHyperAIStudioToolForm",
+   "key": "Approve",
+   "source": "Approve",
+   "text": "批准"
+  },
+  {
+   "namespace": "SHyperAIStudioToolForm",
+   "key": "ApproveTooltip",
+   "source": "This edit waits for approval, and you are the one who ran it: approve it here.",
+   "text": "这次编辑正在等待批准，而运行它的正是你：在这里批准。"
+  },
+  {
+   "namespace": "SHyperAIStudioToolForm",
+   "key": "CopyCall",
+   "source": "Copy call",
+   "text": "复制调用"
+  },
+  {
+   "namespace": "SHyperAIStudioToolForm",
+   "key": "CopyCallTooltip",
+   "source": "Copy this call as an MCP call_tool payload, to paste into a prompt or a script.",
+   "text": "将这次调用复制为 MCP call_tool 载荷，以便粘贴到提示词或脚本中。"
+  },
+  {
+   "namespace": "SHyperAIStudioToolForm",
+   "key": "ImageTooltip",
+   "source": "{0}\nClick to open it in the HyperAI Preview tab.",
+   "text": "{0}\n点击在 HyperAI 预览标签页中打开。"
+  },
+  {
+   "namespace": "SHyperAIStudioToolForm",
+   "key": "JsonHint",
+   "source": "This tool has no reflected fields; write its arguments as JSON.",
+   "text": "此工具没有可反射的字段；请用 JSON 填写它的参数。"
+  },
+  {
+   "namespace": "SHyperAIStudioToolForm",
+   "key": "Run",
+   "source": "Run",
+   "text": "运行"
+  },
+  {
+   "namespace": "SHyperAIStudioToolForm",
+   "key": "RunTooltip",
+   "source": "Call the tool with these arguments, the way an agent's MCP call would.",
+   "text": "用这些参数调用工具，就像智能体的 MCP 调用那样。"
+  },
+  {
+   "namespace": "SHyperAIStudioToolForm",
+   "key": "WindowTitle",
+   "source": "Run {0}",
+   "text": "运行 {0}"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5208,6 +5520,18 @@
    "key": "ToolInventoryRowHyperAI",
    "source": "HyperAI",
    "text": "HyperAI"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryRun",
+   "source": "Run...",
+   "text": "运行..."
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryRunTooltip",
+   "source": "Open this tool as a form: fill its request, run it, and read its answer.",
+   "text": "将此工具作为表单打开：填写请求、运行并查看回答。"
   },
   {
    "namespace": "SHyperAIStudioWindow",

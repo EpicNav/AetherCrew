@@ -14,6 +14,7 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "SHyperAIStudioPreviewPanel.h"
+#include "SHyperAIStudioToolForm.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "ToolsetRegistry/ToolCallAsyncResultString.h"
@@ -118,6 +119,81 @@ bool FHyperAIStudioScreensImageMatchTest::RunTest(const FString& Parameters)
 	{
 		AddInfo(TEXT("Screenshot: ") + Shot);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioScreensToolFormTest,
+	"HyperAIStudio.Screens.ToolFormRunsAnyTool",
+	HyperAIStudio::ScreensTests::Flags)
+
+bool FHyperAIStudioScreensToolFormTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ScreensTests;
+	auto Pump = [](const TSharedRef<SHyperAIStudioToolForm>& Form)
+	{
+		const double End = FPlatformTime::Seconds() + 30.0;
+		while (Form->IsRunning() && FPlatformTime::Seconds() < End)
+		{
+			Form->Tick(FGeometry(), 0.0, 0.05f);
+			FTSTicker::GetCoreTicker().Tick(0.02f);
+			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+		}
+		Form->Tick(FGeometry(), 0.0, 0.05f);
+	};
+
+	// A tool with reflected parameters gets a form of its fields.
+	const FString Folder = FPaths::ConvertRelativePathToFull(FPaths::AutomationTransientDir() / TEXT("ToolForm"));
+	const FString Reference = Folder / TEXT("reference.png");
+	const FString Attempt = Folder / TEXT("attempt.png");
+	HyperAIStudio::Tests::WriteScenePng(Reference, FIntPoint(480, 300));
+	HyperAIStudio::Tests::WriteScenePng(Attempt, FIntPoint(480, 300), FLinearColor(0.8f, 0.55f, 0.35f), FLinearColor(0.3f, 0.2f, 0.4f));
+	const TSharedRef<SHyperAIStudioToolForm> Form = SNew(SHyperAIStudioToolForm)
+		.Toolset(TEXT("HyperAIStudioLighting.HyperAIStudioLightingToolset"))
+		.Tool(TEXT("hyper_image_compare"))
+		.Description(TEXT("How close an attempt is to a reference image, for scenes, materials, effects and UI."));
+	if (!TestTrue(TEXT("hyper_image_compare's request is a form of its fields"), Form->HasReflectedForm()))
+	{
+		return false;
+	}
+	FString Error;
+	TestTrue(TEXT("The form takes arguments as JSON: ") + Error, Form->SetArguments(FString::Printf(
+		TEXT("{\"request\": {\"referenceImagePath\": %s, \"candidateImagePath\": %s, \"mode\": \"look\", \"targetScore\": 80, \"grid\": 4}}"),
+		*Quoted(Reference), *Quoted(Attempt)), Error));
+	const FString Arguments = Form->BuildArguments();
+	TestTrue(TEXT("and sends them under the names the registry uses"), Arguments.Contains(TEXT("\"request\"")) && Arguments.Contains(TEXT("\"referenceImagePath\""))
+		&& Arguments.Contains(TEXT("attempt.png")) && Arguments.Contains(TEXT("\"targetScore\": 80")));
+	Form->Run();
+	Pump(Form);
+	TestTrue(TEXT("Run answers with the tool's report"), Form->GetAnswer().Contains(TEXT("\"score\"")) && Form->GetAnswer().Contains(TEXT("\"sideBySidePath\"")));
+	const FString Shot = HyperAIStudio::Tests::SaveWidgetShot(Form, FIntPoint(900, 1040), TEXT("step12-tool-form"));
+	if (!Shot.IsEmpty())
+	{
+		AddInfo(TEXT("Screenshot: ") + Shot);
+	}
+
+	// Epic's own tools reflect too: their toolset classes are generated from Python.
+	const TSharedRef<SHyperAIStudioToolForm> Scene = SNew(SHyperAIStudioToolForm)
+		.Toolset(TEXT("editor_toolset.toolsets.scene.SceneTools"))
+		.Tool(TEXT("get_current_level"))
+		.Description(TEXT("The level open in the editor."));
+	TestTrue(TEXT("An Epic tool gets a form too"), Scene->HasReflectedForm());
+	Scene->Run();
+	Pump(Scene);
+	TestFalse(TEXT("and answers"), Scene->GetAnswer().IsEmpty());
+	AddInfo(TEXT("get_current_level answered: ") + Scene->GetAnswer().Left(160));
+
+	// A tool the editor cannot reflect gets a JSON box, and Run still reports what happened.
+	const TSharedRef<SHyperAIStudioToolForm> Plain = SNew(SHyperAIStudioToolForm)
+		.Toolset(TEXT("HyperAIStudioNotLoaded.NoSuchToolset"))
+		.Tool(TEXT("no_such_tool"))
+		.Description(TEXT("A tool from a pack that is not loaded."));
+	TestFalse(TEXT("Without a reflected function the form is a JSON box"), Plain->HasReflectedForm());
+	TestEqual(TEXT("starting as an empty object"), Plain->BuildArguments(), FString(TEXT("{}")));
+	AddExpectedError(TEXT("not found"), EAutomationExpectedErrorFlags::Contains, 1);
+	Plain->Run();
+	Pump(Plain);
+	TestTrue(TEXT("and a call that cannot run answers nothing, without hanging"), !Plain->IsRunning() && Plain->GetAnswer().IsEmpty());
 	return true;
 }
 
