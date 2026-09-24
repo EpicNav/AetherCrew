@@ -1,0 +1,5099 @@
+{
+ "culture": "zh-Hans",
+ "entries": [
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "AddSelectionContext",
+   "source": "Copy Selection Prompt",
+   "text": "复制选中内容提示词"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "AddSelectionContextAssetsTooltip",
+   "source": "Copy a prompt for the preferred external agent with the selected assets.",
+   "text": "为首选的外部智能体复制包含所选资产的提示词。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "AddSelectionContextTooltip",
+   "source": "Copy a prompt for the preferred external agent with the current selection.",
+   "text": "为首选的外部智能体复制包含当前选中内容的提示词。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "AssetContextOpenNotification",
+   "source": "HyperAIStudio sent asset context",
+   "text": "HyperAIStudio 已发送资产上下文"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "AssetContextPackNotification",
+   "source": "HyperAIStudio copied an asset prompt",
+   "text": "HyperAIStudio 已复制资产提示词"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "BlueprintContextCopiedMessage",
+   "source": "Blueprint node context copied successfully. Paste it into your terminal or coding agent.",
+   "text": "蓝图节点上下文已复制。请粘贴到你的终端或编程智能体中。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "BlueprintContextCopiedTitle",
+   "source": "Selected node context copied",
+   "text": "已复制所选节点上下文"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "BlueprintContextCopyDisabledMessage",
+   "source": "Clipboard copying is disabled. Enable it in HyperAIStudio under Files And Permissions, then try again.",
+   "text": "剪贴板复制已禁用。请在 HyperAIStudio 的“文件与权限”中启用后重试。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "BlueprintContextCopyDisabledTitle",
+   "source": "Selected node context was not copied",
+   "text": "未复制所选节点上下文"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "BlueprintContextCopyFailedTitle",
+   "source": "Selected node context could not be copied",
+   "text": "无法复制所选节点上下文"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "BlueprintContextSection",
+   "source": "HyperAIStudio",
+   "text": "HyperAIStudio"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "ChatTabTitle",
+   "source": "HyperAI Chat",
+   "text": "HyperAI 对话"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "ChatTabTitleNumbered",
+   "source": "HyperAI Chat {0}",
+   "text": "HyperAI 对话 {0}"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "ChatTabTooltip",
+   "source": "Open the lightweight HyperAI chat panel for Unreal context handoff.",
+   "text": "打开轻量的 HyperAI 对话面板，用于传递 Unreal 上下文。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "ContextOpenNotification",
+   "source": "HyperAIStudio sent selection context",
+   "text": "HyperAIStudio 已发送选中内容上下文"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "ContextPackNotification",
+   "source": "HyperAIStudio copied a selection prompt",
+   "text": "HyperAIStudio 已复制选中内容提示词"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "CopyBlueprintNodeContext",
+   "source": "Copy Selected Node Context",
+   "text": "复制所选节点上下文"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "CopyBlueprintNodeContextTooltip",
+   "source": "Copy provider-neutral context for the selected Blueprint nodes to use in any terminal or coding agent.",
+   "text": "复制所选蓝图节点的通用上下文，可用于任意终端或编程智能体。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "CopyMakeSkillPrompt",
+   "source": "Copy a make-skill prompt for your agent",
+   "text": "为你的智能体复制创建技能的提示词"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "CreateClaudeTaskPack",
+   "source": "Copy Claude Code Prompt",
+   "text": "复制 Claude Code 提示词"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "CreateClaudeTaskPackAssetsTooltip",
+   "source": "Copy a Claude Code-ready prompt with context for the selected assets.",
+   "text": "复制可直接用于 Claude Code 的提示词，包含所选资产的上下文。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "CreateClaudeTaskPackTooltip",
+   "source": "Copy a Claude Code-ready prompt with context for the current Unreal selection.",
+   "text": "复制可直接用于 Claude Code 的提示词，包含当前 Unreal 选中内容的上下文。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "CreateCodexTaskPack",
+   "source": "Copy Codex Prompt",
+   "text": "复制 Codex 提示词"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "CreateCodexTaskPackAssetsTooltip",
+   "source": "Copy a Codex-ready prompt with context for the selected assets.",
+   "text": "复制可直接用于 Codex 的提示词，包含所选资产的上下文。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "CreateCodexTaskPackTooltip",
+   "source": "Copy a Codex-ready prompt with context for the current Unreal selection.",
+   "text": "复制可直接用于 Codex 的提示词，包含当前 Unreal 选中内容的上下文。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "DockedChatTabLabel",
+   "source": "HyperAI Chat",
+   "text": "HyperAI 对话"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "DockedChatTabLabelNumbered",
+   "source": "HyperAI Chat {0}",
+   "text": "HyperAI 对话 {0}"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "DockedTabLabel",
+   "source": "HyperAIStudio",
+   "text": "HyperAIStudio"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenClaudeContext",
+   "source": "Open Claude Code With Selection",
+   "text": "带选中内容打开 Claude Code"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenClaudeContextAssetsTooltip",
+   "source": "Copy a prompt with the selected assets and open Claude Code from the project root.",
+   "text": "复制包含所选资产的提示词，并从项目根目录打开 Claude Code。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenClaudeContextTooltip",
+   "source": "Copy a prompt with the current selection and open Claude Code from the project root.",
+   "text": "复制包含当前选中内容的提示词，并从项目根目录打开 Claude Code。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenCodexContext",
+   "source": "Open Codex With Selection",
+   "text": "带选中内容打开 Codex"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenCodexContextAssetsTooltip",
+   "source": "Copy a prompt with the selected assets and open Codex from the project root.",
+   "text": "复制包含所选资产的提示词，并从项目根目录打开 Codex。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenCodexContextTooltip",
+   "source": "Copy a prompt with the current selection and open Codex from the project root.",
+   "text": "复制包含当前选中内容的提示词，并从项目根目录打开 Codex。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenHyperAIStudio",
+   "source": "HyperAIStudio",
+   "text": "HyperAIStudio"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenHyperAIStudioChat",
+   "source": "HyperAI Chat",
+   "text": "HyperAI 对话"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenHyperAIStudioChatTooltip",
+   "source": "Open the lightweight HyperAI chat panel.",
+   "text": "打开轻量的 HyperAI 对话面板。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenHyperAIStudioPreview",
+   "source": "HyperAI Preview",
+   "text": "HyperAI 预览"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenHyperAIStudioPreviewTooltip",
+   "source": "Compare a reference image with what a pack produced.",
+   "text": "将参考图像与功能包生成的结果进行对比。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenHyperAIStudioQuickAction",
+   "source": "HyperAI Chat Overlay",
+   "text": "HyperAI 对话浮层"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenHyperAIStudioQuickActionTooltip",
+   "source": "Open the lightweight chat overlay without changing the editor layout.",
+   "text": "打开轻量的对话浮层，不改变编辑器布局。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "OpenHyperAIStudioTooltip",
+   "source": "Open HyperAIStudio MCP setup and readiness checks.",
+   "text": "打开 HyperAIStudio 的 MCP 设置与就绪检查。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PostRestartSetupNotification",
+   "source": "HyperAIStudio setup",
+   "text": "HyperAIStudio 设置"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PostRestartSetupReady",
+   "source": "Setup finished: Unreal MCP and tools/list are ready.",
+   "text": "设置完成：Unreal MCP 与 tools/list 已就绪。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PreviewDockedTabLabel",
+   "source": "HyperAI Preview",
+   "text": "HyperAI 预览"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PreviewTabTitle",
+   "source": "HyperAI Preview",
+   "text": "HyperAI 预览"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PreviewTabTooltip",
+   "source": "Compare a reference image with what a pack produced, with the numbers behind it.",
+   "text": "将参考图像与功能包生成的结果进行对比，并显示背后的数据。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "QuickActionWindowTitle",
+   "source": "HyperAI Chat",
+   "text": "HyperAI 对话"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "QuickAutoCommentBlueprintNodes",
+   "source": "Quick Auto Comment Selected Nodes",
+   "text": "快速自动注释所选节点"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "QuickAutoCommentBlueprintNodesTooltip",
+   "source": "Add a fast local title-based Unreal comment box around the selected nodes without using AI.",
+   "text": "在所选节点周围添加基于标题的本地 Unreal 注释框，不使用 AI。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "QuickAutoCommentFailedNotification",
+   "source": "Quick comment could not be added",
+   "text": "无法添加快速注释"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "QuickAutoCommentNotification",
+   "source": "Quick comment added",
+   "text": "已添加快速注释"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "SmartAutoCommentBlueprintNodes",
+   "source": "Smart Auto Comment Selected Nodes",
+   "text": "智能自动注释所选节点"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "SmartAutoCommentBlueprintNodesTooltip",
+   "source": "Open the preferred coding-agent flow and ask AI to understand the selected nodes before adding useful native Blueprint comments.",
+   "text": "打开首选的编程智能体流程，让 AI 理解所选节点后再添加有用的原生蓝图注释。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "SmartAutoCommentFailedTitle",
+   "source": "Smart Auto Comment could not start",
+   "text": "无法启动智能自动注释"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "SmartAutoCommentReadyTitle",
+   "source": "Smart Auto Comment ready",
+   "text": "智能自动注释已就绪"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "StatusBarLabel",
+   "source": "HyperAIStudio",
+   "text": "HyperAIStudio"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "StatusBarTooltip",
+   "source": "Open HyperAIStudio setup, agent handoff, and MCP readiness.",
+   "text": "打开 HyperAIStudio 设置、智能体交接和 MCP 就绪状态。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "TabTitle",
+   "source": "HyperAIStudio",
+   "text": "HyperAIStudio"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "TabTooltip",
+   "source": "Open HyperAIStudio setup, agent handoff, and MCP readiness.",
+   "text": "打开 HyperAIStudio 设置、智能体交接和 MCP 就绪状态。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeBody",
+   "source": "HyperAIStudio is the Unreal-to-agent connection layer. It is not an in-editor replacement for Codex, Claude Code, Cursor, VS Code, or Gemini. Run setup once, verify Unreal MCP and agent configs, then continue the real chat in your external agent.",
+   "text": "HyperAIStudio 是连接 Unreal 与智能体的桥梁，并不是 Codex、Claude Code、Cursor、VS Code 或 Gemini 在编辑器内的替代品。先完成一次设置，验证 Unreal MCP 和智能体配置，然后在外部智能体中继续真正的对话。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeDontShow",
+   "source": "Don't show again",
+   "text": "不再显示"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeDontShowTooltip",
+   "source": "Hide this startup prompt. You can still open HyperAIStudio from Tools or the status bar.",
+   "text": "隐藏此启动提示。你仍可以从“工具”菜单或状态栏打开 HyperAIStudio。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeOpenChat",
+   "source": "Open Chat / Terminal",
+   "text": "打开对话 / 终端"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeOpenChatTooltip",
+   "source": "Open the separate daily prompt and terminal handoff panel.",
+   "text": "打开独立的日常提示词与终端交接面板。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeOpenDocs",
+   "source": "Open Docs",
+   "text": "打开文档"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeOpenDocsTooltip",
+   "source": "Open the HyperAIStudio documentation site.",
+   "text": "打开 HyperAIStudio 文档网站。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeOpenPanel",
+   "source": "Open HyperAIStudio",
+   "text": "打开 HyperAIStudio"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeOpenPanelTooltip",
+   "source": "Open the main HyperAIStudio workbench.",
+   "text": "打开 HyperAIStudio 主工作台。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeRouteHint",
+   "source": "Intended workflow: compose a prompt or attach Unreal context in HyperAIStudio, then paste/open that handoff in the external agent from the project root.",
+   "text": "推荐流程：在 HyperAIStudio 中编写提示词或附加 Unreal 上下文，然后在项目根目录下的外部智能体中粘贴或打开该交接内容。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeSetupNotification",
+   "source": "HyperAIStudio setup",
+   "text": "HyperAIStudio 设置"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeStartSetup",
+   "source": "Start Setup",
+   "text": "开始设置"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeStartSetupTooltip",
+   "source": "Configure Unreal MCP, generate agent files, and open HyperAIStudio.",
+   "text": "配置 Unreal MCP，生成智能体文件，并打开 HyperAIStudio。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeTitle",
+   "source": "Welcome to HyperAIStudio",
+   "text": "欢迎使用 HyperAIStudio"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "WelcomeWindowTitle",
+   "source": "HyperAIStudio Setup",
+   "text": "HyperAIStudio 设置"
+  },
+  {
+   "namespace": "HyperAIStudio",
+   "key": "AgentLaunchMCPStartFailed",
+   "source": "Unreal MCP could not be started before launching the agent: {0}",
+   "text": "启动智能体前无法启动 Unreal MCP：{0}"
+  },
+  {
+   "namespace": "HyperAIStudio",
+   "key": "AssetPromptFilesGenerationFailed",
+   "source": "Agent files were missing and could not be generated: {0}",
+   "text": "缺少智能体文件，且无法生成：{0}"
+  },
+  {
+   "namespace": "HyperAIStudio",
+   "key": "AutoCommentBlueprintNodesTransaction",
+   "source": "HyperAIStudio Quick Auto Comment Blueprint Nodes",
+   "text": "HyperAIStudio 快速自动注释蓝图节点"
+  },
+  {
+   "namespace": "HyperAIStudio",
+   "key": "BlueprintPromptFilesGenerationFailed",
+   "source": "Agent files were missing and could not be generated: {0}",
+   "text": "缺少智能体文件，且无法生成：{0}"
+  },
+  {
+   "namespace": "HyperAIStudio",
+   "key": "EnablePluginFailed",
+   "source": "Could not enable {0}: {1}",
+   "text": "无法启用 {0}：{1}"
+  },
+  {
+   "namespace": "HyperAIStudio",
+   "key": "PromptFilesGenerationFailed",
+   "source": "Agent files were missing and could not be generated: {0}",
+   "text": "缺少智能体文件，且无法生成：{0}"
+  },
+  {
+   "namespace": "HyperAIStudio",
+   "key": "QuickPromptFilesGenerationFailed",
+   "source": "Agent files were missing and could not be generated: {0}",
+   "text": "缺少智能体文件，且无法生成：{0}"
+  },
+  {
+   "namespace": "HyperAIStudio",
+   "key": "SaveProjectFailed",
+   "source": "Required plugins were enabled, but the project file could not be saved: {0}",
+   "text": "已启用所需插件，但无法保存项目文件：{0}"
+  },
+  {
+   "namespace": "HyperAIStudio",
+   "key": "SendScriptMissing",
+   "source": "The current Send-HyperAIStudioPrompt.ps1 could not be generated: {0}",
+   "text": "无法生成当前的 Send-HyperAIStudioPrompt.ps1：{0}"
+  },
+  {
+   "namespace": "HyperAIStudio",
+   "key": "SetupPreparedForRestart",
+   "source": "Setup prepared successfully: Epic MCP toolsets were synchronized and agent instructions, configs, and helper scripts were generated. Unreal must restart once; HyperAIStudio will finish setup automatically after relaunch. {0}",
+   "text": "设置已准备就绪：Epic MCP 工具集已同步，智能体说明、配置和辅助脚本已生成。Unreal 需要重启一次；重启后 HyperAIStudio 会自动完成设置。{0}"
+  },
+  {
+   "namespace": "HyperAIStudio",
+   "key": "TextureGraphEditOps",
+   "source": "HyperAI Texture Graph Edit",
+   "text": "HyperAI 纹理图编辑"
+  },
+  {
+   "namespace": "HyperAIStudioAgentState",
+   "key": "AwaitingApproval",
+   "source": "needs approval",
+   "text": "需要审批"
+  },
+  {
+   "namespace": "HyperAIStudioAgentState",
+   "key": "Blocked",
+   "source": "blocked",
+   "text": "已阻止"
+  },
+  {
+   "namespace": "HyperAIStudioAgentState",
+   "key": "Idle",
+   "source": "ready",
+   "text": "就绪"
+  },
+  {
+   "namespace": "HyperAIStudioAgentState",
+   "key": "NeedsInput",
+   "source": "needs you",
+   "text": "需要你处理"
+  },
+  {
+   "namespace": "HyperAIStudioAgentState",
+   "key": "PlanReview",
+   "source": "plan to review",
+   "text": "有计划待审阅"
+  },
+  {
+   "namespace": "HyperAIStudioAgentState",
+   "key": "Starting",
+   "source": "starting",
+   "text": "正在启动"
+  },
+  {
+   "namespace": "HyperAIStudioAgentState",
+   "key": "Stopped",
+   "source": "stopped",
+   "text": "已停止"
+  },
+  {
+   "namespace": "HyperAIStudioAgentState",
+   "key": "Working",
+   "source": "working",
+   "text": "工作中"
+  },
+  {
+   "namespace": "HyperAIStudioAnimBlueprint",
+   "key": "CreateAnimBlueprint",
+   "source": "HyperAI: Create Animation Blueprint",
+   "text": "HyperAI：创建动画蓝图"
+  },
+  {
+   "namespace": "HyperAIStudioAnimBlueprint",
+   "key": "EditAnimBlueprint",
+   "source": "HyperAI: Edit Animation Blueprint",
+   "text": "HyperAI：编辑动画蓝图"
+  },
+  {
+   "namespace": "HyperAIStudioAnimationBlendSpace",
+   "key": "ApplyBlendSpacePlan",
+   "source": "HyperAI: Apply Blend Space Plan",
+   "text": "HyperAI：应用混合空间计划"
+  },
+  {
+   "namespace": "HyperAIStudioLevelDesign",
+   "key": "ApplyBlockoutPlan",
+   "source": "HyperAI: Apply Blockout Plan",
+   "text": "HyperAI：应用白模计划"
+  },
+  {
+   "namespace": "HyperAIStudioLighting",
+   "key": "ApplyLightingPlan",
+   "source": "HyperAI: Apply Lighting Plan",
+   "text": "HyperAI：应用光照计划"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "AutoExposure",
+   "source": "Auto exposure is on, so this comparison measures the eye adapting, not the lighting. Lock it before matching a reference.",
+   "text": "自动曝光已开启，因此这次对比测量的是人眼适应，而不是光照本身。请先锁定曝光再匹配参考。"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "Contrast",
+   "source": "Contrast",
+   "text": "对比度"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "Distance",
+   "source": "Distance",
+   "text": "差距"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "EV",
+   "source": "{0} EV",
+   "text": "{0} EV"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "Exposure",
+   "source": "Exposure",
+   "text": "曝光"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "Kelvin",
+   "source": "{0} K",
+   "text": "{0} K"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "LockExposure",
+   "source": "Lock exposure",
+   "text": "锁定曝光"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "Next",
+   "source": "Next",
+   "text": "下一个"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "Reference",
+   "source": "Reference",
+   "text": "参考"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "Saturation",
+   "source": "Saturation",
+   "text": "饱和度"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "SourceLabel",
+   "source": "Lighting: reference vs viewport",
+   "text": "光照：参考图与视口"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "SourceTooltip",
+   "source": "Capture the level viewport and measure it against a reference image.",
+   "text": "捕获关卡视口，并与参考图像进行测量对比。"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "Temperature",
+   "source": "Temperature",
+   "text": "色温"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "Viewport",
+   "source": "Level viewport",
+   "text": "关卡视口"
+  },
+  {
+   "namespace": "HyperAIStudioMaterials",
+   "key": "ApplyPlan",
+   "source": "HyperAI Material Edit",
+   "text": "HyperAI 材质编辑"
+  },
+  {
+   "namespace": "HyperAIStudioMeshTerrain",
+   "key": "MeshTerrainEdit",
+   "source": "HyperAI: Mesh Terrain edit",
+   "text": "HyperAI：网格地形编辑"
+  },
+  {
+   "namespace": "HyperAIStudioNiagaraExternalEditGate",
+   "key": "ApplyOpsTransaction",
+   "source": "HyperAI Niagara Edit",
+   "text": "HyperAI Niagara 编辑"
+  },
+  {
+   "namespace": "HyperAIStudioNiagaraExternalEditGate",
+   "key": "FixNotApplied",
+   "source": "The stack issue fix was not applied.",
+   "text": "未应用堆栈问题的修复。"
+  },
+  {
+   "namespace": "HyperAIStudioNiagaraExternalEditGate",
+   "key": "InvalidInputValue",
+   "source": "The input value no longer parses.",
+   "text": "输入值已无法解析。"
+  },
+  {
+   "namespace": "HyperAIStudioNiagaraExternalEditGate",
+   "key": "UnsupportedOp",
+   "source": "Unsupported op kind.",
+   "text": "不支持的操作类型。"
+  },
+  {
+   "namespace": "HyperAIStudioPaper2D",
+   "key": "FastReversibleEdit",
+   "source": "HyperAIStudio Paper2D Edit",
+   "text": "HyperAIStudio Paper2D 编辑"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "Browse",
+   "source": "Browse...",
+   "text": "浏览..."
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "BrowseTip",
+   "source": "Pick a PNG, JPG, BMP or TGA from inside the project.",
+   "text": "从项目内选择 PNG、JPG、BMP 或 TGA 图像。"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "DropHint",
+   "source": "Or drop an image from the project folder anywhere on this panel.",
+   "text": "也可以将项目文件夹中的图像拖放到此面板任意位置。"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "ExpandTip",
+   "source": "Show the full path and where else a reference can come from.",
+   "text": "显示完整路径，以及参考图还可以来自哪里。"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "Less",
+   "source": "▲",
+   "text": "▲"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "More",
+   "source": "▼",
+   "text": "▼"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "NoRecents",
+   "source": "Nothing yet",
+   "text": "暂无内容"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "NoReference",
+   "source": "No reference image",
+   "text": "没有参考图像"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "NoSource",
+   "source": "No preview source",
+   "text": "没有预览来源"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "PickReference",
+   "source": "Pick a reference image",
+   "text": "选择参考图像"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "PickThenRefresh",
+   "source": "Pick a reference, then Refresh.",
+   "text": "选择参考图，然后点击刷新。"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "Recents",
+   "source": "Recent",
+   "text": "最近"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "RecentsTip",
+   "source": "Reference images you used before.",
+   "text": "你之前使用过的参考图像。"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "Refresh",
+   "source": "Refresh",
+   "text": "刷新"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "RefreshTip",
+   "source": "Capture and measure again.",
+   "text": "重新捕获并测量。"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "ResetView",
+   "source": "Fit",
+   "text": "适应"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "ResetViewTip",
+   "source": "Back to fitting both images. Drag to pan, wheel to zoom, double-click to fit.",
+   "text": "恢复为同时适应两张图像。拖动可平移，滚轮可缩放，双击可适应。"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "SideBySide",
+   "source": "Side by side",
+   "text": "并排"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "StatSummary",
+   "source": "{0} {1}",
+   "text": "{0} {1}"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "Wipe",
+   "source": "Wipe",
+   "text": "擦除对比"
+  },
+  {
+   "namespace": "HyperAIStudioScripting",
+   "key": "RunScript",
+   "source": "HyperAI: Run Script",
+   "text": "HyperAI：运行脚本"
+  },
+  {
+   "namespace": "HyperAIStudioUAF",
+   "key": "CreateUAFGraph",
+   "source": "HyperAI: Create UAF Animation Graph",
+   "text": "HyperAI：创建 UAF 动画图"
+  },
+  {
+   "namespace": "HyperAIStudioUAF",
+   "key": "EditUAFGraph",
+   "source": "HyperAI: Edit UAF Animation Graph",
+   "text": "HyperAI：编辑 UAF 动画图"
+  },
+  {
+   "namespace": "HyperAIStudioUIAnimation",
+   "key": "ApplyWidgetAnimationPlan",
+   "source": "HyperAI: Apply Widget Animation Plan",
+   "text": "HyperAI：应用控件动画计划"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "AddTeam",
+   "source": "Add Gameplay Team",
+   "text": "添加玩法团队"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "AddTeamTitle",
+   "source": "Gameplay team",
+   "text": "玩法团队"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "AddTeamTooltip",
+   "source": "Add HyperAI's gameplay team: an architect, Blueprint, asset and level builders, a playtester and a reviewer, with the build workflow that runs them together. Nothing you already have is overwritten.",
+   "text": "添加 HyperAI 的玩法团队：一名架构师、蓝图、资产和关卡构建者、一名试玩者和一名审阅者，以及让他们协同工作的构建工作流。不会覆盖你已有的任何内容。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "BuiltIn",
+   "source": "gameplay team",
+   "text": "玩法团队"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "BuiltInTooltip",
+   "source": "Installed with HyperAI's gameplay team and updated with the plugin until you edit it.",
+   "text": "随 HyperAI 玩法团队安装，并在你编辑之前随插件更新。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "Cancel",
+   "source": "Cancel",
+   "text": "取消"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "Changed",
+   "source": "{0} {0}|plural(one=file,other=files) written.",
+   "text": "已写入 {0} 个文件。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "Claude",
+   "source": "Claude Code",
+   "text": "Claude Code"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "ClaudeModelHint",
+   "source": "Empty keeps the chat's model; or sonnet, opus, haiku",
+   "text": "留空则使用对话的模型；或填写 sonnet、opus、haiku"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "ClaudeModelLabel",
+   "source": "Claude Code model",
+   "text": "Claude Code 模型"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "Codex",
+   "source": "Codex",
+   "text": "Codex"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "CodexModelHint",
+   "source": "Empty keeps the chat's model",
+   "text": "留空则使用对话的模型"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "CodexModelLabel",
+   "source": "Codex model",
+   "text": "Codex 模型"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "Delete",
+   "source": "Delete",
+   "text": "删除"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "DeleteConfirm",
+   "source": "Delete the subagent {0}, for both Claude Code and Codex?",
+   "text": "要删除子智能体 {0}（同时适用于 Claude Code 和 Codex）吗？"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "DescriptionHint",
+   "source": "What it does and when to use it; agents pick it by this",
+   "text": "它做什么以及何时使用；智能体据此选择它"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "DescriptionLabel",
+   "source": "Description",
+   "text": "描述"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "Edit",
+   "source": "Edit",
+   "text": "编辑"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "EditTitle",
+   "source": "Edit Subagent",
+   "text": "编辑子智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "EditTooltip",
+   "source": "Change this subagent for both Claude Code and Codex.",
+   "text": "同时为 Claude Code 和 Codex 修改此子智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "Empty",
+   "source": "No subagents yet. Add the gameplay team, or define your own.",
+   "text": "还没有子智能体。可以添加玩法团队，或定义你自己的子智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "InstructionsHint",
+   "source": "Its instructions: what it is for, how to work in this project, and what to report back.",
+   "text": "它的说明：用途是什么、在此项目中如何工作，以及需要汇报什么。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "InstructionsLabel",
+   "source": "Instructions",
+   "text": "说明"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "NameHint",
+   "source": "lowercase-with-hyphens, such as quest-designer",
+   "text": "小写字母加连字符，例如 quest-designer"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "NameLabel",
+   "source": "Name",
+   "text": "名称"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "New",
+   "source": "New Subagent...",
+   "text": "新建子智能体..."
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "NewTitle",
+   "source": "New Subagent",
+   "text": "新建子智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "NewTooltip",
+   "source": "Define a subagent for both Claude Code and Codex.",
+   "text": "为 Claude Code 和 Codex 定义一个子智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "Open",
+   "source": "Open",
+   "text": "打开"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "OpenTooltip",
+   "source": "Show its file.",
+   "text": "显示它的文件。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "Promote",
+   "source": "Share with Codex",
+   "text": "共享给 Codex"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "PromoteTooltip",
+   "source": "Make this Claude Code subagent a project definition, so Codex gets it too.",
+   "text": "将此 Claude Code 子智能体设为项目定义，这样 Codex 也能使用它。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "ReadOnly",
+   "source": "read only",
+   "text": "只读"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "ReadOnlyBoxTooltip",
+   "source": "It can still call Unreal tools; this stops it writing files and running commands.",
+   "text": "它仍可调用 Unreal 工具；此选项会阻止它写入文件和运行命令。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "ReadOnlyLabel",
+   "source": "Read only: it inspects and reports, and never writes files",
+   "text": "只读：只检查和汇报，从不写入文件"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "ReadOnlyTooltip",
+   "source": "It can read files and call Unreal tools, but not write files or run commands.",
+   "text": "它可以读取文件并调用 Unreal 工具，但不能写入文件或运行命令。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "Save",
+   "source": "Save",
+   "text": "保存"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "ScopeClaude",
+   "source": "Claude Code only",
+   "text": "仅 Claude Code"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "ScopeProject",
+   "source": "Claude Code + Codex",
+   "text": "Claude Code + Codex"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "SharedNote",
+   "source": "Saved in .hyperai/agents and written out for both agents; Git shares it with your team.",
+   "text": "保存在 .hyperai/agents 中，并为两个智能体分别写出；Git 会将其共享给你的团队。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "SkillsHint",
+   "source": "Skills it should use, such as unreal-blueprint, hyperai-memory",
+   "text": "它应使用的技能，例如 unreal-blueprint、hyperai-memory"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "SkillsLabel",
+   "source": "Skills",
+   "text": "技能"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "StateEdited",
+   "source": "{0} file edited",
+   "text": "{0} 文件已被编辑"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "StateEditedTooltip",
+   "source": "Someone edited this subagent's {0} file directly, so HyperAIStudio no longer updates it. Edit the definition here and delete that file to regenerate it.",
+   "text": "有人直接编辑了此子智能体的 {0} 文件，因此 HyperAIStudio 不再更新它。请在这里编辑定义，并删除该文件以重新生成。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "StateTaken",
+   "source": "name taken in {0}",
+   "text": "名称已在 {0} 中被占用"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "StateTakenTooltip",
+   "source": "{0} already has a subagent of this name that HyperAIStudio did not write; {0} uses that one.",
+   "text": "{0} 中已有一个同名子智能体，但它不是由 HyperAIStudio 写入的；{0} 会使用那一个。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "Subtitle",
+   "source": "Each subagent is defined once in .hyperai/agents and written out for Claude Code (.claude/agents) and Codex (.codex/agents). A chat hands work to one by name, or the gameplay team builds a whole system: /hyperai-build-system in Claude Code, $build-system in Codex.",
+   "text": "每个子智能体只在 .hyperai/agents 中定义一次，并分别写出给 Claude Code（.claude/agents）和 Codex（.codex/agents）。对话可以按名称把工作交给它，或者由玩法团队构建整个系统：在 Claude Code 中使用 /hyperai-build-system，在 Codex 中使用 $build-system。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "Sync",
+   "source": "Sync",
+   "text": "同步"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "SyncTitle",
+   "source": "Subagents synced",
+   "text": "子智能体已同步"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "SyncTooltip",
+   "source": "Write every definition out for Claude Code and Codex again. Nothing edited there is overwritten.",
+   "text": "重新为 Claude Code 和 Codex 写出所有定义。不会覆盖在那边编辑过的内容。"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "Title",
+   "source": "Subagents",
+   "text": "子智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "Approve",
+   "source": "Approve",
+   "text": "批准"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ApproveTooltip",
+   "source": "Run this plan now.",
+   "text": "立即运行此计划。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "CancelJob",
+   "source": "Cancel",
+   "text": "取消"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "CancelJobTooltip",
+   "source": "Stop this job. The agent that started it sees it as cancelled.",
+   "text": "停止此作业。启动它的智能体会看到它已被取消。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ClearTooltip",
+   "source": "Clear the finished entries. Plans waiting for approval stay.",
+   "text": "清除已完成的条目。等待审批的计划会保留。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "CloseTooltip",
+   "source": "Hide the Activity panel",
+   "text": "隐藏活动面板"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "Empty",
+   "source": "No agent edits yet. Plans appear here for approval before anything changes.",
+   "text": "还没有智能体编辑。在任何内容改变之前，计划会先出现在这里等待审批。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "EntryAgentTime",
+   "source": "{0}, {1}",
+   "text": "{0}，{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "EntryLine",
+   "source": "{0}: {1}",
+   "text": "{0}：{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "HistoryHeading",
+   "source": "History",
+   "text": "历史"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "HoursAgo",
+   "source": "{0}h ago",
+   "text": "{0} 小时前"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "JobElapsed",
+   "source": "running for {0}s",
+   "text": "已运行 {0} 秒"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "JobLine",
+   "source": "{0} - {1}",
+   "text": "{0} - {1}"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "JustNow",
+   "source": "just now",
+   "text": "刚刚"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "MinutesAgo",
+   "source": "{0}m ago",
+   "text": "{0} 分钟前"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "MoreEffects",
+   "source": "- and {0} more",
+   "text": "- 以及另外 {0} 项"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "PendingHeading",
+   "source": "Waiting for you",
+   "text": "等待你处理"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "RecordHeading",
+   "source": "Track record",
+   "text": "历史表现"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "Reject",
+   "source": "Reject",
+   "text": "拒绝"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "RejectTooltip",
+   "source": "Discard this plan. Nothing changes.",
+   "text": "放弃此计划。不会有任何改变。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "RunningHeading",
+   "source": "Running",
+   "text": "运行中"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ScoreCount",
+   "source": "{0} of {1}",
+   "text": "第 {0} 个，共 {1} 个"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ScoreLine",
+   "source": "{0} - {1}",
+   "text": "{0} - {1}"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ScoreTooltip",
+   "source": "{0} on {1}: {2} completed, {3} failed, {4} rejected by you. The new-tab menu picks agents by this record.",
+   "text": "{0} 在 {1} 上：完成 {2} 次，失败 {3} 次，被你拒绝 {4} 次。新标签页菜单会根据此记录选择智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ShowAssetTooltip",
+   "source": "Show {0} in the Content Browser",
+   "text": "在内容浏览器中显示 {0}"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "Title",
+   "source": "Activity",
+   "text": "活动"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "BackgroundBadgeTooltip",
+   "source": "Running in the background. Click to open it here; right-click to stop it.",
+   "text": "正在后台运行。点击在这里打开；右键点击可停止。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "CloseTooltip",
+   "source": "Hide chat history",
+   "text": "隐藏对话历史"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "DaysAgo",
+   "source": "{0}d ago",
+   "text": "{0} 天前"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "Empty",
+   "source": "No Claude Code or Codex chats have run in this project yet.",
+   "text": "此项目中还没有运行过 Claude Code 或 Codex 对话。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "GroupMonth",
+   "source": "Previous 30 Days",
+   "text": "过去 30 天"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "GroupPinned",
+   "source": "Pinned",
+   "text": "已置顶"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "GroupToday",
+   "source": "Today",
+   "text": "今天"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "GroupWeek",
+   "source": "Previous 7 Days",
+   "text": "过去 7 天"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "GroupYesterday",
+   "source": "Yesterday",
+   "text": "昨天"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "HoursAgo",
+   "source": "{0}h ago",
+   "text": "{0} 小时前"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "InteractiveBadgeTooltip",
+   "source": "Open in a terminal right now.",
+   "text": "立即在终端中打开。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "Loading",
+   "source": "Reading chat history...",
+   "text": "正在读取对话历史..."
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuAttach",
+   "source": "Open Running Chat",
+   "text": "打开运行中的对话"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuPin",
+   "source": "Pin to Top",
+   "text": "置顶"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuRemote",
+   "source": "Remote Control",
+   "text": "远程控制"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuRemoteCodex",
+   "source": "Per-chat Remote Control is a Claude Code feature. Codex's remote control opens every Codex chat on this PC at once, so it is not offered per chat.",
+   "text": "按对话的远程控制是 Claude Code 的功能。Codex 的远程控制会同时打开这台电脑上所有的 Codex 对话，因此不提供按对话的远程控制。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuRemoteTooltip",
+   "source": "Continue this chat at claude.ai/code or in the Claude app. Remote chats run in the background, so they keep going after the editor closes.",
+   "text": "在 claude.ai/code 或 Claude 应用中继续此对话。远程对话在后台运行，因此编辑器关闭后仍会继续。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuRename",
+   "source": "Rename",
+   "text": "重命名"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuRenameTooltip",
+   "source": "Rename this chat here. The agent's own log is not touched.",
+   "text": "在这里重命名此对话。不会改动智能体自己的日志。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuResume",
+   "source": "Resume",
+   "text": "继续"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuStop",
+   "source": "Stop Background Chat",
+   "text": "停止后台对话"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuStopTooltip",
+   "source": "End the background session. The conversation is kept and can be resumed.",
+   "text": "结束后台会话。对话内容会保留，可以稍后继续。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuUnpin",
+   "source": "Unpin",
+   "text": "取消置顶"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MinutesAgo",
+   "source": "{0}m ago",
+   "text": "{0} 分钟前"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "NewChatTooltip",
+   "source": "Start a new chat with the selected agent",
+   "text": "用所选智能体开始新对话"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "NoMatch",
+   "source": "No chats match.",
+   "text": "没有匹配的对话。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "PinTooltip",
+   "source": "Pin this chat to the top",
+   "text": "将此对话置顶"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "RefreshTooltip",
+   "source": "Re-read chat history",
+   "text": "重新读取对话历史"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "RemoteBadge",
+   "source": "Remote",
+   "text": "远程"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "RemoteBadgeTooltip",
+   "source": "Remote Control is on: while it runs, this chat is at claude.ai/code and in the Claude app.",
+   "text": "远程控制已开启：运行期间，此对话可在 claude.ai/code 和 Claude 应用中访问。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "RenameTooltip",
+   "source": "Rename this chat here. The agent's own log is not touched.",
+   "text": "在这里重命名此对话。不会改动智能体自己的日志。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "RowMeta",
+   "source": "{0} - {1}",
+   "text": "{0} - {1}"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "RowTooltip",
+   "source": "{0}\nResume in {1}",
+   "text": "{0}\n在 {1} 中继续"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "RowTooltipAttach",
+   "source": "{0}\nOpen the running {1} chat",
+   "text": "{0}\n打开运行中的 {1} 对话"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "RunningBadge",
+   "source": "Running",
+   "text": "运行中"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "SearchHint",
+   "source": "Search chats",
+   "text": "搜索对话"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "Title",
+   "source": "Chats",
+   "text": "对话"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "UnpinTooltip",
+   "source": "Unpin this chat",
+   "text": "取消置顶此对话"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "UnrealBadge",
+   "source": "Unreal",
+   "text": "Unreal"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "UnrealBadgeTooltip",
+   "source": "This chat called Unreal MCP tools.",
+   "text": "此对话调用了 Unreal MCP 工具。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "WorkingBadge",
+   "source": "Working",
+   "text": "工作中"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "AddFact",
+   "source": "Add Fact",
+   "text": "添加事实"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "AddFactTooltip",
+   "source": "Write a fact every agent should know about this project.",
+   "text": "写下每个智能体都应了解的关于此项目的事实。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "AddTitle",
+   "source": "Add to Project Memory",
+   "text": "添加到项目记忆"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "AwaitingReview",
+   "source": "awaiting review",
+   "text": "等待审阅"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "Cancel",
+   "source": "Cancel",
+   "text": "取消"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "Confirm",
+   "source": "Confirm",
+   "text": "确认"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "ConfirmTooltip",
+   "source": "Let every future chat see this fact in full.",
+   "text": "让以后的每个对话都能看到这条事实的全文。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "Delete",
+   "source": "Delete",
+   "text": "删除"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "DeleteConfirm",
+   "source": "Delete the memory \"{0}\"? Future chats will no longer see it.",
+   "text": "要删除记忆“{0}”吗？以后的对话将不再看到它。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "Edit",
+   "source": "Edit",
+   "text": "编辑"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "EditTitle",
+   "source": "Edit Memory",
+   "text": "编辑记忆"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "Empty",
+   "source": "Nothing remembered yet. Add a fact, or let agents save what they learn.",
+   "text": "还没有记住任何内容。可以添加事实，或让智能体保存它们学到的东西。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "FromAgent",
+   "source": "Saved by an agent",
+   "text": "由智能体保存"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "FromUser",
+   "source": "Written by you",
+   "text": "由你编写"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "ImportCancel",
+   "source": "Cancel",
+   "text": "取消"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "ImportClaude",
+   "source": "Import from Claude Code...",
+   "text": "从 Claude Code 导入..."
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "ImportClaudeTooltip",
+   "source": "Copy chosen facts from Claude Code's own memory for this project. You see each one before it is copied.",
+   "text": "从 Claude Code 为此项目保存的记忆中复制选定的事实。复制前你会逐条查看。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "ImportNote",
+   "source": "These are your private Claude Code memories for this project. Imported facts go to .hyperai/memory, which Git can share with your team, so read each one before you tick it.",
+   "text": "这些是你在此项目中的私人 Claude Code 记忆。导入的事实会进入 .hyperai/memory，Git 可能会将其共享给你的团队，所以勾选前请逐条阅读。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "ImportResult",
+   "source": "Imported {0} {0}|plural(one=fact,other=facts).{1}",
+   "text": "已导入 {0} 条事实。{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "ImportSelected",
+   "source": "Import Selected",
+   "text": "导入所选"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "ImportTitle",
+   "source": "Import from Claude Code Memory",
+   "text": "从 Claude Code 记忆导入"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "ModeAutoTooltip",
+   "source": "Straight into every future chat; review or delete it here later.",
+   "text": "直接进入以后的每个对话；之后可以在这里审阅或删除。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "ModeLabel",
+   "source": "Agent-saved memories:",
+   "text": "智能体保存的记忆："
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "ModeReviewTooltip",
+   "source": "Future chats never see it until you confirm it.",
+   "text": "在你确认之前，以后的对话都看不到它。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "ModeTitleTooltip",
+   "source": "Future chats see the title at once and can look up the text; the text joins every chat once you confirm it.",
+   "text": "以后的对话会立即看到标题并可以查阅正文；你确认后，正文会进入每个对话。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "ModeTooltip",
+   "source": "How a fact an agent saves on its own reaches future chats. Facts you add always apply in full.",
+   "text": "智能体自行保存的事实如何进入以后的对话。你添加的事实总是全文生效。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "NoClaudeMemory",
+   "source": "No Claude Code memory was found for this project in {0}.",
+   "text": "在 {0} 中没有找到此项目的 Claude Code 记忆。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "NoMatch",
+   "source": "No fact matches.",
+   "text": "没有匹配的事实。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "RowMeta",
+   "source": "{0}, updated {1}. Name: {2}",
+   "text": "{0}，更新于 {1}。名称：{2}"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "Save",
+   "source": "Save",
+   "text": "保存"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "SearchHint",
+   "source": "Search memory",
+   "text": "搜索记忆"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "SharedNote",
+   "source": "Saved in .hyperai/memory: every agent gets it, and Git shares it with your team.",
+   "text": "保存在 .hyperai/memory 中：每个智能体都能获取，Git 会将其共享给你的团队。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "Subtitle",
+   "source": "Facts every agent gets in every chat, from .hyperai/memory (shared through Git). Facts an agent saves on its own wait here for review.",
+   "text": "每个智能体在每次对话中都会获得的事实，来自 .hyperai/memory（通过 Git 共享）。智能体自行保存的事实会在这里等待审阅。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "TextHint",
+   "source": "What every future chat should know, and why.",
+   "text": "以后的每个对话都应知道什么，以及原因。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "TextLabel",
+   "source": "Text",
+   "text": "正文"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "Title",
+   "source": "Project Memory",
+   "text": "项目记忆"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "TitleHint",
+   "source": "One line: what this is about",
+   "text": "一行：这条事实是关于什么的"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "TitleLabel",
+   "source": "Title",
+   "text": "标题"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "TypeLabel",
+   "source": "Kind",
+   "text": "类型"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "Answered",
+   "source": "Answered: {0}",
+   "text": "已回答：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ComposerHint",
+   "source": "Message {0}. Enter sends; Shift+Enter starts a new line.",
+   "text": "给 {0} 发消息。Enter 发送；Shift+Enter 换行。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "KindCommand",
+   "source": "Command",
+   "text": "命令"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "KindFiles",
+   "source": "Files",
+   "text": "文件"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "KindThinking",
+   "source": "Thinking",
+   "text": "思考"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "KindTool",
+   "source": "Tool",
+   "text": "工具"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "Queue",
+   "source": "Queue",
+   "text": "排队"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "Send",
+   "source": "Send",
+   "text": "发送"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "SendTooltip",
+   "source": "Send now, or after the running turn.",
+   "text": "立即发送，或在当前回合结束后发送。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "StateReady",
+   "source": "Ready",
+   "text": "就绪"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "StateStarting",
+   "source": "Starting...",
+   "text": "正在启动..."
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "StateStopped",
+   "source": "Stopped",
+   "text": "已停止"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "StateWorking",
+   "source": "Working...",
+   "text": "工作中..."
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "StateWorkingQueued",
+   "source": "Working... ({0} queued)",
+   "text": "工作中...（{0} 条排队中）"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "Stop",
+   "source": "Stop",
+   "text": "停止"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "StopTooltip",
+   "source": "Stop the agent's current turn and drop queued messages.",
+   "text": "停止智能体的当前回合，并丢弃排队的消息。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ToggleDetails",
+   "source": "Show or hide the details.",
+   "text": "显示或隐藏详情。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "You",
+   "source": "You",
+   "text": "你"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ActivityToggle",
+   "source": "Activity",
+   "text": "活动"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ActivityTogglePending",
+   "source": "Activity ({0})",
+   "text": "活动（{0}）"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ActivityToggleTooltip",
+   "source": "Plans waiting for your approval, work in progress, and what the agent changed.",
+   "text": "等待你审批的计划、进行中的工作，以及智能体所做的更改。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "AgentConfigNextAction",
+   "source": "Next useful action: enable one installed agent with generated config before using Chat / Terminal.",
+   "text": "下一步建议：先启用一个已安装并生成了配置的智能体，再使用对话 / 终端。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "AgentFinishedToast",
+   "source": "{0}: the agent finished.",
+   "text": "{0}：智能体已完成。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "AgentNeedsYouToast",
+   "source": "{0}: the agent needs you.",
+   "text": "{0}：智能体需要你。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "AgentStateTooltip",
+   "source": "This tab's agent is {0}.",
+   "text": "此标签页的智能体是 {0}。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "AgentStateTooltipEvidence",
+   "source": "This tab's agent is {0}.\nFrom its screen: {1}",
+   "text": "此标签页的智能体是 {0}。\n它的屏幕显示：{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "BackgroundChatFailed",
+   "source": "The background session did not start, so this remote chat runs in the tab and stops with it. {0}",
+   "text": "后台会话未能启动，因此这个远程对话在标签页中运行，并会随标签页一起停止。{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatOpenSetup",
+   "source": "Open Setup",
+   "text": "打开设置"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatOpenSetupTooltip",
+   "source": "Open the main HyperAIStudio Setup tab.",
+   "text": "打开 HyperAIStudio 主设置标签页。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatRemember",
+   "source": "Remember...",
+   "text": "记住..."
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatRememberTooltip",
+   "source": "Add a fact to Project Memory: every agent gets it in every future chat.",
+   "text": "将一条事实添加到项目记忆：以后的每个对话中，每个智能体都会获得它。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatSettingsEntry",
+   "source": "Chat Settings...",
+   "text": "对话设置..."
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatSettingsEntryTooltip",
+   "source": "Agent models and agent options.",
+   "text": "智能体模型和智能体选项。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatSettingsTooltip",
+   "source": "Setup, chat settings and terminal appearance.",
+   "text": "设置、对话设置和终端外观。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatsToggle",
+   "source": "Chats",
+   "text": "对话"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatsToggleTooltip",
+   "source": "Show or hide this project's past agent chats.",
+   "text": "显示或隐藏此项目过去的智能体对话。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "CheckingBadge",
+   "source": "Checking",
+   "text": "检查中"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "CheckingNextAction",
+   "source": "Next useful action: wait for the MCP readiness probe to finish, then choose a handoff action.",
+   "text": "下一步建议：等待 MCP 就绪探测完成，然后选择一个交接操作。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "CloseAnyway",
+   "source": "Close Anyway",
+   "text": "仍然关闭"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "CloseCancel",
+   "source": "Cancel",
+   "text": "取消"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "CloseChatsTitle",
+   "source": "Agent Chats Are Working",
+   "text": "智能体对话仍在工作"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "CloseKeepRunning",
+   "source": "Keep Running",
+   "text": "继续运行"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "CloseKeepsRemoteChats",
+   "source": "{0} remote {0}|plural(one=chat is,other=chats are) working in the background and will keep going after the editor closes. Reopen them from Chats.",
+   "text": "{0} 个远程对话正在后台工作，编辑器关闭后仍会继续。可以从“对话”中重新打开它们。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "CloseStopRemote",
+   "source": "Stop Them and Close",
+   "text": "停止它们并关闭"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "CloseStopsChats",
+   "source": "{0} {0}|plural(one=chat is,other=chats are) still working and will stop when the editor closes.",
+   "text": "{0} 个对话仍在工作，编辑器关闭时它们会停止。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ContextButton",
+   "source": "Context",
+   "text": "上下文"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ContextDropHint",
+   "source": "Dragging assets or actors onto this panel does the same thing.",
+   "text": "将资产或 Actor 拖到此面板上也有同样效果。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ContextInsertFailed",
+   "source": "Nothing inserted: the terminal refused the paste.",
+   "text": "未插入任何内容：终端拒绝了粘贴。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ContextInserted",
+   "source": "Inserted {0} into the prompt.",
+   "text": "已将 {0} 插入提示词。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ContextMenuHeading",
+   "source": "Insert into the prompt",
+   "text": "插入到提示词"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ContextNoAgentPrompt",
+   "source": "Nothing inserted: no agent prompt is accepting input. Start the agent first.",
+   "text": "未插入任何内容：没有智能体提示框在接收输入。请先启动智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ContextTooltip",
+   "source": "Put what you have selected in Unreal into the agent's prompt. You can also drag assets or actors onto this panel.",
+   "text": "将你在 Unreal 中选中的内容放入智能体的提示词。你也可以把资产或 Actor 拖到此面板上。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "CopyPrompt",
+   "source": "Copy Prompt",
+   "text": "复制提示词"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "CopyPromptTooltip",
+   "source": "Copy a context prompt for pasting into an agent outside Unreal.",
+   "text": "复制一段上下文提示词，用于粘贴到 Unreal 之外的智能体中。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "EditModelList",
+   "source": "Edit Model List...",
+   "text": "编辑模型列表..."
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "EditModelListTooltip",
+   "source": "Add the model ids your account can use, spelled exactly as the agent CLI accepts them.",
+   "text": "添加你的账号可用的模型 ID，拼写要与智能体命令行所接受的完全一致。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "EditRouting",
+   "source": "Edit Task Routing...",
+   "text": "编辑任务路由..."
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "EditRoutingTooltip",
+   "source": "Pick an agent and model per kind of task, or leave the agent empty to choose by track record.",
+   "text": "为每类任务选择智能体和模型，或将智能体留空以按历史表现选择。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "HandoffButton",
+   "source": "Hand Off",
+   "text": "交接"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "HandoffHeading",
+   "source": "Plan here, build in",
+   "text": "在此规划，构建于"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "HandoffNoTargets",
+   "source": "Open another chat tab with + and start its agent first.",
+   "text": "先用 + 打开另一个对话标签页并启动其智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "HandoffRunning",
+   "source": "Handoff Running",
+   "text": "交接进行中"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "HandoffTargetTooltip",
+   "source": "This agent writes a plan file, that tab's agent implements it and writes a report, then this agent reviews the work.",
+   "text": "此智能体编写计划文件，那个标签页的智能体负责实现并编写报告，然后由此智能体审阅工作。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "HandoffTooltip",
+   "source": "Plan here, build in another tab: this agent writes a plan file, the other tab's agent implements it and reports, then this one reviews the work.",
+   "text": "在此规划，在另一个标签页构建：此智能体编写计划文件，另一个标签页的智能体实现并汇报，然后由此智能体审阅工作。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "HeaderTitle",
+   "source": "HyperAI Chat",
+   "text": "HyperAI 对话"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "InitialReadyMessage",
+   "source": "Type to the agent in the terminal: Enter sends, Shift+Enter adds a line. The Chats button resumes a past conversation. Copy Prompt is only for manual handoff/context fallback.",
+   "text": "在终端中与智能体对话：Enter 发送，Shift+Enter 换行。“对话”按钮可继续过去的会话。“复制提示词”仅用于手动交接或作为上下文的备用方式。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "InitialSetupMessage",
+   "source": "Setup is incomplete. Open Setup before using Chat / Terminal.",
+   "text": "设置尚未完成。使用对话 / 终端前请先打开设置。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "InsertActors",
+   "source": "Selected actors ({0})",
+   "text": "所选 Actor（{0}）"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "InsertActorsTooltip",
+   "source": "Paste the path of each selected level actor.",
+   "text": "粘贴每个所选关卡 Actor 的路径。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "InsertAssets",
+   "source": "Selected assets ({0})",
+   "text": "所选资产（{0}）"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "InsertAssetsTooltip",
+   "source": "Paste the object path of each selected Content Browser asset.",
+   "text": "粘贴内容浏览器中每个所选资产的对象路径。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "InsertSummary",
+   "source": "Context summary",
+   "text": "上下文摘要"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "InsertSummaryTooltip",
+   "source": "Paste a sentence describing the current selection and map.",
+   "text": "粘贴一句描述当前选中内容和地图的话。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ManageSkills",
+   "source": "Manage Skills...",
+   "text": "管理技能..."
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ManageSkillsTooltip",
+   "source": "Import, export and review skills in HyperAIStudio > Agents.",
+   "text": "在 HyperAIStudio > 智能体 中导入、导出和审阅技能。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpCopyEndpoint",
+   "source": "Copy endpoint",
+   "text": "复制端点"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpCopyEndpointTooltip",
+   "source": "Copy the MCP endpoint URL to the clipboard.",
+   "text": "将 MCP 端点 URL 复制到剪贴板。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpMenuHeading",
+   "source": "Unreal MCP",
+   "text": "Unreal MCP"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpMissing",
+   "source": "MCP: unavailable",
+   "text": "MCP：不可用"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpNotListening",
+   "source": "MCP: port {0} closed",
+   "text": "MCP：端口 {0} 未开放"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpReady",
+   "source": "MCP: {0} tools",
+   "text": "MCP：{0} 个工具"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpReconnect",
+   "source": "Reconnect",
+   "text": "重新连接"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpReconnectTooltip",
+   "source": "Restart the Unreal MCP server, then re-probe it. Running agents reconnect on their next call.",
+   "text": "重启 Unreal MCP 服务器，然后重新探测。运行中的智能体会在下一次调用时重新连接。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpReprobe",
+   "source": "Re-probe",
+   "text": "重新探测"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpReprobeTooltip",
+   "source": "Check the endpoint again without restarting anything.",
+   "text": "再次检查端点，不重启任何内容。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpRestartFailed",
+   "source": "Unreal MCP did not restart.",
+   "text": "Unreal MCP 未能重启。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpRestarted",
+   "source": "Unreal MCP restarted.",
+   "text": "Unreal MCP 已重启。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpStatusTooltip",
+   "source": "Unreal MCP at {0}\nServer running: {1}\nPort listening: {2}\nTool list reachable: {3}\nRegistered tools: {4}",
+   "text": "Unreal MCP 位于 {0}\n服务器运行中：{1}\n端口监听中：{2}\n工具列表可访问：{3}\n已注册工具：{4}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpStopped",
+   "source": "MCP: stopped",
+   "text": "MCP：已停止"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpUnreachable",
+   "source": "MCP: no tool list",
+   "text": "MCP：无工具列表"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelButton",
+   "source": "Model: {0}",
+   "text": "模型：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelDefault",
+   "source": "Default",
+   "text": "默认"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelDefaultEntry",
+   "source": "Default",
+   "text": "默认"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelDefaultEntryTooltip",
+   "source": "Pass no model flag; the agent uses its own configured model.",
+   "text": "不传入模型参数；智能体使用它自己配置的模型。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelDefaultLabel",
+   "source": "its default model",
+   "text": "它的默认模型"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelMenuHeading",
+   "source": "{0} Model",
+   "text": "{0} 模型"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelRestarting",
+   "source": "Restarting {0} with {1}.",
+   "text": "正在用 {1} 重启 {0}。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelSaved",
+   "source": "{0} will start with {1}.",
+   "text": "{0} 将以 {1} 启动。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelSmart",
+   "source": "Smart",
+   "text": "智能"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelSmartEntry",
+   "source": "Smart: {0} plans, {1} builds",
+   "text": "智能：{0} 规划，{1} 构建"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelSmartEntryTooltip",
+   "source": "Plans in plan mode with the plan model, then builds with the build model once you accept the plan. Inside this session `opus` means the plan model and `sonnet` the build model, and the prompt cache starts over once when building begins. Change either model, or plan auto-accept, in Settings.",
+   "text": "先用规划模型在规划模式中制定计划，在你接受计划后再用构建模型进行构建。在此会话中，`opus` 表示规划模型，`sonnet` 表示构建模型；开始构建时提示词缓存会重新开始一次。可在设置中更改任一模型或计划自动接受。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelSmartLabel",
+   "source": "Smart models",
+   "text": "智能模型"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelTooltip",
+   "source": "Model the agent starts with. Changing it restarts a running agent.",
+   "text": "智能体启动时使用的模型。更改它会重启正在运行的智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModuleNextAction",
+   "source": "Next useful action: enable the required Unreal MCP plugins from the full HyperAIStudio workbench.",
+   "text": "下一步建议：在完整的 HyperAIStudio 工作台中启用所需的 Unreal MCP 插件。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "NativeStarted",
+   "source": "{0} is running in the native view.",
+   "text": "{0} 正在原生视图中运行。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "NativeView",
+   "source": "Native View",
+   "text": "原生视图"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "NativeViewTooltip",
+   "source": "Show this chat in HyperAI's own view instead of the terminal: a transcript with tool calls, approvals and the plan, and a message box. New Codex and Gemini chats open the way you leave it. Switching resumes a Codex chat opened from the history or started in this view; other chats start fresh.",
+   "text": "在 HyperAI 自己的视图中而不是终端中显示此对话：包含工具调用、审批和计划的记录，以及一个消息框。新的 Codex 和 Gemini 对话会沿用你最后的选择。切换时会继续从历史打开或在此视图中启动的 Codex 对话；其他对话会重新开始。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "NewAgentTabTooltip",
+   "source": "Open another chat tab, plain or for a kind of task. Each tab runs its own agent; dock them side by side to watch both.",
+   "text": "打开另一个对话标签页，可以是普通标签页，也可以针对某类任务。每个标签页运行自己的智能体；可以并排停靠以同时查看。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "NewChatStarted",
+   "source": "Starting a new chat.",
+   "text": "正在开始新对话。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "NewPlainTab",
+   "source": "New Chat Tab",
+   "text": "新对话标签页"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "NewPlainTabTooltip",
+   "source": "Another tab, starting with the preferred agent.",
+   "text": "另一个标签页，使用首选智能体启动。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "NewTabForHeading",
+   "source": "New tab for",
+   "text": "新标签页用于"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "No",
+   "source": "no",
+   "text": "无"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "NoUsableAgentCopy",
+   "source": "No usable agent is selected. Open Agents to install or configure an agent first.",
+   "text": "没有选择可用的智能体。请先打开“智能体”安装或配置一个智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "PersonalSkills",
+   "source": "Personal",
+   "text": "个人"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ProjectSkills",
+   "source": "Project",
+   "text": "项目"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "PromptCopyFailed",
+   "source": "Prompt copy failed: {0}",
+   "text": "复制提示词失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ReadinessTooltip",
+   "source": "Unreal MCP endpoint: {0}",
+   "text": "Unreal MCP 端点：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ReadyBadge",
+   "source": "Ready",
+   "text": "就绪"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ReadyNextAction",
+   "source": "Next useful action: type to the embedded agent terminal. Copy Prompt is only for manual handoff fallback.",
+   "text": "下一步建议：在内嵌的智能体终端中输入。“复制提示词”仅作为手动交接的备用方式。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RefreshTooltip",
+   "source": "Re-check Unreal MCP readiness and installed agents.",
+   "text": "重新检查 Unreal MCP 就绪状态和已安装的智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RefreshingMessage",
+   "source": "Refreshing HyperAIStudio readiness...",
+   "text": "正在刷新 HyperAIStudio 就绪状态..."
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteClearedLater",
+   "source": "Remote Control is off for that chat from the next time it starts.",
+   "text": "该对话的远程控制将从下次启动起关闭。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteCodexTooltip",
+   "source": "Codex has no per-chat Remote Control: its remote control opens every Codex chat on this PC to your paired devices. To use it anyway, run `codex remote-control start` in a terminal and pair from the ChatGPT app.",
+   "text": "Codex 没有按对话的远程控制：它的远程控制会把这台电脑上所有 Codex 对话开放给你配对的设备。如仍要使用，请在终端中运行 `codex remote-control start`，然后在 ChatGPT 应用中配对。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteOff",
+   "source": "Remote",
+   "text": "远程"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteOffToast",
+   "source": "Remote Control off for this chat.",
+   "text": "此对话的远程控制已关闭。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteOffTooltip",
+   "source": "Turn on Remote Control for this chat, to continue it at claude.ai/code or in the Claude app. The chat restarts on the same conversation. Needs a Claude subscription login; on Team and Enterprise plans an admin must allow Remote Control.",
+   "text": "为此对话开启远程控制，以便在 claude.ai/code 或 Claude 应用中继续。对话会在同一会话上重新启动。需要以 Claude 订阅账号登录；在 Team 和 Enterprise 方案中需要管理员允许远程控制。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteOn",
+   "source": "Remote on",
+   "text": "远程已开启"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteOnBackgroundTooltip",
+   "source": "Remote Control is on: continue this chat at claude.ai/code or in the Claude app. It runs in the background, so it keeps going after this tab or the editor closes; reopen it from Chats. Click to turn it off.",
+   "text": "远程控制已开启：可在 claude.ai/code 或 Claude 应用中继续此对话。它在后台运行，因此此标签页或编辑器关闭后仍会继续；可从“对话”中重新打开。点击可关闭。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteOnToast",
+   "source": "Remote Control on: this chat appears at claude.ai/code and in the Claude app.",
+   "text": "远程控制已开启：此对话会出现在 claude.ai/code 和 Claude 应用中。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteOnTooltip",
+   "source": "Remote Control is on: continue this chat at claude.ai/code or in the Claude app while this tab is open. Click to turn it off.",
+   "text": "远程控制已开启：在此标签页打开期间，可在 claude.ai/code 或 Claude 应用中继续此对话。点击可关闭。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemotePendingTooltip",
+   "source": "Remote Control switches as soon as the agent finishes its current turn. Click again to cancel.",
+   "text": "智能体完成当前回合后会立即切换远程控制。再次点击可取消。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteSetLater",
+   "source": "Remote Control is on for that chat from the next time it starts.",
+   "text": "该对话的远程控制将从下次启动起开启。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteSwitchCancelled",
+   "source": "Remote Control change cancelled.",
+   "text": "已取消远程控制更改。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteSwitching",
+   "source": "Remote...",
+   "text": "远程..."
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteUnavailableTooltip",
+   "source": "Remote Control is available for Claude Code chats.",
+   "text": "远程控制可用于 Claude Code 对话。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteWaitsForTurn",
+   "source": "Remote Control switches when the agent finishes its current turn.",
+   "text": "智能体完成当前回合后会切换远程控制。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ResumeAgentUnavailable",
+   "source": "{0} is not set up for HyperAI Chat, so that chat cannot be resumed here.",
+   "text": "{0} 尚未为 HyperAI 对话设置，因此无法在这里继续该对话。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ResumingChat",
+   "source": "Resuming {0} chat: {1}",
+   "text": "正在继续 {0} 对话：{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RoutedNoAgent",
+   "source": "no agent set up",
+   "text": "未设置智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RoutedTabEntry",
+   "source": "{0}: {1}",
+   "text": "{0}：{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RoutedTabNoRoom",
+   "source": "Every chat tab is already open; close one to start another agent.",
+   "text": "所有对话标签页都已打开；请关闭一个再启动其他智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RoutedTabOpened",
+   "source": "Opened for {0} with {1}. {2}",
+   "text": "已为 {0} 打开，使用 {1}。{2}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "SaveChatAsSkill",
+   "source": "Save Chat as Skill...",
+   "text": "将对话保存为技能..."
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "SaveChatAsSkillTooltip",
+   "source": "Types a request for the agent to turn what this chat did into a reusable project skill. Edit it, then send.",
+   "text": "输入一条请求，让智能体把此对话所做的工作整理成可复用的项目技能。编辑后再发送。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ServerNextAction",
+   "source": "Next useful action: start or refresh Unreal MCP from the full workbench.",
+   "text": "下一步建议：在完整工作台中启动或刷新 Unreal MCP。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "SessionLogTitle",
+   "source": "Session Log",
+   "text": "会话日志"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "SetupBadge",
+   "source": "Setup needed",
+   "text": "需要设置"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "SetupNextAction",
+   "source": "Next useful action: start setup to configure Unreal MCP and generate agent files.",
+   "text": "下一步建议：开始设置，以配置 Unreal MCP 并生成智能体文件。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "SkillsButton",
+   "source": "Skills",
+   "text": "技能"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "SkillsTooltip",
+   "source": "Run one of this agent's skills, or save what this chat did as a new skill.",
+   "text": "运行此智能体的某个技能，或将此对话所做的工作保存为新技能。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "SkillsUnavailable",
+   "source": "Skills work with Claude Code and Codex",
+   "text": "技能可用于 Claude Code 和 Codex"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "StartAgent",
+   "source": "Start Agent",
+   "text": "启动智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "StartAgentTooltip",
+   "source": "Start the selected agent in a fresh embedded terminal session.",
+   "text": "在新的内嵌终端会话中启动所选智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "StartingBackgroundChat",
+   "source": "Starting this remote chat in the background...",
+   "text": "正在后台启动此远程对话..."
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "StopAgent",
+   "source": "Stop Agent",
+   "text": "停止智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "StopAgentTooltip",
+   "source": "Stop the current embedded agent terminal session without changing the selected agent.",
+   "text": "停止当前的内嵌智能体终端会话，不更改所选智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "StopHandoff",
+   "source": "Stop Handoff to {0}",
+   "text": "停止向 {0} 交接"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "StopHandoffTooltip",
+   "source": "Stop watching {0}. Prompts already sent stay sent.",
+   "text": "停止关注 {0}。已发送的提示词不会撤回。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "SubagentTabHeading",
+   "source": "Claude Code as a subagent",
+   "text": "Claude Code 作为子智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "TabLabelFirst",
+   "source": "HyperAI Chat",
+   "text": "HyperAI 对话"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "TabLabelNumbered",
+   "source": "HyperAI Chat {0}",
+   "text": "HyperAI 对话 {0}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "TabLabelWithState",
+   "source": "{0} - {1}",
+   "text": "{0} - {1}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "TabTitleRouted",
+   "source": "{0}: {1}",
+   "text": "{0}：{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "TerminalAgentStarting",
+   "source": "Starting {0} in a fresh embedded terminal.",
+   "text": "正在新的内嵌终端中启动 {0}。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "TerminalAgentStopped",
+   "source": "Stopped {0}. Use Start Agent or choose another agent to launch a fresh terminal session.",
+   "text": "已停止 {0}。使用“启动智能体”或选择其他智能体来启动新的终端会话。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "TerminalAgentSwitching",
+   "source": "Switching embedded terminal to {0}.",
+   "text": "正在将内嵌终端切换到 {0}。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "TerminalAppearance",
+   "source": "Terminal Appearance...",
+   "text": "终端外观..."
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "TerminalAppearanceTooltip",
+   "source": "Font, size, colour scheme and scrollback for the embedded terminal. Changes apply the next time the agent starts.",
+   "text": "内嵌终端的字体、字号、配色方案和回滚行数。更改会在智能体下次启动时生效。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "Yes",
+   "source": "yes",
+   "text": "是"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "AddToProject",
+   "source": "Add to Project",
+   "text": "添加到项目"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "AddToProjectTooltip",
+   "source": "Copy this personal skill into the project, for both agents and your team.",
+   "text": "将这个个人技能复制到项目中，供两个智能体和你的团队使用。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "BuiltIn",
+   "source": "built in",
+   "text": "内置"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "BuiltInTooltip",
+   "source": "Installed by HyperAIStudio and updated with the plugin until you edit it.",
+   "text": "由 HyperAIStudio 安装，并在你编辑之前随插件更新。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "Changed",
+   "source": "{0} {0}|plural(one=skill,other=skills) changed.",
+   "text": "已更改 {0} 个技能。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "Delete",
+   "source": "Delete",
+   "text": "删除"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "DeleteConfirm",
+   "source": "Delete the skill {0} from this project, for both agents?",
+   "text": "要从此项目中删除技能 {0}（对两个智能体都生效）吗？"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "EpicTitle",
+   "source": "Epic skills imported",
+   "text": "已导入 Epic 技能"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "Export",
+   "source": "Export",
+   "text": "导出"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ExportClaude",
+   "source": "To my Claude Code skills",
+   "text": "导出到我的 Claude Code 技能"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ExportCodex",
+   "source": "To my Codex skills",
+   "text": "导出到我的 Codex 技能"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "Exported",
+   "source": "Copied to {0}.",
+   "text": "已复制到 {0}。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ImportEpic",
+   "source": "Import Epic Skills",
+   "text": "导入 Epic 技能"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ImportEpicTooltip",
+   "source": "Copy Epic's editor AgentSkills (their description and instructions) into this project as SKILL.md skills.",
+   "text": "将 Epic 编辑器的 AgentSkills（描述和说明）作为 SKILL.md 技能复制到此项目。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ImportFolder",
+   "source": "Import Folder...",
+   "text": "导入文件夹..."
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ImportFolderTooltip",
+   "source": "Copy a skill folder (with a SKILL.md) into this project.",
+   "text": "将一个技能文件夹（包含 SKILL.md）复制到此项目。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ImportZip",
+   "source": "Import Zip...",
+   "text": "导入压缩包..."
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ImportZipTooltip",
+   "source": "Copy a zipped skill into this project.",
+   "text": "将一个压缩的技能复制到此项目。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "MenuOnly",
+   "source": "Menu only",
+   "text": "仅菜单"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "MenuOnlyTooltip",
+   "source": "Only you start it, from the menu or by typing its command; agents never pick it on their own.",
+   "text": "只能由你从菜单或输入其命令来启动；智能体不会自行选择它。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "MirrorEdited",
+   "source": "Claude copy edited",
+   "text": "Claude 副本已被编辑"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "MirrorEditedTooltip",
+   "source": "Someone edited this skill in .claude/skills. Promote keeps those edits for both agents.",
+   "text": "有人在 .claude/skills 中编辑了此技能。“提升”会为两个智能体保留这些编辑。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "MirrorTaken",
+   "source": "name taken in Claude Code",
+   "text": "名称已在 Claude Code 中被占用"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "MirrorTakenTooltip",
+   "source": "A Claude Code skill of this name exists that HyperAIStudio did not write; Claude Code uses that one.",
+   "text": "已存在一个同名的 Claude Code 技能，但不是由 HyperAIStudio 写入的；Claude Code 会使用那一个。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "OpenFolder",
+   "source": "Open",
+   "text": "打开"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "OpenFolderTooltip",
+   "source": "Show the skill's folder.",
+   "text": "显示技能所在的文件夹。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "PickFolder",
+   "source": "Skill folder",
+   "text": "技能文件夹"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "PickZip",
+   "source": "Zipped skill",
+   "text": "压缩的技能"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "Promote",
+   "source": "Promote",
+   "text": "提升"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "PromoteTooltip",
+   "source": "Make the Claude Code version the project's skill, so Codex gets it too.",
+   "text": "将 Claude Code 版本设为项目技能，这样 Codex 也能使用它。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ScopeClaude",
+   "source": "Claude Code only",
+   "text": "仅 Claude Code"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ScopePersonalAgents",
+   "source": "personal, Codex",
+   "text": "个人，Codex"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ScopePersonalClaude",
+   "source": "personal, Claude Code",
+   "text": "个人，Claude Code"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ScopeProject",
+   "source": "project",
+   "text": "项目"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "Subtitle",
+   "source": "Project skills live once in .agents/skills, where Codex reads them, and are copied to .claude/skills for Claude Code. Agents pick them by their description, or run them from the chat's Skills menu.",
+   "text": "项目技能只在 .agents/skills 中保存一份（Codex 从这里读取），并复制到 .claude/skills 供 Claude Code 使用。智能体会根据描述选择技能，也可以从对话的“技能”菜单运行。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "Sync",
+   "source": "Sync",
+   "text": "同步"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "SyncTitle",
+   "source": "Skills synced",
+   "text": "技能已同步"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "SyncTooltip",
+   "source": "Install or update the built-in skills and refresh Claude Code's copies. Nothing you edited is overwritten.",
+   "text": "安装或更新内置技能，并刷新 Claude Code 的副本。不会覆盖你编辑过的任何内容。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "Title",
+   "source": "Skills",
+   "text": "技能"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AddMCPDialogTitle",
+   "source": "Add MCP Server",
+   "text": "添加 MCP 服务器"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AddServerButton",
+   "source": "Add MCP Server Entry",
+   "text": "添加 MCP 服务器条目"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentChatPanelOpened",
+   "source": "Opened Chat / Terminal for {0}.",
+   "text": "已为 {0} 打开对话 / 终端。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentConfigHint",
+   "source": "Agent config files are written where each external agent expects them. HyperAIStudio only writes configs for agents that are enabled and checked here; disabled agents do not get new config files.",
+   "text": "智能体配置文件会写到每个外部智能体期望的位置。HyperAIStudio 只为已启用并在此勾选的智能体写入配置；已禁用的智能体不会得到新的配置文件。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentConfigTitle",
+   "source": "Agent Configs",
+   "text": "智能体配置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentDisabledText",
+   "source": "Off",
+   "text": "关"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentEnabledText",
+   "source": "On",
+   "text": "开"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentEnabledTooltip",
+   "source": "Show this installed agent in HyperAIStudio chat and context-menu actions.",
+   "text": "在 HyperAIStudio 对话和右键菜单操作中显示这个已安装的智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentFileCreate",
+   "source": "Create",
+   "text": "创建"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentFileCreateTooltip",
+   "source": "Generate this missing HyperAIStudio file now. Existing managed/user content is preserved; incompatible files stop generation without modification.",
+   "text": "立即生成这个缺失的 HyperAIStudio 文件。已有的托管内容和用户内容会被保留；遇到不兼容的文件时会停止生成且不做修改。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentFileOpen",
+   "source": "Open",
+   "text": "打开"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentFileReveal",
+   "source": "Reveal",
+   "text": "显示位置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentFiles",
+   "source": "Files",
+   "text": "文件"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentFilesDialogTitle",
+   "source": "Agent Files",
+   "text": "智能体文件"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentFilesRow",
+   "source": "Agent Files",
+   "text": "智能体文件"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentFilesTooltip",
+   "source": "Open the files relevant to this agent.",
+   "text": "打开与此智能体相关的文件。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentGenerateConfig",
+   "source": "Generate Config",
+   "text": "生成配置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentGenerateConfigTooltip",
+   "source": "Enable this agent for config generation and write its project config file. Existing user content is merged safely; incompatible files stop generation without modification.",
+   "text": "为此智能体启用配置生成，并写入它的项目配置文件。已有的用户内容会被安全合并；遇到不兼容的文件时会停止生成且不做修改。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentHeaderActions",
+   "source": "Actions",
+   "text": "操作"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentHeaderAgent",
+   "source": "Agent",
+   "text": "智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentHeaderCli",
+   "source": "CLI",
+   "text": "命令行"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentHeaderConfig",
+   "source": "Config",
+   "text": "配置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentHeaderEnabled",
+   "source": "Enabled",
+   "text": "已启用"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentInstall",
+   "source": "Install",
+   "text": "安装"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentInstallTooltip",
+   "source": "Start the visible install flow for this missing agent app.",
+   "text": "为这个缺失的智能体应用启动可见的安装流程。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentSpecificFileCreate",
+   "source": "Create",
+   "text": "创建"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentSpecificFileOpen",
+   "source": "Open",
+   "text": "打开"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentSpecificFileReveal",
+   "source": "Reveal",
+   "text": "显示位置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentStatusTitle",
+   "source": "Agent Targets",
+   "text": "智能体目标"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentUseInChat",
+   "source": "Use in Chat",
+   "text": "在对话中使用"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentUseInChatDisabledTooltip",
+   "source": "Enable this agent, install the agent app, and generate its config before using it in Chat / Terminal.",
+   "text": "在对话 / 终端中使用前，请先启用此智能体、安装智能体应用并生成其配置。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentUseInChatTooltip",
+   "source": "Open Chat / Terminal with this installed and configured agent selected.",
+   "text": "打开对话 / 终端，并选中这个已安装且已配置的智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentsSectionTitle",
+   "source": "Agents",
+   "text": "智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AgentsTab",
+   "source": "Agents",
+   "text": "智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AllowAgentLaunch",
+   "source": "Allow future direct external agent launch",
+   "text": "允许以后直接启动外部智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AllowClipboardCopy",
+   "source": "Copy generated instructions to clipboard",
+   "text": "将生成的说明复制到剪贴板"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AllowTerminalLaunch",
+   "source": "Allow HyperAIStudio to open external agent windows",
+   "text": "允许 HyperAIStudio 打开外部智能体窗口"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "AutoRoutedReadyMessage",
+   "source": "Unreal MCP is ready. Open HyperAI Chat to copy or launch an external-agent handoff.",
+   "text": "Unreal MCP 已就绪。打开 HyperAI 对话以复制或启动外部智能体交接。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ChatPanelOpened",
+   "source": "Opened Chat / Terminal.",
+   "text": "已打开对话 / 终端。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ChatPanelUnavailable",
+   "source": "Chat / Terminal command is unavailable.",
+   "text": "对话 / 终端命令不可用。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CheckingHeadline",
+   "source": "Checking Unreal MCP readiness...",
+   "text": "正在检查 Unreal MCP 就绪状态..."
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ClaudeConfig",
+   "source": "Claude Code: .mcp.json",
+   "text": "Claude Code：.mcp.json"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ClaudeMd",
+   "source": "Claude instructions: CLAUDE.md",
+   "text": "Claude 说明：CLAUDE.md"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CodexConfig",
+   "source": "Codex: .codex/config.toml",
+   "text": "Codex：.codex/config.toml"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CodexTomlPatchCopied",
+   "source": "Codex TOML managed block copied. Review or paste it into .codex/config.toml if you do not want automatic setup to write Codex config.",
+   "text": "已复制 Codex TOML 托管块。如果你不希望自动设置写入 Codex 配置，请审阅后将其粘贴到 .codex/config.toml。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CodexTomlSafetyHint",
+   "source": "Codex TOML updates stay inside a HyperAIStudio managed block. Copy the block first if you want to review or manually apply it to an existing config.",
+   "text": "Codex TOML 的更新只会写在 HyperAIStudio 托管块内。如果要审阅或手动应用到现有配置，请先复制该块。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ConfigureAgentsButton",
+   "source": "Configure Agents",
+   "text": "配置智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ConfigureAgentsTooltip",
+   "source": "Open the Agents tab.",
+   "text": "打开“智能体”标签页。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ContextActorsLabel",
+   "source": "Actors",
+   "text": "Actor"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ContextActorsTooltip",
+   "source": "Selected level actors that will be included in a context pack.",
+   "text": "将包含在上下文包中的所选关卡 Actor。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ContextAssetsLabel",
+   "source": "Assets",
+   "text": "资产"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ContextAssetsTooltip",
+   "source": "Selected Content Browser assets that will be included in a context pack.",
+   "text": "将包含在上下文包中的内容浏览器所选资产。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ContextBlueprintLabel",
+   "source": "Blueprint Nodes",
+   "text": "蓝图节点"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ContextBlueprintMenuValue",
+   "source": "Graph menu",
+   "text": "图表菜单"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ContextBlueprintTooltip",
+   "source": "Blueprint node context is captured from the Blueprint graph right-click menu.",
+   "text": "蓝图节点上下文从蓝图图表的右键菜单中获取。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ContextChipsTitle",
+   "source": "Current Context",
+   "text": "当前上下文"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ContextMapLabel",
+   "source": "Map",
+   "text": "地图"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ContextMapTooltip",
+   "source": "Current editor map recorded in generated context packs.",
+   "text": "记录在生成的上下文包中的当前编辑器地图。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ContextProjectRootLabel",
+   "source": "Project Root",
+   "text": "项目根目录"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ContextProjectRootTooltip",
+   "source": "Agent clients opened from this project root can load the generated project-scoped config and rules.",
+   "text": "从此项目根目录打开的智能体客户端可以加载生成的项目级配置和规则。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CopyAgentInstall",
+   "source": "Copy Install",
+   "text": "复制安装命令"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CopyAgentInstallTooltip",
+   "source": "Copy the install command for this agent app.",
+   "text": "复制此智能体应用的安装命令。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CopyAgentPromptEmpty",
+   "source": "Prompt file was created, but the prompt text is empty.",
+   "text": "已创建提示词文件，但提示词内容为空。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CopyAgentPromptFailed",
+   "source": "Copy prompt failed: {0}",
+   "text": "复制提示词失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CopyCodexTomlPatchButton",
+   "source": "Copy Codex TOML Patch",
+   "text": "复制 Codex TOML 补丁"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CopyExampleMCPProfileButton",
+   "source": "Copy Example Profile",
+   "text": "复制示例配置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CopyInspectorCommand",
+   "source": "Copy MCP Inspector",
+   "text": "复制 MCP Inspector 命令"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CopyInstallCommand",
+   "source": "Copy Install",
+   "text": "复制安装命令"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CopyTerminalSetup",
+   "source": "Copy Startup Commands",
+   "text": "复制启动命令"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CopyTestPrompt",
+   "source": "Copy Instructions",
+   "text": "复制说明"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CreateAgentFileFailed",
+   "source": "Create failed for {0}: {1}",
+   "text": "为 {0} 创建失败：{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "CursorConfig",
+   "source": "Cursor: .cursor/mcp.json",
+   "text": "Cursor：.cursor/mcp.json"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DescriptionMCPServerMissing",
+   "source": "That MCP server entry no longer exists.",
+   "text": "该 MCP 服务器条目已不存在。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsAgentBody",
+   "source": "Canonical AGENTS.md plus a starter prompt to paste in your external agent.",
+   "text": "标准的 AGENTS.md，以及一段可粘贴到外部智能体中的起始提示词。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsAgentTitle",
+   "source": "Agent Instructions",
+   "text": "智能体说明"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsCopyExampleProfile",
+   "source": "Copy Example",
+   "text": "复制示例"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsCopyInspector",
+   "source": "Copy Inspector",
+   "text": "复制 Inspector 命令"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsCopyStarter",
+   "source": "Copy Starter",
+   "text": "复制起始提示词"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsEpicBody",
+   "source": "Official reference and MCP Inspector command for Streamable HTTP.",
+   "text": "Streamable HTTP 的官方参考和 MCP Inspector 命令。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsEpicTitle",
+   "source": "Epic Unreal MCP",
+   "text": "Epic Unreal MCP"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsImportProfile",
+   "source": "Import Profile",
+   "text": "导入配置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsLink",
+   "source": "Documentation",
+   "text": "文档"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsLocalBody",
+   "source": "HyperAIStudio guide on gamesbyhyper.com and current project folder.",
+   "text": "gamesbyhyper.com 上的 HyperAIStudio 指南，以及当前项目文件夹。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsLocalTitle",
+   "source": "Website Docs",
+   "text": "网站文档"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsMCPProfilesBody",
+   "source": "Import reviewed hyperai.mcp.v1 profiles or add a local MCP server that is already runnable.",
+   "text": "导入经过审阅的 hyperai.mcp.v1 配置，或添加一个已经可以运行的本地 MCP 服务器。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsMCPProfilesTitle",
+   "source": "MCP Profiles",
+   "text": "MCP 配置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsOpenAgents",
+   "source": "Open AGENTS.md",
+   "text": "打开 AGENTS.md"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsOpenDocs",
+   "source": "Open Docs",
+   "text": "打开文档"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsOpenEpic",
+   "source": "Open Epic Docs",
+   "text": "打开 Epic 文档"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsProjectFolder",
+   "source": "Project Folder",
+   "text": "项目文件夹"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsTroubleshootingBody",
+   "source": "Port conflicts, toolset visibility, missing files, and config repair routes.",
+   "text": "端口冲突、工具集可见性、缺失文件以及配置修复方法。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsTroubleshootingTitle",
+   "source": "Troubleshooting",
+   "text": "故障排除"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsVerify",
+   "source": "Verify",
+   "text": "验证"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "DocsViewPrereqs",
+   "source": "Open Guide",
+   "text": "打开指南"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "EditMCPDialogTitle",
+   "source": "Edit MCP Server",
+   "text": "编辑 MCP 服务器"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "EnableMCPServerMissing",
+   "source": "That MCP server entry no longer exists.",
+   "text": "该 MCP 服务器条目已不存在。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "EnablePluginsButton",
+   "source": "Enable Plugins",
+   "text": "启用插件"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "EndpointMCPServerMissing",
+   "source": "That MCP server entry no longer exists.",
+   "text": "该 MCP 服务器条目已不存在。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ExampleMCPProfileCopied",
+   "source": "Example hyperai-mcp.json profile copied to clipboard.",
+   "text": "已将示例 hyperai-mcp.json 配置复制到剪贴板。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FilesPermissionsTitle",
+   "source": "Files And Permissions",
+   "text": "文件与权限"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunCopyPrompt",
+   "source": "Copy Starter Instructions",
+   "text": "复制起始说明"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunGuideHint",
+   "source": "HyperAIStudio makes Epic Unreal MCP usable from your external agent. Set up once, test the connection, then continue in Codex, Claude Code, Gemini, Cursor, or VS Code/Copilot with generated project instructions.",
+   "text": "HyperAIStudio 让你可以从外部智能体使用 Epic Unreal MCP。完成一次设置并测试连接，然后借助生成的项目说明在 Codex、Claude Code、Gemini、Cursor 或 VS Code/Copilot 中继续工作。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunGuideTitle",
+   "source": "First Run Flow",
+   "text": "首次运行流程"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunOpenDocs",
+   "source": "Open Docs",
+   "text": "打开文档"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunOpenEpicDocs",
+   "source": "Open Epic MCP Docs",
+   "text": "打开 Epic MCP 文档"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunOpenProjectFolder",
+   "source": "Open Project Folder",
+   "text": "打开项目文件夹"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunPromptCopied",
+   "source": "Starter instructions copied. Paste them into your configured agent client; open the project root when possible so project-scoped config and rules load.",
+   "text": "已复制起始说明。请粘贴到已配置的智能体客户端中；尽量从项目根目录打开，以便加载项目级配置和规则。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunStepAgent",
+   "source": "3. Continue In Agent",
+   "text": "3. 在智能体中继续"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunStepAgentNeeded",
+   "source": "Run a connection test",
+   "text": "运行连接测试"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunStepAgentReady",
+   "source": "Ready",
+   "text": "就绪"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunStepSetup",
+   "source": "1. Setup",
+   "text": "1. 设置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunStepSetupNeeded",
+   "source": "Run setup",
+   "text": "运行设置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunStepSetupReady",
+   "source": "Configured",
+   "text": "已配置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunStepVerify",
+   "source": "2. Verify MCP",
+   "text": "2. 验证 MCP"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunStepVerifyNeeded",
+   "source": "Refresh/test",
+   "text": "刷新/测试"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "FirstRunStepVerifyReady",
+   "source": "tools/list works",
+   "text": "tools/list 可用"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "GeminiConfig",
+   "source": "Gemini: .gemini/settings.json",
+   "text": "Gemini：.gemini/settings.json"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "GenerateAgentConfigFailed",
+   "source": "Generate config failed for {0}: {1}",
+   "text": "为 {0} 生成配置失败：{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "HeaderAgentFilesMissing",
+   "source": "Missing",
+   "text": "缺失"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "HeaderAgentFilesReady",
+   "source": "Generated",
+   "text": "已生成"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "HeaderChecking",
+   "source": "Checking",
+   "text": "检查中"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "HeaderMetricAgentFiles",
+   "source": "Agent Files",
+   "text": "智能体文件"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "HeaderMetricEndpoint",
+   "source": "Endpoint",
+   "text": "端点"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "HeaderMetricMCP",
+   "source": "Unreal MCP",
+   "text": "Unreal MCP"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "HeaderReady",
+   "source": "Ready",
+   "text": "就绪"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "HeaderSetupNeeded",
+   "source": "Setup needed",
+   "text": "需要设置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "HelpHint",
+   "source": "Compact shortcuts for website docs, generated guidance, Unreal MCP reference, troubleshooting, and MCP profile templates.",
+   "text": "网站文档、生成的指引、Unreal MCP 参考、故障排除和 MCP 配置模板的快捷入口。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "HelpTab",
+   "source": "Docs",
+   "text": "文档"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "HelpTitle",
+   "source": "Docs",
+   "text": "文档"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "HyperAIToolModesLabel",
+   "source": "Unreal MCP tool set",
+   "text": "Unreal MCP 工具集"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ImportExampleMCPProfileButton",
+   "source": "Import Example Profile",
+   "text": "导入示例配置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ImportExampleMCPProfileFailed",
+   "source": "Example MCP profile import failed: {0}",
+   "text": "导入示例 MCP 配置失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ImportMCPProfileButton",
+   "source": "Import Profile From Clipboard",
+   "text": "从剪贴板导入配置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ImportMCPProfileFailed",
+   "source": "MCP profile import failed: {0}",
+   "text": "导入 MCP 配置失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "InitialMessage",
+   "source": "Setup is incomplete. Run Start Setup, verify blockers, or configure at least one agent.",
+   "text": "设置尚未完成。请运行“开始设置”、检查阻碍项，或至少配置一个智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "InitialReadyMessage",
+   "source": "Ready. Use Chat / Terminal for daily handoff, or adjust agents and MCP profiles here.",
+   "text": "已就绪。日常交接请使用对话 / 终端，也可以在这里调整智能体和 MCP 配置。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "InspectorCommandCopied",
+   "source": "MCP Inspector command copied.",
+   "text": "已复制 MCP Inspector 命令。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "InstallChatNoSlate",
+   "source": "Slate is not initialized. Paste the copied command manually in unattended runs.",
+   "text": "Slate 尚未初始化。在无人值守运行中请手动粘贴已复制的命令。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "InstallChatUnavailable",
+   "source": "HyperAI Chat command is unavailable. Command copied; paste it manually.",
+   "text": "HyperAI 对话命令不可用。命令已复制；请手动粘贴。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "InstallMissingPrerequisites",
+   "source": "Install Missing Prerequisites",
+   "text": "安装缺失的前置组件"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "InstallMissingPrerequisitesTooltip",
+   "source": "Open HyperAI Chat, stop any active embedded agent terminal, and run the visible installer commands for missing external tools.",
+   "text": "打开 HyperAI 对话，停止所有运行中的内嵌智能体终端，并为缺失的外部工具运行可见的安装命令。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "InstallTerminalEmptyCommand",
+   "source": "No install command is available.",
+   "text": "没有可用的安装命令。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPAdd",
+   "source": "Add",
+   "text": "添加"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPAddTooltip",
+   "source": "Add a custom MCP profile entry.",
+   "text": "添加一个自定义 MCP 配置条目。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPCommandLabel",
+   "source": "Command",
+   "text": "命令"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDescriptionHint",
+   "source": "Description for generated agent instructions...",
+   "text": "用于生成的智能体说明的描述..."
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDialogArgs",
+   "source": "Arguments",
+   "text": "参数"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDialogArgsHint",
+   "source": "STDIO arguments, space-separated",
+   "text": "STDIO 参数，以空格分隔"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDialogCancel",
+   "source": "Cancel",
+   "text": "取消"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDialogDescription",
+   "source": "Description",
+   "text": "描述"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDialogEnabled",
+   "source": "Enabled",
+   "text": "已启用"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDialogEndpoint",
+   "source": "Command or URL",
+   "text": "命令或 URL"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDialogEndpointHint",
+   "source": "npx / uvx / local executable, or http://127.0.0.1:9000/mcp",
+   "text": "npx / uvx / 本地可执行文件，或 http://127.0.0.1:9000/mcp"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDialogExportHint",
+   "source": "Export to agents: Codex, Claude Code, Cursor, VS Code/Copilot, Gemini. Environment values are not stored here.",
+   "text": "导出到智能体：Codex、Claude Code、Cursor、VS Code/Copilot、Gemini。环境变量的值不会保存在这里。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDialogName",
+   "source": "Name",
+   "text": "名称"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDialogNoSettings",
+   "source": "HyperAIStudio settings are unavailable.",
+   "text": "HyperAIStudio 设置不可用。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDialogPriority",
+   "source": "Priority",
+   "text": "优先级"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDialogSave",
+   "source": "Save",
+   "text": "保存"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPDialogStdio",
+   "source": "STDIO",
+   "text": "STDIO"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPEditButton",
+   "source": "Edit",
+   "text": "编辑"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPImportProfile",
+   "source": "Import Profile",
+   "text": "导入配置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPImportProfileTooltip",
+   "source": "Import a hyperai.mcp.v1 profile from the clipboard.",
+   "text": "从剪贴板导入 hyperai.mcp.v1 配置。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPPriorityLabel",
+   "source": "Priority",
+   "text": "优先级"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPRegistryTitle",
+   "source": "MCP Servers",
+   "text": "MCP 服务器"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPSectionHint",
+   "source": "Unreal MCP stays the locked primary server. Extended Hyper Tools, when enabled, use that same endpoint. Other MCP entries are exported to agents by advisory priority; HyperAIStudio does not route tool calls.",
+   "text": "Unreal MCP 始终是锁定的主服务器。启用扩展 Hyper 工具时，它们使用同一个端点。其他 MCP 条目会按建议优先级导出给智能体；HyperAIStudio 不会路由工具调用。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPSectionTitle",
+   "source": "MCP",
+   "text": "MCP"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPServerConfigRegenerateFailed",
+   "source": "{0} Config regeneration failed: {1}",
+   "text": "{0} 配置重新生成失败：{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPServerMissingHint",
+   "source": "Server entry no longer exists.",
+   "text": "服务器条目已不存在。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPTab",
+   "source": "MCP",
+   "text": "MCP"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPTestButton",
+   "source": "Test",
+   "text": "测试"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPToolsSearchHint",
+   "source": "Search tool name, description, or toolset",
+   "text": "搜索工具名称、描述或工具集"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPUnknownTools",
+   "source": "not probed",
+   "text": "未探测"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MCPUrlLabel",
+   "source": "URL",
+   "text": "URL"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MissingMCPServerName",
+   "source": "Missing server",
+   "text": "缺少服务器"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "MissingPrerequisitesCommandFailed",
+   "source": "Could not build the missing-prerequisites install command.",
+   "text": "无法构建缺失前置组件的安装命令。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ModuleRow",
+   "source": "Epic Unreal MCP",
+   "text": "Epic Unreal MCP"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NativeExecutionFast",
+   "source": "Fast",
+   "text": "快速"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NativeExecutionFastSelected",
+   "source": "HyperAI execution set to Fast. Destructive and external-effect tools remain strict.",
+   "text": "HyperAI 执行模式已设为“快速”。破坏性工具和有外部影响的工具仍保持严格。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NativeExecutionModeLabel",
+   "source": "Execution",
+   "text": "执行"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NativeExecutionModeTooltip",
+   "source": "Fast minimizes repeated work for reads and reversible edits. Destructive and external effects remain strict in both modes.",
+   "text": "“快速”模式会尽量减少读取和可撤销编辑的重复工作。在两种模式下，破坏性操作和外部影响都保持严格。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NativeExecutionStrict",
+   "source": "Strict Safety",
+   "text": "严格安全"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NativeExecutionStrictSelected",
+   "source": "HyperAI execution set to Strict Safety.",
+   "text": "HyperAI 执行模式已设为“严格安全”。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NativeToolChannelLabel",
+   "source": "Tool set",
+   "text": "工具集"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NativeToolChannelPreview",
+   "source": "Unreal MCP + Extended Hyper Tools",
+   "text": "Unreal MCP + 扩展 Hyper 工具"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NativeToolChannelStable",
+   "source": "Unreal MCP Only",
+   "text": "仅 Unreal MCP"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NativeToolModesHint",
+   "source": "Extended tools are listed under Tools. Destructive and external-effect tools always retain strict safety.",
+   "text": "扩展工具列在“工具”下。破坏性工具和有外部影响的工具始终保持严格安全。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NativeToolPreviewSelected",
+   "source": "Unreal MCP + Extended Hyper Tools selected. Restart Unreal Editor to load the extended tools.",
+   "text": "已选择 Unreal MCP + 扩展 Hyper 工具。请重启 Unreal 编辑器以加载扩展工具。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NativeToolStableSelected",
+   "source": "Unreal MCP Only selected. Restart Unreal Editor to unload HyperAIStudio's extended tools.",
+   "text": "已选择仅 Unreal MCP。请重启 Unreal 编辑器以卸载 HyperAIStudio 的扩展工具。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NeedsSetupHeadline",
+   "source": "Setup needed: run Set Up HyperAIStudio.",
+   "text": "需要设置：请运行“设置 HyperAIStudio”。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "NoMissingPrerequisites",
+   "source": "No missing installable external prerequisites were found.",
+   "text": "没有发现可安装的缺失外部前置组件。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OfficialMCPDocsOpened",
+   "source": "Opened Epic Unreal MCP documentation.",
+   "text": "已打开 Epic Unreal MCP 文档。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenAgentDocs",
+   "source": "Docs",
+   "text": "文档"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenAgentDocsTooltip",
+   "source": "Open setup documentation for this agent app.",
+   "text": "打开此智能体应用的设置文档。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenAgentFilesButton",
+   "source": "Agent Files",
+   "text": "智能体文件"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenAgentFilesTooltip",
+   "source": "Open or reveal generated project agent files.",
+   "text": "打开或显示生成的项目智能体文件。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenAgentTestFailed",
+   "source": "Open agent test failed: {0}",
+   "text": "打开智能体测试失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenAgentsButton",
+   "source": "Open AGENTS.md",
+   "text": "打开 AGENTS.md"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenAgentsFailed",
+   "source": "Open AGENTS.md failed: {0}",
+   "text": "打开 AGENTS.md 失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenChatTerminalButton",
+   "source": "Open Chat / Terminal",
+   "text": "打开对话 / 终端"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenChatTerminalTooltip",
+   "source": "Open the separate Chat / Terminal handoff panel.",
+   "text": "打开独立的对话 / 终端交接面板。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenClaudeButton",
+   "source": "Open CLAUDE.md",
+   "text": "打开 CLAUDE.md"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenClaudeFailed",
+   "source": "Open CLAUDE.md failed: {0}",
+   "text": "打开 CLAUDE.md 失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenIncludedDocsFailed",
+   "source": "Open docs failed: {0}",
+   "text": "打开文档失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenPrereqDocs",
+   "source": "Docs",
+   "text": "文档"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenProjectFolderButton",
+   "source": "Open Project Folder",
+   "text": "打开项目文件夹"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenProjectFolderFailed",
+   "source": "Open project folder failed: {0}",
+   "text": "打开项目文件夹失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenProjectInAgentTooltip",
+   "source": "Create a connection-test prompt and open the selected agent from the project root.",
+   "text": "创建一个连接测试提示词，并从项目根目录打开所选智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenProjectInClaude",
+   "source": "Open Claude Code Test",
+   "text": "打开 Claude Code 测试"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenProjectInCodex",
+   "source": "Open Codex Test",
+   "text": "打开 Codex 测试"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenProjectInCursor",
+   "source": "Open Cursor Test",
+   "text": "打开 Cursor 测试"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenProjectInGemini",
+   "source": "Open Gemini Test",
+   "text": "打开 Gemini 测试"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenProjectInVSCode",
+   "source": "Open VS Code Test",
+   "text": "打开 VS Code 测试"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenTestTerminal",
+   "source": "Open Test Terminal",
+   "text": "打开测试终端"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenTestTerminalFailed",
+   "source": "Open test terminal failed: {0}",
+   "text": "打开测试终端失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenUnrealTerminalButton",
+   "source": "Open UE Terminal",
+   "text": "打开 UE 终端"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "OpenUnrealTerminalFailed",
+   "source": "Open UE Terminal failed: {0}",
+   "text": "打开 UE 终端失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "PortRow",
+   "source": "Port",
+   "text": "端口"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "PrereqDialogVerify",
+   "source": "Verify",
+   "text": "验证"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "PrereqDocs",
+   "source": "Docs",
+   "text": "文档"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "PrereqEnable",
+   "source": "Enable",
+   "text": "启用"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "PrereqHint",
+   "source": "HyperAIStudio checks the Unreal MCP stack, Terminal, and common agent apps. Missing external apps stay manual; required Unreal plugins can be enabled here.",
+   "text": "HyperAIStudio 会检查 Unreal MCP 组件、终端和常用智能体应用。缺失的外部应用需要手动安装；所需的 Unreal 插件可以在这里启用。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "PrereqInstall",
+   "source": "Install",
+   "text": "安装"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "PrereqTitle",
+   "source": "Prerequisites",
+   "text": "前置组件"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "PrereqVerify",
+   "source": "Verify",
+   "text": "验证"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "PrerequisitesDialogIntro",
+   "source": "Install or enable only what you need. Install commands open visibly in HyperAI Chat after resetting any active embedded agent terminal.",
+   "text": "只安装或启用你需要的内容。安装命令会在重置所有运行中的内嵌智能体终端后，在 HyperAI 对话中可见地打开。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "PrerequisitesDialogTitle",
+   "source": "Prerequisites",
+   "text": "前置组件"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "PriorityMCPServerMissing",
+   "source": "That MCP server entry no longer exists.",
+   "text": "该 MCP 服务器条目已不存在。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ProbeDetailFailedUnknown",
+   "source": "The MCP tools/list handshake did not complete.",
+   "text": "MCP tools/list 握手未完成。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ProbeDetailNotCheckedServerNotReady",
+   "source": "Start setup or start Unreal MCP, then verify the endpoint.",
+   "text": "请开始设置或启动 Unreal MCP，然后验证端点。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ProbeDetailNotCheckedServerReady",
+   "source": "Server and port look ready; click Verify to run the MCP tools/list handshake.",
+   "text": "服务器和端口看起来已就绪；点击“验证”运行 MCP tools/list 握手。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ProbeDetailReady",
+   "source": "tools/list is reachable.",
+   "text": "tools/list 可访问。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ProbeStatusChecking",
+   "source": "Checking...",
+   "text": "检查中..."
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ProbeStatusFailed",
+   "source": "Probe failed",
+   "text": "探测失败"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ProbeStatusNotChecked",
+   "source": "Not checked yet",
+   "text": "尚未检查"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ProbeStatusReady",
+   "source": "Ready",
+   "text": "就绪"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ReadinessTitle",
+   "source": "Readiness",
+   "text": "就绪状态"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ReadyHeadline",
+   "source": "Ready: Unreal MCP is listening and tools/list is reachable.",
+   "text": "就绪：Unreal MCP 正在监听，且 tools/list 可访问。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "RefreshButton",
+   "source": "Refresh",
+   "text": "刷新"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "RefreshIconTooltip",
+   "source": "Refresh readiness checks.",
+   "text": "刷新就绪检查。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "RegenerateAgentFiles",
+   "source": "Regenerate Files",
+   "text": "重新生成文件"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "RegenerateAgentFilesFailed",
+   "source": "Regenerate files failed: {0}",
+   "text": "重新生成文件失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "RegenerateAgentFilesTooltip",
+   "source": "Regenerate selected agent instructions and configs while preserving managed/user content.",
+   "text": "重新生成所选智能体的说明和配置，同时保留托管内容和用户内容。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "RemoveMCPServer",
+   "source": "Remove",
+   "text": "移除"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "RemoveMCPServerMissing",
+   "source": "That MCP server entry no longer exists.",
+   "text": "该 MCP 服务器条目已不存在。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "RenameMCPServerMissing",
+   "source": "That MCP server entry no longer exists.",
+   "text": "该 MCP 服务器条目已不存在。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "RequireDestructiveConfirm",
+   "source": "Require confirmation for destructive agent actions",
+   "text": "破坏性智能体操作需要确认"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SelectNativeExecutionFast",
+   "source": "Fast",
+   "text": "快速"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SelectNativeExecutionStrict",
+   "source": "Strict Safety",
+   "text": "严格安全"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SelectNativeToolPreview",
+   "source": "Unreal MCP + Extended Hyper Tools",
+   "text": "Unreal MCP + 扩展 Hyper 工具"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SelectNativeToolStable",
+   "source": "Unreal MCP Only",
+   "text": "仅 Unreal MCP"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SelectNativeToolStableTooltip",
+   "source": "Use Epic Unreal MCP without HyperAIStudio's extended tools.",
+   "text": "只使用 Epic Unreal MCP，不使用 HyperAIStudio 的扩展工具。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ServerRow",
+   "source": "Server",
+   "text": "服务器"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SessionLogEmpty",
+   "source": "No HyperAIStudio actions in this session yet.",
+   "text": "此会话中还没有 HyperAIStudio 操作。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SessionLogTitle",
+   "source": "Session Log",
+   "text": "会话日志"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SettingsRow",
+   "source": "Server Settings",
+   "text": "服务器设置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupAgentFilesGenerated",
+   "source": "Generated",
+   "text": "已生成"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupAgentFilesMissing",
+   "source": "Missing",
+   "text": "缺失"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupAgentFilesOpen",
+   "source": "Open",
+   "text": "打开"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupAgentFilesRow",
+   "source": "Agent instructions and configs",
+   "text": "智能体说明和配置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupAgentsUsableRow",
+   "source": "Agents usable",
+   "text": "可用的智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupButton",
+   "source": "Set Up HyperAIStudio",
+   "text": "设置 HyperAIStudio"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupConfigureAgentsRow",
+   "source": "Configure Agents",
+   "text": "配置智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupFailed",
+   "source": "Setup failed: {0}",
+   "text": "设置失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupFailedOpenDocs",
+   "source": "Open Docs",
+   "text": "打开文档"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupFailedPrereqs",
+   "source": "Fix Help",
+   "text": "修复帮助"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupFailedTitle",
+   "source": "Setup failed",
+   "text": "设置失败"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupFailedTryAgain",
+   "source": "Try Again",
+   "text": "重试"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupFinishedInstallAgents",
+   "source": "{0} Opened HyperAI Chat and stopped the agent terminal before installing missing enabled-agent CLI prerequisite(s). Click Verify after it finishes.",
+   "text": "{0} 已打开 HyperAI 对话，并在安装缺失的已启用智能体命令行前置组件前停止了智能体终端。完成后请点击“验证”。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupFinishedInstallAgentsFailed",
+   "source": "{0} Could not open HyperAI Chat for missing CLI prerequisite(s): {1} Command copied as fallback.",
+   "text": "{0} 无法为缺失的命令行前置组件打开 HyperAI 对话：{1} 已复制命令作为备用。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupFinishedValidating",
+   "source": "{0} Validating readiness...",
+   "text": "{0} 正在验证就绪状态..."
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupInstallPrerequisitesButton",
+   "source": "Install Prerequisites",
+   "text": "安装前置组件"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupInstallPrerequisitesTooltip",
+   "source": "Open HyperAI Chat, stop any active embedded agent terminal, and run the visible installer commands for missing external tools.",
+   "text": "打开 HyperAI 对话，停止所有运行中的内嵌智能体终端，并为缺失的外部工具运行可见的安装命令。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupMCPNotReady",
+   "source": "Not ready",
+   "text": "未就绪"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupMCPReady",
+   "source": "Ready",
+   "text": "就绪"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupNeededSummary",
+   "source": "Run setup once, verify Unreal MCP, and configure at least one external agent.",
+   "text": "完成一次设置，验证 Unreal MCP，并至少配置一个外部智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupOpenChatButton",
+   "source": "Open Chat / Terminal",
+   "text": "打开对话 / 终端"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupOpenChatTooltip",
+   "source": "Open the separate daily handoff panel.",
+   "text": "打开独立的日常交接面板。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupPrimaryButton",
+   "source": "Start Setup",
+   "text": "开始设置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupPrimaryTooltip",
+   "source": "Configure Unreal MCP, generate selected agent files, and verify readiness.",
+   "text": "配置 Unreal MCP，生成所选智能体的文件，并验证就绪状态。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupReadySummary",
+   "source": "Verified connection layer. Daily chat stays in your external agent; HyperAIStudio only prepares context, prompts, files, and MCP routing.",
+   "text": "连接层已验证。日常对话仍在你的外部智能体中进行；HyperAIStudio 只负责准备上下文、提示词、文件和 MCP 路由。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupRequiredPlugins",
+   "source": "Epic MCP toolsets",
+   "text": "Epic MCP 工具集"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupSectionTitle",
+   "source": "Setup",
+   "text": "设置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupSyncToolsets",
+   "source": "Sync Toolsets",
+   "text": "同步工具集"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupTab",
+   "source": "Setup",
+   "text": "设置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupToolsListProbe",
+   "source": "tools/list probe",
+   "text": "tools/list 探测"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupUnrealMCPServer",
+   "source": "Unreal MCP server",
+   "text": "Unreal MCP 服务器"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupVerifyRow",
+   "source": "Verify",
+   "text": "验证"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupVerifyToolsRow",
+   "source": "Verify",
+   "text": "验证"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ShowQuickAutoComment",
+   "source": "Show Quick Auto Comment in Blueprint menu",
+   "text": "在蓝图菜单中显示“快速自动注释”"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ShowQuickAutoCommentTooltip",
+   "source": "Show the fast local title-based comment action in Blueprint and PCG graph context menus. Smart Auto Comment stays AI-assisted.",
+   "text": "在蓝图和 PCG 图表的右键菜单中显示基于标题的快速本地注释操作。“智能自动注释”仍由 AI 辅助。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "StartButton",
+   "source": "Start MCP",
+   "text": "启动 MCP"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "StopButton",
+   "source": "Stop MCP",
+   "text": "停止 MCP"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TerminalInspectorTitle",
+   "source": "MCP Inspector",
+   "text": "MCP Inspector"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TerminalOpenFolder",
+   "source": "Open Project Folder",
+   "text": "打开项目文件夹"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TerminalOpenUnreal",
+   "source": "Open UE Terminal",
+   "text": "打开 UE 终端"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TerminalPanelHint",
+   "source": "Install buttons run visible commands in HyperAI Chat's embedded terminal after resetting any active agent session. For manual startup, use the Unreal Terminal when it is available. If Terminal is missing or disabled, enable the Terminal plugin and restart the editor; meanwhile use Copy Startup Commands and run them from Windows Terminal, PowerShell, or CMD.",
+   "text": "安装按钮会在重置所有运行中的智能体会话后，在 HyperAI 对话的内嵌终端中运行可见的命令。如需手动启动，请在可用时使用 Unreal 终端。如果终端缺失或被禁用，请启用 Terminal 插件并重启编辑器；在此期间可以使用“复制启动命令”，然后在 Windows Terminal、PowerShell 或 CMD 中运行。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TerminalPanelTitle",
+   "source": "Terminal",
+   "text": "终端"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TerminalRecipeTitle",
+   "source": "Project-root startup recipe",
+   "text": "项目根目录启动步骤"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TerminalSetupCopied",
+   "source": "Project-root terminal startup commands copied.",
+   "text": "已复制项目根目录终端启动命令。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TestCommandsHint",
+   "source": "Use these to validate the same flow from terminal, Codex, Claude Code, Gemini, Cursor, or VS Code/Copilot.",
+   "text": "可用这些命令在终端、Codex、Claude Code、Gemini、Cursor 或 VS Code/Copilot 中验证同样的流程。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TestCommandsTitle",
+   "source": "Test Commands",
+   "text": "测试命令"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TestMCPServer",
+   "source": "Test",
+   "text": "测试"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TestMCPServerFailed",
+   "source": "MCP server test failed: {0}",
+   "text": "MCP 服务器测试失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TestPromptCopied",
+   "source": "{0} instructions copied to clipboard.",
+   "text": "已将 {0} 说明复制到剪贴板。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TestPromptFailed",
+   "source": "Test instructions failed: {0}",
+   "text": "测试说明失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "Title",
+   "source": "HyperAIStudio",
+   "text": "HyperAIStudio"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryAllSources",
+   "source": "All sources",
+   "text": "所有来源"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryAvailable",
+   "source": "Available",
+   "text": "可用"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryDescriptionHeader",
+   "source": "Description",
+   "text": "描述"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryEpicSource",
+   "source": "Epic",
+   "text": "Epic"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryHyperSource",
+   "source": "HyperAI",
+   "text": "HyperAI"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryRefresh",
+   "source": "Refresh",
+   "text": "刷新"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryRefreshTooltip",
+   "source": "Rescan every currently registered Unreal MCP toolset.",
+   "text": "重新扫描当前注册的所有 Unreal MCP 工具集。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryRowEpic",
+   "source": "Epic",
+   "text": "Epic"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryRowHyperAI",
+   "source": "HyperAI",
+   "text": "HyperAI"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventorySourceAll",
+   "source": "All sources",
+   "text": "所有来源"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventorySourceEpic",
+   "source": "Epic",
+   "text": "Epic"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventorySourceHeader",
+   "source": "Source",
+   "text": "来源"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventorySourceHyperAI",
+   "source": "HyperAI",
+   "text": "HyperAI"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryStatusHeader",
+   "source": "Status",
+   "text": "状态"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryToolHeader",
+   "source": "Tool",
+   "text": "工具"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryTypeHeader",
+   "source": "Type",
+   "text": "类型"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolInventoryUnavailable",
+   "source": "Not loaded",
+   "text": "未加载"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ToolsListRow",
+   "source": "tools/list",
+   "text": "tools/list"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TopbarNeedsSetup",
+   "source": "Needs setup",
+   "text": "需要设置"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "TopbarReady",
+   "source": "Ready",
+   "text": "就绪"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "UnrealMCPCopyUrl",
+   "source": "Copy URL",
+   "text": "复制 URL"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "UnrealMCPEndpointCopied",
+   "source": "Unreal MCP endpoint copied.",
+   "text": "已复制 Unreal MCP 端点。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "UnrealMCPName",
+   "source": "Unreal MCP",
+   "text": "Unreal MCP"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "UnrealMCPOnlyToolCount",
+   "source": "Epic tools",
+   "text": "Epic 工具"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "UnrealMCPPrimary",
+   "source": "Primary",
+   "text": "主要"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "UnrealMCPToolsButton",
+   "source": "Tools",
+   "text": "工具"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "UnrealMCPType",
+   "source": "Streamable HTTP",
+   "text": "Streamable HTTP"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "VSCodeConfig",
+   "source": "VS Code: .vscode/mcp.json",
+   "text": "VS Code：.vscode/mcp.json"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ValidationStarted",
+   "source": "Validating HyperAIStudio readiness...",
+   "text": "正在验证 HyperAIStudio 就绪状态..."
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "VerifySetupButton",
+   "source": "Verify",
+   "text": "验证"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "VerifySetupTooltip",
+   "source": "Rerun readiness checks.",
+   "text": "重新运行就绪检查。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ViewPrerequisitesButton",
+   "source": "View Prerequisites",
+   "text": "查看前置组件"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "ViewPrerequisitesTooltip",
+   "source": "Open the detailed prerequisite checklist.",
+   "text": "打开详细的前置组件清单。"
+  }
+ ]
+}

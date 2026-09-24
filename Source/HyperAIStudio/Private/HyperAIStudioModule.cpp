@@ -55,6 +55,7 @@
 #include "Interfaces/IMainFrameModule.h"
 #include "HyperAIStudioProjectMemory.h"
 #include "HyperAIStudioAgents.h"
+#include "HyperAIStudioLocalization.h"
 #include "HyperAIStudioSkills.h"
 #include "HyperAIStudioAgentChatHistory.h"
 #include "HyperAIStudioChatHistoryPrefs.h"
@@ -539,6 +540,8 @@ public:
 	{
 		// First: the tab spawners below reference brushes in this style set.
 		FHyperAIStudioStyle::Register();
+		// HyperAI's text in its own language setting, before any of its windows exist.
+		HyperAIStudio::Localization::Startup();
 		EnginePreExitHandle = FCoreDelegates::OnEnginePreExit.AddRaw(
 			this, &FHyperAIStudioModule::BeginEnginePreExit);
 		// Agent chats still working get a say before the editor closes.
@@ -1834,7 +1837,7 @@ private:
 			Section.AddMenuEntry(
 				TEXT("HyperAIStudioOpenCodexContext"),
 				LOCTEXT("OpenCodexContext", "Open Codex With Selection"),
-				LOCTEXT("OpenCodexContextTooltip", "Copy a prompt with the selected assets and open Codex from the project root."),
+				LOCTEXT("OpenCodexContextAssetsTooltip", "Copy a prompt with the selected assets and open Codex from the project root."),
 				FSlateIcon(),
 				OpenCodexAction);
 
@@ -1846,7 +1849,7 @@ private:
 			Section.AddMenuEntry(
 				TEXT("HyperAIStudioOpenClaudeContext"),
 				LOCTEXT("OpenClaudeContext", "Open Claude Code With Selection"),
-				LOCTEXT("OpenClaudeContextTooltip", "Copy a prompt with the selected assets and open Claude Code from the project root."),
+				LOCTEXT("OpenClaudeContextAssetsTooltip", "Copy a prompt with the selected assets and open Claude Code from the project root."),
 				FSlateIcon(),
 				OpenClaudeAction);
 
@@ -1858,7 +1861,7 @@ private:
 			Section.AddMenuEntry(
 				TEXT("HyperAIStudioCreateCodexTaskPack"),
 				LOCTEXT("CreateCodexTaskPack", "Copy Codex Prompt"),
-				LOCTEXT("CreateCodexTaskPackTooltip", "Copy a Codex-ready prompt with context for the selected assets."),
+				LOCTEXT("CreateCodexTaskPackAssetsTooltip", "Copy a Codex-ready prompt with context for the selected assets."),
 				FSlateIcon(),
 				CopyCodexAction);
 
@@ -1870,7 +1873,7 @@ private:
 			Section.AddMenuEntry(
 				TEXT("HyperAIStudioCreateClaudeTaskPack"),
 				LOCTEXT("CreateClaudeTaskPack", "Copy Claude Code Prompt"),
-				LOCTEXT("CreateClaudeTaskPackTooltip", "Copy a Claude Code-ready prompt with context for the selected assets."),
+				LOCTEXT("CreateClaudeTaskPackAssetsTooltip", "Copy a Claude Code-ready prompt with context for the selected assets."),
 				FSlateIcon(),
 				CopyClaudeAction);
 
@@ -1882,7 +1885,7 @@ private:
 			Section.AddMenuEntry(
 				TEXT("HyperAIStudioAddSelectionContext"),
 				LOCTEXT("AddSelectionContext", "Copy Selection Prompt"),
-				LOCTEXT("AddSelectionContextTooltip", "Copy a prompt for the preferred external agent with the selected assets."),
+				LOCTEXT("AddSelectionContextAssetsTooltip", "Copy a prompt for the preferred external agent with the selected assets."),
 				FSlateIcon(),
 				PreferredAction);
 		}

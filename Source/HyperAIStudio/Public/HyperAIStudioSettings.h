@@ -303,6 +303,21 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "First Run")
 	bool bShowWelcomeOnStartup = true;
 
+	/**
+	 * Language of HyperAI's own windows, whatever language the editor uses. Editor follows the editor's language when
+	 * HyperAI has a translation for it; en is English. Applies at once.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Interface", meta = (DisplayName = "HyperAI Language", GetOptions = "GetLanguageOptions"))
+	FString UILanguage = TEXT("Editor");
+
+	/** Editor, en, and every language HyperAI has a translation for. */
+	UFUNCTION()
+	static TArray<FString> GetLanguageOptions();
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+
 	/** Internal one-shot marker used to finish a toolset sync after Unreal restarts. */
 	UPROPERTY(Config)
 	bool bResumeSetupAfterRestart = false;
