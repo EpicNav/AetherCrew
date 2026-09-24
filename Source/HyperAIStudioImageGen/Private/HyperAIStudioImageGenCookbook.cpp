@@ -31,8 +31,10 @@ The loop this pack is built for:
 
 1. `hyper_image_generate` writes a reference PNG into the project.
 2. Open the HyperAI Preview tab and point it at that PNG, beside a viewport capture.
-3. `hyper_lighting_compare` measures the two and reports the gap.
-4. Adjust the lighting, capture again, compare again.
+3. `hyper_image_compare` scores the two, names where they differ, and keeps each iteration in a session.
+   `hyper_lighting_compare` gives the lighting-only numbers.
+4. Adjust, capture again, compare again, until the score reaches the target. The image-match skill
+   (`/hyperai-match` in Claude Code) runs this loop for scenes, materials, effects and UI.
 
 Step 3 is why the prompt template pins time of day, key light direction, contrast and colour
 temperature. A reference whose light is beautiful but unreachable makes step 4 grind forever.

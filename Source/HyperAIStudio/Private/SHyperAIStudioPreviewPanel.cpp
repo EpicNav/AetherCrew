@@ -18,6 +18,8 @@
 #include "Widgets/Input/SSegmentedControl.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SScaleBox.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
@@ -531,6 +533,18 @@ void SHyperAIStudioPreviewPanel::Construct(const FArguments& InArgs)
 			})
 		]
 
+		// Earlier attempts, when the source keeps any: pick one to put it beside the reference.
+		+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 4.0f, 4.0f, 0.0f)
+		[
+			SNew(SScrollBox)
+			.Orientation(Orient_Horizontal)
+			.Visibility_Lambda([this]() { return Comparison.Frames.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+			+ SScrollBox::Slot()
+			[
+				SAssignNew(FrameStrip, SHorizontalBox)
+			]
+		]
+
 		+ SVerticalBox::Slot().AutoHeight().Padding(4.0f)
 		[
 			SNew(SHorizontalBox)
@@ -649,8 +663,63 @@ void SHyperAIStudioPreviewPanel::Refresh()
 	RebuildStats();
 }
 
+void SHyperAIStudioPreviewPanel::RebuildFrames()
+{
+	if (!FrameStrip.IsValid())
+	{
+		return;
+	}
+	FrameStrip->ClearChildren();
+	FrameImages.Reset();
+	for (const FHyperAIStudioPreviewFrame& Frame : Comparison.Frames)
+	{
+		const TSharedPtr<FHyperAIStudioPreviewImage> Image = FrameImages.Add_GetRef(MakeShared<FHyperAIStudioPreviewImage>());
+		const FString Path = Frame.ImagePath;
+		const FText Label = Frame.Label;
+		const FLinearColor Tint = Frame.Tone == EHyperAIStudioPreviewTone::Good ? FLinearColor(0.20f, 0.45f, 0.25f)
+			: Frame.Tone == EHyperAIStudioPreviewTone::Warning ? FLinearColor(0.50f, 0.34f, 0.10f) : FLinearColor(0.16f, 0.16f, 0.18f);
+		FrameStrip->AddSlot().AutoWidth().Padding(0.0f, 0.0f, 6.0f, 0.0f)
+		[
+			SNew(SButton)
+			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+			.ToolTipText(Frame.Tooltip.IsEmpty() ? FText::FromString(Path) : Frame.Tooltip)
+			.OnClicked_Lambda([this, Path, Label]()
+			{
+				Comparison.ImagePathB = Path;
+				Comparison.LabelB = Label;
+				return FReply::Handled();
+			})
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+					.BorderBackgroundColor_Lambda([this, Path, Tint]() { return Comparison.ImagePathB == Path ? FLinearColor(0.85f, 0.55f, 0.1f) : Tint; })
+					.Padding(2.0f)
+					[
+						SNew(SBox).WidthOverride(112.0f).HeightOverride(66.0f)
+						[
+							SNew(SScaleBox)
+							.Stretch(EStretch::ScaleToFit)
+							[
+								SNew(SImage).Image_Lambda([Image, Path]() { return Image->Get(Path); })
+							]
+						]
+					]
+				]
+				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 2.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Regular", 8)).Text(Label)
+				]
+			]
+		];
+	}
+}
+
 void SHyperAIStudioPreviewPanel::RebuildStats()
 {
+	RebuildFrames();
 	if (!StatsBox.IsValid())
 	{
 		return;

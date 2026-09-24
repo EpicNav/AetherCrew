@@ -1946,6 +1946,13 @@
      "safety": [
       "Read"
      ]
+    },
+    {
+     "name": "hyper_image_compare",
+     "cohort": "cohort.source.hyperaistudiolightingtoolset.v1",
+     "safety": [
+      "Read"
+     ]
     }
    ]
   },

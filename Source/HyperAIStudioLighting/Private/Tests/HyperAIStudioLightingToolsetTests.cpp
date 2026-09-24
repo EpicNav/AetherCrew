@@ -83,14 +83,14 @@ namespace HyperAIStudio::Lighting::Tests
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHyperAIStudioLightingCohortTest,
-	"HyperAIStudio.Lighting.Contracts.ExactFourToolCohort",
+	"HyperAIStudio.Lighting.Contracts.ExactFiveToolCohort",
 	HyperAIStudio::Lighting::Tests::Flags)
 
 bool FHyperAIStudioLightingCohortTest::RunTest(const FString& Parameters)
 {
 	(void)Parameters;
 	const TArray<FString> Names = FHyperAIStudioLightingContracts::GetToolNames();
-	TestEqual(TEXT("four tools"), Names.Num(), 4);
+	TestEqual(TEXT("five tools"), Names.Num(), 5);
 	const FHyperAIStudioDomainAdapterDescriptor& Descriptor = FHyperAIStudioLightingContracts::GetAdapterDescriptor();
 	TestEqual(TEXT("one variant per tool"), Descriptor.Variants.Num(), Names.Num());
 	TestFalse(TEXT("adapter fingerprint sealed"), Descriptor.AdapterFingerprint.IsEmpty());
@@ -264,6 +264,7 @@ bool FHyperAIStudioLightingOpsTest::RunTest(const FString& Parameters)
 	Rejects({Op(TEXT("set_sun"), TEXT("intensity"), TEXT("999999"))}, TEXT("from 0 to 200000"));
 	Rejects({Op(TEXT("set_sun"), TEXT("intensity"), TEXT("nan"))}, TEXT("needs a number"));
 	Rejects({Op(TEXT("set_sun"), TEXT("color"), TEXT("1,1"))}, TEXT("r,g,b"));
+	Rejects({Op(TEXT("set_post_process"), TEXT("shadows_offset"), TEXT("0.9,0,0"))}, TEXT("from -0.5 to 0.5"));
 	Rejects({Op(TEXT("set_sun"), TEXT("luminance"), TEXT("1"))}, TEXT("no property"));
 	Rejects({Op(TEXT("lock_exposure"))}, TEXT("EV100"));
 	Rejects({Op(TEXT("lock_exposure"), TEXT(""), TEXT("12")), Op(TEXT("set_post_process"), TEXT("exposure_bias"), TEXT("1"))}, TEXT("exposure is locked"));
@@ -283,6 +284,9 @@ bool FHyperAIStudioLightingOpsTest::RunTest(const FString& Parameters)
 		Op(TEXT("set_sky_light"), TEXT("intensity"), TEXT("2")),
 		Op(TEXT("set_sky_atmosphere"), TEXT("mie_scale"), TEXT("1.5")),
 		Op(TEXT("set_post_process"), TEXT("saturation"), TEXT("0.8")),
+		Op(TEXT("set_post_process"), TEXT("shadows_gain"), TEXT("1,0.8,1.6")),
+		Op(TEXT("set_post_process"), TEXT("shadows_offset"), TEXT("0.04,0,-0.02")),
+		Op(TEXT("set_post_process"), TEXT("highlights_gain"), TEXT("1.1,1,0.9")),
 		Op(TEXT("lock_exposure"), TEXT(""), TEXT("12"))};
 	TArray<AActor*> Touched;
 	TestTrue(TEXT("plan applies: ") + Error, Gate::ApplyOps(*World, Ops, Touched, Error));
@@ -296,6 +300,9 @@ bool FHyperAIStudioLightingOpsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("sky light intensity"), ValueOf(After, TEXT("sky_light"), TEXT("intensity")), FString(TEXT("2")));
 	TestEqual(TEXT("mie scale"), ValueOf(After, TEXT("sky_atmosphere"), TEXT("mie_scale")), FString(TEXT("1.5")));
 	TestEqual(TEXT("saturation"), ValueOf(After, TEXT("post_process"), TEXT("saturation")), FString(TEXT("0.8")));
+	TestEqual(TEXT("shadows graded apart"), ValueOf(After, TEXT("post_process"), TEXT("shadows_gain")), FString(TEXT("1,0.8,1.6")));
+	TestEqual(TEXT("with a lift that may go below zero"), ValueOf(After, TEXT("post_process"), TEXT("shadows_offset")), FString(TEXT("0.04,0,-0.02")));
+	TestEqual(TEXT("and highlights graded apart"), ValueOf(After, TEXT("post_process"), TEXT("highlights_gain")), FString(TEXT("1.1,1,0.9")));
 	TestEqual(TEXT("exposure is manual"), ValueOf(After, TEXT("post_process"), TEXT("exposure_method")), FString(TEXT("manual")));
 	TestEqual(TEXT("and locked at EV100 12"), ValueOf(After, TEXT("post_process"), TEXT("exposure_ev100")), FString(TEXT("12")));
 	TestTrue(TEXT("the level reports exposure locked"), Gate::IsExposureLocked(*World));

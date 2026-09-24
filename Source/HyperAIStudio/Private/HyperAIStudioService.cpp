@@ -4855,7 +4855,8 @@ void BuildAgentInstructionBlocks(
 		TEXT("- To build or change a gameplay Blueprint, follow the `unreal-blueprint` skill (`.agents/skills/unreal-blueprint/SKILL.md`): the whole Blueprint in one script, with the node IDs it needs.") LINE_TERMINATOR +
 		TEXT("- Before designing or changing an Animation Blueprint, read `.hyperai/docs/HyperAIStudio-AnimationCookbook.md`.") LINE_TERMINATOR +
 		TEXT("- Before designing or changing a UAF (Unreal Animation Framework) animation graph, read `.hyperai/docs/HyperAIStudio-UAFCookbook.md`.") LINE_TERMINATOR +
-		TEXT("- Before generating a reference image, read `.hyperai/docs/HyperAIStudio-ImageGenCookbook.md`. If you cannot draw (Claude Code cannot), `hyper_image_generate` with `model_id: codex_image_gen` has Codex draw it into the project; then open the PNG it names.") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("- Before generating a reference image, read `.hyperai/docs/HyperAIStudio-ImageGenCookbook.md`. If you cannot draw (Claude Code cannot), `hyper_image_generate` with `model_id: codex_image_gen` has Codex draw it into the project; then open the PNG it names.") LINE_TERMINATOR +
+		TEXT("- To make a scene, material, effect or UI look like a reference image, follow the `image-match` skill (`.agents/skills/image-match/SKILL.md`): capture, `hyper_image_compare` in a session, one change at a time.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Shared Project Workspace") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("- Treat `.hyperai/` as the shared, Git-trackable workspace for useful agent context, prompts, plans, research, decisions, logs, and task-local scratch files.") LINE_TERMINATOR +
 		TEXT("- Do not create generic agent-work folders such as `Planning`, `Temp`, `Research`, `Notes`, or `Scripts` in the project root.") LINE_TERMINATOR +

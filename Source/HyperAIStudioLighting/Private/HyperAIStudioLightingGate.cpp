@@ -172,6 +172,10 @@ namespace HyperAIStudio::Lighting::Gate
 				Add(TEXT("saturation"), Overridden(S.bOverride_ColorSaturation, Number(S.ColorSaturation.X)));
 				Add(TEXT("contrast"), Overridden(S.bOverride_ColorContrast, Number(S.ColorContrast.X)));
 				Add(TEXT("gamma"), Overridden(S.bOverride_ColorGamma, Number(S.ColorGamma.X)));
+				auto Channels = [](const FVector4& Value) { return Colour(FLinearColor(Value.X, Value.Y, Value.Z)); };
+				Add(TEXT("shadows_gain"), Overridden(S.bOverride_ColorGainShadows, Channels(S.ColorGainShadows)));
+				Add(TEXT("shadows_offset"), Overridden(S.bOverride_ColorOffsetShadows, Channels(S.ColorOffsetShadows)));
+				Add(TEXT("highlights_gain"), Overridden(S.bOverride_ColorGainHighlights, Channels(S.ColorGainHighlights)));
 			}
 		}
 
@@ -204,6 +208,10 @@ namespace HyperAIStudio::Lighting::Gate
 			{TEXT("post_process"), TEXT("saturation"), false, 0.f, 2.f},
 			{TEXT("post_process"), TEXT("contrast"), false, 0.f, 2.f},
 			{TEXT("post_process"), TEXT("gamma"), false, 0.2f, 3.f},
+			// Grading the shadows and highlights apart: a warm sky over violet shadows is a grade, not a light.
+			{TEXT("post_process"), TEXT("shadows_gain"), true, 0.f, 2.f},
+			{TEXT("post_process"), TEXT("shadows_offset"), true, -0.5f, 0.5f},
+			{TEXT("post_process"), TEXT("highlights_gain"), true, 0.f, 2.f},
 		};
 
 		struct FParsedOp
@@ -428,6 +436,9 @@ namespace HyperAIStudio::Lighting::Gate
 					else if (Key == TEXT("saturation")) { S.bOverride_ColorSaturation = true; S.ColorSaturation = FVector4(Op.Value, Op.Value, Op.Value, 1.0); }
 					else if (Key == TEXT("contrast")) { S.bOverride_ColorContrast = true; S.ColorContrast = FVector4(Op.Value, Op.Value, Op.Value, 1.0); }
 					else if (Key == TEXT("gamma")) { S.bOverride_ColorGamma = true; S.ColorGamma = FVector4(Op.Value, Op.Value, Op.Value, 1.0); }
+					else if (Key == TEXT("shadows_gain")) { S.bOverride_ColorGainShadows = true; S.ColorGainShadows = FVector4(Op.Colour.R, Op.Colour.G, Op.Colour.B, 1.0); }
+					else if (Key == TEXT("shadows_offset")) { S.bOverride_ColorOffsetShadows = true; S.ColorOffsetShadows = FVector4(Op.Colour.R, Op.Colour.G, Op.Colour.B, 0.0); }
+					else if (Key == TEXT("highlights_gain")) { S.bOverride_ColorGainHighlights = true; S.ColorGainHighlights = FVector4(Op.Colour.R, Op.Colour.G, Op.Colour.B, 1.0); }
 				});
 			}
 		}

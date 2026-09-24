@@ -251,6 +251,10 @@ bool FHyperAIStudioAgentsTeamTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Its playtesters plan, write, run and judge cases"), VerifyText.Contains(TEXT("agentType: 'playtester'")) && VerifyText.Contains(TEXT("hyper_verify_run")));
 	TestTrue(TEXT("The verify skill is installed for Codex"), HyperAIStudio::Skills::ParseSkill(
 		Read(FPaths::Combine(HyperAIStudio::Skills::CanonicalDirectory(Root.Path), TEXT("verify"), TEXT("SKILL.md"))), SkillName, SkillDescription, bMenuOnly));
+	const FString MatchText = Read(FPaths::Combine(WorkflowDirectory(Root.Path), TEXT("hyperai-match.js")));
+	TestTrue(TEXT("The match workflow begins with its meta"), MatchText.StartsWith(TEXT("export const meta = {")));
+	TestTrue(TEXT("Its builder loops on hyper_image_compare and a reviewer judges"), MatchText.Contains(TEXT("hyper_image_compare"))
+		&& MatchText.Contains(TEXT("agentType: 'reviewer'")) && MatchText.Contains(TEXT("image-match skill")));
 
 	// The scripts must parse the way the workflow runtime runs them: the body inside an async function.
 	int32 NodeCode = -1;
@@ -263,7 +267,7 @@ bool FHyperAIStudioAgentsTeamTest::RunTest(const FString& Parameters)
 	}
 	else
 	{
-		for (const FString& Script : {WorkflowText, VerifyText})
+		for (const FString& Script : {WorkflowText, VerifyText, MatchText})
 		{
 			const FString Wrapped = FPaths::Combine(Root.Path, TEXT("workflow-check.js"));
 			Write(Wrapped, TEXT("(async () => {\n") + Script.Replace(TEXT("export const meta"), TEXT("const meta")) + TEXT("\n})\n"));

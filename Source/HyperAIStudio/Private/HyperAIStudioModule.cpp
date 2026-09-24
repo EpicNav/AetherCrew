@@ -1066,7 +1066,7 @@ private:
 				TEXT("lighting_lookdev"),
 				TEXT("cohort.source.hyperaistudiolightingtoolset.v1"),
 				{TEXT("hyper_lighting_inspect"), TEXT("hyper_lighting_apply_plan"),
-					TEXT("hyper_lighting_compare"), TEXT("hyper_capture_view")},
+					TEXT("hyper_lighting_compare"), TEXT("hyper_capture_view"), TEXT("hyper_image_compare")},
 				{}
 			},
 			{

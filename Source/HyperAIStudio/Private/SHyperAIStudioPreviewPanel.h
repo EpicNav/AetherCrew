@@ -111,6 +111,7 @@ private:
 	void SetReference(const FString& Path, bool bRemember);
 	void Refresh();
 	void RebuildStats();
+	void RebuildFrames();
 	FReply OnBrowseClicked();
 	FReply OnRefreshClicked();
 	FReply OnWarningActionClicked();
@@ -136,6 +137,8 @@ private:
 
 	TSharedPtr<SHyperAIStudioComparisonView> ComparisonView;
 	TSharedPtr<class SWrapBox> StatsBox;
+	TSharedPtr<class SHorizontalBox> FrameStrip;
+	TArray<TSharedPtr<FHyperAIStudioPreviewImage>> FrameImages;
 	FDelegateHandle SourcesChangedHandle;
 	FDelegateHandle OpenRequestedHandle;
 };

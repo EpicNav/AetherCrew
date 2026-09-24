@@ -15,6 +15,7 @@ public class HyperAIStudioLighting : ModuleRules
 			"Engine",
 			"HyperAIStudio",
 			"ImageCore",
+			"Json",
 			"RenderCore",
 			"ToolsetRegistry",
 			"UnrealEd"

@@ -19,6 +19,16 @@ struct FHyperAIStudioPreviewStat
 	EHyperAIStudioPreviewTone Tone = EHyperAIStudioPreviewTone::Neutral;
 };
 
+/** One earlier attempt, shown in the strip under the comparison. */
+struct FHyperAIStudioPreviewFrame
+{
+	/** Full path to a readable image. */
+	FString ImagePath;
+	FText Label;
+	FText Tooltip;
+	EHyperAIStudioPreviewTone Tone = EHyperAIStudioPreviewTone::Neutral;
+};
+
 /** Two images to show together, and whatever the source that produced them measured about the pair. */
 struct FHyperAIStudioPreviewComparison
 {
@@ -31,6 +41,8 @@ struct FHyperAIStudioPreviewComparison
 	/** Equal-length brightness histograms, drawn over each other; leave empty to hide the plot. */
 	TArray<float> HistogramA;
 	TArray<float> HistogramB;
+	/** Earlier attempts, oldest first, as a strip under the comparison; clicking one shows it as B. */
+	TArray<FHyperAIStudioPreviewFrame> Frames;
 	/** Shown across the top while the comparison cannot be trusted, with one button that fixes it. */
 	FText Warning;
 	FText WarningActionLabel;

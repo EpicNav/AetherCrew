@@ -11,6 +11,7 @@
 #include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioImageMatch.h"
 #include "HyperAIStudioLightingCapture.h"
 #include "HyperAIStudioLightingGate.h"
 #include "HyperAIStudioPreviewPanel.h"
@@ -119,6 +120,75 @@ namespace HyperAIStudio::Lighting::Private
 				"Auto exposure is on, so this comparison measures the eye adapting, not the lighting. Lock it before matching a reference.");
 			Out.WarningActionLabel = NSLOCTEXT("HyperAIStudioLightingPreview", "LockExposure", "Lock exposure");
 			Out.WarningAction = FSimpleDelegate::CreateStatic(&LockExposureNow);
+		}
+		return true;
+	}
+
+	FString FullProjectPath(const FString& Path)
+	{
+		return FPaths::ConvertRelativePathToFull(FPaths::IsRelative(Path) ? FPaths::ProjectDir() / Path : Path);
+	}
+
+	/** The Image match source: a session's latest attempt against its reference, with every attempt as a strip. */
+	bool RefreshMatchPreview(const FString& ReferenceImagePath, FHyperAIStudioPreviewComparison& Out, FString& OutError)
+	{
+		namespace Match = HyperAIStudio::Lighting::Match;
+		const FString SessionId = Match::FindSessionFor(ReferenceImagePath);
+		FString Reference;
+		FString Mode = TEXT("look");
+		TArray<FHyperAIImageIteration> History;
+		float Target = 80.f;
+		const bool bSession = !SessionId.IsEmpty() && Match::ReadSession(SessionId, Reference, Mode, History, Target) && !History.IsEmpty();
+		FHyperAIImageCompareRequest Request;
+		Request.ReferenceImagePath = ReferenceImagePath;
+		Request.Mode = Mode;
+		Request.TargetScore = Target;
+		// Without a session, the level viewport is the attempt; with one, its latest candidate is.
+		Request.CandidateImagePath = bSession ? History.Last().CandidateImagePath : FString();
+		const FHyperAIImageCompareReport Report = Match::Compare(Request);
+		if (!Report.bOk)
+		{
+			OutError = Report.Diagnostic;
+			return false;
+		}
+		Out.ImagePathA = ReferenceImagePath;
+		Out.ImagePathB = FullProjectPath(bSession ? History.Last().CandidateImagePath : Report.CandidateWrittenPath);
+		Out.LabelA = NSLOCTEXT("HyperAIStudioLightingPreview", "MatchReference", "Reference");
+		Out.LabelB = bSession
+			? FText::Format(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchIteration", "Iteration {0}"), FText::AsNumber(History.Last().Index))
+			: NSLOCTEXT("HyperAIStudioLightingPreview", "MatchViewport", "Level viewport");
+		auto Add = [&Out](const FText& Label, const FText& Value, const EHyperAIStudioPreviewTone Tone)
+		{
+			Out.Stats.Add({Label, Value, Tone});
+		};
+		auto ScoreTone = [Target](const float Score)
+		{
+			return Score >= Target ? EHyperAIStudioPreviewTone::Good : Score >= Target - 15.f ? EHyperAIStudioPreviewTone::Neutral : EHyperAIStudioPreviewTone::Warning;
+		};
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchScore", "Score"),
+			FText::Format(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchScoreValue", "{0} of {1}"), FText::AsNumber(FMath::RoundToInt(Report.Score)),
+				FText::AsNumber(FMath::RoundToInt(Target))), ScoreTone(Report.Score));
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchPalette", "Palette"), FText::AsNumber(FMath::RoundToInt(Report.PaletteScore)), ScoreTone(Report.PaletteScore));
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchTone", "Tone"), FText::AsNumber(FMath::RoundToInt(Report.ToneScore)), ScoreTone(Report.ToneScore));
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchLayout", "Layout"), FText::AsNumber(FMath::RoundToInt(Report.LayoutScore)), ScoreTone(Report.LayoutScore));
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchDetail", "Detail"), FText::AsNumber(FMath::RoundToInt(Report.DetailScore)), ScoreTone(Report.DetailScore));
+		if (Mode == TEXT("aligned"))
+		{
+			Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchStructure", "Structure"), FText::AsNumber(FMath::RoundToInt(Report.StructureScore)),
+				ScoreTone(Report.StructureScore));
+		}
+		if (!Report.Suggestions.IsEmpty())
+		{
+			Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchNext", "Next"), FText::FromString(Report.Suggestions[0]), EHyperAIStudioPreviewTone::Neutral);
+		}
+		for (const FHyperAIImageIteration& Iteration : History)
+		{
+			FHyperAIStudioPreviewFrame& Frame = Out.Frames.AddDefaulted_GetRef();
+			Frame.ImagePath = FullProjectPath(Iteration.CandidateImagePath);
+			Frame.Label = FText::Format(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchFrame", "#{0}: {1}"), FText::AsNumber(Iteration.Index),
+				FText::AsNumber(FMath::RoundToInt(Iteration.Score)));
+			Frame.Tooltip = FText::FromString(Iteration.Note);
+			Frame.Tone = ScoreTone(Iteration.Score);
 		}
 		return true;
 	}
@@ -245,7 +315,7 @@ FString FHyperAIStudioLightingContracts::GetQualifiedToolsetName()
 
 TArray<FString> FHyperAIStudioLightingContracts::GetToolNames()
 {
-	return {InspectToolName, MutationToolName, CompareToolName, CaptureToolName};
+	return {InspectToolName, MutationToolName, CompareToolName, CaptureToolName, ImageCompareToolName};
 }
 
 bool FHyperAIStudioLightingContracts::IsRegistrationAllowed(const bool bAllowSourceCandidateForDev)
@@ -265,6 +335,7 @@ TArray<FString> FHyperAIStudioLightingContracts::GetCapabilities()
 		TEXT("viewport_or_image_vs_reference_metrics"),
 		TEXT("ranked_next_change_suggestions"),
 		TEXT("view_captures_from_a_camera_or_transform_with_frame_to_frame_differences"),
+		TEXT("image_match_score_regions_and_sessions_for_scenes_materials_effects_and_ui"),
 		TEXT("unsaved_by_default_opt_in_save_of_touched_actors"),
 		TEXT("unsupported:bounded_post_process_volumes_local_lights_lumen_settings_and_baked_lighting_builds")};
 }
@@ -336,6 +407,65 @@ FString FHyperAIStudioLightingContracts::CaptureResultSchemaFingerprint()
 FHyperAICaptureViewReport FHyperAIStudioLightingContracts::CaptureNow(const FHyperAICaptureViewRequest& Request)
 {
 	return HyperAIStudio::Lighting::Capture::RunNow(Request);
+}
+
+FHyperAIImageCompareReport FHyperAIStudioLightingContracts::CompareImages(const FHyperAIImageCompareRequest& Request)
+{
+	return HyperAIStudio::Lighting::Match::Compare(Request);
+}
+
+FString FHyperAIStudioLightingContracts::ImageComparePayloadSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("lighting.image_compare.payload.v1|project_reference|optional_candidate|mode|target|session|note|grid"));
+	return Value;
+}
+
+FString FHyperAIStudioLightingContracts::ImageCompareResultSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("lighting.image_compare.result.v1|score|measures|deltas|regions|suggestions|images|session_history|bounded"));
+	return Value;
+}
+
+FString FHyperAIStudioLightingImageComparePayload::GetTypeId() const
+{
+	return FHyperAIStudioLightingContracts::ImageComparePayloadTypeId;
+}
+
+FString FHyperAIStudioLightingImageComparePayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioLightingContracts::ImageComparePayloadSchemaFingerprint();
+}
+
+int32 FHyperAIStudioLightingImageComparePayload::GetBoundedByteSize() const
+{
+	return HyperAIStudio::Lighting::Private::ClampBytes(96 + 2ll * (Request.ReferenceImagePath.Len() + Request.CandidateImagePath.Len()
+		+ Request.Mode.Len() + Request.SessionId.Len() + Request.Note.Len()));
+}
+
+FString FHyperAIStudioLightingImageCompareResultPayload::GetTypeId() const
+{
+	return FHyperAIStudioLightingContracts::ImageCompareResultTypeId;
+}
+
+FString FHyperAIStudioLightingImageCompareResultPayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioLightingContracts::ImageCompareResultSchemaFingerprint();
+}
+
+int32 FHyperAIStudioLightingImageCompareResultPayload::GetBoundedByteSize() const
+{
+	using namespace HyperAIStudio::Lighting::Private;
+	int64 Size = 512 + EstimateBytes(Report.Status) + EstimateBytes(Report.Diagnostic) + EstimateBytes(Report.SideBySidePath)
+		+ EstimateBytes(Report.DiffPath) + EstimateBytes(Report.CandidateWrittenPath);
+	for (const FHyperAIImageRegion& Region : Report.Regions) Size += 96 + EstimateBytes(Region.Name) + EstimateBytes(Region.Difference);
+	for (const FString& Suggestion : Report.Suggestions) Size += EstimateBytes(Suggestion);
+	for (const FHyperAIImageIteration& Iteration : Report.History)
+	{
+		Size += 48 + EstimateBytes(Iteration.Note) + EstimateBytes(Iteration.CandidateImagePath) + EstimateBytes(Iteration.SideBySidePath);
+	}
+	return ClampBytes(Size);
 }
 
 FString FHyperAIStudioLightingCapturePayload::GetTypeId() const
@@ -522,6 +652,9 @@ const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioLightingContracts::Ge
 		// Read: a capture writes only under Saved/HyperAIStudio, like the compare tool's own capture.
 		Value.Variants.Add({CaptureToolName, CaptureVariantId, CapturePayloadTypeId, CapturePayloadSchemaFingerprint(),
 			CaptureResultTypeId, CaptureResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
+		// Read: its images and sessions go under Saved/HyperAIStudio/Match.
+		Value.Variants.Add({ImageCompareToolName, ImageCompareVariantId, ImageComparePayloadTypeId, ImageComparePayloadSchemaFingerprint(),
+			ImageCompareResultTypeId, ImageCompareResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
 		Value.ContractFingerprint = FHyperAIStudioDomainAdapterRegistry::ComputeContractFingerprint(Value);
 		Value.AdapterFingerprint = FHyperAIStudioDomainAdapterRegistry::ComputeAdapterFingerprint(Value);
 		return Value;
@@ -859,6 +992,11 @@ UHyperAICaptureViewResult* UHyperAIStudioLightingToolset::hyper_capture_view(con
 	return HyperAIStudio::Lighting::Capture::Start(Request);
 }
 
+FHyperAIImageCompareReport UHyperAIStudioLightingToolset::hyper_image_compare(const FHyperAIImageCompareRequest& Request)
+{
+	return FHyperAIStudioLightingContracts::CompareImages(Request);
+}
+
 const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioLightingDomainAdapter::GetDescriptor() const
 {
 	return FHyperAIStudioLightingContracts::GetAdapterDescriptor();
@@ -923,6 +1061,14 @@ FHyperAIStudioDomainAdapterResult FHyperAIStudioLightingDomainAdapter::Execute(
 		const TSharedRef<FHyperAIStudioLightingCaptureResultPayload, ESPMode::ThreadSafe> Output =
 			MakeShared<FHyperAIStudioLightingCaptureResultPayload, ESPMode::ThreadSafe>();
 		Output->Report = Contracts::CaptureNow(static_cast<const FHyperAIStudioLightingCapturePayload&>(Payload).Request);
+		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
+	}
+	if (Matches(Contracts::ImageCompareToolName, Contracts::ImageCompareVariantId, EHyperAIStudioDomainSafety::Read,
+		Contracts::ImageComparePayloadTypeId, Contracts::ImageComparePayloadSchemaFingerprint()))
+	{
+		const TSharedRef<FHyperAIStudioLightingImageCompareResultPayload, ESPMode::ThreadSafe> Output =
+			MakeShared<FHyperAIStudioLightingImageCompareResultPayload, ESPMode::ThreadSafe>();
+		Output->Report = Contracts::CompareImages(static_cast<const FHyperAIStudioLightingImageComparePayload&>(Payload).Request);
 		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
 	}
 	if (Matches(Contracts::MutationToolName, Contracts::MutationVariantId, EHyperAIStudioDomainSafety::Edit,
@@ -1048,6 +1194,16 @@ void FHyperAIStudioLightingRegistration::Startup()
 		Source.Refresh = FHyperAIStudioPreviewRefresh::CreateStatic(&HyperAIStudio::Lighting::Private::RefreshPreview);
 		FHyperAIStudioPreviewPanel::RegisterSource(MoveTemp(Source));
 	}
+	{
+		FHyperAIStudioPreviewPanel::FSource Source;
+		Source.Id = FName(TEXT("image_match"));
+		Source.Label = NSLOCTEXT("HyperAIStudioLightingPreview", "MatchSourceLabel", "Image match: reference vs attempts");
+		Source.Tooltip = NSLOCTEXT("HyperAIStudioLightingPreview", "MatchSourceTooltip",
+			"Score an attempt against a reference, for scenes, materials, effects and UI. With a hyper_image_compare session, every iteration shows as a strip.");
+		Source.bNeedsReference = true;
+		Source.Refresh = FHyperAIStudioPreviewRefresh::CreateStatic(&HyperAIStudio::Lighting::Private::RefreshMatchPreview);
+		FHyperAIStudioPreviewPanel::RegisterSource(MoveTemp(Source));
+	}
 	PostEngineInitHandle = FCoreDelegates::GetOnPostEngineInit().AddRaw(this, &FHyperAIStudioLightingRegistration::RegisterAfterEngineInit);
 	if (GIsRunning && GEngine && UObjectInitialized()) RegisterAfterEngineInit();
 }
@@ -1056,6 +1212,7 @@ void FHyperAIStudioLightingRegistration::Shutdown()
 {
 	HyperAIStudio::Lighting::Capture::CancelAll();
 	FHyperAIStudioPreviewPanel::UnregisterSource(FName(TEXT("lighting")));
+	FHyperAIStudioPreviewPanel::UnregisterSource(FName(TEXT("image_match")));
 	if (PostEngineInitHandle.IsValid())
 	{
 		FCoreDelegates::GetOnPostEngineInit().Remove(PostEngineInitHandle);

@@ -639,6 +639,90 @@
   },
   {
    "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchDetail",
+   "source": "Detail",
+   "text": "细节"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchFrame",
+   "source": "#{0}: {1}",
+   "text": "#{0}：{1}"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchIteration",
+   "source": "Iteration {0}",
+   "text": "第 {0} 次迭代"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchLayout",
+   "source": "Layout",
+   "text": "布局"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchNext",
+   "source": "Next",
+   "text": "下一步"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchPalette",
+   "source": "Palette",
+   "text": "色板"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchReference",
+   "source": "Reference",
+   "text": "参考图"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchScore",
+   "source": "Score",
+   "text": "得分"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchScoreValue",
+   "source": "{0} of {1}",
+   "text": "{0} / {1}"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchSourceLabel",
+   "source": "Image match: reference vs attempts",
+   "text": "图像匹配：参考图与尝试"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchSourceTooltip",
+   "source": "Score an attempt against a reference, for scenes, materials, effects and UI. With a hyper_image_compare session, every iteration shows as a strip.",
+   "text": "将一次尝试与参考图对比打分，适用于场景、材质、特效和 UI。使用 hyper_image_compare 会话时，每次迭代都会显示在条带中。"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchStructure",
+   "source": "Structure",
+   "text": "结构"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchTone",
+   "source": "Tone",
+   "text": "色调"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
+   "key": "MatchViewport",
+   "source": "Level viewport",
+   "text": "关卡视口"
+  },
+  {
+   "namespace": "HyperAIStudioLightingPreview",
    "key": "Next",
    "source": "Next",
    "text": "下一个"

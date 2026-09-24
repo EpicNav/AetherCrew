@@ -168,4 +168,28 @@ bool FHyperAIStudioSkillsBuiltInTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSkillsShippedTest,
+	"HyperAIStudio.Skills.ShippedSkillsParse",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioSkillsShippedTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::Skills;
+	TArray<FString> Folders;
+	IFileManager::Get().FindFiles(Folders, *(BuiltInDirectory() / TEXT("*")), /*Files=*/false, /*Directories=*/true);
+	TestTrue(TEXT("The plugin ships its skills, image-match among them"), Folders.Contains(TEXT("image-match")) && Folders.Contains(TEXT("unreal-playtest")));
+	for (const FString& Folder : Folders)
+	{
+		FString Text;
+		FFileHelper::LoadFileToString(Text, *(BuiltInDirectory() / Folder / TEXT("SKILL.md")));
+		FString Name;
+		FString Description;
+		bool bMenuOnly = false;
+		TestTrue(FString::Printf(TEXT("%s parses, is named for its folder, and describes itself within 1024 characters"), *Folder),
+			ParseSkill(Text, Name, Description, bMenuOnly) && Name == Folder && !Description.IsEmpty() && Description.Len() <= 1024);
+	}
+	return true;
+}
+
 #endif
