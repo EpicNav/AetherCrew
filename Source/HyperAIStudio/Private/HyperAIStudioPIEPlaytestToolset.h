@@ -7,6 +7,7 @@
 #include "HyperAIStudioBot.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioTypedPlan.h"
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
 #include "HyperAIStudioPIEPlaytestToolset.generated.h"
@@ -445,7 +446,189 @@ struct FHyperAIPIEPlaytestStatusResult
 	TArray<FHyperAIPIEPlaytestEvidence> Evidence;
 };
 
-/** One atomic two-tool SourceCandidate cohort on the single Epic MCP endpoint. */
+/** One verification case: bot steps played in a copy of the open level. */
+USTRUCT(BlueprintType)
+struct FHyperAIVerifyCase
+{
+	GENERATED_BODY()
+
+	/** A short name for the report. */
+	UPROPERTY()
+	FString Name;
+
+	/** Bot steps in order, the same objects as hyper_playtest_run's bot field; the first that fails ends the case. */
+	UPROPERTY()
+	TArray<FHyperAIBotStep> Steps;
+
+	/** Simulated seconds the case may run: 1 to the deadline less 5. */
+	UPROPERTY()
+	float TimeoutSeconds = 20.f;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIVerifyRequest
+{
+	GENERATED_BODY()
+
+	/** Played all at once, one copy of the level each: up to the limit hyper_verify_calibrate reports. */
+	UPROPERTY()
+	TArray<FHyperAIVerifyCase> Cases;
+
+	/** Wall-clock seconds for the whole batch, 10 to 60. */
+	UPROPERTY()
+	float DeadlineSeconds = 60.f;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIVerifyStepReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString Action;
+
+	/** passed or failed */
+	UPROPERTY()
+	FString Status;
+
+	/** passed, or why not: assertion_failed, not_found, stuck, timed_out... */
+	UPROPERTY()
+	FString Code;
+
+	/** What the bot saw: positions, values, counts. */
+	UPROPERTY()
+	FString Detail;
+
+	/** Simulated seconds into the case when the step ended. */
+	UPROPERTY()
+	float AtSeconds = 0.f;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIVerifyCaseReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString Name;
+
+	/** passed, failed, timed_out, stopped or not_started */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	/** The 0-based step that failed, or -1. */
+	UPROPERTY()
+	int32 FailedStep = -1;
+
+	UPROPERTY()
+	float SimulatedSeconds = 0.f;
+
+	UPROPERTY()
+	TArray<FHyperAIVerifyStepReport> Steps;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIVerifyReport
+{
+	GENERATED_BODY()
+
+	/** The batch ran; its cases may still have failed. */
+	UPROPERTY()
+	bool bOk = false;
+
+	/** completed, deadline, stopped, refused or busy */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	/** The level the cases played. */
+	UPROPERTY()
+	FString Map;
+
+	/** How many cases a batch may hold here. */
+	UPROPERTY()
+	int32 Limit = 0;
+
+	UPROPERTY()
+	int32 Passed = 0;
+
+	UPROPERTY()
+	int32 Failed = 0;
+
+	UPROPERTY()
+	int32 TimedOut = 0;
+
+	UPROPERTY()
+	float WallSeconds = 0.f;
+
+	UPROPERTY()
+	TArray<FHyperAIVerifyCaseReport> Cases;
+};
+
+/** Completes when the batch has ended, while the editor keeps running it. */
+UCLASS()
+class UHyperAIVerifyRunResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIVerifyReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIVerifyReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIVerifyReport Value;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIVerifyCalibrationReport
+{
+	GENERATED_BODY()
+
+	/** calibrated, not_calibrated, measured, failed or busy */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	UPROPERTY()
+	FString Map;
+
+	/** How many cases a hyper_verify_run batch may hold on this machine and level. */
+	UPROPERTY()
+	int32 Limit = 0;
+
+	UPROPERTY()
+	FString MeasuredUtc;
+
+	/** "N cases: S s" for each batch size measured. */
+	UPROPERTY()
+	TArray<FString> Measurements;
+};
+
+UCLASS()
+class UHyperAIVerifyCalibrationResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIVerifyCalibrationReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIVerifyCalibrationReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIVerifyCalibrationReport Value;
+};
+
+/** One atomic SourceCandidate cohort on the single Epic MCP endpoint: playtests and verification. */
 UCLASS()
 class HYPERAISTUDIO_API UHyperAIStudioPIEPlaytestToolset final : public UToolsetDefinition
 {
@@ -472,6 +655,24 @@ public:
 		const FString& OperationId,
 		int32 PageSize = 32,
 		const FString& Cursor = TEXT(""));
+
+	/**
+	 * Verify many things at once: each case plays in its own copy of the open level, all at the same time, and one
+	 * call returns every case's result within DeadlineSeconds (60 at most). A case is bot steps as in
+	 * hyper_playtest_run (MoveTo, LookAt, Jump, Press, Hold, Interact, Wait, WaitUntil, Survey, Sample and the
+	 * Assert steps), but no UI, Capture, Record or AssertOnScreen steps, since the copies have no screen. Unsaved
+	 * edits are included, and nothing in the level changes. At most the limit hyper_verify_calibrate reports; a case
+	 * still running at the deadline reports timed_out.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
+	static UHyperAIVerifyRunResult* hyper_verify_run(const FHyperAIVerifyRequest& Request);
+
+	/**
+	 * How many verification cases this machine plays at once on the open level. With bMeasure it measures that, in
+	 * about a minute without changing anything, and keeps the result on this machine.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
+	static UHyperAIVerifyCalibrationResult* hyper_verify_calibrate(bool bMeasure = false);
 };
 
 struct FHyperAIStudioPIEPlaytestManifestEntry

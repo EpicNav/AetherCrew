@@ -336,6 +336,17 @@ namespace HyperAIStudio::Bot::Private
 		return Input;
 	}
 
+	/**
+	 * Mapping contexts the game added apply at Enhanced Input's next tick, which only runs where the editor ticks the
+	 * world itself; forcing the rebuild makes them apply now, wherever the world is ticked from.
+	 */
+	void ApplyMappings(UEnhancedInputLocalPlayerSubsystem& Input)
+	{
+		FModifyContextOptions Options;
+		Options.bForceImmediately = true;
+		Input.RequestRebuildControlMappings(Options);
+	}
+
 	const UInputAction* FindInputAction(const FString& NameOrPath)
 	{
 		if (NameOrPath.StartsWith(TEXT("/")))
@@ -718,9 +729,12 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 				break;
 			}
 		}
+		ApplyMappings(*Input);
 		if (Step.Action == EHyperAIBotAction::Hold)
 		{
-			Input->StartContinuousInputInjectionForAction(Action, InputValue(*Action, Step.Value), {}, {});
+			// Held by injecting again every frame, as Enhanced Input's continuous injection would, but from the bot's
+			// own tick, so it also works in worlds the editor loop does not tick.
+			Input->InjectInputForAction(Action, InputValue(*Action, Step.Value), {}, {});
 			Held = Action;
 			break;
 		}
@@ -1018,6 +1032,16 @@ FHyperAIBotResult FHyperAIBotExecutor::Tick()
 			StopHold();
 			Result = FResult::Passed(FString::Printf(TEXT("held %s for %.1f s"), *Name, Elapsed));
 		}
+		else
+		{
+			FString Code;
+			FString Error;
+			UEnhancedInputLocalPlayerSubsystem* Input = InputFor(*W, Code, Error);
+			if (Input && Held.IsValid())
+			{
+				Input->InjectInputForAction(Held.Get(), InputValue(*Held, Step.Value), {}, {});
+			}
+		}
 		break;
 	case EHyperAIBotAction::Sample:
 		Result = TickSample();
@@ -1270,20 +1294,8 @@ FHyperAIBotResult FHyperAIBotExecutor::CaptureTo(const FString& FilePath)
 
 void FHyperAIBotExecutor::StopHold()
 {
-	using namespace HyperAIStudio::Bot::Private;
-	const UInputAction* Action = Held.Get();
+	// Held input is injected frame by frame, so stopping is not injecting any more.
 	Held.Reset();
-	UWorld* W = World.Get();
-	if (!Action || !W)
-	{
-		return;
-	}
-	FString Code;
-	FString Error;
-	if (UEnhancedInputLocalPlayerSubsystem* Input = InputFor(*W, Code, Error))
-	{
-		Input->StopContinuousInputInjectionForAction(Action);
-	}
 }
 
 void FHyperAIBotExecutor::StopRecording()

@@ -984,6 +984,22 @@
      ]
     },
     {
+     "name": "hyper_verify_run",
+     "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_verify_calibrate",
+     "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
      "name": "hyper_playtest_status",
      "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
      "admission": "SourceCandidate",

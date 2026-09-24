@@ -1,6 +1,6 @@
 ---
 name: unreal-playtest
-description: Play the game in Unreal and check that it works, with HyperAI's playtest bot. It starts Play In Editor, walks the player to things, jumps, presses the game's own input actions, clicks UI, waits for things to happen, and captures screenshots, then reports evidence per step. Use it to verify gameplay, such as a pickup adding score, a door opening, or a HUD updating.
+description: Play the game in Unreal and check that it works, with HyperAI's playtest bot. It walks the player to things, jumps, presses the game's own input actions, clicks UI, waits for things to happen, and captures screenshots, then reports evidence per step. hyper_verify_run plays many such cases at once in under a minute. Use it to verify gameplay, such as a pickup adding score, a door opening, or a HUD updating.
 ---
 # Playtest with the HyperAI bot
 
@@ -31,6 +31,30 @@ The first failing step ends the run. Its status and diagnostic say why, such as 
 - **Every step:** a unique `stepId`, `kind: "Bot"`, a `bot` object, and `timeoutMs`, the hard cap for that step (at most 30000).
 - **Leave out** any `bot` field the action does not use.
 - **Changes stay in the PIE world.** Nothing in the level being edited changes.
+
+## Verify many things at once
+
+`hyper_verify_run` (same toolset) plays up to `limit` cases at the same time, each in its own copy of the open level. One call answers with every case's result within `deadlineSeconds`, 60 at most.
+- `hyper_verify_calibrate` with `{"bMeasure": false}` reports `limit` for this machine and level.
+- Unsaved edits are included, and nothing in the level changes.
+- A case starts where the game starts the player. It runs its steps in order, and the first failing step ends it.
+
+```json
+{"request": {"deadlineSeconds": 60, "cases": [
+  {"name": "coin-scores", "timeoutSeconds": 20, "steps": [
+    {"action": "MoveTo", "target": "BP_Coin", "radius": 50, "timeoutSeconds": 15},
+    {"action": "WaitUntil", "until": "AssertGone", "target": "BP_Coin", "timeoutSeconds": 3},
+    {"action": "AssertProperty", "target": "GameMode", "property": "Score", "compare": "==", "value": "10"}]},
+  {"name": "door-opens", "timeoutSeconds": 20, "steps": [
+    {"action": "MoveTo", "target": "BP_Door", "radius": 150, "timeoutSeconds": 15},
+    {"action": "WaitUntil", "until": "AssertProperty", "target": "BP_Door", "property": "Open", "compare": "==", "value": "true", "timeoutSeconds": 3}]}]}}
+```
+
+- **Result:** every case reports `passed`, `failed`, `timed_out`, `stopped` or `not_started`, with a diagnostic and each step's evidence line.
+- **timeoutSeconds** is simulated game time for the case, 1 to the deadline less 5. Simulation usually runs faster than real time.
+- **Steps are the bot actions below**, except UiClick, UiType, UiAssert, Capture, RecordStart, RecordStop and AssertOnScreen. The copies have no screen; check those with `hyper_playtest_run`.
+- **A batch over `limit` is refused.** Run several batches one after another.
+- **When one case per check helps:** make each case prove one thing, so a failure names the broken requirement.
 
 ## Bot actions
 
@@ -75,6 +99,7 @@ The first failing step ends the run. Its status and diagnostic say why, such as 
 
 ## Rules
 
+- Several checks at once: use `hyper_verify_run`. A single playtest that needs the screen, UI or captures: use `hyper_playtest_run`.
 - Only one playtest can play in the editor at a time. A run started while another is playing is refused with `session_already_active`: wait for the first, then run again.
 - Look at captures before saying something looks right.
 - Report every check with its evidence line. A check you could not run is a failure, with the reason.

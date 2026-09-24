@@ -19,6 +19,8 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioSettings.h"
+#include "HyperAIStudioVerify.h"
+#include "UObject/StrongObjectPtr.h"
 #include "InputAction.h"
 #include "InputKeyEventArgs.h"
 #include "HyperAIStudioExtensionRuntime.h"
@@ -631,7 +633,9 @@ const TArray<FHyperAIStudioPIEPlaytestManifestEntry>& FHyperAIStudioPIEPlaytestC
 {
 	static const TArray<FHyperAIStudioPIEPlaytestManifestEntry> Manifest = {
 		{ TEXT("hyper_playtest_run"), GetQualifiedToolsetName() },
-		{ TEXT("hyper_playtest_status"), GetQualifiedToolsetName() }
+		{ TEXT("hyper_playtest_status"), GetQualifiedToolsetName() },
+		{ TEXT("hyper_verify_run"), GetQualifiedToolsetName() },
+		{ TEXT("hyper_verify_calibrate"), GetQualifiedToolsetName() }
 	};
 	return Manifest;
 }
@@ -686,7 +690,7 @@ bool FHyperAIStudioPIEPlaytestContracts::EvaluateCatalogAdmission(
 			}
 			else if (CohortState.GetValue() != Tool.AdmissionState || CohortId != Tool.AtomicCohortId)
 			{
-				OutError = TEXT("hyper_playtest_run and hyper_playtest_status are not one atomic generated cohort.");
+				OutError = TEXT("The playtest and verification tools are not one atomic generated cohort.");
 				return false;
 			}
 		}
@@ -3162,6 +3166,137 @@ FHyperAIPIEPlaytestStatusResult UHyperAIStudioPIEPlaytestToolset::hyper_playtest
 	const FString& Cursor)
 {
 	return FHyperAIStudioPIEPlaytestService::GetStatus(OperationId, PageSize, Cursor);
+}
+
+namespace HyperAIStudio::PIEPlaytest::VerifyTools
+{
+	FHyperAIVerifyReport ToReport(const HyperAIStudio::Verify::FBatchOutcome& Outcome)
+	{
+		FHyperAIVerifyReport Report;
+		Report.bOk = true;
+		Report.Status = Outcome.Status;
+		Report.Map = Outcome.Map;
+		Report.Limit = Outcome.Limit;
+		Report.WallSeconds = static_cast<float>(Outcome.WallSeconds);
+		for (const HyperAIStudio::Verify::FCaseOutcome& Case : Outcome.Cases)
+		{
+			FHyperAIVerifyCaseReport& Out = Report.Cases.AddDefaulted_GetRef();
+			Out.Name = Case.Name;
+			Out.Status = Case.Status;
+			Out.Diagnostic = Case.Diagnostic;
+			Out.FailedStep = Case.FailedStep;
+			Out.SimulatedSeconds = Case.SimulatedSeconds;
+			for (const HyperAIStudio::Verify::FStepOutcome& Step : Case.Steps)
+			{
+				FHyperAIVerifyStepReport& OutStep = Out.Steps.AddDefaulted_GetRef();
+				OutStep.Action = Step.Action;
+				OutStep.Status = Step.Status;
+				OutStep.Code = Step.Code;
+				OutStep.Detail = Step.Detail;
+				OutStep.AtSeconds = Step.AtSeconds;
+			}
+			Report.Passed += Case.Status == TEXT("passed");
+			Report.Failed += Case.Status == TEXT("failed");
+			Report.TimedOut += Case.Status == TEXT("timed_out");
+		}
+		Report.Diagnostic = !Outcome.Diagnostic.IsEmpty() ? Outcome.Diagnostic
+			: FString::Printf(TEXT("%d of %d cases passed in %.1f s."), Report.Passed, Report.Cases.Num(), Report.WallSeconds);
+		return Report;
+	}
+
+	FHyperAIVerifyCalibrationReport ToReport(const HyperAIStudio::Verify::FCalibration& Calibration)
+	{
+		FHyperAIVerifyCalibrationReport Report;
+		Report.Status = Calibration.Status;
+		Report.Diagnostic = Calibration.Diagnostic;
+		Report.Map = Calibration.Map;
+		Report.Limit = Calibration.Limit;
+		Report.MeasuredUtc = Calibration.MeasuredUtc;
+		TArray<int32> Counts;
+		Calibration.SecondsByCount.GetKeys(Counts);
+		Counts.Sort();
+		for (const int32 Count : Counts)
+		{
+			Report.Measurements.Add(FString::Printf(TEXT("%d cases: %.1f s"), Count, Calibration.SecondsByCount[Count]));
+		}
+		return Report;
+	}
+}
+
+UHyperAIVerifyRunResult* UHyperAIStudioPIEPlaytestToolset::hyper_verify_run(const FHyperAIVerifyRequest& Request)
+{
+	namespace Verify = HyperAIStudio::Verify;
+	using namespace HyperAIStudio::PIEPlaytest::VerifyTools;
+	UHyperAIVerifyRunResult* Result = NewObject<UHyperAIVerifyRunResult>();
+	const auto Refuse = [Result](const TCHAR* Status, const FString& Diagnostic)
+	{
+		FHyperAIVerifyReport Report;
+		Report.Status = Status;
+		Report.Diagnostic = Diagnostic;
+		Report.Limit = IsInGameThread() ? Verify::GetLimit() : 0;
+		Result->SetValue(Report);
+		return Result;
+	};
+	if (!IsInGameThread())
+	{
+		return Refuse(TEXT("refused"), TEXT("hyper_verify_run runs on the game thread."));
+	}
+	TArray<Verify::FCase> Cases;
+	for (const FHyperAIVerifyCase& In : Request.Cases)
+	{
+		Verify::FCase& Case = Cases.AddDefaulted_GetRef();
+		Case.Name = In.Name.Left(64);
+		Case.Steps = In.Steps;
+		Case.TimeoutSeconds = In.TimeoutSeconds;
+	}
+	FString Error;
+	if (!Verify::Admit(Cases, Request.DeadlineSeconds, Verify::GetLimit(), Error))
+	{
+		return Refuse(TEXT("refused"), Error);
+	}
+	// The MCP server holds only the returned object; the batch keeps it alive until it answers.
+	const TStrongObjectPtr<UHyperAIVerifyRunResult> Pending(Result);
+	if (!Verify::Start(MoveTemp(Cases), Request.DeadlineSeconds, [Pending](const Verify::FBatchOutcome& Outcome)
+	{
+		Pending->SetValue(ToReport(Outcome));
+	}, Error))
+	{
+		return Refuse(TEXT("busy"), Error);
+	}
+	return Result;
+}
+
+UHyperAIVerifyCalibrationResult* UHyperAIStudioPIEPlaytestToolset::hyper_verify_calibrate(const bool bMeasure)
+{
+	namespace Verify = HyperAIStudio::Verify;
+	using namespace HyperAIStudio::PIEPlaytest::VerifyTools;
+	UHyperAIVerifyCalibrationResult* Result = NewObject<UHyperAIVerifyCalibrationResult>();
+	if (!IsInGameThread())
+	{
+		FHyperAIVerifyCalibrationReport Report;
+		Report.Status = TEXT("failed");
+		Report.Diagnostic = TEXT("hyper_verify_calibrate runs on the game thread.");
+		Result->SetValue(Report);
+		return Result;
+	}
+	if (!bMeasure)
+	{
+		Result->SetValue(ToReport(Verify::GetCalibration()));
+		return Result;
+	}
+	const TStrongObjectPtr<UHyperAIVerifyCalibrationResult> Pending(Result);
+	FString Error;
+	if (!Verify::Calibrate(Verify::MaxCases, [Pending](const Verify::FCalibration& Calibration)
+	{
+		Pending->SetValue(ToReport(Calibration));
+	}, Error))
+	{
+		FHyperAIVerifyCalibrationReport Report = ToReport(Verify::GetCalibration());
+		Report.Status = TEXT("busy");
+		Report.Diagnostic = Error;
+		Result->SetValue(Report);
+	}
+	return Result;
 }
 
 void FHyperAIStudioPIEPlaytestRegistration::Startup()

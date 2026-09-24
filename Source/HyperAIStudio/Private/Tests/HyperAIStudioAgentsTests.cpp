@@ -246,24 +246,33 @@ bool FHyperAIStudioAgentsTeamTest::RunTest(const FString& Parameters)
 		Read(FPaths::Combine(HyperAIStudio::Skills::CanonicalDirectory(Root.Path), TEXT("build-system"), TEXT("SKILL.md"))), SkillName, SkillDescription, bMenuOnly));
 	TestTrue(TEXT("and mirrored for Claude Code"), FPaths::FileExists(FPaths::Combine(HyperAIStudio::Skills::ClaudeDirectory(Root.Path), TEXT("build-system"), TEXT("SKILL.md"))));
 
-	// The script must parse the way the workflow runtime runs it: the body inside an async function.
+	const FString VerifyText = Read(FPaths::Combine(WorkflowDirectory(Root.Path), TEXT("hyperai-verify.js")));
+	TestTrue(TEXT("The verify workflow begins with its meta"), VerifyText.StartsWith(TEXT("export const meta = {")));
+	TestTrue(TEXT("Its playtesters plan, write, run and judge cases"), VerifyText.Contains(TEXT("agentType: 'playtester'")) && VerifyText.Contains(TEXT("hyper_verify_run")));
+	TestTrue(TEXT("The verify skill is installed for Codex"), HyperAIStudio::Skills::ParseSkill(
+		Read(FPaths::Combine(HyperAIStudio::Skills::CanonicalDirectory(Root.Path), TEXT("verify"), TEXT("SKILL.md"))), SkillName, SkillDescription, bMenuOnly));
+
+	// The scripts must parse the way the workflow runtime runs them: the body inside an async function.
 	int32 NodeCode = -1;
 	FString NodeOut;
 	FString NodeErr;
 	FPlatformProcess::ExecProcess(TEXT("node"), TEXT("--version"), &NodeCode, &NodeOut, &NodeErr);
 	if (NodeCode != 0)
 	{
-		AddWarning(TEXT("node is not on PATH, so the workflow's JavaScript syntax was not checked."));
+		AddWarning(TEXT("node is not on PATH, so the workflows' JavaScript syntax was not checked."));
 	}
 	else
 	{
-		const FString Wrapped = FPaths::Combine(Root.Path, TEXT("workflow-check.js"));
-		Write(Wrapped, TEXT("(async () => {\n") + WorkflowText.Replace(TEXT("export const meta"), TEXT("const meta")) + TEXT("\n})\n"));
-		FPlatformProcess::ExecProcess(TEXT("node"), *FString::Printf(TEXT("--check \"%s\""), *Wrapped), &NodeCode, &NodeOut, &NodeErr);
-		TestEqual(TEXT("The workflow's JavaScript parses"), NodeCode, 0);
-		if (NodeCode != 0)
+		for (const FString& Script : {WorkflowText, VerifyText})
 		{
-			AddError(NodeErr);
+			const FString Wrapped = FPaths::Combine(Root.Path, TEXT("workflow-check.js"));
+			Write(Wrapped, TEXT("(async () => {\n") + Script.Replace(TEXT("export const meta"), TEXT("const meta")) + TEXT("\n})\n"));
+			FPlatformProcess::ExecProcess(TEXT("node"), *FString::Printf(TEXT("--check \"%s\""), *Wrapped), &NodeCode, &NodeOut, &NodeErr);
+			TestEqual(TEXT("A workflow's JavaScript parses"), NodeCode, 0);
+			if (NodeCode != 0)
+			{
+				AddError(NodeErr);
+			}
 		}
 	}
 

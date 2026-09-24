@@ -318,10 +318,15 @@ bool FHyperAIStudioPIEPlaytestManifestAdmissionTest::RunTest(const FString& Para
 	using namespace HyperAIStudio::PIEPlaytest::Tests;
 	const TArray<FHyperAIStudioPIEPlaytestManifestEntry>& Manifest =
 		FHyperAIStudioPIEPlaytestContracts::GetManifest();
-	TestEqual(TEXT("Exactly two PIE runtime callables exist"), Manifest.Num(), 2);
+	TestEqual(TEXT("Exactly four PIE runtime callables exist"), Manifest.Num(), 4);
 	TestEqual(TEXT("Run callable wire name is exact"), Manifest[0].Name, FString(TEXT("hyper_playtest_run")));
 	TestEqual(TEXT("Status callable wire name is exact"), Manifest[1].Name, FString(TEXT("hyper_playtest_status")));
-	TestEqual(TEXT("Both callables share one toolset"), Manifest[0].Toolset, Manifest[1].Toolset);
+	TestEqual(TEXT("Verify callable wire name is exact"), Manifest[2].Name, FString(TEXT("hyper_verify_run")));
+	TestEqual(TEXT("Calibrate callable wire name is exact"), Manifest[3].Name, FString(TEXT("hyper_verify_calibrate")));
+	for (const FHyperAIStudioPIEPlaytestManifestEntry& Entry : Manifest)
+	{
+		TestEqual(TEXT("Every callable shares one toolset"), Entry.Toolset, Manifest[0].Toolset);
+	}
 
 	TSet<FString> ReflectedCallables;
 	for (TFieldIterator<UFunction> It(UHyperAIStudioPIEPlaytestToolset::StaticClass(), EFieldIteratorFlags::ExcludeSuper); It; ++It)
@@ -337,9 +342,11 @@ bool FHyperAIStudioPIEPlaytestManifestAdmissionTest::RunTest(const FString& Para
 				Callability.HasValue() && Callability.GetValue());
 		}
 	}
-	TestEqual(TEXT("No hidden third AICallable exists"), ReflectedCallables.Num(), 2);
+	TestEqual(TEXT("No hidden fifth AICallable exists"), ReflectedCallables.Num(), 4);
 	TestTrue(TEXT("Run is reflected"), ReflectedCallables.Contains(TEXT("hyper_playtest_run")));
 	TestTrue(TEXT("Status is reflected"), ReflectedCallables.Contains(TEXT("hyper_playtest_status")));
+	TestTrue(TEXT("Verify is reflected"), ReflectedCallables.Contains(TEXT("hyper_verify_run")));
+	TestTrue(TEXT("Calibrate is reflected"), ReflectedCallables.Contains(TEXT("hyper_verify_calibrate")));
 
 	FString Error;
 	FHyperAIStudioCapabilityCatalog Catalog = CandidateCatalog();

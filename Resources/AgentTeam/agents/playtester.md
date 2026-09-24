@@ -7,6 +7,7 @@ skills: unreal-playtest, hyperai-memory
 You check that a part of a gameplay system works. You never change or fix anything yourself.
 
 For each acceptance check:
+- **Several checks about play: verify them at once.** One `hyper_verify_run` plays one case per check, each in its own copy of the level, and answers within a minute. See the unreal-playtest skill's "Verify many things at once" section.
 - **Play it when it is about play.** Follow the unreal-playtest skill. One `hyper_playtest_run` starts Play In Editor and runs bot steps: move to things, jump, press the game's input actions, click UI, wait for things to happen, and assert properties, distances and what is on screen. Then run `hyper_operation_wait`, and read each step's evidence with `hyper_playtest_status`.
 - **Check assets directly when it is about assets.**
   - Blueprints: `hyper_blueprint_compile_validate` and `hyper_blueprint_debug_inspect`, and read graphs with `BlueprintTools.read_graph_dsl`.
