@@ -32,6 +32,8 @@ private:
 	TSharedRef<SWidget> BuildSectionButton(FName Id, const FText& Label, const FText& Description);
 	TSharedRef<SWidget> BuildSection(FName Id);
 	TSharedRef<SWidget> BuildDetails(TFunction<bool(const FString& Category)> Shows) const;
+	/** Google's Nano Banana models: whether the key is set, where to get one, and what each model costs. */
+	TSharedRef<SWidget> BuildNanoBanana() const;
 
 	FName Section;
 	TArray<FName> Sections;

@@ -37,9 +37,19 @@ bool FHyperAIStudioServiceDefaultsTest::RunTest(const FString& Parameters)
 	const TArray<FHyperAIStudioExternalServiceSettings> Restore = Settings->ExternalServices;
 	ON_SCOPE_EXIT { Settings->ExternalServices = Restore; };
 
-	// Nothing is seeded: a service is whatever the project configures, and the list starts empty.
+	// Only Google's Gemini API is built in, for the Nano Banana models, and its key comes from the environment.
 	Settings->ExternalServices.Reset();
-	TestTrue(TEXT("an unconfigured project has no services"), FHyperAIStudioExternalServices::GetServices().IsEmpty());
+	const TArray<FHyperAIStudioExternalServiceSettings> Unconfigured = FHyperAIStudioExternalServices::GetServices();
+	TestTrue(TEXT("an unconfigured project has only the Gemini API"), Unconfigured.Num() == 1 && Unconfigured[0].Id == TEXT("google_gemini"));
+	FHyperAIStudioExternalServiceSettings Gemini;
+	TestTrue(TEXT("which is found by id"), FHyperAIStudioExternalServices::Find(TEXT("google_gemini"), Gemini));
+	TestTrue(TEXT("with Google's key header and variable"), Gemini.ApiKeyHeader == TEXT("x-goog-api-key") && Gemini.ApiKeyPrefix.IsEmpty()
+		&& Gemini.ApiKeyVariable == TEXT("GEMINI_API_KEY") && Gemini.BaseUrl == TEXT("https://generativelanguage.googleapis.com"));
+	FHyperAIStudioExternalServiceSettings Proxy = Gemini;
+	Proxy.BaseUrl = TEXT("http://127.0.0.1:8123");
+	Settings->ExternalServices = {Proxy};
+	TestTrue(TEXT("and a project's own entry with its id replaces it"), FHyperAIStudioExternalServices::GetServices().Num() == 1
+		&& FHyperAIStudioExternalServices::Find(TEXT("google_gemini"), Gemini) && Gemini.BaseUrl == Proxy.BaseUrl);
 
 	Settings->ExternalServices = {Paid(TEXT("local_model"), 0.0f)};
 	FHyperAIStudioExternalServiceSettings Local;

@@ -111,7 +111,8 @@ namespace HyperAIStudio::ImageGen::Private
 			FString SpendError;
 			FString Agent;
 			// An agent draws on the user's own plan, so there is no service and nothing to reserve against the cap.
-			if (!Gate::IsAgentModel(Model, Agent) && !FHyperAIStudioExternalServices::Reserve(Model.ServiceId, Payload.Count, Cost, SpendError))
+			if (!Gate::IsAgentModel(Model, Agent) && !FHyperAIStudioExternalServices::Reserve(Model.ServiceId, Payload.Count, Cost, SpendError,
+				Gate::CostPerImage(Model, Payload.Width, Payload.Height)))
 			{
 				return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("spend_cap_reached"), SpendError);
 			}
@@ -573,7 +574,8 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 	Report.Width = Width;
 	Report.Height = Height;
 	Report.Seed = Seed;
-	Report.EstimatedCost = Service.CostPerCall * Request.Count;
+	// The model's own price for this size when it has one, as Nano Banana does; otherwise the service's per call.
+	Report.EstimatedCost = static_cast<float>(Gate::CostPerImage(Model, Width, Height) * Request.Count);
 	Report.bRunsOnThisMachine = Model.bRunsOnThisMachine;
 
 	FHyperAIStudioTrustedArtifactRequest Trusted;

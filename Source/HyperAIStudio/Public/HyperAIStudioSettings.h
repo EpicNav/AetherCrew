@@ -95,20 +95,28 @@ struct FHyperAIStudioImageModelSettings
 	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
 	FString ServiceId;
 
-	/** Path under the service's base url, e.g. /v1/images/generations or /sdapi/v1/txt2img. */
+	/**
+	 * Path under the service's base url, e.g. /v1/images/generations, /sdapi/v1/txt2img or
+	 * /v1beta/models/{model}:generateContent, with {model} substituted.
+	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
 	FString Path;
 
 	/**
-	 * The request body, with {prompt}, {negative}, {width}, {height}, {seed} and {model} substituted in.
-	 * Values are JSON-escaped as they go in, so a prompt with quotes cannot break the body.
+	 * The request body. Substituted in:
+	 * - {prompt}, {negative}, {width}, {height}, {seed} and {model}.
+	 * - {aspect_ratio}: the nearest of 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9 and 21:9.
+	 * - {image_size}: 1K, 2K or 4K, from the longest side.
+	 * Values are JSON-escaped as they go in, so a prompt with quotes cannot break the body. A template without
+	 * {negative} still gets the negative prompt, at the end of the prompt as "Avoid: ...".
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (MultiLine = "true"))
 	FString RequestTemplate;
 
 	/**
 	 * Dotted path to the base64 image in the reply: data.0.b64_json for an OpenAI-shaped one, images.0 for
-	 * an Automatic1111, candidates.0.content.parts.0.inlineData.data for a Gemini.
+	 * an Automatic1111, candidates.0.content.parts.*.inlineData.data for a Gemini. A * takes the first element
+	 * that has the rest of the path, for a reply that puts text before the picture.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
 	FString ResponseImagePath;
@@ -122,6 +130,20 @@ struct FHyperAIStudioImageModelSettings
 
 	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (ClampMin = "64", ClampMax = "4096"))
 	int32 Height = 1024;
+
+	/**
+	 * What one image costs, for the approval summary and the session cap. There are prices for a longest side up
+	 * to 1024 (1K), 2048 (2K) and above (4K). A size left at zero costs what the one below it does; all zero uses
+	 * the service's Cost Per Call.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (ClampMin = "0.0", DisplayName = "Cost Per Image 1K"))
+	float CostPerImage = 0.0f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (ClampMin = "0.0", DisplayName = "Cost Per Image 2K"))
+	float CostPerImage2K = 0.0f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (ClampMin = "0.0", DisplayName = "Cost Per Image 4K"))
+	float CostPerImage4K = 0.0f;
 
 	/**
 	 * True when this model runs on this machine. A local model competes with the editor for the same
@@ -150,6 +172,16 @@ struct FHyperAIStudioImagePromptTemplateSettings
 	/** Slots are written {like_this} and filled from the tool's slot list; an unfilled slot drops out. */
 	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (MultiLine = "true"))
 	FString Template;
+};
+
+/** The Nano Banana model Gemini CLI's nanobanana extension draws with. */
+UENUM()
+enum class EHyperAIStudioNanoBananaModel : uint8
+{
+	ExtensionDefault UMETA(DisplayName = "Extension default"),
+	NanoBanana UMETA(DisplayName = "Nano Banana (Gemini 2.5 Flash Image)"),
+	NanoBanana2 UMETA(DisplayName = "Nano Banana 2 (Gemini 3.1 Flash Image)"),
+	NanoBananaPro UMETA(DisplayName = "Nano Banana Pro (Gemini 3 Pro Image)")
 };
 
 UENUM()
@@ -528,11 +560,33 @@ public:
 	bool bEnablePythonScripting = false;
 
 	/**
-	 * Image models available to the generation tools. Empty by default: this plugin ships no model name,
-	 * because the one it shipped would be wrong within months. The cookbook shows how to add one.
+	 * Image models available to the generation tools, besides the built-in ones. Those are Google's Nano Banana
+	 * models through the Gemini API (nano_banana_2, nano_banana_pro, nano_banana_2_lite, nano_banana) and the
+	 * agents that draw on your own plan (codex_image_gen, gemini_image_gen). An entry here with a built-in id
+	 * replaces that model, as when Google renames one. The cookbook shows how to add one.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
 	TArray<FHyperAIStudioImageModelSettings> ImageModels;
+
+	/**
+	 * The model gemini_image_gen draws with. It is passed to Gemini CLI's nanobanana extension as
+	 * NANOBANANA_MODEL, and GEMINI_API_KEY as its key when NANOBANANA_API_KEY is not set. The Nano Banana
+	 * models call the Gemini API directly instead, with the key in GEMINI_API_KEY.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (DisplayName = "Gemini CLI Image Model"))
+	EHyperAIStudioNanoBananaModel GeminiCliImageModel = EHyperAIStudioNanoBananaModel::ExtensionDefault;
+
+	/** The Gemini model id for Gemini CLI Image Model; empty for the extension's default. */
+	FString GetGeminiCliImageModelId() const;
+
+	/** Google's Gemini API, for the Nano Banana models. It is there without settings; an entry with its id replaces it. */
+	static FHyperAIStudioExternalServiceSettings GetGeminiService();
+
+	/**
+	 * Nano Banana 2, Nano Banana Pro, Nano Banana 2 Lite and the original Nano Banana, through the Gemini API, with
+	 * Google's prices per image.
+	 */
+	static TArray<FHyperAIStudioImageModelSettings> GetNanoBananaModels();
 
 	/** Prompt templates the generation tools fill in. Seeded with one for scene references. */
 	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")

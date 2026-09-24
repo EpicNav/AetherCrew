@@ -33,6 +33,17 @@ namespace HyperAIStudio::ImageGen::Gate
 	bool ComposePrompt(const FString& TemplateId, const TArray<FHyperAIImageSlot>& Slots, const FString& Extra,
 		FString& OutPrompt, TArray<FString>& OutUnfilled, FString& OutError);
 
+	/**
+	 * What one image from Model costs at Width by Height: its price for that size (1K, 2K or 4K by the longest side),
+	 * or the service's cost per call when it has none. Zero for an agent model, which draws on the user's own plan.
+	 */
+	double CostPerImage(const FHyperAIStudioImageModelSettings& Model, int32 Width, int32 Height);
+
+	/** The nearest aspect ratio image APIs take, from 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9 and 21:9. */
+	FString AspectRatio(int32 Width, int32 Height);
+	/** 1K, 2K or 4K from the longest side. */
+	FString ImageSize(int32 Width, int32 Height);
+
 	/** The model's request template with its placeholders substituted, each value JSON-escaped. */
 	bool BuildRequestBody(const FHyperAIStudioImageModelSettings& Model, const FString& Prompt, const FString& Negative,
 		int32 Width, int32 Height, int32 Seed, FString& OutBody, FString& OutError);

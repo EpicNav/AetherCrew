@@ -2,6 +2,9 @@
 
 #include "SHyperAIStudioSettingsPage.h"
 
+#include "HAL/PlatformProcess.h"
+#include "HyperAIStudioExternalService.h"
+#include "HyperAIStudioMarkdown.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioWidgets.h"
 #include "IDetailsView.h"
@@ -166,6 +169,10 @@ TSharedRef<SWidget> SHyperAIStudioSettingsPage::BuildSection(const FName Id)
 				PageHeader(LOCTEXT("ImagesTitle", "Image services"),
 					LOCTEXT("ImagesBody", "The models the Images page and agents draw with. Keys are read from environment variables and never stored."))
 			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 0.0f, 12.0f, 14.0f))
+			[
+				BuildNanoBanana()
+			]
 			+ SVerticalBox::Slot().FillHeight(1.0f)
 			[
 				BuildDetails([](const FString& Category)
@@ -189,6 +196,64 @@ TSharedRef<SWidget> SHyperAIStudioSettingsPage::BuildSection(const FName Id)
 	}
 	const int32 Legacy = Id == Setup ? 0 : Id == Agents ? 1 : Id == Servers ? 2 : 3;
 	return SNew(SHyperAIStudioWindow).Section(Legacy);
+}
+
+TSharedRef<SWidget> SHyperAIStudioSettingsPage::BuildNanoBanana() const
+{
+	using namespace HyperAIStudio::UI;
+	FHyperAIStudioExternalServiceSettings Gemini = UHyperAIStudioSettings::GetGeminiService();
+	FHyperAIStudioExternalServices::Find(Gemini.Id, Gemini);
+	// The environment is read when the editor starts, so this cannot change until it restarts.
+	const bool bHasKey = FHyperAIStudioExternalServices::HasApiKey(Gemini);
+	FString Table = FString::Printf(TEXT("| %s | %s | %s | %s |\n|---|---|---|---|\n"),
+		*LOCTEXT("NanoModel", "Model").ToString(), *LOCTEXT("NanoId", "ID for agents").ToString(),
+		*LOCTEXT("NanoGemini", "Gemini model").ToString(), *LOCTEXT("NanoPrice", "Per image").ToString());
+	for (const FHyperAIStudioImageModelSettings& Model : UHyperAIStudioSettings::GetNanoBananaModels())
+	{
+		FString Name = Model.Label;
+		Model.Label.Split(TEXT(" ("), &Name, nullptr);
+		const float Top = FMath::Max(Model.CostPerImage2K, Model.CostPerImage4K);
+		const FString Price = Top > Model.CostPerImage
+			? FString::Printf(TEXT("$%.3f (1K) to $%.3f (4K)"), Model.CostPerImage, Top)
+			: FString::Printf(TEXT("$%.4g"), Model.CostPerImage);
+		Table += FString::Printf(TEXT("| %s | `%s` | %s | %s |\n"), *Name, *Model.Id, *Model.Model, *Price);
+	}
+	return Card(
+		SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.0f, 0.0f, 8.0f, 0.0f))
+			[
+				Dot(StatusColor(bHasKey ? EStatus::Good : EStatus::Warning))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.AutoWrapText(true)
+				.TextStyle(&Style(), "HyperAIStudio.Text.Body")
+				.Text(bHasKey
+					? FText::Format(LOCTEXT("NanoKeySet", "{0} is set, so the Nano Banana models are ready in the Images page and for agents."), FText::FromString(Gemini.ApiKeyVariable))
+					: FText::Format(LOCTEXT("NanoKeyMissing", "Set {0} in your environment to a Gemini API key, then restart the editor. The key is read from there and never saved."), FText::FromString(Gemini.ApiKeyVariable)))
+			]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 10.0f, 0.0f, 0.0f))
+		[
+			SNew(SHyperAIStudioMarkdown).Markdown(Table)
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 8.0f, 0.0f, 0.0f))
+		[
+			SNew(STextBlock)
+			.AutoWrapText(true)
+			.TextStyle(&Style(), "HyperAIStudio.Text.Caption")
+			.Text(LOCTEXT("NanoCli", "Each call goes straight to Google and is billed to that key, counted against the session spend cap below. Gemini CLI's nanobanana extension (gemini_image_gen) draws with the Gemini CLI Image Model chosen below."))
+		],
+		LOCTEXT("NanoTitle", "Nano Banana (Google Gemini API)"),
+		Button(LOCTEXT("NanoGetKey", "Get a key"), FOnClicked::CreateLambda([]()
+			{
+				FPlatformProcess::LaunchURL(TEXT("https://aistudio.google.com/apikey"), nullptr, nullptr);
+				return FReply::Handled();
+			}), nullptr, !bHasKey, LOCTEXT("NanoGetKeyTip", "Open Google AI Studio, where a Gemini API key is made.")));
 }
 
 TSharedRef<SWidget> SHyperAIStudioSettingsPage::BuildDetails(TFunction<bool(const FString& Category)> Shows) const

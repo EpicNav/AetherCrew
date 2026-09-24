@@ -15,8 +15,9 @@ namespace HyperAIStudio::ImageGen
 TEXT(R"CB(# Image Generation Cookbook
 
 Written by HyperAIStudio for agents generating reference images with `hyper_image_inspect` and
-`hyper_image_generate`. Read this before the first generation in a session. It ships no model of its own, so
-`hyper_image_generate` does nothing until one is configured - and section 2 may mean you never need to.
+`hyper_image_generate`. Read this before the first generation in a session. Built in are Google's Nano Banana
+models, which need a Gemini API key in `GEMINI_API_KEY`, and Codex drawing on the user's own plan. Section 2
+says which to use, and section 3 how to add any other model.
 
 ## 1. What this pack is for
 
@@ -76,7 +77,21 @@ machine can (Codex CLI installed). It still waits for the user's approval, becau
 Then open the PNG it names with your own image reader and look at it. `gemini_image_gen` works the same
 way, but only with Gemini's nanobanana extension installed, since Gemini CLI has no generator of its own.
 
-Configure a model below only when you need something no agent can do: a specific checkpoint or
+**Nano Banana, through Google's API.** When `GEMINI_API_KEY` holds a Gemini API key, these draw directly,
+with no agent in between. Each costs money and waits for the user's approval; `hyper_image_inspect` shows each
+one's price and whether the key is set.
+
+| model_id | Model | Use it for | Per image |
+|---|---|---|---|
+| `nano_banana_2` | Gemini 3.1 Flash Image | most references: fast, good, any size to 4K | $0.067 (1K) to $0.151 (4K) |
+| `nano_banana_pro` | Gemini 3 Pro Image | the most detailed and accurate, and legible text | $0.134 (1K, 2K), $0.24 (4K) |
+| `nano_banana_2_lite` | Gemini 3.1 Flash Lite Image | quick, cheap drafts at 1K | $0.0336 |
+| `nano_banana` | Gemini 2.5 Flash Image | the original, older model | $0.039 |
+
+Width and height become the nearest aspect ratio these take (1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9 or
+21:9) and a size of 1K, 2K or 4K by the longer side. A negative prompt is added to the prompt as "Avoid: ...".
+
+Configure a model below only when you need something none of these do: a specific checkpoint or
 style, a fixed seed you can return to, or a model running offline.
 
 ## 3. Configure a model
@@ -90,8 +105,10 @@ A model is two settings entries, both under **Project Settings > Plugins > Hyper
 - **Image Models** - one entry naming that service, the path, a request template, and where the image
   sits in the reply.
 
-This plugin deliberately ships neither. Image model names change faster than plugin releases, and a
-name compiled in goes stale somewhere nobody can correct it.
+Besides the built-in ones, this plugin ships neither. Image model names change faster than plugin releases, so
+even the built-in models are plain data: an Image Models entry with a built-in id, such as `nano_banana_pro`,
+replaces it. That is how to follow Google renaming a model, or to send it through a proxy by adding a
+`google_gemini` service of your own.
 
 ### The request template
 
@@ -104,14 +121,19 @@ name compiled in goes stale somewhere nobody can correct it.
 | `{model}` | the entry's `model` |
 | `{width}` `{height}` | the requested size |
 | `{seed}` | the seed, or `-1` |
+| `{aspect_ratio}` | the nearest of 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9 and 21:9 |
+| `{image_size}` | `1K`, `2K` or `4K`, from the longer side |
 
 Values are JSON-escaped as they are substituted, so a prompt containing quotes, backslashes or
 newlines cannot break the body. Put `{prompt}` inside the quotes of a string field, not around them.
+A template without `{negative}` still gets the negative prompt, at the end of the prompt as "Avoid: ...".
+`path` takes `{model}` too.
 
 ### The response path
 
 `response_image_path` is a dotted path to **base64 image data** in the reply. Numbers index arrays:
-`data.0.b64_json` means "the `b64_json` field of the first element of `data`".
+`data.0.b64_json` means "the `b64_json` field of the first element of `data`". A `*` takes the first element
+that has the rest of the path, for a reply that puts text before the picture, as Gemini's may.
 
 **The reply must carry the image as base64, not a link.** Most endpoints return a URL unless asked
 otherwise, and a URL is refused here rather than fetched: downloading it would mean a second request
@@ -127,11 +149,13 @@ An OpenAI-shaped endpoint - note `response_format`, without which the reply is a
                            "n": 1, "response_format": "b64_json"}
     response_image_path:  data.0.b64_json
 
-A Gemini-shaped endpoint:
+A Gemini-shaped endpoint, as the built-in Nano Banana models are:
 
     path:                 /v1beta/models/{model}:generateContent
-    request_template:     {"contents": [{"parts": [{"text": "{prompt}"}]}]}
-    response_image_path:  candidates.0.content.parts.0.inlineData.data
+    request_template:     {"contents": [{"parts": [{"text": "{prompt}"}]}],
+                           "generationConfig": {"responseModalities": ["IMAGE"],
+                             "imageConfig": {"aspectRatio": "{aspect_ratio}", "imageSize": "{image_size}"}}}
+    response_image_path:  candidates.0.content.parts.*.inlineData.data
 
 An Automatic1111 or a compatible local server:
 

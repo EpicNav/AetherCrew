@@ -8,6 +8,7 @@
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioNativeChat.h"
 #include "HyperAIStudioService.h"
+#include "HyperAIStudioSettings.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 
@@ -104,6 +105,24 @@ TSharedPtr<FHyperAIStudioAgentImage> FHyperAIStudioAgentImage::Start(const FStri
 		return nullptr;
 	}
 	Image->Chat->SetHeadless(Instructions);
+	if (bGemini)
+	{
+		// The nanobanana extension takes its model and its key from the environment Gemini CLI starts in. A model
+		// chosen in settings wins; one set in the user's own environment stays when settings leave it to the extension.
+		const FString NanoModel = GetDefault<UHyperAIStudioSettings>()->GetGeminiCliImageModelId();
+		if (!NanoModel.IsEmpty())
+		{
+			FPlatformMisc::SetEnvironmentVar(TEXT("NANOBANANA_MODEL"), *NanoModel);
+		}
+		if (FPlatformMisc::GetEnvironmentVariable(TEXT("NANOBANANA_API_KEY")).IsEmpty())
+		{
+			const FString Key = FPlatformMisc::GetEnvironmentVariable(TEXT("GEMINI_API_KEY"));
+			if (!Key.IsEmpty())
+			{
+				FPlatformMisc::SetEnvironmentVar(TEXT("NANOBANANA_API_KEY"), *Key);
+			}
+		}
+	}
 	if (!Image->Chat->Start(OutError))
 	{
 		return nullptr;

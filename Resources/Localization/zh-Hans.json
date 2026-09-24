@@ -4113,6 +4113,66 @@
   },
   {
    "namespace": "SHyperAIStudioSettingsPage",
+   "key": "NanoCli",
+   "source": "Each call goes straight to Google and is billed to that key, counted against the session spend cap below. Gemini CLI's nanobanana extension (gemini_image_gen) draws with the Gemini CLI Image Model chosen below.",
+   "text": "每次调用都直接发送到 Google，并按该密钥计费，计入下方的会话花费上限。Gemini CLI 的 nanobanana 扩展（gemini_image_gen）使用下方选择的 Gemini CLI 图像模型绘图。"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "NanoGemini",
+   "source": "Gemini model",
+   "text": "Gemini 模型"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "NanoGetKey",
+   "source": "Get a key",
+   "text": "获取密钥"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "NanoGetKeyTip",
+   "source": "Open Google AI Studio, where a Gemini API key is made.",
+   "text": "打开 Google AI Studio，在那里创建 Gemini API 密钥。"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "NanoId",
+   "source": "ID for agents",
+   "text": "智能体使用的 ID"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "NanoKeyMissing",
+   "source": "Set {0} in your environment to a Gemini API key, then restart the editor. The key is read from there and never saved.",
+   "text": "请在环境变量 {0} 中设置 Gemini API 密钥，然后重启编辑器。密钥只从那里读取，从不保存。"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "NanoKeySet",
+   "source": "{0} is set, so the Nano Banana models are ready in the Images page and for agents.",
+   "text": "{0} 已设置，Nano Banana 模型已可在图像页面中使用，也可供智能体使用。"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "NanoModel",
+   "source": "Model",
+   "text": "模型"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "NanoPrice",
+   "source": "Per image",
+   "text": "每张图像"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "NanoTitle",
+   "source": "Nano Banana (Google Gemini API)",
+   "text": "Nano Banana（Google Gemini API）"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
    "key": "Preferences",
    "source": "Preferences",
    "text": "偏好设置"

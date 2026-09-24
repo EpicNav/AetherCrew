@@ -46,6 +46,7 @@ public:
 	static constexpr int32 MaxRequestBodyBytes = 8 * 1024 * 1024;
 	static constexpr int32 MaxResponseBodyBytes = 64 * 1024 * 1024;
 
+	/** The project's services, and Google's Gemini API for the Nano Banana models unless the project names its own. */
 	static TArray<FHyperAIStudioExternalServiceSettings> GetServices();
 	static bool Find(const FString& Id, FHyperAIStudioExternalServiceSettings& OutService);
 
@@ -60,11 +61,12 @@ public:
 
 	/**
 	 * Books Calls calls against this session's cap. Fails, without spending, when they would pass it.
-	 * A service that costs nothing always succeeds and books nothing.
+	 * A service that costs nothing always succeeds and books nothing. CostPerCall, when not negative, is what
+	 * each call costs instead of the service's own price, for a model priced per image.
 	 */
-	static bool Reserve(const FString& Id, int32 Calls, double& OutEstimatedCost, FString& OutError);
+	static bool Reserve(const FString& Id, int32 Calls, double& OutEstimatedCost, FString& OutError, double CostPerCall = -1.0);
 	/** Records calls that actually went out, so the cap follows real spend rather than plans. */
-	static void RecordSpend(const FString& Id, int32 Calls);
+	static void RecordSpend(const FString& Id, int32 Calls, double CostPerCall = -1.0);
 	static double GetSessionSpend();
 	static void ResetSessionSpend();
 
@@ -73,9 +75,10 @@ public:
 
 	/**
 	 * One bounded POST with the service's key attached, if it has one. False means nothing was sent and
-	 * OnResponse will not run. Records the spend when the request goes out.
+	 * OnResponse will not run. Records the spend when the request goes out, at CostPerCall when it is not negative.
 	 */
-	static bool PostJson(const FString& Id, const FString& Path, const FString& JsonBody, FOnResponse OnResponse, FString& OutError);
+	static bool PostJson(const FString& Id, const FString& Path, const FString& JsonBody, FOnResponse OnResponse, FString& OutError,
+		double CostPerCall = -1.0);
 
 	static const TCHAR* LexToString(EHyperAIStudioServiceHealth Health);
 	static void Shutdown();

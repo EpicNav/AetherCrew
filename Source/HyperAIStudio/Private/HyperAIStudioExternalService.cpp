@@ -125,7 +125,14 @@ namespace HyperAIStudio::Services::Private
 TArray<FHyperAIStudioExternalServiceSettings> FHyperAIStudioExternalServices::GetServices()
 {
 	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
-	return Settings ? Settings->ExternalServices : TArray<FHyperAIStudioExternalServiceSettings>();
+	TArray<FHyperAIStudioExternalServiceSettings> Services = Settings ? Settings->ExternalServices : TArray<FHyperAIStudioExternalServiceSettings>();
+	// Built in for the Nano Banana models; a project's own entry with the same id wins, as when it goes through a proxy.
+	const FHyperAIStudioExternalServiceSettings Gemini = UHyperAIStudioSettings::GetGeminiService();
+	if (!Services.ContainsByPredicate([&Gemini](const FHyperAIStudioExternalServiceSettings& Service) { return Service.Id.Equals(Gemini.Id, ESearchCase::IgnoreCase); }))
+	{
+		Services.Add(Gemini);
+	}
+	return Services;
 }
 
 bool FHyperAIStudioExternalServices::Find(const FString& Id, FHyperAIStudioExternalServiceSettings& OutService)
@@ -192,7 +199,8 @@ FSimpleMulticastDelegate& FHyperAIStudioExternalServices::OnHealthChanged()
 	return Delegate;
 }
 
-bool FHyperAIStudioExternalServices::Reserve(const FString& Id, const int32 Calls, double& OutEstimatedCost, FString& OutError)
+bool FHyperAIStudioExternalServices::Reserve(const FString& Id, const int32 Calls, double& OutEstimatedCost, FString& OutError,
+	const double CostPerCall)
 {
 	using namespace HyperAIStudio::Services::Private;
 	OutEstimatedCost = 0.0;
@@ -208,7 +216,7 @@ bool FHyperAIStudioExternalServices::Reserve(const FString& Id, const int32 Call
 		OutError = TEXT("A reservation needs at least one call.");
 		return false;
 	}
-	OutEstimatedCost = static_cast<double>(Service.CostPerCall) * Calls;
+	OutEstimatedCost = (CostPerCall >= 0.0 ? CostPerCall : static_cast<double>(Service.CostPerCall)) * Calls;
 	if (OutEstimatedCost <= 0.0)
 	{
 		return true;
@@ -227,15 +235,19 @@ bool FHyperAIStudioExternalServices::Reserve(const FString& Id, const int32 Call
 	return true;
 }
 
-void FHyperAIStudioExternalServices::RecordSpend(const FString& Id, const int32 Calls)
+void FHyperAIStudioExternalServices::RecordSpend(const FString& Id, const int32 Calls, const double CostPerCall)
 {
 	using namespace HyperAIStudio::Services::Private;
 	FHyperAIStudioExternalServiceSettings Service;
-	if (Calls <= 0 || !Find(Id, Service) || Service.CostPerCall <= 0.0f)
+	if (Calls <= 0 || !Find(Id, Service))
 	{
 		return;
 	}
-	State().Spend.FindOrAdd(Service.Id) += static_cast<double>(Service.CostPerCall) * Calls;
+	const double Each = CostPerCall >= 0.0 ? CostPerCall : static_cast<double>(Service.CostPerCall);
+	if (Each > 0.0)
+	{
+		State().Spend.FindOrAdd(Service.Id) += Each * Calls;
+	}
 }
 
 double FHyperAIStudioExternalServices::GetSessionSpend()
@@ -249,7 +261,7 @@ void FHyperAIStudioExternalServices::ResetSessionSpend()
 }
 
 bool FHyperAIStudioExternalServices::PostJson(
-	const FString& Id, const FString& Path, const FString& JsonBody, FOnResponse OnResponse, FString& OutError)
+	const FString& Id, const FString& Path, const FString& JsonBody, FOnResponse OnResponse, FString& OutError, const double CostPerCall)
 {
 	using namespace HyperAIStudio::Services::Private;
 	OutError.Reset();
@@ -338,7 +350,7 @@ bool FHyperAIStudioExternalServices::PostJson(
 		OutError = FString::Printf(TEXT("The request to %s could not be sent."), *Url);
 		return false;
 	}
-	RecordSpend(Service.Id, 1);
+	RecordSpend(Service.Id, 1, CostPerCall);
 	return true;
 }
 

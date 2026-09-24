@@ -81,9 +81,14 @@ namespace HyperAIStudio::ImageGen::Gate
 			TSharedPtr<FHyperAIStudioAgentImage> Drawing;
 		};
 
-		/** Pictures an agent CLI draws on the user's own plan; listed whether or not settings name them. */
-		TArray<FHyperAIStudioImageModelSettings> AgentModels()
+		/**
+		 * Models that are there without settings: Google's Nano Banana models through the Gemini API, and pictures an
+		 * agent CLI draws on the user's own plan. They are data like any other model, so an entry in Image Models with
+		 * the same id replaces one.
+		 */
+		TArray<FHyperAIStudioImageModelSettings> BuiltInModels()
 		{
+			TArray<FHyperAIStudioImageModelSettings> Models = UHyperAIStudioSettings::GetNanoBananaModels();
 			FHyperAIStudioImageModelSettings Codex;
 			Codex.Id = TEXT("codex_image_gen");
 			Codex.Label = TEXT("Codex image generation (uses your Codex plan)");
@@ -92,9 +97,95 @@ namespace HyperAIStudio::ImageGen::Gate
 			Codex.Height = 1024;
 			FHyperAIStudioImageModelSettings Gemini = Codex;
 			Gemini.Id = TEXT("gemini_image_gen");
-			Gemini.Label = TEXT("Gemini with its image extension");
+			Gemini.Label = TEXT("Gemini CLI, with its nanobanana extension");
 			Gemini.ServiceId = TEXT("agent:gemini");
-			return {Codex, Gemini};
+			Models.Add(Codex);
+			Models.Add(Gemini);
+			return Models;
+		}
+
+		/** A model sent over HTTP, as the Images page and hyper_image_inspect show it: what it costs, and what stops it. */
+		FHyperAIImageModelInfo DescribeServiceModel(const FHyperAIStudioImageModelSettings& Model)
+		{
+			FHyperAIImageModelInfo Info;
+			Info.Id = Model.Id;
+			Info.Label = Model.Label;
+			Info.ServiceId = Model.ServiceId;
+			Info.Model = Model.Model;
+			Info.Width = Model.Width;
+			Info.Height = Model.Height;
+			Info.bRunsOnThisMachine = Model.bRunsOnThisMachine;
+			FHyperAIStudioExternalServiceSettings Service;
+			if (!FHyperAIStudioExternalServices::Find(Model.ServiceId, Service))
+			{
+				Info.Health = TEXT("unknown");
+				Info.Issue = FString::Printf(TEXT("No external service is configured with id %s."), *Model.ServiceId);
+				return Info;
+			}
+			Info.CostPerCall = static_cast<float>(CostPerImage(Model, Model.Width, Model.Height));
+			Info.bHasApiKey = FHyperAIStudioExternalServices::HasApiKey(Service);
+			if (!Info.bHasApiKey)
+			{
+				Info.Health = FHyperAIStudioExternalServices::LexToString(EHyperAIStudioServiceHealth::KeyMissing);
+				Info.Issue = FString::Printf(TEXT("Needs a key in the %s environment variable%s. Set it, then restart the editor; keys are never kept in project config."),
+					*Service.ApiKeyVariable, Service.Id.Equals(TEXT("google_gemini"), ESearchCase::IgnoreCase) ? TEXT(" (get one at aistudio.google.com/apikey)") : TEXT(""));
+				return Info;
+			}
+			const FHyperAIStudioServiceStatus Status = FHyperAIStudioExternalServices::QueryHealth(Model.ServiceId);
+			Info.Health = FHyperAIStudioExternalServices::LexToString(Status.Health);
+			if (Status.Health == EHyperAIStudioServiceHealth::Unreachable)
+			{
+				Info.Issue = Status.Diagnostic;
+			}
+			else if (Model.RequestTemplate.IsEmpty() || Model.ResponseImagePath.IsEmpty() || Model.Path.IsEmpty())
+			{
+				Info.Issue = TEXT("This model has no path, request_template or response_image_path; see the cookbook.");
+			}
+			return Info;
+		}
+
+		/** Why a Gemini reply holds no picture, in its own words; empty when it does not say. */
+		FString GeminiRefusal(const TSharedPtr<FJsonValue>& Root)
+		{
+			const TSharedPtr<FJsonObject>* Object = nullptr;
+			if (!Root.IsValid() || !Root->TryGetObject(Object))
+			{
+				return FString();
+			}
+			const TSharedPtr<FJsonObject>* Feedback = nullptr;
+			FString Reason;
+			if ((*Object)->TryGetObjectField(TEXT("promptFeedback"), Feedback) && (*Feedback)->TryGetStringField(TEXT("blockReason"), Reason))
+			{
+				return FString::Printf(TEXT("Gemini blocked the prompt (%s). Reword it and try again."), *Reason);
+			}
+			const TArray<TSharedPtr<FJsonValue>>* Candidates = nullptr;
+			const TSharedPtr<FJsonObject>* First = nullptr;
+			if (!(*Object)->TryGetArrayField(TEXT("candidates"), Candidates) || Candidates->IsEmpty() || !(*Candidates)[0]->TryGetObject(First))
+			{
+				return FString();
+			}
+			FString Said;
+			const TSharedPtr<FJsonObject>* Content = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Parts = nullptr;
+			if ((*First)->TryGetObjectField(TEXT("content"), Content) && (*Content)->TryGetArrayField(TEXT("parts"), Parts))
+			{
+				for (const TSharedPtr<FJsonValue>& Part : *Parts)
+				{
+					const TSharedPtr<FJsonObject>* PartObject = nullptr;
+					FString Text;
+					if (Part->TryGetObject(PartObject) && (*PartObject)->TryGetStringField(TEXT("text"), Text) && !Text.IsEmpty())
+					{
+						Said = Text.Left(300);
+						break;
+					}
+				}
+			}
+			(*First)->TryGetStringField(TEXT("finishReason"), Reason);
+			if (!Reason.IsEmpty() && Reason != TEXT("STOP"))
+			{
+				return FString::Printf(TEXT("Gemini stopped without a picture (%s).%s%s"), *Reason, Said.IsEmpty() ? TEXT("") : TEXT(" It said: "), *Said);
+			}
+			return Said.IsEmpty() ? FString() : TEXT("Gemini answered with text instead of a picture: ") + Said;
 		}
 
 		TMap<FString, TSharedPtr<FBatch>>& Batches()
@@ -215,8 +306,10 @@ namespace HyperAIStudio::ImageGen::Gate
 			Batch->bInFlight = true;
 			const TSharedPtr<FBatch> Kept = Batch;
 			FString PostError;
+			// A Gemini model names itself in the path: /v1beta/models/{model}:generateContent.
+			const FString Path = Batch->Model.Path.Replace(TEXT("{model}"), *Batch->Model.Model, ESearchCase::IgnoreCase);
 			const bool bSent = FHyperAIStudioExternalServices::PostJson(
-				Batch->Model.ServiceId, Batch->Model.Path, Body,
+				Batch->Model.ServiceId, Path, Body,
 				[Kept, Index](const bool bOk, const TArray<uint8>& Response, const TMap<FString, FString>&, const FString& ResponseError)
 				{
 					Kept->bInFlight = false;
@@ -252,7 +345,7 @@ namespace HyperAIStudio::ImageGen::Gate
 					Kept->Files.Add(File);
 					++Kept->Done;
 				},
-				PostError);
+				PostError, Batch->CostPerCall);
 			if (!bSent)
 			{
 				Batch->bInFlight = false;
@@ -279,7 +372,7 @@ namespace HyperAIStudio::ImageGen::Gate
 				return true;
 			}
 		}
-		for (const FHyperAIStudioImageModelSettings& Model : AgentModels())
+		for (const FHyperAIStudioImageModelSettings& Model : BuiltInModels())
 		{
 			if (Model.Id.Equals(Id, ESearchCase::IgnoreCase))
 			{
@@ -310,41 +403,18 @@ namespace HyperAIStudio::ImageGen::Gate
 		}
 		for (const FHyperAIStudioImageModelSettings& Model : Settings->ImageModels)
 		{
-			FHyperAIImageModelInfo Info;
-			Info.Id = Model.Id;
-			Info.Label = Model.Label;
-			Info.ServiceId = Model.ServiceId;
-			Info.Model = Model.Model;
-			Info.Width = Model.Width;
-			Info.Height = Model.Height;
-			Info.bRunsOnThisMachine = Model.bRunsOnThisMachine;
-			FHyperAIStudioExternalServiceSettings Service;
-			if (!FHyperAIStudioExternalServices::Find(Model.ServiceId, Service))
-			{
-				Info.Health = TEXT("unknown");
-				Info.Issue = FString::Printf(TEXT("No external service is configured with id %s."), *Model.ServiceId);
-			}
-			else
-			{
-				Info.CostPerCall = Service.CostPerCall;
-				Info.bHasApiKey = FHyperAIStudioExternalServices::HasApiKey(Service);
-				const FHyperAIStudioServiceStatus Status = FHyperAIStudioExternalServices::QueryHealth(Model.ServiceId);
-				Info.Health = FHyperAIStudioExternalServices::LexToString(Status.Health);
-				if (Status.Health == EHyperAIStudioServiceHealth::Unreachable || !Info.bHasApiKey)
-				{
-					Info.Issue = Status.Diagnostic;
-				}
-				else if (Model.RequestTemplate.IsEmpty() || Model.ResponseImagePath.IsEmpty() || Model.Path.IsEmpty())
-				{
-					Info.Issue = TEXT("This model has no path, request_template or response_image_path; see the cookbook.");
-				}
-			}
-			Infos.Add(MoveTemp(Info));
+			Infos.Add(DescribeServiceModel(Model));
 		}
-		for (const FHyperAIStudioImageModelSettings& Model : AgentModels())
+		for (const FHyperAIStudioImageModelSettings& Model : BuiltInModels())
 		{
 			if (Infos.ContainsByPredicate([&Model](const FHyperAIImageModelInfo& Info) { return Info.Id.Equals(Model.Id, ESearchCase::IgnoreCase); }))
 			{
+				continue;
+			}
+			FString Agent;
+			if (!IsAgentModel(Model, Agent))
+			{
+				Infos.Add(DescribeServiceModel(Model));
 				continue;
 			}
 			FHyperAIImageModelInfo Info;
@@ -355,8 +425,6 @@ namespace HyperAIStudio::ImageGen::Gate
 			Info.Height = Model.Height;
 			// No key: the agent is signed in already, and it spends the user's own plan rather than money here.
 			Info.bHasApiKey = true;
-			FString Agent;
-			IsAgentModel(Model, Agent);
 			Info.Health = FHyperAIStudioAgentImage::CanDraw(Agent, Info.Issue) ? TEXT("ready") : TEXT("unavailable");
 			Infos.Add(MoveTemp(Info));
 		}
@@ -580,6 +648,49 @@ namespace HyperAIStudio::ImageGen::Gate
 		return true;
 	}
 
+	double CostPerImage(const FHyperAIStudioImageModelSettings& Model, const int32 Width, const int32 Height)
+	{
+		FString Agent;
+		if (IsAgentModel(Model, Agent))
+		{
+			return 0.0;
+		}
+		const int32 Longest = FMath::Max(Width, Height);
+		double Cost = Model.CostPerImage;
+		if (Longest > 1024 && Model.CostPerImage2K > 0.0f)
+		{
+			Cost = Model.CostPerImage2K;
+		}
+		if (Longest > 2048 && Model.CostPerImage4K > 0.0f)
+		{
+			Cost = Model.CostPerImage4K;
+		}
+		FHyperAIStudioExternalServiceSettings Service;
+		return Cost > 0.0 ? Cost : FHyperAIStudioExternalServices::Find(Model.ServiceId, Service) ? static_cast<double>(Service.CostPerCall) : 0.0;
+	}
+
+	FString AspectRatio(const int32 Width, const int32 Height)
+	{
+		static const TPair<int32, int32> Ratios[] = {{1, 1}, {2, 3}, {3, 2}, {3, 4}, {4, 3}, {4, 5}, {5, 4}, {9, 16}, {16, 9}, {21, 9}};
+		const double Wanted = FMath::Loge(static_cast<double>(FMath::Max(1, Width)) / FMath::Max(1, Height));
+		TPair<int32, int32> Best = Ratios[0];
+		for (const TPair<int32, int32>& Ratio : Ratios)
+		{
+			if (FMath::Abs(FMath::Loge(static_cast<double>(Ratio.Key) / Ratio.Value) - Wanted)
+				< FMath::Abs(FMath::Loge(static_cast<double>(Best.Key) / Best.Value) - Wanted))
+			{
+				Best = Ratio;
+			}
+		}
+		return FString::Printf(TEXT("%d:%d"), Best.Key, Best.Value);
+	}
+
+	FString ImageSize(const int32 Width, const int32 Height)
+	{
+		const int32 Longest = FMath::Max(Width, Height);
+		return Longest <= 1024 ? TEXT("1K") : Longest <= 2048 ? TEXT("2K") : TEXT("4K");
+	}
+
 	bool BuildRequestBody(const FHyperAIStudioImageModelSettings& Model, const FString& Prompt, const FString& Negative,
 		const int32 Width, const int32 Height, const int32 Seed, FString& OutBody, FString& OutError)
 	{
@@ -591,12 +702,18 @@ namespace HyperAIStudio::ImageGen::Gate
 			return false;
 		}
 		OutBody = Model.RequestTemplate;
-		OutBody = OutBody.Replace(TEXT("{prompt}"), *EscapeForJsonString(Prompt), ESearchCase::IgnoreCase);
+		// A model with no field for a negative prompt still hears it, at the end of the description.
+		const FString Avoid = Negative.TrimStartAndEnd();
+		const bool bTakesNegative = Model.RequestTemplate.Contains(TEXT("{negative}"), ESearchCase::IgnoreCase);
+		const FString Described = bTakesNegative || Avoid.IsEmpty() ? Prompt : Prompt + TEXT(" Avoid: ") + Avoid;
+		OutBody = OutBody.Replace(TEXT("{prompt}"), *EscapeForJsonString(Described), ESearchCase::IgnoreCase);
 		OutBody = OutBody.Replace(TEXT("{negative}"), *EscapeForJsonString(Negative), ESearchCase::IgnoreCase);
 		OutBody = OutBody.Replace(TEXT("{model}"), *EscapeForJsonString(Model.Model), ESearchCase::IgnoreCase);
 		OutBody = OutBody.Replace(TEXT("{width}"), *FString::FromInt(Width), ESearchCase::IgnoreCase);
 		OutBody = OutBody.Replace(TEXT("{height}"), *FString::FromInt(Height), ESearchCase::IgnoreCase);
 		OutBody = OutBody.Replace(TEXT("{seed}"), *FString::FromInt(Seed), ESearchCase::IgnoreCase);
+		OutBody = OutBody.Replace(TEXT("{aspect_ratio}"), *AspectRatio(Width, Height), ESearchCase::IgnoreCase);
+		OutBody = OutBody.Replace(TEXT("{image_size}"), *ImageSize(Width, Height), ESearchCase::IgnoreCase);
 		// A template that does not parse would be rejected by the endpoint with a message nobody can act on,
 		// so it is caught here where the setting that caused it can be named.
 		TSharedPtr<FJsonObject> Parsed;
@@ -638,38 +755,48 @@ namespace HyperAIStudio::ImageGen::Gate
 		}
 		TArray<FString> Steps;
 		DottedPath.ParseIntoArray(Steps, TEXT("."), /*InCullEmpty=*/true);
-		TSharedPtr<FJsonValue> Current = Root;
-		for (const FString& Step : Steps)
+		// A * is any element of an array: the first one that has the rest of the path, as a picture that follows text.
+		TFunction<TSharedPtr<FJsonValue>(const TSharedPtr<FJsonValue>&, int32)> Walk =
+			[&Steps, &Walk](const TSharedPtr<FJsonValue>& At, const int32 StepIndex) -> TSharedPtr<FJsonValue>
 		{
-			if (!Current.IsValid())
+			if (!At.IsValid() || StepIndex == Steps.Num())
 			{
-				break;
+				return At;
+			}
+			const FString& Step = Steps[StepIndex];
+			const TArray<TSharedPtr<FJsonValue>>* Array = nullptr;
+			if (Step == TEXT("*"))
+			{
+				if (At->TryGetArray(Array))
+				{
+					for (const TSharedPtr<FJsonValue>& Element : *Array)
+					{
+						const TSharedPtr<FJsonValue> Found = Walk(Element, StepIndex + 1);
+						FString Value;
+						if (Found.IsValid() && Found->TryGetString(Value) && !Value.IsEmpty())
+						{
+							return Found;
+						}
+					}
+				}
+				return nullptr;
 			}
 			if (Step.IsNumeric())
 			{
-				const TArray<TSharedPtr<FJsonValue>>* Array = nullptr;
 				const int32 Index = FCString::Atoi(*Step);
-				if (!Current->TryGetArray(Array) || !Array->IsValidIndex(Index))
-				{
-					Current.Reset();
-					break;
-				}
-				Current = (*Array)[Index];
-				continue;
+				return At->TryGetArray(Array) && Array->IsValidIndex(Index) ? Walk((*Array)[Index], StepIndex + 1) : nullptr;
 			}
 			const TSharedPtr<FJsonObject>* Object = nullptr;
-			if (!Current->TryGetObject(Object) || !(*Object)->HasField(Step))
-			{
-				Current.Reset();
-				break;
-			}
-			Current = (*Object)->TryGetField(Step);
-		}
+			return At->TryGetObject(Object) && (*Object)->HasField(Step) ? Walk((*Object)->TryGetField(Step), StepIndex + 1) : nullptr;
+		};
+		const TSharedPtr<FJsonValue> Current = Walk(Root, 0);
 		FString Encoded;
 		if (!Current.IsValid() || !Current->TryGetString(Encoded) || Encoded.IsEmpty())
 		{
-			OutError = FString::Printf(
-				TEXT("Nothing at response_image_path %s in the reply: %s"), *DottedPath, *Text.Left(200));
+			const FString Refusal = GeminiRefusal(Root);
+			OutError = Refusal.IsEmpty()
+				? FString::Printf(TEXT("Nothing at response_image_path %s in the reply: %s"), *DottedPath, *Text.Left(200))
+				: Refusal;
 			return false;
 		}
 		if (Encoded.StartsWith(TEXT("http://")) || Encoded.StartsWith(TEXT("https://")))
@@ -738,11 +865,7 @@ namespace HyperAIStudio::ImageGen::Gate
 		Batch->Width = Width;
 		Batch->Height = Height;
 		Batch->Seed = Seed;
-		FHyperAIStudioExternalServiceSettings Service;
-		if (FHyperAIStudioExternalServices::Find(Model.ServiceId, Service))
-		{
-			Batch->CostPerCall = Service.CostPerCall;
-		}
+		Batch->CostPerCall = static_cast<float>(CostPerImage(Model, Width, Height));
 		if (!IFileManager::Get().MakeDirectory(*Batch->FolderOnDisk, /*Tree=*/true))
 		{
 			OutError = FString::Printf(TEXT("Could not make %s."), *Batch->FolderOnDisk);

@@ -14,6 +14,8 @@ public class HyperAIStudioImageGen : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			// The tests play Google's image endpoint on a local port.
+			"HTTPServer",
 			"HyperAIStudio",
 			"InputCore",
 			"Json",
