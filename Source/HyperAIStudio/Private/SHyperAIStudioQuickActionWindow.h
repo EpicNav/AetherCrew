@@ -197,7 +197,7 @@ private:
 	FString RouteCategory;
 	/** Claude Code subagent this tab's new chats start as (claude --agent). */
 	FString TabSubagent;
-	/** Codex and Gemini can run in HyperAI's own chat view instead of the terminal. */
+	/** Codex, Gemini and Claude Code can run in HyperAI's own chat view instead of the terminal. */
 	TSharedPtr<class SHyperAIStudioNativeChatView> NativeView;
 	TSharedRef<SWidget> BuildNativeToggle();
 	/** Switches this tab between the terminal and the native view, resuming the conversation when its id is known. */

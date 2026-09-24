@@ -501,9 +501,9 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Sandbox", meta = (DisplayName = "Sandbox Mode"))
 	bool bSandboxMode = false;
 
-	/** Codex and Gemini chats open in HyperAI's own chat view instead of the terminal. Claude Code always uses the terminal. */
-	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Chat", meta = (DisplayName = "Native Chat View for Codex and Gemini"))
-	bool bUseNativeChatView = false;
+	/** Chats open in HyperAI's own chat view instead of the terminal. A Claude Code chat with Remote Control stays in the terminal. */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Chat", meta = (DisplayName = "Native Chat View"))
+	bool bUseNativeChatView = true;
 
 	/** Actor classes a playtest may spawn into the PIE world. Nothing else can be spawned. */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Playtests", meta = (AllowAbstract = "false", MetaClass = "/Script/Engine.Actor"))

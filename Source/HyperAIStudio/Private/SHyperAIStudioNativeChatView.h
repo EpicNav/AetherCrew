@@ -9,7 +9,7 @@
 
 class SMultiLineEditableTextBox;
 
-/** The chat tab's native view of a Codex or Gemini chat: transcript, plan, approvals and a composer. */
+/** The chat tab's native view of a Codex, Gemini or Claude Code chat: transcript, plan, approvals and a composer. */
 class SHyperAIStudioNativeChatView : public SCompoundWidget
 {
 public:

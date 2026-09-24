@@ -6,6 +6,7 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
+#include "HyperAIStudioAgentChatHistory.h"
 #include "HyperAIStudioAgentImage.h"
 #include "HyperAIStudioNativeChat.h"
 #include "HyperAIStudioService.h"
@@ -272,6 +273,178 @@ for line in iter(sys.stdin.readline, ""):
         send({"method": "turn/completed", "params": {"turn": {"id": "turn-1", "status": "completed", "items": []}}})
 )PY");
 
+	/**
+	 * Claude Code headless, as its Agent SDK drives it: a control handshake after the hooks report, messages that stream
+	 * and then come again whole, a permission request, tool results with a picture, the to-do and task tools, a subagent's
+	 * own message, a message that never streamed, and an interrupt that withdraws an open question.
+	 */
+	const TCHAR* const FakeClaude = TEXT(R"PY(import json, sys, os, base64
+from pngwriter import png
+HERE = os.path.dirname(os.path.abspath(__file__))
+SID = None
+USAGE = {"input_tokens": 12, "cache_creation_input_tokens": 3000, "cache_read_input_tokens": 17000, "output_tokens": 988}
+def send(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+def ev(e):
+    send({"type": "stream_event", "event": e, "parent_tool_use_id": None, "session_id": SID, "uuid": "u"})
+def whole(mid, b):
+    send({"type": "assistant", "message": {"id": mid, "role": "assistant", "content": [b], "usage": USAGE}, "parent_tool_use_id": None, "session_id": SID})
+def streamed(mid, blocks):
+    # Each block streams, then comes again whole in an assistant message of its own, under the same message id.
+    ev({"type": "message_start", "message": {"id": mid, "role": "assistant", "content": [], "usage": {"input_tokens": 12}}})
+    for i, b in enumerate(blocks):
+        if b["type"] == "tool_use":
+            ev({"type": "content_block_start", "index": i, "content_block": {"type": "tool_use", "id": b["id"], "name": b["name"], "input": {}}})
+            ev({"type": "content_block_delta", "index": i, "delta": {"type": "input_json_delta", "partial_json": json.dumps(b["input"])}})
+        else:
+            kind = b["type"]
+            ev({"type": "content_block_start", "index": i, "content_block": {"type": kind, kind: ""}})
+            for k in range(0, len(b[kind]), 9):
+                ev({"type": "content_block_delta", "index": i, "delta": {"type": kind + "_delta", kind: b[kind][k:k + 9]}})
+        ev({"type": "content_block_stop", "index": i})
+        whole(mid, b)
+    ev({"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 988}})
+    ev({"type": "message_stop"})
+def result(tool, content, structured=None):
+    m = {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tool, "content": content, "is_error": False}]},
+         "parent_tool_use_id": None, "session_id": SID}
+    if structured:
+        m["tool_use_result"] = structured
+    send(m)
+def finish(text):
+    send({"type": "result", "subtype": "success", "is_error": False, "result": text, "session_id": SID, "usage": {"input_tokens": 40, "output_tokens": 2000},
+          "modelUsage": {"claude-opus-5": {"inputTokens": 40, "outputTokens": 2000, "contextWindow": 200000}}})
+turn = 0
+for line in iter(sys.stdin.readline, ""):
+    m = json.loads(line); t = m.get("type"); r = m.get("request") or {}
+    if t == "control_request" and r.get("subtype") == "initialize":
+        # Hooks report first, under an id that is not the chat's.
+        send({"type": "system", "subtype": "hook_started", "hook_name": "SessionStart:startup", "session_id": "hook-session"})
+        send({"type": "control_response", "response": {"subtype": "success", "request_id": m["request_id"], "response": {"commands": []}}})
+    elif t == "control_request" and r.get("subtype") == "interrupt":
+        send({"type": "control_response", "response": {"subtype": "success", "request_id": m["request_id"], "response": {}}})
+        send({"type": "control_cancel_request", "request_id": "perm-late"})
+        send({"type": "result", "subtype": "error_during_execution", "is_error": True, "errors": ["Request was aborted."], "session_id": SID})
+    elif t == "user":
+        turn += 1
+        SID = m.get("session_id")
+        content = m["message"]["content"]
+        text = [b["text"] for b in content if b["type"] == "text"][0]
+        pictures = [b for b in content if b["type"] == "image" and b["source"]["media_type"] == "image/png"
+                    and base64.b64decode(b["source"]["data"])[:4] == b"\x89PNG"]
+        if turn == 1:
+            send({"type": "system", "subtype": "init", "session_id": SID, "model": "claude-opus-5", "tools": ["Bash", "Edit"],
+                  "mcp_servers": [{"name": "unreal-mcp", "status": "connected"}, {"name": "nwiro", "status": "failed"}]})
+            streamed("msg_1", [
+                {"type": "thinking", "thinking": "Check the level, then answer."},
+                {"type": "text", "text": "You said: %s, with %d picture(s)." % (text, len(pictures))},
+                {"type": "tool_use", "id": "toolu_todo", "name": "TodoWrite", "input": {"todos": [
+                    {"content": "Read the level", "status": "completed", "activeForm": "Reading the level"},
+                    {"content": "Answer", "status": "in_progress", "activeForm": "Answering"}]}},
+                {"type": "tool_use", "id": "toolu_bash", "name": "Bash", "input": {"command": "echo hi", "description": "Say hi"}}])
+            result("toolu_todo", "Todos have been modified successfully.")
+            send({"type": "control_request", "request_id": "perm-1", "request": {"subtype": "can_use_tool", "tool_name": "Bash",
+                  "input": {"command": "echo hi", "description": "Say hi"}, "tool_use_id": "toolu_bash", "title": "Claude wants to run echo hi",
+                  "decision_reason": "\u001b[1mecho\u001b[0m is not in your allow list",
+                  "permission_suggestions": [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "echo:*"}], "behavior": "allow", "destination": "localSettings"}]}})
+        elif turn == 2:
+            streamed("msg_3", [{"type": "tool_use", "id": "toolu_task", "name": "TaskCreate", "input": {"subject": "Build the arena", "description": "Block it out"}}])
+            result("toolu_task", "Task #7 created successfully: Build the arena", structured={"task": {"id": "7", "subject": "Build the arena"}})
+            streamed("msg_4", [{"type": "tool_use", "id": "toolu_task2", "name": "TaskUpdate", "input": {"taskId": "7", "status": "in_progress"}}])
+            result("toolu_task2", "Updated task #7 status")
+            finish("Started on the arena.")
+        else:
+            # Waits on a question until it is interrupted.
+            send({"type": "control_request", "request_id": "perm-late", "request": {"subtype": "can_use_tool", "tool_name": "Write",
+                  "input": {"file_path": os.path.join(HERE, "late.txt"), "content": "late"}, "tool_use_id": "toolu_late"}})
+    elif t == "control_response" and m["response"]["request_id"] == "perm-1":
+        answer = m["response"]["response"]
+        decision = answer["behavior"] + ("+rules" if answer.get("updatedPermissions") else "") \
+            + ("+input" if (answer.get("updatedInput") or {}).get("command") == "echo hi" else "")
+        result("toolu_bash", "decision=" + decision)
+        streamed("msg_2", [
+            {"type": "tool_use", "id": "toolu_mcp", "name": "mcp__unreal-mcp__call_tool", "input": {"toolset_name": "editor_toolset.toolsets.scene.SceneTools",
+             "tool_name": "find_actors", "arguments": {"name": "PlayerStart"}}},
+            {"type": "tool_use", "id": "toolu_edit", "name": "Edit", "input": {"file_path": os.path.join(HERE, "Notes.md"), "old_string": "old line", "new_string": "new line"}}])
+        found = {"summary": "Found 1 actor named PlayerStart.", "count": 1, "actors": [{"name": "PlayerStart", "class": "PlayerStart", "location": "X=0 Y=0 Z=96"}]}
+        data = base64.b64encode(png(os.path.join(HERE, "shot.png"), rgb=(30, 160, 60))).decode()
+        result("toolu_mcp", [{"type": "text", "text": json.dumps(found)}, {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": data}}])
+        result("toolu_edit", "The file has been updated successfully.")
+        # A subagent's own steps carry its card's id, and stay out of the transcript.
+        send({"type": "assistant", "message": {"id": "msg_sub", "role": "assistant", "content": [{"type": "text", "text": "SUBAGENT"}]}, "parent_tool_use_id": "toolu_agent", "session_id": SID})
+        # A message that comes whole, without streaming, still shows.
+        whole("msg_5", {"type": "text", "text": "Done: the start is fine."})
+        finish("Done: the start is fine.")
+)PY");
+
+	/** Claude Code checking a level: a plan, an Unreal MCP tool, a command it asks to run, an edit, and a report. */
+	const TCHAR* const FakeClaudeShowcase = TEXT(R"PY(import json, sys, os
+HERE = os.path.dirname(os.path.abspath(__file__))
+SID = None
+def send(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+def streamed(mid, blocks):
+    send({"type": "stream_event", "event": {"type": "message_start", "message": {"id": mid}}, "parent_tool_use_id": None, "session_id": SID})
+    for i, b in enumerate(blocks):
+        kind = b["type"]
+        if kind == "tool_use":
+            event = {"type": "content_block_start", "index": i, "content_block": {"type": "tool_use", "id": b["id"], "name": b["name"], "input": {}}}
+            send({"type": "stream_event", "event": event, "parent_tool_use_id": None, "session_id": SID})
+        else:
+            for k in range(0, len(b[kind]), 40):
+                event = {"type": "content_block_delta", "index": i, "delta": {"type": kind + "_delta", kind: b[kind][k:k + 40]}}
+                send({"type": "stream_event", "event": event, "parent_tool_use_id": None, "session_id": SID})
+        send({"type": "assistant", "message": {"id": mid, "role": "assistant", "content": [b],
+              "usage": {"input_tokens": 6, "cache_creation_input_tokens": 2400, "cache_read_input_tokens": 31000, "output_tokens": 1200}},
+              "parent_tool_use_id": None, "session_id": SID})
+def result(tool, content):
+    send({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tool, "content": content}]},
+          "parent_tool_use_id": None, "session_id": SID})
+REPORT = """Checked the arena. The player start and the lights are fine; the nav mesh was not, and I fixed its cause.
+
+| Check | Result |
+|---|---|
+| Player start above the floor | PASS 96 cm clear |
+| Lights cast shadows | PASS 4 of 4 |
+| Nav mesh covers the arena | FAIL 2 areas cannot be reached |
+
+The east ramp was 3 degrees too steep for the bot to climb. I lowered it to 35 degrees in `ArenaNotes.md`; rebuild the nav mesh to reach both areas.
+
+![The arena from above](SCENE)
+"""
+for line in iter(sys.stdin.readline, ""):
+    m = json.loads(line); t = m.get("type")
+    if t == "control_request" and m["request"]["subtype"] == "initialize":
+        send({"type": "control_response", "response": {"subtype": "success", "request_id": m["request_id"], "response": {}}})
+    elif t == "user":
+        SID = m.get("session_id")
+        streamed("msg_1", [
+            {"type": "thinking", "thinking": "Find the player start and the lights, check the nav mesh, then fix what fails."},
+            {"type": "text", "text": "I'll check the arena: the player start, the lights and the nav mesh."},
+            {"type": "tool_use", "id": "todo", "name": "TodoWrite", "input": {"todos": [
+                {"content": "Find the player start", "status": "completed", "activeForm": "Finding the player start"},
+                {"content": "Check the lights", "status": "completed", "activeForm": "Checking the lights"},
+                {"content": "Check the nav mesh", "status": "in_progress", "activeForm": "Checking the nav mesh"},
+                {"content": "Fix what fails", "status": "pending", "activeForm": "Fixing what fails"}]}},
+            {"type": "tool_use", "id": "t1", "name": "mcp__unreal-mcp__call_tool", "input": {"toolset_name": "editor_toolset.toolsets.scene.SceneTools",
+             "tool_name": "find_actors", "arguments": {"name": "PlayerStart"}}}])
+        found = {"summary": "Found 1 actor named PlayerStart.", "count": 1, "actors": [{"name": "PlayerStart", "class": "PlayerStart", "location": "X=0 Y=0 Z=96"}]}
+        result("todo", "Todos have been modified successfully.")
+        result("t1", [{"type": "text", "text": json.dumps(found)}])
+        streamed("msg_2", [{"type": "tool_use", "id": "c1", "name": "Bash", "input": {"command": "git status --short", "description": "Show changed files"}}])
+        send({"type": "control_request", "request_id": "p1", "request": {"subtype": "can_use_tool", "tool_name": "Bash",
+              "input": {"command": "git status --short", "description": "Show changed files"}, "tool_use_id": "c1",
+              "permission_suggestions": [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "git status:*"}], "behavior": "allow", "destination": "localSettings"}]}})
+    elif t == "control_response":
+        result("c1", " M Content/Maps/Arena.umap")
+        streamed("msg_3", [{"type": "tool_use", "id": "e1", "name": "Edit", "input": {"file_path": os.path.join(HERE, "ArenaNotes.md"),
+                 "old_string": "Ramp slope: 38 degrees", "new_string": "Ramp slope: 35 degrees"}}])
+        result("e1", "The file has been updated successfully.")
+        streamed("msg_4", [{"type": "text", "text": REPORT.replace("SCENE", os.path.join(HERE, "scene.png").replace("\\", "/"))}])
+        send({"type": "result", "subtype": "success", "is_error": False, "result": "done", "session_id": SID,
+              "modelUsage": {"claude-opus-5": {"contextWindow": 200000}}})
+)PY");
+
 	void WritePng(const FString& Path)
 	{
 		TArray<FColor> Pixels;
@@ -355,7 +528,6 @@ bool FHyperAIStudioNativeChatCodexTest::RunTest(const FString& Parameters)
 	FFileHelper::SaveStringToFile(FakeCodex, *Script, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 	FHyperAIStudioNativeChat::SetCommandForTests(FString::Printf(TEXT("python -u \"%s\""), *Script));
 
-	TestFalse(TEXT("Claude Code has no native chat"), FHyperAIStudioNativeChat::IsSupported(TEXT("Claude Code")));
 	const TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(TEXT("Codex"), Scratch.Dir, FString(), TEXT("gone-thread"));
 	FString Error;
 	if (!TestTrue(TEXT("The Codex chat starts"), Chat.IsValid() && Chat->Start(Error)))
@@ -707,6 +879,221 @@ bool FHyperAIStudioScreensChatReportTest::RunTest(const FString& Parameters)
 		AddInfo(TEXT("Screenshot: ") + Shot);
 	}
 	Chat->Stop();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNativeChatClaudeTest,
+	"HyperAIStudio.NativeChat.ClaudeProtocol",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioNativeChatClaudeTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::NativeChatTests;
+	using EKind = FHyperAIStudioChatItem::EKind;
+	if (!HasPython())
+	{
+		AddWarning(TEXT("python is not on PATH, so the scripted Claude Code stand-in cannot run."));
+		return true;
+	}
+	const FScratch Scratch;
+	UseStandIn(Scratch.Dir, FakeClaude, TEXT("fake_claude.py"));
+	const FString Attached = FPaths::Combine(Scratch.Dir, TEXT("attached.png"));
+	WritePng(Attached);
+
+	TestTrue(TEXT("Claude Code has a native chat"), FHyperAIStudioNativeChat::IsSupported(TEXT("Claude Code")));
+	TestFalse(TEXT("A terminal-only agent has none"), FHyperAIStudioNativeChat::IsSupported(TEXT("Cursor")));
+	const FString Gone = TEXT("0f0e0d0c-0b0a-4000-8000-000000000001");
+	const TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(TEXT("Claude Code"), Scratch.Dir, FString(), Gone);
+	FString Error;
+	if (!TestTrue(TEXT("The Claude Code chat starts"), Chat.IsValid() && Chat->Start(Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	const FString ChatId = Chat->GetSessionId();
+	TestTrue(TEXT("A chat Claude never wrote down starts again, under a new id it has from the start"), ChatId.Len() == 36 && ChatId != Gone);
+	// The view builds a row as soon as it hears of an item: an approval announced before its choices would have no buttons.
+	bool bBareApproval = false;
+	Chat->OnChanged.AddLambda([&Chat, &bBareApproval]()
+	{
+		const TArray<TSharedPtr<FHyperAIStudioChatItem>>& Items = Chat->GetItems();
+		bBareApproval = bBareApproval || (!Items.IsEmpty() && Items.Last()->Kind == EKind::Approval && Items.Last()->Choices.IsEmpty());
+	});
+	auto ById = [&Chat](const FString& Id)
+	{
+		const TSharedPtr<FHyperAIStudioChatItem>* Found = Chat->GetItems().FindByPredicate([&Id](const TSharedPtr<FHyperAIStudioChatItem>& Item) { return Item->Id == Id; });
+		return Found ? *Found : TSharedPtr<FHyperAIStudioChatItem>();
+	};
+
+	Chat->Send(TEXT("hello"), {Attached});
+	TestEqual(TEXT("A message sent before the handshake waits its turn"), Chat->NumQueued(), 1);
+	TestTrue(TEXT("The handshake makes it ready"), PumpUntil([&Chat]() { return Chat->IsReady(); }));
+	TestTrue(TEXT("The queued message goes out, and Claude asks to run a command"), PumpUntil([&Chat]() { return Chat->HasOpenApproval(); }));
+	const TSharedPtr<FHyperAIStudioChatItem> Approval = FindKind(*Chat, EKind::Approval);
+	if (!TestTrue(TEXT("The question is in the transcript"), Approval.IsValid()))
+	{
+		Chat->Stop();
+		return false;
+	}
+	TestEqual(TEXT("It has Claude's own title"), Approval->Title, FString(TEXT("Claude wants to run echo hi")));
+	TestTrue(TEXT("It shows the command, and the reason without terminal colour codes"), Approval->Text.Contains(TEXT("echo hi"))
+		&& Approval->Text.Contains(TEXT("echo is not in your allow list")) && !Approval->Text.Contains(TEXT("\x1b")));
+	TestEqual(TEXT("It offers Allow, Allow and don't ask again, and Deny"), Approval->Choices.Num(), 3);
+	TestFalse(TEXT("It was announced with its choices in, so the view shows its buttons"), bBareApproval);
+	TestTrue(TEXT("A command's own description comes with it"), Approval->Text.StartsWith(TEXT("Say hi")));
+	Chat->Answer(Approval->Id, 1);
+	TestTrue(TEXT("The turn completes"), PumpUntil([&Chat]() { return !Chat->IsBusy(); }));
+	TestEqual(TEXT("The chat keeps its id; the hooks' own is not taken for it"), Chat->GetSessionId(), ChatId);
+
+	const TSharedPtr<FHyperAIStudioChatItem> User = FindKind(*Chat, EKind::User);
+	TestTrue(TEXT("The user's message keeps its picture"), User.IsValid() && User->Text == TEXT("hello") && User->Images == TArray<FString>{Attached});
+	const TSharedPtr<FHyperAIStudioChatItem> Thought = FindKind(*Chat, EKind::Reasoning);
+	TestTrue(TEXT("Thinking streams in as its own step"), Thought.IsValid() && Thought->Text == TEXT("Check the level, then answer."));
+	const TSharedPtr<FHyperAIStudioChatItem> Reply = FindKind(*Chat, EKind::Agent);
+	TestTrue(TEXT("The reply streams in once, and Claude got the picture as a PNG"), Reply.IsValid() && Reply->Text == TEXT("You said: hello, with 1 picture(s)."));
+	TestTrue(TEXT("TodoWrite becomes the plan, not a card"), Chat->GetPlan().Num() == 2 && Chat->GetPlan()[1].Status == TEXT("inProgress")
+		&& !ById(TEXT("toolu_todo")).IsValid());
+	const TSharedPtr<FHyperAIStudioChatItem> Command = ById(TEXT("toolu_bash"));
+	TestTrue(TEXT("Bash is a command card, and Claude got the answer with its rule and the input"), Command.IsValid() && Command->Kind == EKind::Command
+		&& Command->Title == TEXT("echo hi") && Command->Text == TEXT("decision=allow+rules+input") && Command->Status == TEXT("completed"));
+	TestTrue(TEXT("The question shows its answer"), Approval->bAnswered && Approval->Status == TEXT("Allow, and don't ask again"));
+	const TSharedPtr<FHyperAIStudioChatItem> Tool = ById(TEXT("toolu_mcp"));
+	TestTrue(TEXT("Unreal's call_tool is titled as the tool it ran"), Tool.IsValid() && Tool->Title == TEXT("editor_toolset.toolsets.scene.SceneTools.find_actors")
+		&& Tool->Status == TEXT("completed"));
+	TestTrue(TEXT("and its JSON answer reads as a report"), Tool.IsValid() && SHyperAIStudioNativeChatView::StepMarkdown(*Tool).StartsWith(TEXT("Found 1 actor named PlayerStart.")));
+	const TSharedPtr<FHyperAIStudioChatItem> Picture = ById(TEXT("toolu_mcp#image0"));
+	TestTrue(TEXT("A picture in a tool's answer is an image item with its file"), Picture.IsValid() && Picture->Kind == EKind::Image
+		&& Picture->Images.Num() == 1 && IFileManager::Get().FileExists(*Picture->Images[0]));
+	const TSharedPtr<FHyperAIStudioChatItem> Change = ById(TEXT("toolu_edit"));
+	TestTrue(TEXT("An edit is a file change with its diff"), Change.IsValid() && Change->Kind == EKind::FileChange && Change->Title == TEXT("Edit Notes.md")
+		&& Change->Text.Contains(TEXT("-old line")) && Change->Text.Contains(TEXT("+new line")) && Change->Status == TEXT("completed"));
+	const TSharedPtr<FHyperAIStudioChatItem> Whole = FindKind(*Chat, EKind::Agent, 1);
+	TestTrue(TEXT("A message that did not stream still shows, once"), Whole.IsValid() && Whole->Text == TEXT("Done: the start is fine.")
+		&& !FindKind(*Chat, EKind::Agent, 2).IsValid());
+	TestFalse(TEXT("A subagent's own steps stay out of the transcript"), Chat->GetItems().ContainsByPredicate([](const TSharedPtr<FHyperAIStudioChatItem>& Item)
+	{
+		return Item->Text.Contains(TEXT("SUBAGENT"));
+	}));
+	TestTrue(TEXT("An MCP server that did not connect is named, and only that one"), Chat->GetItems().ContainsByPredicate([](const TSharedPtr<FHyperAIStudioChatItem>& Item)
+	{
+		return Item->Kind == EKind::Notice && Item->Text.Contains(TEXT("nwiro (failed)")) && !Item->Text.Contains(TEXT("unreal-mcp"));
+	}));
+	AddInfo(TEXT("Usage: ") + Chat->GetUsage());
+	TestTrue(TEXT("Usage reads as the size of the context"), Chat->GetUsage().StartsWith(TEXT("21.0k tokens")) && Chat->GetUsage().Contains(TEXT("of context used")));
+
+	Chat->Send(TEXT("plan the arena"));
+	TestTrue(TEXT("The second turn completes"), PumpUntil([&Chat]() { return !Chat->IsBusy(); }));
+	TestTrue(TEXT("Claude's task list becomes the plan, under the id its result gave"), Chat->GetPlan().Num() == 1
+		&& Chat->GetPlan()[0].Text == TEXT("Build the arena") && Chat->GetPlan()[0].Status == TEXT("inProgress"));
+	const TSharedPtr<FHyperAIStudioChatItem> Local = FindKind(*Chat, EKind::Agent, 2);
+	TestTrue(TEXT("A turn that answers in its result alone still shows the answer"), Local.IsValid() && Local->Text == TEXT("Started on the arena."));
+
+	Chat->Send(TEXT("write it down"));
+	TestTrue(TEXT("Claude asks to write a file"), PumpUntil([&Chat]() { return Chat->HasOpenApproval(); }));
+	const TSharedPtr<FHyperAIStudioChatItem> Late = FindKind(*Chat, EKind::Approval, 1);
+	TestTrue(TEXT("Without a title from Claude it names the file, shows what goes in, and offers no don't-ask-again without a suggestion"),
+		Late.IsValid() && Late->Title == TEXT("Write late.txt?") && Late->Text.Contains(TEXT("+late")) && Late->Choices.Num() == 2);
+	Chat->Interrupt();
+	TestTrue(TEXT("Stop ends the turn"), PumpUntil([&Chat]() { return !Chat->IsBusy(); }));
+	TestTrue(TEXT("and the question Claude withdrew is closed"), !Chat->HasOpenApproval() && Late.IsValid() && Late->bAnswered && Late->Status == TEXT("Cancelled"));
+	TestTrue(TEXT("It says it stopped"), Chat->GetItems().Last()->Kind == EKind::Notice && Chat->GetItems().Last()->Text == TEXT("Stopped."));
+	TestFalse(TEXT("and nothing failed"), Chat->GetItems().ContainsByPredicate([](const TSharedPtr<FHyperAIStudioChatItem>& Item) { return Item->Kind == EKind::Error; }));
+	if (Picture.IsValid() && !Picture->Images.IsEmpty())
+	{
+		IFileManager::Get().Delete(*Picture->Images[0]);
+	}
+	Chat->Stop();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioScreensClaudeChatTest,
+	"HyperAIStudio.Screens.ClaudeChat",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioScreensClaudeChatTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::NativeChatTests;
+	using EKind = FHyperAIStudioChatItem::EKind;
+	if (!HasPython())
+	{
+		AddWarning(TEXT("python is not on PATH, so the scripted Claude Code stand-in cannot run."));
+		return true;
+	}
+	const FScratch Scratch;
+	HyperAIStudio::Tests::WriteScenePng(FPaths::Combine(Scratch.Dir, TEXT("scene.png")), FIntPoint(480, 300),
+		FLinearColor(0.45f, 0.6f, 0.9f), FLinearColor(0.2f, 0.3f, 0.2f));
+	UseStandIn(Scratch.Dir, FakeClaudeShowcase, TEXT("fake_claude_showcase.py"));
+
+	const TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(TEXT("Claude Code"), Scratch.Dir, FString(), FString());
+	FString Error;
+	if (!TestTrue(TEXT("The Claude Code chat starts"), Chat.IsValid() && Chat->Start(Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	TestTrue(TEXT("It becomes ready"), PumpUntil([&Chat]() { return Chat->IsReady(); }));
+	const TSharedRef<SHyperAIStudioNativeChatView> View = SNew(SHyperAIStudioNativeChatView).Chat(Chat);
+	Chat->Send(TEXT("Check the arena: player start, shadows and nav mesh. Fix what fails."));
+	TestTrue(TEXT("Claude asks before it runs a command"), PumpUntil([&Chat]() { return Chat->HasOpenApproval(); }));
+	const TSharedPtr<FHyperAIStudioChatItem> Approval = FindKind(*Chat, EKind::Approval);
+	TestTrue(TEXT("A command's question is titled as one"), Approval.IsValid() && Approval->Title == TEXT("Run this command?")
+		&& Approval->Text.StartsWith(TEXT("Show changed files")));
+	HyperAIStudio::Tests::SaveWidgetShot(View, FIntPoint(900, 1000), TEXT("step18-claude-approval"), 10);
+	if (Approval.IsValid())
+	{
+		Chat->Answer(Approval->Id, 0);
+	}
+	TestTrue(TEXT("The turn completes"), PumpUntil([&Chat]() { return !Chat->IsBusy(); }));
+	TestTrue(TEXT("The plan, the tool, the command, the edit and the report are all there"), Chat->GetPlan().Num() == 4
+		&& FindKind(*Chat, EKind::Tool).IsValid() && FindKind(*Chat, EKind::Command).IsValid() && FindKind(*Chat, EKind::FileChange).IsValid()
+		&& FindKind(*Chat, EKind::Agent, 1).IsValid());
+	const FString Shot = HyperAIStudio::Tests::SaveWidgetShot(View, FIntPoint(900, 1400), TEXT("step18-claude-chat"), 10);
+	if (Shot.IsEmpty())
+	{
+		AddWarning(TEXT("This editor cannot render, so no screenshot was taken."));
+	}
+	else
+	{
+		AddInfo(TEXT("Screenshot: ") + Shot);
+	}
+	Chat->Stop();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNativeChatClaudeLiveTest,
+	"HyperAIStudio.NativeChat.ClaudeLiveHandshake",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioNativeChatClaudeLiveTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::NativeChatTests;
+	// The real CLI, started the way the chat tab starts it, as far as the handshake: nothing is sent, so no model usage.
+	if (FPlatformMisc::GetEnvironmentVariable(TEXT("HYPERAI_TEST_CLAUDE_CLI")) != TEXT("1"))
+	{
+		AddInfo(TEXT("Skipped: set HYPERAI_TEST_CLAUDE_CLI=1 to run against an installed, logged-in Claude Code."));
+		return true;
+	}
+	const FString Directory = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/ClaudeHandshakeTest"));
+	IFileManager::Get().MakeDirectory(*Directory, /*Tree=*/true);
+	const TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(TEXT("Claude Code"), Directory, FString(), FString());
+	FString Error;
+	if (!TestTrue(TEXT("claude starts"), Chat.IsValid() && Chat->Start(Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	PumpUntil([&Chat]() { return Chat->IsReady() || !Chat->IsRunning(); }, 90.0);
+	for (const TSharedPtr<FHyperAIStudioChatItem>& Item : Chat->GetItems())
+	{
+		AddInfo(TEXT("Transcript: ") + Item->Text);
+	}
+	TestTrue(TEXT("It takes the command line and answers the handshake"), Chat->IsReady());
+	TestTrue(TEXT("and keeps running, waiting for a message"), Chat->IsRunning());
+	Chat->Stop();
+	TestFalse(TEXT("A chat that sent nothing leaves no session behind"), HyperAIStudio::ChatHistory::ClaudeSessionExists(Directory, Chat->GetSessionId()));
 	return true;
 }
 

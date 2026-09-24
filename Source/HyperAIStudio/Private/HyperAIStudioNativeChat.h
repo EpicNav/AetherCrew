@@ -49,9 +49,9 @@ struct FHyperAIStudioChatPlanStep
 };
 
 /**
- * A chat HyperAIStudio hosts itself instead of in a terminal: Codex through its app-server and Gemini through the
- * Agent Client Protocol, both newline-delimited JSON-RPC over the CLI's stdin and stdout. Claude Code has no
- * documented protocol for this and stays in the terminal. Game thread only.
+ * A chat HyperAIStudio hosts itself instead of in a terminal, over the CLI's stdin and stdout: Codex through its
+ * app-server and Gemini through the Agent Client Protocol, both newline-delimited JSON-RPC, and Claude Code through
+ * the stream-json protocol its Agent SDK uses. Game thread only.
  */
 class FHyperAIStudioNativeChat : public TSharedFromThis<FHyperAIStudioNativeChat>
 {
@@ -61,9 +61,12 @@ public:
 	/** Runs Command instead of the agent's CLI, so protocol tests can use a scripted stand-in. Empty restores it. */
 	static void SetCommandForTests(const FString& Command);
 #endif
-	/** Null for an agent without a native protocol. ResumeSessionId continues an earlier chat. */
+	/**
+	 * Null for an agent without a native protocol. ResumeSessionId continues an earlier chat. Subagent is for Claude
+	 * Code: a new chat starts as that project subagent.
+	 */
 	static TSharedPtr<FHyperAIStudioNativeChat> Create(const FString& AgentName, const FString& ProjectRoot, const FString& Model,
-		const FString& ResumeSessionId);
+		const FString& ResumeSessionId, const FString& Subagent = FString());
 
 	virtual ~FHyperAIStudioNativeChat();
 
@@ -112,12 +115,17 @@ protected:
 	virtual void InterruptNow() = 0;
 	virtual void HandleMessage(const FString& Method, const TSharedPtr<FJsonObject>& Params, const TSharedPtr<FJsonValue>& RequestId) = 0;
 	virtual TSharedRef<FJsonObject> AnswerPayload(const FHyperAIStudioChatItem& Item, int32 Choice) = 0;
+	/** Sees every message before it is read as JSON-RPC; true when it was handled. */
+	virtual bool HandleLine(const TSharedRef<FJsonObject>& /*Line*/) { return false; }
 
+	/** One message to the agent, as a line. */
+	void Write(const TSharedRef<FJsonObject>& Message);
 	using FOnResult = TFunction<void(const TSharedPtr<FJsonObject>& Result, const FString& Error)>;
 	void Request(const FString& Method, const TSharedRef<FJsonObject>& Params, FOnResult OnResult = nullptr);
 	void Notify(const FString& Method, const TSharedRef<FJsonObject>& Params);
-	void Respond(const TSharedPtr<FJsonValue>& Id, const TSharedRef<FJsonObject>& Result);
-	void RespondError(const TSharedPtr<FJsonValue>& Id, const FString& Message);
+	/** Answers a request the agent sent; Claude Code answers with control responses instead. */
+	virtual void Respond(const TSharedPtr<FJsonValue>& Id, const TSharedRef<FJsonObject>& Result);
+	virtual void RespondError(const TSharedPtr<FJsonValue>& Id, const FString& Message);
 
 	void Ready(const FString& InSessionId);
 	void TurnStarted();
@@ -128,6 +136,8 @@ protected:
 	/** An approval the user answers later with Answer. */
 	void AskApproval(const TSharedPtr<FJsonValue>& RequestId, const FString& Id, const FString& Title, const FString& Text,
 		const TArray<FString>& Choices, const TArray<FString>& ChoiceIds);
+	/** Closes an approval the agent no longer waits for, with Status as its answer. */
+	void CloseApproval(const FString& ItemId, const FString& Status);
 	void Changed();
 	/** Writes an agent's base64 picture under ImageFolder and returns the file; empty when it is not an image. */
 	static FString SaveImageData(const FString& Base64, const FString& Name);
@@ -149,9 +159,11 @@ private:
 		TArray<FString> Images;
 	};
 
+	/** Adds an item without announcing it; AddItem and AskApproval announce it once it is complete. */
+	TSharedRef<FHyperAIStudioChatItem> NewItem(FHyperAIStudioChatItem::EKind Kind, const FString& Id, const FString& Title,
+		const FString& Text, const FString& Status);
 	bool Pump(float DeltaTime);
 	void Dispatch(const FString& Line);
-	void Write(const TSharedRef<FJsonObject>& Message);
 	void ClosePipes();
 
 	FProcHandle Process;
@@ -160,6 +172,8 @@ private:
 	void* StdInRead = nullptr;
 	void* StdInWrite = nullptr;
 	TArray<uint8> Pending;
+	/** The last line that was not a message: often why the agent stopped. */
+	FString LastLogLine;
 	int64 NextId = 1;
 	TMap<int64, FOnResult> Waiting;
 	TMap<FString, TSharedPtr<FJsonValue>> OpenApprovals;

@@ -3,7 +3,9 @@
 #include "HyperAIStudioNativeChat.h"
 
 #include "HAL/FileManager.h"
+#include "HyperAIStudioAgentChatHistory.h"
 #include "HyperAIStudioService.h"
+#include "HyperAIStudioSettings.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Base64.h"
 #include "Misc/FileHelper.h"
@@ -141,6 +143,9 @@ namespace HyperAIStudio::NativeChat::Private
 		const int64 Size = IFileManager::Get().FileSize(*Path);
 		return Size > 0 && Size <= 20 * 1024 * 1024;
 	}
+
+	/** The largest picture Claude is sent as data: the API takes up to 5 MB of base64. */
+	constexpr int64 MaxInlineImageBytes = 5 * 1024 * 1024 / 4 * 3;
 }
 
 // ---------------------------------------------------------------------------------------------------------------- base
@@ -370,6 +375,14 @@ TSharedPtr<FHyperAIStudioChatItem> FHyperAIStudioNativeChat::FindItem(const FStr
 TSharedRef<FHyperAIStudioChatItem> FHyperAIStudioNativeChat::AddItem(const FHyperAIStudioChatItem::EKind Kind, const FString& Id,
 	const FString& Title, const FString& Text, const FString& Status)
 {
+	const TSharedRef<FHyperAIStudioChatItem> Item = NewItem(Kind, Id, Title, Text, Status);
+	Changed();
+	return Item;
+}
+
+TSharedRef<FHyperAIStudioChatItem> FHyperAIStudioNativeChat::NewItem(const FHyperAIStudioChatItem::EKind Kind, const FString& Id,
+	const FString& Title, const FString& Text, const FString& Status)
+{
 	const TSharedRef<FHyperAIStudioChatItem> Item = MakeShared<FHyperAIStudioChatItem>();
 	Item->Kind = Kind;
 	Item->Id = Id.IsEmpty() ? FGuid::NewGuid().ToString() : Id;
@@ -381,17 +394,27 @@ TSharedRef<FHyperAIStudioChatItem> FHyperAIStudioNativeChat::AddItem(const FHype
 	{
 		Items.RemoveAt(0, Items.Num() - HyperAIStudio::NativeChat::Private::MaxItems);
 	}
-	Changed();
 	return Item;
 }
 
 void FHyperAIStudioNativeChat::AskApproval(const TSharedPtr<FJsonValue>& RequestId, const FString& Id, const FString& Title,
 	const FString& Text, const TArray<FString>& Choices, const TArray<FString>& ChoiceIds)
 {
-	const TSharedRef<FHyperAIStudioChatItem> Item = AddItem(FHyperAIStudioChatItem::EKind::Approval, Id + TEXT("#approval"), Title, Text);
+	const TSharedRef<FHyperAIStudioChatItem> Item = NewItem(FHyperAIStudioChatItem::EKind::Approval, Id + TEXT("#approval"), Title, Text, FString());
 	Item->Choices = Choices;
 	Item->ChoiceIds = ChoiceIds;
 	OpenApprovals.Add(Item->Id, RequestId);
+	Changed();
+}
+
+void FHyperAIStudioNativeChat::CloseApproval(const FString& ItemId, const FString& Status)
+{
+	OpenApprovals.Remove(ItemId);
+	if (const TSharedPtr<FHyperAIStudioChatItem> Item = FindItem(ItemId))
+	{
+		Item->bAnswered = true;
+		Item->Status = Status;
+	}
 	Changed();
 }
 
@@ -504,8 +527,9 @@ bool FHyperAIStudioNativeChat::Pump(float)
 	{
 		int32 Code = 0;
 		FPlatformProcess::GetProcReturnCode(Process, &Code);
-		AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(),
-			FString::Printf(TEXT("%s stopped (exit code %d). Start a new chat, or switch this tab to the terminal to see why."), *AgentName, Code));
+		AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(), FString::Printf(
+			TEXT("%s stopped (exit code %d)%s. Start a new chat, or switch this tab to the terminal to see why."), *AgentName, Code,
+			LastLogLine.IsEmpty() ? TEXT("") : *(TEXT(": ") + LastLogLine.Left(300))));
 		Stop();
 		Changed();
 		return false;
@@ -521,6 +545,11 @@ void FHyperAIStudioNativeChat::Dispatch(const FString& Line)
 	{
 		// Log lines on stderr share the pipe.
 		UE_LOG(LogHyperAIStudioNativeChat, Verbose, TEXT("%s: %s"), *AgentName, *Line);
+		LastLogLine = Line;
+		return;
+	}
+	if (HandleLine(Message.ToSharedRef()))
+	{
 		return;
 	}
 	FString Method;
@@ -1259,6 +1288,716 @@ namespace HyperAIStudio::NativeChat::Private
 		TSharedPtr<FHyperAIStudioChatItem> CurrentThought;
 		bool bTakesImages = false;
 	};
+
+	// ------------------------------------------------------------------------------------------------------------ Claude
+
+	/**
+	 * Claude Code as its Agent SDK runs it: stream-json both ways, with control requests for the handshake, permission
+	 * prompts and interrupts. Its lines are not JSON-RPC, so HandleLine takes each one whole.
+	 */
+	class FClaudeChat final : public FHyperAIStudioNativeChat
+	{
+		using EKind = FHyperAIStudioChatItem::EKind;
+
+	public:
+		FClaudeChat(const FString& InProjectRoot, const FString& InModel, const FString& InResumeSessionId, const FString& InSubagent)
+			: FHyperAIStudioNativeChat(TEXT("Claude Code"), InProjectRoot, InModel, InResumeSessionId)
+			, Subagent(InSubagent)
+		{
+			// A chat Claude never wrote down (nothing was sent yet) cannot be resumed, so it starts again. The id is
+			// chosen here, so the tab has it before the first message, as it does in the terminal.
+			if (!HyperAIStudio::ChatHistory::ClaudeSessionExists(ProjectRoot, ResumeSessionId))
+			{
+				ResumeSessionId.Reset();
+			}
+			SessionId = ResumeSessionId.IsEmpty() ? HyperAIStudio::ChatHistory::NewClaudeSessionId() : ResumeSessionId;
+		}
+
+	protected:
+		virtual FString CommandLine() const override
+		{
+			const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+			FString Prefix;
+			FString ModelArgument;
+			FString Error;
+			if (const FHyperAIStudioAgentModelRoute* Saved = Settings->FindAgentModelRoute(AgentName))
+			{
+				// The model the terminal would pass, Smart's plan and build models included.
+				FHyperAIStudioAgentModelRoute Route = *Saved;
+				Route.SelectedModel = Model;
+				if (!Settings->TryResolveModelLaunch(Route, Prefix, ModelArgument, Error))
+				{
+					Prefix.Reset();
+					ModelArgument.Reset();
+				}
+			}
+			// An editor started from a Claude Code session inherits its marker, which stops a nested claude from starting.
+			// AskUserQuestion needs a form this view does not have, so Claude asks in its reply instead.
+			FString Command = TEXT("set \"CLAUDECODE=\" && ") + Prefix + FHyperAIStudioService::GetAgentTerminalLaunchCommand(AgentName)
+				+ TEXT(" --output-format stream-json --input-format stream-json --verbose --include-partial-messages")
+				+ TEXT(" --permission-prompt-tool stdio --disallowedTools AskUserQuestion");
+			if (!ModelArgument.IsEmpty())
+			{
+				Command += TEXT(" ") + ModelArgument;
+			}
+			Command += (ResumeSessionId.IsEmpty() ? TEXT(" --session-id ") : TEXT(" --resume ")) + SessionId;
+			// A resumed chat keeps what it started as.
+			if (ResumeSessionId.IsEmpty() && !Subagent.IsEmpty())
+			{
+				Command += TEXT(" --agent ") + Subagent;
+			}
+			return Command;
+		}
+
+		virtual bool WritesJsonRpcVersion() const override { return false; }
+
+		virtual void Handshake() override
+		{
+			Control(TEXT("hyperai-initialize"), Object({{TEXT("subtype"), Str(TEXT("initialize"))}, {TEXT("hooks"), MakeShared<FJsonValueNull>()}}));
+		}
+
+		virtual void SendNow(const FString& Text, const TArray<FString>& Images) override
+		{
+			bReplied = false;
+			FString Prompt = Text;
+			TArray<TSharedPtr<FJsonValue>> Content;
+			for (const FString& Image : Images)
+			{
+				TArray<uint8> Bytes;
+				// A picture too big to go as data goes as its path; Claude opens it itself.
+				if (IFileManager::Get().FileSize(*Image) > MaxInlineImageBytes || !FFileHelper::LoadFileToArray(Bytes, *Image))
+				{
+					Prompt += TEXT("\n\nAttached picture: ") + Image;
+					continue;
+				}
+				const TSharedRef<FJsonObject> Source = Object({{TEXT("type"), Str(TEXT("base64"))}, {TEXT("media_type"), Str(MimeType(Image))},
+					{TEXT("data"), Str(FBase64::Encode(Bytes))}});
+				Content.Add(Obj(Object({{TEXT("type"), Str(TEXT("image"))}, {TEXT("source"), Obj(Source)}})));
+			}
+			Content.Add(Obj(Object({{TEXT("type"), Str(TEXT("text"))}, {TEXT("text"), Str(Prompt)}})));
+			const TSharedRef<FJsonObject> Message = Object({{TEXT("role"), Str(TEXT("user"))}, {TEXT("content"), Arr(Content)}});
+			Write(Object({{TEXT("type"), Str(TEXT("user"))}, {TEXT("message"), Obj(Message)},
+				{TEXT("parent_tool_use_id"), MakeShared<FJsonValueNull>()}, {TEXT("session_id"), Str(SessionId)}}));
+		}
+
+		virtual void InterruptNow() override
+		{
+			bInterrupted = true;
+			Control(FString::Printf(TEXT("hyperai-interrupt-%d"), ++Interrupts), Object({{TEXT("subtype"), Str(TEXT("interrupt"))}}));
+		}
+
+		virtual void HandleMessage(const FString&, const TSharedPtr<FJsonObject>&, const TSharedPtr<FJsonValue>&) override
+		{
+		}
+
+		virtual void Respond(const TSharedPtr<FJsonValue>& Id, const TSharedRef<FJsonObject>& Result) override
+		{
+			Write(Object({{TEXT("type"), Str(TEXT("control_response"))}, {TEXT("response"), Obj(Object({
+				{TEXT("subtype"), Str(TEXT("success"))}, {TEXT("request_id"), Id}, {TEXT("response"), Obj(Result)}}))}}));
+		}
+
+		virtual void RespondError(const TSharedPtr<FJsonValue>& Id, const FString& Message) override
+		{
+			Write(Object({{TEXT("type"), Str(TEXT("control_response"))}, {TEXT("response"), Obj(Object({
+				{TEXT("subtype"), Str(TEXT("error"))}, {TEXT("request_id"), Id}, {TEXT("error"), Str(Message)}}))}}));
+		}
+
+		virtual TSharedRef<FJsonObject> AnswerPayload(const FHyperAIStudioChatItem& Item, const int32 Choice) override
+		{
+			FAsk Asked;
+			Asks.RemoveAndCopyValue(Item.Id, Asked);
+			const FString Picked = Item.ChoiceIds[Choice];
+			if (Picked == TEXT("deny"))
+			{
+				return Object({{TEXT("behavior"), Str(TEXT("deny"))},
+					{TEXT("message"), Str(TEXT("The user said no to this. Don't try it another way: say what you wanted to do, and wait for them."))}});
+			}
+			const TSharedRef<FJsonObject> Allow = Object({{TEXT("behavior"), Str(TEXT("allow"))}, {TEXT("updatedInput"), Asked.Input}});
+			if (Picked == TEXT("always"))
+			{
+				// Claude's own suggestions, such as a rule for this command, as the terminal's "don't ask again" writes them.
+				Allow->SetArrayField(TEXT("updatedPermissions"), Asked.Suggestions);
+			}
+			return Allow;
+		}
+
+		virtual bool HandleLine(const TSharedRef<FJsonObject>& Line) override
+		{
+			const FString Type = StringField(Line, TEXT("type"));
+			if (Type == TEXT("control_request"))
+			{
+				AskPermission(StringField(Line, TEXT("request_id")), ObjectField(Line, TEXT("request")));
+			}
+			else if (Type == TEXT("control_response"))
+			{
+				const TSharedPtr<FJsonObject> Reply = ObjectField(Line, TEXT("response"));
+				if (StringField(Reply, TEXT("request_id")) == TEXT("hyperai-initialize"))
+				{
+					if (StringField(Reply, TEXT("subtype")) == TEXT("success"))
+					{
+						Ready(SessionId);
+					}
+					else
+					{
+						AddItem(EKind::Error, FString(), FString(), TEXT("Claude Code refused to start: ") + StringField(Reply, TEXT("error")));
+					}
+				}
+			}
+			else if (Type == TEXT("control_cancel_request"))
+			{
+				Withdraw(StringField(Line, TEXT("request_id")));
+			}
+			else if (Line->HasTypedField<EJson::String>(TEXT("parent_tool_use_id")))
+			{
+				// A subagent's own steps stay inside its card, as the terminal folds them.
+			}
+			else if (Type == TEXT("stream_event"))
+			{
+				Stream(ObjectField(Line, TEXT("event")));
+			}
+			else if (Type == TEXT("assistant"))
+			{
+				ShowMessage(ObjectField(Line, TEXT("message")));
+			}
+			else if (Type == TEXT("user"))
+			{
+				ShowResults(Line);
+			}
+			else if (Type == TEXT("system"))
+			{
+				ShowSystem(Line);
+			}
+			else if (Type == TEXT("result"))
+			{
+				EndTurn(Line);
+			}
+			return true;
+		}
+
+	private:
+		struct FAsk
+		{
+			FString RequestId;
+			TSharedPtr<FJsonValue> Input;
+			TArray<TSharedPtr<FJsonValue>> Suggestions;
+		};
+
+		struct FTask
+		{
+			FString Id;
+			FHyperAIStudioChatPlanStep Step;
+		};
+
+		void Control(const FString& RequestId, const TSharedRef<FJsonObject>& Body)
+		{
+			Write(Object({{TEXT("type"), Str(TEXT("control_request"))}, {TEXT("request_id"), Str(RequestId)}, {TEXT("request"), Obj(Body)}}));
+		}
+
+		static bool IsCommand(const FString& Tool)
+		{
+			return Tool == TEXT("Bash") || Tool == TEXT("PowerShell");
+		}
+
+		static bool IsEdit(const FString& Tool)
+		{
+			return Tool == TEXT("Edit") || Tool == TEXT("Write") || Tool == TEXT("NotebookEdit");
+		}
+
+		static bool IsPlanTool(const FString& Tool)
+		{
+			return Tool == TEXT("TodoWrite") || Tool == TEXT("TaskCreate") || Tool == TEXT("TaskUpdate") || Tool == TEXT("TaskList")
+				|| Tool == TEXT("TaskGet");
+		}
+
+		static FString PlanStatus(const FString& Status)
+		{
+			return Status == TEXT("in_progress") ? FString(TEXT("inProgress")) : Status;
+		}
+
+		/** Each line of Text behind Mark, as a diff shows it. */
+		static FString Marked(const FString& Text, const TCHAR* Mark)
+		{
+			TArray<FString> Lines;
+			Text.ParseIntoArrayLines(Lines, /*InCullEmpty=*/false);
+			FString Out;
+			for (const FString& Line : Lines)
+			{
+				Out += Mark + Line + TEXT("\n");
+			}
+			return Out;
+		}
+
+		/** An edit as a diff: the file, then the lines it takes out and puts in. */
+		static FString EditText(const FString& Tool, const TSharedPtr<FJsonObject>& Input)
+		{
+			const bool bNotebook = Tool == TEXT("NotebookEdit");
+			const FString Added = StringField(Input, Tool == TEXT("Write") ? TEXT("content") : bNotebook ? TEXT("new_source") : TEXT("new_string"));
+			return StringField(Input, bNotebook ? TEXT("notebook_path") : TEXT("file_path")) + TEXT("\n")
+				+ Marked(StringField(Input, TEXT("old_string")), TEXT("-")) + Marked(Added, TEXT("+"));
+		}
+
+		/** An MCP tool as server / tool (Unreal's call_tool as the tool it runs), else the tool and what it works on. */
+		static FString ToolTitle(const FString& Tool, const TSharedPtr<FJsonObject>& Input)
+		{
+			FString Server;
+			FString Name;
+			if (Tool.StartsWith(TEXT("mcp__")) && Tool.Mid(5).Split(TEXT("__"), &Server, &Name))
+			{
+				return Input.IsValid() && Input->HasField(TEXT("tool_name"))
+					? StringField(Input, TEXT("toolset_name")) + TEXT(".") + StringField(Input, TEXT("tool_name"))
+					: Server + TEXT(" / ") + Name;
+			}
+			for (const TCHAR* Field : {TEXT("file_path"), TEXT("notebook_path"), TEXT("pattern"), TEXT("url"), TEXT("query"), TEXT("description"), TEXT("skill")})
+			{
+				const FString Value = StringField(Input, Field);
+				if (!Value.IsEmpty())
+				{
+					return Tool + TEXT(" ") + (FCString::Strstr(Field, TEXT("_path")) ? FPaths::GetCleanFilename(Value) : Value);
+				}
+			}
+			return Tool;
+		}
+
+		/** Claude's reasons can carry terminal colour codes. */
+		static FString StripAnsi(const FString& Text)
+		{
+			FString Out;
+			for (int32 Index = 0; Index < Text.Len(); ++Index)
+			{
+				if (Text[Index] == TEXT('\x1b'))
+				{
+					// ESC, then parameters up to the letter that ends the code.
+					while (++Index < Text.Len() && !FChar::IsAlpha(Text[Index]))
+					{
+					}
+					continue;
+				}
+				Out.AppendChar(Text[Index]);
+			}
+			return Out;
+		}
+
+		void AddText(const EKind Kind, const FString& Id, const FString& Text)
+		{
+			AddItem(Kind, Id, FString(), Text);
+			bReplied = bReplied || Kind == EKind::Agent;
+		}
+
+		void AskPermission(const FString& RequestId, const TSharedPtr<FJsonObject>& Body)
+		{
+			const FString Subtype = StringField(Body, TEXT("subtype"));
+			if (Subtype != TEXT("can_use_tool"))
+			{
+				// Anything this view cannot show must still be answered, or Claude waits for ever.
+				RespondError(Str(RequestId), TEXT("HyperAI's native chat view does not support ") + Subtype);
+				AddItem(EKind::Notice, FString(), FString(),
+					FString::Printf(TEXT("Claude Code asked for something this view cannot show (%s); use the terminal view for it."), *Subtype));
+				return;
+			}
+			bool bOnlyInSession = false;
+			Body->TryGetBoolField(TEXT("requires_user_interaction"), bOnlyInSession);
+			if (bOnlyInSession)
+			{
+				Respond(Str(RequestId), Object({{TEXT("behavior"), Str(TEXT("deny"))},
+					{TEXT("message"), Str(TEXT("This chat view cannot show that. Ask the user in your reply instead."))}}));
+				return;
+			}
+			const FString Tool = StringField(Body, TEXT("tool_name"));
+			const TSharedPtr<FJsonValue> Input = Body->TryGetField(TEXT("input"));
+			const TSharedPtr<FJsonObject> Fields = Input.IsValid() && Input->Type == EJson::Object ? Input->AsObject() : nullptr;
+			FString Title = StringField(Body, TEXT("title"));
+			if (Title.IsEmpty())
+			{
+				Title = IsCommand(Tool) ? FString(TEXT("Run this command?")) : IsEdit(Tool) ? ToolTitle(Tool, Fields) + TEXT("?")
+					: FString::Printf(TEXT("Allow %s?"), *ToolTitle(Tool, Fields));
+			}
+			// What it wants to do: the command, the edit as a diff, the address or the plan, else its input.
+			FString Detail = IsEdit(Tool) ? EditText(Tool, Fields) : FString();
+			for (const TCHAR* Field : {TEXT("command"), TEXT("url"), TEXT("plan")})
+			{
+				Detail = Detail.IsEmpty() ? StringField(Fields, Field) : Detail;
+			}
+			Detail = Detail.IsEmpty() ? Compact(Input) : Detail;
+			TArray<FString> Lines;
+			for (const FString& Part : {StringField(Body, TEXT("description")), IsCommand(Tool) ? StringField(Fields, TEXT("description")) : FString(),
+				Detail.Len() > 2000 ? Detail.Left(2000) + TEXT("...") : Detail,
+				StripAnsi(StringField(Body, TEXT("decision_reason")))})
+			{
+				if (!Part.IsEmpty() && !Lines.Contains(Part))
+				{
+					Lines.Add(Part);
+				}
+			}
+			const TArray<TSharedPtr<FJsonValue>>& Suggestions = ArrayField(Body, TEXT("permission_suggestions"));
+			bool bNoRule = false;
+			Body->TryGetBoolField(TEXT("suppress_always_allow_rule"), bNoRule);
+			TArray<FString> Choices = {TEXT("Allow")};
+			TArray<FString> ChoiceIds = {TEXT("allow")};
+			if (!Suggestions.IsEmpty() && !bNoRule)
+			{
+				Choices.Add(TEXT("Allow, and don't ask again"));
+				ChoiceIds.Add(TEXT("always"));
+			}
+			Choices.Add(TEXT("Deny"));
+			ChoiceIds.Add(TEXT("deny"));
+			const FString ToolUseId = StringField(Body, TEXT("tool_use_id"));
+			Asks.Add(ToolUseId + TEXT("#approval"), FAsk{RequestId, Input, Suggestions});
+			AskApproval(Str(RequestId), ToolUseId, Title, FString::Join(Lines, TEXT("\n\n")), Choices, ChoiceIds);
+		}
+
+		/** Claude no longer waits for an answer, as after an interrupt. */
+		void Withdraw(const FString& RequestId)
+		{
+			for (auto It = Asks.CreateIterator(); It; ++It)
+			{
+				if (It->Value.RequestId == RequestId)
+				{
+					CloseApproval(It->Key, TEXT("Cancelled"));
+					It.RemoveCurrent();
+					return;
+				}
+			}
+		}
+
+		/** Text and thinking as they stream in, and each tool call as soon as it starts. */
+		void Stream(const TSharedPtr<FJsonObject>& Event)
+		{
+			const FString Type = StringField(Event, TEXT("type"));
+			if (Type == TEXT("message_start"))
+			{
+				MessageId = StringField(ObjectField(Event, TEXT("message")), TEXT("id"));
+				Streamed.Add(MessageId);
+				return;
+			}
+			double Index = 0.0;
+			if (Event.IsValid())
+			{
+				Event->TryGetNumberField(TEXT("index"), Index);
+			}
+			const FString Key = FString::Printf(TEXT("%s#%d"), *MessageId, static_cast<int32>(Index));
+			if (Type == TEXT("content_block_start"))
+			{
+				const TSharedPtr<FJsonObject> Block = ObjectField(Event, TEXT("content_block"));
+				if (StringField(Block, TEXT("type")) == TEXT("tool_use"))
+				{
+					ShowTool(StringField(Block, TEXT("id")), StringField(Block, TEXT("name")), nullptr);
+				}
+			}
+			else if (Type == TEXT("content_block_delta"))
+			{
+				const TSharedPtr<FJsonObject> Delta = ObjectField(Event, TEXT("delta"));
+				const FString Kind = StringField(Delta, TEXT("type"));
+				if (Kind != TEXT("text_delta") && Kind != TEXT("thinking_delta"))
+				{
+					return;
+				}
+				const bool bText = Kind == TEXT("text_delta");
+				const FString Chunk = StringField(Delta, bText ? TEXT("text") : TEXT("thinking"));
+				if (const TSharedPtr<FHyperAIStudioChatItem> Item = FindItem(Key))
+				{
+					Item->Text = Clip(Item->Text + Chunk);
+					Changed();
+				}
+				else if (!Chunk.IsEmpty())
+				{
+					// Made on the first words, so a block that stays empty, such as hidden thinking, shows nothing.
+					AddText(bText ? EKind::Agent : EKind::Reasoning, Key, Chunk);
+				}
+			}
+		}
+
+		/**
+		 * A whole assistant message. One that streamed is already on screen, and only its tools' inputs are new; one that
+		 * did not shows here. Its usage is the size of the context.
+		 */
+		void ShowMessage(const TSharedPtr<FJsonObject>& Message)
+		{
+			const bool bStreamed = Streamed.Contains(StringField(Message, TEXT("id")));
+			for (const TSharedPtr<FJsonValue>& Value : ArrayField(Message, TEXT("content")))
+			{
+				const TSharedPtr<FJsonObject> Block = Value->AsObject();
+				const FString Kind = StringField(Block, TEXT("type"));
+				if (Kind == TEXT("tool_use"))
+				{
+					ShowTool(StringField(Block, TEXT("id")), StringField(Block, TEXT("name")), ObjectField(Block, TEXT("input")));
+				}
+				else if (!bStreamed && (Kind == TEXT("text") || Kind == TEXT("thinking")) && !StringField(Block, *Kind).IsEmpty())
+				{
+					AddText(Kind == TEXT("text") ? EKind::Agent : EKind::Reasoning, FString(), StringField(Block, *Kind));
+				}
+			}
+			if (const TSharedPtr<FJsonObject> Used = ObjectField(Message, TEXT("usage")))
+			{
+				double Tokens = 0.0;
+				for (const TCHAR* Field : {TEXT("input_tokens"), TEXT("cache_creation_input_tokens"), TEXT("cache_read_input_tokens"), TEXT("output_tokens")})
+				{
+					double Part = 0.0;
+					Used->TryGetNumberField(Field, Part);
+					Tokens += Part;
+				}
+				ContextTokens = Tokens;
+			}
+		}
+
+		/** A tool call's card, or the plan for Claude's to-do tools. Input is null while the call is still streaming in. */
+		void ShowTool(const FString& Id, const FString& Tool, const TSharedPtr<FJsonObject>& Input)
+		{
+			if (IsPlanTool(Tool))
+			{
+				if (Input.IsValid())
+				{
+					UpdatePlan(Id, Tool, Input);
+				}
+				return;
+			}
+			const bool bCommand = IsCommand(Tool);
+			TSharedPtr<FHyperAIStudioChatItem> Item = FindItem(Id);
+			if (!Item.IsValid())
+			{
+				Item = AddItem(bCommand ? EKind::Command : IsEdit(Tool) ? EKind::FileChange : EKind::Tool, Id, Tool, FString(), TEXT("running"));
+			}
+			if (!Input.IsValid())
+			{
+				return;
+			}
+			if (bCommand)
+			{
+				Item->Title = StringField(Input, TEXT("command"));
+			}
+			else if (IsEdit(Tool))
+			{
+				const FString Path = StringField(Input, Tool == TEXT("NotebookEdit") ? TEXT("notebook_path") : TEXT("file_path"));
+				Item->Title = (Tool == TEXT("Write") ? TEXT("Write ") : TEXT("Edit ")) + FPaths::GetCleanFilename(Path);
+				Item->Text = Clip(EditText(Tool, Input));
+			}
+			else
+			{
+				Item->Title = ToolTitle(Tool, Input);
+				Item->Text = Clip(TEXT("Arguments: ") + Compact(MakeShared<FJsonValueObject>(Input)));
+			}
+			Changed();
+		}
+
+		/** TodoWrite sends the whole list; the task tools add and change one task at a time. */
+		void UpdatePlan(const FString& ToolUseId, const FString& Tool, const TSharedPtr<FJsonObject>& Input)
+		{
+			if (Tool == TEXT("TodoWrite"))
+			{
+				Plan.Reset();
+				for (const TSharedPtr<FJsonValue>& Todo : ArrayField(Input, TEXT("todos")))
+				{
+					Plan.Add({StringField(Todo->AsObject(), TEXT("content")), PlanStatus(StringField(Todo->AsObject(), TEXT("status")))});
+				}
+				Changed();
+			}
+			else if (Tool == TEXT("TaskCreate"))
+			{
+				// Its id comes with the result.
+				NewTasks.Add(ToolUseId, StringField(Input, TEXT("subject")));
+			}
+			else if (Tool == TEXT("TaskUpdate"))
+			{
+				const FString TaskId = StringField(Input, TEXT("taskId"));
+				const int32 Index = Tasks.IndexOfByPredicate([&TaskId](const FTask& Task) { return Task.Id == TaskId; });
+				if (Index == INDEX_NONE)
+				{
+					return;
+				}
+				const FString Status = StringField(Input, TEXT("status"));
+				const FString Subject = StringField(Input, TEXT("subject"));
+				if (Status == TEXT("deleted"))
+				{
+					Tasks.RemoveAt(Index);
+				}
+				else
+				{
+					Tasks[Index].Step.Status = Status.IsEmpty() ? Tasks[Index].Step.Status : PlanStatus(Status);
+					Tasks[Index].Step.Text = Subject.IsEmpty() ? Tasks[Index].Step.Text : Subject;
+				}
+				ShowTasks();
+			}
+		}
+
+		void ShowTasks()
+		{
+			Plan.Reset();
+			for (const FTask& Task : Tasks)
+			{
+				Plan.Add(Task.Step);
+			}
+			Changed();
+		}
+
+		/** Tool results: each card gets its answer and status, and pictures in an answer show as their own items. */
+		void ShowResults(const TSharedRef<FJsonObject>& Line)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : ArrayField(ObjectField(Line, TEXT("message")), TEXT("content")))
+			{
+				const TSharedPtr<FJsonObject> Block = Value->AsObject();
+				if (!Block.IsValid() || StringField(Block, TEXT("type")) != TEXT("tool_result"))
+				{
+					continue;
+				}
+				const FString Id = StringField(Block, TEXT("tool_use_id"));
+				bool bError = false;
+				Block->TryGetBoolField(TEXT("is_error"), bError);
+				FString Text;
+				int32 Pictures = 0;
+				const TSharedPtr<FJsonValue> Content = Block->TryGetField(TEXT("content"));
+				if (Content.IsValid() && Content->Type == EJson::String)
+				{
+					Text = Content->AsString();
+				}
+				else if (Content.IsValid() && Content->Type == EJson::Array)
+				{
+					for (const TSharedPtr<FJsonValue>& Part : Content->AsArray())
+					{
+						const TSharedPtr<FJsonObject> Piece = Part->AsObject();
+						if (StringField(Piece, TEXT("type")) == TEXT("text"))
+						{
+							Text += (Text.IsEmpty() ? FString() : FString(TEXT("\n"))) + StringField(Piece, TEXT("text"));
+						}
+						else if (StringField(Piece, TEXT("type")) == TEXT("image"))
+						{
+							const FString PictureId = FString::Printf(TEXT("%s#image%d"), *Id, Pictures++);
+							const FString File = FindItem(PictureId).IsValid() ? FString()
+								: SaveImageData(StringField(ObjectField(Piece, TEXT("source")), TEXT("data")), TEXT("claude"));
+							if (!File.IsEmpty())
+							{
+								AddItem(EKind::Image, PictureId, TEXT("Looked at an image"), FString(), TEXT("completed"))->Images = {File};
+							}
+						}
+					}
+				}
+				if (const FString* Subject = NewTasks.Find(Id))
+				{
+					// "Task #7 created successfully: ..." when the structured result is missing.
+					FString TaskId = StringField(ObjectField(ObjectField(Line, TEXT("tool_use_result")), TEXT("task")), TEXT("id"));
+					if (TaskId.IsEmpty() && Text.StartsWith(TEXT("Task #")))
+					{
+						Text.Mid(6).Split(TEXT(" "), &TaskId, nullptr);
+					}
+					if (!TaskId.IsEmpty() && !bError)
+					{
+						Tasks.Add(FTask{TaskId, {*Subject, TEXT("pending")}});
+						ShowTasks();
+					}
+					NewTasks.Remove(Id);
+					continue;
+				}
+				const TSharedPtr<FHyperAIStudioChatItem> Item = FindItem(Id);
+				if (!Item.IsValid())
+				{
+					continue;
+				}
+				Item->Status = bError ? TEXT("failed") : TEXT("completed");
+				if (Item->Kind == EKind::Command)
+				{
+					Item->Text = Clip(Text);
+				}
+				else if (Item->Kind == EKind::FileChange)
+				{
+					Item->Text = bError ? Clip(TEXT("Error: ") + Text + TEXT("\n\n") + Item->Text) : Item->Text;
+				}
+				else
+				{
+					Item->Text = Clip(Item->Text + TEXT("\n\n") + (bError ? TEXT("Error: ") : TEXT("")) + Text);
+				}
+				Changed();
+			}
+		}
+
+		void ShowSystem(const TSharedRef<FJsonObject>& Line)
+		{
+			const FString Subtype = StringField(Line, TEXT("subtype"));
+			if (Subtype == TEXT("init"))
+			{
+				const FString Id = StringField(Line, TEXT("session_id"));
+				SessionId = Id.IsEmpty() ? SessionId : Id;
+				TArray<FString> Down;
+				for (const TSharedPtr<FJsonValue>& Server : ArrayField(Line, TEXT("mcp_servers")))
+				{
+					const FString Status = StringField(Server->AsObject(), TEXT("status"));
+					if (Status == TEXT("failed") || Status == TEXT("needs-auth"))
+					{
+						Down.Add(FString::Printf(TEXT("%s (%s)"), *StringField(Server->AsObject(), TEXT("name")), *Status));
+					}
+				}
+				if (!Down.IsEmpty() && !bToldServers)
+				{
+					bToldServers = true;
+					AddItem(EKind::Notice, FString(), FString(), TEXT("MCP servers not connected: ") + FString::Join(Down, TEXT(", "))
+						+ TEXT(". Check them with /mcp in the terminal view."));
+				}
+			}
+			else if (Subtype == TEXT("compact_boundary"))
+			{
+				AddItem(EKind::Notice, FString(), FString(), TEXT("Claude Code compacted the conversation to free context."));
+			}
+		}
+
+		void EndTurn(const TSharedRef<FJsonObject>& Line)
+		{
+			double Window = 0.0;
+			if (const TSharedPtr<FJsonObject> Models = ObjectField(Line, TEXT("modelUsage")))
+			{
+				for (const TPair<FString, TSharedPtr<FJsonValue>>& Entry : Models->Values)
+				{
+					double Size = 0.0;
+					if (Entry.Value.IsValid() && Entry.Value->Type == EJson::Object && Entry.Value->AsObject()->TryGetNumberField(TEXT("contextWindow"), Size))
+					{
+						Window = FMath::Max(Window, Size);
+					}
+				}
+			}
+			if (ContextTokens > 0.0)
+			{
+				Usage = Window > 0.0
+					? FString::Printf(TEXT("%.1fk tokens, %d%% of context used"), ContextTokens / 1000.0, FMath::RoundToInt(100.0 * ContextTokens / Window))
+					: FString::Printf(TEXT("%.1fk tokens"), ContextTokens / 1000.0);
+			}
+			bool bError = false;
+			Line->TryGetBoolField(TEXT("is_error"), bError);
+			FString Text = StringField(Line, TEXT("result"));
+			for (const TSharedPtr<FJsonValue>& Value : ArrayField(Line, TEXT("errors")))
+			{
+				Text += (Text.IsEmpty() ? FString() : FString(TEXT(" "))) + Value->AsString();
+			}
+			if (bInterrupted)
+			{
+				AddItem(EKind::Notice, FString(), FString(), TEXT("Stopped."));
+			}
+			else if (bError)
+			{
+				AddItem(EKind::Error, FString(), FString(), Text.Contains(TEXT("/login"))
+					? FString(TEXT("Claude Code needs you to sign in: switch this tab to the terminal view and run /login once."))
+					: TEXT("Claude Code: ") + (Text.IsEmpty() ? StringField(Line, TEXT("subtype")) : Text));
+			}
+			else if (!bReplied && !Text.IsEmpty())
+			{
+				// A turn that answers in its result alone, such as a local command.
+				AddText(EKind::Agent, FString(), Text);
+			}
+			bInterrupted = false;
+			Streamed.Reset();
+			TurnFinished();
+		}
+
+		FString Subagent;
+		/** The message now streaming, and every message this turn that streamed. */
+		FString MessageId;
+		TSet<FString> Streamed;
+		/** Open permission requests, by approval item. */
+		TMap<FString, FAsk> Asks;
+		/** TaskCreate calls waiting for their task's id, by tool call. */
+		TMap<FString, FString> NewTasks;
+		TArray<FTask> Tasks;
+		double ContextTokens = 0.0;
+		int32 Interrupts = 0;
+		bool bInterrupted = false;
+		bool bReplied = false;
+		bool bToldServers = false;
+	};
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -1270,11 +2009,12 @@ void FHyperAIStudioNativeChat::SetCommandForTests(const FString& Command)
 
 bool FHyperAIStudioNativeChat::IsSupported(const FString& AgentName)
 {
-	return AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase) || AgentName.Contains(TEXT("Gemini"), ESearchCase::IgnoreCase);
+	return AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase) || AgentName.Contains(TEXT("Gemini"), ESearchCase::IgnoreCase)
+		|| AgentName.Contains(TEXT("Claude"), ESearchCase::IgnoreCase);
 }
 
 TSharedPtr<FHyperAIStudioNativeChat> FHyperAIStudioNativeChat::Create(const FString& AgentName, const FString& ProjectRoot, const FString& Model,
-	const FString& ResumeSessionId)
+	const FString& ResumeSessionId, const FString& Subagent)
 {
 	using namespace HyperAIStudio::NativeChat::Private;
 	if (AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase))
@@ -1284,6 +2024,10 @@ TSharedPtr<FHyperAIStudioNativeChat> FHyperAIStudioNativeChat::Create(const FStr
 	if (AgentName.Contains(TEXT("Gemini"), ESearchCase::IgnoreCase))
 	{
 		return MakeShared<FGeminiChat>(ProjectRoot, Model, ResumeSessionId);
+	}
+	if (AgentName.Contains(TEXT("Claude"), ESearchCase::IgnoreCase))
+	{
+		return MakeShared<FClaudeChat>(ProjectRoot, Model, ResumeSessionId, Subagent);
 	}
 	return nullptr;
 }

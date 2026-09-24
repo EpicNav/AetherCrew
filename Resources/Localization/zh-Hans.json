@@ -3705,6 +3705,12 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "NativeNeedsTerminal",
+   "source": "This chat has Remote Control on, so it stays in the terminal. New chats open in the native view.",
+   "text": "此对话已开启远程控制，因此会留在终端中。新对话会在原生视图中打开。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "NativeStarted",
    "source": "{0} is running in the native view.",
    "text": "{0} 正在原生视图中运行。"
@@ -3717,9 +3723,9 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
-   "key": "NativeViewTooltip",
-   "source": "Show this chat in HyperAI's own view instead of the terminal: a transcript with tool calls, approvals and the plan, and a message box. New Codex and Gemini chats open the way you leave it. Switching resumes a Codex chat opened from the history or started in this view; other chats start fresh.",
-   "text": "在 HyperAI 自己的视图中而不是终端中显示此对话：包含工具调用、审批和计划的记录，以及一个消息框。新的 Codex 和 Gemini 对话会沿用你最后的选择。切换时会继续从历史打开或在此视图中启动的 Codex 对话；其他对话会重新开始。"
+   "key": "NativeViewAgentsTooltip",
+   "source": "Show this chat in HyperAI's own view instead of the terminal: a transcript with tool calls, approvals and the plan, and a message box. New chats open the way you leave it. Switching keeps a Claude Code conversation, and a Codex one opened from the history or started in this view; a Gemini chat starts fresh. A Claude Code chat with Remote Control stays in the terminal.",
+   "text": "在 HyperAI 自己的视图中而不是终端中显示此对话：包含工具调用、审批和计划的记录，以及一个消息框。新对话会沿用你最后的选择。切换时会保留 Claude Code 对话，以及从历史打开或在此视图中启动的 Codex 对话；Gemini 对话会重新开始。开启了远程控制的 Claude Code 对话会留在终端中。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
@@ -3816,6 +3822,12 @@
    "key": "RemoteOff",
    "source": "Remote",
    "text": "远程"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RemoteOffNativeTooltip",
+   "source": "Turn on Remote Control for this chat, to continue it at claude.ai/code or in the Claude app. The chat moves to the terminal view, on the same conversation. Needs a Claude subscription login; on Team and Enterprise plans an admin must allow Remote Control.",
+   "text": "为此对话开启远程控制，以便在 claude.ai/code 或 Claude 应用中继续。对话会在同一会话上移到终端视图。需要以 Claude 订阅账号登录；在 Team 和 Enterprise 方案中需要管理员允许远程控制。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",

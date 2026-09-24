@@ -285,6 +285,12 @@ namespace HyperAIStudio::QuickAction
 		return AgentName.Equals(TEXT("Claude Code"), ESearchCase::IgnoreCase);
 	}
 
+	/** A Claude Code chat with Remote Control, or one running in the background, stays in the terminal, where those run. */
+	bool NeedsTerminal(const FString& AgentName, const FString& SessionId, const FString& BackgroundId)
+	{
+		return IsClaudeAgent(AgentName) && (!BackgroundId.IsEmpty() || UHyperAIStudioChatHistoryPrefs::IsRemote(SessionId));
+	}
+
 	void Toast(const FText& Text)
 	{
 		FNotificationInfo Info(Text);
@@ -2202,9 +2208,11 @@ void SHyperAIStudioQuickActionWindow::QueueTerminalStartup(bool bForce, bool bRe
 		{
 			return;
 		}
-		if (FHyperAIStudioNativeChat::IsSupported(AgentName))
+		const bool bResuming = ResumeAgentName.Equals(AgentName, ESearchCase::IgnoreCase);
+		const FString Resume = bResuming ? ResumeSessionId : FString();
+		if (FHyperAIStudioNativeChat::IsSupported(AgentName)
+			&& !HyperAIStudio::QuickAction::NeedsTerminal(AgentName, Resume, bResuming ? ResumeBackgroundId : FString()))
 		{
-			const FString Resume = ResumeAgentName.Equals(AgentName, ESearchCase::IgnoreCase) ? ResumeSessionId : FString();
 			ResumeAgentName.Reset();
 			ResumeSessionId.Reset();
 			ResumeTitle.Reset();
@@ -2213,7 +2221,7 @@ void SHyperAIStudioQuickActionWindow::QueueTerminalStartup(bool bForce, bool bRe
 			StartNativeChat(Resume);
 			return;
 		}
-		// A terminal-only agent, such as Claude Code, takes the tab back to the terminal.
+		// A terminal-only agent, or a Claude Code chat with Remote Control, takes the tab back to the terminal.
 		bResetTerminal = true;
 	}
 	if (!bForce && bTerminalStartupPaused)
@@ -2318,7 +2326,8 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 	const int32 Generation = ++LaunchGeneration;
 
 	// A native chat that cannot start falls back to the terminal.
-	if (GetDefault<UHyperAIStudioSettings>()->bUseNativeChatView && FHyperAIStudioNativeChat::IsSupported(AgentName) && StartNativeChat(SessionId))
+	if (GetDefault<UHyperAIStudioSettings>()->bUseNativeChatView && FHyperAIStudioNativeChat::IsSupported(AgentName)
+		&& !HyperAIStudio::QuickAction::NeedsTerminal(AgentName, SessionId, AttachId) && StartNativeChat(SessionId))
 	{
 		return;
 	}
@@ -2451,7 +2460,7 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildNativeToggle()
 		.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
 		.Visibility_Lambda([this]() { return FHyperAIStudioNativeChat::IsSupported(GetSelectedAgentName()) ? EVisibility::Visible : EVisibility::Collapsed; })
 		.IsChecked_Lambda([this]() { return NativeView.IsValid() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-		.ToolTipText(LOCTEXT("NativeViewTooltip", "Show this chat in HyperAI's own view instead of the terminal: a transcript with tool calls, approvals and the plan, and a message box. New Codex and Gemini chats open the way you leave it. Switching resumes a Codex chat opened from the history or started in this view; other chats start fresh."))
+		.ToolTipText(LOCTEXT("NativeViewAgentsTooltip", "Show this chat in HyperAI's own view instead of the terminal: a transcript with tool calls, approvals and the plan, and a message box. New chats open the way you leave it. Switching keeps a Claude Code conversation, and a Codex one opened from the history or started in this view; a Gemini chat starts fresh. A Claude Code chat with Remote Control stays in the terminal."))
 		.OnCheckStateChanged_Lambda([this](const ECheckBoxState State)
 		{
 			UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
@@ -2470,7 +2479,9 @@ bool SHyperAIStudioQuickActionWindow::StartNativeChat(const FString& ResumeId)
 {
 	const FString Agent = GetSelectedAgentName();
 	const FString ChatModel = GetModelForAgent(Agent);
-	const TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(Agent, FHyperAIStudioService::GetProjectRoot(), ChatModel, ResumeId);
+	// A new chat in a subagent tab starts as that subagent, as it does in the terminal.
+	const TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(Agent, FHyperAIStudioService::GetProjectRoot(), ChatModel, ResumeId,
+		HyperAIStudio::Skills::IsValidName(TabSubagent) ? TabSubagent : FString());
 	FString Error;
 	if (!Chat.IsValid() || !Chat->Start(Error))
 	{
@@ -2483,7 +2494,8 @@ bool SHyperAIStudioQuickActionWindow::StartNativeChat(const FString& ResumeId)
 	bTerminalStartupSent = true;
 	ActiveTerminalAgentName = Agent;
 	ActiveTerminalModel = ChatModel;
-	ActiveChatSessionId = ResumeId;
+	// Claude Code's id is known from the start; the others' arrive with their handshake.
+	ActiveChatSessionId = Chat->GetSessionId().IsEmpty() ? ResumeId : Chat->GetSessionId();
 	if (TerminalHost.IsValid())
 	{
 		TerminalHost->SetContent(SAssignNew(NativeView, SHyperAIStudioNativeChatView).Chat(Chat));
@@ -2516,7 +2528,12 @@ void SHyperAIStudioQuickActionWindow::SetNativeView(const bool bNative)
 	}
 	if (bNative)
 	{
-		if (FHyperAIStudioNativeChat::IsSupported(GetSelectedAgentName()))
+		if (HyperAIStudio::QuickAction::NeedsTerminal(ActiveTerminalAgentName, ActiveChatSessionId, ActiveBackgroundId))
+		{
+			LastMessage = LOCTEXT("NativeNeedsTerminal", "This chat has Remote Control on, so it stays in the terminal. New chats open in the native view.");
+			AddTranscriptLine(LastMessage.ToString());
+		}
+		else if (FHyperAIStudioNativeChat::IsSupported(GetSelectedAgentName()))
 		{
 			StartNativeChat(ActiveChatSessionId);
 		}
@@ -2654,6 +2671,10 @@ FText SHyperAIStudioQuickActionWindow::GetRemoteToolTip() const
 		return GetDefault<UHyperAIStudioSettings>()->bKeepRemoteChatsRunning
 			? LOCTEXT("RemoteOnBackgroundTooltip", "Remote Control is on: continue this chat at claude.ai/code or in the Claude app. It runs in the background, so it keeps going after this tab or the editor closes; reopen it from Chats. Click to turn it off.")
 			: LOCTEXT("RemoteOnTooltip", "Remote Control is on: continue this chat at claude.ai/code or in the Claude app while this tab is open. Click to turn it off.");
+	}
+	if (NativeView.IsValid())
+	{
+		return LOCTEXT("RemoteOffNativeTooltip", "Turn on Remote Control for this chat, to continue it at claude.ai/code or in the Claude app. The chat moves to the terminal view, on the same conversation. Needs a Claude subscription login; on Team and Enterprise plans an admin must allow Remote Control.");
 	}
 	return LOCTEXT("RemoteOffTooltip", "Turn on Remote Control for this chat, to continue it at claude.ai/code or in the Claude app. The chat restarts on the same conversation. Needs a Claude subscription login; on Team and Enterprise plans an admin must allow Remote Control.");
 }
