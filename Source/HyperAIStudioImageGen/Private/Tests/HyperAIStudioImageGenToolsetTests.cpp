@@ -6,8 +6,8 @@
 
 #include "Async/TaskGraphInterfaces.h"
 #include "Containers/Ticker.h"
-#include "Framework/Docking/TabManager.h"
 #include "HAL/FileManager.h"
+#include "HyperAIStudioShell.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioAgentImage.h"
@@ -576,7 +576,7 @@ for line in iter(sys.stdin.readline, ""):
 		}
 	};
 
-	TestTrue(TEXT("The Images tab is registered"), FGlobalTabmanager::Get()->HasTabSpawner(SHyperAIStudioImagesPanel::GetTabName()));
+	TestTrue(TEXT("The Images page is in HyperAI Studio"), FHyperAIStudioShell::FindPage(TEXT("Images")) != nullptr);
 	const TSharedRef<SHyperAIStudioImagesPanel> Panel = SNew(SHyperAIStudioImagesPanel);
 	TestTrue(TEXT("The panel lists the Codex generator"), Panel->SelectModel(TEXT("codex_image_gen")));
 	Panel->SetPrompt(TEXT("A lighthouse on a rocky shore at dusk, warm sky fading to violet, calm sea, room for a title on the right."));

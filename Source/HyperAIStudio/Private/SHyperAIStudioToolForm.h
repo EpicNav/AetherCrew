@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "ToolsetRegistry/ToolCallAsyncResultString.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/SCompoundWidget.h"
 
@@ -10,7 +11,6 @@ class IStructureDetailsView;
 class FStructOnScope;
 class SMultiLineEditableTextBox;
 class SWrapBox;
-class UToolCallAsyncResultString;
 class FHyperAIStudioPreviewImage;
 
 /**

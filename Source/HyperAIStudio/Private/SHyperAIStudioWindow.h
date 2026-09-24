@@ -26,7 +26,11 @@ struct FHyperAIStudioWorkbenchSurfaceSmoke
 class SHyperAIStudioWindow : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SHyperAIStudioWindow) {}
+	SLATE_BEGIN_ARGS(SHyperAIStudioWindow)
+		: _Section(-1)
+	{}
+		/** One section only, for a HyperAI Studio page: 0 setup, 1 agents, 2 MCP servers, 3 documentation. -1 shows them all behind a tab bar. */
+		SLATE_ARGUMENT(int32, Section)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);

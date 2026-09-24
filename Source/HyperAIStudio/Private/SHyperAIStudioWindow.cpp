@@ -635,6 +635,27 @@ void SHyperAIStudioWindow::Construct(const FArguments& InArgs)
 		? TEXT("HyperAIStudio opened. Unreal MCP is ready.")
 		: TEXT("HyperAIStudio opened. Setup is not ready yet."));
 
+	// In HyperAI Studio each section is its own page, so it has no tab bar or header of its own.
+	if (InArgs._Section >= 0)
+	{
+		ActiveTabIndex = FMath::Clamp(InArgs._Section, 0, 3);
+		bUserSelectedTab = true;
+		ChildSlot
+		[
+			SAssignNew(MainScrollBox, SScrollBox)
+			+ SScrollBox::Slot()
+			.Padding(0.0f, 0.0f, 12.0f, 18.0f)
+			[
+				ActiveTabIndex == 0 ? BuildSetupTab()
+					: ActiveTabIndex == 1 ? BuildAgentsTab()
+					: ActiveTabIndex == 2 ? BuildMCPServersTab()
+					: BuildHelpTab()
+			]
+		];
+		RegisterActiveTimer(0.15f, FWidgetActiveTimerDelegate::CreateSP(this, &SHyperAIStudioWindow::RunDeferredRefresh));
+		return;
+	}
+
 	ChildSlot
 	[
 		SNew(SVerticalBox)
@@ -1296,18 +1317,6 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildAgentsTab()
 		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
 		[
 			BuildAgentRow(TEXT("vscode"), TEXT("VS Code/Copilot"), TEXT(".vscode/mcp.json"))
-		]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 22.0f, 0.0f, 0.0f)
-		[
-			SNew(SHyperAIStudioMemoryPanel)
-		]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 22.0f, 0.0f, 0.0f)
-		[
-			SNew(SHyperAIStudioSkillsPanel)
-		]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 22.0f, 0.0f, 0.0f)
-		[
-			SNew(SHyperAIStudioAgentsPanel)
 		];
 }
 

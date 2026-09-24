@@ -3,6 +3,42 @@
  "entries": [
   {
    "namespace": "FHyperAIStudioModule",
+   "key": "ActionDocs",
+   "source": "Documentation",
+   "text": "文档"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "ActionDocsTip",
+   "source": "HyperAI Studio's guides, in the browser.",
+   "text": "在浏览器中打开 HyperAI Studio 指南。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "ActionNewChat",
+   "source": "New chat",
+   "text": "新对话"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "ActionNewChatTip",
+   "source": "Start another chat with an agent, beside the ones open.",
+   "text": "在已打开的对话旁边，与智能体开始另一个对话。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "ActionSetup",
+   "source": "Set up HyperAI",
+   "text": "设置 HyperAI"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "ActionSetupTip",
+   "source": "Unreal MCP, the agent files, and what is missing.",
+   "text": "Unreal MCP、智能体文件，以及还缺少什么。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
    "key": "AddSelectionContext",
    "source": "Copy Selection Prompt",
    "text": "复制选中内容提示词"
@@ -69,21 +105,9 @@
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "ChatTabTitle",
-   "source": "HyperAI Chat",
-   "text": "HyperAI 对话"
-  },
-  {
-   "namespace": "FHyperAIStudioModule",
-   "key": "ChatTabTitleNumbered",
-   "source": "HyperAI Chat {0}",
-   "text": "HyperAI 对话 {0}"
-  },
-  {
-   "namespace": "FHyperAIStudioModule",
-   "key": "ChatTabTooltip",
-   "source": "Open the lightweight HyperAI chat panel for Unreal context handoff.",
-   "text": "打开轻量的 HyperAI 对话面板，用于传递 Unreal 上下文。"
+   "key": "CommandsContext",
+   "source": "HyperAI Studio",
+   "text": "HyperAI Studio"
   },
   {
    "namespace": "FHyperAIStudioModule",
@@ -153,24 +177,6 @@
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "DockedChatTabLabel",
-   "source": "HyperAI Chat",
-   "text": "HyperAI 对话"
-  },
-  {
-   "namespace": "FHyperAIStudioModule",
-   "key": "DockedChatTabLabelNumbered",
-   "source": "HyperAI Chat {0}",
-   "text": "HyperAI 对话 {0}"
-  },
-  {
-   "namespace": "FHyperAIStudioModule",
-   "key": "DockedTabLabel",
-   "source": "HyperAIStudio",
-   "text": "HyperAIStudio"
-  },
-  {
-   "namespace": "FHyperAIStudioModule",
    "key": "OpenClaudeContext",
    "source": "Open Claude Code With Selection",
    "text": "带选中内容打开 Claude Code"
@@ -207,75 +213,141 @@
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "OpenHyperAIStudio",
-   "source": "HyperAIStudio",
-   "text": "HyperAIStudio"
+   "key": "OpenHyperAIStudioMenu",
+   "source": "HyperAI Studio",
+   "text": "HyperAI Studio"
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "OpenHyperAIStudioChat",
-   "source": "HyperAI Chat",
-   "text": "HyperAI 对话"
+   "key": "OpenHyperAIStudioMenuTooltip",
+   "source": "Open HyperAI Studio: chat, images, match, playtest, memory, skills, agents, tools, activity and settings.",
+   "text": "打开 HyperAI Studio：对话、图像、匹配、试玩、记忆、技能、智能体、工具、活动和设置。"
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "OpenHyperAIStudioChatTooltip",
-   "source": "Open the lightweight HyperAI chat panel.",
-   "text": "打开轻量的 HyperAI 对话面板。"
+   "key": "PageActivity",
+   "source": "Activity",
+   "text": "活动"
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "OpenHyperAIStudioPlaytest",
-   "source": "HyperAI Playtest",
-   "text": "HyperAI 试玩"
+   "key": "PageActivityTip",
+   "source": "Edits waiting for your approval, jobs running, and what happened.",
+   "text": "等待你审批的编辑、正在运行的任务，以及发生了什么。"
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "OpenHyperAIStudioPlaytestTooltip",
-   "source": "Play the open level with the HyperAI bot: reach, collect, fight, survive, explore and duel, many cases at once.",
-   "text": "让 HyperAI 机器人试玩当前关卡：抵达、收集、战斗、生存、探索和对决，多个用例同时进行。"
+   "key": "PageAgents",
+   "source": "Agents",
+   "text": "智能体"
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "OpenHyperAIStudioPreview",
-   "source": "HyperAI Preview",
-   "text": "HyperAI 预览"
+   "key": "PageAgentsTip",
+   "source": "Your team of specialist subagents, for Claude Code and Codex.",
+   "text": "你的专业子智能体团队，适用于 Claude Code 和 Codex。"
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "OpenHyperAIStudioPreviewTooltip",
-   "source": "Compare a reference image with what a pack produced.",
-   "text": "将参考图像与功能包生成的结果进行对比。"
+   "key": "PageChat",
+   "source": "Chat",
+   "text": "对话"
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "OpenHyperAIStudioQuickAction",
-   "source": "HyperAI Chat Overlay",
-   "text": "HyperAI 对话浮层"
+   "key": "PageChatNumbered",
+   "source": "Chat {0}",
+   "text": "对话 {0}"
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "OpenHyperAIStudioQuickActionTooltip",
-   "source": "Open the lightweight chat overlay without changing the editor layout.",
-   "text": "打开轻量的对话浮层，不改变编辑器布局。"
+   "key": "PageChatTip",
+   "source": "Work with Codex, Claude Code or Gemini in this editor.",
+   "text": "在这个编辑器中与 Codex、Claude Code 或 Gemini 协作。"
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "OpenHyperAIStudioTooltip",
-   "source": "Open HyperAIStudio MCP setup and readiness checks.",
-   "text": "打开 HyperAIStudio 的 MCP 设置与就绪检查。"
+   "key": "PageHome",
+   "source": "Home",
+   "text": "主页"
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "PlaytestTabTitle",
-   "source": "HyperAI Playtest",
-   "text": "HyperAI 试玩"
+   "key": "PageHomeTip",
+   "source": "Status, what needs you, and where to start.",
+   "text": "状态、需要你处理的事项，以及从哪里开始。"
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "PlaytestTabTooltip",
-   "source": "Play the open level with the HyperAI bot: many cases at once, each in its own copy of the level.",
-   "text": "让 HyperAI 机器人试玩当前关卡：多个用例同时进行，每个用例在各自的关卡副本中运行。"
+   "key": "PageMatch",
+   "source": "Match",
+   "text": "匹配"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PageMatchTip",
+   "source": "Compare what the editor makes with a reference image, side by side or with a wipe.",
+   "text": "将编辑器的产出与参考图像并排或用滑动对比进行比较。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PageMemory",
+   "source": "Memory",
+   "text": "记忆"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PageMemoryTip",
+   "source": "What agents should know about this project, kept between chats.",
+   "text": "智能体应了解的关于本项目的信息，在对话之间保留。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PagePlaytest",
+   "source": "Playtest",
+   "text": "试玩"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PagePlaytestTip",
+   "source": "A bot plays the level like a person: many cases at once, each in its own copy.",
+   "text": "机器人像真人一样玩关卡：多个用例同时进行，每个都在自己的关卡副本中。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PageSettings",
+   "source": "Settings",
+   "text": "设置"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PageSettingsTip",
+   "source": "Setup, agents, MCP servers, image services and preferences.",
+   "text": "初始设置、智能体、MCP 服务器、图像服务和偏好设置。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PageSkills",
+   "source": "Skills",
+   "text": "技能"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PageSkillsTip",
+   "source": "Know-how agents follow, such as how to build a Blueprint or match an image.",
+   "text": "智能体遵循的专业知识，例如如何构建蓝图或匹配图像。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PageTools",
+   "source": "Tools",
+   "text": "工具"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PageToolsTip",
+   "source": "Every tool agents can call, as a form you can run yourself.",
+   "text": "智能体可以调用的每个工具，都是可由你自己运行的表单。"
   },
   {
    "namespace": "FHyperAIStudioModule",
@@ -288,24 +360,6 @@
    "key": "PostRestartSetupReady",
    "source": "Setup finished: Unreal MCP and tools/list are ready.",
    "text": "设置完成：Unreal MCP 与 tools/list 已就绪。"
-  },
-  {
-   "namespace": "FHyperAIStudioModule",
-   "key": "PreviewDockedTabLabel",
-   "source": "HyperAI Preview",
-   "text": "HyperAI 预览"
-  },
-  {
-   "namespace": "FHyperAIStudioModule",
-   "key": "PreviewTabTitle",
-   "source": "HyperAI Preview",
-   "text": "HyperAI 预览"
-  },
-  {
-   "namespace": "FHyperAIStudioModule",
-   "key": "PreviewTabTooltip",
-   "source": "Compare a reference image with what a pack produced, with the numbers behind it.",
-   "text": "将参考图像与功能包生成的结果进行对比，并显示背后的数据。"
   },
   {
    "namespace": "FHyperAIStudioModule",
@@ -363,27 +417,15 @@
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "StatusBarLabel",
-   "source": "HyperAIStudio",
-   "text": "HyperAIStudio"
+   "key": "StatusBarLabelStudio",
+   "source": "HyperAI",
+   "text": "HyperAI"
   },
   {
    "namespace": "FHyperAIStudioModule",
-   "key": "StatusBarTooltip",
-   "source": "Open HyperAIStudio setup, agent handoff, and MCP readiness.",
-   "text": "打开 HyperAIStudio 设置、智能体交接和 MCP 就绪状态。"
-  },
-  {
-   "namespace": "FHyperAIStudioModule",
-   "key": "TabTitle",
-   "source": "HyperAIStudio",
-   "text": "HyperAIStudio"
-  },
-  {
-   "namespace": "FHyperAIStudioModule",
-   "key": "TabTooltip",
-   "source": "Open HyperAIStudio setup, agent handoff, and MCP readiness.",
-   "text": "打开 HyperAIStudio 设置、智能体交接和 MCP 就绪状态。"
+   "key": "StatusBarTooltipStudio",
+   "source": "Open HyperAI Studio (Ctrl+Alt+H).",
+   "text": "打开 HyperAI Studio（Ctrl+Alt+H）。"
   },
   {
    "namespace": "FHyperAIStudioModule",
@@ -609,27 +651,15 @@
   },
   {
    "namespace": "HyperAIStudioImageGenModule",
-   "key": "ImagesMenu",
-   "source": "HyperAI Images",
-   "text": "HyperAI 图片"
+   "key": "ImagesPage",
+   "source": "Images",
+   "text": "图像"
   },
   {
    "namespace": "HyperAIStudioImageGenModule",
-   "key": "ImagesMenuTooltip",
-   "source": "Generate reference images and browse the generated ones.",
-   "text": "生成参考图片，并浏览已生成的图片。"
-  },
-  {
-   "namespace": "HyperAIStudioImageGenModule",
-   "key": "ImagesTab",
-   "source": "HyperAI Images",
-   "text": "HyperAI 图片"
-  },
-  {
-   "namespace": "HyperAIStudioImageGenModule",
-   "key": "ImagesTabTooltip",
-   "source": "Generate reference images, with Codex or a configured model, and browse the ones the project has.",
-   "text": "使用 Codex 或已配置的模型生成参考图片，并浏览项目中已有的图片。"
+   "key": "ImagesPageTooltip",
+   "source": "Generate reference images, with Codex, Gemini or a configured model, and browse the ones the project has.",
+   "text": "使用 Codex、Gemini 或已配置的模型生成参考图像，并浏览项目中已有的图像。"
   },
   {
    "namespace": "HyperAIStudioLevelDesign",
@@ -810,6 +840,24 @@
    "key": "Viewport",
    "source": "Level viewport",
    "text": "关卡视口"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "Code",
+   "source": "code",
+   "text": "代码"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "CopyCode",
+   "source": "Copy",
+   "text": "复制"
+  },
+  {
+   "namespace": "HyperAIStudioMarkdown",
+   "key": "PictureTooltip",
+   "source": "{0}\nClick to open it in Preview.",
+   "text": "{0}\n点击在预览中打开。"
   },
   {
    "namespace": "HyperAIStudioMaterials",
@@ -1020,6 +1068,156 @@
    "key": "RunScript",
    "source": "HyperAI: Run Script",
    "text": "HyperAI：运行脚本"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "Approvals",
+   "source": "{0} {0}|plural(one=item,other=items) waiting for you",
+   "text": "{0} 项等待你处理"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "GroupCreate",
+   "source": "Create",
+   "text": "创作"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "GroupProject",
+   "source": "Project",
+   "text": "项目"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "GroupSystem",
+   "source": "System",
+   "text": "系统"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "GroupTest",
+   "source": "Test",
+   "text": "测试"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "HelpTooltip",
+   "source": "HyperAI Studio documentation.",
+   "text": "HyperAI Studio 文档。"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "McpChecking",
+   "source": "Checking Unreal MCP...",
+   "text": "正在检查 Unreal MCP..."
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "McpMissing",
+   "source": "Unreal MCP is not set up",
+   "text": "Unreal MCP 尚未设置"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "McpRunning",
+   "source": "Unreal MCP running",
+   "text": "Unreal MCP 正在运行"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "McpRunningPort",
+   "source": "Unreal MCP running on port {0}",
+   "text": "Unreal MCP 正在端口 {0} 上运行"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "McpShort",
+   "source": "MCP",
+   "text": "MCP"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "McpStopped",
+   "source": "Unreal MCP is not running",
+   "text": "Unreal MCP 未运行"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "McpTooltip",
+   "source": "The Unreal MCP server agents connect to. Click for setup and status.",
+   "text": "智能体所连接的 Unreal MCP 服务器。点击查看设置和状态。"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "MissingPageBody",
+   "source": "The feature that provides it is not loaded. Check that its plugin module is enabled.",
+   "text": "提供此页面的功能未加载。请检查其插件模块是否已启用。"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "MissingPageTitle",
+   "source": "This page is not available",
+   "text": "此页面不可用"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "NavTip",
+   "source": "{0}\n{1}",
+   "text": "{0}\n{1}"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "Running",
+   "source": "{0} {0}|plural(one=job,other=jobs) running",
+   "text": "{0} 个任务正在运行"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "SearchHint",
+   "source": "Search pages and actions  (Ctrl+K)",
+   "text": "搜索页面和操作  (Ctrl+K)"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "SettingsTooltip",
+   "source": "Settings: setup, agents, MCP servers, image services and preferences.",
+   "text": "设置：初始设置、智能体、MCP 服务器、图像服务和偏好设置。"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "StudioTab",
+   "source": "HyperAI Studio",
+   "text": "HyperAI Studio"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "StudioTabTooltip",
+   "source": "Every HyperAI feature in one window: chat, images, match, playtest, memory, skills, agents, tools, activity and settings.",
+   "text": "所有 HyperAI 功能都在一个窗口中：对话、图像、匹配、试玩、记忆、技能、智能体、工具、活动和设置。"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "StudioTitle",
+   "source": "HyperAI Studio",
+   "text": "HyperAI Studio"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "ToggleRail",
+   "source": "Show or hide the page names in the navigation.",
+   "text": "在导航栏中显示或隐藏页面名称。"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "Version",
+   "source": "HyperAI Studio {0}",
+   "text": "HyperAI Studio {0}"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "VersionUnknown",
+   "source": "HyperAI Studio",
+   "text": "HyperAI Studio"
   },
   {
    "namespace": "HyperAIStudioUAF",
@@ -1800,6 +1998,240 @@
    "key": "WorkingBadge",
    "source": "Working",
    "text": "工作中"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "AgentMissing",
+   "source": "Not installed",
+   "text": "未安装"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "AgentReady",
+   "source": "Installed",
+   "text": "已安装"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "AgentsCard",
+   "source": "Agents",
+   "text": "智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "ApprovalsWaiting",
+   "source": "waiting for your approval",
+   "text": "等待你审批"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "ChatTile",
+   "source": "Chat with an agent",
+   "text": "与智能体对话"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "ChatTileBody",
+   "source": "Codex, Claude Code or Gemini, working in this editor.",
+   "text": "Codex、Claude Code 或 Gemini，在这个编辑器中工作。"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "Claude",
+   "source": "Claude Code",
+   "text": "Claude Code"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "Codex",
+   "source": "Codex",
+   "text": "Codex"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "Description",
+   "source": "Agents, tools and tests for this project, in one place.",
+   "text": "本项目的智能体、工具和测试，集中在一处。"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "Endpoint",
+   "source": "Endpoint",
+   "text": "端点"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "Gemini",
+   "source": "Gemini",
+   "text": "Gemini"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "ImagesTile",
+   "source": "Generate an image",
+   "text": "生成图像"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "ImagesTileBody",
+   "source": "Concept art and references, with Nano Banana or Codex.",
+   "text": "概念图和参考图，使用 Nano Banana 或 Codex。"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "JobsRunning",
+   "source": "{0} {0}|plural(one=job,other=jobs) running",
+   "text": "{0} 个任务正在运行"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "MatchTile",
+   "source": "Match a reference",
+   "text": "匹配参考图"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "MatchTileBody",
+   "source": "Compare the level with a target image, side by side.",
+   "text": "将关卡与目标图像并排比较。"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "McpCard",
+   "source": "Unreal MCP",
+   "text": "Unreal MCP"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "McpChecking",
+   "source": "Checking...",
+   "text": "正在检查..."
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "McpOff",
+   "source": "Not running",
+   "text": "未运行"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "McpRunning",
+   "source": "Running",
+   "text": "运行中"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "MemoryTile",
+   "source": "Remember a fact",
+   "text": "记住一件事"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "MemoryTileBody",
+   "source": "What agents should know about this project.",
+   "text": "智能体应了解的关于本项目的信息。"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "NeedsYouCard",
+   "source": "Needs you",
+   "text": "需要你处理"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "NoEndpoint",
+   "source": "not set",
+   "text": "未设置"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "NoJobs",
+   "source": "No jobs running",
+   "text": "没有正在运行的任务"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "None",
+   "source": "none",
+   "text": "无"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "OpenActivity",
+   "source": "Open Activity",
+   "text": "打开活动"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "OpenSetup",
+   "source": "Open setup",
+   "text": "打开初始设置"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "PlaytestTile",
+   "source": "Playtest the level",
+   "text": "试玩关卡"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "PlaytestTileBody",
+   "source": "A bot plays like a person, many cases at once.",
+   "text": "机器人像真人一样玩，多个用例同时进行。"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "Port",
+   "source": "Port",
+   "text": "端口"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "RefreshTooltip",
+   "source": "Check the status again.",
+   "text": "再次检查状态。"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "SetupBody",
+   "source": "Unreal MCP and the agent files are not ready yet, so agents cannot work in this editor.",
+   "text": "Unreal MCP 和智能体文件尚未就绪，因此智能体还无法在这个编辑器中工作。"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "SetupTitle",
+   "source": "Finish setting up HyperAI",
+   "text": "完成 HyperAI 的设置"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "StartSection",
+   "source": "Start something",
+   "text": "开始"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "StatusSection",
+   "source": "Status",
+   "text": "状态"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "Title",
+   "source": "Welcome to HyperAI Studio",
+   "text": "欢迎使用 HyperAI Studio"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "ToolsTile",
+   "source": "Run a tool",
+   "text": "运行工具"
+  },
+  {
+   "namespace": "SHyperAIStudioHomePage",
+   "key": "ToolsTileBody",
+   "source": "Any HyperAI or Unreal tool, as a form.",
+   "text": "任意 HyperAI 或 Unreal 工具，以表单形式运行。"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
@@ -3518,6 +3950,108 @@
    "text": "是"
   },
   {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "Agents",
+   "source": "Agents",
+   "text": "智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "AgentsDescription",
+   "source": "The agent CLIs HyperAI works with, and their files.",
+   "text": "HyperAI 配合使用的智能体命令行工具及其文件。"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "Docs",
+   "source": "Documentation",
+   "text": "文档"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "DocsDescription",
+   "source": "Guides, the agent instructions, and troubleshooting.",
+   "text": "指南、智能体说明和故障排除。"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "Images",
+   "source": "Image services",
+   "text": "图像服务"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "ImagesBody",
+   "source": "The models the Images page and agents draw with. Keys are read from environment variables and never stored.",
+   "text": "图像页面和智能体用来绘图的模型。密钥从环境变量读取，从不保存。"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "ImagesDescription",
+   "source": "Image models, and the services and keys they need.",
+   "text": "图像模型，以及它们需要的服务和密钥。"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "ImagesTitle",
+   "source": "Image services",
+   "text": "图像服务"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "Preferences",
+   "source": "Preferences",
+   "text": "偏好设置"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "PreferencesBody",
+   "source": "Every HyperAI setting. Changes save as you make them.",
+   "text": "所有 HyperAI 设置。更改会随时保存。"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "PreferencesDescription",
+   "source": "Every HyperAI setting, in one place.",
+   "text": "所有 HyperAI 设置，集中在一处。"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "PreferencesTitle",
+   "source": "Preferences",
+   "text": "偏好设置"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "Servers",
+   "source": "MCP servers",
+   "text": "MCP 服务器"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "ServersDescription",
+   "source": "The Unreal MCP server, and extra servers agents can use.",
+   "text": "Unreal MCP 服务器，以及智能体可以使用的其他服务器。"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "Setup",
+   "source": "Setup",
+   "text": "初始设置"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "SetupDescription",
+   "source": "Unreal MCP, agent files, and what is missing.",
+   "text": "Unreal MCP、智能体文件，以及还缺少什么。"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "Title",
+   "source": "Settings",
+   "text": "设置"
+  },
+  {
    "namespace": "SHyperAIStudioSkillsPanel",
    "key": "AddToProject",
    "source": "Add to Project",
@@ -3810,6 +4344,90 @@
    "key": "WindowTitle",
    "source": "Run {0}",
    "text": "运行 {0}"
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "All",
+   "source": "All",
+   "text": "全部"
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "ChipEpic",
+   "source": "EPIC",
+   "text": "EPIC"
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "ChipHyper",
+   "source": "HYPERAI",
+   "text": "HYPERAI"
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "Epic",
+   "source": "Epic",
+   "text": "Epic"
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "HyperAI",
+   "source": "HyperAI",
+   "text": "HyperAI"
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "Loading",
+   "source": "Reading the tools from Unreal MCP...",
+   "text": "正在从 Unreal MCP 读取工具..."
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "NotLoadedBody",
+   "source": "This tool's toolset is not loaded in this editor, so it cannot run here. Its plugin may be disabled.",
+   "text": "此工具的工具集未在这个编辑器中加载，因此无法在此运行。其插件可能已被禁用。"
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "PickBody",
+   "source": "Its request opens here as a form. Run calls it the way an agent's MCP call would, and its answer shows below.",
+   "text": "它的请求会以表单形式在此打开。“运行”会像智能体的 MCP 调用那样调用它，结果显示在下方。"
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "PickTitle",
+   "source": "Pick a tool",
+   "text": "选择一个工具"
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "RefreshTooltip",
+   "source": "Ask Unreal MCP for its tools again.",
+   "text": "再次向 Unreal MCP 获取工具列表。"
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "SearchHint",
+   "source": "Search tools by name, description or toolset",
+   "text": "按名称、描述或工具集搜索工具"
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "Shown",
+   "source": "{0} shown",
+   "text": "显示 {0} 个"
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "Summary",
+   "source": "{0} tools agents can call: {1} from HyperAI and {2} from Epic.",
+   "text": "智能体可以调用 {0} 个工具：{1} 个来自 HyperAI，{2} 个来自 Epic。"
+  },
+  {
+   "namespace": "SHyperAIStudioToolsPage",
+   "key": "Title",
+   "source": "Tools",
+   "text": "工具"
   },
   {
    "namespace": "SHyperAIStudioWindow",

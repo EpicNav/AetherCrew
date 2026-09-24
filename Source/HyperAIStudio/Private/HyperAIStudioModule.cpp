@@ -75,8 +75,19 @@
 #include "ToolMenus.h"
 #include "UnrealEdMisc.h"
 #include "Widgets/Docking/SDockTab.h"
+#include "Framework/Commands/Commands.h"
+#include "Framework/Commands/UICommandList.h"
 #include "HyperAIStudioPreviewPanel.h"
+#include "HyperAIStudioShell.h"
+#include "SHyperAIStudioActivitySidebar.h"
+#include "SHyperAIStudioAgentsPanel.h"
+#include "SHyperAIStudioHomePage.h"
+#include "SHyperAIStudioMemoryPanel.h"
 #include "SHyperAIStudioPreviewPanel.h"
+#include "SHyperAIStudioSettingsPage.h"
+#include "SHyperAIStudioSkillsPanel.h"
+#include "SHyperAIStudioToolsPage.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -92,22 +103,35 @@
 
 #define LOCTEXT_NAMESPACE "FHyperAIStudioModule"
 
+/** HyperAI Studio's commands, bindable in Editor Preferences > Keyboard Shortcuts. */
+class FHyperAIStudioCommands final : public TCommands<FHyperAIStudioCommands>
+{
+public:
+	FHyperAIStudioCommands()
+		: TCommands<FHyperAIStudioCommands>(TEXT("HyperAIStudio"), LOCTEXT("CommandsContext", "HyperAI Studio"), NAME_None, FHyperAIStudioStyle::GetStyleSetName())
+	{
+	}
+
+	virtual void RegisterCommands() override
+	{
+		UI_COMMAND(OpenStudio, "HyperAI Studio", "Open HyperAI Studio: chat, images, match, playtest, memory, skills, agents, tools, activity and settings.",
+			EUserInterfaceActionType::Button, FInputChord(EModifierKey::Control | EModifierKey::Alt, EKeys::H));
+		UI_COMMAND(NewChat, "New HyperAI Chat", "Start a chat with an agent in HyperAI Studio, beside the ones already open.",
+			EUserInterfaceActionType::Button, FInputChord());
+	}
+
+	TSharedPtr<FUICommandInfo> OpenStudio;
+	TSharedPtr<FUICommandInfo> NewChat;
+};
+
 namespace
 {
-	const FName HyperAIStudioTabName(TEXT("HyperAIStudio"));
-	const FName HyperAIStudioChatTabName(TEXT("HyperAIStudioChat"));
-
 	/**
-	 * Extra chat tabs, so several agents can work at once and be docked side by side. Each is its own
-	 * nomad tab with its own panel, terminal and agent; they share the one Unreal MCP endpoint, which
-	 * serialises their tool calls, and the one-at-a-time mutation lane.
+	 * Chats open at once, so several agents can work side by side. Each is a page of HyperAI Studio with its own
+	 * panel, terminal and agent; they share the one Unreal MCP endpoint, which serialises their tool calls, and the
+	 * one-at-a-time mutation lane.
 	 */
 	constexpr int32 MaxChatTabs = 4;
-
-	FName ChatTabNameForIndex(const int32 Index)
-	{
-		return Index <= 1 ? HyperAIStudioChatTabName : FName(*FString::Printf(TEXT("HyperAIStudioChat%d"), Index));
-	}
 
 	FString NormalizeMCPServerSelector(const FString& RawValue)
 	{
@@ -594,48 +618,10 @@ public:
 		HyperAIStudio::BenchmarkInstrumentation::Startup();
 #endif
 
-		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-			HyperAIStudioTabName,
-			FOnSpawnTab::CreateRaw(this, &FHyperAIStudioModule::SpawnTab))
-			.SetDisplayName(LOCTEXT("TabTitle", "HyperAIStudio"))
-			.SetTooltipText(LOCTEXT("TabTooltip", "Open HyperAIStudio setup, agent handoff, and MCP readiness."))
-			.SetIcon(FSlateIcon(FHyperAIStudioStyle::GetStyleSetName(), "HyperAIStudio.TabIcon"))
-			.SetMenuType(ETabSpawnerMenuType::Hidden);
-
-		for (int32 Index = 1; Index <= MaxChatTabs; ++Index)
-		{
-			FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-				ChatTabNameForIndex(Index),
-				FOnSpawnTab::CreateRaw(this, &FHyperAIStudioModule::SpawnChatTabAtIndex, Index))
-				.SetDisplayName(Index <= 1
-					? LOCTEXT("ChatTabTitle", "HyperAI Chat")
-					: FText::Format(LOCTEXT("ChatTabTitleNumbered", "HyperAI Chat {0}"), Index))
-				.SetTooltipText(LOCTEXT("ChatTabTooltip", "Open the lightweight HyperAI chat panel for Unreal context handoff."))
-				.SetIcon(FSlateIcon(FHyperAIStudioStyle::GetStyleSetName(), "HyperAIStudio.TabIcon"))
-				.SetMenuType(ETabSpawnerMenuType::Hidden);
-		}
-
-		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(SHyperAIStudioPlaytestPanel::GetTabName(), FOnSpawnTab::CreateLambda([](const FSpawnTabArgs&)
-		{
-			return SNew(SDockTab)
-				.TabRole(ETabRole::NomadTab)
-				.Label(LOCTEXT("PlaytestTabTitle", "HyperAI Playtest"))
-				[
-					SNew(SHyperAIStudioPlaytestPanel)
-				];
-		}))
-			.SetDisplayName(LOCTEXT("PlaytestTabTitle", "HyperAI Playtest"))
-			.SetTooltipText(LOCTEXT("PlaytestTabTooltip", "Play the open level with the HyperAI bot: many cases at once, each in its own copy of the level."))
-			.SetIcon(FSlateIcon(FHyperAIStudioStyle::GetStyleSetName(), "HyperAIStudio.TabIcon"))
-			.SetMenuType(ETabSpawnerMenuType::Hidden);
-
-		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-			FHyperAIStudioPreviewPanel::GetTabName(),
-			FOnSpawnTab::CreateRaw(this, &FHyperAIStudioModule::SpawnPreviewTab))
-			.SetDisplayName(LOCTEXT("PreviewTabTitle", "HyperAI Preview"))
-			.SetTooltipText(LOCTEXT("PreviewTabTooltip", "Compare a reference image with what a pack produced, with the numbers behind it."))
-			.SetIcon(FSlateIcon(FHyperAIStudioStyle::GetStyleSetName(), "HyperAIStudio.TabIcon"))
-			.SetMenuType(ETabSpawnerMenuType::Hidden);
+		// One window for every feature: HyperAI Studio, each feature a page in it.
+		FHyperAIStudioCommands::Register();
+		FHyperAIStudioShell::RegisterTabSpawner();
+		RegisterStudioPages();
 
 		UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FHyperAIStudioModule::RegisterMenus));
 
@@ -956,13 +942,15 @@ public:
 			UToolMenus::UnregisterOwner(this);
 		}
 
-		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FHyperAIStudioPreviewPanel::GetTabName());
-		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(SHyperAIStudioPlaytestPanel::GetTabName());
-		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(HyperAIStudioTabName);
-		for (int32 Index = 1; Index <= MaxChatTabs; ++Index)
+		UnregisterStudioPages();
+		FHyperAIStudioShell::UnregisterTabSpawner();
+		if (FModuleManager::Get().IsModuleLoaded(TEXT("LevelEditor")) && FHyperAIStudioCommands::IsRegistered())
 		{
-			FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(ChatTabNameForIndex(Index));
+			const TSharedRef<FUICommandList> Actions = FModuleManager::GetModuleChecked<FLevelEditorModule>(TEXT("LevelEditor")).GetGlobalLevelEditorActions();
+			Actions->UnmapAction(FHyperAIStudioCommands::Get().OpenStudio);
+			Actions->UnmapAction(FHyperAIStudioCommands::Get().NewChat);
 		}
+		FHyperAIStudioCommands::Unregister();
 		// Jobs hold pack callbacks and pending approvals hold prepared plans; neither may outlive the host.
 		FHyperAIStudioAsyncJobHost::Shutdown();
 		FHyperAIStudioExecutionQueue::Clear();
@@ -1365,90 +1353,141 @@ private:
 		}), 0.25f);
 	}
 
-	TSharedRef<SDockTab> SpawnTab(const FSpawnTabArgs& Args)
+	static FName ChatPageId(const int32 Index)
 	{
-		return SNew(SDockTab)
-			.TabRole(ETabRole::NomadTab)
-			.Label(LOCTEXT("DockedTabLabel", "HyperAIStudio"))
-			[
-				SNew(SBox)
-				.MinDesiredWidth(420.0f)
-				.MinDesiredHeight(520.0f)
-				[
-					SNew(SHyperAIStudioWindow)
-				]
-			];
+		return Index <= 1 ? FName(TEXT("Chat")) : FName(*FString::Printf(TEXT("Chat%d"), Index));
 	}
 
-	TSharedRef<SDockTab> SpawnPreviewTab(const FSpawnTabArgs& Args)
-	{
-		return SNew(SDockTab)
-			.TabRole(ETabRole::NomadTab)
-			.Label(LOCTEXT("PreviewDockedTabLabel", "HyperAI Preview"))
-			[
-				SNew(SBox)
-				.MinDesiredWidth(560.0f)
-				.MinDesiredHeight(420.0f)
-				[
-					SNew(SHyperAIStudioPreviewPanel)
-				]
-			];
-	}
-
-	TSharedRef<SDockTab> CreateChatDockTab(const int32 TabIndex = 1)
+	TSharedRef<SWidget> CreateChatPage(const TSharedRef<SDockTab>& Tab, const int32 TabIndex)
 	{
 		TSharedPtr<SHyperAIStudioQuickActionWindow> ChatWidget;
-		TSharedRef<SDockTab> ChatTab = SNew(SDockTab)
-			.TabRole(ETabRole::NomadTab)
-			.Label(TabIndex <= 1
-				? LOCTEXT("DockedChatTabLabel", "HyperAI Chat")
-				: FText::Format(LOCTEXT("DockedChatTabLabelNumbered", "HyperAI Chat {0}"), TabIndex))
-			[
-				SNew(SBox)
-				.MinDesiredWidth(420.0f)
-				.MinDesiredHeight(520.0f)
-				[
-					SAssignNew(ChatWidget, SHyperAIStudioQuickActionWindow)
-					.OnOpenWorkbench(FSimpleDelegate::CreateRaw(this, &FHyperAIStudioModule::OpenTab))
-					.OnNewAgentTab(FSimpleDelegate::CreateRaw(this, &FHyperAIStudioModule::OpenNextChatTab))
-					.TabIndex(TabIndex)
-				]
-			];
-		ChatTab->SetOnTabClosed(SDockTab::FOnTabClosedCallback::CreateRaw(this, &FHyperAIStudioModule::OnChatTabClosed));
-		if (ChatWidget.IsValid())
-		{
-			ChatWidget->SetOwnerTab(ChatTab);
-		}
-		// Enqueued visible commands target the most recent chat panel; each tab still owns its own terminal.
-		ActiveChatTab = ChatTab;
+		const TSharedRef<SWidget> Content = SAssignNew(ChatWidget, SHyperAIStudioQuickActionWindow)
+			.OnOpenWorkbench(FSimpleDelegate::CreateLambda([]() { FHyperAIStudioShell::Open(TEXT("Settings")); }))
+			.OnNewAgentTab(FSimpleDelegate::CreateRaw(this, &FHyperAIStudioModule::OpenNextChatTab))
+			.TabIndex(TabIndex);
+		Tab->SetOnTabClosed(SDockTab::FOnTabClosedCallback::CreateRaw(this, &FHyperAIStudioModule::OnChatTabClosed));
+		ChatWidget->SetOwnerTab(Tab);
+		// Enqueued visible commands target the most recent chat; each chat still owns its own terminal.
+		ActiveChatTab = Tab;
 		ActiveChatWidget = ChatWidget;
-		return ChatTab;
+		return Content;
 	}
 
-	TSharedRef<SDockTab> SpawnChatTab(const FSpawnTabArgs& Args)
-	{
-		return CreateChatDockTab();
-	}
-
-	TSharedRef<SDockTab> SpawnChatTabAtIndex(const FSpawnTabArgs& Args, const int32 TabIndex)
-	{
-		return CreateChatDockTab(TabIndex);
-	}
-
-	/** Opens the lowest-numbered chat tab that is not already live, so each agent gets its own. */
+	/** Opens the lowest-numbered chat that is not already open, so each agent gets its own. */
 	void OpenNextChatTab()
 	{
 		for (int32 Index = 1; Index <= MaxChatTabs; ++Index)
 		{
-			const FName TabName = ChatTabNameForIndex(Index);
-			if (!FGlobalTabmanager::Get()->FindExistingLiveTab(FTabId(TabName)).IsValid())
+			if (!FHyperAIStudioShell::FindPageTab(ChatPageId(Index)).IsValid())
 			{
-				FGlobalTabmanager::Get()->TryInvokeTab(TabName);
+				FHyperAIStudioShell::Open(ChatPageId(Index));
 				return;
 			}
 		}
 		UE_LOG(LogHyperAIStudio, Display,
 			TEXT("All %d HyperAI chat tabs are already open; close one to start another agent."), MaxChatTabs);
+	}
+
+	static FHyperAIStudioPage MakePage(const FName Id, const FText& Label, const FText& Tooltip, const FName Group, const int32 Order,
+		const FName Icon, TFunction<TSharedRef<SWidget>(const TSharedRef<SDockTab>&)> Create)
+	{
+		FHyperAIStudioPage Page;
+		Page.Id = Id;
+		Page.Label = Label;
+		Page.Tooltip = Tooltip;
+		Page.Group = Group;
+		Page.Order = Order;
+		Page.Icon = Icon;
+		Page.Create = MoveTemp(Create);
+		return Page;
+	}
+
+	/** A panel that was a section of the old window, given a page's margins. */
+	static TSharedRef<SWidget> PanelPage(const TSharedRef<SWidget>& Panel)
+	{
+		return SNew(SScrollBox)
+			+ SScrollBox::Slot().Padding(FMargin(24.0f, 20.0f, 24.0f, 24.0f))
+			[
+				Panel
+			];
+	}
+
+	void RegisterStudioPages()
+	{
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Home"), LOCTEXT("PageHome", "Home"),
+			LOCTEXT("PageHomeTip", "Status, what needs you, and where to start."), TEXT("Start"), 0, TEXT("HyperAIStudio.Icon.Home"),
+			[](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioHomePage); }));
+		for (int32 Index = 1; Index <= MaxChatTabs; ++Index)
+		{
+			FHyperAIStudioPage Chat = MakePage(ChatPageId(Index),
+				Index <= 1 ? LOCTEXT("PageChat", "Chat") : FText::Format(LOCTEXT("PageChatNumbered", "Chat {0}"), Index),
+				LOCTEXT("PageChatTip", "Work with Codex, Claude Code or Gemini in this editor."), TEXT("Create"), 0, TEXT("HyperAIStudio.Icon.Chat"),
+				[this, Index](const TSharedRef<SDockTab>& Tab) { return CreateChatPage(Tab, Index); });
+			// Only the first chat is in the navigation; the others open from a chat's new-chat button.
+			Chat.bHidden = Index > 1;
+			FHyperAIStudioShell::RegisterPage(Chat);
+		}
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Match"), LOCTEXT("PageMatch", "Match"),
+			LOCTEXT("PageMatchTip", "Compare what the editor makes with a reference image, side by side or with a wipe."), TEXT("Create"), 20,
+			TEXT("HyperAIStudio.Icon.Match"), [](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioPreviewPanel); }));
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Playtest"), LOCTEXT("PagePlaytest", "Playtest"),
+			LOCTEXT("PagePlaytestTip", "A bot plays the level like a person: many cases at once, each in its own copy."), TEXT("Test"), 0,
+			TEXT("HyperAIStudio.Icon.Playtest"), [](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioPlaytestPanel); }));
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Memory"), LOCTEXT("PageMemory", "Memory"),
+			LOCTEXT("PageMemoryTip", "What agents should know about this project, kept between chats."), TEXT("Project"), 0,
+			TEXT("HyperAIStudio.Icon.Memory"), [](const TSharedRef<SDockTab>&) { return PanelPage(SNew(SHyperAIStudioMemoryPanel)); }));
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Skills"), LOCTEXT("PageSkills", "Skills"),
+			LOCTEXT("PageSkillsTip", "Know-how agents follow, such as how to build a Blueprint or match an image."), TEXT("Project"), 10,
+			TEXT("HyperAIStudio.Icon.Skills"), [](const TSharedRef<SDockTab>&) { return PanelPage(SNew(SHyperAIStudioSkillsPanel)); }));
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Agents"), LOCTEXT("PageAgents", "Agents"),
+			LOCTEXT("PageAgentsTip", "Your team of specialist subagents, for Claude Code and Codex."), TEXT("Project"), 20,
+			TEXT("HyperAIStudio.Icon.Agents"), [](const TSharedRef<SDockTab>&) { return PanelPage(SNew(SHyperAIStudioAgentsPanel)); }));
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Tools"), LOCTEXT("PageTools", "Tools"),
+			LOCTEXT("PageToolsTip", "Every tool agents can call, as a form you can run yourself."), TEXT("System"), 0,
+			TEXT("HyperAIStudio.Icon.Tools"), [](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioToolsPage); }));
+		FHyperAIStudioPage Activity = MakePage(TEXT("Activity"), LOCTEXT("PageActivity", "Activity"),
+			LOCTEXT("PageActivityTip", "Edits waiting for your approval, jobs running, and what happened."), TEXT("System"), 10,
+			TEXT("HyperAIStudio.Icon.Activity"), [](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioChatActivitySidebar); });
+		Activity.Badge = []() { return SHyperAIStudioChatActivitySidebar::GetPendingApprovalCount(); };
+		FHyperAIStudioShell::RegisterPage(Activity);
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Settings"), LOCTEXT("PageSettings", "Settings"),
+			LOCTEXT("PageSettingsTip", "Setup, agents, MCP servers, image services and preferences."), TEXT("System"), 20,
+			TEXT("HyperAIStudio.Icon.Settings"), [](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioSettingsPage); }));
+
+		// What the search box can do besides opening a page.
+		auto Action = [](const FName Id, const FText& Label, const FText& Description, const FName Icon, TFunction<void()> Run)
+		{
+			FHyperAIStudioAction Entry;
+			Entry.Id = Id;
+			Entry.Label = Label;
+			Entry.Description = Description;
+			Entry.Icon = Icon;
+			Entry.Run = MoveTemp(Run);
+			FHyperAIStudioShell::RegisterAction(Entry);
+		};
+		Action(TEXT("NewChat"), LOCTEXT("ActionNewChat", "New chat"), LOCTEXT("ActionNewChatTip", "Start another chat with an agent, beside the ones open."),
+			TEXT("HyperAIStudio.Icon.Chat"), [this]() { OpenNextChatTab(); });
+		Action(TEXT("StartSetup"), LOCTEXT("ActionSetup", "Set up HyperAI"), LOCTEXT("ActionSetupTip", "Unreal MCP, the agent files, and what is missing."),
+			TEXT("HyperAIStudio.Icon.Settings"), []() { FHyperAIStudioShell::Open(TEXT("Settings")); });
+		Action(TEXT("OpenDocs"), LOCTEXT("ActionDocs", "Documentation"), LOCTEXT("ActionDocsTip", "HyperAI Studio's guides, in the browser."),
+			TEXT("HyperAIStudio.Icon.Report"), []() { FPlatformProcess::LaunchURL(TEXT("https://hyperaistudio.com/docs"), nullptr, nullptr); });
+	}
+
+	void UnregisterStudioPages()
+	{
+		for (const FName Id : {FName(TEXT("Home")), FName(TEXT("Match")), FName(TEXT("Playtest")), FName(TEXT("Memory")), FName(TEXT("Skills")),
+			FName(TEXT("Agents")), FName(TEXT("Tools")), FName(TEXT("Activity")), FName(TEXT("Settings"))})
+		{
+			FHyperAIStudioShell::UnregisterPage(Id);
+		}
+		for (int32 Index = 1; Index <= MaxChatTabs; ++Index)
+		{
+			FHyperAIStudioShell::UnregisterPage(ChatPageId(Index));
+		}
+		for (const FName Id : {FName(TEXT("NewChat")), FName(TEXT("StartSetup")), FName(TEXT("OpenDocs"))})
+		{
+			FHyperAIStudioShell::UnregisterAction(Id);
+		}
 	}
 
 	void RegisterMenus()
@@ -1458,36 +1497,18 @@ private:
 		if (UToolMenu* ToolsMenu = UToolMenus::Get()->ExtendMenu(TEXT("LevelEditor.MainMenu.Tools")))
 		{
 			FToolMenuSection& Section = ToolsMenu->FindOrAddSection(TEXT("HyperAIStudio"));
-			Section.AddMenuEntry(
-				TEXT("OpenHyperAIStudio"),
-				LOCTEXT("OpenHyperAIStudio", "HyperAIStudio"),
-				LOCTEXT("OpenHyperAIStudioTooltip", "Open HyperAIStudio MCP setup and readiness checks."),
-				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateRaw(this, &FHyperAIStudioModule::OpenTab)));
-			Section.AddMenuEntry(
-				TEXT("OpenHyperAIStudioChat"),
-				LOCTEXT("OpenHyperAIStudioChat", "HyperAI Chat"),
-				LOCTEXT("OpenHyperAIStudioChatTooltip", "Open the lightweight HyperAI chat panel."),
-				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateRaw(this, &FHyperAIStudioModule::OpenChatTab)));
-			Section.AddMenuEntry(
-				TEXT("OpenHyperAIStudioPreview"),
-				LOCTEXT("OpenHyperAIStudioPreview", "HyperAI Preview"),
-				LOCTEXT("OpenHyperAIStudioPreviewTooltip", "Compare a reference image with what a pack produced."),
-				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateLambda([]() { FHyperAIStudioPreviewPanel::Open(); })));
-			Section.AddMenuEntry(
-				TEXT("OpenHyperAIStudioPlaytest"),
-				LOCTEXT("OpenHyperAIStudioPlaytest", "HyperAI Playtest"),
-				LOCTEXT("OpenHyperAIStudioPlaytestTooltip", "Play the open level with the HyperAI bot: reach, collect, fight, survive, explore and duel, many cases at once."),
-				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateLambda([]() { FGlobalTabmanager::Get()->TryInvokeTab(SHyperAIStudioPlaytestPanel::GetTabName()); })));
-			Section.AddMenuEntry(
-				TEXT("OpenHyperAIStudioQuickAction"),
-				LOCTEXT("OpenHyperAIStudioQuickAction", "HyperAI Chat Overlay"),
-				LOCTEXT("OpenHyperAIStudioQuickActionTooltip", "Open the lightweight chat overlay without changing the editor layout."),
-				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateRaw(this, &FHyperAIStudioModule::OpenQuickActionWindowFromMenu)));
+			FLevelEditorModule& LevelEditor = FModuleManager::LoadModuleChecked<FLevelEditorModule>(TEXT("LevelEditor"));
+			const TSharedRef<FUICommandList> Actions = LevelEditor.GetGlobalLevelEditorActions();
+			if (!Actions->IsActionMapped(FHyperAIStudioCommands::Get().OpenStudio))
+			{
+				Actions->MapAction(FHyperAIStudioCommands::Get().OpenStudio, FExecuteAction::CreateRaw(this, &FHyperAIStudioModule::OpenTab));
+				Actions->MapAction(FHyperAIStudioCommands::Get().NewChat, FExecuteAction::CreateRaw(this, &FHyperAIStudioModule::OpenNextChatTab));
+			}
+			// One entry, showing its shortcut; every feature is a page inside the window.
+			Section.AddMenuEntryWithCommandList(FHyperAIStudioCommands::Get().OpenStudio, Actions,
+				LOCTEXT("OpenHyperAIStudioMenu", "HyperAI Studio"),
+				LOCTEXT("OpenHyperAIStudioMenuTooltip", "Open HyperAI Studio: chat, images, match, playtest, memory, skills, agents, tools, activity and settings."),
+				FSlateIcon(FHyperAIStudioStyle::GetStyleSetName(), "HyperAIStudio.TabIcon"), NAME_None, FName(TEXT("OpenHyperAIStudio")));
 		}
 
 		if (UToolMenu* StatusBarMenu = UToolMenus::Get()->ExtendMenu(TEXT("LevelEditor.StatusBar.ToolBar")))
@@ -1501,7 +1522,7 @@ private:
 				SNew(SButton)
 				.ButtonStyle(&FAppStyle::Get().GetWidgetStyle<FButtonStyle>(TEXT("StatusBar.StatusBarButton")))
 				.ContentPadding(FMargin(6.0f, 0.0f))
-				.ToolTipText(LOCTEXT("StatusBarTooltip", "Open HyperAIStudio setup, agent handoff, and MCP readiness."))
+				.ToolTipText(LOCTEXT("StatusBarTooltipStudio", "Open HyperAI Studio (Ctrl+Alt+H)."))
 				.OnClicked_Lambda([this]()
 				{
 					OpenTab();
@@ -1515,7 +1536,7 @@ private:
 					[
 						SNew(SImage)
 						.ColorAndOpacity(FSlateColor::UseForeground())
-						.Image(FAppStyle::Get().GetBrush(TEXT("Icons.Comment")))
+						.Image(FHyperAIStudioStyle::Get().GetBrush(TEXT("HyperAIStudio.TabIcon")))
 					]
 					+ SHorizontalBox::Slot()
 					.AutoWidth()
@@ -1523,7 +1544,7 @@ private:
 					.Padding(FMargin(5.0f, 0.0f, 0.0f, 0.0f))
 					[
 						SNew(STextBlock)
-						.Text(LOCTEXT("StatusBarLabel", "HyperAIStudio"))
+						.Text(LOCTEXT("StatusBarLabelStudio", "HyperAI"))
 						.TextStyle(&FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>(TEXT("NormalText")))
 					]
 				];
@@ -2012,20 +2033,7 @@ private:
 		{
 			return;
 		}
-
-		if (FModuleManager::Get().IsModuleLoaded(TEXT("LevelEditor")))
-		{
-			FLevelEditorModule& LevelEditorModule = FModuleManager::LoadModuleChecked<FLevelEditorModule>(TEXT("LevelEditor"));
-			if (const TSharedPtr<FTabManager> LevelEditorTabManager = LevelEditorModule.GetLevelEditorTabManager())
-			{
-				if (LevelEditorTabManager->TryInvokeTab(HyperAIStudioTabName).IsValid())
-				{
-					return;
-				}
-			}
-		}
-
-		FGlobalTabmanager::Get()->TryInvokeTab(HyperAIStudioTabName);
+		FHyperAIStudioShell::Open();
 	}
 
 	void OpenChatTab()
@@ -2050,54 +2058,19 @@ private:
 			}
 		}
 
-		auto ActivateExistingChatTab = [this, &TrimmedAgentName](const TSharedPtr<SDockTab>& ExistingChatTab)
+		// The chat the user was last in when it is still open, otherwise the first.
+		FName Page = ChatPageId(1);
+		if (const TSharedPtr<SDockTab> Existing = ActiveChatTab.Pin())
 		{
-			if (!ExistingChatTab.IsValid())
-			{
-				return false;
-			}
-
-			ActiveChatTab = ExistingChatTab;
-			if (!TrimmedAgentName.IsEmpty())
-			{
-				if (const TSharedPtr<SHyperAIStudioQuickActionWindow> ExistingChatWidget = ActiveChatWidget.Pin())
-				{
-					ExistingChatWidget->SelectAgentByName(TrimmedAgentName);
-				}
-			}
-
-			ExistingChatTab->ActivateInParent(ETabActivationCause::SetDirectly);
-			return true;
-		};
-
-		if (ActivateExistingChatTab(ActiveChatTab.Pin()))
-		{
-			return;
+			Page = Existing->GetLayoutIdentifier().TabType;
 		}
-
-		if (FModuleManager::Get().IsModuleLoaded(TEXT("LevelEditor")))
+		FHyperAIStudioShell::Open(Page);
+		if (!TrimmedAgentName.IsEmpty())
 		{
-			FLevelEditorModule& LevelEditorModule = FModuleManager::LoadModuleChecked<FLevelEditorModule>(TEXT("LevelEditor"));
-			if (const TSharedPtr<FTabManager> LevelEditorTabManager = LevelEditorModule.GetLevelEditorTabManager())
+			if (const TSharedPtr<SHyperAIStudioQuickActionWindow> ExistingChatWidget = ActiveChatWidget.Pin())
 			{
-				if (ActivateExistingChatTab(LevelEditorTabManager->FindExistingLiveTab(FTabId(HyperAIStudioChatTabName))))
-				{
-					return;
-				}
-
-				if (const TSharedPtr<SDockTab> InvokedChatTab = LevelEditorTabManager->TryInvokeTab(HyperAIStudioChatTabName))
-				{
-					ActiveChatTab = InvokedChatTab;
-					ActivateExistingChatTab(InvokedChatTab);
-					return;
-				}
+				ExistingChatWidget->SelectAgentByName(TrimmedAgentName);
 			}
-		}
-
-		if (const TSharedPtr<SDockTab> InvokedChatTab = FGlobalTabmanager::Get()->TryInvokeTab(HyperAIStudioChatTabName))
-		{
-			ActiveChatTab = InvokedChatTab;
-			ActivateExistingChatTab(InvokedChatTab);
 		}
 	}
 
@@ -2129,11 +2102,6 @@ private:
 
 		FSlateApplication::Get().AddWindow(QuickActionWindow);
 		return true;
-	}
-
-	void OpenQuickActionWindowFromMenu()
-	{
-		OpenQuickActionWindow();
 	}
 
 	FText GetWelcomeWindowTitleText() const
@@ -3148,8 +3116,8 @@ private:
 			&& TerminalRecipe.Contains(TEXT("gemini"))
 			&& TerminalRecipe.Contains(TEXT("cursor ."))
 			&& TerminalRecipe.Contains(TEXT("code ."));
-		const bool bDockableWorkbenchOk = FGlobalTabmanager::Get()->HasTabSpawner(HyperAIStudioTabName)
-			&& FGlobalTabmanager::Get()->HasTabSpawner(HyperAIStudioChatTabName);
+		const bool bDockableWorkbenchOk = FGlobalTabmanager::Get()->HasTabSpawner(FHyperAIStudioShell::GetTabName())
+			&& FHyperAIStudioShell::FindPage(TEXT("Chat")) != nullptr;
 		FHyperAIStudioMCPServerEntry ExactRetiredEntry;
 		ExactRetiredEntry.Id = TEXT("hyper-ue-mcp");
 		ExactRetiredEntry.DisplayName = TEXT("Retired built-in profile");
@@ -6345,9 +6313,7 @@ private:
 		const bool bToolsOk = HasToolMenuEntriesWithText(
 			TEXT("LevelEditor.MainMenu.Tools"),
 			{
-				{ TEXT("OpenHyperAIStudio"), TEXT("HyperAIStudio"), TEXT("Open HyperAIStudio") },
-				{ TEXT("OpenHyperAIStudioChat"), TEXT("HyperAI Chat"), TEXT("lightweight HyperAI chat panel") },
-				{ TEXT("OpenHyperAIStudioQuickAction"), TEXT("HyperAI Chat Overlay"), TEXT("lightweight chat overlay") }
+				{ TEXT("OpenHyperAIStudio"), TEXT("HyperAI Studio"), TEXT("Open HyperAI Studio") }
 			},
 			ToolsFound,
 			ToolsTextOk,
@@ -6382,7 +6348,7 @@ private:
 			ActorUnexpected);
 		const bool bGraphExtenderOk = IsGraphEditorExtenderRegistered();
 		const int32 MenuTextOk = ToolsTextOk + AssetTextOk;
-		const bool bTextOk = MenuTextOk == 8;
+		const bool bTextOk = MenuTextOk == 6;
 		const bool bOk = bToolsOk && bStatusOk && bAssetOk && bActorOk && bGraphExtenderOk && bTextOk;
 
 		TArray<FString> Problems;
@@ -6408,10 +6374,10 @@ private:
 		}
 		if (!bTextOk)
 		{
-			Problems.Add(FString::Printf(TEXT("visible menu text validated %d/8"), MenuTextOk));
+			Problems.Add(FString::Printf(TEXT("visible menu text validated %d/6"), MenuTextOk));
 		}
 
-		UE_LOG(LogHyperAIStudio, Display, TEXT("HyperAIStudio.MenuSmoke %s tools=%d/3 status=%d/1 asset=%d/5 actorUnexpected=%d/0 menuText=%d/8 graphExtender=%s problems=%s"),
+		UE_LOG(LogHyperAIStudio, Display, TEXT("HyperAIStudio.MenuSmoke %s tools=%d/1 status=%d/1 asset=%d/5 actorUnexpected=%d/0 menuText=%d/6 graphExtender=%s problems=%s"),
 			bOk ? TEXT("succeeded") : TEXT("failed"),
 			ToolsFound,
 			StatusFound,

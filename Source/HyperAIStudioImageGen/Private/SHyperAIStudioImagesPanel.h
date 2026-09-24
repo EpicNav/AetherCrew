@@ -25,8 +25,6 @@ public:
 	void Construct(const FArguments& InArgs);
 	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
 
-	static FName GetTabName();
-
 	/** Reads models, templates, generated images and batches again. */
 	void Reload();
 	void SetPrompt(const FString& Text) { Prompt = Text; }

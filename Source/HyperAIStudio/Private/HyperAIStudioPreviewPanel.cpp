@@ -2,8 +2,8 @@
 
 #include "HyperAIStudioPreviewPanel.h"
 
-#include "Framework/Docking/TabManager.h"
 #include "HAL/FileManager.h"
+#include "HyperAIStudioShell.h"
 #include "Misc/Paths.h"
 
 #define LOCTEXT_NAMESPACE "HyperAIStudioPreviewPanel"
@@ -56,11 +56,6 @@ FSimpleMulticastDelegate& FHyperAIStudioPreviewPanel::OnSourcesChanged()
 	return Delegate;
 }
 
-FName FHyperAIStudioPreviewPanel::GetTabName()
-{
-	return FName(TEXT("HyperAIStudioPreview"));
-}
-
 FHyperAIStudioPreviewPanel::FOnOpenRequested& FHyperAIStudioPreviewPanel::OnOpenRequested()
 {
 	static FOnOpenRequested Delegate;
@@ -73,8 +68,8 @@ void FHyperAIStudioPreviewPanel::Open(const FName SourceId, const FString& Refer
 	{
 		return;
 	}
-	FGlobalTabmanager::Get()->TryInvokeTab(FTabId(GetTabName()));
-	// The tab may have just been created, so tell whichever panel is live what to show.
+	FHyperAIStudioShell::Open(TEXT("Match"));
+	// The page may have just been created, so tell whichever panel is live what to show.
 	OnOpenRequested().Broadcast(SourceId, ReferenceImagePath);
 }
 

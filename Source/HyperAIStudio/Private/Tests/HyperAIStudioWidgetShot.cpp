@@ -53,6 +53,9 @@ namespace HyperAIStudio::Tests
 		for (int32 Frame = 0; Frame < Frames; ++Frame)
 		{
 			Renderer.DrawWidget(Target, Framed, FVector2D(Size), 1.0f / 30.0f);
+			// SVG icons are rasterised when the editor's own renderer next draws its windows; until then they are blank
+			// squares. Let it draw, so the frames after the first show them.
+			FSlateApplication::Get().Tick();
 			FlushRenderingCommands();
 		}
 		FReadSurfaceDataFlags Flags(RCM_UNorm);

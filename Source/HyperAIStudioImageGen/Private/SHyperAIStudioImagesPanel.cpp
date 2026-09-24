@@ -55,11 +55,6 @@ namespace HyperAIStudio::ImagesPanel
 	}
 }
 
-FName SHyperAIStudioImagesPanel::GetTabName()
-{
-	return FName(TEXT("HyperAIStudioImages"));
-}
-
 void SHyperAIStudioImagesPanel::Construct(const FArguments& InArgs)
 {
 	BatchName = NewBatchName();

@@ -2,13 +2,10 @@
 
 #include "HyperAIStudioImageGenToolset.h"
 
-#include "Framework/Application/SlateApplication.h"
-#include "Framework/Docking/TabManager.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
+#include "HyperAIStudioShell.h"
 #include "Modules/ModuleManager.h"
 #include "SHyperAIStudioImagesPanel.h"
-#include "ToolMenus.h"
-#include "Widgets/Docking/SDockTab.h"
 
 #define LOCTEXT_NAMESPACE "HyperAIStudioImageGenModule"
 
@@ -32,47 +29,24 @@ public:
 		Registration = MakeUnique<FHyperAIStudioImageGenRegistration>();
 		Registration->Startup();
 
-		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(SHyperAIStudioImagesPanel::GetTabName(), FOnSpawnTab::CreateLambda([](const FSpawnTabArgs&)
-		{
-			return SNew(SDockTab)
-				.TabRole(ETabRole::NomadTab)
-				.Label(LOCTEXT("ImagesTab", "HyperAI Images"))
-				[
-					SNew(SHyperAIStudioImagesPanel)
-				];
-		}))
-		.SetDisplayName(LOCTEXT("ImagesTab", "HyperAI Images"))
-		.SetTooltipText(LOCTEXT("ImagesTabTooltip", "Generate reference images, with Codex or a configured model, and browse the ones the project has."))
-		.SetMenuType(ETabSpawnerMenuType::Hidden);
-		bTabRegistered = true;
-		UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FHyperAIStudioImageGenModule::RegisterMenus));
-	}
-
-	void RegisterMenus()
-	{
-		FToolMenuOwnerScoped Owner(this);
-		if (UToolMenu* Menu = UToolMenus::Get()->ExtendMenu(TEXT("LevelEditor.MainMenu.Tools")))
-		{
-			Menu->FindOrAddSection(TEXT("HyperAIStudio")).AddMenuEntry(
-				TEXT("OpenHyperAIStudioImages"),
-				LOCTEXT("ImagesMenu", "HyperAI Images"),
-				LOCTEXT("ImagesMenuTooltip", "Generate reference images and browse the generated ones."),
-				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateLambda([]() { FGlobalTabmanager::Get()->TryInvokeTab(SHyperAIStudioImagesPanel::GetTabName()); })));
-		}
+		FHyperAIStudioPage Page;
+		Page.Id = TEXT("Images");
+		Page.Label = LOCTEXT("ImagesPage", "Images");
+		Page.Tooltip = LOCTEXT("ImagesPageTooltip", "Generate reference images, with Codex, Gemini or a configured model, and browse the ones the project has.");
+		Page.Group = TEXT("Create");
+		Page.Order = 10;
+		Page.Icon = TEXT("HyperAIStudio.Icon.Images");
+		Page.Create = [](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioImagesPanel); };
+		FHyperAIStudioShell::RegisterPage(Page);
+		bPageRegistered = true;
 	}
 
 	virtual void ShutdownModule() override
 	{
-		if (UObjectInitialized())
+		if (bPageRegistered)
 		{
-			UToolMenus::UnRegisterStartupCallback(this);
-			UToolMenus::UnregisterOwner(this);
-		}
-		if (bTabRegistered && FSlateApplication::IsInitialized())
-		{
-			FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(SHyperAIStudioImagesPanel::GetTabName());
-			bTabRegistered = false;
+			FHyperAIStudioShell::UnregisterPage(TEXT("Images"));
+			bPageRegistered = false;
 		}
 		if (Registration)
 		{
@@ -105,7 +79,7 @@ public:
 private:
 	TUniquePtr<FHyperAIStudioImageGenRegistration> Registration;
 	bool bRuntimeToolsetPublished = false;
-	bool bTabRegistered = false;
+	bool bPageRegistered = false;
 };
 
 IMPLEMENT_MODULE(FHyperAIStudioImageGenModule, HyperAIStudioImageGen)

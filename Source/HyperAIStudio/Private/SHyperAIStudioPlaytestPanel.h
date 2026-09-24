@@ -24,8 +24,6 @@ public:
 	void Construct(const FArguments& InArgs);
 	virtual ~SHyperAIStudioPlaytestPanel() override;
 
-	static FName GetTabName();
-
 	/** The request the panel holds, as hyper_verify_run takes it: a deadline and cases. */
 	FString GetCases() const;
 	void SetCases(const FString& Json);

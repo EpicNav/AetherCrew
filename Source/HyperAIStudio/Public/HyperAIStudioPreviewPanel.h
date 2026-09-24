@@ -78,9 +78,8 @@ public:
 	/** Broadcast when a pack registers or withdraws a source, so a live panel can rebuild its list. */
 	static FSimpleMulticastDelegate& OnSourcesChanged();
 
-	/** Opens or focuses the tab; a source id and reference select what it shows. */
+	/** Opens or focuses the Match page of HyperAI Studio; a source id and reference select what it shows. */
 	static void Open(FName SourceId = NAME_None, const FString& ReferenceImagePath = FString());
-	static FName GetTabName();
 
 	DECLARE_MULTICAST_DELEGATE_TwoParams(FOnOpenRequested, FName /*SourceId*/, const FString& /*ReferenceImagePath*/);
 	static FOnOpenRequested& OnOpenRequested();

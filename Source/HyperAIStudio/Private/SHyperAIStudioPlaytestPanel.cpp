@@ -116,11 +116,6 @@ namespace HyperAIStudio::PlaytestPanel
 	}
 }
 
-FName SHyperAIStudioPlaytestPanel::GetTabName()
-{
-	return TEXT("HyperAIStudioPlaytest");
-}
-
 void SHyperAIStudioPlaytestPanel::Construct(const FArguments& InArgs)
 {
 	using namespace HyperAIStudio::PlaytestPanel;
