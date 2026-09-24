@@ -53,7 +53,7 @@ struct FHyperAIImageRecord
 {
 	GENERATED_BODY()
 
-	/** Project-relative path, ready for the Preview tab and hyper_lighting_compare. */
+	/** Project-relative path, ready for the Match page and hyper_lighting_compare. */
 	UPROPERTY() FString File;
 	UPROPERTY() FString BatchId;
 	UPROPERTY() FString Prompt;

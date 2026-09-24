@@ -548,7 +548,7 @@ void SHyperAIStudioToolForm::RebuildImages()
 		[
 			SNew(SButton)
 			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-			.ToolTipText(FText::Format(LOCTEXT("ImageTooltip", "{0}\nClick to open it in the HyperAI Preview tab."), FText::FromString(Path)))
+			.ToolTipText(FText::Format(LOCTEXT("ImageMatchTooltip", "{0}\nClick to open it in the Match page."), FText::FromString(Path)))
 			.OnClicked_Lambda([Path]()
 			{
 				FHyperAIStudioPreviewPanel::Open(NAME_None, Path);

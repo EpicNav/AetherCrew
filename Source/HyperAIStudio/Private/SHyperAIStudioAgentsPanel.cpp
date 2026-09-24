@@ -2,6 +2,7 @@
 
 #include "SHyperAIStudioAgentsPanel.h"
 
+#include "HyperAIStudioStyle.h"
 #include "HAL/PlatformProcess.h"
 #include "HyperAIStudioService.h"
 #include "Misc/MessageDialog.h"
@@ -75,7 +76,7 @@ void SHyperAIStudioAgentsPanel::Construct(const FArguments& InArgs)
 		[
 			SNew(STextBlock)
 			.Text(LOCTEXT("Title", "Subagents"))
-			.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
+			.TextStyle(FHyperAIStudioStyle::Get(), "HyperAIStudio.Text.PageTitle")
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -130,11 +131,10 @@ void SHyperAIStudioAgentsPanel::Construct(const FArguments& InArgs)
 			.Text(LOCTEXT("Empty", "No subagents yet. Add the gameplay team, or define your own."))
 		]
 		+ SVerticalBox::Slot()
-		.AutoHeight()
+		.FillHeight(1.0f)
 		.Padding(0.0f, 4.0f, 0.0f, 0.0f)
 		[
 			SNew(SBox)
-			.MaxDesiredHeight(460.0f)
 			.Visibility_Lambda([this]() { return Agents.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
 			[
 				SAssignNew(List, SListView<FAgentPtr>)

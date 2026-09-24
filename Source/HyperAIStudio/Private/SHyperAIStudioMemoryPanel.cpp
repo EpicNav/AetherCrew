@@ -2,6 +2,7 @@
 
 #include "SHyperAIStudioMemoryPanel.h"
 
+#include "HyperAIStudioStyle.h"
 #include "Dialog/SCustomDialog.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "HAL/FileManager.h"
@@ -127,7 +128,7 @@ void SHyperAIStudioMemoryPanel::Construct(const FArguments& InArgs)
 		[
 			SNew(STextBlock)
 			.Text(LOCTEXT("Title", "Project Memory"))
-			.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
+			.TextStyle(FHyperAIStudioStyle::Get(), "HyperAIStudio.Text.PageTitle")
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -221,11 +222,10 @@ void SHyperAIStudioMemoryPanel::Construct(const FArguments& InArgs)
 			})
 		]
 		+ SVerticalBox::Slot()
-		.AutoHeight()
+		.FillHeight(1.0f)
 		.Padding(0.0f, 4.0f, 0.0f, 0.0f)
 		[
 			SNew(SBox)
-			.MaxDesiredHeight(420.0f)
 			.Visibility_Lambda([this]() { return Filtered.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
 			[
 				SAssignNew(List, SListView<FFactPtr>)

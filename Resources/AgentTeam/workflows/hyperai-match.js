@@ -118,5 +118,5 @@ return {
   verdict: verdict ? verdict.verdict : 'unjudged',
   reason: verdict ? verdict.reason : 'The reviewer returned nothing.',
   nextSteps: verdict ? verdict.nextSteps : [],
-  preview: 'Open the HyperAI Preview tab, pick the Image match source and the same reference, to see every iteration.',
+  preview: 'Open the Match page in HyperAI Studio (Ctrl+Alt+H), pick the Image match source and the same reference, to see every iteration.',
 }

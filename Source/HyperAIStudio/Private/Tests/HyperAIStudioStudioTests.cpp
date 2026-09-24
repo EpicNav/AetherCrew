@@ -10,6 +10,7 @@
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioMarkdown.h"
+#include "HyperAIStudioPIEPlaytestToolset.h"
 #include "HyperAIStudioPreviewPanel.h"
 #include "HyperAIStudioService.h"
 #include "HyperAIStudioShell.h"
@@ -19,6 +20,7 @@
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "JsonObjectConverter.h"
 #include "Misc/ScopeExit.h"
 #include "SHyperAIStudioPlaytestPanel.h"
 #include "SHyperAIStudioSettingsPage.h"
@@ -503,6 +505,61 @@ bool FHyperAIStudioScreensResultReportsTest::RunTest(const FString& Parameters)
 	Panel->ShowOutcome(Batch);
 	HyperAIStudio::Tests::SaveWidgetShot(Panel, FIntPoint(1400, 1000), TEXT("step15-playtest-report"), 10);
 	TestTrue(TEXT("The report saves as an HTML page"), !HyperAIStudio::Markdown::SaveReport(TEXT("Playtest Lvl_Arena"), BatchReport).IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioScreensStudioPolishTest,
+	"HyperAIStudio.Screens.StudioPolish",
+	HyperAIStudio::StudioTests::Flags)
+
+bool FHyperAIStudioScreensStudioPolishTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::StudioTests;
+	// Playtest cases are a form, over the same request the JSON holds.
+	const TSharedRef<SHyperAIStudioPlaytestPanel> Playtest = SNew(SHyperAIStudioPlaytestPanel);
+	TestFalse(TEXT("Playtest opens on the form"), Playtest->IsJsonShown());
+	Playtest->AddTemplate(TEXT("Reach"));
+	TestTrue(TEXT("A template still adds its case"), Playtest->GetCases().Contains(TEXT("\"reach\"")));
+	TestFalse(TEXT("and the form shows it"), Playtest->IsJsonShown());
+	HyperAIStudio::Tests::SaveWidgetShot(Playtest, FIntPoint(1400, 900), TEXT("step17-playtest-form"), 8);
+	TestTrue(TEXT("The JSON is one click away"), Playtest->ShowJson(true) && Playtest->IsJsonShown());
+	HyperAIStudio::Tests::SaveWidgetShot(Playtest, FIntPoint(1400, 900), TEXT("step17-playtest-json"), 4);
+	TestTrue(TEXT("and so is the form again"), Playtest->ShowJson(false) && !Playtest->IsJsonShown());
+	Playtest->SetCases(TEXT("{\"cases\": [ {broken"));
+	TestTrue(TEXT("JSON the form cannot hold is shown as JSON to fix"), Playtest->IsJsonShown());
+	TestFalse(TEXT("and the form waits until it can"), Playtest->ShowJson(false));
+
+	// Written back without the fields left at their defaults.
+	FHyperAIVerifyRequest Request;
+	FHyperAIVerifyCase& Case = Request.Cases.AddDefaulted_GetRef();
+	Case.Name = TEXT("explore");
+	FHyperAIBotStep& Step = Case.Steps.AddDefaulted_GetRef();
+	Step.Action = EHyperAIBotAction::Play;
+	Step.Goal = EHyperAIBotGoal::Explore;
+	Step.Seconds = 20.0f;
+	const FString Json = SHyperAIStudioPlaytestPanel::RequestToJson(Request);
+	AddInfo(TEXT("Form as JSON: ") + Json.Replace(TEXT("\n"), TEXT(" ")).Replace(TEXT("\t"), TEXT("")));
+	TestTrue(TEXT("The JSON keeps what was set"), Json.Contains(TEXT("\"action\": \"Play\"")) && Json.Contains(TEXT("\"goal\": \"Explore\""))
+		&& Json.Contains(TEXT("\"seconds\": 20")) && Json.Contains(TEXT("\"name\": \"explore\"")));
+	TestFalse(TEXT("and leaves out what was not"), Json.Contains(TEXT("\"skill\"")) || Json.Contains(TEXT("\"playerIndex\"")));
+	FHyperAIVerifyRequest Back;
+	TestTrue(TEXT("and reads back as the same request"), FJsonObjectConverter::JsonObjectStringToUStruct(Json, &Back, 0, 0)
+		&& Back.Cases.Num() == 1 && Back.Cases[0].Steps.Num() == 1 && Back.Cases[0].Steps[0].Goal == EHyperAIBotGoal::Explore
+		&& FMath::IsNearlyEqual(Back.Cases[0].Steps[0].Seconds, 20.0f));
+
+	// Pages that were panels of the old window, in the new one.
+	const TSharedRef<SDockTab> Owner = SNew(SDockTab).TabRole(ETabRole::MajorTab);
+	const TSharedRef<SHyperAIStudioShell> Shell = SNew(SHyperAIStudioShell, Owner, nullptr);
+	Owner->SetContent(Shell);
+	Shell->SetRail(SHyperAIStudioShell::ERail::Expanded);
+	ON_SCOPE_EXIT { Shell->SetRail(SHyperAIStudioShell::ERail::Auto); };
+	for (const TCHAR* Page : {TEXT("Memory"), TEXT("Settings")})
+	{
+		Shell->OpenPage(Page);
+		Pump(1.2, []() { return false; });
+		HyperAIStudio::Tests::SaveWidgetShot(Shell, FIntPoint(1440, 900), FString::Printf(TEXT("step17-page-%s"), Page).ToLower(), 10);
+	}
 	return true;
 }
 

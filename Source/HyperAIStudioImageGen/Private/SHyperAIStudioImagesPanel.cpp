@@ -7,6 +7,7 @@
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioPreviewPanel.h"
+#include "HyperAIStudioWidgets.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Styling/AppStyle.h"
@@ -58,17 +59,31 @@ namespace HyperAIStudio::ImagesPanel
 void SHyperAIStudioImagesPanel::Construct(const FArguments& InArgs)
 {
 	BatchName = NewBatchName();
+	// A page of HyperAI Studio, headed like the others.
 	ChildSlot
 	[
-		SNew(SSplitter)
-		.Orientation(Orient_Horizontal)
-		+ SSplitter::Slot().Value(0.42f)
+		SNew(SBox)
+		.Padding(FMargin(24.0f, 20.0f, 24.0f, 16.0f))
 		[
-			BuildForm()
-		]
-		+ SSplitter::Slot().Value(0.58f)
-		[
-			BuildBrowser()
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
+			[
+				HyperAIStudio::UI::PageHeader(LOCTEXT("PageTitle", "Images"),
+					LOCTEXT("PageBody", "Reference images for the look you are after, from Nano Banana, Codex or a model you configure, written into the project with the prompt that made them."))
+			]
+			+ SVerticalBox::Slot().FillHeight(1.0f)
+			[
+				SNew(SSplitter)
+				.Orientation(Orient_Horizontal)
+				+ SSplitter::Slot().Value(0.42f)
+				[
+					BuildForm()
+				]
+				+ SSplitter::Slot().Value(0.58f)
+				[
+					BuildBrowser()
+				]
+			]
 		]
 	];
 	Reload();
@@ -378,7 +393,7 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildBrowser()
 				.InnerSlotPadding(FVector2D(6.0f, 6.0f))
 				+ SWrapBox::Slot()
 				[
-					Action(LOCTEXT("OpenPreview", "Open in Preview"), LOCTEXT("OpenPreviewTooltip", "Measure the level viewport's lighting against it in the HyperAI Preview tab."),
+					Action(LOCTEXT("OpenMatch", "Open in Match"), LOCTEXT("OpenMatchTooltip", "Measure the level viewport's lighting against it in the Match page."),
 						[this]() { if (const FHyperAIImageRecord* Record = SelectedRecord()) FHyperAIStudioPreviewPanel::Open(FName(TEXT("lighting")), FullPath(Record->File)); })
 				]
 				+ SWrapBox::Slot()

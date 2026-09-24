@@ -9,6 +9,13 @@
 #include "GameFramework/PlayerStart.h"
 #include "HyperAIStudioMarkdown.h"
 #include "HyperAIStudioPIEPlaytestToolset.h"
+#include "HyperAIStudioWidgets.h"
+#include "IDetailsView.h"
+#include "IStructureDetailsView.h"
+#include "Modules/ModuleManager.h"
+#include "PropertyEditorModule.h"
+#include "UObject/StructOnScope.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "JsonObjectConverter.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -102,6 +109,46 @@ namespace HyperAIStudio::PlaytestPanel
 		return Text;
 	}
 
+	/**
+	 * A struct as JSON without the fields left at their defaults, so a case reads as it was written. A step always
+	 * says its action, and a case its name.
+	 */
+	TSharedRef<FJsonObject> Pruned(const UScriptStruct* Struct, const void* Data)
+	{
+		const TSharedRef<FJsonObject> Out = MakeShared<FJsonObject>();
+		const FStructOnScope Default(Struct);
+		for (TFieldIterator<FProperty> It(Struct); It; ++It)
+		{
+			const FProperty* Property = *It;
+			const void* Value = Property->ContainerPtrToValuePtr<void>(Data);
+			const FString Key = FJsonObjectConverter::StandardizeCase(Property->GetName());
+			if (const FArrayProperty* Array = CastField<FArrayProperty>(Property))
+			{
+				FScriptArrayHelper Items(Array, Value);
+				if (Items.Num() == 0)
+				{
+					continue;
+				}
+				TArray<TSharedPtr<FJsonValue>> Values;
+				const FStructProperty* Inner = CastField<FStructProperty>(Array->Inner);
+				for (int32 Index = 0; Index < Items.Num(); ++Index)
+				{
+					Values.Add(Inner ? MakeShared<FJsonValueObject>(Pruned(Inner->Struct, Items.GetRawPtr(Index)))
+						: FJsonObjectConverter::UPropertyToJsonValue(Array->Inner, Items.GetRawPtr(Index)));
+				}
+				Out->SetArrayField(Key, Values);
+				continue;
+			}
+			const bool bAlways = Property->GetFName() == TEXT("Action") || Property->GetFName() == TEXT("Name");
+			if (!bAlways && Property->Identical(Value, Property->ContainerPtrToValuePtr<void>(Default.GetStructMemory())))
+			{
+				continue;
+			}
+			Out->SetField(Key, FJsonObjectConverter::UPropertyToJsonValue(const_cast<FProperty*>(Property), Value));
+		}
+		return Out;
+	}
+
 	/** Text for a table cell: a pipe would end the cell, and a new line the row. */
 	FString Cell(const FString& Text)
 	{
@@ -146,26 +193,37 @@ void SHyperAIStudioPlaytestPanel::Construct(const FArguments& InArgs)
 			})
 		];
 	}
+	FormRequest = MakeShared<FStructOnScope>(FHyperAIVerifyRequest::StaticStruct());
+	FPropertyEditorModule& Editor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
+	FDetailsViewArgs ViewArgs;
+	ViewArgs.bAllowSearch = true;
+	ViewArgs.bHideSelectionTip = true;
+	ViewArgs.bShowOptions = false;
+	// The request's fields are made for agents and carry no Edit flag; they are shown here all the same.
+	ViewArgs.bForceHiddenPropertyVisibility = true;
+	ViewArgs.NameAreaSettings = FDetailsViewArgs::HideNameArea;
+	Form = Editor.CreateStructureDetailView(ViewArgs, FStructureDetailsViewArgs(), FormRequest);
+	Form->GetOnFinishedChangingPropertiesDelegate().AddSP(this, &SHyperAIStudioPlaytestPanel::FormToJsonOnChange);
+	auto ViewToggle = [this](const FText& Label, const bool bForJson)
+	{
+		return SNew(SCheckBox)
+			.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+			.IsChecked_Lambda([this, bForJson]() { return bJson == bForJson ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+			.OnCheckStateChanged_Lambda([this, bForJson](ECheckBoxState) { ShowJson(bForJson); })
+			[
+				SNew(STextBlock).Text(Label).Margin(FMargin(8.0f, 1.0f))
+			];
+	};
 	ChildSlot
 	[
-		SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("Brushes.Panel"))
-		.Padding(10.0f)
+		SNew(SBox)
+		.Padding(FMargin(24.0f, 20.0f, 24.0f, 16.0f))
 		[
 			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 12.0f)
 			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("Title", "Playtest"))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 8.0f)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("Intro", "The HyperAI bot plays the open level the way a person would, through the game's own controls. Every case plays in its own copy of the level, all at the same time, and answers within a minute. Nothing in the level changes."))
-				.Font(FAppStyle::GetFontStyle("SmallFont"))
-				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-				.AutoWrapText(true)
+				HyperAIStudio::UI::PageHeader(LOCTEXT("Title", "Playtest"),
+					LOCTEXT("Intro", "The HyperAI bot plays the open level the way a person would, through the game's own controls. Every case plays in its own copy of the level, all at the same time, and answers within a minute. Nothing in the level changes."))
 			]
 			+ SVerticalBox::Slot().FillHeight(1.0f)
 			[
@@ -181,11 +239,34 @@ void SHyperAIStudioPlaytestPanel::Construct(const FArguments& InArgs)
 					[
 						Templates
 					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth()
+						[
+							ViewToggle(LOCTEXT("FormView", "Form"), false)
+						]
+						+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f, 0.0f, 0.0f, 0.0f)
+						[
+							ViewToggle(LOCTEXT("JsonView", "JSON"), true)
+						]
+					]
 					+ SVerticalBox::Slot().FillHeight(1.0f)
 					[
 						SNew(SBorder)
 						.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
 						.Padding(4.0f)
+						.Visibility_Lambda([this]() { return bJson ? EVisibility::Collapsed : EVisibility::Visible; })
+						[
+							Form->GetWidget().ToSharedRef()
+						]
+					]
+					+ SVerticalBox::Slot().FillHeight(1.0f)
+					[
+						SNew(SBorder)
+						.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
+						.Padding(4.0f)
+						.Visibility_Lambda([this]() { return bJson ? EVisibility::Visible : EVisibility::Collapsed; })
 						[
 							SAssignNew(CasesBox, SMultiLineEditableTextBox)
 							.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
@@ -237,7 +318,7 @@ void SHyperAIStudioPlaytestPanel::Construct(const FArguments& InArgs)
 							.IsEnabled_Lambda([this]() { return bRunning; })
 							.OnClicked_Lambda([]()
 							{
-								HyperAIStudio::Verify::Stop(TEXT("Stopped from the Playtest tab."));
+								HyperAIStudio::Verify::Stop(TEXT("Stopped from the Playtest page."));
 								return FReply::Handled();
 							})
 						]
@@ -283,6 +364,69 @@ void SHyperAIStudioPlaytestPanel::SetCases(const FString& Json)
 	{
 		CasesBox->SetText(FText::FromString(Json));
 	}
+	FText Why;
+	if (!bJson && !JsonToForm(Why))
+	{
+		// JSON the form cannot hold stays as written, to be fixed by hand.
+		bJson = true;
+		Status = FText::Format(LOCTEXT("NotARequest", "Shown as JSON: {0}"), Why);
+	}
+}
+
+bool SHyperAIStudioPlaytestPanel::ShowJson(const bool bInJson)
+{
+	if (bInJson == bJson)
+	{
+		return true;
+	}
+	if (bInJson)
+	{
+		bJson = true;
+		return true;
+	}
+	FText Why;
+	if (!JsonToForm(Why))
+	{
+		Status = FText::Format(LOCTEXT("CannotShowForm", "The JSON is not a hyper_verify_run request, so it stays as JSON: {0}"), Why);
+		return false;
+	}
+	bJson = false;
+	return true;
+}
+
+bool SHyperAIStudioPlaytestPanel::JsonToForm(FText& OutWhy)
+{
+	FHyperAIVerifyRequest Parsed;
+	if (!CasesBox.IsValid() || !FJsonObjectConverter::JsonObjectStringToUStruct(CasesBox->GetText().ToString(), &Parsed, 0, 0, false, &OutWhy))
+	{
+		return false;
+	}
+	*reinterpret_cast<FHyperAIVerifyRequest*>(FormRequest->GetStructMemory()) = MoveTemp(Parsed);
+	if (Form.IsValid())
+	{
+		Form->SetStructureData(FormRequest);
+		Form->GetDetailsView()->ForceRefresh();
+	}
+	return true;
+}
+
+FString SHyperAIStudioPlaytestPanel::RequestToJson(const FHyperAIVerifyRequest& Request)
+{
+	using namespace HyperAIStudio::PlaytestPanel;
+	return Pretty(Pruned(FHyperAIVerifyRequest::StaticStruct(), &Request));
+}
+
+void SHyperAIStudioPlaytestPanel::FormToJson()
+{
+	if (CasesBox.IsValid())
+	{
+		CasesBox->SetText(FText::FromString(RequestToJson(*reinterpret_cast<const FHyperAIVerifyRequest*>(FormRequest->GetStructMemory()))));
+	}
+}
+
+void SHyperAIStudioPlaytestPanel::FormToJsonOnChange(const FPropertyChangedEvent& Event)
+{
+	FormToJson();
 }
 
 void SHyperAIStudioPlaytestPanel::AddTemplate(const FString& Kind)

@@ -195,7 +195,13 @@ TSharedRef<SWidget> SHyperAIStudioSettingsPage::BuildSection(const FName Id)
 			];
 	}
 	const int32 Legacy = Id == Setup ? 0 : Id == Agents ? 1 : Id == Servers ? 2 : 3;
-	return SNew(SHyperAIStudioWindow).Section(Legacy);
+	static const FName LegacyIds[] = {Setup, Agents, Servers, Docs};
+	return SNew(SHyperAIStudioWindow)
+		.Section(Legacy)
+		.OnOpenSection_Lambda([this](const int32 Section)
+		{
+			ShowSection(LegacyIds[FMath::Clamp(Section, 0, 3)]);
+		});
 }
 
 TSharedRef<SWidget> SHyperAIStudioSettingsPage::BuildNanoBanana() const

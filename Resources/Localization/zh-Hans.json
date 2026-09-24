@@ -909,9 +909,9 @@
   },
   {
    "namespace": "HyperAIStudioMarkdown",
-   "key": "PictureTooltip",
-   "source": "{0}\nClick to open it in Preview.",
-   "text": "{0}\n点击在预览中打开。"
+   "key": "PictureMatchTooltip",
+   "source": "{0}\nClick to open it in Match.",
+   "text": "{0}\n点击在匹配页面中打开。"
   },
   {
    "namespace": "HyperAIStudioMarkdown",
@@ -2427,15 +2427,27 @@
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
-   "key": "OpenPreview",
-   "source": "Open in Preview",
-   "text": "在预览中打开"
+   "key": "OpenMatch",
+   "source": "Open in Match",
+   "text": "在匹配中打开"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
-   "key": "OpenPreviewTooltip",
-   "source": "Measure the level viewport's lighting against it in the HyperAI Preview tab.",
-   "text": "在 HyperAI 预览标签页中，将关卡视口的光照与它对比测量。"
+   "key": "OpenMatchTooltip",
+   "source": "Measure the level viewport's lighting against it in the Match page.",
+   "text": "在匹配页面中，将关卡视口的光照与它进行对比测量。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PageBody",
+   "source": "Reference images for the look you are after, from Nano Banana, Codex or a model you configure, written into the project with the prompt that made them.",
+   "text": "为你想要的外观生成参考图像，可使用 Nano Banana、Codex 或你配置的模型，图像连同生成它的提示词一起写入项目。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PageTitle",
+   "source": "Images",
+   "text": "图像"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
@@ -2841,15 +2853,15 @@
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
-   "key": "OpenInPreview",
-   "source": "Open in Preview",
-   "text": "在预览中打开"
+   "key": "OpenInMatch",
+   "source": "Open in Match",
+   "text": "在匹配中打开"
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
-   "key": "OpenInPreviewTooltip",
-   "source": "Show it in the HyperAI Preview tab, beside what the level looks like.",
-   "text": "在 HyperAI 预览标签页中显示，与关卡当前的样子并排对比。"
+   "key": "OpenInMatchTooltip",
+   "source": "Show it in the Match page, beside what the level looks like.",
+   "text": "在匹配页面中显示它，与关卡当前的样子并排比较。"
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
@@ -3003,6 +3015,12 @@
   },
   {
    "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "CannotShowForm",
+   "source": "The JSON is not a hyper_verify_run request, so it stays as JSON: {0}",
+   "text": "该 JSON 不是 hyper_verify_run 请求，因此保持为 JSON：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
    "key": "CasesHint",
    "source": "hyper_verify_run's request: a deadline and cases of bot steps.",
    "text": "hyper_verify_run 的请求：一个截止时间和由机器人步骤组成的用例。"
@@ -3045,15 +3063,33 @@
   },
   {
    "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "FormView",
+   "source": "Form",
+   "text": "表单"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
    "key": "Intro",
    "source": "The HyperAI bot plays the open level the way a person would, through the game's own controls. Every case plays in its own copy of the level, all at the same time, and answers within a minute. Nothing in the level changes.",
    "text": "HyperAI 机器人像真人一样试玩当前关卡，使用游戏自己的操作。每个用例在各自的关卡副本中运行，全部同时进行，一分钟内给出结果。关卡中的任何内容都不会改变。"
   },
   {
    "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "JsonView",
+   "source": "JSON",
+   "text": "JSON"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
    "key": "Limit",
    "source": "Up to {0} cases at once on this machine and level.",
    "text": "在这台机器和这个关卡上，一次最多运行 {0} 个用例。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "NotARequest",
+   "source": "Shown as JSON: {0}",
+   "text": "以 JSON 显示：{0}"
   },
   {
    "namespace": "SHyperAIStudioPlaytestPanel",
@@ -3207,15 +3243,27 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatMcpTooltip",
+   "source": "The Unreal MCP server this chat's agent uses: its state and what to do about it.",
+   "text": "此对话的智能体所使用的 Unreal MCP 服务器：它的状态以及可以采取的操作。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "ChatOpenSetup",
    "source": "Open Setup",
    "text": "打开设置"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
-   "key": "ChatOpenSetupTooltip",
-   "source": "Open the main HyperAIStudio Setup tab.",
-   "text": "打开 HyperAIStudio 主设置标签页。"
+   "key": "ChatOpenSetupStudioTooltip",
+   "source": "Open Settings in HyperAI Studio: setup, agents and MCP servers.",
+   "text": "在 HyperAI Studio 中打开设置：初始设置、智能体和 MCP 服务器。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatRefresh",
+   "source": "Check Again",
+   "text": "重新检查"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
@@ -3243,9 +3291,9 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
-   "key": "ChatSettingsTooltip",
-   "source": "Setup, chat settings and terminal appearance.",
-   "text": "设置、对话设置和终端外观。"
+   "key": "ChatSettingsMoreTooltip",
+   "source": "Unreal MCP, checking again, setup, chat settings and terminal appearance.",
+   "text": "Unreal MCP、重新检查、初始设置、对话设置和终端外观。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
@@ -3429,12 +3477,6 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
-   "key": "HeaderTitle",
-   "source": "HyperAI Chat",
-   "text": "HyperAI 对话"
-  },
-  {
-   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "InitialReadyMessage",
    "source": "Type to the agent in the terminal: Enter sends, Shift+Enter adds a line. The Chats button resumes a past conversation. Copy Prompt is only for manual handoff/context fallback.",
    "text": "在终端中与智能体对话：Enter 发送，Shift+Enter 换行。“对话”按钮可继续过去的会话。“复制提示词”仅用于手动交接或作为上下文的备用方式。"
@@ -3564,12 +3606,6 @@
    "key": "McpRestarted",
    "source": "Unreal MCP restarted.",
    "text": "Unreal MCP 已重启。"
-  },
-  {
-   "namespace": "SHyperAIStudioQuickActionWindow",
-   "key": "McpStatusTooltip",
-   "source": "Unreal MCP at {0}\nServer running: {1}\nPort listening: {2}\nTool list reachable: {3}\nRegistered tools: {4}",
-   "text": "Unreal MCP 位于 {0}\n服务器运行中：{1}\n端口监听中：{2}\n工具列表可访问：{3}\n已注册工具：{4}"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
@@ -3717,12 +3753,6 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
-   "key": "No",
-   "source": "no",
-   "text": "无"
-  },
-  {
-   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "NoUsableAgentCopy",
    "source": "No usable agent is selected. Open Agents to install or configure an agent first.",
    "text": "没有选择可用的智能体。请先打开“智能体”安装或配置一个智能体。"
@@ -3744,12 +3774,6 @@
    "key": "PromptCopyFailed",
    "source": "Prompt copy failed: {0}",
    "text": "复制提示词失败：{0}"
-  },
-  {
-   "namespace": "SHyperAIStudioQuickActionWindow",
-   "key": "ReadinessTooltip",
-   "source": "Unreal MCP endpoint: {0}",
-   "text": "Unreal MCP 端点：{0}"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
@@ -4056,12 +4080,6 @@
    "key": "TerminalAppearanceTooltip",
    "source": "Font, size, colour scheme and scrollback for the embedded terminal. Changes apply the next time the agent starts.",
    "text": "内嵌终端的字体、字号、配色方案和回滚行数。更改会在智能体下次启动时生效。"
-  },
-  {
-   "namespace": "SHyperAIStudioQuickActionWindow",
-   "key": "Yes",
-   "source": "yes",
-   "text": "是"
   },
   {
    "namespace": "SHyperAIStudioSettingsPage",
@@ -4491,9 +4509,9 @@
   },
   {
    "namespace": "SHyperAIStudioToolForm",
-   "key": "ImageTooltip",
-   "source": "{0}\nClick to open it in the HyperAI Preview tab.",
-   "text": "{0}\n点击在 HyperAI 预览标签页中打开。"
+   "key": "ImageMatchTooltip",
+   "source": "{0}\nClick to open it in the Match page.",
+   "text": "{0}\n点击在匹配页面中打开。"
   },
   {
    "namespace": "SHyperAIStudioToolForm",
@@ -4623,27 +4641,9 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "AddServerButton",
-   "source": "Add MCP Server Entry",
-   "text": "添加 MCP 服务器条目"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "AgentChatPanelOpened",
    "source": "Opened Chat / Terminal for {0}.",
    "text": "已为 {0} 打开对话 / 终端。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "AgentConfigHint",
-   "source": "Agent config files are written where each external agent expects them. HyperAIStudio only writes configs for agents that are enabled and checked here; disabled agents do not get new config files.",
-   "text": "智能体配置文件会写到每个外部智能体期望的位置。HyperAIStudio 只为已启用并在此勾选的智能体写入配置；已禁用的智能体不会得到新的配置文件。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "AgentConfigTitle",
-   "source": "Agent Configs",
-   "text": "智能体配置"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -4696,12 +4696,6 @@
   {
    "namespace": "SHyperAIStudioWindow",
    "key": "AgentFilesDialogTitle",
-   "source": "Agent Files",
-   "text": "智能体文件"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "AgentFilesRow",
    "source": "Agent Files",
    "text": "智能体文件"
   },
@@ -4785,12 +4779,6 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "AgentStatusTitle",
-   "source": "Agent Targets",
-   "text": "智能体目标"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "AgentUseInChat",
    "source": "Use in Chat",
    "text": "在对话中使用"
@@ -4815,30 +4803,6 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "AgentsTab",
-   "source": "Agents",
-   "text": "智能体"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "AllowAgentLaunch",
-   "source": "Allow future direct external agent launch",
-   "text": "允许以后直接启动外部智能体"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "AllowClipboardCopy",
-   "source": "Copy generated instructions to clipboard",
-   "text": "将生成的说明复制到剪贴板"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "AllowTerminalLaunch",
-   "source": "Allow HyperAIStudio to open external agent windows",
-   "text": "允许 HyperAIStudio 打开外部智能体窗口"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "AutoRoutedReadyMessage",
    "source": "Unreal MCP is ready. Open HyperAI Chat to copy or launch an external-agent handoff.",
    "text": "Unreal MCP 已就绪。打开 HyperAI 对话以复制或启动外部智能体交接。"
@@ -4857,42 +4821,6 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "CheckingHeadline",
-   "source": "Checking Unreal MCP readiness...",
-   "text": "正在检查 Unreal MCP 就绪状态..."
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ClaudeConfig",
-   "source": "Claude Code: .mcp.json",
-   "text": "Claude Code：.mcp.json"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ClaudeMd",
-   "source": "Claude instructions: CLAUDE.md",
-   "text": "Claude 说明：CLAUDE.md"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "CodexConfig",
-   "source": "Codex: .codex/config.toml",
-   "text": "Codex：.codex/config.toml"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "CodexTomlPatchCopied",
-   "source": "Codex TOML managed block copied. Review or paste it into .codex/config.toml if you do not want automatic setup to write Codex config.",
-   "text": "已复制 Codex TOML 托管块。如果你不希望自动设置写入 Codex 配置，请审阅后将其粘贴到 .codex/config.toml。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "CodexTomlSafetyHint",
-   "source": "Codex TOML updates stay inside a HyperAIStudio managed block. Copy the block first if you want to review or manually apply it to an existing config.",
-   "text": "Codex TOML 的更新只会写在 HyperAIStudio 托管块内。如果要审阅或手动应用到现有配置，请先复制该块。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "ConfigureAgentsButton",
    "source": "Configure Agents",
    "text": "配置智能体"
@@ -4902,90 +4830,6 @@
    "key": "ConfigureAgentsTooltip",
    "source": "Open the Agents tab.",
    "text": "打开“智能体”标签页。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ContextActorsLabel",
-   "source": "Actors",
-   "text": "Actor"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ContextActorsTooltip",
-   "source": "Selected level actors that will be included in a context pack.",
-   "text": "将包含在上下文包中的所选关卡 Actor。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ContextAssetsLabel",
-   "source": "Assets",
-   "text": "资产"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ContextAssetsTooltip",
-   "source": "Selected Content Browser assets that will be included in a context pack.",
-   "text": "将包含在上下文包中的内容浏览器所选资产。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ContextBlueprintLabel",
-   "source": "Blueprint Nodes",
-   "text": "蓝图节点"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ContextBlueprintMenuValue",
-   "source": "Graph menu",
-   "text": "图表菜单"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ContextBlueprintTooltip",
-   "source": "Blueprint node context is captured from the Blueprint graph right-click menu.",
-   "text": "蓝图节点上下文从蓝图图表的右键菜单中获取。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ContextChipsTitle",
-   "source": "Current Context",
-   "text": "当前上下文"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ContextMapLabel",
-   "source": "Map",
-   "text": "地图"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ContextMapTooltip",
-   "source": "Current editor map recorded in generated context packs.",
-   "text": "记录在生成的上下文包中的当前编辑器地图。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ContextProjectRootLabel",
-   "source": "Project Root",
-   "text": "项目根目录"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ContextProjectRootTooltip",
-   "source": "Agent clients opened from this project root can load the generated project-scoped config and rules.",
-   "text": "从此项目根目录打开的智能体客户端可以加载生成的项目级配置和规则。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "CopyAgentInstall",
-   "source": "Copy Install",
-   "text": "复制安装命令"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "CopyAgentInstallTooltip",
-   "source": "Copy the install command for this agent app.",
-   "text": "复制此智能体应用的安装命令。"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5001,57 +4845,9 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "CopyCodexTomlPatchButton",
-   "source": "Copy Codex TOML Patch",
-   "text": "复制 Codex TOML 补丁"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "CopyExampleMCPProfileButton",
-   "source": "Copy Example Profile",
-   "text": "复制示例配置"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "CopyInspectorCommand",
-   "source": "Copy MCP Inspector",
-   "text": "复制 MCP Inspector 命令"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "CopyInstallCommand",
-   "source": "Copy Install",
-   "text": "复制安装命令"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "CopyTerminalSetup",
-   "source": "Copy Startup Commands",
-   "text": "复制启动命令"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "CopyTestPrompt",
-   "source": "Copy Instructions",
-   "text": "复制说明"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "CreateAgentFileFailed",
    "source": "Create failed for {0}: {1}",
    "text": "为 {0} 创建失败：{1}"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "CursorConfig",
-   "source": "Cursor: .cursor/mcp.json",
-   "text": "Cursor：.cursor/mcp.json"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "DescriptionMCPServerMissing",
-   "source": "That MCP server entry no longer exists.",
-   "text": "该 MCP 服务器条目已不存在。"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5103,12 +4899,6 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "DocsLink",
-   "source": "Documentation",
-   "text": "文档"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "DocsLocalBody",
    "source": "HyperAIStudio guide on gamesbyhyper.com and current project folder.",
    "text": "gamesbyhyper.com 上的 HyperAIStudio 指南，以及当前项目文件夹。"
@@ -5157,6 +4947,12 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
+   "key": "DocsSectionTitle",
+   "source": "Documentation",
+   "text": "文档"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
    "key": "DocsTroubleshootingBody",
    "source": "Port conflicts, toolset visibility, missing files, and config repair routes.",
    "text": "端口冲突、工具集可见性、缺失文件以及配置修复方法。"
@@ -5187,69 +4983,9 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "EnableMCPServerMissing",
-   "source": "That MCP server entry no longer exists.",
-   "text": "该 MCP 服务器条目已不存在。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "EnablePluginsButton",
-   "source": "Enable Plugins",
-   "text": "启用插件"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "EndpointMCPServerMissing",
-   "source": "That MCP server entry no longer exists.",
-   "text": "该 MCP 服务器条目已不存在。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "ExampleMCPProfileCopied",
    "source": "Example hyperai-mcp.json profile copied to clipboard.",
    "text": "已将示例 hyperai-mcp.json 配置复制到剪贴板。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FilesPermissionsTitle",
-   "source": "Files And Permissions",
-   "text": "文件与权限"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunCopyPrompt",
-   "source": "Copy Starter Instructions",
-   "text": "复制起始说明"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunGuideHint",
-   "source": "HyperAIStudio makes Epic Unreal MCP usable from your external agent. Set up once, test the connection, then continue in Codex, Claude Code, Gemini, Cursor, or VS Code/Copilot with generated project instructions.",
-   "text": "HyperAIStudio 让你可以从外部智能体使用 Epic Unreal MCP。完成一次设置并测试连接，然后借助生成的项目说明在 Codex、Claude Code、Gemini、Cursor 或 VS Code/Copilot 中继续工作。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunGuideTitle",
-   "source": "First Run Flow",
-   "text": "首次运行流程"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunOpenDocs",
-   "source": "Open Docs",
-   "text": "打开文档"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunOpenEpicDocs",
-   "source": "Open Epic MCP Docs",
-   "text": "打开 Epic MCP 文档"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunOpenProjectFolder",
-   "source": "Open Project Folder",
-   "text": "打开项目文件夹"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5259,117 +4995,9 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunStepAgent",
-   "source": "3. Continue In Agent",
-   "text": "3. 在智能体中继续"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunStepAgentNeeded",
-   "source": "Run a connection test",
-   "text": "运行连接测试"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunStepAgentReady",
-   "source": "Ready",
-   "text": "就绪"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunStepSetup",
-   "source": "1. Setup",
-   "text": "1. 设置"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunStepSetupNeeded",
-   "source": "Run setup",
-   "text": "运行设置"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunStepSetupReady",
-   "source": "Configured",
-   "text": "已配置"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunStepVerify",
-   "source": "2. Verify MCP",
-   "text": "2. 验证 MCP"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunStepVerifyNeeded",
-   "source": "Refresh/test",
-   "text": "刷新/测试"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "FirstRunStepVerifyReady",
-   "source": "tools/list works",
-   "text": "tools/list 可用"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "GeminiConfig",
-   "source": "Gemini: .gemini/settings.json",
-   "text": "Gemini：.gemini/settings.json"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "GenerateAgentConfigFailed",
    "source": "Generate config failed for {0}: {1}",
    "text": "为 {0} 生成配置失败：{1}"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "HeaderAgentFilesMissing",
-   "source": "Missing",
-   "text": "缺失"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "HeaderAgentFilesReady",
-   "source": "Generated",
-   "text": "已生成"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "HeaderChecking",
-   "source": "Checking",
-   "text": "检查中"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "HeaderMetricAgentFiles",
-   "source": "Agent Files",
-   "text": "智能体文件"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "HeaderMetricEndpoint",
-   "source": "Endpoint",
-   "text": "端点"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "HeaderMetricMCP",
-   "source": "Unreal MCP",
-   "text": "Unreal MCP"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "HeaderReady",
-   "source": "Ready",
-   "text": "就绪"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "HeaderSetupNeeded",
-   "source": "Setup needed",
-   "text": "需要设置"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5379,39 +5007,9 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "HelpTab",
-   "source": "Docs",
-   "text": "文档"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "HelpTitle",
-   "source": "Docs",
-   "text": "文档"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "HyperAIToolModesLabel",
    "source": "Unreal MCP tool set",
    "text": "Unreal MCP 工具集"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ImportExampleMCPProfileButton",
-   "source": "Import Example Profile",
-   "text": "导入示例配置"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ImportExampleMCPProfileFailed",
-   "source": "Example MCP profile import failed: {0}",
-   "text": "导入示例 MCP 配置失败：{0}"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ImportMCPProfileButton",
-   "source": "Import Profile From Clipboard",
-   "text": "从剪贴板导入配置"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5478,18 +5076,6 @@
    "key": "MCPAddTooltip",
    "source": "Add a custom MCP profile entry.",
    "text": "添加一个自定义 MCP 配置条目。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "MCPCommandLabel",
-   "source": "Command",
-   "text": "命令"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "MCPDescriptionHint",
-   "source": "Description for generated agent instructions...",
-   "text": "用于生成的智能体说明的描述..."
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5589,27 +5175,9 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "MCPPriorityLabel",
-   "source": "Priority",
-   "text": "优先级"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "MCPRegistryTitle",
-   "source": "MCP Servers",
-   "text": "MCP 服务器"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "MCPSectionHint",
    "source": "Unreal MCP stays the locked primary server. Extended Hyper Tools, when enabled, use that same endpoint. Other MCP entries are exported to agents by advisory priority; HyperAIStudio does not route tool calls.",
    "text": "Unreal MCP 始终是锁定的主服务器。启用扩展 Hyper 工具时，它们使用同一个端点。其他 MCP 条目会按建议优先级导出给智能体；HyperAIStudio 不会路由工具调用。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "MCPSectionTitle",
-   "source": "MCP",
-   "text": "MCP"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5619,15 +5187,9 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "MCPServerMissingHint",
-   "source": "Server entry no longer exists.",
-   "text": "服务器条目已不存在。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "MCPTab",
-   "source": "MCP",
-   "text": "MCP"
+   "key": "MCPServersSectionTitle",
+   "source": "MCP servers",
+   "text": "MCP 服务器"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5649,27 +5211,9 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "MCPUrlLabel",
-   "source": "URL",
-   "text": "URL"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "MissingMCPServerName",
-   "source": "Missing server",
-   "text": "缺少服务器"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "MissingPrerequisitesCommandFailed",
    "source": "Could not build the missing-prerequisites install command.",
    "text": "无法构建缺失前置组件的安装命令。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ModuleRow",
-   "source": "Epic Unreal MCP",
-   "text": "Epic Unreal MCP"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5745,12 +5289,6 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "NeedsSetupHeadline",
-   "source": "Setup needed: run Set Up HyperAIStudio.",
-   "text": "需要设置：请运行“设置 HyperAIStudio”。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "NoMissingPrerequisites",
    "source": "No missing installable external prerequisites were found.",
    "text": "没有发现可安装的缺失外部前置组件。"
@@ -5760,18 +5298,6 @@
    "key": "OfficialMCPDocsOpened",
    "source": "Opened Epic Unreal MCP documentation.",
    "text": "已打开 Epic Unreal MCP 文档。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenAgentDocs",
-   "source": "Docs",
-   "text": "文档"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenAgentDocsTooltip",
-   "source": "Open setup documentation for this agent app.",
-   "text": "打开此智能体应用的设置文档。"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5787,45 +5313,9 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "OpenAgentTestFailed",
-   "source": "Open agent test failed: {0}",
-   "text": "打开智能体测试失败：{0}"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenAgentsButton",
-   "source": "Open AGENTS.md",
-   "text": "打开 AGENTS.md"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "OpenAgentsFailed",
    "source": "Open AGENTS.md failed: {0}",
    "text": "打开 AGENTS.md 失败：{0}"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenChatTerminalButton",
-   "source": "Open Chat / Terminal",
-   "text": "打开对话 / 终端"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenChatTerminalTooltip",
-   "source": "Open the separate Chat / Terminal handoff panel.",
-   "text": "打开独立的对话 / 终端交接面板。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenClaudeButton",
-   "source": "Open CLAUDE.md",
-   "text": "打开 CLAUDE.md"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenClaudeFailed",
-   "source": "Open CLAUDE.md failed: {0}",
-   "text": "打开 CLAUDE.md 失败：{0}"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5835,87 +5325,9 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "OpenPrereqDocs",
-   "source": "Docs",
-   "text": "文档"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenProjectFolderButton",
-   "source": "Open Project Folder",
-   "text": "打开项目文件夹"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "OpenProjectFolderFailed",
    "source": "Open project folder failed: {0}",
    "text": "打开项目文件夹失败：{0}"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenProjectInAgentTooltip",
-   "source": "Create a connection-test prompt and open the selected agent from the project root.",
-   "text": "创建一个连接测试提示词，并从项目根目录打开所选智能体。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenProjectInClaude",
-   "source": "Open Claude Code Test",
-   "text": "打开 Claude Code 测试"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenProjectInCodex",
-   "source": "Open Codex Test",
-   "text": "打开 Codex 测试"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenProjectInCursor",
-   "source": "Open Cursor Test",
-   "text": "打开 Cursor 测试"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenProjectInGemini",
-   "source": "Open Gemini Test",
-   "text": "打开 Gemini 测试"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenProjectInVSCode",
-   "source": "Open VS Code Test",
-   "text": "打开 VS Code 测试"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenTestTerminal",
-   "source": "Open Test Terminal",
-   "text": "打开测试终端"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenTestTerminalFailed",
-   "source": "Open test terminal failed: {0}",
-   "text": "打开测试终端失败：{0}"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenUnrealTerminalButton",
-   "source": "Open UE Terminal",
-   "text": "打开 UE 终端"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "OpenUnrealTerminalFailed",
-   "source": "Open UE Terminal failed: {0}",
-   "text": "打开 UE 终端失败：{0}"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "PortRow",
-   "source": "Port",
-   "text": "端口"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5937,21 +5349,9 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "PrereqHint",
-   "source": "HyperAIStudio checks the Unreal MCP stack, Terminal, and common agent apps. Missing external apps stay manual; required Unreal plugins can be enabled here.",
-   "text": "HyperAIStudio 会检查 Unreal MCP 组件、终端和常用智能体应用。缺失的外部应用需要手动安装；所需的 Unreal 插件可以在这里启用。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "PrereqInstall",
    "source": "Install",
    "text": "安装"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "PrereqTitle",
-   "source": "Prerequisites",
-   "text": "前置组件"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -5970,12 +5370,6 @@
    "key": "PrerequisitesDialogTitle",
    "source": "Prerequisites",
    "text": "前置组件"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "PriorityMCPServerMissing",
-   "source": "That MCP server entry no longer exists.",
-   "text": "该 MCP 服务器条目已不存在。"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -6027,30 +5421,6 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "ReadinessTitle",
-   "source": "Readiness",
-   "text": "就绪状态"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ReadyHeadline",
-   "source": "Ready: Unreal MCP is listening and tools/list is reachable.",
-   "text": "就绪：Unreal MCP 正在监听，且 tools/list 可访问。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "RefreshButton",
-   "source": "Refresh",
-   "text": "刷新"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "RefreshIconTooltip",
-   "source": "Refresh readiness checks.",
-   "text": "刷新就绪检查。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "RegenerateAgentFiles",
    "source": "Regenerate Files",
    "text": "重新生成文件"
@@ -6066,30 +5436,6 @@
    "key": "RegenerateAgentFilesTooltip",
    "source": "Regenerate selected agent instructions and configs while preserving managed/user content.",
    "text": "重新生成所选智能体的说明和配置，同时保留托管内容和用户内容。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "RemoveMCPServer",
-   "source": "Remove",
-   "text": "移除"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "RemoveMCPServerMissing",
-   "source": "That MCP server entry no longer exists.",
-   "text": "该 MCP 服务器条目已不存在。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "RenameMCPServerMissing",
-   "source": "That MCP server entry no longer exists.",
-   "text": "该 MCP 服务器条目已不存在。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "RequireDestructiveConfirm",
-   "source": "Require confirmation for destructive agent actions",
-   "text": "破坏性智能体操作需要确认"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -6123,30 +5469,6 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "ServerRow",
-   "source": "Server",
-   "text": "服务器"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "SessionLogEmpty",
-   "source": "No HyperAIStudio actions in this session yet.",
-   "text": "此会话中还没有 HyperAIStudio 操作。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "SessionLogTitle",
-   "source": "Session Log",
-   "text": "会话日志"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "SettingsRow",
-   "source": "Server Settings",
-   "text": "服务器设置"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "SetupAgentFilesGenerated",
    "source": "Generated",
    "text": "已生成"
@@ -6174,12 +5496,6 @@
    "key": "SetupAgentsUsableRow",
    "source": "Agents usable",
    "text": "可用的智能体"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "SetupButton",
-   "source": "Set Up HyperAIStudio",
-   "text": "设置 HyperAIStudio"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -6315,12 +5631,6 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "SetupTab",
-   "source": "Setup",
-   "text": "设置"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "SetupToolsListProbe",
    "source": "tools/list probe",
    "text": "tools/list 探测"
@@ -6345,111 +5655,15 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "ShowQuickAutoComment",
-   "source": "Show Quick Auto Comment in Blueprint menu",
-   "text": "在蓝图菜单中显示“快速自动注释”"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "ShowQuickAutoCommentTooltip",
-   "source": "Show the fast local title-based comment action in Blueprint and PCG graph context menus. Smart Auto Comment stays AI-assisted.",
-   "text": "在蓝图和 PCG 图表的右键菜单中显示基于标题的快速本地注释操作。“智能自动注释”仍由 AI 辅助。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "StartButton",
-   "source": "Start MCP",
-   "text": "启动 MCP"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "StopButton",
-   "source": "Stop MCP",
-   "text": "停止 MCP"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "TerminalInspectorTitle",
-   "source": "MCP Inspector",
-   "text": "MCP Inspector"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "TerminalOpenFolder",
-   "source": "Open Project Folder",
-   "text": "打开项目文件夹"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "TerminalOpenUnreal",
-   "source": "Open UE Terminal",
-   "text": "打开 UE 终端"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "TerminalPanelHint",
    "source": "Install buttons run visible commands in HyperAI Chat's embedded terminal after resetting any active agent session. For manual startup, use the Unreal Terminal when it is available. If Terminal is missing or disabled, enable the Terminal plugin and restart the editor; meanwhile use Copy Startup Commands and run them from Windows Terminal, PowerShell, or CMD.",
    "text": "安装按钮会在重置所有运行中的智能体会话后，在 HyperAI 对话的内嵌终端中运行可见的命令。如需手动启动，请在可用时使用 Unreal 终端。如果终端缺失或被禁用，请启用 Terminal 插件并重启编辑器；在此期间可以使用“复制启动命令”，然后在 Windows Terminal、PowerShell 或 CMD 中运行。"
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "TerminalPanelTitle",
-   "source": "Terminal",
-   "text": "终端"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "TerminalRecipeTitle",
-   "source": "Project-root startup recipe",
-   "text": "项目根目录启动步骤"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "TerminalSetupCopied",
-   "source": "Project-root terminal startup commands copied.",
-   "text": "已复制项目根目录终端启动命令。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "TestCommandsHint",
-   "source": "Use these to validate the same flow from terminal, Codex, Claude Code, Gemini, Cursor, or VS Code/Copilot.",
-   "text": "可用这些命令在终端、Codex、Claude Code、Gemini、Cursor 或 VS Code/Copilot 中验证同样的流程。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "TestCommandsTitle",
-   "source": "Test Commands",
-   "text": "测试命令"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "TestMCPServer",
-   "source": "Test",
-   "text": "测试"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "TestMCPServerFailed",
    "source": "MCP server test failed: {0}",
    "text": "MCP 服务器测试失败：{0}"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "TestPromptCopied",
-   "source": "{0} instructions copied to clipboard.",
-   "text": "已将 {0} 说明复制到剪贴板。"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "TestPromptFailed",
-   "source": "Test instructions failed: {0}",
-   "text": "测试说明失败：{0}"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "Title",
-   "source": "HyperAIStudio",
-   "text": "HyperAIStudio"
   },
   {
    "namespace": "SHyperAIStudioWindow",
@@ -6567,24 +5781,6 @@
   },
   {
    "namespace": "SHyperAIStudioWindow",
-   "key": "ToolsListRow",
-   "source": "tools/list",
-   "text": "tools/list"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "TopbarNeedsSetup",
-   "source": "Needs setup",
-   "text": "需要设置"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "TopbarReady",
-   "source": "Ready",
-   "text": "就绪"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
    "key": "UnrealMCPCopyUrl",
    "source": "Copy URL",
    "text": "复制 URL"
@@ -6624,12 +5820,6 @@
    "key": "UnrealMCPType",
    "source": "Streamable HTTP",
    "text": "Streamable HTTP"
-  },
-  {
-   "namespace": "SHyperAIStudioWindow",
-   "key": "VSCodeConfig",
-   "source": "VS Code: .vscode/mcp.json",
-   "text": "VS Code：.vscode/mcp.json"
   },
   {
    "namespace": "SHyperAIStudioWindow",

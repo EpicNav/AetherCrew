@@ -1378,7 +1378,7 @@ TSharedRef<SWidget> SHyperAIStudioMarkdown::MakeImage(const HyperAIStudio::Markd
 			SNew(SButton)
 			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
 			.ContentPadding(0.0f)
-			.ToolTipText(FText::Format(LOCTEXT("PictureTooltip", "{0}\nClick to open it in Preview."), FText::FromString(Path)))
+			.ToolTipText(FText::Format(LOCTEXT("PictureMatchTooltip", "{0}\nClick to open it in Match."), FText::FromString(Path)))
 			.OnClicked_Lambda([Path]()
 			{
 				FHyperAIStudioPreviewPanel::Open(NAME_None, Path);

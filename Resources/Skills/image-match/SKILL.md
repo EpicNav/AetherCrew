@@ -65,7 +65,7 @@ Stop when:
 
 - The score of each iteration, and what changed in it (the session `history` has both).
 - The best iteration's side-by-side path, and what still differs, in your words and the report's.
-- The user can see the whole session in the HyperAI Preview tab: pick the **Image match** source and the same reference. Every iteration shows as a strip beside it.
+- The user can see the whole session in HyperAI Studio's Match page: pick the **Image match** source and the same reference. Every iteration shows as a strip beside it.
 
 ## Rules
 

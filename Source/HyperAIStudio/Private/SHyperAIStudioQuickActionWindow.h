@@ -32,7 +32,6 @@ public:
 	bool GetRunningAgent(FString& OutAgent, FString& OutModel) const;
 	/** "HyperAI Chat 2: VFX (Codex)": which tab and agent, for handoff menus and messages. */
 	FString GetTabDescription() const;
-	bool IsActiveOrSelectedAgent(const FString& AgentName) const;
 	void SelectAgentByName(const FString& AgentName);
 	/** Restart the terminal on that chat's agent, resuming the conversation. */
 	void ResumeChat(const struct FHyperAIStudioChatSession& Session);
@@ -60,7 +59,6 @@ private:
 	TSharedRef<SWidget> BuildModelMenu();
 	TSharedRef<SWidget> BuildContextSelector();
 	TSharedRef<SWidget> BuildContextMenu();
-	TSharedRef<SWidget> BuildMcpStatusSelector();
 	TSharedRef<SWidget> BuildMcpStatusMenu();
 	/** Paste text into the running agent's prompt without sending it. */
 	bool InsertIntoAgentPrompt(const FString& Text, const FString& Label, bool bFocusTerminal = true);
@@ -81,7 +79,6 @@ private:
 	FString GetModelForAgent(const FString& AgentName) const;
 	FText GetTabTitle() const;
 	FText GetMcpStatusText() const;
-	FSlateColor GetMcpStatusColor() const;
 	void SelectModel(FString ModelId);
 	bool IsModelSelected(FString ModelId) const;
 	FText GetModelButtonText() const;

@@ -507,18 +507,6 @@ SHyperAIStudioQuickActionWindow::~SHyperAIStudioQuickActionWindow()
 	}
 }
 
-bool SHyperAIStudioQuickActionWindow::IsActiveOrSelectedAgent(const FString& AgentName) const
-{
-	const FString TrimmedAgentName = AgentName.TrimStartAndEnd();
-	if (TrimmedAgentName.IsEmpty())
-	{
-		return false;
-	}
-
-	const FString ActiveAgent = ActiveTerminalAgentName.IsEmpty() ? GetSelectedAgentName() : ActiveTerminalAgentName;
-	return ActiveAgent.Equals(TrimmedAgentName, ESearchCase::IgnoreCase);
-}
-
 void SHyperAIStudioQuickActionWindow::SelectAgentByName(const FString& AgentName)
 {
 	const FString TrimmedAgentName = AgentName.TrimStartAndEnd();
@@ -750,33 +738,6 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildHeader()
 		+ SHorizontalBox::Slot()
 		.AutoWidth()
 		.VAlign(VAlign_Center)
-		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("HeaderTitle", "HyperAI Chat"))
-			.TextStyle(FHyperAIStudioStyle::Get(), "HyperAIStudio.Text.Title")
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		.Padding(10.0f, 0.0f, 0.0f, 0.0f)
-		[
-			SNew(SBorder)
-			.BorderImage(FHyperAIStudioStyle::Get().GetBrush("HyperAIStudio.Badge"))
-			.Padding(FMargin(8.0f, 2.0f))
-			.ToolTipText_Lambda([this]()
-			{
-				return FText::Format(LOCTEXT("ReadinessTooltip", "Unreal MCP endpoint: {0}"),
-					FText::FromString(Status.Endpoint.IsEmpty() ? FString(TEXT("<not configured>")) : Status.Endpoint));
-			})
-			[
-				SNew(STextBlock)
-				.Text(this, &SHyperAIStudioQuickActionWindow::GetReadinessText)
-				.ColorAndOpacity(this, &SHyperAIStudioQuickActionWindow::GetReadinessColor)
-			]
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
 		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
 		[
 			BuildAgentStateBadge()
@@ -809,13 +770,6 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildHeader()
 				SNew(STextBlock)
 				.Text(LOCTEXT("SkillsButton", "Skills"))
 			]
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
-		[
-			BuildMcpStatusSelector()
 		]
 		+ SHorizontalBox::Slot()
 		.FillWidth(1.0f)
@@ -887,26 +841,12 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildHeader()
 		+ SHorizontalBox::Slot()
 		.AutoWidth()
 		.VAlign(VAlign_Center)
-		[
-			SNew(SButton)
-			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-			.ToolTipText(LOCTEXT("RefreshTooltip", "Re-check Unreal MCP readiness and installed agents."))
-			.OnClicked(this, &SHyperAIStudioQuickActionWindow::OnRefreshClicked)
-			[
-				SNew(SImage)
-				.Image(FAppStyle::GetBrush(TEXT("Icons.Refresh")))
-				.ColorAndOpacity(FSlateColor::UseForeground())
-			]
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
 		.Padding(2.0f, 0.0f, 0.0f, 0.0f)
 		[
 			SNew(SComboButton)
 			.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
 			.HasDownArrow(false)
-			.ToolTipText(LOCTEXT("ChatSettingsTooltip", "Setup, chat settings and terminal appearance."))
+			.ToolTipText(LOCTEXT("ChatSettingsMoreTooltip", "Unreal MCP, checking again, setup, chat settings and terminal appearance."))
 			.OnGetMenuContent(this, &SHyperAIStudioQuickActionWindow::BuildSettingsMenu)
 			.ButtonContent()
 			[
@@ -920,9 +860,20 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildHeader()
 TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildSettingsMenu()
 {
 	FMenuBuilder Menu(true, nullptr);
+	Menu.AddWrapperSubMenu(
+		GetMcpStatusText(),
+		LOCTEXT("ChatMcpTooltip", "The Unreal MCP server this chat's agent uses: its state and what to do about it."),
+		FOnGetContent::CreateSP(this, &SHyperAIStudioQuickActionWindow::BuildMcpStatusMenu),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.BulletPoint"));
+	Menu.AddMenuEntry(
+		LOCTEXT("ChatRefresh", "Check Again"),
+		LOCTEXT("RefreshTooltip", "Re-check Unreal MCP readiness and installed agents."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Refresh"),
+		FUIAction(FExecuteAction::CreateSPLambda(this, [this]() { OnRefreshClicked(); })));
+	Menu.AddSeparator();
 	Menu.AddMenuEntry(
 		LOCTEXT("ChatOpenSetup", "Open Setup"),
-		LOCTEXT("ChatOpenSetupTooltip", "Open the main HyperAIStudio Setup tab."),
+		LOCTEXT("ChatOpenSetupStudioTooltip", "Open Settings in HyperAI Studio: setup, agents and MCP servers."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Settings"),
 		FUIAction(FExecuteAction::CreateSPLambda(this, [this]() { OnOpenWorkbenchClicked(); })));
 	Menu.AddMenuEntry(
@@ -1522,44 +1473,6 @@ FReply SHyperAIStudioQuickActionWindow::OnDrop(const FGeometry& MyGeometry, cons
 	return FReply::Handled();
 }
 
-TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildMcpStatusSelector()
-{
-	return SNew(SComboButton)
-		.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
-		.HasDownArrow(false)
-		.ToolTipText_Lambda([this]()
-		{
-			return FText::Format(
-				LOCTEXT("McpStatusTooltip", "Unreal MCP at {0}\nServer running: {1}\nPort listening: {2}\nTool list reachable: {3}\nRegistered tools: {4}"),
-				FText::FromString(Status.Endpoint.IsEmpty() ? FString(TEXT("<not configured>")) : Status.Endpoint),
-				Status.bServerRunning ? LOCTEXT("Yes", "yes") : LOCTEXT("No", "no"),
-				Status.bPortListening ? LOCTEXT("Yes", "yes") : LOCTEXT("No", "no"),
-				Status.bToolsListReachable ? LOCTEXT("Yes", "yes") : LOCTEXT("No", "no"),
-				Status.RegisteredToolCount);
-		})
-		.OnGetMenuContent(this, &SHyperAIStudioQuickActionWindow::BuildMcpStatusMenu)
-		.ButtonContent()
-		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			[
-				SNew(SImage)
-				.Image(FAppStyle::GetBrush(TEXT("Icons.BulletPoint")))
-				.ColorAndOpacity(this, &SHyperAIStudioQuickActionWindow::GetMcpStatusColor)
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(3.0f, 0.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(this, &SHyperAIStudioQuickActionWindow::GetMcpStatusText)
-			]
-		];
-}
-
 TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildMcpStatusMenu()
 {
 	FMenuBuilder Menu(true, nullptr);
@@ -1617,19 +1530,6 @@ FText SHyperAIStudioQuickActionWindow::GetMcpStatusText() const
 		return LOCTEXT("McpUnreachable", "MCP: no tool list");
 	}
 	return FText::Format(LOCTEXT("McpReady", "MCP: {0} tools"), Status.RegisteredToolCount);
-}
-
-FSlateColor SHyperAIStudioQuickActionWindow::GetMcpStatusColor() const
-{
-	if (!Status.bServerRunning || !Status.bUnrealMCPModuleAvailable)
-	{
-		return FSlateColor(FStyleColors::AccentRed);
-	}
-	if (!Status.bPortListening || !Status.bToolsListReachable)
-	{
-		return FSlateColor(FStyleColors::AccentYellow);
-	}
-	return FSlateColor(FStyleColors::AccentGreen);
 }
 
 TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildModelSelector()

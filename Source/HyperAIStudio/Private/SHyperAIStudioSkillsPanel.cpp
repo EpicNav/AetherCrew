@@ -2,6 +2,7 @@
 
 #include "SHyperAIStudioSkillsPanel.h"
 
+#include "HyperAIStudioStyle.h"
 #include "DesktopPlatformModule.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
@@ -74,7 +75,7 @@ void SHyperAIStudioSkillsPanel::Construct(const FArguments& InArgs)
 		[
 			SNew(STextBlock)
 			.Text(LOCTEXT("Title", "Skills"))
-			.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
+			.TextStyle(FHyperAIStudioStyle::Get(), "HyperAIStudio.Text.PageTitle")
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -140,11 +141,10 @@ void SHyperAIStudioSkillsPanel::Construct(const FArguments& InArgs)
 			]
 		]
 		+ SVerticalBox::Slot()
-		.AutoHeight()
+		.FillHeight(1.0f)
 		.Padding(0.0f, 8.0f, 0.0f, 0.0f)
 		[
 			SNew(SBox)
-			.MaxDesiredHeight(460.0f)
 			[
 				SAssignNew(List, SListView<FSkillPtr>)
 				.ListItemsSource(&Skills)

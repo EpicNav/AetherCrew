@@ -601,7 +601,7 @@ TSharedRef<SWidget> SHyperAIStudioNativeChatView::ImageActions(const FItemPtr& I
 		.Visibility_Lambda([Item]() { return Item->Images.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
 		+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 6.0f, 0.0f)
 		[
-			Action(LOCTEXT("OpenInPreview", "Open in Preview"), LOCTEXT("OpenInPreviewTooltip", "Show it in the HyperAI Preview tab, beside what the level looks like."),
+			Action(LOCTEXT("OpenInMatch", "Open in Match"), LOCTEXT("OpenInMatchTooltip", "Show it in the Match page, beside what the level looks like."),
 				[this, Weak]()
 				{
 					const TSharedPtr<FHyperAIStudioChatItem> Pinned = Weak.Pin();
@@ -609,7 +609,7 @@ TSharedRef<SWidget> SHyperAIStudioNativeChatView::ImageActions(const FItemPtr& I
 					{
 						return;
 					}
-					// The Preview tab only opens pictures inside the project, and Codex keeps its own elsewhere.
+					// Match only opens pictures inside the project, and Codex keeps its own elsewhere.
 					FString Path = Pinned->Images[0];
 					if (!FPaths::IsUnderDirectory(FPaths::ConvertRelativePathToFull(Path), FPaths::ConvertRelativePathToFull(FPaths::ProjectDir())))
 					{

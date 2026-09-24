@@ -10,6 +10,7 @@
 #include "Framework/Docking/TabManager.h"
 #include "HyperAIStudioCapabilityCatalogCounts.h"
 #include "HyperAIStudioCapabilityInventoryClient.h"
+#include "HyperAIStudioStyle.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioLegacyMigration.h"
 #include "HyperAIStudioSettings.h"
@@ -635,72 +636,49 @@ void SHyperAIStudioWindow::Construct(const FArguments& InArgs)
 		? TEXT("HyperAIStudio opened. Unreal MCP is ready.")
 		: TEXT("HyperAIStudio opened. Setup is not ready yet."));
 
-	// In HyperAI Studio each section is its own page, so it has no tab bar or header of its own.
-	if (InArgs._Section >= 0)
-	{
-		ActiveTabIndex = FMath::Clamp(InArgs._Section, 0, 3);
-		bUserSelectedTab = true;
-		ChildSlot
-		[
-			SAssignNew(MainScrollBox, SScrollBox)
-			+ SScrollBox::Slot()
-			.Padding(0.0f, 0.0f, 12.0f, 18.0f)
-			[
-				ActiveTabIndex == 0 ? BuildSetupTab()
-					: ActiveTabIndex == 1 ? BuildAgentsTab()
-					: ActiveTabIndex == 2 ? BuildMCPServersTab()
-					: BuildHelpTab()
-			]
-		];
-		RegisterActiveTimer(0.15f, FWidgetActiveTimerDelegate::CreateSP(this, &SHyperAIStudioWindow::RunDeferredRefresh));
-		return;
-	}
-
+	// Each section is a page of HyperAI Studio's Settings, with no tab bar or header of its own.
+	ActiveTabIndex = FMath::Clamp(InArgs._Section, 0, 3);
+	bUserSelectedTab = true;
+	OnOpenSection = InArgs._OnOpenSection;
 	ChildSlot
 	[
-		SNew(SVerticalBox)
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(8.0f, 4.0f, 8.0f, 0.0f)
+		SAssignNew(MainScrollBox, SScrollBox)
+		+ SScrollBox::Slot()
+		.Padding(0.0f, 0.0f, 12.0f, 18.0f)
 		[
-			BuildTabBar()
-		]
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(18.0f, 8.0f, 18.0f, 0.0f)
-		[
-			BuildHeader()
-		]
-		+ SVerticalBox::Slot()
-		.FillHeight(1.0f)
-		[
-			SAssignNew(MainScrollBox, SScrollBox)
-			+ SScrollBox::Slot()
-			.Padding(18.0f, 12.0f, 18.0f, 18.0f)
-			[
-				SAssignNew(MainTabSwitcher, SWidgetSwitcher)
-				.WidgetIndex_Lambda([this]() { return ActiveTabIndex; })
-				+ SWidgetSwitcher::Slot()
-				[
-					BuildSetupTab()
-				]
-				+ SWidgetSwitcher::Slot()
-				[
-					BuildAgentsTab()
-				]
-				+ SWidgetSwitcher::Slot()
-				[
-					BuildMCPServersTab()
-				]
-				+ SWidgetSwitcher::Slot()
-				[
-					BuildHelpTab()
-				]
-			]
+			ActiveTabIndex == 0 ? BuildSetupTab()
+				: ActiveTabIndex == 1 ? BuildAgentsTab()
+				: ActiveTabIndex == 2 ? BuildMCPServersTab()
+				: BuildHelpTab()
 		]
 	];
-
 	RegisterActiveTimer(0.15f, FWidgetActiveTimerDelegate::CreateSP(this, &SHyperAIStudioWindow::RunDeferredRefresh));
+}
+
+SHyperAIStudioWindow::~SHyperAIStudioWindow()
+{
+	for (const TWeakPtr<SWindow>& Dialog : OpenDialogs)
+	{
+		if (const TSharedPtr<SWindow> Open = Dialog.Pin())
+		{
+			Open->RequestDestroyWindow();
+		}
+	}
+}
+
+void SHyperAIStudioWindow::ShowDialog(const TSharedRef<SWindow>& Dialog)
+{
+	OpenDialogs.RemoveAll([](const TWeakPtr<SWindow>& Open) { return !Open.IsValid(); });
+	OpenDialogs.Add(Dialog);
+	const TSharedPtr<SWindow> Parent = FSlateApplication::Get().FindWidgetWindow(AsShared());
+	if (Parent.IsValid())
+	{
+		FSlateApplication::Get().AddWindowAsNativeChild(Dialog, Parent.ToSharedRef());
+	}
+	else
+	{
+		FSlateApplication::Get().AddWindow(Dialog);
+	}
 }
 
 void SHyperAIStudioWindow::RefreshPrerequisitesCache()
@@ -724,116 +702,6 @@ bool SHyperAIStudioWindow::HasCachedMissingInstallablePrerequisites() const
 	{
 		return HyperAIStudio::Private::IsMissingInstallablePrerequisite(Entry);
 	});
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildTabBar()
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
-		.Padding(FMargin(6.0f, 5.0f))
-		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.Padding(0.0f, 0.0f, 6.0f, 0.0f)
-			[
-				BuildTabButton(LOCTEXT("SetupTab", "Setup"), TEXT("Icons.Settings"), 0)
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.Padding(0.0f, 0.0f, 6.0f, 0.0f)
-			[
-				BuildTabButton(LOCTEXT("AgentsTab", "Agents"), TEXT("Icons.Comment"), 1)
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.Padding(0.0f, 0.0f, 6.0f, 0.0f)
-			[
-				BuildTabButton(LOCTEXT("MCPTab", "MCP"), TEXT("Icons.Package"), 2)
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.Padding(0.0f, 0.0f, 6.0f, 0.0f)
-			[
-				BuildTabButton(LOCTEXT("HelpTab", "Docs"), TEXT("Icons.Help"), 3)
-			]
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
-			[
-				SNew(SBox)
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(0.0f, 0.0f, 10.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text_Lambda([this]() { return Status.IsReady() ? LOCTEXT("TopbarReady", "Ready") : LOCTEXT("TopbarNeedsSetup", "Needs setup"); })
-				.ColorAndOpacity_Lambda([this]() { return Status.IsReady() ? HyperAIStudio::Private::GoodColor() : HyperAIStudio::Private::WarningColor(); })
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(0.0f, 0.0f, 6.0f, 0.0f)
-			[
-				SNew(SButton)
-				.Visibility_Lambda([this]() { return Status.IsReady() ? EVisibility::Visible : EVisibility::Collapsed; })
-				.ToolTipText(LOCTEXT("OpenChatTerminalTooltip", "Open the separate Chat / Terminal handoff panel."))
-				.OnClicked(this, &SHyperAIStudioWindow::OnOpenChatClicked)
-				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-					[
-						SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Comment")))
-					]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5.0f, 0.0f, 0.0f, 0.0f)
-					[
-						SNew(STextBlock).Text(LOCTEXT("OpenChatTerminalButton", "Open Chat / Terminal"))
-					]
-				]
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			[
-				SNew(SButton)
-				.ToolTipText(LOCTEXT("RefreshIconTooltip", "Refresh readiness checks."))
-				.OnClicked(this, &SHyperAIStudioWindow::OnRefreshClicked)
-				[
-					SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Refresh")))
-				]
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildTabButton(const FText& Label, const FName IconName, int32 TabIndex)
-{
-	return SNew(SButton)
-		.ButtonColorAndOpacity_Lambda([this, TabIndex]()
-		{
-			return ActiveTabIndex == TabIndex
-				? FSlateColor(FLinearColor(0.12f, 0.32f, 0.46f))
-				: FSlateColor(FLinearColor::White);
-		})
-		.OnClicked_Lambda([this, TabIndex]()
-		{
-			bUserSelectedTab = true;
-			bAutoRouteAfterFirstRefresh = false;
-			ActiveTabIndex = TabIndex;
-			ResetContentScroll();
-			return FReply::Handled();
-		})
-		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-			[
-				SNew(SImage).Image(FAppStyle::GetBrush(IconName))
-			]
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5.0f, 0.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock).Text(Label)
-			]
-		];
 }
 
 TSharedRef<SWidget> SHyperAIStudioWindow::BuildIconTextButton(const FText& Label, const FName IconName, const FText& ToolTip, FOnClicked OnClicked) const
@@ -886,7 +754,7 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildSetupSummaryPanel()
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("SetupSectionTitle", "Setup"))
-					.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
+					.TextStyle(FHyperAIStudioStyle::Get(), "HyperAIStudio.Text.PageTitle")
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
@@ -1159,98 +1027,6 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildSetupSummaryRow(const FText& Labe
 		];
 }
 
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildFirstRunGuidePanel()
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(12.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("FirstRunGuideTitle", "First Run Flow"))
-				.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("FirstRunGuideHint", "HyperAIStudio makes Epic Unreal MCP usable from your external agent. Set up once, test the connection, then continue in Codex, Claude Code, Gemini, Cursor, or VS Code/Copilot with generated project instructions."))
-				.AutoWrapText(true)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 10.0f, 0.0f, 0.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.34f)
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					BuildHeaderMetric(
-						LOCTEXT("FirstRunStepSetup", "1. Setup"),
-						[this]() { return Status.bUnrealMCPSettingsConfigured && Status.bAgentFilesReady ? LOCTEXT("FirstRunStepSetupReady", "Configured") : LOCTEXT("FirstRunStepSetupNeeded", "Run setup"); },
-						[this]() { return Status.bUnrealMCPSettingsConfigured && Status.bAgentFilesReady ? HyperAIStudio::Private::GoodColor() : HyperAIStudio::Private::WarningColor(); })
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.33f)
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					BuildHeaderMetric(
-						LOCTEXT("FirstRunStepVerify", "2. Verify MCP"),
-						[this]() { return Status.bToolsListReachable ? LOCTEXT("FirstRunStepVerifyReady", "tools/list works") : LOCTEXT("FirstRunStepVerifyNeeded", "Refresh/test"); },
-						[this]() { return Status.bToolsListReachable ? HyperAIStudio::Private::GoodColor() : HyperAIStudio::Private::WarningColor(); })
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.33f)
-				[
-					BuildHeaderMetric(
-						LOCTEXT("FirstRunStepAgent", "3. Continue In Agent"),
-						[this]() { return Status.IsReady() ? LOCTEXT("FirstRunStepAgentReady", "Ready") : LOCTEXT("FirstRunStepAgentNeeded", "Run a connection test"); },
-						[this]() { return Status.IsReady() ? HyperAIStudio::Private::GoodColor() : HyperAIStudio::Private::MutedColor(); })
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 10.0f, 0.0f, 0.0f)
-			[
-				SNew(SWrapBox)
-				+ SWrapBox::Slot()
-				.Padding(0.0f, 0.0f, 8.0f, 8.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("FirstRunOpenDocs", "Open Docs"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnOpenIncludedDocsClicked)
-				]
-				+ SWrapBox::Slot()
-				.Padding(0.0f, 0.0f, 8.0f, 8.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("FirstRunCopyPrompt", "Copy Starter Instructions"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnCopyFirstRunPromptClicked)
-				]
-				+ SWrapBox::Slot()
-				.Padding(0.0f, 0.0f, 8.0f, 8.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("FirstRunOpenEpicDocs", "Open Epic MCP Docs"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnOpenOfficialMCPDocsClicked)
-				]
-				+ SWrapBox::Slot()
-				.Padding(0.0f, 0.0f, 8.0f, 8.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("FirstRunOpenProjectFolder", "Open Project Folder"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnOpenProjectFolderClicked)
-				]
-			]
-		];
-}
-
 TSharedRef<SWidget> SHyperAIStudioWindow::BuildAgentsTab()
 {
 	return SNew(SVerticalBox)
@@ -1268,7 +1044,7 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildAgentsTab()
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("AgentsSectionTitle", "Agents"))
-					.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
+					.TextStyle(FHyperAIStudioStyle::Get(), "HyperAIStudio.Text.PageTitle")
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
@@ -1504,21 +1280,6 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildAgentRow(const FString& Prerequis
 		];
 }
 
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildTerminalTab()
-{
-	return BuildTerminalPanel();
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildStatusTab()
-{
-	return BuildStatusPanel();
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildTestsTab()
-{
-	return BuildTestCommandsPanel();
-}
-
 TSharedRef<SWidget> SHyperAIStudioWindow::BuildNativeToolSettingsBar()
 {
 	const FHyperAIStudioCapabilityCatalog& Catalog = FHyperAIStudioCapabilityPackRegistry::GetCatalog();
@@ -1704,8 +1465,8 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildMCPServersTab()
 				+ SVerticalBox::Slot().AutoHeight()
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("MCPSectionTitle", "MCP"))
-					.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
+					.Text(LOCTEXT("MCPServersSectionTitle", "MCP servers"))
+					.TextStyle(FHyperAIStudioStyle::Get(), "HyperAIStudio.Text.PageTitle")
 				]
 				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
 				[
@@ -1865,8 +1626,8 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildHelpTab()
 		.AutoHeight()
 		[
 			SNew(STextBlock)
-			.Text(LOCTEXT("HelpTitle", "Docs"))
-			.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
+			.Text(LOCTEXT("DocsSectionTitle", "Documentation"))
+			.TextStyle(FHyperAIStudioStyle::Get(), "HyperAIStudio.Text.PageTitle")
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -1968,1308 +1729,6 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildDocsShortcutRow(const FText& Titl
 		];
 }
 
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildHeader()
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(14.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(1.0f)
-				[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("Title", "HyperAIStudio"))
-						.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-					[
-						SNew(STextBlock)
-						.Text(this, &SHyperAIStudioWindow::GetHeadlineText)
-						.ColorAndOpacity(this, &SHyperAIStudioWindow::GetHeadlineColor)
-					]
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Top)
-				[
-					SNew(SHyperlink)
-					.Text(LOCTEXT("DocsLink", "Documentation"))
-					.OnNavigate_Lambda([]()
-					{
-						const FString Url = FHyperAIStudioService::GetDocumentationUrl();
-						FPlatformProcess::LaunchURL(*Url, nullptr, nullptr);
-					})
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 8.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(this, &SHyperAIStudioWindow::GetMessageText)
-				.AutoWrapText(true)
-				.Font_Lambda([this]()
-				{
-					return LastMessage.ToString().Contains(TEXT("Project-root note:"))
-						? FAppStyle::GetFontStyle(TEXT("BoldFont"))
-						: FAppStyle::GetFontStyle(TEXT("NormalFont"));
-				})
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 12.0f, 0.0f, 0.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.32f)
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					BuildHeaderMetric(
-						LOCTEXT("HeaderMetricMCP", "Unreal MCP"),
-						[this]() { return Status.IsReady() ? LOCTEXT("HeaderReady", "Ready") : (Status.bProbeInProgress ? LOCTEXT("HeaderChecking", "Checking") : LOCTEXT("HeaderSetupNeeded", "Setup needed")); },
-						[this]() { return Status.IsReady() ? HyperAIStudio::Private::GoodColor() : (Status.bProbeInProgress ? HyperAIStudio::Private::WarningColor() : HyperAIStudio::Private::ErrorColor()); })
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.36f)
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					BuildHeaderMetric(
-						LOCTEXT("HeaderMetricEndpoint", "Endpoint"),
-						[this]() { return FText::FromString(Status.Endpoint.IsEmpty() ? FString(TEXT("Not configured")) : Status.Endpoint); },
-						[this]() { return Status.bPortListening ? HyperAIStudio::Private::GoodColor() : HyperAIStudio::Private::MutedColor(); })
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.32f)
-				[
-					BuildHeaderMetric(
-						LOCTEXT("HeaderMetricAgentFiles", "Agent Files"),
-						[this]() { return Status.bAgentFilesReady ? LOCTEXT("HeaderAgentFilesReady", "Generated") : LOCTEXT("HeaderAgentFilesMissing", "Missing"); },
-						[this]() { return Status.bAgentFilesReady ? HyperAIStudio::Private::GoodColor() : HyperAIStudio::Private::WarningColor(); })
-				]
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildHeaderMetric(const FText& Label, TFunction<FText()> ValueGetter, TFunction<FSlateColor()> ColorGetter) const
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
-		.Padding(10.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(Label)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 4.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text_Lambda([ValueGetter]() { return ValueGetter(); })
-				.ColorAndOpacity_Lambda([ColorGetter]() { return ColorGetter(); })
-				.AutoWrapText(true)
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildActionBar()
-{
-	return SNew(SHorizontalBox)
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("SetupButton", "Set Up HyperAIStudio"))
-			.OnClicked(this, &SHyperAIStudioWindow::OnSetupClicked)
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("EnablePluginsButton", "Enable Plugins"))
-			.OnClicked(this, &SHyperAIStudioWindow::OnEnablePluginsClicked)
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("RefreshButton", "Refresh"))
-			.OnClicked(this, &SHyperAIStudioWindow::OnRefreshClicked)
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("StartButton", "Start MCP"))
-			.OnClicked(this, &SHyperAIStudioWindow::OnStartClicked)
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("StopButton", "Stop MCP"))
-			.OnClicked(this, &SHyperAIStudioWindow::OnStopClicked)
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("OpenUnrealTerminalButton", "Open UE Terminal"))
-			.OnClicked(this, &SHyperAIStudioWindow::OnOpenUnrealTerminalClicked)
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildPrerequisitesPanel()
-{
-	TSharedRef<SVerticalBox> Rows = SNew(SVerticalBox);
-	for (const FHyperAIStudioPrerequisiteStatus& Prerequisite : CachedPrerequisites)
-	{
-		Rows->AddSlot()
-		.AutoHeight()
-		.Padding(0.0f, 5.0f, 0.0f, 0.0f)
-		[
-			BuildPrerequisiteRow(Prerequisite)
-		];
-	}
-
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(12.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("PrereqTitle", "Prerequisites"))
-				.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("PrereqHint", "HyperAIStudio checks the Unreal MCP stack, Terminal, and common agent apps. Missing external apps stay manual; required Unreal plugins can be enabled here."))
-				.AutoWrapText(true)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 8.0f, 0.0f, 0.0f)
-			[
-				Rows
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildContextChipsPanel()
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
-		.Padding(8.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("ContextChipsTitle", "Current Context"))
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-			[
-				SNew(SWrapBox)
-				+ SWrapBox::Slot()
-				.Padding(0.0f, 0.0f, 8.0f, 8.0f)
-				[
-					BuildContextChip(
-						LOCTEXT("ContextActorsLabel", "Actors"),
-						[this]()
-						{
-							return FText::AsNumber(Service->GetCurrentContextSnapshot().SelectedActorCount);
-						},
-						[this]()
-						{
-							return Service->GetCurrentContextSnapshot().SelectedActorCount > 0 ? HyperAIStudio::Private::GoodColor() : HyperAIStudio::Private::MutedColor();
-						},
-						LOCTEXT("ContextActorsTooltip", "Selected level actors that will be included in a context pack."))
-				]
-				+ SWrapBox::Slot()
-				.Padding(0.0f, 0.0f, 8.0f, 8.0f)
-				[
-					BuildContextChip(
-						LOCTEXT("ContextAssetsLabel", "Assets"),
-						[this]()
-						{
-							return FText::AsNumber(Service->GetCurrentContextSnapshot().SelectedAssetCount);
-						},
-						[this]()
-						{
-							return Service->GetCurrentContextSnapshot().SelectedAssetCount > 0 ? HyperAIStudio::Private::GoodColor() : HyperAIStudio::Private::MutedColor();
-						},
-						LOCTEXT("ContextAssetsTooltip", "Selected Content Browser assets that will be included in a context pack."))
-				]
-				+ SWrapBox::Slot()
-				.Padding(0.0f, 0.0f, 8.0f, 8.0f)
-				[
-					BuildContextChip(
-						LOCTEXT("ContextBlueprintLabel", "Blueprint Nodes"),
-						[this]()
-						{
-							const FHyperAIStudioContextSnapshot Snapshot = Service->GetCurrentContextSnapshot();
-							return Snapshot.SelectedBlueprintNodeCount > 0
-								? FText::AsNumber(Snapshot.SelectedBlueprintNodeCount)
-								: LOCTEXT("ContextBlueprintMenuValue", "Graph menu");
-						},
-						[this]()
-						{
-							return Service->GetCurrentContextSnapshot().SelectedBlueprintNodeCount > 0 ? HyperAIStudio::Private::GoodColor() : HyperAIStudio::Private::WarningColor();
-						},
-						LOCTEXT("ContextBlueprintTooltip", "Blueprint node context is captured from the Blueprint graph right-click menu."))
-				]
-				+ SWrapBox::Slot()
-				.Padding(0.0f, 0.0f, 8.0f, 8.0f)
-				[
-					BuildContextChip(
-						LOCTEXT("ContextMapLabel", "Map"),
-						[this]()
-						{
-							return FText::FromString(Service->GetCurrentContextSnapshot().CurrentMap);
-						},
-						[]()
-						{
-							return HyperAIStudio::Private::MutedColor();
-						},
-						LOCTEXT("ContextMapTooltip", "Current editor map recorded in generated context packs."))
-				]
-				+ SWrapBox::Slot()
-				.Padding(0.0f, 0.0f, 8.0f, 8.0f)
-				[
-					BuildContextChip(
-						LOCTEXT("ContextProjectRootLabel", "Project Root"),
-						[this]()
-						{
-							return FText::FromString(FPaths::GetBaseFilename(FPaths::GetProjectFilePath()));
-						},
-						[]()
-						{
-							return HyperAIStudio::Private::MutedColor();
-						},
-						LOCTEXT("ContextProjectRootTooltip", "Agent clients opened from this project root can load the generated project-scoped config and rules."))
-				]
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildContextChip(const FText& Label, TFunction<FText()> ValueGetter, TFunction<FSlateColor()> ColorGetter, const FText& ToolTip) const
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(FMargin(8.0f, 4.0f))
-		.ToolTipText(ToolTip)
-		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			[
-				SNew(STextBlock)
-				.Text(Label)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text_Lambda([ValueGetter]() { return ValueGetter(); })
-				.ColorAndOpacity_Lambda([ColorGetter]() { return ColorGetter(); })
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildAgentStatusPanel()
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
-		.Padding(8.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("AgentStatusTitle", "Agent Targets"))
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-			[
-				BuildAgentStatusRow(TEXT("codex"), TEXT("Codex"), LOCTEXT("OpenProjectInCodex", "Open Codex Test"))
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				BuildAgentStatusRow(TEXT("claude"), TEXT("Claude Code"), LOCTEXT("OpenProjectInClaude", "Open Claude Code Test"))
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				BuildAgentStatusRow(TEXT("gemini"), TEXT("Gemini"), LOCTEXT("OpenProjectInGemini", "Open Gemini Test"))
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				BuildAgentStatusRow(TEXT("cursor"), TEXT("Cursor"), LOCTEXT("OpenProjectInCursor", "Open Cursor Test"))
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				BuildAgentStatusRow(TEXT("vscode"), TEXT("VS Code/Copilot"), LOCTEXT("OpenProjectInVSCode", "Open VS Code Test"))
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildAgentStatusRow(const FString& PrerequisiteId, const FString& AgentName, const FText& OpenLabel)
-{
-	const FHyperAIStudioPrerequisiteStatus* Prerequisite = FindCachedPrerequisite(PrerequisiteId);
-
-	const bool bAvailable = Prerequisite && Prerequisite->bAvailable;
-	const FString Detail = Prerequisite ? Prerequisite->ActionHint : TEXT("Prerequisite state is unavailable.");
-	const FString InstallCommand = Prerequisite ? Prerequisite->InstallCommand : FString();
-	const FString DocumentationUrl = Prerequisite ? Prerequisite->DocumentationUrl : FString();
-
-	return SNew(SHorizontalBox)
-		+ SHorizontalBox::Slot()
-		.FillWidth(0.22f)
-		.VAlign(VAlign_Center)
-		[
-			SNew(STextBlock)
-			.Text(FText::FromString(AgentName))
-		]
-		+ SHorizontalBox::Slot()
-		.FillWidth(0.18f)
-		.VAlign(VAlign_Center)
-		.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-		[
-			SNew(STextBlock)
-			.Text(FText::FromString(bAvailable ? TEXT("Installed") : TEXT("Missing")))
-			.ColorAndOpacity(bAvailable ? HyperAIStudio::Private::GoodColor() : HyperAIStudio::Private::WarningColor())
-		]
-		+ SHorizontalBox::Slot()
-		.FillWidth(0.34f)
-		.VAlign(VAlign_Center)
-		.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-		[
-			SNew(STextBlock)
-			.Text(FText::FromString(Detail))
-			.AutoWrapText(true)
-			.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-		[
-			SNew(SButton)
-			.Text(OpenLabel)
-			.ToolTipText(LOCTEXT("OpenProjectInAgentTooltip", "Create a connection-test prompt and open the selected agent from the project root."))
-			.IsEnabled(bAvailable)
-			.OnClicked(this, &SHyperAIStudioWindow::OnOpenAgentTestClicked, AgentName)
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("CopyAgentInstall", "Copy Install"))
-			.ToolTipText(LOCTEXT("CopyAgentInstallTooltip", "Copy the install command for this agent app."))
-			.IsEnabled(!InstallCommand.IsEmpty())
-			.OnClicked(this, &SHyperAIStudioWindow::OnCopyPrerequisiteCommandClicked, AgentName, InstallCommand)
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("OpenAgentDocs", "Docs"))
-			.ToolTipText(LOCTEXT("OpenAgentDocsTooltip", "Open setup documentation for this agent app."))
-			.IsEnabled(!DocumentationUrl.IsEmpty())
-			.OnClicked(this, &SHyperAIStudioWindow::OnOpenPrerequisiteDocsClicked, AgentName, DocumentationUrl)
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildSessionLogPanel()
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
-		.Padding(8.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("SessionLogTitle", "Session Log"))
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 4.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(this, &SHyperAIStudioWindow::GetSessionLogText)
-				.AutoWrapText(true)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildTerminalPanel()
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(12.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("TerminalPanelTitle", "Terminal"))
-				.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(GetTerminalPanelHintText())
-				.AutoWrapText(true)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 8.0f, 0.0f, 0.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("TerminalOpenUnreal", "Open UE Terminal"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnOpenUnrealTerminalClicked)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("CopyTerminalSetup", "Copy Startup Commands"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnCopyTerminalSetupClicked)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("CopyInspectorCommand", "Copy MCP Inspector"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnCopyInspectorCommandClicked)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("TerminalOpenFolder", "Open Project Folder"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnOpenProjectFolderClicked)
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 12.0f, 0.0f, 0.0f)
-			[
-				SNew(SBorder)
-				.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
-				.Padding(10.0f)
-				[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("TerminalRecipeTitle", "Project-root startup recipe"))
-						.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-					[
-						SNew(STextBlock)
-						.Text_Lambda([this]()
-						{
-							return FText::FromString(GetTerminalStartupRecipeText(FHyperAIStudioService::GetProjectRoot()));
-						})
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Mono"), 9))
-						.AutoWrapText(true)
-					]
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 12.0f, 0.0f, 0.0f)
-			[
-				SNew(SBorder)
-				.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
-				.Padding(10.0f)
-				[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("TerminalInspectorTitle", "MCP Inspector"))
-						.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-					[
-						SNew(STextBlock)
-						.Text_Lambda([this]()
-						{
-							return FText::FromString(FString::Printf(
-								TEXT("npx @modelcontextprotocol/inspector\nEndpoint: %s\nTransport: Streamable HTTP"),
-								*Status.Endpoint));
-						})
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Mono"), 9))
-						.AutoWrapText(true)
-					]
-				]
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildTestCommandsPanel()
-{
-	TSharedRef<SVerticalBox> Rows = SNew(SVerticalBox);
-	for (const FHyperAIStudioTestCommand& Command : Service->GetTestCommands())
-	{
-		Rows->AddSlot()
-		.AutoHeight()
-		.Padding(0.0f, 8.0f, 0.0f, 0.0f)
-		[
-			BuildTestCommandRow(Command)
-		];
-	}
-
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(12.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("TestCommandsTitle", "Test Commands"))
-				.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("TestCommandsHint", "Use these to validate the same flow from terminal, Codex, Claude Code, Gemini, Cursor, or VS Code/Copilot."))
-				.AutoWrapText(true)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				Rows
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildStatusPanel()
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(12.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("ReadinessTitle", "Readiness"))
-				.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
-			[
-				BuildStatusRow(LOCTEXT("ModuleRow", "Epic Unreal MCP"), [this]() { return BoolText(Status.bUnrealMCPModuleAvailable, TEXT("Detected"), TEXT("Not loaded")); }, [this]() { return BoolColor(Status.bUnrealMCPModuleAvailable); })
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				BuildStatusRow(LOCTEXT("SettingsRow", "Server Settings"), [this]() { return BoolText(Status.bUnrealMCPSettingsConfigured, TEXT("Configured"), TEXT("Needs setup")); }, [this]() { return BoolColor(Status.bUnrealMCPSettingsConfigured); })
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				BuildStatusRow(LOCTEXT("ServerRow", "Server"), [this]() { return FText::FromString(Status.bServerRunning ? FString::Printf(TEXT("Running on port %u"), Status.ActivePort) : TEXT("Stopped")); }, [this]() { return BoolColor(Status.bServerRunning); })
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				BuildStatusRow(LOCTEXT("PortRow", "Port"), [this]() { return BoolText(Status.bPortListening, TEXT("Listening"), TEXT("Closed")); }, [this]() { return BoolColor(Status.bPortListening); })
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				BuildStatusRow(LOCTEXT("ToolsListRow", "tools/list"), [this]()
-				{
-					if (Status.bToolsListReachable && Status.ProbeToolCount > 0)
-					{
-						return FText::FromString(FString::Printf(TEXT("Reachable (%d tools)"), Status.ProbeToolCount));
-					}
-					return HyperAIStudio::Private::GetProbeStatusText(Status);
-				}, [this]() { return HyperAIStudio::Private::GetProbeStatusColor(Status); })
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				BuildStatusRow(LOCTEXT("AgentFilesRow", "Agent Files"), [this]() { return BoolText(Status.bAgentFilesReady, TEXT("Present"), TEXT("Missing")); }, [this]() { return BoolColor(Status.bAgentFilesReady); })
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text_Lambda([this]() { return FText::FromString(FString::Printf(TEXT("Endpoint: %s"), *Status.Endpoint)); })
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text_Lambda([this]() { return HyperAIStudio::Private::GetProbeStatusDetailText(Status); })
-				.AutoWrapText(true)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildAgentConfigPanel()
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(12.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("AgentConfigTitle", "Agent Configs"))
-				.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("AgentConfigHint", "Agent config files are written where each external agent expects them. HyperAIStudio only writes configs for agents that are enabled and checked here; disabled agents do not get new config files."))
-				.AutoWrapText(true)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
-			[
-				SNew(SCheckBox)
-				.IsChecked_Lambda([]() { return HyperAIStudio::Private::CheckedState(GetDefault<UHyperAIStudioSettings>()->bGenerateCodexConfig); })
-				.OnCheckStateChanged_Lambda([](ECheckBoxState State) { UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>(); Settings->bGenerateCodexConfig = State == ECheckBoxState::Checked; Settings->SaveConfig(); })
-				[
-					SNew(STextBlock).Text(LOCTEXT("CodexConfig", "Codex: .codex/config.toml"))
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(20.0f, 5.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("CodexTomlSafetyHint", "Codex TOML updates stay inside a HyperAIStudio managed block. Copy the block first if you want to review or manually apply it to an existing config."))
-				.AutoWrapText(true)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left).Padding(20.0f, 7.0f, 0.0f, 0.0f)
-			[
-				SNew(SButton)
-				.Text(LOCTEXT("CopyCodexTomlPatchButton", "Copy Codex TOML Patch"))
-				.OnClicked(this, &SHyperAIStudioWindow::OnCopyCodexTomlPatchClicked)
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				SNew(SCheckBox)
-				.IsChecked_Lambda([]() { return HyperAIStudio::Private::CheckedState(GetDefault<UHyperAIStudioSettings>()->bGenerateClaudeConfig); })
-				.OnCheckStateChanged_Lambda([](ECheckBoxState State) { UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>(); Settings->bGenerateClaudeConfig = State == ECheckBoxState::Checked; Settings->SaveConfig(); })
-				[
-					SNew(STextBlock).Text(LOCTEXT("ClaudeConfig", "Claude Code: .mcp.json"))
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				SNew(SCheckBox)
-				.IsChecked_Lambda([]() { return HyperAIStudio::Private::CheckedState(GetDefault<UHyperAIStudioSettings>()->bGenerateClaudeMarkdown); })
-				.OnCheckStateChanged_Lambda([](ECheckBoxState State) { UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>(); Settings->bGenerateClaudeMarkdown = State == ECheckBoxState::Checked; Settings->SaveConfig(); })
-				[
-					SNew(STextBlock).Text(LOCTEXT("ClaudeMd", "Claude instructions: CLAUDE.md"))
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				SNew(SCheckBox)
-				.IsChecked_Lambda([]() { return HyperAIStudio::Private::CheckedState(GetDefault<UHyperAIStudioSettings>()->bGenerateCursorConfig); })
-				.OnCheckStateChanged_Lambda([](ECheckBoxState State) { UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>(); Settings->bGenerateCursorConfig = State == ECheckBoxState::Checked; Settings->SaveConfig(); })
-				[
-					SNew(STextBlock).Text(LOCTEXT("CursorConfig", "Cursor: .cursor/mcp.json"))
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				SNew(SCheckBox)
-				.IsChecked_Lambda([]() { return HyperAIStudio::Private::CheckedState(GetDefault<UHyperAIStudioSettings>()->bGenerateVSCodeConfig); })
-				.OnCheckStateChanged_Lambda([](ECheckBoxState State) { UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>(); Settings->bGenerateVSCodeConfig = State == ECheckBoxState::Checked; Settings->SaveConfig(); })
-				[
-					SNew(STextBlock).Text(LOCTEXT("VSCodeConfig", "VS Code: .vscode/mcp.json"))
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				SNew(SCheckBox)
-				.IsChecked_Lambda([]() { return HyperAIStudio::Private::CheckedState(GetDefault<UHyperAIStudioSettings>()->bGenerateGeminiConfig); })
-				.OnCheckStateChanged_Lambda([](ECheckBoxState State) { UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>(); Settings->bGenerateGeminiConfig = State == ECheckBoxState::Checked; Settings->SaveConfig(); })
-				[
-					SNew(STextBlock).Text(LOCTEXT("GeminiConfig", "Gemini: .gemini/settings.json"))
-				]
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildFilesAndPermissionsPanel()
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(12.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("FilesPermissionsTitle", "Files And Permissions"))
-				.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 8.0f, 0.0f, 0.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("OpenAgentsButton", "Open AGENTS.md"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnOpenAgentsClicked)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("OpenClaudeButton", "Open CLAUDE.md"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnOpenClaudeClicked)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("OpenProjectFolderButton", "Open Project Folder"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnOpenProjectFolderClicked)
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 10.0f, 0.0f, 0.0f)
-			[
-				SNew(SCheckBox)
-				.IsChecked_Lambda([]() { return HyperAIStudio::Private::CheckedState(GetDefault<UHyperAIStudioSettings>()->bAllowClipboardPromptCopy); })
-				.OnCheckStateChanged_Lambda([](ECheckBoxState State) { UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>(); Settings->bAllowClipboardPromptCopy = State == ECheckBoxState::Checked; Settings->SaveConfig(); })
-				[
-					SNew(STextBlock).Text(LOCTEXT("AllowClipboardCopy", "Copy generated instructions to clipboard"))
-				]
-			]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-				[
-					SNew(SCheckBox)
-					.IsChecked_Lambda([]() { return HyperAIStudio::Private::CheckedState(GetDefault<UHyperAIStudioSettings>()->bShowQuickAutoCommentInBlueprintMenu); })
-					.OnCheckStateChanged_Lambda([](ECheckBoxState State) { UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>(); Settings->bShowQuickAutoCommentInBlueprintMenu = State == ECheckBoxState::Checked; Settings->SaveConfig(); })
-					.ToolTipText(LOCTEXT("ShowQuickAutoCommentTooltip", "Show the fast local title-based comment action in Blueprint and PCG graph context menus. Smart Auto Comment stays AI-assisted."))
-					[
-						SNew(STextBlock).Text(LOCTEXT("ShowQuickAutoComment", "Show Quick Auto Comment in Blueprint menu"))
-					]
-				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-				[
-					SNew(SCheckBox)
-					.IsChecked_Lambda([]() { return HyperAIStudio::Private::CheckedState(GetDefault<UHyperAIStudioSettings>()->bAllowTerminalLaunch); })
-				.OnCheckStateChanged_Lambda([](ECheckBoxState State) { UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>(); Settings->bAllowTerminalLaunch = State == ECheckBoxState::Checked; Settings->SaveConfig(); })
-				[
-					SNew(STextBlock).Text(LOCTEXT("AllowTerminalLaunch", "Allow HyperAIStudio to open external agent windows"))
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				SNew(SCheckBox)
-				.IsChecked_Lambda([]() { return HyperAIStudio::Private::CheckedState(GetDefault<UHyperAIStudioSettings>()->bAllowExternalAgentLaunch); })
-				.OnCheckStateChanged_Lambda([](ECheckBoxState State) { UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>(); Settings->bAllowExternalAgentLaunch = State == ECheckBoxState::Checked; Settings->SaveConfig(); })
-				[
-					SNew(STextBlock).Text(LOCTEXT("AllowAgentLaunch", "Allow future direct external agent launch"))
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				SNew(SCheckBox)
-				.IsChecked_Lambda([]() { return HyperAIStudio::Private::CheckedState(GetDefault<UHyperAIStudioSettings>()->bRequireConfirmationForDestructiveActions); })
-				.OnCheckStateChanged_Lambda([](ECheckBoxState State) { UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>(); Settings->bRequireConfirmationForDestructiveActions = State == ECheckBoxState::Checked; Settings->SaveConfig(); })
-				[
-					SNew(STextBlock).Text(LOCTEXT("RequireDestructiveConfirm", "Require confirmation for destructive agent actions"))
-				]
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildMCPRegistryPanel()
-{
-	TSharedRef<SVerticalBox> ServerRows = SNew(SVerticalBox);
-	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
-	if (Settings)
-	{
-		for (int32 Index = 0; Index < Settings->ExtraServers.Num(); ++Index)
-		{
-			ServerRows->AddSlot()
-			.AutoHeight()
-			.Padding(0.0f, 8.0f, 0.0f, 0.0f)
-			[
-				BuildMCPServerRow(Index)
-			];
-		}
-	}
-
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(12.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("MCPRegistryTitle", "MCP Servers"))
-				.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text_Lambda([this]() { return FText::FromString(FString::Printf(TEXT("Locked primary: unreal-mcp -> %s"), *Status.Endpoint)); })
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text_Lambda([]()
-				{
-					const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
-					const int32 EnabledCount = Settings ? Settings->ExtraServers.FilterByPredicate([](const FHyperAIStudioMCPServerEntry& Entry) { return Entry.bEnabled; }).Num() : 0;
-					const int32 TotalCount = Settings ? Settings->ExtraServers.Num() : 0;
-					return FText::FromString(FString::Printf(TEXT("Community MCP entries: %d enabled, %d total. Changes regenerate client configs and agent instructions."), EnabledCount, TotalCount));
-				})
-				.AutoWrapText(true)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-			+ SVerticalBox::Slot().AutoHeight()
-			[
-				ServerRows
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("AddServerButton", "Add MCP Server Entry"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnAddServerClicked)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("ImportExampleMCPProfileButton", "Import Example Profile"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnImportExampleMCPProfileClicked)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("ImportMCPProfileButton", "Import Profile From Clipboard"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnImportMCPProfileClicked)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("CopyExampleMCPProfileButton", "Copy Example Profile"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnCopyExampleMCPProfileClicked)
-				]
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildMCPServerRow(int32 ServerIndex)
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
-		.Padding(8.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SCheckBox)
-					.IsChecked_Lambda([ServerIndex]()
-					{
-						const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
-						return HyperAIStudio::Private::CheckedState(Settings && Settings->ExtraServers.IsValidIndex(ServerIndex) && Settings->ExtraServers[ServerIndex].bEnabled);
-					})
-					.OnCheckStateChanged(this, &SHyperAIStudioWindow::OnMCPServerEnabledChanged, ServerIndex)
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.42f)
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SEditableTextBox)
-					.Text_Lambda([ServerIndex]()
-					{
-						const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
-						return Settings && Settings->ExtraServers.IsValidIndex(ServerIndex)
-							? FText::FromString(Settings->ExtraServers[ServerIndex].DisplayName)
-							: LOCTEXT("MissingMCPServerName", "Missing server");
-					})
-					.OnTextCommitted(this, &SHyperAIStudioWindow::OnMCPServerNameCommitted, ServerIndex)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(0.0f, 0.0f, 6.0f, 0.0f)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("MCPPriorityLabel", "Priority"))
-					.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SBox)
-					.WidthOverride(64.0f)
-					[
-						SNew(SEditableTextBox)
-						.Text_Lambda([ServerIndex]()
-						{
-							const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
-							return Settings && Settings->ExtraServers.IsValidIndex(ServerIndex)
-								? FText::AsNumber(Settings->ExtraServers[ServerIndex].Priority)
-								: FText::GetEmpty();
-						})
-						.OnTextCommitted(this, &SHyperAIStudioWindow::OnMCPServerPriorityCommitted, ServerIndex)
-					]
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("TestMCPServer", "Test"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnTestMCPServerClicked, ServerIndex)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("RemoveMCPServer", "Remove"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnRemoveMCPServerClicked, ServerIndex)
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 8.0f, 0.0f, 0.0f)
-			[
-				SNew(SEditableTextBox)
-				.HintText(LOCTEXT("MCPDescriptionHint", "Description for generated agent instructions..."))
-				.Text_Lambda([ServerIndex]()
-				{
-					const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
-					return Settings && Settings->ExtraServers.IsValidIndex(ServerIndex)
-						? FText::FromString(Settings->ExtraServers[ServerIndex].Description)
-						: FText::GetEmpty();
-				})
-				.OnTextCommitted(this, &SHyperAIStudioWindow::OnMCPServerDescriptionCommitted, ServerIndex)
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 8.0f, 0.0f, 0.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(STextBlock)
-					.Text_Lambda([ServerIndex]()
-					{
-						const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
-						if (Settings && Settings->ExtraServers.IsValidIndex(ServerIndex) && Settings->ExtraServers[ServerIndex].Transport == EHyperAIStudioMCPTransport::Command)
-						{
-							return LOCTEXT("MCPCommandLabel", "Command");
-						}
-						return LOCTEXT("MCPUrlLabel", "URL");
-					})
-					.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(1.0f)
-				[
-					SNew(SEditableTextBox)
-					.Text_Lambda([ServerIndex]()
-					{
-						const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
-						if (!Settings || !Settings->ExtraServers.IsValidIndex(ServerIndex))
-						{
-							return FText::GetEmpty();
-						}
-						const FHyperAIStudioMCPServerEntry& Entry = Settings->ExtraServers[ServerIndex];
-						return FText::FromString(Entry.Transport == EHyperAIStudioMCPTransport::Command ? Entry.Command : Entry.Url);
-					})
-					.OnTextCommitted(this, &SHyperAIStudioWindow::OnMCPServerEndpointCommitted, ServerIndex)
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text_Lambda([ServerIndex]()
-				{
-					const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
-					if (!Settings || !Settings->ExtraServers.IsValidIndex(ServerIndex))
-					{
-						return LOCTEXT("MCPServerMissingHint", "Server entry no longer exists.");
-					}
-					const FHyperAIStudioMCPServerEntry& Entry = Settings->ExtraServers[ServerIndex];
-					const FString Transport = Entry.Transport == EHyperAIStudioMCPTransport::Command ? TEXT("command/stdio") : TEXT("streamable HTTP");
-					const FString Id = Entry.Id.IsEmpty() ? TEXT("custom-mcp") : Entry.Id;
-					FString Detail = FString::Printf(TEXT("id `%s`, %s. Enabled entries are exported next to unreal-mcp; HyperAIStudio does not route tool calls."), *Id, *Transport);
-					if (Entry.Domains.Num() > 0)
-					{
-						Detail += FString::Printf(TEXT(" Domains: %s."), *FString::Join(Entry.Domains, TEXT(", ")));
-					}
-					if (Entry.TargetClients.Num() > 0)
-					{
-						Detail += FString::Printf(TEXT(" Targets: %s."), *FString::Join(Entry.TargetClients, TEXT(", ")));
-					}
-					if (Entry.Arguments.Num() > 0)
-					{
-						Detail += FString::Printf(TEXT(" Args: %s."), *FString::Join(Entry.Arguments, TEXT(" ")));
-					}
-					if (!Entry.SetupNotes.IsEmpty())
-					{
-						Detail += FString::Printf(TEXT(" %s"), *Entry.SetupNotes);
-					}
-					if (Entry.AgentInstructions.Num() > 0)
-					{
-						Detail += FString::Printf(TEXT(" Agent instructions: %s."), *FString::Join(Entry.AgentInstructions, TEXT(" ")));
-					}
-					return FText::FromString(Detail);
-				})
-				.AutoWrapText(true)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildPrerequisiteRow(const FHyperAIStudioPrerequisiteStatus& Prerequisite)
-{
-	const bool bOk = Prerequisite.bAvailable && Prerequisite.bEnabled;
-	const FSlateColor StatusColor = bOk
-		? HyperAIStudio::Private::GoodColor()
-		: (Prerequisite.bRequired ? HyperAIStudio::Private::ErrorColor() : HyperAIStudio::Private::WarningColor());
-	const FString DetailText = Prerequisite.ActionHint.IsEmpty()
-		? Prerequisite.Detail
-		: FString::Printf(TEXT("%s - %s"), *Prerequisite.Detail, *Prerequisite.ActionHint);
-
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
-		.Padding(8.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(1.0f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(Prerequisite.DisplayName))
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(bOk ? TEXT("Ready") : (Prerequisite.bAvailable ? TEXT("Needs enable") : TEXT("Missing"))))
-					.ColorAndOpacity(StatusColor)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("CopyInstallCommand", "Copy Install"))
-					.IsEnabled(!Prerequisite.InstallCommand.IsEmpty())
-					.OnClicked(this, &SHyperAIStudioWindow::OnCopyPrerequisiteCommandClicked, Prerequisite.DisplayName, Prerequisite.InstallCommand)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(6.0f, 0.0f, 0.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("OpenPrereqDocs", "Docs"))
-					.IsEnabled(!Prerequisite.DocumentationUrl.IsEmpty())
-					.OnClicked(this, &SHyperAIStudioWindow::OnOpenPrerequisiteDocsClicked, Prerequisite.DisplayName, Prerequisite.DocumentationUrl)
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 5.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(FText::FromString(DetailText))
-				.AutoWrapText(true)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildTestCommandRow(const FHyperAIStudioTestCommand& Command)
-{
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
-		.Padding(8.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(1.0f)
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(Command.Title))
-					.TextStyle(FAppStyle::Get(), "DetailsView.CategoryTextStyle")
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("CopyTestPrompt", "Copy Instructions"))
-					.OnClicked(this, &SHyperAIStudioWindow::OnCopyTestPromptClicked, Command.Id)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("OpenTestTerminal", "Open Test Terminal"))
-					.IsEnabled(!Command.TerminalCommand.IsEmpty())
-					.OnClicked(this, &SHyperAIStudioWindow::OnOpenTestTerminalClicked, Command.Id)
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 4.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(FText::FromString(Command.Description))
-				.AutoWrapText(true)
-				.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-			]
-		];
-}
-
-TSharedRef<SWidget> SHyperAIStudioWindow::BuildStatusRow(const FText& Label, TFunction<FText()> ValueGetter, TFunction<FSlateColor()> ColorGetter) const
-{
-	return SNew(SHorizontalBox)
-		+ SHorizontalBox::Slot()
-		.FillWidth(0.38f)
-		[
-			SNew(STextBlock)
-			.Text(Label)
-			.ColorAndOpacity(HyperAIStudio::Private::MutedColor())
-		]
-		+ SHorizontalBox::Slot()
-		.FillWidth(0.62f)
-		[
-			SNew(STextBlock)
-			.Text_Lambda([ValueGetter]() { return ValueGetter(); })
-			.ColorAndOpacity_Lambda([ColorGetter]() { return ColorGetter(); })
-		];
-}
-
 void SHyperAIStudioWindow::ResetContentScroll()
 {
 	if (MainScrollBox.IsValid())
@@ -3360,41 +1819,6 @@ FReply SHyperAIStudioWindow::OnRefreshClicked()
 	LastMessage = LOCTEXT("ValidationStarted", "Validating HyperAIStudio readiness...");
 	AddSessionLogEntry(TEXT("Validation started."));
 	RefreshStatus();
-	return FReply::Handled();
-}
-
-FReply SHyperAIStudioWindow::OnStartClicked()
-{
-	FText Message;
-	Service->StartUnrealMCP(Message);
-	PendingReadinessRetryCount = 10;
-	LastMessage = Message;
-	RefreshStatus();
-	return FReply::Handled();
-}
-
-FReply SHyperAIStudioWindow::OnStopClicked()
-{
-	FText Message;
-	Service->StopUnrealMCP(Message);
-	PendingReadinessRetryCount = 0;
-	LastMessage = Message;
-	RefreshStatus();
-	return FReply::Handled();
-}
-
-FReply SHyperAIStudioWindow::OnAddServerClicked()
-{
-	FText Message;
-	if (Service->AddDefaultCustomServer(Message))
-	{
-		SaveMCPServerChange(Message.ToString());
-	}
-	else
-	{
-		LastMessage = Message;
-		RefreshStatus();
-	}
 	return FReply::Handled();
 }
 
@@ -3586,7 +2010,7 @@ FReply SHyperAIStudioWindow::OnEditMCPServerClicked(int32 ServerIndex)
 				]
 			]
 		]);
-	FSlateApplication::Get().AddWindow(Dialog);
+	ShowDialog(Dialog);
 	return FReply::Handled();
 }
 
@@ -3610,6 +2034,11 @@ FReply SHyperAIStudioWindow::OnOpenChatClicked()
 
 FReply SHyperAIStudioWindow::OnConfigureAgentsClicked()
 {
+	if (OnOpenSection.IsBound())
+	{
+		OnOpenSection.Execute(1);
+		return FReply::Handled();
+	}
 	ActiveTabIndex = 1;
 	bUserSelectedTab = true;
 	bAutoRouteAfterFirstRefresh = false;
@@ -3731,7 +2160,7 @@ FReply SHyperAIStudioWindow::OnViewPrerequisitesClicked()
 				+ SScrollBox::Slot()[Rows]
 			]
 		]);
-	FSlateApplication::Get().AddWindow(Dialog);
+	ShowDialog(Dialog);
 	return FReply::Handled();
 }
 
@@ -3811,7 +2240,7 @@ FReply SHyperAIStudioWindow::OnOpenAgentFilesDialogClicked()
 		.SupportsMaximize(false)
 		.SupportsMinimize(false);
 	Dialog->SetContent(SNew(SBorder).BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder")).Padding(14.0f)[SNew(SScrollBox) + SScrollBox::Slot()[Rows]]);
-	FSlateApplication::Get().AddWindow(Dialog);
+	ShowDialog(Dialog);
 	return FReply::Handled();
 }
 
@@ -3895,7 +2324,7 @@ FReply SHyperAIStudioWindow::OnOpenAgentFilesForAgentClicked(FString AgentName)
 		.SupportsMaximize(false)
 		.SupportsMinimize(false);
 	Dialog->SetContent(SNew(SBorder).BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder")).Padding(14.0f)[SNew(SScrollBox) + SScrollBox::Slot()[Rows]]);
-	FSlateApplication::Get().AddWindow(Dialog);
+	ShowDialog(Dialog);
 	return FReply::Handled();
 }
 
@@ -4070,7 +2499,7 @@ FReply SHyperAIStudioWindow::OnOpenMCPToolsClicked(FString ServerName, FString T
 				.AutoWrapText(true)
 			]
 			);
-		FSlateApplication::Get().AddWindow(Dialog);
+		ShowDialog(Dialog);
 		return FReply::Handled();
 	}
 
@@ -4263,7 +2692,7 @@ FReply SHyperAIStudioWindow::OnOpenMCPToolsClicked(FString ServerName, FString T
 		]);
 	State->ListView = ToolList;
 	State->RefreshFilter();
-	FSlateApplication::Get().AddWindow(Dialog);
+	ShowDialog(Dialog);
 
 	const TWeakPtr<HyperAIStudio::Private::FToolInventoryDialogState> WeakState = State;
 	const TWeakPtr<SHyperAIStudioWindow> WeakWindow = SharedThis(this);
@@ -4455,21 +2884,6 @@ FReply SHyperAIStudioWindow::OnCopyExampleMCPProfileClicked()
 	return FReply::Handled();
 }
 
-FReply SHyperAIStudioWindow::OnImportExampleMCPProfileClicked()
-{
-	FText Message;
-	if (Service->ImportExampleMCPProfile(Message))
-	{
-		SaveMCPServerChange(Message.ToString());
-	}
-	else
-	{
-		LastMessage = FText::Format(LOCTEXT("ImportExampleMCPProfileFailed", "Example MCP profile import failed: {0}"), Message);
-		RefreshStatus();
-	}
-	return FReply::Handled();
-}
-
 FReply SHyperAIStudioWindow::OnImportMCPProfileClicked()
 {
 	FText Message;
@@ -4482,21 +2896,6 @@ FReply SHyperAIStudioWindow::OnImportMCPProfileClicked()
 		LastMessage = FText::Format(LOCTEXT("ImportMCPProfileFailed", "MCP profile import failed: {0}"), Message);
 		RefreshStatus();
 	}
-	return FReply::Handled();
-}
-
-FReply SHyperAIStudioWindow::OnRemoveMCPServerClicked(int32 ServerIndex)
-{
-	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
-	if (!Settings || !Settings->ExtraServers.IsValidIndex(ServerIndex))
-	{
-		LastMessage = LOCTEXT("RemoveMCPServerMissing", "That MCP server entry no longer exists.");
-		return FReply::Handled();
-	}
-
-	const FString RemovedName = Settings->ExtraServers[ServerIndex].DisplayName;
-	Settings->ExtraServers.RemoveAt(ServerIndex);
-	SaveMCPServerChange(FString::Printf(TEXT("Removed MCP server `%s`."), *RemovedName));
 	return FReply::Handled();
 }
 
@@ -4522,106 +2921,6 @@ FReply SHyperAIStudioWindow::OnTestMCPServerClicked(int32 ServerIndex)
 	return FReply::Handled();
 }
 
-void SHyperAIStudioWindow::OnMCPServerEnabledChanged(ECheckBoxState State, int32 ServerIndex)
-{
-	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
-	if (!Settings || !Settings->ExtraServers.IsValidIndex(ServerIndex))
-	{
-		LastMessage = LOCTEXT("EnableMCPServerMissing", "That MCP server entry no longer exists.");
-		return;
-	}
-
-	Settings->ExtraServers[ServerIndex].bEnabled = State == ECheckBoxState::Checked;
-	SaveMCPServerChange(FString::Printf(TEXT("%s `%s`."), Settings->ExtraServers[ServerIndex].bEnabled ? TEXT("Enabled") : TEXT("Disabled"), *Settings->ExtraServers[ServerIndex].DisplayName));
-}
-
-void SHyperAIStudioWindow::OnMCPServerNameCommitted(const FText& Text, ETextCommit::Type CommitType, int32 ServerIndex)
-{
-	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
-	if (!Settings || !Settings->ExtraServers.IsValidIndex(ServerIndex))
-	{
-		LastMessage = LOCTEXT("RenameMCPServerMissing", "That MCP server entry no longer exists.");
-		return;
-	}
-
-	const FString NewName = Text.ToString().TrimStartAndEnd();
-	if (NewName.IsEmpty() || Settings->ExtraServers[ServerIndex].DisplayName == NewName)
-	{
-		return;
-	}
-
-	Settings->ExtraServers[ServerIndex].DisplayName = NewName;
-	SaveMCPServerChange(FString::Printf(TEXT("Renamed MCP server to `%s`."), *NewName));
-}
-
-void SHyperAIStudioWindow::OnMCPServerDescriptionCommitted(const FText& Text, ETextCommit::Type CommitType, int32 ServerIndex)
-{
-	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
-	if (!Settings || !Settings->ExtraServers.IsValidIndex(ServerIndex))
-	{
-		LastMessage = LOCTEXT("DescriptionMCPServerMissing", "That MCP server entry no longer exists.");
-		return;
-	}
-
-	const FString NewDescription = Text.ToString().TrimStartAndEnd();
-	if (Settings->ExtraServers[ServerIndex].Description == NewDescription)
-	{
-		return;
-	}
-
-	Settings->ExtraServers[ServerIndex].Description = NewDescription;
-	SaveMCPServerChange(FString::Printf(TEXT("Updated description for `%s`."), *Settings->ExtraServers[ServerIndex].DisplayName));
-}
-
-void SHyperAIStudioWindow::OnMCPServerEndpointCommitted(const FText& Text, ETextCommit::Type CommitType, int32 ServerIndex)
-{
-	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
-	if (!Settings || !Settings->ExtraServers.IsValidIndex(ServerIndex))
-	{
-		LastMessage = LOCTEXT("EndpointMCPServerMissing", "That MCP server entry no longer exists.");
-		return;
-	}
-
-	const FString NewValue = Text.ToString().TrimStartAndEnd();
-	if (Settings->ExtraServers[ServerIndex].Transport == EHyperAIStudioMCPTransport::Command)
-	{
-		if (NewValue.IsEmpty() || Settings->ExtraServers[ServerIndex].Command == NewValue)
-		{
-			return;
-		}
-		Settings->ExtraServers[ServerIndex].Command = NewValue;
-	}
-	else
-	{
-		if (NewValue.IsEmpty() || Settings->ExtraServers[ServerIndex].Url == NewValue)
-		{
-			return;
-		}
-		Settings->ExtraServers[ServerIndex].Url = NewValue;
-	}
-
-	SaveMCPServerChange(FString::Printf(TEXT("Updated endpoint for `%s`."), *Settings->ExtraServers[ServerIndex].DisplayName));
-}
-
-void SHyperAIStudioWindow::OnMCPServerPriorityCommitted(const FText& Text, ETextCommit::Type CommitType, int32 ServerIndex)
-{
-	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
-	if (!Settings || !Settings->ExtraServers.IsValidIndex(ServerIndex))
-	{
-		LastMessage = LOCTEXT("PriorityMCPServerMissing", "That MCP server entry no longer exists.");
-		return;
-	}
-
-	const int32 NewPriority = FMath::Clamp(FCString::Atoi(*Text.ToString()), 0, 10000);
-	if (Settings->ExtraServers[ServerIndex].Priority == NewPriority)
-	{
-		return;
-	}
-
-	Settings->ExtraServers[ServerIndex].Priority = NewPriority;
-	SaveMCPServerChange(FString::Printf(TEXT("Updated priority for `%s`."), *Settings->ExtraServers[ServerIndex].DisplayName));
-}
-
 void SHyperAIStudioWindow::SaveMCPServerChange(const FString& ChangeSummary)
 {
 	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
@@ -4640,39 +2939,6 @@ void SHyperAIStudioWindow::SaveMCPServerChange(const FString& ChangeSummary)
 		LastMessage = FText::Format(LOCTEXT("MCPServerConfigRegenerateFailed", "{0} Config regeneration failed: {1}"), FText::FromString(ChangeSummary), Message);
 	}
 	RefreshStatus();
-}
-
-FReply SHyperAIStudioWindow::OnOpenAgentTestClicked(const FString AgentName)
-{
-	FText Message;
-	const bool bOk = Service->CreateTestPromptPackage(TEXT("agent-connection"), AgentName, LastPromptPackage, Message)
-		&& Service->OpenTerminalForPrompt(LastPromptPackage, Message);
-	LastMessage = bOk ? Message : FText::Format(LOCTEXT("OpenAgentTestFailed", "Open agent test failed: {0}"), Message);
-	AddSessionLogEntry(FString::Printf(TEXT("%s connection test %s: %s"),
-		AgentName.IsEmpty() ? TEXT("Preferred agent") : *AgentName,
-		bOk ? TEXT("opened") : TEXT("failed"),
-		*Message.ToString()));
-	return FReply::Handled();
-}
-
-FReply SHyperAIStudioWindow::OnOpenUnrealTerminalClicked()
-{
-	FText Message;
-	const bool bOk = Service->OpenUnrealTerminal(Message);
-	LastMessage = bOk ? Message : FText::Format(LOCTEXT("OpenUnrealTerminalFailed", "Open UE Terminal failed: {0}"), Message);
-	AddSessionLogEntry(FString::Printf(TEXT("UE Terminal %s: %s"), bOk ? TEXT("opened") : TEXT("failed"), *Message.ToString()));
-	return FReply::Handled();
-}
-
-FReply SHyperAIStudioWindow::OnCopyTerminalSetupClicked()
-{
-	FString Commands = GetTerminalStartupRecipeText(FHyperAIStudioService::GetProjectRoot());
-	Commands.ReplaceInline(TEXT("\n"), TEXT("\r\n"));
-	Commands += TEXT("\r\n");
-	Service->CopyTextToClipboard(Commands);
-	LastMessage = LOCTEXT("TerminalSetupCopied", "Project-root terminal startup commands copied.");
-	AddSessionLogEntry(TEXT("Project-root terminal startup commands copied."));
-	return FReply::Handled();
 }
 
 FReply SHyperAIStudioWindow::OnCopyInspectorCommandClicked()
@@ -4694,14 +2960,6 @@ FReply SHyperAIStudioWindow::OnOpenAgentsClicked()
 	return FReply::Handled();
 }
 
-FReply SHyperAIStudioWindow::OnOpenClaudeClicked()
-{
-	FText Message;
-	const bool bOk = Service->OpenClaudeFile(Message);
-	LastMessage = bOk ? Message : FText::Format(LOCTEXT("OpenClaudeFailed", "Open CLAUDE.md failed: {0}"), Message);
-	return FReply::Handled();
-}
-
 FReply SHyperAIStudioWindow::OnOpenIncludedDocsClicked()
 {
 	FText Message;
@@ -4715,14 +2973,6 @@ FReply SHyperAIStudioWindow::OnCopyFirstRunPromptClicked()
 	Service->CopyTextToClipboard(Service->GetFirstRunPrompt());
 	LastMessage = LOCTEXT("FirstRunPromptCopied", "Starter instructions copied. Paste them into your configured agent client; open the project root when possible so project-scoped config and rules load.");
 	AddSessionLogEntry(TEXT("Starter instructions copied."));
-	return FReply::Handled();
-}
-
-FReply SHyperAIStudioWindow::OnCopyCodexTomlPatchClicked()
-{
-	Service->CopyTextToClipboard(Service->GetCodexTomlPatch());
-	LastMessage = LOCTEXT("CodexTomlPatchCopied", "Codex TOML managed block copied. Review or paste it into .codex/config.toml if you do not want automatic setup to write Codex config.");
-	AddSessionLogEntry(TEXT("Codex TOML managed block copied."));
 	return FReply::Handled();
 }
 
@@ -4741,20 +2991,6 @@ FReply SHyperAIStudioWindow::OnOpenProjectFolderClicked()
 	return FReply::Handled();
 }
 
-FReply SHyperAIStudioWindow::OnCopyPrerequisiteCommandClicked(FString DisplayName, FString InstallCommand)
-{
-	if (InstallCommand.IsEmpty())
-	{
-		LastMessage = FText::FromString(FString::Printf(TEXT("No install command is defined for %s."), *DisplayName));
-		return FReply::Handled();
-	}
-
-	Service->CopyTextToClipboard(InstallCommand);
-	LastMessage = FText::FromString(FString::Printf(TEXT("%s install command copied. Review it before running."), *DisplayName));
-	AddSessionLogEntry(FString::Printf(TEXT("%s install command copied."), *DisplayName));
-	return FReply::Handled();
-}
-
 FReply SHyperAIStudioWindow::OnOpenPrerequisiteDocsClicked(FString DisplayName, FString DocumentationUrl)
 {
 	if (DocumentationUrl.IsEmpty())
@@ -4765,31 +3001,6 @@ FReply SHyperAIStudioWindow::OnOpenPrerequisiteDocsClicked(FString DisplayName, 
 
 	FPlatformProcess::LaunchURL(*DocumentationUrl, nullptr, nullptr);
 	LastMessage = FText::FromString(FString::Printf(TEXT("Opened %s documentation."), *DisplayName));
-	return FReply::Handled();
-}
-
-FReply SHyperAIStudioWindow::OnCopyTestPromptClicked(FString TestId)
-{
-	FText Message;
-	const bool bOk = Service->CreateTestPromptPackage(TestId, FString(), LastPromptPackage, Message);
-	if (bOk)
-	{
-		Service->CopyTextToClipboard(LastPromptPackage.PromptText);
-		LastMessage = FText::Format(LOCTEXT("TestPromptCopied", "{0} instructions copied to clipboard."), Message);
-	}
-	else
-	{
-		LastMessage = FText::Format(LOCTEXT("TestPromptFailed", "Test instructions failed: {0}"), Message);
-	}
-	return FReply::Handled();
-}
-
-FReply SHyperAIStudioWindow::OnOpenTestTerminalClicked(FString TestId)
-{
-	FText Message;
-	const bool bOk = Service->CreateTestPromptPackage(TestId, FString(), LastPromptPackage, Message)
-		&& Service->OpenTerminalForPrompt(LastPromptPackage, Message);
-	LastMessage = bOk ? Message : FText::Format(LOCTEXT("OpenTestTerminalFailed", "Open test terminal failed: {0}"), Message);
 	return FReply::Handled();
 }
 
@@ -4930,52 +3141,6 @@ void SHyperAIStudioWindow::AddSessionLogEntry(const FString& Entry)
 	{
 		SessionLog.SetNum(MaxSessionLogEntries);
 	}
-}
-
-FText SHyperAIStudioWindow::GetHeadlineText() const
-{
-	if (Status.IsReady())
-	{
-		return LOCTEXT("ReadyHeadline", "Ready: Unreal MCP is listening and tools/list is reachable.");
-	}
-	if (Status.bProbeInProgress)
-	{
-		return LOCTEXT("CheckingHeadline", "Checking Unreal MCP readiness...");
-	}
-	return LOCTEXT("NeedsSetupHeadline", "Setup needed: run Set Up HyperAIStudio.");
-}
-
-FSlateColor SHyperAIStudioWindow::GetHeadlineColor() const
-{
-	if (Status.IsReady())
-	{
-		return HyperAIStudio::Private::GoodColor();
-	}
-	if (Status.bProbeInProgress)
-	{
-		return HyperAIStudio::Private::WarningColor();
-	}
-	return HyperAIStudio::Private::ErrorColor();
-}
-
-FText SHyperAIStudioWindow::GetMessageText() const
-{
-	return LastMessage;
-}
-
-FText SHyperAIStudioWindow::GetSessionLogText() const
-{
-	if (SessionLog.Num() == 0)
-	{
-		return LOCTEXT("SessionLogEmpty", "No HyperAIStudio actions in this session yet.");
-	}
-
-	return FText::FromString(FString::Join(SessionLog, LINE_TERMINATOR));
-}
-
-FText SHyperAIStudioWindow::BoolText(bool bValue, const FString& TrueText, const FString& FalseText) const
-{
-	return FText::FromString(bValue ? TrueText : FalseText);
 }
 
 FSlateColor SHyperAIStudioWindow::BoolColor(bool bValue) const

@@ -31,7 +31,7 @@ playable space needs. Nothing in it tells you a doorway is 2.2 m. Route layout t
 The loop this pack is built for:
 
 1. `hyper_image_generate` writes a reference PNG into the project.
-2. Open the HyperAI Preview tab and point it at that PNG, beside a viewport capture.
+2. Open the Match page of HyperAI Studio and point it at that PNG, beside a viewport capture.
 3. `hyper_image_compare` scores the two, names where they differ, and keeps each iteration in a session.
    `hyper_lighting_compare` gives the lighting-only numbers.
 4. Adjust, capture again, compare again, until the score reaches the target. The image-match skill
@@ -47,7 +47,7 @@ generation - Codex has an `imagegen` skill, for instance - and when yours does, 
 nothing beyond the subscription already running the session, there is no key to set, no endpoint to
 configure, and no model name to go stale.
 
-This pack does not care who made an image. `hyper_image_inspect`, the Preview tab and
+This pack does not care who made an image. `hyper_image_inspect`, the Match page and
 `hyper_lighting_compare` all take a path. So generate the image your own way and drop it in:
 
     Content/References/Generated/<batch>/<batch>_01.png
@@ -229,7 +229,7 @@ Each image lands in the project as a **file, not an asset**:
 The `.json` sidecar records the prompt, model, seed, size, time and cost. It is what makes a reference
 re-generatable six months later, and what `hyper_image_inspect` reads back.
 
-Files rather than assets on purpose: the Preview tab and `hyper_lighting_compare` both take a file
+Files rather than assets on purpose: the Match page and `hyper_lighting_compare` both take a file
 path, so a reference is useful the moment it lands, with no import step and nothing to cook. Import
 one as a texture only if it is going into the game.
 )CB")};

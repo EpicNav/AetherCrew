@@ -1402,11 +1402,11 @@ private:
 		return Page;
 	}
 
-	/** A panel that was a section of the old window, given a page's margins. */
+	/** A panel given a page's margins; its list fills the height and scrolls itself. */
 	static TSharedRef<SWidget> PanelPage(const TSharedRef<SWidget>& Panel)
 	{
-		return SNew(SScrollBox)
-			+ SScrollBox::Slot().Padding(FMargin(24.0f, 20.0f, 24.0f, 24.0f))
+		return SNew(SBox)
+			.Padding(FMargin(24.0f, 20.0f, 24.0f, 16.0f))
 			[
 				Panel
 			];
