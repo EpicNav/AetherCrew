@@ -321,7 +321,7 @@ struct FHyperAIStudioAgentTaskRoute
 	UPROPERTY(Config, EditAnywhere, Category = "Routing")
 	TArray<FString> Packs;
 
-	/** Claude Code only: the tab starts as this subagent from .hyperai/agents or .claude/agents, e.g. blueprint-builder. */
+	/** Claude Code only: the tab starts as this subagent from .hyperai/agents or .claude/agents, e.g. programmer. */
 	UPROPERTY(Config, EditAnywhere, Category = "Routing")
 	FString Subagent;
 };

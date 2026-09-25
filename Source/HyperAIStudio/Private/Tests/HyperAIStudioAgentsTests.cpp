@@ -225,36 +225,42 @@ bool FHyperAIStudioAgentsTeamTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Installing writes files"), Report.Changed > 0);
 	TestTrue(TEXT("without complaint"), Report.Notes.IsEmpty());
 	const TArray<FHyperAIStudioAgentDefinition> Team = List(Root.Path);
-	for (const TCHAR* Name : {TEXT("gameplay-architect"), TEXT("blueprint-builder"), TEXT("asset-builder"), TEXT("level-builder"), TEXT("playtester"), TEXT("reviewer")})
+	for (const TCHAR* Name : {TEXT("director"), TEXT("programmer"), TEXT("level-designer"), TEXT("lighting-artist"), TEXT("technical-artist"), TEXT("qa-tester")})
 	{
 		const TOptional<FHyperAIStudioAgentDefinition> Member = Find(Team, Name);
 		TestTrue(FString::Printf(TEXT("%s is installed, built in and written for both agents"), Name),
 			Member && Member->bBuiltIn && Member->ClaudeState == TEXT("synced") && Member->CodexState == TEXT("synced"));
+		TestTrue(FString::Printf(TEXT("%s carries a quality bar or judges by one"), Name), Member && Member->Instructions.Contains(TEXT("quality bar")));
 	}
-	const TOptional<FHyperAIStudioAgentDefinition> Tester = Find(Team, TEXT("playtester"));
-	TestTrue(TEXT("The playtester only reads"), Tester && Tester->Tools == TEXT("read"));
+	const TOptional<FHyperAIStudioAgentDefinition> Tester = Find(Team, TEXT("qa-tester"));
+	TestTrue(TEXT("The QA tester only reads"), Tester && Tester->Tools == TEXT("read"));
+	TestTrue(TEXT("The team is installed"), IsTeamInstalled(Root.Path));
 
-	const FString Workflow = FPaths::Combine(WorkflowDirectory(Root.Path), TEXT("hyperai-build-system.js"));
+	const FString Workflow = FPaths::Combine(WorkflowDirectory(Root.Path), TEXT("hyperai-team.js"));
 	const FString WorkflowText = Read(Workflow);
-	TestTrue(TEXT("The build workflow begins with its meta"), WorkflowText.StartsWith(TEXT("export const meta = {")));
+	TestTrue(TEXT("The team workflow begins with its meta"), WorkflowText.StartsWith(TEXT("export const meta = {")));
 	TestEqual(TEXT("and ends with HyperAIStudio's marker"), MarkerState(WorkflowText, TEXT("hyperai-generated")), FString(TEXT("clean")));
-	TestTrue(TEXT("It runs the team's agents"), WorkflowText.Contains(TEXT("agentType: 'gameplay-architect'")) && WorkflowText.Contains(TEXT("agentType: 'playtester'")));
+	TestTrue(TEXT("It runs the team's roles"), WorkflowText.Contains(TEXT("agentType: 'director'")) && WorkflowText.Contains(TEXT("agentType: 'qa-tester'"))
+		&& WorkflowText.Contains(TEXT("'lighting-artist'")));
 	FString SkillName;
 	FString SkillDescription;
 	bool bMenuOnly = false;
-	TestTrue(TEXT("The build-system skill is installed for Codex"), HyperAIStudio::Skills::ParseSkill(
-		Read(FPaths::Combine(HyperAIStudio::Skills::CanonicalDirectory(Root.Path), TEXT("build-system"), TEXT("SKILL.md"))), SkillName, SkillDescription, bMenuOnly));
-	TestTrue(TEXT("and mirrored for Claude Code"), FPaths::FileExists(FPaths::Combine(HyperAIStudio::Skills::ClaudeDirectory(Root.Path), TEXT("build-system"), TEXT("SKILL.md"))));
+	TestTrue(TEXT("The team skill is installed for Codex"), HyperAIStudio::Skills::ParseSkill(
+		Read(FPaths::Combine(HyperAIStudio::Skills::CanonicalDirectory(Root.Path), TEXT("team"), TEXT("SKILL.md"))), SkillName, SkillDescription, bMenuOnly));
+	TestTrue(TEXT("and mirrored for Claude Code"), FPaths::FileExists(FPaths::Combine(HyperAIStudio::Skills::ClaudeDirectory(Root.Path), TEXT("team"), TEXT("SKILL.md"))));
+	TestEqual(TEXT("Claude Code asks for the team with its skill"), TeamRequest(TEXT("Claude Code"), TEXT("a crypt")), FString(TEXT("/team a crypt")));
+	TestEqual(TEXT("so does Codex"), TeamRequest(TEXT("Codex"), TEXT("a crypt")), FString(TEXT("$team a crypt")));
+	TestTrue(TEXT("and another agent reads the skill's file"), TeamRequest(TEXT("Gemini"), TEXT("a crypt")).StartsWith(TEXT("Follow the team skill in .agents/skills/team/SKILL.md")));
 
 	const FString VerifyText = Read(FPaths::Combine(WorkflowDirectory(Root.Path), TEXT("hyperai-verify.js")));
 	TestTrue(TEXT("The verify workflow begins with its meta"), VerifyText.StartsWith(TEXT("export const meta = {")));
-	TestTrue(TEXT("Its playtesters plan, write, run and judge cases"), VerifyText.Contains(TEXT("agentType: 'playtester'")) && VerifyText.Contains(TEXT("hyper_verify_run")));
+	TestTrue(TEXT("Its QA testers plan, write, run and judge cases"), VerifyText.Contains(TEXT("agentType: 'qa-tester'")) && VerifyText.Contains(TEXT("hyper_verify_run")));
 	TestTrue(TEXT("The verify skill is installed for Codex"), HyperAIStudio::Skills::ParseSkill(
 		Read(FPaths::Combine(HyperAIStudio::Skills::CanonicalDirectory(Root.Path), TEXT("verify"), TEXT("SKILL.md"))), SkillName, SkillDescription, bMenuOnly));
 	const FString MatchText = Read(FPaths::Combine(WorkflowDirectory(Root.Path), TEXT("hyperai-match.js")));
 	TestTrue(TEXT("The match workflow begins with its meta"), MatchText.StartsWith(TEXT("export const meta = {")));
-	TestTrue(TEXT("Its builder loops on hyper_image_compare and a reviewer judges"), MatchText.Contains(TEXT("hyper_image_compare"))
-		&& MatchText.Contains(TEXT("agentType: 'reviewer'")) && MatchText.Contains(TEXT("image-match skill")));
+	TestTrue(TEXT("Its builder loops on hyper_image_compare and the director judges"), MatchText.Contains(TEXT("hyper_image_compare"))
+		&& MatchText.Contains(TEXT("agentType: 'director'")) && MatchText.Contains(TEXT("image-match skill")));
 
 	// The scripts must parse the way the workflow runtime runs them: the body inside an async function.
 	int32 NodeCode = -1;
@@ -281,13 +287,47 @@ bool FHyperAIStudioAgentsTeamTest::RunTest(const FString& Parameters)
 	}
 
 	// An update keeps a team member the project edited, and the others unchanged.
-	const FString Reviewer = FPaths::Combine(CanonicalDirectory(Root.Path), TEXT("reviewer.md"));
-	Write(Reviewer, Read(Reviewer).Replace(TEXT("You do not change anything."), TEXT("You do not change anything. Be brief.")));
+	const FString Director = FPaths::Combine(CanonicalDirectory(Root.Path), TEXT("director.md"));
+	Write(Director, Read(Director).Replace(TEXT("you do not build."), TEXT("you do not build. Be brief.")));
 	InstallTeam(Root.Path, /*bUpdateOnly=*/true);
-	TestTrue(TEXT("The edited member keeps its edit"), Read(Reviewer).Contains(TEXT("Be brief.")));
-	const TOptional<FHyperAIStudioAgentDefinition> Edited = Find(List(Root.Path), TEXT("reviewer"));
+	TestTrue(TEXT("The edited member keeps its edit"), Read(Director).Contains(TEXT("Be brief.")));
+	const TOptional<FHyperAIStudioAgentDefinition> Edited = Find(List(Root.Path), TEXT("director"));
 	TestTrue(TEXT("and is no longer marked built in, while its files follow the edit"), Edited && !Edited->bBuiltIn && Edited->ClaudeState == TEXT("synced"));
-	TestTrue(TEXT("Claude's reviewer carries the edit"), Read(FPaths::Combine(ClaudeDirectory(Root.Path), TEXT("reviewer.md"))).Contains(TEXT("Be brief.")));
+	TestTrue(TEXT("Claude's director carries the edit"), Read(FPaths::Combine(ClaudeDirectory(Root.Path), TEXT("director.md"))).Contains(TEXT("Be brief.")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAgentsTeamMigrationTest,
+	"HyperAIStudio.Agents.TeamMigration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioAgentsTeamMigrationTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::Agents;
+	using namespace HyperAIStudio::AgentsTests;
+	const FScratchRoot Root;
+	// A project with the old gameplay team, as the plugin installed it: one member untouched, one edited there.
+	const auto OldMember = [](const TCHAR* Name)
+	{
+		return WithMarker(FString::Printf(TEXT("---\nname: %s\ndescription: The old team's %s.\ntools: read\n---\nYou did this job.\n"), Name, Name),
+			TEXT("hyperai-builtin"), TEXT("plugin"), TEXT("<!--"), TEXT(" -->"));
+	};
+	const FString Untouched = FPaths::Combine(CanonicalDirectory(Root.Path), TEXT("playtester.md"));
+	const FString Edited = FPaths::Combine(CanonicalDirectory(Root.Path), TEXT("reviewer.md"));
+	Write(Untouched, OldMember(TEXT("playtester")));
+	Write(Edited, OldMember(TEXT("reviewer")).Replace(TEXT("You did this job."), TEXT("You did this job, our way.")));
+	Sync(Root.Path);
+	const FString UntouchedCopy = FPaths::Combine(ClaudeDirectory(Root.Path), TEXT("playtester.md"));
+	TestTrue(TEXT("The old member was written for Claude Code"), FPaths::FileExists(UntouchedCopy));
+
+	// The update-only refresh at startup moves it to the new team.
+	const HyperAIStudio::Skills::FSyncReport Report = InstallTeam(Root.Path, /*bUpdateOnly=*/true);
+	TestTrue(TEXT("A project with the old team gets the new one"), IsTeamInstalled(Root.Path));
+	TestFalse(TEXT("An untouched old member goes"), FPaths::FileExists(Untouched));
+	TestFalse(TEXT("and so do its generated copies"), FPaths::FileExists(UntouchedCopy));
+	TestTrue(TEXT("An edited old member stays"), Read(Edited).Contains(TEXT("our way")));
+	TestTrue(TEXT("and the report says why"), Report.Notes.ContainsByPredicate([](const FString& Note) { return Note.StartsWith(TEXT("reviewer:")); }));
 	return true;
 }
 

@@ -1,11 +1,11 @@
 export const meta = {
   name: 'hyperai-match',
-  description: 'Make a scene, material, effect or UI look like a reference image: a builder iterates capture, compare and one change at a time until the score reaches the target or stops improving, then a reviewer judges the best attempt by eye',
+  description: 'Make a scene, material, effect or UI look like a reference image: the lighting artist, level designer or technical artist iterates capture, compare and one change at a time until the score reaches the target or stops improving, then the director judges the best attempt by eye',
   whenToUse: 'When the user has a reference image (concept art, a photo, a generated image) and wants the level, a material, an effect or a UI to look like it, such as "/hyperai-match Content/References/dusk.png make the level lighting match"',
   phases: [
     { title: 'Plan', detail: 'look at the reference, choose the mode, target, capture and levers' },
     { title: 'Match', detail: 'capture, hyper_image_compare in one session, one change at a time' },
-    { title: 'Judge', detail: 'a reviewer compares the reference with the best attempt' },
+    { title: 'Judge', detail: 'the director compares the reference with the best attempt' },
   ],
 }
 
@@ -69,7 +69,7 @@ const plan = await agent(
   'or the steps to set up a camera first), and the levers you will change, strongest first. ' +
   'Then capture the current state once and call hyper_image_compare with that sessionId and the note "starting point"; report its score as firstScore. ' +
   'Lock exposure first for a scene or environment match.',
-  { agentType: 'level-builder', phase: 'Plan', label: 'plan', schema: PLAN })
+  { agentType: 'lighting-artist', phase: 'Plan', label: 'plan', schema: PLAN })
 if (!plan) {
   log('The planner returned nothing; nothing was matched.')
   return { status: 'no_plan' }
@@ -77,7 +77,8 @@ if (!plan) {
 log(`Matching ${plan.domain} against ${plan.reference} in ${plan.mode} mode, target ${plan.targetScore}; starting at ${Math.round(plan.firstScore)}.`)
 
 phase('Match')
-const builder = plan.domain === 'scene' || plan.domain === 'environment' ? 'level-builder' : 'asset-builder'
+// A scene's look is its light; an environment is its layout; the rest is surfaces, effects and interface.
+const builder = plan.domain === 'scene' ? 'lighting-artist' : plan.domain === 'environment' ? 'level-designer' : 'technical-artist'
 const match = await agent(
   `Run the image-match loop from the image-match skill until it stops.\n\n` +
   `Reference: ${plan.reference}\nWhat makes its look: ${plan.look}\nDomain: ${plan.domain}\nMode: ${plan.mode}, target ${plan.targetScore}\n` +
@@ -101,7 +102,7 @@ const verdict = await agent(
   `Scores by iteration: ${JSON.stringify(match.iterations)}\nWhat the builder says still differs: ${match.remaining}\n\n` +
   'matched: a viewer would call it the same look. close: the look reads, with differences you can name. not_matched: it does not read as the reference. ' +
   'Say why in terms of light, palette, shapes and mood, and list the next steps that would close the gap.',
-  { agentType: 'reviewer', phase: 'Judge', label: 'judge', schema: VERDICT })
+  { agentType: 'director', phase: 'Judge', label: 'judge', schema: VERDICT })
 
 return {
   request,
@@ -116,7 +117,7 @@ return {
   stoppedBecause: match.stoppedBecause,
   iterations: match.iterations,
   verdict: verdict ? verdict.verdict : 'unjudged',
-  reason: verdict ? verdict.reason : 'The reviewer returned nothing.',
+  reason: verdict ? verdict.reason : 'The director returned nothing.',
   nextSteps: verdict ? verdict.nextSteps : [],
   preview: 'Open the Match page in HyperAI Studio (Ctrl+Alt+H), pick the Image match source and the same reference, to see every iteration.',
 }

@@ -3,10 +3,10 @@ export const meta = {
   description: 'Verify gameplay in Unreal within a minute: playtesters write test cases in parallel, HyperAI plays every case at once in copies of the level, and playtesters judge the evidence',
   whenToUse: 'After gameplay is built, to check that it works, such as "the coin adds 10 to the score and disappears, and the door opens when the player walks up to it"',
   phases: [
-    { title: 'Plan', detail: 'a playtester reads the case limit and splits the request into checks' },
-    { title: 'Write', detail: 'one playtester per check writes its test case' },
+    { title: 'Plan', detail: 'the QA tester reads the case limit and splits the request into checks' },
+    { title: 'Write', detail: 'one QA tester per check writes its test case' },
     { title: 'Run', detail: 'one hyper_verify_run plays every case at once, within its deadline' },
-    { title: 'Judge', detail: 'one playtester per case decides whether its evidence proves the check' },
+    { title: 'Judge', detail: 'one QA tester per case decides whether its evidence proves the check' },
   ],
 }
 
@@ -114,7 +114,7 @@ const plan = await agent(
   `Plan how to verify this gameplay in the open Unreal level, following the unreal-playtest skill's "Verify many things at once" section:\n\n${request}\n\n` +
   'First call hyper_verify_calibrate with {"bMeasure": false} and report its limit. Then run one hyper_verify_run case of a single Survey step (or one per actor you need), to learn the class names, labels and where the player starts. ' +
   'Split the request into at most that many checks, each one observable thing with one clear pass condition. Write down in notes the targets, properties and input actions the case writers need.',
-  { agentType: 'playtester', phase: 'Plan', label: 'plan', schema: PLAN })
+  { agentType: 'qa-tester', phase: 'Plan', label: 'plan', schema: PLAN })
 if (!plan || !plan.checks.length) {
   log('The planner returned no checks; nothing was verified.')
   return { status: 'no_plan' }
@@ -131,7 +131,7 @@ const written = await parallel(checks.map(check => () => agent(
   `Check "${check.name}": ${check.requirement}\n\nWhat the planner learned about the level:\n${plan.notes}\n\n` +
   'The case starts where the game starts the player. Use only the listed step actions. End with a step that proves the requirement: an Assert step, or a Play step for what a player does, such as defeating enemies, collecting every pickup or reaching the exit. ' +
   'and set timeoutSeconds to the simulated seconds the case needs plus a margin (at most 55). In proves, say what a pass shows.',
-  { agentType: 'playtester', phase: 'Write', label: `write:${check.name}`, schema: CASE })))
+  { agentType: 'qa-tester', phase: 'Write', label: `write:${check.name}`, schema: CASE })))
 // Each case keeps its check's name, so results and verdicts line up with the checks.
 const cases = written.map((c, index) => c && { ...c, name: checks[index].name }).filter(Boolean)
 if (!cases.length) {
@@ -150,7 +150,7 @@ const report = await agent(
   'Call hyper_verify_run (toolset HyperAIStudio.HyperAIStudioPIEPlaytestToolset) exactly once, with exactly these arguments, changing nothing:\n\n' +
   `${JSON.stringify(runArguments)}\n\n` +
   'Return its returnValue as your structured result: status, diagnostic, wallSeconds and every case with its steps. If the call is refused, return that status and diagnostic with no cases.',
-  { agentType: 'playtester', phase: 'Run', label: 'run', schema: REPORT })
+  { agentType: 'qa-tester', phase: 'Run', label: 'run', schema: REPORT })
 if (!report) {
   log('The run step returned nothing.')
   return { status: 'not_run', level: plan.level, cases: cases.map(c => c.name) }
@@ -170,7 +170,7 @@ const judged = await parallel(report.cases.map(result => () => {
     'pass: the evidence shows the requirement holds. fail: the evidence shows it does not, which is a bug in the game. ' +
     'inconclusive: the case could not tell, for example a wrong target name or a step that failed for a reason unrelated to the requirement. ' +
     'A step\'s file is a picture, a capture or a Play step\'s map of where the player went: open it when it helps. Quote the evidence line you relied on.',
-    { agentType: 'playtester', phase: 'Judge', label: `judge:${result.name}`, schema: VERDICT })
+    { agentType: 'qa-tester', phase: 'Judge', label: `judge:${result.name}`, schema: VERDICT })
 }))
 
 const results = report.cases.map((result, index) => ({

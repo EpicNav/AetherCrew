@@ -71,6 +71,8 @@ private:
 	TArray<FString> Attached;
 	/** What the last Save to project or capture said, shown under the composer. */
 	FString Notice;
+	/** Messages go to HyperAI's team, not to this agent alone. */
+	bool bTeam = false;
 	/** Items whose details are open. */
 	TSet<FString> Open;
 	FDelegateHandle ChangedHandle;

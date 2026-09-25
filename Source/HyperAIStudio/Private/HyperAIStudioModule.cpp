@@ -2226,7 +2226,7 @@ private:
 			{
 				UE_LOG(LogHyperAIStudio, Display, TEXT("Skills: %s"), *Note);
 			}
-			// An installed gameplay team takes plugin updates; a project without one gets nothing new.
+			// An installed team takes plugin updates, the old gameplay team included; a project without one gets nothing new.
 			HyperAIStudio::Agents::InstallTeam(Root, /*bUpdateOnly=*/true);
 			for (const FString& Note : HyperAIStudio::Agents::Sync(Root).Notes)
 			{

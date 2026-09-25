@@ -1407,33 +1407,33 @@
   },
   {
    "namespace": "SHyperAIStudioAgentsPanel",
-   "key": "AddTeam",
-   "source": "Add Gameplay Team",
-   "text": "添加玩法团队"
-  },
-  {
-   "namespace": "SHyperAIStudioAgentsPanel",
    "key": "AddTeamTitle",
    "source": "Gameplay team",
    "text": "玩法团队"
   },
   {
    "namespace": "SHyperAIStudioAgentsPanel",
-   "key": "AddTeamTooltip",
-   "source": "Add HyperAI's gameplay team: an architect, Blueprint, asset and level builders, a playtester and a reviewer, with the build workflow that runs them together. Nothing you already have is overwritten.",
-   "text": "添加 HyperAI 的玩法团队：一名架构师、蓝图、资产和关卡构建者、一名试玩者和一名审阅者，以及让他们协同工作的构建工作流。不会覆盖你已有的任何内容。"
+   "key": "AddTheTeam",
+   "source": "Add the Team",
+   "text": "添加团队"
   },
   {
    "namespace": "SHyperAIStudioAgentsPanel",
-   "key": "BuiltIn",
-   "source": "gameplay team",
-   "text": "玩法团队"
+   "key": "AddTheTeamTooltip",
+   "source": "Add HyperAI's team: a director, a programmer, a level designer, a lighting artist, a technical artist and a QA tester, each with its quality bar, and the workflow that runs them together. Nothing you already have is overwritten.",
+   "text": "添加 HyperAI 的团队：导演、程序员、关卡设计师、灯光师、技术美术和 QA 测试员，各有自己的质量标准，以及让他们协同工作的工作流。你已有的内容不会被覆盖。"
   },
   {
    "namespace": "SHyperAIStudioAgentsPanel",
-   "key": "BuiltInTooltip",
-   "source": "Installed with HyperAI's gameplay team and updated with the plugin until you edit it.",
-   "text": "随 HyperAI 玩法团队安装，并在你编辑之前随插件更新。"
+   "key": "BuiltInTeam",
+   "source": "team",
+   "text": "团队"
+  },
+  {
+   "namespace": "SHyperAIStudioAgentsPanel",
+   "key": "BuiltInTeamTooltip",
+   "source": "Installed with HyperAI's team and updated with the plugin until you edit it.",
+   "text": "随 HyperAI 团队安装，在你编辑之前会随插件更新。"
   },
   {
    "namespace": "SHyperAIStudioAgentsPanel",
@@ -1527,9 +1527,9 @@
   },
   {
    "namespace": "SHyperAIStudioAgentsPanel",
-   "key": "Empty",
-   "source": "No subagents yet. Add the gameplay team, or define your own.",
-   "text": "还没有子智能体。可以添加玩法团队，或定义你自己的子智能体。"
+   "key": "EmptyTeam",
+   "source": "No subagents yet. Add the team, or define your own.",
+   "text": "还没有子智能体。添加团队，或定义你自己的。"
   },
   {
    "namespace": "SHyperAIStudioAgentsPanel",
@@ -1683,9 +1683,9 @@
   },
   {
    "namespace": "SHyperAIStudioAgentsPanel",
-   "key": "Subtitle",
-   "source": "Each subagent is defined once in .hyperai/agents and written out for Claude Code (.claude/agents) and Codex (.codex/agents). A chat hands work to one by name, or the gameplay team builds a whole system: /hyperai-build-system in Claude Code, $build-system in Codex.",
-   "text": "每个子智能体只在 .hyperai/agents 中定义一次，并分别写出给 Claude Code（.claude/agents）和 Codex（.codex/agents）。对话可以按名称把工作交给它，或者由玩法团队构建整个系统：在 Claude Code 中使用 /hyperai-build-system，在 Codex 中使用 $build-system。"
+   "key": "SubtitleTeam",
+   "source": "Each subagent is defined once in .hyperai/agents and written out for Claude Code (.claude/agents) and Codex (.codex/agents). A chat hands work to one by name, or the whole team takes a request: the Team switch in the chat, /hyperai-team in Claude Code, $team in Codex.",
+   "text": "每个子智能体在 .hyperai/agents 中定义一次，并为 Claude Code（.claude/agents）和 Codex（.codex/agents）写出。对话可以按名称把工作交给其中一个，也可以让整个团队接下请求：对话中的“团队”开关，Claude Code 中的 /hyperai-team，Codex 中的 $team。"
   },
   {
    "namespace": "SHyperAIStudioAgentsPanel",
@@ -3276,6 +3276,18 @@
    "key": "StopTooltip",
    "source": "Stop the agent's current turn and drop queued messages.",
    "text": "停止智能体的当前回合，并丢弃排队的消息。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "Team",
+   "source": "Team",
+   "text": "团队"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "TeamTooltip",
+   "source": "Send your messages to HyperAI's team, not to this agent alone. The director plans the work, the programmer, level designer, lighting artist and technical artist build their parts at once, the QA tester proves each part, and the director reviews it all against the team's quality bar. The first time, this adds the team to the project.",
+   "text": "把你的消息交给 HyperAI 的团队，而不只是这个智能体。导演规划工作，程序员、关卡设计师、灯光师和技术美术同时完成各自的部分，QA 测试员验证每个部分，导演再按团队的质量标准审查全部成果。第一次使用时，会把团队添加到项目中。"
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",

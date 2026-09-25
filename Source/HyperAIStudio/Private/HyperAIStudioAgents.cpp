@@ -14,6 +14,14 @@ namespace
 {
 	const TCHAR* GeneratedTag = TEXT("hyperai-generated");
 	const TCHAR* BuiltInTag = TEXT("hyperai-builtin");
+	/**
+	 * What the team once installed under names it no longer ships: the gameplay team's members became the director
+	 * (gameplay-architect and reviewer), the programmer, the technical artist, the level designer and the QA tester.
+	 */
+	const TCHAR* const RetiredAgents[] = {TEXT("gameplay-architect"), TEXT("blueprint-builder"), TEXT("asset-builder"), TEXT("level-builder"),
+		TEXT("playtester"), TEXT("reviewer")};
+	const TCHAR* const RetiredWorkflows[] = {TEXT("hyperai-build-system.js")};
+	const TCHAR* const RetiredSkills[] = {TEXT("build-system")};
 	/** A read agent may inspect files and call Unreal MCP tools, but not write files or run commands. */
 	const TCHAR* ReadOnlyDenied = TEXT("Bash, Edit, NotebookEdit, Write");
 
@@ -561,7 +569,13 @@ Skills::FSyncReport InstallTeam(const FString& ProjectRoot, const bool bUpdateOn
 	Skills::FSyncReport Report;
 	const FString Team = TeamDirectory();
 	const TArray<FString> Sources = FilesIn(FPaths::Combine(Team, TEXT("agents")), TEXT(".md"));
-	const bool bInstalled = Sources.ContainsByPredicate([&ProjectRoot](const FString& Source)
+	// A project with the old team is a project with the team: it moves to the new one, even on an update.
+	bool bMigrating = false;
+	for (const TCHAR* Name : RetiredAgents)
+	{
+		bMigrating |= FPaths::FileExists(FPaths::Combine(CanonicalDirectory(ProjectRoot), FString(Name) + TEXT(".md")));
+	}
+	const bool bInstalled = bMigrating || Sources.ContainsByPredicate([&ProjectRoot](const FString& Source)
 	{
 		return FPaths::FileExists(FPaths::Combine(CanonicalDirectory(ProjectRoot), FPaths::GetCleanFilename(Source)));
 	});
@@ -582,7 +596,7 @@ Skills::FSyncReport InstallTeam(const FString& ProjectRoot, const bool bUpdateOn
 		FString Existing;
 		if (!Load(Target, Existing))
 		{
-			if (!bUpdateOnly && WriteFile(Target, Wanted))
+			if ((!bUpdateOnly || bMigrating) && WriteFile(Target, Wanted))
 			{
 				++Report.Changed;
 			}
@@ -602,6 +616,44 @@ Skills::FSyncReport InstallTeam(const FString& ProjectRoot, const bool bUpdateOn
 			++Report.Changed;
 		}
 	}
+	// Members the team no longer has go, unless the project edited them; the roles they became are installed above.
+	for (const TCHAR* Name : RetiredAgents)
+	{
+		const FString File = FPaths::Combine(CanonicalDirectory(ProjectRoot), FString(Name) + TEXT(".md"));
+		FString Text;
+		if (!Load(File, Text))
+		{
+			continue;
+		}
+		if (MarkerState(Text, BuiltInTag) != TEXT("clean"))
+		{
+			Report.Notes.Add(FString::Printf(TEXT("%s: no longer in the team, but it is this project's own or was edited here, so it stays."), Name));
+		}
+		else if (IFileManager::Get().Delete(*File))
+		{
+			++Report.Changed;
+		}
+	}
+	for (const TCHAR* Name : RetiredWorkflows)
+	{
+		const FString File = FPaths::Combine(WorkflowDirectory(ProjectRoot), Name);
+		FString Text;
+		if (Load(File, Text) && MarkerState(Text, GeneratedTag) == TEXT("clean") && IFileManager::Get().Delete(*File))
+		{
+			++Report.Changed;
+		}
+	}
+	for (const FHyperAIStudioSkill& Skill : Skills::ListProjectSkills(ProjectRoot))
+	{
+		FString Error;
+		for (const TCHAR* Name : RetiredSkills)
+		{
+			if (Skill.Name == Name && Skill.bBuiltIn && Skills::Delete(ProjectRoot, Skill.Name, Error))
+			{
+				++Report.Changed;
+			}
+		}
+	}
 	for (const FString& Workflow : FilesIn(FPaths::Combine(Team, TEXT("workflows")), TEXT(".js")))
 	{
 		FString Text;
@@ -616,6 +668,25 @@ Skills::FSyncReport InstallTeam(const FString& ProjectRoot, const bool bUpdateOn
 	Merge(Report, Skills::SyncClaudeMirror(ProjectRoot));
 	Merge(Report, Sync(ProjectRoot));
 	return Report;
+}
+
+bool IsTeamInstalled(const FString& ProjectRoot)
+{
+	for (const FString& Source : FilesIn(FPaths::Combine(TeamDirectory(), TEXT("agents")), TEXT(".md")))
+	{
+		if (!FPaths::FileExists(FPaths::Combine(CanonicalDirectory(ProjectRoot), FPaths::GetCleanFilename(Source))))
+		{
+			return false;
+		}
+	}
+	return FPaths::FileExists(FPaths::Combine(Skills::CanonicalDirectory(ProjectRoot), TEXT("team"), TEXT("SKILL.md")));
+}
+
+FString TeamRequest(const FString& AgentName, const FString& Message)
+{
+	const FString Prefix = Skills::InvocationPrefix(AgentName);
+	return Prefix.IsEmpty() ? TEXT("Follow the team skill in .agents/skills/team/SKILL.md for this request:\n\n") + Message
+		: Prefix + TEXT("team ") + Message;
 }
 
 bool Save(const FString& ProjectRoot, const FHyperAIStudioAgentDefinition& Agent, const FString& PreviousName, FString& OutError)

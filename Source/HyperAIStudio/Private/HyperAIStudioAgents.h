@@ -58,10 +58,19 @@ namespace HyperAIStudio::Agents
 	/** Brings .claude/agents and .codex/agents in line with .hyperai/agents, within the rules above. */
 	Skills::FSyncReport Sync(const FString& ProjectRoot);
 	/**
-	 * The gameplay team: its agents, the build-system skill and Claude Code's build workflow, then a sync. With
-	 * bUpdateOnly, refreshes an installed team and adds nothing to a project without one.
+	 * HyperAI's team: its agents (director, programmer, level designer, lighting artist, technical artist and QA
+	 * tester), the team skill and Claude Code's team workflow, then a sync. Members, skills and workflows the team
+	 * no longer has are removed where the project did not edit them. With bUpdateOnly, refreshes an installed team,
+	 * the retired one included, and adds nothing to a project without one.
 	 */
 	Skills::FSyncReport InstallTeam(const FString& ProjectRoot, bool bUpdateOnly);
+	/** Every member of the team is in the project, with the team skill. */
+	bool IsTeamInstalled(const FString& ProjectRoot);
+	/**
+	 * Message as a request for the team, in the agent's own way: its team skill for Claude Code ("/team") and Codex
+	 * ("$team"), and the skill's file for an agent without skills or a chat that started before the team was added.
+	 */
+	FString TeamRequest(const FString& AgentName, const FString& Message);
 	/** Writes the definition and syncs. PreviousName renames an existing agent. */
 	bool Save(const FString& ProjectRoot, const FHyperAIStudioAgentDefinition& Agent, const FString& PreviousName, FString& OutError);
 	bool Delete(const FString& ProjectRoot, const FString& Name, FString& OutError);

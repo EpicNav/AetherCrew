@@ -85,7 +85,7 @@ void SHyperAIStudioAgentsPanel::Construct(const FArguments& InArgs)
 			SNew(STextBlock)
 			.AutoWrapText(true)
 			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-			.Text(LOCTEXT("Subtitle", "Each subagent is defined once in .hyperai/agents and written out for Claude Code (.claude/agents) and Codex (.codex/agents). A chat hands work to one by name, or the gameplay team builds a whole system: /hyperai-build-system in Claude Code, $build-system in Codex."))
+			.Text(LOCTEXT("SubtitleTeam", "Each subagent is defined once in .hyperai/agents and written out for Claude Code (.claude/agents) and Codex (.codex/agents). A chat hands work to one by name, or the whole team takes a request: the Team switch in the chat, /hyperai-team in Claude Code, $team in Codex."))
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -102,8 +102,8 @@ void SHyperAIStudioAgentsPanel::Construct(const FArguments& InArgs)
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
 			[
-				Button(LOCTEXT("AddTeam", "Add Gameplay Team"),
-					LOCTEXT("AddTeamTooltip", "Add HyperAI's gameplay team: an architect, Blueprint, asset and level builders, a playtester and a reviewer, with the build workflow that runs them together. Nothing you already have is overwritten."),
+				Button(LOCTEXT("AddTheTeam", "Add the Team"),
+					LOCTEXT("AddTheTeamTooltip", "Add HyperAI's team: a director, a programmer, a level designer, a lighting artist, a technical artist and a QA tester, each with its quality bar, and the workflow that runs them together. Nothing you already have is overwritten."),
 					[this]()
 				{
 					const HyperAIStudio::Skills::FSyncReport Report = HyperAIStudio::Agents::InstallTeam(FHyperAIStudioService::GetProjectRoot(), /*bUpdateOnly=*/false);
@@ -128,7 +128,7 @@ void SHyperAIStudioAgentsPanel::Construct(const FArguments& InArgs)
 			SNew(STextBlock)
 			.Visibility_Lambda([this]() { return Agents.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed; })
 			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-			.Text(LOCTEXT("Empty", "No subagents yet. Add the gameplay team, or define your own."))
+			.Text(LOCTEXT("EmptyTeam", "No subagents yet. Add the team, or define your own."))
 		]
 		+ SVerticalBox::Slot()
 		.FillHeight(1.0f)
@@ -197,8 +197,8 @@ TSharedRef<ITableRow> SHyperAIStudioAgentsPanel::GenerateRow(FAgentPtr Agent, co
 	}
 	if (Copy.bBuiltIn)
 	{
-		AddBadge(Badge(LOCTEXT("BuiltIn", "gameplay team"), FSlateColor(FStyleColors::AccentBlue),
-			LOCTEXT("BuiltInTooltip", "Installed with HyperAI's gameplay team and updated with the plugin until you edit it.")));
+		AddBadge(Badge(LOCTEXT("BuiltInTeam", "team"), FSlateColor(FStyleColors::AccentBlue),
+			LOCTEXT("BuiltInTeamTooltip", "Installed with HyperAI's team and updated with the plugin until you edit it.")));
 	}
 	if (const TSharedPtr<SWidget> Claude = StateBadge(Copy.ClaudeState, LOCTEXT("Claude", "Claude Code")))
 	{

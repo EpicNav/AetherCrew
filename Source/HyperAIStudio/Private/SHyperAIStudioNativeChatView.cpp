@@ -8,8 +8,10 @@
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
+#include "HyperAIStudioAgents.h"
 #include "HyperAIStudioMarkdown.h"
 #include "HyperAIStudioPreviewPanel.h"
+#include "HyperAIStudioService.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioWidgets.h"
 #include "IDesktopPlatform.h"
@@ -24,6 +26,7 @@
 #include "Styling/CoreStyle.h"
 #include "Styling/StyleColors.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Images/SImage.h"
@@ -310,6 +313,24 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 			.VAlign(VAlign_Bottom)
 			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
 			[
+				SNew(SCheckBox)
+				.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+				.ToolTipText(LOCTEXT("TeamTooltip", "Send your messages to HyperAI's team, not to this agent alone. The director plans the work, the programmer, level designer, lighting artist and technical artist build their parts at once, the QA tester proves each part, and the director reviews it all against the team's quality bar. The first time, this adds the team to the project."))
+				.IsChecked_Lambda([this]() { return bTeam ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+				.OnCheckStateChanged_Lambda([this](const ECheckBoxState State) { bTeam = State == ECheckBoxState::Checked; })
+				[
+					SNew(SBox)
+					.Padding(FMargin(8.0f, 2.0f))
+					[
+						SNew(STextBlock).Text(LOCTEXT("Team", "Team"))
+					]
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Bottom)
+			.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
 				SNew(SButton)
 				.Text(LOCTEXT("AttachImage", "Image..."))
 				.ToolTipText(LOCTEXT("AttachImageTooltip", "Attach a picture for the agent to look at. Dropping image files onto the chat does the same."))
@@ -415,7 +436,20 @@ void SHyperAIStudioNativeChatView::Submit()
 	}
 	Composer->SetText(FText::GetEmpty());
 	bFollow = true;
-	Chat->Send(Text, Attached);
+	FString Message = Text;
+	if (bTeam)
+	{
+		// A chat that started before the team was added does not know its skill yet, so it gets the skill's file.
+		const FString Root = FHyperAIStudioService::GetProjectRoot();
+		const bool bAdded = !HyperAIStudio::Agents::IsTeamInstalled(Root);
+		if (bAdded)
+		{
+			HyperAIStudio::Agents::InstallTeam(Root, /*bUpdateOnly=*/false);
+			Notice = TEXT("Added HyperAI's team to this project, in .hyperai/agents, with its skill and workflow.");
+		}
+		Message = HyperAIStudio::Agents::TeamRequest(bAdded ? FString() : Chat->GetAgentName(), Text);
+	}
+	Chat->Send(Message, Attached);
 	Attached.Reset();
 	RebuildAttachments();
 }
