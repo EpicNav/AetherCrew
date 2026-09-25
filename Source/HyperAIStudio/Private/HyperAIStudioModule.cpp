@@ -640,7 +640,7 @@ public:
 
 		CommandDocsSmoke = MakeUnique<FAutoConsoleCommand>(
 			TEXT("HyperAIStudio.DocsSmoke"),
-			TEXT("Validates the packaged HyperAIStudio HTML documentation for required first-user workflow sections. Add quit-on-complete for unattended smoke runs."),
+			TEXT("Validates the plugin's documentation site in Docs: every page is there with its main section. Add quit-on-complete for unattended smoke runs."),
 			FConsoleCommandWithArgsDelegate::CreateRaw(this, &FHyperAIStudioModule::RunConsoleDocsSmoke));
 
 		CommandWelcomeSmoke = MakeUnique<FAutoConsoleCommand>(
@@ -2755,79 +2755,29 @@ private:
 			}
 		}
 
+		// The documentation site in the plugin's Docs folder: every page, each with the heading of its main section.
 		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("HyperAIStudio"));
-		const bool bPluginOk = Plugin.IsValid();
-		const FString DocsPath = bPluginOk
-			? FPaths::Combine(Plugin->GetBaseDir(), TEXT("Docs"), TEXT("HyperAIStudio.html"))
-			: FString();
-		const bool bDocsExists = !DocsPath.IsEmpty() && FPaths::FileExists(DocsPath);
-
-		FString DocsText;
-		const bool bDocsRead = bDocsExists && FFileHelper::LoadFileToString(DocsText, *DocsPath);
-		const bool bFirstRunOk = DocsText.Contains(TEXT("First Run"));
-		const bool bGeneratedOk = DocsText.Contains(TEXT("What HyperAIStudio Generates"))
-			&& DocsText.Contains(TEXT("Shared Project Workspace"))
-			&& DocsText.Contains(TEXT(".hyperai/work/YYYY-MM-DD-&lt;clear-context-name&gt;/"));
-		const bool bDailyOk = DocsText.Contains(TEXT("Daily Use"));
-		const bool bContextMenusOk = DocsText.Contains(TEXT("From editor context menus"));
-		const bool bPrerequisitesOk = DocsText.Contains(TEXT("Prerequisites"));
-		const bool bMultiMcpOk = DocsText.Contains(TEXT("MCP Profiles"))
-			&& DocsText.Contains(TEXT("single execution server"))
-			&& DocsText.Contains(TEXT("Toolset Registry"))
-			&& DocsText.Contains(TEXT("MCP</code> tab"));
-		const bool bProvidersOk = !DocsText.Contains(TEXT("Model Providers"))
-			&& !DocsText.Contains(TEXT("Add OpenAI Provider"))
-			&& !DocsText.Contains(TEXT("Copy Codex Provider Patch"))
-			&& !DocsText.Contains(TEXT("Optional Provider Integrations"))
-			&& !DocsText.Contains(TEXT("Provider Templates"));
-		const bool bNoBridgeOk = DocsText.Contains(TEXT("does not provide licensing, accounts, cloud services, an execution bridge"))
-			&& DocsText.Contains(TEXT("retired Hyper UE TCP/stdio/HTTP runtime is never started or used as fallback"))
-			&& !DocsText.Contains(TEXT("<h2>Automation Bridge</h2>"))
-			&& !DocsText.Contains(TEXT("534-tool MCP runtime"))
-			&& !DocsText.Contains(TEXT("127.0.0.1:55557"))
-			&& !DocsText.Contains(TEXT("127.0.0.1:8765"));
-		const bool bSafetyOk = DocsText.Contains(TEXT("Safety And Limits"));
-		const bool bTroubleshootingOk = DocsText.Contains(TEXT("Troubleshooting"));
-		const bool bAgentActionsOk = DocsText.Contains(TEXT("Use the HyperAIStudio workbench tabs for setup"))
-			&& DocsText.Contains(TEXT("HyperAI Chat"))
-			&& DocsText.Contains(TEXT("embedded terminal"))
-			&& DocsText.Contains(TEXT("Stop Agent"))
-			&& DocsText.Contains(TEXT("Copy Prompt"))
-			&& DocsText.Contains(TEXT("does not interpret terminal output"))
-			&& DocsText.Contains(TEXT("own agent approvals/history"))
-			&& DocsText.Contains(TEXT("Setup</code>, <code>Agents</code>, <code>MCP</code>, and <code>Docs"));
-		const bool bOk = bPluginOk
-			&& bDocsExists
-			&& bDocsRead
-			&& bFirstRunOk
-			&& bGeneratedOk
-			&& bDailyOk
-			&& bContextMenusOk
-			&& bPrerequisitesOk
-			&& bMultiMcpOk
-			&& bProvidersOk
-			&& bNoBridgeOk
-			&& bSafetyOk
-			&& bTroubleshootingOk
-			&& bAgentActionsOk;
-
-		UE_LOG(LogHyperAIStudio, Display, TEXT("HyperAIStudio.DocsSmoke %s path=%s plugin=%s docs=%s read=%s firstRun=%s generated=%s daily=%s contextMenus=%s prerequisites=%s multiMcp=%s providers=%s noBridge=%s safety=%s troubleshooting=%s agentActions=%s"),
-			bOk ? TEXT("succeeded") : TEXT("failed"),
-			DocsPath.IsEmpty() ? TEXT("<missing>") : *DocsPath,
-			bPluginOk ? TEXT("true") : TEXT("false"),
-			bDocsExists ? TEXT("true") : TEXT("false"),
-			bDocsRead ? TEXT("true") : TEXT("false"),
-			bFirstRunOk ? TEXT("true") : TEXT("false"),
-			bGeneratedOk ? TEXT("true") : TEXT("false"),
-			bDailyOk ? TEXT("true") : TEXT("false"),
-			bContextMenusOk ? TEXT("true") : TEXT("false"),
-			bPrerequisitesOk ? TEXT("true") : TEXT("false"),
-			bMultiMcpOk ? TEXT("true") : TEXT("false"),
-			bProvidersOk ? TEXT("true") : TEXT("false"),
-			bNoBridgeOk ? TEXT("true") : TEXT("false"),
-			bSafetyOk ? TEXT("true") : TEXT("false"),
-			bTroubleshootingOk ? TEXT("true") : TEXT("false"),
-			bAgentActionsOk ? TEXT("true") : TEXT("false"));
+		const TPair<const TCHAR*, const TCHAR*> Pages[] = {
+			{TEXT("index.html"), TEXT("Everything HyperAI adds.")},
+			{TEXT("setup.html"), TEXT("One button: Start Setup.")},
+			{TEXT("chat.html"), TEXT("A studio team of six.")},
+			{TEXT("match.html"), TEXT("Match it: the agent does the work.")},
+			{TEXT("memory.html"), TEXT("Held notes and keys.")},
+			{TEXT("tools.html"), TEXT("The 35 packs.")},
+			{TEXT("reference.html"), TEXT("Console commands.")}};
+		TArray<FString> Missing;
+		for (const TPair<const TCHAR*, const TCHAR*>& Page : Pages)
+		{
+			FString Text;
+			if (!Plugin.IsValid() || !FFileHelper::LoadFileToString(Text, *FPaths::Combine(Plugin->GetBaseDir(), TEXT("Docs"), Page.Key))
+				|| !Text.Contains(Page.Value))
+			{
+				Missing.Add(Page.Key);
+			}
+		}
+		const bool bOk = Plugin.IsValid() && Missing.IsEmpty();
+		UE_LOG(LogHyperAIStudio, Display, TEXT("HyperAIStudio.DocsSmoke %s plugin=%s pages=%d missing=%s"), bOk ? TEXT("succeeded") : TEXT("failed"),
+			Plugin.IsValid() ? TEXT("true") : TEXT("false"), static_cast<int32>(UE_ARRAY_COUNT(Pages)), Missing.IsEmpty() ? TEXT("none") : *FString::Join(Missing, TEXT(",")));
 
 		if (bQuitOnComplete)
 		{
