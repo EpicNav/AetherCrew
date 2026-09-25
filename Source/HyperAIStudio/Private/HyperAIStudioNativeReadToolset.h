@@ -470,6 +470,10 @@ struct FHyperAIMemoryRecallReport
 	/** What agents changed lately on this machine, newest first, one line each. */
 	UPROPERTY()
 	TArray<FString> RecentChanges;
+
+	/** Tasks chats finished that match the query, best first, one line each: when, which agent, what was asked, how it ended. */
+	UPROPERTY()
+	TArray<FString> History;
 };
 
 USTRUCT(BlueprintType)
@@ -477,7 +481,7 @@ struct FHyperAIMemoryWriteReport
 {
 	GENERATED_BODY()
 
-	/** saved, forgotten, refused or invalid_request. */
+	/** saved, held (saved, but the user has to allow it), forgotten, refused or invalid_request. */
 	UPROPERTY()
 	FString Status;
 
@@ -890,17 +894,18 @@ public:
 	static FHyperAIPIEQueryReport hyper_pie_query(int32 PieInstance = -1);
 
 	/**
-	 * Project memory: facts about this project every agent shares, best matches first, plus what agents changed
-	 * lately. Query is a few keywords; empty returns the newest facts. Target is an asset path to narrow the
-	 * changes to, or all.
+	 * Project memory: notes about this project every agent shares and the tasks chats finished before, best matches
+	 * first, plus what agents changed lately. Query is a few keywords; empty returns the newest. Target is an asset
+	 * path to narrow the changes to, or all.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Memory")
 	static FHyperAIMemoryRecallReport hyper_memory_recall(const FString& Query, int32 Limit = 10, const FString& Target = TEXT("all"));
 
 	/**
-	 * Save a lasting fact about this project for every future chat: a convention, a decision or a gotcha, never task
-	 * progress. Title is one line; Text up to 4000 characters; Type is convention, decision, fact or gotcha. Replaces
-	 * is new, or the name of a fact you saved earlier, to update it. The user reviews what agents save.
+	 * Save a lasting fact about this project for every future chat, without asking: a convention, a decision, a gotcha
+	 * or a preference the user stated, never task progress. Title is the fact itself, in one line; Text up to 4000
+	 * characters; Type is convention, decision, fact or gotcha. Replaces is new, or the name of a fact you saved
+	 * earlier, to update it. A fact that reads like instructions to agents waits for the user; keys are refused.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Memory")
 	static FHyperAIMemoryWriteReport hyper_memory_remember(

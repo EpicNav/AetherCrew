@@ -510,12 +510,13 @@ public:
 	TArray<FSoftClassPath> PlaytestSpawnableClasses;
 
 	/**
-	 * How a memory an agent saves on its own (hyper_memory_remember) reaches future chats. A fact planted by text
-	 * the agent read would otherwise reach every later chat, so by default only its title does until you confirm it
-	 * in HyperAIStudio > Agents > Project Memory.
+	 * How a memory an agent saves on its own (hyper_memory_remember) reaches future chats: at once by default. A fact
+	 * that reads like instructions to agents, as one planted by text the agent read would, waits for you in
+	 * HyperAIStudio > Agents > Project Memory whatever this says. (Not AgentMemoryMode: projects that kept the old
+	 * review-first default take this one.)
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Memory", meta = (DisplayName = "Agent-Saved Memories"))
-	EHyperAIStudioAgentMemoryMode AgentMemoryMode = EHyperAIStudioAgentMemoryMode::TitleUntilReviewed;
+	EHyperAIStudioAgentMemoryMode AgentMemory = EHyperAIStudioAgentMemoryMode::Automatic;
 
 	/** The chat panel's new-tab menu: one entry per kind of task. Empty restores the built-in list. */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing")

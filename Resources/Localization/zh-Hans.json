@@ -2811,6 +2811,18 @@
   },
   {
    "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "Allow",
+   "source": "Allow",
+   "text": "允许"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "AllowTooltip",
+   "source": "Let every future chat use this note.",
+   "text": "让以后的每个对话都能使用这条笔记。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
    "key": "AwaitingReview",
    "source": "awaiting review",
    "text": "等待审阅"
@@ -2877,6 +2889,18 @@
   },
   {
    "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "Held",
+   "source": "held for you",
+   "text": "等你确认"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "HeldTooltip",
+   "source": "No chat sees this note: {0}. Allow it once you have checked it is a note about the project, not instructions.",
+   "text": "没有对话能看到这条笔记：{0}。确认它是关于项目的笔记而不是指令后，再允许它。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
    "key": "ImportCancel",
    "source": "Cancel",
    "text": "取消"
@@ -2919,9 +2943,9 @@
   },
   {
    "namespace": "SHyperAIStudioMemoryPanel",
-   "key": "ModeAutoTooltip",
-   "source": "Straight into every future chat; review or delete it here later.",
-   "text": "直接进入以后的每个对话；之后可以在这里审阅或删除。"
+   "key": "ModeAutomaticTooltip",
+   "source": "Straight into every future chat; review or delete it here later. A note that reads like instructions to agents still waits for you.",
+   "text": "直接进入以后的每个对话；之后可在这里查看或删除。读起来像是给智能体下指令的笔记仍会等你确认。"
   },
   {
    "namespace": "SHyperAIStudioMemoryPanel",
@@ -2961,6 +2985,30 @@
   },
   {
    "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "NoTaskMatch",
+   "source": "No past task matches.",
+   "text": "没有匹配的过往任务。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "NoTasks",
+   "source": "No finished tasks yet. Each task a chat finishes on this machine is kept here, in .hyperai/runtime/memory/history.",
+   "text": "还没有完成的任务。这台电脑上每个对话完成的任务都保存在这里，位于 .hyperai/runtime/memory/history。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "NotesTab",
+   "source": "Notes",
+   "text": "笔记"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "NotesTabTooltip",
+   "source": "What agents know about this project.",
+   "text": "智能体对这个项目的了解。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
    "key": "RowMeta",
    "source": "{0}, updated {1}. Name: {2}",
    "text": "{0}，更新于 {1}。名称：{2}"
@@ -2985,9 +3033,33 @@
   },
   {
    "namespace": "SHyperAIStudioMemoryPanel",
-   "key": "Subtitle",
-   "source": "Facts every agent gets in every chat, from .hyperai/memory (shared through Git). Facts an agent saves on its own wait here for review.",
-   "text": "每个智能体在每次对话中都会获得的事实，来自 .hyperai/memory（通过 Git 共享）。智能体自行保存的事实会在这里等待审阅。"
+   "key": "SubtitleAutomatic",
+   "source": "What agents know about this project, from .hyperai/memory (shared through Git). Agents save what they learn on their own, each message a chat sends carries the notes that match it, and a note that reads like instructions to agents waits here for you.",
+   "text": "智能体对这个项目的了解，来自 .hyperai/memory（通过 Git 共享）。智能体会自行保存学到的内容，对话发出的每条消息都会附上与之匹配的笔记，而读起来像是给智能体下指令的笔记会在这里等你确认。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "TaskMeta",
+   "source": "{0}, {1}.{2}",
+   "text": "{0}，{1}。{2}"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "TaskTools",
+   "source": " Used {0}.",
+   "text": "使用了 {0}。"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "TasksTab",
+   "source": "Past tasks",
+   "text": "过往任务"
+  },
+  {
+   "namespace": "SHyperAIStudioMemoryPanel",
+   "key": "TasksTabTooltip",
+   "source": "Every task a chat finished on this machine: what was asked and how it ended. Agents find these when a new task looks like an old one.",
+   "text": "这台电脑上对话完成的每个任务：提出了什么要求，结果如何。新任务与旧任务相似时，智能体会找到它们。"
   },
   {
    "namespace": "SHyperAIStudioMemoryPanel",

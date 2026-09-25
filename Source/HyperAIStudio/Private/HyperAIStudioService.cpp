@@ -4914,7 +4914,7 @@ bool FHyperAIStudioService::RefreshMemoryInstructions()
 	{
 		return false;
 	}
-	const FString Block = HyperAIStudio::Memory::BuildInstructionSection(GetProjectRoot(), Settings->AgentMemoryMode)
+	const FString Block = HyperAIStudio::Memory::BuildInstructionSection(GetProjectRoot(), Settings->AgentMemory)
 		.Replace(TEXT("\n"), LINE_TERMINATOR);
 	return UpsertManagedBlock(AgentsPath, Block, ManagedMemoryBegin, ManagedMemoryEnd);
 }

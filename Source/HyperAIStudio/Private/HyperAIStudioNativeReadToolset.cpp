@@ -2536,18 +2536,23 @@ FHyperAIMemoryRecallReport UHyperAIStudioNativeReadToolset::hyper_memory_recall(
 		return Report;
 	}
 	const FString Root = FHyperAIStudioService::GetProjectRoot();
-	for (const FHyperAIStudioMemoryFact& Fact : HyperAIStudio::Memory::Recall(Root, Query, Limit, GetDefault<UHyperAIStudioSettings>()->AgentMemoryMode))
+	for (const FHyperAIStudioMemoryFact& Fact : HyperAIStudio::Memory::Recall(Root, Query, Limit, GetDefault<UHyperAIStudioSettings>()->AgentMemory))
 	{
 		Report.Facts.Add(HyperAIStudio::NativeRead::Memory::ToView(Fact));
+	}
+	// Past tasks are longer than notes: a few of the best will do.
+	for (const FHyperAIStudioMemoryTask& Task : HyperAIStudio::Memory::RecallTasks(Root, Query, FMath::Clamp(Limit, 1, 5)))
+	{
+		Report.History.Add(HyperAIStudio::Memory::FormatTask(Task));
 	}
 	// ponytail: Epic's schema makes a parameter with an empty-string default required, so the defaults are words (all, new).
 	const FString AssetFilter = Target.TrimStartAndEnd();
 	Report.RecentChanges = HyperAIStudio::Memory::RecentChanges(Root, FMath::Clamp(Limit, 1, 50),
 		AssetFilter.Equals(TEXT("all"), ESearchCase::IgnoreCase) ? FString() : AssetFilter);
 	Report.Status = TEXT("ok");
-	if (Report.Facts.IsEmpty())
+	if (Report.Facts.IsEmpty() && Report.History.IsEmpty())
 	{
-		Report.Diagnostic = TEXT("No saved fact matches. Save lasting project facts with hyper_memory_remember.");
+		Report.Diagnostic = TEXT("Nothing in memory matches. Save lasting project facts with hyper_memory_remember.");
 	}
 	return Report;
 }
@@ -2572,18 +2577,31 @@ FHyperAIMemoryWriteReport UHyperAIStudioNativeReadToolset::hyper_memory_remember
 	Fact.Type = Type.TrimStartAndEnd().IsEmpty() ? FString(TEXT("fact")) : Type;
 	Fact.Source = TEXT("agent");
 	FString Error;
-	Report.Name = HyperAIStudio::Memory::Remember(FHyperAIStudioService::GetProjectRoot(), Fact, Error);
+	FHyperAIStudioMemoryFact Saved;
+	Report.Name = HyperAIStudio::Memory::Remember(FHyperAIStudioService::GetProjectRoot(), Fact, Error, &Saved);
 	if (Report.Name.IsEmpty())
 	{
 		Report.Status = TEXT("refused");
 		Report.Diagnostic = Error;
 		return Report;
 	}
+	if (!Saved.Held.IsEmpty())
+	{
+		Report.Status = TEXT("held");
+		Report.Diagnostic = FString::Printf(TEXT("Saved, but held for the user: %s. No chat sees it until they allow it."), *Saved.Held);
+		// Only a held fact needs the user; everything else an agent saves applies without them.
+		FNotificationInfo Info(FText::FromString(FString::Printf(
+			TEXT("An agent's memory waits for you: %s. It is held because %s. Allow or delete it in HyperAIStudio > Agents > Project Memory."),
+			*Saved.Title.Left(120), *Saved.Held)));
+		Info.ExpireDuration = 10.0f;
+		FSlateNotificationManager::Get().AddNotification(Info);
+		return Report;
+	}
 	Report.Status = TEXT("saved");
-	switch (GetDefault<UHyperAIStudioSettings>()->AgentMemoryMode)
+	switch (GetDefault<UHyperAIStudioSettings>()->AgentMemory)
 	{
 	case EHyperAIStudioAgentMemoryMode::Automatic:
-		Report.Diagnostic = TEXT("Saved. Future chats get it in full.");
+		Report.Diagnostic = TEXT("Saved. Every future chat can use it.");
 		break;
 	case EHyperAIStudioAgentMemoryMode::AfterReview:
 		Report.Diagnostic = TEXT("Saved. Future chats get it once the user confirms it.");
@@ -2592,11 +2610,6 @@ FHyperAIMemoryWriteReport UHyperAIStudioNativeReadToolset::hyper_memory_remember
 		Report.Diagnostic = TEXT("Saved. Future chats see its title now and its text once the user confirms it.");
 		break;
 	}
-	// The user decides what agents remember, so every new agent memory is announced.
-	FNotificationInfo Info(FText::FromString(FString::Printf(
-		TEXT("An agent saved a memory: %s. Review it in HyperAIStudio > Agents > Project Memory."), *Title.Left(120))));
-	Info.ExpireDuration = 8.0f;
-	FSlateNotificationManager::Get().AddNotification(Info);
 	return Report;
 }
 

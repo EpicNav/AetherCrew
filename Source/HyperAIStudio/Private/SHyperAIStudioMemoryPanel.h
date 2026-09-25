@@ -7,7 +7,7 @@
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
 
-/** Project Memory in the workbench: every fact agents see, with review for the ones agents saved. */
+/** Project Memory in the workbench: every note agents see, the ones held for the user first, and the tasks chats finished. */
 class SHyperAIStudioMemoryPanel : public SCompoundWidget
 {
 public:
@@ -24,15 +24,23 @@ public:
 
 private:
 	using FFactPtr = TSharedPtr<FHyperAIStudioMemoryFact>;
+	using FTaskPtr = TSharedPtr<FHyperAIStudioMemoryTask>;
 
 	void Reload();
 	void RebuildFiltered();
 	TSharedRef<ITableRow> GenerateRow(FFactPtr Fact, const TSharedRef<STableViewBase>& OwnerTable);
+	TSharedRef<ITableRow> GenerateTaskRow(FTaskPtr Task, const TSharedRef<STableViewBase>& OwnerTable);
+	/** A held note, or one the setting keeps from chats until the user confirms it. */
+	static bool NeedsUser(const FHyperAIStudioMemoryFact& Fact);
 	TSharedRef<SWidget> BuildModeMenu();
 
 	TArray<FHyperAIStudioMemoryFact> AllFacts;
 	TArray<FFactPtr> Filtered;
 	FString Filter;
 	TSharedPtr<SListView<FFactPtr>> List;
+	/** The page shows notes, or the tasks chats finished on this machine. */
+	bool bShowTasks = false;
+	TArray<FTaskPtr> Tasks;
+	TSharedPtr<SListView<FTaskPtr>> TaskList;
 	FDelegateHandle ChangedHandle;
 };

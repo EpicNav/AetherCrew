@@ -20,11 +20,13 @@
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
+#include "Widgets/Input/SSegmentedControl.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
 
@@ -137,13 +139,32 @@ void SHyperAIStudioMemoryPanel::Construct(const FArguments& InArgs)
 			SNew(STextBlock)
 			.AutoWrapText(true)
 			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-			.Text(LOCTEXT("Subtitle", "Facts every agent gets in every chat, from .hyperai/memory (shared through Git). Facts an agent saves on its own wait here for review."))
+			.Text(LOCTEXT("SubtitleAutomatic", "What agents know about this project, from .hyperai/memory (shared through Git). Agents save what they learn on their own, each message a chat sends carries the notes that match it, and a note that reads like instructions to agents waits here for you."))
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.Padding(0.0f, 8.0f, 0.0f, 0.0f)
 		[
 			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+			[
+				SNew(SSegmentedControl<bool>)
+				.Value_Lambda([this]() { return bShowTasks; })
+				.OnValueChanged_Lambda([this](const bool bTasks)
+				{
+					bShowTasks = bTasks;
+					RebuildFiltered();
+				})
+				+ SSegmentedControl<bool>::Slot(false)
+					.Text(LOCTEXT("NotesTab", "Notes"))
+					.ToolTip(LOCTEXT("NotesTabTooltip", "What agents know about this project."))
+				+ SSegmentedControl<bool>::Slot(true)
+					.Text(LOCTEXT("TasksTab", "Past tasks"))
+					.ToolTip(LOCTEXT("TasksTabTooltip", "Every task a chat finished on this machine: what was asked and how it ended. Agents find these when a new task looks like an old one."))
+			]
 			+ SHorizontalBox::Slot()
 			.FillWidth(1.0f)
 			.VAlign(VAlign_Center)
@@ -162,6 +183,7 @@ void SHyperAIStudioMemoryPanel::Construct(const FArguments& InArgs)
 			.Padding(10.0f, 0.0f, 4.0f, 0.0f)
 			[
 				SNew(STextBlock)
+				.Visibility_Lambda([this]() { return bShowTasks ? EVisibility::Collapsed : EVisibility::Visible; })
 				.Text(LOCTEXT("ModeLabel", "Agent-saved memories:"))
 				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 			]
@@ -170,12 +192,13 @@ void SHyperAIStudioMemoryPanel::Construct(const FArguments& InArgs)
 			.VAlign(VAlign_Center)
 			[
 				SNew(SComboButton)
+				.Visibility_Lambda([this]() { return bShowTasks ? EVisibility::Collapsed : EVisibility::Visible; })
 				.OnGetMenuContent(this, &SHyperAIStudioMemoryPanel::BuildModeMenu)
 				.ToolTipText(LOCTEXT("ModeTooltip", "How a fact an agent saves on its own reaches future chats. Facts you add always apply in full."))
 				.ButtonContent()
 				[
 					SNew(STextBlock)
-					.Text_Lambda([]() { return HyperAIStudio::MemoryPanel::ModeLabel(GetDefault<UHyperAIStudioSettings>()->AgentMemoryMode); })
+					.Text_Lambda([]() { return HyperAIStudio::MemoryPanel::ModeLabel(GetDefault<UHyperAIStudioSettings>()->AgentMemory); })
 				]
 			]
 			+ SHorizontalBox::Slot()
@@ -184,6 +207,7 @@ void SHyperAIStudioMemoryPanel::Construct(const FArguments& InArgs)
 			.Padding(8.0f, 0.0f, 0.0f, 0.0f)
 			[
 				SNew(SButton)
+				.Visibility_Lambda([this]() { return bShowTasks ? EVisibility::Collapsed : EVisibility::Visible; })
 				.Text(LOCTEXT("AddFact", "Add Fact"))
 				.ToolTipText(LOCTEXT("AddFactTooltip", "Write a fact every agent should know about this project."))
 				.OnClicked_Lambda([]()
@@ -198,6 +222,7 @@ void SHyperAIStudioMemoryPanel::Construct(const FArguments& InArgs)
 			.Padding(4.0f, 0.0f, 0.0f, 0.0f)
 			[
 				SNew(SButton)
+				.Visibility_Lambda([this]() { return bShowTasks ? EVisibility::Collapsed : EVisibility::Visible; })
 				.Text(LOCTEXT("ImportClaude", "Import from Claude Code..."))
 				.ToolTipText(LOCTEXT("ImportClaudeTooltip", "Copy chosen facts from Claude Code's own memory for this project. You see each one before it is copied."))
 				.OnClicked_Lambda([]()
@@ -212,10 +237,17 @@ void SHyperAIStudioMemoryPanel::Construct(const FArguments& InArgs)
 		.Padding(0.0f, 8.0f, 0.0f, 0.0f)
 		[
 			SNew(STextBlock)
-			.Visibility_Lambda([this]() { return Filtered.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed; })
+			.Visibility_Lambda([this]() { return (bShowTasks ? Tasks.IsEmpty() : Filtered.IsEmpty()) ? EVisibility::Visible : EVisibility::Collapsed; })
 			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			.AutoWrapText(true)
 			.Text_Lambda([this]()
 			{
+				if (bShowTasks)
+				{
+					return Filter.IsEmpty()
+						? LOCTEXT("NoTasks", "No finished tasks yet. Each task a chat finishes on this machine is kept here, in .hyperai/runtime/memory/history.")
+						: LOCTEXT("NoTaskMatch", "No past task matches.");
+				}
 				return AllFacts.IsEmpty()
 					? LOCTEXT("Empty", "Nothing remembered yet. Add a fact, or let agents save what they learn.")
 					: LOCTEXT("NoMatch", "No fact matches.");
@@ -225,13 +257,28 @@ void SHyperAIStudioMemoryPanel::Construct(const FArguments& InArgs)
 		.FillHeight(1.0f)
 		.Padding(0.0f, 4.0f, 0.0f, 0.0f)
 		[
-			SNew(SBox)
-			.Visibility_Lambda([this]() { return Filtered.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+			SNew(SOverlay)
+			+ SOverlay::Slot()
 			[
-				SAssignNew(List, SListView<FFactPtr>)
-				.ListItemsSource(&Filtered)
-				.SelectionMode(ESelectionMode::None)
-				.OnGenerateRow(this, &SHyperAIStudioMemoryPanel::GenerateRow)
+				SNew(SBox)
+				.Visibility_Lambda([this]() { return bShowTasks || Filtered.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+				[
+					SAssignNew(List, SListView<FFactPtr>)
+					.ListItemsSource(&Filtered)
+					.SelectionMode(ESelectionMode::None)
+					.OnGenerateRow(this, &SHyperAIStudioMemoryPanel::GenerateRow)
+				]
+			]
+			+ SOverlay::Slot()
+			[
+				SNew(SBox)
+				.Visibility_Lambda([this]() { return !bShowTasks || Tasks.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+				[
+					SAssignNew(TaskList, SListView<FTaskPtr>)
+					.ListItemsSource(&Tasks)
+					.SelectionMode(ESelectionMode::None)
+					.OnGenerateRow(this, &SHyperAIStudioMemoryPanel::GenerateTaskRow)
+				]
 			]
 		]
 	];
@@ -249,8 +296,27 @@ void SHyperAIStudioMemoryPanel::Reload()
 	RebuildFiltered();
 }
 
+bool SHyperAIStudioMemoryPanel::NeedsUser(const FHyperAIStudioMemoryFact& Fact)
+{
+	return !Fact.Held.IsEmpty() || (!Fact.bConfirmed && GetDefault<UHyperAIStudioSettings>()->AgentMemory != EHyperAIStudioAgentMemoryMode::Automatic);
+}
+
 void SHyperAIStudioMemoryPanel::RebuildFiltered()
 {
+	if (bShowTasks)
+	{
+		// Read afresh: chats add a task each time they finish one. A search ranks them as agents' recalls do.
+		Tasks.Reset();
+		for (const FHyperAIStudioMemoryTask& Task : HyperAIStudio::Memory::RecallTasks(FHyperAIStudioService::GetProjectRoot(), Filter, 50))
+		{
+			Tasks.Add(MakeShared<FHyperAIStudioMemoryTask>(Task));
+		}
+		if (TaskList.IsValid())
+		{
+			TaskList->RequestListRefresh();
+		}
+		return;
+	}
 	Filtered.Reset();
 	for (const FHyperAIStudioMemoryFact& Fact : AllFacts)
 	{
@@ -259,8 +325,8 @@ void SHyperAIStudioMemoryPanel::RebuildFiltered()
 			Filtered.Add(MakeShared<FHyperAIStudioMemoryFact>(Fact));
 		}
 	}
-	// What waits for review comes first; otherwise newest first, as loaded.
-	Filtered.StableSort([](const FFactPtr& A, const FFactPtr& B) { return !A->bConfirmed && B->bConfirmed; });
+	// What waits for the user comes first; otherwise newest first, as loaded.
+	Filtered.StableSort([](const FFactPtr& A, const FFactPtr& B) { return NeedsUser(*A) && !NeedsUser(*B); });
 	if (List.IsValid())
 	{
 		List->RequestListRefresh();
@@ -280,20 +346,20 @@ TSharedRef<SWidget> SHyperAIStudioMemoryPanel::BuildModeMenu()
 				FExecuteAction::CreateLambda([Mode]()
 				{
 					UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
-					Settings->AgentMemoryMode = Mode;
+					Settings->AgentMemory = Mode;
 					Settings->SaveConfig();
 					// AGENTS.md follows the new rule.
 					HyperAIStudio::Memory::OnChanged().Broadcast();
 				}),
 				FCanExecuteAction(),
-				FIsActionChecked::CreateLambda([Mode]() { return GetDefault<UHyperAIStudioSettings>()->AgentMemoryMode == Mode; })),
+				FIsActionChecked::CreateLambda([Mode]() { return GetDefault<UHyperAIStudioSettings>()->AgentMemory == Mode; })),
 			NAME_None,
 			EUserInterfaceActionType::RadioButton);
 	};
+	AddMode(EHyperAIStudioAgentMemoryMode::Automatic,
+		LOCTEXT("ModeAutomaticTooltip", "Straight into every future chat; review or delete it here later. A note that reads like instructions to agents still waits for you."));
 	AddMode(EHyperAIStudioAgentMemoryMode::TitleUntilReviewed,
 		LOCTEXT("ModeTitleTooltip", "Future chats see the title at once and can look up the text; the text joins every chat once you confirm it."));
-	AddMode(EHyperAIStudioAgentMemoryMode::Automatic,
-		LOCTEXT("ModeAutoTooltip", "Straight into every future chat; review or delete it here later."));
 	AddMode(EHyperAIStudioAgentMemoryMode::AfterReview,
 		LOCTEXT("ModeReviewTooltip", "Future chats never see it until you confirm it."));
 	return Menu.MakeWidget();
@@ -321,14 +387,21 @@ TSharedRef<ITableRow> SHyperAIStudioMemoryPanel::GenerateRow(FFactPtr Fact, cons
 		[
 			Badge(FText::FromString(Copy.Type), FSlateColor::UseSubduedForeground())
 		];
-	if (!Copy.bConfirmed)
+	if (NeedsUser(Copy))
 	{
+		const bool bHeld = !Copy.Held.IsEmpty();
 		TitleLine->AddSlot()
 		.AutoWidth()
 		.VAlign(VAlign_Center)
 		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
 		[
-			Badge(LOCTEXT("AwaitingReview", "awaiting review"), FSlateColor(FStyleColors::AccentYellow))
+			SNew(SBox)
+			.ToolTipText(bHeld ? FText::Format(LOCTEXT("HeldTooltip", "No chat sees this note: {0}. Allow it once you have checked it is a note about the project, not instructions."),
+				FText::FromString(Copy.Held)) : FText::GetEmpty())
+			[
+				Badge(bHeld ? LOCTEXT("Held", "held for you") : LOCTEXT("AwaitingReview", "awaiting review"),
+					FSlateColor(bHeld ? FStyleColors::AccentOrange : FStyleColors::AccentYellow))
+			]
 		];
 		TitleLine->AddSlot()
 		.AutoWidth()
@@ -336,8 +409,8 @@ TSharedRef<ITableRow> SHyperAIStudioMemoryPanel::GenerateRow(FFactPtr Fact, cons
 		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
 		[
 			SNew(SButton)
-			.Text(LOCTEXT("Confirm", "Confirm"))
-			.ToolTipText(LOCTEXT("ConfirmTooltip", "Let every future chat see this fact in full."))
+			.Text(bHeld ? LOCTEXT("Allow", "Allow") : LOCTEXT("Confirm", "Confirm"))
+			.ToolTipText(bHeld ? LOCTEXT("AllowTooltip", "Let every future chat use this note.") : LOCTEXT("ConfirmTooltip", "Let every future chat see this fact in full."))
 			.OnClicked_Lambda([Name = Copy.Name]()
 			{
 				HyperAIStudio::Memory::Confirm(FHyperAIStudioService::GetProjectRoot(), Name);
@@ -408,6 +481,47 @@ TSharedRef<ITableRow> SHyperAIStudioMemoryPanel::GenerateRow(FFactPtr Fact, cons
 				.Text(FText::Format(LOCTEXT("RowMeta", "{0}, updated {1}. Name: {2}"),
 					Copy.Source == TEXT("agent") ? LOCTEXT("FromAgent", "Saved by an agent") : LOCTEXT("FromUser", "Written by you"),
 					FText::FromString(Copy.Updated), FText::FromString(Copy.Name)))
+			]
+		];
+}
+
+TSharedRef<ITableRow> SHyperAIStudioMemoryPanel::GenerateTaskRow(FTaskPtr Task, const TSharedRef<STableViewBase>& OwnerTable)
+{
+	const FHyperAIStudioMemoryTask& Copy = *Task;
+	const FString Asked = Copy.Request.Len() > 200 ? Copy.Request.Left(200) + TEXT("...") : Copy.Request;
+	const FString Ended = Copy.Outcome.Len() > 320 ? Copy.Outcome.Left(320) + TEXT("...") : Copy.Outcome;
+	return SNew(STableRow<FTaskPtr>, OwnerTable)
+		.Padding(FMargin(6.0f, 6.0f))
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Asked))
+				.Font(FAppStyle::GetFontStyle("NormalFontBold"))
+				.AutoWrapText(true)
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 3.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Visibility(Ended.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+				.Text(FText::FromString(Ended))
+				.AutoWrapText(true)
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 3.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.AutoWrapText(true)
+				.Text(FText::Format(LOCTEXT("TaskMeta", "{0}, {1}.{2}"), FText::AsDateTime(Copy.Utc, EDateTimeStyle::Medium, EDateTimeStyle::Short),
+					FText::FromString(Copy.Agent),
+					Copy.Tools.IsEmpty() ? FText::GetEmpty() : FText::Format(LOCTEXT("TaskTools", " Used {0}."), FText::FromString(FString::Join(Copy.Tools, TEXT(", "))))))
 			]
 		];
 }

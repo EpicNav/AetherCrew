@@ -165,6 +165,10 @@ private:
 	bool Pump(float DeltaTime);
 	void Dispatch(const FString& Line);
 	void ClosePipes();
+	/** What project memory knows about Text that this chat has not had yet, to send with it. */
+	FString MemoryFor(const FString& Text);
+	/** Records the turn that just ended in the project's task history. */
+	void RecordTurn();
 
 	FProcHandle Process;
 	void* StdOutRead = nullptr;
@@ -183,4 +187,6 @@ private:
 	bool bReady = false;
 	bool bBusy = false;
 	bool bStopped = false;
+	/** The notes and past tasks this chat was given, and the tasks it finished: none is sent to it again. */
+	TSet<FString> GivenMemory;
 };

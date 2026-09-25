@@ -3,7 +3,9 @@
 #include "HyperAIStudioNativeChat.h"
 
 #include "HAL/FileManager.h"
+#include "CoreGlobals.h"
 #include "HyperAIStudioAgentChatHistory.h"
+#include "HyperAIStudioProjectMemory.h"
 #include "HyperAIStudioService.h"
 #include "HyperAIStudioSettings.h"
 #include "Interfaces/IPluginManager.h"
@@ -295,7 +297,58 @@ void FHyperAIStudioNativeChat::Send(const FString& Text, const TArray<FString>& 
 	}
 	AddItem(FHyperAIStudioChatItem::EKind::User, FString(), FString(), Trimmed)->Images = Sendable;
 	TurnStarted();
-	SendNow(Trimmed, Sendable);
+	// The agent also gets what project memory knows about the message; the transcript keeps what was typed.
+	SendNow(Trimmed + MemoryFor(Trimmed), Sendable);
+}
+
+FString FHyperAIStudioNativeChat::MemoryFor(const FString& Text)
+{
+	// A headless chat answers one question for a tool, a slash command has to stay a command, and tests script exact messages.
+	if (bHeadless || Text.StartsWith(TEXT("/")) || GIsAutomationTesting)
+	{
+		return FString();
+	}
+	return HyperAIStudio::Memory::ContextFor(ProjectRoot, Text, GivenMemory, GetDefault<UHyperAIStudioSettings>()->AgentMemory);
+}
+
+void FHyperAIStudioNativeChat::RecordTurn()
+{
+	if (bHeadless || GIsAutomationTesting)
+	{
+		return;
+	}
+	int32 Asked = Items.Num() - 1;
+	while (Asked >= 0 && Items[Asked]->Kind != FHyperAIStudioChatItem::EKind::User)
+	{
+		--Asked;
+	}
+	if (Asked < 0)
+	{
+		return;
+	}
+	FHyperAIStudioMemoryTask Task;
+	Task.Utc = FDateTime::UtcNow();
+	Task.Agent = Model.IsEmpty() ? AgentName : FString::Printf(TEXT("%s (%s)"), *AgentName, *Model);
+	Task.Request = Items[Asked]->Text;
+	for (int32 Index = Asked + 1; Index < Items.Num(); ++Index)
+	{
+		const FHyperAIStudioChatItem& Item = *Items[Index];
+		if (Item.Kind == FHyperAIStudioChatItem::EKind::Agent && !Item.Text.TrimStartAndEnd().IsEmpty())
+		{
+			// The last reply says how the task ended.
+			Task.Outcome = Item.Text;
+		}
+		else if ((Item.Kind == FHyperAIStudioChatItem::EKind::Tool || Item.Kind == FHyperAIStudioChatItem::EKind::FileChange) && !Item.Title.IsEmpty())
+		{
+			Task.Tools.AddUnique(Item.Title);
+		}
+	}
+	// The chat holds this task in its own conversation, so its later messages are not reminded of it.
+	const FString Id = HyperAIStudio::Memory::RecordTask(ProjectRoot, Task);
+	if (!Id.IsEmpty())
+	{
+		GivenMemory.Add(Id);
+	}
 }
 
 void FHyperAIStudioNativeChat::Interrupt()
@@ -353,6 +406,7 @@ void FHyperAIStudioNativeChat::TurnFinished()
 			Item->Status = TEXT("stopped");
 		}
 	}
+	RecordTurn();
 	if (!Queued.IsEmpty() && bReady)
 	{
 		const FQueuedMessage Next = Queued[0];
