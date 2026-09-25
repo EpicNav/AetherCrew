@@ -5,6 +5,7 @@
 #include "Camera/CameraComponent.h"
 #include "Camera/CameraTypes.h"
 #include "Components/SceneCaptureComponent2D.h"
+#include "Components/SkyLightComponent.h"
 #include "Containers/Ticker.h"
 #include "Editor.h"
 #include "Engine/TextureRenderTarget2D.h"
@@ -20,6 +21,7 @@
 #include "TextureResource.h"
 #include "UObject/Package.h"
 #include "UObject/StrongObjectPtr.h"
+#include "UObject/UObjectIterator.h"
 #include "UObject/UObjectGlobals.h"
 
 namespace HyperAIStudio::Lighting::Capture
@@ -54,6 +56,43 @@ namespace HyperAIStudio::Lighting::Capture
 			{
 				LastEditSeconds = FPlatformTime::Seconds();
 				LastEditFrame = GFrameCounter;
+			}
+		}
+
+		/**
+		 * A real-time sky light is captured only while a main view draws; scene captures never refresh it. A level
+		 * viewport stops drawing while a tab covers it (HyperAI Studio docked over the level editor), and the sky light
+		 * then keeps the look it had, so every capture would be lit by a stale sky. The covered viewport draws to its
+		 * own render target instead, which keeps the sky light current and shows nothing.
+		 */
+		void DrawCoveredLevelViewport(UWorld& World)
+		{
+			bool bRealTimeSky = false;
+			for (TObjectIterator<USkyLightComponent> It; It && !bRealTimeSky; ++It)
+			{
+				bRealTimeSky = It->GetWorld() == &World && It->IsRegistered() && It->IsVisible() && It->bRealTimeCapture;
+			}
+			if (!bRealTimeSky || !GEditor)
+			{
+				return;
+			}
+			FLevelEditorViewportClient* Covered = nullptr;
+			for (FLevelEditorViewportClient* Client : GEditor->GetLevelViewportClients())
+			{
+				if (!Client || !Client->Viewport || Client->GetWorld() != &World)
+				{
+					continue;
+				}
+				if (Client->IsVisible())
+				{
+					// The editor draws this one, and that keeps the sky light current.
+					return;
+				}
+				Covered = !Covered && Client->IsPerspective() ? Client : Covered;
+			}
+			if (Covered && Covered->Viewport->GetSizeXY().X > 0 && Covered->Viewport->GetSizeXY().Y > 0)
+			{
+				Covered->Viewport->Draw(/*bShouldPresent=*/false);
 			}
 		}
 
@@ -411,6 +450,7 @@ namespace HyperAIStudio::Lighting::Capture
 				if (!CurrentWorld || !Component.IsValid() || !Target.IsValid()) return false;
 				// Actors changed this frame get their render state at its end; the capture must see them now.
 				CurrentWorld->SendAllEndOfFrameUpdates();
+				DrawCoveredLevelViewport(*CurrentWorld);
 				Component->CaptureScene();
 				FTextureRenderTargetResource* Resource = Target->GameThread_GetRenderTargetResource();
 				return Resource && Resource->ReadPixels(OutPixels) && OutPixels.Num() == Request.Width * Request.Height;
