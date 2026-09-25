@@ -2989,10 +2989,19 @@ int32 SHyperAIStudioQuickActionWindow::OpenJobChat(const FString& Category, cons
 	Window->PendingImages = Images;
 	if (bReused)
 	{
+		// A job is new work, never the conversation the tab was reopened with.
+		Window->ResumeAgentName.Reset();
+		Window->ResumeSessionId.Reset();
+		Window->ResumeTitle.Reset();
+		Window->ResumeBackgroundId.Reset();
+		Window->ActiveChatSessionId.Reset();
 		// A fresh session replaces the blank one; the job's agent launches in it and takes the prompt as it starts.
 		// Restarting a native chat in place would not: only a launch sends the pending prompt.
 		Window->StopNativeChat();
 		Window->QueueTerminalStartup(/*bForce=*/true, /*bResetTerminal=*/true);
+		// A tab that sat behind others never re-probed: its status can still be the one it had as the editor started,
+		// before Unreal MCP was up, and its startup would wait on that for ever. A fresh probe starts it once MCP answers.
+		Window->RefreshStatus(/*bSilent=*/false);
 	}
 	OutAgent = Choice.Model.IsEmpty() ? Choice.Agent : FString::Printf(TEXT("%s (%s)"), *Choice.Agent, *Choice.Model);
 	Window->LastMessage = FText::Format(LOCTEXT("JobTabOpened", "Opened for a job ({0}) with {1}, your {2}."), FText::FromString(Category.IsEmpty() ? TEXT("general") : Category),
