@@ -137,6 +137,10 @@ struct FHyperAILightingCompareReport
  *   lock_exposure: value is the exposure bias in EV (default 0); unlock_exposure: no value
  *   set_actor_material: actor_label (required) names any placed actor; property is empty (slot 0),
  *     slot:<index or name>, or component:<name>/slot:<index or name>; value is the material's path
+ *   set_sky_system: a Blueprint sky such as Ultra Dynamic Sky, which owns its sun, sky light and fog. Property is a
+ *     variable by the name its Details panel shows (Time of Day, Cloud Coverage, Sun Light Intensity, ...), value is
+ *     a number, true/false, an enum's display name or Unreal's text form; empty actor_label takes the first sky that
+ *     has the variable. With such a sky, set_sun, set_sky_light, set_fog and set_sky_atmosphere are refused.
  * ActorLabel picks an actor; empty uses the first of its kind, adding one if the level has none.
  */
 USTRUCT(BlueprintType)
@@ -210,6 +214,12 @@ struct FHyperAICaptureViewRequest
 	UPROPERTY() TArray<float> MaterialTimes;
 	/** Discarded captures before the first frame, 0-8, so temporal effects settle. */
 	UPROPERTY() int32 WarmupFrames = 3;
+	/**
+	 * Then keep drawing until the level shows its latest change: sky captures, global illumination and fog take many
+	 * frames to catch up, and the first of them can look unchanged. At least 1.5 seconds and 45 frames after the last
+	 * edit to the level, then until two draws in a row match; 6 seconds at most. False takes exactly WarmupFrames.
+	 */
+	UPROPERTY() bool bSettle = true;
 	/** Largest per-channel change (0-1) above which a pixel counts as changed between frames. */
 	UPROPERTY() float DiffThreshold = 0.03f;
 	/** Names the batch folder: letters, digits, - and _. */
@@ -263,6 +273,10 @@ struct FHyperAICaptureViewReport
 	UPROPERTY() bool bWorldTimeAdvanced = false;
 	/** True when shaders were still compiling at capture time, so some surfaces may show default materials. */
 	UPROPERTY() bool bShadersStillCompiling = false;
+	/** Draws settling took beyond WarmupFrames. */
+	UPROPERTY() int32 SettleFrames = 0;
+	/** True when settling ran out of time: the picture kept changing (a moving sky, clouds or water) or the level kept being edited. */
+	UPROPERTY() bool bSettleTimedOut = false;
 	UPROPERTY() TArray<FString> Capabilities;
 };
 
@@ -402,15 +416,15 @@ class HYPERAISTUDIOLIGHTING_API UHyperAIStudioLightingToolset final : public UTo
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** Sun, sky light, fog, sky atmosphere and post-process settings in the open level, whether exposure is locked, and the revision apply_plan needs. */
+	/** Sun, sky light, fog, sky atmosphere, post process and any Blueprint sky (Ultra Dynamic Sky and Weather) in the open level, whether exposure is locked, and the revision apply_plan needs. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
 	static FHyperAILightingInspectReport hyper_lighting_inspect(const FHyperAILightingInspectRequest& Request);
 
 	/**
-	 * Closed lighting edits as one undo step: sun, sky light, fog, sky atmosphere, post process, exposure lock, and
-	 * set_actor_material to put a material on a placed actor's mesh.
-	 * Submit with bDryRun false and an operation_id (expected_plan_hash optional), call hyper_operation_wait, then
-	 * hyper_lighting_compare. Unsaved by default; set bSave once the look matches.
+	 * Closed lighting edits as one undo step: sun, sky light, fog, sky atmosphere, post process, exposure lock,
+	 * set_actor_material for a placed mesh, and set_sky_system for a Blueprint sky such as Ultra Dynamic Sky, by its
+	 * Details names. Submit with bDryRun false and an operation_id, call hyper_operation_wait, then compare. Unsaved
+	 * unless bSave.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
 	static FHyperAILightingApplyPlanReport hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& Request);

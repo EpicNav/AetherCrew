@@ -24,4 +24,14 @@ namespace HyperAIStudio::Lighting::Capture
 
 	/** Mean absolute RGB change (0-1) and share of pixels whose largest channel change exceeds Threshold. */
 	void Diff(TConstArrayView<FColor> A, TConstArrayView<FColor> B, float Threshold, float& OutMeanAbs, float& OutChangedFraction);
+
+	/** Starts noting edits to the level, which captures wait to show; the module calls these. */
+	void Startup();
+	void Shutdown();
+
+	/**
+	 * Whether a capture may shoot: the level's latest edit is old enough to have shown (SecondsSinceEdit is negative
+	 * when none is known) and the last two draws matched, or settling ran out of time (bOutTimedOut).
+	 */
+	bool IsSettled(double SecondsSettling, double SecondsSinceEdit, uint64 FramesSinceEdit, float LastChange, bool& bOutTimedOut);
 }

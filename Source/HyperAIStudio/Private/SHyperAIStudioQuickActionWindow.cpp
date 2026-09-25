@@ -250,6 +250,31 @@ namespace HyperAIStudio::QuickAction
 		FString Subagent;
 	};
 
+	/**
+	 * A terminal takes one line: a message with more in it is saved to .hyperai/runtime/jobs, and the line points at
+	 * the file, as after an editor restart. Empty when the file cannot be written.
+	 */
+	FString WriteTerminalPrompt(const int32 TabIndex, const FString& Text, const TArray<FString>& Images)
+	{
+		const FString Relative = FString::Printf(TEXT(".hyperai/runtime/jobs/chat-%d.md"), TabIndex);
+		FString Body = Text;
+		if (!Images.IsEmpty())
+		{
+			Body += TEXT("\n\nImages for this message; open each one:\n");
+			for (const FString& Image : Images)
+			{
+				Body += TEXT("- ") + Image + TEXT("\n");
+			}
+		}
+		const FString Path = FPaths::Combine(FHyperAIStudioService::GetProjectRoot(), Relative);
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), /*Tree=*/true);
+		if (!FFileHelper::SaveStringToFile(Body, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+		{
+			return FString();
+		}
+		return FString::Printf(TEXT("Read %s and do what it asks."), *Relative);
+	}
+
 	/** Set just before a routed tab opens, and taken by the tab it opens. */
 	TOptional<FPendingRoute>& PendingRoute()
 	{
@@ -2379,6 +2404,8 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 	const FString ContinueArgument = Continue.IsEmpty() ? FString() : TEXT("\"") + FHyperAIStudioEditorRestart::ContinuePrompt() + TEXT("\"");
 	const FString Prompt = MoveTemp(PendingPrompt);
 	PendingPrompt.Reset();
+	const TArray<FString> PromptImages = MoveTemp(PendingImages);
+	PendingImages.Reset();
 
 	// A native chat that cannot start falls back to the terminal.
 	if (GetDefault<UHyperAIStudioSettings>()->bUseNativeChatView && FHyperAIStudioNativeChat::IsSupported(AgentName)
@@ -2391,25 +2418,29 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 		}
 		if (!Prompt.IsEmpty() && NativeView.IsValid() && NativeView->GetChat().IsValid())
 		{
-			NativeView->GetChat()->Send(Prompt);
+			NativeView->GetChat()->Send(Prompt, PromptImages);
 		}
 		return;
 	}
-	if (!Prompt.IsEmpty())
+	// A first message reaches a terminal agent the way a restart's does: as its opening prompt, one line pointing at a file.
+	FString FirstArgument = ContinueArgument;
+	if (FirstArgument.IsEmpty() && !Prompt.IsEmpty())
 	{
-		UE_LOG(LogHyperAIStudioChat, Warning, TEXT("Chat %d starts in the terminal, so the prompt HyperAIStudio.ChatSend gave it was not sent."), TabIndex);
+		const FString Line = HyperAIStudio::QuickAction::WriteTerminalPrompt(TabIndex, Prompt, PromptImages);
+		FirstArgument = Line.IsEmpty() ? FString() : TEXT("\"") + Line + TEXT("\"");
+		UE_LOG(LogHyperAIStudioChat, Display, TEXT("Chat %d starts in the terminal; its first message is in .hyperai/runtime/jobs/chat-%d.md."), TabIndex, TabIndex);
 	}
 	if (!HyperAIStudio::QuickAction::IsClaudeAgent(AgentName))
 	{
 		ActiveChatSessionId = SessionId;
 		FString ChatArguments = BuildResumeArguments(AgentName, SessionId);
-		if (!ContinueArgument.IsEmpty() && AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase))
+		if (!FirstArgument.IsEmpty() && AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase))
 		{
-			ChatArguments += TEXT(" ") + ContinueArgument;
+			ChatArguments += TEXT(" ") + FirstArgument;
 		}
-		else if (!ContinueArgument.IsEmpty() && AgentName.Contains(TEXT("Gemini"), ESearchCase::IgnoreCase))
+		else if (!FirstArgument.IsEmpty() && AgentName.Contains(TEXT("Gemini"), ESearchCase::IgnoreCase))
 		{
-			ChatArguments += TEXT(" -i ") + ContinueArgument;
+			ChatArguments += TEXT(" -i ") + FirstArgument;
 		}
 		RunBootstrap(AgentName, GetTerminalLaunchCommandForAgent(AgentName, ChatArguments.TrimStart()));
 		return;
@@ -2446,9 +2477,9 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 	// A resumed chat keeps what it started as; a new one in a subagent tab starts as that subagent.
 	const FString SubagentArgument = !bExists && HyperAIStudio::Skills::IsValidName(TabSubagent) ? TEXT(" --agent ") + TabSubagent : FString();
 	ForegroundArguments += SubagentArgument;
-	if (!ContinueArgument.IsEmpty())
+	if (!FirstArgument.IsEmpty())
 	{
-		ForegroundArguments += TEXT(" ") + ContinueArgument;
+		ForegroundArguments += TEXT(" ") + FirstArgument;
 	}
 	if (bRemote)
 	{
@@ -2868,20 +2899,151 @@ TArray<FHyperAIStudioRestartChat> SHyperAIStudioQuickActionWindow::GetRestartCha
 	return Chats;
 }
 
-bool SHyperAIStudioQuickActionWindow::SendToChat(const int32 TabIndex, const FString& Text, FString& OutMessage)
+TSharedPtr<SHyperAIStudioQuickActionWindow> SHyperAIStudioQuickActionWindow::FindTab(const int32 TabIndex)
+{
+	for (const TWeakPtr<SHyperAIStudioQuickActionWindow>& Weak : HyperAIStudio::QuickAction::LiveWindows())
+	{
+		const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = Weak.Pin();
+		if (Window.IsValid() && Window->TabIndex == TabIndex)
+		{
+			return Window;
+		}
+	}
+	return nullptr;
+}
+
+int32 SHyperAIStudioQuickActionWindow::OpenJobChat(const FString& Category, const FString& Prompt, const TArray<FString>& Images,
+	FString& OutAgent, FString& OutError)
+{
+	int32 Free = 0;
+	for (int32 Index = 1; Index <= MaxChatTabs && Free == 0; ++Index)
+	{
+		Free = FHyperAIStudioShell::FindPageTab(GetPageId(Index)).IsValid() ? 0 : Index;
+	}
+	// Every tab open, as after the Studio reopens its layout: a job may take one whose chat is blank and idle.
+	bool bReused = false;
+	for (int32 Index = 1; Index <= MaxChatTabs && Free == 0; ++Index)
+	{
+		const TSharedPtr<SHyperAIStudioQuickActionWindow> Candidate = FindTab(Index);
+		if (!Candidate.IsValid() || !Candidate->PendingPrompt.IsEmpty())
+		{
+			continue;
+		}
+		const TSharedPtr<FHyperAIStudioNativeChat> Native = Candidate->NativeView.IsValid() ? Candidate->NativeView->GetChat() : nullptr;
+		// Blank: a native chat with nothing said in it, or a tab whose agent never launched because it was never in front.
+		// A terminal chat that started is never blank: what was said in it cannot be read.
+		Free = (Native.IsValid()
+			? !Native->IsBusy() && !Native->HasOpenApproval() && Native->NumQueued() == 0 && !Native->GetItems().ContainsByPredicate(
+				[](const TSharedPtr<FHyperAIStudioChatItem>& Item) { return Item.IsValid() && Item->Kind == FHyperAIStudioChatItem::EKind::User; })
+			: !Candidate->bTerminalStartupSent) ? Index : 0;
+		bReused = Free != 0;
+	}
+	if (Free == 0)
+	{
+		OutError = FString::Printf(TEXT("All %d chat tabs are open and in use; close one so the job has a tab to work in."), MaxChatTabs);
+		return 0;
+	}
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	if (Settings->EnsureDefaultTaskRoutes())
+	{
+		Settings->SaveConfig();
+	}
+	const FHyperAIStudioAgentTaskRoute* Route = Category.IsEmpty() ? nullptr : Settings->AgentTaskRoutes.FindByPredicate(
+		[&Category](const FHyperAIStudioAgentTaskRoute& Candidate) { return Candidate.Category.Equals(Category, ESearchCase::IgnoreCase); });
+	// The tab's own agent list says what can run, so the agent is picked once the tab exists, before its agent starts.
+	HyperAIStudio::QuickAction::PendingRoute() = HyperAIStudio::QuickAction::FPendingRoute{Route ? Route->Category : Category, FHyperAIStudioRouteChoice(), FString()};
+	FHyperAIStudioShell::Open(GetPageId(Free));
+	HyperAIStudio::QuickAction::PendingRoute().Reset();
+	const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = FindTab(Free);
+	if (!Window.IsValid())
+	{
+		OutError = FString::Printf(TEXT("Chat %d could not be opened."), Free);
+		return 0;
+	}
+	// The route's own agent when it names one, else the preferred agent: a job never goes to an agent the user did not pick.
+	const bool bRouteAgent = Route && !Route->AgentName.IsEmpty();
+	const FHyperAIStudioRouteChoice Choice = FHyperAIStudioAgentScoreboard::ChooseAgent(bRouteAgent ? Route->AgentName : Settings->PreferredAgent,
+		Route ? Route->ModelId : FString(), Route ? Route->Packs : TArray<FString>(), Window->GetUsableAgentNames(), Settings->PreferredAgent);
+	if (Choice.Agent.IsEmpty())
+	{
+		OutError = TEXT("No agent is set up to take the job; set one up in Agents first.");
+		return 0;
+	}
+	if (bReused)
+	{
+		// An open tab is not built again, so it takes the job's route here, as a new tab does as it is built.
+		Window->RouteCategory = Route ? Route->Category : Category;
+		Window->TabSubagent.Reset();
+	}
+	Window->SelectAgentByName(Choice.Agent);
+	if (!Choice.Model.IsEmpty())
+	{
+		Window->TabModel = Choice.Model;
+		Window->TabModelAgent = Choice.Agent;
+	}
+	if (Route && HyperAIStudio::QuickAction::IsClaudeAgent(Choice.Agent) && HyperAIStudio::Skills::IsValidName(Route->Subagent))
+	{
+		Window->TabSubagent = Route->Subagent;
+	}
+	Window->PendingPrompt = Prompt;
+	Window->PendingImages = Images;
+	if (bReused)
+	{
+		// A fresh session replaces the blank one; the job's agent launches in it and takes the prompt as it starts.
+		// Restarting a native chat in place would not: only a launch sends the pending prompt.
+		Window->StopNativeChat();
+		Window->QueueTerminalStartup(/*bForce=*/true, /*bResetTerminal=*/true);
+	}
+	OutAgent = Choice.Model.IsEmpty() ? Choice.Agent : FString::Printf(TEXT("%s (%s)"), *Choice.Agent, *Choice.Model);
+	Window->LastMessage = FText::Format(LOCTEXT("JobTabOpened", "Opened for a job ({0}) with {1}, your {2}."), FText::FromString(Category.IsEmpty() ? TEXT("general") : Category),
+		FText::FromString(OutAgent), bRouteAgent ? LOCTEXT("JobAgentFromRoute", "routed agent") : LOCTEXT("JobAgentPreferred", "preferred agent"));
+	UE_LOG(LogHyperAIStudioChat, Display, TEXT("Chat %d takes a job (%s) with %s."), Free, Category.IsEmpty() ? TEXT("general") : *Category, *OutAgent);
+	return Free;
+}
+
+bool SHyperAIStudioQuickActionWindow::GetTabWork(const int32 TabIndex, bool& bOutWorking, bool* bOutStarted)
+{
+	bOutWorking = false;
+	const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = FindTab(TabIndex);
+	if (!Window.IsValid())
+	{
+		return false;
+	}
+	if (bOutStarted)
+	{
+		*bOutStarted = Window->bTerminalStartupSent && Window->PendingPrompt.IsEmpty();
+	}
+	const TSharedPtr<FHyperAIStudioNativeChat> Native = Window->NativeView.IsValid() ? Window->NativeView->GetChat() : nullptr;
+	// Still starting counts as working: the job's message waits for the agent.
+	bOutWorking = !Window->PendingPrompt.IsEmpty() || !Window->bTerminalStartupSent
+		|| (Native.IsValid() ? Native->IsBusy() || Native->HasOpenApproval() || Native->NumQueued() > 0 : Window->IsTurnActive());
+	return true;
+}
+
+void SHyperAIStudioQuickActionWindow::InterruptTab(const int32 TabIndex)
+{
+	const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = FindTab(TabIndex);
+	const TSharedPtr<FHyperAIStudioNativeChat> Native = Window.IsValid() && Window->NativeView.IsValid() ? Window->NativeView->GetChat() : nullptr;
+	if (Native.IsValid() && Native->IsBusy())
+	{
+		Native->Interrupt();
+	}
+}
+
+bool SHyperAIStudioQuickActionWindow::SendToChat(const int32 TabIndex, const FString& Text, FString& OutMessage, const TArray<FString>& Images)
 {
 	if (Text.TrimStartAndEnd().IsEmpty())
 	{
 		OutMessage = TEXT("Nothing to send.");
 		return false;
 	}
-	// Opens the tab, or brings it forward: a tab behind another page does not tick, and its agent would not start.
-	FHyperAIStudioShell::Open(GetPageId(TabIndex));
-	TSharedPtr<SHyperAIStudioQuickActionWindow> Window;
-	for (const TWeakPtr<SHyperAIStudioQuickActionWindow>& Weak : HyperAIStudio::QuickAction::LiveWindows())
+	// Opens the tab, or brings it forward until its agent starts: a tab behind another page does not tick, so its agent
+	// would never launch. A running chat takes the message where it is, without taking over the screen.
+	TSharedPtr<SHyperAIStudioQuickActionWindow> Window = FindTab(TabIndex);
+	if (!Window.IsValid() || !Window->bTerminalStartupSent)
 	{
-		const TSharedPtr<SHyperAIStudioQuickActionWindow> Candidate = Weak.Pin();
-		Window = Candidate.IsValid() && Candidate->TabIndex == TabIndex ? Candidate : Window;
+		FHyperAIStudioShell::Open(GetPageId(TabIndex));
+		Window = FindTab(TabIndex);
 	}
 	if (!Window.IsValid())
 	{
@@ -2891,17 +3053,20 @@ bool SHyperAIStudioQuickActionWindow::SendToChat(const int32 TabIndex, const FSt
 	const TSharedPtr<FHyperAIStudioNativeChat> Native = Window->NativeView.IsValid() ? Window->NativeView->GetChat() : nullptr;
 	if (Native.IsValid() && Native->IsRunning())
 	{
-		Native->Send(Text);
+		Native->Send(Text, Images);
 		OutMessage = FString::Printf(TEXT("Sent to chat %d."), TabIndex);
 		return true;
 	}
 	if (!Window->bTerminalStartupSent)
 	{
 		Window->PendingPrompt = Text;
+		Window->PendingImages = Images;
 		OutMessage = FString::Printf(TEXT("Chat %d gets it as its agent starts."), TabIndex);
 		return true;
 	}
-	if (Window->DeliverHandoffPrompt(Text, TEXT("console")))
+	const bool bOneLine = Images.IsEmpty() && !Text.Contains(TEXT("\n")) && Text.Len() <= 400;
+	const FString Line = bOneLine ? Text : HyperAIStudio::QuickAction::WriteTerminalPrompt(TabIndex, Text, Images);
+	if (!Line.IsEmpty() && Window->DeliverHandoffPrompt(Line, TEXT("console")))
 	{
 		OutMessage = FString::Printf(TEXT("Typed into chat %d's terminal."), TabIndex);
 		return true;

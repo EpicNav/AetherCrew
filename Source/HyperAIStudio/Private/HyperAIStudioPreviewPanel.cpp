@@ -73,6 +73,22 @@ void FHyperAIStudioPreviewPanel::Open(const FName SourceId, const FString& Refer
 	OnOpenRequested().Broadcast(SourceId, ReferenceImagePath);
 }
 
+bool FHyperAIStudioPreviewPanel::StartAgentAction(const FName SourceId, const FName ActionId, const FString& ReferenceImagePath, FString& OutError)
+{
+	const FSource* Source = FindSource(SourceId);
+	const FAgentAction* Action = Source ? Source->AgentActions.FindByPredicate([ActionId](const FAgentAction& Candidate) { return Candidate.Id == ActionId; }) : nullptr;
+	if (!Action || !Action->Start)
+	{
+		OutError = FString::Printf(TEXT("Nothing offers the agent action %s here; its pack may not be loaded."), *ActionId.ToString());
+		return false;
+	}
+	if (!IsSupportedProjectImage(ReferenceImagePath, OutError))
+	{
+		return false;
+	}
+	return Action->Start(FPaths::ConvertRelativePathToFull(ReferenceImagePath), OutError);
+}
+
 bool FHyperAIStudioPreviewPanel::IsSupportedProjectImage(const FString& Path, FString& OutError)
 {
 	OutError.Reset();

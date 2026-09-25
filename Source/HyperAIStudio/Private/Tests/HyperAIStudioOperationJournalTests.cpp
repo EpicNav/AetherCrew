@@ -112,6 +112,54 @@ namespace HyperAIStudio::OperationJournal::Tests
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioOperationJournalCapacityTest,
+	"HyperAIStudio.NativeTools.OperationJournalCapacity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioOperationJournalCapacityTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::OperationJournal::Tests;
+	const FString TestRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("HyperAIStudioTests"), FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	IFileManager::Get().MakeDirectory(*TestRoot, true);
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+	};
+	const FString Plan = Sha256Token(TEXT('a'));
+	const FString Capability = Sha256Token(TEXT('1'));
+	FString Error;
+	FHyperAIStudioOperationRecord Record;
+	// The smallest journal there is: 16 records.
+	constexpr int32 Capacity = 16;
+	FHyperAIStudioOperationJournal Journal(TestRoot, Capacity);
+	TestTrue(TEXT("The journal loads"), Journal.Load(Error));
+	const auto Begin = [&](const FString& Id) { return Journal.BeginOperation(Id, Plan, Capability, Record, Error); };
+	const auto Done = [](const int32 Index) { return FString::Printf(TEXT("operation-done-%02d"), Index); };
+	const auto New = [](const int32 Index) { return FString::Printf(TEXT("operation-new-%02d"), Index); };
+	for (int32 Index = 1; Index <= Capacity; ++Index)
+	{
+		Begin(Done(Index));
+		Journal.Transition(Done(Index), EHyperAIStudioOperationState::Queued, EHyperAIStudioOperationState::Failed, EHyperAIStudioRollbackState::NotNeeded,
+			/*bRetrySafe=*/true, /*bPartialCommit=*/false, TEXT("test_failed"), Record, Error);
+	}
+	// A long job makes hundreds of edits: a full journal of settled operations still admits the next one.
+	TestEqual(TEXT("A full journal of settled operations admits a new one"), Begin(New(1)), EHyperAIStudioOperationBeginResult::Created);
+	TestFalse(TEXT("The oldest settled record made room"), Journal.Find(Done(1)).IsSet());
+	TestTrue(TEXT("Newer records stay, for retries"), Journal.Find(Done(Capacity)).IsSet());
+	bool bAllAdmitted = true;
+	for (int32 Index = 2; Index <= Capacity; ++Index)
+	{
+		bAllAdmitted &= Begin(New(Index)) == EHyperAIStudioOperationBeginResult::Created;
+	}
+	TestTrue(TEXT("Each settled record makes room in turn"), bAllAdmitted);
+	// Unresolved operations are never given up.
+	TestEqual(TEXT("A journal full of unresolved operations refuses a new one"), Begin(New(Capacity + 1)),
+		EHyperAIStudioOperationBeginResult::CapacityExceeded);
+	TestEqual(TEXT("It keeps every unresolved one"), Journal.GetRecordsSnapshot().Num(), Capacity);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHyperAIStudioOperationJournalTest,
 	"HyperAIStudio.NativeTools.OperationJournal",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

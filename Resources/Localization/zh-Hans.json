@@ -932,6 +932,30 @@
    "text": "另存为 HTML 报告，便于分享或保留。"
   },
   {
+   "namespace": "HyperAIStudioMatchJobs",
+   "key": "MatchLevel",
+   "source": "Build the level to match",
+   "text": "按参考搭建关卡"
+  },
+  {
+   "namespace": "HyperAIStudioMatchJobs",
+   "key": "MatchLevelTip",
+   "source": "Your preferred agent builds the level toward the reference as a level designer would: a camera framed like it, the big shapes at real scale, then materials and light. HyperAI checks after every round and sends it back to work until it scores 72. Its level, lighting and material edits are approved for you while it runs.",
+   "text": "你的首选智能体会像关卡设计师一样按参考图像搭建关卡：先放一台与参考构图一致的摄像机，再按真实比例摆出大体形状，然后是材质和光照。HyperAI 会在每一轮之后检查，并让它继续工作，直到得分达到 72。它运行期间的关卡、光照和材质修改会替你批准。"
+  },
+  {
+   "namespace": "HyperAIStudioMatchJobs",
+   "key": "MatchLighting",
+   "source": "Match the lighting",
+   "text": "匹配光照"
+  },
+  {
+   "namespace": "HyperAIStudioMatchJobs",
+   "key": "MatchLightingTip",
+   "source": "Your preferred agent relights the level until it scores 78 against the reference: sun, sky, fog, exposure and grade, or an Ultra Dynamic Sky's own settings. HyperAI checks after every round and sends it back to work until it matches. Its lighting edits are approved for you while it runs, and stay unsaved until it matches.",
+   "text": "你的首选智能体会为关卡重新布光，直到与参考图像的得分达到 78：太阳、天空、雾、曝光和调色，或 Ultra Dynamic Sky 自身的设置。HyperAI 会在每一轮之后检查，并让它继续工作，直到匹配为止。它运行期间的光照修改会替你批准，并在匹配之前保持未保存。"
+  },
+  {
    "namespace": "HyperAIStudioMaterials",
    "key": "ApplyPlan",
    "source": "HyperAI Material Edit",
@@ -999,9 +1023,57 @@
   },
   {
    "namespace": "HyperAIStudioPreviewPanel",
+   "key": "JobDone",
+   "source": "done",
+   "text": "已完成"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "JobFailed",
+   "source": "failed",
+   "text": "失败"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "JobLine",
+   "source": "{0}. {1} in chat {2}, {3}, round {4}. {5}",
+   "text": "{0}。{1}，对话 {2}，{3}，第 {4} 轮。{5}"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "JobStarting",
+   "source": "starting",
+   "text": "正在启动"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "JobStopped",
+   "source": "stopped",
+   "text": "已停止"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "JobWorking",
+   "source": "working",
+   "text": "工作中"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
    "key": "Less",
    "source": "▲",
    "text": "▲"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "MatchIt",
+   "source": "Match it",
+   "text": "交给智能体匹配"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "MatchItTip",
+   "source": "Hand the reference to your preferred agent. It changes the level until the match score reaches the target, and HyperAI sends it back to work after each round until it does.",
+   "text": "把参考图像交给你的首选智能体。它会修改关卡，直到匹配得分达到目标；每一轮结束后，HyperAI 都会让它继续工作，直到达到为止。"
   },
   {
    "namespace": "HyperAIStudioPreviewPanel",
@@ -1077,6 +1149,18 @@
   },
   {
    "namespace": "HyperAIStudioPreviewPanel",
+   "key": "ShowJobChat",
+   "source": "Show chat",
+   "text": "显示对话"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "ShowJobChatTip",
+   "source": "Bring the agent's chat forward.",
+   "text": "把智能体的对话调到前面。"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
    "key": "SideBySide",
    "source": "Side by side",
    "text": "并排"
@@ -1086,6 +1170,18 @@
    "key": "StatSummary",
    "source": "{0} {1}",
    "text": "{0} {1}"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "StopJob",
+   "source": "Stop",
+   "text": "停止"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "StopJobTip",
+   "source": "Stop the agent's turn and stop sending it back to work. What it changed so far stays, unsaved.",
+   "text": "停止智能体当前的回合，并不再让它继续工作。它到目前为止所做的修改会保留，但尚未保存。"
   },
   {
    "namespace": "HyperAIStudioPreviewPanel",
@@ -3528,6 +3624,24 @@
    "key": "InsertSummaryTooltip",
    "source": "Paste a sentence describing the current selection and map.",
    "text": "粘贴一句描述当前选中内容和地图的话。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "JobAgentFromRoute",
+   "source": "routed agent",
+   "text": "路由指定的智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "JobAgentPreferred",
+   "source": "preferred agent",
+   "text": "首选智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "JobTabOpened",
+   "source": "Opened for a job ({0}) with {1}, your {2}.",
+   "text": "已为任务（{0}）打开，使用 {1}，即你的{2}。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",

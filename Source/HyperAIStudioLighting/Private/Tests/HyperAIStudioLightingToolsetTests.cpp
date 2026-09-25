@@ -25,6 +25,11 @@
 #include "ShaderCompiler.h"
 #include "HyperAIStudioPreviewPanel.h"
 #include "HyperAIStudioSettings.h"
+#include "Engine/Blueprint.h"
+#include "EdGraph/EdGraphPin.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#include "LevelEditorViewport.h"
 #include "Misc/App.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
@@ -459,6 +464,15 @@ bool FHyperAIStudioLightingCaptureContractsTest::RunTest(const FString& Paramete
 	Request.WarmupFrames = 0;
 	TestEqual(TEXT("world-time frames need the async tool"), Capture::RunNow(Request).Status, FString(TEXT("async_required")));
 
+	// Settling: a fresh edit waits however still the picture looks; an old one waits for two draws that match.
+	bool bTimedOut = false;
+	TestFalse(TEXT("a fresh edit is not settled"), Capture::IsSettled(0.2, 0.5, 60, 0.f, bTimedOut));
+	TestFalse(TEXT("an edit a few frames old is not settled"), Capture::IsSettled(0.2, 3.0, 10, 0.f, bTimedOut));
+	TestFalse(TEXT("an old edit still showing is not settled"), Capture::IsSettled(2.0, 2.0, 90, 0.02f, bTimedOut));
+	TestTrue(TEXT("an old edit that stopped changing is settled"), Capture::IsSettled(2.0, 2.0, 90, 0.001f, bTimedOut) && !bTimedOut);
+	TestTrue(TEXT("with no edit known, still draws are settled"), Capture::IsSettled(0.1, -1.0, 0, 0.001f, bTimedOut));
+	TestTrue(TEXT("settling gives up after its time"), Capture::IsSettled(7.0, 0.1, 1, 0.5f, bTimedOut) && bTimedOut);
+
 	float Mean = 1.f;
 	float Changed = 1.f;
 	const TArray<FColor> Black = {FColor::Black, FColor::Black, FColor::Black, FColor::Black};
@@ -626,6 +640,114 @@ bool FHyperAIStudioLightingActorMaterialTest::RunTest(const FString& Parameters)
 	{
 		TestEqual(TEXT("one undo restores the original material"), Plane->GetStaticMeshComponent()->GetMaterial(0), Original);
 		TestFalse(TEXT("and the postcondition notices"), Gate::CheckMaterialOps(*World, Ops, Error));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioLightingSkySystemTest,
+	"HyperAIStudio.Lighting.Ops.SkySystem",
+	HyperAIStudio::Lighting::Tests::Flags)
+
+bool FHyperAIStudioLightingSkySystemTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Lighting::Tests;
+	namespace Gate = HyperAIStudio::Lighting::Gate;
+	// A Blueprint named and shaped like Ultra Dynamic Sky: the variables it reads by the names its Details panel shows.
+	UPackage* Package = CreatePackage(*FString::Printf(TEXT("/Temp/HyperAITests/Sky_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8)));
+	UBlueprint* Blueprint = FKismetEditorUtilities::CreateBlueprint(AActor::StaticClass(), Package, TEXT("Ultra_Dynamic_Sky"), BPTYPE_Normal);
+	if (!TestNotNull(TEXT("a stand-in sky Blueprint"), Blueprint)) return false;
+	FEdGraphPinType Real;
+	Real.PinCategory = TEXT("real");
+	Real.PinSubCategory = TEXT("double");
+	FEdGraphPinType Bool;
+	Bool.PinCategory = TEXT("bool");
+	FEdGraphPinType Colour;
+	Colour.PinCategory = TEXT("struct");
+	Colour.PinSubCategoryObject = TBaseStructure<FLinearColor>::Get();
+	auto Add = [Blueprint](const TCHAR* Name, const FEdGraphPinType& Type, const TCHAR* Default, const bool bOnInstance)
+	{
+		FBlueprintEditorUtils::AddMemberVariable(Blueprint, Name, Type, Default);
+		FBlueprintEditorUtils::SetBlueprintOnlyEditableFlag(Blueprint, Name, !bOnInstance);
+	};
+	Add(TEXT("Time of Day"), Real, TEXT("1300.0"), true);
+	FBlueprintEditorUtils::SetBlueprintVariableMetaData(Blueprint, TEXT("Time of Day"), nullptr, TEXT("ClampMin"), TEXT("0"));
+	FBlueprintEditorUtils::SetBlueprintVariableMetaData(Blueprint, TEXT("Time of Day"), nullptr, TEXT("ClampMax"), TEXT("2400"));
+	Add(TEXT("Cloud Coverage"), Real, TEXT("1.0"), true);
+	Add(TEXT("Apply Exposure Settings"), Bool, TEXT("true"), true);
+	Add(TEXT("Sun Light Color"), Colour, TEXT("(R=1.0,G=1.0,B=1.0,A=1.0)"), true);
+	Add(TEXT("Internal Cache"), Real, TEXT("0.0"), false);
+	FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::SkipGarbageCollection);
+	if (!TestNotNull(TEXT("it compiled to a class"), Blueprint->GeneratedClass.Get())) return false;
+
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAILightingSkyWorld"));
+	if (!TestNotNull(TEXT("a test world"), World)) return false;
+	ON_SCOPE_EXIT { World->DestroyWorld(/*bInformEngineOfWorld=*/false); };
+	FActorSpawnParameters Spawn;
+	Spawn.ObjectFlags |= RF_Transactional;
+	AActor* Sky = World->SpawnActor(Blueprint->GeneratedClass, nullptr, nullptr, Spawn);
+	if (!TestNotNull(TEXT("the sky spawned"), Sky)) return false;
+	Sky->SetActorLabel(TEXT("Ultra_Dynamic_Sky"));
+	auto Read = [&](const TCHAR* Key) { return ValueOf(Gate::ReadActors(*World), TEXT("sky_system"), Key); };
+
+	TestEqual(TEXT("inspect names the system"), Read(TEXT("system")), FString(TEXT("Ultra Dynamic Sky")));
+	TestEqual(TEXT("which owns its lights"), Read(TEXT("owns_lights")), FString(TEXT("true")));
+	TestEqual(TEXT("and shows Time of Day as a plain number"), Read(TEXT("Time of Day")), FString(TEXT("1300")));
+	TestEqual(TEXT("and whether it applies its own exposure"), Read(TEXT("Apply Exposure Settings")), FString(TEXT("true")));
+	TestEqual(TEXT("a variable the placed actor cannot edit stays out"), Read(TEXT("Internal Cache")), FString(TEXT("<missing>")));
+	TestEqual(TEXT("the sky is found as the light owner"), Gate::LightOwningSky(*World), FString(TEXT("Ultra Dynamic Sky ('Ultra_Dynamic_Sky')")));
+	// A viewport set to a fixed exposure counts as locked whatever the sky does, so only check without one.
+	if (!(GCurrentLevelEditingViewportClient && GCurrentLevelEditingViewportClient->ExposureSettings.bFixed))
+	{
+		TestFalse(TEXT("a sky applying its own exposure means exposure is not locked"), Gate::IsExposureLocked(*World));
+	}
+
+	auto Rejects = [&](const TArray<FHyperAILightingOp>& Ops, const TCHAR* Expected)
+	{
+		FString Error;
+		const bool bValid = Gate::ValidateOps(*World, Ops, Error);
+		TestTrue(*FString::Printf(TEXT("rejected with '%s' (got '%s')"), Expected, *Error), !bValid && Error.Contains(Expected));
+	};
+	Rejects({Op(TEXT("set_sun"), TEXT("intensity"), TEXT("5"))}, TEXT("owns its sun, sky light, fog and atmosphere"));
+	Rejects({Op(TEXT("set_fog"), TEXT("density"), TEXT("0.1"))}, TEXT("Use set_sky_system instead: Time of Day"));
+	Rejects({Op(TEXT("set_sky_system"), TEXT("Rain"), TEXT("1"))}, TEXT("no sky in the level has a variable 'Rain'"));
+	Rejects({Op(TEXT("set_sky_system"), TEXT("Time of Day"), TEXT("dusk"))}, TEXT("does not take 'dusk'"));
+	Rejects({Op(TEXT("set_sky_system"), TEXT("Time of Day"), TEXT("3000"))}, TEXT("from 0 to 2400"));
+	Rejects({Op(TEXT("set_sky_system"), TEXT("Apply Exposure Settings"), TEXT("maybe"))}, TEXT("takes true or false"));
+	Rejects({Op(TEXT("set_sky_system"), TEXT("Internal Cache"), TEXT("1"))}, TEXT("is not editable on the placed actor"));
+	Rejects({Op(TEXT("set_sky_system"), TEXT("Time of Day"), TEXT("1200"), TEXT("Other_Sky"))}, TEXT("no sky is labelled 'Other_Sky'"));
+	Rejects({Op(TEXT("set_sky_system"), TEXT(""), TEXT("1"))}, TEXT("needs property"));
+	FString Error;
+	TestTrue(TEXT("a post-process edit is still fine beside the sky"), Gate::ValidateOps(*World, {Op(TEXT("set_post_process"), TEXT("contrast"), TEXT("1.1"))}, Error));
+
+	const FString Before = Gate::ComputeRevision(*World);
+	const TArray<FHyperAILightingOp> Ops = {
+		Op(TEXT("set_sky_system"), TEXT("Time of Day"), TEXT("1730")),
+		Op(TEXT("set_sky_system"), TEXT("cloud coverage"), TEXT("3.5")),
+		Op(TEXT("set_sky_system"), TEXT("Sun Light Color"), TEXT("(R=1,G=0.5,B=0.25,A=1)"))};
+	TArray<AActor*> Touched;
+	TestTrue(TEXT("sky edits apply: ") + Error, Gate::ApplyOps(*World, Ops, Touched, Error));
+	TestTrue(TEXT("only the sky was touched"), Touched.Num() == 1 && Touched[0] == Sky);
+	TestEqual(TEXT("Time of Day moved"), Read(TEXT("Time of Day")), FString(TEXT("1730")));
+	TestEqual(TEXT("a name in any case finds its variable"), Read(TEXT("Cloud Coverage")), FString(TEXT("3.5")));
+	TestTrue(TEXT("the colour is set: ") + Read(TEXT("Sun Light Color")), Read(TEXT("Sun Light Color")).Contains(TEXT("G=0.5")));
+	TestNotEqual(TEXT("the revision follows the sky"), Gate::ComputeRevision(*World), Before);
+	TestTrue(TEXT("the sky is the save target"), Gate::ResolveTargets(*World, Ops).Num() == 1 && Gate::ResolveTargets(*World, Ops)[0] == Sky);
+	TestEqual(TEXT("no stock light was added"), Gate::ReadActors(*World).Num(), 1);
+
+	Touched.Reset();
+	TestTrue(TEXT("locking exposure applies: ") + Error, Gate::ApplyOps(*World, {Op(TEXT("lock_exposure"), TEXT(""), TEXT("13"))}, Touched, Error));
+	TestEqual(TEXT("locking also turns the sky's own exposure off"), Read(TEXT("Apply Exposure Settings")), FString(TEXT("false")));
+	TestTrue(TEXT("so the level now counts as locked"), Gate::IsExposureLocked(*World));
+	TestTrue(TEXT("and the sky is among the touched actors"), Touched.Contains(Sky));
+	TestTrue(TEXT("lock ops resolve to the sky too, for saving"), Gate::ResolveTargets(*World, {Op(TEXT("lock_exposure"), TEXT(""), TEXT("13"))}).Contains(Sky));
+
+	FlushAsyncLoading();
+	if (GEditor && GEditor->UndoTransaction() && GEditor->UndoTransaction())
+	{
+		TestEqual(TEXT("two undos give back the sky's exposure"), Read(TEXT("Apply Exposure Settings")), FString(TEXT("true")));
+		TestEqual(TEXT("and its time of day"), Read(TEXT("Time of Day")), FString(TEXT("1300")));
 	}
 	return true;
 }

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HyperAIStudioAgentJobs.h"
 #include "HyperAIStudioPreviewImage.h"
 #include "HyperAIStudioPreviewPanel.h"
 #include "Widgets/SCompoundWidget.h"
@@ -105,8 +106,14 @@ public:
 	virtual void OnDragLeave(const FDragDropEvent& Event) override;
 	virtual FReply OnDragOver(const FGeometry& Geometry, const FDragDropEvent& Event) override;
 	virtual FReply OnDrop(const FGeometry& Geometry, const FDragDropEvent& Event) override;
+	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
 
 private:
+	/** The agent work the current source offers for this reference. */
+	TSharedRef<SWidget> BuildMatchItMenu();
+	/** The newest job for the current reference, running or done. */
+	TOptional<FHyperAIStudioAgentJobInfo> CurrentJob() const;
+	FText GetJobText() const;
 	void RebuildSourceOptions();
 	void SetReference(const FString& Path, bool bRemember);
 	void Refresh();
@@ -141,4 +148,6 @@ private:
 	TArray<TSharedPtr<FHyperAIStudioPreviewImage>> FrameImages;
 	FDelegateHandle SourcesChangedHandle;
 	FDelegateHandle OpenRequestedHandle;
+	FDelegateHandle JobsChangedHandle;
+	double NextJobRefresh = 0.0;
 };

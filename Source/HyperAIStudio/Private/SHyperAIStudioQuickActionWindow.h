@@ -48,8 +48,25 @@ public:
 	static FName GetPageId(int32 TabIndex);
 	/** Every tab running an agent, as an editor restart reopens it. */
 	static TArray<FHyperAIStudioRestartChat> GetRestartChats();
-	/** Sends Text to a chat tab as the user, opening the tab if needed (HyperAIStudio.ChatSend). */
-	static bool SendToChat(int32 TabIndex, const FString& Text, FString& OutMessage);
+	/**
+	 * Sends Text to a chat tab as the user, opening the tab if needed (HyperAIStudio.ChatSend). Images go with it in
+	 * HyperAI's chat view; a terminal gets a long or multi-line message as one line pointing at a file that holds it.
+	 */
+	static bool SendToChat(int32 TabIndex, const FString& Text, FString& OutMessage, const TArray<FString>& Images = {});
+	/** Chats open at once. */
+	static constexpr int32 MaxChatTabs = 4;
+	/**
+	 * Opens the lowest free chat tab for a job, on the agent its task route names or else the preferred agent, and gives
+	 * the agent Prompt (with Images) as it starts. Returns the tab's index, or 0 with OutError set.
+	 */
+	static int32 OpenJobChat(const FString& Category, const FString& Prompt, const TArray<FString>& Images, FString& OutAgent, FString& OutError);
+	/**
+	 * False when the tab is not open. Working: starting, a turn running, a message queued, or a question waiting.
+	 * Started: its agent was launched, after which the tab may go behind another page (only the launch needs it in front).
+	 */
+	static bool GetTabWork(int32 TabIndex, bool& bOutWorking, bool* bOutStarted = nullptr);
+	/** Interrupts the turn running in a tab's HyperAI chat view; a terminal chat is left to finish. */
+	static void InterruptTab(int32 TabIndex);
 
 	virtual FReply OnPreviewKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	/** Assets and actors dropped on the panel become object paths in the agent's prompt. */
@@ -83,6 +100,7 @@ private:
 	 */
 	bool TickHandoff(float DeltaTime);
 	TArray<FString> GetUsableAgentNames() const;
+	static TSharedPtr<SHyperAIStudioQuickActionWindow> FindTab(int32 TabIndex);
 	/** The model this tab launches AgentName with: the tab's own choice, else the agent's saved one. */
 	FString GetModelForAgent(const FString& AgentName) const;
 	FText GetTabTitle() const;
@@ -209,8 +227,9 @@ private:
 	FString ContinueMessage;
 	/** What the agent's start last waited on, so the log says it once. */
 	FString LastStartupWait;
-	/** A prompt HyperAIStudio.ChatSend sent before the agent started: a native chat gets it as it starts. */
+	/** A prompt sent before the agent started (HyperAIStudio.ChatSend, a job): the agent gets it as it starts. */
 	FString PendingPrompt;
+	TArray<FString> PendingImages;
 	/** Codex, Gemini and Claude Code can run in HyperAI's own chat view instead of the terminal. */
 	TSharedPtr<class SHyperAIStudioNativeChatView> NativeView;
 	TSharedRef<SWidget> BuildNativeToggle();

@@ -3,6 +3,7 @@
 #include "HyperAIStudioLightingToolset.h"
 
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
+#include "HyperAIStudioLightingCapture.h"
 #include "Modules/ModuleManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioLightingModule, Log, All);
@@ -24,10 +25,12 @@ public:
 		bRuntimeToolsetPublished = true;
 		Registration = MakeUnique<FHyperAIStudioLightingRegistration>();
 		Registration->Startup();
+		HyperAIStudio::Lighting::Capture::Startup();
 	}
 
 	virtual void ShutdownModule() override
 	{
+		HyperAIStudio::Lighting::Capture::Shutdown();
 		if (Registration)
 		{
 			Registration->Shutdown();

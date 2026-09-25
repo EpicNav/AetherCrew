@@ -95,7 +95,8 @@ struct FHyperAIStudioOperationRecord
 };
 
 /**
- * Durable, bounded, per-project idempotency journal for HyperAI-managed mutations.
+ * Durable, bounded, per-project idempotency journal for HyperAI-managed mutations. When full, a new operation
+ * takes the place of the oldest settled one; operations still unresolved are never dropped.
  *
  * Persistence uses two complete generations. Saving only overwrites the inactive/older
  * generation and promotes it after a read-back checksum succeeds, so the last validated

@@ -26,12 +26,20 @@ namespace HyperAIStudio::Lighting::Gate
 	bool WritePng(const FString& Path, TConstArrayView<FColor> Pixels, int32 Width, int32 Height);
 
 	UWorld* GetEditorWorld();
-	/** Directional lights, sky lights, height fogs, sky atmospheres and unbound post-process volumes, in a stable order. */
+	/**
+	 * Directional lights, sky lights, height fogs, sky atmospheres and unbound post-process volumes, then Blueprint skies
+	 * (kind sky_system: Ultra Dynamic Sky and Weather, Sun Sky, Sky Sphere) with the variables that move their look.
+	 */
 	TArray<FHyperAILightingActorRecord> ReadActors(UWorld& World);
 	/** Level path plus every value ReadActors reports; any lighting change moves it. */
 	FString ComputeRevision(UWorld& World);
-	/** True when the level viewport uses a fixed exposure or an unbound post-process volume locks it. */
+	/** True when the level viewport uses a fixed exposure or an unbound post-process volume locks it, and no sky applies its own. */
 	bool IsExposureLocked(UWorld& World);
+	/**
+	 * A Blueprint sky that owns its sun, sky light and fog, such as Ultra Dynamic Sky, as "<system> ('<label>')": the level
+	 * is lit through its variables, so stock-light edits are refused. Empty when the level has none.
+	 */
+	FString LightOwningSky(UWorld& World);
 
 	/** Checks every op against the level as it would be at that point in the plan; changes nothing. */
 	bool ValidateOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, FString& OutError);

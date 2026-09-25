@@ -14,6 +14,7 @@
 #include "HyperAIStudioImageMatch.h"
 #include "HyperAIStudioLightingCapture.h"
 #include "HyperAIStudioLightingGate.h"
+#include "HyperAIStudioMatchJobs.h"
 #include "HyperAIStudioPreviewPanel.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Paths.h"
@@ -332,6 +333,7 @@ TArray<FString> FHyperAIStudioLightingContracts::GetCapabilities()
 		TEXT("closed_lighting_edits_as_one_undo_step"),
 		TEXT("missing_lighting_actors_added_on_demand"),
 		TEXT("material_assignment_to_a_placed_actor_mesh_slot"),
+		TEXT("blueprint_skies_ultra_dynamic_sky_and_weather_sun_sky_and_sky_sphere_lit_through_their_variables"),
 		TEXT("viewport_or_image_vs_reference_metrics"),
 		TEXT("ranked_next_change_suggestions"),
 		TEXT("view_captures_from_a_camera_or_transform_with_frame_to_frame_differences"),
@@ -693,17 +695,21 @@ FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHy
 	Report.Actors = Gate::ReadActors(*World);
 	Report.bOk = true;
 	Report.Status = TEXT("captured");
+	// A sky that owns its lights has no stock actors to add, and must not get any.
+	const FString Sky = Gate::LightOwningSky(*World);
 	TArray<FString> Missing;
 	for (const TCHAR* Kind : {TEXT("sun"), TEXT("sky_light"), TEXT("fog"), TEXT("sky_atmosphere"), TEXT("post_process")})
 	{
-		if (!Report.Actors.ContainsByPredicate([Kind](const FHyperAILightingActorRecord& Actor) { return Actor.Kind == Kind; }))
+		if ((Sky.IsEmpty() || FCString::Strcmp(Kind, TEXT("post_process")) == 0)
+			&& !Report.Actors.ContainsByPredicate([Kind](const FHyperAILightingActorRecord& Actor) { return Actor.Kind == Kind; }))
 		{
 			Missing.Add(Kind);
 		}
 	}
-	Report.Diagnostic = FString::Printf(TEXT("%d lighting actors.%s%s"), Report.Actors.Num(),
+	Report.Diagnostic = FString::Printf(TEXT("%d lighting actors.%s%s%s"), Report.Actors.Num(),
+		Sky.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" The sky is %s: it owns the sun, sky light and fog, so light it with set_sky_system and its variables."), *Sky),
 		Missing.IsEmpty() ? TEXT("") : *(TEXT(" None of: ") + FString::Join(Missing, TEXT(", ")) + TEXT("; the first op on one adds it.")),
-		Report.bExposureLocked ? TEXT("") : TEXT(" Auto exposure is on: lock_exposure before comparing."));
+		Report.bExposureLocked ? TEXT("") : TEXT(" Auto exposure is on: lock_exposure before comparing (it also turns off a sky's own exposure)."));
 	return Report;
 }
 
@@ -1192,6 +1198,7 @@ void FHyperAIStudioLightingRegistration::Startup()
 			"Capture the level viewport and measure it against a reference image.");
 		Source.bNeedsReference = true;
 		Source.Refresh = FHyperAIStudioPreviewRefresh::CreateStatic(&HyperAIStudio::Lighting::Private::RefreshPreview);
+		Source.AgentActions = HyperAIStudio::Lighting::MatchJobs::Actions();
 		FHyperAIStudioPreviewPanel::RegisterSource(MoveTemp(Source));
 	}
 	{
@@ -1202,6 +1209,8 @@ void FHyperAIStudioLightingRegistration::Startup()
 			"Score an attempt against a reference, for scenes, materials, effects and UI. With a hyper_image_compare session, every iteration shows as a strip.");
 		Source.bNeedsReference = true;
 		Source.Refresh = FHyperAIStudioPreviewRefresh::CreateStatic(&HyperAIStudio::Lighting::Private::RefreshMatchPreview);
+		Source.AgentActions = HyperAIStudio::Lighting::MatchJobs::Actions();
+		Source.bRefreshWhileAgentWorks = true;
 		FHyperAIStudioPreviewPanel::RegisterSource(MoveTemp(Source));
 	}
 	PostEngineInitHandle = FCoreDelegates::GetOnPostEngineInit().AddRaw(this, &FHyperAIStudioLightingRegistration::RegisterAfterEngineInit);

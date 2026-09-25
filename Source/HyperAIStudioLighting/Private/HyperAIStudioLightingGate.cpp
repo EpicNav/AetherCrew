@@ -21,6 +21,7 @@
 #include "LevelEditorViewport.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/FileHelper.h"
+#include "Misc/StringOutputDevice.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "ScopedTransaction.h"
@@ -86,6 +87,240 @@ namespace HyperAIStudio::Lighting::Gate
 		{
 			const TArray<AActor*> Actors = ActorsOfKind(World, Kind, Label);
 			return Actors.IsEmpty() ? nullptr : Actors[0];
+		}
+
+		/** A Blueprint sky or weather actor, and the variables that move its look, by the names its Details panel shows. */
+		struct FSkySystem
+		{
+			/** The Blueprint class's name without _C; a child Blueprint of it counts too. */
+			const TCHAR* ClassName;
+			const TCHAR* Name;
+			/** It has its own sun, sky light and fog, so an edit to a stock light would fight it or add a second one. */
+			bool bOwnsLights;
+			/** What to change instead of a stock light, for the refusal. */
+			const TCHAR* Levers;
+			TArray<const TCHAR*> Keys;
+		};
+
+		const TArray<FSkySystem>& SkySystems()
+		{
+			// Skies that own their lights first, so a variable both have resolves to the sky rather than the weather.
+			static const TArray<FSkySystem> Systems = {
+				{TEXT("Ultra_Dynamic_Sky"), TEXT("Ultra Dynamic Sky"), true,
+					TEXT("Time of Day (the sun's angle), Sun Light Intensity, Sun Light Color, Sky Light Intensity, Cloud Coverage, Fog, Dust Amount, Saturation and Contrast"),
+					{TEXT("Time of Day"), TEXT("Animate Time of Day"), TEXT("Sun Light Intensity"), TEXT("Sun Light Color"), TEXT("Moon Light Intensity"),
+						TEXT("Sky Light Intensity"), TEXT("Night Brightness"), TEXT("Cloud Coverage"), TEXT("Fog"), TEXT("Dust Amount"),
+						TEXT("Overall Intensity"), TEXT("Saturation"), TEXT("Contrast"), TEXT("Sun Yaw"), TEXT("Sun Pitch"),
+						TEXT("Apply Exposure Settings"), TEXT("Exposure Bias Day"), TEXT("Exposure Bias Dawn/Dusk"), TEXT("Exposure Bias Night"),
+						TEXT("Exposure Bias Cloudy"), TEXT("Volumetric Fog"), TEXT("Sky Mode"), TEXT("Color Mode")}},
+				{TEXT("SunSky"), TEXT("Sun Sky"), true, TEXT("SolarTime (the sun's angle), Latitude, Longitude, Month and Day"),
+					{TEXT("Latitude"), TEXT("Longitude"), TEXT("TimeZone"), TEXT("SolarTime"), TEXT("Month"), TEXT("Day"), TEXT("NorthOffset")}},
+				{TEXT("Ultra_Dynamic_Weather"), TEXT("Ultra Dynamic Weather"), false, TEXT("Weather, Cloud Coverage, Fog, Rain and Snow"),
+					{TEXT("Weather"), TEXT("Cloud Coverage"), TEXT("Fog"), TEXT("Dust Amount"), TEXT("Rain"), TEXT("Snow"), TEXT("Wind Intensity"),
+						TEXT("Thunder/Lightning"), TEXT("Material Wetness")}},
+				{TEXT("BP_Sky_Sphere"), TEXT("Sky Sphere"), false, TEXT("Sun Brightness, Sun Height and the sky colours"),
+					{TEXT("Sun Brightness"), TEXT("Sun Height"), TEXT("Cloud Speed"), TEXT("Cloud Opacity"), TEXT("Stars Brightness"),
+						TEXT("Horizon Falloff"), TEXT("Zenith Color"), TEXT("Horizon Color"), TEXT("Cloud Color"), TEXT("Overall Color")}},
+			};
+			return Systems;
+		}
+
+		const FSkySystem* SkySystemOf(const UClass* Class)
+		{
+			for (const UClass* Current = Class; Current; Current = Current->GetSuperClass())
+			{
+				FString Name = Current->GetName();
+				Name.RemoveFromEnd(TEXT("_C"));
+				for (const FSkySystem& System : SkySystems())
+				{
+					if (Name == System.ClassName) return &System;
+				}
+			}
+			return nullptr;
+		}
+
+		/** Sky and weather actors: skies that own their lights first, then in path order. */
+		TArray<AActor*> SkyActors(UWorld& World)
+		{
+			TArray<AActor*> Actors;
+			for (TActorIterator<AActor> It(&World); It; ++It)
+			{
+				if (IsValid(*It) && !It->IsTemplate() && SkySystemOf(It->GetClass())) Actors.Add(*It);
+			}
+			Actors.Sort([](const AActor& A, const AActor& B)
+			{
+				const bool bOwnsA = SkySystemOf(A.GetClass())->bOwnsLights;
+				const bool bOwnsB = SkySystemOf(B.GetClass())->bOwnsLights;
+				return bOwnsA != bOwnsB ? bOwnsA : A.GetPathName() < B.GetPathName();
+			});
+			return Actors;
+		}
+
+		/** The variable a Details panel shows as Name: its own name first, then its display name. */
+		FProperty* FindSkyProperty(const UClass* Class, const FString& Name)
+		{
+			for (TFieldIterator<FProperty> It(Class); It; ++It)
+			{
+				if (It->GetName().Equals(Name, ESearchCase::IgnoreCase)) return *It;
+			}
+#if WITH_EDITOR
+			for (TFieldIterator<FProperty> It(Class); It; ++It)
+			{
+				if (It->GetDisplayNameText().ToString().Equals(Name, ESearchCase::IgnoreCase)) return *It;
+			}
+#endif
+			return nullptr;
+		}
+
+		/** Only what a person could set on the placed actor in its Details panel, and of a plain type. */
+		bool IsEditableSkyProperty(const FProperty& Property, FString& OutWhy)
+		{
+			if (!Property.HasAnyPropertyFlags(CPF_Edit) || Property.HasAnyPropertyFlags(CPF_DisableEditOnInstance | CPF_EditConst))
+			{
+				OutWhy = TEXT("is not editable on the placed actor");
+				return false;
+			}
+			if (Property.ArrayDim != 1 || Property.IsA<FArrayProperty>() || Property.IsA<FMapProperty>() || Property.IsA<FSetProperty>())
+			{
+				OutWhy = TEXT("is a list, which set_sky_system does not edit");
+				return false;
+			}
+			if (const FStructProperty* Struct = CastField<FStructProperty>(&Property))
+			{
+				const UScriptStruct* Type = Struct->Struct;
+				if (Type == TBaseStructure<FLinearColor>::Get() || Type == TBaseStructure<FColor>::Get() || Type == TBaseStructure<FVector>::Get()
+					|| Type == TBaseStructure<FRotator>::Get() || Type == TBaseStructure<FVector2D>::Get())
+				{
+					return true;
+				}
+				OutWhy = FString::Printf(TEXT("is a %s, which set_sky_system does not edit"), Type ? *Type->GetName() : TEXT("struct"));
+				return false;
+			}
+			if (Property.IsA<FNumericProperty>() || Property.IsA<FBoolProperty>() || Property.IsA<FEnumProperty>() || Property.IsA<FNameProperty>()
+				|| Property.IsA<FStrProperty>() || Property.IsA<FTextProperty>() || Property.IsA<FObjectPropertyBase>())
+			{
+				return true;
+			}
+			OutWhy = TEXT("is of a type set_sky_system does not edit");
+			return false;
+		}
+
+		const UEnum* EnumOf(const FProperty& Property)
+		{
+			if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(&Property)) return EnumProperty->GetEnum();
+			if (const FByteProperty* Byte = CastField<FByteProperty>(&Property)) return Byte->Enum;
+			return nullptr;
+		}
+
+		/** Values as set_sky_system takes them back: numbers plain, enums by display name, the rest in Unreal's text form. */
+		FString SkyValueText(const FProperty& Property, const AActor& Actor)
+		{
+			const void* Value = Property.ContainerPtrToValuePtr<void>(&Actor);
+			if (const UEnum* Enum = EnumOf(Property))
+			{
+				const FNumericProperty* Underlying = Property.IsA<FEnumProperty>()
+					? CastField<FEnumProperty>(&Property)->GetUnderlyingProperty() : CastField<FNumericProperty>(&Property);
+				const int64 Raw = Underlying ? Underlying->GetSignedIntPropertyValue(Value) : 0;
+				const int32 Index = Enum->GetIndexByValue(Raw);
+				return Index == INDEX_NONE ? LexToString(Raw) : Enum->GetDisplayNameTextByIndex(Index).ToString();
+			}
+			if (const FNumericProperty* Numeric = CastField<FNumericProperty>(&Property))
+			{
+				return Numeric->IsFloatingPoint() ? FString::Printf(TEXT("%.6g"), Numeric->GetFloatingPointPropertyValue(Value)) : LexToString(Numeric->GetSignedIntPropertyValue(Value));
+			}
+			if (const FBoolProperty* Bool = CastField<FBoolProperty>(&Property))
+			{
+				return Bool->GetPropertyValue(Value) ? TEXT("true") : TEXT("false");
+			}
+			FString Text;
+			Property.ExportTextItem_Direct(Text, Value, nullptr, nullptr, PPF_None);
+			return Text.Len() > 200 ? Text.Left(200) + TEXT("...") : Text;
+		}
+
+		/** The value as the Details panel would take it, checked by importing it into scratch memory; enums by display name. */
+		bool ParseSkyValue(const FProperty& Property, AActor& Owner, const FString& Text, FString& OutImport, FString& OutError)
+		{
+			OutImport = Text.TrimStartAndEnd();
+			if (const UEnum* Enum = EnumOf(Property))
+			{
+				TArray<FString> Names;
+				for (int32 Index = 0; Index < Enum->NumEnums() - (Enum->ContainsExistingMax() ? 1 : 0); ++Index)
+				{
+					const FString Display = Enum->GetDisplayNameTextByIndex(Index).ToString();
+					if (Display.Equals(OutImport, ESearchCase::IgnoreCase) || Enum->GetNameStringByIndex(Index).Equals(OutImport, ESearchCase::IgnoreCase)
+						|| Enum->GetAuthoredNameStringByIndex(Index).Equals(OutImport, ESearchCase::IgnoreCase))
+					{
+						OutImport = Enum->GetNameStringByIndex(Index);
+						return true;
+					}
+					Names.Add(Display);
+				}
+				OutError = FString::Printf(TEXT("takes one of: %s"), *FString::Join(Names, TEXT(", ")));
+				return false;
+			}
+			if (Property.IsA<FBoolProperty>())
+			{
+				const bool bTrue = OutImport.Equals(TEXT("true"), ESearchCase::IgnoreCase) || OutImport == TEXT("1");
+				const bool bFalse = OutImport.Equals(TEXT("false"), ESearchCase::IgnoreCase) || OutImport == TEXT("0");
+				OutImport = bTrue ? TEXT("True") : TEXT("False");
+				if (!bTrue && !bFalse) OutError = TEXT("takes true or false");
+				return bTrue || bFalse;
+			}
+			void* Scratch = FMemory::Malloc(Property.GetSize(), Property.GetMinAlignment());
+			Property.InitializeValue(Scratch);
+			FStringOutputDevice Errors;
+			const TCHAR* End = Property.ImportText_Direct(*OutImport, Scratch, &Owner, PPF_None, &Errors);
+			bool bOk = End != nullptr && FString(End).TrimStartAndEnd().IsEmpty() && Errors.IsEmpty();
+			if (bOk)
+			{
+				if (const FNumericProperty* Numeric = CastField<FNumericProperty>(&Property))
+				{
+					const double Value = Numeric->IsFloatingPoint() ? Numeric->GetFloatingPointPropertyValue(Scratch)
+						: static_cast<double>(Numeric->GetSignedIntPropertyValue(Scratch));
+#if WITH_EDITOR
+					const FString Min = Property.GetMetaData(TEXT("ClampMin"));
+					const FString Max = Property.GetMetaData(TEXT("ClampMax"));
+#else
+					const FString Min, Max;
+#endif
+					if (!FMath::IsFinite(Value) || (!Min.IsEmpty() && Value < FCString::Atod(*Min)) || (!Max.IsEmpty() && Value > FCString::Atod(*Max)))
+					{
+						bOk = false;
+						OutError = Min.IsEmpty() && Max.IsEmpty() ? FString(TEXT("needs a finite number"))
+							: FString::Printf(TEXT("needs a number from %s to %s"), Min.IsEmpty() ? TEXT("any") : *Min, Max.IsEmpty() ? TEXT("any") : *Max);
+					}
+				}
+			}
+			else
+			{
+				OutError = FString::Printf(TEXT("does not take '%s'%s"), *OutImport.Left(64),
+					Property.IsA<FStructProperty>() ? TEXT("; give it in Unreal's text form, such as (R=1,G=0.5,B=0.2,A=1)") : TEXT(""));
+			}
+			Property.DestroyValue(Scratch);
+			FMemory::Free(Scratch);
+			return bOk;
+		}
+
+		AActor* LightOwningSkyActor(UWorld& World)
+		{
+			for (AActor* Sky : SkyActors(World))
+			{
+				if (SkySystemOf(Sky->GetClass())->bOwnsLights) return Sky;
+			}
+			return nullptr;
+		}
+
+		/** Skies with their own exposure switch (Ultra Dynamic Sky's Apply Exposure Settings). */
+		TArray<TPair<AActor*, FBoolProperty*>> ExposureSkies(UWorld& World)
+		{
+			TArray<TPair<AActor*, FBoolProperty*>> Skies;
+			for (AActor* Sky : SkyActors(World))
+			{
+				FString Why;
+				FBoolProperty* Applies = CastField<FBoolProperty>(FindSkyProperty(Sky->GetClass(), TEXT("Apply Exposure Settings")));
+				if (Applies && IsEditableSkyProperty(*Applies, Why)) Skies.Add({Sky, Applies});
+			}
+			return Skies;
 		}
 
 		FString Number(const double Value)
@@ -227,6 +462,9 @@ namespace HyperAIStudio::Lighting::Gate
 			FString ComponentName;
 			int32 SlotIndex = 0;
 			FName SlotName;
+			// set_sky_system: the variable, by the name its Details panel shows, and its value as typed.
+			FString SkyVariable;
+			FString SkyValue;
 		};
 
 		bool ParseNumber(const FString& Text, const float Min, const float Max, float& Out)
@@ -303,6 +541,18 @@ namespace HyperAIStudio::Lighting::Gate
 				}
 				return true;
 			}
+			if (Op.Kind == TEXT("set_sky_system"))
+			{
+				Out.Kind = TEXT("sky_system");
+				Out.SkyVariable = Op.Property.TrimStartAndEnd();
+				Out.SkyValue = Op.Value;
+				if (Out.SkyVariable.IsEmpty() || Op.Value.TrimStartAndEnd().IsEmpty())
+				{
+					OutError = TEXT("set_sky_system needs property, a variable of the sky by the name its Details panel shows (hyper_lighting_inspect lists them), and value.");
+					return false;
+				}
+				return true;
+			}
 			if (!Op.Kind.StartsWith(TEXT("set_")))
 			{
 				OutError = FString::Printf(TEXT("Unknown kind '%s'."), *Op.Kind);
@@ -311,7 +561,7 @@ namespace HyperAIStudio::Lighting::Gate
 			Out.Kind = Op.Kind.RightChop(4);
 			if (!ClassOf(Out.Kind))
 			{
-				OutError = FString::Printf(TEXT("Unknown kind '%s': use set_sun, set_sky_light, set_fog, set_sky_atmosphere, set_post_process, lock_exposure, unlock_exposure or set_actor_material."), *Op.Kind);
+				OutError = FString::Printf(TEXT("Unknown kind '%s': use set_sun, set_sky_light, set_fog, set_sky_atmosphere, set_post_process, lock_exposure, unlock_exposure, set_actor_material or set_sky_system."), *Op.Kind);
 				return false;
 			}
 			for (const FPropertySpec& Spec : PropertySpecs)
@@ -489,6 +739,48 @@ namespace HyperAIStudio::Lighting::Gate
 			return false;
 		}
 
+		/** The sky a set_sky_system op edits and its checked value: the labelled one, else the first sky that has the variable. */
+		bool ResolveSkyOp(UWorld& World, const FString& Label, const FParsedOp& Op, AActor*& OutActor, FProperty*& OutProperty,
+			FString& OutImport, FString& OutError)
+		{
+			const TArray<AActor*> Skies = SkyActors(World);
+			if (Skies.IsEmpty())
+			{
+				OutError = TEXT("the level has no Blueprint sky (Ultra Dynamic Sky or Weather, Sun Sky, Sky Sphere); light it with set_sun and the other kinds.");
+				return false;
+			}
+			TArray<FString> Labels;
+			for (AActor* Sky : Skies)
+			{
+				Labels.Add(FString::Printf(TEXT("'%s' (%s)"), *Sky->GetActorLabel(), SkySystemOf(Sky->GetClass())->Name));
+				if (!Label.IsEmpty() && Sky->GetActorLabel() != Label) continue;
+				FProperty* Property = FindSkyProperty(Sky->GetClass(), Op.SkyVariable);
+				if (!Property)
+				{
+					if (!Label.IsEmpty())
+					{
+						OutError = FString::Printf(TEXT("'%s' has no variable '%s'; hyper_lighting_inspect lists the ones that move its look."), *Label, *Op.SkyVariable);
+						return false;
+					}
+					// Weather variables live on the weather actor: try the next sky.
+					continue;
+				}
+				FString Why;
+				if (!IsEditableSkyProperty(*Property, Why) || !ParseSkyValue(*Property, *Sky, Op.SkyValue, OutImport, Why))
+				{
+					OutError = FString::Printf(TEXT("'%s' on '%s' %s."), *Op.SkyVariable, *Sky->GetActorLabel(), *Why);
+					return false;
+				}
+				OutActor = Sky;
+				OutProperty = Property;
+				return true;
+			}
+			OutError = !Label.IsEmpty()
+				? FString::Printf(TEXT("no sky is labelled '%s'; the skies are %s."), *Label, *FString::Join(Labels, TEXT(", ")))
+				: FString::Printf(TEXT("no sky in the level has a variable '%s' (skies: %s); hyper_lighting_inspect lists their variables."), *Op.SkyVariable, *FString::Join(Labels, TEXT(", ")));
+			return false;
+		}
+
 		AActor* SpawnKind(UWorld& World, const FString& Kind)
 		{
 			FActorSpawnParameters Params;
@@ -536,6 +828,34 @@ namespace HyperAIStudio::Lighting::Gate
 					}
 					continue;
 				}
+				if (Parsed.Kind == TEXT("sky_system"))
+				{
+					AActor* Sky = nullptr;
+					FProperty* Property = nullptr;
+					FString Import;
+					if (!ResolveSkyOp(World, Op.ActorLabel, Parsed, Sky, Property, Import, Error))
+					{
+						OutError = FString::Printf(TEXT("Op %d: %s"), Index, *Error);
+						return false;
+					}
+					if (bWrite)
+					{
+						// The Details panel's route: undo, then the sky's construction script redraws it.
+						Edit(*Sky, Property->GetFName(), [&] { Property->ImportText_InContainer(*Import, Sky, Sky, PPF_None); });
+						OutTouched.AddUnique(Sky);
+					}
+					continue;
+				}
+				if (Parsed.Kind == TEXT("sun") || Parsed.Kind == TEXT("sky_light") || Parsed.Kind == TEXT("fog") || Parsed.Kind == TEXT("sky_atmosphere"))
+				{
+					if (const AActor* Owner = LightOwningSkyActor(World))
+					{
+						const FSkySystem* System = SkySystemOf(Owner->GetClass());
+						OutError = FString::Printf(TEXT("Op %d: this level's sky is %s ('%s'), which owns its sun, sky light, fog and atmosphere, so %s would fight it or add a second one. Use set_sky_system instead: %s."),
+							Index, System->Name, *Owner->GetActorLabel(), *Op.Kind, System->Levers);
+						return false;
+					}
+				}
 				AActor* Actor = FindActor(World, Parsed.Kind, Op.ActorLabel);
 				const bool bPlannedLabel = Op.ActorLabel == SpawnLabelOf(Parsed.Kind) && PlannedSpawns.Contains(Parsed.Kind);
 				if (!Actor && !Op.ActorLabel.IsEmpty() && !bPlannedLabel)
@@ -573,6 +893,15 @@ namespace HyperAIStudio::Lighting::Gate
 				{
 					WriteOp(*Actor, Parsed);
 					OutTouched.AddUnique(Actor);
+					// A sky that applies its own exposure would move a locked exposure again, so locking switches it off.
+					for (const TPair<AActor*, FBoolProperty*>& Sky : (Parsed.bLock || Parsed.bUnlock) ? ExposureSkies(World) : TArray<TPair<AActor*, FBoolProperty*>>())
+					{
+						if (Sky.Value->GetPropertyValue_InContainer(Sky.Key) == Parsed.bLock)
+						{
+							Edit(*Sky.Key, Sky.Value->GetFName(), [&] { Sky.Value->SetPropertyValue_InContainer(Sky.Key, !Parsed.bLock); });
+							OutTouched.AddUnique(Sky.Key);
+						}
+					}
 				}
 			}
 			return true;
@@ -851,6 +1180,27 @@ namespace HyperAIStudio::Lighting::Gate
 				ReadProperties(*Actors[Index], Kind, Record.Properties);
 			}
 		}
+		const TArray<AActor*> Skies = SkyActors(World);
+		for (int32 Index = 0; Index < FMath::Min(Skies.Num(), MaxActorsPerKind); ++Index)
+		{
+			AActor& Sky = *Skies[Index];
+			const FSkySystem& System = *SkySystemOf(Sky.GetClass());
+			FHyperAILightingActorRecord& Record = Records.AddDefaulted_GetRef();
+			Record.Kind = TEXT("sky_system");
+			Record.Label = Sky.GetActorLabel();
+			Record.Path = Sky.GetPathName();
+			Record.Properties.Add({TEXT("system"), System.Name});
+			Record.Properties.Add({TEXT("owns_lights"), System.bOwnsLights ? TEXT("true") : TEXT("false")});
+			for (const TCHAR* Key : System.Keys)
+			{
+				FString Why;
+				const FProperty* Property = FindSkyProperty(Sky.GetClass(), Key);
+				if (Property && IsEditableSkyProperty(*Property, Why))
+				{
+					Record.Properties.Add({Key, SkyValueText(*Property, Sky)});
+				}
+			}
+		}
 		return Records;
 	}
 
@@ -874,6 +1224,13 @@ namespace HyperAIStudio::Lighting::Gate
 		{
 			return true;
 		}
+		for (const TPair<AActor*, FBoolProperty*>& Sky : ExposureSkies(World))
+		{
+			if (Sky.Value->GetPropertyValue_InContainer(Sky.Key))
+			{
+				return false;
+			}
+		}
 		static IConsoleVariable* DefaultAutoExposure = IConsoleManager::Get().FindConsoleVariable(TEXT("r.DefaultFeature.AutoExposure"));
 		if (DefaultAutoExposure && DefaultAutoExposure->GetInt() == 0)
 		{
@@ -887,6 +1244,12 @@ namespace HyperAIStudio::Lighting::Gate
 			}
 		}
 		return false;
+	}
+
+	FString LightOwningSky(UWorld& World)
+	{
+		const AActor* Sky = LightOwningSkyActor(World);
+		return Sky ? FString::Printf(TEXT("%s ('%s')"), SkySystemOf(Sky->GetClass())->Name, *Sky->GetActorLabel()) : FString();
 	}
 
 	bool ValidateOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, FString& OutError)
@@ -919,6 +1282,18 @@ namespace HyperAIStudio::Lighting::Gate
 			{
 				if (ResolveMaterialSlot(World, Op.ActorLabel, Parsed, Mesh, Slot, Error)) Actors.AddUnique(Mesh->GetOwner());
 				continue;
+			}
+			if (Parsed.Kind == TEXT("sky_system"))
+			{
+				AActor* Sky = nullptr;
+				FProperty* Property = nullptr;
+				FString Import;
+				if (ResolveSkyOp(World, Op.ActorLabel, Parsed, Sky, Property, Import, Error)) Actors.AddUnique(Sky);
+				continue;
+			}
+			if (Parsed.bLock || Parsed.bUnlock)
+			{
+				for (const TPair<AActor*, FBoolProperty*>& Sky : ExposureSkies(World)) Actors.AddUnique(Sky.Key);
 			}
 			if (AActor* Actor = FindActor(World, Parsed.Kind, Op.ActorLabel)) Actors.AddUnique(Actor);
 		}

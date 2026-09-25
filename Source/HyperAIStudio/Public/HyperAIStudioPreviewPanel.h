@@ -60,6 +60,16 @@ DECLARE_DELEGATE_RetVal_ThreeParams(bool, FHyperAIStudioPreviewRefresh,
 class HYPERAISTUDIO_API FHyperAIStudioPreviewPanel
 {
 public:
+	/** Work an agent can do toward the chosen reference, offered on the Match page under Match it. */
+	struct FAgentAction
+	{
+		FName Id;
+		FText Label;
+		FText Tooltip;
+		/** Starts the work for this reference: true once it is under way, or false with OutError set. */
+		TFunction<bool(const FString& /*ReferenceImagePath*/, FString& /*OutError*/)> Start;
+	};
+
 	struct FSource
 	{
 		FName Id;
@@ -68,6 +78,10 @@ public:
 		/** True when the source measures a reference image the user picks, rather than producing both itself. */
 		bool bNeedsReference = false;
 		FHyperAIStudioPreviewRefresh Refresh;
+		/** Agent work this source offers; none hides Match it. */
+		TArray<FAgentAction> AgentActions;
+		/** Cheap enough to refresh every few seconds while an agent works on the reference, so its attempts appear as they land. */
+		bool bRefreshWhileAgentWorks = false;
 	};
 
 	/** Replaces any source already registered under this id. */
@@ -86,4 +100,7 @@ public:
 
 	/** PNG, JPG, BMP or TGA inside the project folder, which is all the image tools accept. */
 	static bool IsSupportedProjectImage(const FString& Path, FString& OutError);
+
+	/** Starts one of a source's agent actions, as Match it does. The action decides what to show while it works. */
+	static bool StartAgentAction(FName SourceId, FName ActionId, const FString& ReferenceImagePath, FString& OutError);
 };

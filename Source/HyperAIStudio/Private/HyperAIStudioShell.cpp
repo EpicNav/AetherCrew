@@ -72,6 +72,18 @@ namespace HyperAIStudio::Shell
 		UE_LOG(LogHyperAIStudioShell, Display, TEXT("HyperAIStudio.Screenshot: %s"), FFileHelper::SaveArrayToFile(Png, *Path) ? *Path : TEXT("could not be written"));
 	}
 
+	/** HyperAIStudio.OpenPage <page id>: brings a page of the Studio forward, such as Match, Images or Chat2. */
+	void OpenPageFromConsole(const TArray<FString>& Args)
+	{
+		const FName PageId = Args.IsEmpty() ? FName(TEXT("Home")) : FName(*Args[0]);
+		UE_LOG(LogHyperAIStudioShell, Display, TEXT("HyperAIStudio.OpenPage %s: %s"), *PageId.ToString(),
+			FHyperAIStudioShell::Open(PageId).IsValid() ? TEXT("shown") : TEXT("no such page"));
+	}
+
+	FAutoConsoleCommand OpenPageCommand(TEXT("HyperAIStudio.OpenPage"),
+		TEXT("Bring a page of HyperAI Studio forward by its id, such as Home, Chat, Chat2, Match, Images or Memory: HyperAIStudio.OpenPage <page>."),
+		FConsoleCommandWithArgsDelegate::CreateStatic(&OpenPageFromConsole));
+
 	FAutoConsoleCommand ScreenshotCommand(TEXT("HyperAIStudio.Screenshot"),
 		TEXT("Save the HyperAI Studio window, as the editor drew it, to Saved/HyperAIStudio/Screens/<name>.png; Window takes the window it is in: HyperAIStudio.Screenshot [Window] [name]."),
 		FConsoleCommandWithArgsDelegate::CreateStatic(&SaveScreenshot));

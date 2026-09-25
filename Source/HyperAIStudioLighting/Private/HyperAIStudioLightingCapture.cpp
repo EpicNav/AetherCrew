@@ -14,11 +14,13 @@
 #include "HAL/IConsoleManager.h"
 #include "HyperAIStudioLightingGate.h"
 #include "LevelEditorViewport.h"
+#include "Materials/MaterialInterface.h"
 #include "Misc/Paths.h"
 #include "ShaderCompiler.h"
 #include "TextureResource.h"
 #include "UObject/Package.h"
 #include "UObject/StrongObjectPtr.h"
+#include "UObject/UObjectGlobals.h"
 
 namespace HyperAIStudio::Lighting::Capture
 {
@@ -30,10 +32,31 @@ namespace HyperAIStudio::Lighting::Capture
 		constexpr int32 MaxHeight = 1080;
 		constexpr int32 MaxFrames = 4;
 		constexpr int32 MaxWarmupFrames = 8;
+		constexpr double EditSettleSeconds = 1.5;
+		constexpr uint64 EditSettleFrames = 45;
+		constexpr double MaxSettleSeconds = 6.0;
+		/** Mean RGB change between two draws of a settled picture; temporal noise stays well under it. */
+		constexpr float SettledChange = 0.003f;
 		constexpr int32 MaxSessions = 4;
 		constexpr int32 KeptBatches = 20;
 		constexpr double SessionSeconds = 60.0;
 		constexpr double ShaderWaitSeconds = 20.0;
+		/** When the level last changed, whoever changed it; zero until something does. */
+		double LastEditSeconds = 0.0;
+		uint64 LastEditFrame = 0;
+		FDelegateHandle EditHandle;
+
+		void NoteEdit(UObject* Object, FPropertyChangedEvent& /*Event*/)
+		{
+			// What can change a picture: anything in an editor level, and materials.
+			const UWorld* ObjectWorld = Object ? Object->GetWorld() : nullptr;
+			if ((ObjectWorld && ObjectWorld->WorldType == EWorldType::Editor) || (Object && Object->IsA<UMaterialInterface>()))
+			{
+				LastEditSeconds = FPlatformTime::Seconds();
+				LastEditFrame = GFrameCounter;
+			}
+		}
+
 		// Forces what every material's Time node reads; non-shipping, and always put back to -1 afterwards.
 		const TCHAR* const MaterialTimeVariable = TEXT("r.Test.OverrideTimeMaterialExpressions");
 
@@ -257,14 +280,35 @@ namespace HyperAIStudio::Lighting::Capture
 						}
 					}
 					bShadersSettled = true;
+					SettleStartSeconds = Now;
 				}
-				if (WarmupLeft > 0)
+				// The warm-ups asked for, then more until the level shows its last change. Settling needs the editor to
+				// tick between draws, so a capture that cannot wait takes the warm-ups alone.
+				bool bTimedOut = false;
+				if (WarmupLeft > 0 || (bAllowWaiting && Request.bSettle && !IsSettled(Now - SettleStartSeconds,
+					LastEditSeconds > 0.0 ? Now - LastEditSeconds : -1.0, GFrameCounter - LastEditFrame, LastChange, bTimedOut)))
 				{
-					TArray<FColor> Discard;
-					Read(Discard);
-					--WarmupLeft;
+					TArray<FColor> Pixels;
+					Read(Pixels);
+					if (WarmupLeft > 0)
+					{
+						--WarmupLeft;
+					}
+					else
+					{
+						++Report.SettleFrames;
+					}
+					float Unused = 0.f;
+					LastChange = 1.f;
+					if (PreviousDraw.Num() == Pixels.Num() && !Pixels.IsEmpty())
+					{
+						Diff(PreviousDraw, Pixels, Request.DiffThreshold, LastChange, Unused);
+					}
+					PreviousDraw = MoveTemp(Pixels);
 					return false;
 				}
+				Report.bSettleTimedOut |= bTimedOut;
+				PreviousDraw.Empty();
 
 				const int32 Index = Report.Frames.Num();
 				const bool bMaterialTime = Request.TimeMode == TEXT("material_time");
@@ -376,6 +420,10 @@ namespace HyperAIStudio::Lighting::Capture
 			TStrongObjectPtr<USceneCaptureComponent2D> Component;
 			TStrongObjectPtr<UTextureRenderTarget2D> Target;
 			TArray<TArray<FColor>> Frames;
+			/** The last warm-up draw and how far it moved from the one before (0-1). */
+			TArray<FColor> PreviousDraw;
+			float LastChange = 1.f;
+			double SettleStartSeconds = 0.0;
 			FString FolderOnDisk;
 			int32 WarmupLeft = 0;
 			double NextWorldTime = 0.0;
@@ -438,6 +486,32 @@ namespace HyperAIStudio::Lighting::Capture
 		}
 		OutMeanAbs = static_cast<float>(Sum / (3.0 * 255.0 * A.Num()));
 		OutChangedFraction = static_cast<float>(double(Changed) / A.Num());
+	}
+
+	void Startup()
+	{
+		if (!EditHandle.IsValid())
+		{
+			EditHandle = FCoreUObjectDelegates::OnObjectPropertyChanged.AddStatic(&NoteEdit);
+		}
+	}
+
+	void Shutdown()
+	{
+		FCoreUObjectDelegates::OnObjectPropertyChanged.Remove(EditHandle);
+		EditHandle.Reset();
+	}
+
+	bool IsSettled(const double SecondsSettling, const double SecondsSinceEdit, const uint64 FramesSinceEdit, const float LastChange, bool& bOutTimedOut)
+	{
+		bOutTimedOut = SecondsSettling > MaxSettleSeconds;
+		if (bOutTimedOut)
+		{
+			return true;
+		}
+		// A fresh edit may not show at all yet, so matching draws prove nothing until it is old enough.
+		const bool bFreshEdit = SecondsSinceEdit >= 0.0 && (SecondsSinceEdit < EditSettleSeconds || FramesSinceEdit < EditSettleFrames);
+		return !bFreshEdit && LastChange <= SettledChange;
 	}
 
 	UHyperAICaptureViewResult* Start(const FHyperAICaptureViewRequest& Request)
