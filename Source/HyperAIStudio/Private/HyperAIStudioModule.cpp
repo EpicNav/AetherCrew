@@ -40,6 +40,7 @@
 #include "HyperAIStudioFoundationProbe.h"
 #include "HyperAIStudioNativeReadToolset.h"
 #include "HyperAIStudioPIEPlaytestToolset.h"
+#include "HyperAIStudioEditorRestart.h"
 #include "HyperAIStudioPlanExecuteToolset.h"
 #include "HyperAIStudioPlanValidateToolset.h"
 #include "HyperAIStudioSettings.h"
@@ -585,6 +586,8 @@ public:
 			CanCloseEditorHandle = MainFrame->RegisterCanCloseEditor(
 				IMainFrameModule::FMainFrameCanCloseEditor::CreateStatic(&SHyperAIStudioQuickActionWindow::CanCloseEditor));
 		}
+		// Restart and resume: the tool and console command, and, in an editor a restart opened, its chats.
+		FHyperAIStudioEditorRestart::Startup();
 		if (FHyperAIStudioExtensionRuntime::AreExtendedHyperToolsEnabled())
 		{
 			FString TrustedExecutionError;
@@ -847,6 +850,7 @@ public:
 			}
 			CanCloseEditorHandle.Reset();
 		}
+		FHyperAIStudioEditorRestart::Shutdown();
 		if (PIEPlaytestRegistration)
 		{
 			PIEPlaytestRegistration->Shutdown();
@@ -1355,7 +1359,7 @@ private:
 
 	static FName ChatPageId(const int32 Index)
 	{
-		return Index <= 1 ? FName(TEXT("Chat")) : FName(*FString::Printf(TEXT("Chat%d"), Index));
+		return SHyperAIStudioQuickActionWindow::GetPageId(Index);
 	}
 
 	TSharedRef<SWidget> CreateChatPage(const TSharedRef<SDockTab>& Tab, const int32 TabIndex)

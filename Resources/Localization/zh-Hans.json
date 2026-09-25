@@ -3279,6 +3279,12 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatRestored",
+   "source": "The editor restarted; this tab picks its chat up again.",
+   "text": "编辑器已重启；此标签页会接着继续它的对话。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "ChatSettingsEntry",
    "source": "Chat Settings...",
    "text": "对话设置..."

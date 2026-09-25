@@ -12,6 +12,8 @@
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/SCompoundWidget.h"
 
+struct FHyperAIStudioRestartChat;
+
 class SHyperAIStudioQuickActionWindow : public SCompoundWidget
 {
 public:
@@ -42,6 +44,10 @@ public:
 	static FString BuildTerminalBootstrapCommandForStatus(const FHyperAIStudioStatus& InStatus, const FString& AgentName, const FString& ProjectRoot, const FString& LaunchCommand);
 	/** Editor close check: chats still working get a say, and remote chats working in the background can be stopped. */
 	static bool CanCloseEditor();
+	/** The chat pages' ids: Chat for the first tab, then Chat2, Chat3... */
+	static FName GetPageId(int32 TabIndex);
+	/** Every tab running an agent, as an editor restart reopens it. */
+	static TArray<FHyperAIStudioRestartChat> GetRestartChats();
 
 	virtual FReply OnPreviewKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	/** Assets and actors dropped on the panel become object paths in the agent's prompt. */
@@ -197,6 +203,10 @@ private:
 	FString RouteCategory;
 	/** Claude Code subagent this tab's new chats start as (claude --agent). */
 	FString TabSubagent;
+	/** After an editor restart: what this tab's chat is told when it runs again. */
+	FString ContinueMessage;
+	/** What the agent's start last waited on, so the log says it once. */
+	FString LastStartupWait;
 	/** Codex, Gemini and Claude Code can run in HyperAI's own chat view instead of the terminal. */
 	TSharedPtr<class SHyperAIStudioNativeChatView> NativeView;
 	TSharedRef<SWidget> BuildNativeToggle();

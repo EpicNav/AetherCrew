@@ -204,8 +204,15 @@ bool FHyperAIStudioNativeChat::Start(FString& OutError)
 		ClosePipes();
 		return false;
 	}
-	const FString Command = HyperAIStudio::NativeChat::Private::CommandForTests().IsEmpty()
-		? CommandLine() : HyperAIStudio::NativeChat::Private::CommandForTests();
+	FString Command = HyperAIStudio::NativeChat::Private::CommandForTests();
+#if WITH_DEV_AUTOMATION_TESTS
+	if (Command.IsEmpty())
+	{
+		// A stand-in for tests that span an editor restart, which outlive SetCommandForTests.
+		Command = FPlatformMisc::GetEnvironmentVariable(TEXT("HYPERAI_TEST_NATIVE_CHAT_COMMAND"));
+	}
+#endif
+	Command = Command.IsEmpty() ? CommandLine() : Command;
 	// Through cmd so npm's .cmd shims start too; /s keeps the quoted executable path intact.
 	Process = FPlatformProcess::CreateProc(TEXT("cmd.exe"), *FString::Printf(TEXT("/d /s /c \"%s\""), *Command),
 		/*bLaunchDetached=*/false, /*bLaunchHidden=*/true, /*bLaunchReallyHidden=*/true, nullptr, 0, *ProjectRoot, StdOutWrite, StdInRead);

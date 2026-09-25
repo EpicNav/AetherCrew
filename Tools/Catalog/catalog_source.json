@@ -3189,6 +3189,33 @@
      ]
     }
    ]
+  },
+  {
+   "id": "editor_lifecycle",
+   "tier": "Core",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [
+    {
+     "id": "editor_restart",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "plugin.ModelContextProtocol"
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "hyper_editor_restart",
+     "cohort": "cohort.source.hyperaistudioeditorrestarttoolset.v1",
+     "safety": [
+      "Edit",
+      "ExternalEffect"
+     ]
+    }
+   ]
   }
  ]
 }

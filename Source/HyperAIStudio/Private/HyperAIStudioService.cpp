@@ -4853,7 +4853,8 @@ void BuildAgentInstructionBlocks(
 		TEXT("- Keep code, commands and JSON short, in fenced blocks with a language. End with the next step only when there is one.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Reconnect") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("- If Unreal is closed or disconnected, run `.hyperai/scripts/Start-HyperAIStudioEditor.ps1`; this also waits for MCP readiness.") LINE_TERMINATOR +
-		TEXT("- Use `.hyperai/scripts/Wait-HyperAIStudioMCP.ps1 -TimeoutSeconds 90` for a readiness-only retry, then continue the requested task.") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("- Use `.hyperai/scripts/Wait-HyperAIStudioMCP.ps1 -TimeoutSeconds 90` for a readiness-only retry, then continue the requested task.") LINE_TERMINATOR +
+		TEXT("- To restart Unreal, for example after changing C++ or plugin settings, call `hyper_editor_restart` with a `note` for yourself. It saves, closes the editor, builds, opens the project again and resumes your HyperAI chat with the build result. Never kill the editor from its own terminal: that ends your session.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Context Packs") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("- Only read `.hyperai/context/` files when the prompt explicitly references them.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Domain Guides") LINE_TERMINATOR LINE_TERMINATOR +
