@@ -16,6 +16,8 @@
 #include "Framework/Notifications/NotificationManager.h"
 #include "HyperAIStudioChatHistoryPrefs.h"
 #include "HyperAIStudioEditorRestart.h"
+#include "HyperAIStudioShell.h"
+#include "HAL/IConsoleManager.h"
 #include "Misc/App.h"
 #include "Widgets/Notifications/SNotificationList.h"
 #include "Modules/ModuleManager.h"
@@ -2375,6 +2377,8 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 	const FString Continue = bResuming ? ContinueMessage : FString();
 	ContinueMessage.Reset();
 	const FString ContinueArgument = Continue.IsEmpty() ? FString() : TEXT("\"") + FHyperAIStudioEditorRestart::ContinuePrompt() + TEXT("\"");
+	const FString Prompt = MoveTemp(PendingPrompt);
+	PendingPrompt.Reset();
 
 	// A native chat that cannot start falls back to the terminal.
 	if (GetDefault<UHyperAIStudioSettings>()->bUseNativeChatView && FHyperAIStudioNativeChat::IsSupported(AgentName)
@@ -2385,7 +2389,15 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 			NativeView->GetChat()->Send(Continue);
 			UE_LOG(LogHyperAIStudioChat, Display, TEXT("Chat %d: %s is told the editor restarted."), TabIndex, *AgentName);
 		}
+		if (!Prompt.IsEmpty() && NativeView.IsValid() && NativeView->GetChat().IsValid())
+		{
+			NativeView->GetChat()->Send(Prompt);
+		}
 		return;
+	}
+	if (!Prompt.IsEmpty())
+	{
+		UE_LOG(LogHyperAIStudioChat, Warning, TEXT("Chat %d starts in the terminal, so the prompt HyperAIStudio.ChatSend gave it was not sent."), TabIndex);
 	}
 	if (!HyperAIStudio::QuickAction::IsClaudeAgent(AgentName))
 	{
@@ -2854,6 +2866,76 @@ TArray<FHyperAIStudioRestartChat> SHyperAIStudioQuickActionWindow::GetRestartCha
 		Chat.bWorking = Native.IsValid() ? Native->IsBusy() || Native->HasOpenApproval() : Window->IsTurnActive();
 	}
 	return Chats;
+}
+
+bool SHyperAIStudioQuickActionWindow::SendToChat(const int32 TabIndex, const FString& Text, FString& OutMessage)
+{
+	if (Text.TrimStartAndEnd().IsEmpty())
+	{
+		OutMessage = TEXT("Nothing to send.");
+		return false;
+	}
+	// Opens the tab, or brings it forward: a tab behind another page does not tick, and its agent would not start.
+	FHyperAIStudioShell::Open(GetPageId(TabIndex));
+	TSharedPtr<SHyperAIStudioQuickActionWindow> Window;
+	for (const TWeakPtr<SHyperAIStudioQuickActionWindow>& Weak : HyperAIStudio::QuickAction::LiveWindows())
+	{
+		const TSharedPtr<SHyperAIStudioQuickActionWindow> Candidate = Weak.Pin();
+		Window = Candidate.IsValid() && Candidate->TabIndex == TabIndex ? Candidate : Window;
+	}
+	if (!Window.IsValid())
+	{
+		OutMessage = FString::Printf(TEXT("Chat %d could not be opened."), TabIndex);
+		return false;
+	}
+	const TSharedPtr<FHyperAIStudioNativeChat> Native = Window->NativeView.IsValid() ? Window->NativeView->GetChat() : nullptr;
+	if (Native.IsValid() && Native->IsRunning())
+	{
+		Native->Send(Text);
+		OutMessage = FString::Printf(TEXT("Sent to chat %d."), TabIndex);
+		return true;
+	}
+	if (!Window->bTerminalStartupSent)
+	{
+		Window->PendingPrompt = Text;
+		OutMessage = FString::Printf(TEXT("Chat %d gets it as its agent starts."), TabIndex);
+		return true;
+	}
+	if (Window->DeliverHandoffPrompt(Text, TEXT("console")))
+	{
+		OutMessage = FString::Printf(TEXT("Typed into chat %d's terminal."), TabIndex);
+		return true;
+	}
+	OutMessage = FString::Printf(TEXT("Chat %d's agent is not running."), TabIndex);
+	return false;
+}
+
+namespace HyperAIStudio::QuickAction
+{
+	/** HyperAIStudio.ChatSend [Tab=<n>] <text> */
+	void RunChatSend(const TArray<FString>& Args)
+	{
+		int32 Tab = 1;
+		TArray<FString> Words;
+		for (const FString& Arg : Args)
+		{
+			if (Arg.StartsWith(TEXT("Tab="), ESearchCase::IgnoreCase))
+			{
+				Tab = FMath::Max(1, FCString::Atoi(*Arg.Mid(4)));
+			}
+			else
+			{
+				Words.Add(Arg);
+			}
+		}
+		FString Message;
+		SHyperAIStudioQuickActionWindow::SendToChat(Tab, FString::Join(Words, TEXT(" ")), Message);
+		UE_LOG(LogHyperAIStudioChat, Display, TEXT("HyperAIStudio.ChatSend: %s"), *Message);
+	}
+
+	FAutoConsoleCommand ChatSendCommand(TEXT("HyperAIStudio.ChatSend"),
+		TEXT("Send a message to a HyperAI chat tab as the user, opening it if needed: HyperAIStudio.ChatSend [Tab=<n>] <text>."),
+		FConsoleCommandWithArgsDelegate::CreateStatic(&RunChatSend));
 }
 
 bool SHyperAIStudioQuickActionWindow::CanCloseEditor()

@@ -12,6 +12,10 @@
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioStyle.h"
 #include "HyperAIStudioWidgets.h"
+#include "HAL/IConsoleManager.h"
+#include "ImageUtils.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/ConfigCacheIni.h"
 #include "SHyperAIStudioActivitySidebar.h"
@@ -35,8 +39,43 @@
 
 #define LOCTEXT_NAMESPACE "HyperAIStudioShell"
 
+DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioShell, Log, All);
+
 namespace HyperAIStudio::Shell
 {
+	/**
+	 * HyperAIStudio.Screenshot [Window] [name]: the Studio as the editor drew it, as a PNG under Saved/HyperAIStudio/Screens.
+	 * Window takes the whole window the Studio is in: the editor itself when the Studio is docked there.
+	 */
+	void SaveScreenshot(const TArray<FString>& InArgs)
+	{
+		TArray<FString> Args = InArgs;
+		const bool bWindow = Args.RemoveAll([](const FString& Arg) { return Arg.Equals(TEXT("Window"), ESearchCase::IgnoreCase); }) > 0;
+		const FString Name = FPaths::MakeValidFileName(Args.IsEmpty() ? FString(TEXT("studio")) : FString::Join(Args, TEXT("-")), TEXT('_'));
+		const TSharedPtr<SDockTab> Studio = FSlateApplication::IsInitialized()
+			? FGlobalTabmanager::Get()->FindExistingLiveTab(FTabId(FHyperAIStudioShell::GetTabName())) : nullptr;
+		const TSharedPtr<SWidget> Widget = !Studio.IsValid() ? TSharedPtr<SWidget>() : bWindow ? StaticCastSharedPtr<SWidget>(Studio->GetParentWindow()) : Studio->GetContent().ToSharedPtr();
+		TArray<FColor> Pixels;
+		FIntVector Size;
+		if (!Widget.IsValid() || !FSlateApplication::Get().TakeScreenshot(Widget.ToSharedRef(), Pixels, Size) || Size.X <= 0 || Size.Y <= 0)
+		{
+			UE_LOG(LogHyperAIStudioShell, Warning, TEXT("HyperAIStudio.Screenshot: the HyperAI Studio window is not open."));
+			return;
+		}
+		for (FColor& Pixel : Pixels)
+		{
+			Pixel.A = 255;
+		}
+		TArray64<uint8> Png;
+		FImageUtils::PNGCompressImageArray(Size.X, Size.Y, TArrayView64<const FColor>(Pixels.GetData(), static_cast<int64>(Size.X) * Size.Y), Png);
+		const FString Path = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio") / TEXT("Screens") / (Name + TEXT(".png")));
+		UE_LOG(LogHyperAIStudioShell, Display, TEXT("HyperAIStudio.Screenshot: %s"), FFileHelper::SaveArrayToFile(Png, *Path) ? *Path : TEXT("could not be written"));
+	}
+
+	FAutoConsoleCommand ScreenshotCommand(TEXT("HyperAIStudio.Screenshot"),
+		TEXT("Save the HyperAI Studio window, as the editor drew it, to Saved/HyperAIStudio/Screens/<name>.png; Window takes the window it is in: HyperAIStudio.Screenshot [Window] [name]."),
+		FConsoleCommandWithArgsDelegate::CreateStatic(&SaveScreenshot));
+
 	constexpr float ExpandedRail = 204.0f;
 	constexpr float CompactRail = 48.0f;
 	/** Narrower than this, the rail folds to icons by itself. */

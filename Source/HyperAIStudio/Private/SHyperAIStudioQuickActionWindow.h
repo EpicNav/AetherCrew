@@ -48,6 +48,8 @@ public:
 	static FName GetPageId(int32 TabIndex);
 	/** Every tab running an agent, as an editor restart reopens it. */
 	static TArray<FHyperAIStudioRestartChat> GetRestartChats();
+	/** Sends Text to a chat tab as the user, opening the tab if needed (HyperAIStudio.ChatSend). */
+	static bool SendToChat(int32 TabIndex, const FString& Text, FString& OutMessage);
 
 	virtual FReply OnPreviewKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	/** Assets and actors dropped on the panel become object paths in the agent's prompt. */
@@ -207,6 +209,8 @@ private:
 	FString ContinueMessage;
 	/** What the agent's start last waited on, so the log says it once. */
 	FString LastStartupWait;
+	/** A prompt HyperAIStudio.ChatSend sent before the agent started: a native chat gets it as it starts. */
+	FString PendingPrompt;
 	/** Codex, Gemini and Claude Code can run in HyperAI's own chat view instead of the terminal. */
 	TSharedPtr<class SHyperAIStudioNativeChatView> NativeView;
 	TSharedRef<SWidget> BuildNativeToggle();
