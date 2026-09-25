@@ -2,25 +2,34 @@
 
 #include "SHyperAIStudioImagesPanel.h"
 
+#include "Dom/JsonObject.h"
+#include "HAL/FileManager.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioPreviewPanel.h"
 #include "HyperAIStudioWidgets.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/StyleColors.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
+#include "Widgets/Input/SSegmentedControl.h"
 #include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSplitter.h"
@@ -33,6 +42,31 @@
 namespace HyperAIStudio::ImagesPanel
 {
 	constexpr int32 MaxShown = 60;
+
+	/**
+	 * Shapes a preset or the row picks. The sizes are what the request carries: the model takes an aspect ratio and a
+	 * size class from them, so a longest side of 1024 keeps every model at its 1K price. Width and Height under More
+	 * options ask for more.
+	 */
+	struct FShape
+	{
+		const TCHAR* Label;
+		int32 Width;
+		int32 Height;
+	};
+	const FShape Shapes[] = {
+		{TEXT("16:9"), 1024, 576}, {TEXT("1:1"), 1024, 1024}, {TEXT("9:16"), 576, 1024}, {TEXT("4:3"), 1024, 768},
+		{TEXT("3:4"), 768, 1024}, {TEXT("21:9"), 1024, 439}};
+	constexpr int32 ShapeCount = UE_ARRAY_COUNT(Shapes);
+
+	int32 ShapeIndexOf(const FString& Label)
+	{
+		for (int32 Index = 0; Index < ShapeCount; ++Index)
+		{
+			if (Label == Shapes[Index].Label) return Index;
+		}
+		return 0;
+	}
 
 	FString FullPath(const FString& Path)
 	{
@@ -54,6 +88,86 @@ namespace HyperAIStudio::ImagesPanel
 	{
 		return SNew(STextBlock).Text(Text).Font(FCoreStyle::GetDefaultFontStyle("Bold", 11));
 	}
+
+	/** One sentence joined to the next: a full stop between them unless the first already ends one. */
+	FString Join(const FString& First, const FString& Second)
+	{
+		const FString A = First.TrimStartAndEnd();
+		const FString B = Second.TrimStartAndEnd();
+		if (A.IsEmpty() || B.IsEmpty()) return A.IsEmpty() ? B : A;
+		const TCHAR Last = A[A.Len() - 1];
+		return A + (Last == TEXT('.') || Last == TEXT('!') || Last == TEXT('?') || Last == TEXT(':') ? TEXT(" ") : TEXT(". ")) + B;
+	}
+}
+
+TArray<SHyperAIStudioImagesPanel::FPreset> SHyperAIStudioImagesPanel::BuiltInPresets()
+{
+	using namespace HyperAIStudio::ImagesPanel;
+	auto Make = [](const TCHAR* Id, const FText& Label, const FText& Hint, const TCHAR* After, const TCHAR* Negative, const TCHAR* Shape, const int32 Count)
+	{
+		FPreset Preset;
+		Preset.Id = Id;
+		Preset.Label = Label;
+		Preset.Hint = Hint;
+		Preset.After = After;
+		Preset.Negative = Negative;
+		Preset.Shape = ShapeIndexOf(Shape);
+		Preset.Count = Count;
+		return Preset;
+	};
+	// Each preset names what a good image of its kind needs, so the prompt only has to say what it is of.
+	return {
+		Make(TEXT("scene_lighting"), LOCTEXT("PresetScene", "Scene lighting"),
+			LOCTEXT("PresetSceneHint", "A place at a time of day: where it is, when, the weather, the mood. For example: a mountain monastery at dusk, low sun, thin fog."),
+			TEXT("Photographic still of the scene, natural light with a clear key light direction, readable contrast, true-to-life colour"),
+			TEXT("text, watermark, logo, people, frame, border"), TEXT("16:9"), 2),
+		Make(TEXT("level_concept"), LOCTEXT("PresetLevel", "Level concept"),
+			LOCTEXT("PresetLevelHint", "The level as a player sees it: the layout, the landmarks, the paths, the scale. For example: a ruined courtyard with a broken bridge over a gorge."),
+			TEXT("Game environment concept art seen from eye height, a clear foreground, midground and background, readable paths and landmarks, real-world scale"),
+			TEXT("text, watermark, interface, characters, frame"), TEXT("16:9"), 2),
+		Make(TEXT("tileable_texture"), LOCTEXT("PresetTexture", "Tileable texture"),
+			LOCTEXT("PresetTextureHint", "The surface: its material, age, wear and colour. For example: mossy cobblestones, wet after rain."),
+			TEXT("Seamless tileable texture filling the frame, flat top-down orthographic view, even diffuse light, no shadows, no perspective"),
+			TEXT("perspective, horizon, shadows, objects, text, border, visible seams"), TEXT("1:1"), 2),
+		Make(TEXT("skybox"), LOCTEXT("PresetSky", "Sky panorama"),
+			LOCTEXT("PresetSkyHint", "The sky: the time of day, the clouds, the colour. For example: a stormy sunset, towering clouds lit orange from below."),
+			TEXT("Wide sky panorama, horizon on the lower third, sky only, no ground objects"),
+			TEXT("buildings, people, text, frame"), TEXT("21:9"), 1),
+		Make(TEXT("character"), LOCTEXT("PresetCharacter", "Character"),
+			LOCTEXT("PresetCharacterHint", "Who they are: their silhouette, clothing, gear and colours. For example: a desert scout in layered cloth with a brass spyglass."),
+			TEXT("Full-body character concept, neutral standing pose, front view, plain light background, readable silhouette"),
+			TEXT("busy background, cropped limbs, text, watermark"), TEXT("3:4"), 2),
+		Make(TEXT("prop"), LOCTEXT("PresetProp", "Prop"),
+			LOCTEXT("PresetPropHint", "The object: what it is, its material, size and style. For example: an iron lantern with cracked green glass."),
+			TEXT("A single isolated prop, three-quarter view, plain neutral background, soft studio light"),
+			TEXT("background clutter, hands, text, watermark"), TEXT("1:1"), 2),
+		Make(TEXT("ui_icon"), LOCTEXT("PresetIcon", "UI icon"),
+			LOCTEXT("PresetIconHint", "The icon's subject and style. For example: a glowing fire rune on a stone disc."),
+			TEXT("Game interface icon, one bold centred shape that reads at small sizes, plain flat background"),
+			TEXT("text, letters, numbers, photographic background, frame"), TEXT("1:1"), 4),
+		Make(TEXT("decal"), LOCTEXT("PresetDecal", "Decal"),
+			LOCTEXT("PresetDecalHint", "The mark: cracks, stains, scorch marks, footprints, graffiti. For example: a scorch mark with soot spray."),
+			TEXT("Isolated decal seen straight on, top-down with no perspective, on a plain black background"),
+			TEXT("perspective, objects, text unless asked, frame"), TEXT("1:1"), 2),
+	};
+}
+
+FString SHyperAIStudioImagesPanel::UserPresetsFile()
+{
+	return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT(".hyperai"), TEXT("image-presets.json")));
+}
+
+FString SHyperAIStudioImagesPanel::ComposePrompt(const FPreset* Preset, const FString& Text)
+{
+	using namespace HyperAIStudio::ImagesPanel;
+	return Preset ? Join(Join(Preset->Before, Text), Preset->After) : Text.TrimStartAndEnd();
+}
+
+FString SHyperAIStudioImagesPanel::ComposeNegative(const FPreset* Preset, const FString& Avoid)
+{
+	const FString Base = Preset ? Preset->Negative.TrimStartAndEnd() : FString();
+	const FString Extra = Avoid.TrimStartAndEnd();
+	return Base.IsEmpty() || Extra.IsEmpty() ? Base + Extra : Base + TEXT(", ") + Extra;
 }
 
 void SHyperAIStudioImagesPanel::Construct(const FArguments& InArgs)
@@ -69,17 +183,17 @@ void SHyperAIStudioImagesPanel::Construct(const FArguments& InArgs)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
 			[
 				HyperAIStudio::UI::PageHeader(LOCTEXT("PageTitle", "Images"),
-					LOCTEXT("PageBody", "Reference images for the look you are after, from Nano Banana, Codex or a model you configure, written into the project with the prompt that made them."))
+					LOCTEXT("PageBody", "Reference images for the look you are after: pick a preset, say what it is of, and Generate. From Nano Banana, Codex or a model you configure, written into the project with the prompt that made them."))
 			]
 			+ SVerticalBox::Slot().FillHeight(1.0f)
 			[
 				SNew(SSplitter)
 				.Orientation(Orient_Horizontal)
-				+ SSplitter::Slot().Value(0.42f)
+				+ SSplitter::Slot().Value(0.40f)
 				[
 					BuildForm()
 				]
-				+ SSplitter::Slot().Value(0.58f)
+				+ SSplitter::Slot().Value(0.60f)
 				[
 					BuildBrowser()
 				]
@@ -87,6 +201,7 @@ void SHyperAIStudioImagesPanel::Construct(const FArguments& InArgs)
 		]
 	];
 	Reload();
+	SelectPreset(TEXT("scene_lighting"));
 }
 
 FString SHyperAIStudioImagesPanel::NewBatchName() const
@@ -94,29 +209,73 @@ FString SHyperAIStudioImagesPanel::NewBatchName() const
 	return TEXT("images_") + FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
 }
 
+TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildPresets()
+{
+	return SAssignNew(PresetBox, SWrapBox)
+		.UseAllottedSize(true)
+		.InnerSlotPadding(FVector2D(6.0f, 6.0f));
+}
+
+void SHyperAIStudioImagesPanel::RebuildPresetButtons()
+{
+	if (!PresetBox.IsValid())
+	{
+		return;
+	}
+	PresetBox->ClearChildren();
+	for (int32 Index = 0; Index < Presets.Num(); ++Index)
+	{
+		const FPreset& Preset = Presets[Index];
+		PresetBox->AddSlot()
+		[
+			SNew(SCheckBox)
+			.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+			.ToolTipText(FText::Format(LOCTEXT("PresetTip", "{0}\nAdds: {1}"), Preset.Hint, FText::FromString(Preset.After.IsEmpty() ? Preset.Before : Preset.After)))
+			.IsChecked_Lambda([this, Index]() { return PresetIndex == Index ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+			// Pressing the picked preset again leaves the prompt as written.
+			.OnCheckStateChanged_Lambda([this, Id = Preset.Id](const ECheckBoxState State) { SelectPreset(State == ECheckBoxState::Checked ? Id : FString()); })
+			[
+				SNew(SBox)
+				.Padding(FMargin(10.0f, 4.0f))
+				[
+					SNew(STextBlock)
+					.Text(Preset.bUser ? FText::Format(LOCTEXT("UserPresetLabel", "{0} (yours)"), Preset.Label) : Preset.Label)
+				]
+			]
+		];
+	}
+}
+
 TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildForm()
 {
 	using namespace HyperAIStudio::ImagesPanel;
-	auto Number = [](const FText& Name, const int32 Min, const int32 Max, TFunction<int32()> Get, TFunction<void(int32)> Set, const FText& Tooltip)
-	{
-		return SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()[Label(Name)]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 6.0f, 0.0f)
-			[
-				SNew(SSpinBox<int32>)
-				.MinValue(Min)
-				.MaxValue(Max)
-				.ToolTipText(Tooltip)
-				.Value_Lambda(MoveTemp(Get))
-				.OnValueChanged_Lambda(MoveTemp(Set))
-			];
-	};
 	return SNew(SScrollBox)
 		+ SScrollBox::Slot().Padding(8.0f)
 		[
 			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()[Header(LOCTEXT("Generate", "Generate"))]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 2.0f)[Label(LOCTEXT("Model", "Model"))]
+			+ SVerticalBox::Slot().AutoHeight()[Header(LOCTEXT("StartFrom", "Start from a preset"))]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[BuildPresets()]
+
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 2.0f)[Label(LOCTEXT("Prompt", "What it is of"))]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SBox)
+				.MinDesiredHeight(110.0f)
+				[
+					SNew(SMultiLineEditableTextBox)
+					.AutoWrapText(true)
+					.HintText_Lambda([this]()
+					{
+						const FPreset* Preset = SelectedPreset();
+						return Preset ? Preset->Hint : LOCTEXT("PromptHint", "What to draw, as you would tell an artist.");
+					})
+					.Text_Lambda([this]() { return FText::FromString(Prompt); })
+					.OnTextChanged_Lambda([this](const FText& Text) { Prompt = Text.ToString(); })
+				]
+			]
+
+			// The three choices most images need; the rest is under More options.
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 10.0f, 0.0f, 2.0f)[Label(LOCTEXT("Model", "Model"))]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
 				SAssignNew(ModelCombo, SComboBox<FModelPtr>)
@@ -140,10 +299,44 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildForm()
 				[
 					SNew(STextBlock).Text_Lambda([this]()
 					{
-						return Model.IsValid()
-							? FText::Format(LOCTEXT("ModelShown", "{0} ({1})"), FText::FromString(Model->Label.IsEmpty() ? Model->Id : Model->Label), FText::FromString(Model->Health))
-							: LOCTEXT("NoModel", "No image model");
+						return Model.IsValid() ? FText::FromString(Model->Label.IsEmpty() ? Model->Id : Model->Label) : LOCTEXT("NoModel", "No image model");
 					})
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 12.0f, 0.0f)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 2.0f)[Label(LOCTEXT("Shape", "Shape"))]
+					+ SVerticalBox::Slot().AutoHeight()
+					[
+						SNew(SSegmentedControl<int32>)
+						.Value_Lambda([this]() { return Shape; })
+						.OnValueChanged_Lambda([this](const int32 In) { Shape = In; })
+						+ SSegmentedControl<int32>::Slot(0).Text(FText::FromString(Shapes[0].Label))
+						+ SSegmentedControl<int32>::Slot(1).Text(FText::FromString(Shapes[1].Label))
+						+ SSegmentedControl<int32>::Slot(2).Text(FText::FromString(Shapes[2].Label))
+						+ SSegmentedControl<int32>::Slot(3).Text(FText::FromString(Shapes[3].Label))
+						+ SSegmentedControl<int32>::Slot(4).Text(FText::FromString(Shapes[4].Label))
+						+ SSegmentedControl<int32>::Slot(5).Text(FText::FromString(Shapes[5].Label))
+					]
+				]
+				+ SHorizontalBox::Slot().AutoWidth()
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 2.0f)[Label(LOCTEXT("Count", "Images"))]
+					+ SVerticalBox::Slot().AutoHeight()
+					[
+						SNew(SSegmentedControl<int32>)
+						.Value_Lambda([this]() { return Count; })
+						.OnValueChanged_Lambda([this](const int32 In) { Count = In; })
+						+ SSegmentedControl<int32>::Slot(1).Text(FText::AsNumber(1))
+						+ SSegmentedControl<int32>::Slot(2).Text(FText::AsNumber(2))
+						+ SSegmentedControl<int32>::Slot(3).Text(FText::AsNumber(3))
+						+ SSegmentedControl<int32>::Slot(4).Text(FText::AsNumber(4))
+					]
 				]
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 0.0f)
@@ -154,6 +347,124 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildForm()
 				.ColorAndOpacity(FSlateColor(FStyleColors::AccentRed))
 				.Visibility_Lambda([this]() { return Model.IsValid() && !Model->Issue.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed; })
 				.Text_Lambda([this]() { return FText::FromString(Model.IsValid() ? Model->Issue : FString()); })
+			]
+
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 0.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth()
+				[
+					SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "PrimaryButton")
+					.Text(LOCTEXT("GenerateButton", "Generate"))
+					.ToolTipText(LOCTEXT("GenerateTooltip", "Generate the batch. This spends money, or your agent's plan for an agent model; pressing it is the approval."))
+					.IsEnabled_Lambda([this]() { return Model.IsValid() && Model->Issue.IsEmpty() && !Prompt.TrimStartAndEnd().IsEmpty(); })
+					.OnClicked_Lambda([this]()
+					{
+						Generate();
+						return FReply::Handled();
+					})
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(6.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("PreviewPrompt", "Preview prompt"))
+					.ToolTipText(LOCTEXT("PreviewPromptTooltip", "A free dry run: the exact prompt that would be sent, and what it costs."))
+					.OnClicked_Lambda([this]()
+					{
+						PreviewPrompt();
+						return FReply::Handled();
+					})
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(10.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.Font(FAppStyle::GetFontStyle("SmallFont"))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					.Text_Lambda([this]()
+					{
+						const HyperAIStudio::ImagesPanel::FShape& Chosen = HyperAIStudio::ImagesPanel::Shapes[FMath::Clamp(Shape, 0, HyperAIStudio::ImagesPanel::ShapeCount - 1)];
+						return FText::Format(LOCTEXT("WillMake", "{0} x {1}, {2} image(s)"), FText::AsNumber(Width > 0 ? Width : Chosen.Width),
+							FText::AsNumber(Height > 0 ? Height : Chosen.Height), FText::AsNumber(Count));
+					})
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.AutoWrapText(true)
+				.Visibility_Lambda([this]() { return Status.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+				.Text_Lambda([this]() { return FText::FromString(Status); })
+				.ColorAndOpacity_Lambda([this]() { return bStatusIsError ? FSlateColor(FStyleColors::AccentRed) : FSlateColor::UseForeground(); })
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.AutoWrapText(true)
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.Visibility_Lambda([this]() { return ComposedPrompt.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+				.Text_Lambda([this]() { return FText::Format(LOCTEXT("Composed", "Will send: {0}"), FText::FromString(ComposedPrompt)); })
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.AutoWrapText(true)
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+				.Visibility_Lambda([this]() { return Inspect.Batches.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+				.Text_Lambda([this]()
+				{
+					TArray<FString> Lines;
+					for (const FHyperAIImageBatchInfo& Batch : Inspect.Batches)
+					{
+						Lines.Add(FString::Printf(TEXT("%s: %s, %s%s"), *Batch.BatchId, *Batch.State, *Batch.Progress,
+							Batch.Diagnostic.IsEmpty() ? TEXT("") : *(TEXT(" - ") + Batch.Diagnostic)));
+					}
+					return FText::FromString(FString::Join(Lines, TEXT("\n")));
+				})
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 0.0f)
+			[
+				BuildMoreOptions()
+			]
+		];
+}
+
+TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildMoreOptions()
+{
+	using namespace HyperAIStudio::ImagesPanel;
+	auto Number = [](const FText& Name, const int32 Min, const int32 Max, TFunction<int32()> Get, TFunction<void(int32)> Set, const FText& Tooltip)
+	{
+		return SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight()[Label(Name)]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 6.0f, 0.0f)
+			[
+				SNew(SSpinBox<int32>)
+				.MinValue(Min)
+				.MaxValue(Max)
+				.ToolTipText(Tooltip)
+				.Value_Lambda(MoveTemp(Get))
+				.OnValueChanged_Lambda(MoveTemp(Set))
+			];
+	};
+	return SNew(SExpandableArea)
+		.InitiallyCollapsed(true)
+		.AreaTitle(LOCTEXT("MoreOptions", "More options"))
+		.BodyContent()
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 2.0f)[Label(LOCTEXT("Negative", "Also keep out"))]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SEditableTextBox)
+				.HintText_Lambda([this]()
+				{
+					const FPreset* Preset = SelectedPreset();
+					return Preset && !Preset->Negative.IsEmpty() ? FText::Format(LOCTEXT("NegativeHintPreset", "The preset keeps out: {0}"), FText::FromString(Preset->Negative))
+						: LOCTEXT("NegativeHint", "What to keep out, such as text or people.");
+				})
+				.Text_Lambda([this]() { return FText::FromString(Negative); })
+				.OnTextChanged_Lambda([this](const FText& Text) { Negative = Text.ToString(); })
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 2.0f)[Label(LOCTEXT("Template", "Prompt template"))]
 			+ SVerticalBox::Slot().AutoHeight()
@@ -182,44 +493,18 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildForm()
 			[
 				SAssignNew(SlotBox, SVerticalBox)
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 2.0f)[Label(LOCTEXT("Prompt", "Prompt"))]
-			+ SVerticalBox::Slot().AutoHeight()
-			[
-				SNew(SBox)
-				.MinDesiredHeight(84.0f)
-				[
-					SNew(SMultiLineEditableTextBox)
-					.AutoWrapText(true)
-					.HintText(LOCTEXT("PromptHint", "What to draw. With a template, this is added after it."))
-					.Text_Lambda([this]() { return FText::FromString(Prompt); })
-					.OnTextChanged_Lambda([this](const FText& Text) { Prompt = Text.ToString(); })
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 2.0f)[Label(LOCTEXT("Negative", "Avoid"))]
-			+ SVerticalBox::Slot().AutoHeight()
-			[
-				SNew(SEditableTextBox)
-				.HintText(LOCTEXT("NegativeHint", "What to keep out, such as text or people."))
-				.Text_Lambda([this]() { return FText::FromString(Negative); })
-				.OnTextChanged_Lambda([this](const FText& Text) { Negative = Text.ToString(); })
-			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().FillWidth(1.0f)
 				[
-					Number(LOCTEXT("Count", "Count"), 1, FHyperAIStudioImageGenContracts::MaxImagesPerBatch, [this]() { return Count; }, [this](const int32 Value) { Count = Value; },
-						LOCTEXT("CountTooltip", "Images in the batch."))
-				]
-				+ SHorizontalBox::Slot().FillWidth(1.0f)
-				[
 					Number(LOCTEXT("Width", "Width"), 0, FHyperAIStudioImageGenContracts::MaxImageSize, [this]() { return Width; }, [this](const int32 Value) { Width = Value; },
-						LOCTEXT("SizeTooltip", "0 for the model's own size."))
+						LOCTEXT("SizeTooltip", "0 uses the shape above."))
 				]
 				+ SHorizontalBox::Slot().FillWidth(1.0f)
 				[
 					Number(LOCTEXT("Height", "Height"), 0, FHyperAIStudioImageGenContracts::MaxImageSize, [this]() { return Height; }, [this](const int32 Value) { Height = Value; },
-						LOCTEXT("SizeTooltip", "0 for the model's own size."))
+						LOCTEXT("SizeTooltip", "0 uses the shape above."))
 				]
 				+ SHorizontalBox::Slot().FillWidth(1.0f)
 				[
@@ -235,65 +520,32 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildForm()
 				.Text_Lambda([this]() { return FText::FromString(BatchName); })
 				.OnTextChanged_Lambda([this](const FText& Text) { BatchName = Text.ToString(); })
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 10.0f, 0.0f, 0.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 10.0f, 0.0f, 2.0f)[Label(LOCTEXT("SavePresetLabel", "Save these settings as a preset for the team"))]
+			+ SVerticalBox::Slot().AutoHeight()
 			[
 				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(0.0f, 0.0f, 6.0f, 0.0f)
+				[
+					SNew(SEditableTextBox)
+					.HintText(LOCTEXT("PresetNameHint", "Preset name, such as Ember concept"))
+					.ToolTipText(LOCTEXT("PresetNameTip", "The prompt you have written becomes the preset's style, kept with the preset's own words, the shape, the count and what to keep out. Presets live in .hyperai/image-presets.json, shared with the team."))
+					.Text_Lambda([this]() { return FText::FromString(NewPresetLabel); })
+					.OnTextChanged_Lambda([this](const FText& Text) { NewPresetLabel = Text.ToString(); })
+				]
 				+ SHorizontalBox::Slot().AutoWidth()
 				[
 					SNew(SButton)
-					.Text(LOCTEXT("PreviewPrompt", "Preview prompt"))
-					.ToolTipText(LOCTEXT("PreviewPromptTooltip", "A free dry run: the exact prompt that would be sent, and what it costs."))
+					.Text(LOCTEXT("SavePreset", "Save preset"))
+					.IsEnabled_Lambda([this]() { return !NewPresetLabel.TrimStartAndEnd().IsEmpty(); })
 					.OnClicked_Lambda([this]()
 					{
-						PreviewPrompt();
+						FString Error;
+						Status = SaveAsPreset(NewPresetLabel, Error) ? FString::Printf(TEXT("Saved the preset %s."), *NewPresetLabel.TrimStartAndEnd()) : Error;
+						bStatusIsError = !Error.IsEmpty();
+						NewPresetLabel.Reset();
 						return FReply::Handled();
 					})
 				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(6.0f, 0.0f, 0.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("GenerateButton", "Generate"))
-					.ToolTipText(LOCTEXT("GenerateTooltip", "Generate the batch. This spends money, or your agent's plan for an agent model; pressing it is the approval."))
-					.IsEnabled_Lambda([this]() { return Model.IsValid() && Model->Issue.IsEmpty(); })
-					.OnClicked_Lambda([this]()
-					{
-						Generate();
-						return FReply::Handled();
-					})
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.AutoWrapText(true)
-				.Text_Lambda([this]() { return FText::FromString(Status); })
-				.ColorAndOpacity_Lambda([this]() { return bStatusIsError ? FSlateColor(FStyleColors::AccentRed) : FSlateColor::UseForeground(); })
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.AutoWrapText(true)
-				.Font(FAppStyle::GetFontStyle("SmallFont"))
-				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-				.Visibility_Lambda([this]() { return ComposedPrompt.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
-				.Text_Lambda([this]() { return FText::Format(LOCTEXT("Composed", "Will send: {0}"), FText::FromString(ComposedPrompt)); })
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 4.0f)[Header(LOCTEXT("Batches", "Batches this session"))]
-			+ SVerticalBox::Slot().AutoHeight()
-			[
-				SNew(STextBlock)
-				.AutoWrapText(true)
-				.Font(FAppStyle::GetFontStyle("SmallFont"))
-				.Text_Lambda([this]()
-				{
-					TArray<FString> Lines;
-					for (const FHyperAIImageBatchInfo& Batch : Inspect.Batches)
-					{
-						Lines.Add(FString::Printf(TEXT("%s: %s, %s%s"), *Batch.BatchId, *Batch.State, *Batch.Progress,
-							Batch.Diagnostic.IsEmpty() ? TEXT("") : *(TEXT(" - ") + Batch.Diagnostic)));
-					}
-					return Lines.IsEmpty() ? LOCTEXT("NoBatches", "None yet.") : FText::FromString(FString::Join(Lines, TEXT("\n")));
-				})
 			]
 		];
 }
@@ -301,13 +553,17 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildForm()
 TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildBrowser()
 {
 	using namespace HyperAIStudio::ImagesPanel;
-	auto Action = [](const FText& Text, const FText& Tooltip, TFunction<void()> Run)
+	auto Action = [](const FText& Text, const FText& Tooltip, TFunction<void()> Run, const bool bPrimary = false)
 	{
-		return SNew(SButton).Text(Text).ToolTipText(Tooltip).OnClicked_Lambda([Run]()
-		{
-			Run();
-			return FReply::Handled();
-		});
+		return SNew(SButton)
+			.ButtonStyle(FAppStyle::Get(), bPrimary ? "PrimaryButton" : "Button")
+			.Text(Text)
+			.ToolTipText(Tooltip)
+			.OnClicked_Lambda([Run]()
+			{
+				Run();
+				return FReply::Handled();
+			});
 	};
 	return SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 8.0f, 8.0f, 4.0f)
@@ -333,7 +589,7 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildBrowser()
 				})
 			]
 		]
-		+ SVerticalBox::Slot().FillHeight(0.45f).Padding(8.0f, 0.0f)
+		+ SVerticalBox::Slot().FillHeight(0.42f).Padding(8.0f, 0.0f)
 		[
 			SNew(SBorder)
 			.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
@@ -348,7 +604,7 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildBrowser()
 				]
 			]
 		]
-		+ SVerticalBox::Slot().FillHeight(0.55f).Padding(8.0f, 8.0f)
+		+ SVerticalBox::Slot().FillHeight(0.58f).Padding(8.0f, 8.0f)
 		[
 			SNew(SVerticalBox)
 			.Visibility_Lambda([this]() { return SelectedRecord() ? EVisibility::Visible : EVisibility::Hidden; })
@@ -386,20 +642,28 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildBrowser()
 						Record->Width, Record->Height, *Record->GeneratedUtc.Left(19), *Record->File)) : FText::GetEmpty();
 				})
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
+			// What to do with a picture: make the level look like it first, then the smaller moves.
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
 			[
 				SNew(SWrapBox)
 				.UseAllottedSize(true)
 				.InnerSlotPadding(FVector2D(6.0f, 6.0f))
 				+ SWrapBox::Slot()
 				[
-					Action(LOCTEXT("OpenMatch", "Open in Match"), LOCTEXT("OpenMatchTooltip", "Measure the level viewport's lighting against it in the Match page."),
-						[this]() { if (const FHyperAIImageRecord* Record = SelectedRecord()) FHyperAIStudioPreviewPanel::Open(FName(TEXT("lighting")), FullPath(Record->File)); })
+					Action(LOCTEXT("MatchLighting", "Match the lighting to this"),
+						LOCTEXT("MatchLightingTooltip", "Your preferred agent relights the level until it matches this picture, and HyperAI sends it back to work after each round until it does. Follow it on the Match page."),
+						[this]() { StartMatch(FName(TEXT("match_lighting"))); }, /*bPrimary=*/true)
 				]
 				+ SWrapBox::Slot()
 				[
-					Action(LOCTEXT("UseMatch", "Use as match reference"), LOCTEXT("UseMatchTooltip", "Open the Image match source with it: score attempts against it, iteration by iteration."),
-						[this]() { if (const FHyperAIImageRecord* Record = SelectedRecord()) FHyperAIStudioPreviewPanel::Open(FName(TEXT("image_match")), FullPath(Record->File)); })
+					Action(LOCTEXT("MatchLevel", "Build the level like this"),
+						LOCTEXT("MatchLevelTooltip", "Your preferred agent builds the level toward this picture as a level designer would, then lights it, until it matches. Follow it on the Match page."),
+						[this]() { StartMatch(FName(TEXT("match_level"))); })
+				]
+				+ SWrapBox::Slot()
+				[
+					Action(LOCTEXT("UseMatch", "Compare on Match"), LOCTEXT("UseMatchTooltip", "Open the Match page with it: the level's lighting measured against it, and any match session's attempts."),
+						[this]() { if (const FHyperAIImageRecord* Record = SelectedRecord()) FHyperAIStudioPreviewPanel::Open(FName(TEXT("lighting")), FullPath(Record->File)); })
 				]
 				+ SWrapBox::Slot()
 				[
@@ -408,6 +672,7 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildBrowser()
 						{
 							if (const FHyperAIImageRecord* Record = SelectedRecord())
 							{
+								SelectPreset(FString());
 								Prompt = Record->Prompt;
 								Seed = Record->Seed;
 								SelectModel(Record->ModelId);
@@ -428,6 +693,121 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildBrowser()
 		];
 }
 
+void SHyperAIStudioImagesPanel::StartMatch(const FName ActionId)
+{
+	const FHyperAIImageRecord* Record = SelectedRecord();
+	if (!Record)
+	{
+		return;
+	}
+	FString Error;
+	if (FHyperAIStudioPreviewPanel::StartAgentAction(FName(TEXT("image_match")), ActionId, HyperAIStudio::ImagesPanel::FullPath(Record->File), Error))
+	{
+		Status = TEXT("Handed to your preferred agent; follow it on the Match page.");
+		bStatusIsError = false;
+	}
+	else
+	{
+		Status = Error;
+		bStatusIsError = true;
+	}
+}
+
+void SHyperAIStudioImagesPanel::LoadUserPresets()
+{
+	using namespace HyperAIStudio::ImagesPanel;
+	FString Text;
+	TSharedPtr<FJsonValue> Root;
+	if (!FFileHelper::LoadFileToString(Text, *UserPresetsFile()) || !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Root) || !Root.IsValid())
+	{
+		return;
+	}
+	const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
+	if (!Root->TryGetArray(Items) || !Items)
+	{
+		return;
+	}
+	for (const TSharedPtr<FJsonValue>& Item : *Items)
+	{
+		const TSharedPtr<FJsonObject> Object = Item.IsValid() ? Item->AsObject() : nullptr;
+		FString Name;
+		if (!Object.IsValid() || !Object->TryGetStringField(TEXT("label"), Name) || Name.TrimStartAndEnd().IsEmpty())
+		{
+			continue;
+		}
+		FPreset Preset;
+		Preset.Id = TEXT("user:") + Name.TrimStartAndEnd();
+		Preset.Label = FText::FromString(Name.TrimStartAndEnd().Left(40));
+		Preset.bUser = true;
+		Object->TryGetStringField(TEXT("before"), Preset.Before);
+		Object->TryGetStringField(TEXT("after"), Preset.After);
+		Object->TryGetStringField(TEXT("negative"), Preset.Negative);
+		FString ShapeLabel;
+		Preset.Shape = Object->TryGetStringField(TEXT("shape"), ShapeLabel) ? ShapeIndexOf(ShapeLabel) : 0;
+		int32 PresetCount = 1;
+		Preset.Count = Object->TryGetNumberField(TEXT("count"), PresetCount) ? FMath::Clamp(PresetCount, 1, 4) : 1;
+		Preset.Hint = FText::Format(LOCTEXT("UserPresetHint", "What it is of; the preset {0} adds its style."), Preset.Label);
+		Presets.Add(MoveTemp(Preset));
+	}
+}
+
+bool SHyperAIStudioImagesPanel::SaveAsPreset(const FString& InLabel, FString& OutError)
+{
+	using namespace HyperAIStudio::ImagesPanel;
+	const FString Name = InLabel.TrimStartAndEnd().Left(40);
+	if (Name.IsEmpty())
+	{
+		OutError = TEXT("A preset needs a name.");
+		return false;
+	}
+	FString Text;
+	TArray<TSharedPtr<FJsonValue>> Items;
+	TSharedPtr<FJsonValue> Root;
+	if (FFileHelper::LoadFileToString(Text, *UserPresetsFile()) && FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Root) && Root.IsValid())
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Existing = nullptr;
+		if (Root->TryGetArray(Existing) && Existing)
+		{
+			Items = *Existing;
+		}
+	}
+	// The same name replaces the older one.
+	Items.RemoveAll([&Name](const TSharedPtr<FJsonValue>& Item)
+	{
+		const TSharedPtr<FJsonObject> Object = Item.IsValid() ? Item->AsObject() : nullptr;
+		FString Other;
+		return Object.IsValid() && Object->TryGetStringField(TEXT("label"), Other) && Other.Equals(Name, ESearchCase::IgnoreCase);
+	});
+	const FPreset* Base = SelectedPreset();
+	const TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
+	Object->SetStringField(TEXT("label"), Name);
+	Object->SetStringField(TEXT("before"), Base ? Base->Before : FString());
+	// What the user wrote becomes the style every image of this preset carries.
+	Object->SetStringField(TEXT("after"), Join(Base ? Base->After : FString(), Prompt));
+	Object->SetStringField(TEXT("negative"), ComposeNegative(Base, Negative));
+	Object->SetStringField(TEXT("shape"), Shapes[FMath::Clamp(Shape, 0, ShapeCount - 1)].Label);
+	Object->SetNumberField(TEXT("count"), Count);
+	Items.Add(MakeShared<FJsonValueObject>(Object));
+	FString Out;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Out);
+	if (!FJsonSerializer::Serialize(Items, Writer))
+	{
+		OutError = TEXT("The preset could not be written.");
+		return false;
+	}
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(UserPresetsFile()), /*Tree=*/true);
+	if (!FFileHelper::SaveStringToFile(Out, *UserPresetsFile(), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	{
+		OutError = FString::Printf(TEXT("Could not write %s."), *UserPresetsFile());
+		return false;
+	}
+	const FString Id = TEXT("user:") + Name;
+	Reload();
+	SelectPreset(Id);
+	Prompt.Reset();
+	return true;
+}
+
 void SHyperAIStudioImagesPanel::Reload()
 {
 	FHyperAIImageInspectRequest Request;
@@ -435,6 +815,7 @@ void SHyperAIStudioImagesPanel::Reload()
 	Inspect = FHyperAIStudioImageGenContracts::Inspect(Request);
 	const FString KeptModel = Model.IsValid() ? Model->Id : FString();
 	const FString KeptTemplate = Template.IsValid() ? Template->Id : FString();
+	const FString KeptPreset = SelectedPreset() ? SelectedPreset()->Id : FString();
 	Models.Reset();
 	for (const FHyperAIImageModelInfo& Info : Inspect.Models)
 	{
@@ -458,6 +839,9 @@ void SHyperAIStudioImagesPanel::Reload()
 			Template = Templates.Last();
 		}
 	}
+	Presets = BuiltInPresets();
+	LoadUserPresets();
+	PresetIndex = Presets.IndexOfByPredicate([&KeptPreset](const FPreset& Preset) { return !KeptPreset.IsEmpty() && Preset.Id == KeptPreset; });
 	if (ModelCombo.IsValid())
 	{
 		ModelCombo->RefreshOptions();
@@ -472,6 +856,7 @@ void SHyperAIStudioImagesPanel::Reload()
 	{
 		Selected = Inspect.Images.IsEmpty() ? INDEX_NONE : 0;
 	}
+	RebuildPresetButtons();
 	RebuildSlots();
 	RebuildGallery();
 }
@@ -491,6 +876,25 @@ bool SHyperAIStudioImagesPanel::SelectModel(const FString& Id)
 		}
 	}
 	return false;
+}
+
+bool SHyperAIStudioImagesPanel::SelectPreset(const FString& Id)
+{
+	PresetIndex = Id.IsEmpty() ? INDEX_NONE : Presets.IndexOfByPredicate([&Id](const FPreset& Preset) { return Preset.Id == Id; });
+	if (const FPreset* Preset = SelectedPreset())
+	{
+		Shape = Preset->Shape;
+		Count = Preset->Count;
+		Width = 0;
+		Height = 0;
+	}
+	ComposedPrompt.Reset();
+	return Id.IsEmpty() || PresetIndex != INDEX_NONE;
+}
+
+const SHyperAIStudioImagesPanel::FPreset* SHyperAIStudioImagesPanel::SelectedPreset() const
+{
+	return Presets.IsValidIndex(PresetIndex) ? &Presets[PresetIndex] : nullptr;
 }
 
 void SHyperAIStudioImagesPanel::SelectImage(const int32 Index)
@@ -562,10 +966,10 @@ void SHyperAIStudioImagesPanel::RebuildGallery()
 			[
 				SNew(SBorder)
 				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-				.BorderBackgroundColor_Lambda([this, Index]() { return Selected == Index ? FLinearColor(0.85f, 0.55f, 0.1f) : FLinearColor(0.16f, 0.16f, 0.18f); })
+				.BorderBackgroundColor_Lambda([this, Index]() { return Selected == Index ? FStyleColors::Primary : FStyleColors::Header; })
 				.Padding(2.0f)
 				[
-					SNew(SBox).WidthOverride(132.0f).HeightOverride(88.0f)
+					SNew(SBox).WidthOverride(150.0f).HeightOverride(96.0f)
 					[
 						SNew(SScaleBox)
 						.Stretch(EStretch::ScaleToFit)
@@ -581,6 +985,7 @@ void SHyperAIStudioImagesPanel::RebuildGallery()
 
 FHyperAIImageGenerateRequest SHyperAIStudioImagesPanel::BuildRequest(const bool bDryRun) const
 {
+	using namespace HyperAIStudio::ImagesPanel;
 	FHyperAIImageGenerateRequest Request;
 	Request.bDryRun = bDryRun;
 	Request.ModelId = Model.IsValid() ? Model->Id : FString();
@@ -594,12 +999,14 @@ FHyperAIImageGenerateRequest SHyperAIStudioImagesPanel::BuildRequest(const bool 
 			Filled.Value = Slot.Value.TrimStartAndEnd();
 		}
 	}
-	Request.Prompt = Prompt.TrimStartAndEnd();
-	Request.Negative = Negative.TrimStartAndEnd();
+	const FPreset* Preset = SelectedPreset();
+	Request.Prompt = ComposePrompt(Preset, Prompt);
+	Request.Negative = ComposeNegative(Preset, Negative);
 	Request.BatchName = BatchName.TrimStartAndEnd();
 	Request.Count = Count;
-	Request.Width = Width;
-	Request.Height = Height;
+	const FShape& Chosen = Shapes[FMath::Clamp(Shape, 0, ShapeCount - 1)];
+	Request.Width = Width > 0 ? Width : Chosen.Width;
+	Request.Height = Height > 0 ? Height : Chosen.Height;
 	Request.Seed = Seed;
 	return Request;
 }
@@ -608,7 +1015,10 @@ FHyperAIImageGenerateReport SHyperAIStudioImagesPanel::PreviewPrompt()
 {
 	const FHyperAIImageGenerateReport Plan = FHyperAIStudioImageGenContracts::BuildPlan(BuildRequest(/*bDryRun=*/true));
 	ComposedPrompt = Plan.ComposedPrompt;
-	Status = Plan.Diagnostic;
+	const FString Cost = Plan.EstimatedCost > 0.f ? FString::Printf(TEXT(", about %.2f"), Plan.EstimatedCost) : FString();
+	Status = Plan.bOk ? FString::Printf(TEXT("Nothing is sent until you press Generate: %d image%s at %d x %d from %s%s."), Plan.Count,
+		Plan.Count == 1 ? TEXT("") : TEXT("s"), Plan.Width, Plan.Height, *(Model.IsValid() && !Model->Label.IsEmpty() ? Model->Label : Plan.ModelId), *Cost)
+		: Plan.Diagnostic;
 	bStatusIsError = !Plan.bOk;
 	return Plan;
 }

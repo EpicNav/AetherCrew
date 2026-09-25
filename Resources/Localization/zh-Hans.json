@@ -2415,12 +2415,6 @@
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
-   "key": "Batches",
-   "source": "Batches this session",
-   "text": "本次会话的批次"
-  },
-  {
-   "namespace": "SHyperAIStudioImagesPanel",
    "key": "Composed",
    "source": "Will send: {0}",
    "text": "将发送：{0}"
@@ -2440,20 +2434,8 @@
   {
    "namespace": "SHyperAIStudioImagesPanel",
    "key": "Count",
-   "source": "Count",
-   "text": "数量"
-  },
-  {
-   "namespace": "SHyperAIStudioImagesPanel",
-   "key": "CountTooltip",
-   "source": "Images in the batch.",
-   "text": "批次中的图片数量。"
-  },
-  {
-   "namespace": "SHyperAIStudioImagesPanel",
-   "key": "Generate",
-   "source": "Generate",
-   "text": "生成"
+   "source": "Images",
+   "text": "张数"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
@@ -2481,21 +2463,45 @@
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
+   "key": "MatchLevel",
+   "source": "Build the level like this",
+   "text": "按这张图搭建关卡"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "MatchLevelTooltip",
+   "source": "Your preferred agent builds the level toward this picture as a level designer would, then lights it, until it matches. Follow it on the Match page.",
+   "text": "你偏好的智能体会像关卡设计师一样朝这张图搭建关卡，再为它布光，直到匹配为止。可在匹配页面跟进。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "MatchLighting",
+   "source": "Match the lighting to this",
+   "text": "按这张图匹配光照"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "MatchLightingTooltip",
+   "source": "Your preferred agent relights the level until it matches this picture, and HyperAI sends it back to work after each round until it does. Follow it on the Match page.",
+   "text": "你偏好的智能体会重新为关卡布光，直到与这张图匹配；每轮结束后 HyperAI 都会让它继续，直到达成。可在匹配页面跟进。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
    "key": "Model",
    "source": "Model",
    "text": "模型"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
-   "key": "ModelShown",
-   "source": "{0} ({1})",
-   "text": "{0}（{1}）"
+   "key": "MoreOptions",
+   "source": "More options",
+   "text": "更多选项"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
    "key": "Negative",
-   "source": "Avoid",
-   "text": "避免"
+   "source": "Also keep out",
+   "text": "另外排除"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
@@ -2505,9 +2511,9 @@
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
-   "key": "NoBatches",
-   "source": "None yet.",
-   "text": "暂无。"
+   "key": "NegativeHintPreset",
+   "source": "The preset keeps out: {0}",
+   "text": "预设已排除：{0}"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
@@ -2523,27 +2529,129 @@
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
-   "key": "OpenMatch",
-   "source": "Open in Match",
-   "text": "在匹配中打开"
-  },
-  {
-   "namespace": "SHyperAIStudioImagesPanel",
-   "key": "OpenMatchTooltip",
-   "source": "Measure the level viewport's lighting against it in the Match page.",
-   "text": "在匹配页面中，将关卡视口的光照与它进行对比测量。"
-  },
-  {
-   "namespace": "SHyperAIStudioImagesPanel",
    "key": "PageBody",
-   "source": "Reference images for the look you are after, from Nano Banana, Codex or a model you configure, written into the project with the prompt that made them.",
-   "text": "为你想要的外观生成参考图像，可使用 Nano Banana、Codex 或你配置的模型，图像连同生成它的提示词一起写入项目。"
+   "source": "Reference images for the look you are after: pick a preset, say what it is of, and Generate. From Nano Banana, Codex or a model you configure, written into the project with the prompt that made them.",
+   "text": "为你想要的效果生成参考图像：选一个预设，说明画的是什么，然后点“生成”。可用 Nano Banana、Codex 或你配置的模型，图像连同生成它的提示词一起写入项目。"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
    "key": "PageTitle",
    "source": "Images",
    "text": "图像"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetCharacter",
+   "source": "Character",
+   "text": "角色"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetCharacterHint",
+   "source": "Who they are: their silhouette, clothing, gear and colours. For example: a desert scout in layered cloth with a brass spyglass.",
+   "text": "这是谁：轮廓、服装、装备和配色。例如：身披层叠布衣、手持黄铜望远镜的沙漠斥候。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetDecal",
+   "source": "Decal",
+   "text": "贴花"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetDecalHint",
+   "source": "The mark: cracks, stains, scorch marks, footprints, graffiti. For example: a scorch mark with soot spray.",
+   "text": "痕迹本身：裂纹、污渍、焦痕、脚印、涂鸦。例如：带有烟灰飞溅的焦痕。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetIcon",
+   "source": "UI icon",
+   "text": "界面图标"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetIconHint",
+   "source": "The icon's subject and style. For example: a glowing fire rune on a stone disc.",
+   "text": "图标的主体和风格。例如：石盘上发光的火焰符文。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetLevel",
+   "source": "Level concept",
+   "text": "关卡概念"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetLevelHint",
+   "source": "The level as a player sees it: the layout, the landmarks, the paths, the scale. For example: a ruined courtyard with a broken bridge over a gorge.",
+   "text": "玩家眼中的关卡：布局、地标、路径和尺度。例如：峡谷上方有断桥的废弃庭院。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetNameHint",
+   "source": "Preset name, such as Ember concept",
+   "text": "预设名称，例如 余烬概念"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetNameTip",
+   "source": "The prompt you have written becomes the preset's style, kept with the preset's own words, the shape, the count and what to keep out. Presets live in .hyperai/image-presets.json, shared with the team.",
+   "text": "你写的提示词会成为该预设的风格，与预设自带的描述、画幅、张数和排除项一起保存。预设保存在 .hyperai/image-presets.json，与团队共享。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetProp",
+   "source": "Prop",
+   "text": "道具"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetPropHint",
+   "source": "The object: what it is, its material, size and style. For example: an iron lantern with cracked green glass.",
+   "text": "物体本身：是什么、材质、大小和风格。例如：玻璃碎裂泛绿的铁灯笼。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetScene",
+   "source": "Scene lighting",
+   "text": "场景光照"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetSceneHint",
+   "source": "A place at a time of day: where it is, when, the weather, the mood. For example: a mountain monastery at dusk, low sun, thin fog.",
+   "text": "某个时刻的某个地方：在哪里、何时、天气和氛围。例如：黄昏时分的山间寺院，低垂的太阳，薄雾。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetSky",
+   "source": "Sky panorama",
+   "text": "天空全景"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetSkyHint",
+   "source": "The sky: the time of day, the clouds, the colour. For example: a stormy sunset, towering clouds lit orange from below.",
+   "text": "天空：时间、云层和色彩。例如：暴风雨中的日落，高耸的云层被自下而上染成橙色。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetTexture",
+   "source": "Tileable texture",
+   "text": "可平铺纹理"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetTextureHint",
+   "source": "The surface: its material, age, wear and colour. For example: mossy cobblestones, wet after rain.",
+   "text": "表面：材质、年代、磨损和颜色。例如：雨后湿润、长满青苔的鹅卵石。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetTip",
+   "source": "{0}\nAdds: {1}",
+   "text": "{0}\n附加：{1}"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
@@ -2560,14 +2668,14 @@
   {
    "namespace": "SHyperAIStudioImagesPanel",
    "key": "Prompt",
-   "source": "Prompt",
-   "text": "提示词"
+   "source": "What it is of",
+   "text": "画的是什么"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
    "key": "PromptHint",
-   "source": "What to draw. With a template, this is added after it.",
-   "text": "要画的内容。使用模板时，这段文字会接在模板之后。"
+   "source": "What to draw, as you would tell an artist.",
+   "text": "要画什么，像对画师说的那样描述。"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
@@ -2589,6 +2697,18 @@
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
+   "key": "SavePreset",
+   "source": "Save preset",
+   "text": "保存预设"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "SavePresetLabel",
+   "source": "Save these settings as a preset for the team",
+   "text": "把这些设置保存为团队预设"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
    "key": "Seed",
    "source": "Seed",
    "text": "种子"
@@ -2598,6 +2718,12 @@
    "key": "SeedTooltip",
    "source": "-1 for a random seed. A fixed seed re-renders the same image, where the model takes one.",
    "text": "-1 表示随机种子。固定种子会重新渲染同一张图片（需模型支持种子）。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "Shape",
+   "source": "Shape",
+   "text": "画幅"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
@@ -2614,8 +2740,14 @@
   {
    "namespace": "SHyperAIStudioImagesPanel",
    "key": "SizeTooltip",
-   "source": "0 for the model's own size.",
-   "text": "0 表示使用模型自己的尺寸。"
+   "source": "0 uses the shape above.",
+   "text": "0 表示使用上方的画幅。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "StartFrom",
+   "source": "Start from a preset",
+   "text": "从预设开始"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
@@ -2626,20 +2758,38 @@
   {
    "namespace": "SHyperAIStudioImagesPanel",
    "key": "UseMatch",
-   "source": "Use as match reference",
-   "text": "用作匹配参考图"
+   "source": "Compare on Match",
+   "text": "在匹配页面比较"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
    "key": "UseMatchTooltip",
-   "source": "Open the Image match source with it: score attempts against it, iteration by iteration.",
-   "text": "用它打开图像匹配来源：逐次迭代地为尝试与它的相似度打分。"
+   "source": "Open the Match page with it: the level's lighting measured against it, and any match session's attempts.",
+   "text": "用它打开匹配页面：关卡光照与它的对比，以及任意匹配会话的尝试。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "UserPresetHint",
+   "source": "What it is of; the preset {0} adds its style.",
+   "text": "画的是什么；预设 {0} 会加上它的风格。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "UserPresetLabel",
+   "source": "{0} (yours)",
+   "text": "{0}（你的）"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
    "key": "Width",
    "source": "Width",
    "text": "宽度"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "WillMake",
+   "source": "{0} x {1}, {2} image(s)",
+   "text": "{0} x {1}，{2} 张"
   },
   {
    "namespace": "SHyperAIStudioMemoryPanel",

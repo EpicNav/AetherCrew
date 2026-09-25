@@ -522,6 +522,30 @@ for line in iter(sys.stdin.readline, ""):
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioImageGenPresetsTest,
+	"HyperAIStudio.ImageGen.Presets",
+	HyperAIStudio::ImageGen::Tests::Flags)
+
+bool FHyperAIStudioImageGenPresetsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using FPreset = SHyperAIStudioImagesPanel::FPreset;
+	const TArray<FPreset> Presets = SHyperAIStudioImagesPanel::BuiltInPresets();
+	TestTrue(TEXT("There are presets for the images a game needs"), Presets.Num() >= 8
+		&& Presets.ContainsByPredicate([](const FPreset& Preset) { return Preset.Id == TEXT("scene_lighting"); }));
+	const FPreset* Texture = Presets.FindByPredicate([](const FPreset& Preset) { return Preset.Id == TEXT("tileable_texture"); });
+	TestTrue(TEXT("A preset's words follow the prompt as a sentence"), Texture
+		&& SHyperAIStudioImagesPanel::ComposePrompt(Texture, TEXT("Mossy cobblestones")).StartsWith(TEXT("Mossy cobblestones. Seamless tileable texture")));
+	TestEqual(TEXT("With no preset the prompt goes as written"), SHyperAIStudioImagesPanel::ComposePrompt(nullptr, TEXT(" A door ")), FString(TEXT("A door")));
+	TestTrue(TEXT("What to keep out adds to the preset's own list"), Texture
+		&& SHyperAIStudioImagesPanel::ComposeNegative(Texture, TEXT("people")).EndsWith(TEXT(", people")));
+	const TSharedRef<SHyperAIStudioImagesPanel> Panel = SNew(SHyperAIStudioImagesPanel);
+	TestTrue(TEXT("A preset is picked by id"), Panel->SelectPreset(TEXT("ui_icon")));
+	TestFalse(TEXT("An unknown one is not"), Panel->SelectPreset(TEXT("no_such_preset")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHyperAIStudioScreensImagesPanelTest,
 	"HyperAIStudio.Screens.ImagesPanel",
 	HyperAIStudio::ImageGen::Tests::Flags)
