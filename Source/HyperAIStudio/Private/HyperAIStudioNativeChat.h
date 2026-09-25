@@ -165,7 +165,7 @@ private:
 	bool Pump(float DeltaTime);
 	void Dispatch(const FString& Line);
 	void ClosePipes();
-	/** What project memory knows about Text that this chat has not had yet, to send with it. */
+	/** What project memory knows about Text and the skills that fit it, that this chat has not had yet, to send with it. */
 	FString MemoryFor(const FString& Text);
 	/** Records the turn that just ended in the project's task history. */
 	void RecordTurn();

@@ -47,6 +47,11 @@ namespace HyperAIStudio::Skills
 	TArray<FHyperAIStudioSkill> ListForAgent(const FString& ProjectRoot, const FString& AgentName);
 	/** "/" for Claude Code, "$" for Codex, empty for agents without skills. */
 	FString InvocationPrefix(const FString& AgentName);
+	/**
+	 * The project skills that fit Message and the chat was not pointed at yet, as a short block to send with it, or
+	 * empty. Only skills an agent may start on its own; Given holds what the chat already got.
+	 */
+	FString HintFor(const FString& ProjectRoot, const FString& Message, TSet<FString>& Given);
 
 	struct FSyncReport
 	{

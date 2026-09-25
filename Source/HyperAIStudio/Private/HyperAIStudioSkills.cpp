@@ -2,6 +2,8 @@
 
 #include "HyperAIStudioSkills.h"
 
+#include "HyperAIStudioProjectMemory.h"
+
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/BlueprintSupport.h"
 #include "Engine/Blueprint.h"
@@ -336,6 +338,64 @@ TArray<FHyperAIStudioSkill> ListPersonalSkills()
 		AddNestedSkills(Directory, TEXT("personal-agents"), Skills);
 	}
 	return Skills;
+}
+
+FString HintFor(const FString& ProjectRoot, const FString& Message, TSet<FString>& Given)
+{
+	// Project memory's search: a skill fits with two of the message's words, or one that few skills hold.
+	TArray<FString> Words;
+	for (const FString& Word : Memory::SearchWords(Message))
+	{
+		if (Words.Num() >= 40)
+		{
+			break;
+		}
+		Words.AddUnique(Word);
+	}
+	const TArray<FHyperAIStudioSkill> Skills = ListProjectSkills(ProjectRoot).FilterByPredicate(
+		[](const FHyperAIStudioSkill& Skill) { return !Skill.bMenuOnly; });
+	if (Words.IsEmpty() || Skills.IsEmpty())
+	{
+		return FString();
+	}
+	TArray<TArray<FString>> Documents;
+	for (const FHyperAIStudioSkill& Skill : Skills)
+	{
+		// A skill is mostly what its name says, so its name counts twice.
+		const TArray<FString> Name = Memory::SearchWords(Skill.Name.Replace(TEXT("-"), TEXT(" ")));
+		TArray<FString>& Document = Documents.Add_GetRef(Name);
+		Document.Append(Name);
+		Document.Append(Memory::SearchWords(Skill.Description));
+	}
+	const TArray<Memory::FRank> Ranks = Memory::Rank(Words, Documents);
+	TArray<int32> Order;
+	for (int32 Index = 0; Index < Ranks.Num(); ++Index)
+	{
+		Order.Add(Index);
+	}
+	Order.StableSort([&Ranks](const int32 A, const int32 B) { return Ranks[A].Score > Ranks[B].Score; });
+	const int32 NeedWords = FMath::Min(2, Words.Num());
+	TArray<FString> Lines;
+	for (const int32 Index : Order)
+	{
+		const Memory::FRank& Found = Ranks[Index];
+		const FHyperAIStudioSkill& Skill = Skills[Index];
+		if (Lines.Num() >= 2 || Found.Matched == 0)
+		{
+			break;
+		}
+		if ((Found.Matched < NeedWords && Found.MatchedRare == 0) || Given.Contains(TEXT("skill:") + Skill.Name))
+		{
+			continue;
+		}
+		Given.Add(TEXT("skill:") + Skill.Name);
+		FString Folder = Skill.Folder;
+		FPaths::MakePathRelativeTo(Folder, *(ProjectRoot / TEXT("")));
+		const FString Description = Skill.Description.Len() > 300 ? Skill.Description.Left(300) + TEXT("...") : Skill.Description;
+		Lines.Add(FString::Printf(TEXT("- `%s`: %s Read `%s/SKILL.md` before you start."), *Skill.Name, *Description, *Folder));
+	}
+	return Lines.IsEmpty() ? FString()
+		: TEXT("\n\n<skills>\nProject skills that fit this message. Use them without being asked.\n") + FString::Join(Lines, TEXT("\n")) + TEXT("\n</skills>");
 }
 
 FString InvocationPrefix(const FString& AgentName)

@@ -6,6 +6,7 @@
 #include "CoreGlobals.h"
 #include "HyperAIStudioAgentChatHistory.h"
 #include "HyperAIStudioProjectMemory.h"
+#include "HyperAIStudioSkills.h"
 #include "HyperAIStudioService.h"
 #include "HyperAIStudioSettings.h"
 #include "Interfaces/IPluginManager.h"
@@ -308,7 +309,8 @@ FString FHyperAIStudioNativeChat::MemoryFor(const FString& Text)
 	{
 		return FString();
 	}
-	return HyperAIStudio::Memory::ContextFor(ProjectRoot, Text, GivenMemory, GetDefault<UHyperAIStudioSettings>()->AgentMemory);
+	return HyperAIStudio::Memory::ContextFor(ProjectRoot, Text, GivenMemory, GetDefault<UHyperAIStudioSettings>()->AgentMemory)
+		+ HyperAIStudio::Skills::HintFor(ProjectRoot, Text, GivenMemory);
 }
 
 void FHyperAIStudioNativeChat::RecordTurn()

@@ -77,6 +77,38 @@ bool FHyperAIStudioSkillsFormatTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSkillsHintTest,
+	"HyperAIStudio.Skills.Hint",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioSkillsHintTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::Skills;
+	using namespace HyperAIStudio::SkillsTests;
+	const FScratchRoot Root;
+	WriteSkill(FPaths::Combine(CanonicalDirectory(Root.Path), TEXT("image-match")), TEXT("image-match"),
+		TEXT("Make a scene look like a reference image and prove it with hyper_image_compare."));
+	WriteSkill(FPaths::Combine(CanonicalDirectory(Root.Path), TEXT("unreal-blueprint")), TEXT("unreal-blueprint"),
+		TEXT("Build or change a gameplay Blueprint in one script."));
+	const FString MenuOnly = FPaths::Combine(CanonicalDirectory(Root.Path), TEXT("make-skill"));
+	WriteSkill(MenuOnly, TEXT("make-skill"), TEXT("Turn a repeated workflow into a skill."));
+	FString Error;
+	SetMenuOnly(MenuOnly, true, Error);
+
+	// The agent is pointed at the skill a task needs; the user never has to name it.
+	TSet<FString> Given;
+	const FString Hint = HintFor(Root.Path, TEXT("Make the level look like this reference image"), Given);
+	TestTrue(TEXT("The skill that fits is named, with where to read it"), Hint.Contains(TEXT("`image-match`"))
+		&& Hint.Contains(TEXT(".agents/skills/image-match/SKILL.md")));
+	TestFalse(TEXT("One that does not fit is not"), Hint.Contains(TEXT("unreal-blueprint")));
+	TestTrue(TEXT("A chat is pointed at a skill once"), HintFor(Root.Path, TEXT("Make the level look like this reference image"), Given).IsEmpty());
+	TSet<FString> Fresh;
+	TestFalse(TEXT("Only skills an agent may start itself are named"), HintFor(Root.Path, TEXT("Turn this workflow into a skill"), Fresh).Contains(TEXT("make-skill")));
+	TestTrue(TEXT("A message no skill fits names none"), HintFor(Root.Path, TEXT("What time is it?"), Fresh).IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHyperAIStudioSkillsMirrorTest,
 	"HyperAIStudio.Skills.Mirror",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
