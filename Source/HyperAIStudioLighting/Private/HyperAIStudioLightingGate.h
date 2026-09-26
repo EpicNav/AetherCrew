@@ -31,6 +31,14 @@ namespace HyperAIStudio::Lighting::Gate
 	 * (kind sky_system: Ultra Dynamic Sky and Weather, Sun Sky, Sky Sphere) with the variables that move their look.
 	 */
 	TArray<FHyperAILightingActorRecord> ReadActors(UWorld& World);
+	/**
+	 * Point, spot and rect lights: light actors, and lights held inside other actors such as a torch Blueprint. With a view
+	 * (CameraLabel's camera, else HyperAI_MatchCamera, else the level viewport) those whose light reaches into it come
+	 * first, nearest first, each with in_view and distance; without one, in path order. LabelFilter keeps actors whose
+	 * label contains it. OutTotal counts every local light in the level; OutView names the view, empty for none.
+	 */
+	TArray<FHyperAILightingActorRecord> ReadLocalLights(UWorld& World, const FString& CameraLabel, const FString& LabelFilter, int32 Limit,
+		int32& OutTotal, FString& OutView, bool bUseView = true);
 	/** Level path plus every value ReadActors reports; any lighting change moves it. */
 	FString ComputeRevision(UWorld& World);
 	/** True when the level viewport uses a fixed exposure or an unbound post-process volume locks it, and no sky applies its own. */

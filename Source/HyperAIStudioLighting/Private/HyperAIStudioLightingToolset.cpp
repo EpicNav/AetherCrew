@@ -333,13 +333,15 @@ TArray<FString> FHyperAIStudioLightingContracts::GetCapabilities()
 		TEXT("closed_lighting_edits_as_one_undo_step"),
 		TEXT("missing_lighting_actors_added_on_demand"),
 		TEXT("material_assignment_to_a_placed_actor_mesh_slot"),
+		TEXT("point_spot_and_rect_lights_listed_by_view_edited_added_aimed_and_switched_off"),
+		TEXT("volumetric_fog_for_light_shafts"),
 		TEXT("blueprint_skies_ultra_dynamic_sky_and_weather_sun_sky_and_sky_sphere_lit_through_their_variables"),
 		TEXT("viewport_or_image_vs_reference_metrics"),
 		TEXT("ranked_next_change_suggestions"),
 		TEXT("view_captures_from_a_camera_or_transform_with_frame_to_frame_differences"),
 		TEXT("image_match_score_regions_and_sessions_for_scenes_materials_effects_and_ui"),
 		TEXT("unsaved_by_default_opt_in_save_of_touched_actors"),
-		TEXT("unsupported:bounded_post_process_volumes_local_lights_lumen_settings_and_baked_lighting_builds")};
+		TEXT("unsupported:bounded_post_process_volumes_lumen_settings_and_baked_lighting_builds")};
 }
 
 bool FHyperAIStudioLightingContracts::IsCanonicalSha256(const FString& Value)
@@ -361,14 +363,14 @@ bool FHyperAIStudioLightingContracts::IsCanonicalSha256(const FString& Value)
 
 FString FHyperAIStudioLightingContracts::InspectPayloadSchemaFingerprint()
 {
-	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(TEXT("lighting.inspect.payload.v1|editor_world|output_bytes"));
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(TEXT("lighting.inspect.payload.v2|editor_world|output_bytes|camera_view|label_filter|local_light_limit"));
 	return Value;
 }
 
 FString FHyperAIStudioLightingContracts::EditOpsPayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("lighting.edit_ops.payload.v1|level_path|base_revision|ordered_closed_ops|save|deep_clone|bounded"));
+		TEXT("lighting.edit_ops.payload.v2|level_path|base_revision|ordered_closed_ops|local_lights|save|deep_clone|bounded"));
 	return Value;
 }
 
@@ -382,7 +384,7 @@ FString FHyperAIStudioLightingContracts::ComparePayloadSchemaFingerprint()
 FString FHyperAIStudioLightingContracts::InspectResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("lighting.inspect.result.v1|level|revision|exposure_lock|actors_properties|bounded"));
+		TEXT("lighting.inspect.result.v2|level|revision|exposure_lock|actors_properties|local_lights_by_view|bounded"));
 	return Value;
 }
 
@@ -524,7 +526,7 @@ FString FHyperAIStudioLightingInspectPayload::GetSchemaFingerprint() const
 
 int32 FHyperAIStudioLightingInspectPayload::GetBoundedByteSize() const
 {
-	return 64;
+	return 64 + Request.CameraActorLabel.Len() + Request.LabelFilter.Len();
 }
 
 FString FHyperAIStudioLightingComparePayload::GetTypeId() const
@@ -689,10 +691,45 @@ FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHy
 	{
 		return Reject(TEXT("no_editor_world"), TEXT("No level is open in the editor."));
 	}
+	if (Request.MaxLocalLights < 0 || Request.MaxLocalLights > 128 || Request.CameraActorLabel.Len() > 128 || Request.LabelFilter.Len() > 128)
+	{
+		return Reject(TEXT("invalid_bounds"), TEXT("max_local_lights is 0 to 128, and camera_actor_label and label_filter are up to 128 characters."));
+	}
 	Report.LevelPath = World->GetPathName();
 	Report.Revision = Gate::ComputeRevision(*World);
 	Report.bExposureLocked = Gate::IsExposureLocked(*World);
 	Report.Actors = Gate::ReadActors(*World);
+	TArray<FHyperAILightingActorRecord> LocalLights = Gate::ReadLocalLights(*World, Request.CameraActorLabel, Request.LabelFilter,
+		Request.MaxLocalLights, Report.LocalLightCount, Report.LightView);
+	if (!Request.CameraActorLabel.IsEmpty() && Report.LightView != Request.CameraActorLabel)
+	{
+		return Reject(TEXT("camera_not_found"), FString::Printf(TEXT("No camera is labelled '%s'; leave camera_actor_label empty to use HyperAI_MatchCamera or the level viewport."),
+			*Request.CameraActorLabel));
+	}
+	// Local lights fill what the output bound leaves, in view order, so a level with hundreds of them still answers.
+	auto Bytes = [](const FHyperAILightingActorRecord& Record)
+	{
+		int32 Size = 64 + Record.Kind.Len() + Record.Label.Len() + Record.Path.Len();
+		for (const FHyperAILightingProperty& Property : Record.Properties)
+		{
+			Size += 24 + Property.Key.Len() + Property.Value.Len();
+		}
+		return Size;
+	};
+	int32 Used = 2048;
+	for (const FHyperAILightingActorRecord& Record : Report.Actors)
+	{
+		Used += Bytes(Record);
+	}
+	const int32 StockActors = Report.Actors.Num();
+	int32 Listed = 0;
+	for (FHyperAILightingActorRecord& Light : LocalLights)
+	{
+		Used += Bytes(Light);
+		if (Used > Request.MaxOutputBytes) break;
+		Report.Actors.Add(MoveTemp(Light));
+		++Listed;
+	}
 	Report.bOk = true;
 	Report.Status = TEXT("captured");
 	// A sky that owns its lights has no stock actors to add, and must not get any.
@@ -706,9 +743,14 @@ FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHy
 			Missing.Add(Kind);
 		}
 	}
-	Report.Diagnostic = FString::Printf(TEXT("%d lighting actors.%s%s%s"), Report.Actors.Num(),
+	const FString Local = Report.LocalLightCount == 0 ? FString(TEXT(" No point, spot or rect lights; add_light places one."))
+		: FString::Printf(TEXT(" %d point, spot and rect lights, %d listed%s%s."), Report.LocalLightCount, Listed,
+			Report.LightView.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(", those lighting the view of %s first"), *Report.LightView),
+			Listed < Report.LocalLightCount ? TEXT("; label_filter or max_local_lights (up to 128) lists others") : TEXT(""));
+	Report.Diagnostic = FString::Printf(TEXT("%d lighting actors.%s%s%s%s"), StockActors,
 		Sky.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" The sky is %s: it owns the sun, sky light and fog, so light it with set_sky_system and its variables."), *Sky),
 		Missing.IsEmpty() ? TEXT("") : *(TEXT(" None of: ") + FString::Join(Missing, TEXT(", ")) + TEXT("; the first op on one adds it.")),
+		*Local,
 		Report.bExposureLocked ? TEXT("") : TEXT(" Auto exposure is on: lock_exposure before comparing (it also turns off a sky's own exposure)."));
 	return Report;
 }

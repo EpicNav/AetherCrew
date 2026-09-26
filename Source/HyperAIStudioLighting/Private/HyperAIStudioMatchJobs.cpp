@@ -81,6 +81,7 @@ FString BuildPrompt(const EGoal Goal, const FString& Reference, const FString& S
 			+ TEXT("4. Frame the view once: a camera where the reference's camera would stand, captured with hyper_capture_view (source camera, the reference's aspect ratio). Use that same capture for every attempt.\n")
 			+ TEXT("5. Each attempt: make one change, or one coherent group such as the sun's angle and colour together, capture, and ") + Compare + TEXT("\n")
 			+ TEXT("6. Strongest levers first: the key light (angle, colour, intensity), then the sky and fog, then exposure and the post-process grade, with shadows and highlights graded apart for a painted look.\n")
+			+ TEXT("   Interiors, night scenes and practicals run on local lights: hyper_lighting_inspect lists the point, spot and rect lights lighting the camera's view first. set_light changes one by label (intensity in its intensity_units, color, temperature, attenuation_radius, source_radius, cone angles, source_width and source_height, cast_shadows, volumetric_scattering, location, aim_at), add_light places a new key, fill, rim or practical, and enabled false turns one off: nothing is deleted.\n")
 			+ FString::Printf(TEXT("7. Keep edits unsaved while you iterate. When the score reaches %d, save with bSave true and say so.\n\n"), Points(Target))
 			+ TEXT("A high score with an image that looks wrong is not a match: say what you see.");
 	}
@@ -90,7 +91,7 @@ FString BuildPrompt(const EGoal Goal, const FString& Reference, const FString& S
 		+ TEXT("2. Recall project memory (hyper_memory_recall) and look at the level (SceneTools get_current_level and find_actors). Search the project's content for meshes and materials that fit before you reach for engine shapes.\n")
 		+ TEXT("3. Place a CineCameraActor labelled HyperAI_MatchCamera where the reference's camera would stand, and capture it with hyper_capture_view (source camera, camera_actor_label HyperAI_MatchCamera, the reference's aspect ratio). Use that capture for every attempt.\n")
 		+ TEXT("4. Block out at real scale, biggest forms first, then mid-size forms, then detail (the level design pack's player metrics: a person is 180 cm, a door 220 cm high). Put things on the ground by tracing down, not by guessing heights, and keep the space playable.\n")
-		+ TEXT("5. Materials next, and lighting last: lock exposure and light it to the reference as the image-match skill's lighting steps say.") + Sky + TEXT("\n")
+		+ TEXT("5. Materials next, and lighting last: lock exposure and light it to the reference as the image-match skill's lighting steps say. Lamps, windows and fires in the reference are local lights: add_light places them and set_light shapes them.") + Sky + TEXT("\n")
 		+ TEXT("6. Each attempt: change one group, capture, and ") + Compare + TEXT("\n")
 		+ FString::Printf(TEXT("7. Save the level when the score reaches %d, and say what you built.\n\n"), Points(Target))
 		+ TEXT("A high score with an image that looks wrong is not a match: say what you see.");

@@ -1,6 +1,6 @@
 ---
 name: image-match
-description: Make a scene, environment, level layout, material, effect or UI look like a reference image, and prove it. Capture the attempt, score it against the reference with hyper_image_compare in a session, change one thing, and compare again until the score reaches the target or stops improving. Use it when the user has concept art, a photo or a generated image and says "make it look like this", "match this lighting" or "build this level", and for any HyperAI Match job. Covers Ultra Dynamic Sky.
+description: Make a scene, environment, level layout, material, effect or UI look like a reference image, and prove it. Capture the attempt, score it against the reference with hyper_image_compare in a session, change one thing, and compare again until the score reaches the target or stops improving. Use it when the user has concept art, a photo or a generated image and says "make it look like this", "match this lighting" or "build this level", and for any HyperAI Match job. Covers Ultra Dynamic Sky, and the point, spot and rect lights of interiors and night scenes.
 ---
 # Match a reference image
 
@@ -27,7 +27,7 @@ A match is a loop with a scorekeeper. You make the changes. `hyper_image_compare
 
 | Domain | Capture | Levers, strongest first |
 |---|---|---|
-| Scene, environment | `hyper_capture_view` from a camera framed like the reference (source `camera`, the reference's aspect ratio) | `hyper_lighting_apply_plan`: sun pitch, yaw, temperature and intensity; sky light; fog; sky atmosphere; post process. For a painted grade, such as a warm sky over violet shadows, grade apart with `shadows_gain`, `shadows_offset` and `highlights_gain`. Then placement and materials. |
+| Scene, environment | `hyper_capture_view` from a camera framed like the reference (source `camera`, the reference's aspect ratio) | `hyper_lighting_apply_plan`: sun pitch, yaw, temperature and intensity; the point, spot and rect lights that carry interiors and night scenes (`set_light`, `add_light`); sky light; fog; sky atmosphere; post process. For a painted grade, such as a warm sky over violet shadows, grade apart with `shadows_gain`, `shadows_offset` and `highlights_gain`. Then placement and materials. |
 | Material | A camera on a preview mesh in the level, captured with `hyper_capture_view`; or the asset preview a material edit writes | Base colour, roughness, metallic, normal strength, emissive, texture tiling: the material tools or parameter edits |
 | Effect (Niagara) | `hyper_capture_view` with `frameCount` 3-4 and `intervalSeconds` 0.25; compare the frame at the reference's moment | Spawn rate, colour over life, size, lifetime, velocity: the Niagara tools |
 | UI | A playtest `Capture` step in PIE, at the mock's resolution | Widget layout, colours, fonts, sizes: the UI tools |
@@ -55,6 +55,29 @@ With Ultra Dynamic Weather in the level, cloud coverage, fog, dust, rain and sno
 
 - With no `candidateImagePath`, `hyper_image_compare` captures the active level viewport. That is fine for a quick look, but a named camera repeats exactly, so use one for a loop.
 - After changing many lights at once, wait a few seconds before capturing: a real-time sky light takes time to catch up. If a score jumps with no reason, capture again with nothing changed before you believe it.
+
+### Local lights: interiors, night scenes and practicals
+
+When the reference is lit from inside the frame, by a lamp, a window, a fire, neon or a stage spot, the key light is a local light, not the sun.
+
+- `hyper_lighting_inspect` lists the level's point, spot and rect lights after the sun and sky. Those lighting the camera's view come first (`camera_actor_label`, else `HyperAI_MatchCamera`, else the level viewport), each with `in_view` and `distance`. It lists 32 by default; `max_local_lights` (up to 128) and `label_filter` show others. A light inside a Blueprint, such as a torch or a street lamp, lists under the actor's label with its `component`.
+- `set_light` changes one by `actor_label`. For a light inside an actor, the property is `component:<name>/<setting>`.
+- `add_light` places a new one: property `point`, `spot` or `rect`, value its world location `x,y,z`, and a label of your choosing. It is movable and marked `added_by_hyperai`. Aim spot and rect lights with `aim_at`.
+- Nothing is deleted. `enabled false` switches a light off, and undo takes an added light away.
+- Local lights are the level's, not the sky's, so they change beside Ultra Dynamic Sky too.
+
+| What the reference shows | Local light settings |
+|---|---|
+| A lamp, candle or fire | Point light: `intensity`, `temperature` 1800-2700 K, `attenuation_radius` to where its light fades, `source_radius` for soft shadows |
+| Daylight through a window or door, a softbox | Rect light in the opening: `source_width`, `source_height`, `barn_door_angle` to shape the spill, `temperature` 5500-7000 K |
+| A pool of light, a stage spot, a torch beam | Spot light: `aim_at` the subject, `outer_cone_angle` for the pool's size, `inner_cone_angle` for its edge |
+| Shafts and beams in haze | `set_fog` `volumetric_fog` true, then the light's `volumetric_scattering`, 1 to 5 |
+| Hard or soft shadows | `source_radius` or `source_width`: larger is softer. `cast_shadows` false for fills |
+| A patterned or shaped beam | `ies_profile`, an IES light profile asset, or `light_function`, a Light Function material |
+| Light everywhere, flat | Lower the fills, shorten their `attenuation_radius`, or `indirect_intensity` below 1 |
+
+- Intensity is in each light's `intensity_units` (candelas, lumens, unitless, EV or nits). `set_light` `intensity_units` switches a light to candelas or lumens and keeps it as bright, so every light can be reasoned about in one system; `add_light` places lights in the project's default units. Change intensity by ratios, twice or half, rather than guessing absolute values, and keep exposure locked: a bright interior is about EV100 8, a dim one 4.
+- Light as a lighting artist does: the key first, then the fill, then rims and practicals. One light at a time, capture, compare.
 
 ## 3. The loop
 

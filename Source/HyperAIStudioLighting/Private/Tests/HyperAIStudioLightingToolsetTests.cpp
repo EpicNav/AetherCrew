@@ -16,6 +16,12 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
+#include "Components/PointLightComponent.h"
+#include "Engine/PointLight.h"
+#include "Engine/RectLight.h"
+#include "Engine/SpotLight.h"
+#include "Engine/Scene.h"
+#include "HAL/IConsoleManager.h"
 #include "HAL/FileManager.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionSine.h"
@@ -720,6 +726,11 @@ bool FHyperAIStudioLightingSkySystemTest::RunTest(const FString& Parameters)
 	Rejects({Op(TEXT("set_sky_system"), TEXT(""), TEXT("1"))}, TEXT("needs property"));
 	FString Error;
 	TestTrue(TEXT("a post-process edit is still fine beside the sky"), Gate::ValidateOps(*World, {Op(TEXT("set_post_process"), TEXT("contrast"), TEXT("1.1"))}, Error));
+	FActorSpawnParameters LampSpawn;
+	LampSpawn.ObjectFlags |= RF_Transactional;
+	World->SpawnActor<APointLight>(FVector(0.0, 0.0, 300.0), FRotator::ZeroRotator, LampSpawn)->SetActorLabel(TEXT("Lamp"));
+	TestTrue(TEXT("a local light is the level's, not the sky's, so it may change beside the sky: ") + Error,
+		Gate::ValidateOps(*World, {Op(TEXT("set_light"), TEXT("intensity"), TEXT("20"), TEXT("Lamp"))}, Error));
 
 	const FString Before = Gate::ComputeRevision(*World);
 	const TArray<FHyperAILightingOp> Ops = {
@@ -748,6 +759,202 @@ bool FHyperAIStudioLightingSkySystemTest::RunTest(const FString& Parameters)
 	{
 		TestEqual(TEXT("two undos give back the sky's exposure"), Read(TEXT("Apply Exposure Settings")), FString(TEXT("true")));
 		TestEqual(TEXT("and its time of day"), Read(TEXT("Time of Day")), FString(TEXT("1300")));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioLightingLocalLightsTest,
+	"HyperAIStudio.Lighting.Ops.LocalLights",
+	HyperAIStudio::Lighting::Tests::Flags)
+
+bool FHyperAIStudioLightingLocalLightsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Lighting::Tests;
+	namespace Gate = HyperAIStudio::Lighting::Gate;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAILocalLightsWorld"));
+	if (!World)
+	{
+		AddError(TEXT("Could not create a test world."));
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		World->DestroyWorld(/*bInformEngineOfWorld=*/false);
+	};
+	FActorSpawnParameters Spawn;
+	Spawn.ObjectFlags |= RF_Transactional;
+	auto Place = [&](UClass* Class, const FVector& Location, const FRotator& Rotation, const TCHAR* Label)
+	{
+		AActor* Actor = World->SpawnActor(Class, &Location, &Rotation, Spawn);
+		Actor->SetActorLabel(Label);
+		return Actor;
+	};
+	APointLight* Lamp = CastChecked<APointLight>(Place(APointLight::StaticClass(), FVector(0.0, 0.0, 200.0), FRotator::ZeroRotator, TEXT("Lamp")));
+	Place(ASpotLight::StaticClass(), FVector(300.0, 0.0, 300.0), FRotator(-90.0, 0.0, 0.0), TEXT("Accent"));
+	Place(ARectLight::StaticClass(), FVector(-400.0, 0.0, 250.0), FRotator::ZeroRotator, TEXT("Window"));
+	AActor* Behind = Place(APointLight::StaticClass(), FVector(-3000.0, 0.0, 250.0), FRotator::ZeroRotator, TEXT("Behind"));
+	CastChecked<APointLight>(Behind)->PointLightComponent->AttenuationRadius = 100.f;
+	// A torch Blueprint's shape: an actor holding two lights among its components.
+	AActor* Torch = Place(AStaticMeshActor::StaticClass(), FVector(600.0, 0.0, 0.0), FRotator::ZeroRotator, TEXT("Torch"));
+	for (const TCHAR* Name : {TEXT("Flame"), TEXT("Glow")})
+	{
+		UPointLightComponent* Light = NewObject<UPointLightComponent>(Torch, Name);
+		Light->SetupAttachment(Torch->GetRootComponent());
+		Light->RegisterComponent();
+		Torch->AddInstanceComponent(Light);
+	}
+	Place(ACameraActor::StaticClass(), FVector(-1000.0, 0.0, 250.0), FRotator::ZeroRotator, TEXT("Cam"));
+
+	struct FRead
+	{
+		TArray<FHyperAILightingActorRecord> Records;
+		int32 Total = 0;
+		FString View;
+	};
+	auto Read = [&](const TCHAR* Camera, const TCHAR* Filter, const int32 Limit)
+	{
+		FRead Out;
+		Out.Records = Gate::ReadLocalLights(*World, Camera, Filter, Limit, Out.Total, Out.View);
+		return Out;
+	};
+	auto Value = [](const TArray<FHyperAILightingActorRecord>& Records, const TCHAR* Label, const TCHAR* Key, const TCHAR* Component = TEXT(""))
+	{
+		for (const FHyperAILightingActorRecord& Record : Records)
+		{
+			const FHyperAILightingProperty* Held = Record.Properties.FindByPredicate([](const FHyperAILightingProperty& Property) { return Property.Key == TEXT("component"); });
+			if (Record.Label != Label || (Held ? Held->Value : FString()) != Component) continue;
+			const FHyperAILightingProperty* Found = Record.Properties.FindByPredicate([Key](const FHyperAILightingProperty& Property) { return Property.Key == Key; });
+			return Found ? Found->Value : FString(TEXT("<missing>"));
+		}
+		return FString(TEXT("<missing>"));
+	};
+	auto KindOf = [](const TArray<FHyperAILightingActorRecord>& Records, const TCHAR* Label)
+	{
+		const FHyperAILightingActorRecord* Found = Records.FindByPredicate([Label](const FHyperAILightingActorRecord& Record) { return Record.Label == Label; });
+		return Found ? Found->Kind : FString(TEXT("<missing>"));
+	};
+
+	const FRead All = Read(TEXT(""), TEXT(""), 32);
+	TestEqual(TEXT("every local light is counted, the torch's two included"), All.Total, 6);
+	TestEqual(TEXT("and every one is listed"), All.Records.Num(), 6);
+	TestEqual(TEXT("a test world has no view to order by"), All.View, FString());
+	TestEqual(TEXT("the lamp reads as a point light"), KindOf(All.Records, TEXT("Lamp")), FString(TEXT("point_light")));
+	TestEqual(TEXT("the accent as a spot light"), KindOf(All.Records, TEXT("Accent")), FString(TEXT("spot_light")));
+	TestEqual(TEXT("the window as a rect light"), KindOf(All.Records, TEXT("Window")), FString(TEXT("rect_light")));
+	TestNotEqual(TEXT("a spot light reports its cone"), Value(All.Records, TEXT("Accent"), TEXT("outer_cone_angle")), FString(TEXT("<missing>")));
+	TestNotEqual(TEXT("a rect light its size"), Value(All.Records, TEXT("Window"), TEXT("source_width")), FString(TEXT("<missing>")));
+	TestEqual(TEXT("a point light has no cone"), Value(All.Records, TEXT("Lamp"), TEXT("outer_cone_angle")), FString(TEXT("<missing>")));
+	TestNotEqual(TEXT("each says what units its intensity is in"), Value(All.Records, TEXT("Lamp"), TEXT("intensity_units")), FString(TEXT("<missing>")));
+	TestEqual(TEXT("a light inside an actor is read by its component"), Value(All.Records, TEXT("Torch"), TEXT("enabled"), TEXT("Glow")), FString(TEXT("true")));
+
+	const FRead Seen = Read(TEXT("Cam"), TEXT(""), 32);
+	TestEqual(TEXT("ordered from the named camera"), Seen.View, FString(TEXT("Cam")));
+	TestTrue(TEXT("the nearest light in view comes first"), Seen.Records.Num() == 6 && Seen.Records[0].Label == TEXT("Window"));
+	TestEqual(TEXT("and says it is in view"), Value(Seen.Records, TEXT("Window"), TEXT("in_view")), FString(TEXT("true")));
+	TestEqual(TEXT("a light behind the camera that reaches nowhere near the view is not"), Value(Seen.Records, TEXT("Behind"), TEXT("in_view")), FString(TEXT("false")));
+	TestTrue(TEXT("and comes last"), Seen.Records.Num() == 6 && Seen.Records.Last().Label == TEXT("Behind"));
+	TestEqual(TEXT("a filter keeps matching labels, in any case"), Read(TEXT(""), TEXT("tor"), 32).Records.Num(), 2);
+	TestEqual(TEXT("while the total still counts every light"), Read(TEXT(""), TEXT("tor"), 32).Total, 6);
+	TestEqual(TEXT("the limit bounds the list"), Read(TEXT("Cam"), TEXT(""), 2).Records.Num(), 2);
+	TestEqual(TEXT("a camera that is not there gives no view"), Read(TEXT("NoCam"), TEXT(""), 32).View, FString());
+
+	auto Rejects = [&](const TArray<FHyperAILightingOp>& Ops, const TCHAR* Expected)
+	{
+		FString Error;
+		const bool bValid = Gate::ValidateOps(*World, Ops, Error);
+		TestTrue(*FString::Printf(TEXT("rejected with '%s' (got '%s')"), Expected, *Error), !bValid && Error.Contains(Expected));
+	};
+	Rejects({Op(TEXT("set_light"), TEXT("outer_cone_angle"), TEXT("30"), TEXT("Lamp"))}, TEXT("applies only to spot lights"));
+	Rejects({Op(TEXT("set_light"), TEXT("source_width"), TEXT("100"), TEXT("Accent"))}, TEXT("applies only to rect lights"));
+	Rejects({Op(TEXT("set_light"), TEXT("aim_at"), TEXT("0,0,0"), TEXT("Lamp"))}, TEXT("applies only to spot and rect lights"));
+	Rejects({Op(TEXT("set_light"), TEXT("intensity"), TEXT("5"), TEXT("Torch"))}, TEXT("holds 2 lights"));
+	Rejects({Op(TEXT("set_light"), TEXT("component:Wick/intensity"), TEXT("5"), TEXT("Torch"))}, TEXT("no light component 'Wick'"));
+	Rejects({Op(TEXT("set_light"), TEXT("component:Glow/location"), TEXT("0,0,0"), TEXT("Torch"))}, TEXT("moves and aims only light actors"));
+	Rejects({Op(TEXT("set_light"), TEXT("intensity"), TEXT("5"), TEXT("Nobody"))}, TEXT("no actor is labelled 'Nobody'"));
+	Rejects({Op(TEXT("set_light"), TEXT("intensity"), TEXT("-1"), TEXT("Lamp"))}, TEXT("from 0 to"));
+	Rejects({Op(TEXT("set_light"), TEXT("color"), TEXT("2,0,0"), TEXT("Lamp"))}, TEXT("r,g,b"));
+	Rejects({Op(TEXT("set_light"), TEXT("glow"), TEXT("1"), TEXT("Lamp"))}, TEXT("no setting 'glow'"));
+	Rejects({Op(TEXT("set_light"), TEXT("ies_profile"), TEXT("/Engine/BasicShapes/Cube"), TEXT("Lamp"))}, TEXT("not an IES light profile"));
+	Rejects({Op(TEXT("set_light"), TEXT("intensity"), TEXT("5"))}, TEXT("needs actor_label"));
+	Rejects({Op(TEXT("add_light"), TEXT("point"), TEXT("0,0,100"), TEXT("Lamp"))}, TEXT("already labelled 'Lamp'"));
+	Rejects({Op(TEXT("add_light"), TEXT("cone"), TEXT("0,0,100"), TEXT("Fill"))}, TEXT("point, spot or rect"));
+	Rejects({Op(TEXT("add_light"), TEXT("spot"), TEXT("up high"), TEXT("Fill"))}, TEXT("x,y,z"));
+	Rejects({Op(TEXT("add_light"), TEXT("spot"), TEXT("0,0,100"), TEXT("Fill")), Op(TEXT("set_light"), TEXT("source_width"), TEXT("50"), TEXT("Fill"))},
+		TEXT("applies only to rect lights"));
+	Rejects({Op(TEXT("set_fog"), TEXT("volumetric_fog"), TEXT("maybe"))}, TEXT("takes true or false"));
+	Rejects({Op(TEXT("set_light"), TEXT("intensity_units"), TEXT("furlongs"), TEXT("Lamp"))}, TEXT("takes unitless, candelas, lumens"));
+	FString Error;
+	TestTrue(TEXT("a later op may set a light an earlier op adds: ") + Error, Gate::ValidateOps(*World,
+		{Op(TEXT("add_light"), TEXT("rect"), TEXT("100,100,300"), TEXT("Fill")), Op(TEXT("set_light"), TEXT("source_width"), TEXT("80"), TEXT("Fill"))}, Error));
+	TestEqual(TEXT("validation adds nothing"), Read(TEXT(""), TEXT(""), 32).Total, 6);
+
+	const FString Before = Gate::ComputeRevision(*World);
+	const TArray<FHyperAILightingOp> Ops = {
+		Op(TEXT("set_light"), TEXT("intensity"), TEXT("12"), TEXT("Lamp")),
+		Op(TEXT("set_light"), TEXT("temperature"), TEXT("2700"), TEXT("Lamp")),
+		Op(TEXT("set_light"), TEXT("attenuation_radius"), TEXT("900"), TEXT("Lamp")),
+		Op(TEXT("set_light"), TEXT("source_radius"), TEXT("5"), TEXT("Lamp")),
+		Op(TEXT("set_light"), TEXT("outer_cone_angle"), TEXT("30"), TEXT("Accent")),
+		Op(TEXT("set_light"), TEXT("aim_at"), TEXT("0,0,0"), TEXT("Accent")),
+		Op(TEXT("set_light"), TEXT("volumetric_scattering"), TEXT("3"), TEXT("Accent")),
+		Op(TEXT("set_light"), TEXT("source_width"), TEXT("200"), TEXT("Window")),
+		Op(TEXT("set_light"), TEXT("barn_door_angle"), TEXT("45"), TEXT("Window")),
+		Op(TEXT("set_light"), TEXT("cast_shadows"), TEXT("false"), TEXT("Window")),
+		Op(TEXT("set_light"), TEXT("component:Glow/enabled"), TEXT("false"), TEXT("Torch")),
+		Op(TEXT("add_light"), TEXT("rect"), TEXT("100,100,300"), TEXT("Fill")),
+		Op(TEXT("set_light"), TEXT("intensity"), TEXT("4"), TEXT("Fill")),
+		Op(TEXT("set_light"), TEXT("aim_at"), TEXT("100,100,0"), TEXT("Fill")),
+		Op(TEXT("set_fog"), TEXT("volumetric_fog"), TEXT("true")),
+		Op(TEXT("set_fog"), TEXT("volumetric_albedo"), TEXT("0.9,0.8,0.7"))};
+	TArray<AActor*> Touched;
+	TestTrue(TEXT("the plan applies: ") + Error, Gate::ApplyOps(*World, Ops, Touched, Error));
+	const FRead After = Read(TEXT(""), TEXT(""), 32);
+	TestEqual(TEXT("one light was added"), After.Total, 7);
+	TestEqual(TEXT("lamp intensity"), Value(After.Records, TEXT("Lamp"), TEXT("intensity")), FString(TEXT("12")));
+	TestEqual(TEXT("lamp temperature"), Value(After.Records, TEXT("Lamp"), TEXT("temperature")), FString(TEXT("2700")));
+	TestEqual(TEXT("which switches temperature on"), Value(After.Records, TEXT("Lamp"), TEXT("use_temperature")), FString(TEXT("true")));
+	TestEqual(TEXT("lamp reach"), Value(After.Records, TEXT("Lamp"), TEXT("attenuation_radius")), FString(TEXT("900")));
+	TestEqual(TEXT("lamp size"), Value(After.Records, TEXT("Lamp"), TEXT("source_radius")), FString(TEXT("5")));
+	TestEqual(TEXT("accent cone"), Value(After.Records, TEXT("Accent"), TEXT("outer_cone_angle")), FString(TEXT("30")));
+	TestEqual(TEXT("accent shafts"), Value(After.Records, TEXT("Accent"), TEXT("volumetric_scattering")), FString(TEXT("3")));
+	TestTrue(TEXT("the accent now points down at the origin: ") + Value(After.Records, TEXT("Accent"), TEXT("rotation")),
+		Value(After.Records, TEXT("Accent"), TEXT("rotation")).StartsWith(TEXT("-45")));
+	TestEqual(TEXT("window width"), Value(After.Records, TEXT("Window"), TEXT("source_width")), FString(TEXT("200")));
+	TestEqual(TEXT("window barn doors"), Value(After.Records, TEXT("Window"), TEXT("barn_door_angle")), FString(TEXT("45")));
+	TestEqual(TEXT("window shadows off"), Value(After.Records, TEXT("Window"), TEXT("cast_shadows")), FString(TEXT("false")));
+	TestEqual(TEXT("the torch's glow is off"), Value(After.Records, TEXT("Torch"), TEXT("enabled"), TEXT("Glow")), FString(TEXT("false")));
+	TestEqual(TEXT("its flame is not"), Value(After.Records, TEXT("Torch"), TEXT("enabled"), TEXT("Flame")), FString(TEXT("true")));
+	TestEqual(TEXT("the added light is a rect light"), KindOf(After.Records, TEXT("Fill")), FString(TEXT("rect_light")));
+	TestEqual(TEXT("marked as added"), Value(After.Records, TEXT("Fill"), TEXT("added_by_hyperai")), FString(TEXT("true")));
+	TestEqual(TEXT("and movable"), Value(After.Records, TEXT("Fill"), TEXT("mobility")), FString(TEXT("Movable")));
+	TestEqual(TEXT("set in the same plan"), Value(After.Records, TEXT("Fill"), TEXT("intensity")), FString(TEXT("4")));
+	TestTrue(TEXT("and pointing straight down: ") + Value(After.Records, TEXT("Fill"), TEXT("rotation")),
+		Value(After.Records, TEXT("Fill"), TEXT("rotation")).StartsWith(TEXT("-90")));
+	TestEqual(TEXT("volumetric fog is on"), ValueOf(Gate::ReadActors(*World), TEXT("fog"), TEXT("volumetric_fog")), FString(TEXT("true")));
+	TestNotEqual(TEXT("the revision moved"), Gate::ComputeRevision(*World), Before);
+	TestEqual(TEXT("every op resolves to its actor, for saving"), Gate::ResolveTargets(*World, Ops).Num(), 6);
+
+	static const TConsoleVariableData<int32>* DefaultUnits = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.DefaultFeature.LightUnits"));
+	TestEqual(TEXT("an added light is in the project's default light units, as a placed one would be"), Value(After.Records, TEXT("Fill"), TEXT("intensity_units")),
+		StaticEnum<ELightUnits>()->GetNameStringByValue(DefaultUnits ? DefaultUnits->GetValueOnGameThread() : 0).ToLower());
+	const float Brightness = Lamp->PointLightComponent->ComputeLightBrightness();
+	const FString Units = Value(After.Records, TEXT("Lamp"), TEXT("intensity_units")) == TEXT("lumens") ? TEXT("candelas") : TEXT("lumens");
+	Touched.Reset();
+	TestTrue(TEXT("units change: ") + Error, Gate::ApplyOps(*World, {Op(TEXT("set_light"), TEXT("intensity_units"), *Units, TEXT("Lamp"))}, Touched, Error));
+	TestEqual(TEXT("to the units asked for"), Value(Read(TEXT(""), TEXT(""), 32).Records, TEXT("Lamp"), TEXT("intensity_units")), Units);
+	TestTrue(TEXT("and the lamp is as bright as before"), FMath::IsNearlyEqual(Lamp->PointLightComponent->ComputeLightBrightness(), Brightness, Brightness * 0.001f + 0.001f));
+
+	const FString Listed = Gate::ComputeRevision(*World);
+	Touched.Reset();
+	TestTrue(TEXT("a far light changes: ") + Error, Gate::ApplyOps(*World, {Op(TEXT("set_light"), TEXT("intensity"), TEXT("3"), TEXT("Behind"))}, Touched, Error));
+	TestNotEqual(TEXT("the revision covers lights no short listing shows"), Gate::ComputeRevision(*World), Listed);
+
+	FlushAsyncLoading();
+	if (GEditor && GEditor->UndoTransaction())
+	{
+		TestNotEqual(TEXT("one undo takes the far light's change back"), Value(Read(TEXT(""), TEXT(""), 32).Records, TEXT("Behind"), TEXT("intensity")), FString(TEXT("3")));
 	}
 	return true;
 }

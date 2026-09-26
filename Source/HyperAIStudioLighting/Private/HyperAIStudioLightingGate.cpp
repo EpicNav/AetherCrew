@@ -2,16 +2,26 @@
 
 #include "HyperAIStudioLightingGate.h"
 
+#include "Camera/CameraComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/MeshComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
+#include "Components/PointLightComponent.h"
+#include "Components/RectLightComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "Editor.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/ExponentialHeightFog.h"
+#include "Engine/Light.h"
+#include "Engine/PointLight.h"
 #include "Engine/PostProcessVolume.h"
+#include "Engine/RectLight.h"
+#include "Engine/Scene.h"
 #include "Engine/SkyLight.h"
+#include "Engine/SpotLight.h"
+#include "Engine/TextureLightProfile.h"
 #include "EngineUtils.h"
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
@@ -19,6 +29,7 @@
 #include "ImageCore.h"
 #include "ImageUtils.h"
 #include "LevelEditorViewport.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/FileHelper.h"
 #include "Misc/StringOutputDevice.h"
@@ -26,6 +37,7 @@
 #include "Misc/Paths.h"
 #include "ScopedTransaction.h"
 #include "UObject/SoftObjectPath.h"
+#include "UObject/UObjectIterator.h"
 #include "UnrealClient.h"
 
 #define LOCTEXT_NAMESPACE "HyperAIStudioLighting"
@@ -383,6 +395,9 @@ namespace HyperAIStudio::Lighting::Gate
 				Add(TEXT("start_distance"), Number(Component.StartDistance));
 				Add(TEXT("inscattering_color"), Colour(Component.FogInscatteringLuminance));
 				Add(TEXT("volumetric_fog"), Component.bEnableVolumetricFog ? TEXT("true") : TEXT("false"));
+				Add(TEXT("volumetric_scattering_distribution"), Number(Component.VolumetricFogScatteringDistribution));
+				Add(TEXT("volumetric_albedo"), Colour(FLinearColor(Component.VolumetricFogAlbedo)));
+				Add(TEXT("volumetric_extinction_scale"), Number(Component.VolumetricFogExtinctionScale));
 			}
 			else if (const ASkyAtmosphere* Atmosphere = Cast<ASkyAtmosphere>(&Actor); Atmosphere && Atmosphere->GetComponent())
 			{
@@ -421,6 +436,8 @@ namespace HyperAIStudio::Lighting::Gate
 			bool bColour;
 			float Min;
 			float Max;
+			/** Takes true or false. */
+			bool bBool = false;
 		};
 
 		const FPropertySpec PropertySpecs[] = {
@@ -436,6 +453,11 @@ namespace HyperAIStudio::Lighting::Gate
 			{TEXT("fog"), TEXT("height_falloff"), false, 0.001f, 2.f},
 			{TEXT("fog"), TEXT("start_distance"), false, 0.f, 1000000.f},
 			{TEXT("fog"), TEXT("inscattering_color"), true, 0.f, 10.f},
+			// Volumetric fog is what a spot or window light's shafts show in.
+			{TEXT("fog"), TEXT("volumetric_fog"), false, 0.f, 1.f, true},
+			{TEXT("fog"), TEXT("volumetric_scattering_distribution"), false, -0.9f, 0.9f},
+			{TEXT("fog"), TEXT("volumetric_albedo"), true, 0.f, 1.f},
+			{TEXT("fog"), TEXT("volumetric_extinction_scale"), false, 0.1f, 10.f},
 			{TEXT("sky_atmosphere"), TEXT("rayleigh_scale"), false, 0.f, 2.f},
 			{TEXT("sky_atmosphere"), TEXT("mie_scale"), false, 0.f, 5.f},
 			{TEXT("post_process"), TEXT("exposure_bias"), false, -15.f, 15.f},
@@ -448,6 +470,68 @@ namespace HyperAIStudio::Lighting::Gate
 			{TEXT("post_process"), TEXT("shadows_offset"), true, -0.5f, 0.5f},
 			{TEXT("post_process"), TEXT("highlights_gain"), true, 0.f, 2.f},
 		};
+
+		enum ELocalLightMask : uint8
+		{
+			PointMask = 1,
+			SpotMask = 2,
+			RectMask = 4,
+			AllLocal = PointMask | SpotMask | RectMask,
+		};
+
+		enum class ELightValue : uint8
+		{
+			Number,
+			Colour,
+			Bool,
+			Vector,
+			Rotator,
+			Asset,
+			Units,
+		};
+
+		/** A set_light setting, the value it takes and the light types it applies to. */
+		struct FLightSpec
+		{
+			const TCHAR* Key;
+			ELightValue Type;
+			uint8 Mask;
+			float Min;
+			float Max;
+		};
+
+		const FLightSpec LightSpecs[] = {
+			{TEXT("intensity"), ELightValue::Number, AllLocal, 0.f, 1000000.f},
+			{TEXT("intensity_units"), ELightValue::Units, AllLocal, 0.f, 0.f},
+			{TEXT("color"), ELightValue::Colour, AllLocal, 0.f, 1.f},
+			{TEXT("temperature"), ELightValue::Number, AllLocal, 1700.f, 12000.f},
+			{TEXT("use_temperature"), ELightValue::Bool, AllLocal, 0.f, 1.f},
+			{TEXT("attenuation_radius"), ELightValue::Number, AllLocal, 1.f, 100000.f},
+			{TEXT("source_radius"), ELightValue::Number, PointMask | SpotMask, 0.f, 10000.f},
+			{TEXT("soft_source_radius"), ELightValue::Number, PointMask | SpotMask, 0.f, 10000.f},
+			{TEXT("source_length"), ELightValue::Number, PointMask | SpotMask, 0.f, 10000.f},
+			{TEXT("inner_cone_angle"), ELightValue::Number, SpotMask, 0.f, 80.f},
+			{TEXT("outer_cone_angle"), ELightValue::Number, SpotMask, 1.f, 80.f},
+			{TEXT("source_width"), ELightValue::Number, RectMask, 1.f, 10000.f},
+			{TEXT("source_height"), ELightValue::Number, RectMask, 1.f, 10000.f},
+			{TEXT("barn_door_angle"), ELightValue::Number, RectMask, 0.f, 90.f},
+			{TEXT("barn_door_length"), ELightValue::Number, RectMask, 0.f, 10000.f},
+			{TEXT("cast_shadows"), ELightValue::Bool, AllLocal, 0.f, 1.f},
+			{TEXT("volumetric_scattering"), ELightValue::Number, AllLocal, 0.f, 20.f},
+			{TEXT("indirect_intensity"), ELightValue::Number, AllLocal, 0.f, 20.f},
+			{TEXT("specular_scale"), ELightValue::Number, AllLocal, 0.f, 4.f},
+			// Off, never deleted: a light the level had stays in it.
+			{TEXT("enabled"), ELightValue::Bool, AllLocal, 0.f, 1.f},
+			{TEXT("ies_profile"), ELightValue::Asset, AllLocal, 0.f, 0.f},
+			{TEXT("use_ies_brightness"), ELightValue::Bool, AllLocal, 0.f, 1.f},
+			{TEXT("light_function"), ELightValue::Asset, AllLocal, 0.f, 0.f},
+			{TEXT("location"), ELightValue::Vector, AllLocal, 0.f, 0.f},
+			{TEXT("rotation"), ELightValue::Rotator, SpotMask | RectMask, 0.f, 0.f},
+			{TEXT("aim_at"), ELightValue::Vector, SpotMask | RectMask, 0.f, 0.f},
+		};
+
+		/** Lights add_light places: the level can tell them from its own. */
+		const FName AddedLightTag(TEXT("HyperAI.AddedLight"));
 
 		struct FParsedOp
 		{
@@ -465,6 +549,13 @@ namespace HyperAIStudio::Lighting::Gate
 			// set_sky_system: the variable, by the name its Details panel shows, and its value as typed.
 			FString SkyVariable;
 			FString SkyValue;
+			// set_light and add_light: a point, spot or rect light by label, and a setting from LightSpecs or the type to add.
+			const FLightSpec* LightSpec = nullptr;
+			uint8 LightMask = 0;
+			FVector Vector = FVector::ZeroVector;
+			FRotator Rotator = FRotator::ZeroRotator;
+			bool bFlag = false;
+			UObject* Asset = nullptr;
 		};
 
 		bool ParseNumber(const FString& Text, const float Min, const float Max, float& Out)
@@ -472,9 +563,115 @@ namespace HyperAIStudio::Lighting::Gate
 			return !Text.IsEmpty() && LexTryParseString(Out, *Text.TrimStartAndEnd()) && FMath::IsFinite(Out) && Out >= Min && Out <= Max;
 		}
 
+		/** World "x,y,z" in centimetres, within 20 km of the origin. */
+		bool ParseVector(const FString& Text, FVector& Out)
+		{
+			constexpr float Reach = 2000000.f;
+			TArray<FString> Parts;
+			Text.ParseIntoArray(Parts, TEXT(","));
+			float X = 0.f, Y = 0.f, Z = 0.f;
+			if (Parts.Num() != 3 || !ParseNumber(Parts[0], -Reach, Reach, X) || !ParseNumber(Parts[1], -Reach, Reach, Y) || !ParseNumber(Parts[2], -Reach, Reach, Z))
+			{
+				return false;
+			}
+			Out = FVector(X, Y, Z);
+			return true;
+		}
+
+		bool IsLightFunction(const UObject* Object)
+		{
+			const UMaterialInterface* Material = Cast<UMaterialInterface>(Object);
+			return Material && Material->GetMaterial() && Material->GetMaterial()->MaterialDomain == MD_LightFunction;
+		}
+
+		bool ParseLightValue(const FLightSpec& Spec, const FString& Text, FParsedOp& Out, FString& OutError)
+		{
+			const FString Value = Text.TrimStartAndEnd();
+			TArray<FString> Parts;
+			Value.ParseIntoArray(Parts, TEXT(","));
+			switch (Spec.Type)
+			{
+			case ELightValue::Number:
+				if (ParseNumber(Value, Spec.Min, Spec.Max, Out.Value)) return true;
+				OutError = FString::Printf(TEXT("set_light %s needs a number from %g to %g."), Spec.Key, Spec.Min, Spec.Max);
+				return false;
+			case ELightValue::Colour:
+			{
+				float R = 0.f, G = 0.f, B = 0.f;
+				if (Parts.Num() == 3 && ParseNumber(Parts[0], 0.f, 1.f, R) && ParseNumber(Parts[1], 0.f, 1.f, G) && ParseNumber(Parts[2], 0.f, 1.f, B))
+				{
+					Out.Colour = FLinearColor(R, G, B);
+					return true;
+				}
+				OutError = TEXT("set_light color needs linear \"r,g,b\" with each from 0 to 1.");
+				return false;
+			}
+			case ELightValue::Bool:
+				Out.bFlag = Value.Equals(TEXT("true"), ESearchCase::IgnoreCase) || Value == TEXT("1");
+				if (Out.bFlag || Value.Equals(TEXT("false"), ESearchCase::IgnoreCase) || Value == TEXT("0")) return true;
+				OutError = FString::Printf(TEXT("set_light %s takes true or false."), Spec.Key);
+				return false;
+			case ELightValue::Vector:
+				if (ParseVector(Value, Out.Vector)) return true;
+				OutError = FString::Printf(TEXT("set_light %s needs world \"x,y,z\" in centimetres."), Spec.Key);
+				return false;
+			case ELightValue::Rotator:
+			{
+				float Pitch = 0.f, Yaw = 0.f, Roll = 0.f;
+				if (Parts.Num() == 3 && ParseNumber(Parts[0], -360.f, 360.f, Pitch) && ParseNumber(Parts[1], -360.f, 360.f, Yaw) && ParseNumber(Parts[2], -360.f, 360.f, Roll))
+				{
+					Out.Rotator = FRotator(Pitch, Yaw, Roll);
+					return true;
+				}
+				OutError = TEXT("set_light rotation needs \"pitch,yaw,roll\" in degrees from -360 to 360; aim_at points it at a world \"x,y,z\" instead.");
+				return false;
+			}
+			case ELightValue::Units:
+			{
+				const UEnum* Units = StaticEnum<ELightUnits>();
+				TArray<FString> Names;
+				for (int32 Index = 0; Index < Units->NumEnums() - (Units->ContainsExistingMax() ? 1 : 0); ++Index)
+				{
+					Names.Add(Units->GetNameStringByIndex(Index).ToLower());
+					if (Names.Last() == Value.ToLower())
+					{
+						Out.Value = static_cast<float>(Units->GetValueByIndex(Index));
+						return true;
+					}
+				}
+				OutError = FString::Printf(TEXT("set_light intensity_units takes %s; the light keeps its brightness."), *FString::Join(Names, TEXT(", ")));
+				return false;
+			}
+			case ELightValue::Asset:
+			{
+				if (Value.Equals(TEXT("none"), ESearchCase::IgnoreCase))
+				{
+					Out.Asset = nullptr;
+					return true;
+				}
+				FString Path = Value;
+				if (Path.StartsWith(TEXT("/")) && !Path.Contains(TEXT(".")))
+				{
+					Path += TEXT(".") + FPackageName::GetShortName(Path);
+				}
+				UObject* Loaded = Path.StartsWith(TEXT("/")) ? FSoftObjectPath(Path).TryLoad() : nullptr;
+				const bool bIes = FCString::Strcmp(Spec.Key, TEXT("ies_profile")) == 0;
+				if (bIes ? Loaded && Loaded->IsA<UTextureLightProfile>() : IsLightFunction(Loaded))
+				{
+					Out.Asset = Loaded;
+					return true;
+				}
+				OutError = bIes ? FString::Printf(TEXT("set_light ies_profile '%s' is not an IES light profile; pass its path, or none."), *Value.Left(128))
+					: FString::Printf(TEXT("set_light light_function '%s' is not a material in the Light Function domain; pass its path, or none."), *Value.Left(128));
+				return false;
+			}
+			}
+			return false;
+		}
+
 		bool ParseOp(const FHyperAILightingOp& Op, FParsedOp& Out, FString& OutError)
 		{
-			if (Op.ActorLabel.Len() > MaxLabelChars || Op.Property.Len() > 64 || Op.Value.Len() > 128)
+			if (Op.ActorLabel.Len() > MaxLabelChars || Op.Property.Len() > 128 || Op.Value.Len() > 128)
 			{
 				OutError = TEXT("actor_label, property or value is too long.");
 				return false;
@@ -553,6 +750,57 @@ namespace HyperAIStudio::Lighting::Gate
 				}
 				return true;
 			}
+			if (Op.Kind == TEXT("add_light"))
+			{
+				Out.Kind = TEXT("add_light");
+				Out.LightMask = Op.Property == TEXT("point") ? PointMask : Op.Property == TEXT("spot") ? SpotMask : Op.Property == TEXT("rect") ? RectMask : 0;
+				if (Op.ActorLabel.IsEmpty() || Op.ActorLabel != Op.ActorLabel.TrimStartAndEnd())
+				{
+					OutError = TEXT("add_light needs actor_label: the new light's label, such as Key_Window or Practical_Lamp_1.");
+					return false;
+				}
+				if (!Out.LightMask)
+				{
+					OutError = TEXT("add_light property is the light's type: point, spot or rect.");
+					return false;
+				}
+				if (!ParseVector(Op.Value, Out.Vector))
+				{
+					OutError = TEXT("add_light value is where it goes, as world \"x,y,z\" in centimetres.");
+					return false;
+				}
+				return true;
+			}
+			if (Op.Kind == TEXT("set_light"))
+			{
+				Out.Kind = TEXT("light");
+				if (Op.ActorLabel.IsEmpty())
+				{
+					OutError = TEXT("set_light needs actor_label: the light, or the actor holding it (hyper_lighting_inspect lists them).");
+					return false;
+				}
+				FString Key = Op.Property;
+				if (Key.StartsWith(TEXT("component:")) && (!Key.RightChop(10).Split(TEXT("/"), &Out.ComponentName, &Key) || Out.ComponentName.IsEmpty()))
+				{
+					OutError = TEXT("set_light property is a setting, or component:<name>/<setting> for one light among several in an actor.");
+					return false;
+				}
+				for (const FLightSpec& Spec : LightSpecs)
+				{
+					if (Key == Spec.Key) Out.LightSpec = &Spec;
+				}
+				if (!Out.LightSpec)
+				{
+					TArray<FString> Keys;
+					for (const FLightSpec& Spec : LightSpecs)
+					{
+						Keys.Add(Spec.Key);
+					}
+					OutError = FString::Printf(TEXT("set_light has no setting '%s'; use one of %s."), *Key, *FString::Join(Keys, TEXT(", ")));
+					return false;
+				}
+				return ParseLightValue(*Out.LightSpec, Op.Value, Out, OutError);
+			}
 			if (!Op.Kind.StartsWith(TEXT("set_")))
 			{
 				OutError = FString::Printf(TEXT("Unknown kind '%s'."), *Op.Kind);
@@ -561,7 +809,7 @@ namespace HyperAIStudio::Lighting::Gate
 			Out.Kind = Op.Kind.RightChop(4);
 			if (!ClassOf(Out.Kind))
 			{
-				OutError = FString::Printf(TEXT("Unknown kind '%s': use set_sun, set_sky_light, set_fog, set_sky_atmosphere, set_post_process, lock_exposure, unlock_exposure, set_actor_material or set_sky_system."), *Op.Kind);
+				OutError = FString::Printf(TEXT("Unknown kind '%s': use set_sun, set_sky_light, set_fog, set_sky_atmosphere, set_post_process, lock_exposure, unlock_exposure, set_light, add_light, set_actor_material or set_sky_system."), *Op.Kind);
 				return false;
 			}
 			for (const FPropertySpec& Spec : PropertySpecs)
@@ -580,6 +828,18 @@ namespace HyperAIStudio::Lighting::Gate
 				}
 				OutError = FString::Printf(TEXT("%s has no property '%s'; use one of %s."), *Op.Kind, *Op.Property, *FString::Join(Keys, TEXT(", ")));
 				return false;
+			}
+			if (Out.Spec->bBool)
+			{
+				const FString Flag = Op.Value.TrimStartAndEnd();
+				const bool bTrue = Flag.Equals(TEXT("true"), ESearchCase::IgnoreCase) || Flag == TEXT("1");
+				if (!bTrue && !Flag.Equals(TEXT("false"), ESearchCase::IgnoreCase) && Flag != TEXT("0"))
+				{
+					OutError = FString::Printf(TEXT("%s %s takes true or false."), *Op.Kind, *Op.Property);
+					return false;
+				}
+				Out.Value = bTrue ? 1.f : 0.f;
+				return true;
 			}
 			if (Out.Spec->bColour)
 			{
@@ -653,6 +913,10 @@ namespace HyperAIStudio::Lighting::Gate
 				else if (Key == TEXT("height_falloff")) Edit(C, GET_MEMBER_NAME_CHECKED(UExponentialHeightFogComponent, FogHeightFalloff), [&] { C.FogHeightFalloff = Op.Value; });
 				else if (Key == TEXT("start_distance")) Edit(C, GET_MEMBER_NAME_CHECKED(UExponentialHeightFogComponent, StartDistance), [&] { C.StartDistance = Op.Value; });
 				else if (Key == TEXT("inscattering_color")) Edit(C, GET_MEMBER_NAME_CHECKED(UExponentialHeightFogComponent, FogInscatteringLuminance), [&] { C.FogInscatteringLuminance = Op.Colour; });
+				else if (Key == TEXT("volumetric_fog")) Edit(C, GET_MEMBER_NAME_CHECKED(UExponentialHeightFogComponent, bEnableVolumetricFog), [&] { C.bEnableVolumetricFog = Op.Value > 0.5f; });
+				else if (Key == TEXT("volumetric_scattering_distribution")) Edit(C, GET_MEMBER_NAME_CHECKED(UExponentialHeightFogComponent, VolumetricFogScatteringDistribution), [&] { C.VolumetricFogScatteringDistribution = Op.Value; });
+				else if (Key == TEXT("volumetric_albedo")) Edit(C, GET_MEMBER_NAME_CHECKED(UExponentialHeightFogComponent, VolumetricFogAlbedo), [&] { C.VolumetricFogAlbedo = Op.Colour.ToFColor(true); });
+				else if (Key == TEXT("volumetric_extinction_scale")) Edit(C, GET_MEMBER_NAME_CHECKED(UExponentialHeightFogComponent, VolumetricFogExtinctionScale), [&] { C.VolumetricFogExtinctionScale = Op.Value; });
 			}
 			else if (ASkyAtmosphere* Atmosphere = Cast<ASkyAtmosphere>(&Actor))
 			{
@@ -797,10 +1061,294 @@ namespace HyperAIStudio::Lighting::Gate
 			return Actor;
 		}
 
+		uint8 MaskOf(const ULocalLightComponent& Light)
+		{
+			// A spot light is a point light too, so it is asked first.
+			return Light.IsA<USpotLightComponent>() ? SpotMask : Light.IsA<URectLightComponent>() ? RectMask : PointMask;
+		}
+
+		const TCHAR* LightTypeOf(const uint8 Mask)
+		{
+			return Mask == SpotMask ? TEXT("spot") : Mask == RectMask ? TEXT("rect") : TEXT("point");
+		}
+
+		FString KindsIn(const uint8 Mask)
+		{
+			TArray<FString> Names;
+			for (const uint8 Type : {uint8(PointMask), uint8(SpotMask), uint8(RectMask)})
+			{
+				if (Mask & Type) Names.Add(LightTypeOf(Type));
+			}
+			FString Joined = Names[0];
+			for (int32 Index = 1; Index < Names.Num(); ++Index)
+			{
+				Joined += (Index + 1 == Names.Num() ? TEXT(" and ") : TEXT(", ")) + Names[Index];
+			}
+			return Joined + TEXT(" lights");
+		}
+
+		/** The actors labelled Label; a light's label is how every op names it. */
+		TArray<AActor*> Labelled(UWorld& World, const FString& Label)
+		{
+			TArray<AActor*> Found;
+			for (TActorIterator<AActor> It(&World); It; ++It)
+			{
+				if (IsValid(*It) && !It->IsTemplate() && It->GetActorLabel() == Label) Found.Add(*It);
+			}
+			return Found;
+		}
+
+		/** The local lights an actor holds: its own, or those among its components, in name order. */
+		TArray<ULocalLightComponent*> LocalLightsOf(AActor& Actor)
+		{
+			TArray<ULocalLightComponent*> Lights;
+			Actor.GetComponents(Lights);
+			Lights.Sort([](const ULocalLightComponent& A, const ULocalLightComponent& B) { return A.GetName() < B.GetName(); });
+			return Lights;
+		}
+
+		/** The light a set_light op changes, on the labelled actor; or, while validating, the type of one the plan adds first. */
+		bool ResolveLight(UWorld& World, const FString& Label, const FParsedOp& Op, const TMap<FString, uint8>& Planned, AActor*& OutActor,
+			ULocalLightComponent*& OutLight, uint8& OutMask, FString& OutError)
+		{
+			OutActor = nullptr;
+			OutLight = nullptr;
+			OutMask = 0;
+			const TArray<AActor*> Actors = Labelled(World, Label);
+			if (Actors.IsEmpty() && Planned.Contains(Label))
+			{
+				if (!Op.ComponentName.IsEmpty())
+				{
+					OutError = FString::Printf(TEXT("'%s' is a light this plan adds; it has no components to name."), *Label);
+					return false;
+				}
+				OutMask = Planned[Label];
+				return true;
+			}
+			if (Actors.Num() != 1)
+			{
+				OutError = Actors.IsEmpty() ? FString::Printf(TEXT("no actor is labelled '%s'; hyper_lighting_inspect lists the local lights by label."), *Label)
+					: FString::Printf(TEXT("%d actors are labelled '%s'; give the light a unique label first."), Actors.Num(), *Label);
+				return false;
+			}
+			const TArray<ULocalLightComponent*> Lights = LocalLightsOf(*Actors[0]);
+			TArray<FString> Names;
+			for (ULocalLightComponent* Light : Lights)
+			{
+				Names.Add(Light->GetName());
+				if (!Op.ComponentName.IsEmpty() ? Light->GetName() == Op.ComponentName : Lights.Num() == 1)
+				{
+					OutActor = Actors[0];
+					OutLight = Light;
+					OutMask = MaskOf(*Light);
+					return true;
+				}
+			}
+			OutError = Lights.IsEmpty() ? FString::Printf(TEXT("'%s' has no point, spot or rect light; set_sun, set_sky_light and set_sky_system change the others."), *Label)
+				: !Op.ComponentName.IsEmpty() ? FString::Printf(TEXT("'%s' has no light component '%s'; it has %s."), *Label, *Op.ComponentName, *FString::Join(Names, TEXT(", ")))
+				: FString::Printf(TEXT("'%s' holds %d lights; name one as component:<name>/<setting>: %s."), *Label, Lights.Num(), *FString::Join(Names, TEXT(", ")));
+			return false;
+		}
+
+		AActor* SpawnLight(UWorld& World, const uint8 Mask, const FVector& Location, const FString& Label)
+		{
+			UClass* Class = Mask == SpotMask ? ASpotLight::StaticClass() : Mask == RectMask ? ARectLight::StaticClass() : APointLight::StaticClass();
+			FActorSpawnParameters Params;
+			Params.ObjectFlags |= RF_Transactional;
+			// Spot and rect lights start pointing down, so a new one lights what is under it until the plan aims it.
+			const FTransform Transform(Mask == PointMask ? FRotator::ZeroRotator : FRotator(-90.0, 0.0, 0.0), Location);
+			AActor* Actor = World.SpawnActor(Class, &Transform, Params);
+			if (!Actor) return nullptr;
+			Actor->SetActorLabel(Label);
+			Actor->Tags.AddUnique(AddedLightTag);
+			// Movable, so it lights the level at once; a static light would wait for a lighting build.
+			if (ULightComponent* Light = CastChecked<ALight>(Actor)->GetLightComponent())
+			{
+				Light->SetMobility(EComponentMobility::Movable);
+			}
+			// In the project's default light units, as the editor's own placement does, and as bright as the engine's default.
+			static const TConsoleVariableData<int32>* DefaultUnits = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.DefaultFeature.LightUnits"));
+			ULocalLightComponent* Local = Cast<ULocalLightComponent>(CastChecked<ALight>(Actor)->GetLightComponent());
+			if (Local && DefaultUnits)
+			{
+				const ELightUnits Units = static_cast<ELightUnits>(DefaultUnits->GetValueOnGameThread());
+				const USpotLightComponent* Spot = Cast<USpotLightComponent>(Local);
+				Local->Intensity *= ULocalLightComponent::GetUnitsConversionFactor(Local->IntensityUnits, Units, Spot ? Spot->GetCosHalfConeAngle() : -1.f);
+				Local->IntensityUnits = Units;
+			}
+			return Actor;
+		}
+
+		void WriteLightOp(AActor& Actor, ULocalLightComponent& Light, const FParsedOp& Op)
+		{
+			const FString Key = Op.LightSpec->Key;
+			if (Key == TEXT("location") || Key == TEXT("rotation") || Key == TEXT("aim_at"))
+			{
+				Actor.Modify();
+				if (Key == TEXT("location"))
+				{
+					Actor.SetActorLocation(Op.Vector);
+				}
+				else
+				{
+					Actor.SetActorRotation(Key == TEXT("rotation") ? Op.Rotator : (Op.Vector - Actor.GetActorLocation()).Rotation());
+				}
+				Actor.PostEditMove(true);
+				return;
+			}
+			UPointLightComponent* Point = Cast<UPointLightComponent>(&Light);
+			USpotLightComponent* Spot = Cast<USpotLightComponent>(&Light);
+			URectLightComponent* Rect = Cast<URectLightComponent>(&Light);
+			const float V = Op.Value;
+			if (Key == TEXT("intensity")) Edit(Light, GET_MEMBER_NAME_CHECKED(ULightComponentBase, Intensity), [&] { Light.Intensity = V; });
+			else if (Key == TEXT("intensity_units"))
+			{
+				Edit(Light, GET_MEMBER_NAME_CHECKED(ULocalLightComponent, IntensityUnits), [&]
+				{
+					// As bright as before, in the new units: what the Details panel does when the units change.
+					const float Brightness = Light.ComputeLightBrightness();
+					Light.IntensityUnits = static_cast<ELightUnits>(FMath::RoundToInt(V));
+					Light.SetLightBrightness(Brightness);
+				});
+			}
+			else if (Key == TEXT("color")) Edit(Light, GET_MEMBER_NAME_CHECKED(ULightComponentBase, LightColor), [&] { Light.LightColor = Op.Colour.ToFColor(true); });
+			else if (Key == TEXT("temperature"))
+			{
+				Edit(Light, GET_MEMBER_NAME_CHECKED(ULightComponent, Temperature), [&]
+				{
+					Light.Temperature = V;
+					Light.bUseTemperature = true;
+				});
+			}
+			else if (Key == TEXT("use_temperature")) Edit(Light, GET_MEMBER_NAME_CHECKED(ULightComponent, bUseTemperature), [&] { Light.bUseTemperature = Op.bFlag; });
+			else if (Key == TEXT("attenuation_radius")) Edit(Light, GET_MEMBER_NAME_CHECKED(ULocalLightComponent, AttenuationRadius), [&] { Light.AttenuationRadius = V; });
+			else if (Key == TEXT("source_radius")) Edit(*Point, GET_MEMBER_NAME_CHECKED(UPointLightComponent, SourceRadius), [&] { Point->SourceRadius = V; });
+			else if (Key == TEXT("soft_source_radius")) Edit(*Point, GET_MEMBER_NAME_CHECKED(UPointLightComponent, SoftSourceRadius), [&] { Point->SoftSourceRadius = V; });
+			else if (Key == TEXT("source_length")) Edit(*Point, GET_MEMBER_NAME_CHECKED(UPointLightComponent, SourceLength), [&] { Point->SourceLength = V; });
+			else if (Key == TEXT("inner_cone_angle")) Edit(*Spot, GET_MEMBER_NAME_CHECKED(USpotLightComponent, InnerConeAngle), [&] { Spot->InnerConeAngle = V; });
+			else if (Key == TEXT("outer_cone_angle")) Edit(*Spot, GET_MEMBER_NAME_CHECKED(USpotLightComponent, OuterConeAngle), [&] { Spot->OuterConeAngle = V; });
+			else if (Key == TEXT("source_width")) Edit(*Rect, GET_MEMBER_NAME_CHECKED(URectLightComponent, SourceWidth), [&] { Rect->SourceWidth = V; });
+			else if (Key == TEXT("source_height")) Edit(*Rect, GET_MEMBER_NAME_CHECKED(URectLightComponent, SourceHeight), [&] { Rect->SourceHeight = V; });
+			else if (Key == TEXT("barn_door_angle")) Edit(*Rect, GET_MEMBER_NAME_CHECKED(URectLightComponent, BarnDoorAngle), [&] { Rect->BarnDoorAngle = V; });
+			else if (Key == TEXT("barn_door_length")) Edit(*Rect, GET_MEMBER_NAME_CHECKED(URectLightComponent, BarnDoorLength), [&] { Rect->BarnDoorLength = V; });
+			else if (Key == TEXT("cast_shadows")) Edit(Light, GET_MEMBER_NAME_CHECKED(ULightComponentBase, CastShadows), [&] { Light.CastShadows = Op.bFlag; });
+			else if (Key == TEXT("volumetric_scattering")) Edit(Light, GET_MEMBER_NAME_CHECKED(ULightComponentBase, VolumetricScatteringIntensity), [&] { Light.VolumetricScatteringIntensity = V; });
+			else if (Key == TEXT("indirect_intensity")) Edit(Light, GET_MEMBER_NAME_CHECKED(ULightComponentBase, IndirectLightingIntensity), [&] { Light.IndirectLightingIntensity = V; });
+			else if (Key == TEXT("specular_scale")) Edit(Light, GET_MEMBER_NAME_CHECKED(ULightComponent, SpecularScale), [&] { Light.SpecularScale = V; });
+			else if (Key == TEXT("enabled")) Edit(Light, USceneComponent::GetVisiblePropertyName(), [&] { Light.SetVisibility(Op.bFlag); });
+			else if (Key == TEXT("ies_profile")) Edit(Light, GET_MEMBER_NAME_CHECKED(ULightComponent, IESTexture), [&] { Light.IESTexture = Cast<UTextureLightProfile>(Op.Asset); });
+			else if (Key == TEXT("use_ies_brightness")) Edit(Light, GET_MEMBER_NAME_CHECKED(ULightComponent, bUseIESBrightness), [&] { Light.bUseIESBrightness = Op.bFlag; });
+			else if (Key == TEXT("light_function")) Edit(Light, GET_MEMBER_NAME_CHECKED(ULightComponent, LightFunctionMaterial), [&] { Light.LightFunctionMaterial = Cast<UMaterialInterface>(Op.Asset); });
+		}
+
+		void ReadLight(const AActor& Actor, const ULocalLightComponent& Light, TArray<FHyperAILightingProperty>& Out)
+		{
+			auto Add = [&Out](const TCHAR* Key, const FString& Value) { Out.Add({Key, Value}); };
+			auto Flag = [](const bool bValue) { return bValue ? FString(TEXT("true")) : FString(TEXT("false")); };
+			auto Triple = [](const double A, const double B, const double C) { return FString::Printf(TEXT("%.1f,%.1f,%.1f"), A, B, C); };
+			if (!Actor.IsA<ALight>())
+			{
+				Add(TEXT("component"), Light.GetName());
+			}
+			Add(TEXT("intensity"), Number(Light.Intensity));
+			Add(TEXT("intensity_units"), StaticEnum<ELightUnits>()->GetNameStringByValue(static_cast<int64>(Light.IntensityUnits)).ToLower());
+			Add(TEXT("color"), Colour(FLinearColor(Light.LightColor)));
+			Add(TEXT("temperature"), Number(Light.Temperature));
+			Add(TEXT("use_temperature"), Flag(Light.bUseTemperature));
+			Add(TEXT("attenuation_radius"), Number(Light.AttenuationRadius));
+			if (const UPointLightComponent* Point = Cast<UPointLightComponent>(&Light))
+			{
+				Add(TEXT("source_radius"), Number(Point->SourceRadius));
+				Add(TEXT("soft_source_radius"), Number(Point->SoftSourceRadius));
+				Add(TEXT("source_length"), Number(Point->SourceLength));
+			}
+			if (const USpotLightComponent* Spot = Cast<USpotLightComponent>(&Light))
+			{
+				Add(TEXT("inner_cone_angle"), Number(Spot->InnerConeAngle));
+				Add(TEXT("outer_cone_angle"), Number(Spot->OuterConeAngle));
+			}
+			if (const URectLightComponent* Rect = Cast<URectLightComponent>(&Light))
+			{
+				Add(TEXT("source_width"), Number(Rect->SourceWidth));
+				Add(TEXT("source_height"), Number(Rect->SourceHeight));
+				Add(TEXT("barn_door_angle"), Number(Rect->BarnDoorAngle));
+				Add(TEXT("barn_door_length"), Number(Rect->BarnDoorLength));
+			}
+			Add(TEXT("cast_shadows"), Flag(Light.CastShadows));
+			Add(TEXT("volumetric_scattering"), Number(Light.VolumetricScatteringIntensity));
+			Add(TEXT("indirect_intensity"), Number(Light.IndirectLightingIntensity));
+			Add(TEXT("specular_scale"), Number(Light.SpecularScale));
+			Add(TEXT("enabled"), Flag(Light.IsVisible()));
+			Add(TEXT("ies_profile"), Light.IESTexture ? Light.IESTexture->GetPathName() : FString(TEXT("none")));
+			Add(TEXT("light_function"), Light.LightFunctionMaterial ? Light.LightFunctionMaterial->GetPathName() : FString(TEXT("none")));
+			const FVector Location = Light.GetComponentLocation();
+			Add(TEXT("location"), Triple(Location.X, Location.Y, Location.Z));
+			if (MaskOf(Light) != PointMask)
+			{
+				const FRotator Rotation = Light.GetComponentRotation();
+				Add(TEXT("rotation"), Triple(Rotation.Pitch, Rotation.Yaw, Rotation.Roll));
+			}
+			Add(TEXT("mobility"), StaticEnum<EComponentMobility::Type>()->GetNameStringByValue(Light.Mobility));
+			if (Actor.Tags.Contains(AddedLightTag))
+			{
+				Add(TEXT("added_by_hyperai"), TEXT("true"));
+			}
+		}
+
+		/** Where the scene is looked at from, to list first the local lights that light what is seen. */
+		struct FLightView
+		{
+			bool bValid = false;
+			FVector Origin = FVector::ZeroVector;
+			FVector Forward = FVector::ForwardVector;
+			double HalfFovRadians = UE_HALF_PI * 0.5;
+			FString Name;
+		};
+
+		FLightView FindView(UWorld& World, const FString& CameraLabel)
+		{
+			FLightView View;
+			const FString Label = CameraLabel.IsEmpty() ? FString(TEXT("HyperAI_MatchCamera")) : CameraLabel;
+			for (AActor* Actor : Labelled(World, Label))
+			{
+				if (const UCameraComponent* Camera = Actor->FindComponentByClass<UCameraComponent>())
+				{
+					View.bValid = true;
+					View.Origin = Camera->GetComponentLocation();
+					View.Forward = Camera->GetForwardVector();
+					View.HalfFovRadians = FMath::DegreesToRadians(Camera->FieldOfView * 0.5);
+					View.Name = Label;
+					return View;
+				}
+			}
+			// A camera that was named and is not there gives no view, so the caller can say so.
+			const FLevelEditorViewportClient* Client = GCurrentLevelEditingViewportClient;
+			if (CameraLabel.IsEmpty() && Client && Client->IsPerspective() && Client->GetWorld() == &World)
+			{
+				View.bValid = true;
+				View.Origin = Client->GetViewLocation();
+				View.Forward = Client->GetViewRotation().Vector();
+				View.HalfFovRadians = FMath::DegreesToRadians(Client->ViewFOV * 0.5);
+				View.Name = TEXT("level_viewport");
+			}
+			return View;
+		}
+
+		/** Whether a light's sphere of reach overlaps the view: its cone, widened a quarter for the frame's corners. */
+		bool InView(const FLightView& View, const FVector& Location, const double Radius)
+		{
+			const FVector ToLight = Location - View.Origin;
+			const double Distance = ToLight.Size();
+			if (Distance <= Radius) return true;
+			const double Angle = FMath::Acos(FMath::Clamp(FVector::DotProduct(ToLight / Distance, View.Forward), -1.0, 1.0));
+			return Angle - FMath::Asin(FMath::Clamp(Radius / Distance, 0.0, 1.0)) <= View.HalfFovRadians * 1.25;
+		}
+
 		bool RunOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, const bool bWrite, TArray<AActor*>& OutTouched, FString& OutError)
 		{
 			TMap<FString, bool> ManualLock;
 			TSet<FString> PlannedSpawns;
+			TMap<FString, uint8> PlannedLights;
 			for (int32 Index = 0; Index < Ops.Num(); ++Index)
 			{
 				const FHyperAILightingOp& Op = Ops[Index];
@@ -843,6 +1391,62 @@ namespace HyperAIStudio::Lighting::Gate
 						// The Details panel's route: undo, then the sky's construction script redraws it.
 						Edit(*Sky, Property->GetFName(), [&] { Property->ImportText_InContainer(*Import, Sky, Sky, PPF_None); });
 						OutTouched.AddUnique(Sky);
+					}
+					continue;
+				}
+				if (Parsed.Kind == TEXT("add_light"))
+				{
+					if (PlannedLights.Contains(Op.ActorLabel) || !Labelled(World, Op.ActorLabel).IsEmpty())
+					{
+						OutError = FString::Printf(TEXT("Op %d: an actor is already labelled '%s'; give the new light its own label."), Index, *Op.ActorLabel);
+						return false;
+					}
+					PlannedLights.Add(Op.ActorLabel, Parsed.LightMask);
+					if (bWrite)
+					{
+						AActor* Added = SpawnLight(World, Parsed.LightMask, Parsed.Vector, Op.ActorLabel);
+						if (!Added)
+						{
+							OutError = FString::Printf(TEXT("Op %d: the level refused a new %s light."), Index, LightTypeOf(Parsed.LightMask));
+							return false;
+						}
+						OutTouched.AddUnique(Added);
+					}
+					continue;
+				}
+				if (Parsed.Kind == TEXT("light"))
+				{
+					// Local lights are the level's own, never a Blueprint sky's, so they change beside one too.
+					AActor* Owner = nullptr;
+					ULocalLightComponent* Light = nullptr;
+					uint8 Mask = 0;
+					if (!ResolveLight(World, Op.ActorLabel, Parsed, PlannedLights, Owner, Light, Mask, Error))
+					{
+						OutError = FString::Printf(TEXT("Op %d: %s"), Index, *Error);
+						return false;
+					}
+					if (!(Mask & Parsed.LightSpec->Mask))
+					{
+						OutError = FString::Printf(TEXT("Op %d: '%s' is a %s light, and %s applies only to %s."), Index, *Op.ActorLabel, LightTypeOf(Mask),
+							Parsed.LightSpec->Key, *KindsIn(Parsed.LightSpec->Mask));
+						return false;
+					}
+					const bool bMoves = Parsed.LightSpec->Type == ELightValue::Vector || Parsed.LightSpec->Type == ELightValue::Rotator;
+					if (bMoves && Owner && !Owner->IsA<ALight>())
+					{
+						OutError = FString::Printf(TEXT("Op %d: '%s' holds its lights inside; %s moves and aims only light actors, so move '%s' itself with the level tools."),
+							Index, *Op.ActorLabel, Parsed.LightSpec->Key, *Op.ActorLabel);
+						return false;
+					}
+					if (bWrite)
+					{
+						if (!Owner || !Light)
+						{
+							OutError = FString::Printf(TEXT("Op %d: '%s' was not there to change."), Index, *Op.ActorLabel);
+							return false;
+						}
+						WriteLightOp(*Owner, *Light, Parsed);
+						OutTouched.AddUnique(Owner);
 					}
 					continue;
 				}
@@ -1204,10 +1808,64 @@ namespace HyperAIStudio::Lighting::Gate
 		return Records;
 	}
 
+	TArray<FHyperAILightingActorRecord> ReadLocalLights(UWorld& World, const FString& CameraLabel, const FString& LabelFilter, const int32 Limit,
+		int32& OutTotal, FString& OutView, const bool bUseView)
+	{
+		struct FEntry
+		{
+			AActor* Actor;
+			ULocalLightComponent* Light;
+			bool bInView;
+			double Distance;
+			FString Path;
+		};
+		const FLightView View = bUseView ? FindView(World, CameraLabel) : FLightView();
+		OutView = View.bValid ? View.Name : FString();
+		OutTotal = 0;
+		TArray<FEntry> Entries;
+		// Only the level's light components are walked, not every actor, so a large level stays quick.
+		for (TObjectIterator<ULocalLightComponent> It; It; ++It)
+		{
+			ULocalLightComponent* Light = *It;
+			AActor* Actor = IsValid(Light) && !Light->IsTemplate() && Light->GetWorld() == &World ? Light->GetOwner() : nullptr;
+			if (!IsValid(Actor) || Actor->IsTemplate()) continue;
+			++OutTotal;
+			if (!LabelFilter.IsEmpty() && !Actor->GetActorLabel().Contains(LabelFilter)) continue;
+			const FVector Location = Light->GetComponentLocation();
+			Entries.Add({Actor, Light, View.bValid && InView(View, Location, Light->AttenuationRadius),
+				View.bValid ? FVector::Dist(View.Origin, Location) : 0.0, Light->GetPathName()});
+		}
+		Entries.Sort([](const FEntry& A, const FEntry& B)
+		{
+			return A.bInView != B.bInView ? A.bInView : A.Distance != B.Distance ? A.Distance < B.Distance : A.Path < B.Path;
+		});
+		TArray<FHyperAILightingActorRecord> Records;
+		for (int32 Index = 0; Index < FMath::Min(Entries.Num(), Limit); ++Index)
+		{
+			const FEntry& Entry = Entries[Index];
+			FHyperAILightingActorRecord& Record = Records.AddDefaulted_GetRef();
+			Record.Kind = FString(LightTypeOf(MaskOf(*Entry.Light))) + TEXT("_light");
+			Record.Label = Entry.Actor->GetActorLabel();
+			Record.Path = Entry.Path;
+			ReadLight(*Entry.Actor, *Entry.Light, Record.Properties);
+			if (View.bValid)
+			{
+				Record.Properties.Add({TEXT("in_view"), Entry.bInView ? TEXT("true") : TEXT("false")});
+				Record.Properties.Add({TEXT("distance"), FString::Printf(TEXT("%.0f"), Entry.Distance)});
+			}
+		}
+		return Records;
+	}
+
 	FString ComputeRevision(UWorld& World)
 	{
 		FString Canonical = TEXT("hyperai.lighting.revision.v1\n") + World.GetPathName() + TEXT("\n");
-		for (const FHyperAILightingActorRecord& Record : ReadActors(World))
+		TArray<FHyperAILightingActorRecord> Records = ReadActors(World);
+		// Every local light, however few an inspection lists, and nothing that moves with a camera.
+		int32 LocalTotal = 0;
+		FString NoView;
+		Records.Append(ReadLocalLights(World, FString(), FString(), MAX_int32, LocalTotal, NoView, /*bUseView=*/false));
+		for (const FHyperAILightingActorRecord& Record : Records)
 		{
 			Canonical += Record.Kind + TEXT("|") + Record.Path + TEXT("|") + Record.Label + TEXT("\n");
 			for (const FHyperAILightingProperty& Property : Record.Properties)
@@ -1289,6 +1947,12 @@ namespace HyperAIStudio::Lighting::Gate
 				FProperty* Property = nullptr;
 				FString Import;
 				if (ResolveSkyOp(World, Op.ActorLabel, Parsed, Sky, Property, Import, Error)) Actors.AddUnique(Sky);
+				continue;
+			}
+			if (Parsed.Kind == TEXT("light") || Parsed.Kind == TEXT("add_light"))
+			{
+				const TArray<AActor*> Found = Labelled(World, Op.ActorLabel);
+				if (Found.Num() == 1) Actors.AddUnique(Found[0]);
 				continue;
 			}
 			if (Parsed.bLock || Parsed.bUnlock)

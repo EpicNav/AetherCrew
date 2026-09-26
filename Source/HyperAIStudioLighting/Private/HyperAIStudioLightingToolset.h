@@ -27,7 +27,7 @@ struct FHyperAILightingActorRecord
 {
 	GENERATED_BODY()
 
-	/** sun, sky_light, fog, sky_atmosphere or post_process. */
+	/** sun, sky_light, fog, sky_atmosphere, post_process, sky_system, or point_light, spot_light and rect_light. */
 	UPROPERTY() FString Kind;
 	UPROPERTY() FString Label;
 	UPROPERTY() FString Path;
@@ -40,6 +40,12 @@ struct FHyperAILightingInspectRequest
 	GENERATED_BODY()
 
 	UPROPERTY() int32 MaxOutputBytes = 65536;
+	/** Local lights lighting this camera's view come first; empty uses HyperAI_MatchCamera if it is placed, else the level viewport. */
+	UPROPERTY() FString CameraActorLabel;
+	/** Only local lights on actors whose label contains this, in any case. */
+	UPROPERTY() FString LabelFilter;
+	/** Point, spot and rect lights to list, 0-128: those in view first, nearest first. */
+	UPROPERTY() int32 MaxLocalLights = 32;
 };
 
 USTRUCT(BlueprintType)
@@ -57,6 +63,10 @@ struct FHyperAILightingInspectReport
 	/** False means auto exposure is on, so screenshots cannot be compared fairly; lock it first. */
 	UPROPERTY() bool bExposureLocked = false;
 	UPROPERTY() TArray<FHyperAILightingActorRecord> Actors;
+	/** Point, spot and rect lights in the level, listed or not. */
+	UPROPERTY() int32 LocalLightCount = 0;
+	/** What the local lights were ordered from: a camera's label, or level_viewport; empty for path order. */
+	UPROPERTY() FString LightView;
 	UPROPERTY() TArray<FString> Capabilities;
 };
 
@@ -130,7 +140,8 @@ struct FHyperAILightingCompareReport
  * One closed lighting edit. Kind and Property:
  *   set_sun: intensity (lux), temperature (K), color (r,g,b), pitch, yaw (degrees), source_angle
  *   set_sky_light: intensity, color
- *   set_fog: density, height_falloff, start_distance, inscattering_color
+ *   set_fog: density, height_falloff, start_distance, inscattering_color, and for light shafts volumetric_fog (true/false),
+ *     volumetric_scattering_distribution (-0.9 to 0.9), volumetric_albedo (r,g,b), volumetric_extinction_scale
  *   set_sky_atmosphere: rayleigh_scale, mie_scale
  *   set_post_process: exposure_bias (EV), white_temp (K), saturation, contrast, gamma, and grading as r,g,b:
  *     shadows_gain, shadows_offset (-0.5 to 0.5), highlights_gain
@@ -141,7 +152,18 @@ struct FHyperAILightingCompareReport
  *     variable by the name its Details panel shows (Time of Day, Cloud Coverage, Sun Light Intensity, ...), value is
  *     a number, true/false, an enum's display name or Unreal's text form; empty actor_label takes the first sky that
  *     has the variable. With such a sky, set_sun, set_sky_light, set_fog and set_sky_atmosphere are refused.
- * ActorLabel picks an actor; empty uses the first of its kind, adding one if the level has none.
+ *   set_light: a point, spot or rect light by actor_label: a light actor, or an actor holding lights, whose property is then
+ *     component:<name>/<setting> unless it holds one. Settings: intensity (in the light's intensity_units), intensity_units
+ *     (unitless, candelas, lumens, ev or nits; the light keeps its brightness), color (r,g,b),
+ *     temperature (K), use_temperature, attenuation_radius, source_radius, soft_source_radius and source_length (point and
+ *     spot), inner_cone_angle and outer_cone_angle (spot), source_width, source_height, barn_door_angle and
+ *     barn_door_length (rect), cast_shadows, volumetric_scattering, indirect_intensity, specular_scale, enabled (true or
+ *     false: a light is switched off, never deleted), ies_profile and light_function (an asset path, or none), and for
+ *     light actors location (x,y,z), rotation (pitch,yaw,roll) and aim_at (x,y,z; spot and rect)
+ *   add_light: actor_label is the new light's label, property its type (point, spot or rect), value its world location
+ *     "x,y,z". It is movable, in the project's default light units, and marked as added by HyperAI; a later op in the same
+ *     plan may set_light it.
+ * ActorLabel picks an actor; for the stock kinds, empty uses the first of its kind, adding one if the level has none.
  */
 USTRUCT(BlueprintType)
 struct FHyperAILightingOp
@@ -416,15 +438,19 @@ class HYPERAISTUDIOLIGHTING_API UHyperAIStudioLightingToolset final : public UTo
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** Sun, sky light, fog, sky atmosphere, post process and any Blueprint sky (Ultra Dynamic Sky and Weather) in the open level, whether exposure is locked, and the revision apply_plan needs. */
+	/**
+	 * Sun, sky light, fog, sky atmosphere, post process and any Blueprint sky (Ultra Dynamic Sky and Weather) in the open
+	 * level, then its point, spot and rect lights, those lighting the view of camera_actor_label (else HyperAI_MatchCamera,
+	 * else the level viewport) first; whether exposure is locked, and the revision apply_plan needs.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
 	static FHyperAILightingInspectReport hyper_lighting_inspect(const FHyperAILightingInspectRequest& Request);
 
 	/**
-	 * Closed lighting edits as one undo step: sun, sky light, fog, sky atmosphere, post process, exposure lock,
-	 * set_actor_material for a placed mesh, and set_sky_system for a Blueprint sky such as Ultra Dynamic Sky, by its
-	 * Details names. Submit with bDryRun false and an operation_id, call hyper_operation_wait, then compare. Unsaved
-	 * unless bSave.
+	 * Closed lighting edits as one undo step: sun, sky light, fog, sky atmosphere, post process, exposure lock, point, spot
+	 * and rect lights (set_light, add_light), set_actor_material for a placed mesh, and set_sky_system for a Blueprint sky
+	 * such as Ultra Dynamic Sky. Submit with bDryRun false and an operation_id, call hyper_operation_wait, then compare.
+	 * Unsaved unless bSave.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
 	static FHyperAILightingApplyPlanReport hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& Request);
