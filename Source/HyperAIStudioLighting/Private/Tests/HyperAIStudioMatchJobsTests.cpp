@@ -2,11 +2,21 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Editor.h"
+#include "Editor/Transactor.h"
+#include "EngineUtils.h"
+#include "HAL/FileManager.h"
 #include "HyperAIStudioAgentJobs.h"
+#include "HyperAIStudioLightingGate.h"
 #include "HyperAIStudioMatchJobs.h"
 #include "HyperAIStudioPreviewPanel.h"
+#include "LevelEditorViewport.h"
+#include "Misc/App.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 
 namespace HyperAIStudio::Lighting::MatchJobTests
 {
@@ -118,6 +128,113 @@ bool FHyperAIStudioMatchJobsActionsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("and says why"), Error.Contains(TEXT("project")));
 	TestEqual(TEXT("no job was started"), FHyperAIStudioAgentJobs::FindByKey(TEXT("C:/Elsewhere/photo.png")).IsSet(), false);
 	TestEqual(TEXT("a job needs a prompt"), FHyperAIStudioAgentJobs::Start(FHyperAIStudioAgentJobSpec(), Error), 0);
+	TestTrue(TEXT("the image match source can take its view, for Relight this view"), static_cast<bool>(FHyperAIStudioPreviewPanel::FindSource(FName(TEXT("image_match")))->CaptureView));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioMatchJobsSameViewTest,
+	"HyperAIStudio.Lighting.MatchJobs.RelitReferenceKeepsItsView",
+	HyperAIStudio::Lighting::MatchJobTests::Flags)
+
+bool FHyperAIStudioMatchJobsSameViewTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	namespace Jobs = HyperAIStudio::Lighting::MatchJobs;
+	// A relit reference as the image pack leaves one: the picture, a sidecar naming the capture it changed, and that capture's view.
+	const FString Folder = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Tests") / (TEXT("SameView-") + FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Folder, /*RequireExists=*/false, /*Tree=*/true); };
+	const FString Reference = Folder / TEXT("relit_01.png");
+	FString Input = Folder / TEXT("relit_input.png");
+	FPaths::MakePathRelativeTo(Input, *FPaths::ProjectDir());
+	FFileHelper::SaveStringToFile(FString::Printf(TEXT(R"({"image": "relit_01.png", "input_image": "%s"})"), *Input), *(Folder / TEXT("relit_01.json")));
+	TestTrue(TEXT("Without the view beside the picture it changed, there is no note"), Jobs::SameViewNote(Reference).IsEmpty());
+	FFileHelper::SaveStringToFile(TEXT(R"({"source": "camera", "camera_actor_label": "HyperAI_MatchCamera", "location": [1, 2, 3], "rotation": [-10, 90, 0], "fov_degrees": 75, "width": 1024, "height": 576})"),
+		*(Folder / TEXT("capture.json")));
+	const FString Camera = Jobs::SameViewNote(Reference);
+	AddInfo(Camera);
+	TestTrue(TEXT("A reference made from a camera's capture is matched through that camera, unmoved"),
+		Camera.Contains(TEXT("source camera, camera_actor_label HyperAI_MatchCamera, width 1024 and height 576")) && Camera.Contains(TEXT("unmoved")));
+	TestTrue(TEXT("naming the picture it was made from"), Camera.Contains(Input));
+	FFileHelper::SaveStringToFile(TEXT(R"({"source": "viewport", "location": [1, 2, 3], "rotation": [-10, 90, 0], "fov_degrees": 75, "width": 1024, "height": 576})"),
+		*(Folder / TEXT("capture.json")));
+	const FString Transform = Jobs::SameViewNote(Reference);
+	TestTrue(TEXT("and one from the viewport's, by the transform it had"),
+		Transform.Contains(TEXT("source transform, location (1.0, 2.0, 3.0), rotation (-10.0, 90.0, 0.0)")) && Transform.Contains(TEXT("fovDegrees 75.0")));
+	FFileHelper::SaveStringToFile(TEXT(R"({"image": "relit_01.png"})"), *(Folder / TEXT("relit_01.json")));
+	TestTrue(TEXT("A reference drawn from words has no note"), Jobs::SameViewNote(Reference).IsEmpty());
+
+	const FString Light = Jobs::BuildPrompt(Jobs::EGoal::Lighting, TEXT("Content/References/Generated/relit/relit_01.png"), TEXT("s"), 78.f, FString(), Camera);
+	TestTrue(TEXT("The lighting prompt frames the same view"), Light.Contains(TEXT("4. This reference is the level's own view")) && !Light.Contains(TEXT("Frame the view once")));
+	const FString Level = Jobs::BuildPrompt(Jobs::EGoal::Level, TEXT("Content/References/Generated/relit/relit_01.png"), TEXT("s"), 72.f, FString(), Camera);
+	TestTrue(TEXT("and so does the level prompt"), Level.Contains(TEXT("3. This reference is the level's own view")) && !Level.Contains(TEXT("Place a CineCameraActor")));
+
+	// The view itself: HyperAI_MatchCamera, placed where the level viewport looks when the level has none.
+	UWorld* World = HyperAIStudio::Lighting::Gate::GetEditorWorld();
+	if (!FApp::CanEverRender() || !World || !GEditor)
+	{
+		AddWarning(TEXT("Needs a rendering editor with a level open to take the view."));
+		return true;
+	}
+	const auto FindCamera = [World]() -> AActor*
+	{
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (It->GetActorLabel().Equals(Jobs::MatchCameraLabel, ESearchCase::IgnoreCase))
+			{
+				return *It;
+			}
+		}
+		return nullptr;
+	};
+	// A camera the level already has is set aside for the test, so the one placed is this test's.
+	AActor* Kept = FindCamera();
+	if (Kept)
+	{
+		Kept->SetActorLabel(TEXT("HyperAI_MatchCamera_KeptByTest"), /*bMarkDirty=*/false);
+	}
+	ON_SCOPE_EXIT
+	{
+		if (Kept && IsValid(Kept))
+		{
+			Kept->SetActorLabel(Jobs::MatchCameraLabel, /*bMarkDirty=*/false);
+		}
+	};
+	const bool bHadCamera = FindCamera() != nullptr;
+	const bool bCanPlace = GCurrentLevelEditingViewportClient && GCurrentLevelEditingViewportClient->IsPerspective();
+	FString Path;
+	FString Error;
+	const bool bCaptured = Jobs::CaptureMatchView(FIntPoint(640, 360), Path, Error);
+	AActor* Placed = bHadCamera ? nullptr : FindCamera();
+	if (!bHadCamera && !bCanPlace)
+	{
+		TestFalse(TEXT("With no camera and no viewport to place one at, nothing is taken"), bCaptured);
+		TestTrue(TEXT("and it says what to place"), Error.Contains(TEXT("HyperAI_MatchCamera")));
+		return true;
+	}
+	if (!TestTrue(TEXT("The view is taken: ") + Error, bCaptured))
+	{
+		return false;
+	}
+	TestTrue(TEXT("as a picture inside the project"), IFileManager::Get().FileExists(*(FPaths::ProjectDir() / Path)));
+	FString View;
+	FFileHelper::LoadFileToString(View, *(FPaths::GetPath(FPaths::ProjectDir() / Path) / TEXT("capture.json")));
+	TestTrue(TEXT("with the view it shows beside it"), View.Contains(TEXT("\"camera_actor_label\": \"HyperAI_MatchCamera\"")) && View.Contains(TEXT("640")));
+	if (Placed)
+	{
+		TestTrue(TEXT("With none, HyperAI_MatchCamera is placed where the level viewport looks"),
+			Placed->GetActorLocation().Equals(GCurrentLevelEditingViewportClient->GetViewLocation(), 1.0));
+		// As the user would place it: one undo takes it away again.
+		if (TestEqual(TEXT("in one undo step of its own"), GEditor->Trans->GetUndoContext().Title.ToString(), FString(TEXT("Place HyperAI_MatchCamera"))))
+		{
+			GEditor->UndoTransaction();
+			TestNull(TEXT("which undo takes away"), FindCamera());
+		}
+		else if (IsValid(Placed))
+		{
+			Placed->Destroy();
+		}
+	}
 	return true;
 }
 

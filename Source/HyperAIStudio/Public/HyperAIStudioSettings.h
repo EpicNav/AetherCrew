@@ -114,6 +114,18 @@ struct FHyperAIStudioImageModelSettings
 	FString RequestTemplate;
 
 	/**
+	 * The request body when a picture goes in to be changed rather than drawn from nothing, such as a view of the level
+	 * to relight. Substituted like Request Template, plus {input_image}, the picture as base64, and {input_mime_type}:
+	 * image/png, image/jpeg or image/webp. Empty: this model draws from words only.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (MultiLine = "true"))
+	FString EditRequestTemplate;
+
+	/** The path for a request with a picture in it, when it is not Path, such as /sdapi/v1/img2img. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString EditPath;
+
+	/**
 	 * Dotted path to the base64 image in the reply: data.0.b64_json for an OpenAI-shaped one, images.0 for
 	 * an Automatic1111, candidates.0.content.parts.*.inlineData.data for a Gemini. A * takes the first element
 	 * that has the rest of the path, for a reply that puts text before the picture.

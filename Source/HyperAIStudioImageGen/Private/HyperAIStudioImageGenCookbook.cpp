@@ -40,6 +40,8 @@ The loop this pack is built for:
 Step 3 is why the prompt template pins time of day, key light direction, contrast and colour
 temperature. A reference whose light is beautiful but unreachable makes step 4 grind forever.
 
+No reference at all? Section 8 makes one from the level's own view, relit as the user asks.
+
 ## 2. First: can you already generate images yourself?
 
 Check before configuring anything here. Some agents that drive this plugin carry their own image
@@ -232,6 +234,47 @@ re-generatable six months later, and what `hyper_image_inspect` reads back.
 Files rather than assets on purpose: the Match page and `hyper_lighting_compare` both take a file
 path, so a reference is useful the moment it lands, with no import step and nothing to cook. Import
 one as a texture only if it is going into the game.
+)CB"),
+TEXT(R"CB(
+## 8. Change a picture: a reference from the level itself
+
+With no reference, make one from the level's own view. Pass `input_image_path`, a picture inside the project
+for the model to change rather than draw from nothing, and say in the prompt what to change and what to keep.
+
+1. Capture the view with `hyper_capture_view`: source `camera`, `camera_actor_label` `HyperAI_MatchCamera`
+   (place one where the view should be if the level has none), at the shape you want, such as 1024 x 576.
+2. `hyper_image_generate` with `input_image_path` set to the frame it wrote, and a prompt such as: "Relight
+   this picture of a game level: late dusk, warm lamps glowing inside, cool blue moonlight through the
+   windows. Keep the camera, the framing and every object exactly as they are, with the same shapes,
+   positions and materials; change only the light, the shadows, the sky, the fog and the colour grade."
+3. Match the level to what comes back, capturing the same camera for every attempt: it frames the same view.
+
+With no width or height, the result keeps the picture's shape at the model's own size, so a 1280 x 720
+capture comes back 1024 x 576, at the 1K price. The sidecar records the picture it changed as `input_image`,
+and a capture folder records its view in `capture.json`, so a Match job knows the reference is the level's
+own view and captures that same view.
+
+The Nano Banana models, `codex_image_gen` and `gemini_image_gen` take a picture; `hyper_image_inspect` marks
+each one that does with `bTakesInputImage`. For a model you configure, add `edit_request_template`: the
+request body with the picture in it, where `{input_image}` becomes the picture as base64 and
+`{input_mime_type}` its type. Add `edit_path` when the endpoint is another, as Automatic1111's is:
+
+    edit_path:              /sdapi/v1/img2img
+    edit_request_template:  {"init_images": ["{input_image}"], "prompt": "{prompt}",
+                             "negative_prompt": "{negative}", "denoising_strength": 0.45,
+                             "width": {width}, "height": {height}, "seed": {seed}}
+
+The Nano Banana models send it as a part beside the words:
+
+    edit_request_template:  {"contents": [{"parts": [{"text": "{prompt}"},
+                             {"inlineData": {"mimeType": "{input_mime_type}", "data": "{input_image}"}}]}],
+                             "generationConfig": {...}}
+
+The picture is a PNG, JPEG or WebP of at most 5 MB, sealed into the plan by a hash of its bytes: if it
+changes between the dry run and the send, nothing is sent.
+
+In HyperAI Studio, the Images page's **Relight this view** preset does all three steps, and the Match page's
+**Relight this view...** opens it.
 )CB")};
 	}
 

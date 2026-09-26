@@ -37,7 +37,10 @@ TArray<FHyperAIStudioImageModelSettings> UHyperAIStudioSettings::GetNanoBananaMo
 	// first candidate, after any text; aspect ratio always, and size only where the model takes one.
 	const TCHAR* Sized = TEXT(R"({"contents": [{"parts": [{"text": "{prompt}"}]}], "generationConfig": {"responseModalities": ["IMAGE"], "imageConfig": {"aspectRatio": "{aspect_ratio}", "imageSize": "{image_size}"}}})");
 	const TCHAR* Fixed = TEXT(R"({"contents": [{"parts": [{"text": "{prompt}"}]}], "generationConfig": {"responseModalities": ["IMAGE"], "imageConfig": {"aspectRatio": "{aspect_ratio}"}}})");
-	auto Model = [](const TCHAR* Id, const TCHAR* Label, const TCHAR* Gemini, const TCHAR* Request, const float Cost1K, const float Cost2K, const float Cost4K)
+	// A picture to change goes beside the words, as a part of its own.
+	const TCHAR* SizedEdit = TEXT(R"({"contents": [{"parts": [{"text": "{prompt}"}, {"inlineData": {"mimeType": "{input_mime_type}", "data": "{input_image}"}}]}], "generationConfig": {"responseModalities": ["IMAGE"], "imageConfig": {"aspectRatio": "{aspect_ratio}", "imageSize": "{image_size}"}}})");
+	const TCHAR* FixedEdit = TEXT(R"({"contents": [{"parts": [{"text": "{prompt}"}, {"inlineData": {"mimeType": "{input_mime_type}", "data": "{input_image}"}}]}], "generationConfig": {"responseModalities": ["IMAGE"], "imageConfig": {"aspectRatio": "{aspect_ratio}"}}})");
+	auto Model = [](const TCHAR* Id, const TCHAR* Label, const TCHAR* Gemini, const TCHAR* Request, const TCHAR* Edit, const float Cost1K, const float Cost2K, const float Cost4K)
 	{
 		FHyperAIStudioImageModelSettings Out;
 		Out.Id = Id;
@@ -45,6 +48,7 @@ TArray<FHyperAIStudioImageModelSettings> UHyperAIStudioSettings::GetNanoBananaMo
 		Out.ServiceId = TEXT("google_gemini");
 		Out.Path = TEXT("/v1beta/models/{model}:generateContent");
 		Out.RequestTemplate = Request;
+		Out.EditRequestTemplate = Edit;
 		Out.ResponseImagePath = TEXT("candidates.0.content.parts.*.inlineData.data");
 		Out.Model = Gemini;
 		Out.Width = 1024;
@@ -56,10 +60,10 @@ TArray<FHyperAIStudioImageModelSettings> UHyperAIStudioSettings::GetNanoBananaMo
 	};
 	// Google's standard prices per image, 2026-09.
 	return {
-		Model(TEXT("nano_banana_2"), TEXT("Nano Banana 2 (Gemini 3.1 Flash Image)"), TEXT("gemini-3.1-flash-image"), Sized, 0.067f, 0.101f, 0.151f),
-		Model(TEXT("nano_banana_pro"), TEXT("Nano Banana Pro (Gemini 3 Pro Image)"), TEXT("gemini-3-pro-image"), Sized, 0.134f, 0.134f, 0.24f),
-		Model(TEXT("nano_banana_2_lite"), TEXT("Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)"), TEXT("gemini-3.1-flash-lite-image"), Fixed, 0.0336f, 0.0f, 0.0f),
-		Model(TEXT("nano_banana"), TEXT("Nano Banana (Gemini 2.5 Flash Image)"), TEXT("gemini-2.5-flash-image"), Fixed, 0.039f, 0.0f, 0.0f)};
+		Model(TEXT("nano_banana_2"), TEXT("Nano Banana 2 (Gemini 3.1 Flash Image)"), TEXT("gemini-3.1-flash-image"), Sized, SizedEdit, 0.067f, 0.101f, 0.151f),
+		Model(TEXT("nano_banana_pro"), TEXT("Nano Banana Pro (Gemini 3 Pro Image)"), TEXT("gemini-3-pro-image"), Sized, SizedEdit, 0.134f, 0.134f, 0.24f),
+		Model(TEXT("nano_banana_2_lite"), TEXT("Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)"), TEXT("gemini-3.1-flash-lite-image"), Fixed, FixedEdit, 0.0336f, 0.0f, 0.0f),
+		Model(TEXT("nano_banana"), TEXT("Nano Banana (Gemini 2.5 Flash Image)"), TEXT("gemini-2.5-flash-image"), Fixed, FixedEdit, 0.039f, 0.0f, 0.0f)};
 }
 
 TArray<FString> UHyperAIStudioSettings::GetLanguageOptions()

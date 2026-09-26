@@ -26,8 +26,12 @@ public:
 	static void SetCommandForTests(const FString& Command);
 #endif
 
-	/** Starts drawing Prompt; poll IsDone. The size is a hint in the prompt, since these generators pick from a few sizes. */
-	static TSharedPtr<FHyperAIStudioAgentImage> Start(const FString& Agent, const FString& Prompt, const FIntPoint& SizeHint, FString& OutError);
+	/**
+	 * Starts drawing Prompt; poll IsDone. The size is a hint in the prompt, since these generators pick from a few sizes.
+	 * With an InputImage, the agent changes that picture as the prompt says rather than drawing from nothing.
+	 */
+	static TSharedPtr<FHyperAIStudioAgentImage> Start(const FString& Agent, const FString& Prompt, const FIntPoint& SizeHint, FString& OutError,
+		const FString& InputImage = FString());
 
 	~FHyperAIStudioAgentImage();
 
@@ -47,6 +51,8 @@ private:
 	TSharedPtr<FHyperAIStudioNativeChat> Chat;
 	FString Agent;
 	FString WorkDirectory;
+	/** The picture to change, copied into the work directory; never taken for the one drawn. */
+	FString InputCopy;
 	FString ImagePath;
 	FString Error;
 	FString RevisedPrompt;

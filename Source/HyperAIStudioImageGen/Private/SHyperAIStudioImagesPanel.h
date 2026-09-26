@@ -37,10 +37,20 @@ public:
 		int32 Count = 1;
 		/** Saved by someone on the team, in .hyperai/image-presets.json. */
 		bool bUser = false;
+		/** Changes a picture of the level, taken through HyperAI_MatchCamera when Generate is pressed, rather than drawing from words. */
+		bool bFromView = false;
 	};
 
 	void Construct(const FArguments& InArgs);
 	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
+
+	/**
+	 * Opens the Images page on a preset, as the Relight this view action does. A prompt fills the box, a model id picks the
+	 * model, and bGenerate presses Generate, which spends as the button does.
+	 */
+	static void OpenOnPreset(const FString& PresetId, const FString& Prompt = FString(), const FString& ModelId = FString(), bool bGenerate = false);
+	/** For a preset that changes a picture of the level: start matching the level's lighting to the picture once it lands. */
+	void SetMatchWhenDone(const bool bInMatchWhenDone) { bMatchWhenDone = bInMatchWhenDone; }
 
 	/** Reads models, templates, presets, generated images and batches again. */
 	void Reload();
@@ -84,6 +94,12 @@ private:
 	FString NewBatchName() const;
 	/** Match it from a generated image: a job for the preferred agent, followed on the Match page. */
 	void StartMatch(const FName ActionId);
+	/** The level's view through HyperAI_MatchCamera at the chosen shape, for a preset that changes it; false with Status set. */
+	bool CaptureView();
+	/** Once the batch's picture lands, the lighting is matched to it, wherever the user is by then. */
+	void MatchWhenDone(const FString& BatchId);
+	/** An OpenOnPreset waiting for the page to show. */
+	void TakePending();
 
 	FHyperAIImageInspectReport Inspect;
 	TArray<FModelPtr> Models;
@@ -108,6 +124,9 @@ private:
 	FString ComposedPrompt;
 	int32 Selected = INDEX_NONE;
 	double NextReload = 0.0;
+	/** The picture of the level a preset that changes one sends, captured when Generate is pressed. */
+	FString InputImage;
+	bool bMatchWhenDone = true;
 
 	TSharedPtr<SComboBox<FModelPtr>> ModelCombo;
 	TSharedPtr<SComboBox<FTemplatePtr>> TemplateCombo;

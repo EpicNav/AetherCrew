@@ -7,6 +7,7 @@
 #include "Fonts/FontMeasure.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "HyperAIStudioSettings.h"
+#include "HyperAIStudioShell.h"
 #include "IDesktopPlatform.h"
 #include "Input/DragAndDrop.h"
 #include "Misc/Paths.h"
@@ -38,6 +39,19 @@ namespace HyperAIStudio::Preview::Private
 	const FSlateBrush* WhiteBrush()
 	{
 		return FCoreStyle::Get().GetBrush("GenericWhiteBox");
+	}
+
+	/** Relight this view, which the image pack registers when it loads: a reference made from the level itself. */
+	TOptional<FHyperAIStudioAction> RelightAction()
+	{
+		for (const FHyperAIStudioAction& Action : FHyperAIStudioShell::GetActions())
+		{
+			if (Action.Id == FName(TEXT("RelightView")))
+			{
+				return Action;
+			}
+		}
+		return {};
 	}
 
 	FVector2f ImageSizeOf(const FSlateBrush* Brush)
@@ -434,6 +448,22 @@ void SHyperAIStudioPreviewPanel::Construct(const FArguments& InArgs)
 						.ToolTipText(LOCTEXT("BrowseTip", "Pick a PNG, JPG, BMP or TGA from inside the project."))
 						.OnClicked(this, &SHyperAIStudioPreviewPanel::OnBrowseClicked)
 					]
+					// No reference at all: one made from the level itself, relit as the user describes.
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f)
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("RelightView", "Relight this view..."))
+						.ToolTipText(LOCTEXT("RelightViewTip", "No reference? Make one from the level itself. The Images page takes the view through HyperAI_MatchCamera, an image model relights it as you describe, and your preferred agent then matches the level's lighting to that picture."))
+						.Visibility_Lambda([]() { return HyperAIStudio::Preview::Private::RelightAction().IsSet() ? EVisibility::Visible : EVisibility::Collapsed; })
+						.OnClicked_Lambda([]()
+						{
+							if (const TOptional<FHyperAIStudioAction> Action = HyperAIStudio::Preview::Private::RelightAction(); Action.IsSet() && Action->Run)
+							{
+								Action->Run();
+							}
+							return FReply::Handled();
+						})
+					]
 					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f)
 					[
 						SNew(SButton)
@@ -605,7 +635,13 @@ void SHyperAIStudioPreviewPanel::Construct(const FArguments& InArgs)
 			.Mode_Lambda([this]() { return Mode; })
 			.EmptyMessage_Lambda([this]()
 			{
-				return Status.IsEmpty() ? LOCTEXT("PickThenRefresh", "Pick a reference, then Refresh.") : FText::FromString(Status);
+				if (!Status.IsEmpty())
+				{
+					return FText::FromString(Status);
+				}
+				return HyperAIStudio::Preview::Private::RelightAction().IsSet()
+					? LOCTEXT("PickOrRelight", "Pick a reference, then Refresh. No reference? Relight this view makes one from the level itself.")
+					: LOCTEXT("PickThenRefresh", "Pick a reference, then Refresh.");
 			})
 		]
 

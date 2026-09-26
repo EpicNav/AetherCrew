@@ -13,7 +13,12 @@ A match is a loop with a scorekeeper. You make the changes. `hyper_image_compare
 ## 1. Before the first attempt
 
 - **Look at the reference yourself.** Open the PNG with your image reader. Say in a sentence what makes the look: time of day, key light, palette, contrast, mood, the main shapes. The numbers measure; you decide what matters.
-- **No reference yet?** Generate one with `hyper_image_generate`; see `.hyperai/docs/HyperAIStudio-ImageGenCookbook.md`. If your client cannot draw (Claude Code), use `model_id: codex_image_gen`.
+- **No reference yet?** Make one from the level itself, relit the way the user asks:
+  1. Capture `HyperAI_MatchCamera` with `hyper_capture_view` (source `camera`, 1024 x 576 for 16:9). If the level has no such camera, place a camera labelled `HyperAI_MatchCamera` where the view should be first.
+  2. Call `hyper_image_generate` with `input_image_path` set to that frame and a model whose `bTakesInputImage` is true (a Nano Banana model, or `codex_image_gen` if your client cannot draw, as Claude Code cannot). In the prompt, say how the view should be lit, and to keep the camera, framing, objects and materials exactly as they are and change only the light.
+  3. The picture that comes back frames the same view. Capture that same camera for every attempt and change the light only. Compare in `look` mode, since the model redraws small details a little differently.
+
+  The Images page's **Relight this view** preset does all three and then starts a Match job. To draw a reference from words instead, see `.hyperai/docs/HyperAIStudio-ImageGenCookbook.md`.
 - **Pick the mode:**
   - `aligned`: the reference frames the same view as your capture, such as a photo from a matched camera, a material ball against its own preview, a UI mock at the same size, or an earlier capture.
   - `look`: concept art or a generated image that will never line up pixel for pixel. Structure is not scored there; palette, tone, layout and detail are.

@@ -17,6 +17,8 @@ public class HyperAIStudioImageGen : ModuleRules
 			// The tests play Google's image endpoint on a local port.
 			"HTTPServer",
 			"HyperAIStudio",
+			// The size of a picture to change.
+			"ImageCore",
 			"InputCore",
 			"Json",
 			"Slate",

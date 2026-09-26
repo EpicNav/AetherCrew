@@ -1253,6 +1253,8 @@ void FHyperAIStudioLightingRegistration::Startup()
 		Source.Refresh = FHyperAIStudioPreviewRefresh::CreateStatic(&HyperAIStudio::Lighting::Private::RefreshMatchPreview);
 		Source.AgentActions = HyperAIStudio::Lighting::MatchJobs::Actions();
 		Source.bRefreshWhileAgentWorks = true;
+		// For the Images page's Relight this view: the picture a reference is made from is the view the Match jobs work on.
+		Source.CaptureView = &HyperAIStudio::Lighting::MatchJobs::CaptureMatchView;
 		FHyperAIStudioPreviewPanel::RegisterSource(MoveTemp(Source));
 	}
 	PostEngineInitHandle = FCoreDelegates::GetOnPostEngineInit().AddRaw(this, &FHyperAIStudioLightingRegistration::RegisterAfterEngineInit);

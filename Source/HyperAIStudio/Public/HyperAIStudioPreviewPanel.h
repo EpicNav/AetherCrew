@@ -82,6 +82,11 @@ public:
 		TArray<FAgentAction> AgentActions;
 		/** Cheap enough to refresh every few seconds while an agent works on the reference, so its attempts appear as they land. */
 		bool bRefreshWhileAgentWorks = false;
+		/**
+		 * Captures the view this source's agent actions work on, for a reference to be made from it, as the Images page's
+		 * Relight this view does: a picture inside the project, of the size asked for. Unbound when the source has no view.
+		 */
+		TFunction<bool(const FIntPoint& /*Size*/, FString& /*OutImagePath*/, FString& /*OutError*/)> CaptureView;
 	};
 
 	/** Replaces any source already registered under this id. */

@@ -7,9 +7,12 @@
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioExternalService.h"
+#include "ImageCore.h"
+#include "ImageUtils.h"
 #include "Misc/Base64.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/SecureHash.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -79,6 +82,10 @@ namespace HyperAIStudio::ImageGen::Gate
 			TArray<FString> Files;
 			/** The picture an agent is drawing now, for an agent model. */
 			TSharedPtr<FHyperAIStudioAgentImage> Drawing;
+			/** The picture each image changes, read once when the batch starts; empty bytes draw from words. */
+			FInputImage Input;
+			/** Project-relative, for the sidecars. */
+			FString InputProjectPath;
 		};
 
 		/**
@@ -115,6 +122,7 @@ namespace HyperAIStudio::ImageGen::Gate
 			Info.Width = Model.Width;
 			Info.Height = Model.Height;
 			Info.bRunsOnThisMachine = Model.bRunsOnThisMachine;
+			Info.bTakesInputImage = TakesInputImage(Model);
 			FHyperAIStudioExternalServiceSettings Service;
 			if (!FHyperAIStudioExternalServices::Find(Model.ServiceId, Service))
 			{
@@ -222,6 +230,7 @@ namespace HyperAIStudio::ImageGen::Gate
 				TEXT("\t\"height\": %d,\n")
 				TEXT("\t\"seed\": %d,\n")
 				TEXT("\t\"cost\": %.4f,\n")
+				TEXT("%s")
 				TEXT("\t\"generated_utc\": \"%s\"\n")
 				TEXT("}\n"),
 				*EscapeForJsonString(FPaths::GetCleanFilename(ImageFile)),
@@ -234,6 +243,8 @@ namespace HyperAIStudio::ImageGen::Gate
 				*EscapeForJsonString(Batch.Model.ServiceId),
 				Batch.Width, Batch.Height, SeedFor(Batch, Index),
 				Batch.CostPerCall,
+				// The picture it changed, so whoever matches to it can find the view it came from.
+				Batch.InputProjectPath.IsEmpty() ? TEXT("") : *FString::Printf(TEXT("\t\"input_image\": \"%s\",\n"), *EscapeForJsonString(Batch.InputProjectPath)),
 				*FDateTime::UtcNow().ToIso8601());
 			const FString SidecarFile = FPaths::ChangeExtension(ImageFile, TEXT("json"));
 			FFileHelper::SaveStringToFile(Json, *SidecarFile, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
@@ -280,7 +291,7 @@ namespace HyperAIStudio::ImageGen::Gate
 			FString StartError;
 			// These generators take no negative prompt, so it goes into the description.
 			const FString Prompt = Batch->Negative.IsEmpty() ? Batch->Prompt : Batch->Prompt + TEXT(" Avoid: ") + Batch->Negative;
-			Batch->Drawing = FHyperAIStudioAgentImage::Start(Agent, Prompt, FIntPoint(Batch->Width, Batch->Height), StartError);
+			Batch->Drawing = FHyperAIStudioAgentImage::Start(Agent, Prompt, FIntPoint(Batch->Width, Batch->Height), StartError, Batch->Input.Path);
 			if (!Batch->Drawing.IsValid())
 			{
 				Batch->bFailed = true;
@@ -296,8 +307,9 @@ namespace HyperAIStudio::ImageGen::Gate
 			const int32 Index = Batch->Sent;
 			FString Body;
 			FString BuildError;
+			const bool bChanges = !Batch->Input.Bytes.IsEmpty();
 			if (!BuildRequestBody(Batch->Model, Batch->Prompt, Batch->Negative,
-				Batch->Width, Batch->Height, SeedFor(*Batch, Index), Body, BuildError))
+				Batch->Width, Batch->Height, SeedFor(*Batch, Index), Body, BuildError, bChanges ? &Batch->Input : nullptr))
 			{
 				Batch->bFailed = true;
 				Batch->Error = BuildError;
@@ -307,7 +319,8 @@ namespace HyperAIStudio::ImageGen::Gate
 			const TSharedPtr<FBatch> Kept = Batch;
 			FString PostError;
 			// A Gemini model names itself in the path: /v1beta/models/{model}:generateContent.
-			const FString Path = Batch->Model.Path.Replace(TEXT("{model}"), *Batch->Model.Model, ESearchCase::IgnoreCase);
+			const FString& PathTemplate = bChanges && !Batch->Model.EditPath.IsEmpty() ? Batch->Model.EditPath : Batch->Model.Path;
+			const FString Path = PathTemplate.Replace(TEXT("{model}"), *Batch->Model.Model, ESearchCase::IgnoreCase);
 			const bool bSent = FHyperAIStudioExternalServices::PostJson(
 				Batch->Model.ServiceId, Path, Body,
 				[Kept, Index](const bool bOk, const TArray<uint8>& Response, const TMap<FString, FString>&, const FString& ResponseError)
@@ -393,6 +406,12 @@ namespace HyperAIStudio::ImageGen::Gate
 		return true;
 	}
 
+	bool TakesInputImage(const FHyperAIStudioImageModelSettings& Model)
+	{
+		FString Agent;
+		return IsAgentModel(Model, Agent) || !Model.EditRequestTemplate.IsEmpty();
+	}
+
 	TArray<FHyperAIImageModelInfo> ReadModels()
 	{
 		TArray<FHyperAIImageModelInfo> Infos;
@@ -423,6 +442,7 @@ namespace HyperAIStudio::ImageGen::Gate
 			Info.ServiceId = Model.ServiceId;
 			Info.Width = Model.Width;
 			Info.Height = Model.Height;
+			Info.bTakesInputImage = true;
 			// No key: the agent is signed in already, and it spends the user's own plan rather than money here.
 			Info.bHasApiKey = true;
 			Info.Health = FHyperAIStudioAgentImage::CanDraw(Agent, Info.Issue) ? TEXT("ready") : TEXT("unavailable");
@@ -533,6 +553,7 @@ namespace HyperAIStudio::ImageGen::Gate
 			Object->TryGetNumberField(TEXT("seed"), Record.Seed);
 			Object->TryGetNumberField(TEXT("width"), Record.Width);
 			Object->TryGetNumberField(TEXT("height"), Record.Height);
+			Object->TryGetStringField(TEXT("input_image"), Record.InputImage);
 			Record.SizeBytes = IFileManager::Get().FileSize(*ImageFile);
 			Records.Add(MoveTemp(Record));
 		}
@@ -691,20 +712,71 @@ namespace HyperAIStudio::ImageGen::Gate
 		return Longest <= 1024 ? TEXT("1K") : Longest <= 2048 ? TEXT("2K") : TEXT("4K");
 	}
 
+	bool ReadInputImage(const FString& Path, FInputImage& Out, FString& OutError)
+	{
+		Out = FInputImage();
+		OutError.Reset();
+		const FString Root = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+		Out.Path = FPaths::ConvertRelativePathToFull(FPaths::IsRelative(Path) ? FPaths::ProjectDir() / Path : Path);
+		if (!FPaths::IsUnderDirectory(Out.Path, Root) || !FFileHelper::LoadFileToArray(Out.Bytes, *Out.Path))
+		{
+			OutError = FString::Printf(TEXT("input_image_path %s is not a file inside the project; pass a picture such as a hyper_capture_view frame."), *Path.Left(200));
+			return false;
+		}
+		const FString Extension = SniffImageExtension(Out.Bytes);
+		if (Extension.IsEmpty())
+		{
+			OutError = FString::Printf(TEXT("input_image_path %s is not a PNG, JPEG or WebP picture."), *Path.Left(200));
+			return false;
+		}
+		if (Out.Bytes.Num() > MaxInputImageBytes)
+		{
+			OutError = FString::Printf(TEXT("input_image_path %s is %.1f MB; a picture to change is at most %d MB, which a 1920 x 1080 capture is well within."),
+				*Path.Left(200), Out.Bytes.Num() / (1024.0 * 1024.0), MaxInputImageBytes / (1024 * 1024));
+			return false;
+		}
+		Out.MimeType = Extension == TEXT("jpg") ? FString(TEXT("image/jpeg")) : TEXT("image/") + Extension;
+		FImage Decoded;
+		if (FImageUtils::DecompressImage(Out.Bytes.GetData(), Out.Bytes.Num(), Decoded))
+		{
+			Out.Size = FIntPoint(Decoded.SizeX, Decoded.SizeY);
+		}
+		Out.Hash = FMD5::HashBytes(Out.Bytes.GetData(), Out.Bytes.Num());
+		return true;
+	}
+
 	bool BuildRequestBody(const FHyperAIStudioImageModelSettings& Model, const FString& Prompt, const FString& Negative,
-		const int32 Width, const int32 Height, const int32 Seed, FString& OutBody, FString& OutError)
+		const int32 Width, const int32 Height, const int32 Seed, FString& OutBody, FString& OutError, const FInputImage* Input)
 	{
 		OutBody.Reset();
 		OutError.Reset();
-		if (Model.RequestTemplate.IsEmpty())
+		const FString& Template = Input ? Model.EditRequestTemplate : Model.RequestTemplate;
+		if (Input && Template.IsEmpty())
+		{
+			OutError = FString::Printf(TEXT("Model %s draws from words only: it has no edit_request_template, so it cannot change a picture. ")
+				TEXT("The Nano Banana models, codex_image_gen and gemini_image_gen can; the cookbook shows the shape."), *Model.Id);
+			return false;
+		}
+		if (Input && !Template.Contains(TEXT("{input_image}"), ESearchCase::IgnoreCase))
+		{
+			OutError = FString::Printf(TEXT("Model %s's edit_request_template has no {input_image}, so the picture would never reach it; see the cookbook."), *Model.Id);
+			return false;
+		}
+		if (Template.IsEmpty())
 		{
 			OutError = FString::Printf(TEXT("Model %s has no request_template; see the cookbook for three worked shapes."), *Model.Id);
 			return false;
 		}
-		OutBody = Model.RequestTemplate;
+		OutBody = Template;
+		// The picture first, so no text substituted after it can hold a placeholder that would take it; base64 has no braces.
+		if (Input)
+		{
+			OutBody = OutBody.Replace(TEXT("{input_mime_type}"), *Input->MimeType, ESearchCase::IgnoreCase);
+			OutBody = OutBody.Replace(TEXT("{input_image}"), *FBase64::Encode(Input->Bytes), ESearchCase::IgnoreCase);
+		}
 		// A model with no field for a negative prompt still hears it, at the end of the description.
 		const FString Avoid = Negative.TrimStartAndEnd();
-		const bool bTakesNegative = Model.RequestTemplate.Contains(TEXT("{negative}"), ESearchCase::IgnoreCase);
+		const bool bTakesNegative = Template.Contains(TEXT("{negative}"), ESearchCase::IgnoreCase);
 		const FString Described = bTakesNegative || Avoid.IsEmpty() ? Prompt : Prompt + TEXT(" Avoid: ") + Avoid;
 		OutBody = OutBody.Replace(TEXT("{prompt}"), *EscapeForJsonString(Described), ESearchCase::IgnoreCase);
 		OutBody = OutBody.Replace(TEXT("{negative}"), *EscapeForJsonString(Negative), ESearchCase::IgnoreCase);
@@ -722,11 +794,12 @@ namespace HyperAIStudio::ImageGen::Gate
 		{
 			OutBody.Reset();
 			OutError = FString::Printf(
-				TEXT("Model %s produced a request body that is not valid JSON. Check request_template: {prompt} belongs inside a string's quotes, {width} outside them."),
-				*Model.Id);
+				TEXT("Model %s produced a request body that is not valid JSON. Check %s: {prompt} belongs inside a string's quotes, {width} outside them."),
+				*Model.Id, Input ? TEXT("edit_request_template") : TEXT("request_template"));
 			return false;
 		}
-		if (OutBody.Len() * 2 > FHyperAIStudioExternalServices::MaxRequestBodyBytes)
+		// Counted as sent: UTF-8, where a picture's base64 is a byte a character.
+		if (FTCHARToUTF8(*OutBody).Length() > FHyperAIStudioExternalServices::MaxRequestBodyBytes)
 		{
 			OutBody.Reset();
 			OutError = TEXT("The request body exceeds the bounded request size.");
@@ -845,7 +918,7 @@ namespace HyperAIStudio::ImageGen::Gate
 
 	bool StartBatch(const FString& BatchId, const FHyperAIStudioImageModelSettings& Model, const FString& TemplateId,
 		const FString& Prompt, const FString& Negative, const int32 Count, const int32 Width, const int32 Height,
-		const int32 Seed, FString& OutError)
+		const int32 Seed, FString& OutError, const FString& InputImagePath, const FString& InputImageHash)
 	{
 		OutError.Reset();
 		if (Batches().Contains(BatchId))
@@ -854,6 +927,20 @@ namespace HyperAIStudio::ImageGen::Gate
 			return false;
 		}
 		const TSharedPtr<FBatch> Batch = MakeShared<FBatch>();
+		if (!InputImagePath.IsEmpty())
+		{
+			if (!ReadInputImage(InputImagePath, Batch->Input, OutError))
+			{
+				return false;
+			}
+			if (!InputImageHash.IsEmpty() && Batch->Input.Hash != InputImageHash)
+			{
+				OutError = FString::Printf(TEXT("%s changed after the plan was made, so it is not the picture that was approved; nothing was sent."), *InputImagePath);
+				return false;
+			}
+			Batch->InputProjectPath = Batch->Input.Path;
+			FPaths::MakePathRelativeTo(Batch->InputProjectPath, *(FPaths::ProjectDir()));
+		}
 		Batch->BatchId = BatchId;
 		Batch->ProjectFolder = OutputFolder() / BatchId;
 		Batch->FolderOnDisk = OutputRootOnDisk() / BatchId;
@@ -870,6 +957,22 @@ namespace HyperAIStudio::ImageGen::Gate
 		{
 			OutError = FString::Printf(TEXT("Could not make %s."), *Batch->FolderOnDisk);
 			return false;
+		}
+		// The picture it changes stays beside the results, with the capture.json naming its view when it is a capture of the
+		// level: the reference keeps where it came from after the captures folder is pruned.
+		if (!Batch->Input.Bytes.IsEmpty())
+		{
+			const FString Kept = Batch->FolderOnDisk / (BatchId + TEXT("_input.") + SniffImageExtension(Batch->Input.Bytes));
+			if (FFileHelper::SaveArrayToFile(Batch->Input.Bytes, *Kept))
+			{
+				Batch->InputProjectPath = Kept;
+				FPaths::MakePathRelativeTo(Batch->InputProjectPath, *(FPaths::ProjectDir()));
+				const FString View = FPaths::GetPath(Batch->Input.Path) / TEXT("capture.json");
+				if (IFileManager::Get().FileExists(*View))
+				{
+					IFileManager::Get().Copy(*(Batch->FolderOnDisk / TEXT("capture.json")), *View);
+				}
+			}
 		}
 
 		FHyperAIStudioAsyncJobRequest Job;

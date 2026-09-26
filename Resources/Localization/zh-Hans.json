@@ -662,6 +662,18 @@
    "text": "使用 Codex、Gemini 或已配置的模型生成参考图像，并浏览项目中已有的图像。"
   },
   {
+   "namespace": "HyperAIStudioImageGenModule",
+   "key": "RelightAction",
+   "source": "Relight this view",
+   "text": "为此视角重新布光"
+  },
+  {
+   "namespace": "HyperAIStudioImageGenModule",
+   "key": "RelightActionDescription",
+   "source": "No reference image? Make one from the level itself: an image model relights the view as you describe, then your preferred agent matches the level's lighting to it.",
+   "text": "没有参考图？用关卡本身做一张：图像模型按你的描述为这个视角重新布光，然后你的首选智能体把关卡的光照匹配到这张图。"
+  },
+  {
    "namespace": "HyperAIStudioLevelDesign",
    "key": "ApplyBlockoutPlan",
    "source": "HyperAI: Apply Blockout Plan",
@@ -956,6 +968,12 @@
    "text": "你的首选智能体会为关卡重新布光，直到与参考图像的得分达到 78：太阳、天空、雾、曝光和调色，或 Ultra Dynamic Sky 自身的设置。HyperAI 会在每一轮之后检查，并让它继续工作，直到匹配为止。它运行期间的光照修改会替你批准，并在匹配之前保持未保存。"
   },
   {
+   "namespace": "HyperAIStudioMatchJobs",
+   "key": "PlaceMatchCamera",
+   "source": "Place HyperAI_MatchCamera",
+   "text": "放置 HyperAI_MatchCamera"
+  },
+  {
    "namespace": "HyperAIStudioMaterials",
    "key": "ApplyPlan",
    "source": "HyperAI Material Edit",
@@ -1101,6 +1119,12 @@
   },
   {
    "namespace": "HyperAIStudioPreviewPanel",
+   "key": "PickOrRelight",
+   "source": "Pick a reference, then Refresh. No reference? Relight this view makes one from the level itself.",
+   "text": "选择参考图，然后点击刷新。没有参考图？“为此视角重新布光”可以用关卡本身做一张。"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
    "key": "PickReference",
    "source": "Pick a reference image",
    "text": "选择参考图像"
@@ -1134,6 +1158,18 @@
    "key": "RefreshTip",
    "source": "Capture and measure again.",
    "text": "重新捕获并测量。"
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "RelightView",
+   "source": "Relight this view...",
+   "text": "为此视角重新布光..."
+  },
+  {
+   "namespace": "HyperAIStudioPreviewPanel",
+   "key": "RelightViewTip",
+   "source": "No reference? Make one from the level itself. The Images page takes the view through HyperAI_MatchCamera, an image model relights it as you describe, and your preferred agent then matches the level's lighting to that picture.",
+   "text": "没有参考图？用关卡本身做一张。图像页面通过 HyperAI_MatchCamera 截取视角，图像模型按你的描述为它重新布光，然后你的首选智能体把关卡的光照匹配到这张图。"
   },
   {
    "namespace": "HyperAIStudioPreviewPanel",
@@ -2439,6 +2475,12 @@
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
+   "key": "FromViewNote",
+   "source": "Generate takes the picture through HyperAI_MatchCamera, placing that camera where the level viewport looks if the level has none, and the model changes only its light. Move the camera to relight another view.",
+   "text": "生成时会通过 HyperAI_MatchCamera 截取画面；关卡中没有这台相机时，会把它放在关卡视口所看的位置。模型只改变画面的光照。移动这台相机即可为其他视角重新布光。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
    "key": "GenerateButton",
    "source": "Generate",
    "text": "生成"
@@ -2487,6 +2529,18 @@
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
+   "key": "MatchWhenDone",
+   "source": "Then match the level's lighting to it",
+   "text": "然后把关卡的光照匹配到这张图"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "MatchWhenDoneTip",
+   "source": "When the picture arrives, your preferred agent relights the level until it matches, as Match the lighting to this does. With more than one image, pick one and use Match the lighting to this.",
+   "text": "图片生成后，你的首选智能体会为关卡重新布光直到匹配，与“按这张图匹配光照”相同。生成多张时，请选中一张再使用“按这张图匹配光照”。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
    "key": "Model",
    "source": "Model",
    "text": "模型"
@@ -2520,6 +2574,12 @@
    "key": "NoModel",
    "source": "No image model",
    "text": "没有图片模型"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "NoPictureModel",
+   "source": "This model draws from words only, so it cannot relight a view. Pick a Nano Banana model or Codex.",
+   "text": "这个模型只能根据文字作画，无法为视角重新布光。请选择 Nano Banana 模型或 Codex。"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
@@ -2613,6 +2673,18 @@
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetRelight",
+   "source": "Relight this view",
+   "text": "为此视角重新布光"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PresetRelightHint",
+   "source": "How the view should be lit: the time of day, where the light comes from, its colour, the weather and the mood. For example: late dusk, warm lamps glowing inside, cool blue moonlight through the windows, a little fog.",
+   "text": "这个视角应该如何照明：一天中的时刻、光从哪里来、光的颜色、天气和氛围。例如：深黄昏，室内暖色灯光亮起，冷蓝色月光透过窗户，些许薄雾。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
    "key": "PresetScene",
    "source": "Scene lighting",
    "text": "场景光照"
@@ -2676,6 +2748,12 @@
    "key": "PromptHint",
    "source": "What to draw, as you would tell an artist.",
    "text": "要画什么，像对画师说的那样描述。"
+  },
+  {
+   "namespace": "SHyperAIStudioImagesPanel",
+   "key": "PromptLight",
+   "source": "How it should be lit",
+   "text": "应该如何照明"
   },
   {
    "namespace": "SHyperAIStudioImagesPanel",

@@ -7,6 +7,7 @@
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SkyLightComponent.h"
 #include "Containers/Ticker.h"
+#include "Dom/JsonObject.h"
 #include "Editor.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
@@ -16,7 +17,9 @@
 #include "HyperAIStudioLightingGate.h"
 #include "LevelEditorViewport.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Serialization/JsonSerializer.h"
 #include "ShaderCompiler.h"
 #include "TextureResource.h"
 #include "UObject/Package.h"
@@ -260,6 +263,21 @@ namespace HyperAIStudio::Lighting::Capture
 					OutError = TEXT("Could not create the capture folder.");
 					return false;
 				}
+				// The view its frames show, so a picture made from one, such as the level relit, is matched from the same view.
+				const TSharedRef<FJsonObject> ViewFile = MakeShared<FJsonObject>();
+				ViewFile->SetStringField(TEXT("source"), Request.Source);
+				ViewFile->SetStringField(TEXT("camera_actor_label"), Request.Source == TEXT("camera") ? Request.CameraActorLabel : FString());
+				ViewFile->SetArrayField(TEXT("location"), {MakeShared<FJsonValueNumber>(View.Location.X), MakeShared<FJsonValueNumber>(View.Location.Y),
+					MakeShared<FJsonValueNumber>(View.Location.Z)});
+				ViewFile->SetArrayField(TEXT("rotation"), {MakeShared<FJsonValueNumber>(View.Rotation.Pitch), MakeShared<FJsonValueNumber>(View.Rotation.Yaw),
+					MakeShared<FJsonValueNumber>(View.Rotation.Roll)});
+				ViewFile->SetNumberField(TEXT("fov_degrees"), View.Fov);
+				ViewFile->SetNumberField(TEXT("width"), Request.Width);
+				ViewFile->SetNumberField(TEXT("height"), Request.Height);
+				ViewFile->SetStringField(TEXT("level"), InWorld.GetOutermost()->GetName());
+				FString ViewText;
+				FJsonSerializer::Serialize(ViewFile, TJsonWriterFactory<>::Create(&ViewText));
+				FFileHelper::SaveStringToFile(ViewText, *(FolderOnDisk / TEXT("capture.json")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 
 				Target.Reset(NewObject<UTextureRenderTarget2D>(GetTransientPackage(), NAME_None, RF_Transient));
 				Target->RenderTargetFormat = RTF_RGBA8;

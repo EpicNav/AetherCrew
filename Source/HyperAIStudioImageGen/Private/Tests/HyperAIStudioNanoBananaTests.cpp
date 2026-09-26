@@ -126,6 +126,27 @@ bool FHyperAIStudioNanoBananaModelsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Nano Banana's request builds"), Gate::BuildRequestBody(Banana, TEXT("a lighthouse"), FString(), 1024, 1024, -1, Body, Error));
 	TestTrue(TEXT("with no size, which it does not take"), Body.Contains(TEXT("\"aspectRatio\": \"1:1\"")) && !Body.Contains(TEXT("imageSize")));
 
+	// A picture to change goes beside the words, as a part of its own.
+	Gate::FInputImage Input;
+	Input.Bytes = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02, 0x03};
+	Input.MimeType = TEXT("image/png");
+	TestTrue(TEXT("Every Nano Banana model and the agents can change a picture"), Gate::TakesInputImage(Two) && Gate::TakesInputImage(Pro)
+		&& Gate::TakesInputImage(Lite) && Gate::TakesInputImage(Banana) && Gate::TakesInputImage(Model(TEXT("codex_image_gen"))));
+	TestTrue(TEXT("Nano Banana 2's request with a picture builds: ") + Error,
+		Gate::BuildRequestBody(Two, TEXT("relight it at dusk"), FString(), 1024, 576, -1, Body, Error, &Input));
+	TestTrue(TEXT("carrying the picture as inline data after the words"),
+		Body.Contains(FString::Printf(TEXT("{\"inlineData\": {\"mimeType\": \"image/png\", \"data\": \"%s\"}}"), *FBase64::Encode(Input.Bytes)))
+		&& Body.Find(TEXT("relight it at dusk")) < Body.Find(TEXT("inlineData")));
+	TestTrue(TEXT("at the picture's 16:9 and 1K"), Body.Contains(TEXT("\"aspectRatio\": \"16:9\"")) && Body.Contains(TEXT("\"imageSize\": \"1K\"")));
+	FHyperAIStudioImageModelSettings WordsOnly = Two;
+	WordsOnly.EditRequestTemplate.Reset();
+	TestFalse(TEXT("A model with no edit template cannot change a picture"),
+		Gate::TakesInputImage(WordsOnly) || Gate::BuildRequestBody(WordsOnly, TEXT("x"), FString(), 1024, 576, -1, Body, Error, &Input));
+	TestTrue(TEXT("and it says which can"), Error.Contains(TEXT("draws from words only")) && Error.Contains(TEXT("Nano Banana")));
+	WordsOnly.EditRequestTemplate = WordsOnly.RequestTemplate;
+	TestFalse(TEXT("Nor can one whose edit template leaves the picture out"), Gate::BuildRequestBody(WordsOnly, TEXT("x"), FString(), 1024, 576, -1, Body, Error, &Input));
+	TestTrue(TEXT("which is named"), Error.Contains(TEXT("{input_image}")));
+
 	// Model names are data: an entry with a built-in id replaces it.
 	FHyperAIStudioImageModelSettings Renamed = Pro;
 	Renamed.Model = TEXT("gemini-3-pro-image-preview");
@@ -280,6 +301,143 @@ bool FHyperAIStudioNanoBananaEndToEndTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("with a sidecar naming the model and its price"), FFileHelper::LoadFileToString(Sidecar, *(Gate::OutputRootOnDisk() / BatchId / (BatchId + TEXT("_01.json"))))
 		&& Sidecar.Contains(TEXT("\"model\": \"gemini-3.1-flash-image\"")) && Sidecar.Contains(TEXT("\"cost\": 0.1010")));
 	TestEqual(TEXT("and the session's spend counts it at the 2K price"), FHyperAIStudioExternalServices::GetSessionSpend(), 0.101, 1e-4);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNanoBananaRelightTest,
+	"HyperAIStudio.ImageGen.NanoBanana.ChangeAPicture",
+	HyperAIStudio::ImageGen::NanoBananaTests::Flags)
+
+bool FHyperAIStudioNanoBananaRelightTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ImageGen;
+	using namespace HyperAIStudio::ImageGen::NanoBananaTests;
+	// Google's endpoint on this machine again: what reaches it with a picture in the request.
+	constexpr uint32 Port = 18323;
+	const TSharedPtr<IHttpRouter> Router = FHttpServerModule::Get().GetHttpRouter(Port, /*bFailOnBindFailure=*/true);
+	if (!Router.IsValid())
+	{
+		AddWarning(TEXT("Port 18323 is taken, so the stand-in for Google's endpoint could not start."));
+		return true;
+	}
+	struct FSeen
+	{
+		FString Body;
+		int32 Calls = 0;
+	};
+	const TSharedRef<FSeen> Seen = MakeShared<FSeen>();
+	const FString Picture = PngBase64();
+	const FHttpRouteHandle Route = Router->BindRoute(FHttpPath(TEXT("/v1beta/models")), EHttpServerRequestVerbs::VERB_POST,
+		FHttpRequestHandler::CreateLambda([Seen, Picture](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
+		{
+			++Seen->Calls;
+			FUTF8ToTCHAR Body(reinterpret_cast<const ANSICHAR*>(Request.Body.GetData()), Request.Body.Num());
+			Seen->Body = FString(Body.Length(), Body.Get());
+			OnComplete(FHttpServerResponse::Create(FString::Printf(
+				TEXT(R"({"candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": "%s"}}]}, "finishReason": "STOP"}]})"),
+				*Picture), TEXT("application/json")));
+			return true;
+		}));
+	FHttpServerModule::Get().StartAllListeners();
+
+	const FSettingsGuard Guard;
+	FHyperAIStudioExternalServiceSettings Local = UHyperAIStudioSettings::GetGeminiService();
+	Local.BaseUrl = FString::Printf(TEXT("http://127.0.0.1:%u"), Port);
+	Local.ApiKeyVariable = TEXT("HYPERAI_TEST_GEMINI_KEY");
+	Guard.Settings->ExternalServices = {Local};
+	Guard.Settings->ImageModels.Reset();
+	FPlatformMisc::SetEnvironmentVar(TEXT("HYPERAI_TEST_GEMINI_KEY"), TEXT("test-key-4821"));
+	FHyperAIStudioExternalServices::ResetSessionSpend();
+	// A capture of the level as hyper_capture_view leaves one: a frame, and the view it shows beside it.
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	const FString CaptureFolder = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Captures") / (TEXT("relight-test-") + Suffix));
+	const FString BatchId = TEXT("relight_e2e_") + Suffix;
+	ON_SCOPE_EXIT
+	{
+		Router->UnbindRoute(Route);
+		FPlatformMisc::SetEnvironmentVar(TEXT("HYPERAI_TEST_GEMINI_KEY"), TEXT(""));
+		FHyperAIStudioExternalServices::ResetSessionSpend();
+		IFileManager::Get().DeleteDirectory(*CaptureFolder, /*RequireExists=*/false, /*Tree=*/true);
+		IFileManager::Get().DeleteDirectory(*(Gate::OutputRootOnDisk() / BatchId), /*RequireExists=*/false, /*Tree=*/true);
+	};
+	const FString Frame = CaptureFolder / TEXT("frame_00.png");
+	HyperAIStudio::Tests::WriteScenePng(Frame, FIntPoint(1280, 720));
+	FFileHelper::SaveStringToFile(TEXT(R"({"source": "camera", "camera_actor_label": "HyperAI_MatchCamera", "width": 1280, "height": 720})"),
+		*(CaptureFolder / TEXT("capture.json")));
+	FString FrameRelative = Frame;
+	FPaths::MakePathRelativeTo(FrameRelative, *FPaths::ProjectDir());
+
+	FHyperAIImageGenerateRequest Request;
+	Request.ModelId = TEXT("nano_banana_2");
+	Request.BatchName = BatchId;
+	Request.Prompt = TEXT("Relight this picture of a game level: late dusk. Keep everything else as it is.");
+	Request.InputImagePath = FrameRelative;
+	const FHyperAIImageGenerateReport Plan = FHyperAIStudioImageGenContracts::BuildPlan(Request);
+	AddInfo(Plan.Status + TEXT(": ") + Plan.Diagnostic);
+	TestTrue(TEXT("A dry run with a picture to change plans"), Plan.bOk && Plan.Status == TEXT("planned"));
+	TestTrue(TEXT("at the picture's shape and the model's own 1K size"), Plan.Width == 1024 && Plan.Height == 576);
+	TestEqual(TEXT("so at the 1K price"), Plan.EstimatedCost, 0.067f, 1e-4f);
+	TestEqual(TEXT("naming the picture it changes"), Plan.InputImagePath, FrameRelative);
+	TestTrue(TEXT("as the dry run says"), Plan.Diagnostic.Contains(TEXT("changing ") + FrameRelative));
+	// Another picture at the same path is another plan: an approval covers the picture it showed.
+	HyperAIStudio::Tests::WriteScenePng(Frame, FIntPoint(1280, 720), FLinearColor(0.1f, 0.2f, 0.6f));
+	TestNotEqual(TEXT("A different picture makes a different plan"), FHyperAIStudioImageGenContracts::BuildPlan(Request).PlanHash, Plan.PlanHash);
+
+	FHyperAIImageGenerateRequest Refused = Request;
+	Refused.InputImagePath = FPaths::ConvertRelativePathToFull(FPaths::EngineDir() / TEXT("Content/Splash/EdSplash.bmp"));
+	TestEqual(TEXT("A picture outside the project is refused"), FHyperAIStudioImageGenContracts::BuildPlan(Refused).Status, FString(TEXT("invalid_input_image")));
+	Refused.InputImagePath = FPaths::GetPath(FrameRelative) / TEXT("capture.json");
+	TestEqual(TEXT("and a file that is no picture"), FHyperAIStudioImageGenContracts::BuildPlan(Refused).Status, FString(TEXT("invalid_input_image")));
+	FHyperAIStudioImageModelSettings WordsOnly = Model(TEXT("nano_banana_2"));
+	WordsOnly.Id = TEXT("words_only");
+	WordsOnly.EditRequestTemplate.Reset();
+	Guard.Settings->ImageModels = {WordsOnly};
+	Refused = Request;
+	Refused.ModelId = TEXT("words_only");
+	const FHyperAIImageGenerateReport NoPicture = FHyperAIStudioImageGenContracts::BuildPlan(Refused);
+	TestEqual(TEXT("and a model that draws from words only"), NoPicture.Status, FString(TEXT("model_takes_no_picture")));
+	TestTrue(TEXT("saying which can"), NoPicture.Diagnostic.Contains(TEXT("codex_image_gen")));
+	Guard.Settings->ImageModels.Reset();
+
+	Gate::FInputImage Input;
+	FString Error;
+	if (!TestTrue(TEXT("The picture reads: ") + Error, Gate::ReadInputImage(FrameRelative, Input, Error)))
+	{
+		return false;
+	}
+	TestTrue(TEXT("as a 1280 x 720 PNG"), Input.Size == FIntPoint(1280, 720) && Input.MimeType == TEXT("image/png"));
+	const FHyperAIStudioImageModelSettings Two = Model(TEXT("nano_banana_2"));
+	TestFalse(TEXT("A picture that is not the one planned sends nothing"),
+		Gate::StartBatch(BatchId + TEXT("_x"), Two, FString(), Request.Prompt, FString(), 1, 1024, 576, -1, Error, FrameRelative, TEXT("0123456789abcdef")));
+	TestTrue(TEXT("and says so"), Error.Contains(TEXT("changed after the plan")));
+	if (!TestTrue(TEXT("The planned picture starts a batch: ") + Error,
+		Gate::StartBatch(BatchId, Two, FString(), Request.Prompt, FString(), 1, 1024, 576, -1, Error, FrameRelative, Input.Hash)))
+	{
+		return false;
+	}
+	FHyperAIImageBatchInfo Batch;
+	const double End = FPlatformTime::Seconds() + 30.0;
+	while (FPlatformTime::Seconds() < End && (!Gate::FindBatch(BatchId, Batch) || (Batch.State != TEXT("complete") && Batch.State != TEXT("failed"))))
+	{
+		FTSTicker::GetCoreTicker().Tick(0.02f);
+		FPlatformProcess::Sleep(0.01f);
+	}
+	AddInfo(FString::Printf(TEXT("Batch %s: %s %s"), *Batch.State, *Batch.Progress, *Batch.Diagnostic));
+	TestEqual(TEXT("The batch completes"), Batch.State, FString(TEXT("complete")));
+	TestEqual(TEXT("with one call to Google"), Seen->Calls, 1);
+	TestTrue(TEXT("carrying the picture as inline data"),
+		Seen->Body.Contains(FString::Printf(TEXT("\"inlineData\": {\"mimeType\": \"image/png\", \"data\": \"%s\"}"), *FBase64::Encode(Input.Bytes))));
+	TestTrue(TEXT("at 16:9 and 1K"), Seen->Body.Contains(TEXT("\"aspectRatio\": \"16:9\"")) && Seen->Body.Contains(TEXT("\"imageSize\": \"1K\"")));
+	const TArray<FHyperAIImageRecord> Records = Gate::ReadGenerated(BatchId, 8);
+	if (!TestEqual(TEXT("One picture lands, the one Google drew"), Records.Num(), 1))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Its sidecar names the picture it changed, kept beside it"), Records[0].InputImage,
+		Gate::OutputFolder() / BatchId / (BatchId + TEXT("_input.png")));
+	TestTrue(TEXT("which is the picture sent"), IFileManager::Get().FileSize(*(Gate::OutputRootOnDisk() / BatchId / (BatchId + TEXT("_input.png")))) == Input.Bytes.Num());
+	TestTrue(TEXT("with the view it shows"), IFileManager::Get().FileExists(*(Gate::OutputRootOnDisk() / BatchId / TEXT("capture.json"))));
 	return true;
 }
 

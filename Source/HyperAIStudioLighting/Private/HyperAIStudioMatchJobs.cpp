@@ -2,10 +2,20 @@
 
 #include "HyperAIStudioMatchJobs.h"
 
+#include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
+#include "Dom/JsonObject.h"
+#include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
 #include "HyperAIStudioImageMatch.h"
+#include "HyperAIStudioLightingCapture.h"
 #include "HyperAIStudioLightingGate.h"
+#include "LevelEditorViewport.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "ScopedTransaction.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioMatchJobs, Log, All);
 
@@ -24,6 +34,112 @@ namespace
 		const FString Root = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 		return FPaths::MakePathRelativeTo(Relative, *Root) ? Relative : Full;
 	}
+
+	TSharedPtr<FJsonObject> ReadJson(const FString& Path)
+	{
+		FString Text;
+		TSharedPtr<FJsonObject> Object;
+		return FFileHelper::LoadFileToString(Text, *Path) && FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Object) ? Object : nullptr;
+	}
+
+	FString Triple(const TSharedPtr<FJsonObject>& Object, const TCHAR* Field)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+		if (!Object->TryGetArrayField(Field, Values) || Values->Num() != 3)
+		{
+			return FString();
+		}
+		return FString::Printf(TEXT("(%.1f, %.1f, %.1f)"), (*Values)[0]->AsNumber(), (*Values)[1]->AsNumber(), (*Values)[2]->AsNumber());
+	}
+}
+
+FString SameViewNote(const FString& ReferenceImagePath)
+{
+	// The reference's sidecar names the picture it changed, and the capture.json beside that picture names its view.
+	const FString Reference = FPaths::ConvertRelativePathToFull(FPaths::IsRelative(ReferenceImagePath) ? FPaths::ProjectDir() / ReferenceImagePath : ReferenceImagePath);
+	const TSharedPtr<FJsonObject> Sidecar = ReadJson(FPaths::ChangeExtension(Reference, TEXT("json")));
+	FString Input;
+	if (!Sidecar.IsValid() || !Sidecar->TryGetStringField(TEXT("input_image"), Input) || Input.IsEmpty())
+	{
+		return FString();
+	}
+	const FString InputFull = FPaths::ConvertRelativePathToFull(FPaths::IsRelative(Input) ? FPaths::ProjectDir() / Input : Input);
+	const TSharedPtr<FJsonObject> View = ReadJson(FPaths::GetPath(InputFull) / TEXT("capture.json"));
+	if (!View.IsValid())
+	{
+		return FString();
+	}
+	FString Source;
+	FString Camera;
+	int32 Width = 0;
+	int32 Height = 0;
+	double Fov = 0.0;
+	View->TryGetStringField(TEXT("source"), Source);
+	View->TryGetStringField(TEXT("camera_actor_label"), Camera);
+	View->TryGetNumberField(TEXT("width"), Width);
+	View->TryGetNumberField(TEXT("height"), Height);
+	View->TryGetNumberField(TEXT("fov_degrees"), Fov);
+	const FString Location = Triple(View, TEXT("location"));
+	const FString Rotation = Triple(View, TEXT("rotation"));
+	const FString How = Source == TEXT("camera") && !Camera.IsEmpty()
+		? FString::Printf(TEXT("source camera, camera_actor_label %s, width %d and height %d"), *Camera, Width, Height)
+		: FString::Printf(TEXT("source transform, location %s, rotation %s as pitch, yaw and roll, fovDegrees %.1f, width %d and height %d"),
+			*Location, *Rotation, Fov, Width, Height);
+	return FString::Printf(TEXT("This reference is the level's own view, relit by an image model from a capture of it (%s): the same camera, framing and objects. ")
+		TEXT("Capture every attempt from that same view, unmoved: hyper_capture_view with %s. Match the light only, and where the picture drew an object a little differently, leave the object alone."),
+		*ProjectRelative(InputFull), *How);
+}
+
+bool CaptureMatchView(const FIntPoint& Size, FString& OutImagePath, FString& OutError)
+{
+	UWorld* World = Gate::GetEditorWorld();
+	if (!World)
+	{
+		OutError = TEXT("No level is open in the editor.");
+		return false;
+	}
+	bool bPlaced = false;
+	for (TActorIterator<AActor> It(World); It && !bPlaced; ++It)
+	{
+		bPlaced = It->GetActorLabel().Equals(MatchCameraLabel, ESearchCase::IgnoreCase);
+	}
+	if (!bPlaced)
+	{
+		const FLevelEditorViewportClient* Client = GCurrentLevelEditingViewportClient;
+		if (!Client || !Client->IsPerspective())
+		{
+			OutError = FString::Printf(TEXT("The level has no %s, and there is no perspective level viewport to place one at. Place a camera labelled %s where the view should be."),
+				MatchCameraLabel, MatchCameraLabel);
+			return false;
+		}
+		// As the user would place it: one undo step, and a camera they can see and move to relight another view.
+		const FScopedTransaction Transaction(NSLOCTEXT("HyperAIStudioMatchJobs", "PlaceMatchCamera", "Place HyperAI_MatchCamera"));
+		FActorSpawnParameters Params;
+		Params.ObjectFlags |= RF_Transactional;
+		ACameraActor* Camera = World->SpawnActor<ACameraActor>(Client->GetViewLocation(), Client->GetViewRotation(), Params);
+		if (!Camera)
+		{
+			OutError = FString::Printf(TEXT("Could not place %s."), MatchCameraLabel);
+			return false;
+		}
+		Camera->SetActorLabel(MatchCameraLabel);
+		Camera->GetCameraComponent()->SetFieldOfView(Client->ViewFOV);
+		UE_LOG(LogHyperAIStudioMatchJobs, Display, TEXT("Placed %s where the level viewport looks."), MatchCameraLabel);
+	}
+	FHyperAICaptureViewRequest Request;
+	Request.Source = TEXT("camera");
+	Request.CameraActorLabel = MatchCameraLabel;
+	Request.Width = FMath::Clamp(Size.X, 64, 1920);
+	Request.Height = FMath::Clamp(Size.Y, 64, 1080);
+	Request.Label = TEXT("relight");
+	const FHyperAICaptureViewReport Report = Capture::RunNow(Request);
+	if (!Report.bOk || Report.Frames.IsEmpty())
+	{
+		OutError = Report.Diagnostic.IsEmpty() ? FString(TEXT("The view could not be captured.")) : Report.Diagnostic;
+		return false;
+	}
+	OutImagePath = Report.Frames[0].ImagePath;
+	return true;
 }
 
 FString SkyNote(UWorld& World)
@@ -63,7 +179,7 @@ FString SkyNote(UWorld& World)
 	return Note;
 }
 
-FString BuildPrompt(const EGoal Goal, const FString& Reference, const FString& SessionId, const float Target, const FString& Sky)
+FString BuildPrompt(const EGoal Goal, const FString& Reference, const FString& SessionId, const float Target, const FString& Sky, const FString& SameView)
 {
 	const FString Loop = FString::Printf(
 		TEXT("This is a HyperAI Match job. After each of your turns HyperAI scores the session and, until the best attempt reaches %d, sends you back to work with what still differs. So work in rounds of up to 12 attempts, and end each turn with a one-line status.\n\n"),
@@ -78,7 +194,9 @@ FString BuildPrompt(const EGoal Goal, const FString& Reference, const FString& S
 			+ TEXT("1. Look at the reference and say in one sentence what makes its look: time of day, key light direction and colour, palette, contrast, fog and mood.\n")
 			+ TEXT("2. Call hyper_lighting_inspect to see how the level is lit.") + Sky + TEXT("\n")
 			+ TEXT("3. Lock exposure first with lock_exposure, or every change is undone by the eye adapting. For lights in physical units that is about 15 EV100 for noon sun, 12 overcast, 8 a bright interior, 4 a dim one, -2 moonlight. A sky whose lights are not physical, such as Ultra Dynamic Sky, sits far lower, often -4 to 2: capture after locking and move the EV100 until the frame's luminanceP50 is near 0.18. A black or white capture means the EV100 is wrong, not the light.\n")
-			+ TEXT("4. Frame the view once: a camera where the reference's camera would stand, captured with hyper_capture_view (source camera, the reference's aspect ratio). Use that same capture for every attempt.\n")
+			+ (SameView.IsEmpty()
+				? FString(TEXT("4. Frame the view once: a camera where the reference's camera would stand, captured with hyper_capture_view (source camera, the reference's aspect ratio). Use that same capture for every attempt.\n"))
+				: TEXT("4. ") + SameView + TEXT("\n"))
 			+ TEXT("5. Each attempt: make one change, or one coherent group such as the sun's angle and colour together, capture, and ") + Compare + TEXT("\n")
 			+ TEXT("6. Strongest levers first: the key light (angle, colour, intensity), then the sky and fog, then exposure and the post-process grade, with shadows and highlights graded apart for a painted look.\n")
 			+ TEXT("   Interiors, night scenes and practicals run on local lights: hyper_lighting_inspect lists the point, spot and rect lights lighting the camera's view first. set_light changes one by label (intensity in its intensity_units, color, temperature, attenuation_radius, source_radius, cone angles, source_width and source_height, cast_shadows, volumetric_scattering, location, aim_at), add_light places a new key, fill, rim or practical, and enabled false turns one off: nothing is deleted.\n")
@@ -89,7 +207,9 @@ FString BuildPrompt(const EGoal Goal, const FString& Reference, const FString& S
 		+ TEXT("How to work (the image-match skill has the details):\n")
 		+ TEXT("1. Read the reference: where its camera stands (eye height, angle, lens), the big forms and where they sit (ground, walls, buildings, landmarks, water, foliage), their materials, the time of day and the light.\n")
 		+ TEXT("2. Recall project memory (hyper_memory_recall) and look at the level (SceneTools get_current_level and find_actors). Search the project's content for meshes and materials that fit before you reach for engine shapes.\n")
-		+ TEXT("3. Place a CineCameraActor labelled HyperAI_MatchCamera where the reference's camera would stand, and capture it with hyper_capture_view (source camera, camera_actor_label HyperAI_MatchCamera, the reference's aspect ratio). Use that capture for every attempt.\n")
+		+ (SameView.IsEmpty()
+			? FString(TEXT("3. Place a CineCameraActor labelled HyperAI_MatchCamera where the reference's camera would stand, and capture it with hyper_capture_view (source camera, camera_actor_label HyperAI_MatchCamera, the reference's aspect ratio). Use that capture for every attempt.\n"))
+			: TEXT("3. ") + SameView + TEXT("\n"))
 		+ TEXT("4. Block out at real scale, biggest forms first, then mid-size forms, then detail (the level design pack's player metrics: a person is 180 cm, a door 220 cm high). Put things on the ground by tracing down, not by guessing heights, and keep the space playable.\n")
 		+ TEXT("5. Materials next, and lighting last: lock exposure and light it to the reference as the image-match skill's lighting steps say. Lamps, windows and fires in the reference are local lights: add_light places them and set_light shapes them.") + Sky + TEXT("\n")
 		+ TEXT("6. Each attempt: change one group, capture, and ") + Compare + TEXT("\n")
@@ -195,7 +315,7 @@ bool Start(const EGoal Goal, const FString& ReferenceImagePath, FString& OutErro
 	FHyperAIStudioAgentJobSpec Spec;
 	Spec.Title = FString::Printf(TEXT("%s: %s"), Goal == EGoal::Lighting ? TEXT("Match the lighting") : TEXT("Build the level to match"), *FPaths::GetCleanFilename(Full));
 	Spec.Category = Goal == EGoal::Lighting ? TEXT("Lighting") : TEXT("Level Design");
-	Spec.Prompt = BuildPrompt(Goal, ProjectRelative(Full), SessionId, Target, World ? SkyNote(*World) : FString());
+	Spec.Prompt = BuildPrompt(Goal, ProjectRelative(Full), SessionId, Target, World ? SkyNote(*World) : FString(), SameViewNote(Full));
 	Spec.Images = {Full};
 	Spec.Key = Full;
 	Spec.MaxFollowUps = MaxFollowUps;

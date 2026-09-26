@@ -34,10 +34,24 @@ namespace HyperAIStudio::Lighting::MatchJobs
 	/** A new match session, a chat on the Lighting or Level Design route with the reference attached, and the job that watches it. */
 	bool Start(EGoal Goal, const FString& ReferenceImagePath, FString& OutError);
 
+	/** The camera a reference made from the level is taken through, and every attempt at matching it. */
+	inline const TCHAR* const MatchCameraLabel = TEXT("HyperAI_MatchCamera");
+	/**
+	 * The view the Match jobs work on, as a picture for a reference to be made from, such as the level relit: HyperAI_MatchCamera
+	 * at Size, placed where the level viewport looks when the level has none (one undo step). OutImagePath is project-relative.
+	 */
+	bool CaptureMatchView(const FIntPoint& Size, FString& OutImagePath, FString& OutError);
+
 	// Pure pieces, exposed for tests.
 	/** How this level's Blueprint sky is lit, for the prompt; empty without one. */
 	FString SkyNote(UWorld& World);
-	FString BuildPrompt(EGoal Goal, const FString& ReferenceProjectPath, const FString& SessionId, float Target, const FString& SkyNote);
+	/**
+	 * When an image model made the reference from a capture of this level, as Relight this view does, how to capture that same
+	 * view for every attempt, from the capture.json beside the picture it changed; empty otherwise.
+	 */
+	FString SameViewNote(const FString& ReferenceImagePath);
+	FString BuildPrompt(EGoal Goal, const FString& ReferenceProjectPath, const FString& SessionId, float Target, const FString& SkyNote,
+		const FString& SameView = FString());
 
 	struct FRoundState
 	{

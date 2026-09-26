@@ -2,13 +2,16 @@
 
 #include "SHyperAIStudioImagesPanel.h"
 
+#include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioImageGenGate.h"
 #include "HyperAIStudioPreviewPanel.h"
+#include "HyperAIStudioShell.h"
 #include "HyperAIStudioWidgets.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
@@ -98,6 +101,21 @@ namespace HyperAIStudio::ImagesPanel
 		const TCHAR Last = A[A.Len() - 1];
 		return A + (Last == TEXT('.') || Last == TEXT('!') || Last == TEXT('?') || Last == TEXT(':') ? TEXT(" ") : TEXT(". ")) + B;
 	}
+
+	/** What OpenOnPreset asked for, until the page shows and takes it. */
+	struct FPendingOpen
+	{
+		FString Preset;
+		FString Prompt;
+		FString ModelId;
+		bool bGenerate = false;
+	};
+
+	TOptional<FPendingOpen>& Pending()
+	{
+		static TOptional<FPendingOpen> Value;
+		return Value;
+	}
 }
 
 TArray<SHyperAIStudioImagesPanel::FPreset> SHyperAIStudioImagesPanel::BuiltInPresets()
@@ -115,12 +133,20 @@ TArray<SHyperAIStudioImagesPanel::FPreset> SHyperAIStudioImagesPanel::BuiltInPre
 		Preset.Count = Count;
 		return Preset;
 	};
+	// The level itself, relit: the prompt says only how, and the words around it keep everything else as it is.
+	FPreset Relight = Make(TEXT("relight_view"), LOCTEXT("PresetRelight", "Relight this view"),
+		LOCTEXT("PresetRelightHint", "How the view should be lit: the time of day, where the light comes from, its colour, the weather and the mood. For example: late dusk, warm lamps glowing inside, cool blue moonlight through the windows, a little fog."),
+		TEXT("Keep the camera, the framing and every object exactly as they are, with the same shapes, positions and materials; change only the light, the shadows, the sky, the fog and the colour grade. A photorealistic real-time render of the same scene"),
+		TEXT("new objects, removed objects, changed shapes, a moved camera, text, watermark, people"), TEXT("16:9"), 1);
+	Relight.Before = TEXT("Relight this picture of a game level:");
+	Relight.bFromView = true;
 	// Each preset names what a good image of its kind needs, so the prompt only has to say what it is of.
 	return {
 		Make(TEXT("scene_lighting"), LOCTEXT("PresetScene", "Scene lighting"),
 			LOCTEXT("PresetSceneHint", "A place at a time of day: where it is, when, the weather, the mood. For example: a mountain monastery at dusk, low sun, thin fog."),
 			TEXT("Photographic still of the scene, natural light with a clear key light direction, readable contrast, true-to-life colour"),
 			TEXT("text, watermark, logo, people, frame, border"), TEXT("16:9"), 2),
+		Relight,
 		Make(TEXT("level_concept"), LOCTEXT("PresetLevel", "Level concept"),
 			LOCTEXT("PresetLevelHint", "The level as a player sees it: the layout, the landmarks, the paths, the scale. For example: a ruined courtyard with a broken bridge over a gorge."),
 			TEXT("Game environment concept art seen from eye height, a clear foreground, midground and background, readable paths and landmarks, real-world scale"),
@@ -202,6 +228,40 @@ void SHyperAIStudioImagesPanel::Construct(const FArguments& InArgs)
 	];
 	Reload();
 	SelectPreset(TEXT("scene_lighting"));
+	TakePending();
+}
+
+void SHyperAIStudioImagesPanel::OpenOnPreset(const FString& PresetId, const FString& InPrompt, const FString& ModelId, const bool bGenerate)
+{
+	// Taken by the page as it shows: a new one takes it as it is built, an open one on its next tick.
+	HyperAIStudio::ImagesPanel::Pending() = HyperAIStudio::ImagesPanel::FPendingOpen{PresetId, InPrompt, ModelId, bGenerate};
+	FHyperAIStudioShell::Open(TEXT("Images"));
+}
+
+void SHyperAIStudioImagesPanel::TakePending()
+{
+	TOptional<HyperAIStudio::ImagesPanel::FPendingOpen>& Waiting = HyperAIStudio::ImagesPanel::Pending();
+	if (!Waiting.IsSet())
+	{
+		return;
+	}
+	const HyperAIStudio::ImagesPanel::FPendingOpen Open = Waiting.GetValue();
+	Waiting.Reset();
+	SelectPreset(Open.Preset);
+	if (!Open.Prompt.IsEmpty())
+	{
+		Prompt = Open.Prompt;
+	}
+	if (!Open.ModelId.IsEmpty() && !SelectModel(Open.ModelId))
+	{
+		Status = FString::Printf(TEXT("There is no image model %s; hyper_image_inspect lists them."), *Open.ModelId);
+		bStatusIsError = true;
+		return;
+	}
+	if (Open.bGenerate)
+	{
+		Generate();
+	}
 }
 
 FString SHyperAIStudioImagesPanel::NewBatchName() const
@@ -249,6 +309,7 @@ void SHyperAIStudioImagesPanel::RebuildPresetButtons()
 TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildForm()
 {
 	using namespace HyperAIStudio::ImagesPanel;
+	const auto FromView = [this]() { const FPreset* Preset = SelectedPreset(); return Preset && Preset->bFromView; };
 	return SNew(SScrollBox)
 		+ SScrollBox::Slot().Padding(8.0f)
 		[
@@ -256,7 +317,13 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildForm()
 			+ SVerticalBox::Slot().AutoHeight()[Header(LOCTEXT("StartFrom", "Start from a preset"))]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[BuildPresets()]
 
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 2.0f)[Label(LOCTEXT("Prompt", "What it is of"))]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 2.0f)
+			[
+				SNew(STextBlock)
+				.Font(FAppStyle::GetFontStyle("SmallFontBold"))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.Text_Lambda([FromView]() { return FromView() ? LOCTEXT("PromptLight", "How it should be lit") : LOCTEXT("Prompt", "What it is of"); })
+			]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
 				SNew(SBox)
@@ -271,6 +338,31 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildForm()
 					})
 					.Text_Lambda([this]() { return FText::FromString(Prompt); })
 					.OnTextChanged_Lambda([this](const FText& Text) { Prompt = Text.ToString(); })
+				]
+			]
+			// Where the picture comes from, and what happens once it is back.
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
+			[
+				SNew(SVerticalBox)
+				.Visibility_Lambda([FromView]() { return FromView() ? EVisibility::Visible : EVisibility::Collapsed; })
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(STextBlock)
+					.AutoWrapText(true)
+					.Font(FAppStyle::GetFontStyle("SmallFont"))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					.Text(LOCTEXT("FromViewNote", "Generate takes the picture through HyperAI_MatchCamera, placing that camera where the level viewport looks if the level has none, and the model changes only its light. Move the camera to relight another view."))
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
+				[
+					SNew(SCheckBox)
+					.IsChecked_Lambda([this]() { return bMatchWhenDone ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+					.OnCheckStateChanged_Lambda([this](const ECheckBoxState State) { bMatchWhenDone = State == ECheckBoxState::Checked; })
+					.IsEnabled_Lambda([this]() { return Count == 1; })
+					.ToolTipText(LOCTEXT("MatchWhenDoneTip", "When the picture arrives, your preferred agent relights the level until it matches, as Match the lighting to this does. With more than one image, pick one and use Match the lighting to this."))
+					[
+						SNew(STextBlock).Text(LOCTEXT("MatchWhenDone", "Then match the level's lighting to it"))
+					]
 				]
 			]
 
@@ -348,6 +440,15 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildForm()
 				.Visibility_Lambda([this]() { return Model.IsValid() && !Model->Issue.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed; })
 				.Text_Lambda([this]() { return FText::FromString(Model.IsValid() ? Model->Issue : FString()); })
 			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.AutoWrapText(true)
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+				.ColorAndOpacity(FSlateColor(FStyleColors::AccentRed))
+				.Visibility_Lambda([this, FromView]() { return FromView() && Model.IsValid() && !Model->bTakesInputImage ? EVisibility::Visible : EVisibility::Collapsed; })
+				.Text(LOCTEXT("NoPictureModel", "This model draws from words only, so it cannot relight a view. Pick a Nano Banana model or Codex."))
+			]
 
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 0.0f)
 			[
@@ -358,7 +459,10 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildForm()
 					.ButtonStyle(FAppStyle::Get(), "PrimaryButton")
 					.Text(LOCTEXT("GenerateButton", "Generate"))
 					.ToolTipText(LOCTEXT("GenerateTooltip", "Generate the batch. This spends money, or your agent's plan for an agent model; pressing it is the approval."))
-					.IsEnabled_Lambda([this]() { return Model.IsValid() && Model->Issue.IsEmpty() && !Prompt.TrimStartAndEnd().IsEmpty(); })
+					.IsEnabled_Lambda([this, FromView]()
+					{
+						return Model.IsValid() && Model->Issue.IsEmpty() && !Prompt.TrimStartAndEnd().IsEmpty() && (!FromView() || Model->bTakesInputImage);
+					})
 					.OnClicked_Lambda([this]()
 					{
 						Generate();
@@ -635,11 +739,13 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildBrowser()
 				SNew(STextBlock)
 				.Font(FAppStyle::GetFontStyle("SmallFont"))
 				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.AutoWrapText(true)
 				.Text_Lambda([this]()
 				{
 					const FHyperAIImageRecord* Record = SelectedRecord();
-					return Record ? FText::FromString(FString::Printf(TEXT("%s | %s | seed %d | %dx%d | %s | %s"), *Record->ModelId, *Record->BatchId, Record->Seed,
-						Record->Width, Record->Height, *Record->GeneratedUtc.Left(19), *Record->File)) : FText::GetEmpty();
+					return Record ? FText::FromString(FString::Printf(TEXT("%s | %s | seed %d | %dx%d | %s | %s%s"), *Record->ModelId, *Record->BatchId, Record->Seed,
+						Record->Width, Record->Height, *Record->GeneratedUtc.Left(19), *Record->File,
+						*(Record->InputImage.IsEmpty() ? FString() : TEXT(" | relit from ") + Record->InputImage))) : FText::GetEmpty();
 				})
 			]
 			// What to do with a picture: make the level look like it first, then the smaller moves.
@@ -711,6 +817,71 @@ void SHyperAIStudioImagesPanel::StartMatch(const FName ActionId)
 		Status = Error;
 		bStatusIsError = true;
 	}
+}
+
+bool SHyperAIStudioImagesPanel::CaptureView()
+{
+	using namespace HyperAIStudio::ImagesPanel;
+	InputImage.Reset();
+	// The lighting pack owns the view the Match jobs work on, and captures it.
+	const FHyperAIStudioPreviewPanel::FSource* Source = FHyperAIStudioPreviewPanel::FindSource(FName(TEXT("image_match")));
+	if (!Source || !Source->CaptureView)
+	{
+		Status = TEXT("Relighting a view needs the lighting pack, which takes the picture, and it is not loaded.");
+		bStatusIsError = true;
+		return false;
+	}
+	const FShape& Chosen = Shapes[FMath::Clamp(Shape, 0, ShapeCount - 1)];
+	FString Error;
+	if (!Source->CaptureView(FIntPoint(Width > 0 ? Width : Chosen.Width, Height > 0 ? Height : Chosen.Height), InputImage, Error))
+	{
+		InputImage.Reset();
+		Status = Error;
+		bStatusIsError = true;
+		return false;
+	}
+	return true;
+}
+
+void SHyperAIStudioImagesPanel::MatchWhenDone(const FString& BatchId)
+{
+	using namespace HyperAIStudio::ImagesPanel;
+	namespace Gate = HyperAIStudio::ImageGen::Gate;
+	const TWeakPtr<SHyperAIStudioImagesPanel> Weak = StaticCastSharedRef<SHyperAIStudioImagesPanel>(AsShared());
+	// The approved plan starts the batch once the execution queue reaches it, which another edit can hold up a while.
+	const double StartBy = FPlatformTime::Seconds() + 120.0;
+	// ponytail: a one-second core ticker rather than the page's own tick, which stops while the page is hidden.
+	FTSTicker::GetCoreTicker().AddTicker(TEXT("HyperAIRelightThenMatch"), 1.0f, [Weak, BatchId, StartBy](float)
+	{
+		FHyperAIImageBatchInfo Batch;
+		const bool bKnown = Gate::FindBatch(BatchId, Batch);
+		if (bKnown ? Batch.State == TEXT("running") : FPlatformTime::Seconds() < StartBy)
+		{
+			return true;
+		}
+		const TArray<FHyperAIImageRecord> Landed = bKnown && Batch.State == TEXT("complete") ? Gate::ReadGenerated(BatchId, 1) : TArray<FHyperAIImageRecord>();
+		FString Message = !bKnown ? FString(TEXT("The relight never started, so nothing was matched; the Activity panel says why."))
+			: Batch.Diagnostic.IsEmpty() ? FString(TEXT("The relit view did not arrive, so nothing was matched.")) : Batch.Diagnostic;
+		bool bError = true;
+		if (!Landed.IsEmpty())
+		{
+			const FString Reference = FullPath(Landed[0].File);
+			FString Error;
+			bError = !FHyperAIStudioPreviewPanel::StartAgentAction(FName(TEXT("image_match")), FName(TEXT("match_lighting")), Reference, Error);
+			Message = bError ? Error : FString(TEXT("The view is relit, and your preferred agent is matching the level's lighting to it; follow it on the Match page."));
+			if (bError)
+			{
+				// The picture is still worth having: on the Match page, where Match it can try again.
+				FHyperAIStudioPreviewPanel::Open(FName(TEXT("image_match")), Reference);
+			}
+		}
+		if (const TSharedPtr<SHyperAIStudioImagesPanel> Panel = Weak.Pin())
+		{
+			Panel->Status = Message;
+			Panel->bStatusIsError = bError;
+		}
+		return false;
+	});
 }
 
 void SHyperAIStudioImagesPanel::LoadUserPresets()
@@ -1008,16 +1179,29 @@ FHyperAIImageGenerateRequest SHyperAIStudioImagesPanel::BuildRequest(const bool 
 	Request.Width = Width > 0 ? Width : Chosen.Width;
 	Request.Height = Height > 0 ? Height : Chosen.Height;
 	Request.Seed = Seed;
+	Request.InputImagePath = Preset && Preset->bFromView ? InputImage : FString();
 	return Request;
 }
 
 FHyperAIImageGenerateReport SHyperAIStudioImagesPanel::PreviewPrompt()
 {
+	const FPreset* Preset = SelectedPreset();
+	const bool bFromView = Preset && Preset->bFromView;
+	if (bFromView && Model.IsValid() && !Model->bTakesInputImage)
+	{
+		FHyperAIImageGenerateReport Refused;
+		Refused.Status = TEXT("model_takes_no_picture");
+		Refused.Diagnostic = Status = FString::Printf(TEXT("%s draws from words only, so it cannot relight a view. Pick a Nano Banana model or Codex."), *Model->Id);
+		bStatusIsError = true;
+		return Refused;
+	}
+	// Free, and so nothing in the level changes: the view is taken, and the camera placed, only when Generate is pressed.
 	const FHyperAIImageGenerateReport Plan = FHyperAIStudioImageGenContracts::BuildPlan(BuildRequest(/*bDryRun=*/true));
 	ComposedPrompt = Plan.ComposedPrompt;
 	const FString Cost = Plan.EstimatedCost > 0.f ? FString::Printf(TEXT(", about %.2f"), Plan.EstimatedCost) : FString();
-	Status = Plan.bOk ? FString::Printf(TEXT("Nothing is sent until you press Generate: %d image%s at %d x %d from %s%s."), Plan.Count,
-		Plan.Count == 1 ? TEXT("") : TEXT("s"), Plan.Width, Plan.Height, *(Model.IsValid() && !Model->Label.IsEmpty() ? Model->Label : Plan.ModelId), *Cost)
+	Status = Plan.bOk ? FString::Printf(TEXT("Nothing is sent until you press Generate: %d image%s at %d x %d from %s%s.%s"), Plan.Count,
+		Plan.Count == 1 ? TEXT("") : TEXT("s"), Plan.Width, Plan.Height, *(Model.IsValid() && !Model->Label.IsEmpty() ? Model->Label : Plan.ModelId), *Cost,
+		bFromView ? TEXT(" Generate first takes the view through HyperAI_MatchCamera.") : TEXT(""))
 		: Plan.Diagnostic;
 	bStatusIsError = !Plan.bOk;
 	return Plan;
@@ -1025,6 +1209,25 @@ FHyperAIImageGenerateReport SHyperAIStudioImagesPanel::PreviewPrompt()
 
 FHyperAIImageGenerateReport SHyperAIStudioImagesPanel::Generate()
 {
+	const FPreset* Preset = SelectedPreset();
+	const bool bFromView = Preset && Preset->bFromView;
+	// What stops the model stops the relight before the view is taken, so no camera is placed for nothing.
+	if (bFromView && Model.IsValid() && (!Model->Issue.IsEmpty() || !Model->bTakesInputImage))
+	{
+		FHyperAIImageGenerateReport Refused;
+		Refused.Status = Model->Issue.IsEmpty() ? TEXT("model_takes_no_picture") : TEXT("model_unavailable");
+		Refused.Diagnostic = Status = Model->Issue.IsEmpty()
+			? FString::Printf(TEXT("%s draws from words only, so it cannot relight a view. Pick a Nano Banana model or Codex."), *Model->Id) : Model->Issue;
+		bStatusIsError = true;
+		return Refused;
+	}
+	if (bFromView && !CaptureView())
+	{
+		FHyperAIImageGenerateReport Failed;
+		Failed.Status = TEXT("view_not_captured");
+		Failed.Diagnostic = Status;
+		return Failed;
+	}
 	FHyperAIImageGenerateRequest Request = BuildRequest(/*bDryRun=*/true);
 	const FHyperAIImageGenerateReport Plan = FHyperAIStudioImageGenContracts::BuildPlan(Request);
 	ComposedPrompt = Plan.ComposedPrompt;
@@ -1058,6 +1261,12 @@ FHyperAIImageGenerateReport SHyperAIStudioImagesPanel::Generate()
 	}
 	Status = FString::Printf(TEXT("Generating %d image%s into %s with %s."), Submitted.Count, Submitted.Count == 1 ? TEXT("") : TEXT("s"),
 		*Submitted.Folder, *Submitted.ModelId);
+	if (bFromView && bMatchWhenDone && Submitted.Count == 1)
+	{
+		MatchWhenDone(Submitted.BatchId);
+		Status = FString::Printf(TEXT("Relighting the view into %s with %s. When it lands, your preferred agent matches the level's lighting to it."),
+			*Submitted.Folder, *Submitted.ModelId);
+	}
 	bStatusIsError = false;
 	BatchName = NewBatchName();
 	NextReload = 0.0;
@@ -1068,6 +1277,7 @@ FHyperAIImageGenerateReport SHyperAIStudioImagesPanel::Generate()
 void SHyperAIStudioImagesPanel::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	TakePending();
 	// Only while a batch runs: the gallery fills in as its images land.
 	const bool bRunning = Inspect.Batches.ContainsByPredicate([](const FHyperAIImageBatchInfo& Batch) { return Batch.State == TEXT("running"); });
 	if (bRunning && FPlatformTime::Seconds() >= NextReload)

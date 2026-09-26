@@ -16,8 +16,9 @@ namespace HyperAIStudio::AgentImage::Private
 {
 	const TCHAR* const Instructions = TEXT(
 		"You make pictures for a game studio's editor tool. For each message, draw exactly one image with your image ")
-		TEXT("generation tool from the description, then reply with one short line saying what you drew. Do not run ")
-		TEXT("commands, read or write files, browse, or ask questions. If you cannot draw it, say why in one line.");
+		TEXT("generation tool from the description, or change the attached picture as the message says, then reply with ")
+		TEXT("one short line saying what you drew. Do not run commands, read or write files, browse, or ask questions. If ")
+		TEXT("you cannot draw it, say why in one line.");
 
 	bool IsPicture(const FString& Path)
 	{
@@ -84,7 +85,7 @@ void FHyperAIStudioAgentImage::SetCommandForTests(const FString& Command)
 #endif
 
 TSharedPtr<FHyperAIStudioAgentImage> FHyperAIStudioAgentImage::Start(const FString& Agent, const FString& Prompt, const FIntPoint& SizeHint,
-	FString& OutError)
+	FString& OutError, const FString& InputImage)
 {
 	using namespace HyperAIStudio::AgentImage::Private;
 	const bool bGemini = Agent.Equals(TEXT("gemini"), ESearchCase::IgnoreCase);
@@ -97,6 +98,16 @@ TSharedPtr<FHyperAIStudioAgentImage> FHyperAIStudioAgentImage::Start(const FStri
 	{
 		OutError = FString::Printf(TEXT("Could not make %s."), *Image->WorkDirectory);
 		return nullptr;
+	}
+	// In the folder the CLI runs in, so an extension whose edit tool takes a file name can open it.
+	if (!InputImage.IsEmpty())
+	{
+		Image->InputCopy = Image->WorkDirectory / (TEXT("input.") + FPaths::GetExtension(InputImage).ToLower());
+		if (IFileManager::Get().Copy(*Image->InputCopy, *InputImage) != COPY_OK)
+		{
+			OutError = FString::Printf(TEXT("Could not copy the picture to change, %s."), *InputImage);
+			return nullptr;
+		}
 	}
 	Image->Chat = FHyperAIStudioNativeChat::Create(Image->Agent, Image->WorkDirectory, FString(), FString());
 	if (!Image->Chat.IsValid())
@@ -128,7 +139,15 @@ TSharedPtr<FHyperAIStudioAgentImage> FHyperAIStudioAgentImage::Start(const FStri
 		return nullptr;
 	}
 	const TCHAR* Shape = SizeHint.X > SizeHint.Y * 1.15 ? TEXT("landscape") : SizeHint.Y > SizeHint.X * 1.15 ? TEXT("portrait") : TEXT("square");
-	Image->Chat->Send(FString::Printf(TEXT("Draw this picture (%s, about %dx%d pixels): %s"), Shape, SizeHint.X, SizeHint.Y, *Prompt));
+	if (Image->InputCopy.IsEmpty())
+	{
+		Image->Chat->Send(FString::Printf(TEXT("Draw this picture (%s, about %dx%d pixels): %s"), Shape, SizeHint.X, SizeHint.Y, *Prompt));
+	}
+	else
+	{
+		Image->Chat->Send(FString::Printf(TEXT("Change the attached picture, which is also %s in your working folder, keeping it %s, about %dx%d pixels: %s"),
+			*FPaths::GetCleanFilename(Image->InputCopy), Shape, SizeHint.X, SizeHint.Y, *Prompt), {Image->InputCopy});
+	}
 	Image->StartedAt = FPlatformTime::Seconds();
 	return Image;
 }
@@ -170,11 +189,12 @@ bool FHyperAIStudioAgentImage::IsDone()
 	{
 		return false;
 	}
-	// The newest picture the agent reported, or one its tool wrote into the folder.
+	// The newest picture the agent reported, or one its tool wrote into the folder; the picture it was given is neither.
+	const auto IsDrawn = [this](const FString& Path) { return IsPicture(Path) && (InputCopy.IsEmpty() || !FPaths::IsSamePath(Path, InputCopy)); };
 	for (int32 Index = Items.Num() - 1; Index >= 0 && ImagePath.IsEmpty(); --Index)
 	{
 		const FHyperAIStudioChatItem& Item = *Items[Index];
-		if (Item.Kind == EKind::Image && !Item.Images.IsEmpty() && IFileManager::Get().FileExists(*Item.Images[0]))
+		if (Item.Kind == EKind::Image && !Item.Images.IsEmpty() && IsDrawn(Item.Images[0]) && IFileManager::Get().FileExists(*Item.Images[0]))
 		{
 			ImagePath = Item.Images[0];
 			RevisedPrompt = Item.Text;
@@ -184,7 +204,7 @@ bool FHyperAIStudioAgentImage::IsDone()
 	{
 		TArray<FString> Written;
 		IFileManager::Get().FindFilesRecursive(Written, *WorkDirectory, TEXT("*.*"), /*Files=*/true, /*Directories=*/false);
-		Written = Written.FilterByPredicate(&IsPicture);
+		Written = Written.FilterByPredicate(IsDrawn);
 		if (!Written.IsEmpty())
 		{
 			ImagePath = Written.Last();

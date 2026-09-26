@@ -2,6 +2,7 @@
 
 #include "HyperAIStudioImageGenToolset.h"
 
+#include "HAL/IConsoleManager.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioShell.h"
 #include "Modules/ModuleManager.h"
@@ -10,6 +11,27 @@
 #define LOCTEXT_NAMESPACE "HyperAIStudioImageGenModule"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioImageGenModule, Log, All);
+
+namespace HyperAIStudio::ImageGen::Private
+{
+	/** HyperAIStudio.Relight [model=<id>] <how it should be lit>: Relight this view from the console, generating at once as Generate does. */
+	void RunRelight(const TArray<FString>& Args)
+	{
+		TArray<FString> Words = Args;
+		FString ModelId;
+		if (!Words.IsEmpty() && Words[0].StartsWith(TEXT("model="), ESearchCase::IgnoreCase))
+		{
+			ModelId = Words[0].RightChop(6);
+			Words.RemoveAt(0);
+		}
+		const FString Prompt = FString::Join(Words, TEXT(" ")).TrimStartAndEnd();
+		SHyperAIStudioImagesPanel::OpenOnPreset(TEXT("relight_view"), Prompt, ModelId, /*bGenerate=*/!Prompt.IsEmpty());
+	}
+
+	FAutoConsoleCommand RelightCommand(TEXT("HyperAIStudio.Relight"),
+		TEXT("Relight this view: HyperAIStudio.Relight [model=<id>] <how it should be lit>. Takes the view through HyperAI_MatchCamera, has the image model relight it, which spends as the Images page's Generate does, then matches the level's lighting to it. With no words it only opens the page on the preset."),
+		FConsoleCommandWithArgsDelegate::CreateStatic(&RunRelight));
+}
 
 /** Explicit owner for one LoadingPhase=None, atomic two-tool image generation source cohort. */
 class FHyperAIStudioImageGenModule final : public IModuleInterface
@@ -39,12 +61,22 @@ public:
 		Page.Create = [](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioImagesPanel); };
 		FHyperAIStudioShell::RegisterPage(Page);
 		bPageRegistered = true;
+
+		// By this id the Match page offers Relight this view... beside Browse, for a user with no reference image.
+		FHyperAIStudioAction Relight;
+		Relight.Id = TEXT("RelightView");
+		Relight.Label = LOCTEXT("RelightAction", "Relight this view");
+		Relight.Description = LOCTEXT("RelightActionDescription", "No reference image? Make one from the level itself: an image model relights the view as you describe, then your preferred agent matches the level's lighting to it.");
+		Relight.Icon = TEXT("HyperAIStudio.Icon.Images");
+		Relight.Run = []() { SHyperAIStudioImagesPanel::OpenOnPreset(TEXT("relight_view")); };
+		FHyperAIStudioShell::RegisterAction(Relight);
 	}
 
 	virtual void ShutdownModule() override
 	{
 		if (bPageRegistered)
 		{
+			FHyperAIStudioShell::UnregisterAction(TEXT("RelightView"));
 			FHyperAIStudioShell::UnregisterPage(TEXT("Images"));
 			bPageRegistered = false;
 		}

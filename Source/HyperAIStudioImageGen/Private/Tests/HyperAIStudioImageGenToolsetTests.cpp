@@ -8,14 +8,22 @@
 #include "Containers/Ticker.h"
 #include "HAL/FileManager.h"
 #include "HyperAIStudioShell.h"
+#include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioAgentImage.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioExternalService.h"
 #include "HyperAIStudioImageGenCookbook.h"
 #include "HyperAIStudioImageGenGate.h"
+#include "HyperAIStudioPreviewPanel.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioWidgetShot.h"
+#include "HttpPath.h"
+#include "HttpServerModule.h"
+#include "HttpServerRequest.h"
+#include "HttpServerResponse.h"
+#include "IHttpRouter.h"
 #include "Misc/AutomationTest.h"
 #include "SHyperAIStudioImagesPanel.h"
 #include "Misc/Base64.h"
@@ -631,6 +639,245 @@ for line in iter(sys.stdin.readline, ""):
 	{
 		AddInfo(TEXT("Screenshot: ") + Shot);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioImageGenAgentChangesAPictureTest,
+	"HyperAIStudio.ImageGen.AgentModels.ChangeAPicture",
+	HyperAIStudio::ImageGen::Tests::Flags)
+
+bool FHyperAIStudioImageGenAgentChangesAPictureTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::ImageGen;
+	int32 Code = -1;
+	FPlatformProcess::ExecProcess(TEXT("python"), TEXT("--version"), &Code, nullptr, nullptr);
+	if (Code != 0)
+	{
+		AddWarning(TEXT("python is not on PATH, so the Codex stand-in cannot draw."));
+		return true;
+	}
+	// A scripted Codex that notes what it is sent, then draws a small picture of its own.
+	const FString Dir = FPaths::ConvertRelativePathToFull(FPaths::AutomationTransientDir()) / (TEXT("ImageGenChange-") + FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	const FString BatchId = TEXT("agent_change_") + Suffix;
+	const FString Frame = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Captures") / (TEXT("agent-change-") + Suffix) / TEXT("frame_00.png"));
+	ON_SCOPE_EXIT
+	{
+		FHyperAIStudioAgentImage::SetCommandForTests(FString());
+		IFileManager::Get().DeleteDirectory(*Dir, false, true);
+		IFileManager::Get().DeleteDirectory(*FPaths::GetPath(Frame), false, true);
+		IFileManager::Get().DeleteDirectory(*(Gate::OutputRootOnDisk() / BatchId), false, true);
+	};
+	HyperAIStudio::Tests::WriteScenePng(Frame, FIntPoint(1024, 576));
+	const FString Script = Dir / TEXT("fake_codex.py");
+	FFileHelper::SaveStringToFile(TEXT(R"PY(import json, sys, os, zlib, struct
+HERE = os.path.dirname(os.path.abspath(__file__))
+def png(path):
+    raw = b"".join(b"\x00" + bytes((30, 90, 200)) * 6 for _ in range(4))
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+    open(path, "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 6, 4, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+def send(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+for line in iter(sys.stdin.readline, ""):
+    m = json.loads(line); method = m.get("method"); i = m.get("id")
+    if method == "initialize":
+        send({"id": i, "result": {}})
+    elif method == "thread/start":
+        send({"id": i, "result": {"thread": {"id": "t"}}})
+    elif method == "turn/start":
+        open(os.path.join(HERE, "seen.json"), "w").write(json.dumps(m["params"]["input"]))
+        saved = os.path.join(HERE, "drawn.png"); png(saved)
+        send({"id": i, "result": {"turn": {"id": "u"}}})
+        send({"method": "item/completed", "params": {"item": {"type": "imageGeneration", "id": "g", "status": "completed", "revisedPrompt": "r", "result": "", "savedPath": saved}}})
+        send({"method": "turn/completed", "params": {"turn": {"id": "u", "status": "completed"}}})
+)PY"), *Script, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	FHyperAIStudioAgentImage::SetCommandForTests(FString::Printf(TEXT("python -u \"%s\""), *Script));
+
+	FHyperAIStudioImageModelSettings Model;
+	Gate::FInputImage Input;
+	FString Error;
+	if (!TestTrue(TEXT("codex_image_gen resolves"), Gate::FindModel(TEXT("codex_image_gen"), Model))
+		|| !TestTrue(TEXT("The picture reads: ") + Error, Gate::ReadInputImage(Frame, Input, Error))
+		|| !TestTrue(TEXT("A batch that changes it starts: ") + Error,
+			Gate::StartBatch(BatchId, Model, FString(), TEXT("Relight this picture at night."), FString(), 1, 1024, 576, -1, Error, Frame, Input.Hash)))
+	{
+		return false;
+	}
+	FHyperAIImageBatchInfo Info;
+	const double End = FPlatformTime::Seconds() + 60.0;
+	while (Gate::FindBatch(BatchId, Info) && Info.State == TEXT("running") && FPlatformTime::Seconds() < End)
+	{
+		FTSTicker::GetCoreTicker().Tick(0.05f);
+		FPlatformProcess::Sleep(0.02f);
+	}
+	TestEqual(TEXT("The batch completes"), Info.State, FString(TEXT("complete")));
+	FString Sent;
+	FFileHelper::LoadFileToString(Sent, *(Dir / TEXT("seen.json")));
+	AddInfo(TEXT("Codex was sent: ") + Sent.Left(600));
+	TestTrue(TEXT("Codex is sent the picture as an image of its own, from its working folder"), Sent.Contains(TEXT("\"localImage\"")) && Sent.Contains(TEXT("/input.png")));
+	TestTrue(TEXT("and told to change it"), Sent.Contains(TEXT("Change the attached picture")) && Sent.Contains(TEXT("Relight this picture at night.")));
+	const TArray<FHyperAIImageRecord> Records = Gate::ReadGenerated(BatchId, 8);
+	TestTrue(TEXT("What Codex drew lands, not the picture it was given"), Records.Num() == 1
+		&& IFileManager::Get().FileSize(*(FPaths::ProjectDir() / Records[0].File)) < 1024 && !Records[0].InputImage.IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioImageGenRelightViewTest,
+	"HyperAIStudio.ImageGen.RelightView",
+	HyperAIStudio::ImageGen::Tests::Flags)
+
+bool FHyperAIStudioImageGenRelightViewTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::ImageGen;
+	using FSource = FHyperAIStudioPreviewPanel::FSource;
+	// Google's endpoint on this machine, drawing a relit scene back.
+	constexpr uint32 Port = 18324;
+	const TSharedPtr<IHttpRouter> Router = FHttpServerModule::Get().GetHttpRouter(Port, /*bFailOnBindFailure=*/true);
+	if (!Router.IsValid())
+	{
+		AddWarning(TEXT("Port 18324 is taken, so the stand-in for Google's endpoint could not start."));
+		return true;
+	}
+	struct FSeen
+	{
+		FIntPoint Captured = FIntPoint::ZeroValue;
+		FString Body;
+		FString Matched;
+	};
+	const TSharedRef<FSeen> Seen = MakeShared<FSeen>();
+	const FString Folder = FPaths::ConvertRelativePathToFull(FPaths::AutomationTransientDir()) / (TEXT("RelightView-") + FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	// The relit view is the level at night; the view itself, taken below, is the level by day.
+	HyperAIStudio::Tests::WriteScenePng(Folder / TEXT("night.png"), FIntPoint(1024, 576), FLinearColor(0.05f, 0.08f, 0.25f), FLinearColor(0.35f, 0.22f, 0.1f));
+	TArray<uint8> Night;
+	FFileHelper::LoadFileToArray(Night, *(Folder / TEXT("night.png")));
+	const FString Drawn = FBase64::Encode(Night);
+	const FHttpRouteHandle Route = Router->BindRoute(FHttpPath(TEXT("/v1beta/models")), EHttpServerRequestVerbs::VERB_POST,
+		FHttpRequestHandler::CreateLambda([Seen, Drawn](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
+		{
+			FUTF8ToTCHAR Body(reinterpret_cast<const ANSICHAR*>(Request.Body.GetData()), Request.Body.Num());
+			Seen->Body = FString(Body.Length(), Body.Get());
+			OnComplete(FHttpServerResponse::Create(FString::Printf(
+				TEXT(R"({"candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": "%s"}}]}, "finishReason": "STOP"}]})"),
+				*Drawn), TEXT("application/json")));
+			return true;
+		}));
+	FHttpServerModule::Get().StartAllListeners();
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const TArray<FHyperAIStudioImageModelSettings> KeptModels = Settings->ImageModels;
+	const TArray<FHyperAIStudioExternalServiceSettings> KeptServices = Settings->ExternalServices;
+	FHyperAIStudioExternalServiceSettings Local = UHyperAIStudioSettings::GetGeminiService();
+	Local.BaseUrl = FString::Printf(TEXT("http://127.0.0.1:%u"), Port);
+	Local.ApiKeyVariable = TEXT("HYPERAI_TEST_GEMINI_KEY");
+	Settings->ExternalServices = {Local};
+	Settings->ImageModels.Reset();
+	FPlatformMisc::SetEnvironmentVar(TEXT("HYPERAI_TEST_GEMINI_KEY"), TEXT("test-key-4821"));
+	FHyperAIStudioExternalServices::ResetSessionSpend();
+
+	// The lighting pack's view and its Match it, played by stand-ins: a picture of the level, and a match that notes its reference.
+	const FSource* Real = FHyperAIStudioPreviewPanel::FindSource(FName(TEXT("image_match")));
+	const TOptional<FSource> KeptSource = Real ? TOptional<FSource>(*Real) : TOptional<FSource>();
+	FSource StandIn;
+	StandIn.Id = FName(TEXT("image_match"));
+	StandIn.Label = FText::FromString(TEXT("Stand-in image match"));
+	StandIn.bNeedsReference = true;
+	const FString CaptureFolder = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Captures") / (TEXT("relight-view-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8)));
+	StandIn.CaptureView = [Seen, CaptureFolder](const FIntPoint& Size, FString& OutImagePath, FString& /*OutError*/)
+	{
+		Seen->Captured = Size;
+		OutImagePath = CaptureFolder / TEXT("frame_00.png");
+		HyperAIStudio::Tests::WriteScenePng(OutImagePath, Size, FLinearColor(0.55f, 0.75f, 0.95f), FLinearColor(0.45f, 0.5f, 0.35f));
+		FFileHelper::SaveStringToFile(FString::Printf(TEXT(R"({"source": "camera", "camera_actor_label": "HyperAI_MatchCamera", "width": %d, "height": %d})"), Size.X, Size.Y),
+			*(CaptureFolder / TEXT("capture.json")));
+		FPaths::MakePathRelativeTo(OutImagePath, *FPaths::ProjectDir());
+		return true;
+	};
+	FHyperAIStudioPreviewPanel::FAgentAction Match;
+	Match.Id = FName(TEXT("match_lighting"));
+	Match.Start = [Seen](const FString& Reference, FString& /*OutError*/)
+	{
+		Seen->Matched = Reference;
+		return true;
+	};
+	StandIn.AgentActions = {Match};
+	FHyperAIStudioPreviewPanel::RegisterSource(StandIn);
+	FString BatchId;
+	ON_SCOPE_EXIT
+	{
+		if (KeptSource.IsSet())
+		{
+			FHyperAIStudioPreviewPanel::RegisterSource(KeptSource.GetValue());
+		}
+		else
+		{
+			FHyperAIStudioPreviewPanel::UnregisterSource(FName(TEXT("image_match")));
+		}
+		Router->UnbindRoute(Route);
+		FPlatformMisc::SetEnvironmentVar(TEXT("HYPERAI_TEST_GEMINI_KEY"), TEXT(""));
+		FHyperAIStudioExternalServices::ResetSessionSpend();
+		Settings->ImageModels = KeptModels;
+		Settings->ExternalServices = KeptServices;
+		IFileManager::Get().DeleteDirectory(*Folder, false, true);
+		IFileManager::Get().DeleteDirectory(*CaptureFolder, false, true);
+		if (!BatchId.IsEmpty())
+		{
+			IFileManager::Get().DeleteDirectory(*(Gate::OutputRootOnDisk() / BatchId), false, true);
+		}
+	};
+
+	const TSharedRef<SHyperAIStudioImagesPanel> Panel = SNew(SHyperAIStudioImagesPanel);
+	TestTrue(TEXT("Relight this view is a preset"), Panel->SelectPreset(TEXT("relight_view")));
+	TestTrue(TEXT("Nano Banana 2 can relight it"), Panel->SelectModel(TEXT("nano_banana_2")));
+	Panel->SetPrompt(TEXT("late dusk, warm lamps glowing inside, cool blue moonlight through the windows"));
+	const FHyperAIImageGenerateReport Preview = Panel->PreviewPrompt();
+	AddInfo(TEXT("Will send: ") + Preview.ComposedPrompt);
+	TestTrue(TEXT("Preview prompt plans it"), Preview.bOk && Preview.Status == TEXT("planned"));
+	TestTrue(TEXT("with the words inside the preset's, which keep all but the light"),
+		Preview.ComposedPrompt.StartsWith(TEXT("Relight this picture of a game level: late dusk")) && Preview.ComposedPrompt.Contains(TEXT("change only the light")));
+	TestEqual(TEXT("and takes no picture, so nothing in the level changes"), Seen->Captured, FIntPoint::ZeroValue);
+	HyperAIStudio::Tests::SaveWidgetShot(Panel, FIntPoint(1280, 880), TEXT("step29-relight-view"));
+
+	const FHyperAIImageGenerateReport Submitted = Panel->Generate();
+	BatchId = Submitted.BatchId;
+	AddInfo(Submitted.Status + TEXT(": ") + Submitted.Diagnostic);
+	TestTrue(TEXT("Generate submits, and the click approves it"), Submitted.bOk && Submitted.Status == TEXT("approved"));
+	TestEqual(TEXT("taking the view at the preset's 16:9 first"), Seen->Captured, FIntPoint(1024, 576));
+	TestTrue(TEXT("and sending it to be changed"), Submitted.InputImagePath.EndsWith(TEXT("frame_00.png")));
+	const double End = FPlatformTime::Seconds() + 30.0;
+	while (Seen->Matched.IsEmpty() && FPlatformTime::Seconds() < End)
+	{
+		FTSTicker::GetCoreTicker().Tick(0.05f);
+		FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+		Panel->Tick(FGeometry(), 0.0, 0.05f);
+		FPlatformProcess::Sleep(0.02f);
+	}
+	TestTrue(TEXT("Google is sent the view as inline data"), Seen->Body.Contains(TEXT("\"inlineData\"")));
+	TestTrue(TEXT("and once the relit view lands, the level's lighting is matched to it"), Seen->Matched.EndsWith(BatchId + TEXT("_01.png")));
+	Panel->Reload();
+	const int32 Relit = Panel->GetInspect().Images.IndexOfByPredicate([&BatchId](const FHyperAIImageRecord& Record) { return Record.BatchId == BatchId; });
+	if (TestTrue(TEXT("The relit view is in the gallery"), Relit != INDEX_NONE))
+	{
+		TestTrue(TEXT("naming the view it was made from"), Panel->GetInspect().Images[Relit].InputImage.EndsWith(BatchId + TEXT("_input.png")));
+		Panel->SelectImage(Relit);
+		HyperAIStudio::Tests::SaveWidgetShot(Panel, FIntPoint(1280, 880), TEXT("step29-relight-view-done"));
+	}
+
+	// A model that draws from words only is refused before anything is taken or sent.
+	FHyperAIStudioImageModelSettings WordsOnly;
+	Gate::FindModel(TEXT("nano_banana_2"), WordsOnly);
+	WordsOnly.Id = TEXT("words_only");
+	WordsOnly.EditRequestTemplate.Reset();
+	Settings->ImageModels = {WordsOnly};
+	Panel->Reload();
+	Seen->Captured = FIntPoint::ZeroValue;
+	TestTrue(TEXT("A words-only model can be picked"), Panel->SelectModel(TEXT("words_only")));
+	TestEqual(TEXT("but not to relight a view"), Panel->PreviewPrompt().Status, FString(TEXT("model_takes_no_picture")));
+	TestEqual(TEXT("and Generate refuses it"), Panel->Generate().Status, FString(TEXT("model_takes_no_picture")));
+	TestEqual(TEXT("before the view is taken"), Seen->Captured, FIntPoint::ZeroValue);
 	return true;
 }
 

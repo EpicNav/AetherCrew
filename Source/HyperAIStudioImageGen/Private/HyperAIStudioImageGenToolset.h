@@ -31,6 +31,8 @@ struct FHyperAIImageModelInfo
 	UPROPERTY() float CostPerCall = 0.0f;
 	/** False when the service names an environment variable that is not set. */
 	UPROPERTY() bool bHasApiKey = false;
+	/** True when it can change a picture passed as input_image_path, rather than only draw from words. */
+	UPROPERTY() bool bTakesInputImage = false;
 	/** Why this model cannot be used, when it cannot. */
 	UPROPERTY() FString Issue;
 };
@@ -63,6 +65,8 @@ struct FHyperAIImageRecord
 	UPROPERTY() int32 Height = 0;
 	UPROPERTY() FString GeneratedUtc;
 	UPROPERTY() int64 SizeBytes = 0;
+	/** The picture it changed, project-relative, when it was made from one, such as a capture of the level. */
+	UPROPERTY() FString InputImage;
 };
 
 USTRUCT(BlueprintType)
@@ -142,7 +146,13 @@ struct FHyperAIImageGenerateRequest
 	/** Names the folder the images land in; a short suffix keeps batches apart. */
 	UPROPERTY() FString BatchName;
 	UPROPERTY() int32 Count = 1;
-	/** 0 for the model's configured size. */
+	/**
+	 * A picture inside the project to change rather than draw from nothing, such as a hyper_capture_view frame of the
+	 * level to relight: say in the prompt what to change and what to keep. PNG, JPEG or WebP, for a model whose
+	 * bTakesInputImage is true.
+	 */
+	UPROPERTY() FString InputImagePath;
+	/** 0 for the model's configured size; with an input picture, its shape at that size. */
 	UPROPERTY() int32 Width = 0;
 	UPROPERTY() int32 Height = 0;
 	/** -1 for a random seed. A fixed seed re-renders the same image; a batch increments from it. */
@@ -171,6 +181,8 @@ struct FHyperAIImageGenerateReport
 	UPROPERTY() FString BatchId;
 	/** Project-relative folder the images land in. */
 	UPROPERTY() FString Folder;
+	/** The picture each image changes, project-relative; empty when they are drawn from words. */
+	UPROPERTY() FString InputImagePath;
 	UPROPERTY() int32 Count = 0;
 	UPROPERTY() int32 Width = 0;
 	UPROPERTY() int32 Height = 0;
@@ -197,10 +209,10 @@ public:
 	static FHyperAIImageInspectReport hyper_image_inspect(const FHyperAIImageInspectRequest& Request);
 
 	/**
-	 * Generate reference images from a prompt, written into the project as PNG files with a JSON sidecar
-	 * recording the prompt, model and seed. Read .hyperai/docs/HyperAIStudio-ImageGenCookbook.md first.
-	 * This spends money, so it always waits for approval. Dry-run to read the composed prompt for free,
-	 * then resubmit; watch the batch with hyper_image_inspect.
+	 * Generate reference images from a prompt, or change a picture (input_image_path), written into the project
+	 * as PNG files with a JSON sidecar. Read .hyperai/docs/HyperAIStudio-ImageGenCookbook.md first. This spends
+	 * money, so it always waits for approval. Dry-run to read the composed prompt for free, then resubmit; watch
+	 * the batch with hyper_image_inspect.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|ImageGen")
 	static FHyperAIImageGenerateReport hyper_image_generate(const FHyperAIImageGenerateRequest& Request);
@@ -229,6 +241,9 @@ public:
 	int32 Width = 0;
 	int32 Height = 0;
 	int32 Seed = -1;
+	/** The picture each image changes, project-relative, and the hash of its bytes when planned; empty to draw from words. */
+	FString InputImagePath;
+	FString InputImageHash;
 	FString SemanticFingerprint;
 
 	virtual FString GetTypeId() const override;

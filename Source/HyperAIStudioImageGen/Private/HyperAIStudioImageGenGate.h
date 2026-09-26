@@ -15,6 +15,8 @@ namespace HyperAIStudio::ImageGen::Gate
 	 * an external service; OutAgent is codex or gemini. These are built in, so they are there without settings.
 	 */
 	bool IsAgentModel(const FHyperAIStudioImageModelSettings& Model, FString& OutAgent);
+	/** True when Model can change a picture rather than only draw from words: an agent model, or one with an edit request template. */
+	bool TakesInputImage(const FHyperAIStudioImageModelSettings& Model);
 	TArray<FHyperAIImageModelInfo> ReadModels();
 	TArray<FHyperAIImageTemplateInfo> ReadTemplates();
 	/** Slot names a template takes, in the order they first appear. */
@@ -44,9 +46,32 @@ namespace HyperAIStudio::ImageGen::Gate
 	/** 1K, 2K or 4K from the longest side. */
 	FString ImageSize(int32 Width, int32 Height);
 
-	/** The model's request template with its placeholders substituted, each value JSON-escaped. */
+	/** A picture for a model to change. */
+	struct FInputImage
+	{
+		/** Absolute; an agent model opens the file itself. */
+		FString Path;
+		TArray<uint8> Bytes;
+		/** image/png, image/jpeg or image/webp, from the bytes. */
+		FString MimeType;
+		/** 0 x 0 when the editor cannot read its size. */
+		FIntPoint Size = FIntPoint::ZeroValue;
+		/** Seals the picture into a plan: another picture at the same path is another plan. */
+		FString Hash;
+	};
+
+	/** At most this, so its base64 stays inside the bounded request size. */
+	constexpr int32 MaxInputImageBytes = 5 * 1024 * 1024;
+
+	/** Reads a PNG, JPEG or WebP inside the project for a model to change; Path is project-relative or absolute. */
+	bool ReadInputImage(const FString& Path, FInputImage& Out, FString& OutError);
+
+	/**
+	 * The model's request template with its placeholders substituted, each value JSON-escaped. With an Input picture,
+	 * its edit request template, which takes the picture as {input_image} and its type as {input_mime_type}.
+	 */
 	bool BuildRequestBody(const FHyperAIStudioImageModelSettings& Model, const FString& Prompt, const FString& Negative,
-		int32 Width, int32 Height, int32 Seed, FString& OutBody, FString& OutError);
+		int32 Width, int32 Height, int32 Seed, FString& OutBody, FString& OutError, const FInputImage* Input = nullptr);
 
 	/** Walks a dotted path into a JSON reply and base64-decodes what it finds; numbers index arrays. */
 	bool ExtractImageBytes(const TArray<uint8>& Response, const FString& DottedPath, TArray<uint8>& OutBytes, FString& OutError);
@@ -54,8 +79,13 @@ namespace HyperAIStudio::ImageGen::Gate
 	/** png, jpg or webp from the leading bytes; empty when they are not an image this pack recognises. */
 	FString SniffImageExtension(const TArray<uint8>& Bytes);
 
+	/**
+	 * Starts generating Count images in the background. With an InputImagePath, each changes that picture; a hash sealed
+	 * into the plan must still match it, or nothing is sent.
+	 */
 	bool StartBatch(const FString& BatchId, const FHyperAIStudioImageModelSettings& Model, const FString& TemplateId,
-		const FString& Prompt, const FString& Negative, int32 Count, int32 Width, int32 Height, int32 Seed, FString& OutError);
+		const FString& Prompt, const FString& Negative, int32 Count, int32 Width, int32 Height, int32 Seed, FString& OutError,
+		const FString& InputImagePath = FString(), const FString& InputImageHash = FString());
 	bool FindBatch(const FString& BatchId, FHyperAIImageBatchInfo& OutInfo);
 	TArray<FHyperAIImageBatchInfo> ReadBatches(const FString& BatchId);
 }

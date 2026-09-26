@@ -58,6 +58,7 @@ namespace HyperAIStudio::ImageGen::Private
 		AppendToken(Canonical, Payload.ModelId);
 		AppendToken(Canonical, Payload.Prompt);
 		AppendToken(Canonical, FString::FromInt(Payload.Count));
+		AppendToken(Canonical, Payload.InputImageHash);
 		return FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(Canonical);
 	}
 
@@ -107,6 +108,17 @@ namespace HyperAIStudio::ImageGen::Private
 				return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("batch_folder_exists"),
 					TEXT("Something created the batch folder after planning; nothing was sent."));
 			}
+			// The picture approved is the picture sent: checked before anything is reserved against the cap.
+			if (!Payload.InputImagePath.IsEmpty())
+			{
+				Gate::FInputImage Input;
+				FString InputError;
+				if (!Gate::ReadInputImage(Payload.InputImagePath, Input, InputError) || Input.Hash != Payload.InputImageHash)
+				{
+					return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("input_image_changed"), InputError.IsEmpty()
+						? FString::Printf(TEXT("%s changed after planning; nothing was sent."), *Payload.InputImagePath) : InputError);
+				}
+			}
 			double Cost = 0.0;
 			FString SpendError;
 			FString Agent;
@@ -118,7 +130,7 @@ namespace HyperAIStudio::ImageGen::Private
 			}
 			FString StartError;
 			if (!Gate::StartBatch(Payload.BatchId, Model, Payload.TemplateId, Payload.Prompt, Payload.Negative,
-				Payload.Count, Payload.Width, Payload.Height, Payload.Seed, StartError))
+				Payload.Count, Payload.Width, Payload.Height, Payload.Seed, StartError, Payload.InputImagePath, Payload.InputImageHash))
 			{
 				return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("batch_not_started"), StartError);
 			}
@@ -178,6 +190,7 @@ TArray<FString> FHyperAIStudioImageGenContracts::GetCapabilities()
 		TEXT("prompt_templates_with_slots_that_drop_out_unfilled"),
 		TEXT("png_jpeg_and_webp_written_into_the_project_with_a_json_sidecar"),
 		TEXT("approval_and_a_session_spend_cap_before_anything_is_sent"),
+		TEXT("a_picture_in_the_project_changed_rather_than_drawn_such_as_a_view_of_the_level_relit"),
 		TEXT("unsupported:endpoints_that_queue_work_and_need_polling_such_as_comfyui_graphs"),
 		TEXT("unsupported:image_links_in_the_reply_instead_of_base64"),
 		TEXT("unsupported:importing_the_result_as_a_texture_asset")};
@@ -224,14 +237,14 @@ FString FHyperAIStudioImageGenContracts::InspectPayloadSchemaFingerprint()
 FString FHyperAIStudioImageGenContracts::GeneratePayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("image_generation.render.payload.v1|batch|folder|model|template|composed_prompt|negative|count|size|seed|deep_clone|bounded"));
+		TEXT("image_generation.render.payload.v2|batch|folder|model|template|composed_prompt|negative|count|size|seed|input_image_hashed|deep_clone|bounded"));
 	return Value;
 }
 
 FString FHyperAIStudioImageGenContracts::InspectResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("image_generation.inspect.result.v1|models_with_health|templates_with_slots|generated_with_sidecars|batches|spend|bounded"));
+		TEXT("image_generation.inspect.result.v2|models_with_health_and_input_image|templates_with_slots|generated_with_sidecars_and_input_image|batches|spend|bounded"));
 	return Value;
 }
 
@@ -256,7 +269,7 @@ int32 FHyperAIStudioImageGenGeneratePayload::GetBoundedByteSize() const
 	using HyperAIStudio::ImageGen::Private::EstimateBytes;
 	return HyperAIStudio::ImageGen::Private::ClampBytes(160 + EstimateBytes(BatchId) + EstimateBytes(Folder)
 		+ EstimateBytes(ModelId) + EstimateBytes(TemplateId) + EstimateBytes(Prompt) + EstimateBytes(Negative)
-		+ EstimateBytes(SemanticFingerprint));
+		+ EstimateBytes(InputImagePath) + EstimateBytes(InputImageHash) + EstimateBytes(SemanticFingerprint));
 }
 FString FHyperAIStudioImageGenGeneratePayload::GetSemanticFingerprint() const { return SemanticFingerprint; }
 TSharedRef<const IHyperAIStudioTypedArtifactPayload, ESPMode::ThreadSafe> FHyperAIStudioImageGenGeneratePayload::CloneImmutable() const
@@ -273,6 +286,8 @@ TSharedRef<const IHyperAIStudioTypedArtifactPayload, ESPMode::ThreadSafe> FHyper
 	Clone->Width = Width;
 	Clone->Height = Height;
 	Clone->Seed = Seed;
+	Clone->InputImagePath = InputImagePath;
+	Clone->InputImageHash = InputImageHash;
 	Clone->SemanticFingerprint = SemanticFingerprint;
 	return Clone;
 }
@@ -296,7 +311,7 @@ int32 FHyperAIStudioImageGenInspectResultPayload::GetBoundedByteSize() const
 	for (const FHyperAIImageRecord& Image : Report.Images)
 	{
 		Size += 64 + EstimateBytes(Image.File) + EstimateBytes(Image.BatchId) + EstimateBytes(Image.Prompt)
-			+ EstimateBytes(Image.ModelId) + EstimateBytes(Image.GeneratedUtc);
+			+ EstimateBytes(Image.ModelId) + EstimateBytes(Image.GeneratedUtc) + EstimateBytes(Image.InputImage);
 	}
 	for (const FHyperAIImageBatchInfo& Batch : Report.Batches)
 	{
@@ -379,7 +394,7 @@ FHyperAIImageInspectReport FHyperAIStudioImageGenContracts::Inspect(const FHyper
 		for (const FHyperAIImageTemplateInfo& Template : Report.Templates) Budget += 48 + EstimateBytes(Template.Template);
 		for (FHyperAIImageRecord& Image : Gate::ReadGenerated(Request.BatchId, /*Max=*/128))
 		{
-			const int64 Bytes = 64 + EstimateBytes(Image.File) + EstimateBytes(Image.Prompt) + EstimateBytes(Image.ModelId);
+			const int64 Bytes = 64 + EstimateBytes(Image.File) + EstimateBytes(Image.Prompt) + EstimateBytes(Image.ModelId) + EstimateBytes(Image.InputImage);
 			if (Budget + Bytes > Request.MaxOutputBytes)
 			{
 				Report.bTruncated = true;
@@ -424,6 +439,8 @@ FString FHyperAIStudioImageGenContracts::ComputeGenerateSemanticFingerprint(cons
 	AppendToken(Canonical, FString::FromInt(Payload.Width));
 	AppendToken(Canonical, FString::FromInt(Payload.Height));
 	AppendToken(Canonical, FString::FromInt(Payload.Seed));
+	AppendToken(Canonical, Payload.InputImagePath);
+	AppendToken(Canonical, Payload.InputImageHash);
 	return FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(Canonical);
 }
 
@@ -512,8 +529,36 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 		}
 	}
 
-	const int32 Width = Request.Width > 0 ? Request.Width : Model.Width;
-	const int32 Height = Request.Height > 0 ? Request.Height : Model.Height;
+	// A picture to change: read here, sealed into the plan by the hash of its bytes, and checked against it when sent.
+	Gate::FInputImage Input;
+	FString InputRelative;
+	const bool bChanges = !Request.InputImagePath.IsEmpty();
+	if (bChanges)
+	{
+		FString InputError;
+		if (!Gate::ReadInputImage(Request.InputImagePath, Input, InputError))
+		{
+			return Reject(TEXT("invalid_input_image"), InputError);
+		}
+		if (!Gate::TakesInputImage(Model))
+		{
+			return Reject(TEXT("model_takes_no_picture"), FString::Printf(
+				TEXT("%s draws from words only, so it cannot change a picture. The Nano Banana models, codex_image_gen and gemini_image_gen can: ")
+				TEXT("hyper_image_inspect marks them bTakesInputImage."), *Model.Id));
+		}
+		InputRelative = Input.Path;
+		FPaths::MakePathRelativeTo(InputRelative, *(FPaths::ProjectDir()));
+	}
+
+	int32 Width = Request.Width > 0 ? Request.Width : Model.Width;
+	int32 Height = Request.Height > 0 ? Request.Height : Model.Height;
+	// With no size asked for, a changed picture keeps its shape at the model's own size, so it frames what the picture framed.
+	if (bChanges && Request.Width <= 0 && Request.Height <= 0 && Input.Size.X > 0 && Input.Size.Y > 0)
+	{
+		const double Scale = static_cast<double>(FMath::Max(Model.Width, Model.Height)) / FMath::Max(Input.Size.X, Input.Size.Y);
+		Width = FMath::Max(MinImageSize, FMath::RoundToInt(Input.Size.X * Scale));
+		Height = FMath::Max(MinImageSize, FMath::RoundToInt(Input.Size.Y * Scale));
+	}
 	if (Width < MinImageSize || Width > MaxImageSize || Height < MinImageSize || Height > MaxImageSize)
 	{
 		return Reject(TEXT("invalid_size"), FString::Printf(TEXT("Width and height are %d to %d, or 0 for the model's own size."),
@@ -533,7 +578,7 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 	// the dry run rather than after the user has approved a spend. An agent takes the prompt as it is.
 	FString Body;
 	FString BodyError;
-	if (!bAgent && !Gate::BuildRequestBody(Model, Prompt, Request.Negative, Width, Height, Seed, Body, BodyError))
+	if (!bAgent && !Gate::BuildRequestBody(Model, Prompt, Request.Negative, Width, Height, Seed, Body, BodyError, bChanges ? &Input : nullptr))
 	{
 		return Reject(TEXT("invalid_request_template"), BodyError);
 	}
@@ -562,6 +607,8 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 	Payload->Width = Width;
 	Payload->Height = Height;
 	Payload->Seed = Seed;
+	Payload->InputImagePath = InputRelative;
+	Payload->InputImageHash = Input.Hash;
 	Payload->SemanticFingerprint = ComputeGenerateSemanticFingerprint(*Payload);
 	if (Payload->GetBoundedByteSize() > FHyperAIStudioDomainLimits::MaxRequestBytes)
 	{
@@ -570,6 +617,7 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 
 	Report.BatchId = Payload->BatchId;
 	Report.Folder = Folder;
+	Report.InputImagePath = InputRelative;
 	Report.Count = Request.Count;
 	Report.Width = Width;
 	Report.Height = Height;
@@ -621,14 +669,15 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 		: Model.bRunsOnThisMachine
 		? FString(TEXT(" This model runs on this machine, so it shares the graphics card with the editor and can take many times longer than it would alone; close the editor if it crawls."))
 		: FString();
+	const FString Changing = bChanges ? FString::Printf(TEXT(", changing %s"), *InputRelative) : FString();
 	if (Request.bDryRun)
 	{
 		Report.bOk = true;
 		Report.Status = TEXT("planned");
 		Report.Diagnostic = FString::Printf(
-			TEXT("Nothing was sent and nothing was spent. Read composed_prompt before resubmitting: %d image%s at %dx%d from %s, about %.2f.%s ")
+			TEXT("Nothing was sent and nothing was spent. Read composed_prompt before resubmitting: %d image%s at %dx%d from %s%s, about %.2f.%s ")
 			TEXT("To generate, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash."),
-			Request.Count, Request.Count == 1 ? TEXT("") : TEXT("s"), Width, Height, *Model.Id, Report.EstimatedCost, *SlowWarning);
+			Request.Count, Request.Count == 1 ? TEXT("") : TEXT("s"), Width, Height, *Model.Id, *Changing, Report.EstimatedCost, *SlowWarning);
 		if (!Report.UnfilledSlots.IsEmpty())
 		{
 			Report.Diagnostic += FString::Printf(TEXT(" Unfilled template slots dropped out of the prompt: %s."),
@@ -654,6 +703,7 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 			Request.Count, Request.Count == 1 ? TEXT("") : TEXT("s"), *Model.Id, *AgentLabel)
 		: FString::Printf(TEXT("generate %d image%s at %dx%d with %s, about %.2f"),
 			Request.Count, Request.Count == 1 ? TEXT("") : TEXT("s"), Width, Height, *Model.Id, Report.EstimatedCost));
+	if (bChanges) Summary.Effects.Add(TEXT("send the picture ") + InputRelative + TEXT(" to change"));
 	Summary.Effects.Add(TEXT("prompt: ") + Prompt);
 	if (!Request.Negative.IsEmpty()) Summary.Effects.Add(TEXT("negative: ") + Request.Negative);
 	Summary.Effects.Add(FString::Printf(TEXT("write %d PNG files and their sidecars into %s"), Request.Count, *Folder));
