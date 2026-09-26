@@ -553,8 +553,10 @@ class Accounting:
                 parsed = json.loads(text)
             except (TypeError, ValueError):
                 continue
-            if isinstance(parsed, dict) and any(parsed.get(key) is False for key in ("bOk", "ok", "success")):
-                failed = True
+            # HyperAI's tools report a refusal inside their return value, not as a tool error; both are recorded failures.
+            for value in (parsed, parsed.get("returnValue") if isinstance(parsed, dict) else None):
+                if isinstance(value, dict) and any(value.get(key) is False for key in ("bOk", "ok", "success")):
+                    failed = True
         self.failed += 1 if failed else 0
 
     def local(self, name):
@@ -1004,7 +1006,8 @@ Claude <code>{html.escape(str(meta['claude_model']))}</code> ({html.escape(str(m
 <h2>Per task</h2>
 <table><tr><th>Agent</th><th>Task</th><th>Result</th><th>Requests</th><th>State-changing</th><th>Failed</th><th>Time</th><th>Stopped</th><th>Why</th></tr>
 {''.join(details)}</table>
-<p>NeoStack's published pilot, for reference: NeoStack 3/5 (145 requests, median 27), Epic MCP 1/5 (375, 66), Nwiro 0/5 (320, 64).
+<p>NeoStack's published pilot (31 July 2026), for reference, as passed / requests / median / failed: NeoStack 3/5, 145, 27, 14;
+Aura 1/5, 159, 30, 17; Epic MCP 1/5, 375, 66, 34; UE Copilot 0/5, 448, 87, 29; Nwiro 0/5, 320, 64, 35.
 Their tasks and verifier are not public; these tasks follow their descriptions, and this verifier checks saved state in a fresh editor.</p>
 </body></html>"""
     (run_dir / "scorecard.html").write_text(page, encoding="utf-8")

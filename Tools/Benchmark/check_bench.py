@@ -37,6 +37,14 @@ def main():
         summary = "Done. " + "The level is lit and saved; the courtyard is symmetric. " * 5 + "No limit reached."
         assert not bench.usage_limit_message("claude", {"final": summary, "is_error": False}, out), "a real summary is not a limit"
 
+    # A failed request is any recorded failure: a tool error, or a refusal inside HyperAI's return value.
+    acct = bench.Accounting({})
+    for call, body in (("a", {"returnValue": {"bOk": False, "diagnostic": "warmup_frames is 0-8."}}), ("b", {"bOk": False}),
+                       ("c", {"returnValue": {"bOk": True}}), ("d", {"ok": True})):
+        acct.begin(call, "unreal-mcp", "call_tool", {"tool_name": "hyper_capture_view", "arguments": {}})
+        acct.end(call, False, [json.dumps(body)])
+    assert acct.failed == 2, acct.summary()
+
     # Task sets: "all" stays the five comparison tasks; the Blueprint set has a three-minute target.
     assert [t[0] for t in bench.select_tasks("all")] == ["01-niagara", "02-material", "03-level", "04-umg", "05-animbp"]
     assert [t[0] for t in bench.select_tasks("bp")] == ["06-bp-pickup", "07-bp-door", "08-bp-health"]
