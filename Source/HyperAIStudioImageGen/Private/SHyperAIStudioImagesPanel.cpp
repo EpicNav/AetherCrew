@@ -49,7 +49,8 @@ namespace HyperAIStudio::ImagesPanel
 	/**
 	 * Shapes a preset or the row picks. The sizes are what the request carries: the model takes an aspect ratio and a
 	 * size class from them, so a longest side of 1024 keeps every model at its 1K price. Width and Height under More
-	 * options ask for more.
+	 * options ask for more. 3:2 is the landscape GPT image models draw, as Codex does: a view relit at 3:2 comes back framed
+	 * as it went.
 	 */
 	struct FShape
 	{
@@ -58,7 +59,7 @@ namespace HyperAIStudio::ImagesPanel
 		int32 Height;
 	};
 	const FShape Shapes[] = {
-		{TEXT("16:9"), 1024, 576}, {TEXT("1:1"), 1024, 1024}, {TEXT("9:16"), 576, 1024}, {TEXT("4:3"), 1024, 768},
+		{TEXT("16:9"), 1024, 576}, {TEXT("3:2"), 1024, 683}, {TEXT("1:1"), 1024, 1024}, {TEXT("9:16"), 576, 1024}, {TEXT("4:3"), 1024, 768},
 		{TEXT("3:4"), 768, 1024}, {TEXT("21:9"), 1024, 439}};
 	constexpr int32 ShapeCount = UE_ARRAY_COUNT(Shapes);
 
@@ -109,6 +110,7 @@ namespace HyperAIStudio::ImagesPanel
 		FString Prompt;
 		FString ModelId;
 		bool bGenerate = false;
+		FString Shape;
 	};
 
 	TOptional<FPendingOpen>& Pending()
@@ -133,10 +135,11 @@ TArray<SHyperAIStudioImagesPanel::FPreset> SHyperAIStudioImagesPanel::BuiltInPre
 		Preset.Count = Count;
 		return Preset;
 	};
-	// The level itself, relit: the prompt says only how, and the words around it keep everything else as it is.
+	// The level itself, relit: the prompt says only how, and the words around it keep everything else as it is. A blockout's
+	// flat colours stand for materials not made yet, so those are rendered as what they stand for.
 	FPreset Relight = Make(TEXT("relight_view"), LOCTEXT("PresetRelight", "Relight this view"),
 		LOCTEXT("PresetRelightHint", "How the view should be lit: the time of day, where the light comes from, its colour, the weather and the mood. For example: late dusk, warm lamps glowing inside, cool blue moonlight through the windows, a little fog."),
-		TEXT("Keep the camera, the framing and every object exactly as they are, with the same shapes, positions and materials; change only the light, the shadows, the sky, the fog and the colour grade. A photorealistic real-time render of the same scene"),
+		TEXT("Keep the camera, the framing and every object exactly where it is, with the same shapes and sizes. Change only the light, the shadows, the sky, the fog and the colour grade; where a surface is a flat blockout colour, render it as the finished material it stands for, such as stone, rock, wood, grass or water. A photorealistic real-time render of the same scene"),
 		TEXT("new objects, removed objects, changed shapes, a moved camera, text, watermark, people"), TEXT("16:9"), 1);
 	Relight.Before = TEXT("Relight this picture of a game level:");
 	Relight.bFromView = true;
@@ -231,10 +234,11 @@ void SHyperAIStudioImagesPanel::Construct(const FArguments& InArgs)
 	TakePending();
 }
 
-void SHyperAIStudioImagesPanel::OpenOnPreset(const FString& PresetId, const FString& InPrompt, const FString& ModelId, const bool bGenerate)
+void SHyperAIStudioImagesPanel::OpenOnPreset(const FString& PresetId, const FString& InPrompt, const FString& ModelId, const bool bGenerate,
+	const FString& ShapeLabel)
 {
 	// Taken by the page as it shows: a new one takes it as it is built, an open one on its next tick.
-	HyperAIStudio::ImagesPanel::Pending() = HyperAIStudio::ImagesPanel::FPendingOpen{PresetId, InPrompt, ModelId, bGenerate};
+	HyperAIStudio::ImagesPanel::Pending() = HyperAIStudio::ImagesPanel::FPendingOpen{PresetId, InPrompt, ModelId, bGenerate, ShapeLabel};
 	FHyperAIStudioShell::Open(TEXT("Images"));
 }
 
@@ -257,6 +261,18 @@ void SHyperAIStudioImagesPanel::TakePending()
 		Status = FString::Printf(TEXT("There is no image model %s; hyper_image_inspect lists them."), *Open.ModelId);
 		bStatusIsError = true;
 		return;
+	}
+	if (!Open.Shape.IsEmpty())
+	{
+		using namespace HyperAIStudio::ImagesPanel;
+		const int32 Found = ShapeIndexOf(Open.Shape);
+		if (Shapes[Found].Label != Open.Shape)
+		{
+			Status = FString::Printf(TEXT("There is no shape %s; the shapes are 16:9, 3:2, 1:1, 9:16, 4:3, 3:4 and 21:9."), *Open.Shape);
+			bStatusIsError = true;
+			return;
+		}
+		Shape = Found;
 	}
 	if (Open.bGenerate)
 	{
@@ -413,6 +429,7 @@ TSharedRef<SWidget> SHyperAIStudioImagesPanel::BuildForm()
 						+ SSegmentedControl<int32>::Slot(3).Text(FText::FromString(Shapes[3].Label))
 						+ SSegmentedControl<int32>::Slot(4).Text(FText::FromString(Shapes[4].Label))
 						+ SSegmentedControl<int32>::Slot(5).Text(FText::FromString(Shapes[5].Label))
+						+ SSegmentedControl<int32>::Slot(6).Text(FText::FromString(Shapes[6].Label))
 					]
 				]
 				+ SHorizontalBox::Slot().AutoWidth()

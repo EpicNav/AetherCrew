@@ -14,22 +14,26 @@ DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioImageGenModule, Log, All);
 
 namespace HyperAIStudio::ImageGen::Private
 {
-	/** HyperAIStudio.Relight [model=<id>] <how it should be lit>: Relight this view from the console, generating at once as Generate does. */
+	/**
+	 * HyperAIStudio.Relight [model=<id>] [shape=<3:2 and so on>] <how it should be lit>: Relight this view from the console,
+	 * generating at once as Generate does.
+	 */
 	void RunRelight(const TArray<FString>& Args)
 	{
 		TArray<FString> Words = Args;
 		FString ModelId;
-		if (!Words.IsEmpty() && Words[0].StartsWith(TEXT("model="), ESearchCase::IgnoreCase))
+		FString Shape;
+		while (!Words.IsEmpty() && (Words[0].StartsWith(TEXT("model="), ESearchCase::IgnoreCase) || Words[0].StartsWith(TEXT("shape="), ESearchCase::IgnoreCase)))
 		{
-			ModelId = Words[0].RightChop(6);
+			(Words[0].StartsWith(TEXT("model="), ESearchCase::IgnoreCase) ? ModelId : Shape) = Words[0].RightChop(6);
 			Words.RemoveAt(0);
 		}
 		const FString Prompt = FString::Join(Words, TEXT(" ")).TrimStartAndEnd();
-		SHyperAIStudioImagesPanel::OpenOnPreset(TEXT("relight_view"), Prompt, ModelId, /*bGenerate=*/!Prompt.IsEmpty());
+		SHyperAIStudioImagesPanel::OpenOnPreset(TEXT("relight_view"), Prompt, ModelId, /*bGenerate=*/!Prompt.IsEmpty(), Shape);
 	}
 
 	FAutoConsoleCommand RelightCommand(TEXT("HyperAIStudio.Relight"),
-		TEXT("Relight this view: HyperAIStudio.Relight [model=<id>] <how it should be lit>. Takes the view through HyperAI_MatchCamera, has the image model relight it, which spends as the Images page's Generate does, then matches the level's lighting to it. With no words it only opens the page on the preset."),
+		TEXT("Relight this view: HyperAIStudio.Relight [model=<id>] [shape=<16:9, 3:2 and so on>] <how it should be lit>. Takes the view through HyperAI_MatchCamera, has the image model relight it, which spends as the Images page's Generate does, then matches the level's lighting to it. With no words it only opens the page on the preset."),
 		FConsoleCommandWithArgsDelegate::CreateStatic(&RunRelight));
 }
 

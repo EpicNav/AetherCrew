@@ -46,9 +46,10 @@ public:
 
 	/**
 	 * Opens the Images page on a preset, as the Relight this view action does. A prompt fills the box, a model id picks the
-	 * model, and bGenerate presses Generate, which spends as the button does.
+	 * model, a shape such as 3:2 replaces the preset's, and bGenerate presses Generate, which spends as the button does.
 	 */
-	static void OpenOnPreset(const FString& PresetId, const FString& Prompt = FString(), const FString& ModelId = FString(), bool bGenerate = false);
+	static void OpenOnPreset(const FString& PresetId, const FString& Prompt = FString(), const FString& ModelId = FString(), bool bGenerate = false,
+		const FString& ShapeLabel = FString());
 	/** For a preset that changes a picture of the level: start matching the level's lighting to the picture once it lands. */
 	void SetMatchWhenDone(const bool bInMatchWhenDone) { bMatchWhenDone = bInMatchWhenDone; }
 

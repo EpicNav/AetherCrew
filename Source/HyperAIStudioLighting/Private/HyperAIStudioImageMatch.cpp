@@ -789,6 +789,69 @@ namespace HyperAIStudio::Lighting::Match
 		}
 	}
 
+	/**
+	 * The grade that would close the colour gap, as a colourist would give it: a LUT fitted from the candidate to the reference
+	 * and composed after the level's own LUT, so it replaces that one; the candidate's score graded through it; and the graded
+	 * candidate beside the reference.
+	 */
+	void FitGrade(const FHyperAIImageCompareRequest& Request, const TArray<FColor>& Reference, const int32 ReferenceWidth, const int32 ReferenceHeight,
+		const TArray<FColor>& Candidate, const int32 CandidateWidth, const int32 CandidateHeight, const FString& Folder, const FString& Stem,
+		FHyperAIImageCompareReport& Report)
+	{
+		// At the working size with both cropped to the reference's shape, so the pixels pair up as the scores pair them.
+		const float Aspect = static_cast<float>(ReferenceWidth) / ReferenceHeight;
+		const int32 Height = FMath::Clamp(FMath::RoundToInt(WorkWidth / Aspect), 16, 512);
+		const TArray<FColor> Ref = Resample(Reference, ReferenceWidth, ReferenceHeight, Aspect, WorkWidth, Height);
+		const TArray<FColor> Cand = Resample(Candidate, CandidateWidth, CandidateHeight, Aspect, WorkWidth, Height);
+		// Pixel by pixel suits a view that differs from the reference in its grade alone; the look suits one whose content
+		// differs too, such as a blockout under finished assets, where pairing pixels would recolour shapes. Both are fitted,
+		// and the one that grades the candidate closer is kept.
+		Lut::FTable Fitted;
+		TArray<FColor> Graded;
+		FHyperAIImageCompareReport GradedReport;
+		bool bPairs = false;
+		for (const bool bByPixel : {true, false})
+		{
+			Lut::FTable Table = Lut::Fit(Cand, Ref, bByPixel);
+			TArray<FColor> Pixels = Lut::Apply(Table, Candidate);
+			FHyperAIImageCompareReport Scored = ComparePixels(Reference, ReferenceWidth, ReferenceHeight, Pixels, CandidateWidth, CandidateHeight,
+				Request.Mode, Request.TargetScore, Request.Grid);
+			if (Fitted.IsEmpty() || Scored.Score > GradedReport.Score)
+			{
+				Fitted = MoveTemp(Table);
+				Graded = MoveTemp(Pixels);
+				GradedReport = MoveTemp(Scored);
+				bPairs = bByPixel;
+			}
+		}
+		Lut::FTable Current = Lut::Identity();
+		FString CurrentPath;
+		if (UWorld* World = Gate::GetEditorWorld(); World && Gate::ReadLevelLut(*World, Current, CurrentPath))
+		{
+			Report.LutComposedWith = CurrentPath;
+		}
+		const FString Name = Request.SessionId.IsEmpty() ? FString::Printf(TEXT("lut_%s"), *FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S")))
+			: Request.SessionId + TEXT("_") + Stem;
+		const FString LutFile = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio") / TEXT("LUTs") / (Name + TEXT(".png")));
+		if (!Gate::WritePng(LutFile, Lut::ToStrip(Lut::Compose(Fitted, Current)), Lut::StripWidth, Lut::StripHeight))
+		{
+			Report.Diagnostic += TEXT(" The LUT could not be written.");
+			return;
+		}
+		Report.LutPath = ProjectRelative(LutFile);
+		Report.LutScore = GradedReport.Score;
+		WriteImages(Reference, ReferenceWidth, ReferenceHeight, Graded, CandidateWidth, CandidateHeight, Request.Grid,
+			Folder / (Stem + TEXT("_lut_side.png")), Folder / (Stem + TEXT("_lut_diff.png")), GradedReport);
+		Report.LutSideBySidePath = GradedReport.SideBySidePath;
+		Report.Diagnostic += FString::Printf(TEXT(" LUT fitted %s: graded, the candidate scores %.0f; it is %s%s."), bPairs ? TEXT("pixel by pixel") : TEXT("to the look"),
+			Report.LutScore, *Report.LutPath, CurrentPath.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(", and replaces %s"), *CurrentPath));
+		if (Report.LutScore > Report.Score + 1.f)
+		{
+			Report.Suggestions.Insert(FString::Printf(TEXT("Grade it: through a LUT fitted to the reference the candidate scores %.0f, not %.0f. Once the light is close, apply it with ")
+				TEXT("set_post_process color_grading_lut %s, and fit again after a big change of light."), Report.LutScore, Report.Score, *Report.LutPath), 0);
+		}
+	}
+
 	FHyperAIImageCompareReport Compare(const FHyperAIImageCompareRequest& Request)
 	{
 		FHyperAIImageCompareReport Report;
@@ -913,6 +976,10 @@ namespace HyperAIStudio::Lighting::Match
 		Report.Diagnostic = FString::Printf(TEXT("Score %.0f of 100 (target %.0f, %s mode): palette %.0f, tone %.0f, layout %.0f, detail %.0f%s.%s"),
 			Report.Score, Request.TargetScore, *Request.Mode, Report.PaletteScore, Report.ToneScore, Report.LayoutScore, Report.DetailScore,
 			Request.Mode == TEXT("aligned") ? *FString::Printf(TEXT(", structure %.0f"), Report.StructureScore) : TEXT(""), *Cropped);
+		if (Request.bFitLut)
+		{
+			FitGrade(Request, Reference, ReferenceWidth, ReferenceHeight, Candidate, CandidateWidth, CandidateHeight, Folder, Stem, Report);
+		}
 
 		if (!Request.SessionId.IsEmpty())
 		{

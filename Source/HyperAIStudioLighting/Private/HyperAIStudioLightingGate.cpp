@@ -2,6 +2,7 @@
 
 #include "HyperAIStudioLightingGate.h"
 
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Camera/CameraComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/MeshComponent.h"
@@ -11,7 +12,9 @@
 #include "Components/PointLightComponent.h"
 #include "Components/RectLightComponent.h"
 #include "Components/SpotLightComponent.h"
+#include "Components/VolumetricCloudComponent.h"
 #include "Editor.h"
+#include "Engine/Texture2D.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Engine/Light.h"
@@ -30,12 +33,15 @@
 #include "ImageUtils.h"
 #include "LevelEditorViewport.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/FileHelper.h"
 #include "Misc/StringOutputDevice.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "ScopedTransaction.h"
+#include "TextureCompiler.h"
+#include "UObject/Package.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UObjectIterator.h"
 #include "UnrealClient.h"
@@ -53,7 +59,7 @@ namespace HyperAIStudio::Lighting::Gate
 		constexpr int32 MaxActorsPerKind = 16;
 		constexpr int32 MaxLabelChars = 128;
 
-		const TCHAR* const Kinds[] = {TEXT("sun"), TEXT("sky_light"), TEXT("fog"), TEXT("sky_atmosphere"), TEXT("post_process")};
+		const TCHAR* const Kinds[] = {TEXT("sun"), TEXT("sky_light"), TEXT("fog"), TEXT("sky_atmosphere"), TEXT("clouds"), TEXT("post_process")};
 
 		UClass* ClassOf(const FString& Kind)
 		{
@@ -61,6 +67,7 @@ namespace HyperAIStudio::Lighting::Gate
 			if (Kind == TEXT("sky_light")) return ASkyLight::StaticClass();
 			if (Kind == TEXT("fog")) return AExponentialHeightFog::StaticClass();
 			if (Kind == TEXT("sky_atmosphere")) return ASkyAtmosphere::StaticClass();
+			if (Kind == TEXT("clouds")) return AVolumetricCloud::StaticClass();
 			if (Kind == TEXT("post_process")) return APostProcessVolume::StaticClass();
 			return nullptr;
 		}
@@ -71,7 +78,14 @@ namespace HyperAIStudio::Lighting::Gate
 			if (Kind == TEXT("sky_light")) return TEXT("HyperAI_SkyLight");
 			if (Kind == TEXT("fog")) return TEXT("HyperAI_HeightFog");
 			if (Kind == TEXT("sky_atmosphere")) return TEXT("HyperAI_SkyAtmosphere");
+			if (Kind == TEXT("clouds")) return TEXT("HyperAI_VolumetricCloud");
 			return TEXT("HyperAI_PostProcess");
+		}
+
+		/** Kinds a Blueprint sky that owns its lights also owns: an edit to one would fight it or add a second. */
+		bool IsSkyOwnedKind(const FString& Kind)
+		{
+			return Kind == TEXT("sun") || Kind == TEXT("sky_light") || Kind == TEXT("fog") || Kind == TEXT("sky_atmosphere") || Kind == TEXT("clouds");
 		}
 
 		/** Actors of one kind in path order; post process lists only unbound volumes unless a label names one. */
@@ -250,7 +264,7 @@ namespace HyperAIStudio::Lighting::Gate
 		}
 
 		/** The value as the Details panel would take it, checked by importing it into scratch memory; enums by display name. */
-		bool ParseSkyValue(const FProperty& Property, AActor& Owner, const FString& Text, FString& OutImport, FString& OutError)
+		bool ParseSkyValue(const FProperty& Property, UObject& Owner, const FString& Text, FString& OutImport, FString& OutError)
 		{
 			OutImport = Text.TrimStartAndEnd();
 			if (const UEnum* Enum = EnumOf(Property))
@@ -362,6 +376,210 @@ namespace HyperAIStudio::Lighting::Gate
 					&& Settings.AutoExposureMinBrightness == Settings.AutoExposureMaxBrightness);
 		}
 
+		constexpr int32 MaxChangedDetails = 32;
+
+		/**
+		 * Where a stock actor keeps what its Details panel shows: its component, or a volume's post-process settings. Every
+		 * setting there is a lever a lighting artist reaches for, so the ops take any of them by name beside their fixed keys.
+		 */
+		struct FDetails
+		{
+			/** What an edit is announced to: PreEditChange and PostEditChangeProperty. */
+			UObject* Object = nullptr;
+			/** Where the values live, and the class or struct declaring them. */
+			void* Container = nullptr;
+			const UStruct* Type = nullptr;
+			/** The values nothing has changed: the component's archetype, or default post-process settings. */
+			const void* Defaults = nullptr;
+			bool bPostProcess = false;
+		};
+
+		const FPostProcessSettings& DefaultPostProcess()
+		{
+			static const FPostProcessSettings Settings;
+			return Settings;
+		}
+
+		UActorComponent* ComponentOf(AActor& Actor)
+		{
+			if (ADirectionalLight* Sun = Cast<ADirectionalLight>(&Actor)) return Sun->GetComponent();
+			if (ASkyLight* Sky = Cast<ASkyLight>(&Actor)) return Sky->GetLightComponent();
+			if (AExponentialHeightFog* Fog = Cast<AExponentialHeightFog>(&Actor)) return Fog->GetComponent();
+			if (ASkyAtmosphere* Atmosphere = Cast<ASkyAtmosphere>(&Actor)) return Atmosphere->GetComponent();
+			return Actor.IsA<AVolumetricCloud>() ? Actor.FindComponentByClass<UVolumetricCloudComponent>() : nullptr;
+		}
+
+		FDetails DetailsOf(AActor& Actor)
+		{
+			FDetails Details;
+			if (APostProcessVolume* Volume = Cast<APostProcessVolume>(&Actor))
+			{
+				Details.Object = Volume;
+				Details.Container = &Volume->Settings;
+				Details.Type = FPostProcessSettings::StaticStruct();
+				Details.Defaults = &DefaultPostProcess();
+				Details.bPostProcess = true;
+			}
+			else if (UActorComponent* Component = ComponentOf(Actor))
+			{
+				Details.Object = Component;
+				Details.Container = Component;
+				Details.Type = Component->GetClass();
+				Details.Defaults = Component->GetArchetype();
+			}
+			return Details;
+		}
+
+		/** Letters and digits in lower case: how a name compares, however it is spaced or cased. */
+		FString Plain(const FString& Name)
+		{
+			FString Out;
+			for (const TCHAR Character : Name)
+			{
+				if (FChar::IsAlnum(Character)) Out.AppendChar(FChar::ToLower(Character));
+			}
+			return Out;
+		}
+
+		/** Settings the ops already own, so the Details path cannot route around the exposure lock. */
+		bool IsOwnedByOps(const FString& Name)
+		{
+			return Name == TEXT("AutoExposureMethod") || Name == TEXT("AutoExposureBias") || Name == TEXT("AutoExposureApplyPhysicalCameraExposure")
+				|| Name == TEXT("Mobility");
+		}
+
+		bool IsDetail(const FProperty& Property)
+		{
+			const FString Name = Property.GetName();
+			return Property.HasAnyPropertyFlags(CPF_Edit) && !Property.HasAnyPropertyFlags(CPF_EditConst | CPF_DisableEditOnInstance | CPF_Deprecated)
+				&& Property.ArrayDim == 1 && !Name.StartsWith(TEXT("bOverride_")) && !IsOwnedByOps(Name);
+		}
+
+		/** A Details-panel setting by its C++ name or its label there, in any case, with or without spaces and underscores. */
+		FProperty* FindDetail(const UStruct& Type, const FString& Name, FString& OutError)
+		{
+			const FString Wanted = Plain(Name);
+			TArray<FProperty*> Matches;
+			for (TFieldIterator<FProperty> It(&Type); It; ++It)
+			{
+				FProperty* Property = *It;
+				if (!IsDetail(*Property)) continue;
+				const FString Own = Property->GetName();
+				if (Own.Equals(Name, ESearchCase::IgnoreCase))
+				{
+					return Property;
+				}
+				// A flag also answers to its name without the b: bEnableLightShaftBloom as enable_light_shaft_bloom.
+				const FString Bare = Property->IsA<FBoolProperty>() && Own.Len() > 1 && Own[0] == TEXT('b') && FChar::IsUpper(Own[1]) ? Own.RightChop(1) : Own;
+				if (Plain(Bare) == Wanted || Plain(Property->GetDisplayNameText().ToString()) == Wanted)
+				{
+					Matches.AddUnique(Property);
+				}
+			}
+			if (Matches.Num() == 1)
+			{
+				return Matches[0];
+			}
+			TArray<FString> Names;
+			for (const FProperty* Match : Matches)
+			{
+				Names.Add(Match->GetName());
+			}
+			OutError = Matches.IsEmpty() ? FString::Printf(TEXT("has no setting '%s' in its Details panel"), *Name.Left(64))
+				: FString::Printf(TEXT("has several settings called '%s' (%s); name one exactly"), *Name.Left(64), *FString::Join(Names, TEXT(", ")));
+			return nullptr;
+		}
+
+		/** Colours and vectors as the fixed keys take them, "r,g,b", in Unreal's text form; anything else as typed. */
+		FString DetailText(const FProperty& Property, const FString& Value)
+		{
+			const FStructProperty* Struct = CastField<FStructProperty>(&Property);
+			TArray<FString> Parts;
+			Value.ParseIntoArray(Parts, TEXT(","));
+			if (!Struct || Value.StartsWith(TEXT("(")) || Parts.Num() < 3 || Parts.Num() > 4)
+			{
+				return Value;
+			}
+			TArray<float> Numbers;
+			for (const FString& Part : Parts)
+			{
+				float Number = 0.f;
+				if (!LexTryParseString(Number, *Part.TrimStartAndEnd())) return Value;
+				Numbers.Add(Number);
+			}
+			const float W = Numbers.Num() == 4 ? Numbers[3] : 1.f;
+			const UScriptStruct* Type = Struct->Struct;
+			if (Type == TBaseStructure<FLinearColor>::Get())
+			{
+				return FString::Printf(TEXT("(R=%g,G=%g,B=%g,A=%g)"), Numbers[0], Numbers[1], Numbers[2], W);
+			}
+			if (Type == TBaseStructure<FColor>::Get())
+			{
+				// Written in linear colour like every other colour here; kept as sRGB bytes.
+				const FColor Bytes = FLinearColor(Numbers[0], Numbers[1], Numbers[2]).ToFColor(true);
+				return FString::Printf(TEXT("(R=%d,G=%d,B=%d,A=255)"), Bytes.R, Bytes.G, Bytes.B);
+			}
+			if (Type == TBaseStructure<FVector4>::Get())
+			{
+				return FString::Printf(TEXT("(X=%g,Y=%g,Z=%g,W=%g)"), Numbers[0], Numbers[1], Numbers[2], W);
+			}
+			if (Type == TBaseStructure<FVector>::Get() && Numbers.Num() == 3)
+			{
+				return FString::Printf(TEXT("(X=%g,Y=%g,Z=%g)"), Numbers[0], Numbers[1], Numbers[2]);
+			}
+			return Value;
+		}
+
+		/** The C++ names the fixed keys already show, so a changed setting is not listed twice. */
+		const TSet<FString>& ShownByKeys()
+		{
+			static const TSet<FString> Names = {TEXT("Intensity"), TEXT("Temperature"), TEXT("bUseTemperature"), TEXT("LightColor"), TEXT("LightSourceAngle"),
+				TEXT("bAtmosphereSunLight"), TEXT("bRealTimeCapture"), TEXT("SourceType"), TEXT("FogDensity"), TEXT("FogHeightFalloff"), TEXT("StartDistance"),
+				TEXT("FogInscatteringLuminance"), TEXT("bEnableVolumetricFog"), TEXT("VolumetricFogScatteringDistribution"), TEXT("VolumetricFogAlbedo"),
+				TEXT("VolumetricFogExtinctionScale"), TEXT("RayleighScatteringScale"), TEXT("MieScatteringScale"), TEXT("WhiteTemp"), TEXT("ColorSaturation"),
+				TEXT("ColorContrast"), TEXT("ColorGamma"), TEXT("ColorGainShadows"), TEXT("ColorOffsetShadows"), TEXT("ColorGainHighlights"),
+				TEXT("LayerBottomAltitude"), TEXT("LayerHeight"), TEXT("Material")};
+			return Names;
+		}
+
+		/** Settings changed from their defaults beyond the fixed keys: what a plan or a person set through the Details panel. */
+		void AddChangedDetails(AActor& Actor, TArray<FHyperAILightingProperty>& Out)
+		{
+			const FDetails Details = DetailsOf(Actor);
+			if (!Details.Type || !Details.Defaults)
+			{
+				return;
+			}
+			int32 Added = 0;
+			for (TFieldIterator<FProperty> It(Details.Type); It && Added < MaxChangedDetails; ++It)
+			{
+				FProperty* Property = *It;
+				const FString Name = Property->GetName();
+				// Where a component sits and whether it renders are the level's business, not its light's.
+				const UStruct* Owner = Property->GetOwnerStruct();
+				if (!IsDetail(*Property) || Property->HasAnyPropertyFlags(CPF_Transient) || ShownByKeys().Contains(Name)
+					|| Owner == USceneComponent::StaticClass() || Owner == UActorComponent::StaticClass() || Owner == UPrimitiveComponent::StaticClass())
+				{
+					continue;
+				}
+				bool bChanged = false;
+				if (Details.bPostProcess)
+				{
+					const FBoolProperty* Override = FindFProperty<FBoolProperty>(FPostProcessSettings::StaticStruct(), FName(*(TEXT("bOverride_") + Name)));
+					bChanged = Override && Override->GetPropertyValue_InContainer(Details.Container);
+				}
+				else
+				{
+					bChanged = !Property->Identical_InContainer(Details.Container, Details.Defaults);
+				}
+				if (!bChanged) continue;
+				FString Text;
+				Property->ExportTextItem_InContainer(Text, Details.Container, nullptr, Details.Object, PPF_None);
+				Out.Add({Name, Text.Len() > 160 ? Text.Left(160) + TEXT("...") : Text});
+				++Added;
+			}
+		}
+
 		void ReadProperties(AActor& Actor, const FString& Kind, TArray<FHyperAILightingProperty>& Out)
 		{
 			auto Add = [&Out](const TCHAR* Key, const FString& Value) { Out.Add({Key, Value}); };
@@ -404,6 +622,23 @@ namespace HyperAIStudio::Lighting::Gate
 				Add(TEXT("rayleigh_scale"), Number(Atmosphere->GetComponent()->RayleighScatteringScale));
 				Add(TEXT("mie_scale"), Number(Atmosphere->GetComponent()->MieScatteringScale));
 			}
+			else if (const UVolumetricCloudComponent* Cloud = Actor.IsA<AVolumetricCloud>() ? Actor.FindComponentByClass<UVolumetricCloudComponent>() : nullptr)
+			{
+				Add(TEXT("layer_bottom_altitude"), Number(Cloud->LayerBottomAltitude));
+				Add(TEXT("layer_height"), Number(Cloud->LayerHeight));
+				// A soft reference the component loads when it registers, so this only looks it up.
+				const UMaterialInterface* Material = Cloud->Material.LoadSynchronous();
+				Add(TEXT("material"), Material ? Material->GetPathName() : FString(TEXT("none")));
+				// The engine's cloud material's two strongest levers, when the clouds' material has them.
+				for (const TCHAR* Parameter : {TEXT("Cloud_GlobalCoverage"), TEXT("Cloud_GlobalDensity")})
+				{
+					float Value = 0.f;
+					if (Material && Material->GetScalarParameterValue(FHashedMaterialParameterInfo(FName(Parameter)), Value))
+					{
+						Out.Add({FString(TEXT("material:")) + Parameter, Number(Value)});
+					}
+				}
+			}
 			else if (const APostProcessVolume* Volume = Cast<APostProcessVolume>(&Actor))
 			{
 				const FPostProcessSettings& S = Volume->Settings;
@@ -427,6 +662,7 @@ namespace HyperAIStudio::Lighting::Gate
 				Add(TEXT("shadows_offset"), Overridden(S.bOverride_ColorOffsetShadows, Channels(S.ColorOffsetShadows)));
 				Add(TEXT("highlights_gain"), Overridden(S.bOverride_ColorGainHighlights, Channels(S.ColorGainHighlights)));
 			}
+			AddChangedDetails(Actor, Out);
 		}
 
 		struct FPropertySpec
@@ -556,6 +792,9 @@ namespace HyperAIStudio::Lighting::Gate
 			FRotator Rotator = FRotator::ZeroRotator;
 			bool bFlag = false;
 			UObject* Asset = nullptr;
+			// A stock kind's setting beyond the fixed keys: any its Details panel shows, found by name when the plan runs.
+			FString DetailName;
+			FString DetailValue;
 		};
 
 		bool ParseNumber(const FString& Text, const float Min, const float Max, float& Out)
@@ -738,6 +977,26 @@ namespace HyperAIStudio::Lighting::Gate
 				}
 				return true;
 			}
+			if (Op.Kind == TEXT("set_actor_shadow"))
+			{
+				// A blockout shape standing in for foliage, cloth or glass would block light the finished asset lets through.
+				Out.Kind = TEXT("actor_shadow");
+				FString Component = Op.Property.TrimStartAndEnd();
+				if (Op.ActorLabel.IsEmpty() || (!Component.IsEmpty() && !Component.StartsWith(TEXT("component:"))))
+				{
+					OutError = TEXT("set_actor_shadow needs actor_label, a placed actor; property is empty for all its meshes or component:<name> for one; value true or false.");
+					return false;
+				}
+				Out.ComponentName = Component.RightChop(10);
+				const FString Flag = Op.Value.TrimStartAndEnd();
+				Out.bFlag = Flag.Equals(TEXT("true"), ESearchCase::IgnoreCase) || Flag == TEXT("1");
+				if (!Out.bFlag && !Flag.Equals(TEXT("false"), ESearchCase::IgnoreCase) && Flag != TEXT("0"))
+				{
+					OutError = TEXT("set_actor_shadow takes true (it casts shadows) or false (light passes it).");
+					return false;
+				}
+				return true;
+			}
 			if (Op.Kind == TEXT("set_sky_system"))
 			{
 				Out.Kind = TEXT("sky_system");
@@ -809,7 +1068,7 @@ namespace HyperAIStudio::Lighting::Gate
 			Out.Kind = Op.Kind.RightChop(4);
 			if (!ClassOf(Out.Kind))
 			{
-				OutError = FString::Printf(TEXT("Unknown kind '%s': use set_sun, set_sky_light, set_fog, set_sky_atmosphere, set_post_process, lock_exposure, unlock_exposure, set_light, add_light, set_actor_material or set_sky_system."), *Op.Kind);
+				OutError = FString::Printf(TEXT("Unknown kind '%s': use set_sun, set_sky_light, set_fog, set_sky_atmosphere, set_clouds, set_post_process, lock_exposure, unlock_exposure, set_light, add_light, set_actor_material, set_actor_shadow or set_sky_system."), *Op.Kind);
 				return false;
 			}
 			for (const FPropertySpec& Spec : PropertySpecs)
@@ -821,13 +1080,24 @@ namespace HyperAIStudio::Lighting::Gate
 			}
 			if (!Out.Spec)
 			{
-				TArray<FString> Keys;
-				for (const FPropertySpec& Spec : PropertySpecs)
+				// Beyond the fixed keys, any setting the actor's Details panel shows: checked against the actor when the plan runs.
+				Out.DetailName = Op.Property.TrimStartAndEnd();
+				Out.DetailValue = Op.Value.TrimStartAndEnd();
+				if (Out.DetailName.IsEmpty() || Out.DetailValue.IsEmpty())
 				{
-					if (Out.Kind == Spec.Kind) Keys.Add(Spec.Key);
+					TArray<FString> Keys;
+					for (const FPropertySpec& Spec : PropertySpecs)
+					{
+						if (Out.Kind == Spec.Kind) Keys.Add(Spec.Key);
+					}
+					OutError = FString::Printf(TEXT("%s needs property and value: %s%sor any setting its Details panel shows, by name, such as %s."), *Op.Kind,
+						*FString::Join(Keys, TEXT(", ")), Keys.IsEmpty() ? TEXT("") : TEXT(", "),
+						Out.Kind == TEXT("sun") ? TEXT("BloomScale or light_shaft_bloom") : Out.Kind == TEXT("sky_light") ? TEXT("MinOcclusion or OcclusionTint")
+						: Out.Kind == TEXT("fog") ? TEXT("DirectionalInscatteringExponent or SecondFogData") : Out.Kind == TEXT("clouds") ? TEXT("LayerBottomAltitude, or material:Cloud_GlobalCoverage")
+						: Out.Kind == TEXT("post_process") ? TEXT("BloomIntensity, LocalExposureShadowContrastScale or color_grading_lut") : TEXT("MieAnisotropy"));
+					return false;
 				}
-				OutError = FString::Printf(TEXT("%s has no property '%s'; use one of %s."), *Op.Kind, *Op.Property, *FString::Join(Keys, TEXT(", ")));
-				return false;
+				return true;
 			}
 			if (Out.Spec->bBool)
 			{
@@ -955,6 +1225,305 @@ namespace HyperAIStudio::Lighting::Gate
 					else if (Key == TEXT("highlights_gain")) { S.bOverride_ColorGainHighlights = true; S.ColorGainHighlights = FVector4(Op.Colour.R, Op.Colour.G, Op.Colour.B, 1.0); }
 				});
 			}
+		}
+
+		/** A Details-panel setting's value from an op, checked as the panel would take it; "default" lifts a post-process override. */
+		bool ResolveDetail(AActor& Actor, const FParsedOp& Op, FDetails& OutDetails, FProperty*& OutProperty, FString& OutImport, bool& bOutDefault,
+			FString& OutError)
+		{
+			OutDetails = DetailsOf(Actor);
+			bOutDefault = false;
+			if (!OutDetails.Type)
+			{
+				OutError = FString::Printf(TEXT("'%s' has no settings these ops change"), *Actor.GetActorLabel());
+				return false;
+			}
+			OutProperty = FindDetail(*OutDetails.Type, Op.DetailName, OutError);
+			if (!OutProperty)
+			{
+				return false;
+			}
+			if (OutDetails.bPostProcess && Op.DetailValue.Equals(TEXT("default"), ESearchCase::IgnoreCase))
+			{
+				bOutDefault = true;
+				return true;
+			}
+			const FString Text = DetailText(*OutProperty, Op.DetailValue);
+			// An asset's path loads it first, so the panel's own parsing finds it.
+			if (CastField<FObjectPropertyBase>(OutProperty) && Text.StartsWith(TEXT("/")))
+			{
+				FString Path = Text;
+				if (!Path.Contains(TEXT(".")))
+				{
+					Path += TEXT(".") + FPackageName::GetShortName(Path);
+				}
+				FSoftObjectPath(Path).TryLoad();
+			}
+			FString Why;
+			if (!ParseSkyValue(*OutProperty, *OutDetails.Object, Text, OutImport, Why))
+			{
+				OutError = FString::Printf(TEXT("%s %s"), *OutProperty->GetName(), *Why);
+				return false;
+			}
+			return true;
+		}
+
+		void WriteDetail(const FDetails& Details, FProperty& Property, const FString& Import, const bool bDefault)
+		{
+			// A post-process setting counts only while its override is on, as its Details-panel checkbox is.
+			FBoolProperty* Override = Details.bPostProcess
+				? FindFProperty<FBoolProperty>(FPostProcessSettings::StaticStruct(), FName(*(TEXT("bOverride_") + Property.GetName()))) : nullptr;
+			Edit(*Details.Object, Details.bPostProcess ? GET_MEMBER_NAME_CHECKED(APostProcessVolume, Settings) : Property.GetFName(), [&]
+			{
+				if (!bDefault)
+				{
+					Property.ImportText_InContainer(*Import, Details.Container, Details.Object, PPF_None);
+				}
+				if (Override)
+				{
+					Override->SetPropertyValue_InContainer(Details.Container, !bDefault);
+				}
+			});
+		}
+
+		/** A 256 x 16 LUT image as the texture Unreal's colour grading takes: made, or refreshed, under MadeAssetsRoot/LUTs. */
+		UTexture2D* MakeLutTexture(const FString& ImagePath, const TArray<FColor>& Strip, FString& OutError)
+		{
+			FString Stem;
+			for (const TCHAR Character : FPaths::GetBaseFilename(ImagePath))
+			{
+				Stem.AppendChar(FChar::IsAlnum(Character) && Character < 128 ? Character : TEXT('_'));
+			}
+			const FString Name = TEXT("LUT_") + Stem.Left(80);
+			const FString PackageName = FString(MadeAssetsRoot) + TEXT("LUTs/") + Name;
+			UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *(PackageName + TEXT(".") + Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
+			const bool bNew = Texture == nullptr;
+			if (bNew)
+			{
+				UPackage* Package = CreatePackage(*PackageName);
+				Texture = Package ? NewObject<UTexture2D>(Package, *Name, RF_Public | RF_Standalone | RF_Transactional) : nullptr;
+				if (!Texture)
+				{
+					OutError = FString::Printf(TEXT("the LUT texture %s could not be made"), *PackageName);
+					return nullptr;
+				}
+			}
+			Texture->Modify();
+			Texture->PreEditChange(nullptr);
+			Texture->Source.Init(Lut::StripWidth, Lut::StripHeight, 1, 1, TSF_BGRA8, reinterpret_cast<const uint8*>(Strip.GetData()));
+			// What the engine asks of a colour-grading LUT: no mips, no sRGB decode, uncompressed and clamped.
+			Texture->LODGroup = TEXTUREGROUP_ColorLookupTable;
+			Texture->MipGenSettings = TMGS_NoMipmaps;
+			Texture->SRGB = false;
+			Texture->CompressionSettings = TC_VectorDisplacementmap;
+			Texture->AddressX = TA_Clamp;
+			Texture->AddressY = TA_Clamp;
+			Texture->PostEditChange();
+			// Built now, so the next capture shows the grade rather than the texture still compiling.
+			FTextureCompilingManager::Get().FinishCompilation({static_cast<UTexture*>(Texture)});
+			if (bNew)
+			{
+				FAssetRegistryModule::AssetCreated(Texture);
+			}
+			Texture->MarkPackageDirty();
+			return Texture;
+		}
+
+		/**
+		 * set_post_process color_grading_lut: a 256 x 16 LUT image inside the project, as hyper_image_compare's fit_lut writes
+		 * one, imported as a LUT texture; a LUT texture's path; or none. It applies at full intensity: a fitted LUT already holds
+		 * the old grade at its old strength, and a later ColorGradingIntensity op softens it.
+		 */
+		bool LutOp(APostProcessVolume& Volume, const FString& Value, const bool bWrite, FString& OutError)
+		{
+			const bool bNone = Value.Equals(TEXT("none"), ESearchCase::IgnoreCase);
+			const bool bImage = !bNone && !Value.StartsWith(TEXT("/"));
+			UTexture* Texture = nullptr;
+			TArray<FColor> Strip;
+			if (bImage)
+			{
+				int32 Width = 0;
+				int32 Height = 0;
+				if (!LoadProjectImage(Value, Strip, Width, Height, OutError))
+				{
+					return false;
+				}
+				if (Width != Lut::StripWidth || Height != Lut::StripHeight)
+				{
+					OutError = FString::Printf(TEXT("color_grading_lut %s is %d x %d; a LUT is 256 x 16, as hyper_image_compare's fit_lut writes"), *Value, Width, Height);
+					return false;
+				}
+			}
+			else if (!bNone)
+			{
+				FString Path = Value;
+				if (!Path.Contains(TEXT(".")))
+				{
+					Path += TEXT(".") + FPackageName::GetShortName(Path);
+				}
+				Texture = Cast<UTexture>(FSoftObjectPath(Path).TryLoad());
+				if (!Texture)
+				{
+					OutError = FString::Printf(TEXT("color_grading_lut '%s' is not a texture; pass a LUT image inside the project, a LUT texture's path, or none"), *Value.Left(128));
+					return false;
+				}
+			}
+			if (!bWrite)
+			{
+				return true;
+			}
+			if (bImage && !(Texture = MakeLutTexture(Value, Strip, OutError)))
+			{
+				return false;
+			}
+			Edit(Volume, GET_MEMBER_NAME_CHECKED(APostProcessVolume, Settings), [&]
+			{
+				FPostProcessSettings& S = Volume.Settings;
+				S.bOverride_ColorGradingLUT = !bNone;
+				S.ColorGradingLUT = bNone ? nullptr : Texture;
+				S.bOverride_ColorGradingIntensity = !bNone;
+				S.ColorGradingIntensity = 1.f;
+			});
+			return true;
+		}
+
+		/** The clouds' own material instance: made from their material, under MadeAssetsRoot/Clouds, the first time a plan changes one of its parameters. */
+		UMaterialInstanceConstant* OwnCloudMaterial(UVolumetricCloudComponent& Cloud, UWorld& World, FString& OutError)
+		{
+			UMaterialInterface* Current = Cloud.Material.LoadSynchronous();
+			const FString Folder = FString(MadeAssetsRoot) + TEXT("Clouds/");
+			if (UMaterialInstanceConstant* Own = Cast<UMaterialInstanceConstant>(Current); Own && Own->GetPathName().StartsWith(Folder))
+			{
+				return Own;
+			}
+			const FString Base = TEXT("MI_Clouds_") + FPackageName::GetShortName(World.GetOutermost()->GetName());
+			FString Name = Base;
+			for (int32 Suffix = 2; FindPackage(nullptr, *(Folder + Name)) || FPackageName::DoesPackageExist(Folder + Name); ++Suffix)
+			{
+				Name = FString::Printf(TEXT("%s_%d"), *Base, Suffix);
+			}
+			UPackage* Package = CreatePackage(*(Folder + Name));
+			UMaterialInstanceConstant* Instance = Package ? NewObject<UMaterialInstanceConstant>(Package, *Name, RF_Public | RF_Standalone | RF_Transactional) : nullptr;
+			if (!Instance)
+			{
+				OutError = TEXT("the clouds' material instance could not be made");
+				return nullptr;
+			}
+			Instance->SetParentEditorOnly(Current);
+			Instance->PostEditChange();
+			FAssetRegistryModule::AssetCreated(Instance);
+			Instance->MarkPackageDirty();
+			// As the Details panel sets it: the component registers again around the edit and loads the new material.
+			Edit(Cloud, FName(TEXT("Material")), [&] { Cloud.Material = Instance; });
+			return Instance;
+		}
+
+		/** set_clouds material:<parameter>: a number, or "r,g,b[,a]" for a colour, on the clouds' own material instance. */
+		bool CloudParameterOp(UWorld& World, AActor& Actor, const FString& Parameter, const FString& Value, const bool bWrite, FString& OutError)
+		{
+			UVolumetricCloudComponent* Cloud = Actor.FindComponentByClass<UVolumetricCloudComponent>();
+			UMaterialInterface* Material = Cloud ? Cloud->Material.LoadSynchronous() : nullptr;
+			if (!Material)
+			{
+				OutError = TEXT("the clouds have no material to set a parameter on");
+				return false;
+			}
+			const FHashedMaterialParameterInfo Info{FName(*Parameter)};
+			float Scalar = 0.f;
+			FLinearColor Colour = FLinearColor::White;
+			const bool bScalar = Material->GetScalarParameterValue(Info, Scalar);
+			if (!bScalar && !Material->GetVectorParameterValue(Info, Colour))
+			{
+				OutError = FString::Printf(TEXT("material %s has no parameter '%s'; the engine's clouds take Cloud_GlobalCoverage, Cloud_GlobalDensity, Layout_CloudGlobalScale and Cloud_AlbedoColor"),
+					*Material->GetName(), *Parameter.Left(64));
+				return false;
+			}
+			TArray<FString> Parts;
+			Value.ParseIntoArray(Parts, TEXT(","));
+			if (bScalar ? !LexTryParseString(Scalar, *Value) || !FMath::IsFinite(Scalar)
+				: (Parts.Num() < 3 || Parts.Num() > 4 || !LexTryParseString(Colour.R, *Parts[0].TrimStartAndEnd()) || !LexTryParseString(Colour.G, *Parts[1].TrimStartAndEnd())
+					|| !LexTryParseString(Colour.B, *Parts[2].TrimStartAndEnd()) || (Parts.Num() == 4 && !LexTryParseString(Colour.A, *Parts[3].TrimStartAndEnd()))))
+			{
+				OutError = FString::Printf(TEXT("material:%s takes %s"), *Parameter, bScalar ? TEXT("a number") : TEXT("\"r,g,b\" or \"r,g,b,a\""));
+				return false;
+			}
+			if (!bWrite)
+			{
+				return true;
+			}
+			UMaterialInstanceConstant* Instance = OwnCloudMaterial(*Cloud, World, OutError);
+			if (!Instance)
+			{
+				return false;
+			}
+			Instance->Modify();
+			if (bScalar)
+			{
+				Instance->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(FName(*Parameter)), Scalar);
+			}
+			else
+			{
+				Instance->SetVectorParameterValueEditorOnly(FMaterialParameterInfo(FName(*Parameter)), Colour);
+			}
+			Instance->PostEditChange();
+			return true;
+		}
+
+		/** A setting beyond the fixed keys: the grade's LUT, a parameter of the clouds' material, or any Details-panel setting. */
+		bool DetailOp(UWorld& World, AActor& Actor, const FParsedOp& Op, const bool bWrite, FString& OutError)
+		{
+			if (APostProcessVolume* Volume = Cast<APostProcessVolume>(&Actor); Volume && Plain(Op.DetailName) == TEXT("colorgradinglut"))
+			{
+				return LutOp(*Volume, Op.DetailValue, bWrite, OutError);
+			}
+			if (Actor.IsA<AVolumetricCloud>() && Op.DetailName.StartsWith(TEXT("material:")))
+			{
+				return CloudParameterOp(World, Actor, Op.DetailName.RightChop(9), Op.DetailValue, bWrite, OutError);
+			}
+			FDetails Details;
+			FProperty* Property = nullptr;
+			FString Import;
+			bool bDefault = false;
+			if (!ResolveDetail(Actor, Op, Details, Property, Import, bDefault, OutError))
+			{
+				return false;
+			}
+			if (bWrite)
+			{
+				WriteDetail(Details, *Property, Import, bDefault);
+			}
+			return true;
+		}
+
+		/** The meshes a set_actor_shadow op names: all of the labelled actor's, or its one component by name. */
+		bool ResolveShadowMeshes(UWorld& World, const FString& Label, const FParsedOp& Op, TArray<UMeshComponent*>& OutMeshes, FString& OutError)
+		{
+			TArray<AActor*> Matches;
+			for (TActorIterator<AActor> It(&World); It; ++It)
+			{
+				if (IsValid(*It) && !It->IsTemplate() && It->GetActorLabel() == Label) Matches.Add(*It);
+			}
+			if (Matches.Num() != 1)
+			{
+				OutError = Matches.IsEmpty() ? FString::Printf(TEXT("no actor is labelled '%s'."), *Label)
+					: FString::Printf(TEXT("%d actors are labelled '%s'; give the one to change a unique label first."), Matches.Num(), *Label);
+				return false;
+			}
+			TArray<UMeshComponent*> Meshes;
+			Matches[0]->GetComponents(Meshes);
+			TArray<FString> Names;
+			for (UMeshComponent* Mesh : Meshes)
+			{
+				Names.Add(Mesh->GetName());
+				if (Op.ComponentName.IsEmpty() || Mesh->GetName() == Op.ComponentName) OutMeshes.Add(Mesh);
+			}
+			if (OutMeshes.IsEmpty())
+			{
+				OutError = Meshes.IsEmpty() ? FString::Printf(TEXT("'%s' has no mesh to cast a shadow."), *Label)
+					: FString::Printf(TEXT("'%s' has no mesh component '%s'; it has %s."), *Label, *Op.ComponentName, *FString::Join(Names, TEXT(", ")));
+				return false;
+			}
+			return true;
 		}
 
 		/** The mesh component and slot a set_actor_material op names, on the one actor with that label. Never spawns. */
@@ -1394,6 +1963,24 @@ namespace HyperAIStudio::Lighting::Gate
 					}
 					continue;
 				}
+				if (Parsed.Kind == TEXT("actor_shadow"))
+				{
+					TArray<UMeshComponent*> Meshes;
+					if (!ResolveShadowMeshes(World, Op.ActorLabel, Parsed, Meshes, Error))
+					{
+						OutError = FString::Printf(TEXT("Op %d: %s"), Index, *Error);
+						return false;
+					}
+					if (bWrite)
+					{
+						for (UMeshComponent* Mesh : Meshes)
+						{
+							Edit(*Mesh, FName(TEXT("CastShadow")), [&] { Mesh->SetCastShadow(Parsed.bFlag); });
+						}
+						OutTouched.AddUnique(Meshes[0]->GetOwner());
+					}
+					continue;
+				}
 				if (Parsed.Kind == TEXT("add_light"))
 				{
 					if (PlannedLights.Contains(Op.ActorLabel) || !Labelled(World, Op.ActorLabel).IsEmpty())
@@ -1450,12 +2037,12 @@ namespace HyperAIStudio::Lighting::Gate
 					}
 					continue;
 				}
-				if (Parsed.Kind == TEXT("sun") || Parsed.Kind == TEXT("sky_light") || Parsed.Kind == TEXT("fog") || Parsed.Kind == TEXT("sky_atmosphere"))
+				if (IsSkyOwnedKind(Parsed.Kind))
 				{
 					if (const AActor* Owner = LightOwningSkyActor(World))
 					{
 						const FSkySystem* System = SkySystemOf(Owner->GetClass());
-						OutError = FString::Printf(TEXT("Op %d: this level's sky is %s ('%s'), which owns its sun, sky light, fog and atmosphere, so %s would fight it or add a second one. Use set_sky_system instead: %s."),
+						OutError = FString::Printf(TEXT("Op %d: this level's sky is %s ('%s'), which owns its sun, sky light, fog, atmosphere and clouds, so %s would fight it or add a second one. Use set_sky_system instead: %s."),
 							Index, System->Name, *Owner->GetActorLabel(), *Op.Kind, System->Levers);
 						return false;
 					}
@@ -1492,6 +2079,21 @@ namespace HyperAIStudio::Lighting::Gate
 						return false;
 					}
 					bLocked = Parsed.bLock || (bLocked && !Parsed.bUnlock);
+				}
+				if (!Parsed.DetailName.IsEmpty())
+				{
+					// Checked on the actor, or, before the plan adds it, on its class's default, which has the same settings.
+					AActor& Target = Actor ? *Actor : *ClassOf(Parsed.Kind)->GetDefaultObject<AActor>();
+					if (!DetailOp(World, Target, Parsed, bWrite, Error))
+					{
+						OutError = FString::Printf(TEXT("Op %d: %s %s."), Index, *Op.Kind, *Error);
+						return false;
+					}
+					if (bWrite)
+					{
+						OutTouched.AddUnique(Actor);
+					}
+					continue;
 				}
 				if (bWrite)
 				{
@@ -1949,7 +2551,7 @@ namespace HyperAIStudio::Lighting::Gate
 				if (ResolveSkyOp(World, Op.ActorLabel, Parsed, Sky, Property, Import, Error)) Actors.AddUnique(Sky);
 				continue;
 			}
-			if (Parsed.Kind == TEXT("light") || Parsed.Kind == TEXT("add_light"))
+			if (Parsed.Kind == TEXT("light") || Parsed.Kind == TEXT("add_light") || Parsed.Kind == TEXT("actor_shadow"))
 			{
 				const TArray<AActor*> Found = Labelled(World, Op.ActorLabel);
 				if (Found.Num() == 1) Actors.AddUnique(Found[0]);
@@ -1992,12 +2594,57 @@ namespace HyperAIStudio::Lighting::Gate
 	TArray<UPackage*> PackagesOf(const TArray<AActor*>& Actors)
 	{
 		TArray<UPackage*> Packages;
+		// An asset a plan made for the level, still unsaved: saved with it, or the level would name an asset that is not there.
+		auto AddMade = [&Packages](const UObject* Asset)
+		{
+			UPackage* Package = Asset ? Asset->GetPackage() : nullptr;
+			if (Package && Package->IsDirty() && Package->GetName().StartsWith(MadeAssetsRoot)) Packages.AddUnique(Package);
+		};
 		for (const AActor* Actor : Actors)
 		{
 			// An actor's package is its own external package under One File Per Actor, else the level's.
 			if (Actor && Actor->GetPackage()) Packages.AddUnique(Actor->GetPackage());
+			if (const APostProcessVolume* Volume = Cast<APostProcessVolume>(Actor))
+			{
+				AddMade(Volume->Settings.ColorGradingLUT.Get());
+			}
+			if (const UVolumetricCloudComponent* Cloud = Actor && Actor->IsA<AVolumetricCloud>() ? Actor->FindComponentByClass<UVolumetricCloudComponent>() : nullptr)
+			{
+				AddMade(Cloud->Material.Get());
+			}
 		}
 		return Packages;
+	}
+
+	bool ReadLevelLut(UWorld& World, Lut::FTable& OutTable, FString& OutPath)
+	{
+		OutTable = Lut::Identity();
+		OutPath.Reset();
+		for (AActor* Actor : ActorsOfKind(World, TEXT("post_process")))
+		{
+			const APostProcessVolume* Volume = CastChecked<APostProcessVolume>(Actor);
+			const FPostProcessSettings& S = Volume->Settings;
+			UTexture2D* Texture = Cast<UTexture2D>(S.ColorGradingLUT.Get());
+			FImage Image;
+			if (!Volume->bEnabled || Volume->BlendWeight <= 0.f || !S.bOverride_ColorGradingLUT || !Texture || !Texture->Source.IsValid()
+				|| !Texture->Source.GetMipImage(Image, 0))
+			{
+				continue;
+			}
+			// The bytes as stored: a LUT keeps sRGB values in a texture that does not decode them.
+			FImage Stored;
+			Image.CopyTo(Stored, ERawImageFormat::BGRA8, EGammaSpace::Linear);
+			const TArrayView64<FColor> Pixels = Stored.AsBGRA8();
+			Lut::FTable Table;
+			if (!Lut::FromStrip(TConstArrayView<FColor>(Pixels.GetData(), static_cast<int32>(Pixels.Num())), Stored.SizeX, Stored.SizeY, Table))
+			{
+				continue;
+			}
+			OutTable = Lut::Weaken(Table, S.bOverride_ColorGradingIntensity ? S.ColorGradingIntensity : 1.f);
+			OutPath = Texture->GetPathName();
+			return true;
+		}
+		return false;
 	}
 }
 

@@ -10,6 +10,7 @@
 #include "HyperAIStudioLightingGate.h"
 #include "HyperAIStudioMatchJobs.h"
 #include "HyperAIStudioPreviewPanel.h"
+#include "HyperAIStudioWidgetShot.h"
 #include "LevelEditorViewport.h"
 #include "Misc/App.h"
 #include "Misc/AutomationTest.h"
@@ -46,6 +47,9 @@ bool FHyperAIStudioMatchJobsPromptTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("and the session and target to score in"), Light.Contains(TEXT("sessionId match_lighting_1")) && Light.Contains(TEXT("targetScore 78")));
 	TestTrue(TEXT("says HyperAI sends it back until the target"), Light.Contains(TEXT("until the best attempt reaches 78")));
 	TestTrue(TEXT("locks exposure first"), Light.Contains(TEXT("lock_exposure")));
+	TestTrue(TEXT("lights with every tool: stand-ins that let light through, clouds, softer shadows"), Light.Contains(TEXT("set_actor_shadow false"))
+		&& Light.Contains(TEXT("set_clouds")) && Light.Contains(TEXT("ShadowAmount")));
+	TestTrue(TEXT("and grades last with a fitted LUT"), Light.Contains(TEXT("bFitLut true")) && Light.Contains(TEXT("color_grading_lut")));
 	TestTrue(TEXT("and carries the sky note"), Light.Contains(Sky));
 	const FString Level = Jobs::BuildPrompt(Jobs::EGoal::Level, TEXT("Content/References/town.png"), TEXT("match_level_1"), 72.f, FString());
 	TestTrue(TEXT("the level prompt builds like a level designer"), Level.Contains(TEXT("level designer")) && Level.Contains(TEXT("HyperAI_MatchCamera")));
@@ -156,6 +160,10 @@ bool FHyperAIStudioMatchJobsSameViewTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A reference made from a camera's capture is matched through that camera, unmoved"),
 		Camera.Contains(TEXT("source camera, camera_actor_label HyperAI_MatchCamera, width 1024 and height 576")) && Camera.Contains(TEXT("unmoved")));
 	TestTrue(TEXT("naming the picture it was made from"), Camera.Contains(Input));
+	// GPT image models draw 3:2 whatever the view's shape: the attempts are then captured at the reference's shape.
+	HyperAIStudio::Tests::WriteScenePng(Reference, FIntPoint(1536, 1024));
+	TestTrue(TEXT("A reference drawn at another shape is matched at its own"),
+		Jobs::SameViewNote(Reference).Contains(TEXT("width 1024 and height 683, the reference's shape: the model drew it 1536 x 1024")));
 	FFileHelper::SaveStringToFile(TEXT(R"({"source": "viewport", "location": [1, 2, 3], "rotation": [-10, 90, 0], "fov_degrees": 75, "width": 1024, "height": 576})"),
 		*(Folder / TEXT("capture.json")));
 	const FString Transform = Jobs::SameViewNote(Reference);

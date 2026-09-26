@@ -143,8 +143,19 @@ struct FHyperAILightingCompareReport
  *   set_fog: density, height_falloff, start_distance, inscattering_color, and for light shafts volumetric_fog (true/false),
  *     volumetric_scattering_distribution (-0.9 to 0.9), volumetric_albedo (r,g,b), volumetric_extinction_scale
  *   set_sky_atmosphere: rayleigh_scale, mie_scale
+ *   set_clouds: volumetric clouds, added if the level has none; material:<parameter> sets one of their material's, such
+ *     as material:Cloud_GlobalCoverage or material:Cloud_GlobalDensity, on a material instance the level owns
  *   set_post_process: exposure_bias (EV), white_temp (K), saturation, contrast, gamma, and grading as r,g,b:
- *     shadows_gain, shadows_offset (-0.5 to 0.5), highlights_gain
+ *     shadows_gain, shadows_offset (-0.5 to 0.5), highlights_gain; color_grading_lut takes a LUT image such as
+ *     hyper_image_compare's fit_lut writes (imported as a LUT texture), a LUT texture's path, or none, and applies it at
+ *     full intensity (a later ColorGradingIntensity op softens it)
+ *   Beyond these keys, every stock kind takes any setting its Details panel shows, by its C++ name or its label there:
+ *     set_sun BloomScale or light_shaft_bloom, set_sky_light MinOcclusion or OcclusionTint (r,g,b), set_fog
+ *     DirectionalInscatteringExponent or SecondFogData, set_sky_atmosphere MieAnisotropy, set_clouds LayerBottomAltitude,
+ *     set_post_process LocalExposureShadowContrastScale or BloomIntensity. Values are numbers, true/false, an enum's name,
+ *     r,g,b for a colour, or Unreal's text form; a post-process setting set to default goes back to the level's.
+ *   set_actor_shadow: actor_label names a placed actor; property is empty for all its meshes or component:<name>; value
+ *     false lets light through, as the foliage, cloth or glass a blockout shape stands for would
  *   lock_exposure: value is the exposure bias in EV (default 0); unlock_exposure: no value
  *   set_actor_material: actor_label (required) names any placed actor; property is empty (slot 0),
  *     slot:<index or name>, or component:<name>/slot:<index or name>; value is the material's path
@@ -324,6 +335,12 @@ struct FHyperAIImageCompareRequest
 	UPROPERTY() FString Note;
 	/** Cells a side for the region breakdown, 2-8. */
 	UPROPERTY() int32 Grid = 4;
+	/**
+	 * Also fit a colour-grading LUT that takes the candidate's colours to the reference's, as a colourist grades a frame, and
+	 * say what the candidate would score through it. The LUT allows for any LUT the level's grade has now. Apply it with
+	 * hyper_lighting_apply_plan set_post_process color_grading_lut <lut_path>.
+	 */
+	UPROPERTY() bool bFitLut = false;
 };
 
 USTRUCT(BlueprintType)
@@ -399,6 +416,12 @@ struct FHyperAIImageCompareReport
 	/** Reference and candidate side by side with the grid and the worst cells outlined, and a heat map of where they differ. Open them. */
 	UPROPERTY() FString SideBySidePath;
 	UPROPERTY() FString DiffPath;
+	/** With bFitLut: the fitted LUT, a 256 x 16 image; the candidate's score graded through it; and that graded candidate beside the reference. */
+	UPROPERTY() FString LutPath;
+	UPROPERTY() float LutScore = 0.f;
+	UPROPERTY() FString LutSideBySidePath;
+	/** The level's LUT the fit allowed for, when its grade had one. */
+	UPROPERTY() FString LutComposedWith;
 	/** The candidate as measured, when it was a viewport capture. */
 	UPROPERTY() FString CandidateWrittenPath;
 	UPROPERTY() FString SessionId;
@@ -447,10 +470,10 @@ public:
 	static FHyperAILightingInspectReport hyper_lighting_inspect(const FHyperAILightingInspectRequest& Request);
 
 	/**
-	 * Closed lighting edits as one undo step: sun, sky light, fog, sky atmosphere, post process, exposure lock, point, spot
-	 * and rect lights (set_light, add_light), set_actor_material for a placed mesh, and set_sky_system for a Blueprint sky
-	 * such as Ultra Dynamic Sky. Submit with bDryRun false and an operation_id, call hyper_operation_wait, then compare.
-	 * Unsaved unless bSave.
+	 * Closed lighting edits as one undo step: sun, sky light, fog, sky atmosphere, clouds and post process (fixed keys,
+	 * or any Details-panel setting by name; a LUT too), exposure lock, point, spot and rect lights, set_actor_material,
+	 * set_actor_shadow, and set_sky_system for a Blueprint sky. Submit with bDryRun false and an operation_id, call
+	 * hyper_operation_wait, then compare. Unsaved unless bSave.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
 	static FHyperAILightingApplyPlanReport hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& Request);
@@ -474,7 +497,8 @@ public:
 	/**
 	 * How close an attempt is to a reference image, for scenes, materials, effects and UI: a 0-100 score from palette,
 	 * tone, layout and detail (structure too when aligned), the cells that differ most, suggestions, and side-by-side and
-	 * heat-map PNGs to open. Pass session_id and a note on each iteration of a match loop to keep its history. Changes nothing.
+	 * heat-map PNGs to open. bFitLut also fits a colour-grading LUT to the reference. Pass session_id and a note to keep a
+	 * match loop's history. Changes nothing.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
 	static FHyperAIImageCompareReport hyper_image_compare(const FHyperAIImageCompareRequest& Request);

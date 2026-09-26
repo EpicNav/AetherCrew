@@ -1,6 +1,6 @@
 ---
 name: image-match
-description: Make a scene, environment, level layout, material, effect or UI look like a reference image, and prove it. Capture the attempt, score it against the reference with hyper_image_compare in a session, change one thing, and compare again until the score reaches the target or stops improving. Use it when the user has concept art, a photo or a generated image and says "make it look like this", "match this lighting" or "build this level", and for any HyperAI Match job. Covers Ultra Dynamic Sky, and the point, spot and rect lights of interiors and night scenes.
+description: Make a scene, environment, level layout, material, effect or UI look like a reference image, and prove it. Capture the attempt, score it against the reference with hyper_image_compare in a session, change one thing, and compare again until the score reaches the target or stops improving. Use it when the user has concept art, a photo or a generated image and says "make it look like this", "match this lighting" or "build this level", and for any HyperAI Match job. Covers Ultra Dynamic Sky, the point, spot and rect lights of interiors and night scenes, atmosphere, fog and clouds, softer shadows, and a colour-grading LUT fitted to the reference.
 ---
 # Match a reference image
 
@@ -15,7 +15,7 @@ A match is a loop with a scorekeeper. You make the changes. `hyper_image_compare
 - **Look at the reference yourself.** Open the PNG with your image reader. Say in a sentence what makes the look: time of day, key light, palette, contrast, mood, the main shapes. The numbers measure; you decide what matters.
 - **No reference yet?** Make one from the level itself, relit the way the user asks:
   1. Capture `HyperAI_MatchCamera` with `hyper_capture_view` (source `camera`, 1024 x 576 for 16:9). If the level has no such camera, place a camera labelled `HyperAI_MatchCamera` where the view should be first.
-  2. Call `hyper_image_generate` with `input_image_path` set to that frame and a model whose `bTakesInputImage` is true (a Nano Banana model, or `codex_image_gen` if your client cannot draw, as Claude Code cannot). In the prompt, say how the view should be lit, and to keep the camera, framing, objects and materials exactly as they are and change only the light.
+  2. Call `hyper_image_generate` with `input_image_path` set to that frame and a model whose `bTakesInputImage` is true (a Nano Banana model, or `codex_image_gen` if your client cannot draw, as Claude Code cannot). In the prompt, say how the view should be lit, and to keep the camera, framing and objects exactly as they are and change only the light. On a blockout, also ask for its flat colours to be rendered as the finished materials they stand for, such as stone, wood or grass.
   3. The picture that comes back frames the same view. Capture that same camera for every attempt and change the light only. Compare in `look` mode, since the model redraws small details a little differently.
 
   The Images page's **Relight this view** preset does all three and then starts a Match job. To draw a reference from words instead, see `.hyperai/docs/HyperAIStudio-ImageGenCookbook.md`.
@@ -32,7 +32,7 @@ A match is a loop with a scorekeeper. You make the changes. `hyper_image_compare
 
 | Domain | Capture | Levers, strongest first |
 |---|---|---|
-| Scene, environment | `hyper_capture_view` from a camera framed like the reference (source `camera`, the reference's aspect ratio) | `hyper_lighting_apply_plan`: sun pitch, yaw, temperature and intensity; the point, spot and rect lights that carry interiors and night scenes (`set_light`, `add_light`); sky light; fog; sky atmosphere; post process. For a painted grade, such as a warm sky over violet shadows, grade apart with `shadows_gain`, `shadows_offset` and `highlights_gain`. Then placement and materials. |
+| Scene, environment | `hyper_capture_view` from a camera framed like the reference (source `camera`, the reference's aspect ratio) | `hyper_lighting_apply_plan`: sun pitch, yaw, temperature and intensity; the point, spot and rect lights that carry interiors and night scenes (`set_light`, `add_light`); sky light; fog; sky atmosphere; clouds; post process, and any setting their Details panels show. For a painted grade, such as a warm sky over violet shadows, grade apart with `shadows_gain`, `shadows_offset` and `highlights_gain`, and last a LUT fitted to the reference. Then placement and materials. See "Light it with every tool" below. |
 | Material | A camera on a preview mesh in the level, captured with `hyper_capture_view`; or the asset preview a material edit writes | Base colour, roughness, metallic, normal strength, emissive, texture tiling: the material tools or parameter edits |
 | Effect (Niagara) | `hyper_capture_view` with `frameCount` 3-4 and `intervalSeconds` 0.25; compare the frame at the reference's moment | Spawn rate, colour over life, size, lifetime, velocity: the Niagara tools |
 | UI | A playtest `Capture` step in PIE, at the mock's resolution | Widget layout, colours, fonts, sizes: the UI tools |
@@ -44,7 +44,7 @@ A match is a loop with a scorekeeper. You make the changes. `hyper_image_compare
 - Ultra Dynamic Sky owns its sun, moon, sky light, fog and atmosphere. `set_sun`, `set_sky_light`, `set_fog` and `set_sky_atmosphere` are refused while it is in the level: an edit to a light it owns would be undone on its next update, and adding one would give the level a second sun.
 - Change it with `set_sky_system`. The property is a variable by the name its Details panel shows, and the value is a number, true or false, an enum's display name, or Unreal's text form such as `(R=1,G=0.6,B=0.3,A=1)`. Leave `actor_label` empty and the first sky with that variable takes it.
 - `lock_exposure` also sets its Apply Exposure Settings to false, since the sky's own exposure would move a locked exposure again; `unlock_exposure` sets it back.
-- Its lights are not in physical units, so the EV100 to lock at is far below real sunlight's 15, often -4 to 2. Lock, capture, and move the EV100 until the frame's `luminanceP50` is near 0.18: a black or white capture means the exposure is wrong, not the light.
+- Its lights are not in physical units, so the EV100 to lock at is far below real sunlight's 15, often -3 to 3. Lock, capture, and move the EV100 until the frame's `luminanceP50` is near 0.18: a black or white capture means the exposure is wrong, not the light.
 - Post process still works beside it: `set_post_process` for the grade.
 
 | What the reference shows | Ultra Dynamic Sky variables |
@@ -84,6 +84,56 @@ When the reference is lit from inside the frame, by a lamp, a window, a fire, ne
 - Intensity is in each light's `intensity_units` (candelas, lumens, unitless, EV or nits). `set_light` `intensity_units` switches a light to candelas or lumens and keeps it as bright, so every light can be reasoned about in one system; `add_light` places lights in the project's default units. Change intensity by ratios, twice or half, rather than guessing absolute values, and keep exposure locked: a bright interior is about EV100 8, a dim one 4.
 - Light as a lighting artist does: the key first, then the fill, then rims and practicals. One light at a time, capture, compare.
 
+### Light it with every tool
+
+A real frame is never one light. When the score stalls on the sun, the missing piece is usually elsewhere: the atmosphere, the fill in the shadows, or the grade.
+
+**Assets are not light.** A generated reference or concept art shows finished assets where the level may have blockout shapes. Leaves let light through where a solid sphere blocks it, textures break a surface up, and bounce light fills real shadows. Do not chase those differences with the sun:
+
+- `set_actor_shadow` with an `actor_label` and value `false` stops a shape that stands for foliage, cloth or glass from casting a shadow; property `component:<name>` picks one of its meshes. `true` puts the shadow back.
+- Leave surface detail to the materials.
+
+**Atmosphere, fog and clouds:**
+
+| What the reference shows | Levers |
+|---|---|
+| A glow around a low sun | `set_sky_atmosphere` `MieAnisotropy` (0.8 to 0.95) and `mie_scale` |
+| Haze the sun lights | `set_fog` `DirectionalInscatteringExponent`, `DirectionalInscatteringLuminance`, `inscattering_color` and `density` |
+| Low mist over water or a valley | `set_fog` `SecondFogData`, such as `(FogDensity=0.05,FogHeightFalloff=0.5,FogHeightOffset=-200)` |
+| God rays and light shafts | `set_fog` `volumetric_fog` true with the sun's `VolumetricScatteringIntensity`; `set_sun` `light_shaft_bloom` true with `BloomScale` and `BloomThreshold` |
+| Clouds, overcast | `set_clouds`, which adds volumetric clouds if the level has none: `material:Cloud_GlobalCoverage` and `material:Cloud_GlobalDensity` set their material's parameters, on an instance the level owns under `/Game/HyperAI/Clouds/` that is saved with the plan; `LayerBottomAltitude` and `LayerHeight` in kilometres |
+
+**Shadows too dark.** Soften them with several tools together, never with the sun's intensity alone:
+
+- The sun's `source_angle` for softer edges, and its `ShadowAmount` below 1, which lets part of its light into every shadow.
+- More fill from the sky: `set_sky_light` `intensity`, `MinOcclusion` (how dark an occluded corner gets) and `OcclusionTint`.
+- More bounce: `IndirectLightingIntensity` on the sun and in `set_post_process`.
+- A fill that casts no shadow: `add_light`, then `cast_shadows` false.
+- Local exposure: `set_post_process` `LocalExposureShadowContrastScale` below 1, and a lower `AmbientOcclusionIntensity`.
+- Last, the grade's `shadows_gain` and `shadows_offset`.
+
+**Any setting, by name.** Beside their fixed keys, `set_sun`, `set_sky_light`, `set_fog`, `set_sky_atmosphere`, `set_clouds` and `set_post_process` take any setting the actor's Details panel shows:
+
+- By its C++ name (`BloomScale`), its label there (`Light Shaft Bloom`), or either in words (`light_shaft_bloom`). A name that fits several settings is refused with their names.
+- Values are numbers, true or false, an enum's name, `r,g,b` for a colour, or Unreal's text form.
+- A post-process setting takes effect with its override on, as ticking its checkbox would. The value `default` unticks it.
+- `hyper_lighting_inspect` lists the settings that differ from the defaults. Exposure stays with `lock_exposure`.
+
+### Grade last: a LUT fitted to the reference
+
+Much of a reference's look is its colour grade, which no light reaches. Once the light is close:
+
+1. Compare with `bFitLut` true. The report adds:
+   - `lutPath`: a 256 x 16 LUT image fitted from the attempt to the reference. It allows for any LUT the level has now, so it replaces that one.
+   - `lutScore`: what the attempt scores graded through it.
+   - `lutSideBySidePath`: the graded attempt beside the reference.
+
+   It is fitted two ways, and the one that scores higher is kept, as the diagnostic says: to the look (a tone curve for lightness and colour by band of lightness, for a reference whose content differs, such as finished assets over a blockout), or pixel by pixel (for a view that differs in grade alone).
+2. If `lutScore` is higher, apply it with `set_post_process` `color_grading_lut` and the `lutPath`. It is imported as a LUT texture under `/Game/HyperAI/LUTs/`, saved with the plan, and applied at full intensity; a `ColorGradingIntensity` below 1 softens it.
+3. Keep lighting, and fit again after a big change of light.
+
+`color_grading_lut` also takes a LUT texture's path, or `none` to take the LUT off.
+
 ## 3. The loop
 
 Call `hyper_image_compare` every iteration with the same `sessionId` (letters, digits, - and _) and a `note` saying what you changed:
@@ -108,7 +158,7 @@ Each call:
 Stop when:
 
 - `bMatched` is true: the score reached the target. Keep that iteration.
-- `bPlateau` is true: three iterations without a point gained. Change lever categories, for example from light to materials, or from colour to placement. If a second plateau follows, stop and keep the best iteration.
+- `bPlateau` is true: three iterations without a point gained. Change lever categories, for example from the sun to the atmosphere and clouds, from darker shadows to softer ones, from light to a fitted LUT, or from light to materials or placement. If a second plateau follows, stop and keep the best iteration.
 - You reach 12 iterations. Stop and keep the best (`bestIteration`, `bestScore`).
 - The report says `session_reference_changed`: that session belongs to another reference. Start a new `sessionId`.
 

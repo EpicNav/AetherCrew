@@ -245,8 +245,9 @@ for the model to change rather than draw from nothing, and say in the prompt wha
    (place one where the view should be if the level has none), at the shape you want, such as 1024 x 576.
 2. `hyper_image_generate` with `input_image_path` set to the frame it wrote, and a prompt such as: "Relight
    this picture of a game level: late dusk, warm lamps glowing inside, cool blue moonlight through the
-   windows. Keep the camera, the framing and every object exactly as they are, with the same shapes,
-   positions and materials; change only the light, the shadows, the sky, the fog and the colour grade."
+   windows. Keep the camera, the framing and every object exactly where it is, with the same shapes and
+   sizes. Change only the light, the shadows, the sky, the fog and the colour grade; where a surface is a
+   flat blockout colour, render it as the finished material it stands for, such as stone, wood or grass."
 3. Match the level to what comes back, capturing the same camera for every attempt: it frames the same view.
 
 With no width or height, the result keeps the picture's shape at the model's own size, so a 1280 x 720

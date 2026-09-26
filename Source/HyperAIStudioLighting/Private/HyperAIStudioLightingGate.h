@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HyperAIStudioColorLut.h"
 #include "HyperAIStudioLightingToolset.h"
 
 class AActor;
@@ -57,6 +58,17 @@ namespace HyperAIStudio::Lighting::Gate
 	bool CheckMaterialOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, FString& OutError);
 	/** The actors ops resolve to now, without adding any. */
 	TArray<AActor*> ResolveTargets(UWorld& World, const TArray<FHyperAILightingOp>& Ops);
-	/** Packages holding these actors: their own under One File Per Actor, otherwise the level's. */
+	/**
+	 * Packages holding these actors (their own under One File Per Actor, otherwise the level's), and the unsaved assets a
+	 * plan made for them: a volume's colour-grading LUT, the clouds' material instance.
+	 */
 	TArray<UPackage*> PackagesOf(const TArray<AActor*>& Actors);
+
+	/**
+	 * The colour-grading LUT the level's grade applies now, weakened by its intensity: that of the first enabled, unbound
+	 * post-process volume that sets one. False, with the identity, when there is none. OutPath names its texture.
+	 */
+	bool ReadLevelLut(UWorld& World, Lut::FTable& OutTable, FString& OutPath);
+	/** Where made assets go: the LUTs set_post_process color_grading_lut imports, and the clouds' material instances. */
+	inline const TCHAR* const MadeAssetsRoot = TEXT("/Game/HyperAI/");
 }

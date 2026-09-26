@@ -335,13 +335,17 @@ TArray<FString> FHyperAIStudioLightingContracts::GetCapabilities()
 		TEXT("material_assignment_to_a_placed_actor_mesh_slot"),
 		TEXT("point_spot_and_rect_lights_listed_by_view_edited_added_aimed_and_switched_off"),
 		TEXT("volumetric_fog_for_light_shafts"),
+		TEXT("any_details_panel_setting_of_the_sun_sky_light_fog_atmosphere_clouds_and_post_process_by_name"),
+		TEXT("volumetric_clouds_added_and_shaped_through_a_material_instance_the_level_owns"),
+		TEXT("colour_grading_luts_fitted_to_a_reference_and_imported_as_lut_textures"),
+		TEXT("shadows_switched_off_on_blockout_shapes_that_stand_for_foliage_cloth_or_glass"),
 		TEXT("blueprint_skies_ultra_dynamic_sky_and_weather_sun_sky_and_sky_sphere_lit_through_their_variables"),
 		TEXT("viewport_or_image_vs_reference_metrics"),
 		TEXT("ranked_next_change_suggestions"),
 		TEXT("view_captures_from_a_camera_or_transform_with_frame_to_frame_differences"),
 		TEXT("image_match_score_regions_and_sessions_for_scenes_materials_effects_and_ui"),
 		TEXT("unsaved_by_default_opt_in_save_of_touched_actors"),
-		TEXT("unsupported:bounded_post_process_volumes_lumen_settings_and_baked_lighting_builds")};
+		TEXT("unsupported:bounded_post_process_volumes_and_baked_lighting_builds")};
 }
 
 bool FHyperAIStudioLightingContracts::IsCanonicalSha256(const FString& Value)
@@ -370,7 +374,7 @@ FString FHyperAIStudioLightingContracts::InspectPayloadSchemaFingerprint()
 FString FHyperAIStudioLightingContracts::EditOpsPayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("lighting.edit_ops.payload.v2|level_path|base_revision|ordered_closed_ops|local_lights|save|deep_clone|bounded"));
+		TEXT("lighting.edit_ops.payload.v3|level_path|base_revision|ordered_closed_ops|local_lights|details_by_name|clouds|lut|actor_shadow|save|deep_clone|bounded"));
 	return Value;
 }
 
@@ -384,7 +388,7 @@ FString FHyperAIStudioLightingContracts::ComparePayloadSchemaFingerprint()
 FString FHyperAIStudioLightingContracts::InspectResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("lighting.inspect.result.v2|level|revision|exposure_lock|actors_properties|local_lights_by_view|bounded"));
+		TEXT("lighting.inspect.result.v3|level|revision|exposure_lock|actors_properties|changed_details|clouds|local_lights_by_view|bounded"));
 	return Value;
 }
 
@@ -421,14 +425,14 @@ FHyperAIImageCompareReport FHyperAIStudioLightingContracts::CompareImages(const 
 FString FHyperAIStudioLightingContracts::ImageComparePayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("lighting.image_compare.payload.v1|project_reference|optional_candidate|mode|target|session|note|grid"));
+		TEXT("lighting.image_compare.payload.v2|project_reference|optional_candidate|mode|target|session|note|grid|fit_lut"));
 	return Value;
 }
 
 FString FHyperAIStudioLightingContracts::ImageCompareResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("lighting.image_compare.result.v1|score|measures|deltas|regions|suggestions|images|session_history|bounded"));
+		TEXT("lighting.image_compare.result.v2|score|measures|deltas|regions|suggestions|images|lut_path_score_side|session_history|bounded"));
 	return Value;
 }
 
@@ -462,7 +466,8 @@ int32 FHyperAIStudioLightingImageCompareResultPayload::GetBoundedByteSize() cons
 {
 	using namespace HyperAIStudio::Lighting::Private;
 	int64 Size = 512 + EstimateBytes(Report.Status) + EstimateBytes(Report.Diagnostic) + EstimateBytes(Report.SideBySidePath)
-		+ EstimateBytes(Report.DiffPath) + EstimateBytes(Report.CandidateWrittenPath);
+		+ EstimateBytes(Report.DiffPath) + EstimateBytes(Report.CandidateWrittenPath) + EstimateBytes(Report.LutPath)
+		+ EstimateBytes(Report.LutSideBySidePath) + EstimateBytes(Report.LutComposedWith);
 	for (const FHyperAIImageRegion& Region : Report.Regions) Size += 96 + EstimateBytes(Region.Name) + EstimateBytes(Region.Difference);
 	for (const FString& Suggestion : Report.Suggestions) Size += EstimateBytes(Suggestion);
 	for (const FHyperAIImageIteration& Iteration : Report.History)

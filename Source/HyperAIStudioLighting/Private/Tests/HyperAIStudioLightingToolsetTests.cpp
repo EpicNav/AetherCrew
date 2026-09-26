@@ -13,14 +13,27 @@
 #include "HyperAIStudioLightingGate.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/VolumetricCloudComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Engine/PostProcessVolume.h"
+#include "Engine/SkyLight.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
+#include "Engine/Texture2D.h"
 #include "Components/PointLightComponent.h"
 #include "Engine/PointLight.h"
 #include "Engine/RectLight.h"
 #include "Engine/SpotLight.h"
 #include "Engine/Scene.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Materials/MaterialInstanceConstant.h"
+#include "Misc/Guid.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/FileManager.h"
 #include "Materials/Material.h"
@@ -276,7 +289,7 @@ bool FHyperAIStudioLightingOpsTest::RunTest(const FString& Parameters)
 	Rejects({Op(TEXT("set_sun"), TEXT("intensity"), TEXT("nan"))}, TEXT("needs a number"));
 	Rejects({Op(TEXT("set_sun"), TEXT("color"), TEXT("1,1"))}, TEXT("r,g,b"));
 	Rejects({Op(TEXT("set_post_process"), TEXT("shadows_offset"), TEXT("0.9,0,0"))}, TEXT("from -0.5 to 0.5"));
-	Rejects({Op(TEXT("set_sun"), TEXT("luminance"), TEXT("1"))}, TEXT("no property"));
+	Rejects({Op(TEXT("set_sun"), TEXT("luminance"), TEXT("1"))}, TEXT("no setting 'luminance'"));
 	Rejects({Op(TEXT("lock_exposure"))}, TEXT("EV100"));
 	Rejects({Op(TEXT("lock_exposure"), TEXT(""), TEXT("12")), Op(TEXT("set_post_process"), TEXT("exposure_bias"), TEXT("1"))}, TEXT("exposure is locked"));
 	Rejects({Op(TEXT("set_sun"), TEXT("intensity"), TEXT("5"), TEXT("Nope"))}, TEXT("no sun actor is labelled"));
@@ -715,7 +728,8 @@ bool FHyperAIStudioLightingSkySystemTest::RunTest(const FString& Parameters)
 		const bool bValid = Gate::ValidateOps(*World, Ops, Error);
 		TestTrue(*FString::Printf(TEXT("rejected with '%s' (got '%s')"), Expected, *Error), !bValid && Error.Contains(Expected));
 	};
-	Rejects({Op(TEXT("set_sun"), TEXT("intensity"), TEXT("5"))}, TEXT("owns its sun, sky light, fog and atmosphere"));
+	Rejects({Op(TEXT("set_sun"), TEXT("intensity"), TEXT("5"))}, TEXT("owns its sun, sky light, fog, atmosphere and clouds"));
+	Rejects({Op(TEXT("set_clouds"), TEXT("material:Cloud_GlobalCoverage"), TEXT("0.5"))}, TEXT("so set_clouds would fight it"));
 	Rejects({Op(TEXT("set_fog"), TEXT("density"), TEXT("0.1"))}, TEXT("Use set_sky_system instead: Time of Day"));
 	Rejects({Op(TEXT("set_sky_system"), TEXT("Rain"), TEXT("1"))}, TEXT("no sky in the level has a variable 'Rain'"));
 	Rejects({Op(TEXT("set_sky_system"), TEXT("Time of Day"), TEXT("dusk"))}, TEXT("does not take 'dusk'"));
@@ -955,6 +969,265 @@ bool FHyperAIStudioLightingLocalLightsTest::RunTest(const FString& Parameters)
 	if (GEditor && GEditor->UndoTransaction())
 	{
 		TestNotEqual(TEXT("one undo takes the far light's change back"), Value(Read(TEXT(""), TEXT(""), 32).Records, TEXT("Behind"), TEXT("intensity")), FString(TEXT("3")));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioLightingDetailsTest,
+	"HyperAIStudio.Lighting.Ops.DetailsByName",
+	HyperAIStudio::Lighting::Tests::Flags)
+
+bool FHyperAIStudioLightingDetailsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Lighting::Tests;
+	namespace Gate = HyperAIStudio::Lighting::Gate;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAILightingDetailsWorld"));
+	if (!World)
+	{
+		AddError(TEXT("Could not create a test world."));
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		World->DestroyWorld(/*bInformEngineOfWorld=*/false);
+	};
+	auto Rejects = [&](const TArray<FHyperAILightingOp>& Ops, const TCHAR* Expected)
+	{
+		FString Error;
+		const bool bValid = Gate::ValidateOps(*World, Ops, Error);
+		TestTrue(*FString::Printf(TEXT("rejected with '%s' (got '%s')"), Expected, *Error), !bValid && Error.Contains(Expected));
+	};
+	Rejects({Op(TEXT("set_post_process"), TEXT("Intensity"), TEXT("1"))}, TEXT("several settings called 'Intensity'"));
+	Rejects({Op(TEXT("set_sky_atmosphere"), TEXT("MieAnisotropy"), TEXT("1.5"))}, TEXT("0.999"));
+	Rejects({Op(TEXT("set_sun"), TEXT("BloomScale"), TEXT("bright"))}, TEXT("does not take 'bright'"));
+	Rejects({Op(TEXT("set_sun"), TEXT("BloomScale"), TEXT(""))}, TEXT("or any setting its Details panel shows"));
+	// The exposure lock's settings stay with lock_exposure, and whether a light moves stays with the level.
+	Rejects({Op(TEXT("set_post_process"), TEXT("AutoExposureBias"), TEXT("1"))}, TEXT("no setting 'AutoExposureBias'"));
+	Rejects({Op(TEXT("set_sun"), TEXT("Mobility"), TEXT("Static"))}, TEXT("no setting 'Mobility'"));
+	FString Error;
+	TestTrue(TEXT("a setting by name validates before the plan adds its actor: ") + Error, Gate::ValidateOps(*World, {Op(TEXT("set_sun"), TEXT("BloomScale"), TEXT("0.3"))}, Error));
+	TestEqual(TEXT("and validation adds nothing"), Gate::ReadActors(*World).Num(), 0);
+
+	const TArray<FHyperAILightingOp> Ops = {
+		Op(TEXT("set_sun"), TEXT("light_shaft_bloom"), TEXT("true")),
+		Op(TEXT("set_sun"), TEXT("BloomScale"), TEXT("0.3")),
+		Op(TEXT("set_sun"), TEXT("shadow_amount"), TEXT("0.7")),
+		Op(TEXT("set_sky_light"), TEXT("MinOcclusion"), TEXT("0.2")),
+		Op(TEXT("set_sky_light"), TEXT("OcclusionTint"), TEXT("0.1,0.1,0.15")),
+		Op(TEXT("set_fog"), TEXT("Directional Inscattering Exponent"), TEXT("8")),
+		Op(TEXT("set_fog"), TEXT("SecondFogData"), TEXT("(FogDensity=0.02,FogHeightFalloff=0.1,FogHeightOffset=500)")),
+		Op(TEXT("set_sky_atmosphere"), TEXT("MieAnisotropy"), TEXT("0.9")),
+		Op(TEXT("set_post_process"), TEXT("LocalExposureShadowContrastScale"), TEXT("0.6")),
+		Op(TEXT("set_post_process"), TEXT("bloom_intensity"), TEXT("0.5"))};
+	TArray<AActor*> Touched;
+	const bool bApplied = Gate::ApplyOps(*World, Ops, Touched, Error);
+	if (!TestTrue(TEXT("the plan applies: ") + Error, bApplied))
+	{
+		return false;
+	}
+	ADirectionalLight* Sun = nullptr;
+	ASkyLight* Sky = nullptr;
+	AExponentialHeightFog* Fog = nullptr;
+	ASkyAtmosphere* Atmosphere = nullptr;
+	APostProcessVolume* Volume = nullptr;
+	for (AActor* Actor : Touched)
+	{
+		Sun = Sun ? Sun : Cast<ADirectionalLight>(Actor);
+		Sky = Sky ? Sky : Cast<ASkyLight>(Actor);
+		Fog = Fog ? Fog : Cast<AExponentialHeightFog>(Actor);
+		Atmosphere = Atmosphere ? Atmosphere : Cast<ASkyAtmosphere>(Actor);
+		Volume = Volume ? Volume : Cast<APostProcessVolume>(Actor);
+	}
+	if (!TestTrue(TEXT("one actor of each kind was added"), Touched.Num() == 5 && Sun && Sky && Fog && Atmosphere && Volume))
+	{
+		return false;
+	}
+	const UDirectionalLightComponent& Light = *Sun->GetComponent();
+	TestTrue(TEXT("light shaft bloom is on, by its label in the Details panel"), Light.bEnableLightShaftBloom);
+	TestEqual(TEXT("bloom scale, by its C++ name"), Light.BloomScale, 0.3f);
+	TestEqual(TEXT("shadow amount, by its name in words"), Light.ShadowAmount, 0.7f);
+	TestEqual(TEXT("min occlusion"), Sky->GetLightComponent()->MinOcclusion, 0.2f);
+	TestTrue(TEXT("a colour kept as sRGB bytes is given in linear r,g,b like every other colour"),
+		Sky->GetLightComponent()->OcclusionTint == FLinearColor(0.1f, 0.1f, 0.15f).ToFColor(true));
+	TestEqual(TEXT("directional inscattering exponent, spaced as a person types it"), Fog->GetComponent()->DirectionalInscatteringExponent, 8.f);
+	TestEqual(TEXT("a struct in Unreal's text form"), Fog->GetComponent()->SecondFogData.FogDensity, 0.02f);
+	TestEqual(TEXT("mie anisotropy"), Atmosphere->GetComponent()->MieAnisotropy, 0.9f);
+	const FPostProcessSettings& Post = Volume->Settings;
+	TestTrue(TEXT("a post-process setting takes effect with its override on"), Post.bOverride_LocalExposureShadowContrastScale && Post.LocalExposureShadowContrastScale == 0.6f);
+	TestTrue(TEXT("bloom intensity by its C++ name in words, though its label is only Intensity"), Post.bOverride_BloomIntensity && Post.BloomIntensity == 0.5f);
+
+	const TArray<FHyperAILightingActorRecord> Records = Gate::ReadActors(*World);
+	TestTrue(TEXT("inspect lists what was set through the Details panel: ") + ValueOf(Records, TEXT("sun"), TEXT("BloomScale")),
+		ValueOf(Records, TEXT("sun"), TEXT("BloomScale")).StartsWith(TEXT("0.3")));
+	TestNotEqual(TEXT("post process too"), ValueOf(Records, TEXT("post_process"), TEXT("LocalExposureShadowContrastScale")), FString(TEXT("<missing>")));
+	TestEqual(TEXT("but not what it left alone"), ValueOf(Records, TEXT("sun"), TEXT("BloomThreshold")), FString(TEXT("<missing>")));
+	const FHyperAILightingActorRecord* SunRecord = Records.FindByPredicate([](const FHyperAILightingActorRecord& Record) { return Record.Kind == TEXT("sun"); });
+	TestFalse(TEXT("nor what a fixed key already shows"), SunRecord && SunRecord->Properties.ContainsByPredicate([](const FHyperAILightingProperty& Property)
+	{
+		return Property.Key.Equals(TEXT("Intensity"), ESearchCase::CaseSensitive);
+	}));
+	const FString Revised = Gate::ComputeRevision(*World);
+	Touched.Reset();
+	TestTrue(TEXT("a threshold applies: ") + Error, Gate::ApplyOps(*World, {Op(TEXT("set_sun"), TEXT("BloomThreshold"), TEXT("2"))}, Touched, Error));
+	TestNotEqual(TEXT("the revision covers settings changed by name"), Gate::ComputeRevision(*World), Revised);
+
+	Touched.Reset();
+	TestTrue(TEXT("default applies: ") + Error, Gate::ApplyOps(*World, {Op(TEXT("set_post_process"), TEXT("LocalExposureShadowContrastScale"), TEXT("default"))}, Touched, Error));
+	TestFalse(TEXT("default lifts the override"), Volume->Settings.bOverride_LocalExposureShadowContrastScale);
+	TestEqual(TEXT("and inspect no longer lists it"), ValueOf(Gate::ReadActors(*World), TEXT("post_process"), TEXT("LocalExposureShadowContrastScale")), FString(TEXT("<missing>")));
+	FlushAsyncLoading();
+	if (GEditor && GEditor->UndoTransaction())
+	{
+		TestTrue(TEXT("one undo puts the override back"), Volume->Settings.bOverride_LocalExposureShadowContrastScale);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioLightingMadeAssetsTest,
+	"HyperAIStudio.Lighting.Ops.CloudsShadowsAndLut",
+	HyperAIStudio::Lighting::Tests::Flags)
+
+bool FHyperAIStudioLightingMadeAssetsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Lighting::Tests;
+	namespace Gate = HyperAIStudio::Lighting::Gate;
+	namespace Lut = HyperAIStudio::Lighting::Lut;
+	UStaticMesh* SphereMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	const FString Stem = TEXT("hyperai_test_lut_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8);
+	const FString LutImage = TEXT("Saved/HyperAIStudio/Tests/") + Stem + TEXT(".png");
+	const FString WrongSize = TEXT("Saved/HyperAIStudio/Tests/") + Stem + TEXT("_wrong.png");
+	// What the plan makes is never saved, so it is only forgotten, once the test world that uses it is gone.
+	TArray<UObject*> Made;
+	ON_SCOPE_EXIT
+	{
+		for (UObject* Object : Made)
+		{
+			FAssetRegistryModule::AssetDeleted(Object);
+			Object->GetPackage()->SetDirtyFlag(false);
+			Object->ClearFlags(RF_Public | RF_Standalone);
+			Object->MarkAsGarbage();
+		}
+		IFileManager::Get().Delete(*(FPaths::ProjectDir() / LutImage));
+		IFileManager::Get().Delete(*(FPaths::ProjectDir() / WrongSize));
+	};
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAILightingMadeAssetsWorld"));
+	if (!World || !SphereMesh)
+	{
+		AddError(TEXT("Needs a test world and the engine sphere."));
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		World->DestroyWorld(/*bInformEngineOfWorld=*/false);
+	};
+	// A blockout tree's canopy: a solid sphere where the finished tree's leaves would let light through.
+	FActorSpawnParameters Spawn;
+	Spawn.ObjectFlags |= RF_Transactional;
+	AStaticMeshActor* Canopy = World->SpawnActor<AStaticMeshActor>(FVector(0.0, 0.0, 600.0), FRotator::ZeroRotator, Spawn);
+	Canopy->GetStaticMeshComponent()->UnregisterComponent();
+	Canopy->GetStaticMeshComponent()->SetStaticMesh(SphereMesh);
+	Canopy->GetStaticMeshComponent()->RegisterComponent();
+	Canopy->SetActorLabel(TEXT("Tree_Canopy"));
+	// A warm grade as hyper_image_compare's fit_lut would write one.
+	Lut::FTable Warm = Lut::Identity();
+	for (FVector3f& Node : Warm)
+	{
+		Node = FVector3f(FMath::Min(Node.X * 1.1f + 0.02f, 1.f), Node.Y, Node.Z * 0.85f);
+	}
+	TestTrue(TEXT("the LUT image is written"), Gate::WritePng(FPaths::ProjectDir() / LutImage, Lut::ToStrip(Warm), Lut::StripWidth, Lut::StripHeight));
+	TestTrue(TEXT("and one of the wrong size"), Gate::WritePng(FPaths::ProjectDir() / WrongSize, Solid(FColor(128, 128, 128)), Side, Side));
+
+	auto Rejects = [&](const TArray<FHyperAILightingOp>& Ops, const TCHAR* Expected)
+	{
+		FString Error;
+		const bool bValid = Gate::ValidateOps(*World, Ops, Error);
+		TestTrue(*FString::Printf(TEXT("rejected with '%s' (got '%s')"), Expected, *Error), !bValid && Error.Contains(Expected));
+	};
+	Rejects({Op(TEXT("set_actor_shadow"), TEXT(""), TEXT("false"))}, TEXT("needs actor_label"));
+	Rejects({Op(TEXT("set_actor_shadow"), TEXT(""), TEXT("maybe"), TEXT("Tree_Canopy"))}, TEXT("takes true"));
+	Rejects({Op(TEXT("set_actor_shadow"), TEXT("component:Leaves"), TEXT("false"), TEXT("Tree_Canopy"))}, TEXT("has no mesh component 'Leaves'"));
+	Rejects({Op(TEXT("set_actor_shadow"), TEXT(""), TEXT("false"), TEXT("Nobody"))}, TEXT("no actor is labelled 'Nobody'"));
+	Rejects({Op(TEXT("set_clouds"), TEXT("material:Cloud_Fluffiness"), TEXT("1"))}, TEXT("has no parameter 'Cloud_Fluffiness'"));
+	Rejects({Op(TEXT("set_clouds"), TEXT("material:Cloud_GlobalCoverage"), TEXT("lots"))}, TEXT("takes a number"));
+	Rejects({Op(TEXT("set_post_process"), TEXT("color_grading_lut"), TEXT("/Game/NoSuchLut"))}, TEXT("is not a texture"));
+	Rejects({Op(TEXT("set_post_process"), TEXT("color_grading_lut"), *WrongSize)}, TEXT("a LUT is 256 x 16"));
+
+	const TArray<FHyperAILightingOp> Ops = {
+		Op(TEXT("set_actor_shadow"), TEXT(""), TEXT("false"), TEXT("Tree_Canopy")),
+		Op(TEXT("set_clouds"), TEXT("layer_bottom_altitude"), TEXT("3")),
+		Op(TEXT("set_clouds"), TEXT("material:Cloud_GlobalCoverage"), TEXT("0.35")),
+		Op(TEXT("set_clouds"), TEXT("material:Cloud_AlbedoColor"), TEXT("0.9,0.85,0.8")),
+		Op(TEXT("set_post_process"), TEXT("color_grading_lut"), *LutImage)};
+	TArray<AActor*> Touched;
+	FString Error;
+	const bool bApplied = Gate::ApplyOps(*World, Ops, Touched, Error);
+	AVolumetricCloud* Clouds = nullptr;
+	APostProcessVolume* Volume = nullptr;
+	for (AActor* Actor : Touched)
+	{
+		Clouds = Clouds ? Clouds : Cast<AVolumetricCloud>(Actor);
+		Volume = Volume ? Volume : Cast<APostProcessVolume>(Actor);
+	}
+	UVolumetricCloudComponent* Cloud = Clouds ? Clouds->FindComponentByClass<UVolumetricCloudComponent>() : nullptr;
+	UMaterialInstanceConstant* Instance = Cloud ? Cast<UMaterialInstanceConstant>(Cloud->Material.Get()) : nullptr;
+	UTexture2D* Texture = Volume ? Cast<UTexture2D>(Volume->Settings.ColorGradingLUT.Get()) : nullptr;
+	if (Instance && Instance->GetPathName().StartsWith(Gate::MadeAssetsRoot)) Made.Add(Instance);
+	if (Texture && Texture->GetPathName().StartsWith(Gate::MadeAssetsRoot)) Made.Add(Texture);
+	if (!TestTrue(TEXT("the plan applies: ") + Error, bApplied) || !TestTrue(TEXT("with clouds, a post-process volume and what they hold"), Cloud && Instance && Texture))
+	{
+		return false;
+	}
+
+	TestFalse(TEXT("the canopy lets the light through"), Canopy->GetStaticMeshComponent()->CastShadow);
+	TestTrue(TEXT("and is saved with the plan"), Gate::ResolveTargets(*World, Ops).Contains(Canopy));
+	TestEqual(TEXT("the clouds' layer by its name in words"), Cloud->LayerBottomAltitude, 3.f);
+	TestTrue(TEXT("the clouds have their own material instance, under HyperAI: ") + Instance->GetPathName(),
+		Instance->GetPathName().StartsWith(FString(Gate::MadeAssetsRoot) + TEXT("Clouds/MI_Clouds_")));
+	TestTrue(TEXT("made from the material they had"), Instance->Parent && Instance->Parent->GetName() == TEXT("m_SimpleVolumetricCloud_Inst"));
+	float Coverage = 0.f;
+	TestTrue(TEXT("coverage set on it"), Instance->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("Cloud_GlobalCoverage")), Coverage) && Coverage == 0.35f);
+	FLinearColor Albedo;
+	TestTrue(TEXT("and a colour"), Instance->GetVectorParameterValue(FHashedMaterialParameterInfo(TEXT("Cloud_AlbedoColor")), Albedo)
+		&& FVector3f(Albedo.R, Albedo.G, Albedo.B).Equals(FVector3f(0.9f, 0.85f, 0.8f)));
+	TestEqual(TEXT("inspect shows the coverage"), ValueOf(Gate::ReadActors(*World), TEXT("clouds"), TEXT("material:Cloud_GlobalCoverage")), FString(TEXT("0.35")));
+
+	TestEqual(TEXT("the LUT is imported under HyperAI"), Texture->GetPathName(), FString(Gate::MadeAssetsRoot) + TEXT("LUTs/LUT_") + Stem + TEXT(".LUT_") + Stem);
+	TestTrue(TEXT("as a LUT: its texture group, no mips, no sRGB decode"),
+		Texture->LODGroup == TEXTUREGROUP_ColorLookupTable && Texture->MipGenSettings == TMGS_NoMipmaps && !Texture->SRGB);
+	TestTrue(TEXT("and the grade uses it at full strength"), Volume->Settings.bOverride_ColorGradingLUT
+		&& Volume->Settings.bOverride_ColorGradingIntensity && Volume->Settings.ColorGradingIntensity == 1.f);
+	Lut::FTable Read;
+	FString LutPath;
+	float Worst = 1.f;
+	if (TestTrue(TEXT("the level's LUT reads back"), Gate::ReadLevelLut(*World, Read, LutPath) && Read.Num() == Warm.Num()))
+	{
+		Worst = 0.f;
+		for (int32 Index = 0; Index < Read.Num(); ++Index)
+		{
+			Worst = FMath::Max(Worst, (Read[Index] - Warm[Index]).GetAbsMax());
+		}
+	}
+	TestTrue(FString::Printf(TEXT("as the grade it was made from (worst %.4f)"), Worst), Worst <= 1.f / 255.f + 0.0001f);
+	TestEqual(TEXT("with its path"), LutPath, Texture->GetPathName());
+	const TArray<UPackage*> Packages = Gate::PackagesOf(Touched);
+	TestTrue(TEXT("both made assets are saved with the plan"), Packages.Contains(Texture->GetPackage()) && Packages.Contains(Instance->GetPackage()));
+
+	Touched.Reset();
+	TestTrue(TEXT("the clouds change again: ") + Error, Gate::ApplyOps(*World, {Op(TEXT("set_clouds"), TEXT("material:Cloud_GlobalCoverage"), TEXT("0.5"))}, Touched, Error));
+	TestTrue(TEXT("on the same instance"), Cloud->Material.Get() == Instance
+		&& Instance->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("Cloud_GlobalCoverage")), Coverage) && Coverage == 0.5f);
+	Touched.Reset();
+	TestTrue(TEXT("none applies: ") + Error, Gate::ApplyOps(*World, {Op(TEXT("set_post_process"), TEXT("color_grading_lut"), TEXT("none"))}, Touched, Error));
+	TestTrue(TEXT("none takes the LUT off"), !Volume->Settings.bOverride_ColorGradingLUT && !Volume->Settings.ColorGradingLUT);
+	TestFalse(TEXT("and the level has no LUT to read"), Gate::ReadLevelLut(*World, Read, LutPath));
+	FlushAsyncLoading();
+	if (GEditor && GEditor->UndoTransaction())
+	{
+		TestTrue(TEXT("one undo puts the LUT back"), Volume->Settings.ColorGradingLUT.Get() == Texture);
 	}
 	return true;
 }

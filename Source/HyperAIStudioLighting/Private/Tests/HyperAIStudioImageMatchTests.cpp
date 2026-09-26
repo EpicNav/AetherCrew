@@ -403,4 +403,144 @@ bool FHyperAIStudioImageMatchLoopTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioImageMatchLutTest,
+	"HyperAIStudio.Lighting.ImageMatch.LutFitsAGrade",
+	HyperAIStudio::Lighting::MatchTests::Flags)
+
+bool FHyperAIStudioImageMatchLutTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Lighting::MatchTests;
+	namespace Lut = HyperAIStudio::Lighting::Lut;
+	auto WorstGap = [](const Lut::FTable& A, const Lut::FTable& B)
+	{
+		float Gap = 0.f;
+		for (int32 Index = 0; Index < A.Num(); ++Index) Gap = FMath::Max(Gap, (A[Index] - B[Index]).GetAbsMax());
+		return Gap;
+	};
+	auto MeanGap = [](TConstArrayView<FColor> A, TConstArrayView<FColor> B)
+	{
+		double Sum = 0.0;
+		for (int32 Index = 0; Index < A.Num(); ++Index)
+		{
+			Sum += FMath::Abs(A[Index].R - B[Index].R) + FMath::Abs(A[Index].G - B[Index].G) + FMath::Abs(A[Index].B - B[Index].B);
+		}
+		return Sum / (3.0 * A.Num());
+	};
+
+	const Lut::FTable Neutral = Lut::Identity();
+	const TArray<FColor> Strip = Lut::ToStrip(Neutral);
+	// Blue picks the slice, red runs across it and green down it; a step is 255 / 15 = 17.
+	TestTrue(TEXT("The neutral strip is laid out as Unreal's neutral LUT"), Strip.Num() == Lut::StripWidth * Lut::StripHeight
+		&& Strip[7 * Lut::StripWidth + 3 * Lut::Size + 5] == FColor(85, 119, 51, 255));
+	Lut::FTable Read;
+	TestTrue(TEXT("and reads back"), Lut::FromStrip(Strip, Lut::StripWidth, Lut::StripHeight, Read) && WorstGap(Read, Neutral) < 0.0001f);
+	TestFalse(TEXT("A strip of another size does not"), Lut::FromStrip(Strip, 128, 32, Read));
+	const FPicture Reference = Scene();
+	TestTrue(TEXT("The neutral LUT changes nothing"), MeanGap(Lut::Apply(Neutral, Reference.Pixels), Reference.Pixels) < 0.01);
+
+	// A colourist's grade on the same frame: more contrast, warmer highlights, bluer lifted shadows.
+	const FPicture Graded = Edited(Reference, [](int32, int32, FColor& Pixel)
+	{
+		auto Byte = [](const float Value) { return static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Value * 255.f), 0, 255)); };
+		const float R = Pixel.R / 255.f, G = Pixel.G / 255.f, B = Pixel.B / 255.f;
+		const float Luma = 0.3f * R + 0.59f * G + 0.11f * B;
+		auto Contrast = [](const float Value) { return 0.5f + (Value - 0.5f) * 1.2f; };
+		Pixel = FColor(Byte(Contrast(R) + 0.06f * Luma), Byte(Contrast(G)), Byte(Contrast(B) + 0.08f * (1.f - Luma)), 255);
+	});
+	const Lut::FTable Fitted = Lut::Fit(Reference.Pixels, Graded.Pixels, /*bAligned=*/true);
+	const FPicture Through{Reference.Width, Reference.Height, Lut::Apply(Fitted, Reference.Pixels)};
+	const double Before = MeanGap(Reference.Pixels, Graded.Pixels);
+	const double After = MeanGap(Through.Pixels, Graded.Pixels);
+	TestTrue(FString::Printf(TEXT("A LUT fitted pixel by pixel carries the grade (mean gap %.2f of 255, from %.2f)"), After, Before), After < Before * 0.25);
+	const FHyperAIImageCompareReport Plain = Measure(Graded, Reference, TEXT("aligned"));
+	const FHyperAIImageCompareReport Fixed = Measure(Graded, Through, TEXT("aligned"));
+	TestTrue(FString::Printf(TEXT("and the score rises through it (%.1f, from %.1f)"), Fixed.Score, Plain.Score), Fixed.Score > Plain.Score + 5.f);
+
+	// A look from another frame: its tone curve and its colour by lightness carry over, as a colourist matches a look by eye.
+	const Lut::FTable Look = Lut::Fit(Reference.Pixels, Graded.Pixels, /*bAligned=*/false);
+	const FPicture Looked{Reference.Width, Reference.Height, Lut::Apply(Look, Reference.Pixels)};
+	const FHyperAIImageCompareReport LookPlain = Measure(Graded, Reference);
+	const FHyperAIImageCompareReport LookFixed = Measure(Graded, Looked);
+	TestTrue(FString::Printf(TEXT("A LUT fitted to the look moves the look towards it (%.1f, from %.1f)"), LookFixed.Score, LookPlain.Score),
+		LookFixed.Score > LookPlain.Score + 5.f);
+	// A look carries over from a frame that does not line up: here the graded picture upside down.
+	const FPicture Flipped = Edited(Graded, [&Graded](const int32 X, const int32 Y, FColor& Pixel) { Pixel = Graded.Pixels[(Graded.Height - 1 - Y) * Graded.Width + X]; });
+	TestTrue(TEXT("and the same look is fitted from a frame that does not line up"),
+		MeanGap(Lut::Apply(Lut::Fit(Reference.Pixels, Flipped.Pixels, false), Reference.Pixels), Looked.Pixels) < 1.0);
+
+	TestTrue(TEXT("Weakened to nothing, a LUT is neutral"), WorstGap(Lut::Weaken(Fitted, 0.f), Neutral) < 0.0001f);
+	TestTrue(TEXT("and at full strength, itself"), WorstGap(Lut::Weaken(Fitted, 1.f), Fitted) < 0.0001f);
+	TestTrue(TEXT("Composed with the neutral LUT, either way round, a LUT is itself"),
+		WorstGap(Lut::Compose(Fitted, Neutral), Fitted) < 0.001f && WorstGap(Lut::Compose(Neutral, Fitted), Fitted) < 0.001f);
+	// Two grades that stay within range, so each is exact at every node and their composition is too.
+	Lut::FTable Squeeze = Neutral;
+	Lut::FTable Tint = Neutral;
+	for (int32 Index = 0; Index < Neutral.Num(); ++Index)
+	{
+		Squeeze[Index] = Neutral[Index] * 0.8f + FVector3f(0.1f);
+		Tint[Index] = FVector3f(Neutral[Index].X * 0.9f + 0.05f, Neutral[Index].Y, Neutral[Index].Z * 0.8f + 0.1f);
+	}
+	TestTrue(TEXT("Composing two LUTs applies the first, then the second"),
+		MeanGap(Lut::Apply(Lut::Compose(Tint, Squeeze), Reference.Pixels), Lut::Apply(Tint, Lut::Apply(Squeeze, Reference.Pixels))) < 1.0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioImageMatchFitLutTest,
+	"HyperAIStudio.Lighting.ImageMatch.CompareFitsALut",
+	HyperAIStudio::Lighting::MatchTests::Flags)
+
+bool FHyperAIStudioImageMatchFitLutTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Lighting::MatchTests;
+	namespace Gate = HyperAIStudio::Lighting::Gate;
+	const FString SessionId = TEXT("test_lut_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(10);
+	FString LutFile;
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*(Match::SessionsFolder() / SessionId), false, true);
+		IFileManager::Get().DeleteDirectory(*Folder(), false, true);
+		if (!LutFile.IsEmpty()) IFileManager::Get().Delete(*LutFile);
+	};
+	const FPicture Reference = Scene();
+	// The attempt has the reference's light but not its grade: cooler and duller.
+	const FPicture Attempt = Edited(Reference, [](int32, int32, FColor& Pixel)
+	{
+		Pixel = FColor(Darker(Pixel.R, 0.6f), Darker(Pixel.G, 0.8f), Pixel.B, 255);
+	});
+	FHyperAIImageCompareRequest Request;
+	Request.ReferenceImagePath = Save(Reference, TEXT("lut_reference.png"));
+	Request.CandidateImagePath = Save(Attempt, TEXT("lut_attempt.png"));
+	Request.Mode = TEXT("aligned");
+	Request.SessionId = SessionId;
+	Request.bFitLut = true;
+	const FHyperAIImageCompareReport Report = Match::Compare(Request);
+	if (!TestTrue(FString::Printf(TEXT("compares (%s)"), *Report.Diagnostic), Report.bOk))
+	{
+		return false;
+	}
+	LutFile = FPaths::ProjectDir() / Report.LutPath;
+	TArray<FColor> Strip;
+	int32 Width = 0;
+	int32 Height = 0;
+	FString Error;
+	TestTrue(TEXT("The LUT is written as a 256 x 16 image: ") + Report.LutPath,
+		!Report.LutPath.IsEmpty() && Gate::LoadProjectImage(Report.LutPath, Strip, Width, Height, Error) && Width == 256 && Height == 16);
+	TestTrue(TEXT("named for its session"), Report.LutPath.Contains(SessionId));
+	TestTrue(FString::Printf(TEXT("Graded through it, the attempt scores higher (%.1f, from %.1f)"), Report.LutScore, Report.Score), Report.LutScore > Report.Score + 5.f);
+	TestTrue(TEXT("which leads the suggestions"), !Report.Suggestions.IsEmpty() && Report.Suggestions[0].StartsWith(TEXT("Grade it"))
+		&& Report.Suggestions[0].Contains(Report.LutPath));
+	TestTrue(TEXT("with the graded attempt beside the reference"), !Report.LutSideBySidePath.IsEmpty()
+		&& IFileManager::Get().FileExists(*(FPaths::ProjectDir() / Report.LutSideBySidePath)));
+	TestTrue(TEXT("and the diagnostic says how it was fitted: ") + Report.Diagnostic,
+		Report.Diagnostic.Contains(TEXT("LUT fitted pixel by pixel")) || Report.Diagnostic.Contains(TEXT("LUT fitted to the look")));
+	Request.bFitLut = false;
+	Request.SessionId.Reset();
+	TestTrue(TEXT("Without fit_lut, no LUT"), Match::Compare(Request).LutPath.IsEmpty());
+	return true;
+}
+
 #endif

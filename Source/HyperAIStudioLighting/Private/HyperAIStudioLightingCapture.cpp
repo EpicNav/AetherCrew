@@ -281,6 +281,9 @@ namespace HyperAIStudio::Lighting::Capture
 
 				Target.Reset(NewObject<UTextureRenderTarget2D>(GetTransientPackage(), NAME_None, RF_Transient));
 				Target->RenderTargetFormat = RTF_RGBA8;
+				// Rendered for a display, as the viewport is. An 8-bit target otherwise counts as linear, and the engine then
+				// darkens every mid-tone for it: a display's 50% grey comes out as 20%, and shadows far darker than anyone sees.
+				Target->TargetGamma = UTextureRenderTarget::GetDefaultDisplayGamma();
 				Target->ClearColor = FLinearColor::Black;
 				Target->InitAutoFormat(Request.Width, Request.Height);
 				Target->UpdateResourceImmediate(/*bClearRenderTarget=*/true);

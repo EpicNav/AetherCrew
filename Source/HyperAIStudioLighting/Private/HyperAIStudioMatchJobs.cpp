@@ -10,6 +10,8 @@
 #include "HyperAIStudioImageMatch.h"
 #include "HyperAIStudioLightingCapture.h"
 #include "HyperAIStudioLightingGate.h"
+#include "ImageCore.h"
+#include "ImageUtils.h"
 #include "LevelEditorViewport.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -79,12 +81,25 @@ FString SameViewNote(const FString& ReferenceImagePath)
 	View->TryGetNumberField(TEXT("width"), Width);
 	View->TryGetNumberField(TEXT("height"), Height);
 	View->TryGetNumberField(TEXT("fov_degrees"), Fov);
+	// A model may draw another shape than the view it was given, as GPT image models draw 3:2; captured at the reference's shape,
+	// the same camera frames what the model framed, and the compare crops nothing away.
+	FString Shape;
+	FImage Drawn;
+	if (Width > 0 && FImageUtils::LoadImage(*Reference, Drawn) && Drawn.SizeX > 0 && Drawn.SizeY > 0)
+	{
+		const double Aspect = static_cast<double>(Drawn.SizeX) / Drawn.SizeY;
+		if (FMath::Abs(Aspect - static_cast<double>(Width) / FMath::Max(1, Height)) > 0.02 * Aspect)
+		{
+			Height = FMath::RoundToInt(Width / Aspect);
+			Shape = FString::Printf(TEXT(", the reference's shape: the model drew it %d x %d"), Drawn.SizeX, Drawn.SizeY);
+		}
+	}
 	const FString Location = Triple(View, TEXT("location"));
 	const FString Rotation = Triple(View, TEXT("rotation"));
 	const FString How = Source == TEXT("camera") && !Camera.IsEmpty()
-		? FString::Printf(TEXT("source camera, camera_actor_label %s, width %d and height %d"), *Camera, Width, Height)
-		: FString::Printf(TEXT("source transform, location %s, rotation %s as pitch, yaw and roll, fovDegrees %.1f, width %d and height %d"),
-			*Location, *Rotation, Fov, Width, Height);
+		? FString::Printf(TEXT("source camera, camera_actor_label %s, width %d and height %d%s"), *Camera, Width, Height, *Shape)
+		: FString::Printf(TEXT("source transform, location %s, rotation %s as pitch, yaw and roll, fovDegrees %.1f, width %d and height %d%s"),
+			*Location, *Rotation, Fov, Width, Height, *Shape);
 	return FString::Printf(TEXT("This reference is the level's own view, relit by an image model from a capture of it (%s): the same camera, framing and objects. ")
 		TEXT("Capture every attempt from that same view, unmoved: hyper_capture_view with %s. Match the light only, and where the picture drew an object a little differently, leave the object alone."),
 		*ProjectRelative(InputFull), *How);
@@ -193,14 +208,20 @@ FString BuildPrompt(const EGoal Goal, const FString& Reference, const FString& S
 			+ TEXT("How to work (the image-match skill has the details):\n")
 			+ TEXT("1. Look at the reference and say in one sentence what makes its look: time of day, key light direction and colour, palette, contrast, fog and mood.\n")
 			+ TEXT("2. Call hyper_lighting_inspect to see how the level is lit.") + Sky + TEXT("\n")
-			+ TEXT("3. Lock exposure first with lock_exposure, or every change is undone by the eye adapting. For lights in physical units that is about 15 EV100 for noon sun, 12 overcast, 8 a bright interior, 4 a dim one, -2 moonlight. A sky whose lights are not physical, such as Ultra Dynamic Sky, sits far lower, often -4 to 2: capture after locking and move the EV100 until the frame's luminanceP50 is near 0.18. A black or white capture means the EV100 is wrong, not the light.\n")
+			+ TEXT("3. Lock exposure first with lock_exposure, or every change is undone by the eye adapting. For lights in physical units that is about 15 EV100 for noon sun, 12 overcast, 8 a bright interior, 4 a dim one, -2 moonlight. A sky whose lights are not physical, such as Ultra Dynamic Sky, sits far lower, often -3 to 3: capture after locking and move the EV100 until the frame's luminanceP50 is near 0.18. A black or white capture means the EV100 is wrong, not the light.\n")
 			+ (SameView.IsEmpty()
 				? FString(TEXT("4. Frame the view once: a camera where the reference's camera would stand, captured with hyper_capture_view (source camera, the reference's aspect ratio). Use that same capture for every attempt.\n"))
 				: TEXT("4. ") + SameView + TEXT("\n"))
 			+ TEXT("5. Each attempt: make one change, or one coherent group such as the sun's angle and colour together, capture, and ") + Compare + TEXT("\n")
-			+ TEXT("6. Strongest levers first: the key light (angle, colour, intensity), then the sky and fog, then exposure and the post-process grade, with shadows and highlights graded apart for a painted look.\n")
-			+ TEXT("   Interiors, night scenes and practicals run on local lights: hyper_lighting_inspect lists the point, spot and rect lights lighting the camera's view first. set_light changes one by label (intensity in its intensity_units, color, temperature, attenuation_radius, source_radius, cone angles, source_width and source_height, cast_shadows, volumetric_scattering, location, aim_at), add_light places a new key, fill, rim or practical, and enabled false turns one off: nothing is deleted.\n")
-			+ FString::Printf(TEXT("7. Keep edits unsaved while you iterate. When the score reaches %d, save with bSave true and say so.\n\n"), Points(Target))
+			+ TEXT("6. Light it as a lighting artist does, with every tool rather than one:\n")
+			+ TEXT("   - The key light first: the sun's pitch, yaw, temperature and intensity, and source_angle for how soft its shadows fall.\n")
+			+ TEXT("   - Tell assets from light. The reference may show finished assets where the level has blockout shapes: foliage lets light through where a solid sphere blocks it, textures break light up, and bounce light fills real shadows. Do not chase an asset difference with light: set_actor_shadow false on a shape that stands for foliage, cloth or glass, and leave surface detail to the materials.\n")
+			+ TEXT("   - The atmosphere: set_sky_atmosphere (rayleigh_scale, mie_scale, MieAnisotropy for the glow around the sun); set_fog DirectionalInscatteringExponent and DirectionalInscatteringLuminance for haze the sun lights, SecondFogData for low mist, volumetric_fog with the sun's VolumetricScatteringIntensity for shafts; set_sun light_shaft_bloom with BloomScale and BloomThreshold for god rays; set_clouds with material:Cloud_GlobalCoverage, material:Cloud_GlobalDensity and LayerBottomAltitude for the sky.\n")
+			+ TEXT("   - Shadows darker than the reference: soften them with several tools together, not one: the sun's source_angle, and its ShadowAmount below 1, which lets part of its light into every shadow; set_sky_light intensity with MinOcclusion and OcclusionTint, IndirectLightingIntensity on the sun and in post process, fills that cast no shadow, set_post_process LocalExposureShadowContrastScale below 1 and a lower AmbientOcclusionIntensity, then the grade's shadows_gain.\n")
+			+ TEXT("   - Interiors, night scenes and practicals run on local lights: hyper_lighting_inspect lists the point, spot and rect lights lighting the camera's view first. set_light changes one by label (intensity in its intensity_units, color, temperature, attenuation_radius, source_radius, cone angles, source_width and source_height, cast_shadows, volumetric_scattering, location, aim_at), add_light places a new key, fill, rim or practical, and enabled false turns one off: nothing is deleted.\n")
+			+ TEXT("   - Any setting the Details panel shows on the sun, sky light, fog, sky atmosphere, clouds or post process can be set by name, such as set_sun BloomScale or set_post_process FilmToe; hyper_lighting_inspect lists what differs from the defaults.\n")
+			+ TEXT("7. Grade last, as a colourist would. Once the light is close, compare with bFitLut true: it fits a colour-grading LUT to the reference and says what the attempt would score through it. If that is higher, apply it with set_post_process color_grading_lut <lutPath>, keep refining the light, and fit again after a big change of light. Bloom, vignette and white balance finish it.\n")
+			+ FString::Printf(TEXT("8. Keep edits unsaved while you iterate. When the score reaches %d, save with bSave true and say so.\n\n"), Points(Target))
 			+ TEXT("A high score with an image that looks wrong is not a match: say what you see.");
 	}
 	return FString::Printf(TEXT("Build the open level so that it matches the reference image %s (attached): its layout, big shapes, materials and light, as a level designer and then a lighting artist would.\n\n"), *Reference) + Loop
@@ -286,7 +307,7 @@ FHyperAIStudioAgentJobVerdict Judge(FRoundState& State, const EGoal Goal, const 
 	{
 		Message += Goal == EGoal::Level
 			? TEXT("\nThe last round gained under a point, so switch to another kind of lever: add the shapes still missing, change materials, or move to the light.\n")
-			: TEXT("\nThe last round gained under a point, so switch to another kind of lever: from the sun to the sky and fog, from colour to contrast, or from the light to the post-process grade.\n");
+			: TEXT("\nThe last round gained under a point, so switch to another kind of lever: from the sun to the atmosphere, fog and clouds; from darker shadows to softer ones (sky light occlusion, indirect light, local exposure); from a blockout shape's shadow to set_actor_shadow; or from the light to the grade, with a LUT fitted by hyper_image_compare's bFitLut.\n");
 	}
 	Message += TEXT("\nOpen each side-by-side before choosing the next change, and end the turn with a one-line status.");
 	Verdict.NextMessage = Message;
