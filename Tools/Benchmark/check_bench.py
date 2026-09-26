@@ -70,6 +70,84 @@ def main():
         assert summary["targeted"] == 3 and summary["within_target"] == 1, summary
         assert summary["median_seconds"] == 175, summary
 
+    # The control arm: HyperAIStudio off in the project file and back on, keeping every other listing.
+    with tempfile.TemporaryDirectory() as scratch:
+        uproject = Path(scratch) / "Bench.uproject"
+        uproject.write_text(json.dumps({"Plugins": [{"Name": "Niagara", "Enabled": True}]}), encoding="utf-8")
+        assert not bench.clear_plugin_off("HyperAIStudio", uproject), "nothing to clear on a plain project"
+        bench.set_plugin_off("HyperAIStudio", uproject)
+        bench.set_plugin_off("HyperAIStudio", uproject)
+        plugins = json.loads(uproject.read_text(encoding="utf-8"))["Plugins"]
+        assert plugins == [{"Name": "Niagara", "Enabled": True}, {"Name": "HyperAIStudio", "Enabled": False}], plugins
+        assert bench.clear_plugin_off("HyperAIStudio", uproject)
+        assert json.loads(uproject.read_text(encoding="utf-8"))["Plugins"] == [{"Name": "Niagara", "Enabled": True}]
+    engine = bench.hyperai_engine_plugins()
+    assert {"ModelContextProtocol", "EditorToolset", "PythonScriptPlugin"} <= set(engine) and "Niagara" not in engine, engine
+
+    # Its agent sees none of HyperAI's files; afterwards the originals come back and the control's own leftovers go.
+    with tempfile.TemporaryDirectory() as scratch:
+        root, store = Path(scratch) / "Bench", Path(scratch) / "Bench" / "Saved" / "hidden"
+        (root / ".claude" / "skills").mkdir(parents=True)
+        (root / ".claude" / "skills" / "SKILL.md").write_text("hyperai", encoding="utf-8")
+        (root / "AGENTS.md").write_text("hyperai", encoding="utf-8")
+        (root / "Content").mkdir()
+        assert bench.hide_agent_files(root, store) == ["AGENTS.md", ".claude"]
+        assert not (root / "AGENTS.md").exists() and not (root / ".claude").exists() and (root / "Content").is_dir()
+        (root / ".claude").mkdir()
+        (root / ".claude" / "settings.local.json").write_text("control", encoding="utf-8")
+        assert sorted(bench.restore_agent_files(root, store)) == [".claude", "AGENTS.md"]
+        assert (root / ".claude" / "skills" / "SKILL.md").read_text(encoding="utf-8") == "hyperai"
+        assert not (root / ".claude" / "settings.local.json").exists() and not store.exists()
+        assert bench.restore_agent_files(root, store) == [], "restoring twice is harmless"
+
+    # The control's environment restores HyperAI even when the run inside it fails.
+    calls = []
+    saved = {name: getattr(bench, name) for name in ("ensure_plugins", "set_plugin_off", "hide_agent_files", "stop_editor", "restore_hyperai")}
+    try:
+        bench.ensure_plugins = lambda source=None: calls.append("ensure")
+        bench.set_plugin_off = lambda name, uproject=None: calls.append(f"off:{name}")
+        bench.hide_agent_files = lambda *a: calls.append("hide") or []
+        bench.stop_editor = lambda: calls.append("stop")
+        bench.restore_hyperai = lambda: calls.append("restore")
+        with bench.arm_environment("hyperai"):
+            pass
+        assert calls == [], "the product arm changes nothing"
+        try:
+            with bench.arm_environment("epic"):
+                calls.append("run")
+                raise RuntimeError("agent crashed")
+        except RuntimeError:
+            pass
+        assert calls == ["ensure", "off:HyperAIStudio", "hide", "run", "stop", "restore"], calls
+    finally:
+        for name, value in saved.items():
+            setattr(bench, name, value)
+    run = Path("runs") / "x"
+    assert bench.run_dir_for(run, "codex", "01-niagara", "epic", 0, 1) == run / "codex" / "01-niagara-epic"
+    assert bench.run_dir_for(run, "codex", "01-niagara", "hyperai", 1, 3) == run / "codex" / "01-niagara-r2"
+
+    # NeoStack's published figures agree with themselves, and the scorecard compares both arms against them.
+    passes = {}
+    for task, winners in bench.PUBLISHED["passes"].items():
+        for product, (requests, _) in winners.items():
+            passes[product] = passes.get(product, 0) + 1
+            assert requests <= bench.PUBLISHED["products"][product]["requests"]
+    assert all(passes.get(product, 0) == p["passed"] for product, p in bench.PUBLISHED["products"].items()), passes
+    assert bench.published_uplift() == {"tasks": 2, "requests": 0.39, "failed": 0.41}
+    with tempfile.TemporaryDirectory() as scratch:
+        run = Path(scratch)
+        def row(task, ok, requests, failed, arm):
+            return {"agent": "claude", "arm": arm, "task": task, "pass": ok, "seconds": 300, "stop_reason": "completed",
+                    "accounting": {"requests": requests, "state_changing": 5, "failed": failed}, "verification": {"checks": []}}
+        records = [row("01-niagara", True, 30, 2, "hyperai"), row("04-umg", False, 30, 3, "hyperai"),
+                   row("01-niagara", False, 100, 10, "epic"), row("04-umg", False, 100, 10, "epic")]
+        (run / "results.json").write_text(json.dumps({"meta": meta, "records": records}), encoding="utf-8")
+        summary = bench.write_report(run)
+        assert summary["claude"]["passed"] == 1 and summary["claude+epic"]["passed"] == 0, summary
+        assert bench.uplift(summary["claude"], summary["claude+epic"]) == {"tasks": 1, "requests": 0.3, "failed": 0.25}
+        page = (run / "scorecard.html").read_text(encoding="utf-8")
+        assert "Uplift over the control" in page and "none of the five passed" in page and "NeoStack 50 requests, 13.3 min" in page
+
     # Archived runs: replay each transcript through the parser and report what the check would have said.
     for run_dir in map(Path, sys.argv[1:]):
         for transcript in sorted(run_dir.glob("*/*/transcript.jsonl")):

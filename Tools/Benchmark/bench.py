@@ -11,12 +11,14 @@ editor, which is exactly what makes "saved" provable, and exactly what must neve
     python Tools/Benchmark/bench.py editor start     launch the bench editor and wait for MCP
     python Tools/Benchmark/bench.py editor stop
     python Tools/Benchmark/bench.py run --agent codex --task all
+    python Tools/Benchmark/bench.py run --agent claude --arm both    HyperAI and the Epic-only control, same model
     python Tools/Benchmark/bench.py report
 
 Standard library only.
 """
 
 import argparse
+import contextlib
 import filecmp
 import json
 import os
@@ -100,6 +102,37 @@ MCP_SETTINGS = {
     "bEnableToolSearch": "True",
 }
 
+# Two arms. "hyperai" is the product. "epic" is a control: HyperAIStudio switched off and its agent files out of sight,
+# leaving Epic's Unreal MCP and the same engine plugins. NeoStack's pilot measured Epic's Unreal MCP too, so the control
+# ties this bench to theirs: with one model and one verifier on both arms, HyperAI's result reads as an uplift over a
+# shared baseline, which a stronger model or a gentler verifier cannot fake.
+ARMS = ("hyperai", "epic")
+PLUGIN_NAME = "HyperAIStudio"
+# Everything HyperAIStudio writes into a project for agents: instructions, MCP configs, skills, subagents, the tool guide.
+AGENT_FILES = ("AGENTS.md", "CLAUDE.md", ".mcp.json", ".hyperai", ".claude", ".codex", ".agents", ".gemini", ".cursor",
+               ".vscode")
+HIDDEN_AGENT_FILES = BENCH_ROOT / "Saved" / "HyperAIBench" / "hidden-agent-files"
+
+# NeoStack's published pilot: https://neostack.dev/benchmark.md, run 31 July 2026, one run per product and task.
+PUBLISHED = {
+    "date": "31 July 2026",
+    "products": {
+        "NeoStack": {"passed": 3, "requests": 145, "median": 27, "minutes": 36.4, "failed": 14},
+        "Aura": {"passed": 1, "requests": 159, "median": 30, "minutes": 61.1, "failed": 17},
+        "Epic Unreal MCP": {"passed": 1, "requests": 375, "median": 66, "minutes": 48.3, "failed": 34},
+        "Nwiro": {"passed": 0, "requests": 320, "median": 64, "minutes": 34.7, "failed": 35},
+        "UE Copilot": {"passed": 0, "requests": 448, "median": 87, "minutes": 58.6, "failed": 29},
+    },
+    # Per task they published passing runs only, as (requests, minutes).
+    "passes": {
+        "01-niagara": {"NeoStack": (50, 13.3)},
+        "02-material": {"Aura": (36, 9.4)},
+        "03-level": {"NeoStack": (17, 4.1), "Epic Unreal MCP": (66, 11.4)},
+        "04-umg": {},
+        "05-animbp": {"NeoStack": (28, 5.9)},
+    },
+}
+
 
 def log(message):
     print(f"[bench] {message}", flush=True)
@@ -163,15 +196,51 @@ def create_project():
     uproject_path().write_text(json.dumps(project, indent="\t") + "\n", encoding="utf-8")
 
 
-def ensure_plugins():
+def bench_plugin_dir():
+    return BENCH_ROOT / "Plugins" / PLUGIN_FOLDER
+
+
+def hyperai_engine_plugins(source=PLUGIN_ROOT):
+    """The engine plugins HyperAIStudio switches on itself. The project lists them too, so the control arm, with
+    HyperAIStudio off, keeps the same Epic toolsets and differs by HyperAI alone."""
+    descriptor = json.loads((Path(source) / f"{PLUGIN_NAME}.uplugin").read_text(encoding="utf-8-sig"))
+    return tuple(plugin["Name"] for plugin in descriptor.get("Plugins", []) if plugin.get("Enabled"))
+
+
+def ensure_plugins(source=PLUGIN_ROOT):
     project = json.loads(uproject_path().read_text(encoding="utf-8-sig"))
     plugins = project.setdefault("Plugins", [])
     enabled = {plugin["Name"] for plugin in plugins}
-    added = [name for name in REQUIRED_PLUGINS if name not in enabled]
+    wanted = dict.fromkeys(REQUIRED_PLUGINS + hyperai_engine_plugins(source))
+    added = [name for name in wanted if name not in enabled]
     plugins.extend({"Name": name, "Enabled": True} for name in added)
     if added:
         uproject_path().write_text(json.dumps(project, indent="\t") + "\n", encoding="utf-8")
         log(f"Enabled {len(added)} plugins: {', '.join(added)}")
+
+
+def set_plugin_off(name, uproject=None):
+    """Lists a project plugin as disabled. Project plugins are on unless the project says otherwise."""
+    path = uproject or uproject_path()
+    project = json.loads(path.read_text(encoding="utf-8-sig"))
+    plugins = [plugin for plugin in project.setdefault("Plugins", []) if plugin.get("Name") != name]
+    project["Plugins"] = plugins + [{"Name": name, "Enabled": False}]
+    path.write_text(json.dumps(project, indent="\t") + "\n", encoding="utf-8")
+
+
+def clear_plugin_off(name, uproject=None):
+    """Removes a disabled listing, so the project plugin is on again; returns whether there was one."""
+    path = uproject or uproject_path()
+    if not path.exists():
+        return False
+    project = json.loads(path.read_text(encoding="utf-8-sig"))
+    plugins = project.get("Plugins", [])
+    kept = [plugin for plugin in plugins if not (plugin.get("Name") == name and plugin.get("Enabled") is False)]
+    if len(kept) == len(plugins):
+        return False
+    project["Plugins"] = kept
+    path.write_text(json.dumps(project, indent="\t") + "\n", encoding="utf-8")
+    return True
 
 
 def ensure_settings():
@@ -245,11 +314,13 @@ def build_editor():
 def cmd_setup(args):
     if editor_running():
         raise SystemExit("The bench editor is running; stop it first (bench.py editor stop).")
+    source = Path(args.source) if args.source else PLUGIN_ROOT
     if not uproject_path().exists():
         create_project()
-    ensure_plugins()
+    restore_hyperai()
+    ensure_plugins(source)
     ensure_settings()
-    mirror_plugin(Path(args.source) if args.source else PLUGIN_ROOT)
+    mirror_plugin(source)
     if not args.skip_build:
         build_editor()
     log("Setup done.")
@@ -358,7 +429,7 @@ def clear_restore_prompt():
     shutil.rmtree(BENCH_ROOT / "Saved" / "Autosaves", ignore_errors=True)
 
 
-def start_editor(extra_args=(), timeout=300):
+def start_editor(extra_args=(), timeout=300, require_hyperai=True):
     if editor_running():
         log("Bench editor already running.")
     else:
@@ -372,7 +443,7 @@ def start_editor(extra_args=(), timeout=300):
     deadline = time.time() + timeout
     message = ""
     while time.time() < deadline:
-        ready, message = mcp_ready()
+        ready, message = mcp_ready(require_hyperai)
         if ready:
             log(f"MCP ready at {MCP_URL}: {message}.")
             return True
@@ -397,6 +468,8 @@ def stop_editor():
 
 def cmd_editor(args):
     if args.action == "start":
+        if not editor_running():
+            restore_hyperai()
         start_editor(args.extra or ())
     elif args.action == "stop":
         stop_editor()
@@ -404,6 +477,73 @@ def cmd_editor(args):
         running = editor_running()
         ready, message = mcp_ready() if running else (False, "editor not running")
         log(f"running={running} ready={ready} ({message})")
+
+
+# -------------------------------------------------------------------------------------------- arms
+
+
+def restore_agent_files(root=BENCH_ROOT, store=HIDDEN_AGENT_FILES):
+    """Puts hidden agent files back. Anything the control run left in their place is its own and goes."""
+    if not store.is_dir():
+        return []
+    restored = []
+    for item in sorted(store.iterdir()):
+        target = root / item.name
+        if target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
+        shutil.move(str(item), str(target))
+        restored.append(item.name)
+    store.rmdir()
+    return restored
+
+
+def hide_agent_files(root=BENCH_ROOT, store=HIDDEN_AGENT_FILES):
+    """Moves HyperAI's agent files out of the project, so the control arm's agent sees none of them."""
+    restore_agent_files(root, store)
+    hidden = []
+    for name in AGENT_FILES:
+        if (root / name).exists():
+            store.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(root / name), str(store / name))
+            hidden.append(name)
+    return hidden
+
+
+def restore_hyperai():
+    """Undoes a control arm, including one a crash cut short: HyperAIStudio on and its agent files back."""
+    restored = restore_agent_files()
+    if clear_plugin_off(PLUGIN_NAME) or restored:
+        log(f"{PLUGIN_NAME} is on again" + (f"; restored {', '.join(restored)}." if restored else "."))
+
+
+def control_mcp_config():
+    """Claude's MCP config for the control arm, which runs without the project's .mcp.json: the bench editor only."""
+    path = BENCH_ROOT / "Saved" / "HyperAIBench" / "control.mcp.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"mcpServers": {"unreal-mcp": {"type": "http", "url": MCP_URL}}}, indent=2) + "\n",
+                    encoding="utf-8")
+    return path
+
+
+@contextlib.contextmanager
+def arm_environment(arm):
+    """Sets the project up for one arm's agent run; enter with the editor stopped. The control arm stops the editor
+    and restores HyperAI on the way out, because verification loads HyperAI's verifier module."""
+    if arm != "epic":
+        yield
+        return
+    source = bench_plugin_dir() if (bench_plugin_dir() / f"{PLUGIN_NAME}.uplugin").exists() else PLUGIN_ROOT
+    ensure_plugins(source)
+    set_plugin_off(PLUGIN_NAME)
+    hidden = hide_agent_files()
+    log(f"Control arm: {PLUGIN_NAME} off" + (f"; hid {', '.join(hidden)}." if hidden else "."))
+    try:
+        yield
+    finally:
+        stop_editor()
+        restore_hyperai()
 
 
 # ------------------------------------------------------------------------------------------ verify
@@ -431,6 +571,7 @@ def verify(tasks, log_path, timeout=900):
     """Runs the verification tests in a fresh editor, which only knows what was saved to disk."""
     if editor_running():
         raise SystemExit("Stop the bench editor before verifying: verification must load only saved state.")
+    restore_hyperai()
     report_dir = BENCH_ROOT / "Saved" / "HyperAIBench" / "verify"
     shutil.rmtree(report_dir, ignore_errors=True)
     clear_restore_prompt()
@@ -668,10 +809,10 @@ def claude_executable():
     return shim or "claude"
 
 
-def claude_command(prompt, model, effort):
+def claude_command(prompt, model, effort, mcp_config=None):
     # The prompt goes on stdin, never argv, so no shell ever gets to parse it.
     command = [claude_executable(), "-p", "--output-format", "stream-json", "--verbose",
-               "--strict-mcp-config", "--mcp-config", str(BENCH_ROOT / ".mcp.json"),
+               "--strict-mcp-config", "--mcp-config", str(mcp_config or BENCH_ROOT / ".mcp.json"),
                "--allowedTools", "mcp__unreal-mcp__list_toolsets,mcp__unreal-mcp__describe_toolset,mcp__unreal-mcp__call_tool,Read,Glob,Grep",
                "--permission-prompts", "none"]
     if model:
@@ -685,19 +826,21 @@ def kill_tree(process):
     subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True)
 
 
-def run_agent(agent, prompt, out_dir, args, seconds=TASK_SECONDS):
+def run_agent(agent, prompt, out_dir, args, seconds=TASK_SECONDS, arm="hyperai"):
     """Runs one agent on one task, counting as it goes, and stops it at either limit."""
     import queue
     import threading
 
     safety = load_catalog_safety()
     acct = Accounting(safety)
-    state = {"agent": agent}
+    state = {"agent": agent, "arm": arm}
     if agent == "codex":
+        # Codex is given the bench server on its command line whatever the arm.
         command = codex_command(prompt, args.codex_model, args.codex_effort)
         parse = parse_codex
     else:
-        command = claude_command(prompt, args.claude_model, args.claude_effort)
+        mcp_config = control_mcp_config() if arm == "epic" else None
+        command = claude_command(prompt, args.claude_model, args.claude_effort, mcp_config)
         parse = parse_claude
     executable = shutil.which(command[0]) or command[0]
     transcript = open(out_dir / "transcript.jsonl", "w", encoding="utf-8")
@@ -840,12 +983,12 @@ def usage_reset_time(message, now=None):
     return (target if target > now else target + 86400) + 120
 
 
-def run_one(agent, task, out_dir, args):
+def run_one(agent, task, out_dir, args, arm="hyperai"):
     """One run; when a usage limit cut it short, the attempt is kept beside it and the run starts over later."""
     waited = 0.0
     attempt = 1
     while True:
-        record = run_attempt(agent, task, out_dir, args)
+        record = run_attempt(agent, task, out_dir, args, arm)
         if record["stop_reason"] != "usage_limit":
             return record
         resume = usage_reset_time(record["usage_limit"])
@@ -863,34 +1006,37 @@ def run_one(agent, task, out_dir, args):
         attempt += 1
 
 
-def run_attempt(agent, task, out_dir, args):
+def run_attempt(agent, task, out_dir, args, arm="hyperai"):
     task_id, test, _ = task
     out_dir.mkdir(parents=True, exist_ok=True)
     prompt = PROMPT_PREAMBLE + "\n\n" + (TASKS_DIR / f"{task_id}.md").read_text(encoding="utf-8").strip()
+    name = agent if arm == "hyperai" else f"{agent} (Epic MCP only)"
     stop_editor()
+    restore_hyperai()
     wipe_bench_content()
     if agent == "claude":
         # Every run starts from nothing an earlier run learned; what this one writes is kept with it below.
         shutil.rmtree(claude_memory_dir(), ignore_errors=True)
-    start_editor(timeout=900)
-    offset = editor_log_size()
-    seconds = task_seconds(task_id)
-    log(f"{agent} / {task_id}: running (limit {seconds // 60} min, {MAX_STATE_CHANGING} state-changing requests).")
-    record = run_agent(agent, prompt, out_dir, args, seconds)
-    record["editor_log_tool_calls"] = editor_log_tool_lines(offset)
-    if agent == "claude" and claude_memory_dir().is_dir():
-        shutil.copytree(claude_memory_dir(), out_dir / "agent-memory", dirs_exist_ok=True)
-    limit = usage_limit_message(agent, record, out_dir)
-    if limit:
+    with arm_environment(arm):
+        start_editor(timeout=900, require_hyperai=arm == "hyperai")
+        offset = editor_log_size()
+        seconds = task_seconds(task_id)
+        log(f"{name} / {task_id}: running (limit {seconds // 60} min, {MAX_STATE_CHANGING} state-changing requests).")
+        record = run_agent(agent, prompt, out_dir, args, seconds, arm)
+        record["editor_log_tool_calls"] = editor_log_tool_lines(offset)
+        if agent == "claude" and claude_memory_dir().is_dir():
+            shutil.copytree(claude_memory_dir(), out_dir / "agent-memory", dirs_exist_ok=True)
+        limit = usage_limit_message(agent, record, out_dir)
+        if not limit:
+            # Work the agent submitted just before exiting still gets its editor ticks to land and save.
+            time.sleep(10)
         stop_editor()
+    if limit:
         record.update({"task": task_id, "pass": False, "stop_reason": "usage_limit", "usage_limit": limit,
                        "verification": {"error": "stopped by the agent's plan usage limit"}, "out_dir": str(out_dir)})
         (out_dir / "record.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
-        log(f"{agent} / {task_id}: stopped by a usage limit after {record['seconds']:.0f}s: {limit[:200]}")
+        log(f"{name} / {task_id}: stopped by a usage limit after {record['seconds']:.0f}s: {limit[:200]}")
         return record
-    # Work the agent submitted just before exiting still gets its editor ticks to land and save.
-    time.sleep(10)
-    stop_editor()
     archive_bench_content(out_dir)
     verification = verify([task], out_dir / "verify.log")[task_id]
     copy_evidence(task_id, out_dir)
@@ -900,13 +1046,19 @@ def run_attempt(agent, task, out_dir, args):
         record["within_target"] = record["pass"] and record["seconds"] <= TARGET_SECONDS[task_id]
     (out_dir / "record.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
     acct = record["accounting"]
-    log(f"{agent} / {task_id}: {'PASS' if record['pass'] else 'FAIL'} in {record['seconds']:.0f}s, "
+    log(f"{name} / {task_id}: {'PASS' if record['pass'] else 'FAIL'} in {record['seconds']:.0f}s, "
         f"{acct['requests']} requests ({acct['state_changing']} state-changing, {acct['failed']} failed), stop={record['stop_reason']}")
     return record
 
 
+def run_dir_for(run_dir, agent, task_id, arm, repeat, repeats):
+    """<run>/<agent>/<task>[-epic][-rN]: the agent stays the folder, so archived transcripts replay by folder name."""
+    return run_dir / agent / (task_id + ("-epic" if arm == "epic" else "") + (f"-r{repeat + 1}" if repeats > 1 else ""))
+
+
 def cmd_run(args):
     agents = ["codex", "claude"] if args.agent == "both" else [args.agent]
+    arms = list(ARMS) if args.arm == "both" else [args.arm]
     tasks = select_tasks(args.task)
     run_id = time.strftime("%Y%m%d-%H%M%S") + (f"-{args.label}" if args.label else "")
     run_dir = RUNS_DIR / run_id
@@ -916,18 +1068,19 @@ def cmd_run(args):
     except (OSError, ValueError, KeyError):
         measured = git_commit()
     meta = {"run_id": run_id, "plugin_commit": measured, "started": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "agents": agents, "tasks": [t[0] for t in tasks], "repeats": args.repeats,
+            "agents": agents, "arms": arms, "tasks": [t[0] for t in tasks], "repeats": args.repeats,
             "codex_model": args.codex_model, "codex_effort": args.codex_effort,
             "claude_model": args.claude_model, "claude_effort": args.claude_effort,
             "limits": {"seconds": TASK_SECONDS, "state_changing": MAX_STATE_CHANGING,
                        "task_seconds": {t[0]: task_seconds(t[0]) for t in tasks}}}
     records = []
     for repeat in range(args.repeats):
-        for agent in agents:
-            for task in tasks:
-                suffix = f"-r{repeat + 1}" if args.repeats > 1 else ""
-                records.append(run_one(agent, task, run_dir / agent / f"{task[0]}{suffix}", args))
-                (run_dir / "results.json").write_text(json.dumps({"meta": meta, "records": records}, indent=2), encoding="utf-8")
+        for arm in arms:
+            for agent in agents:
+                for task in tasks:
+                    out_dir = run_dir_for(run_dir, agent, task[0], arm, repeat, args.repeats)
+                    records.append(run_one(agent, task, out_dir, args, arm))
+                    (run_dir / "results.json").write_text(json.dumps({"meta": meta, "records": records}, indent=2), encoding="utf-8")
     write_report(run_dir)
     log(f"Run {run_id} done: {run_dir}")
 
@@ -954,20 +1107,46 @@ def cmd_reverify(args):
 # ------------------------------------------------------------------------------------------ report
 
 
+def arm_key(record):
+    """A record's row in the scorecard: its agent, or agent+epic for the control arm."""
+    return record["agent"] + ("+epic" if record.get("arm", "hyperai") == "epic" else "")
+
+
+def arm_label(key):
+    agent, _, arm = key.partition("+")
+    return f"{agent}, Epic MCP only" if arm == "epic" else f"{agent} + HyperAI"
+
+
+def uplift(ours, control):
+    """What HyperAI adds over the Epic-only control: tasks gained, and requests and failures as a share of the control's."""
+    return {"tasks": ours["passed"] - control["passed"],
+            "requests": round(ours["requests"] / control["requests"], 2) if control["requests"] else None,
+            "failed": round(ours["failed_requests"] / control["failed_requests"], 2) if control["failed_requests"] else None}
+
+
+def published_uplift():
+    """NeoStack over Epic's Unreal MCP in their own pilot, the same comparison the control arm makes here."""
+    neo, epic = PUBLISHED["products"]["NeoStack"], PUBLISHED["products"]["Epic Unreal MCP"]
+    return {"tasks": neo["passed"] - epic["passed"], "requests": round(neo["requests"] / epic["requests"], 2),
+            "failed": round(neo["failed"] / epic["failed"], 2)}
+
+
 def write_report(run_dir):
-    """A scorecard in the benchmark's own shape: tasks passed, requests, median per task, time, failures."""
+    """A scorecard in the benchmark's own shape (tasks passed, requests, median per task, time, failures), beside
+    NeoStack's published pilot and, when the control arm ran, HyperAI's uplift over Epic's Unreal MCP."""
     import html
     import statistics
 
     results = json.loads((run_dir / "results.json").read_text(encoding="utf-8"))
     meta, records = results["meta"], results["records"]
-    agents = sorted({r["agent"] for r in records})
+    keys = sorted({arm_key(r) for r in records})
     summary = {}
     rows = []
-    for agent in agents:
-        mine = [r for r in records if r["agent"] == agent]
+    for key in keys:
+        mine = [r for r in records if arm_key(r) == key]
         requests = [r["accounting"]["requests"] for r in mine]
-        summary[agent] = {
+        summary[key] = {
+            "arm": "epic" if key.endswith("+epic") else "hyperai",
             "passed": sum(r["pass"] for r in mine), "tasks": len(mine),
             "requests": sum(requests), "median_requests": statistics.median(requests) if requests else 0,
             "failed_requests": sum(r["accounting"]["failed"] for r in mine),
@@ -976,11 +1155,49 @@ def write_report(run_dir):
             "targeted": sum("target_seconds" in r for r in mine),
             "within_target": sum(bool(r.get("within_target")) for r in mine),
         }
-        s = summary[agent]
+        s = summary[key]
         target = f"{s['within_target']} / {s['targeted']}" if s["targeted"] else "-"
-        rows.append(f"<tr><td>{html.escape(agent)}</td><td>{s['passed']} / {s['tasks']}</td><td>{target}</td><td>{s['requests']}</td>"
+        rows.append(f"<tr><td>{html.escape(arm_label(key))}</td><td>{s['passed']} / {s['tasks']}</td><td>{target}</td><td>{s['requests']}</td>"
                     f"<td>{s['median_requests']}</td><td>{s['failed_requests']}</td><td>{s['minutes']} min</td>"
                     f"<td>{s['median_seconds'] / 60:.1f} min</td></tr>")
+
+    # Each task once, ours beside the passes NeoStack published for it.
+    task_ids = [t[0] for t in TASKS if any(r["task"] == t[0] for r in records)]
+    by_task = []
+    for task_id in task_ids:
+        cells = []
+        for key in keys:
+            mine = [r for r in records if arm_key(r) == key and r["task"] == task_id]
+            if not mine:
+                cells.append("<td>-</td>")
+                continue
+            passed = sum(r["pass"] for r in mine)
+            median = statistics.median(r["accounting"]["requests"] for r in mine)
+            verdict = ("Pass" if passed else "Fail") if len(mine) == 1 else f"{passed} / {len(mine)} passed"
+            cells.append(f"<td class='{'pass' if passed else 'fail'}'>{verdict}, {median:g} requests</td>")
+        if task_id in PUBLISHED["passes"]:
+            passes = PUBLISHED["passes"][task_id]
+            theirs = "; ".join(f"{product} {req} requests, {minutes} min" for product, (req, minutes) in passes.items()) or "none of the five passed"
+        else:
+            theirs = "not in the pilot"
+        by_task.append(f"<tr><td>{html.escape(task_id)}</td>{''.join(cells)}<td>{html.escape(theirs)}</td></tr>")
+
+    comparisons = []
+    reference = published_uplift()
+    for key in keys:
+        control = summary.get(f"{key}+epic")
+        if "+" in key or not control:
+            continue
+        gain = uplift(summary[key], control)
+        same = {r["task"] for r in records if arm_key(r) == key} == {r["task"] for r in records if arm_key(r) == f"{key}+epic"}
+        ratio = lambda value: "n/a" if value is None else f"{value}x"
+        comparisons.append(
+            f"<li>{html.escape(key)}: HyperAI passes {gain['tasks']:+d} tasks over the Epic-only control, with "
+            f"{ratio(gain['requests'])} its requests and {ratio(gain['failed'])} its failed requests"
+            + ("" if same else " (the arms ran different tasks, so this is not a like-for-like comparison)")
+            + f". NeoStack over Epic MCP in their pilot: {reference['tasks']:+d} tasks, {reference['requests']}x requests, "
+            f"{reference['failed']}x failed requests.</li>")
+
     details = []
     for r in records:
         acct = r["accounting"]
@@ -988,14 +1205,19 @@ def write_report(run_dir):
         failing = [c for c in checks if c["required"] and not c["pass"]]
         why = "; ".join(f"{c['id']}: {c['detail']}" for c in failing[:4]) or r["verification"].get("error", "")
         details.append(
-            f"<tr class='{'pass' if r['pass'] else 'fail'}'><td>{html.escape(r['agent'])}</td><td>{html.escape(r['task'])}</td>"
+            f"<tr class='{'pass' if r['pass'] else 'fail'}'><td>{html.escape(arm_label(arm_key(r)))}</td><td>{html.escape(r['task'])}</td>"
             f"<td>{'Pass' if r['pass'] else 'Fail'}</td><td>{acct['requests']}</td><td>{acct['state_changing']}</td>"
             f"<td>{acct['failed']}</td><td>{r['seconds'] / 60:.1f} min</td><td>{html.escape(r['stop_reason'])}</td>"
             f"<td>{html.escape(why)}</td></tr>")
+
+    published = "".join(
+        f"<tr><td>{html.escape(product)}</td><td>{p['passed']} / 5</td><td>{p['requests']}</td><td>{p['median']}</td>"
+        f"<td>{p['failed']}</td><td>{p['minutes']} min</td></tr>" for product, p in PUBLISHED["products"].items())
+    headers = "".join(f"<th>{html.escape(arm_label(key))}</th>" for key in keys)
     page = f"""<!doctype html><html><head><meta charset="utf-8"><title>HyperAIStudio benchmark {html.escape(meta['run_id'])}</title>
 <style>body{{font:14px system-ui,sans-serif;margin:24px;max-width:1200px}}table{{border-collapse:collapse;width:100%;margin:12px 0}}
-td,th{{border-bottom:1px solid #ddd;padding:6px 8px;text-align:left;vertical-align:top}}tr.pass td:nth-child(3){{color:#137333;font-weight:600}}
-tr.fail td:nth-child(3){{color:#b3261e;font-weight:600}}code{{background:#f3f3f3;padding:1px 4px}}</style></head><body>
+td,th{{border-bottom:1px solid #ddd;padding:6px 8px;text-align:left;vertical-align:top}}tr.pass td:nth-child(3),td.pass{{color:#137333;font-weight:600}}
+tr.fail td:nth-child(3),td.fail{{color:#b3261e;font-weight:600}}code{{background:#f3f3f3;padding:1px 4px}}</style></head><body>
 <h1>HyperAIStudio benchmark</h1>
 <p>Run <code>{html.escape(meta['run_id'])}</code>, plugin <code>{html.escape(meta['plugin_commit'])}</code>, started {html.escape(meta['started'])}.
 Limits: {meta['limits']['seconds'] // 60} minutes and {meta['limits']['state_changing']} state-changing requests per task.
@@ -1003,12 +1225,19 @@ Models: Codex <code>{html.escape(str(meta['codex_model']))}</code> ({html.escape
 Claude <code>{html.escape(str(meta['claude_model']))}</code> ({html.escape(str(meta['claude_effort']))}).</p>
 <table><tr><th>Agent</th><th>Tasks passed</th><th>Passed within target</th><th>Total requests</th><th>Median / task</th><th>Failed requests</th><th>Total time</th><th>Median time</th></tr>
 {''.join(rows)}</table>
-<h2>Per task</h2>
+{f"<h2>Uplift over the control</h2><ul>{''.join(comparisons)}</ul>" if comparisons else ""}
+<h2>By task</h2>
+<table><tr><th>Task</th>{headers}<th>Published passes</th></tr>
+{''.join(by_task)}</table>
+<h2>Every run</h2>
 <table><tr><th>Agent</th><th>Task</th><th>Result</th><th>Requests</th><th>State-changing</th><th>Failed</th><th>Time</th><th>Stopped</th><th>Why</th></tr>
 {''.join(details)}</table>
-<p>NeoStack's published pilot (31 July 2026), for reference, as passed / requests / median / failed: NeoStack 3/5, 145, 27, 14;
-Aura 1/5, 159, 30, 17; Epic MCP 1/5, 375, 66, 34; UE Copilot 0/5, 448, 87, 29; Nwiro 0/5, 320, 64, 35.
-Their tasks and verifier are not public; these tasks follow their descriptions, and this verifier checks saved state in a fresh editor.</p>
+<h2>NeoStack's published pilot, {html.escape(PUBLISHED['date'])}</h2>
+<table><tr><th>Product</th><th>Tasks passed</th><th>Total requests</th><th>Median / task</th><th>Failed requests</th><th>Total time</th></tr>
+{published}</table>
+<p>One run per product and task, with one model they do not name. Their tasks and verifier are not public; these tasks follow
+their descriptions, and this verifier checks saved state in a fresh editor. Read HyperAI's numbers against theirs through the
+control arm, which runs Epic's Unreal MCP on this bench with this run's model.</p>
 </body></html>"""
     (run_dir / "scorecard.html").write_text(page, encoding="utf-8")
     (run_dir / "summary.json").write_text(json.dumps({"meta": meta, "summary": summary}, indent=2), encoding="utf-8")
@@ -1049,6 +1278,8 @@ def main(argv=None):
 
     run = sub.add_parser("run", help="run agents on tasks, verify, and write a scorecard")
     run.add_argument("--agent", choices=("codex", "claude", "both"), default="both")
+    run.add_argument("--arm", choices=ARMS + ("both",), default="hyperai",
+                     help="hyperai, epic (a control: Epic's Unreal MCP alone, as NeoStack also measured it), or both")
     run.add_argument("--task", default="all", help="all (the five comparison tasks), bp (the Blueprint speed tasks), or a comma list such as 01,06")
     run.add_argument("--repeats", type=int, default=1)
     run.add_argument("--label", default="")
