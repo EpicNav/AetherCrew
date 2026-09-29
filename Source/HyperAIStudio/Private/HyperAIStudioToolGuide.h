@@ -16,6 +16,9 @@ namespace HyperAIStudio::ToolGuide
 {
 	FString Build();
 	FString GetPath();
-	/** Writes the guide when it is missing or differs from what the running editor would write. */
+	/** Epic's toolsets the same way, from the schemas the toolset registry serves, in Epic-ToolGuide.md beside it. */
+	FString BuildEpic();
+	FString GetEpicPath();
+	/** Writes both guides when missing or different from what the running editor would write. */
 	bool Ensure();
 }
