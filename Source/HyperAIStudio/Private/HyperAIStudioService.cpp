@@ -4843,7 +4843,7 @@ void BuildAgentInstructionBlocks(
 		TEXT("- Parallel agents can share this editor: reads run side by side, and HyperAI edits wait their turn (status `queued`; `hyper_operation_wait` waits through it). Give each agent its own assets; two agents editing one asset still conflict.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Fast Paths") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("- Before your first Unreal call, read `.hyperai/docs/HyperAIStudio-ToolGuide.md`. It lists every HyperAIStudio toolset, tool, and field, so you can `call_tool` directly.") LINE_TERMINATOR +
-		TEXT("- For Epic's toolsets, grep `.hyperai/docs/Epic-ToolGuide.md` for the tool you need: it lists every field, which ones are required, and each enum's names, so `list_toolsets` and `describe_toolset` are rarely needed.") LINE_TERMINATOR +
+		TEXT("- For Epic's toolsets, grep `.hyperai/docs/Epic-ToolGuide.md` for the tool you need: it lists every field, which ones are required, and each enum's names, so a toolset seldom needs looking up.") LINE_TERMINATOR +
 		TEXT("- Edit in one call: a pack's `*_apply_plan` with `bDryRun: false` and a fresh `operationId` (`expectedPlanHash` is optional) replies once the edit has finished; then the pack's validate tool. Only a reply still `queued` or `running` needs `hyper_operation_wait` (toolset `HyperAIStudio.HyperAIStudioNativeReadToolset`, arguments `{\"operationId\": ...}`).") LINE_TERMINATOR +
 		TEXT("- Current level: `call_tool` -> `editor_toolset.toolsets.scene.SceneTools` / `get_current_level` / `{}`.") LINE_TERMINATOR +
 		TEXT("- List actors: `call_tool` -> `editor_toolset.toolsets.scene.SceneTools` / `find_actors` / `{\"name\":\"\",\"tag\":\"\",\"collision_channels\":[]}`.") LINE_TERMINATOR LINE_TERMINATOR +
