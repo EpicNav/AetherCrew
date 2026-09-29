@@ -164,8 +164,20 @@ struct FHyperAISoundOp
 	UPROPERTY() double LengthBeats = 0.0;
 	/** clip.midi: its notes. */
 	UPROPERTY() TArray<FHyperAISoundNote> Notes;
-	/** clip.audio: a SoundWave in the project. */
+	/**
+	 * clip.audio: a SoundWave in the project, or a sound file on disk (WAV, FLAC, OGG, AIFF, such as a sound library's),
+	 * imported into /Game/Audio/Library once and reused after. device.add, device.set: the same, as the sample gen.sampler
+	 * plays across the keys (set its root param to the key the sound was recorded at) or fx.verb's impulse response.
+	 */
 	UPROPERTY() FString Sound;
+	/** device.add, device.set on gen.sampler: one_shot plays the sample once per note, loop holds it (loopstart, loopend, xfadelen), granular clouds it. */
+	UPROPERTY() FString SamplerMode;
+	/**
+	 * clip.audio: where in the sound the clip begins, and how much of it plays, in seconds; 0 plays to its end. Library
+	 * files often hold several takes one after another: pick one this way.
+	 */
+	UPROPERTY() double SourceStartSeconds = 0.0;
+	UPROPERTY() double SourceSeconds = 0.0;
 	/** clip.audio: gain as a factor, and pitch in semitones. */
 	UPROPERTY() float Gain = 1.f;
 	UPROPERTY() float Pitch = 0.f;
@@ -245,6 +257,21 @@ struct FHyperAISoundRenderRequest
 	UPROPERTY() bool bLoop = false;
 	/** Also a MetaSound Source playing it, looping or one-shot as above, named MS_<name> beside it. */
 	UPROPERTY() bool bMetaSound = false;
+	/**
+	 * Scale the finished render so its loudest sample lands here, in dBFS, such as -1; 0 leaves it. Decibel's limiter lets
+	 * the fastest transients through, and a WAV clips anything over full scale; this makes a set of sounds sit at one peak.
+	 */
+	UPROPERTY() float NormalizePeakDb = 0.f;
+	/**
+	 * A seamless loop, for a looping bed: the render runs this many seconds past its end and that overrun is crossfaded over
+	 * its start, so the last sample leads into the first and whatever still rings at the loop point wraps around. 0 = off.
+	 */
+	UPROPERTY() double LoopCrossfadeSeconds = 0.0;
+	/**
+	 * A music loop, whose notes end at the loop point: the render runs this many seconds past its end and adds that tail (the
+	 * releases and reverb) onto its start, which plays at full level from its first beat. 0 = off; not with LoopCrossfadeSeconds.
+	 */
+	UPROPERTY() double LoopTailSeconds = 0.0;
 	/** Only check the request: nothing is rendered. */
 	UPROPERTY() bool bDryRun = false;
 	UPROPERTY() FString OperationId;

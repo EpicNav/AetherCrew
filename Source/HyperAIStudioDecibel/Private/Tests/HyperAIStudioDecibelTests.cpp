@@ -7,6 +7,7 @@
 #include "HyperAIStudioDecibelToolset.h"
 #include "HyperAIStudioSettings.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
@@ -44,6 +45,21 @@ namespace HyperAIStudio::DecibelTests
 		{
 			ObjectTools::ForceDeleteObjects(Objects, /*ShowConfirmation=*/false);
 		}
+	}
+
+	/** The 16-bit samples of a render's WAV (WriteWav's 44-byte header, then PCM), deleting the file. */
+	TArray<int16> TakeWav(const FString& WavFile)
+	{
+		const FString File = FPaths::ProjectDir() / WavFile;
+		TArray<uint8> Bytes;
+		FFileHelper::LoadFileToArray(Bytes, *File);
+		IFileManager::Get().Delete(*File);
+		TArray<int16> Samples;
+		if (Bytes.Num() > 44)
+		{
+			Samples.Append(reinterpret_cast<const int16*>(Bytes.GetData() + 44), (Bytes.Num() - 44) / 2);
+		}
+		return Samples;
 	}
 
 	struct FNoApproval
@@ -282,5 +298,160 @@ bool FHyperAIStudioSoundSynthEffectTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSoundLibraryFileTest,
+	"HyperAIStudio.Sound.LibraryFile",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioSoundLibraryFileTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::DecibelTests;
+	const FNoApproval NoApproval;
+	using C = FHyperAIStudioDecibelContracts;
+	// A sound library's WAV on disk: one second of a 220 Hz tone, 48 kHz mono.
+	const FString Name = TEXT("HyperAI_Tone_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8);
+	const FString File = FPaths::ConvertRelativePathToFull(FPaths::AutomationTransientDir() / Name + TEXT(".wav"));
+	{
+		constexpr int32 Rate = 48000;
+		TArray<uint8> Bytes;
+		auto U32 = [&Bytes](const uint32 V) { Bytes.Append(reinterpret_cast<const uint8*>(&V), 4); };
+		auto U16 = [&Bytes](const uint16 V) { Bytes.Append(reinterpret_cast<const uint8*>(&V), 2); };
+		Bytes.Append(reinterpret_cast<const uint8*>("RIFF"), 4); U32(36 + Rate * 2);
+		Bytes.Append(reinterpret_cast<const uint8*>("WAVEfmt "), 8); U32(16); U16(1); U16(1); U32(Rate); U32(Rate * 2); U16(2); U16(16);
+		Bytes.Append(reinterpret_cast<const uint8*>("data"), 4); U32(Rate * 2);
+		for (int32 Index = 0; Index < Rate; ++Index)
+		{
+			U16(static_cast<uint16>(static_cast<int16>(12000.0 * FMath::Sin(2.0 * PI * 220.0 * Index / Rate))));
+		}
+		FFileHelper::SaveArrayToFile(Bytes, *File);
+	}
+	const FString LibraryObject = TEXT("/Game/Audio/Library/") + Name + TEXT(".") + Name;
+
+	FHyperAISoundPlanRequest Plan;
+	Plan.SessionPath = NewSessionPath(TEXT("Library"));
+	Plan.bCreate = true;
+	FHyperAISoundOp Track = Op(TEXT("track.add"));
+	Track.Name = TEXT("Bed");
+	Track.Type = TEXT("audio");
+	FHyperAISoundOp Clip = Op(TEXT("clip.audio"), TEXT("Bed"));
+	Clip.Sound = File;
+	Plan.Operations = {Track, Clip};
+	TArray<FString> Made;
+	ON_SCOPE_EXIT
+	{
+		Clean(Made);
+		IFileManager::Get().Delete(*File);
+	};
+
+	FHyperAISoundPlanRequest DryRun = Plan;
+	DryRun.bDryRun = true;
+	TestTrue(TEXT("A dry run takes a sound file on disk"), C::ApplyPlan(DryRun).Status == TEXT("checked"));
+	TestNull(TEXT("and imports nothing"), LoadObject<USoundWave>(nullptr, *LibraryObject, nullptr, LOAD_NoWarn | LOAD_Quiet));
+
+	const FHyperAISoundPlanReport Built = C::ApplyPlan(Plan);
+	Made.Append({Built.SessionPath, LibraryObject});
+	if (!TestTrue(TEXT("For real, the file is imported and played: ") + Built.Diagnostic, Built.bOk))
+	{
+		return false;
+	}
+	TestNotNull(TEXT("as a SoundWave under /Game/Audio/Library"), LoadObject<USoundWave>(nullptr, *LibraryObject, nullptr, LOAD_NoWarn | LOAD_Quiet));
+	TestTrue(TEXT("which the clip plays, a second long"), Built.Tracks.Num() == 1 && Built.Tracks[0].Clips.Num() == 1
+		&& Built.Tracks[0].Clips[0].Sound == LibraryObject && FMath::IsNearlyEqual(Built.Tracks[0].Clips[0].LengthBeats, 2.0, 0.05));
+
+	FHyperAISoundRenderRequest Render;
+	Render.SessionPath = Plan.SessionPath;
+	const FHyperAISoundRenderReport Heard = C::Render(Render);
+	Made.Add(Heard.SoundWave);
+	TestTrue(TEXT("and the render hears it: ") + Heard.Diagnostic, Heard.bOk && !Heard.bSilent);
+
+	// A seamless loop. Cut after 110.24 cycles of the tone, a plain render jumps at the join; the crossfaded one does not.
+	FHyperAISoundRenderRequest Loop;
+	Loop.SessionPath = Plan.SessionPath;
+	Loop.OutputPath = Plan.SessionPath + TEXT("_Loop");
+	Loop.DurationSeconds = 0.5011;
+	Loop.LoopCrossfadeSeconds = 0.25;
+	Loop.bLoop = true;
+	Loop.Channels = 1;
+	const FHyperAISoundRenderReport Looped = C::Render(Loop);
+	Made.Add(Looped.SoundWave);
+	const TArray<int16> Pcm = TakeWav(Looped.WavFile);
+	int32 Step = 0;
+	for (int32 Index = 1; Index < Pcm.Num(); ++Index)
+	{
+		Step = FMath::Max(Step, FMath::Abs(Pcm[Index] - Pcm[Index - 1]));
+	}
+	const int32 Join = Pcm.IsEmpty() ? -1 : FMath::Abs(Pcm[0] - Pcm.Last());
+	TestTrue(TEXT("A seamless loop lasts the loop: ") + Looped.Diagnostic, Looped.bOk && Pcm.Num() == FMath::RoundToInt(0.5011 * 48000));
+	TestTrue(FString::Printf(TEXT("and its last sample leads into its first (join %d, largest step %d)"), Join, Step), !Pcm.IsEmpty() && Join <= Step * 3 / 2);
+
+	// A tail loop, for music: the 0.1 s past the loop point lands on its start, which keeps its full level.
+	FHyperAISoundRenderRequest Plain;
+	Plain.SessionPath = Plan.SessionPath;
+	Plain.OutputPath = Plan.SessionPath + TEXT("_Plain");
+	Plain.DurationSeconds = 0.5;
+	Plain.Channels = 1;
+	const FHyperAISoundRenderReport PlainHeard = C::Render(Plain);
+	Made.Add(PlainHeard.SoundWave);
+	const TArray<int16> Whole = TakeWav(PlainHeard.WavFile);
+	FHyperAISoundRenderRequest Tail = Plain;
+	Tail.OutputPath = Plan.SessionPath + TEXT("_Tail");
+	Tail.DurationSeconds = 0.4;
+	Tail.LoopTailSeconds = 0.1;
+	const FHyperAISoundRenderReport TailHeard = C::Render(Tail);
+	Made.Add(TailHeard.SoundWave);
+	const TArray<int16> Wrapped = TakeWav(TailHeard.WavFile);
+	int32 Worst = Wrapped.Num() == 19200 && Whole.Num() == 24000 ? 0 : MAX_int32;
+	for (int32 Index = 0; Worst != MAX_int32 && Index < Wrapped.Num(); ++Index)
+	{
+		Worst = FMath::Max(Worst, FMath::Abs(Wrapped[Index] - (Whole[Index] + (Index < 4800 ? Whole[19200 + Index] : 0))));
+	}
+	TestTrue(FString::Printf(TEXT("A tail loop adds what rings past its end onto its start (largest difference %d)"), Worst), Worst <= 2);
+	FHyperAISoundRenderRequest Both = Tail;
+	Both.LoopCrossfadeSeconds = 0.1;
+	TestFalse(TEXT("and a loop asking for both is refused"), C::Render(Both).bOk);
+
+	// The same file as an instrument: a looping sampler rooted at A3, where the tone was recorded, holding an A4 for 2 s.
+	FHyperAISoundPlanRequest Keys;
+	Keys.SessionPath = NewSessionPath(TEXT("Sampler"));
+	Keys.bCreate = true;
+	FHyperAISoundOp Instrument = Op(TEXT("track.add"));
+	Instrument.Name = TEXT("Tone");
+	Instrument.Type = TEXT("instrument");
+	FHyperAISoundOp Sampler = Op(TEXT("device.add"), TEXT("Tone"), TEXT("gen.sampler"));
+	Sampler.Sound = File;
+	Sampler.SamplerMode = TEXT("loop");
+	FHyperAISoundParamValue Root;
+	Root.Id = TEXT("root");
+	Root.Value = 57.f;
+	Sampler.Params = {Root};
+	FHyperAISoundOp Held = Op(TEXT("clip.midi"), TEXT("Tone"));
+	FHyperAISoundNote& A4 = Held.Notes.AddDefaulted_GetRef();
+	A4.Pitch = 69;
+	A4.StartBeat = 0.0;
+	A4.LengthBeats = 4.0; // 2 s at 120 BPM; an octave up, the 1 s sample lasts 0.5 s, so the rest is the loop
+	Keys.Operations = {Instrument, Sampler, Held};
+	const FHyperAISoundPlanReport Played = C::ApplyPlan(Keys);
+	Made.Add(Played.SessionPath);
+	if (!TestTrue(TEXT("A sampler takes the file as its sample: ") + Played.Diagnostic, Played.bOk))
+	{
+		return false;
+	}
+	FHyperAISoundRenderRequest Hear;
+	Hear.SessionPath = Keys.SessionPath;
+	Hear.Channels = 1;
+	const FHyperAISoundRenderReport Heard2 = C::Render(Hear);
+	Made.Add(Heard2.SoundWave);
+	const TArray<int16> Note = TakeWav(Heard2.WavFile);
+	int32 Rises = 0;
+	for (int32 Index = FMath::RoundToInt(0.2 * 48000); Index < FMath::Min(Note.Num(), FMath::RoundToInt(1.8 * 48000)); ++Index)
+	{
+		Rises += (Note[Index - 1] < 0 && Note[Index] >= 0) ? 1 : 0;
+	}
+	const double Hz = Rises / 1.6;
+	TestTrue(FString::Printf(TEXT("and plays it an octave up, held past the sample's end by the loop (%.0f Hz from 0.2 to 1.8 s)"), Hz),
+		Heard2.bOk && FMath::IsNearlyEqual(Hz, 440.0, 15.0));
+	return true;
+}
 
 #endif // WITH_DEV_AUTOMATION_TESTS && WITH_DECIBEL

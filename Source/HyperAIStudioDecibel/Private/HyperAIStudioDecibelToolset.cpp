@@ -23,11 +23,13 @@
 #include "Interfaces/IPluginManager.h"
 #include "MetasoundBuilderSubsystem.h"
 #include "MetasoundEditorSubsystem.h"
+#include "MetasoundSource.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/StringOutputDevice.h"
+#include "ObjectTools.h"
 #include "ScopedTransaction.h"
 #include "Sound/SoundWave.h"
 #include "UObject/Package.h"
@@ -116,6 +118,21 @@ namespace HyperAIStudio::Decibel::Private
 		}
 		return Package;
 	}
+
+	/** A sound file on disk, such as a sound library's WAV, which a plan imports before it uses it. */
+	bool IsSoundFile(const FString& Sound)
+	{
+		static const TArray<FString> Extensions = {TEXT("wav"), TEXT("flac"), TEXT("ogg"), TEXT("aif"), TEXT("aiff")};
+		return !Sound.StartsWith(TEXT("/Game/")) && !FPaths::IsRelative(Sound) && Extensions.Contains(FPaths::GetExtension(Sound).ToLower());
+	}
+
+	/** Where a sound file lives once imported: /Game/Audio/Library/<its name>. */
+	FString LibraryPackage(const FString& File)
+	{
+		return TEXT("/Game/Audio/Library/") + ObjectTools::SanitizeObjectName(FPaths::GetBaseFilename(File));
+	}
+
+	USoundWave* ImportWave(const FString& File, const FString& Package, const bool bLoop, FString& OutError);
 
 	bool IsProjectPackage(const FString& Package, FString& OutError)
 	{
@@ -294,8 +311,72 @@ namespace HyperAIStudio::Decibel::Private
 		return true;
 	}
 
+	/**
+	 * The SoundWave a Sound names: a project asset, or a sound file on disk, which the plan imported before running for real.
+	 * A trial imports nothing, so a file never imported before comes back null with bPending set, and no error.
+	 */
+	USoundWave* ResolveSound(const FString& Sound, const TMap<FString, USoundWave*>* Library, bool& bPending, FString& OutError)
+	{
+		bPending = false;
+		USoundWave* Wave = nullptr;
+		if (IsSoundFile(Sound))
+		{
+			if (!FPaths::FileExists(Sound))
+			{
+				OutError = FString::Printf(TEXT("There is no file %s."), *Sound);
+				return nullptr;
+			}
+			Wave = Library ? Library->FindRef(Sound) : LoadObject<USoundWave>(nullptr, *ObjectPath(LibraryPackage(Sound)), nullptr, LOAD_NoWarn | LOAD_Quiet);
+			bPending = !Wave && !Library;
+		}
+		else
+		{
+			Wave = LoadObject<USoundWave>(nullptr, *ObjectPath(Sound));
+		}
+		if (!Wave && !bPending)
+		{
+			OutError = FString::Printf(TEXT("'%s' is not a SoundWave, or a sound file on disk."), *Sound);
+		}
+		return Wave;
+	}
+
+	/** device.add, device.set: the sound a sampler plays or a convolution reverb takes as its room, and how a sampler reads it. */
+	bool SetDeviceSound(FDecibelDevice& Device, const FHyperAISoundOp& Op, const TMap<FString, USoundWave*>* Library, FString& OutError)
+	{
+		const bool bSampler = Device.DeviceId == TEXT("gen.sampler");
+		if (!Op.Sound.IsEmpty())
+		{
+			if (!bSampler && Device.DeviceId != TEXT("fx.verb"))
+			{
+				OutError = FString::Printf(TEXT("%s takes no sound: gen.sampler plays one, fx.verb takes one as its impulse response."), *Device.DeviceId);
+				return false;
+			}
+			bool bPending = false;
+			USoundWave* Wave = ResolveSound(Op.Sound, Library, bPending, OutError);
+			if (!Wave && !bPending)
+			{
+				return false;
+			}
+			Device.Sample = Wave;
+		}
+		if (!Op.SamplerMode.IsEmpty())
+		{
+			// EDecibelSampleMode: the ones a plan can use without a pool, zones or slices of their own.
+			static const TMap<FString, uint8> Modes = {{TEXT("one_shot"), 0}, {TEXT("loop"), 1}, {TEXT("granular"), 3}};
+			const uint8* Mode = bSampler ? Modes.Find(Op.SamplerMode.TrimStartAndEnd().ToLower()) : nullptr;
+			if (!Mode)
+			{
+				OutError = bSampler ? FString::Printf(TEXT("A sampler's mode is one_shot, loop or granular, not '%s'."), *Op.SamplerMode)
+					: FString::Printf(TEXT("%s is not a sampler: only gen.sampler has a SamplerMode."), *Device.DeviceId);
+				return false;
+			}
+			Device.SamplerMode = *Mode;
+		}
+		return true;
+	}
+
 	/** Applies one op; false with OutError stops the plan. */
-	bool ApplyOp(UDecibelSession& Session, const FHyperAISoundOp& Op, TArray<FString>& OutNotes, FString& OutError)
+	bool ApplyOp(UDecibelSession& Session, const FHyperAISoundOp& Op, const TMap<FString, USoundWave*>* Library, TArray<FString>& OutNotes, FString& OutError)
 	{
 		const FString Kind = Op.Kind.TrimStartAndEnd().ToLower();
 		if (Kind == TEXT("session.set"))
@@ -375,7 +456,7 @@ namespace HyperAIStudio::Decibel::Private
 			{
 				return false;
 			}
-			return !Added || SetParams(*Added, Op.Params, OutNotes, OutError);
+			return !Added || (SetParams(*Added, Op.Params, OutNotes, OutError) && SetDeviceSound(*Added, Op, Library, OutError));
 		}
 		int32 DeviceIndex = INDEX_NONE;
 		if (bDeviceOp && !FindDevice(Track, Op, DeviceIndex, OutError))
@@ -384,7 +465,7 @@ namespace HyperAIStudio::Decibel::Private
 		}
 		if (Kind == TEXT("device.set"))
 		{
-			return SetParams(Track.Devices[DeviceIndex], Op.Params, OutNotes, OutError);
+			return SetParams(Track.Devices[DeviceIndex], Op.Params, OutNotes, OutError) && SetDeviceSound(Track.Devices[DeviceIndex], Op, Library, OutError);
 		}
 		if (Kind == TEXT("device.preset"))
 		{
@@ -425,15 +506,31 @@ namespace HyperAIStudio::Decibel::Private
 				OutError = TEXT("An audio clip goes on an audio track.");
 				return false;
 			}
-			USoundWave* Wave = LoadObject<USoundWave>(nullptr, *ObjectPath(Op.Sound));
+			bool bPending = false;
+			USoundWave* Wave = ResolveSound(Op.Sound, Library, bPending, OutError);
+			if (bPending)
+			{
+				// A trial, before the file is imported: the clip holds its place.
+				Clip.Kind = EDecibelClipKind::Audio;
+				Clip.Name = FPaths::GetBaseFilename(Op.Sound);
+				Clip.LengthBeats = Op.LengthBeats > 0.0 ? Op.LengthBeats : 4.0;
+				Track.Clips.Add(MoveTemp(Clip));
+				return true;
+			}
 			if (!Wave)
 			{
-				OutError = FString::Printf(TEXT("'%s' is not a SoundWave."), *Op.Sound);
 				return false;
 			}
 			Clip.Kind = EDecibelClipKind::Audio;
 			Clip.Sound = Wave;
-			Clip.SrcLenSec = Wave->GetDuration();
+			const double Duration = Wave->GetDuration();
+			if (Op.SourceStartSeconds >= Duration)
+			{
+				OutError = FString::Printf(TEXT("%s lasts %.2f s: it has nothing after %.2f s."), *Wave->GetName(), Duration, Op.SourceStartSeconds);
+				return false;
+			}
+			Clip.StartOffsetSec = FMath::Max(0.0, Op.SourceStartSeconds);
+			Clip.SrcLenSec = Op.SourceSeconds > 0.0 ? FMath::Min(Op.SourceSeconds, Duration - Clip.StartOffsetSec) : Duration - Clip.StartOffsetSec;
 			Clip.Gain = FMath::Clamp(Op.Gain, 0.f, 8.f);
 			Clip.Pitch = FMath::Clamp(Op.Pitch, -48.f, 48.f);
 			Clip.FadeInBeats = FMath::Max(0.0, Op.FadeInBeats);
@@ -482,14 +579,15 @@ namespace HyperAIStudio::Decibel::Private
 		return true;
 	}
 
-	/** Runs the plan on Session; stops at the first failing op, naming it. */
-	bool ApplyAll(UDecibelSession& Session, const TArray<FHyperAISoundOp>& Ops, int32& OutApplied, TArray<FString>& OutNotes, FString& OutError)
+	/** Runs the plan on Session; stops at the first failing op, naming it. Library holds the sound files imported for it. */
+	bool ApplyAll(UDecibelSession& Session, const TArray<FHyperAISoundOp>& Ops, const TMap<FString, USoundWave*>* Library, int32& OutApplied,
+		TArray<FString>& OutNotes, FString& OutError)
 	{
 		OutApplied = 0;
 		for (int32 Index = 0; Index < Ops.Num(); ++Index)
 		{
 			FString Error;
-			if (!ApplyOp(Session, Ops[Index], OutNotes, Error))
+			if (!ApplyOp(Session, Ops[Index], Library, OutNotes, Error))
 			{
 				OutError = FString::Printf(TEXT("Operation %d (%s): %s"), Index, *Ops[Index].Kind, *Error);
 				return false;
@@ -544,6 +642,24 @@ namespace HyperAIStudio::Decibel::Private
 		const FString Package = PackageOf(Request.SessionPath);
 		UDecibelSession* Session = nullptr;
 		FString Error;
+		// Sound files on disk become SoundWaves under /Game/Audio/Library first, outside the undo step, once each.
+		TMap<FString, USoundWave*> Library;
+		for (const FHyperAISoundOp& Op : Request.Operations)
+		{
+			if (!IsSoundFile(Op.Sound) || Library.Contains(Op.Sound))
+			{
+				continue;
+			}
+			const FString LibraryAsset = LibraryPackage(Op.Sound);
+			USoundWave* Wave = LoadObject<USoundWave>(nullptr, *ObjectPath(LibraryAsset), nullptr, LOAD_NoWarn | LOAD_Quiet);
+			if (!Wave && !(Wave = ImportWave(Op.Sound, LibraryAsset, /*bLoop=*/false, Error)))
+			{
+				Report.Status = TEXT("import_failed");
+				Report.Diagnostic = FString::Printf(TEXT("%s could not be imported: %s"), *Op.Sound, *Error);
+				return Report;
+			}
+			Library.Add(Op.Sound, Wave);
+		}
 		{
 			const FScopedTransaction Transaction(LOCTEXT("SoundPlan", "HyperAI: Edit Decibel Session"));
 			if (Request.bCreate)
@@ -564,7 +680,7 @@ namespace HyperAIStudio::Decibel::Private
 				return Report;
 			}
 			Session->Modify();
-			if (!ApplyAll(*Session, Request.Operations, Report.Applied, Report.Notes, Error))
+			if (!ApplyAll(*Session, Request.Operations, &Library, Report.Applied, Report.Notes, Error))
 			{
 				Report.Status = TEXT("operation_failed");
 				Report.Diagnostic = Error + TEXT(" The operations before it stay applied; Edit > Undo takes the whole plan back.");
@@ -691,6 +807,17 @@ namespace HyperAIStudio::Decibel::Private
 		FString Name = Wave->GetName();
 		Name.RemoveFromStart(TEXT("SW_"));
 		Name = TEXT("MS_") + Name;
+		// A MetaSound made by an earlier render already plays this SoundWave, which was just replaced in place. Building
+		// over it would ask the editor whether to replace it, in a dialog nobody may be there to answer.
+		if (UObject* Existing = LoadObject<UObject>(nullptr, *(Folder / Name + TEXT(".") + Name), nullptr, LOAD_NoWarn | LOAD_Quiet))
+		{
+			if (Existing->IsA<UMetaSoundSource>())
+			{
+				return Existing->GetPathName();
+			}
+			OutError = FString::Printf(TEXT("%s is taken by a %s."), *Existing->GetPathName(), *Existing->GetClass()->GetName());
+			return FString();
+		}
 		UMetaSoundBuilderSubsystem& Builders = UMetaSoundBuilderSubsystem::GetChecked();
 		EMetaSoundBuilderResult Result = EMetaSoundBuilderResult::Failed;
 		FMetaSoundBuilderNodeOutputHandle OnPlay;
@@ -787,6 +914,12 @@ namespace HyperAIStudio::Decibel::Private
 		{
 			return false;
 		}
+		if (Request.LoopCrossfadeSeconds > 0.0 && Request.LoopTailSeconds > 0.0)
+		{
+			OutError = TEXT("A loop crossfades (LoopCrossfadeSeconds, a bed that runs on past the loop point) or wraps its tail (LoopTailSeconds, "
+				"music whose notes end there), not both.");
+			return false;
+		}
 		const double Spb = SecondsPerBeat(*Session);
 		Out.StartSeconds = FMath::Max(0.0, Request.StartSeconds);
 		Out.DurationSeconds = Request.DurationSeconds > 0.0 ? Request.DurationSeconds
@@ -814,14 +947,48 @@ namespace HyperAIStudio::Decibel::Private
 		// Plug-ins are left out, as Decibel's own offline bounce does: a VST3 is not reproducible off the audio thread.
 		const TSharedRef<const ::Decibel::FRenderSession> Snapshot = ::Decibel::CompileSession(Session, static_cast<double>(SampleRate),
 			::Decibel::EDecibelCompileMode::Sync, ::Decibel::EDecibelCompileExternals::Strip);
+		const bool bCrossfade = Request.LoopCrossfadeSeconds > 0.0;
+		const double Wrap = bCrossfade ? FMath::Min(Request.LoopCrossfadeSeconds, Plan.DurationSeconds * 0.5)
+			: FMath::Clamp(Request.LoopTailSeconds, 0.0, Plan.DurationSeconds);
 		TArray<float> Samples;
-		::Decibel::FAudioEngine::RenderWindowOffline(Snapshot, Plan.StartSeconds, Plan.DurationSeconds, SampleRate, Channels, Samples);
+		::Decibel::FAudioEngine::RenderWindowOffline(Snapshot, Plan.StartSeconds, Plan.DurationSeconds + Wrap, SampleRate, Channels, Samples);
 		if (Samples.IsEmpty())
 		{
 			OutError = TEXT("Decibel's offline render returned nothing.");
 			return nullptr;
 		}
+		// The loops. The seamless one fades the overrun past the end out over the start while the start fades in (equal
+		// power), so the frame after the last is the one that followed it in the render. The tail one adds the overrun onto
+		// the start as it is: the start keeps its first beat, and what rings past the loop point rings on into it.
+		const int32 Frames = FMath::RoundToInt(Plan.DurationSeconds * SampleRate);
+		const int32 Over = FMath::Min(FMath::RoundToInt(Wrap * SampleRate), Samples.Num() / Channels - Frames);
+		if (Over > 0)
+		{
+			for (int32 Frame = 0; Frame < Over; ++Frame)
+			{
+				const float Angle = HALF_PI * Frame / Over;
+				const float In = bCrossfade ? FMath::Sin(Angle) : 1.f;
+				const float Out = bCrossfade ? FMath::Cos(Angle) : 1.f;
+				for (int32 Channel = 0; Channel < Channels; ++Channel)
+				{
+					float& Head = Samples[Frame * Channels + Channel];
+					Head = Head * In + Samples[(Frames + Frame) * Channels + Channel] * Out;
+				}
+			}
+			Samples.SetNum(Frames * Channels);
+		}
 		OutLevels = Measure(Samples, Channels, SampleRate);
+		// Peak normalising: the whole render scaled so its loudest sample lands on the target. Nothing can clip at the
+		// WAV, however fast a transient got past a limiter, and a set of sounds lands at one level.
+		if (Request.NormalizePeakDb < 0.f && !OutLevels.bSilent)
+		{
+			const float Scale = FMath::Pow(10.f, (FMath::Max(Request.NormalizePeakDb, -60.f) - OutLevels.PeakDb) / 20.f);
+			for (float& Sample : Samples)
+			{
+				Sample *= Scale;
+			}
+			OutLevels = Measure(Samples, Channels, SampleRate);
+		}
 		const FString File = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Sound") / FPackageName::GetShortName(Package) + TEXT(".wav"));
 		if (!WriteWav(File, Samples, Channels, SampleRate))
 		{
@@ -1065,7 +1232,7 @@ FHyperAISoundPlanReport FHyperAIStudioDecibelContracts::ApplyPlan(const FHyperAI
 	{
 		Trial->EnsureHostChainDefaults();
 	}
-	if (!ApplyAll(*Trial, Request.Operations, Report.Applied, Report.Notes, Error))
+	if (!ApplyAll(*Trial, Request.Operations, /*Library=*/nullptr, Report.Applied, Report.Notes, Error))
 	{
 		Report.Status = TEXT("operation_failed");
 		Report.Diagnostic = Error + TEXT(" Nothing was changed.");
