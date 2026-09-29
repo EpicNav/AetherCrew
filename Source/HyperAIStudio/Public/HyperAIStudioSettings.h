@@ -625,6 +625,16 @@ public:
 	static FHyperAIStudioExternalServiceSettings GetGeminiService();
 
 	/**
+	 * Tripo, Meshy and Hi3D, for 3D models, with the price of a textured model. They are there without settings; an
+	 * entry with the same id (tripo, meshy, hi3d) replaces one, to go through a proxy or follow a price change.
+	 */
+	static TArray<FHyperAIStudioExternalServiceSettings> GetMeshServices();
+
+	/** Where generated 3D models are imported. */
+	UPROPERTY(Config, EditAnywhere, Category = "3D Generation")
+	FString MeshImportFolder = TEXT("/Game/Generated/Models");
+
+	/**
 	 * Nano Banana 2, Nano Banana Pro, Nano Banana 2 Lite and the original Nano Banana, through the Gemini API, with
 	 * Google's prices per image.
 	 */

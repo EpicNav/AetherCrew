@@ -126,11 +126,16 @@ TArray<FHyperAIStudioExternalServiceSettings> FHyperAIStudioExternalServices::Ge
 {
 	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
 	TArray<FHyperAIStudioExternalServiceSettings> Services = Settings ? Settings->ExternalServices : TArray<FHyperAIStudioExternalServiceSettings>();
-	// Built in for the Nano Banana models; a project's own entry with the same id wins, as when it goes through a proxy.
-	const FHyperAIStudioExternalServiceSettings Gemini = UHyperAIStudioSettings::GetGeminiService();
-	if (!Services.ContainsByPredicate([&Gemini](const FHyperAIStudioExternalServiceSettings& Service) { return Service.Id.Equals(Gemini.Id, ESearchCase::IgnoreCase); }))
+	// Built in for the Nano Banana models and 3D generation; a project's own entry with the same id wins, as when it
+	// goes through a proxy.
+	TArray<FHyperAIStudioExternalServiceSettings> BuiltIn = UHyperAIStudioSettings::GetMeshServices();
+	BuiltIn.Insert(UHyperAIStudioSettings::GetGeminiService(), 0);
+	for (const FHyperAIStudioExternalServiceSettings& Default : BuiltIn)
 	{
-		Services.Add(Gemini);
+		if (!Services.ContainsByPredicate([&Default](const FHyperAIStudioExternalServiceSettings& Service) { return Service.Id.Equals(Default.Id, ESearchCase::IgnoreCase); }))
+		{
+			Services.Add(Default);
+		}
 	}
 	return Services;
 }

@@ -31,6 +31,27 @@ FHyperAIStudioExternalServiceSettings UHyperAIStudioSettings::GetGeminiService()
 	return Service;
 }
 
+TArray<FHyperAIStudioExternalServiceSettings> UHyperAIStudioSettings::GetMeshServices()
+{
+	auto Make = [](const TCHAR* Id, const TCHAR* Label, const TCHAR* BaseUrl, const TCHAR* KeyVariable, const float Cost)
+	{
+		FHyperAIStudioExternalServiceSettings Service;
+		Service.Id = Id;
+		Service.Label = Label;
+		Service.BaseUrl = BaseUrl;
+		Service.ApiKeyVariable = KeyVariable;
+		Service.CostPerCall = Cost;
+		Service.TimeoutSeconds = 120;
+		return Service;
+	};
+	// A textured model from a picture, at list price (September 2026): Tripo 30 credits at $0.01, Meshy 30 at about
+	// $0.02, Hi3D v3.0 65 at $0.02. Hi3D's key is client_id:client_secret in one variable.
+	return {
+		Make(TEXT("tripo"), TEXT("Tripo 3D"), TEXT("https://openapi.tripo3d.ai/v3"), TEXT("TRIPO_API_KEY"), 0.30f),
+		Make(TEXT("meshy"), TEXT("Meshy"), TEXT("https://api.meshy.ai"), TEXT("MESHY_API_KEY"), 0.60f),
+		Make(TEXT("hi3d"), TEXT("Hi3D (Hitem3D)"), TEXT("https://api.hitem3d.ai"), TEXT("HITEM3D_API_KEY"), 1.30f)};
+}
+
 TArray<FHyperAIStudioImageModelSettings> UHyperAIStudioSettings::GetNanoBananaModels()
 {
 	// generateContent, which Google keeps supported beside its newer Interactions API. The picture is a part of the

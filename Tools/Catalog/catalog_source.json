@@ -3414,6 +3414,32 @@
    ]
   },
   {
+   "id": "mesh_generation",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [],
+   "tools": [
+    {
+     "name": "hyper_mesh_generate",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_mesh_status",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    }
+   ]
+  },
+  {
    "id": "scripting",
    "tier": "Optional",
    "dependsOn": [

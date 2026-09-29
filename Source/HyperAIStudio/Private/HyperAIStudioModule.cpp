@@ -1120,6 +1120,13 @@ private:
 				{TEXT("PythonScriptPlugin")}
 			},
 			{
+				TEXT("HyperAIStudioMeshGen"),
+				TEXT("mesh_generation"),
+				TEXT("cohort.source.hyperaistudiomeshgentoolset.v1"),
+				{TEXT("hyper_mesh_generate"), TEXT("hyper_mesh_status")},
+				{TEXT("Interchange")}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),

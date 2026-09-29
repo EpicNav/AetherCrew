@@ -1960,20 +1960,23 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 			Report.JournalAccessMode = TEXT("activity_log");
 			return Report;
 		}
-		// Scripts run outside the typed executor, so their activity entries are their only status record.
-		if (Entry.PackId == TEXT("scripting") && (Entry.Kind == EHyperAIStudioActivityKind::Completed
-			|| Entry.Kind == EHyperAIStudioActivityKind::Failed || Entry.Kind == EHyperAIStudioActivityKind::ApprovalApproved))
+		// Scripts and 3D models are made outside the typed executor, so their activity entries are their only status record.
+		// A 3D model is a background job, whose start and end the job host records.
+		const bool bScript = Entry.PackId == TEXT("scripting");
+		const bool bRunning = Entry.Kind == EHyperAIStudioActivityKind::ApprovalApproved || Entry.Kind == EHyperAIStudioActivityKind::JobStarted;
+		if ((bScript || Entry.PackId == TEXT("mesh_generation")) && (bRunning || Entry.Kind == EHyperAIStudioActivityKind::Completed
+			|| Entry.Kind == EHyperAIStudioActivityKind::Failed || Entry.Kind == EHyperAIStudioActivityKind::JobFinished))
 		{
 			Report.bOk = true;
 			Report.bFound = true;
-			Report.bTerminal = Entry.Kind != EHyperAIStudioActivityKind::ApprovalApproved;
+			Report.bTerminal = !bRunning;
 			Report.Status = Report.bTerminal ? Entry.StatusCode : FString(TEXT("running"));
 			Report.State = Report.Status;
 			Report.StatusCode = Report.Status;
 			Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(Entry.Detail, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
-			Report.NextAction = Report.bTerminal
-				? TEXT("The script's result, output and traceback are in Saved/HyperAIStudio/Scripts/<operation_id>/result.json.")
-				: TEXT("Still running; call hyper_operation_wait to wait for it.");
+			Report.NextAction = !Report.bTerminal ? TEXT("Still running; call hyper_operation_wait to wait for it.")
+				: bScript ? TEXT("The script's result, output and traceback are in Saved/HyperAIStudio/Scripts/<operation_id>/result.json.")
+				: TEXT("hyper_mesh_status has the model's file and the asset it was imported as.");
 			Report.JournalAccessMode = TEXT("activity_log");
 			return Report;
 		}
