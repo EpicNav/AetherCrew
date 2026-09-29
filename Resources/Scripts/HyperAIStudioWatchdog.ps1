@@ -42,6 +42,9 @@ for ($Try = 0; $Try -lt 10 -and -not $Crash; $Try++) {
       error = (@("$($Context.ErrorMessage)" -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join ' ')
       callstack = @("$($Context.CallStack)" -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -First 8)
       report = 'Saved/Crashes/' + $Dir.Name
+      # For the helper: the crash reporter still showing this editor's crash, and the report it would send.
+      processId = [int]$Plan.editorProcessId
+      folder = $Dir.FullName
     }
     if ($Crash.error.Length -gt 400) { $Crash.error = $Crash.error.Substring(0, 400) + '...' }
   }

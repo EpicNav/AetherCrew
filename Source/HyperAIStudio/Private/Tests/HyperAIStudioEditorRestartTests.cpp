@@ -328,6 +328,45 @@ bool FHyperAIStudioEditorRestartCrashResumeTest::RunTest(const FString& Paramete
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioEditorRestartCrashResumeWithoutTokenTest,
+	"HyperAIStudio.EditorRestart.CrashResumeWithoutToken",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioEditorRestartCrashResumeWithoutTokenTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::EditorRestartTests;
+	const FString Folder = NewFolder();
+	const FString ThisProject = FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath()).ReplaceCharWithEscapedChar();
+	// The crash plan the watchdog wrote, and no result: the helper had not opened an editor when this one started.
+	auto WritePlan = [&Folder](const FString& Reason, const FString& ProjectFile, const FDateTime& At)
+	{
+		FFileHelper::SaveStringToFile(FString::Printf(TEXT(R"JSON({"token": "c2", %s "requestedAt": "%s", "projectFile": "%s",
+			"crash": {"error": "Assertion failed: false [File:PlayLevel.cpp] [Line: 553]", "report": "Saved/Crashes/UECC-Windows-DEF_0001"},
+			"build": {"enabled": false, "target": "HyperAIDevEditor"},
+			"chats": [{"tab": 1, "agent": "Claude Code", "sessionId": "s-7", "working": true}]})JSON"),
+			*Reason, *At.ToIso8601(), *ProjectFile), *(Folder / TEXT("request.json")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	};
+
+	WritePlan(TEXT(R"("reason": "restart",)"), ThisProject, FDateTime::UtcNow());
+	TestFalse(TEXT("Without the token, an editor leaves a restart's plan for the editor its helper opens"), FHyperAIStudioEditorRestart::LoadResume(Folder, FString(), 3600.0));
+	TestTrue(TEXT("and leaves its files alone"), FPaths::FileExists(Folder / TEXT("request.json")));
+	WritePlan(TEXT(R"("reason": "crash",)"), TEXT("E:\\\\Other\\\\Other.uproject"), FDateTime::UtcNow());
+	TestFalse(TEXT("It leaves another project's crash alone"), FHyperAIStudioEditorRestart::LoadResume(Folder, FString(), 3600.0));
+	WritePlan(TEXT(R"("reason": "crash",)"), ThisProject, FDateTime::UtcNow() - FTimespan::FromMinutes(30.0));
+	TestFalse(TEXT("and a crash from half an hour ago"), FHyperAIStudioEditorRestart::LoadResume(Folder, FString(), 3600.0));
+
+	// Send and Restart in the crash reporter, or a quick reopen by hand: the crash's chats come back without the token.
+	WritePlan(TEXT(R"("reason": "crash",)"), ThisProject, FDateTime::UtcNow());
+	TestTrue(TEXT("An editor opened without the token takes a fresh crash's chats back"), FHyperAIStudioEditorRestart::LoadResume(Folder, FString(), 3600.0));
+	TestFalse(TEXT("and uses the plan up"), FPaths::FileExists(Folder / TEXT("request.json")));
+	const TOptional<FHyperAIStudioRestartChat> Chat = FHyperAIStudioEditorRestart::TakeChat(1);
+	TestTrue(TEXT("The chat that was working is told the editor crashed and was opened again"), Chat.IsSet() && Chat->SessionId == TEXT("s-7")
+		&& Chat->Message.StartsWith(TEXT("The Unreal Editor crashed and was opened again")) && Chat->Message.Contains(TEXT("PlayLevel.cpp")));
+	IFileManager::Get().DeleteDirectory(*Folder, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHyperAIStudioEditorRestartWatchdogTest,
 	"HyperAIStudio.EditorRestart.Watchdog",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -346,9 +385,20 @@ bool FHyperAIStudioEditorRestartWatchdogTest::RunTest(const FString& Parameters)
 	const FString Recovery = Folder / TEXT("Recovery");
 	const FString Marker = Folder / TEXT("relaunched.txt");
 	const FString BuildScript = Folder / TEXT("build.cmd");
+	// Stands in for the crash reporter sending a report unattended: it notes what it was asked to send.
+	const FString Sender = Folder / TEXT("send.cmd");
+	const FString Sent = Folder / TEXT("sent.txt");
 	IFileManager::Get().MakeDirectory(*Recovery, /*Tree=*/true);
 	FFileHelper::SaveStringToFile(TEXT("@echo off\r\necho Building HyperAIDevEditor...\r\nexit /b 0\r\n"), *BuildScript);
+	FFileHelper::SaveStringToFile(FString::Printf(TEXT("@echo off\r\necho %%*> \"%s\"\r\nexit /b 0\r\n"), *Native(Sent)), *Sender);
 	auto Escaped = [](const FString& Path) { return Native(Path).ReplaceCharWithEscapedChar(); };
+	// Stands in for the crash reporter's dialog for the editor with EditorId: it runs with -MONITOR=<that id>.
+	FProcHandle Reporter;
+	auto StartReporter = [&Reporter](const uint32 EditorId)
+	{
+		Reporter = FPlatformProcess::CreateProc(TEXT("powershell.exe"), *FString::Printf(TEXT("-NoProfile -Command \"Start-Sleep -Seconds 60 # -MONITOR=%u\""), EditorId),
+			false, true, true, nullptr, 0, nullptr, nullptr);
+	};
 
 	// A stand-in editor that ends two seconds from now leaving a crash report of ReportType, the plan the editor keeps
 	// for it, and the watchdog run until it hands over or gives up.
@@ -358,13 +408,15 @@ bool FHyperAIStudioEditorRestartWatchdogTest::RunTest(const FString& Parameters)
 		FProcHandle Editor = FPlatformProcess::CreateProc(TEXT("powershell.exe"), TEXT("-NoProfile -Command Start-Sleep -Seconds 2"), false, true, true,
 			&EditorId, 0, nullptr, nullptr);
 		WriteCrashReport(Crashes, FString::Printf(TEXT("UECC-Windows-%u_0000"), EditorId), EditorId, ReportType, Error);
+		StartReporter(EditorId);
 		const FString Session = Recovery / FString::Printf(TEXT("session-%u.json"), EditorId);
 		FFileHelper::SaveStringToFile(FString::Printf(TEXT(R"JSON({"token": "tok", "project": "Stand-in", "projectFile": "", "editorProcessId": %u,
+			"sendCrashReport": true, "crashReporter": "%s",
 			"closeTimeoutSeconds": 30, "requestedAt": "%s", "lingerSeconds": 0, "delaySeconds": 0, "helperWindow": "Hidden", "crashes": "%s", "restartFolder": "%s",
 			"build": {"enabled": true, "target": "HyperAIDevEditor", "script": "%s", "log": "%s", "logRelative": "Saved/HyperAIStudio/Recovery/build.log"},
 			"relaunch": {"executable": "cmd.exe", "arguments": "/c echo relaunched -HyperAIResume=tok> \"%s\"", "workingDirectory": "%s"},
 			"chats": [{"tab": 1, "agent": "Claude Code", "sessionId": "s-9", "working": true}]})JSON"),
-			EditorId, *FDateTime::UtcNow().ToIso8601(), *Escaped(Crashes), *Escaped(Restart), *Escaped(BuildScript), *Escaped(Folder / TEXT("build.log")),
+			EditorId, *Escaped(Sender), *FDateTime::UtcNow().ToIso8601(), *Escaped(Crashes), *Escaped(Restart), *Escaped(BuildScript), *Escaped(Folder / TEXT("build.log")),
 			*Escaped(Marker), *Escaped(Folder)), *Session, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 		int32 Code = -1;
 		FString Out;
@@ -406,16 +458,27 @@ bool FHyperAIStudioEditorRestartWatchdogTest::RunTest(const FString& Parameters)
 	WaitFor(Restart / TEXT("result.json"));
 	const TSharedPtr<FJsonObject> Result = ReadJsonFile(Restart / TEXT("result.json"));
 	TestTrue(TEXT("and the helper built and relaunched it"), Result.IsValid() && Result->GetStringField(TEXT("state")) == TEXT("relaunched"));
+	// Nobody chose in the crash reporter: the helper did Send and Close before opening the editor again.
+	TestFalse(TEXT("The crash reporter still waiting in its dialog was closed"), FPlatformProcess::IsProcRunning(Reporter));
+	FString SentText;
+	FFileHelper::LoadFileToString(SentText, *Sent);
+	TestTrue(TEXT("after its report was sent unattended"), SentText.Contains(TEXT("-Unattended")) && SentText.Contains(TEXT("UECC-Windows-")));
+	FPlatformProcess::TerminateProc(Reporter, true);
+	FPlatformProcess::CloseProc(Reporter);
 
 	// Killed, with only an ensure's report: it stays closed.
 	IFileManager::Get().DeleteDirectory(*Restart, false, true);
 	Watch(TEXT("Ensure"), TEXT("Ensure condition failed: false"));
+	FPlatformProcess::TerminateProc(Reporter, true);
+	FPlatformProcess::CloseProc(Reporter);
 	TestFalse(TEXT("An editor that ended without a fatal report of its own stays closed"), FPaths::FileExists(Restart / TEXT("request.json")));
 
 	// A third crash in half an hour: it stays closed, and the helper says why.
 	FFileHelper::SaveStringToFile(FDateTime::UtcNow().ToIso8601() + TEXT("\r\n") + FDateTime::UtcNow().ToIso8601() + TEXT("\r\n"), *(Recovery / TEXT("crashes.txt")));
 	IFileManager::Get().Delete(*Marker);
 	Watch(TEXT("Crash"), TEXT("Unhandled Exception: EXCEPTION_ACCESS_VIOLATION reading address 0x0000000000000000"));
+	FPlatformProcess::TerminateProc(Reporter, true);
+	FPlatformProcess::CloseProc(Reporter);
 	WaitFor(Recovery / TEXT("result.json"));
 	const TSharedPtr<FJsonObject> LeftClosed = ReadJsonFile(Recovery / TEXT("result.json"));
 	TestTrue(TEXT("The third crash in half an hour leaves the editor closed"), LeftClosed.IsValid() && LeftClosed->GetStringField(TEXT("state")) == TEXT("left_closed")

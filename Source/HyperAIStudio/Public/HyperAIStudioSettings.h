@@ -536,6 +536,14 @@ public:
 	bool bReopenEditorAfterCrash = true;
 
 	/**
+	 * When nobody has chosen in Unreal's crash reporter by the time HyperAI Studio reopens the editor, send the crash
+	 * report to Epic and close the crash reporter, as its Send and Close would. Off: close it without sending. Choosing
+	 * yourself always wins: Send and Restart opens the editor at once, and its chats come back there.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Crashes", meta = (DisplayName = "Send The Crash Report For Me", EditCondition = "bReopenEditorAfterCrash"))
+	bool bSendCrashReportForMe = true;
+
+	/**
 	 * Before an agent changes an asset, check it out through the project's source control (or, in a Lore workspace with
 	 * no Unreal provider, lock it with the lore command). An asset a teammate has checked out or locked, or one behind
 	 * the latest revision, turns the edit away. Files an agent adds are marked for add once saved.

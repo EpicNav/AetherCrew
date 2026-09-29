@@ -27,18 +27,55 @@ function Save-Result([hashtable]$Result) {
   [IO.File]::WriteAllText($ResultPath, ($Result | ConvertTo-Json -Depth 5), $Utf8)
 }
 
-# After a crash, an editor someone opened already (by hand, or the crash reporter's Send and Restart) keeps the project.
-# ponytail: matched by the project's file name, so two projects sharing one count as one.
-function Test-EditorOpen {
+# After a crash, an editor someone opened already (by hand, or the crash reporter's Send and Restart) keeps the project,
+# and takes the chats back itself. ponytail: matched by the project's file name, so two projects sharing one count as one.
+function Test-EditorProcess {
   $Name = if ($Crashed -and $Plan.projectFile) { [IO.Path]::GetFileName($Plan.projectFile) } else { '' }
   if (-not $Name) { return $false }
   $Open = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'UnrealEditor%'" -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -notlike 'UnrealEditor-Cmd*' -and "$($_.CommandLine)".IndexOf($Name, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
-  if ($Open.Count -eq 0) { return $false }
-  Say 'The editor is open again already, so this window leaves it at that.' 'Green'
+  return $Open.Count -gt 0
+}
+
+function Test-EditorOpen {
+  if (-not (Test-EditorProcess)) { return $false }
+  Say 'The editor is open again already, and its chats come back there.' 'Green'
   Save-Result @{ state = 'already_open' }
   Start-Sleep -Seconds $Linger
   return $true
+}
+
+# Unreal's crash reporter runs beside the editor with -MONITOR=<its process> and, after a crash, waits in its dialog.
+# Nobody chose by now: send the report (unless Send The Crash Report For Me is off) and close it, as Send and Close
+# would, so it cannot open a second editor later. Gone already: someone chose, and Send and Restart's editor may still
+# be starting, so it gets a few seconds to appear.
+function Close-CrashReporter {
+  $Id = [int]$Plan.crash.processId
+  $Reporter = if ($Id) { @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { "$($_.CommandLine)" -match "-MONITOR=$Id\b" }) } else { @() }
+  if ($Reporter.Count -eq 0) {
+    for ($Try = 0; $Try -lt 10 -and -not (Test-EditorProcess); $Try++) { Start-Sleep -Milliseconds 500 }
+    return
+  }
+  $Reporter | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  if (-not $Plan.sendCrashReport -or -not $Plan.crash.folder) {
+    Say 'Nobody chose in the crash reporter, so HyperAI Studio closed it without sending the report.'
+    return
+  }
+  Say 'Nobody chose in the crash reporter, so HyperAI Studio sends the report and closes it, as Send and Close would.'
+  $Sender = if ($Plan.crashReporter) { $Plan.crashReporter } else { Join-Path (Split-Path -Parent $Plan.relaunch.executable) 'CrashReportClientEditor.exe' }
+  try {
+    $Send = Start-Process -FilePath $Sender -ArgumentList @("`"$($Plan.crash.folder)`"", '-Unattended') -WindowStyle Hidden -PassThru -ErrorAction Stop
+    if (-not $Send.WaitForExit(90000)) {
+      Stop-Process -Id $Send.Id -Force -ErrorAction SilentlyContinue
+      Say 'The crash report was not sent within 90 s.' 'Yellow'
+    } elseif ($Send.ExitCode -eq 0) {
+      Say 'The crash report was sent.' 'Green'
+    } else {
+      Say "The crash reporter could not send the report (exit code $($Send.ExitCode))." 'Yellow'
+    }
+  } catch {
+    Say "The crash report was not sent: $_" 'Yellow'
+  }
 }
 
 if ($Crashed) {
@@ -52,8 +89,10 @@ if ($Crashed) {
   }
   $Delay = if ($null -ne $Plan.delaySeconds) { [int]$Plan.delaySeconds } else { 15 }
   Say "HyperAI Studio opens it again in $Delay s, with its chats. Close this window to leave it closed." 'Cyan'
-  Say 'To send the crash report, use Send and Close: Send and Restart would open a second editor.'
+  Say "Your choice in Unreal's crash reporter counts: Send and Restart opens the editor now, and its chats come back there."
   Start-Sleep -Seconds $Delay
+  if (Test-EditorOpen) { exit 0 }
+  Close-CrashReporter
   if (Test-EditorOpen) { exit 0 }
 } else {
   Say "HyperAI Studio is restarting the editor for $($Plan.project)." 'Cyan'

@@ -43,6 +43,8 @@ namespace HyperAIStudio::EditorRestart::Private
 	constexpr int32 CloseTimeoutSeconds = 120;
 	/** A restart older than this is not resumed: a full rebuild can take hours, a forgotten plan should not come back. */
 	constexpr double MaxResumeAgeSeconds = 6.0 * 60.0 * 60.0;
+	/** An editor opened without the token takes a crash's chats only this soon after it: Send and Restart, or a quick reopen by hand. */
+	constexpr double MaxCrashAgeWithoutTokenSeconds = 10.0 * 60.0;
 	/** The editor waits this long before it closes, so the tool's answer reaches the agent first. */
 	constexpr float CloseDelaySeconds = 2.0f;
 	/** A close still not under way this long after it was asked for was cancelled. */
@@ -255,6 +257,7 @@ namespace HyperAIStudio::EditorRestart::Private
 		Plan->SetStringField(TEXT("projectFile"), Native(Reopen.ProjectFile));
 		Plan->SetNumberField(TEXT("editorProcessId"), FPlatformProcess::GetCurrentProcessId());
 		Plan->SetNumberField(TEXT("closeTimeoutSeconds"), CloseTimeoutSeconds);
+		Plan->SetBoolField(TEXT("sendCrashReport"), GetDefault<UHyperAIStudioSettings>()->bSendCrashReportForMe);
 		Plan->SetStringField(TEXT("requestedAt"), FDateTime::UtcNow().ToIso8601());
 		Plan->SetObjectField(TEXT("build"), Build);
 		Plan->SetObjectField(TEXT("relaunch"), Relaunch);
@@ -647,7 +650,7 @@ FString FHyperAIStudioEditorRestart::DescribeRestart(const TSharedPtr<FJsonObjec
 	// A crash's plan comes from the watchdog, with the crash report's error and where it happened.
 	const TSharedPtr<FJsonObject> Crash = StringField(Plan, TEXT("reason")) == TEXT("crash") ? ObjectField(Plan, TEXT("crash")) : nullptr;
 	TArray<FString> Lines = {Crash.IsValid()
-		? FString(TEXT("The Unreal Editor crashed, and HyperAI Studio opened it again; this chat resumed."))
+		? FString(TEXT("The Unreal Editor crashed and was opened again; this chat resumed."))
 		: FString(TEXT("The Unreal Editor restarted, as you asked with hyper_editor_restart, and this chat resumed.")), FString()};
 	if (Crash.IsValid())
 	{
@@ -733,13 +736,23 @@ bool FHyperAIStudioEditorRestart::LoadResume(const FString& Folder, const FStrin
 	const FString ResultPath = Folder / TEXT("result.json");
 	const TSharedPtr<FJsonObject> Plan = ReadJson(PlanPath);
 	const TSharedPtr<FJsonObject> Result = ReadJson(ResultPath);
+	FDateTime Requested;
+	const double Age = FDateTime::ParseIso8601(*StringField(Plan, TEXT("requestedAt")), Requested) ? (FDateTime::UtcNow() - Requested).GetTotalSeconds() : -1.0;
+	// Opened without the token (the crash reporter's Send and Restart, or by hand): only a fresh crash plan for this very
+	// project resumes here. Anything else stays for the editor its helper opens.
+	const bool bNoToken = Token.IsEmpty();
+	if (bNoToken && !(StringField(Plan, TEXT("reason")) == TEXT("crash") && Age >= 0.0 && Age <= MaxCrashAgeWithoutTokenSeconds
+		&& FPaths::IsSamePath(StringField(Plan, TEXT("projectFile")), FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath()))))
+	{
+		return false;
+	}
+	const FString Expected = bNoToken ? StringField(Plan, TEXT("token")) : Token;
 	// A restart resumes once: whatever the files hold, they are used up now.
 	IFileManager::Get().Delete(*PlanPath, false, true, true);
 	IFileManager::Get().Delete(*ResultPath, false, true, true);
-	FDateTime Requested;
-	if (Token.IsEmpty() || StringField(Plan, TEXT("token")) != Token || StringField(Result, TEXT("token")) != Token
-		|| !FDateTime::ParseIso8601(*StringField(Plan, TEXT("requestedAt")), Requested)
-		|| (FDateTime::UtcNow() - Requested).GetTotalSeconds() > MaxAgeSeconds)
+	// Without the token there may be no result yet: the helper writes one only for an editor it opened itself.
+	if (Expected.IsEmpty() || StringField(Plan, TEXT("token")) != Expected || (!bNoToken && StringField(Result, TEXT("token")) != Expected)
+		|| Age < 0.0 || Age > MaxAgeSeconds)
 	{
 		UE_LOG(LogHyperAIStudioRestart, Display, TEXT("This editor was opened by a restart whose plan is missing, stale or another restart's; chats start fresh."));
 		return false;
@@ -791,7 +804,8 @@ void FHyperAIStudioEditorRestart::Startup()
 	Current.PreExit = FCoreDelegates::OnEnginePreExit.AddStatic(&EndCrashWatch);
 
 	FString Token;
-	const bool bResume = FParse::Value(FCommandLine::Get(), TEXT("HyperAIResume="), Token) && LoadResume(GetFolder(), Token, MaxResumeAgeSeconds);
+	FParse::Value(FCommandLine::Get(), TEXT("HyperAIResume="), Token);
+	const bool bResume = IsInteractiveEditor() && LoadResume(GetFolder(), Token, MaxResumeAgeSeconds);
 	// Once the main frame is up: the crash watch, and after a restart, every restored chat tab a moment later. Tabs the
 	// Studio layout brings back take their chats as they open.
 	auto WhenUp = [bResume]()
