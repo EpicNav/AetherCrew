@@ -200,8 +200,26 @@ struct FHyperAINiagaraRendererTopology
 {
 	GENERATED_BODY()
 
+	/** Use as renderer_index in a set_renderer_property op. */
 	UPROPERTY() int32 RendererIndex = INDEX_NONE;
 	UPROPERTY() FString RendererClassPath;
+};
+
+/** One simulation stage: its own module stack, run after Particle Update (GPU emitters only in UE 5.8). */
+USTRUCT(BlueprintType)
+struct FHyperAINiagaraSimStageTopology
+{
+	GENERATED_BODY()
+
+	/** Use as stage_name, with script_name ParticleSimulationStageScript, in an edit op. */
+	UPROPERTY() FString StageName;
+	UPROPERTY() bool bEnabled = true;
+	/** particles, data_interface or direct_set. */
+	UPROPERTY() FString IterationSource;
+	/** Times the stage runs per frame (its constant; a bound attribute reports the constant it falls back to). */
+	UPROPERTY() int32 Iterations = 1;
+	/** Module names and scripts, in execution order; stage module inputs are not listed. */
+	UPROPERTY() TArray<FHyperAINiagaraModuleTopology> Modules;
 };
 
 USTRUCT(BlueprintType)
@@ -215,6 +233,7 @@ struct FHyperAINiagaraEmitterTopology
 	/** CPUSim or GPUComputeSim. */
 	UPROPERTY() FString SimTarget;
 	UPROPERTY() TArray<FHyperAINiagaraScriptStackTopology> ScriptStacks;
+	UPROPERTY() TArray<FHyperAINiagaraSimStageTopology> SimulationStages;
 	UPROPERTY() TArray<FHyperAINiagaraRendererTopology> Renderers;
 };
 
@@ -250,6 +269,8 @@ struct FHyperAINiagaraInspectReport
 	UPROPERTY() TArray<FHyperAINiagaraUserParameterIdentity> UserParameters;
 	/** Present only when bIncludeTopology was requested. */
 	UPROPERTY() TArray<FHyperAINiagaraEmitterTopology> Emitters;
+	/** With bIncludeTopology: the System's scratch pad module scripts (add_hlsl_module makes these), by object name. */
+	UPROPERTY() TArray<FString> ScratchPadModules;
 	/** Filled instead of Health when target_path is an effect type, data channel or sim cache. */
 	UPROPERTY() FHyperAINiagaraAssetRecord Asset;
 	UPROPERTY() TArray<FHyperAINiagaraIssue> Issues;
@@ -325,26 +346,37 @@ struct FHyperAINiagaraEditOp
 
 	/**
 	 * System edits: set_module_enabled | add_module | add_renderer | add_emitter | set_input_value | apply_stack_issue_fix.
+	 * Stages, code and properties: add_simulation_stage (emitter_name, name, value = iterations 1-64) |
+	 * add_hlsl_module (script_name, stage_name for a stage, name, hlsl) | set_emitter_property (emitter_name, name
+	 * sim_target|local_space|determinism|random_seed|fixed_bounds|enabled, value) | set_renderer_property
+	 * (emitter_name, renderer_index, name = the renderer's C++ property, value). add_module and set_module_enabled
+	 * also take a stage_name.
 	 * Assets saved with the System: set_effect_type (asset_path, empty clears) | create_effect_type (asset_path) |
 	 * set_effect_type_setting (asset_path, name, value) | create_data_channel (asset_path, value_type
 	 * global|islands|gameplay_burst, value "Name:type,...") | bake_sim_cache (name = capture_id, asset_path).
 	 */
 	UPROPERTY() FString Kind;
-	/** Required for emitter scripts and renderers; empty for System* scripts. */
+	/** Required for emitter scripts, stages and renderers; empty for System* scripts. */
 	UPROPERTY() FString EmitterName;
-	/** SystemSpawnScript | SystemUpdateScript | EmitterSpawnScript | EmitterUpdateScript | ParticleSpawnScript | ParticleUpdateScript */
+	/** SystemSpawnScript | SystemUpdateScript | EmitterSpawnScript | EmitterUpdateScript | ParticleSpawnScript | ParticleUpdateScript | ParticleSimulationStageScript (with stage_name) */
 	UPROPERTY() FString ScriptName;
+	/** A simulation stage's name from inspect, to address its module stack. */
+	UPROPERTY() FString StageName;
 	UPROPERTY() FString ModuleName;
 	/** set_input_value: the module input, then any nested dynamic-input names. */
 	UPROPERTY() TArray<FString> InputNameStack;
 	/** add_module: module script object path. add_emitter: emitter template path. add_renderer: renderer class path. */
 	UPROPERTY() FString AssetPath;
-	/** add_emitter: the new emitter's name. */
+	/** add_emitter: the new emitter's name. add_simulation_stage: the stage's. add_hlsl_module: the module's. set_*_property: the property. */
 	UPROPERTY() FString Name;
 	/** set_input_value: float | int32 | bool | vector | color */
 	UPROPERTY() FString ValueType;
-	/** set_input_value: 1.5 | 3 | true | 1,2,3 | 1,0.5,0,1 */
+	/** set_input_value: 1.5 | 3 | true | 1,2,3 | 1,0.5,0,1. set_renderer_property: Unreal text, e.g. VelocityAligned, 2,2 or an asset path. */
 	UPROPERTY() FString Value;
+	/** set_renderer_property: the renderer's index in its emitter, from inspect. */
+	UPROPERTY() int32 RendererIndex = INDEX_NONE;
+	/** add_hlsl_module: the module body. Read and write attributes by name (Particles.Velocity, Engine.DeltaTime, User.X); up to 16384 characters. */
+	UPROPERTY() FString Hlsl;
 	/** set_module_enabled */
 	UPROPERTY() bool bEnabled = true;
 	/** apply_stack_issue_fix: ids from hyper_niagara_validate. */

@@ -15,6 +15,7 @@
 #include "NiagaraTypes.h"
 #include "ScopedTransaction.h"
 #include "HyperAIStudioNiagaraAssetsGate.h"
+#include "HyperAIStudioNiagaraGraphGate.h"
 #include "StructUtils/InstancedStruct.h"
 #include "UObject/SoftObjectPath.h"
 
@@ -291,6 +292,8 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 			{
 				CopyStack(*Stack, Out.ScriptStacks.AddDefaulted_GetRef(), ModuleBudget, bOutTruncated);
 			}
+			// The external API reads only the four fixed stacks; stages come from the emitter and its graph.
+			HyperAIStudio::Niagara::GraphGate::ReadSimulationStages(System, Out.EmitterName, Out.SimulationStages, ModuleBudget, bOutTruncated);
 			for (const FNiagaraExt_RendererRef& Renderer : Topology.Renderers)
 			{
 				FHyperAINiagaraRendererTopology& Entry = Out.Renderers.AddDefaulted_GetRef();
@@ -398,11 +401,14 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 			return false;
 		};
 
+		// Values carry asset paths and struct text for renderer properties, so they get the path bound. The HLSL body
+		// of add_hlsl_module is checked by the graph gate, which allows its newlines and tabs.
 		if (!IsBoundedText(Op.EmitterName, MaxNameChars) || !IsBoundedText(Op.ScriptName, MaxNameChars)
-			|| !IsBoundedText(Op.ModuleName, MaxNameChars) || !IsBoundedText(Op.Name, MaxNameChars)
-			|| !IsBoundedText(Op.AssetPath, MaxPathChars) || !IsBoundedText(Op.IssueId, MaxIdChars)
-			|| !IsBoundedText(Op.FixId, MaxIdChars) || !IsBoundedText(Op.ValueType, MaxNameChars)
-			|| !IsBoundedText(Op.Value, MaxNameChars) || Op.InputNameStack.Num() > MaxInputNameDepth)
+			|| !IsBoundedText(Op.StageName, MaxNameChars) || !IsBoundedText(Op.ModuleName, MaxNameChars)
+			|| !IsBoundedText(Op.Name, MaxNameChars) || !IsBoundedText(Op.AssetPath, MaxPathChars)
+			|| !IsBoundedText(Op.IssueId, MaxIdChars) || !IsBoundedText(Op.FixId, MaxIdChars)
+			|| !IsBoundedText(Op.ValueType, MaxNameChars) || !IsBoundedText(Op.Value, MaxPathChars)
+			|| Op.InputNameStack.Num() > MaxInputNameDepth)
 		{
 			return Fail(TEXT("invalid_op_text"), TEXT("An op field is too long, contains control characters, or nests inputs too deeply."));
 		}
@@ -412,6 +418,17 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 			{
 				return Fail(TEXT("invalid_op_text"), TEXT("input_name_stack entries must be non-empty, bounded names."));
 			}
+		}
+		if (HyperAIStudio::Niagara::GraphGate::IsGraphOp(Op))
+		{
+			return HyperAIStudio::Niagara::GraphGate::ValidateGraphOp(Op, bResolveAssets, OutStatus, OutDiagnostic);
+		}
+		if (!Op.StageName.IsEmpty() || !Op.Hlsl.IsEmpty())
+		{
+			// A stage address on an op that cannot use one would otherwise edit a different stack.
+			return Fail(TEXT("invalid_op_address"), Op.Kind == TEXT("set_input_value")
+				? TEXT("Inputs of simulation-stage modules cannot be set yet; write the values into an add_hlsl_module in that stage.")
+				: TEXT("stage_name goes only with add_module, set_module_enabled and add_hlsl_module; hlsl only with add_hlsl_module."));
 		}
 
 		const bool bHasScript = !Op.ScriptName.IsEmpty();
@@ -491,7 +508,7 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 			}
 			return true;
 		}
-		return Fail(TEXT("unsupported_op_kind"), TEXT("kind must be set_module_enabled, add_module, add_renderer, add_emitter, set_input_value, or apply_stack_issue_fix."));
+		return Fail(TEXT("unsupported_op_kind"), TEXT("kind must be set_module_enabled, add_module, add_renderer, add_emitter, set_input_value, apply_stack_issue_fix, add_simulation_stage, add_hlsl_module, set_emitter_property or set_renderer_property."));
 	}
 
 	bool ApplyOps(
@@ -516,7 +533,15 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 			const int32 ErrorsBefore = Context.Errors.Num();
 			FString Status = TEXT("applied");
 
-			if (Op.Kind == TEXT("set_module_enabled"))
+			if (HyperAIStudio::Niagara::GraphGate::IsGraphOp(Op))
+			{
+				FString GraphError;
+				if (!HyperAIStudio::Niagara::GraphGate::ApplyGraphOp(System, Op, Status, GraphError))
+				{
+					Context.Error(FText::FromString(GraphError));
+				}
+			}
+			else if (Op.Kind == TEXT("set_module_enabled"))
 			{
 				UNiagaraExternalEditUtilities::SetModuleEnabled(MakeReference(System, Op), Op.bEnabled, Context);
 			}

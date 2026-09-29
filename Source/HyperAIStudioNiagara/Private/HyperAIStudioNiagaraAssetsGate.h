@@ -12,7 +12,8 @@ class UNiagaraSystem;
  * golden-output regression checks. FNiagaraSimCacheCompare is experimental in UE 5.8 and data channels expose no
  * setters, so both stay inside this file. Everything runs on the game thread.
  *
- * Module and function script authoring is absent on purpose: UE 5.8 exports no way to build a script graph.
+ * Standalone module and function script assets are not authored here; scratch pad HLSL modules, which live inside the
+ * System, are the graph gate's (HyperAIStudioNiagaraGraphGate.h).
  */
 namespace HyperAIStudio::Niagara::AssetsGate
 {

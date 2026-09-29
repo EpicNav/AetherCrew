@@ -8,12 +8,18 @@
 #include "AssetRegistry/IAssetRegistry.h"
 #include "AssetToolsModule.h"
 #include "Containers/Ticker.h"
+#include "Editor.h"
 #include "FileHelpers.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioSettings.h"
 #include "Misc/ScopeExit.h"
 #include "HyperAIStudioNiagaraAssetsGate.h"
 #include "HyperAIStudioNiagaraExternalEditGate.h"
+#include "HyperAIStudioNiagaraGraphGate.h"
+#include "NiagaraNodeCustomHlsl.h"
+#include "NiagaraScript.h"
+#include "NiagaraSimulationStageBase.h"
+#include "NiagaraSpriteRendererProperties.h"
 #include "NiagaraDataChannel.h"
 #include "NiagaraDataChannelAsset.h"
 #include "NiagaraDataChannelVariable.h"
@@ -61,6 +67,36 @@ namespace HyperAIStudio::Niagara::Tests
 		FHyperAINiagaraEditOp Op;
 		Op.Kind = Kind;
 		return Op;
+	}
+
+	const TCHAR* FountainPath = TEXT("/Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain");
+
+	/** An unsaved System under /Game with one emitter copied from Niagara's Fountain template (CPU, one sprite renderer). */
+	UNiagaraSystem* MakeFountainSystem(const TCHAR* Prefix)
+	{
+		UNiagaraEmitter* Fountain = LoadObject<UNiagaraEmitter>(nullptr, FountainPath);
+		if (!Fountain)
+		{
+			return nullptr;
+		}
+		const FString Name = FString(Prefix) + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+		UPackage* Package = CreatePackage(*(TEXT("/Game/__HyperAIStudioTests/") + Name));
+		UNiagaraSystem* System = NewObject<UNiagaraSystem>(Package, FName(*Name), RF_Public | RF_Standalone | RF_Transactional);
+		UNiagaraSystemFactoryNew::InitializeSystem(System, /*bCreateDefaultNodes=*/true);
+		FNiagaraEditorUtilities::AddEmitterToSystem(*System, *Fountain, Fountain->GetExposedVersion().VersionGuid);
+		System->RequestCompile(/*bForce=*/false);
+		System->WaitForCompilationComplete(/*bIncludingGPUShaders=*/true, /*bShowProgress=*/false);
+		return System;
+	}
+
+	FString DescribeIssues(const HyperAIStudio::Niagara::ExternalEditGate::FDiagnostics& Diagnostics)
+	{
+		FString Text;
+		for (const FHyperAINiagaraIssue& Issue : Diagnostics.Issues)
+		{
+			Text += FString::Printf(TEXT("[%s %s] %s | "), *Issue.Severity, *Issue.SourcePath, *Issue.Summary);
+		}
+		return Text.IsEmpty() ? FString(TEXT("none")) : Text;
 	}
 }
 
@@ -825,6 +861,395 @@ bool FHyperAIStudioNiagaraRuntimeProbeTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("an unmet minimum fails the probe"), FHyperAIStudioNiagaraContracts::Validate(Request).Status, FString(TEXT("not_live")));
 	Request.ProbeFrames = 0;
 	TestEqual(TEXT("bounds are enforced"), FHyperAIStudioNiagaraContracts::Validate(Request).Status, FString(TEXT("invalid_request")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNiagaraUnversionedHandleTest,
+	"HyperAIStudio.Niagara.Contracts.TemplateEmittersWithoutVersionGuid",
+	HyperAIStudio::Niagara::Tests::Flags)
+
+bool FHyperAIStudioNiagaraUnversionedHandleTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	// Epic's CreateNiagaraSystem copies a template whose emitter handles carry no version guid, which the engine reads
+	// as the emitter's only (or exposed) version. Capture used to call that an incomplete identity and refuse to edit.
+	UNiagaraSystem* System = HyperAIStudio::Niagara::Tests::MakeFountainSystem(TEXT("NS_HyperAIUnversioned_"));
+	if (!System)
+	{
+		AddInfo(TEXT("Skipped: Niagara's Fountain template is not available."));
+		return true;
+	}
+	ON_SCOPE_EXIT { ObjectTools::ForceDeleteObjects({System}, /*ShowConfirmation=*/false); };
+	FNiagaraEmitterHandle& Handle = System->GetEmitterHandles()[0];
+	Handle.SetInstanceVersion(FGuid());
+	TestFalse(TEXT("the handle has no version guid"), Handle.GetInstance().Version.IsValid());
+	TestNotNull(TEXT("and still resolves its emitter data"), Handle.GetEmitterData());
+	FHyperAIStudioNiagaraValueSnapshot Snapshot;
+	FString Status;
+	FString Diagnostic;
+	FHyperAIStudioNiagaraContracts::CaptureExact(System->GetPathName(), FHyperAIStudioNiagaraContracts::MaxReadGameThreadMs, Snapshot, Status, Diagnostic);
+	TestFalse(TEXT("capture accepts it as a complete emitter identity"), Snapshot.CaptureIssues.ContainsByPredicate([](const FHyperAINiagaraIssue& Issue)
+	{
+		return Issue.Code == TEXT("emitter_version_identity_incomplete");
+	}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNiagaraGraphOpShapeTest,
+	"HyperAIStudio.Niagara.Mutation.GraphOpValidation",
+	HyperAIStudio::Niagara::Tests::Flags)
+
+bool FHyperAIStudioNiagaraGraphOpShapeTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Niagara::Tests;
+	namespace Gate = HyperAIStudio::Niagara::ExternalEditGate;
+	FString Status;
+	FString Diagnostic;
+	auto Accepts = [&](const FHyperAINiagaraEditOp& Op) { return Gate::ValidateOp(Op, false, Status, Diagnostic); };
+
+	FHyperAINiagaraEditOp Stage = MakeOp(TEXT("add_simulation_stage"));
+	Stage.EmitterName = TEXT("Sparks");
+	Stage.Name = TEXT("Relax");
+	TestTrue(TEXT("a stage with a name is accepted"), Accepts(Stage));
+	Stage.Value = TEXT("8");
+	TestTrue(TEXT("with an iteration count"), Accepts(Stage));
+	for (const TCHAR* Bad : {TEXT("0"), TEXT("65"), TEXT("2.5"), TEXT("many")})
+	{
+		Stage.Value = Bad;
+		TestFalse(FString::Printf(TEXT("iterations '%s' are refused"), Bad), Accepts(Stage));
+	}
+	TestEqual(TEXT("as invalid_iterations"), Status, FString(TEXT("invalid_iterations")));
+	Stage.Value.Reset();
+	Stage.Name = TEXT("Relax Pass");
+	TestFalse(TEXT("stage names are identifiers"), Accepts(Stage));
+
+	FHyperAINiagaraEditOp Code = MakeOp(TEXT("add_hlsl_module"));
+	Code.EmitterName = TEXT("Sparks");
+	Code.ScriptName = TEXT("ParticleUpdateScript");
+	Code.Name = TEXT("Drag");
+	Code.Hlsl = TEXT("// Slow down.\r\n\tParticles.Velocity *= 1.0 - 0.5 * Engine.DeltaTime;\n");
+	TestTrue(TEXT("an HLSL module with newlines and tabs is accepted"), Accepts(Code));
+	FHyperAINiagaraEditOp Unbalanced = Code;
+	Unbalanced.Hlsl = TEXT("if (Particles.Age > 1.0) { Particles.Velocity = float3(0, 0, 0);");
+	TestFalse(TEXT("an unclosed brace is refused"), Accepts(Unbalanced));
+	TestEqual(TEXT("as invalid_hlsl"), Status, FString(TEXT("invalid_hlsl")));
+	Unbalanced.Hlsl = TEXT("/* a comment with ( in it */ float X = 1.0; // and ] here");
+	TestTrue(TEXT("brackets inside comments do not count"), Accepts(Unbalanced));
+	Unbalanced.Hlsl = TEXT("   ");
+	TestFalse(TEXT("an empty body is refused"), Accepts(Unbalanced));
+	Unbalanced.Hlsl = FString::ChrN(HyperAIStudio::Niagara::GraphGate::MaxHlslChars + 1, TEXT('x'));
+	TestFalse(TEXT("an oversized body is refused"), Accepts(Unbalanced));
+	FHyperAINiagaraEditOp SystemCode = Code;
+	SystemCode.ScriptName = TEXT("SystemUpdateScript");
+	TestFalse(TEXT("a System script with an emitter is refused"), Accepts(SystemCode));
+	SystemCode.EmitterName.Reset();
+	TestTrue(TEXT("and accepted without one"), Accepts(SystemCode));
+	FHyperAINiagaraEditOp StageCode = Code;
+	StageCode.ScriptName = TEXT("ParticleSimulationStageScript");
+	TestFalse(TEXT("a stage stack needs its stage name"), Accepts(StageCode));
+	StageCode.StageName = TEXT("Relax");
+	TestTrue(TEXT("and is accepted with it"), Accepts(StageCode));
+	StageCode.ScriptName.Reset();
+	TestTrue(TEXT("a stage name alone addresses the stage"), Accepts(StageCode));
+
+	FHyperAINiagaraEditOp StageInput = MakeOp(TEXT("set_input_value"));
+	StageInput.EmitterName = TEXT("Sparks");
+	StageInput.StageName = TEXT("Relax");
+	StageInput.ModuleName = TEXT("Drag");
+	StageInput.InputNameStack = {TEXT("Strength")};
+	StageInput.ValueType = TEXT("float");
+	StageInput.Value = TEXT("1");
+	TestFalse(TEXT("stage module inputs are refused rather than set on another stack"), Accepts(StageInput));
+	FHyperAINiagaraEditOp StrayCode = MakeOp(TEXT("apply_stack_issue_fix"));
+	StrayCode.IssueId = TEXT("issue");
+	StrayCode.FixId = TEXT("fix");
+	StrayCode.Hlsl = TEXT("float X = 1.0;");
+	TestFalse(TEXT("hlsl on another kind is refused"), Accepts(StrayCode));
+
+	FHyperAINiagaraEditOp StageModule = MakeOp(TEXT("add_module"));
+	StageModule.EmitterName = TEXT("Sparks");
+	StageModule.StageName = TEXT("Relax");
+	StageModule.AssetPath = TEXT("/Niagara/Modules/Update/Forces/Drag.Drag");
+	TestTrue(TEXT("a module can target a stage"), Accepts(StageModule));
+	StageModule.ScriptName = TEXT("ParticleUpdateScript");
+	TestFalse(TEXT("but not a stage and another stack at once"), Accepts(StageModule));
+
+	FHyperAINiagaraEditOp Property = MakeOp(TEXT("set_emitter_property"));
+	Property.EmitterName = TEXT("Sparks");
+	auto PropertyAccepted = [&](const TCHAR* Name, const TCHAR* Value)
+	{
+		Property.Name = Name;
+		Property.Value = Value;
+		return Accepts(Property);
+	};
+	TestTrue(TEXT("sim_target gpu"), PropertyAccepted(TEXT("sim_target"), TEXT("gpu")));
+	TestTrue(TEXT("local_space"), PropertyAccepted(TEXT("local_space"), TEXT("true")));
+	TestTrue(TEXT("random_seed"), PropertyAccepted(TEXT("random_seed"), TEXT("1234")));
+	TestTrue(TEXT("fixed_bounds"), PropertyAccepted(TEXT("fixed_bounds"), TEXT("-100,-100,0,100,100,300")));
+	TestTrue(TEXT("fixed_bounds back to dynamic"), PropertyAccepted(TEXT("fixed_bounds"), TEXT("dynamic")));
+	TestFalse(TEXT("inverted bounds are refused"), PropertyAccepted(TEXT("fixed_bounds"), TEXT("100,0,0,-100,1,1")));
+	TestFalse(TEXT("an unknown sim target is refused"), PropertyAccepted(TEXT("sim_target"), TEXT("quantum")));
+	TestFalse(TEXT("an unknown property is refused"), PropertyAccepted(TEXT("max_particles"), TEXT("10")));
+	TestEqual(TEXT("as invalid_emitter_property"), Status, FString(TEXT("invalid_emitter_property")));
+
+	FHyperAINiagaraEditOp Renderer = MakeOp(TEXT("set_renderer_property"));
+	Renderer.EmitterName = TEXT("Sparks");
+	Renderer.Name = TEXT("Alignment");
+	Renderer.Value = TEXT("VelocityAligned");
+	TestFalse(TEXT("a renderer property needs renderer_index"), Accepts(Renderer));
+	Renderer.RendererIndex = 0;
+	TestTrue(TEXT("and is accepted with it"), Accepts(Renderer));
+	Renderer.Value = FString::ChrN(300, TEXT('a'));
+	TestTrue(TEXT("values may be as long as an asset path"), Accepts(Renderer));
+
+	// New fields are part of the sealed plan: changing any of them is a different plan.
+	FHyperAIStudioNiagaraEditOpsPayload Payload;
+	Payload.TargetPath = TEXT("/Game/VFX/NS_Test.NS_Test");
+	Payload.BaseRevision = HashOf(TEXT('1'));
+	Payload.Ops = {Code};
+	const FString Sealed = FHyperAIStudioNiagaraContracts::ComputeEditOpsSemanticFingerprint(Payload);
+	Payload.Ops[0].Hlsl += TEXT(" ");
+	TestNotEqual(TEXT("the HLSL body is sealed"), Sealed, FHyperAIStudioNiagaraContracts::ComputeEditOpsSemanticFingerprint(Payload));
+	Payload.Ops = {Code};
+	Payload.Ops[0].StageName = TEXT("Relax");
+	TestNotEqual(TEXT("the stage is sealed"), Sealed, FHyperAIStudioNiagaraContracts::ComputeEditOpsSemanticFingerprint(Payload));
+	Payload.Ops = {Code};
+	Payload.Ops[0].RendererIndex = 3;
+	TestNotEqual(TEXT("the renderer index is sealed"), Sealed, FHyperAIStudioNiagaraContracts::ComputeEditOpsSemanticFingerprint(Payload));
+	Payload.Ops = {Code};
+	TestTrue(TEXT("the HLSL counts toward the bounded size"), Payload.GetBoundedByteSize() > 2 * Code.Hlsl.Len());
+
+	// The Custom HLSL body is written by name through reflection; this fails when UE renames or retypes it.
+	TestNotNull(TEXT("UNiagaraNodeCustomHlsl::CustomHlsl is still a string property"),
+		FindFProperty<FStrProperty>(UNiagaraNodeCustomHlsl::StaticClass(), TEXT("CustomHlsl")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNiagaraStagesAndPropertiesTest,
+	"HyperAIStudio.Niagara.Mutation.StagesHlslPropertiesAndUndo",
+	HyperAIStudio::Niagara::Tests::Flags)
+
+bool FHyperAIStudioNiagaraStagesAndPropertiesTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Niagara::Tests;
+	namespace Gate = HyperAIStudio::Niagara::ExternalEditGate;
+	namespace GraphGate = HyperAIStudio::Niagara::GraphGate;
+	UNiagaraSystem* System = MakeFountainSystem(TEXT("NS_HyperAIStages_"));
+	if (!System)
+	{
+		AddInfo(TEXT("Skipped: Niagara's Fountain template is not available."));
+		return true;
+	}
+	ON_SCOPE_EXIT { ObjectTools::ForceDeleteObjects({System}, /*ShowConfirmation=*/false); };
+	const FString Emitter = System->GetEmitterHandles()[0].GetName().ToString();
+	auto EmitterData = [System]() { return System->GetEmitterHandles()[0].GetEmitterData(); };
+	UNiagaraSpriteRendererProperties* Sprite = EmitterData() && EmitterData()->GetRenderers().Num() > 0
+		? Cast<UNiagaraSpriteRendererProperties>(EmitterData()->GetRenderers()[0]) : nullptr;
+	if (!TestNotNull(TEXT("the Fountain copy renders sprites"), Sprite))
+	{
+		return false;
+	}
+	TestEqual(TEXT("and simulates on the CPU"), EmitterData()->SimTarget, ENiagaraSimTarget::CPUSim);
+	const ENiagaraSpriteAlignment OriginalAlignment = Sprite->Alignment;
+	const FVector2D OriginalGrid = Sprite->SubImageSize;
+
+	auto Op = [&Emitter](const TCHAR* Kind)
+	{
+		FHyperAINiagaraEditOp Result = MakeOp(Kind);
+		Result.EmitterName = Emitter;
+		return Result;
+	};
+	FHyperAINiagaraEditOp ToGpu = Op(TEXT("set_emitter_property"));
+	ToGpu.Name = TEXT("sim_target");
+	ToGpu.Value = TEXT("gpu");
+	FHyperAINiagaraEditOp Stage = Op(TEXT("add_simulation_stage"));
+	Stage.Name = TEXT("Settle");
+	Stage.Value = TEXT("2");
+	FHyperAINiagaraEditOp StageCode = Op(TEXT("add_hlsl_module"));
+	StageCode.ScriptName = TEXT("ParticleSimulationStageScript");
+	StageCode.StageName = TEXT("Settle");
+	StageCode.Name = TEXT("Damp");
+	StageCode.Hlsl = TEXT("// Bleed off a little speed on every stage pass.\nParticles.Velocity = Particles.Velocity * 0.98;");
+	FHyperAINiagaraEditOp UpdateCode = Op(TEXT("add_hlsl_module"));
+	UpdateCode.ScriptName = TEXT("ParticleUpdateScript");
+	UpdateCode.Name = TEXT("Swirl");
+	UpdateCode.Hlsl = TEXT("float3 Offset = Particles.Position;\nParticles.Velocity += float3(-Offset.y, Offset.x, 0.0) * 0.5 * Engine.DeltaTime;");
+	FHyperAINiagaraEditOp Align = Op(TEXT("set_renderer_property"));
+	Align.RendererIndex = 0;
+	Align.Name = TEXT("Alignment");
+	Align.Value = TEXT("VelocityAligned");
+	FHyperAINiagaraEditOp Grid = Align;
+	Grid.Name = TEXT("SubImageSize");
+	Grid.Value = TEXT("2,2");
+	const TArray<FHyperAINiagaraEditOp> Plan = {ToGpu, Stage, StageCode, UpdateCode, Align, Grid};
+
+	FString Status;
+	FString Diagnostic;
+	for (const FHyperAINiagaraEditOp& Each : Plan)
+	{
+		const bool bShaped = Gate::ValidateOp(Each, true, Status, Diagnostic);
+		TestTrue(FString::Printf(TEXT("%s %s passes its shape check (%s)"), *Each.Kind, *Each.Name, *Diagnostic), bShaped);
+	}
+	TestFalse(TEXT("a stage on the CPU emitter is refused against the System"), GraphGate::ValidatePlanAgainstSystem(*System, {Stage}, Status, Diagnostic));
+	TestEqual(TEXT("with the sim_target remedy"), Status, FString(TEXT("simulation_stage_needs_gpu")));
+	const bool bPlanValid = GraphGate::ValidatePlanAgainstSystem(*System, Plan, Status, Diagnostic);
+	TestTrue(FString::Printf(TEXT("switching to GPU first makes the plan valid (%s)"), *Diagnostic), bPlanValid);
+
+	auto Refused = [&](const TArray<FHyperAINiagaraEditOp>& Ops, const TCHAR* Expected)
+	{
+		const bool bValid = GraphGate::ValidatePlanAgainstSystem(*System, Ops, Status, Diagnostic);
+		TestFalse(FString::Printf(TEXT("%s is caught in the dry run"), Expected), bValid);
+		TestEqual(FString::Printf(TEXT("as %s (%s)"), Expected, *Diagnostic), Status, FString(Expected));
+	};
+	FHyperAINiagaraEditOp BadIndex = Align;
+	BadIndex.RendererIndex = 5;
+	Refused({BadIndex}, TEXT("renderer_index_out_of_range"));
+	FHyperAINiagaraEditOp Typo = Align;
+	Typo.Name = TEXT("Alignmnt");
+	Refused({Typo}, TEXT("renderer_property_not_found"));
+	TestTrue(TEXT("and the typo's diagnostic suggests the real name"), Diagnostic.Contains(TEXT("Alignment")));
+	FHyperAINiagaraEditOp BadValue = Align;
+	BadValue.Value = TEXT("Sideways");
+	Refused({BadValue}, TEXT("invalid_renderer_property_value"));
+	FHyperAINiagaraEditOp Binding = Align;
+	Binding.Name = TEXT("PositionBinding");
+	Refused({Binding}, TEXT("renderer_property_not_settable"));
+	FHyperAINiagaraEditOp NoStage = StageCode;
+	NoStage.StageName = TEXT("Nope");
+	Refused({ToGpu, Stage, NoStage}, TEXT("stage_not_found"));
+	FHyperAINiagaraEditOp Twin = MakeOp(TEXT("add_emitter"));
+	Twin.AssetPath = FountainPath;
+	Twin.Name = Emitter;
+	Refused({Twin}, TEXT("emitter_name_taken"));
+	FHyperAINiagaraEditOp Ghost = Align;
+	Ghost.EmitterName = TEXT("Nope");
+	Refused({Ghost}, TEXT("emitter_not_found"));
+
+	int32 Applied = 0;
+	TArray<FString> PerOp;
+	FString Error;
+	const bool bApplied = Gate::ApplyOps(*System, Plan, Applied, PerOp, Error);
+	TestTrue(FString::Printf(TEXT("the plan applies (%s)"), *Error), bApplied);
+	TestEqual(TEXT("every op landed"), Applied, Plan.Num());
+	AddInfo(TEXT("Per op: ") + FString::Join(PerOp, TEXT(", ")));
+	if (!bApplied)
+	{
+		return false;
+	}
+	TestEqual(TEXT("the emitter simulates on the GPU"), EmitterData()->SimTarget, ENiagaraSimTarget::GPUComputeSim);
+	TestEqual(TEXT("sprites align to velocity"), Sprite->Alignment, ENiagaraSpriteAlignment::VelocityAligned);
+	TestEqual(TEXT("the flipbook grid is 2x2"), Sprite->SubImageSize, FVector2D(2.0, 2.0));
+
+	TArray<FHyperAINiagaraEmitterTopology> Topology;
+	bool bTruncated = false;
+	FString TopologyError;
+	TestTrue(FString::Printf(TEXT("topology reads (%s)"), *TopologyError), Gate::ReadTopology(*System, Topology, bTruncated, TopologyError));
+	const FHyperAINiagaraSimStageTopology* Settle = Topology.Num() == 1
+		? Topology[0].SimulationStages.FindByPredicate([](const FHyperAINiagaraSimStageTopology& Each) { return Each.StageName == TEXT("Settle"); })
+		: nullptr;
+	if (TestNotNull(TEXT("inspect lists the stage"), Settle))
+	{
+		TestEqual(TEXT("iterating particles"), Settle->IterationSource, FString(TEXT("particles")));
+		TestEqual(TEXT("twice a frame"), Settle->Iterations, 2);
+		TestTrue(TEXT("with the HLSL module in its stack"), Settle->Modules.Num() == 1 && Settle->Modules[0].ModuleName == TEXT("Damp"));
+	}
+	const FHyperAINiagaraScriptStackTopology* Update = Topology.Num() == 1
+		? Topology[0].ScriptStacks.FindByPredicate([](const FHyperAINiagaraScriptStackTopology& Each) { return Each.ScriptName == TEXT("ParticleUpdateScript"); })
+		: nullptr;
+	TestTrue(TEXT("the update HLSL module runs last in Particle Update"),
+		Update && Update->Modules.Num() > 0 && Update->Modules.Last().ModuleName == TEXT("Swirl"));
+	const TArray<FString> ScratchPads = GraphGate::ReadScratchPadModules(*System);
+	TestTrue(TEXT("both modules are scratch pads of the System"), ScratchPads.Contains(TEXT("Damp")) && ScratchPads.Contains(TEXT("Swirl")));
+
+	System->RequestCompile(/*bForce=*/false);
+	System->WaitForCompilationComplete(/*bIncludingGPUShaders=*/true, /*bShowProgress=*/false);
+	HyperAIStudio::Niagara::ExternalEditGate::FDiagnostics Diagnostics;
+	FString DiagnosticsError;
+	TestTrue(FString::Printf(TEXT("diagnostics read (%s)"), *DiagnosticsError), Gate::ReadDiagnostics(*System, 64, Diagnostics, DiagnosticsError));
+	TestFalse(TEXT("the System compiles without errors: ") + DescribeIssues(Diagnostics), Diagnostics.bCompileHasErrors);
+	TestEqual(TEXT("and has no stack errors: ") + DescribeIssues(Diagnostics), Diagnostics.StackErrorCount, 0);
+	bool bStageCompiled = false;
+	if (const UNiagaraScript* Gpu = EmitterData()->GetGPUComputeScript())
+	{
+		for (const FSimulationStageMetaData& Meta : Gpu->GetSimulationStageMetaData())
+		{
+			bStageCompiled |= Meta.SimulationStageName == FName(TEXT("Settle"));
+		}
+	}
+	TestTrue(TEXT("the GPU script compiled the Settle stage"), bStageCompiled);
+
+	// The whole plan was one transaction: one undo takes all of it back, one redo restores it.
+	if (!GEditor)
+	{
+		AddWarning(TEXT("No editor transaction buffer; undo not checked."));
+		return true;
+	}
+	TestTrue(TEXT("one undo step"), GEditor->UndoTransaction());
+	TestEqual(TEXT("undo puts the emitter back on the CPU"), EmitterData()->SimTarget, ENiagaraSimTarget::CPUSim);
+	TestEqual(TEXT("removes the stage"), EmitterData()->GetSimulationStages().Num(), 0);
+	TestEqual(TEXT("restores the sprite alignment"), Sprite->Alignment, OriginalAlignment);
+	TestEqual(TEXT("and the flipbook grid"), Sprite->SubImageSize, OriginalGrid);
+	TestTrue(TEXT("and drops the scratch pads"), GraphGate::ReadScratchPadModules(*System).IsEmpty());
+	TestTrue(TEXT("one redo step"), GEditor->RedoTransaction());
+	TestEqual(TEXT("redo brings the stage back"), EmitterData()->GetSimulationStages().Num(), 1);
+	TestEqual(TEXT("and the alignment"), Sprite->Alignment, ENiagaraSpriteAlignment::VelocityAligned);
+	TestEqual(TEXT("and both scratch pads"), GraphGate::ReadScratchPadModules(*System).Num(), 2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNiagaraHlslRuntimeTest,
+	"HyperAIStudio.Niagara.Mutation.HlslModuleChangesTheSimulation",
+	HyperAIStudio::Niagara::Tests::Flags)
+
+bool FHyperAIStudioNiagaraHlslRuntimeTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Niagara::Tests;
+	namespace Gate = HyperAIStudio::Niagara::ExternalEditGate;
+	UNiagaraSystem* System = MakeFountainSystem(TEXT("NS_HyperAIHlsl_"));
+	if (!System)
+	{
+		AddInfo(TEXT("Skipped: Niagara's Fountain template is not available."));
+		return true;
+	}
+	ON_SCOPE_EXIT { ObjectTools::ForceDeleteObjects({System}, /*ShowConfirmation=*/false); };
+	FHyperAINiagaraValidateRequest Probe;
+	Probe.TargetPath = System->GetPathName();
+	Probe.Policy = TEXT("runtime_probe");
+	Probe.ProbeFrames = 120;
+	auto LiveParticles = [&Probe]()
+	{
+		const FHyperAINiagaraValidateReport Report = FHyperAIStudioNiagaraContracts::Validate(Probe);
+		return Report.RuntimeProbe.Emitters.Num() == 1 ? Report.RuntimeProbe.Emitters[0].NumParticles : -1;
+	};
+	const int32 Before = LiveParticles();
+	TestTrue(FString::Printf(TEXT("the Fountain has particles to begin with (%d)"), Before), Before > 10);
+
+	// Age every particle past its lifetime at the end of Particle Update: Particle State kills it on the next frame,
+	// so only particles born this frame are left. A count that collapses proves the HLSL ran in the simulation.
+	FHyperAINiagaraEditOp Expire = MakeOp(TEXT("add_hlsl_module"));
+	Expire.EmitterName = System->GetEmitterHandles()[0].GetName().ToString();
+	Expire.ScriptName = TEXT("ParticleUpdateScript");
+	Expire.Name = TEXT("ExpireNow");
+	Expire.Hlsl = TEXT("Particles.Age = Particles.Lifetime + 1.0;");
+	int32 Applied = 0;
+	TArray<FString> PerOp;
+	FString Error;
+	TestTrue(FString::Printf(TEXT("the HLSL module applies (%s)"), *Error), Gate::ApplyOps(*System, {Expire}, Applied, PerOp, Error));
+	System->RequestCompile(/*bForce=*/false);
+	System->WaitForCompilationComplete(/*bIncludingGPUShaders=*/true, /*bShowProgress=*/false);
+	HyperAIStudio::Niagara::ExternalEditGate::FDiagnostics Diagnostics;
+	FString DiagnosticsError;
+	Gate::ReadDiagnostics(*System, 64, Diagnostics, DiagnosticsError);
+	TestFalse(TEXT("the CPU System compiles the HLSL without errors: ") + DescribeIssues(Diagnostics), Diagnostics.bCompileHasErrors);
+	const int32 After = LiveParticles();
+	TestTrue(FString::Printf(TEXT("the HLSL module ran: %d live particles before, %d after"), Before, After), After >= 0 && After * 4 < Before);
 	return true;
 }
 

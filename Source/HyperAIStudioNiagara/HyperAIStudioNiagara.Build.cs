@@ -17,6 +17,7 @@ public class HyperAIStudioNiagara : ModuleRules
 			"AssetTools",
 			"HyperAIStudio",
 			"Niagara",
+			"NiagaraCore",
 			"NiagaraEditor",
 			"ToolsetRegistry",
 			"UnrealEd"

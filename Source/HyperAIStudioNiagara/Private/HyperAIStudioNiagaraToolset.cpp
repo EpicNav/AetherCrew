@@ -13,6 +13,7 @@
 #include "FileHelpers.h"
 #include "HyperAIStudioNiagaraAssetsGate.h"
 #include "HyperAIStudioNiagaraExternalEditGate.h"
+#include "HyperAIStudioNiagaraGraphGate.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioAsyncJobHost.h"
@@ -398,6 +399,16 @@ namespace HyperAIStudio::Niagara::Private
 		return true;
 	}
 
+	int64 EstimateModuleBytes(const FHyperAINiagaraModuleTopology& Module)
+	{
+		int64 Size = 96 + 2ll * (Module.ModuleName.Len() + Module.ScriptAssetPath.Len());
+		for (const FString& Input : Module.InputNames)
+		{
+			Size += 16 + 2ll * Input.Len();
+		}
+		return Size;
+	}
+
 	int32 EstimateTopologyBytes(const FHyperAINiagaraEmitterTopology& Emitter)
 	{
 		int64 Size = 128 + 2ll * (Emitter.EmitterName.Len() + Emitter.SimTarget.Len());
@@ -406,11 +417,15 @@ namespace HyperAIStudio::Niagara::Private
 			Size += 64 + 2ll * Stack.ScriptName.Len();
 			for (const FHyperAINiagaraModuleTopology& Module : Stack.Modules)
 			{
-				Size += 96 + 2ll * (Module.ModuleName.Len() + Module.ScriptAssetPath.Len());
-				for (const FString& Input : Module.InputNames)
-				{
-					Size += 16 + 2ll * Input.Len();
-				}
+				Size += EstimateModuleBytes(Module);
+			}
+		}
+		for (const FHyperAINiagaraSimStageTopology& Stage : Emitter.SimulationStages)
+		{
+			Size += 96 + 2ll * (Stage.StageName.Len() + Stage.IterationSource.Len());
+			for (const FHyperAINiagaraModuleTopology& Module : Stage.Modules)
+			{
+				Size += EstimateModuleBytes(Module);
 			}
 		}
 		for (const FHyperAINiagaraRendererTopology& Renderer : Emitter.Renderers)
@@ -749,7 +764,7 @@ FString FHyperAIStudioNiagaraContracts::InspectPayloadSchemaFingerprint()
 FString FHyperAIStudioNiagaraContracts::EditOpsPayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("niagara.edit_ops.payload.v2|one_target|base_revision|ordered_closed_ops|compile|save|deep_clone|bounded"));
+		TEXT("niagara.edit_ops.payload.v3|one_target|base_revision|ordered_closed_ops|stage_name|renderer_index|hlsl|compile|save|deep_clone|bounded"));
 	return Value;
 }
 
@@ -763,7 +778,7 @@ FString FHyperAIStudioNiagaraContracts::ValidatePayloadSchemaFingerprint()
 FString FHyperAIStudioNiagaraContracts::InspectResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("niagara.inspect.result.v2|health|revision|parameter_identity_page|emitter_topology|capabilities|issues|bounded"));
+		TEXT("niagara.inspect.result.v3|health|revision|parameter_identity_page|emitter_topology|simulation_stages|scratch_pad_modules|capabilities|issues|bounded"));
 	return Value;
 }
 
@@ -829,9 +844,9 @@ int32 FHyperAIStudioNiagaraEditOpsPayload::GetBoundedByteSize() const
 	int64 Size = 256 + 2ll * (TargetPath.Len() + BaseRevision.Len() + SemanticFingerprint.Len());
 	for (const FHyperAINiagaraEditOp& Op : Ops)
 	{
-		Size += 64 + 2ll * (Op.Kind.Len() + Op.EmitterName.Len() + Op.ScriptName.Len() + Op.ModuleName.Len()
-			+ Op.AssetPath.Len() + Op.Name.Len() + Op.ValueType.Len() + Op.Value.Len()
-			+ Op.IssueId.Len() + Op.FixId.Len());
+		Size += 80 + 2ll * (Op.Kind.Len() + Op.EmitterName.Len() + Op.ScriptName.Len() + Op.StageName.Len()
+			+ Op.ModuleName.Len() + Op.AssetPath.Len() + Op.Name.Len() + Op.ValueType.Len() + Op.Value.Len()
+			+ Op.IssueId.Len() + Op.FixId.Len() + Op.Hlsl.Len());
 		for (const FString& InputName : Op.InputNameStack)
 		{
 			Size += 16 + 2ll * InputName.Len();
@@ -882,6 +897,10 @@ int32 FHyperAIStudioNiagaraInspectResultPayload::GetBoundedByteSize() const
 	for (const FHyperAINiagaraEmitterTopology& Emitter : Report.Emitters)
 	{
 		Size += HyperAIStudio::Niagara::Private::EstimateTopologyBytes(Emitter);
+	}
+	for (const FString& Module : Report.ScratchPadModules)
+	{
+		Size += 16 + 2ll * Module.Len();
 	}
 	for (const FHyperAINiagaraIssue& Issue : Report.Issues)
 	{
@@ -943,7 +962,12 @@ TArray<FHyperAINiagaraCapabilityStatus> FHyperAIStudioNiagaraContracts::GetCapab
 		TEXT("effect_type_create_configure_and_assign"),
 		TEXT("data_channel_create_and_inspect"),
 		TEXT("sim_cache_capture_bake_and_golden_regression"),
-		TEXT("effect_type_data_channel_sim_cache_inspect")};
+		TEXT("effect_type_data_channel_sim_cache_inspect"),
+		TEXT("simulation_stages_with_module_stacks"),
+		TEXT("hlsl_scratch_pad_modules"),
+		TEXT("emitter_sim_target_space_determinism_bounds_edits"),
+		TEXT("renderer_property_edits_with_undo"),
+		TEXT("dry_run_checks_addresses_against_the_system")};
 	// Epic's NiagaraToolsets expose these as single calls. apply_plan adds batching, a revision check, one undo
 	// step, and a durable journal on top of the same engine API; it does not replace them.
 	Niagara.DelegatedEpicCallables = {
@@ -975,11 +999,14 @@ TArray<FHyperAINiagaraCapabilityStatus> FHyperAIStudioNiagaraContracts::GetCapab
 		TEXT("target_open_in_niagara_editor"),
 		TEXT("destructive_removal_ops_until_server_grant_path_is_exercised"),
 		TEXT("opaque_system_emitter_renderer_property_json"),
-		TEXT("raw_hlsl_python_lua_or_script_text"),
-		TEXT("scratchpad_authoring"),
+		TEXT("python_lua_or_script_text_outside_hlsl_modules"),
+		TEXT("scratch_pad_dynamic_inputs"),
 		TEXT("module_reorder_through_unexported_editor_api"),
-		TEXT("event_or_simulation_stage_or_version_authoring"),
-		TEXT("module_or_function_script_authoring_no_exported_graph_api"),
+		TEXT("event_handler_or_emitter_version_authoring"),
+		TEXT("simulation_stage_module_input_values"),
+		TEXT("data_interface_iteration_stages"),
+		TEXT("renderer_attribute_bindings"),
+		TEXT("module_or_function_script_asset_authoring"),
 		TEXT("module_script_schema_from_asset_not_exported"),
 		TEXT("gpu_emitter_sim_cache_capture"),
 		TEXT("link_style_stack_issue_fixes"),
@@ -987,7 +1014,7 @@ TArray<FHyperAINiagaraCapabilityStatus> FHyperAIStudioNiagaraContracts::GetCapab
 		TEXT("runtime_simulation_screenshot_or_actor_spawn"),
 		TEXT("generic_reflection_property_dispatch")};
 	Niagara.State = TEXT("source_candidate_external_edit_ops");
-	Niagara.Remediation = TEXT("Inspect with bIncludeTopology, then apply_plan: submit with bDryRun false and an operation_id (plan hash optional), call hyper_operation_wait, then hyper_niagara_validate. Close the System's Niagara editor tab first. Planning may load referenced module scripts or emitter templates; it never loads the edited System. Removals stay on Epic's NiagaraToolsets.");
+	Niagara.Remediation = TEXT("Inspect with bIncludeTopology, then apply_plan: submit with bDryRun false and an operation_id (plan hash optional), call hyper_operation_wait, then hyper_niagara_validate. Close the System's Niagara editor tab first. Planning may load referenced module scripts or emitter templates; it never loads the edited System. Stages, HLSL modules, emitter and renderer properties are apply_plan ops with undo; removals stay on Epic's NiagaraToolsets.");
 	return {Niagara};
 }
 
@@ -1167,14 +1194,17 @@ bool FHyperAIStudioNiagaraContracts::CaptureExact(
 		AppendToken(Entry, Handle.GetIsEnabled() ? TEXT("enabled") : TEXT("disabled"));
 		AppendToken(Entry, FString::FromInt(static_cast<int32>(Handle.GetEmitterMode())));
 		const FVersionedNiagaraEmitter Instance = Handle.GetInstance();
-		if (!Instance.Emitter || !Instance.Version.IsValid())
+		// A handle with no version guid (every System made from Niagara's templates, and handles older than emitter
+		// versioning) means the emitter's only, or exposed, version: the engine resolves it so, and so does identity.
+		const FVersionedNiagaraEmitterData* InstanceData = Instance.Emitter ? Instance.GetEmitterData() : nullptr;
+		if (!Instance.Emitter || !InstanceData)
 		{
 			bComplete = false;
 			AddIssue(OutSnapshot.CaptureIssues, TEXT("emitter_version_identity_incomplete"),
-				TEXT("error"), TEXT("Every emitter handle requires one loaded emitter and stable version guid."));
+				TEXT("error"), TEXT("Every emitter handle requires one loaded emitter whose version data resolves."));
 		}
 		AppendToken(Entry, ObjectIdentity(Instance.Emitter));
-		AppendToken(Entry, CanonicalGuid(Instance.Version));
+		AppendToken(Entry, CanonicalGuid(Instance.Version.IsValid() || !InstanceData ? Instance.Version : InstanceData->Version.VersionGuid));
 		EmitterEvidence.Add(MoveTemp(Entry));
 	}
 	EmitterEvidence.Sort();
@@ -1535,6 +1565,20 @@ FHyperAINiagaraInspectReport FHyperAIStudioNiagaraContracts::Inspect(
 			EstimatedBytes += EmitterBytes;
 			Report.Emitters.Add(MoveTemp(Emitter));
 		}
+		if (IsInGameThread() && System)
+		{
+			for (FString& Module : HyperAIStudio::Niagara::GraphGate::ReadScratchPadModules(*System))
+			{
+				const int64 ModuleBytes = 16 + 2ll * Module.Len();
+				if (EstimatedBytes + ModuleBytes > Request.MaxOutputBytes)
+				{
+					bTopologyTruncated = true;
+					break;
+				}
+				EstimatedBytes += ModuleBytes;
+				Report.ScratchPadModules.Add(MoveTemp(Module));
+			}
+		}
 		Report.bTruncated |= bTopologyTruncated;
 	}
 	return Report;
@@ -1653,7 +1697,7 @@ FString FHyperAIStudioNiagaraContracts::ComputeEditOpsSemanticFingerprint(
 {
 	using namespace HyperAIStudio::Niagara::Private;
 	FString Canonical;
-	AppendToken(Canonical, TEXT("hyperai.niagara.edit-ops-intent.v1"));
+	AppendToken(Canonical, TEXT("hyperai.niagara.edit-ops-intent.v2"));
 	AppendToken(Canonical, PackId);
 	AppendToken(Canonical, TEXT("hyper_niagara_apply_plan"));
 	AppendToken(Canonical, MutationVariantId);
@@ -1669,6 +1713,7 @@ FString FHyperAIStudioNiagaraContracts::ComputeEditOpsSemanticFingerprint(
 		AppendToken(Canonical, Op.Kind);
 		AppendToken(Canonical, Op.EmitterName);
 		AppendToken(Canonical, Op.ScriptName);
+		AppendToken(Canonical, Op.StageName);
 		AppendToken(Canonical, Op.ModuleName);
 		AppendToken(Canonical, FString::FromInt(Op.InputNameStack.Num()));
 		for (const FString& InputName : Op.InputNameStack)
@@ -1682,6 +1727,8 @@ FString FHyperAIStudioNiagaraContracts::ComputeEditOpsSemanticFingerprint(
 		AppendToken(Canonical, Op.bEnabled ? TEXT("enabled") : TEXT("disabled"));
 		AppendToken(Canonical, Op.IssueId);
 		AppendToken(Canonical, Op.FixId);
+		AppendToken(Canonical, FString::FromInt(Op.RendererIndex));
+		AppendToken(Canonical, Op.Hlsl);
 	}
 	return FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(Canonical);
 }
@@ -1826,6 +1873,14 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 		return Reject(TEXT("target_open_in_editor"),
 			TEXT("Close the System's Niagara editor tab first. Edits run through a separate headless view model, and two view models over one System can overwrite each other."));
 	}
+	// Emitters, stages, renderer indices and property values are checked against the System now, walking the ops in
+	// order, so a wrong address fails this dry run instead of the edit halfway through.
+	FString AddressStatus;
+	FString AddressDiagnostic;
+	if (!HyperAIStudio::Niagara::GraphGate::ValidatePlanAgainstSystem(*System, Request.Ops, AddressStatus, AddressDiagnostic))
+	{
+		return Reject(AddressStatus, AddressDiagnostic);
+	}
 	const TSharedRef<FHyperAIStudioNiagaraEditOpsPayload, ESPMode::ThreadSafe> Payload =
 		MakeShared<FHyperAIStudioNiagaraEditOpsPayload, ESPMode::ThreadSafe>();
 	Payload->TargetPath = Request.TargetPath;
@@ -1916,7 +1971,7 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 		for (const FHyperAINiagaraEditOp& Op : Request.Ops)
 		{
 			Summary.Effects.Add(FString::Printf(TEXT("%s %s"), *Op.Kind,
-				*FString::Join(TArray<FString>({Op.EmitterName, Op.ScriptName, Op.ModuleName, Op.Name}).FilterByPredicate(
+				*FString::Join(TArray<FString>({Op.EmitterName, Op.ScriptName, Op.StageName, Op.ModuleName, Op.Name}).FilterByPredicate(
 					[](const FString& Part) { return !Part.IsEmpty(); }), TEXT(" / "))));
 		}
 		Summary.Touches.Add(Request.TargetPath);
