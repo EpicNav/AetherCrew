@@ -32,6 +32,34 @@ The first failing step ends the run. Its status and diagnostic say why, such as 
 - **Leave out** any `bot` field the action does not use.
 - **Changes stay in the PIE world.** Nothing in the level being edited changes.
 
+### Record it as proof
+
+Set `"bRecordVideo": true` (and `videoFps`, 10 unless set, 5 to 30) to record the run as an MP4 a person can watch.
+- **What it shows:** the game view with its UI, and each step with its result drawn over it.
+- **Where it goes:** `Saved/HyperAIStudio/Playtests/<operationId>/playtest.mp4`. A `timeline.json` beside it gives each step's start and end in milliseconds, with its status and detail.
+- **How it reports:** as the run's last evidence item, kind `video`, with the file in `objectPath`.
+- **When to use it:** whenever someone will review gameplay you built. Link the video in your reply.
+
+### Multiplayer: host, clients and late joiners
+
+- **Start a networked session.** Set `netMode` to `ListenServer` or `Client`, with `numPlayers` 2 to 4. Every player plays in this editor process, in a window of its own, and the run starts once all of them are in.
+  - With `ListenServer`, PIE instance 0 hosts and plays, and 1 and up are its clients.
+  - With `Client`, a dedicated server is instance 0, and the players come after it.
+- **Pick a player per step.** A step's `pieInstance` (-1 for the run's own world) picks the player it acts as. A check on a client, such as `AssertProperty` or `UiAssert` at `pieInstance: 1`, proves what replicated to it.
+- **Late join.** `{"stepId": "join", "kind": "JoinPlayer", "timeoutMs": 20000}` adds a client the way a late joiner arrives. Its evidence names the new instance, which later steps can use.
+
+```json
+{"request": {"operationId": "door-replicates-01", "mode": "StartInProcess", "teardown": "StopOwnedSession",
+  "netMode": "ListenServer", "numPlayers": 2, "bRecordVideo": true,
+  "steps": [
+    {"stepId": "open", "kind": "Bot", "timeoutMs": 20000, "bot": {"action": "MoveTo", "target": "BP_Door", "radius": 150, "timeoutSeconds": 15}},
+    {"stepId": "client-sees-it", "kind": "Bot", "pieInstance": 1, "timeoutMs": 5000,
+     "bot": {"action": "WaitUntil", "until": "AssertProperty", "target": "BP_Door", "property": "bOpen", "compare": "==", "value": "true", "timeoutSeconds": 3}},
+    {"stepId": "join", "kind": "JoinPlayer", "timeoutMs": 20000},
+    {"stepId": "joiner-sees-it", "kind": "Bot", "pieInstance": 2, "timeoutMs": 5000,
+     "bot": {"action": "AssertProperty", "target": "BP_Door", "property": "bOpen", "compare": "==", "value": "true"}}]}}
+```
+
 ## Verify many things at once
 
 `hyper_verify_run` (same toolset) plays up to `limit` cases at the same time, each in its own copy of the open level. One call answers with every case's result within `deadlineSeconds`, 60 at most.

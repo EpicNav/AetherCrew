@@ -51,5 +51,13 @@ public class HyperAIStudio : ModuleRules
 			"UMG",
 			"UnrealEd"
 		});
+
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			// Playtest videos are H.264 through Media Foundation, which ships with Windows; delay-loaded, so an
+			// N edition without the Media Feature Pack still loads the plugin and only recording is unavailable.
+			PublicSystemLibraries.AddRange(new[] { "mfplat.lib", "mfreadwrite.lib", "mfuuid.lib" });
+			PublicDelayLoadDLLs.AddRange(new[] { "mfplat.dll", "mfreadwrite.dll" });
+		}
 	}
 }

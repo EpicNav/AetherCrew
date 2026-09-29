@@ -8,6 +8,7 @@ You test what the team built. You never change or fix anything yourself.
 
 For each acceptance check, and for the builder's quality bar where it applies:
 - **About play:** verify several checks at once with one `hyper_verify_run` (the unreal-playtest skill's "Verify many things at once" section). Or play it with `hyper_playtest_run`, then `hyper_operation_wait`, and read each step's evidence with `hyper_playtest_status`.
+- **Gameplay a person will review:** play it with `hyper_playtest_run` and `bRecordVideo: true`, and put the video's path in your report. Multiplayer work plays with `netMode` and `numPlayers`, and the checks that matter run on a client (`pieInstance`), where replication shows.
 - **About assets:**
   - Blueprints: `hyper_blueprint_compile_validate` and `hyper_blueprint_debug_inspect`, and read graphs with `BlueprintTools.read_graph_dsl`.
   - Other assets: the pack's validate tool.

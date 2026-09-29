@@ -32,6 +32,17 @@ enum class EHyperAIPIEPlaytestTeardown : uint8
 	LeaveSessionRunning
 };
 
+/** How a started session plays: every player stays in this editor process, each in a window of their own. */
+UENUM(BlueprintType)
+enum class EHyperAIPIEPlaytestNetMode : uint8
+{
+	Standalone,
+	/** PIE instance 0 hosts and plays; the other players join it as clients. */
+	ListenServer,
+	/** A dedicated server, with every player a client. */
+	Client
+};
+
 /** Closed runtime operations. There is deliberately no console, script, raw tool, reflection-write, or file operation. */
 UENUM(BlueprintType)
 enum class EHyperAIPIEPlaytestStepKind : uint8
@@ -60,7 +71,9 @@ enum class EHyperAIPIEPlaytestStepKind : uint8
 	ReplayPlaybackCaptured,
 	StopSession,
 	/** One playtest bot step, given in bot: move, look, jump, press, wait, capture, check. */
-	Bot
+	Bot,
+	/** Another player joins the running networked session as a client, the way a late joiner would. */
+	JoinPlayer
 };
 
 /** Exact key allowlist; callers never provide an arbitrary FName. */
@@ -184,6 +197,13 @@ struct FHyperAIPIEPlaytestStep
 	/** Kind Bot only: the bot step. timeout_ms still caps it. */
 	UPROPERTY()
 	FHyperAIBotStep Bot;
+
+	/**
+	 * The PIE world the step acts in: -1 for the run's world, or a PIE instance. In a ListenServer session instance 0
+	 * hosts and 1 and up are its clients, so a check on one client proves what replicated to it.
+	 */
+	UPROPERTY()
+	int32 PieInstance = -1;
 };
 
 USTRUCT(BlueprintType)
@@ -219,6 +239,25 @@ struct FHyperAIPIEPlaytestRequest
 
 	UPROPERTY()
 	int32 MaxOutputBytes = 262144;
+
+	/** StartInProcess only: how the session plays. */
+	UPROPERTY()
+	EHyperAIPIEPlaytestNetMode NetMode = EHyperAIPIEPlaytestNetMode::Standalone;
+
+	/** StartInProcess only: players, 1-4. The run starts once every one of them is in. */
+	UPROPERTY()
+	int32 NumPlayers = 1;
+
+	/**
+	 * Record the run's game view as an MP4, with each step and its result drawn over the game, and a timeline.json of
+	 * the steps beside it: proof a person can watch. The video is the run's last evidence item.
+	 */
+	UPROPERTY()
+	bool bRecordVideo = false;
+
+	/** Frames per second for bRecordVideo, 5-30. */
+	UPROPERTY()
+	int32 VideoFps = 10;
 };
 
 /** Immutable bounded evidence produced by one lifecycle/step transition. */
@@ -650,7 +689,11 @@ public:
 	 * AssertNear, AssertOnScreen, AssertExists, AssertGone, UiClick, UiType and UiAssert. Play plays toward a goal
 	 * the way a person would (Reach, Collect, Defeat, Survive or Explore: moving, jumping, aiming and attacking
 	 * through the game's controls) and writes a map of it; AddPlayer adds a local player, for PvP. The first failing
-	 * step ends the run with its reason. Changes stay in the PIE world.
+	 * step ends the run with its reason. Changes stay in the PIE world. bRecordVideo records the run as an MP4 with
+	 * each step and its result drawn over the game, plus timeline.json: proof to watch. For multiplayer, net_mode
+	 * ListenServer or Client with num_players 2-4 plays every player in this editor; a step's pie_instance picks the
+	 * player it acts as (ListenServer: 0 hosts), so a check on a client proves what replicated, and JoinPlayer adds
+	 * a late joiner.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
 	static FHyperAIPIEPlaytestRunResult hyper_playtest_run(const FHyperAIPIEPlaytestRequest& Request);
@@ -803,6 +846,10 @@ public:
 		const FHyperAIStudioPIENormalizedPlan& Plan,
 		bool bOwnsSession) = 0;
 	virtual void ForceTeardown(const FHyperAIStudioPIENormalizedPlan& Plan, bool bOwnsSession) = 0;
+	/** Starts recording the run's world when the plan asks for video: evidence that it started or why not, or none. */
+	virtual FHyperAIPIEPlaytestEvidence StartRecording(const FHyperAIStudioPIENormalizedPlan& Plan) { return {}; }
+	/** Step Index of Count began (Finished null) or ended, for a recording's overlay and timeline. */
+	virtual void NoteStep(int32 Index, int32 Count, const FHyperAIPIEPlaytestStep& Step, const FHyperAIPIEPlaytestEvidence* Finished) {}
 };
 
 class IHyperAIStudioPIEClock
@@ -967,6 +1014,9 @@ public:
 	static constexpr int32 MaxScreenshotWidth = 1920;
 	static constexpr int32 MaxScreenshotHeight = 1080;
 	static constexpr int32 MaxScreenshotPixels = MaxScreenshotWidth * MaxScreenshotHeight;
+	static constexpr int32 MaxPlayers = 4;
+	static constexpr int32 MinVideoFps = 5;
+	static constexpr int32 MaxVideoFps = 30;
 
 	static const TArray<FHyperAIStudioPIEPlaytestManifestEntry>& GetManifest();
 	static FString GetQualifiedToolsetName();
