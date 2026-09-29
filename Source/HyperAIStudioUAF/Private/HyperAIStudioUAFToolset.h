@@ -9,6 +9,7 @@
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioUAFToolset.generated.h"
 
 USTRUCT(BlueprintType)
@@ -204,6 +205,22 @@ struct FHyperAIUAFValidateReport
 	UPROPERTY() TArray<FString> Capabilities;
 };
 
+/** hyper_uaf_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIUAFApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIUAFApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIUAFApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIUAFApplyPlanReport Value;
+};
+
 /** UAF (Unreal Animation Framework) animation graphs: trait stacks, their pins, variables and the output pose. */
 UCLASS()
 class HYPERAISTUDIOUAF_API UHyperAIStudioUAFToolset final : public UToolsetDefinition
@@ -220,10 +237,10 @@ public:
 	/**
 	 * Closed UAF graph edits, then a compile, as one undo step: create a graph, add variables, trait stacks and
 	 * traits, set or bind their pins, link poses and the output. Read .hyperai/docs/HyperAIStudio-UAFCookbook.md
-	 * first. Dry-run, resubmit, poll, then validate.
+	 * first. Dry-run, then resubmit: the reply waits for the edit. Then validate.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|UAF")
-	static FHyperAIUAFApplyPlanReport hyper_uaf_apply_plan(const FHyperAIUAFApplyPlanRequest& Request);
+	static UHyperAIUAFApplyPlanResult* hyper_uaf_apply_plan(const FHyperAIUAFApplyPlanRequest& Request);
 
 	/** Compile status plus graph checks: the output pose is wired, every stack has one base trait, pose pins are fed, no orphan stacks, assets and variables resolve, and the graph allocates a runnable instance. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|UAF")
@@ -356,6 +373,8 @@ public:
 	static const FHyperAIStudioDomainAdapterDescriptor& GetAdapterDescriptor();
 	static FHyperAIUAFInspectReport Inspect(const FHyperAIUAFInspectRequest& Request);
 	static FHyperAIUAFValidateReport Validate(const FHyperAIUAFValidateRequest& Request);
+	/** hyper_uaf_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIUAFApplyPlanReport BuildFittedPlan(const FHyperAIUAFApplyPlanRequest& Request);
 	static FHyperAIUAFApplyPlanReport BuildPlan(const FHyperAIUAFApplyPlanRequest& Request);
 	static FString ComputeEditOpsSemanticFingerprint(const FHyperAIStudioUAFEditOpsPayload& Payload);
 };

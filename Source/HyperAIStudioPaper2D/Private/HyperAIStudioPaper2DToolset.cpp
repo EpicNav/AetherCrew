@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioPaper2DToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 #include "HyperAIStudioAgentActivity.h"
 
@@ -1703,7 +1704,12 @@ FHyperAIPaper2DInspectReport UHyperAIStudioPaper2DToolset::hyper_paper2d_inspect
 	return FHyperAIStudioPaper2DContracts::Inspect(Request);
 }
 
-FHyperAIPaper2DApplyPlanReport UHyperAIStudioPaper2DToolset::hyper_paper2d_apply_plan(
+UHyperAIPaper2DApplyPlanResult* UHyperAIStudioPaper2DToolset::hyper_paper2d_apply_plan(const FHyperAIPaper2DApplyPlanRequest& Request)
+{
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIPaper2DApplyPlanResult>(FHyperAIStudioPaper2DContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIPaper2DApplyPlanReport FHyperAIStudioPaper2DContracts::BuildFittedPlan(
 	const FHyperAIPaper2DApplyPlanRequest& InRequest)
 {
 	FHyperAIPaper2DApplyPlanRequest Request = InRequest;

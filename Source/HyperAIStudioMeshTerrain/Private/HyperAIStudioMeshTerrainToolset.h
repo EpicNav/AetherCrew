@@ -9,6 +9,7 @@
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioMeshTerrainToolset.generated.h"
 
 /** One Mesh Terrain: a Mesh Partition actor and the base mesh sections it was created with. */
@@ -184,6 +185,22 @@ struct FHyperAIMeshTerrainValidateReport
 	UPROPERTY() TArray<FString> Capabilities;
 };
 
+/** hyper_mesh_terrain_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIMeshTerrainApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIMeshTerrainApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIMeshTerrainApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIMeshTerrainApplyPlanReport Value;
+};
+
 /** Mesh Terrain (UE 5.8 Mesh Partition, experimental): create terrains and shape them with modifiers, then check them. */
 UCLASS()
 class HYPERAISTUDIOMESHTERRAIN_API UHyperAIStudioMeshTerrainToolset final : public UToolsetDefinition
@@ -200,10 +217,10 @@ public:
 	/**
 	 * Terrain edits as one undo step: create a flat terrain, then add, change or remove noise, remesh, texture_patch
 	 * (heightmap stamp) and spline (roads, rivers, ridges) modifiers. Submit with bDryRun false (expected_plan_hash
-	 * optional) and call hyper_operation_wait: it returns when the terrain has rebuilt. Unsaved unless bSave.
+	 * optional): the reply waits until the terrain has rebuilt. Unsaved unless bSave.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|MeshTerrain")
-	static FHyperAIMeshTerrainApplyPlanReport hyper_mesh_terrain_apply_plan(const FHyperAIMeshTerrainApplyPlanRequest& Request);
+	static UHyperAIMeshTerrainApplyPlanResult* hyper_mesh_terrain_apply_plan(const FHyperAIMeshTerrainApplyPlanRequest& Request);
 
 	/** Problems in the open level's terrains: no base mesh or definition, unbound or disabled modifiers, stamps without a texture, splines without points, and rebuilds still running. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|MeshTerrain")
@@ -335,6 +352,8 @@ public:
 	static const FHyperAIStudioDomainAdapterDescriptor& GetAdapterDescriptor();
 	static FHyperAIMeshTerrainInspectReport Inspect(const FHyperAIMeshTerrainInspectRequest& Request);
 	static FHyperAIMeshTerrainValidateReport Validate(const FHyperAIMeshTerrainValidateRequest& Request);
+	/** hyper_mesh_terrain_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIMeshTerrainApplyPlanReport BuildFittedPlan(const FHyperAIMeshTerrainApplyPlanRequest& Request);
 	static FHyperAIMeshTerrainApplyPlanReport BuildPlan(const FHyperAIMeshTerrainApplyPlanRequest& Request);
 	static FString ComputeEditOpsSemanticFingerprint(const FHyperAIStudioMeshTerrainEditOpsPayload& Payload);
 };

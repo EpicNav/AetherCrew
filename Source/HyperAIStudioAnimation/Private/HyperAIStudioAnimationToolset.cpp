@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioAnimationToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioAnimationBlendSpace.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioExecutionQueue.h"
@@ -3129,7 +3130,12 @@ FHyperAIAnimationInspectReport UHyperAIStudioAnimationToolset::hyper_animation_i
 	return Report;
 }
 
-FHyperAIAnimationApplyPlanReport UHyperAIStudioAnimationToolset::hyper_animation_apply_plan(
+UHyperAIAnimationApplyPlanResult* UHyperAIStudioAnimationToolset::hyper_animation_apply_plan(const FHyperAIAnimationApplyPlanRequest& Request)
+{
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIAnimationApplyPlanResult>(FHyperAIStudioAnimationContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIAnimationApplyPlanReport FHyperAIStudioAnimationContracts::BuildFittedPlan(
 	const FHyperAIAnimationApplyPlanRequest& InRequest)
 {
 	using C = FHyperAIStudioAnimationContracts;

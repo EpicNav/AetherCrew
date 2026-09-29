@@ -200,8 +200,9 @@ namespace HyperAIStudio::ToolGuide
 			TEXT("Without `toolset_name` a tool is \"not found\", `hyper_operation_wait` included. Nothing listed here needs `list_toolsets` first.\n");
 		Text += TEXT("- Top-level fields are listed with each tool; the structs they name are spelled out once under Shapes at the end. ")
 			TEXT("An enum takes exactly one of the names listed: any other name fails the call before the tool runs.\n");
-		Text += TEXT("- To edit, call the pack's `*_apply_plan` with `bDryRun: false` and a fresh `operationId`. That plans and applies in one call; ")
-			TEXT("`expectedPlanHash` is optional. Then call `hyper_operation_wait` with that `operationId`, then the pack's validate tool. ")
+		Text += TEXT("- To edit, call the pack's `*_apply_plan` with `bDryRun: false` and a fresh `operationId`: it plans, applies and waits for the edit ")
+			TEXT("in one call (`expectedPlanHash` is optional), and replies `completed` or why not. Then call the pack's validate tool. ")
+			TEXT("Only a reply still `queued`, `running` or `awaiting_user_approval` needs `hyper_operation_wait` with that `operationId`. ")
 			TEXT("Dry-run first only when you want to review a plan before it runs.\n");
 		Text += TEXT("- A limit out of range, or 0 for one you do not care about, is fitted rather than refused, and the reply says what was used.\n");
 		Text += TEXT("- Epic's own toolsets, whose names do not start with `HyperAIStudio`, are in `Epic-ToolGuide.md` beside this file with every field: ")

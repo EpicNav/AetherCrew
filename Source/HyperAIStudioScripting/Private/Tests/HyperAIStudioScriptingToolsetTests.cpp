@@ -149,6 +149,10 @@ bool FHyperAIStudioScriptingRunTest::RunTest(const FString& Parameters)
 	Report = RunScript(TEXT("import unreal\ndef run():\n    getattr(unreal.EditorAssetLibrary, 'delete_' + 'asset')\n"));
 	TestTrue(TEXT("a computed name cannot reach what the check escalates: ") + Report.Diagnostic, Report.Traceback.Contains(TEXT("PermissionError")));
 
+	// A guessed name comes back with the names it was near, so the next try needs no dir() probe.
+	Report = RunScript(TEXT("import unreal\ndef run():\n    return unreal.KismetSystemLibrary\n"));
+	TestTrue(TEXT("a missed attribute names its neighbours: ") + Report.Diagnostic, Report.Diagnostic.Contains(TEXT("SystemLibrary")));
+
 	FHyperAIScriptRunRequest Request;
 	Request.Code = TEXT("def run():\n    return {}\n");
 	Request.OperationId = Report.OperationId;

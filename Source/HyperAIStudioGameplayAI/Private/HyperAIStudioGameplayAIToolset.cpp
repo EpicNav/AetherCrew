@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioGameplayAIToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 
 // Every direct UE Gameplay AI dependency is isolated in this LoadingPhase=None editor module.
@@ -2029,7 +2030,12 @@ FHyperAIGameplayAIValidateReport UHyperAIStudioGameplayAIToolset::hyper_gameplay
 	return Report;
 }
 
-FHyperAIGameplayAIApplyPlanReport UHyperAIStudioGameplayAIToolset::hyper_gameplay_ai_apply_plan(
+UHyperAIGameplayAIApplyPlanResult* UHyperAIStudioGameplayAIToolset::hyper_gameplay_ai_apply_plan(const FHyperAIGameplayAIApplyPlanRequest& Request)
+{
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIGameplayAIApplyPlanResult>(FHyperAIStudioGameplayAIContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIGameplayAIApplyPlanReport FHyperAIStudioGameplayAIContracts::BuildFittedPlan(
 	const FHyperAIGameplayAIApplyPlanRequest& InRequest)
 {
 	FHyperAIGameplayAIApplyPlanRequest Request = InRequest;

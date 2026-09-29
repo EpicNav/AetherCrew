@@ -10,6 +10,7 @@
 #include "Layout/Margin.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioUIToolset.generated.h"
 
 /** One closed scalar from a UI value snapshot. Type selects exactly one value field. */
@@ -500,6 +501,22 @@ struct FHyperAIUIApplyPlanReport
 	TArray<FHyperAIUIIssue> Issues;
 };
 
+/** hyper_ui_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIUIApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIUIApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIUIApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIUIApplyPlanReport Value;
+};
+
 /** Exact atomic pack: no Epic callable is re-exposed under a second name. */
 UCLASS()
 class HYPERAISTUDIOUI_API UHyperAIStudioUIToolset final : public UToolsetDefinition
@@ -516,11 +533,11 @@ public:
 	/**
 	 * Widget Blueprint plans. animation.create (name; number_value = seconds) and animation.add_float_track
 	 * (subject_id = widget, secondary_name = animation, name = RenderOpacity, string_value = keys "0=0.3, 1=1")
-	 * run for real: submit with bDryRun false and an operation_id, then hyper_operation_wait. Other ops only dry-run;
+	 * run for real: submit with bDryRun false and an operation_id, and the reply waits for the edit. Other ops only dry-run;
 	 * build the widget tree with Epic's UMGToolSet.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|UI")
-	static FHyperAIUIApplyPlanReport hyper_ui_apply_plan(const FHyperAIUIApplyPlanRequest& Request);
+	static UHyperAIUIApplyPlanResult* hyper_ui_apply_plan(const FHyperAIUIApplyPlanRequest& Request);
 
 	/** Layout, accessibility, animation, binding and MVVM checks of loaded Widget Blueprints. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|UI")
@@ -663,6 +680,8 @@ public:
 	static FString PayloadSchemaFingerprint();
 	static FString ComputePayloadSemanticFingerprint(const FHyperAIStudioUIPlanPayload& Payload);
 	static const FHyperAIStudioDomainAdapterDescriptor& GetPreparationDescriptor();
+	/** hyper_ui_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIUIApplyPlanReport BuildFittedPlan(const FHyperAIUIApplyPlanRequest& Request);
 	static FHyperAIUIApplyPlanReport BuildPlan(const FHyperAIUIApplyPlanRequest& Request);
 };
 

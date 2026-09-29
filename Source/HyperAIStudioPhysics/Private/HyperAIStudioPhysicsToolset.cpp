@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioPhysicsToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 #include "HyperAIStudioAgentActivity.h"
 
@@ -2141,7 +2142,12 @@ FHyperAIPhysicsInspectReport UHyperAIStudioPhysicsToolset::hyper_physics_inspect
 	return FHyperAIStudioPhysicsContracts::Inspect(Request);
 }
 
-FHyperAIPhysicsApplyPlanReport UHyperAIStudioPhysicsToolset::hyper_physics_apply_plan(
+UHyperAIPhysicsApplyPlanResult* UHyperAIStudioPhysicsToolset::hyper_physics_apply_plan(const FHyperAIPhysicsApplyPlanRequest& Request)
+{
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIPhysicsApplyPlanResult>(FHyperAIStudioPhysicsContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIPhysicsApplyPlanReport FHyperAIStudioPhysicsContracts::BuildFittedPlan(
 	const FHyperAIPhysicsApplyPlanRequest& InRequest)
 {
 	FHyperAIPhysicsApplyPlanRequest Request = InRequest;

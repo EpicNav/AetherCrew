@@ -9,6 +9,7 @@
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioLevelDesignToolset.generated.h"
 
 /** What the player can do, in centimetres and seconds, and the level sizes that follow from it. */
@@ -259,6 +260,22 @@ struct FHyperAILevelDesignValidateReport
 	UPROPERTY() TArray<FString> Capabilities;
 };
 
+/** hyper_level_blockout_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAILevelBlockoutApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAILevelBlockoutApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAILevelBlockoutApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAILevelBlockoutApplyPlanReport Value;
+};
+
 /** Blockout at player scale: measure the player, place blocks, ramps, stairs and markers, then check the layout plays. */
 UCLASS()
 class HYPERAISTUDIOLEVELDESIGN_API UHyperAIStudioLevelDesignToolset final : public UToolsetDefinition
@@ -274,11 +291,11 @@ public:
 
 	/**
 	 * Closed blockout edits as one undo step: blocks, walkable ramps, stairs split to the player's step height, and
-	 * markers (start, goal, spawn, cover...). Submit with bDryRun false (expected_plan_hash optional), then
-	 * hyper_operation_wait, then hyper_level_design_validate. Unsaved unless bSave.
+	 * markers (start, goal, spawn, cover...). Submit with bDryRun false (expected_plan_hash optional): the reply
+	 * waits for the edit. Then hyper_level_design_validate. Unsaved unless bSave.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|LevelDesign")
-	static FHyperAILevelBlockoutApplyPlanReport hyper_level_blockout_apply_plan(const FHyperAILevelBlockoutApplyPlanRequest& Request);
+	static UHyperAILevelBlockoutApplyPlanResult* hyper_level_blockout_apply_plan(const FHyperAILevelBlockoutApplyPlanRequest& Request);
 
 	/**
 	 * Plays the layout against player metrics: markers on walkable floor with room to stand, navmesh routes from each
@@ -415,6 +432,8 @@ public:
 	static const FHyperAIStudioDomainAdapterDescriptor& GetAdapterDescriptor();
 	static FHyperAILevelDesignInspectReport Inspect(const FHyperAILevelDesignInspectRequest& Request);
 	static FHyperAILevelDesignValidateReport Validate(const FHyperAILevelDesignValidateRequest& Request);
+	/** hyper_level_blockout_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAILevelBlockoutApplyPlanReport BuildFittedPlan(const FHyperAILevelBlockoutApplyPlanRequest& Request);
 	static FHyperAILevelBlockoutApplyPlanReport BuildPlan(const FHyperAILevelBlockoutApplyPlanRequest& Request);
 	static FString ComputeEditOpsSemanticFingerprint(const FHyperAIStudioLevelDesignEditOpsPayload& Payload);
 };

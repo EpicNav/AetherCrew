@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioAnimBlueprintToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 
 #include "Animation/AnimBlueprint.h"
@@ -707,7 +708,12 @@ FHyperAIAnimBlueprintInspectReport UHyperAIStudioAnimBlueprintToolset::hyper_ani
 	return FHyperAIStudioAnimBlueprintContracts::Inspect(Request);
 }
 
-FHyperAIAnimBlueprintApplyPlanReport UHyperAIStudioAnimBlueprintToolset::hyper_anim_blueprint_apply_plan(const FHyperAIAnimBlueprintApplyPlanRequest& InRequest)
+UHyperAIAnimBlueprintApplyPlanResult* UHyperAIStudioAnimBlueprintToolset::hyper_anim_blueprint_apply_plan(const FHyperAIAnimBlueprintApplyPlanRequest& Request)
+{
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIAnimBlueprintApplyPlanResult>(FHyperAIStudioAnimBlueprintContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIAnimBlueprintApplyPlanReport FHyperAIStudioAnimBlueprintContracts::BuildFittedPlan(const FHyperAIAnimBlueprintApplyPlanRequest& InRequest)
 {
 	FHyperAIAnimBlueprintApplyPlanRequest Request = InRequest;
 	FHyperAIStudioRequestFit Fit;

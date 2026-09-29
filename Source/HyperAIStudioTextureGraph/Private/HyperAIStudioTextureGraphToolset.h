@@ -10,6 +10,7 @@
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioTextureGraphToolset.generated.h"
 
 USTRUCT(BlueprintType)
@@ -274,6 +275,22 @@ struct FHyperAITextureGraphApplyPlanReport
 	UPROPERTY() TArray<FHyperAITextureGraphIssue> Issues;
 };
 
+/** hyper_texture_graph_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAITextureGraphApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAITextureGraphApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAITextureGraphApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAITextureGraphApplyPlanReport Value;
+};
+
 /** Exactly three functions form the Texture Graph atomic cohort. */
 UCLASS()
 class HYPERAISTUDIOTEXTUREGRAPH_API UHyperAIStudioTextureGraphToolset final : public UToolsetDefinition
@@ -288,9 +305,9 @@ public:
 	static FHyperAITextureGraphInspectReport hyper_texture_graph_inspect(
 		const FHyperAITextureGraphInspectRequest& Request);
 
-	/** Create or edit a Texture Graph as one undo step: nodes, connections, pin values, outputs, then save and export. Submit with bDryRun false and an operation_id (plan hash optional), then call hyper_operation_wait. */
+	/** Create or edit a Texture Graph as one undo step: nodes, connections, pin values, outputs, then save and export. Submit with bDryRun false and an operation_id (plan hash optional): the reply waits for the edit. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|TextureGraph")
-	static FHyperAITextureGraphApplyPlanReport hyper_texture_graph_apply_plan(
+	static UHyperAITextureGraphApplyPlanResult* hyper_texture_graph_apply_plan(
 		const FHyperAITextureGraphApplyPlanRequest& Request);
 
 	/** Structural errors and export state of a Texture Graph. Policy exported confirms every output texture was written and saved. */
@@ -433,6 +450,8 @@ public:
 	static const FHyperAIStudioDomainAdapterDescriptor& GetAdapterDescriptor();
 	static FHyperAITextureGraphInspectReport Inspect(const FHyperAITextureGraphInspectRequest& Request);
 	static FHyperAITextureGraphValidateReport Validate(const FHyperAITextureGraphValidateRequest& Request);
+	/** hyper_texture_graph_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAITextureGraphApplyPlanReport BuildFittedPlan(const FHyperAITextureGraphApplyPlanRequest& Request);
 	static FHyperAITextureGraphApplyPlanReport BuildPlan(const FHyperAITextureGraphApplyPlanRequest& Request);
 	/** Order-sensitive: the same ops in a different order are a different plan. */
 	static FString ComputeEditOpsSemanticFingerprint(const FHyperAIStudioTextureGraphEditOpsPayload& Payload);

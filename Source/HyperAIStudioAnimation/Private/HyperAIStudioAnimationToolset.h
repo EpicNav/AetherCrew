@@ -10,6 +10,7 @@
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioAnimationToolset.generated.h"
 
 /** One stable, bounded Animation/Rigging finding. */
@@ -332,6 +333,22 @@ struct FHyperAIAnimationApplyPlanReport
 	UPROPERTY() TArray<FHyperAIAnimationVariantStatus> Variants;
 };
 
+/** hyper_animation_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIAnimationApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIAnimationApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIAnimationApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIAnimationApplyPlanReport Value;
+};
+
 /** Exactly three tools form the Animation/Rigging atomic cohort. */
 UCLASS()
 class HYPERAISTUDIOANIMATION_API UHyperAIStudioAnimationToolset final : public UToolsetDefinition
@@ -349,11 +366,11 @@ public:
 	/**
 	 * Closed animation asset plans. One blend space's blend_space.create (ReferencePath = Skeleton; bFlag true for 1D),
 	 * set_axis (AxisIndex, Name, Minimum, Maximum) and set_samples (SequencePath and Position each) run for real: submit
-	 * with bDryRun false and an operation_id, then hyper_operation_wait. Other types only dry-run; use
+	 * with bDryRun false and an operation_id, and the reply waits for the edit. Other types only dry-run; use
 	 * hyper_anim_blueprint_apply_plan for Animation Blueprints.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Animation")
-	static FHyperAIAnimationApplyPlanReport hyper_animation_apply_plan(
+	static UHyperAIAnimationApplyPlanResult* hyper_animation_apply_plan(
 		const FHyperAIAnimationApplyPlanRequest& Request);
 
 	/** Fresh checks of loaded animation assets: skeletons, blend space samples, montage sections, notifies. */
@@ -630,6 +647,8 @@ public:
 		const FString& OperationId,
 		const FString& PlanHash,
 		const FString& EffectFingerprint);
+	/** hyper_animation_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIAnimationApplyPlanReport BuildFittedPlan(const FHyperAIAnimationApplyPlanRequest& Request);
 	static FHyperAIAnimationApplyPlanReport BuildPlan(
 		const FHyperAIAnimationApplyPlanRequest& Request);
 };

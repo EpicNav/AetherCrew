@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioLightingToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioAgentActivity.h"
 
 #include "Editor.h"
@@ -1038,7 +1039,12 @@ FHyperAILightingInspectReport UHyperAIStudioLightingToolset::hyper_lighting_insp
 	return FHyperAIStudioLightingContracts::Inspect(Request);
 }
 
-FHyperAILightingApplyPlanReport UHyperAIStudioLightingToolset::hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& InRequest)
+UHyperAILightingApplyPlanResult* UHyperAIStudioLightingToolset::hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& Request)
+{
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAILightingApplyPlanResult>(FHyperAIStudioLightingContracts::BuildFittedPlan(Request));
+}
+
+FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildFittedPlan(const FHyperAILightingApplyPlanRequest& InRequest)
 {
 	FHyperAILightingApplyPlanRequest Request = InRequest;
 	FHyperAIStudioRequestFit Fit;

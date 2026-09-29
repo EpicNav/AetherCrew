@@ -12,9 +12,11 @@ sandbox.
 import ast
 import builtins
 import contextlib
+import difflib
 import io
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -243,6 +245,26 @@ def _checked_builtins():
     return table
 
 
+def _attribute_hint(error):
+    """Names on the object an AttributeError missed that look like the one asked for, so the next try needs no dir() probe."""
+    target, name = getattr(error, "obj", None), getattr(error, "name", None)
+    if target is None or not isinstance(name, str):
+        return ""
+    try:
+        available = [a for a in dir(target) if not a.startswith("_")]
+    except Exception:  # an object's own __dir__ may raise
+        return ""
+    words = [w for w in re.findall(r"[a-z]+|[A-Z][a-z]*", name.replace("_", " ")) if len(w) > 2 and w.lower() not in ("get", "set")]
+    scored = [(sum(w.lower() in a.lower() for w in words), a) for a in available]
+    related = [a for score, a in sorted(scored, key=lambda item: (-item[0], len(item[1]))) if score][:12]
+    close = difflib.get_close_matches(name, available, n=4, cutoff=0.6)
+    names = list(dict.fromkeys(close + related))
+    if not names:
+        return ""
+    owner = target.__name__ if isinstance(target, (type, types.ModuleType)) else type(target).__name__
+    return f" Close names on {owner}: {', '.join(names)}."
+
+
 def run(script_path, timeout, out_path, guarded):
     with open(script_path, "r", encoding="utf-8") as handle:
         code = handle.read()
@@ -278,8 +300,9 @@ def run(script_path, timeout, out_path, guarded):
     except ScriptTimeout:
         record["timed_out"] = True
         record["traceback"] = traceback.format_exc(limit=6)
-    except BaseException:  # the agent's script may raise anything, SystemExit included
-        record["traceback"] = traceback.format_exc(limit=8)
+    except BaseException as error:  # the agent's script may raise anything, SystemExit included
+        record["traceback"] = traceback.format_exc(limit=8).rstrip() + (
+            _attribute_hint(error) if isinstance(error, AttributeError) else "")
     finally:
         guard.active = False
         record["output"] = output.getvalue()[-20000:]

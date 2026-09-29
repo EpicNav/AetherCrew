@@ -7,6 +7,7 @@
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioAudioToolset.generated.h"
 
 struct FMetasoundFrontendDocument;
@@ -514,6 +515,22 @@ struct FHyperAIAudioApplyPlanReport
 	TArray<FHyperAIAudioIssue> Issues;
 };
 
+/** hyper_audio_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIAudioApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIAudioApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIAudioApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIAudioApplyPlanReport Value;
+};
+
 UCLASS()
 class HYPERAISTUDIOAUDIO_API UHyperAIStudioAudioToolset final : public UToolsetDefinition
 {
@@ -526,7 +543,7 @@ public:
 	static FHyperAIAudioInspectReport hyper_audio_inspect(const FHyperAIAudioInspectRequest& Request);
 
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Audio")
-	static FHyperAIAudioApplyPlanReport hyper_audio_apply_plan(const FHyperAIAudioApplyPlanRequest& Request);
+	static UHyperAIAudioApplyPlanResult* hyper_audio_apply_plan(const FHyperAIAudioApplyPlanRequest& Request);
 
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Audio")
 	static FHyperAIAudioValidateReport hyper_audio_validate(const FHyperAIAudioValidateRequest& Request);
@@ -645,6 +662,8 @@ public:
 	static bool Capture(const FHyperAIAudioInspectRequest& Request, FHyperAIAudioValueSnapshot& Out, FString& OutError);
 	static FString ComputeSnapshotRevision(FHyperAIAudioValueSnapshot& Snapshot);
 	static TArray<FHyperAIAudioIssue> ValidateSnapshot(const FHyperAIAudioValueSnapshot& Snapshot, int32 MaxIssueCount, bool& bOutTruncated);
+	/** hyper_audio_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIAudioApplyPlanReport BuildFittedPlan(const FHyperAIAudioApplyPlanRequest& Request);
 	static FHyperAIAudioApplyPlanReport BuildPlan(const FHyperAIAudioApplyPlanRequest& Request);
 #if WITH_DEV_AUTOMATION_TESTS
 	static FString ComputeOnDiskEvidenceRevisionForTest(

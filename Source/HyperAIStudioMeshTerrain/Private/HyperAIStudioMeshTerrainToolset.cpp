@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioMeshTerrainToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 
 #include "Editor.h"
@@ -747,7 +748,12 @@ FHyperAIMeshTerrainInspectReport UHyperAIStudioMeshTerrainToolset::hyper_mesh_te
 	return FHyperAIStudioMeshTerrainContracts::Inspect(Request);
 }
 
-FHyperAIMeshTerrainApplyPlanReport UHyperAIStudioMeshTerrainToolset::hyper_mesh_terrain_apply_plan(const FHyperAIMeshTerrainApplyPlanRequest& InRequest)
+UHyperAIMeshTerrainApplyPlanResult* UHyperAIStudioMeshTerrainToolset::hyper_mesh_terrain_apply_plan(const FHyperAIMeshTerrainApplyPlanRequest& Request)
+{
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIMeshTerrainApplyPlanResult>(FHyperAIStudioMeshTerrainContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIMeshTerrainApplyPlanReport FHyperAIStudioMeshTerrainContracts::BuildFittedPlan(const FHyperAIMeshTerrainApplyPlanRequest& InRequest)
 {
 	FHyperAIMeshTerrainApplyPlanRequest Request = InRequest;
 	FHyperAIStudioRequestFit Fit;

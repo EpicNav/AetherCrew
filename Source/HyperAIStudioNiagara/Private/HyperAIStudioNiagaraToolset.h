@@ -11,6 +11,7 @@
 #include "Misc/AssetRegistryInterface.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioNiagaraToolset.generated.h"
 
 USTRUCT(BlueprintType)
@@ -412,6 +413,22 @@ struct FHyperAINiagaraApplyPlanReport
 	UPROPERTY() TArray<FHyperAINiagaraCapabilityStatus> Capabilities;
 };
 
+/** hyper_niagara_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAINiagaraApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAINiagaraApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAINiagaraApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAINiagaraApplyPlanReport Value;
+};
+
 /** Exactly three functions form the Niagara atomic cohort. */
 UCLASS()
 class HYPERAISTUDIONIAGARA_API UHyperAIStudioNiagaraToolset final : public UToolsetDefinition
@@ -426,9 +443,9 @@ public:
 	static FHyperAINiagaraInspectReport hyper_niagara_inspect(
 		const FHyperAINiagaraInspectRequest& Request);
 
-	/** Batched Niagara edits as one undo step with revision check, compile, save and fresh verify. Submit with bDryRun false and an operation_id (plan hash optional), call hyper_operation_wait, then hyper_niagara_validate. */
+	/** Batched Niagara edits as one undo step with revision check, compile, save and fresh verify. Submit with bDryRun false and an operation_id (plan hash optional): the reply waits for the edit and says how it ended. Then hyper_niagara_validate. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Niagara")
-	static FHyperAINiagaraApplyPlanReport hyper_niagara_apply_plan(
+	static UHyperAINiagaraApplyPlanResult* hyper_niagara_apply_plan(
 		const FHyperAINiagaraApplyPlanRequest& Request);
 
 	/** Compile state and Niagara stack issues for a loaded System, including fix ids usable by apply_stack_issue_fix ops. */
@@ -620,6 +637,8 @@ public:
 		FString& OutDiagnostic);
 	static FHyperAINiagaraInspectReport Inspect(const FHyperAINiagaraInspectRequest& Request);
 	static FHyperAINiagaraValidateReport Validate(const FHyperAINiagaraValidateRequest& Request);
+	/** hyper_niagara_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAINiagaraApplyPlanReport BuildFittedPlan(const FHyperAINiagaraApplyPlanRequest& Request);
 	static FHyperAINiagaraApplyPlanReport BuildPlan(const FHyperAINiagaraApplyPlanRequest& Request);
 	/** Order-sensitive: the same ops in a different order are a different plan. */
 	static FString ComputeEditOpsSemanticFingerprint(const FHyperAIStudioNiagaraEditOpsPayload& Payload);

@@ -452,6 +452,22 @@ public:
 	FHyperAICaptureViewReport Value;
 };
 
+/** hyper_lighting_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAILightingApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAILightingApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAILightingApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAILightingApplyPlanReport Value;
+};
+
 /** Match a level's lighting to a reference image: inspect, lock exposure, compare, adjust, compare again. */
 UCLASS()
 class HYPERAISTUDIOLIGHTING_API UHyperAIStudioLightingToolset final : public UToolsetDefinition
@@ -472,11 +488,11 @@ public:
 	/**
 	 * Closed lighting edits as one undo step: sun, sky light, fog, sky atmosphere, clouds and post process (fixed keys,
 	 * or any Details-panel setting by name; a LUT too), exposure lock, point, spot and rect lights, set_actor_material,
-	 * set_actor_shadow, and set_sky_system for a Blueprint sky. Submit with bDryRun false and an operation_id, call
-	 * hyper_operation_wait, then compare. Unsaved unless bSave.
+	 * set_actor_shadow, and set_sky_system for a Blueprint sky. Submit with bDryRun false and an operation_id: the reply
+	 * waits for the edit. Then compare. Unsaved unless bSave.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
-	static FHyperAILightingApplyPlanReport hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& Request);
+	static UHyperAILightingApplyPlanResult* hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& Request);
 
 	/**
 	 * Measures the active level viewport (or current_image_path) against a reference image: brightness percentiles,
@@ -678,6 +694,8 @@ public:
 	/** Captures without waiting between frames: one frame, or frames at forced material times. */
 	static FHyperAICaptureViewReport CaptureNow(const FHyperAICaptureViewRequest& Request);
 	static FHyperAIImageCompareReport CompareImages(const FHyperAIImageCompareRequest& Request);
+	/** hyper_lighting_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAILightingApplyPlanReport BuildFittedPlan(const FHyperAILightingApplyPlanRequest& Request);
 	static FHyperAILightingApplyPlanReport BuildPlan(const FHyperAILightingApplyPlanRequest& Request);
 	/** Order-sensitive: the same ops in a different order are a different plan. */
 	static FString ComputeEditOpsSemanticFingerprint(const FHyperAIStudioLightingEditOpsPayload& Payload);

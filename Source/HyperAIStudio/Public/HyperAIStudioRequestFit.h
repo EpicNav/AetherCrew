@@ -68,6 +68,8 @@ struct FHyperAIStudioRequestFit
 			Note(FString::Printf(TEXT("operation_id %s belongs to an earlier edit, so this one is %s; wait on that"),
 				*Requested, *Request.OperationId));
 		}
+		// The reply names the id the edit runs under, which a wait needs.
+		Report.OperationId = Request.OperationId;
 		return Report;
 	}
 

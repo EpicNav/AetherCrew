@@ -24,6 +24,7 @@
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioDependencyGraphToolset.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioPlanExecuteToolset.h"
 #include "HyperAIStudioProjectMemory.h"
 #include "HyperAIStudioSandbox.h"
@@ -2034,6 +2035,8 @@ namespace HyperAIStudio::NativeReadTools::Wait
 	struct FWaiter
 	{
 		TStrongObjectPtr<UHyperAIOperationWaitResult> Result;
+		/** Instead of Result, for a tool that waits for its own edit before it replies. */
+		TFunction<void(const FHyperAIOperationWaitReport&)> OnDone;
 		FString OperationId;
 		double StartedSeconds = 0.0;
 		double DeadlineSeconds = 0.0;
@@ -2072,13 +2075,20 @@ namespace HyperAIStudio::NativeReadTools::Wait
 		return Now >= Waiter.DeadlineSeconds ? FString(TEXT("timeout")) : FString();
 	}
 
-	void Complete(UHyperAIOperationWaitResult& Result, const FHyperAIOperationStatus& Status, const FString& Reason, const double Waited)
+	void Complete(const FWaiter& Waiter, const FHyperAIOperationStatus& Status, const FString& Reason, const double Waited)
 	{
 		FHyperAIOperationWaitReport Report;
 		Report.Status = Status;
 		Report.CompletedBecause = Reason;
 		Report.WaitedMs = static_cast<int32>(FMath::Max(0.0, Waited) * 1000.0);
-		Result.SetValue(Report);
+		if (Waiter.Result.IsValid())
+		{
+			Waiter.Result->SetValue(Report);
+		}
+		else if (Waiter.OnDone)
+		{
+			Waiter.OnDone(Report);
+		}
 	}
 
 	/** Completes every waiter whose operation has reached an answer; true while any are left. */
@@ -2104,7 +2114,7 @@ namespace HyperAIStudio::NativeReadTools::Wait
 		// Completion notifies the MCP server, so it happens after the list is consistent again.
 		for (int32 Index = 0; Index < Done.Num(); ++Index)
 		{
-			Complete(*Done[Index].Result, DoneStatus[Index], DoneReason[Index], Now - Done[Index].StartedSeconds);
+			Complete(Done[Index], DoneStatus[Index], DoneReason[Index], Now - Done[Index].StartedSeconds);
 		}
 		return !Items.IsEmpty();
 	}
@@ -2133,6 +2143,34 @@ namespace HyperAIStudio::NativeReadTools::Wait
 			}), PollSeconds);
 		}
 	}
+
+	void Start(FWaiter&& Waiter, const int32 TimeoutMs)
+	{
+		const double Now = FPlatformTime::Seconds();
+		Waiter.StartedSeconds = Now;
+		Waiter.DeadlineSeconds = Now + FMath::Clamp(TimeoutMs, 1000, 120000) / 1000.0;
+
+		// When the answer is already known, one round trip is the whole cost.
+		const FHyperAIOperationStatus Status = UHyperAIStudioNativeReadToolset::hyper_operation_status(Waiter.OperationId);
+		if (Status.Status == TEXT("invalid_operation_id"))
+		{
+			Complete(Waiter, Status, TEXT("invalid_request"), 0.0);
+			return;
+		}
+		const FString Reason = CompletionReason(Status, Waiter, Now);
+		if (!Reason.IsEmpty())
+		{
+			Complete(Waiter, Status, Reason, 0.0);
+			return;
+		}
+		if (Waiters().Num() >= MaxWaiters)
+		{
+			Complete(Waiter, Status, TEXT("too_many_waiters"), 0.0);
+			return;
+		}
+		Waiters().Add(MoveTemp(Waiter));
+		EnsureTicking();
+	}
 }
 
 UHyperAIOperationWaitResult* UHyperAIStudioNativeReadToolset::hyper_operation_wait(
@@ -2147,35 +2185,43 @@ UHyperAIOperationWaitResult* UHyperAIStudioNativeReadToolset::hyper_operation_wa
 		Result->SetError(TEXT("hyper_operation_wait runs on the game thread."));
 		return Result;
 	}
-	const double Now = FPlatformTime::Seconds();
 	FWaiter Waiter;
 	Waiter.Result.Reset(Result);
 	Waiter.OperationId = OperationId;
-	Waiter.StartedSeconds = Now;
-	Waiter.DeadlineSeconds = Now + FMath::Clamp(TimeoutMs, 1000, 120000) / 1000.0;
 	Waiter.bWaitThroughApproval = bWaitThroughApproval;
-
-	// When the answer is already known, one round trip is the whole cost.
-	const FHyperAIOperationStatus Status = hyper_operation_status(OperationId);
-	if (Status.Status == TEXT("invalid_operation_id"))
-	{
-		Complete(*Result, Status, TEXT("invalid_request"), 0.0);
-		return Result;
-	}
-	const FString Reason = CompletionReason(Status, Waiter, Now);
-	if (!Reason.IsEmpty())
-	{
-		Complete(*Result, Status, Reason, 0.0);
-		return Result;
-	}
-	if (Waiters().Num() >= MaxWaiters)
-	{
-		Complete(*Result, Status, TEXT("too_many_waiters"), 0.0);
-		return Result;
-	}
-	Waiters().Add(MoveTemp(Waiter));
-	EnsureTicking();
+	Start(MoveTemp(Waiter), TimeoutMs);
 	return Result;
+}
+
+void HyperAIStudio::OperationWait::WhenDone(const FString& OperationId, const int32 TimeoutMs, TFunction<void(const FHyperAIStudioEditOutcome&)>&& Done)
+{
+	using namespace HyperAIStudio::NativeReadTools::Wait;
+	FWaiter Waiter;
+	Waiter.OperationId = OperationId;
+	Waiter.OnDone = [Done = MoveTemp(Done)](const FHyperAIOperationWaitReport& Report)
+	{
+		const FHyperAIOperationStatus& Status = Report.Status;
+		FHyperAIStudioEditOutcome Outcome;
+		Outcome.Status = Status.Status;
+		// A wait that ran out, or one for approval, is no failure: the edit goes on, and hyper_operation_wait picks it up.
+		Outcome.bOk = Status.bTerminal
+			? Status.Status == TEXT("completed") || Status.Status == TEXT("replay_completed")
+			: Report.CompletedBecause != TEXT("not_found") && Report.CompletedBecause != TEXT("invalid_request");
+		const bool bStillGoing = !Status.bTerminal && (Report.CompletedBecause == TEXT("timeout") || Report.CompletedBecause == TEXT("too_many_waiters"));
+		Outcome.Diagnostic = bStillGoing
+			? FString::Printf(TEXT("Still %s after %d s; call hyper_operation_wait with operation_id to wait on."), *Status.Status, Report.WaitedMs / 1000)
+			: FString::Join(TArray<FString>({Status.Diagnostic, Status.NextAction}).FilterByPredicate(
+				[](const FString& Part) { return !Part.IsEmpty(); }), TEXT(" "));
+		Done(Outcome);
+	};
+	if (!IsInGameThread())
+	{
+		FHyperAIOperationStatus Status;
+		Status.Status = TEXT("game_thread_required");
+		Complete(Waiter, Status, TEXT("invalid_request"), 0.0);
+		return;
+	}
+	Start(MoveTemp(Waiter), TimeoutMs);
 }
 
 FHyperAIBlueprintDebugReport UHyperAIStudioNativeReadToolset::hyper_blueprint_debug_inspect(

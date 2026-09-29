@@ -713,7 +713,7 @@ bool FHyperAIStudioAnimationBlendSpaceTest::RunTest(const FString& Parameters)
 	Missing.ReferencePath = TEXT("/Game/__NoSuch/SK_None.SK_None");
 	FHyperAIAnimationApplyPlanRequest Request;
 	Request.Operations = {Missing, Axis, Samples};
-	const FHyperAIAnimationApplyPlanReport Refused = UHyperAIStudioAnimationToolset::hyper_animation_apply_plan(Request);
+	const FHyperAIAnimationApplyPlanReport Refused = FHyperAIStudioAnimationContracts::BuildFittedPlan(Request);
 	TestFalse(TEXT("a plan with a missing skeleton is refused"), Refused.bOk);
 	TestTrue(TEXT("and the issue names it"), Refused.Issues.ContainsByPredicate([](const FHyperAIAnimationIssue& Issue)
 	{
@@ -724,7 +724,7 @@ bool FHyperAIStudioAnimationBlendSpaceTest::RunTest(const FString& Parameters)
 	Request.Operations = {Create, Axis, Samples};
 	Request.bDryRun = false;
 	Request.OperationId = TEXT("animation-blendspace-") + Suffix;
-	const FHyperAIAnimationApplyPlanReport Submitted = UHyperAIStudioAnimationToolset::hyper_animation_apply_plan(Request);
+	const FHyperAIAnimationApplyPlanReport Submitted = FHyperAIStudioAnimationContracts::BuildFittedPlan(Request);
 	FString IssueText;
 	for (const FHyperAIAnimationIssue& Issue : Submitted.Issues) IssueText += Issue.Code + TEXT(": ") + Issue.Message + TEXT(" ");
 	if (!TestEqual(*FString::Printf(TEXT("the plan is submitted (%s %s)"), *Submitted.Diagnostic, *IssueText), Submitted.Status, FString(TEXT("submitted"))))

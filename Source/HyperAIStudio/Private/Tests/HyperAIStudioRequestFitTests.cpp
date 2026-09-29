@@ -36,6 +36,7 @@ bool FHyperAIStudioRequestFitTest::RunTest(const FString& Parameters)
 	struct FReport
 	{
 		FString Status;
+		FString OperationId;
 	};
 	FRequest Request;
 	FHyperAIStudioRequestFit DryRun;
@@ -55,8 +56,10 @@ bool FHyperAIStudioRequestFitTest::RunTest(const FString& Parameters)
 		return FReport{bReplay ? TEXT("replayed") : TEXT("submitted")};
 	};
 	FHyperAIStudioRequestFit Fresh;
-	TestEqual(TEXT("a conflicting id runs under the next free one"), Fresh.FreshOperationId(Request, Submit).Status, FString(TEXT("submitted")));
+	const FReport Submitted = Fresh.FreshOperationId(Request, Submit);
+	TestEqual(TEXT("a conflicting id runs under the next free one"), Submitted.Status, FString(TEXT("submitted")));
 	TestEqual(TEXT("which is"), Request.OperationId, FString(TEXT("beacon-probe-001-3")));
+	TestEqual(TEXT("and the reply carries it"), Submitted.OperationId, FString(TEXT("beacon-probe-001-3")));
 	TestTrue(TEXT("and the reply names it: ") + Fresh.AppendTo(FString()), Fresh.AppendTo(FString()).Contains(TEXT("beacon-probe-001-3")));
 	Request.OperationId = TEXT("beacon-probe-001");
 	TestEqual(TEXT("the same plan again replays"), FHyperAIStudioRequestFit().FreshOperationId(Request, Submit).Status, FString(TEXT("replayed")));

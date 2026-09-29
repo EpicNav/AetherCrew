@@ -331,11 +331,11 @@ bool FHyperAIAudioPlanTest::RunTest(const FString& Parameters)
 	Configure.Parameters.Add(Pitch);
 	Request.Operations.Add(Configure);
 	const FHyperAIAudioApplyPlanReport First =
-		UHyperAIStudioAudioToolset::hyper_audio_apply_plan(Request);
+		FHyperAIStudioAudioContracts::BuildFittedPlan(Request);
 	FHyperAIAudioApplyPlanRequest Reordered = Request;
 	Reordered.Operations[1].Parameters.Swap(0, 1);
 	const FHyperAIAudioApplyPlanReport Second =
-		UHyperAIStudioAudioToolset::hyper_audio_apply_plan(Reordered);
+		FHyperAIStudioAudioContracts::BuildFittedPlan(Reordered);
 	TestTrue(TEXT("create-to-configure one-call dry-run succeeds"), First.bOk);
 	TestEqual(TEXT("all apply plans external effect"), First.SafetyClass,
 		FString(TEXT("external_effect")));
@@ -358,14 +358,14 @@ bool FHyperAIAudioPlanTest::RunTest(const FString& Parameters)
 	Request.OperationId = TEXT("audio-plan-test-operation-001");
 	Request.ExpectedPlanHash = First.PlanHash;
 	const FHyperAIAudioApplyPlanReport NonDry =
-		UHyperAIStudioAudioToolset::hyper_audio_apply_plan(Request);
+		FHyperAIStudioAudioContracts::BuildFittedPlan(Request);
 	TestFalse(TEXT("source candidate never reports mutation success"), NonDry.bOk);
 	TestFalse(TEXT("source candidate never submits"), NonDry.bExecutionSubmitted);
 	TestEqual(TEXT("async trusted backend required"), NonDry.Status,
 		FString(TEXT("staged_backend_required")));
 	Request.ExpectedPlanHash = Sha(TEXT('f'));
 	const FHyperAIAudioApplyPlanReport WrongHash =
-		UHyperAIStudioAudioToolset::hyper_audio_apply_plan(Request);
+		FHyperAIStudioAudioContracts::BuildFittedPlan(Request);
 	TestEqual(TEXT("wrong echoed plan hash rejected"), WrongHash.Status,
 		FString(TEXT("expected_plan_hash_mismatch")));
 
@@ -386,14 +386,14 @@ bool FHyperAIAudioPlanTest::RunTest(const FString& Parameters)
 		Op.ExpectedRevision = Revision;
 		CasRequest.Operations.Add(Op);
 		const FHyperAIAudioApplyPlanReport CasOk =
-			UHyperAIStudioAudioToolset::hyper_audio_apply_plan(CasRequest);
+			FHyperAIStudioAudioContracts::BuildFittedPlan(CasRequest);
 		TestTrue(TEXT("exact loaded CAS passes dry-run"), CasOk.bOk);
 		Cue->VolumeMultiplier = 0.37f;
 		const FString ChangedRevision = FHyperAIStudioAudioContracts::ComputeLoadedTargetRevision(
 			Cue->GetPathName());
 		TestNotEqual(TEXT("selected persisted property changes revision"), ChangedRevision, Revision);
 		const FHyperAIAudioApplyPlanReport CasBad =
-			UHyperAIStudioAudioToolset::hyper_audio_apply_plan(CasRequest);
+			FHyperAIStudioAudioContracts::BuildFittedPlan(CasRequest);
 		TestEqual(TEXT("stale loaded CAS rejected"), CasBad.Status, FString(TEXT("cas_failed")));
 		Cue->MarkAsGarbage();
 	}

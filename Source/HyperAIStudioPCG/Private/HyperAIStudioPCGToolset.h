@@ -11,6 +11,7 @@
 #include "Misc/AssetRegistryInterface.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioPCGToolset.generated.h"
 
 class UPCGComponent;
@@ -322,6 +323,22 @@ struct FHyperAIPCGApplyPlanReport
 	UPROPERTY() TArray<FHyperAIPCGCapabilityStatus> Capabilities;
 };
 
+/** hyper_pcg_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIPCGApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIPCGApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIPCGApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIPCGApplyPlanReport Value;
+};
+
 /**
  * Generate or clean up a PCG component as a job an agent can wait for: inspect the graph and component, dry-run the
  * lifecycle, run it, then wait with hyper_operation_wait. Build graphs with Epic's PCGToolset.
@@ -345,11 +362,11 @@ public:
 	/**
 	 * Generate (keep the output, terminal generated), clean up (terminal clean), or generate_validate_cleanup (prove the
 	 * graph generates and leave nothing, terminal clean) on one component. Dry-run first with the revision and fingerprint
-	 * from hyper_pcg_inspect; then resubmit with bDryRun false, a new operation_id and expected_plan_hash, and call
-	 * hyper_operation_wait: it returns when the generation or cleanup has finished. deadline_ms stops it if it runs longer.
+	 * from hyper_pcg_inspect; then resubmit with bDryRun false, a new operation_id and expected_plan_hash: the reply
+	 * waits until the generation or cleanup has finished. deadline_ms stops it if it runs longer.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|PCG")
-	static FHyperAIPCGApplyPlanReport hyper_pcg_apply_plan(const FHyperAIPCGApplyPlanRequest& Request);
+	static UHyperAIPCGApplyPlanResult* hyper_pcg_apply_plan(const FHyperAIPCGApplyPlanRequest& Request);
 
 	/** Structural or generation_ready issues in a loaded PCG graph and component, checked against the revision you expect. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|PCG")
@@ -583,6 +600,8 @@ public:
 		FString& OutDiagnostic);
 	static FHyperAIPCGInspectReport Inspect(const FHyperAIPCGInspectRequest& Request);
 	static FHyperAIPCGValidateReport Validate(const FHyperAIPCGValidateRequest& Request);
+	/** hyper_pcg_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIPCGApplyPlanReport BuildFittedPlan(const FHyperAIPCGApplyPlanRequest& Request);
 	static FHyperAIPCGApplyPlanReport BuildPlan(const FHyperAIPCGApplyPlanRequest& Request);
 	static FString ComputeLifecycleSemanticFingerprint(const FHyperAIStudioPCGLifecyclePayload& Payload);
 	/** generated, clean, or empty for a lifecycle this pack does not run. */

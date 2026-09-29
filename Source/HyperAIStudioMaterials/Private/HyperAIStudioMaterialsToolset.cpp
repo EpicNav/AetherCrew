@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioMaterialsToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioAgentActivity.h"
 
 #include "AssetRegistry/IAssetRegistry.h"
@@ -4510,7 +4511,12 @@ FHyperAIMaterialInspectReport UHyperAIStudioMaterialsToolset::hyper_material_ins
 	return Report;
 }
 
-FHyperAIMaterialApplyPlanReport UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(
+UHyperAIMaterialApplyPlanResult* UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(const FHyperAIMaterialApplyPlanRequest& Request)
+{
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIMaterialApplyPlanResult>(FHyperAIStudioMaterialsContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIMaterialApplyPlanReport FHyperAIStudioMaterialsContracts::BuildFittedPlan(
 	const FHyperAIMaterialApplyPlanRequest& InRequest)
 {
 	using C = FHyperAIStudioMaterialsContracts;

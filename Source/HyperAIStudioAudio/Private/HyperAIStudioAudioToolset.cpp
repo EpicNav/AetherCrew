@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioAudioToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 
 #include "AssetRegistry/AssetData.h"
@@ -5226,7 +5227,12 @@ FHyperAIAudioApplyPlanReport FHyperAIStudioAudioContracts::BuildPlan(
 	return Report;
 }
 
-FHyperAIAudioApplyPlanReport UHyperAIStudioAudioToolset::hyper_audio_apply_plan(
+UHyperAIAudioApplyPlanResult* UHyperAIStudioAudioToolset::hyper_audio_apply_plan(const FHyperAIAudioApplyPlanRequest& Request)
+{
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIAudioApplyPlanResult>(FHyperAIStudioAudioContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIAudioApplyPlanReport FHyperAIStudioAudioContracts::BuildFittedPlan(
 	const FHyperAIAudioApplyPlanRequest& InRequest)
 {
 	FHyperAIAudioApplyPlanRequest Request = InRequest;

@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioLevelDesignToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 
 #include "Editor.h"
@@ -730,7 +731,12 @@ FHyperAILevelDesignInspectReport UHyperAIStudioLevelDesignToolset::hyper_level_d
 	return Report;
 }
 
-FHyperAILevelBlockoutApplyPlanReport UHyperAIStudioLevelDesignToolset::hyper_level_blockout_apply_plan(const FHyperAILevelBlockoutApplyPlanRequest& InRequest)
+UHyperAILevelBlockoutApplyPlanResult* UHyperAIStudioLevelDesignToolset::hyper_level_blockout_apply_plan(const FHyperAILevelBlockoutApplyPlanRequest& Request)
+{
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAILevelBlockoutApplyPlanResult>(FHyperAIStudioLevelDesignContracts::BuildFittedPlan(Request));
+}
+
+FHyperAILevelBlockoutApplyPlanReport FHyperAIStudioLevelDesignContracts::BuildFittedPlan(const FHyperAILevelBlockoutApplyPlanRequest& InRequest)
 {
 	using C = FHyperAIStudioLevelDesignContracts;
 	FHyperAILevelBlockoutApplyPlanRequest Request = InRequest;

@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioPCGToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 
 #include "AssetRegistry/AssetData.h"
@@ -2960,7 +2961,12 @@ FHyperAIPCGInspectReport UHyperAIStudioPCGToolset::hyper_pcg_inspect(
 	return FHyperAIStudioPCGContracts::Inspect(Request);
 }
 
-FHyperAIPCGApplyPlanReport UHyperAIStudioPCGToolset::hyper_pcg_apply_plan(
+UHyperAIPCGApplyPlanResult* UHyperAIStudioPCGToolset::hyper_pcg_apply_plan(const FHyperAIPCGApplyPlanRequest& Request)
+{
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIPCGApplyPlanResult>(FHyperAIStudioPCGContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIPCGApplyPlanReport FHyperAIStudioPCGContracts::BuildFittedPlan(
 	const FHyperAIPCGApplyPlanRequest& InRequest)
 {
 	FHyperAIPCGApplyPlanRequest Request = InRequest;

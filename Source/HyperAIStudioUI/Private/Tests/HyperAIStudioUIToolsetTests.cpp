@@ -504,7 +504,7 @@ bool FHyperAIStudioUIWidgetAnimationTest::RunTest(const FString& Parameters)
 	auto DryRun = [&](const TArray<FHyperAIUIPlanOperation>& Operations)
 	{
 		Request.Operations = Operations;
-		return UHyperAIStudioUIToolset::hyper_ui_apply_plan(Request);
+		return FHyperAIStudioUIContracts::BuildFittedPlan(Request);
 	};
 	auto Refuses = [&](const FHyperAIUIPlanOperation& Wrong, const TCHAR* Expected)
 	{
@@ -531,7 +531,7 @@ bool FHyperAIStudioUIWidgetAnimationTest::RunTest(const FString& Parameters)
 	Request.Operations = {Create, Track};
 	Request.bDryRun = false;
 	Request.OperationId = TEXT("ui-animation-") + Suffix;
-	const FHyperAIUIApplyPlanReport Submitted = UHyperAIStudioUIToolset::hyper_ui_apply_plan(Request);
+	const FHyperAIUIApplyPlanReport Submitted = FHyperAIStudioUIContracts::BuildFittedPlan(Request);
 	if (!TestEqual(*FString::Printf(TEXT("the plan is submitted (%s)"), *Submitted.Diagnostic), Submitted.Status, FString(TEXT("submitted"))))
 	{
 		return false;
@@ -577,7 +577,7 @@ bool FHyperAIStudioUIWidgetAnimationTest::RunTest(const FString& Parameters)
 	TestTrue(*FString::Printf(TEXT("opacity runs 0.3 to 1 (%.2f to %.2f)"), Start, End), FMath::IsNearlyEqual(Start, 0.3f, 0.01f) && FMath::IsNearlyEqual(End, 1.f, 0.01f));
 	TestFalse(TEXT("the Widget Blueprint is saved"), Blueprint->GetOutermost()->IsDirty());
 	Request.OperationId = TEXT("ui-animation-again-") + Suffix;
-	TestEqual(TEXT("a second Pulse is refused"), UHyperAIStudioUIToolset::hyper_ui_apply_plan(Request).Status, FString(TEXT("invalid_op")));
+	TestEqual(TEXT("a second Pulse is refused"), FHyperAIStudioUIContracts::BuildFittedPlan(Request).Status, FString(TEXT("invalid_op")));
 	return true;
 }
 

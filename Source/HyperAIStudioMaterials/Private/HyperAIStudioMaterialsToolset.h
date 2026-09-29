@@ -12,6 +12,7 @@
 #include "Misc/AssetRegistryInterface.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioMaterialsToolset.generated.h"
 
 class UMaterial;
@@ -544,6 +545,22 @@ struct FHyperAIMaterialApplyPlanReport
 	UPROPERTY() TArray<FString> PreviewImagePaths;
 };
 
+/** hyper_material_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIMaterialApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIMaterialApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIMaterialApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIMaterialApplyPlanReport Value;
+};
+
 /** Exactly three functions form the core Materials atomic cohort. */
 UCLASS()
 class HYPERAISTUDIOMATERIALS_API UHyperAIStudioMaterialsToolset final : public UToolsetDefinition
@@ -567,11 +584,11 @@ public:
 	 * create_material_instance, set_instance_parameters. Prefer graph nodes; the Materials authoring mode decides
 	 * whether custom_hlsl is refused (Nodes), needs a justification for math nodes cannot express (Hybrid), or is
 	 * free (Hlsl). Dry-run first, then resubmit with bDryRun false, an operation_id and expected_plan_hash =
-	 * plan_hash. Call hyper_operation_wait, then hyper_material_validate for compile errors, instruction counts
+	 * plan_hash: the reply waits for the edit and says how it ended. Then hyper_material_validate for compile errors, instruction counts
 	 * and the preview PNG (open it to see the result). Close the material's editor tab before editing.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Materials")
-	static FHyperAIMaterialApplyPlanReport hyper_material_apply_plan(
+	static UHyperAIMaterialApplyPlanResult* hyper_material_apply_plan(
 		const FHyperAIMaterialApplyPlanRequest& Request);
 
 	/**
@@ -873,6 +890,8 @@ public:
 		const FHyperAIStudioMaterialValueSnapshot& Snapshot,
 		FString& OutEffectFingerprint,
 		FString& OutError);
+	/** hyper_material_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIMaterialApplyPlanReport BuildFittedPlan(const FHyperAIMaterialApplyPlanRequest& Request);
 	static FHyperAIMaterialApplyPlanReport BuildPlan(
 		const FHyperAIMaterialApplyPlanRequest& Request);
 };

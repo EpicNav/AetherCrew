@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioNiagaraToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioAgentActivity.h"
 
 #include "AssetRegistry/IAssetRegistry.h"
@@ -1962,7 +1963,12 @@ FHyperAINiagaraInspectReport UHyperAIStudioNiagaraToolset::hyper_niagara_inspect
 	return Report;
 }
 
-FHyperAINiagaraApplyPlanReport UHyperAIStudioNiagaraToolset::hyper_niagara_apply_plan(
+UHyperAINiagaraApplyPlanResult* UHyperAIStudioNiagaraToolset::hyper_niagara_apply_plan(const FHyperAINiagaraApplyPlanRequest& Request)
+{
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAINiagaraApplyPlanResult>(FHyperAIStudioNiagaraContracts::BuildFittedPlan(Request));
+}
+
+FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildFittedPlan(
 	const FHyperAINiagaraApplyPlanRequest& InRequest)
 {
 	using C = FHyperAIStudioNiagaraContracts;

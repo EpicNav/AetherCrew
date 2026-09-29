@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioUAFToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 
 #include "Editor.h"
@@ -714,7 +715,12 @@ FHyperAIUAFInspectReport UHyperAIStudioUAFToolset::hyper_uaf_inspect(const FHype
 	return FHyperAIStudioUAFContracts::Inspect(Request);
 }
 
-FHyperAIUAFApplyPlanReport UHyperAIStudioUAFToolset::hyper_uaf_apply_plan(const FHyperAIUAFApplyPlanRequest& InRequest)
+UHyperAIUAFApplyPlanResult* UHyperAIStudioUAFToolset::hyper_uaf_apply_plan(const FHyperAIUAFApplyPlanRequest& Request)
+{
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIUAFApplyPlanResult>(FHyperAIStudioUAFContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIUAFApplyPlanReport FHyperAIStudioUAFContracts::BuildFittedPlan(const FHyperAIUAFApplyPlanRequest& InRequest)
 {
 	FHyperAIUAFApplyPlanRequest Request = InRequest;
 	FHyperAIStudioRequestFit Fit;

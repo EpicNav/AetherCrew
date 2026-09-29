@@ -9,6 +9,7 @@
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioAnimBlueprintToolset.generated.h"
 
 USTRUCT(BlueprintType)
@@ -204,6 +205,22 @@ struct FHyperAIAnimBlueprintValidateReport
 	UPROPERTY() TArray<FString> Capabilities;
 };
 
+/** hyper_anim_blueprint_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIAnimBlueprintApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIAnimBlueprintApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIAnimBlueprintApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIAnimBlueprintApplyPlanReport Value;
+};
+
 /** Animation Blueprint graphs: variables and what drives them, state machines, states, transitions and their rules. */
 UCLASS()
 class HYPERAISTUDIOANIMBLUEPRINT_API UHyperAIStudioAnimBlueprintToolset final : public UToolsetDefinition
@@ -220,10 +237,10 @@ public:
 	/**
 	 * Closed graph edits, then a compile, as one undo step: create for a skeleton, variables and per-frame drivers,
 	 * state machines, states playing sequences or blend spaces, transitions with rules. Read
-	 * .hyperai/docs/HyperAIStudio-AnimationCookbook.md first. Dry-run, resubmit, poll, then validate.
+	 * .hyperai/docs/HyperAIStudio-AnimationCookbook.md first. Dry-run, then resubmit: the reply waits for the edit. Then validate.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|AnimBlueprint")
-	static FHyperAIAnimBlueprintApplyPlanReport hyper_anim_blueprint_apply_plan(const FHyperAIAnimBlueprintApplyPlanRequest& Request);
+	static UHyperAIAnimBlueprintApplyPlanResult* hyper_anim_blueprint_apply_plan(const FHyperAIAnimBlueprintApplyPlanRequest& Request);
 
 	/** Compile status plus graph checks: output pose wired, entry states, unreachable or dead-end states, rules without a gap between thresholds, instant blends, skeleton mismatches. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|AnimBlueprint")
@@ -358,6 +375,8 @@ public:
 	static const FHyperAIStudioDomainAdapterDescriptor& GetAdapterDescriptor();
 	static FHyperAIAnimBlueprintInspectReport Inspect(const FHyperAIAnimBlueprintInspectRequest& Request);
 	static FHyperAIAnimBlueprintValidateReport Validate(const FHyperAIAnimBlueprintValidateRequest& Request);
+	/** hyper_anim_blueprint_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIAnimBlueprintApplyPlanReport BuildFittedPlan(const FHyperAIAnimBlueprintApplyPlanRequest& Request);
 	static FHyperAIAnimBlueprintApplyPlanReport BuildPlan(const FHyperAIAnimBlueprintApplyPlanRequest& Request);
 	static FString ComputeEditOpsSemanticFingerprint(const FHyperAIStudioAnimBlueprintEditOpsPayload& Payload);
 };
