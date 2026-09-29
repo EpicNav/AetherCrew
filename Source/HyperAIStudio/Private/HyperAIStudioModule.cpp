@@ -1131,6 +1131,13 @@ private:
 				{TEXT("Interchange")}
 			},
 			{
+				TEXT("HyperAIStudioDecibel"),
+				TEXT("sound_design"),
+				TEXT("cohort.source.hyperaistudiodecibeltoolset.v1"),
+				{TEXT("hyper_sound_inspect"), TEXT("hyper_sound_apply_plan"), TEXT("hyper_sound_render")},
+				{TEXT("Decibel"), TEXT("Metasound")}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),

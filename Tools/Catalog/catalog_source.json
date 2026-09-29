@@ -3440,6 +3440,40 @@
    ]
   },
   {
+   "id": "sound_design",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [],
+   "tools": [
+    {
+     "name": "hyper_sound_inspect",
+     "cohort": "cohort.source.hyperaistudiodecibeltoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_sound_apply_plan",
+     "cohort": "cohort.source.hyperaistudiodecibeltoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_sound_render",
+     "cohort": "cohort.source.hyperaistudiodecibeltoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    }
+   ]
+  },
+  {
    "id": "scripting",
    "tier": "Optional",
    "dependsOn": [
