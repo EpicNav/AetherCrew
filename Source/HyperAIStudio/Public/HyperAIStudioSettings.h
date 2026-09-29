@@ -294,7 +294,10 @@ struct FHyperAIStudioAgentModelRoute
 {
 	GENERATED_BODY()
 
-	/** Chat agent this applies to: Codex, Claude Code or Gemini. */
+	/**
+	 * Chat agent this applies to: Codex, Claude Code, Gemini, or an agent HyperAI hosts through the Agent Client
+	 * Protocol, whose list comes from the agent itself the first time it chats.
+	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Models")
 	FString AgentName;
 
@@ -857,10 +860,82 @@ public:
 		return true;
 	}
 
-	/** Route's launch prefix and model argument, Smart included. Same contract as TryResolveModelArgument. */
+	/** Claude Code and Codex can run a model Ollama or LM Studio serves on this computer. */
+	static bool CanRunLocalModels(const FString& AgentName)
+	{
+		return AgentName.Contains(TEXT("Claude"), ESearchCase::IgnoreCase) || AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase);
+	}
+
+	/** A local model as the Model menu names it, ollama/<name> or lmstudio/<id>: its server, and the name the server uses. */
+	static bool ParseLocalModelId(const FString& ModelId, FString& OutServer, FString& OutName)
+	{
+		FString Server;
+		FString Name;
+		if (!ModelId.Split(TEXT("/"), &Server, &Name) || Name.IsEmpty() || (Server != TEXT("ollama") && Server != TEXT("lmstudio")))
+		{
+			return false;
+		}
+		OutServer = Server;
+		OutName = Name;
+		return true;
+	}
+
+	/** The context a local server should give an agent, as the Model menu asks. */
+	static constexpr int32 LocalModelContextTokens = 65536;
+
+	/** Where each server answers on this computer: Ollama's and LM Studio's own default ports. */
+	static FString GetLocalModelServerUrl(const FString& Server)
+	{
+		return Server == TEXT("lmstudio") ? TEXT("http://127.0.0.1:1234") : TEXT("http://127.0.0.1:11434");
+	}
+
+	/**
+	 * A local model's launch. Claude Code talks to the server's Anthropic-compatible API with every Claude alias pointed
+	 * at the model, so subagents and its own background calls stay local; Codex uses its built-in Ollama and LM Studio
+	 * providers. OutPrefix goes inside the agent's launch like Smart's. Same contract as TryResolveModelArgument.
+	 */
+	static bool TryBuildLocalModelLaunch(const FString& AgentName, const FString& ModelId, FString& OutPrefix, FString& OutArgument, FString& OutError)
+	{
+		OutPrefix.Reset();
+		OutArgument.Reset();
+		OutError.Reset();
+		FString Server;
+		FString Name;
+		if (!ParseLocalModelId(ModelId, Server, Name) || !IsSafeModelId(Name))
+		{
+			OutError = FString::Printf(TEXT("\"%s\" is not a local model id that can be passed to the agent."), *ModelId);
+			return false;
+		}
+		if (AgentName.Contains(TEXT("Claude"), ESearchCase::IgnoreCase))
+		{
+			// Claude Code does not know a local model's window, so it is told the 64K the menu asks the server for, and
+			// compacts the chat before the server would cut it.
+			OutPrefix = FString::Printf(TEXT("set \"ANTHROPIC_BASE_URL=%s\" && set \"ANTHROPIC_AUTH_TOKEN=%s\" && set \"ANTHROPIC_API_KEY=\" && ")
+				TEXT("set \"ANTHROPIC_DEFAULT_OPUS_MODEL=%s\" && set \"ANTHROPIC_DEFAULT_SONNET_MODEL=%s\" && set \"ANTHROPIC_DEFAULT_HAIKU_MODEL=%s\" && ")
+				TEXT("set \"CLAUDE_CODE_MAX_CONTEXT_TOKENS=%d\" && "),
+				*GetLocalModelServerUrl(Server), *Server, *Name, *Name, *Name, LocalModelContextTokens);
+			OutArgument = TEXT("--model ") + Name;
+			return true;
+		}
+		if (AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase))
+		{
+			OutArgument = FString::Printf(TEXT("--oss --local-provider %s -m %s"), *Server, *Name);
+			return true;
+		}
+		OutError = FString::Printf(TEXT("%s cannot run a model from Ollama or LM Studio."), *AgentName);
+		return false;
+	}
+
+	/** Route's launch prefix and model argument, Smart and local models included. Same contract as TryResolveModelArgument. */
 	bool TryResolveModelLaunch(const FHyperAIStudioAgentModelRoute& Route, FString& OutPrefix, FString& OutArgument, FString& OutError) const
 	{
 		OutPrefix.Reset();
+		FString Server;
+		FString Name;
+		if (CanRunLocalModels(Route.AgentName) && ParseLocalModelId(Route.SelectedModel, Server, Name))
+		{
+			return TryBuildLocalModelLaunch(Route.AgentName, Route.SelectedModel, OutPrefix, OutArgument, OutError);
+		}
 		if (Route.SelectedModel != SmartModelId)
 		{
 			return TryResolveModelArgument(Route, OutArgument, OutError);

@@ -2,8 +2,18 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Containers/Ticker.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
+#include "HttpPath.h"
+#include "HttpServerModule.h"
+#include "HttpServerRequest.h"
+#include "HttpServerResponse.h"
+#include "HyperAIStudioLocalModels.h"
 #include "HyperAIStudioSettings.h"
+#include "IHttpRouter.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
 #include "UObject/Package.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -103,6 +113,94 @@ bool FHyperAIStudioAgentModelTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Ordinary models still resolve through the same entry point"), Settings->TryResolveModelLaunch(SmartRoute, Prefix, Argument, Error));
 	TestTrue(TEXT("Ordinary models need no prefix"), Prefix.IsEmpty());
 	TestEqual(TEXT("Ordinary models keep their flag"), Argument, FString(TEXT("--model opus")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioLocalModelsTest,
+	"HyperAIStudio.Chat.LocalModels",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioLocalModelsTest::RunTest(const FString& Parameters)
+{
+	// Claude Code on a model Ollama serves: its API, with every Claude alias pointed at the model, and no real key sent.
+	FString Prefix;
+	FString Argument;
+	FString Error;
+	TestTrue(TEXT("Claude Code launches on an Ollama model"),
+		UHyperAIStudioSettings::TryBuildLocalModelLaunch(TEXT("Claude Code"), TEXT("ollama/qwen3.6:latest"), Prefix, Argument, Error));
+	TestTrue(TEXT("through Ollama's Anthropic-compatible API, its aliases on the model and no Anthropic key"),
+		Prefix.StartsWith(TEXT("set \"ANTHROPIC_BASE_URL=http://127.0.0.1:11434\" && ")) && Prefix.Contains(TEXT("set \"ANTHROPIC_API_KEY=\" && "))
+		&& Prefix.Contains(TEXT("set \"ANTHROPIC_DEFAULT_HAIKU_MODEL=qwen3.6:latest\" && ")) && Prefix.EndsWith(TEXT("&& ")));
+	TestEqual(TEXT("with the model by Ollama's name"), Argument, FString(TEXT("--model qwen3.6:latest")));
+	TestTrue(TEXT("Codex launches on an LM Studio model"),
+		UHyperAIStudioSettings::TryBuildLocalModelLaunch(TEXT("Codex"), TEXT("lmstudio/qwen/qwen3-coder-30b"), Prefix, Argument, Error));
+	TestTrue(TEXT("through its own LM Studio provider"), Prefix.IsEmpty() && Argument == TEXT("--oss --local-provider lmstudio -m qwen/qwen3-coder-30b"));
+	TestFalse(TEXT("A local name that could chain commands is refused"),
+		UHyperAIStudioSettings::TryBuildLocalModelLaunch(TEXT("Claude Code"), TEXT("ollama/qwen & calc"), Prefix, Argument, Error));
+	TestTrue(TEXT("and produces nothing"), Prefix.IsEmpty() && Argument.IsEmpty());
+
+	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+	FHyperAIStudioAgentModelRoute Route;
+	Route.AgentName = TEXT("Claude Code");
+	Route.SelectedModel = TEXT("ollama/qwen3.6:latest");
+	TestTrue(TEXT("A local model resolves without being in the agent's list"), Settings->TryResolveModelLaunch(Route, Prefix, Argument, Error));
+	Route.AgentName = TEXT("OpenCode");
+	Route.SelectedModel = TEXT("ollama/qwen3.6");
+	Route.Models = {TEXT("ollama/qwen3.6")};
+	TestTrue(TEXT("For an agent with its own models, an Ollama id is one of them, passed as it is"),
+		Settings->TryResolveModelLaunch(Route, Prefix, Argument, Error) && Prefix.IsEmpty() && Argument == TEXT("--model ollama/qwen3.6"));
+
+	// Ollama and LM Studio, played by servers on this machine; models that call no tools, and embedding models, are left out.
+	constexpr uint32 OllamaPort = 18331;
+	constexpr uint32 LMStudioPort = 18332;
+	const TSharedPtr<IHttpRouter> Ollama = FHttpServerModule::Get().GetHttpRouter(OllamaPort, /*bFailOnBindFailure=*/true);
+	const TSharedPtr<IHttpRouter> LMStudio = FHttpServerModule::Get().GetHttpRouter(LMStudioPort, /*bFailOnBindFailure=*/true);
+	if (!Ollama.IsValid() || !LMStudio.IsValid())
+	{
+		AddWarning(TEXT("Port 18331 or 18332 is taken, so the stand-ins for Ollama and LM Studio could not start."));
+		return true;
+	}
+	auto Serve = [](const TCHAR* Json)
+	{
+		return FHttpRequestHandler::CreateLambda([Body = FString(Json)](const FHttpServerRequest&, const FHttpResultCallback& OnComplete)
+		{
+			OnComplete(FHttpServerResponse::Create(Body, TEXT("application/json")));
+			return true;
+		});
+	};
+	const FHttpRouteHandle Tags = Ollama->BindRoute(FHttpPath(TEXT("/api/tags")), EHttpServerRequestVerbs::VERB_GET,
+		Serve(TEXT(R"({"models": [{"name": "qwen3.6:latest", "capabilities": ["vision", "completion", "tools", "thinking"]},
+			{"name": "NitrAI/VibeThinker-3B:latest", "capabilities": ["completion"]}, {"name": "nomic-embed-text:latest", "capabilities": ["embedding"]}]})")));
+	const FHttpRouteHandle Models = LMStudio->BindRoute(FHttpPath(TEXT("/v1/models")), EHttpServerRequestVerbs::VERB_GET,
+		Serve(TEXT(R"({"object": "list", "data": [{"id": "qwen/qwen3-coder-30b", "object": "model"}, {"id": "text-embedding-nomic-embed-text-v1.5", "object": "model"}]})")));
+	FHttpServerModule::Get().StartAllListeners();
+	ON_SCOPE_EXIT
+	{
+		Ollama->UnbindRoute(Tags);
+		LMStudio->UnbindRoute(Models);
+		FHyperAIStudioLocalModels::SetServersForTests(FString(), FString());
+	};
+	auto Look = [this]()
+	{
+		bool bDone = false;
+		FHyperAIStudioLocalModels::Refresh([&bDone]() { bDone = true; });
+		const double End = FPlatformTime::Seconds() + 10.0;
+		while (!bDone && FPlatformTime::Seconds() < End)
+		{
+			FTSTicker::GetCoreTicker().Tick(0.02f);
+			FPlatformProcess::Sleep(0.01f);
+		}
+		TestTrue(TEXT("Both servers answered or gave up"), bDone);
+		return FHyperAIStudioLocalModels::Get();
+	};
+	FHyperAIStudioLocalModels::SetServersForTests(FString::Printf(TEXT("http://127.0.0.1:%u"), OllamaPort), FString::Printf(TEXT("http://127.0.0.1:%u"), LMStudioPort));
+	const TArray<FString> Found = Look();
+	AddInfo(TEXT("Found: ") + FString::Join(Found, TEXT(", ")));
+	TestEqual(TEXT("Each server's chat models are found, named for the Model menu"), Found,
+		TArray<FString>{TEXT("ollama/qwen3.6:latest"), TEXT("lmstudio/qwen/qwen3-coder-30b")});
+	FHyperAIStudioLocalModels::SetServersForTests(TEXT("http://127.0.0.1:18339"), TEXT("http://127.0.0.1:18338"));
+	TestTrue(TEXT("With neither server running, there are none"), Look().IsEmpty());
 	return true;
 }
 

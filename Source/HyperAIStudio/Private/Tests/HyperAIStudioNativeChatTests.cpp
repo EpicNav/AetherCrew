@@ -10,7 +10,9 @@
 #include "HyperAIStudioAgentImage.h"
 #include "HyperAIStudioNativeChat.h"
 #include "HyperAIStudioService.h"
+#include "HyperAIStudioSettings.h"
 #include "HyperAIStudioWidgetShot.h"
+#include "Misc/ScopeExit.h"
 #include "ImageUtils.h"
 #include "SHyperAIStudioNativeChatView.h"
 #include "Misc/AutomationTest.h"
@@ -507,6 +509,144 @@ for line in iter(sys.stdin.readline, ""):
 		FPlatformProcess::ExecProcess(TEXT("python"), TEXT("--version"), &Code, &Out, &Err);
 		return Code == 0;
 	}
+
+	/**
+	 * An agent over the Agent Client Protocol, such as OpenCode: it lists its models as a config option (grouped), or the
+	 * older way with "legacy", takes no HTTP MCP with "nohttp", and answers a prompt with the MCP servers it was handed
+	 * and the model it is on.
+	 */
+	const TCHAR* const FakeAcpAgent = TEXT(R"PY(import json, sys
+legacy = "legacy" in sys.argv; nohttp = "nohttp" in sys.argv
+def send(o):
+    o["jsonrpc"] = "2.0"; sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+mcp = []; model = "m-small"
+for line in iter(sys.stdin.readline, ""):
+    m = json.loads(line); method = m.get("method"); i = m.get("id"); p = m.get("params") or {}
+    if method == "initialize":
+        send({"id": i, "result": {"protocolVersion": 1, "agentCapabilities": {"loadSession": False, "mcpCapabilities": {"http": not nohttp, "sse": False}}}})
+    elif method == "session/new":
+        mcp = p.get("mcpServers", [])
+        if legacy:
+            send({"id": i, "result": {"sessionId": "s1", "models": {"currentModelId": model,
+                  "availableModels": [{"modelId": "m-small", "name": "Small"}, {"modelId": "m-large", "name": "Large"}]}}})
+        else:
+            send({"id": i, "result": {"sessionId": "s1", "configOptions": [{"id": "mode", "name": "Mode", "category": "mode", "type": "select", "currentValue": "ask",
+                  "options": [{"value": "ask", "name": "Ask"}]}, {"id": "model", "name": "Model", "category": "model", "type": "select", "currentValue": model,
+                  "options": [{"value": "m-small", "name": "Small"}, {"group": "big", "name": "Big", "options": [{"value": "m-large", "name": "Large"}]}]}]}})
+    elif method == "session/set_config_option" and p.get("configId") == "model":
+        model = p["value"]; send({"id": i, "result": {"configOptions": []}})
+    elif method == "session/set_model":
+        model = p["modelId"]; send({"id": i, "result": {}})
+    elif method == "session/prompt":
+        servers = ",".join("%s:%s=%s" % (s.get("type"), s.get("name"), s.get("url")) for s in mcp)
+        send({"method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "agent_message_chunk",
+              "content": {"type": "text", "text": "mcp=[%s] model=%s" % (servers, model)}}}})
+        send({"id": i, "result": {"stopReason": "end_turn"}})
+    elif i is not None:
+        send({"id": i, "error": {"code": -32601, "message": "unknown " + str(method)}})
+)PY");
+
+	/** Codex's app-server, far enough to show the provider and model a thread started with, as its id. */
+	const TCHAR* const FakeCodexThread = TEXT(R"PY(import json, sys
+def send(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+for line in iter(sys.stdin.readline, ""):
+    m = json.loads(line); method = m.get("method"); i = m.get("id"); p = m.get("params") or {}
+    if method == "initialize":
+        send({"id": i, "result": {"userAgent": "fake"}})
+    elif method == "thread/start":
+        send({"id": i, "result": {"thread": {"id": "%s|%s" % (p.get("modelProvider"), p.get("model"))}, "model": p.get("model")}})
+)PY");
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNativeChatAcpAgentsTest,
+	"HyperAIStudio.NativeChat.AcpAgents",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioNativeChatAcpAgentsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::NativeChatTests;
+	using EKind = FHyperAIStudioChatItem::EKind;
+	TestTrue(TEXT("GitHub Copilot, OpenCode, Kimi and the other ACP agents chat natively"), FHyperAIStudioNativeChat::IsSupported(TEXT("GitHub Copilot"))
+		&& FHyperAIStudioNativeChat::IsSupported(TEXT("OpenCode")) && FHyperAIStudioNativeChat::IsSupported(TEXT("Kimi"))
+		&& FHyperAIStudioNativeChat::IsSupported(TEXT("Gemini")) && !FHyperAIStudioNativeChat::IsSupported(TEXT("Notepad")));
+	TestFalse(TEXT("Gemini keeps its own route, so it is not listed with them"), FHyperAIStudioNativeChat::GetInstalledAcpAgents().Contains(TEXT("Gemini")));
+	TestTrue(TEXT("In a terminal, such an agent runs its own interface"), FHyperAIStudioNativeChat::GetAcpTerminalCommand(TEXT("OpenCode")).Contains(TEXT("opencode"))
+		&& FHyperAIStudioNativeChat::GetAcpTerminalCommand(TEXT("Codex")).IsEmpty());
+	if (!HasPython())
+	{
+		AddWarning(TEXT("python is not on PATH, so the scripted agents cannot run."));
+		return true;
+	}
+	const FScratch Scratch;
+	const FString Script = FPaths::Combine(Scratch.Dir, TEXT("fake_acp.py"));
+	FFileHelper::SaveStringToFile(FakeAcpAgent, *Script, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	// The agent's models are saved as its Model menu; the user's own menus come back afterwards.
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const TArray<FHyperAIStudioAgentModelRoute> Routes = Settings->AgentModelRoutes;
+	ON_SCOPE_EXIT
+	{
+		Settings->AgentModelRoutes = Routes;
+		Settings->SaveConfig();
+	};
+
+	// One turn with the stand-in in Mode, starting on Model; the chat is stopped, its items kept.
+	auto Turn = [&](const TCHAR* Mode, const FString& Model)
+	{
+		FHyperAIStudioNativeChat::SetCommandForTests(FString::Printf(TEXT("python -u \"%s\" %s"), *Script, Mode));
+		const TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(TEXT("OpenCode"), Scratch.Dir, Model, FString());
+		FString Error;
+		if (!Chat.IsValid() || !Chat->Start(Error))
+		{
+			AddError(TEXT("The OpenCode chat did not start: ") + Error);
+			return Chat;
+		}
+		PumpUntil([&Chat]() { return Chat->IsReady(); });
+		Chat->Send(TEXT("hi"));
+		PumpUntil([&Chat]() { return !Chat->IsBusy() && FindKind(*Chat, EKind::Agent).IsValid(); });
+		Chat->Stop();
+		return Chat;
+	};
+	auto Reply = [](const TSharedPtr<FHyperAIStudioNativeChat>& Chat)
+	{
+		const TSharedPtr<FHyperAIStudioChatItem> Item = Chat.IsValid() ? FindKind(*Chat, FHyperAIStudioChatItem::EKind::Agent) : nullptr;
+		return Item.IsValid() ? Item->Text : FString();
+	};
+	auto Told = [](const TSharedPtr<FHyperAIStudioNativeChat>& Chat, const TCHAR* Text)
+	{
+		return Chat.IsValid() && Chat->GetItems().ContainsByPredicate([Text](const TSharedPtr<FHyperAIStudioChatItem>& Item)
+		{
+			return Item->Kind == FHyperAIStudioChatItem::EKind::Notice && Item->Text.Contains(Text);
+		});
+	};
+
+	const FString Endpoint = FHyperAIStudioService::GetEndpoint(Settings->UnrealMCPPort, Settings->UnrealMCPUrlPath);
+	const FString Chosen = Reply(Turn(TEXT("options"), TEXT("m-large")));
+	AddInfo(TEXT("OpenCode said: ") + Chosen);
+	TestTrue(TEXT("The session is handed Unreal MCP over HTTP"), Chosen.Contains(FString::Printf(TEXT("mcp=[http:unreal-mcp=%s]"), *Endpoint)));
+	TestTrue(TEXT("and moves to the chosen model through the agent's model option"), Chosen.EndsWith(TEXT("model=m-large")));
+	const FHyperAIStudioAgentModelRoute* Route = Settings->FindAgentModelRoute(TEXT("OpenCode"));
+	TestTrue(TEXT("The agent's own models, groups and all, become its Model menu"), Route && Route->Models == TArray<FString>{TEXT("m-small"), TEXT("m-large")});
+
+	TestTrue(TEXT("An agent that lists models the older way is switched the older way"), Reply(Turn(TEXT("legacy"), TEXT("m-large"))).EndsWith(TEXT("model=m-large")));
+	const TSharedPtr<FHyperAIStudioNativeChat> Unknown = Turn(TEXT("options"), TEXT("m-huge"));
+	TestTrue(TEXT("A model the agent does not offer leaves it on its own, and says so"), Reply(Unknown).EndsWith(TEXT("model=m-small")) && Told(Unknown, TEXT("does not offer m-huge")));
+	const TSharedPtr<FHyperAIStudioNativeChat> NoHttp = Turn(TEXT("nohttp"), FString());
+	TestTrue(TEXT("An agent that takes no HTTP MCP gets none, and the chat says so"), Reply(NoHttp).StartsWith(TEXT("mcp=[]"))
+		&& Told(NoHttp, TEXT("cannot take Unreal MCP from HyperAI")));
+
+	// A model Ollama serves reaches Codex through its own provider for it.
+	const FString CodexScript = FPaths::Combine(Scratch.Dir, TEXT("fake_codex_thread.py"));
+	FFileHelper::SaveStringToFile(FakeCodexThread, *CodexScript, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	FHyperAIStudioNativeChat::SetCommandForTests(FString::Printf(TEXT("python -u \"%s\""), *CodexScript));
+	const TSharedPtr<FHyperAIStudioNativeChat> Codex = FHyperAIStudioNativeChat::Create(TEXT("Codex"), Scratch.Dir, TEXT("ollama/qwen3.6:latest"), FString());
+	FString Error;
+	TestTrue(TEXT("A Codex chat on a local model starts"), Codex.IsValid() && Codex->Start(Error));
+	TestTrue(TEXT("with Ollama as its provider and the model by Ollama's name"), PumpUntil([&Codex]() { return Codex->IsReady(); })
+		&& Codex->GetSessionId() == TEXT("ollama|qwen3.6:latest"));
+	Codex->Stop();
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -1059,6 +1199,54 @@ bool FHyperAIStudioScreensClaudeChatTest::RunTest(const FString& Parameters)
 		AddInfo(TEXT("Screenshot: ") + Shot);
 	}
 	Chat->Stop();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNativeChatAcpLiveTest,
+	"HyperAIStudio.NativeChat.AcpLiveHandshake",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioNativeChatAcpLiveTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::NativeChatTests;
+	// Installed ACP agents, started the way the chat tab starts them, as far as a session: nothing is sent, so no model usage.
+	TArray<FString> Agents;
+	FPlatformMisc::GetEnvironmentVariable(TEXT("HYPERAI_TEST_ACP_CLI")).ParseIntoArray(Agents, TEXT(","));
+	if (Agents.IsEmpty())
+	{
+		AddInfo(TEXT("Skipped: set HYPERAI_TEST_ACP_CLI to installed agents, such as OpenCode,Kimi."));
+		return true;
+	}
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const TArray<FHyperAIStudioAgentModelRoute> Routes = Settings->AgentModelRoutes;
+	ON_SCOPE_EXIT
+	{
+		Settings->AgentModelRoutes = Routes;
+		Settings->SaveConfig();
+	};
+	const FString Directory = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/AcpHandshakeTest"));
+	IFileManager::Get().MakeDirectory(*Directory, /*Tree=*/true);
+	for (const FString& Agent : Agents)
+	{
+		const TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(Agent.TrimStartAndEnd(), Directory, FString(), FString());
+		FString Error;
+		if (!TestTrue(Agent + TEXT(" starts"), Chat.IsValid() && Chat->Start(Error)))
+		{
+			AddError(Error);
+			continue;
+		}
+		PumpUntil([&Chat]() { return Chat->IsReady() || !Chat->IsRunning(); }, 90.0);
+		for (const TSharedPtr<FHyperAIStudioChatItem>& Item : Chat->GetItems())
+		{
+			AddInfo(Agent + TEXT(": ") + Item->Text);
+		}
+		const FHyperAIStudioAgentModelRoute* Route = Settings->FindAgentModelRoute(Chat->GetAgentName());
+		AddInfo(FString::Printf(TEXT("%s offers %d models: %s"), *Agent, Route ? Route->Models.Num() : 0,
+			Route ? *FString::Join(TArray<FString>(Route->Models.GetData(), FMath::Min(Route->Models.Num(), 12)), TEXT(", ")) : TEXT("none")));
+		TestTrue(Agent + TEXT(" answers the handshake and opens a session"), Chat->IsReady() && !Chat->GetSessionId().IsEmpty());
+		Chat->Stop();
+	}
 	return true;
 }
 

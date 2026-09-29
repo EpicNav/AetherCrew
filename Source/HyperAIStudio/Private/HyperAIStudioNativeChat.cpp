@@ -3,6 +3,7 @@
 #include "HyperAIStudioNativeChat.h"
 
 #include "HAL/FileManager.h"
+#include "HAL/PlatformTime.h"
 #include "CoreGlobals.h"
 #include "HyperAIStudioAgentChatHistory.h"
 #include "HyperAIStudioProjectMemory.h"
@@ -690,7 +691,15 @@ namespace HyperAIStudio::NativeChat::Private
 		void StartThread(const bool bResume)
 		{
 			const TSharedRef<FJsonObject> Params = Object({{TEXT("cwd"), Str(ProjectRoot)}});
-			if (!Model.IsEmpty())
+			FString LocalServer;
+			FString LocalName;
+			if (UHyperAIStudioSettings::ParseLocalModelId(Model, LocalServer, LocalName))
+			{
+				// A model Ollama or LM Studio serves here, through Codex's own provider for it.
+				Params->SetStringField(TEXT("modelProvider"), LocalServer);
+				Params->SetStringField(TEXT("model"), LocalName);
+			}
+			else if (!Model.IsEmpty())
 			{
 				Params->SetStringField(TEXT("model"), Model);
 			}
@@ -1074,21 +1083,60 @@ namespace HyperAIStudio::NativeChat::Private
 		TMap<FString, TSharedPtr<FJsonObject>> RequestedPermissions;
 	};
 
-	// ------------------------------------------------------------------------------------------------------------ Gemini
+	// ------------------------------------------------------------------------------------------------------ ACP agents
 
-	/** Gemini through `gemini --acp`, the Agent Client Protocol. */
-	class FGeminiChat final : public FHyperAIStudioNativeChat
+	/** An agent HyperAI hosts through the Agent Client Protocol, as the ACP registry starts it. */
+	struct FAcpAgent
+	{
+		const TCHAR* Name;
+		const TCHAR* Executable;
+		const TCHAR* Arguments;
+		/** Its own settings name Unreal MCP (HyperAI writes Gemini's), so the session does not hand it over again. */
+		bool bConfiguresMcp = false;
+		/** A launch flag for the model, where the agent takes one; others are set through the session. */
+		const TCHAR* ModelFlag = nullptr;
+	};
+
+	const TArray<FAcpAgent>& AcpAgents()
+	{
+		static const TArray<FAcpAgent> Agents = {
+			{TEXT("Gemini"), TEXT("gemini"), TEXT("--acp"), true, TEXT("--model")},
+			{TEXT("GitHub Copilot"), TEXT("copilot"), TEXT("--acp")},
+			{TEXT("Cursor Agent"), TEXT("cursor-agent"), TEXT("acp")},
+			{TEXT("OpenCode"), TEXT("opencode"), TEXT("acp")},
+			{TEXT("Goose"), TEXT("goose"), TEXT("acp")},
+			{TEXT("Qwen Code"), TEXT("qwen"), TEXT("--acp --experimental-skills")},
+			{TEXT("Kimi"), TEXT("kimi"), TEXT("acp")},
+			{TEXT("Cline"), TEXT("cline"), TEXT("--acp")},
+			{TEXT("Auggie"), TEXT("auggie"), TEXT("--acp")},
+		};
+		return Agents;
+	}
+
+	const FAcpAgent* FindAcpAgent(const FString& Name)
+	{
+		return AcpAgents().FindByPredicate([&Name](const FAcpAgent& Agent) { return Name.Equals(Agent.Name, ESearchCase::IgnoreCase); });
+	}
+
+	/** Most model lists fit; OpenCode can offer every model of every provider it knows. */
+	constexpr int32 MaxAgentModels = 100;
+
+	/** An agent through the Agent Client Protocol: Gemini, GitHub Copilot, OpenCode and the rest of AcpAgents. */
+	class FAcpChat final : public FHyperAIStudioNativeChat
 	{
 	public:
-		FGeminiChat(const FString& InProjectRoot, const FString& InModel, const FString& InResumeSessionId)
-			: FHyperAIStudioNativeChat(TEXT("Gemini"), InProjectRoot, InModel, InResumeSessionId)
+		FAcpChat(const FAcpAgent& InAgent, const FString& InProjectRoot, const FString& InModel, const FString& InResumeSessionId)
+			: FHyperAIStudioNativeChat(InAgent.Name, InProjectRoot, InModel, InResumeSessionId)
+			, Agent(InAgent)
 		{
 		}
 
 	protected:
 		virtual FString CommandLine() const override
 		{
-			return Executable(TEXT("gemini")) + (Model.IsEmpty() ? FString() : TEXT(" --model ") + Model) + TEXT(" --acp");
+			// The model lands on a cmd.exe line, so only a plain id goes.
+			const bool bModelFlag = Agent.ModelFlag && UHyperAIStudioSettings::IsSafeModelId(Model);
+			return Executable(Agent.Executable) + (bModelFlag ? FString::Printf(TEXT(" %s %s"), Agent.ModelFlag, *Model) : FString()) + TEXT(" ") + Agent.Arguments;
 		}
 
 		virtual bool WritesJsonRpcVersion() const override { return true; }
@@ -1102,7 +1150,7 @@ namespace HyperAIStudio::NativeChat::Private
 			{
 				if (!Error.IsEmpty())
 				{
-					AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(), TEXT("Gemini refused to start: ") + Error);
+					AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(), FString::Printf(TEXT("%s refused to start: %s"), *AgentName, *Error));
 					return;
 				}
 				bool bCanLoad = false;
@@ -1113,14 +1161,35 @@ namespace HyperAIStudio::NativeChat::Private
 					{
 						Prompt->TryGetBoolField(TEXT("image"), bTakesImages);
 					}
+					if (const TSharedPtr<FJsonObject> Mcp = ObjectField(Capabilities, TEXT("mcpCapabilities")))
+					{
+						Mcp->TryGetBoolField(TEXT("http"), bTakesHttpMcp);
+					}
+				}
+				if (!Agent.bConfiguresMcp && !bTakesHttpMcp)
+				{
+					AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(), FString::Printf(
+						TEXT("%s cannot take Unreal MCP from HyperAI (it does not accept HTTP servers), so it has only the tools in its own settings."), *AgentName));
 				}
 				OpenSession(bCanLoad && !ResumeSessionId.IsEmpty());
 			});
 		}
 
+		/** Unreal MCP for this session, unless the agent's own settings name it already. */
+		TArray<TSharedPtr<FJsonValue>> McpServers() const
+		{
+			if (Agent.bConfiguresMcp || !bTakesHttpMcp)
+			{
+				return {};
+			}
+			const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+			return {Obj(Object({{TEXT("type"), Str(TEXT("http"))}, {TEXT("name"), Str(TEXT("unreal-mcp"))},
+				{TEXT("url"), Str(FHyperAIStudioService::GetEndpoint(Settings->UnrealMCPPort, Settings->UnrealMCPUrlPath))}, {TEXT("headers"), Arr({})}}))};
+		}
+
 		void OpenSession(const bool bLoad)
 		{
-			const TSharedRef<FJsonObject> Params = Object({{TEXT("cwd"), Str(ProjectRoot)}, {TEXT("mcpServers"), Arr({})}});
+			const TSharedRef<FJsonObject> Params = Object({{TEXT("cwd"), Str(ProjectRoot)}, {TEXT("mcpServers"), Arr(McpServers())}});
 			if (bLoad)
 			{
 				Params->SetStringField(TEXT("sessionId"), ResumeSessionId);
@@ -1135,11 +1204,102 @@ namespace HyperAIStudio::NativeChat::Private
 						return;
 					}
 					AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(), Error.Contains(TEXT("auth"), ESearchCase::IgnoreCase)
-						? TEXT("Gemini needs you to sign in: switch this tab to the terminal view and run gemini once.")
-						: TEXT("Gemini could not start a chat: ") + Error);
+						? FString::Printf(TEXT("%s needs you to sign in: switch this tab to the terminal view and sign in there."), *AgentName)
+						: FString::Printf(TEXT("%s could not start a chat: %s"), *AgentName, *Error));
 					return;
 				}
-				Ready(bLoad ? ResumeSessionId : StringField(Result, TEXT("sessionId")));
+				const FString Session = bLoad ? ResumeSessionId : StringField(Result, TEXT("sessionId"));
+				ReadModels(Result);
+				ChooseModel(Session, [this, Session]() { Ready(Session); });
+			});
+		}
+
+		/**
+		 * The agent's own models, from its model config option or the older models field, kept as its Model menu. A
+		 * chat that loads an old session may not send them; the menu keeps what it had.
+		 */
+		void ReadModels(const TSharedPtr<FJsonObject>& Result)
+		{
+			TArray<FString> Values;
+			for (const TSharedPtr<FJsonValue>& Value : ArrayField(Result, TEXT("configOptions")))
+			{
+				const TSharedPtr<FJsonObject> Option = Value->AsObject();
+				if (StringField(Option, TEXT("category")) != TEXT("model") || !ModelConfigId.IsEmpty())
+				{
+					continue;
+				}
+				ModelConfigId = StringField(Option, TEXT("id"));
+				CurrentModel = StringField(Option, TEXT("currentValue"));
+				for (const TSharedPtr<FJsonValue>& Choice : ArrayField(Option, TEXT("options")))
+				{
+					// Choices may come in groups, each with its own options.
+					const TArray<TSharedPtr<FJsonValue>> Grouped = ArrayField(Choice->AsObject(), TEXT("options"));
+					for (const TSharedPtr<FJsonValue>& Entry : Grouped.IsEmpty() ? TArray<TSharedPtr<FJsonValue>>{Choice} : Grouped)
+					{
+						Values.AddUnique(StringField(Entry->AsObject(), TEXT("value")));
+					}
+				}
+			}
+			if (ModelConfigId.IsEmpty())
+			{
+				const TSharedPtr<FJsonObject> Models = ObjectField(Result, TEXT("models"));
+				CurrentModel = StringField(Models, TEXT("currentModelId"));
+				for (const TSharedPtr<FJsonValue>& Entry : ArrayField(Models, TEXT("availableModels")))
+				{
+					Values.AddUnique(StringField(Entry->AsObject(), TEXT("modelId")));
+				}
+			}
+			Values.Remove(FString());
+			Values.SetNum(FMath::Min(Values.Num(), MaxAgentModels));
+			OfferedModels = Values;
+			UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+			if (Values.IsEmpty() || bHeadless)
+			{
+				return;
+			}
+			FHyperAIStudioAgentModelRoute* Route = Settings->FindAgentModelRoute(AgentName);
+			if (!Route)
+			{
+				Route = &Settings->AgentModelRoutes.AddDefaulted_GetRef();
+				Route->AgentName = AgentName;
+			}
+			if (Route->Models != Values)
+			{
+				Route->Models = Values;
+				Settings->SaveConfig();
+			}
+		}
+
+		/** Switches the session to the chosen model when the agent offers it and it is not already on it. */
+		void ChooseModel(const FString& Session, TFunction<void()> Then)
+		{
+			if (Model.IsEmpty() || Model == CurrentModel || Agent.ModelFlag)
+			{
+				Then();
+				return;
+			}
+			if (!OfferedModels.Contains(Model))
+			{
+				AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(), FString::Printf(TEXT("%s does not offer %s, so it uses %s."),
+					*AgentName, *Model, CurrentModel.IsEmpty() ? TEXT("its own default") : *CurrentModel));
+				Then();
+				return;
+			}
+			const bool bOption = !ModelConfigId.IsEmpty();
+			const TSharedRef<FJsonObject> Params = bOption
+				? Object({{TEXT("sessionId"), Str(Session)}, {TEXT("configId"), Str(ModelConfigId)}, {TEXT("value"), Str(Model)}})
+				: Object({{TEXT("sessionId"), Str(Session)}, {TEXT("modelId"), Str(Model)}});
+			Request(bOption ? TEXT("session/set_config_option") : TEXT("session/set_model"), Params, [this, Then](const TSharedPtr<FJsonObject>&, const FString& Error)
+			{
+				if (!Error.IsEmpty())
+				{
+					AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(), FString::Printf(TEXT("%s kept its model: %s"), *AgentName, *Error));
+				}
+				else
+				{
+					CurrentModel = Model;
+				}
+				Then();
 			});
 		}
 
@@ -1164,7 +1324,7 @@ namespace HyperAIStudio::NativeChat::Private
 			{
 				AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(), bTakesImages
 					? FString(TEXT("An attached picture could not be read, so it was left out."))
-					: FString(TEXT("Gemini did not say it takes pictures, so only the text went.")));
+					: FString::Printf(TEXT("%s did not say it takes pictures, so only the text went."), *AgentName));
 			}
 			Request(TEXT("session/prompt"), Object({{TEXT("sessionId"), Str(SessionId)}, {TEXT("prompt"), Arr(Blocks)}}),
 				[this](const TSharedPtr<FJsonObject>& Result, const FString& Error)
@@ -1172,7 +1332,7 @@ namespace HyperAIStudio::NativeChat::Private
 				const FString StopReason = StringField(Result, TEXT("stopReason"));
 				if (!Error.IsEmpty())
 				{
-					AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(), TEXT("Gemini: ") + Error);
+					AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(), FString::Printf(TEXT("%s: %s"), *AgentName, *Error));
 				}
 				else if (StopReason == TEXT("cancelled"))
 				{
@@ -1180,7 +1340,7 @@ namespace HyperAIStudio::NativeChat::Private
 				}
 				else if (StopReason == TEXT("max_tokens") || StopReason == TEXT("refusal"))
 				{
-					AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(), TEXT("Gemini ended the turn early: ") + StopReason);
+					AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(), FString::Printf(TEXT("%s ended the turn early: %s"), *AgentName, *StopReason));
 				}
 				TurnFinished();
 			});
@@ -1333,23 +1493,29 @@ namespace HyperAIStudio::NativeChat::Private
 		}
 
 	private:
-		/** A picture Gemini sent as data, shown as its own item; Id keeps a repeated update from adding it twice. */
+		/** A picture the agent sent as data, shown as its own item; Id keeps a repeated update from adding it twice. */
 		void AddPicture(const FString& Data, const FString& Id)
 		{
 			if (!Id.IsEmpty() && FindItem(Id).IsValid())
 			{
 				return;
 			}
-			const FString File = SaveImageData(Data, TEXT("gemini"));
+			const FString File = SaveImageData(Data, Agent.Executable);
 			if (!File.IsEmpty())
 			{
 				AddItem(FHyperAIStudioChatItem::EKind::Image, Id, TEXT("Image"), FString(), TEXT("completed"))->Images = {File};
 			}
 		}
 
+		const FAcpAgent& Agent;
 		TSharedPtr<FHyperAIStudioChatItem> CurrentAgent;
 		TSharedPtr<FHyperAIStudioChatItem> CurrentThought;
 		bool bTakesImages = false;
+		bool bTakesHttpMcp = false;
+		/** The model config option's id; empty when the agent lists models the older way, or not at all. */
+		FString ModelConfigId;
+		FString CurrentModel;
+		TArray<FString> OfferedModels;
 	};
 
 	// ------------------------------------------------------------------------------------------------------------ Claude
@@ -2072,8 +2238,35 @@ void FHyperAIStudioNativeChat::SetCommandForTests(const FString& Command)
 
 bool FHyperAIStudioNativeChat::IsSupported(const FString& AgentName)
 {
-	return AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase) || AgentName.Contains(TEXT("Gemini"), ESearchCase::IgnoreCase)
-		|| AgentName.Contains(TEXT("Claude"), ESearchCase::IgnoreCase);
+	return AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase) || AgentName.Contains(TEXT("Claude"), ESearchCase::IgnoreCase)
+		|| HyperAIStudio::NativeChat::Private::FindAcpAgent(AgentName) != nullptr;
+}
+
+TArray<FString> FHyperAIStudioNativeChat::GetInstalledAcpAgents()
+{
+	// ponytail: a PATH search per agent, at most once a minute; an agent installed meanwhile shows after that.
+	static TArray<FString> Installed;
+	static double CheckedAt = -1.0;
+	if (CheckedAt < 0.0 || FPlatformTime::Seconds() - CheckedAt > 60.0)
+	{
+		CheckedAt = FPlatformTime::Seconds();
+		Installed.Reset();
+		for (const HyperAIStudio::NativeChat::Private::FAcpAgent& Agent : HyperAIStudio::NativeChat::Private::AcpAgents())
+		{
+			FString Path;
+			if (!Agent.bConfiguresMcp && FHyperAIStudioService::FindExecutableOnPath(Agent.Executable, Path))
+			{
+				Installed.Add(Agent.Name);
+			}
+		}
+	}
+	return Installed;
+}
+
+FString FHyperAIStudioNativeChat::GetAcpTerminalCommand(const FString& AgentName)
+{
+	const HyperAIStudio::NativeChat::Private::FAcpAgent* Agent = HyperAIStudio::NativeChat::Private::FindAcpAgent(AgentName);
+	return Agent ? HyperAIStudio::NativeChat::Private::Executable(Agent->Executable) : FString();
 }
 
 TSharedPtr<FHyperAIStudioNativeChat> FHyperAIStudioNativeChat::Create(const FString& AgentName, const FString& ProjectRoot, const FString& Model,
@@ -2084,13 +2277,13 @@ TSharedPtr<FHyperAIStudioNativeChat> FHyperAIStudioNativeChat::Create(const FStr
 	{
 		return MakeShared<FCodexChat>(ProjectRoot, Model, ResumeSessionId);
 	}
-	if (AgentName.Contains(TEXT("Gemini"), ESearchCase::IgnoreCase))
-	{
-		return MakeShared<FGeminiChat>(ProjectRoot, Model, ResumeSessionId);
-	}
 	if (AgentName.Contains(TEXT("Claude"), ESearchCase::IgnoreCase))
 	{
 		return MakeShared<FClaudeChat>(ProjectRoot, Model, ResumeSessionId, Subagent);
+	}
+	if (const FAcpAgent* Agent = FindAcpAgent(AgentName))
+	{
+		return MakeShared<FAcpChat>(*Agent, ProjectRoot, Model, ResumeSessionId);
 	}
 	return nullptr;
 }

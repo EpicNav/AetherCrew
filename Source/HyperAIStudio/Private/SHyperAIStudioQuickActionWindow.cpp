@@ -37,6 +37,7 @@
 #include "SHyperAIStudioChatHistorySidebar.h"
 #include "SHyperAIStudioMemoryPanel.h"
 #include "HyperAIStudioAgents.h"
+#include "HyperAIStudioLocalModels.h"
 #include "HyperAIStudioNativeChat.h"
 #include "SHyperAIStudioNativeChatView.h"
 #include "HyperAIStudioSkills.h"
@@ -1645,6 +1646,26 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildModelMenu()
 	}
 	Menu.EndSection();
 
+	if (UHyperAIStudioSettings::CanRunLocalModels(AgentName))
+	{
+		// Found in the background; a server started since shows the next time this menu opens.
+		const TArray<FString> Local = FHyperAIStudioLocalModels::Get();
+		Menu.BeginSection(NAME_None, LOCTEXT("ModelLocalHeading", "On This Computer"));
+		for (const FString& Model : Local)
+		{
+			AddChoice(Model, FText::FromString(Model), LOCTEXT("ModelLocalTooltip",
+				"Served by Ollama or LM Studio on this computer: nothing leaves it and nothing is billed. How well it uses Unreal's tools depends on the model, "
+				"and an agent needs a long context: set the server's context length to 64K or more."));
+		}
+		if (Local.IsEmpty())
+		{
+			Menu.AddMenuEntry(LOCTEXT("ModelLocalNone", "No Ollama or LM Studio models"),
+				LOCTEXT("ModelLocalNoneTooltip", "Start Ollama, or LM Studio's server, with a model downloaded, then open this menu again."),
+				FSlateIcon(), FUIAction(FExecuteAction(), FCanExecuteAction::CreateLambda([]() { return false; })));
+		}
+		Menu.EndSection();
+	}
+
 	Menu.AddMenuSeparator();
 	Menu.AddMenuEntry(
 		LOCTEXT("EditModelList", "Edit Model List..."),
@@ -1886,6 +1907,13 @@ void SHyperAIStudioQuickActionWindow::RefreshAgentOptions()
 			AddAgent(Route.Name);
 		}
 	}
+	// Agents hosted through the Agent Client Protocol need only be installed: each chat hands them Unreal MCP.
+	for (const FString& AgentName : FHyperAIStudioNativeChat::GetInstalledAcpAgents())
+	{
+		AddAgent(AgentName);
+	}
+	// Looks for Ollama and LM Studio models in the background, so the Model menu has them when it opens.
+	FHyperAIStudioLocalModels::Get();
 
 	if (AgentOptions.Num() == 0)
 	{
@@ -2371,7 +2399,8 @@ FString SHyperAIStudioQuickActionWindow::GetTerminalLaunchCommandForAgent(const 
 		return LaunchCommand;
 	}
 
-	return FString();
+	// An agent hosted through the Agent Client Protocol: its own terminal interface, where it can sign in.
+	return FHyperAIStudioNativeChat::GetAcpTerminalCommand(AgentName);
 }
 
 void SHyperAIStudioQuickActionWindow::RunBootstrap(const FString& AgentName, const FString& LaunchCommand)
@@ -3031,12 +3060,17 @@ bool SHyperAIStudioQuickActionWindow::GetTabWork(const int32 TabIndex, bool& bOu
 
 void SHyperAIStudioQuickActionWindow::InterruptTab(const int32 TabIndex)
 {
-	const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = FindTab(TabIndex);
-	const TSharedPtr<FHyperAIStudioNativeChat> Native = Window.IsValid() && Window->NativeView.IsValid() ? Window->NativeView->GetChat() : nullptr;
+	const TSharedPtr<FHyperAIStudioNativeChat> Native = GetTabChat(TabIndex);
 	if (Native.IsValid() && Native->IsBusy())
 	{
 		Native->Interrupt();
 	}
+}
+
+TSharedPtr<FHyperAIStudioNativeChat> SHyperAIStudioQuickActionWindow::GetTabChat(const int32 TabIndex)
+{
+	const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = FindTab(TabIndex);
+	return Window.IsValid() && Window->NativeView.IsValid() ? Window->NativeView->GetChat() : nullptr;
 }
 
 bool SHyperAIStudioQuickActionWindow::SendToChat(const int32 TabIndex, const FString& Text, FString& OutMessage, const TArray<FString>& Images)
@@ -3234,6 +3268,10 @@ FString SHyperAIStudioQuickActionWindow::GetSelectedAgentStatusLine() const
 	}
 
 	const HyperAIStudio::QuickAction::FAgentRoute* Route = HyperAIStudio::QuickAction::FindBuiltInRoute(AgentName);
+	if (!Route && FHyperAIStudioNativeChat::IsSupported(AgentName))
+	{
+		return FString::Printf(TEXT("Agent: %s, through the Agent Client Protocol; its chats get Unreal MCP from HyperAI."), *AgentName);
+	}
 	if (!Route)
 	{
 		return FString::Printf(TEXT("Agent: %s (custom/manual route)."), *AgentName);

@@ -4083,6 +4083,30 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelLocalHeading",
+   "source": "On This Computer",
+   "text": "本机"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelLocalNone",
+   "source": "No Ollama or LM Studio models",
+   "text": "没有 Ollama 或 LM Studio 模型"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelLocalNoneTooltip",
+   "source": "Start Ollama, or LM Studio's server, with a model downloaded, then open this menu again.",
+   "text": "先下载一个模型并启动 Ollama 或 LM Studio 的服务器，然后重新打开此菜单。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ModelLocalTooltip",
+   "source": "Served by Ollama or LM Studio on this computer: nothing leaves it and nothing is billed. How well it uses Unreal's tools depends on the model, and an agent needs a long context: set the server's context length to 64K or more.",
+   "text": "由本机的 Ollama 或 LM Studio 提供：数据不会离开这台电脑，也不产生费用。它使用 Unreal 工具的效果取决于模型，而且智能体需要较长的上下文：请把服务器的上下文长度设为 64K 或更多。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "ModelMenuHeading",
    "source": "{0} Model",
    "text": "{0} 模型"

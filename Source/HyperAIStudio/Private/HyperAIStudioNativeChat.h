@@ -50,13 +50,20 @@ struct FHyperAIStudioChatPlanStep
 
 /**
  * A chat HyperAIStudio hosts itself instead of in a terminal, over the CLI's stdin and stdout: Codex through its
- * app-server and Gemini through the Agent Client Protocol, both newline-delimited JSON-RPC, and Claude Code through
- * the stream-json protocol its Agent SDK uses. Game thread only.
+ * app-server, and Gemini, GitHub Copilot, OpenCode and other agents through the Agent Client Protocol, all
+ * newline-delimited JSON-RPC, and Claude Code through the stream-json protocol its Agent SDK uses. Game thread only.
  */
 class FHyperAIStudioNativeChat : public TSharedFromThis<FHyperAIStudioNativeChat>
 {
 public:
 	static bool IsSupported(const FString& AgentName);
+	/**
+	 * Agents HyperAI hosts through the Agent Client Protocol whose command is installed: each chat hands them Unreal
+	 * MCP, so they need no settings of their own. Gemini is not among them; it has its own route and settings file.
+	 */
+	static TArray<FString> GetInstalledAcpAgents();
+	/** The command that runs such an agent's own terminal interface; empty for any other agent. */
+	static FString GetAcpTerminalCommand(const FString& AgentName);
 #if WITH_DEV_AUTOMATION_TESTS
 	/** Runs Command instead of the agent's CLI, so protocol tests can use a scripted stand-in. Empty restores it. */
 	static void SetCommandForTests(const FString& Command);

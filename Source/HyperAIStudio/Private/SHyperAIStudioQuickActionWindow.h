@@ -13,6 +13,7 @@
 #include "Widgets/SCompoundWidget.h"
 
 struct FHyperAIStudioRestartChat;
+class FHyperAIStudioNativeChat;
 
 class SHyperAIStudioQuickActionWindow : public SCompoundWidget
 {
@@ -67,6 +68,8 @@ public:
 	static bool GetTabWork(int32 TabIndex, bool& bOutWorking, bool* bOutStarted = nullptr);
 	/** Interrupts the turn running in a tab's HyperAI chat view; a terminal chat is left to finish. */
 	static void InterruptTab(int32 TabIndex);
+	/** The chat a tab's HyperAI chat view runs; null for a closed tab or a terminal one. */
+	static TSharedPtr<FHyperAIStudioNativeChat> GetTabChat(int32 TabIndex);
 
 	virtual FReply OnPreviewKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	/** Assets and actors dropped on the panel become object paths in the agent's prompt. */
