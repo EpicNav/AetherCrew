@@ -112,7 +112,60 @@ HyperAI Studio lays out the nodes you add when the Blueprint compiles (`write_gr
 | Move a value toward a target | `Math|Interpolation|FInterptoConstant` (Current Target DeltaTime Speed), `Math|Interpolation|RInterpTo` |
 | Turn a component | `Transformation|SetRelativeRotation :self component :NewRotation rotator` |
 
-There is no Timeline node in the DSL: animate with `EventTick`, or with a looping timer.
+There is no Timeline node in the DSL: add timelines with HyperAI's structure tool below.
+
+## Timelines, interfaces, RPCs, replication and collapsing: HyperAI's structure tool
+
+`hyper_blueprint_structure_apply_plan` (toolset `HyperAIStudioBlueprintStructure.HyperAIStudioBlueprintStructureToolset`) does
+what the DSL and Epic's tools leave out. A plan is one undo step; it is checked before anything changes, compiled after, and
+saved (`bSave` false leaves it unsaved). The report's `Made` names every node it placed (name, title, pins) and
+`CompileMessages` gives the compiler's errors and warnings with the node each is about. Ops:
+
+- **Timelines** (Actor Blueprints, event graph): `timeline.add` with `Name`, `Length` in seconds (0 ends at the last key),
+  `bAutoPlay`, `bLoop`, `bReplicated`, and `Tracks`, each `{Name, Type: float | vector | color | event, Keys: [{Time, Value}],
+  Interp: auto | linear | constant}` (one value for float, three for vector, four for color, none for event). `Drive` names a
+  function of the Blueprint that the timeline's Update runs, each track feeding its input of the same name: write
+  `(fn ApplyOpen (Alpha) ...)` with the DSL first (into an `add_function_graph` graph), then add the timeline with
+  `Drive: "ApplyOpen"`. Start it with `pins.connect` (below) to its `Play`, `PlayFromStart`, `Reverse` or `Stop`.
+- **Interfaces**: `interface.create` (`Interface`: the new asset's path), `interface.add_function` (`Interface`, `Name`,
+  `Inputs`, `Outputs`: a function without outputs is an event), then `interface.implement` (or `interface.remove`) on the
+  Blueprint. The report lists its events and functions: place an event with `BlueprintTools.add_event(bp, 'Interact')` or an
+  `(event Interact ...)` in the DSL, fill each function's graph, and call it on other actors with the interface message node
+  `find_node_types` lists once the interface exists.
+- **Networking**: `event.add` makes a custom event with `Inputs` and `Rpc` none | server | client | multicast and
+  `bReliable`; `event.set_rpc` changes one. `variable.set_replication`: `Replication` none | replicated | rep_notify (makes
+  `OnRep_<Name>`) and `Condition` owner_only | skip_owner | initial_only | simulated_only | autonomous_only |
+  simulated_or_physics | initial_or_owner | custom | replay_or_owner | replay_only | skip_replay | none.
+  `component.set_replicated` with `bReplicated`. An actor's replicated members only matter if the actor replicates: set
+  `bReplicates` true on its default object with `ObjectTools.set_properties`.
+- **Structure**: `graph.collapse` folds `Nodes` into a `collapsed` graph, a `function` or a `macro` (`Into`) named `Name`;
+  `graph.expand` opens one collapsed graph, macro instance or function call back out, links kept.
+- **Wiring**: `pins.connect` with `From` and `To` as `Node.Pin`: a node by its name (`K2Node_Timeline_0`) or its title when
+  only one node has it: a timeline's or custom event's title is its name, and a new Actor Blueprint's events are
+  `Event BeginPlay`, `Event ActorBeginOverlap` and `Event Tick` (so `"Event ActorBeginOverlap.then"` to `"Open.Play"`).
+  The K2 schema checks every link.
+
+A door that swings on a timeline: `add_function_graph` `ApplyOpen`, `add_function_param` `Alpha` float, write
+`(fn ApplyOpen (Alpha) (Transformation|SetRelativeRotation :self (Variables|Default|GetDoor) :NewRotation (Math|Rotator|MakeRotator :Yaw (* Alpha 90.0))))`,
+then one structure plan: `timeline.add` `Open` (Length 1, a float track `Alpha` keyed 0 at 0 and 1 at 1, `Drive` ApplyOpen)
+and `pins.connect` `Event ActorBeginOverlap.then` to `Open.Play`.
+
+`read_graph_dsl` shows a timeline as a call it is not (a timeline named Open reads back as `(MenuAnchor|Open 0.0)`), so never
+write an event that holds a timeline back through `write_graph_dsl`: it would put that call in the timeline's place. Writing
+other events into the same graph is safe and leaves the timeline and its links alone.
+
+Types for parameters: `bool`, `int`, `int64`, `float`, `byte`, `name`, `string`, `text`, `vector`, `rotator`, `transform`,
+`vector2d`, `linearcolor`, or `object:`, `class:`, `struct:`, `enum:` with a path (`object:/Script/Engine.Actor`,
+`object:/Game/BP_Door.BP_Door_C`); `[]` after one makes an array.
+
+`hyper_blueprint_structure_inspect` reads a Blueprint's graphs, interfaces (an interface asset's functions, or the ones it
+implements), timelines and tracks, custom events with their replication, replicated variables and components; with `bNodes`
+it lists every node with its name, title, graph and links, paged by `Offset` and `Limit`, which is how to read a large graph
+and pick the nodes to collapse. A node name is unique only in its own graph: when a plan's node name is found in two graphs it
+is refused, so give `Graph` then.
+
+Event dispatchers are in Epic's tools: `BlueprintTools.add_event_dispatcher`, its parameters with `add_function_param` on
+the dispatcher's graph, then the Call and Bind nodes `find_node_types` lists.
 
 ## DSL in one screen
 

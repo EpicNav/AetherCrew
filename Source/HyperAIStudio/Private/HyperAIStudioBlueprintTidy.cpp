@@ -11,11 +11,15 @@
 #include "Editor.h"
 #include "Engine/Blueprint.h"
 #include "HyperAIStudioSettings.h"
+#include "HyperAIStudioSourceControl.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Subsystems/AssetEditorSubsystem.h"
+#include "UObject/Package.h"
+#include "UObject/SavePackage.h"
 #include "UObject/UObjectGlobals.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioBlueprintTidy, Log, All);
@@ -38,6 +42,24 @@ namespace HyperAIStudio::BlueprintTidy::Private
 	{
 		static FState Instance;
 		return Instance;
+	}
+
+	bool SaveLayout(UBlueprint& Blueprint, FString& OutError)
+	{
+		UPackage* Package = Blueprint.GetOutermost();
+		if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, OutError))
+		{
+			return false;
+		}
+		FSavePackageArgs Args;
+		Args.TopLevelFlags = RF_Public | RF_Standalone;
+		const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
+		if (!UPackage::SavePackage(Package, &Blueprint, *File, Args))
+		{
+			OutError = FString::Printf(TEXT("%s could not be saved."), *Package->GetName());
+			return false;
+		}
+		return true;
 	}
 
 	TArray<UEdGraph*> GraphsOf(UBlueprint* Blueprint)
@@ -231,9 +253,18 @@ int32 FHyperAIStudioBlueprintTidy::Tidy(UBlueprint* Blueprint)
 	}
 	if (!Groups.IsEmpty())
 	{
+		UPackage* Package = Blueprint->GetOutermost();
+		const bool bWasSaved = !Package->IsDirty();
 		if (Arrange(Groups))
 		{
-			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+			// Only positions moved: the compiled Blueprint is unchanged, so its status stays up to date; the package holds the
+			// new layout. An agent that saved right after its edit (this runs on the next tick) gets the layout saved too.
+			Blueprint->MarkPackageDirty();
+			FString Error;
+			if (bWasSaved && !SaveLayout(*Blueprint, Error))
+			{
+				UE_LOG(LogHyperAIStudioBlueprintTidy, Warning, TEXT("Arranged %s, but could not save the layout: %s"), *Blueprint->GetPathName(), *Error);
+			}
 			UE_LOG(LogHyperAIStudioBlueprintTidy, Log, TEXT("Arranged %d new node(s) in %s."), Moved, *Blueprint->GetPathName());
 		}
 		else

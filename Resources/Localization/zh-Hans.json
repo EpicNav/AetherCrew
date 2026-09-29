@@ -650,6 +650,12 @@
    "text": "HyperAI：应用混合空间计划"
   },
   {
+   "namespace": "HyperAIStudioBlueprintStructure",
+   "key": "StructurePlan",
+   "source": "HyperAI: Edit Blueprint Structure",
+   "text": "HyperAI：编辑蓝图结构"
+  },
+  {
    "namespace": "HyperAIStudioDecibel",
    "key": "SoundPlan",
    "source": "HyperAI: Edit Decibel Session",

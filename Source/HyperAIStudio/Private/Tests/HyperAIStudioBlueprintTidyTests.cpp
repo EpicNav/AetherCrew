@@ -103,6 +103,8 @@ bool FHyperAIStudioBlueprintTidyArrangeTest::RunTest(const FString& Parameters)
 	}
 	TestTrue(TEXT("After the compile the chain reads left to right from BeginPlay"), bLeftToRight);
 	TestEqual(TEXT("and BeginPlay, which was there before, did not move"), FIntPoint(BeginPlay->NodePosX, BeginPlay->NodePosY), EventAt);
+	TestTrue(TEXT("Moving nodes left the compiled Blueprint up to date (only the package is dirty)"),
+		Blueprint->Status == BS_UpToDate || Blueprint->Status == BS_UpToDateWithWarnings);
 	TestEqual(TEXT("A second tidy finds nothing new"), FHyperAIStudioBlueprintTidy::Tidy(Blueprint), 0);
 	return true;
 }

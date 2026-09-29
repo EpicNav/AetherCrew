@@ -3474,6 +3474,32 @@
    ]
   },
   {
+   "id": "blueprint_structure",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [],
+   "tools": [
+    {
+     "name": "hyper_blueprint_structure_inspect",
+     "cohort": "cohort.source.hyperaistudioblueprintstructuretoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_blueprint_structure_apply_plan",
+     "cohort": "cohort.source.hyperaistudioblueprintstructuretoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    }
+   ]
+  },
+  {
    "id": "scripting",
    "tier": "Optional",
    "dependsOn": [

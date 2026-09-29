@@ -1142,6 +1142,13 @@ private:
 				{TEXT("Decibel"), TEXT("Metasound")}
 			},
 			{
+				TEXT("HyperAIStudioBlueprintStructure"),
+				TEXT("blueprint_structure"),
+				TEXT("cohort.source.hyperaistudioblueprintstructuretoolset.v1"),
+				{TEXT("hyper_blueprint_structure_inspect"), TEXT("hyper_blueprint_structure_apply_plan")},
+				{}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),
