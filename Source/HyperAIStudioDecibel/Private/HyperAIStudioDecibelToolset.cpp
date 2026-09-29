@@ -149,6 +149,31 @@ namespace HyperAIStudio::Decibel::Private
 		return 60.0 / FMath::Max(1, Session.Bpm);
 	}
 
+	FString AutoParamName(const EDecibelAutoParam Param)
+	{
+		switch (Param)
+		{
+		case EDecibelAutoParam::Volume: return TEXT("volume");
+		case EDecibelAutoParam::Pan: return TEXT("pan");
+		case EDecibelAutoParam::Pitch: return TEXT("pitch");
+		default: return StaticEnum<EDecibelAutoParam>()->GetNameStringByValue(static_cast<int64>(Param)).ToLower();
+		}
+	}
+
+	/** What a track's automation drives, "volume: 3 points" or "fx.filter.fltcut: 2 points". */
+	TArray<FString> DescribeLanes(const FDecibelTrackData& Track)
+	{
+		TArray<FString> Out;
+		for (const FDecibelAutomationLane& Lane : Track.AutomationLanes)
+		{
+			const FString Target = Lane.TargetKind == EDecibelAutoTarget::TrackParam ? AutoParamName(Lane.Param)
+				: Track.Devices.IsValidIndex(Lane.DeviceIndex) ? Track.Devices[Lane.DeviceIndex].DeviceId + TEXT(".") + Lane.DeviceParamId.ToString()
+				: Lane.DeviceParamId.ToString();
+			Out.Add(FString::Printf(TEXT("%s: %d points"), *Target, Lane.Points.Num()));
+		}
+		return Out;
+	}
+
 	TArray<FHyperAISoundTrackInfo> DescribeTracks(const UDecibelSession& Session)
 	{
 		TArray<FHyperAISoundTrackInfo> Out;
@@ -174,6 +199,12 @@ namespace HyperAIStudio::Decibel::Private
 				ClipInfo.Notes = Clip.Notes.Num();
 				ClipInfo.Sound = Clip.Sound.ToSoftObjectPath().ToString();
 			}
+			for (const FDecibelSend& Send : Track.Sends)
+			{
+				const FDecibelTrackData* Target = Session.Tracks.FindByPredicate([&Send](const FDecibelTrackData& Row) { return Row.TrackId == Send.TargetId; });
+				Info.Sends.Add(FString::Printf(TEXT("%s x %.2f"), Target ? *Target->Name : TEXT("master"), Send.Amount));
+			}
+			Info.Lanes = DescribeLanes(Track);
 		}
 		return Out;
 	}
@@ -375,6 +406,89 @@ namespace HyperAIStudio::Decibel::Private
 		return true;
 	}
 
+	/**
+	 * lane.set: a track's (or the master's) automation on one target, replacing what was there. Points arrive in the
+	 * target's own units and are stored on Decibel's normalised axis through the same laws its editor uses: the fader's
+	 * dB for volume, the pitch lane's +-24 semitones, a device parameter's own RealToNorm (its skew and taper).
+	 */
+	bool SetLane(FDecibelTrackData& Track, const bool bMaster, const FHyperAISoundOp& Op, FString& OutError)
+	{
+		static const TMap<FString, EDecibelAutoParam> TrackParams = {
+			{TEXT("volume"), EDecibelAutoParam::Volume}, {TEXT("pan"), EDecibelAutoParam::Pan}, {TEXT("pitch"), EDecibelAutoParam::Pitch}};
+		const FString Name = Op.Param.TrimStartAndEnd();
+		if (Name.IsEmpty() || Op.Points.IsEmpty())
+		{
+			OutError = TEXT("A lane names its Param (volume, pan, pitch, or a device parameter's id with DeviceId) and gives its Points.");
+			return false;
+		}
+		FDecibelAutomationLane Lane;
+		TFunction<float(float)> ToNorm;
+		if (const EDecibelAutoParam* Param = TrackParams.Find(Name.ToLower()))
+		{
+			if (bMaster && *Param == EDecibelAutoParam::Pitch)
+			{
+				OutError = TEXT("The master has no pitch: its lanes are volume, pan and its devices' parameters.");
+				return false;
+			}
+			Lane.Param = *Param;
+			switch (*Param)
+			{
+			case EDecibelAutoParam::Volume:
+				ToNorm = [](const float Db) { return ::Decibel::DecibelGainToFaderPos(::Decibel::DecibelDbToGain(FMath::Clamp(Db, -60.f, 12.f))); };
+				break;
+			case EDecibelAutoParam::Pan:
+				ToNorm = [](const float PanValue) { return (FMath::Clamp(PanValue, -1.f, 1.f) + 1.f) * 0.5f; };
+				break;
+			default:
+				ToNorm = [](const float Semitones) { return static_cast<float>(::Decibel::DecibelPitchAutoSemisToValue(FMath::Clamp(Semitones, -24.f, 24.f))); };
+				break;
+			}
+		}
+		else
+		{
+			int32 DeviceIndex = INDEX_NONE;
+			if (!FindDevice(Track, Op, DeviceIndex, OutError))
+			{
+				return false;
+			}
+			const FDecibelDevice& Device = Track.Devices[DeviceIndex];
+			const FDecibelDeviceParam* DeviceParam = Device.FindParam(FName(*Name));
+			if (!DeviceParam)
+			{
+				OutError = FString::Printf(TEXT("%s has no parameter '%s' to automate: hyper_sound_inspect with its DeviceId lists them."), *Device.DeviceId, *Name);
+				return false;
+			}
+			Lane.TargetKind = EDecibelAutoTarget::DeviceParam;
+			Lane.DeviceIndex = DeviceIndex;
+			Lane.DeviceParamId = DeviceParam->Id;
+			Lane.DeviceParamLabel = DeviceParam->Label;
+			const FDecibelDeviceParam Copy = *DeviceParam;
+			ToNorm = [Copy](const float Real) { return Copy.RealToNorm(Real); };
+		}
+		for (const FHyperAISoundAutoPoint& Point : Op.Points)
+		{
+			FDecibelAutoPoint& Stored = Lane.Points.AddDefaulted_GetRef();
+			Stored.Beat = FMath::Max(0.0, Point.Beat);
+			Stored.Value = FMath::Clamp(ToNorm(Point.Value), 0.f, 1.f);
+			Stored.Curve = FMath::Clamp(Point.Curve, -1.f, 1.f);
+		}
+		Lane.Points.StableSort([](const FDecibelAutoPoint& A, const FDecibelAutoPoint& B) { return A.Beat < B.Beat; });
+		FDecibelAutomationLane* Existing = Track.AutomationLanes.FindByPredicate([&Lane](const FDecibelAutomationLane& Other)
+		{
+			return Other.TargetKind == Lane.TargetKind && (Lane.TargetKind == EDecibelAutoTarget::TrackParam ? Other.Param == Lane.Param
+				: Other.DeviceIndex == Lane.DeviceIndex && Other.DeviceParamId == Lane.DeviceParamId);
+		});
+		if (Existing)
+		{
+			Existing->Points = MoveTemp(Lane.Points);
+		}
+		else
+		{
+			Track.AutomationLanes.Add(MoveTemp(Lane));
+		}
+		return true;
+	}
+
 	/** Applies one op; false with OutError stops the plan. */
 	bool ApplyOp(UDecibelSession& Session, const FHyperAISoundOp& Op, const TMap<FString, USoundWave*>* Library, TArray<FString>& OutNotes, FString& OutError)
 	{
@@ -419,7 +533,8 @@ namespace HyperAIStudio::Decibel::Private
 		}
 		int32 TrackIndex = INDEX_NONE;
 		const bool bDeviceOp = Kind.StartsWith(TEXT("device."));
-		if (!FindTrack(Session, Op.Track, bDeviceOp, TrackIndex, OutError))
+		const bool bMaster = Op.Track.TrimStartAndEnd().Equals(TEXT("master"), ESearchCase::IgnoreCase);
+		if (!FindTrack(Session, Op.Track, bDeviceOp || Kind == TEXT("lane.set"), TrackIndex, OutError))
 		{
 			return false;
 		}
@@ -430,6 +545,43 @@ namespace HyperAIStudio::Decibel::Private
 			if (Op.Volume >= 0.f) Track.Volume = FMath::Clamp(Op.Volume, 0.f, 4.f);
 			if (Op.Pan >= -1.f) Track.Pan = FMath::Clamp(Op.Pan, -1.f, 1.f);
 			return true;
+		}
+		if (Kind == TEXT("track.send"))
+		{
+			int32 TargetIndex = INDEX_NONE;
+			if (!FindTrack(Session, Op.SendTo, /*bAllowMaster=*/false, TargetIndex, OutError))
+			{
+				return false;
+			}
+			if (TargetIndex == TrackIndex || Session.Tracks[TargetIndex].TrackType != EDecibelTrackType::Fx)
+			{
+				OutError = TEXT("A send feeds a return: an fx track other than the one sending.");
+				return false;
+			}
+			static const TMap<FString, EDecibelSendTap> Taps = {
+				{TEXT("post"), EDecibelSendTap::PostFader}, {TEXT("pre"), EDecibelSendTap::PreFader}, {TEXT("prefx"), EDecibelSendTap::PreFx}};
+			const FString TapName = Op.SendTap.TrimStartAndEnd().ToLower();
+			const EDecibelSendTap* Tap = Taps.Find(TapName.IsEmpty() ? FString(TEXT("post")) : TapName);
+			if (!Tap)
+			{
+				OutError = FString::Printf(TEXT("A send taps post, pre or prefx, not '%s'."), *Op.SendTap);
+				return false;
+			}
+			const FGuid TargetId = Session.Tracks[TargetIndex].TrackId;
+			FDecibelSend* Send = Track.Sends.FindByPredicate([&TargetId](const FDecibelSend& Existing) { return Existing.TargetId == TargetId; });
+			if (!Send)
+			{
+				Send = &Track.Sends.AddDefaulted_GetRef();
+				Send->TargetId = TargetId;
+			}
+			Send->Amount = FMath::Clamp(Op.SendGain, 0.f, 4.f);
+			Send->bEnabled = true;
+			DecibelSetSendTap(*Send, *Tap);
+			return true;
+		}
+		if (Kind == TEXT("lane.set"))
+		{
+			return SetLane(Track, bMaster, Op, OutError);
 		}
 		if (Kind == TEXT("track.remove"))
 		{
@@ -488,8 +640,8 @@ namespace HyperAIStudio::Decibel::Private
 		}
 		if (Kind != TEXT("clip.midi") && Kind != TEXT("clip.trigger") && Kind != TEXT("clip.audio"))
 		{
-			OutError = FString::Printf(TEXT("Unknown op '%s': session.set, track.add, track.set, track.remove, device.add, device.set, device.preset, ")
-				TEXT("device.remove, clip.midi, clip.trigger, clip.audio or clip.remove."), *Op.Kind);
+			OutError = FString::Printf(TEXT("Unknown op '%s': session.set, track.add, track.set, track.send, track.remove, device.add, device.set, ")
+				TEXT("device.preset, device.remove, lane.set, clip.midi, clip.trigger, clip.audio or clip.remove."), *Op.Kind);
 			return false;
 		}
 		if (Op.StartBeat < 0.0)
@@ -531,7 +683,23 @@ namespace HyperAIStudio::Decibel::Private
 			}
 			Clip.StartOffsetSec = FMath::Max(0.0, Op.SourceStartSeconds);
 			Clip.SrcLenSec = Op.SourceSeconds > 0.0 ? FMath::Min(Op.SourceSeconds, Duration - Clip.StartOffsetSec) : Duration - Clip.StartOffsetSec;
-			Clip.Gain = FMath::Clamp(Op.Gain, 0.f, 8.f);
+			Clip.Gain = FMath::Clamp(Op.Gain, 0.f, ::Decibel::DecibelDbToGain(::Decibel::kDecibelClipGainMaxDb));
+			Clip.bReversed = Op.bReverse;
+			if (!Op.StretchMode.IsEmpty())
+			{
+				static const TMap<FString, EDecibelStretchMode> Modes = {{TEXT("tape"), EDecibelStretchMode::Default},
+					{TEXT("default"), EDecibelStretchMode::Default}, {TEXT("texture"), EDecibelStretchMode::Texture}, {TEXT("complex"), EDecibelStretchMode::Complex}};
+				const EDecibelStretchMode* Mode = Modes.Find(Op.StretchMode.TrimStartAndEnd().ToLower());
+				if (!Mode)
+				{
+					OutError = FString::Printf(TEXT("A clip's StretchMode is tape, texture or complex, not '%s'."), *Op.StretchMode);
+					return false;
+				}
+				Clip.StretchMode = *Mode;
+			}
+			Clip.TextureGrainMs = FMath::Clamp(Op.TextureGrainMs, 5.0, 500.0);
+			Clip.TextureJitter = FMath::Clamp(Op.TextureJitter, 0.0, 1.0);
+			Clip.TextureTranspose = FMath::Clamp(Op.TextureTranspose, -48.0, 48.0);
 			Clip.Pitch = FMath::Clamp(Op.Pitch, -48.f, 48.f);
 			Clip.FadeInBeats = FMath::Max(0.0, Op.FadeInBeats);
 			Clip.FadeOutBeats = FMath::Max(0.0, Op.FadeOutBeats);
@@ -1045,7 +1213,8 @@ namespace HyperAIStudio::Decibel::Private
 		{
 			Report.Issues.Add(FString::Printf(TEXT("late start: %.2f s of silence before the first sound; a one-shot should start at once."), Levels.LeadingSilenceSeconds));
 		}
-		// Stems: each track alone, in a transient copy with the others silenced, so sends and the master chain still apply.
+		// Stems: each track alone, in a transient copy with the others MUTED, so its sends and the master chain still apply.
+		// Muted, not faded down: a volume lane would ride a zeroed fader straight back up, and a pre-fader send ignores it.
 		if (Request.bStems && Session)
 		{
 			for (int32 Index = 0; Index < Session->Tracks.Num(); ++Index)
@@ -1060,7 +1229,7 @@ namespace HyperAIStudio::Decibel::Private
 				{
 					if (Other != Index && Solo->Tracks[Other].TrackType != EDecibelTrackType::Fx)
 					{
-						Solo->Tracks[Other].Volume = 0.f;
+						Solo->Tracks[Other].bMuted = true;
 					}
 				}
 				FString TrackName = FPaths::MakeValidFileName(Track.Name.IsEmpty() ? FString::Printf(TEXT("Track%d"), Index) : Track.Name).Replace(TEXT(" "), TEXT(""));

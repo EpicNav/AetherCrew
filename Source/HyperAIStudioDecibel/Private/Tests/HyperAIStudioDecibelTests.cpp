@@ -47,6 +47,69 @@ namespace HyperAIStudio::DecibelTests
 		}
 	}
 
+	/** A sound file on disk as a sound library holds one: a second of 16-bit mono at 48 kHz, a tone gliding From to To Hz. */
+	FString WriteSweep(const FString& Name, const double From, const double To)
+	{
+		const FString File = FPaths::ConvertRelativePathToFull(FPaths::AutomationTransientDir() / Name + TEXT(".wav"));
+		constexpr int32 Rate = 48000;
+		TArray<uint8> Bytes;
+		auto U32 = [&Bytes](const uint32 V) { Bytes.Append(reinterpret_cast<const uint8*>(&V), 4); };
+		auto U16 = [&Bytes](const uint16 V) { Bytes.Append(reinterpret_cast<const uint8*>(&V), 2); };
+		Bytes.Append(reinterpret_cast<const uint8*>("RIFF"), 4); U32(36 + Rate * 2);
+		Bytes.Append(reinterpret_cast<const uint8*>("WAVEfmt "), 8); U32(16); U16(1); U16(1); U32(Rate); U32(Rate * 2); U16(2); U16(16);
+		Bytes.Append(reinterpret_cast<const uint8*>("data"), 4); U32(Rate * 2);
+		double Phase = 0.0;
+		for (int32 Index = 0; Index < Rate; ++Index)
+		{
+			U16(static_cast<uint16>(static_cast<int16>(12000.0 * FMath::Sin(Phase))));
+			Phase += 2.0 * PI * (From + (To - From) * Index / Rate) / Rate;
+		}
+		FFileHelper::SaveArrayToFile(Bytes, *File);
+		return File;
+	}
+
+	/** Rising zero crossings per second between two times: a plain tone's frequency. */
+	double Hz(const TArray<int16>& Pcm, const double From, const double To)
+	{
+		const int32 A = FMath::Clamp(FMath::RoundToInt(From * 48000), 1, Pcm.Num());
+		const int32 B = FMath::Clamp(FMath::RoundToInt(To * 48000), A, Pcm.Num());
+		int32 Rises = 0;
+		for (int32 Index = A; Index < B; ++Index)
+		{
+			Rises += (Pcm[Index - 1] < 0 && Pcm[Index] >= 0) ? 1 : 0;
+		}
+		return B > A ? Rises / ((B - A) / 48000.0) : 0.0;
+	}
+
+	/** The level between two times, in dBFS. */
+	double RmsDb(const TArray<int16>& Pcm, const double From, const double To)
+	{
+		const int32 A = FMath::Clamp(FMath::RoundToInt(From * 48000), 0, Pcm.Num());
+		const int32 B = FMath::Clamp(FMath::RoundToInt(To * 48000), A, Pcm.Num());
+		double Sum = 0.0;
+		for (int32 Index = A; Index < B; ++Index)
+		{
+			Sum += FMath::Square(Pcm[Index] / 32768.0);
+		}
+		return B > A ? 10.0 * FMath::LogX(10.0, Sum / (B - A) + 1e-12) : -120.0;
+	}
+
+	FHyperAISoundAutoPoint AutoPoint(const double Beat, const float Value)
+	{
+		FHyperAISoundAutoPoint Out;
+		Out.Beat = Beat;
+		Out.Value = Value;
+		return Out;
+	}
+
+	FHyperAISoundParamValue ParamValue(const TCHAR* Id, const float Value)
+	{
+		FHyperAISoundParamValue Out;
+		Out.Id = Id;
+		Out.Value = Value;
+		return Out;
+	}
+
 	/** The 16-bit samples of a render's WAV (WriteWav's 44-byte header, then PCM), deleting the file. */
 	TArray<int16> TakeWav(const FString& WavFile)
 	{
@@ -311,21 +374,7 @@ bool FHyperAIStudioSoundLibraryFileTest::RunTest(const FString& Parameters)
 	using C = FHyperAIStudioDecibelContracts;
 	// A sound library's WAV on disk: one second of a 220 Hz tone, 48 kHz mono.
 	const FString Name = TEXT("HyperAI_Tone_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8);
-	const FString File = FPaths::ConvertRelativePathToFull(FPaths::AutomationTransientDir() / Name + TEXT(".wav"));
-	{
-		constexpr int32 Rate = 48000;
-		TArray<uint8> Bytes;
-		auto U32 = [&Bytes](const uint32 V) { Bytes.Append(reinterpret_cast<const uint8*>(&V), 4); };
-		auto U16 = [&Bytes](const uint16 V) { Bytes.Append(reinterpret_cast<const uint8*>(&V), 2); };
-		Bytes.Append(reinterpret_cast<const uint8*>("RIFF"), 4); U32(36 + Rate * 2);
-		Bytes.Append(reinterpret_cast<const uint8*>("WAVEfmt "), 8); U32(16); U16(1); U16(1); U32(Rate); U32(Rate * 2); U16(2); U16(16);
-		Bytes.Append(reinterpret_cast<const uint8*>("data"), 4); U32(Rate * 2);
-		for (int32 Index = 0; Index < Rate; ++Index)
-		{
-			U16(static_cast<uint16>(static_cast<int16>(12000.0 * FMath::Sin(2.0 * PI * 220.0 * Index / Rate))));
-		}
-		FFileHelper::SaveArrayToFile(Bytes, *File);
-	}
+	const FString File = WriteSweep(Name, 220.0, 220.0);
 	const FString LibraryObject = TEXT("/Game/Audio/Library/") + Name + TEXT(".") + Name;
 
 	FHyperAISoundPlanRequest Plan;
@@ -442,15 +491,141 @@ bool FHyperAIStudioSoundLibraryFileTest::RunTest(const FString& Parameters)
 	Hear.Channels = 1;
 	const FHyperAISoundRenderReport Heard2 = C::Render(Hear);
 	Made.Add(Heard2.SoundWave);
-	const TArray<int16> Note = TakeWav(Heard2.WavFile);
-	int32 Rises = 0;
-	for (int32 Index = FMath::RoundToInt(0.2 * 48000); Index < FMath::Min(Note.Num(), FMath::RoundToInt(1.8 * 48000)); ++Index)
+	const double HeldHz = Hz(TakeWav(Heard2.WavFile), 0.2, 1.8);
+	TestTrue(FString::Printf(TEXT("and plays it an octave up, held past the sample's end by the loop (%.0f Hz from 0.2 to 1.8 s)"), HeldHz),
+		Heard2.bOk && FMath::IsNearlyEqual(HeldHz, 440.0, 15.0));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSoundRoutingTest,
+	"HyperAIStudio.Sound.RoutingAndAutomation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioSoundRoutingTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::DecibelTests;
+	const FNoApproval NoApproval;
+	using C = FHyperAIStudioDecibelContracts;
+	const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8);
+	const FString Tone = WriteSweep(TEXT("HyperAI_Tone_") + Id, 220.0, 220.0);
+	const FString Chirp = WriteSweep(TEXT("HyperAI_Chirp_") + Id, 110.0, 880.0);
+	TArray<FString> Made = {TEXT("/Game/Audio/Library/HyperAI_Tone_") + Id + TEXT(".HyperAI_Tone_") + Id,
+		TEXT("/Game/Audio/Library/HyperAI_Chirp_") + Id + TEXT(".HyperAI_Chirp_") + Id};
+	ON_SCOPE_EXIT
 	{
-		Rises += (Note[Index - 1] < 0 && Note[Index] >= 0) ? 1 : 0;
+		Clean(Made);
+		IFileManager::Get().Delete(*Tone);
+		IFileManager::Get().Delete(*Chirp);
+	};
+
+	// At 120 BPM a beat is half a second. The tone for a second, faded to silence over it by a volume lane; the chirp,
+	// rising, played backwards from 1.5 s; the tone again from 3 s as a grain cloud walking it at half speed.
+	FHyperAISoundPlanRequest Plan;
+	Plan.SessionPath = NewSessionPath(TEXT("Routing"));
+	Plan.bCreate = true;
+	FHyperAISoundOp Dry = Op(TEXT("track.add"));
+	Dry.Name = TEXT("Dry");
+	Dry.Type = TEXT("audio");
+	FHyperAISoundOp Played = Op(TEXT("clip.audio"), TEXT("Dry"));
+	Played.Sound = Tone;
+	FHyperAISoundOp Fade = Op(TEXT("lane.set"), TEXT("Dry"));
+	Fade.Param = TEXT("volume");
+	Fade.Points = {AutoPoint(0.0, 0.f), AutoPoint(2.0, -60.f)};
+	FHyperAISoundOp Backwards = Op(TEXT("track.add"));
+	Backwards.Name = TEXT("Backwards");
+	Backwards.Type = TEXT("audio");
+	FHyperAISoundOp Reversed = Op(TEXT("clip.audio"), TEXT("Backwards"));
+	Reversed.Sound = Chirp;
+	Reversed.StartBeat = 3.0;
+	Reversed.bReverse = true;
+	FHyperAISoundOp Cloud = Op(TEXT("track.add"));
+	Cloud.Name = TEXT("Cloud");
+	Cloud.Type = TEXT("audio");
+	FHyperAISoundOp Grains = Op(TEXT("clip.audio"), TEXT("Cloud"));
+	Grains.Sound = Tone;
+	Grains.StartBeat = 6.0;
+	Grains.LengthBeats = 4.0;
+	Grains.Pitch = -12.f;
+	Grains.StretchMode = TEXT("texture");
+	Plan.Operations = {Dry, Played, Fade, Backwards, Reversed, Cloud, Grains};
+	const FHyperAISoundPlanReport Built = C::ApplyPlan(Plan);
+	Made.Add(Built.SessionPath);
+	if (!TestTrue(TEXT("The session is built: ") + Built.Diagnostic, Built.bOk && Built.Tracks.Num() == 3))
+	{
+		return false;
 	}
-	const double Hz = Rises / 1.6;
-	TestTrue(FString::Printf(TEXT("and plays it an octave up, held past the sample's end by the loop (%.0f Hz from 0.2 to 1.8 s)"), Hz),
-		Heard2.bOk && FMath::IsNearlyEqual(Hz, 440.0, 15.0));
+	TestEqual(TEXT("with the fade on the dry track's volume"), Built.Tracks[0].Lanes, TArray<FString>{TEXT("volume: 2 points")});
+
+	FHyperAISoundRenderRequest Render;
+	Render.SessionPath = Plan.SessionPath;
+	Render.Channels = 1;
+	Render.DurationSeconds = 5.5;
+	const FHyperAISoundRenderReport Heard = C::Render(Render);
+	Made.Add(Heard.SoundWave);
+	const TArray<int16> Pcm = TakeWav(Heard.WavFile);
+	TestTrue(FString::Printf(TEXT("The volume lane fades the tone (%.0f dB, then %.0f dB)"), RmsDb(Pcm, 0.0, 0.1), RmsDb(Pcm, 0.85, 0.95)),
+		RmsDb(Pcm, 0.85, 0.95) < RmsDb(Pcm, 0.0, 0.1) - 30.0);
+	TestTrue(FString::Printf(TEXT("the chirp played backwards falls (%.0f Hz, then %.0f Hz)"), Hz(Pcm, 1.55, 1.75), Hz(Pcm, 2.25, 2.45)),
+		Hz(Pcm, 1.55, 1.75) > 2.0 * Hz(Pcm, 2.25, 2.45));
+	TestTrue(FString::Printf(TEXT("and the grain cloud lasts twice the tone at the tone's pitch (%.0f Hz near its end)"), Hz(Pcm, 4.5, 4.9)),
+		FMath::IsNearlyEqual(Hz(Pcm, 4.5, 4.9), 220.0, 20.0));
+	const double Before = RmsDb(Pcm, 1.05, 1.45);
+
+	// Stems solo each track: the backwards chirp's stem must not carry the dry tone, whose volume lane would ride a merely
+	// faded-down fader straight back up.
+	FHyperAISoundRenderRequest Split = Render;
+	Split.OutputPath = Plan.SessionPath + TEXT("_Split");
+	Split.bStems = true;
+	const FHyperAISoundRenderReport Stems = C::Render(Split);
+	Made.Add(Stems.SoundWave);
+	Made.Append(Stems.Stems);
+	const bool bBackwardsStem = Stems.Stems.ContainsByPredicate([](const FString& Stem) { return Stem.Contains(TEXT("_Backwards")); });
+	const TArray<int16> Alone = bBackwardsStem ? TakeWav(Stems.WavFile.Replace(TEXT(".wav"), TEXT("_Backwards.wav"))) : TArray<int16>();
+	IFileManager::Get().Delete(*(FPaths::ProjectDir() / Stems.WavFile));
+	TestTrue(FString::Printf(TEXT("A stem holds its own track alone, even beside a lane (%.0f dB of the tone in the backwards stem)"),
+		RmsDb(Alone, 0.0, 0.9)), Stems.bOk && !Alone.IsEmpty() && RmsDb(Alone, 0.0, 0.9) < -80.0 && RmsDb(Alone, 1.55, 2.45) > -40.0);
+
+	// A return with a reverb, fed from before the dry track's fader: it rings on after the tone has faded and ended.
+	FHyperAISoundPlanRequest Wet;
+	Wet.SessionPath = Plan.SessionPath;
+	FHyperAISoundOp Room = Op(TEXT("track.add"));
+	Room.Name = TEXT("Room");
+	Room.Type = TEXT("fx");
+	FHyperAISoundOp Verb = Op(TEXT("device.add"), TEXT("Room"), TEXT("fx.reverb"));
+	Verb.Params = {ParamValue(TEXT("rvmix"), 1.f), ParamValue(TEXT("rvdecay"), 4.f)};
+	FHyperAISoundOp Send = Op(TEXT("track.send"), TEXT("Dry"));
+	Send.SendTo = TEXT("Room");
+	Send.SendTap = TEXT("pre");
+	FHyperAISoundOp Opening = Op(TEXT("lane.set"), TEXT("Room"), TEXT("fx.reverb"));
+	Opening.Param = TEXT("rvmix");
+	Opening.Points = {AutoPoint(0.0, 1.f), AutoPoint(2.0, 0.5f)};
+	Wet.Operations = {Room, Verb, Send, Opening};
+	const FHyperAISoundPlanReport Routed = C::ApplyPlan(Wet);
+	TestTrue(TEXT("A return, the dry track's send to it and a lane on its reverb are added: ") + Routed.Diagnostic, Routed.bOk && Routed.Tracks.Num() == 4
+		&& Routed.Tracks[0].Sends == TArray<FString>{TEXT("Room x 1.00")} && Routed.Tracks[3].Lanes == TArray<FString>{TEXT("fx.reverb.rvmix: 2 points")});
+	const FHyperAISoundRenderReport Rang = C::Render(Render);
+	const TArray<int16> WetPcm = TakeWav(Rang.WavFile);
+	TestTrue(FString::Printf(TEXT("and the room rings on after the tone (%.0f dB; %.0f dB without it)"), RmsDb(WetPcm, 1.05, 1.45), Before),
+		RmsDb(WetPcm, 1.05, 1.45) > -50.0 && Before < -80.0);
+
+	// Refused: a send to a track that is not a return, a lane on a parameter the device lacks, a pitch lane on the master.
+	FHyperAISoundPlanRequest Refuse;
+	Refuse.SessionPath = Plan.SessionPath;
+	FHyperAISoundOp ToAudio = Op(TEXT("track.send"), TEXT("Dry"));
+	ToAudio.SendTo = TEXT("Cloud");
+	Refuse.Operations = {ToAudio};
+	TestFalse(TEXT("A send to an audio track is refused"), C::ApplyPlan(Refuse).bOk);
+	FHyperAISoundOp Missing = Op(TEXT("lane.set"), TEXT("Room"), TEXT("fx.reverb"));
+	Missing.Param = TEXT("nosuch");
+	Missing.Points = {AutoPoint(0.0, 0.f)};
+	Refuse.Operations = {Missing};
+	TestFalse(TEXT("so is a lane on a parameter the device lacks"), C::ApplyPlan(Refuse).bOk);
+	FHyperAISoundOp MasterPitch = Op(TEXT("lane.set"), TEXT("master"));
+	MasterPitch.Param = TEXT("pitch");
+	MasterPitch.Points = {AutoPoint(0.0, 0.f)};
+	Refuse.Operations = {MasterPitch};
+	TestFalse(TEXT("and a pitch lane on the master"), C::ApplyPlan(Refuse).bOk);
 	return true;
 }
 

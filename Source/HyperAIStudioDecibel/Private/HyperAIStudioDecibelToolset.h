@@ -79,6 +79,10 @@ struct FHyperAISoundTrackInfo
 	/** The device chain, in order, by catalog id. */
 	UPROPERTY() TArray<FString> Devices;
 	UPROPERTY() TArray<FHyperAISoundClipInfo> Clips;
+	/** The returns it also feeds, as "name x gain". */
+	UPROPERTY() TArray<FString> Sends;
+	/** What its automation drives, as "target: n points". */
+	UPROPERTY() TArray<FString> Lanes;
 };
 
 USTRUCT(BlueprintType)
@@ -135,13 +139,26 @@ struct FHyperAISoundParamValue
 };
 
 USTRUCT(BlueprintType)
+struct FHyperAISoundAutoPoint
+{
+	GENERATED_BODY()
+
+	/** In beats from the session's start. */
+	UPROPERTY() double Beat = 0.0;
+	/** In the target's own units: volume in dB (-60 to 12), pan -1 to 1, pitch in semitones (-24 to 24), a device parameter in its own. */
+	UPROPERTY() float Value = 0.f;
+	/** How the segment to the next point bends, -1 to 1: 0 is straight; below 0 moves most at its start, as a decay or a closing filter does; above 0 most at its end. */
+	UPROPERTY() float Curve = 0.f;
+};
+
+USTRUCT(BlueprintType)
 struct FHyperAISoundOp
 {
 	GENERATED_BODY()
 
 	/**
-	 * session.set, track.add, track.set, track.remove, device.add, device.set, device.preset, device.remove, clip.midi,
-	 * clip.trigger, clip.audio or clip.remove.
+	 * session.set, track.add, track.set, track.send, track.remove, device.add, device.set, device.preset, device.remove,
+	 * lane.set, clip.midi, clip.trigger, clip.audio or clip.remove.
 	 */
 	UPROPERTY() FString Kind;
 	/** The track: its index from 0, its name, or master for the master chain's devices. */
@@ -178,15 +195,40 @@ struct FHyperAISoundOp
 	 */
 	UPROPERTY() double SourceStartSeconds = 0.0;
 	UPROPERTY() double SourceSeconds = 0.0;
-	/** clip.audio: gain as a factor, and pitch in semitones. */
+	/** clip.audio: gain as a factor (up to 15.8, +24 dB), and pitch in semitones. */
 	UPROPERTY() float Gain = 1.f;
 	UPROPERTY() float Pitch = 0.f;
 	/** clip.audio: fades, in beats. */
 	UPROPERTY() double FadeInBeats = 0.0;
 	UPROPERTY() double FadeOutBeats = 0.0;
+	/** clip.audio: plays the stretch backwards, as a reverse swell into a hit. */
+	UPROPERTY() bool bReverse = false;
+	/**
+	 * clip.audio: how the clip reads its sound. tape (the default): Pitch changes its speed and length together. texture:
+	 * a grain cloud whose walk through the sound Pitch sets (-12 is twice as long) while TextureTranspose sets the grains'
+	 * pitch in semitones, TextureGrainMs their size (90) and TextureJitter (0-1) how far each strays: a smeared tail.
+	 * complex: a transparent phase vocoder, Pitch stretching the length and keeping the pitch.
+	 */
+	UPROPERTY() FString StretchMode;
+	UPROPERTY() double TextureGrainMs = 90.0;
+	UPROPERTY() double TextureJitter = 0.0;
+	UPROPERTY() double TextureTranspose = 0.0;
 	/** track.set: volume as a factor, -1 leaves it; pan from -1 (left) to 1, -2 leaves it. */
 	UPROPERTY() float Volume = -1.f;
 	UPROPERTY() float Pan = -2.f;
+	/**
+	 * track.send: the return (an fx track, by index or name) this track also feeds, a shared reverb or delay; SendGain as
+	 * a factor (0-4); SendTap post (after the fader, the default), pre (before it) or prefx (the dry track, before its devices).
+	 */
+	UPROPERTY() FString SendTo;
+	UPROPERTY() float SendGain = 1.f;
+	UPROPERTY() FString SendTap;
+	/**
+	 * lane.set: automation on the track (or master), replacing any on the same target: Param volume, pan or pitch, or a
+	 * device parameter's id with DeviceId or Device naming the device (a closing filter's fltcut, a reverb's rvmix).
+	 */
+	UPROPERTY() FString Param;
+	UPROPERTY() TArray<FHyperAISoundAutoPoint> Points;
 	/** clip.remove: which clip on the track, from 0 in the order hyper_sound_inspect lists them. */
 	UPROPERTY() int32 Clip = -1;
 	/** session.set: tempo, and time signature; 0 leaves each. */
