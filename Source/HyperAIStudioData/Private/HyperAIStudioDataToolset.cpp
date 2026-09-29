@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioDataToolset.h"
+#include "HyperAIStudioSourceControl.h"
 
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -2086,11 +2087,15 @@ FHyperAIDataApplyPlanReport FHyperAIStudioDataContracts::BuildPlan(
 	FSavePackageArgs SaveArgs;
 	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 	SaveArgs.Error = GWarn;
-	if (!UPackage::SavePackage(Package, Target, *Filename, SaveArgs)
+	FString SourceControlError;
+	if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, SourceControlError)
+		|| !UPackage::SavePackage(Package, Target, *Filename, SaveArgs)
 		|| Package->IsDirty())
 	{
 		Report.Status = TEXT("save_failed_asset_dirty");
-		Report.Diagnostic = TEXT("The reversible field rename ran, but the single package save failed. Undo or source-control revert is available.");
+		Report.Diagnostic = SourceControlError.IsEmpty()
+			? TEXT("The reversible field rename ran, but the single package save failed. Undo or source-control revert is available.")
+			: TEXT("The reversible field rename ran, but source control kept it from being saved: ") + SourceControlError + TEXT(" Undo is available.");
 		return Report;
 	}
 

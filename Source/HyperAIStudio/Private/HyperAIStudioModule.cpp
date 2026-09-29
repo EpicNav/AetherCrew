@@ -42,6 +42,7 @@
 #include "HyperAIStudioPIEPlaytestToolset.h"
 #include "HyperAIStudioEditorRestart.h"
 #include "HyperAIStudioRemote.h"
+#include "HyperAIStudioSourceControl.h"
 #include "HyperAIStudioPlanExecuteToolset.h"
 #include "HyperAIStudioPlanValidateToolset.h"
 #include "HyperAIStudioSettings.h"
@@ -591,6 +592,8 @@ public:
 		FHyperAIStudioEditorRestart::Startup();
 		// The remote page, when it is set to run from the start.
 		FHyperAIStudioRemote::Startup();
+		// Agent edits check assets out first, and new files are marked for add once saved.
+		FHyperAIStudioSourceControl::Startup();
 		if (FHyperAIStudioExtensionRuntime::AreExtendedHyperToolsEnabled())
 		{
 			FString TrustedExecutionError;
@@ -855,6 +858,7 @@ public:
 		}
 		FHyperAIStudioEditorRestart::Shutdown();
 		FHyperAIStudioRemote::Shutdown();
+		FHyperAIStudioSourceControl::Shutdown();
 		if (PIEPlaytestRegistration)
 		{
 			PIEPlaytestRegistration->Shutdown();

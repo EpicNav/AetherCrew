@@ -536,6 +536,14 @@ public:
 	bool bReopenEditorAfterCrash = true;
 
 	/**
+	 * Before an agent changes an asset, check it out through the project's source control (or, in a Lore workspace with
+	 * no Unreal provider, lock it with the lore command). An asset a teammate has checked out or locked, or one behind
+	 * the latest revision, turns the edit away. Files an agent adds are marked for add once saved.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Source Control", meta = (DisplayName = "Check Out Before Agent Edits"))
+	bool bCheckOutBeforeAgentEdits = true;
+
+	/**
 	 * While on, everything saved in the editor lands in a UE File Sandbox until you approve or discard all of it in HyperAI's
 	 * Activity panel: agent edits, Epic's tools, scripts, and your own saves too. Agents cannot approve or discard.
 	 */

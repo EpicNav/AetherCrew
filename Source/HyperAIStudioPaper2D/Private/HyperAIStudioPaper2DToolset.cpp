@@ -4,6 +4,7 @@
 #include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 #include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioSourceControl.h"
 
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -1679,11 +1680,15 @@ FHyperAIPaper2DApplyPlanReport FHyperAIStudioPaper2DContracts::BuildPlan(
 	FSavePackageArgs SaveArgs;
 	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 	SaveArgs.Error = GWarn;
-	if (!UPackage::SavePackage(Package, Target, *Filename, SaveArgs)
+	FString SourceControlError;
+	if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, SourceControlError)
+		|| !UPackage::SavePackage(Package, Target, *Filename, SaveArgs)
 		|| Package->IsDirty())
 	{
 		Report.Status = TEXT("save_failed_asset_dirty");
-		Report.Diagnostic = TEXT("The reversible edit ran, but the one package save failed. Undo or source-control revert is available.");
+		Report.Diagnostic = SourceControlError.IsEmpty()
+			? TEXT("The reversible edit ran, but the one package save failed. Undo or source-control revert is available.")
+			: TEXT("The reversible edit ran, but source control kept it from being saved: ") + SourceControlError + TEXT(" Undo is available.");
 		return Report;
 	}
 	if (!VerifyFastPatch(Target, Patch))

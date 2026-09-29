@@ -44,6 +44,7 @@ public class HyperAIStudio : ModuleRules
 			"RenderCore",
 			"Settings",
 			"Sockets",
+			"SourceControl",
 			"Terminal",
 			"FileSandboxCore",
 			"ToolsetRegistry",

@@ -3511,6 +3511,32 @@
      ]
     }
    ]
+  },
+  {
+   "id": "source_control",
+   "tier": "Core",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [],
+   "tools": [
+    {
+     "name": "hyper_source_control_status",
+     "cohort": "cohort.source.hyperaistudiosourcecontroltoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_source_control_submit",
+     "cohort": "cohort.source.hyperaistudiosourcecontroltoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
+     ]
+    }
+   ]
   }
  ]
 }

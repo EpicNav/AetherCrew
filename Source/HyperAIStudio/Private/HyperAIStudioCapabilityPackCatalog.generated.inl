@@ -4,12 +4,12 @@
 static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatalog& OutCatalog)
 {
 	OutCatalog.Schema = TEXT("hyperai.capability-pack-catalog.v2");
-	OutCatalog.GeneratedFingerprint = TEXT("sha256:27a7fe4e93425032c136d70b57bf2d609509479611cc177049b64bad4de2e180");
+	OutCatalog.GeneratedFingerprint = TEXT("sha256:dfc041a4b39c869ea8f8646977487fa39f853d34247a6af4ed6e615563c5c896");
 	OutCatalog.ApprovedPlanFingerprint = TEXT("sha256:0111a6ad1e4b2f81b6da0439a22d83ffbfd8f7ccb20f958d8494eaeee84c6d1a");
 	OutCatalog.AdmissionMatrixFingerprint = TEXT("sha256:404ea0204015fb9558cf2b5fcc092d77fb7e6dc323f0adde7032252e025c23c9");
 	OutCatalog.SourceLedgerFingerprint = TEXT("sha256:2954241d83a1a24feaf00a28c6884cae62c6b138923cd8d2deae23b7dc9c4e2e");
 	OutCatalog.SourceArtifactFingerprint = TEXT("sha256:52806e6f474cb0216a8cecb2531649612ef1b87f7381a560d023fd8389fd6f4b");
-	OutCatalog.SourceArtifactCount = 141;
+	OutCatalog.SourceArtifactCount = 143;
 
 	{
 		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
@@ -1360,6 +1360,17 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 			Group.bBlocking = true;
 			Group.PrerequisiteIds.Add(TEXT("plugin.ModelContextProtocol"));
 		}
+	}
+	{
+		FHyperAIStudioCapabilityPackDefinition& Pack = OutCatalog.Packs.AddDefaulted_GetRef();
+		Pack.Id = TEXT("source_control");
+		Pack.Tier = EHyperAIStudioCapabilityPackTier::Core;
+		Pack.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Pack.bContainsExternalEffects = true;
+		Pack.DependsOnPackIds.Add(TEXT("shared_foundation"));
+		Pack.AtomicCohortIds.Add(TEXT("cohort.source.hyperaistudiosourcecontroltoolset.v1"));
+		Pack.ToolNames.Add(TEXT("hyper_source_control_status"));
+		Pack.ToolNames.Add(TEXT("hyper_source_control_submit"));
 	}
 
 	{
@@ -3776,6 +3787,40 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 		Tool.ProductEvidenceRows = 0;
 		Tool.SupplementalEvidenceRows = 0;
 		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Edit);
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::ExternalEffect);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_source_control_status");
+		Tool.PackId = TEXT("source_control");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudiosourcecontroltoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:fc847e6c84f01b674f292dbd4f875b693b56e3e31f60eedf43a1d28320d443d6");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Read);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_source_control_submit");
+		Tool.PackId = TEXT("source_control");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudiosourcecontroltoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = true;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:8c6b5eb5444eae77d23342fd4a22e7136b0c45724e22dc0a40fbb176f057ae01");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
 		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::ExternalEffect);
 	}
 }

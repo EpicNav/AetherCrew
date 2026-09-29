@@ -5,7 +5,9 @@
 #include "Containers/Ticker.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioSandbox.h"
+#include "HyperAIStudioSourceControl.h"
 #include "HyperAIStudioTrustedExecutionInternal.h"
+#include "Misc/PackageName.h"
 
 namespace HyperAIStudio::ExecutionQueue::Private
 {
@@ -95,6 +97,12 @@ namespace HyperAIStudio::ExecutionQueue::Private
 		if (!HyperAIStudio::Sandbox::CheckAgentEdit(OutError))
 		{
 			OutStatus = TEXT("sandbox_unavailable");
+			return false;
+		}
+		// Checked out (or locked in Lore) before anything changes; one a teammate holds turns the edit away.
+		if (!FHyperAIStudioSourceControl::MakeEditable({FPackageName::ObjectPathToPackageName(Item.Request.EffectTarget)}, OutError))
+		{
+			OutStatus = TEXT("source_control_blocked");
 			return false;
 		}
 		FHyperAIStudioTypedArtifactStageReceipt Receipt;
