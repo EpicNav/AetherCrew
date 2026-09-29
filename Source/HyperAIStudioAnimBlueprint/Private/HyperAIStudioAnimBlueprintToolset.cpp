@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioAnimBlueprintToolset.h"
+#include "HyperAIStudioRequestFit.h"
 
 #include "Animation/AnimBlueprint.h"
 #include "Animation/Skeleton.h"
@@ -706,9 +707,14 @@ FHyperAIAnimBlueprintInspectReport UHyperAIStudioAnimBlueprintToolset::hyper_ani
 	return FHyperAIStudioAnimBlueprintContracts::Inspect(Request);
 }
 
-FHyperAIAnimBlueprintApplyPlanReport UHyperAIStudioAnimBlueprintToolset::hyper_anim_blueprint_apply_plan(const FHyperAIAnimBlueprintApplyPlanRequest& Request)
+FHyperAIAnimBlueprintApplyPlanReport UHyperAIStudioAnimBlueprintToolset::hyper_anim_blueprint_apply_plan(const FHyperAIAnimBlueprintApplyPlanRequest& InRequest)
 {
-	return FHyperAIStudioAnimBlueprintContracts::BuildPlan(Request);
+	FHyperAIAnimBlueprintApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAIAnimBlueprintApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return FHyperAIStudioAnimBlueprintContracts::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAIAnimBlueprintValidateReport UHyperAIStudioAnimBlueprintToolset::hyper_anim_blueprint_validate(const FHyperAIAnimBlueprintValidateRequest& Request)

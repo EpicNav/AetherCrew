@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioLevelDesignToolset.h"
+#include "HyperAIStudioRequestFit.h"
 
 #include "Editor.h"
 #include "Engine/Engine.h"
@@ -717,19 +718,48 @@ FHyperAILevelBlockoutApplyPlanReport FHyperAIStudioLevelDesignContracts::BuildPl
 	return Report;
 }
 
-FHyperAILevelDesignInspectReport UHyperAIStudioLevelDesignToolset::hyper_level_design_inspect(const FHyperAILevelDesignInspectRequest& Request)
+// The tools fit an agent's near misses (0 for "unset", a limit past its range) before the closed contracts check them.
+FHyperAILevelDesignInspectReport UHyperAIStudioLevelDesignToolset::hyper_level_design_inspect(const FHyperAILevelDesignInspectRequest& InRequest)
 {
-	return FHyperAIStudioLevelDesignContracts::Inspect(Request);
+	using C = FHyperAIStudioLevelDesignContracts;
+	FHyperAILevelDesignInspectRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, FHyperAILevelDesignInspectRequest().MaxOutputBytes, TEXT("max_output_bytes"));
+	FHyperAILevelDesignInspectReport Report = C::Inspect(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
-FHyperAILevelBlockoutApplyPlanReport UHyperAIStudioLevelDesignToolset::hyper_level_blockout_apply_plan(const FHyperAILevelBlockoutApplyPlanRequest& Request)
+FHyperAILevelBlockoutApplyPlanReport UHyperAIStudioLevelDesignToolset::hyper_level_blockout_apply_plan(const FHyperAILevelBlockoutApplyPlanRequest& InRequest)
 {
-	return FHyperAIStudioLevelDesignContracts::BuildPlan(Request);
+	using C = FHyperAIStudioLevelDesignContracts;
+	FHyperAILevelBlockoutApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, FHyperAILevelBlockoutApplyPlanRequest().MaxOutputBytes, TEXT("max_output_bytes"));
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAILevelBlockoutApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return C::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
-FHyperAILevelDesignValidateReport UHyperAIStudioLevelDesignToolset::hyper_level_design_validate(const FHyperAILevelDesignValidateRequest& Request)
+FHyperAILevelDesignValidateReport UHyperAIStudioLevelDesignToolset::hyper_level_design_validate(const FHyperAILevelDesignValidateRequest& InRequest)
 {
-	return FHyperAIStudioLevelDesignContracts::Validate(Request);
+	using C = FHyperAIStudioLevelDesignContracts;
+	const FHyperAILevelDesignValidateRequest Defaults;
+	FHyperAILevelDesignValidateRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	Fit.ClampOrDefault(Request.MaxSightline, 500.f, 100000.f, Defaults.MaxSightline, TEXT("max_sightline"));
+	Fit.ClampOrDefault(Request.SymmetryTolerance, 1.f, 1000.f, Defaults.SymmetryTolerance, TEXT("symmetry_tolerance"));
+	Fit.Clamp(Request.SymmetryPlane, -1000000.f, 1000000.f, TEXT("symmetry_plane"));
+	Request.SymmetryAxis.TrimStartAndEndInline();
+	if (Request.SymmetryAxis.Equals(TEXT("none"), ESearchCase::IgnoreCase))
+	{
+		Request.SymmetryAxis.Reset();
+	}
+	FHyperAILevelDesignValidateReport Report = C::Validate(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioLevelDesignDomainAdapter::GetDescriptor() const

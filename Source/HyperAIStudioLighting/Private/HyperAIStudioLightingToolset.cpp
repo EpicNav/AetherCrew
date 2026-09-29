@@ -671,9 +671,13 @@ const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioLightingContracts::Ge
 	return Descriptor;
 }
 
-FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHyperAILightingInspectRequest& Request)
+FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHyperAILightingInspectRequest& InRequest)
 {
 	namespace Gate = HyperAIStudio::Lighting::Gate;
+	FHyperAILightingInspectRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.MaxOutputBytes, MinOutputBytes, MaxOutputBytes, FHyperAILightingInspectRequest().MaxOutputBytes, TEXT("max_output_bytes"));
+	Fit.ClampOrDefault(Request.MaxLocalLights, 1, 128, FHyperAILightingInspectRequest().MaxLocalLights, TEXT("max_local_lights"));
 	FHyperAILightingInspectReport Report;
 	Report.Capabilities = GetCapabilities();
 	auto Reject = [&](const TCHAR* Status, const FString& Diagnostic)
@@ -757,6 +761,7 @@ FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHy
 		Missing.IsEmpty() ? TEXT("") : *(TEXT(" None of: ") + FString::Join(Missing, TEXT(", ")) + TEXT("; the first op on one adds it.")),
 		*Local,
 		Report.bExposureLocked ? TEXT("") : TEXT(" Auto exposure is on: lock_exposure before comparing (it also turns off a sky's own exposure)."));
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
 	return Report;
 }
 
@@ -854,9 +859,12 @@ FString FHyperAIStudioLightingContracts::ComputeEditOpsSemanticFingerprint(const
 	return FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(Canonical);
 }
 
-FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const FHyperAILightingApplyPlanRequest& Request)
+FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const FHyperAILightingApplyPlanRequest& InRequest)
 {
 	using namespace HyperAIStudio::Lighting::Private;
+	FHyperAILightingApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.MaxOutputBytes, MinOutputBytes, MaxOutputBytes, FHyperAILightingApplyPlanRequest().MaxOutputBytes, TEXT("max_output_bytes"));
 	FHyperAILightingApplyPlanReport Report;
 	Report.bDryRun = Request.bDryRun;
 	Report.OperationId = Request.OperationId.Left(FHyperAIStudioDomainLimits::MaxOperationIdChars);
@@ -973,7 +981,7 @@ FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const
 	{
 		Report.bOk = true;
 		Report.Status = TEXT("planned");
-		Report.Diagnostic = TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash.");
+		Report.Diagnostic = Fit.AppendTo(TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash."));
 		return Report;
 	}
 	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
@@ -1021,7 +1029,7 @@ FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const
 	Report.bExecutionSubmitted = Report.bStaged;
 	Report.bOk = true;
 	Report.Status = QueueStatus;
-	Report.Diagnostic = TEXT("The edit runs over the next editor ticks. Call hyper_operation_wait with operation_id, then hyper_lighting_compare.");
+	Report.Diagnostic = Fit.AppendTo(TEXT("The edit runs over the next editor ticks. Call hyper_operation_wait with operation_id, then hyper_lighting_compare."));
 	return Report;
 }
 
@@ -1030,9 +1038,14 @@ FHyperAILightingInspectReport UHyperAIStudioLightingToolset::hyper_lighting_insp
 	return FHyperAIStudioLightingContracts::Inspect(Request);
 }
 
-FHyperAILightingApplyPlanReport UHyperAIStudioLightingToolset::hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& Request)
+FHyperAILightingApplyPlanReport UHyperAIStudioLightingToolset::hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& InRequest)
 {
-	return FHyperAIStudioLightingContracts::BuildPlan(Request);
+	FHyperAILightingApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAILightingApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return FHyperAIStudioLightingContracts::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAILightingCompareReport UHyperAIStudioLightingToolset::hyper_lighting_compare(const FHyperAILightingCompareRequest& Request)

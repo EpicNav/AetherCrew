@@ -10,6 +10,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioRequestFit.h"
 #include "HyperAIStudioSandbox.h"
 #include "IPythonScriptPlugin.h"
 #include "Interfaces/IPluginManager.h"
@@ -97,10 +98,28 @@ namespace HyperAIStudio::Scripting::Private
 		return Object;
 	}
 
-	bool AnalyzeFolder(const FString& Folder, bool& bOutHasRun, TArray<FString>& OutReasons, FString& OutError)
+	TSet<FString> DirtyPackageNames(const bool bWorldsOnly = false)
+	{
+		TArray<UPackage*> Packages;
+		if (!bWorldsOnly) FEditorFileUtils::GetDirtyContentPackages(Packages);
+		FEditorFileUtils::GetDirtyWorldPackages(Packages);
+		TSet<FString> Names;
+		for (const UPackage* Package : Packages)
+		{
+			if (Package) Names.Add(Package->GetName());
+		}
+		return Names;
+	}
+
+	/**
+	 * Why a script cannot run as one undoable step, and the level-changing calls it makes. The editor never overwrites a
+	 * level, so a change loses nothing while the open one has no unsaved changes; only then does it run without approval.
+	 */
+	bool AnalyzeFolder(const FString& Folder, bool& bOutHasRun, TArray<FString>& OutReasons, TArray<FString>& OutLevelChanges, FString& OutError)
 	{
 		const FString Out = Folder / TEXT("analysis.json");
-		if (!RunRunner(FString::Printf(TEXT("analyze %s %s"), *Quote(Folder / TEXT("script.py")), *Quote(Out)), OutError)) return false;
+		// "levels": this build checks level changes for unsaved levels, so the runner reports them apart from its reasons.
+		if (!RunRunner(FString::Printf(TEXT("analyze %s %s levels"), *Quote(Folder / TEXT("script.py")), *Quote(Out)), OutError)) return false;
 		const TSharedPtr<FJsonObject> Analysis = ReadJson(Out);
 		if (!Analysis.IsValid())
 		{
@@ -114,25 +133,22 @@ namespace HyperAIStudio::Scripting::Private
 		}
 		bOutHasRun = Analysis->GetBoolField(TEXT("has_run"));
 		OutReasons.Reset();
+		OutLevelChanges.Reset();
 		const TArray<TSharedPtr<FJsonValue>>* Reasons = nullptr;
 		if (Analysis->TryGetArrayField(TEXT("reasons"), Reasons))
 		{
 			for (const TSharedPtr<FJsonValue>& Reason : *Reasons) OutReasons.Add(Reason->AsString());
 		}
-		return true;
-	}
-
-	TSet<FString> DirtyPackageNames()
-	{
-		TArray<UPackage*> Packages;
-		FEditorFileUtils::GetDirtyContentPackages(Packages);
-		FEditorFileUtils::GetDirtyWorldPackages(Packages);
-		TSet<FString> Names;
-		for (const UPackage* Package : Packages)
+		const TArray<TSharedPtr<FJsonValue>>* LevelChanges = nullptr;
+		if (Analysis->TryGetArrayField(TEXT("level_changes"), LevelChanges))
 		{
-			if (Package) Names.Add(Package->GetName());
+			for (const TSharedPtr<FJsonValue>& Call : *LevelChanges) OutLevelChanges.Add(Call->AsString());
 		}
-		return Names;
+		if (!OutLevelChanges.IsEmpty() && !DirtyPackageNames(/*bWorldsOnly=*/true).IsEmpty())
+		{
+			OutReasons.Add(FString::Printf(TEXT("calls %s while the open level has unsaved changes"), *FString::Join(OutLevelChanges, TEXT(", "))));
+		}
+		return true;
 	}
 
 	void RecordActivity(const EHyperAIStudioActivityKind Kind, const FString& OperationId, const FString& Status, const FString& Detail)
@@ -148,16 +164,28 @@ namespace HyperAIStudio::Scripting::Private
 		FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
 	}
 
-	/** Runs script.py in Folder inside one undo step, undone if it fails. Guarded runs also refuse deletes and level loads. */
-	FHyperAIScriptRunReport Execute(const FString& OperationId, const FString& Folder, const int32 TimeoutSeconds, const bool bGuarded)
+	/**
+	 * Runs script.py in Folder inside one undo step, undone if it fails. Guarded runs also refuse deletes, and level loads
+	 * unless bChangesLevel: the analysis then found no unsaved level to lose, and the undo step ends where the level changes.
+	 */
+	FHyperAIScriptRunReport Execute(const FString& OperationId, const FString& Folder, const int32 TimeoutSeconds, const bool bGuarded,
+		const bool bChangesLevel = false)
 	{
 		FHyperAIScriptRunReport Report;
 		Report.OperationId = OperationId;
-		Report.Safety = bGuarded ? TEXT("undoable") : TEXT("needs_approval");
+		Report.Safety = !bGuarded ? TEXT("needs_approval") : bChangesLevel ? TEXT("changes_level") : TEXT("undoable");
 		Report.ScriptFolder = ProjectRelative(Folder);
 		if (!HyperAIStudio::Sandbox::CheckAgentEdit(Report.Diagnostic))
 		{
 			Report.Status = TEXT("sandbox_unavailable");
+			RecordActivity(EHyperAIStudioActivityKind::Failed, OperationId, Report.Status, Report.Diagnostic);
+			return Report;
+		}
+		// Checked again here, since an approved run starts later; nothing can veto a new level the way a load is vetoed.
+		if (bChangesLevel && !DirtyPackageNames(/*bWorldsOnly=*/true).IsEmpty())
+		{
+			Report.Status = TEXT("level_unsaved");
+			Report.Diagnostic = TEXT("The open level has unsaved changes, which changing the level would lose, so nothing ran. Save or revert them first.");
 			RecordActivity(EHyperAIStudioActivityKind::Failed, OperationId, Report.Status, Report.Diagnostic);
 			return Report;
 		}
@@ -171,7 +199,10 @@ namespace HyperAIStudio::Scripting::Private
 		{
 			// An undo cannot restore a deleted asset, and a level load would replace the world this undo step lives in.
 			DeleteVeto = FEditorDelegates::OnAssetsCanDelete.AddLambda([](const TArray<UObject*>&, FCanDeleteAssetResult& Result) { Result.Set(false); });
-			MapVeto = FEditorDelegates::OnMapLoad.AddLambda([](const FString&, FCanLoadMap& Result) { Result.SetFalse(); });
+			if (!bChangesLevel)
+			{
+				MapVeto = FEditorDelegates::OnMapLoad.AddLambda([](const FString&, FCanLoadMap& Result) { Result.SetFalse(); });
+			}
 		}
 		const int32 PriorActions = GEditor ? GEditor->BeginTransaction(TEXT("HyperAIStudio"), LOCTEXT("RunScript", "HyperAI: Run Script"), nullptr) : 0;
 		FString Error;
@@ -181,7 +212,7 @@ namespace HyperAIStudio::Scripting::Private
 		if (bGuarded)
 		{
 			FEditorDelegates::OnAssetsCanDelete.Remove(DeleteVeto);
-			FEditorDelegates::OnMapLoad.Remove(MapVeto);
+			if (MapVeto.IsValid()) FEditorDelegates::OnMapLoad.Remove(MapVeto);
 		}
 		const TSharedPtr<FJsonObject> Result = bRan ? ReadJson(ResultPath) : nullptr;
 		const bool bOk = Result.IsValid() && Result->GetBoolField(TEXT("ok"));
@@ -238,7 +269,8 @@ bool FHyperAIStudioScriptingContracts::Analyze(const FString& Code, bool& bOutHa
 	const FString Folder = ScriptsRoot() / TEXT("_checks") / FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	const bool bWritten = IFileManager::Get().MakeDirectory(*Folder, /*Tree=*/true)
 		&& FFileHelper::SaveStringToFile(Code, *(Folder / TEXT("script.py")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
-	const bool bAnalyzed = bWritten && AnalyzeFolder(Folder, bOutHasRun, OutReasons, OutError);
+	TArray<FString> LevelChanges;
+	const bool bAnalyzed = bWritten && AnalyzeFolder(Folder, bOutHasRun, OutReasons, LevelChanges, OutError);
 	if (!bWritten) OutError = TEXT("Could not write the script under Saved/HyperAIStudio/Scripts.");
 	IFileManager::Get().DeleteDirectory(*Folder, /*RequireExists=*/false, /*Tree=*/true);
 	return bAnalyzed;
@@ -283,8 +315,9 @@ FHyperAIScriptRunReport FHyperAIStudioScriptingContracts::Run(const FHyperAIScri
 	}
 	bool bHasRun = false;
 	TArray<FString> Reasons;
+	TArray<FString> LevelChanges;
 	FString Error;
-	if (!AnalyzeFolder(Folder, bHasRun, Reasons, Error))
+	if (!AnalyzeFolder(Folder, bHasRun, Reasons, LevelChanges, Error))
 	{
 		IFileManager::Get().DeleteDirectory(*Folder, false, true);
 		return Reject(Error.StartsWith(TEXT("Syntax error")) ? TEXT("invalid_script") : TEXT("unavailable"), Error);
@@ -296,7 +329,8 @@ FHyperAIScriptRunReport FHyperAIStudioScriptingContracts::Run(const FHyperAIScri
 	}
 	Report.EscalationReasons = Reasons;
 	const bool bUndoable = Reasons.IsEmpty();
-	Report.Safety = bUndoable ? TEXT("undoable") : TEXT("needs_approval");
+	const bool bChangesLevel = bUndoable && !LevelChanges.IsEmpty();
+	Report.Safety = !bUndoable ? TEXT("needs_approval") : bChangesLevel ? TEXT("changes_level") : TEXT("undoable");
 	// Undoable scripts follow the agent-edit approval setting like any plan; the rest always wait for a click.
 	const bool bNeedsApproval = !bUndoable || FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::Edit);
 	if (Request.bDryRun)
@@ -308,11 +342,15 @@ FHyperAIScriptRunReport FHyperAIStudioScriptingContracts::Run(const FHyperAIScri
 			? (bNeedsApproval ? TEXT("Undoable; runs inside one undo step once the user approves it (agent edits need approval here).")
 				: TEXT("Undoable; runs at once, inside one undo step."))
 			: TEXT("Waits for the user's approval because it ") + FString::Join(Reasons, TEXT("; ")) + TEXT(".");
+		if (bChangesLevel)
+		{
+			Report.Diagnostic += TEXT(" It changes the level, where its undo step ends; the open level has nothing unsaved to lose.");
+		}
 		return Report;
 	}
 	if (!bNeedsApproval)
 	{
-		return Execute(Report.OperationId, Folder, Request.TimeoutSeconds, /*bGuarded=*/true);
+		return Execute(Report.OperationId, Folder, Request.TimeoutSeconds, /*bGuarded=*/true, bChangesLevel);
 	}
 
 	FHyperAIStudioApprovalSummary Summary;
@@ -337,7 +375,7 @@ FHyperAIScriptRunReport FHyperAIStudioScriptingContracts::Run(const FHyperAIScri
 	const FString OperationId = Report.OperationId;
 	const int32 Timeout = Request.TimeoutSeconds;
 	if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary,
-		[OperationId, Folder, Timeout, bUndoable]() { Execute(OperationId, Folder, Timeout, /*bGuarded=*/bUndoable); }, Error))
+		[OperationId, Folder, Timeout, bUndoable, bChangesLevel]() { Execute(OperationId, Folder, Timeout, /*bGuarded=*/bUndoable, bChangesLevel); }, Error))
 	{
 		return Reject(TEXT("approval_not_queued"), Error);
 	}
@@ -349,9 +387,17 @@ FHyperAIScriptRunReport FHyperAIStudioScriptingContracts::Run(const FHyperAIScri
 	return Report;
 }
 
-FHyperAIScriptRunReport UHyperAIStudioScriptingToolset::hyper_script_run(const FHyperAIScriptRunRequest& Request)
+FHyperAIScriptRunReport UHyperAIStudioScriptingToolset::hyper_script_run(const FHyperAIScriptRunRequest& InRequest)
 {
-	return FHyperAIStudioScriptingContracts::Run(Request);
+	using C = FHyperAIStudioScriptingContracts;
+	FHyperAIScriptRunRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.TimeoutSeconds, 1, C::MaxTimeoutSeconds, FHyperAIScriptRunRequest().TimeoutSeconds, TEXT("timeout_seconds"));
+	// A script's id names its folder under Saved, which outlives the session, so a reused id runs under the next free one.
+	FHyperAIScriptRunReport Report = Fit.FreshOperationId(Request, [](const FHyperAIScriptRunRequest& Planned) { return C::Run(Planned); },
+		TEXT("operation_id_used"));
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 void FHyperAIStudioScriptingRegistration::Startup()

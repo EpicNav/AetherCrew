@@ -7,6 +7,7 @@
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioRequestFit.h"
 #include "HyperAIStudioUIDelegationMatrix.h"
 #include "HyperAIStudioUIValueModel.h"
 #include "Misc/AssetRegistryInterface.h"
@@ -246,8 +247,15 @@ namespace HyperAIStudio::UI::Toolset::Private
 		return true;
 	}
 
-	FHyperAIUIInspectReport Inspect(const FHyperAIUIInspectRequest& Request)
+	FHyperAIUIInspectReport Inspect(const FHyperAIUIInspectRequest& InRequest)
 	{
+		// Near misses are fitted, not refused: 0 means the default, and a limit out of range its nearest end.
+		const FHyperAIUIInspectRequest Defaults;
+		FHyperAIUIInspectRequest Request = InRequest;
+		FHyperAIStudioRequestFit Fit;
+		Fit.ClampOrDefault(Request.PageSize, 1, FHyperAIStudioUIContracts::MaxPageSize, Defaults.PageSize, TEXT("page_size"));
+		Fit.ClampOrDefault(Request.DeadlineMs, 10, 2000, Defaults.DeadlineMs, TEXT("deadline_ms"));
+		Fit.ClampOrDefault(Request.MaxOutputBytes, 4096, FHyperAIStudioUIContracts::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
 		FHyperAIUIInspectReport Report;
 		auto Reject = [&](const TCHAR* Status, const FString& Diagnostic)
 		{
@@ -263,13 +271,14 @@ namespace HyperAIStudio::UI::Toolset::Private
 			|| Request.MaxOutputBytes < 4096
 			|| Request.MaxOutputBytes > FHyperAIStudioUIContracts::MaxOutputBytes)
 		{
-			return Reject(TEXT("invalid_bounds"),
-				TEXT("Target, paging, deadline, cursor, or output bounds are outside the closed inspect contract."));
+			return Reject(TEXT("invalid_bounds"), FString::Printf(
+				TEXT("Name at most %d target_paths per call, and pass a cursor exactly as a previous page returned it."),
+				FHyperAIStudioUIContracts::MaxTargetPaths));
 		}
 		if (!Request.bIncludeTree && Request.bIncludeLayout)
 		{
-			return Reject(TEXT("invalid_projection_flags"),
-				TEXT("Layout projection requires the bounded WidgetTree projection."));
+			Fit.Note(TEXT("include_layout true -> false, layout comes with the tree"));
+			Request.bIncludeLayout = false;
 		}
 		for (const FString& Path : Request.TargetPaths)
 		{
@@ -326,13 +335,25 @@ namespace HyperAIStudio::UI::Toolset::Private
 			{
 				OnePageBytes += FHyperAIStudioUIValueContracts::EstimateIssueBytes(Issue);
 			}
+			// Such evidence comes in one page or not at all: a page big enough for it, when the contract allows one.
+			if (Request.Cursor.IsEmpty() && Snapshot.Records.Num() > Request.PageSize && Snapshot.Records.Num() <= FHyperAIStudioUIContracts::MaxPageSize)
+			{
+				Fit.Note(FString::Printf(TEXT("page_size %d -> %d, one page for volatile evidence"), Request.PageSize, Snapshot.Records.Num()));
+				Request.PageSize = Snapshot.Records.Num();
+			}
+			if (Request.Cursor.IsEmpty() && OnePageBytes > Request.MaxOutputBytes && OnePageBytes <= FHyperAIStudioUIContracts::MaxOutputBytes)
+			{
+				Fit.Note(FString::Printf(TEXT("max_output_bytes %d -> %lld, one page for volatile evidence"), Request.MaxOutputBytes, OnePageBytes));
+				Request.MaxOutputBytes = static_cast<int32>(OnePageBytes);
+			}
 			if (!Request.Cursor.IsEmpty() || Snapshot.Records.Num() > Request.PageSize
 				|| OnePageBytes > Request.MaxOutputBytes)
 			{
 				return Reject(Snapshot.bContainsVolatile
 					? TEXT("volatile_snapshot_not_pageable")
 					: TEXT("incomplete_snapshot_not_pageable"),
-					TEXT("Volatile or incomplete evidence must fit one bounded response and never receives a continuation cursor."));
+					TEXT("Volatile or incomplete evidence must fit one bounded response and never receives a continuation cursor; "
+						"name fewer target_paths, or leave bIncludeVolatile off."));
 			}
 		}
 		int32 Offset = 0;
@@ -387,12 +408,18 @@ namespace HyperAIStudio::UI::Toolset::Private
 		}
 		Report.bOk = true;
 		Report.Status = CaptureStatus;
-		Report.Diagnostic = CaptureDiagnostic;
+		Report.Diagnostic = Fit.AppendTo(CaptureDiagnostic);
 		return Report;
 	}
 
-	FHyperAIUIValidateReport Validate(const FHyperAIUIValidateRequest& Request)
+	FHyperAIUIValidateReport Validate(const FHyperAIUIValidateRequest& InRequest)
 	{
+		const FHyperAIUIValidateRequest Defaults;
+		FHyperAIUIValidateRequest Request = InRequest;
+		FHyperAIStudioRequestFit Fit;
+		Fit.ClampOrDefault(Request.MaxIssues, 1, FHyperAIStudioUIContracts::MaxIssues, Defaults.MaxIssues, TEXT("max_issues"));
+		Fit.ClampOrDefault(Request.DeadlineMs, 10, 2000, Defaults.DeadlineMs, TEXT("deadline_ms"));
+		Fit.ClampOrDefault(Request.MaxOutputBytes, 4096, FHyperAIStudioUIContracts::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
 		FHyperAIUIValidateReport Report;
 		auto Reject = [&](const TCHAR* Status, const FString& Diagnostic)
 		{
@@ -408,8 +435,8 @@ namespace HyperAIStudio::UI::Toolset::Private
 			|| Request.MaxOutputBytes < 4096
 			|| Request.MaxOutputBytes > FHyperAIStudioUIContracts::MaxOutputBytes)
 		{
-			return Reject(TEXT("invalid_bounds"),
-				TEXT("Target, issue, deadline, or output bounds are outside the closed validate contract."));
+			return Reject(TEXT("invalid_bounds"), FString::Printf(
+				TEXT("Name at most %d target_paths per call."), FHyperAIStudioUIContracts::MaxTargetPaths));
 		}
 		for (const FString& Path : Request.TargetPaths)
 		{
@@ -470,9 +497,9 @@ namespace HyperAIStudio::UI::Toolset::Private
 		Report.bValid = Snapshot.bComplete && !Report.bTruncated && Report.ErrorCount == 0;
 		Report.bOk = !Report.bTruncated;
 		Report.Status = Report.bValid ? TEXT("valid") : TEXT("invalid");
-		Report.Diagnostic = Report.bValid
+		Report.Diagnostic = Fit.AppendTo(Report.bValid
 			? TEXT("Fresh detached loaded-only values satisfy the independent validator policy.")
-			: TEXT("Fresh detached values are incomplete, truncated, or contain closed validation errors.");
+			: TEXT("Fresh detached values are incomplete, truncated, or contain closed validation errors."));
 		return Report;
 	}
 }
@@ -1270,14 +1297,27 @@ FHyperAIUIInspectReport UHyperAIStudioUIToolset::hyper_ui_inspect(
 }
 
 FHyperAIUIApplyPlanReport UHyperAIStudioUIToolset::hyper_ui_apply_plan(
-	const FHyperAIUIApplyPlanRequest& Request)
+	const FHyperAIUIApplyPlanRequest& InRequest)
 {
-	// Widget animation plans execute; everything else keeps the persisted-shadow route.
-	if (HyperAIStudio::UI::Animation::IsAnimationPlan(Request.Operations))
+	const FHyperAIUIApplyPlanRequest Defaults;
+	FHyperAIUIApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.DeadlineMs, 100, 2000, Defaults.DeadlineMs, TEXT("deadline_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, 4096, FHyperAIStudioUIContracts::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	if (Request.ValidationPolicy.IsEmpty())
 	{
-		return HyperAIStudio::UI::Animation::BuildPlan(Request);
+		Request.ValidationPolicy = Defaults.ValidationPolicy;
 	}
-	return FHyperAIStudioUIContracts::BuildPlan(Request);
+	FHyperAIUIApplyPlanReport Report = Fit.FreshOperationId(Request, [](const FHyperAIUIApplyPlanRequest& Planned)
+	{
+		// Widget animation plans execute; everything else keeps the persisted-shadow route.
+		return HyperAIStudio::UI::Animation::IsAnimationPlan(Planned.Operations)
+			? HyperAIStudio::UI::Animation::BuildPlan(Planned)
+			: FHyperAIStudioUIContracts::BuildPlan(Planned);
+	});
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAIUIValidateReport UHyperAIStudioUIToolset::hyper_ui_validate(

@@ -32,6 +32,7 @@
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioRequestFit.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/PackageName.h"
@@ -2870,7 +2871,7 @@ FHyperAIAnimationApplyPlanReport FHyperAIStudioAnimationContracts::BuildPlan(
 	return Report;
 }
 
-FHyperAIAnimationInspectReport UHyperAIStudioAnimationToolset::hyper_animation_inspect(
+static FHyperAIAnimationInspectReport InspectAnimationExact(
 	const FHyperAIAnimationInspectRequest& Request)
 {
 	using namespace HyperAIStudio::Animation::Private;
@@ -3015,7 +3016,7 @@ FHyperAIAnimationInspectReport UHyperAIStudioAnimationToolset::hyper_animation_i
 	return Report;
 }
 
-FHyperAIAnimationValidateReport UHyperAIStudioAnimationToolset::hyper_animation_validate(
+static FHyperAIAnimationValidateReport ValidateAnimationExact(
 	const FHyperAIAnimationValidateRequest& Request)
 {
 	using namespace HyperAIStudio::Animation::Private;
@@ -3111,10 +3112,53 @@ FHyperAIAnimationValidateReport UHyperAIStudioAnimationToolset::hyper_animation_
 	return Report;
 }
 
-FHyperAIAnimationApplyPlanReport UHyperAIStudioAnimationToolset::hyper_animation_apply_plan(
-	const FHyperAIAnimationApplyPlanRequest& Request)
+// The tools fit an agent's near misses (0 for "unset", a limit past its range) before the closed contracts check them.
+FHyperAIAnimationInspectReport UHyperAIStudioAnimationToolset::hyper_animation_inspect(
+	const FHyperAIAnimationInspectRequest& InRequest)
 {
-	return FHyperAIStudioAnimationContracts::BuildPlan(Request);
+	using C = FHyperAIStudioAnimationContracts;
+	const FHyperAIAnimationInspectRequest Defaults;
+	FHyperAIAnimationInspectRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	if (Request.Variant.IsEmpty()) Request.Variant = Defaults.Variant;
+	Fit.ClampOrDefault(Request.PageSize, 1, C::MaxPageSize, Defaults.PageSize, TEXT("page_size"));
+	Fit.ClampOrDefault(Request.MaxGameThreadMs, 1, 250, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, HyperAIStudio::Animation::Private::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	FHyperAIAnimationInspectReport Report = InspectAnimationExact(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
+}
+
+FHyperAIAnimationApplyPlanReport UHyperAIStudioAnimationToolset::hyper_animation_apply_plan(
+	const FHyperAIAnimationApplyPlanRequest& InRequest)
+{
+	using C = FHyperAIStudioAnimationContracts;
+	const FHyperAIAnimationApplyPlanRequest Defaults;
+	FHyperAIAnimationApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.DeadlineMs, 100, 2000, Defaults.DeadlineMs, TEXT("deadline_ms"));
+	Fit.ClampOrDefault(Request.MaxGameThreadMs, 50, 250, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, HyperAIStudio::Animation::Private::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAIAnimationApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return C::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
+}
+
+FHyperAIAnimationValidateReport UHyperAIStudioAnimationToolset::hyper_animation_validate(
+	const FHyperAIAnimationValidateRequest& InRequest)
+{
+	using C = FHyperAIStudioAnimationContracts;
+	const FHyperAIAnimationValidateRequest Defaults;
+	FHyperAIAnimationValidateRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	if (Request.Variant.IsEmpty()) Request.Variant = Defaults.Variant;
+	Fit.ClampOrDefault(Request.MaxIssues, 1, C::MaxIssues, Defaults.MaxIssues, TEXT("max_issues"));
+	Fit.ClampOrDefault(Request.MaxGameThreadMs, 1, 250, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, HyperAIStudio::Animation::Private::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	FHyperAIAnimationValidateReport Report = ValidateAnimationExact(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FString FHyperAIStudioAnimationTypedPayload::GetTypeId() const

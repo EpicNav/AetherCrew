@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "HyperAIStudioLightingToolset.h"
+#include "HyperAIStudioRequestFit.h"
 
 /**
  * View captures for hyper_capture_view: final-colour frames from a camera, a transform, or the level viewport.
@@ -21,6 +22,9 @@ namespace HyperAIStudio::Lighting::Capture
 
 	/** Completes every pending capture with an error; called when the pack unloads. */
 	void CancelAll();
+
+	/** A request's near misses fitted to what a capture takes, each change noted in Out; Start and RunNow do this first. */
+	void Fit(FHyperAICaptureViewRequest& Request, FHyperAIStudioRequestFit& Out);
 
 	/** Mean absolute RGB change (0-1) and share of pixels whose largest channel change exceeds Threshold. */
 	void Diff(TConstArrayView<FColor> A, TConstArrayView<FColor> B, float Threshold, float& OutMeanAbs, float& OutChangedFraction);

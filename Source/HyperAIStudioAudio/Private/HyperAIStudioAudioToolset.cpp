@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioAudioToolset.h"
+#include "HyperAIStudioRequestFit.h"
 
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -5226,9 +5227,14 @@ FHyperAIAudioApplyPlanReport FHyperAIStudioAudioContracts::BuildPlan(
 }
 
 FHyperAIAudioApplyPlanReport UHyperAIStudioAudioToolset::hyper_audio_apply_plan(
-	const FHyperAIAudioApplyPlanRequest& Request)
+	const FHyperAIAudioApplyPlanRequest& InRequest)
 {
-	return FHyperAIStudioAudioContracts::BuildPlan(Request);
+	FHyperAIAudioApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAIAudioApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return FHyperAIStudioAudioContracts::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 void FHyperAIStudioAudioRegistration::Startup()

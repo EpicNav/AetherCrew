@@ -15,6 +15,7 @@
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioMaterialsGraphGate.h"
+#include "HyperAIStudioRequestFit.h"
 #include "HyperAIStudioResultPreview.h"
 #include "HyperAIStudioSettings.h"
 #include "Internationalization/Text.h"
@@ -4306,7 +4307,7 @@ FHyperAIMaterialApplyPlanReport FHyperAIStudioMaterialsContracts::BuildPlan(
 	return Report;
 }
 
-FHyperAIMaterialInspectReport UHyperAIStudioMaterialsToolset::hyper_material_inspect(
+FHyperAIMaterialInspectReport FHyperAIStudioMaterialsContracts::Inspect(
 	const FHyperAIMaterialInspectRequest& Request)
 {
 	using namespace HyperAIStudio::Materials::Private;
@@ -4416,13 +4417,7 @@ FHyperAIMaterialInspectReport UHyperAIStudioMaterialsToolset::hyper_material_ins
 	return Report;
 }
 
-FHyperAIMaterialApplyPlanReport UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(
-	const FHyperAIMaterialApplyPlanRequest& Request)
-{
-	return FHyperAIStudioMaterialsContracts::BuildPlan(Request);
-}
-
-FHyperAIMaterialValidateReport UHyperAIStudioMaterialsToolset::hyper_material_validate(
+FHyperAIMaterialValidateReport FHyperAIStudioMaterialsContracts::Validate(
 	const FHyperAIMaterialValidateRequest& Request)
 {
 	using namespace HyperAIStudio::Materials::Private;
@@ -4495,14 +4490,55 @@ FHyperAIMaterialValidateReport UHyperAIStudioMaterialsToolset::hyper_material_va
 	return Report;
 }
 
-FHyperAIMaterialInspectReport FHyperAIStudioMaterialsContracts::Inspect(const FHyperAIMaterialInspectRequest& Request)
+// The tools fit an agent's near misses (0 for "unset", a limit past its range) before the closed contracts check them.
+FHyperAIMaterialInspectReport UHyperAIStudioMaterialsToolset::hyper_material_inspect(
+	const FHyperAIMaterialInspectRequest& InRequest)
 {
-	return UHyperAIStudioMaterialsToolset::hyper_material_inspect(Request);
+	using C = FHyperAIStudioMaterialsContracts;
+	const FHyperAIMaterialInspectRequest Defaults;
+	FHyperAIMaterialInspectRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	if (Request.Scope.IsEmpty()) Request.Scope = Defaults.Scope;
+	if (Request.TargetFamily.IsEmpty()) Request.TargetFamily = Defaults.TargetFamily;
+	Fit.ClampOrDefault(Request.PageSize, 1, C::MaxPageSize, Defaults.PageSize, TEXT("page_size"));
+	Fit.ClampOrDefault(Request.MaxNodes, 1, C::MaxNodes, Defaults.MaxNodes, TEXT("max_nodes"));
+	Fit.ClampOrDefault(Request.MaxEdges, 1, C::MaxEdges, Defaults.MaxEdges, TEXT("max_edges"));
+	Fit.ClampOrDefault(Request.MaxGameThreadMs, 1, 2000, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	FHyperAIMaterialInspectReport Report = C::Inspect(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
-FHyperAIMaterialValidateReport FHyperAIStudioMaterialsContracts::Validate(const FHyperAIMaterialValidateRequest& Request)
+FHyperAIMaterialApplyPlanReport UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(
+	const FHyperAIMaterialApplyPlanRequest& InRequest)
 {
-	return UHyperAIStudioMaterialsToolset::hyper_material_validate(Request);
+	using C = FHyperAIStudioMaterialsContracts;
+	const FHyperAIMaterialApplyPlanRequest Defaults;
+	FHyperAIMaterialApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.DeadlineMs, 100, 30000, Defaults.DeadlineMs, TEXT("deadline_ms"));
+	Fit.ClampOrDefault(Request.MaxGameThreadMs, 50, 2000, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	FHyperAIMaterialApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return C::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
+}
+
+FHyperAIMaterialValidateReport UHyperAIStudioMaterialsToolset::hyper_material_validate(
+	const FHyperAIMaterialValidateRequest& InRequest)
+{
+	using C = FHyperAIStudioMaterialsContracts;
+	const FHyperAIMaterialValidateRequest Defaults;
+	FHyperAIMaterialValidateRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	if (Request.TargetFamily.IsEmpty()) Request.TargetFamily = Defaults.TargetFamily;
+	Fit.ClampOrDefault(Request.MaxIssues, 1, C::MaxIssues, Defaults.MaxIssues, TEXT("max_issues"));
+	Fit.ClampOrDefault(Request.MaxGameThreadMs, 1, 2000, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	FHyperAIMaterialValidateReport Report = C::Validate(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FString FHyperAIStudioMaterialTypedPayload::GetTypeId() const

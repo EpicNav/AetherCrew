@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioTextureGraphToolset.h"
+#include "HyperAIStudioRequestFit.h"
 #include "HyperAIStudioAgentActivity.h"
 
 #include "Engine/Engine.h"
@@ -914,9 +915,14 @@ FHyperAITextureGraphInspectReport UHyperAIStudioTextureGraphToolset::hyper_textu
 }
 
 FHyperAITextureGraphApplyPlanReport UHyperAIStudioTextureGraphToolset::hyper_texture_graph_apply_plan(
-	const FHyperAITextureGraphApplyPlanRequest& Request)
+	const FHyperAITextureGraphApplyPlanRequest& InRequest)
 {
-	return FHyperAIStudioTextureGraphContracts::BuildPlan(Request);
+	FHyperAITextureGraphApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAITextureGraphApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return FHyperAIStudioTextureGraphContracts::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAITextureGraphValidateReport UHyperAIStudioTextureGraphToolset::hyper_texture_graph_validate(

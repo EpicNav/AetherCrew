@@ -1,16 +1,20 @@
 """HyperAIStudio script runner, written out by the HyperAIStudioScripting module and run in ExecuteFile mode.
 
-    runner.py analyze <script.py> <out.json>
+    runner.py analyze <script.py> <out.json> [levels]
     runner.py run <script.py> <timeout_seconds> <out.json> <guarded 0|1>
 
-analyze reports why a script cannot run as one undoable step. run executes it with a deadline checked between
-Python lines and, when guarded, an audit hook that refuses file writes, processes and sockets. Both are
-best-effort guards for an agent's own work, not a sandbox.
+analyze reports why a script cannot run as one undoable step, and which level changes it makes. run executes it
+with a deadline checked between Python lines and, when guarded, an audit hook that refuses processes, sockets and
+file writes outside the script's own folder and Saved/HyperAIStudio/Captures, and attribute lookups by a computed
+name that reach what the check would have escalated. Both are best-effort guards for an agent's own work, not a
+sandbox.
 """
 import ast
+import builtins
 import contextlib
 import io
 import json
+import os
 import sys
 import time
 import traceback
@@ -46,11 +50,7 @@ ESCALATING_CALLS = {
     "eval": "runs generated code",
     "compile": "compiles generated code",
     "__import__": "imports by name",
-    "load_level": "loads a level",
-    "load_map": "loads a level",
     "load_level_instance": "loads a level",
-    "new_level": "replaces the open level",
-    "new_map": "replaces the open level",
     "begin_transaction": "manages undo itself",
     "end_transaction": "manages undo itself",
     "cancel_transaction": "manages undo itself",
@@ -61,6 +61,13 @@ ESCALATING_CALLS = {
     "request_exit": "closes the editor",
     "quit_editor": "closes the editor",
 }
+
+# Calls that replace the open world. The editor refuses to overwrite a level, so while the open one has nothing unsaved
+# a change loses nothing and needs no approval; the run's undo step just ends where the level changes.
+LEVEL_CALLS = {"new_level", "new_map", "load_level", "load_map"}
+
+# Console commands that only take a screenshot, allowed when a literal command starts with one of them.
+SAFE_CONSOLE_COMMANDS = {"shot", "highresshot", "screenshot"}
 
 # Attribute names used to climb out of plain code into the interpreter's internals.
 ESCAPE_ATTRIBUTES = {
@@ -101,10 +108,40 @@ def _opens_for_writing(node):
     return True
 
 
-def analyze(code):
-    """Returns (defines run(), reasons it needs approval). Raises SyntaxError."""
+def _literal(node, index, keyword):
+    """A call's argument when it is a literal string, else None."""
+    value = node.args[index] if len(node.args) > index else next((k.value for k in node.keywords if k.arg == keyword), None)
+    return value.value if isinstance(value, ast.Constant) and isinstance(value.value, str) else None
+
+
+def _is_safe_console_command(command):
+    """A literal screenshot command with nothing chained after it."""
+    words = (command or "").split()
+    return bool(words) and words[0].lower() in SAFE_CONSOLE_COMMANDS and not any(mark in command for mark in "|;,\r\n")
+
+
+def _write_roots(script_path):
+    """Where an undoable script may write: its own folder, and Captures beside the Scripts folder holding it."""
+    folder = os.path.dirname(os.path.abspath(script_path))
+    scripts = folder
+    while os.path.basename(scripts).lower() != "scripts" and os.path.dirname(scripts) != scripts:
+        scripts = os.path.dirname(scripts)
+    return [os.path.normcase(folder), os.path.normcase(os.path.join(os.path.dirname(scripts), "Captures"))]
+
+
+def _is_under(path, roots):
+    try:
+        full = os.path.normcase(os.path.abspath(os.fsdecode(path)))
+    except (TypeError, ValueError):
+        return False
+    return any(full == root or full.startswith(root + os.sep) for root in roots)
+
+
+def analyze(code, write_roots):
+    """Returns (defines run(), reasons it needs approval, level-changing calls). Raises SyntaxError."""
     tree = ast.parse(code)
     reasons = []
+    level_changes = []
 
     def add(reason):
         if reason not in reasons:
@@ -124,22 +161,32 @@ def analyze(code):
                 add(f"imports from {top}")
         elif isinstance(node, ast.Call):
             name = _call_name(node)
-            if name in ESCALATING_CALLS:
+            if name in LEVEL_CALLS:
+                if name not in level_changes:
+                    level_changes.append(name)
+            elif name in ESCALATING_CALLS and not (
+                    name == "execute_console_command" and _is_safe_console_command(_literal(node, 1, "command"))):
                 add(f"calls {name}: {ESCALATING_CALLS[name]}")
             if name == "open" and _opens_for_writing(node):
-                add("opens a file for writing")
+                # A literal path elsewhere asks first; a computed one is checked when the script runs.
+                path = _literal(node, 0, "file")
+                if path is not None and not _is_under(path, write_roots):
+                    add("opens a file for writing")
             if name in ("getattr", "setattr", "delattr") and len(node.args) > 1:
-                attribute = node.args[1]
-                if not (isinstance(attribute, ast.Constant) and isinstance(attribute.value, str)):
-                    add(f"{name} with a computed name")
-                elif attribute.value in ESCALATING_CALLS or attribute.value in ESCAPE_ATTRIBUTES:
-                    add(f"{name} of {attribute.value}")
+                # A computed name is checked when the script runs.
+                attribute = _literal(node, 1, None)
+                if attribute in ESCALATING_CALLS or attribute in LEVEL_CALLS or attribute in ESCAPE_ATTRIBUTES:
+                    add(f"{name} of {attribute}")
         elif isinstance(node, ast.Attribute) and node.attr in ESCAPE_ATTRIBUTES:
             add(f"reaches {node.attr}")
+        elif isinstance(node, ast.Attribute) and node.attr in LEVEL_CALLS:
+            # Also an alias such as f = subsystem.new_level, which the call check alone would miss.
+            if node.attr not in level_changes:
+                level_changes.append(node.attr)
         elif isinstance(node, ast.Name) and node.id in ESCAPE_NAMES:
             add(f"uses {node.id}")
     has_run = any(isinstance(item, ast.FunctionDef) and item.name == "run" for item in tree.body)
-    return has_run, reasons
+    return has_run, reasons, level_changes
 
 
 def _guard():
@@ -149,6 +196,7 @@ def _guard():
         return guard
     guard = types.ModuleType("hyperai_script_guard")
     guard.active = False
+    guard.write_roots = []
 
     def hook(event, args):
         if not guard.active:
@@ -158,8 +206,10 @@ def _guard():
             flags = args[2] if len(args) > 2 else 0
             writes = (isinstance(mode, str) and any(flag in mode for flag in "wax+")) or (
                 mode is None and isinstance(flags, int) and flags & 0o3 != 0)
-            if writes:
-                raise PermissionError(f"Writing {args[0]!r} needs the user's approval; this script ran as undoable.")
+            if writes and not _is_under(args[0], guard.write_roots):
+                raise PermissionError(
+                    f"Writing {args[0]!r} needs the user's approval: an undoable script writes only under its own "
+                    "folder or Saved/HyperAIStudio/Captures. Write the path out as a literal so the run asks first.")
         elif event in BLOCKED_EVENTS or event.startswith(BLOCKED_EVENT_PREFIXES):
             raise PermissionError(f"{event} needs the user's approval; this script ran as undoable.")
 
@@ -168,13 +218,41 @@ def _guard():
     return guard
 
 
+def _checked_builtins():
+    """Builtins whose attribute functions refuse, by a computed name, what the check escalates when written out."""
+    blocked = set(ESCALATING_CALLS) | LEVEL_CALLS | ESCAPE_ATTRIBUTES
+
+    def check(name):
+        if isinstance(name, str) and name in blocked:
+            raise PermissionError(f"Reaching {name} by a computed name needs the user's approval; write it out so the run asks first.")
+
+    def checked_getattr(target, name, *default):
+        check(name)
+        return getattr(target, name, *default)
+
+    def checked_setattr(target, name, value):
+        check(name)
+        setattr(target, name, value)
+
+    def checked_delattr(target, name):
+        check(name)
+        delattr(target, name)
+
+    table = dict(vars(builtins))
+    table.update(getattr=checked_getattr, setattr=checked_setattr, delattr=checked_delattr)
+    return table
+
+
 def run(script_path, timeout, out_path, guarded):
     with open(script_path, "r", encoding="utf-8") as handle:
         code = handle.read()
     record = {"ok": False, "result_json": "", "output": "", "traceback": "", "timed_out": False, "seconds": 0.0}
     output = io.StringIO()
     namespace = {"__name__": "hyperai_script", "__file__": script_path}
+    if guarded:
+        namespace["__builtins__"] = _checked_builtins()
     guard = _guard()
+    guard.write_roots = _write_roots(script_path)
     started = time.monotonic()
     deadline = started + timeout
 
@@ -215,8 +293,12 @@ def main(argv):
         with open(argv[2], "r", encoding="utf-8") as handle:
             code = handle.read()
         try:
-            has_run, reasons = analyze(code)
-            record = {"ok": True, "has_run": has_run, "reasons": reasons}
+            has_run, reasons, level_changes = analyze(code, _write_roots(argv[2]))
+            if argv[4:5] != ["levels"]:
+                # A caller built before level changes were checked for unsaved levels gets them as reasons, as before.
+                reasons += [f"calls {name}: changes the open level" for name in level_changes]
+                level_changes = []
+            record = {"ok": True, "has_run": has_run, "reasons": reasons, "level_changes": level_changes}
         except SyntaxError as error:
             record = {"ok": False, "syntax_error": f"line {error.lineno}: {error.msg}"}
         with open(argv[3], "w", encoding="utf-8") as handle:

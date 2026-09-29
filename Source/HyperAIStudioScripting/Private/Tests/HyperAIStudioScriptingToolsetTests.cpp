@@ -6,6 +6,7 @@
 
 #include "Editor.h"
 #include "Engine/World.h"
+#include "FileHelpers.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
 #include "HyperAIStudioAgentActivity.h"
@@ -61,6 +62,24 @@ bool FHyperAIStudioScriptingAnalyzeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("importing os needs approval"), Reasons.Contains(TEXT("imports os")));
 	TestTrue(TEXT("deleting an asset needs approval"), Reasons.ContainsByPredicate([](const FString& Reason) { return Reason.StartsWith(TEXT("calls delete_asset")); }));
 	TestTrue(TEXT("writing a file needs approval"), Reasons.Contains(TEXT("opens a file for writing")));
+
+	// What agents reach for in their own work needs no click: screenshots, computed lookups, a computed write path
+	// (checked as it runs), and a level change while the open level has nothing unsaved to lose.
+	TestTrue(TEXT("safe paths analyze"), FHyperAIStudioScriptingContracts::Analyze(TEXT(
+		"import unreal\ndef run():\n"
+		"    unreal.SystemLibrary.execute_console_command(None, 'shot showui')\n"
+		"    open(unreal.Paths.project_saved_dir() + 'HyperAIStudio/Captures/x.png', 'wb')\n"
+		"    return {'names': [getattr(unreal, n, None) for n in ('Vector', 'Rotator')]}\n"), bHasRun, Reasons, Error));
+	TestTrue(TEXT("and need no approval: ") + FString::Join(Reasons, TEXT("; ")), Reasons.IsEmpty());
+	TestTrue(TEXT("a chained console command still does"), FHyperAIStudioScriptingContracts::Analyze(
+		TEXT("import unreal\ndef run():\n    unreal.SystemLibrary.execute_console_command(None, 'shot|exit')\n"), bHasRun, Reasons, Error)
+		&& Reasons.Num() == 1);
+	TArray<UPackage*> DirtyWorlds;
+	FEditorFileUtils::GetDirtyWorldPackages(DirtyWorlds);
+	TestTrue(TEXT("a level change analyzes"), FHyperAIStudioScriptingContracts::Analyze(TEXT(
+		"import unreal\ndef run():\n    unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).new_level('/Game/X')\n"), bHasRun, Reasons, Error));
+	TestEqual(TEXT("and needs approval only over unsaved level changes: ") + FString::Join(Reasons, TEXT("; ")),
+		Reasons.IsEmpty(), DirtyWorlds.IsEmpty());
 	TestFalse(TEXT("a syntax error is reported"), FHyperAIStudioScriptingContracts::Analyze(TEXT("def run(:\n"), bHasRun, Reasons, Error));
 	TestTrue(TEXT("with its line: ") + Error, Error.Contains(TEXT("line 1")));
 	return true;
@@ -119,6 +138,16 @@ bool FHyperAIStudioScriptingRunTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("an undoable script cannot write files"), Report.Status, FString(TEXT("failed")));
 	TestTrue(TEXT("the guard refused it: ") + Report.Diagnostic, Report.Traceback.Contains(TEXT("PermissionError")));
 	TestFalse(TEXT("and no file appeared"), IFileManager::Get().FileExists(*Blocked));
+
+	// Captures are an agent's own scratch: writing one needs no approval, even by a path computed at run time.
+	const FString Capture = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Captures/hyperai_script_test.txt"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Capture), /*Tree=*/true);
+	ON_SCOPE_EXIT { IFileManager::Get().Delete(*Capture, false, true, true); };
+	Report = RunScript(FString::Printf(TEXT("def run():\n    path = r'%s'\n    open(path, 'w').write('ok')\n    return {}\n"), *Capture));
+	TestEqual(*FString::Printf(TEXT("a script writes its captures (%s)"), *Report.Diagnostic), Report.Status, FString(TEXT("completed")));
+	TestTrue(TEXT("and the file is there"), IFileManager::Get().FileExists(*Capture));
+	Report = RunScript(TEXT("import unreal\ndef run():\n    getattr(unreal.EditorAssetLibrary, 'delete_' + 'asset')\n"));
+	TestTrue(TEXT("a computed name cannot reach what the check escalates: ") + Report.Diagnostic, Report.Traceback.Contains(TEXT("PermissionError")));
 
 	FHyperAIScriptRunRequest Request;
 	Request.Code = TEXT("def run():\n    return {}\n");

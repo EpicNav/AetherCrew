@@ -467,19 +467,45 @@ bool FHyperAIStudioLightingCaptureContractsTest::RunTest(const FString& Paramete
 {
 	(void)Parameters;
 	namespace Capture = HyperAIStudio::Lighting::Capture;
+	// Near misses are fitted, not refused: agents send 0 or "" for fields they do not care about, and guess at ranges.
+	FHyperAICaptureViewRequest Near;
+	Near.Source = TEXT("");
+	Near.CameraActorLabel = TEXT("CAM_Front");
+	Near.Width = 5000;
+	Near.Height = 720;
+	Near.WarmupFrames = 30;
+	Near.IntervalSeconds = 0.f;
+	Near.DiffThreshold = 0.f;
+	Near.TimeMode = TEXT("");
+	Near.Label = TEXT("front view!");
+	FHyperAIStudioRequestFit Fit;
+	Capture::Fit(Near, Fit);
+	TestEqual(TEXT("an empty source with a camera label is the camera"), Near.Source, FString(TEXT("camera")));
+	TestTrue(TEXT("an oversized picture is scaled down, keeping its shape"), Near.Width == 1920 && Near.Height == 276);
+	TestEqual(TEXT("warm-up past the most is the most"), Near.WarmupFrames, 8);
+	TestTrue(TEXT("zero means the default"), Near.IntervalSeconds == 0.5f && Near.DiffThreshold == 0.03f && Near.TimeMode == TEXT("world"));
+	TestEqual(TEXT("a label is cleaned"), Near.Label, FString(TEXT("front_view_")));
+	const FString Said = Fit.AppendTo(TEXT("Captured."));
+	TestTrue(TEXT("the reply says what changed: ") + Said, Said.Contains(TEXT("size 5000x720 -> 1920x276")) && Said.Contains(TEXT("warmup_frames 30 -> 8"))
+		&& !Said.Contains(TEXT("interval_seconds")));
+	FHyperAICaptureViewRequest Animated;
+	Animated.TimeMode = TEXT("material");
+	Animated.IntervalSeconds = 0.25f;
+	FHyperAIStudioRequestFit AnimatedFit;
+	Capture::Fit(Animated, AnimatedFit);
+	TestTrue(TEXT("material time without times takes one per interval"), Animated.TimeMode == TEXT("material_time")
+		&& Animated.MaterialTimes.Num() == 2 && Animated.MaterialTimes[1] == 0.25f && Animated.FrameCount == 2);
+
 	FHyperAICaptureViewRequest Request;
-	Request.Source = TEXT("transform");
-	Request.Width = 5000;
-	TestEqual(TEXT("an oversized capture is refused"), Capture::RunNow(Request).Status, FString(TEXT("invalid_request")));
+	Request.Source = TEXT("sideways");
+	TestEqual(TEXT("what cannot be guessed is still refused"), Capture::RunNow(Request).Status, FString(TEXT("invalid_request")));
 	Request.Width = 256;
 	Request.Source = TEXT("camera");
 	Request.CameraActorLabel = TEXT("NoSuchCamera_HyperAITest");
 	TestEqual(TEXT("a missing camera is named, not guessed"), Capture::RunNow(Request).Status, FString(TEXT("view_not_found")));
 	Request.Source = TEXT("transform");
-	Request.TimeMode = TEXT("material_time");
-	Request.FrameCount = 2;
-	TestEqual(TEXT("material time needs one time per frame"), Capture::RunNow(Request).Status, FString(TEXT("invalid_request")));
 	Request.TimeMode = TEXT("world");
+	Request.FrameCount = 2;
 	Request.WarmupFrames = 0;
 	TestEqual(TEXT("world-time frames need the async tool"), Capture::RunNow(Request).Status, FString(TEXT("async_required")));
 

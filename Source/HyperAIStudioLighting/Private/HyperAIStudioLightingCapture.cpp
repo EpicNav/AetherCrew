@@ -15,6 +15,7 @@
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "HyperAIStudioLightingGate.h"
+#include "HyperAIStudioRequestFit.h"
 #include "LevelEditorViewport.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/FileHelper.h"
@@ -243,6 +244,8 @@ namespace HyperAIStudio::Lighting::Capture
 		public:
 			FHyperAICaptureViewRequest Request;
 			FHyperAICaptureViewReport Report;
+			/** What Fit changed in the agent's request, said in the report. */
+			FHyperAIStudioRequestFit Fitted;
 			TStrongObjectPtr<UHyperAICaptureViewResult> Result;
 
 			bool Begin(UWorld& InWorld, FString& OutError)
@@ -447,7 +450,7 @@ namespace HyperAIStudio::Lighting::Capture
 				bFinished = true;
 				Report.bOk = bOk;
 				Report.Status = Status;
-				Report.Diagnostic = Diagnostic;
+				Report.Diagnostic = Fitted.AppendTo(Diagnostic);
 				Report.Capabilities = Capabilities();
 				if (Component.IsValid())
 				{
@@ -529,6 +532,89 @@ namespace HyperAIStudio::Lighting::Capture
 		}
 	}
 
+	/**
+	 * The near misses agents make, fitted instead of refused. Agents fill in every field and send 0 or "" for the ones
+	 * they do not care about, which means the default; numbers out of range move to the nearest end; a bigger picture
+	 * than allowed is scaled down keeping its shape, which a match compares; a label with other characters is cleaned.
+	 * Validate still refuses what cannot be guessed, such as an unknown source.
+	 */
+	void Fit(FHyperAICaptureViewRequest& Request, FHyperAIStudioRequestFit& Out)
+	{
+		const FHyperAICaptureViewRequest Defaults;
+		if (Request.Source.IsEmpty())
+		{
+			Request.Source = Request.CameraActorLabel.IsEmpty() ? TEXT("viewport") : TEXT("camera");
+		}
+		Out.ClampOrDefault(Request.FovDegrees, 5.f, 170.f, Defaults.FovDegrees, TEXT("fov_degrees"));
+		if (Request.Width <= 0 || Request.Height <= 0)
+		{
+			Request.Width = Defaults.Width;
+			Request.Height = Defaults.Height;
+		}
+		if (Request.Width > MaxWidth || Request.Height > MaxHeight)
+		{
+			const double Scale = FMath::Min(static_cast<double>(MaxWidth) / Request.Width, static_cast<double>(MaxHeight) / Request.Height);
+			const int32 Width = FMath::Clamp(FMath::RoundToInt(Request.Width * Scale), 64, MaxWidth);
+			const int32 Height = FMath::Clamp(FMath::RoundToInt(Request.Height * Scale), 64, MaxHeight);
+			Out.Note(FString::Printf(TEXT("size %dx%d -> %dx%d"), Request.Width, Request.Height, Width, Height));
+			Request.Width = Width;
+			Request.Height = Height;
+		}
+		Out.Clamp(Request.Width, 64, MaxWidth, TEXT("width"));
+		Out.Clamp(Request.Height, 64, MaxHeight, TEXT("height"));
+		Out.Clamp(Request.WarmupFrames, 0, MaxWarmupFrames, TEXT("warmup_frames"));
+		Out.ClampOrDefault(Request.DiffThreshold, 0.001f, 0.5f, Defaults.DiffThreshold, TEXT("diff_threshold"));
+		Out.ClampOrDefault(Request.IntervalSeconds, 0.05f, 5.f, Defaults.IntervalSeconds, TEXT("interval_seconds"));
+		Out.ClampOrDefault(Request.FrameCount, 1, MaxFrames, Defaults.FrameCount, TEXT("frame_count"));
+		const FString Mode = Request.TimeMode.TrimStartAndEnd().ToLower();
+		const TCHAR* const TimeMode = Mode.StartsWith(TEXT("material")) || (Mode.IsEmpty() && !Request.MaterialTimes.IsEmpty())
+			? TEXT("material_time") : TEXT("world");
+		if (!Mode.IsEmpty() && Request.TimeMode != TimeMode)
+		{
+			Out.Note(FString::Printf(TEXT("time_mode %s -> %s"), *Request.TimeMode, TimeMode));
+		}
+		Request.TimeMode = TimeMode;
+		if (Request.TimeMode == TEXT("material_time"))
+		{
+			// The forced times decide the frames; without any, one per interval from 0, which is what "animate" asks.
+			if (Request.MaterialTimes.IsEmpty())
+			{
+				Request.FrameCount = FMath::Max(Request.FrameCount, 2);
+				TArray<FString> Times;
+				for (int32 Index = 0; Index < Request.FrameCount; ++Index)
+				{
+					Request.MaterialTimes.Add(Index * Request.IntervalSeconds);
+					Times.Add(FString::SanitizeFloat(Request.MaterialTimes.Last()));
+				}
+				Out.Note(FString::Printf(TEXT("material_times -> %s"), *FString::Join(Times, TEXT(", "))));
+			}
+			if (Request.MaterialTimes.Num() > MaxFrames)
+			{
+				Out.Note(FString::Printf(TEXT("material_times %d entries -> the first %d"), Request.MaterialTimes.Num(), MaxFrames));
+				Request.MaterialTimes.SetNum(MaxFrames);
+			}
+			if (Request.FrameCount != Request.MaterialTimes.Num())
+			{
+				Out.Note(FString::Printf(TEXT("frame_count %d -> %d, one per material time"), Request.FrameCount, Request.MaterialTimes.Num()));
+				Request.FrameCount = Request.MaterialTimes.Num();
+			}
+			for (float& Time : Request.MaterialTimes)
+			{
+				Out.Clamp(Time, 0.f, 3600.f, TEXT("material_times entry"));
+			}
+		}
+		if (!IsSafeLabel(Request.Label))
+		{
+			FString Label;
+			for (const TCHAR Character : Request.Label.Left(48))
+			{
+				Label.AppendChar(FChar::IsAlnum(Character) || Character == TEXT('-') ? Character : TEXT('_'));
+			}
+			Out.Note(FString::Printf(TEXT("label -> %s"), *Label));
+			Request.Label = Label;
+		}
+	}
+
 	void Diff(TConstArrayView<FColor> A, TConstArrayView<FColor> B, const float Threshold, float& OutMeanAbs, float& OutChangedFraction)
 	{
 		OutMeanAbs = 0.f;
@@ -583,10 +669,13 @@ namespace HyperAIStudio::Lighting::Capture
 			Result->SetValue(Rejected(TEXT("game_thread_required"), TEXT("Captures run on the game thread.")));
 			return Result;
 		}
-		const FString Invalid = Validate(Request);
+		FHyperAICaptureViewRequest Fitted = Request;
+		FHyperAIStudioRequestFit Fit;
+		Capture::Fit(Fitted, Fit);
+		const FString Invalid = Validate(Fitted);
 		if (!Invalid.IsEmpty())
 		{
-			Result->SetValue(Rejected(TEXT("invalid_request"), Invalid));
+			Result->SetValue(Rejected(TEXT("invalid_request"), Fit.AppendTo(Invalid)));
 			return Result;
 		}
 		UWorld* World = Gate::GetEditorWorld();
@@ -601,7 +690,8 @@ namespace HyperAIStudio::Lighting::Capture
 			return Result;
 		}
 		const TSharedPtr<FSession> Session = MakeShared<FSession>();
-		Session->Request = Request;
+		Session->Request = Fitted;
+		Session->Fitted = Fit;
 		Session->Result.Reset(Result);
 		FString Error;
 		if (!Session->Begin(*World, Error))
@@ -621,12 +711,16 @@ namespace HyperAIStudio::Lighting::Capture
 	FHyperAICaptureViewReport RunNow(const FHyperAICaptureViewRequest& Request)
 	{
 		if (!IsInGameThread()) return Rejected(TEXT("game_thread_required"), TEXT("Captures run on the game thread."));
-		const FString Invalid = Validate(Request);
-		if (!Invalid.IsEmpty()) return Rejected(TEXT("invalid_request"), Invalid);
+		FHyperAICaptureViewRequest Fitted = Request;
+		FHyperAIStudioRequestFit Fit;
+		Capture::Fit(Fitted, Fit);
+		const FString Invalid = Validate(Fitted);
+		if (!Invalid.IsEmpty()) return Rejected(TEXT("invalid_request"), Fit.AppendTo(Invalid));
 		UWorld* World = Gate::GetEditorWorld();
 		if (!World) return Rejected(TEXT("no_level"), TEXT("No level is open in the editor."));
 		FSession Session;
-		Session.Request = Request;
+		Session.Request = Fitted;
+		Session.Fitted = Fit;
 		FString Error;
 		if (!Session.Begin(*World, Error)) return Rejected(TEXT("view_not_found"), Error);
 		// Every step without waiting makes progress: a warm-up, a frame, or a terminal failure.

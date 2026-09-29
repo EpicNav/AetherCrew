@@ -17,6 +17,7 @@
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioRequestFit.h"
 #include "IO/IoHash.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/PackageName.h"
@@ -1945,22 +1946,64 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 	return Report;
 }
 
+// The tools fit an agent's near misses (0 for "unset", a limit past its range) before the closed contracts check them.
 FHyperAINiagaraInspectReport UHyperAIStudioNiagaraToolset::hyper_niagara_inspect(
-	const FHyperAINiagaraInspectRequest& Request)
+	const FHyperAINiagaraInspectRequest& InRequest)
 {
-	return FHyperAIStudioNiagaraContracts::Inspect(Request);
+	using C = FHyperAIStudioNiagaraContracts;
+	const FHyperAINiagaraInspectRequest Defaults;
+	FHyperAINiagaraInspectRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.PageSize, 1, C::MaxPageSize, Defaults.PageSize, TEXT("page_size"));
+	Fit.ClampOrDefault(Request.MaxGameThreadMs, 1, C::MaxReadGameThreadMs, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	FHyperAINiagaraInspectReport Report = C::Inspect(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAINiagaraApplyPlanReport UHyperAIStudioNiagaraToolset::hyper_niagara_apply_plan(
-	const FHyperAINiagaraApplyPlanRequest& Request)
+	const FHyperAINiagaraApplyPlanRequest& InRequest)
 {
-	return FHyperAIStudioNiagaraContracts::BuildPlan(Request);
+	using C = FHyperAIStudioNiagaraContracts;
+	const FHyperAINiagaraApplyPlanRequest Defaults;
+	FHyperAINiagaraApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.MaxGameThreadMs, 50, C::MaxMutationGameThreadMs, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAINiagaraApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return C::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAINiagaraValidateReport UHyperAIStudioNiagaraToolset::hyper_niagara_validate(
-	const FHyperAINiagaraValidateRequest& Request)
+	const FHyperAINiagaraValidateRequest& InRequest)
 {
-	return FHyperAIStudioNiagaraContracts::Validate(Request);
+	using C = FHyperAIStudioNiagaraContracts;
+	const FHyperAINiagaraValidateRequest Defaults;
+	FHyperAINiagaraValidateRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	if (Request.Policy.IsEmpty())
+	{
+		Request.Policy = Defaults.Policy;
+	}
+	if (Request.Policy == TEXT("runtime_probe") || Request.Policy == TEXT("sim_cache_capture"))
+	{
+		// These take their own budgets: the probe allows a second or more of game-thread time.
+		Fit.ClampOrDefault(Request.ProbeFrames, 1, 600, Defaults.ProbeFrames, TEXT("probe_frames"));
+		Fit.ClampOrDefault(Request.CaptureDeltaSeconds, 1.f / 240.f, 1.f / 15.f, Defaults.CaptureDeltaSeconds, TEXT("capture_delta_seconds"));
+		Fit.Clamp(Request.MinParticlesPerEmitter, 0, MAX_int32, TEXT("min_particles_per_emitter"));
+	}
+	else
+	{
+		Fit.ClampOrDefault(Request.MaxIssues, 1, C::MaxIssues, Defaults.MaxIssues, TEXT("max_issues"));
+		Fit.ClampOrDefault(Request.MaxGameThreadMs, 1, C::MaxReadGameThreadMs, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+		Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	}
+	FHyperAINiagaraValidateReport Report = C::Validate(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAIStudioNiagaraDomainAdapter::FHyperAIStudioNiagaraDomainAdapter()
