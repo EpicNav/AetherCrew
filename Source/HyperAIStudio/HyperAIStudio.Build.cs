@@ -29,7 +29,7 @@ public class HyperAIStudio : ModuleRules
 			"GraphEditor",
 			"ImageCore",
 			"HTTP",
-			// The stand-in servers tests talk to, such as Ollama's.
+			// The remote page's server, and the stand-in servers tests talk to, such as Ollama's.
 			"HTTPServer",
 			"HyperAIStudioBot",
 			"InputCore",

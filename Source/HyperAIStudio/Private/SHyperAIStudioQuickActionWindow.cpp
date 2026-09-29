@@ -16,6 +16,7 @@
 #include "Framework/Notifications/NotificationManager.h"
 #include "HyperAIStudioChatHistoryPrefs.h"
 #include "HyperAIStudioEditorRestart.h"
+#include "HyperAIStudioRemote.h"
 #include "HyperAIStudioShell.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/App.h"
@@ -941,6 +942,11 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildSettingsMenu()
 		LOCTEXT("ChatSettingsEntryTooltip", "Agent models and agent options."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Edit"),
 		FUIAction(FExecuteAction::CreateLambda([]() { HyperAIStudio::QuickAction::OpenSettingsPage(GetDefault<UHyperAIStudioSettings>()); })));
+	Menu.AddMenuEntry(
+		LOCTEXT("ChatRemotePage", "Open On Another Device..."),
+		LOCTEXT("ChatRemotePageTooltip", "Follow the chats, answer their questions and approve edits from a browser, such as your phone's."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Link"),
+		FUIAction(FExecuteAction::CreateStatic(&FHyperAIStudioRemote::OpenDialog)));
 	Menu.AddMenuEntry(
 		LOCTEXT("ChatRemember", "Remember..."),
 		LOCTEXT("ChatRememberTooltip", "Add a fact to Project Memory: every agent gets it in every future chat."),

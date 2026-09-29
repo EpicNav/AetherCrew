@@ -41,6 +41,7 @@
 #include "HyperAIStudioNativeReadToolset.h"
 #include "HyperAIStudioPIEPlaytestToolset.h"
 #include "HyperAIStudioEditorRestart.h"
+#include "HyperAIStudioRemote.h"
 #include "HyperAIStudioPlanExecuteToolset.h"
 #include "HyperAIStudioPlanValidateToolset.h"
 #include "HyperAIStudioSettings.h"
@@ -588,6 +589,8 @@ public:
 		}
 		// Restart and resume: the tool and console command, and, in an editor a restart opened, its chats.
 		FHyperAIStudioEditorRestart::Startup();
+		// The remote page, when it is set to run from the start.
+		FHyperAIStudioRemote::Startup();
 		if (FHyperAIStudioExtensionRuntime::AreExtendedHyperToolsEnabled())
 		{
 			FString TrustedExecutionError;
@@ -851,6 +854,7 @@ public:
 			CanCloseEditorHandle.Reset();
 		}
 		FHyperAIStudioEditorRestart::Shutdown();
+		FHyperAIStudioRemote::Shutdown();
 		if (PIEPlaytestRegistration)
 		{
 			PIEPlaytestRegistration->Shutdown();

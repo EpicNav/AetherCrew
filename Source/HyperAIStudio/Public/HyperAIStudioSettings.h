@@ -510,6 +510,24 @@ public:
 	bool bKeepRemoteChatsRunning = true;
 
 	/**
+	 * Serve the remote page from the start: the chats, their questions and the edits waiting for approval, in a browser.
+	 * A browser pairs with a code from Chat > Open On Another Device, and pairs again after the editor restarts.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Remote", meta = (DisplayName = "Remote Page"))
+	bool bRemotePage = false;
+
+	/**
+	 * Let other devices on this network open the remote page, such as your phone on the same Wi-Fi. The page is not
+	 * encrypted and a paired browser can approve edits, so use it only on a network you trust. Applies from the next
+	 * editor start once the page has run.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Remote", meta = (DisplayName = "Remote Page On This Network"))
+	bool bRemotePageOnNetwork = false;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Remote", meta = (DisplayName = "Remote Page Port", ClampMin = "1024", ClampMax = "65535"))
+	int32 RemotePagePort = 8765;
+
+	/**
 	 * When the editor crashes, HyperAI Studio opens it again with its chat tabs, and the chats that were working are told
 	 * what crashed and carry on. A project with C++ is built first, so code changed since the last build is in it. The
 	 * third crash in half an hour leaves the editor closed. Takes effect the next time the editor starts.

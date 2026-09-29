@@ -1226,6 +1226,84 @@
    "text": "擦除对比"
   },
   {
+   "namespace": "HyperAIStudioRemote",
+   "key": "Addresses",
+   "source": "Open:\n{0}",
+   "text": "打开：\n{0}"
+  },
+  {
+   "namespace": "HyperAIStudioRemote",
+   "key": "Close",
+   "source": "Close",
+   "text": "关闭"
+  },
+  {
+   "namespace": "HyperAIStudioRemote",
+   "key": "Code",
+   "source": "Pairing code: {0}  (ten minutes, one browser)",
+   "text": "配对码：{0}（十分钟内有效，限一个浏览器）"
+  },
+  {
+   "namespace": "HyperAIStudioRemote",
+   "key": "CopyLink",
+   "source": "Copy Link",
+   "text": "复制链接"
+  },
+  {
+   "namespace": "HyperAIStudioRemote",
+   "key": "Forget",
+   "source": "Forget Paired Browsers",
+   "text": "忘记已配对的浏览器"
+  },
+  {
+   "namespace": "HyperAIStudioRemote",
+   "key": "Intro",
+   "source": "Follow the chats, answer their questions and approve edits from a browser: on this computer, or on your phone when other devices may open the page.",
+   "text": "在浏览器中查看对话、回答它们的提问并批准编辑：可以在这台电脑上，也可以在允许其他设备打开页面时用手机。"
+  },
+  {
+   "namespace": "HyperAIStudioRemote",
+   "key": "Network",
+   "source": "Other devices on this network can open it",
+   "text": "允许此网络中的其他设备打开"
+  },
+  {
+   "namespace": "HyperAIStudioRemote",
+   "key": "NetworkRestart",
+   "source": "The page keeps the addresses it started with until the editor restarts.",
+   "text": "在编辑器重启之前，页面会保持它启动时的地址。"
+  },
+  {
+   "namespace": "HyperAIStudioRemote",
+   "key": "NewCode",
+   "source": "New Code",
+   "text": "新配对码"
+  },
+  {
+   "namespace": "HyperAIStudioRemote",
+   "key": "NoCode",
+   "source": "No pairing code on offer. New Code makes one.",
+   "text": "当前没有配对码。点击“新配对码”生成一个。"
+  },
+  {
+   "namespace": "HyperAIStudioRemote",
+   "key": "Serve",
+   "source": "Serve the remote page",
+   "text": "提供远程页面"
+  },
+  {
+   "namespace": "HyperAIStudioRemote",
+   "key": "Title",
+   "source": "Open On Another Device",
+   "text": "在其他设备上打开"
+  },
+  {
+   "namespace": "HyperAIStudioRemote",
+   "key": "Warning",
+   "source": "A paired browser can approve edits. The page is not encrypted, so let other devices open it only on a network you trust; away from it, reach this computer through a VPN such as Tailscale. Browsers pair again after the editor restarts.",
+   "text": "已配对的浏览器可以批准编辑。页面未加密，因此只在你信任的网络中允许其他设备打开；不在该网络时，请通过 Tailscale 等 VPN 访问这台电脑。编辑器重启后，浏览器需要重新配对。"
+  },
+  {
    "namespace": "HyperAIStudioSandbox",
    "key": "DiscardSandbox",
    "source": "Discard",
@@ -3684,6 +3762,18 @@
    "key": "ChatRememberTooltip",
    "source": "Add a fact to Project Memory: every agent gets it in every future chat.",
    "text": "将一条事实添加到项目记忆：以后的每个对话中，每个智能体都会获得它。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatRemotePage",
+   "source": "Open On Another Device...",
+   "text": "在其他设备上打开..."
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ChatRemotePageTooltip",
+   "source": "Follow the chats, answer their questions and approve edits from a browser, such as your phone's.",
+   "text": "在浏览器（例如手机上的浏览器）中查看对话、回答它们的提问并批准编辑。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",

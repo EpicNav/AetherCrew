@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HyperAI Studio Remote</title>
+<style>
+:root { --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a66; --line: #e3e1dc; --accent: #c8553d; --ok: #2e7d4f; --warn: #a86a12; --bad: #b3261e; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #141413; --panel: #1f1f1d; --ink: #ecebe7; --muted: #9a9993; --line: #33322f; --accent: #e07a5f; --ok: #3f9a66; --warn: #d0913d; --bad: #ef6b61; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: var(--bg); border-bottom: 1px solid var(--line); }
+header h1 { flex: 1; margin: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); flex: none; }
+.dot.live { background: var(--ok); }
+main { max-width: 760px; margin: 0 auto; padding: 12px 16px 48px; }
+h2 { margin: 16px 0 8px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.meta { color: var(--muted); font-size: 13px; }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--line); color: var(--ink); }
+.badge.working { background: var(--warn); color: #fff; }
+.badge.risky { background: var(--bad); color: #fff; }
+.items { margin: 8px 0; max-height: 60vh; overflow-y: auto; }
+.item { padding: 6px 0; border-top: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
+.item:first-child { border-top: 0; }
+.who { display: block; font-size: 12px; color: var(--muted); }
+.item.user .who { color: var(--accent); }
+.item.reasoning { color: var(--muted); font-size: 13px; }
+.item.error { color: var(--bad); }
+ul { margin: 6px 0; padding-left: 20px; }
+button { min-height: 40px; padding: 8px 14px; font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+button:disabled { opacity: .5; }
+button.primary { color: #fff; background: var(--ok); border-color: var(--ok); }
+button.danger { color: var(--bad); }
+textarea, input { width: 100%; padding: 8px; font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+textarea { min-height: 64px; resize: vertical; }
+#code { max-width: 200px; font-size: 24px; letter-spacing: .3em; text-align: center; }
+.status { min-height: 1.3em; margin-top: 6px; font-size: 13px; color: var(--muted); }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+<header><span id="dot" class="dot"></span><h1 id="title">HyperAI Studio</h1></header>
+<main>
+  <section id="pair" class="hidden">
+    <div class="card">
+      <p>Enter the pairing code the editor shows under <b>Chat &rsaquo; &hellip; &rsaquo; Open On Another Device</b>.</p>
+      <div class="row"><input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000"><button id="pairButton" class="primary">Pair</button></div>
+      <div id="pairStatus" class="status"></div>
+    </div>
+  </section>
+  <section id="waiting" class="hidden"><h2>Waiting for you</h2><div id="approvals"></div></section>
+  <section id="chatSection" class="hidden"><h2>Chats</h2><div id="chats"></div></section>
+  <p id="empty" class="meta hidden">No chat is running and nothing waits for you. Start a chat in the editor.</p>
+  <p id="offline" class="meta hidden">The editor is not answering. It may be closed, restarting, or out of reach of this device.</p>
+</main>
+<script>
+"use strict";
+// Every call carries X-HyperAI: a page on another site cannot add it without this server's say-so, which it never gives.
+function api(path, body) {
+  return fetch("/remote/api/" + path, {
+    method: body ? "POST" : "GET",
+    headers: body ? { "X-HyperAI": "1", "Content-Type": "application/json" } : { "X-HyperAI": "1" },
+    body: body ? JSON.stringify(body) : undefined,
+    cache: "no-store"
+  });
+}
+// Agents' text only ever goes in as text, never as markup.
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+function show(id, visible) { document.getElementById(id).classList.toggle("hidden", !visible); }
+const names = { user: "You", agent: "Agent", reasoning: "Thinking", tool: "Tool", command: "Command", file_change: "Files", question: "Question", error: "Error", notice: "Note", image: "Picture" };
+const cards = {};
+
+async function act(path, body, status, buttons) {
+  buttons.forEach(b => b.disabled = true);
+  try {
+    const response = await api(path, body);
+    const result = await response.json();
+    if (status) status.textContent = result.message || result.error || "";
+    return response.ok && result.ok;
+  } catch (e) {
+    if (status) status.textContent = "The editor did not answer.";
+    return false;
+  } finally {
+    buttons.forEach(b => b.disabled = false);
+    refresh();
+  }
+}
+
+// Rebuilt only when something changed, so a tap never lands on a card that is being replaced.
+let approvalsShown = null;
+function renderApprovals(approvals) {
+  const shown = JSON.stringify(approvals);
+  if (shown === approvalsShown) return;
+  approvalsShown = shown;
+  const box = document.getElementById("approvals");
+  box.replaceChildren();
+  for (const approval of approvals) {
+    const card = el("div", "card");
+    const head = el("div", "row");
+    head.append(el("b", "", approval.tool || "Edit"));
+    if (approval.safety !== "edit" && approval.safety !== "read") head.append(el("span", "badge risky", approval.safety.replace("_", " ")));
+    card.append(head);
+    if (approval.target) card.append(el("div", "meta", approval.target));
+    const list = el("ul");
+    for (const line of approval.effects.concat(approval.touches.map(t => "writes " + t))) list.append(el("li", "", line));
+    if (list.children.length) card.append(list);
+    const status = el("div", "status");
+    const yes = el("button", "primary", "Approve");
+    const no = el("button", "danger", "Reject");
+    yes.onclick = () => act("approve", { id: approval.id }, status, [yes, no]);
+    no.onclick = () => act("reject", { id: approval.id }, status, [yes, no]);
+    const row = el("div", "row");
+    row.append(yes, no);
+    card.append(row, status);
+    box.append(card);
+  }
+}
+
+function chatCard(tab) {
+  if (cards[tab]) return cards[tab];
+  const root = el("div", "card");
+  const head = el("div", "row");
+  const title = el("b");
+  const badge = el("span", "badge");
+  const meta = el("span", "meta");
+  head.append(title, badge, meta);
+  const items = el("div", "items");
+  const input = el("textarea");
+  input.placeholder = "Message this chat";
+  const status = el("div", "status");
+  const send = el("button", "primary", "Send");
+  const stop = el("button", "", "Stop");
+  send.onclick = async () => {
+    const text = input.value.trim();
+    if (!text) return;
+    if (await act("send", { tab: tab, text: text }, status, [send, stop])) input.value = "";
+  };
+  stop.onclick = () => act("stop", { tab: tab }, status, [send, stop]);
+  const row = el("div", "row");
+  row.append(send, stop);
+  root.append(head, items, input, row, status);
+  cards[tab] = { root, title, badge, meta, items };
+  return cards[tab];
+}
+
+function renderChats(chats) {
+  const box = document.getElementById("chats");
+  const seen = new Set();
+  for (const chat of chats) {
+    seen.add(chat.tab);
+    const card = chatCard(chat.tab);
+    card.title.textContent = "Chat " + chat.tab + " · " + chat.agent;
+    card.badge.textContent = chat.working ? "working" : "idle";
+    card.badge.className = "badge" + (chat.working ? " working" : "");
+    card.meta.textContent = [chat.model, chat.title].filter(Boolean).join(" · ");
+    const shown = JSON.stringify([chat.native, chat.items]);
+    if (card.root.parentNode !== box) box.append(card.root);
+    if (shown === card.shown) continue;
+    card.shown = shown;
+    const atBottom = card.items.scrollHeight - card.items.scrollTop - card.items.clientHeight < 40;
+    card.items.replaceChildren();
+    if (!chat.native) card.items.append(el("div", "item meta", "This chat runs in the editor's terminal: its messages show there. You can still send it one."));
+    for (const item of chat.items) {
+      const line = el("div", "item " + item.kind);
+      line.append(el("span", "who", (names[item.kind] || item.kind) + (item.title ? " · " + item.title : "") + (item.status ? " · " + item.status : "")));
+      line.append(document.createTextNode(item.kind === "reasoning" ? item.text.slice(-300) : item.text));
+      if (item.choices) {
+        const row = el("div", "row");
+        const status = el("div", "status");
+        const buttons = item.choices.map((choice, index) => {
+          const button = el("button", index === 0 ? "primary" : "", choice);
+          button.onclick = () => act("answer", { tab: chat.tab, id: item.id, choice: index }, status, buttons);
+          return button;
+        });
+        row.append(...buttons);
+        line.append(row, status);
+      }
+      card.items.append(line);
+    }
+    if (atBottom) card.items.scrollTop = card.items.scrollHeight;
+  }
+  for (const tab of Object.keys(cards)) {
+    if (!seen.has(Number(tab))) { cards[tab].root.remove(); delete cards[tab]; }
+  }
+}
+
+let asking = false;
+async function refresh() {
+  if (asking) return;
+  asking = true;
+  try {
+    const response = await api("state");
+    document.getElementById("dot").classList.add("live");
+    show("offline", false);
+    if (response.status === 401) {
+      ["waiting", "chatSection", "empty"].forEach(id => show(id, false));
+      show("pair", true);
+      return;
+    }
+    if (!response.ok) throw new Error(String(response.status));
+    const state = await response.json();
+    show("pair", false);
+    document.getElementById("title").textContent = "HyperAI Studio · " + state.project;
+    renderApprovals(state.approvals);
+    renderChats(state.chats);
+    show("waiting", state.approvals.length > 0);
+    show("chatSection", state.chats.length > 0);
+    show("empty", !state.approvals.length && !state.chats.length);
+  } catch (e) {
+    document.getElementById("dot").classList.remove("live");
+    show("offline", true);
+  } finally {
+    asking = false;
+  }
+}
+
+document.getElementById("pairButton").onclick = async () => {
+  const status = document.getElementById("pairStatus");
+  const response = await api("pair", { code: document.getElementById("code").value.trim() }).catch(() => null);
+  if (response && response.ok) { status.textContent = ""; refresh(); return; }
+  const result = response ? await response.json().catch(() => ({})) : {};
+  status.textContent = result.error === "wrong_code" ? "That is not the code. After five wrong tries the editor needs a new one."
+    : result.error === "no_code" ? "No code is on offer: press New Code in the editor." : "The editor did not answer.";
+};
+document.getElementById("code").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("pairButton").click(); });
+refresh();
+setInterval(() => { if (!document.hidden) refresh(); }, 2000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+</script>
+</body>
+</html>
