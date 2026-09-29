@@ -43,6 +43,7 @@
 #include "HyperAIStudioEditorRestart.h"
 #include "HyperAIStudioRemote.h"
 #include "HyperAIStudioSourceControl.h"
+#include "HyperAIStudioBlueprintTidy.h"
 #include "HyperAIStudioPlanExecuteToolset.h"
 #include "HyperAIStudioPlanValidateToolset.h"
 #include "HyperAIStudioSettings.h"
@@ -594,6 +595,8 @@ public:
 		FHyperAIStudioRemote::Startup();
 		// Agent edits check assets out first, and new files are marked for add once saved.
 		FHyperAIStudioSourceControl::Startup();
+		// Blueprint nodes agents add are laid out when their Blueprint compiles.
+		FHyperAIStudioBlueprintTidy::Startup();
 		if (FHyperAIStudioExtensionRuntime::AreExtendedHyperToolsEnabled())
 		{
 			FString TrustedExecutionError;
@@ -859,6 +862,7 @@ public:
 		FHyperAIStudioEditorRestart::Shutdown();
 		FHyperAIStudioRemote::Shutdown();
 		FHyperAIStudioSourceControl::Shutdown();
+		FHyperAIStudioBlueprintTidy::Shutdown();
 		if (PIEPlaytestRegistration)
 		{
 			PIEPlaytestRegistration->Shutdown();

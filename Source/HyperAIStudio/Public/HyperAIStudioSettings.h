@@ -552,6 +552,14 @@ public:
 	bool bCheckOutBeforeAgentEdits = true;
 
 	/**
+	 * Lay out the Blueprint nodes agents add when the Blueprint compiles: flow left to right, branches fanned out, no node
+	 * on another, and the nodes already there left where they are. In a Blueprint open in its editor, the new nodes move
+	 * only when they lie on something, so nodes you drop by hand stay put.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Blueprints", meta = (DisplayName = "Arrange Agents' Blueprint Nodes"))
+	bool bArrangeAgentBlueprintNodes = true;
+
+	/**
 	 * While on, everything saved in the editor lands in a UE File Sandbox until you approve or discard all of it in HyperAI's
 	 * Activity panel: agent edits, Epic's tools, scripts, and your own saves too. Agents cannot approve or discard.
 	 */

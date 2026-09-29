@@ -59,6 +59,8 @@ The returned `graph` is the Event Graph read back in the same DSL: check it matc
 are done. A compile error raises inside the script and comes back as the tool's error; fix the DSL and run the script
 again (use a new asset name, or reuse the existing Blueprint instead of `create`).
 
+HyperAI Studio lays out the nodes you add when the Blueprint compiles (`write_graph_dsl` compiles): flow left to right, branches fanned out, nothing on anything, and the nodes already there left where they are. You do not place nodes or call `arrange_nodes` after a write. To tidy a graph that was already a mess, pass all its nodes to `BlueprintTools.arrange_nodes` once.
+
 ## Facts that save calls
 
 - Objects travel as `{"refPath": "..."}` dicts. Pass what a tool returned straight into the next call. A Blueprint's
