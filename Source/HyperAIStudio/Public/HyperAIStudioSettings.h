@@ -507,6 +507,14 @@ public:
 	bool bKeepRemoteChatsRunning = true;
 
 	/**
+	 * When the editor crashes, HyperAI Studio opens it again with its chat tabs, and the chats that were working are told
+	 * what crashed and carry on. A project with C++ is built first, so code changed since the last build is in it. The
+	 * third crash in half an hour leaves the editor closed. Takes effect the next time the editor starts.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Crashes", meta = (DisplayName = "Reopen The Editor After A Crash", ConfigRestartRequired = true))
+	bool bReopenEditorAfterCrash = true;
+
+	/**
 	 * While on, everything saved in the editor lands in a UE File Sandbox until you approve or discard all of it in HyperAI's
 	 * Activity panel: agent edits, Epic's tools, scripts, and your own saves too. Agents cannot approve or discard.
 	 */

@@ -1,6 +1,7 @@
 # Games by Hyper 2026.
 # The part of hyper_editor_restart that outlives the editor: wait for it to close, build it, note the result and
-# open the same project again. The editor writes the plan (request.json) and starts this in its own window.
+# open the same project again. The editor writes the plan (request.json) and starts this in its own window. After a
+# crash, the watchdog writes the plan (reason crash) and starts this instead.
 param([Parameter(Mandatory = $true)][string]$Request)
 
 $ErrorActionPreference = 'Continue'
@@ -12,7 +13,8 @@ $HelperLog = Join-Path (Split-Path -Parent $Request) 'helper.log'
 [IO.File]::WriteAllText($HelperLog, '', $Utf8)
 # Seconds the window stays up to be read: after a success, after a failure. Tests set 0.
 $Linger = if ($null -ne $Plan.lingerSeconds) { [int]$Plan.lingerSeconds } else { 3 }
-try { $Host.UI.RawUI.WindowTitle = 'HyperAI Studio: restarting the editor' } catch {}
+$Crashed = $Plan.reason -eq 'crash'
+try { $Host.UI.RawUI.WindowTitle = if ($Crashed) { 'HyperAI Studio: the editor crashed' } else { 'HyperAI Studio: restarting the editor' } } catch {}
 
 function Say([string]$Text, [string]$Color = 'Gray') {
   Write-Host $Text -ForegroundColor $Color
@@ -25,10 +27,41 @@ function Save-Result([hashtable]$Result) {
   [IO.File]::WriteAllText($ResultPath, ($Result | ConvertTo-Json -Depth 5), $Utf8)
 }
 
-Say "HyperAI Studio is restarting the editor for $($Plan.project)." 'Cyan'
+# After a crash, an editor someone opened already (by hand, or the crash reporter's Send and Restart) keeps the project.
+# ponytail: matched by the project's file name, so two projects sharing one count as one.
+function Test-EditorOpen {
+  $Name = if ($Crashed -and $Plan.projectFile) { [IO.Path]::GetFileName($Plan.projectFile) } else { '' }
+  if (-not $Name) { return $false }
+  $Open = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'UnrealEditor%'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -notlike 'UnrealEditor-Cmd*' -and "$($_.CommandLine)".IndexOf($Name, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
+  if ($Open.Count -eq 0) { return $false }
+  Say 'The editor is open again already, so this window leaves it at that.' 'Green'
+  Save-Result @{ state = 'already_open' }
+  Start-Sleep -Seconds $Linger
+  return $true
+}
+
+if ($Crashed) {
+  Say "The editor crashed: $($Plan.crash.error)" 'Yellow'
+  Say "The crash report: $($Plan.crash.report)"
+  if (-not $Plan.reopen) {
+    Say 'It crashed three times in half an hour, so HyperAI Studio leaves it closed.' 'Yellow'
+    Save-Result @{ state = 'left_closed' }
+    Start-Sleep -Seconds ($Linger * 20)
+    exit 1
+  }
+  $Delay = if ($null -ne $Plan.delaySeconds) { [int]$Plan.delaySeconds } else { 15 }
+  Say "HyperAI Studio opens it again in $Delay s, with its chats. Close this window to leave it closed." 'Cyan'
+  Say 'To send the crash report, use Send and Close: Send and Restart would open a second editor.'
+  Start-Sleep -Seconds $Delay
+  if (Test-EditorOpen) { exit 0 }
+} else {
+  Say "HyperAI Studio is restarting the editor for $($Plan.project)." 'Cyan'
+}
 
 # 1. Wait for the editor to close. A cancelled close never comes: give up, rather than build after a later close.
-$Editor = Get-Process -Id $Plan.editorProcessId -ErrorAction SilentlyContinue
+# After a crash there is nothing to wait for.
+$Editor = if ($Plan.editorProcessId) { Get-Process -Id $Plan.editorProcessId -ErrorAction SilentlyContinue }
 if ($Editor) {
   Say 'Waiting for the editor to close...'
   if (-not $Editor.WaitForExit([int]$Plan.closeTimeoutSeconds * 1000)) {
@@ -60,6 +93,7 @@ if ($Build.enabled) {
 }
 
 # 3. Open the same project again, with the token that tells HyperAI Studio to give the chats back.
+if (Test-EditorOpen) { exit 0 }
 Save-Result @{ state = 'relaunching'; build = $Build }
 Say 'Opening the project again...' 'Cyan'
 try {

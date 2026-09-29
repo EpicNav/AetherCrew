@@ -85,7 +85,8 @@ struct FHyperAIStudioRestartChat
 /**
  * Restart and resume. The editor saves, writes the plan under Saved/HyperAIStudio/Restart, hands the build and the
  * relaunch to a helper script that outlives it, and closes. The editor the helper opens (with -HyperAIResume=<token>)
- * gives each chat tab its conversation back. Game thread only.
+ * gives each chat tab its conversation back. After a crash the same happens: a watchdog started with the editor finds
+ * the crash report and hands the helper a plan the editor kept current under Saved/HyperAIStudio/Recovery. Game thread only.
  */
 class HYPERAISTUDIO_API FHyperAIStudioEditorRestart
 {
