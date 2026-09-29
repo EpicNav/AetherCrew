@@ -225,7 +225,8 @@ bool FHyperAIStudioAgentsTeamTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Installing writes files"), Report.Changed > 0);
 	TestTrue(TEXT("without complaint"), Report.Notes.IsEmpty());
 	const TArray<FHyperAIStudioAgentDefinition> Team = List(Root.Path);
-	for (const TCHAR* Name : {TEXT("director"), TEXT("programmer"), TEXT("level-designer"), TEXT("lighting-artist"), TEXT("technical-artist"), TEXT("qa-tester")})
+	for (const TCHAR* Name : {TEXT("director"), TEXT("programmer"), TEXT("level-designer"), TEXT("lighting-artist"), TEXT("technical-artist"),
+		TEXT("ui-designer"), TEXT("qa-tester")})
 	{
 		const TOptional<FHyperAIStudioAgentDefinition> Member = Find(Team, Name);
 		TestTrue(FString::Printf(TEXT("%s is installed, built in and written for both agents"), Name),

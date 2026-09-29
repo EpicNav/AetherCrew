@@ -292,10 +292,17 @@ struct FHyperAIUIPlanOperation
 	GENERATED_BODY()
 
 	/**
-	 * animation.create|animation.rename|animation.delete, animation.add_float_track,
-	 * widget.set_property|widget.set_style,
-	 * binding.create_legacy|binding.update_legacy|binding.replace_legacy|binding.delete_legacy,
-	 * binding.create_mvvm|binding.update_mvvm|binding.replace_mvvm|binding.delete_mvvm.
+	 * Run for real: widget.add (subject_id = new name, secondary_name = parent panel or empty for the root,
+	 * string_value = class: CanvasPanel, VerticalBox, Button, TextBlock, Image... or a Widget Blueprint path),
+	 * widget.set_property (name: text, visibility, is_enabled, font_size, justification, image, percent, value,
+	 * padding, render_opacity, render_scale, width_override...), widget.set_style (color_and_opacity, brush_color,
+	 * background_color, fill_color_and_opacity...), widget.set_slot (padding, h_align, v_align, fill; in a canvas:
+	 * anchors, offsets, position, size, alignment, auto_size, z_order), widget.set_navigation (name = up|down|left|
+	 * right|next|previous|all, string_value = escape|stop|wrap|explicit, secondary_name = the widget to focus),
+	 * animation.create, animation.add_float_track (name = a float property: RenderOpacity, Percent...),
+	 * animation.add_transform_track (name = translation_x|translation_y|angle|scale_x|scale_y|shear_x|shear_y).
+	 * Staged only: animation.rename|animation.delete, binding.create_legacy|update_legacy|replace_legacy|
+	 * delete_legacy, binding.create_mvvm|update_mvvm|replace_mvvm|delete_mvvm.
 	 */
 	UPROPERTY()
 	FString Kind;
@@ -304,15 +311,15 @@ struct FHyperAIUIPlanOperation
 	UPROPERTY()
 	FString SubjectId;
 
-	/** Exact per-element fingerprint when updating, replacing, renaming, or deleting. */
+	/** Staged-only ops: the exact per-element fingerprint when updating, replacing, renaming, or deleting. Leave empty on ops that run. */
 	UPROPERTY()
 	FString ExpectedElementFingerprint;
 
-	/** New animation name or allowlisted property/style id. */
+	/** New animation name, property/style/slot id, navigation direction, float property or transform channel. */
 	UPROPERTY()
 	FString Name;
 
-	/** animation name, legacy event/property, or MVVM endpoint/path metadata. */
+	/** Animation name for tracks, parent panel for widget.add, focus target for explicit navigation, legacy event/property, or MVVM metadata. */
 	UPROPERTY()
 	FString SecondaryName;
 
@@ -328,6 +335,7 @@ struct FHyperAIUIPlanOperation
 	UPROPERTY()
 	FString DestinationPath;
 
+	/** The value as text: "Play", "center", "10,20", "#FFAA00", "0.5", an asset path, or animation keys "0=0, 0.3=1". */
 	UPROPERTY()
 	FString StringValue;
 
@@ -424,6 +432,15 @@ struct FHyperAIUIPlanEffects
 
 	UPROPERTY()
 	int32 BindingDeletesOrReplaces = 0;
+
+	UPROPERTY()
+	int32 WidgetAdds = 0;
+
+	UPROPERTY()
+	int32 SlotEdits = 0;
+
+	UPROPERTY()
+	int32 NavigationEdits = 0;
 
 	UPROPERTY()
 	bool bWouldSaveOnce = false;
@@ -531,10 +548,10 @@ public:
 	static FHyperAIUIInspectReport hyper_ui_inspect(const FHyperAIUIInspectRequest& Request);
 
 	/**
-	 * Widget Blueprint plans. animation.create (name; number_value = seconds) and animation.add_float_track
-	 * (subject_id = widget, secondary_name = animation, name = RenderOpacity, string_value = keys "0=0.3, 1=1")
-	 * run for real: submit with bDryRun false and an operation_id, and the reply waits for the edit. Other ops only dry-run;
-	 * build the widget tree with Epic's UMGToolSet.
+	 * Build or change a Widget Blueprint in one undo step, compiled and saved: add widgets to the tree, set their
+	 * properties, styles and slot layout, give them navigation, and animate them (animation.create, float and transform
+	 * tracks). Submit with bDryRun false and an operation_id; the reply waits for the edit. Renames, deletes and
+	 * bindings only dry-run.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|UI")
 	static UHyperAIUIApplyPlanResult* hyper_ui_apply_plan(const FHyperAIUIApplyPlanRequest& Request);

@@ -103,7 +103,7 @@ void SHyperAIStudioAgentsPanel::Construct(const FArguments& InArgs)
 			+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
 			[
 				Button(LOCTEXT("AddTheTeam", "Add the Team"),
-					LOCTEXT("AddTheTeamTooltip", "Add HyperAI's team: a director, a programmer, a level designer, a lighting artist, a technical artist and a QA tester, each with its quality bar, and the workflow that runs them together. Nothing you already have is overwritten."),
+					LOCTEXT("AddTheTeamTooltip", "Add HyperAI's team: a director, a programmer, a level designer, a lighting artist, a technical artist, a UI designer and a QA tester, each with its quality bar, and the workflow that runs them together. Nothing you already have is overwritten."),
 					[this]()
 				{
 					const HyperAIStudio::Skills::FSyncReport Report = HyperAIStudio::Agents::InstallTeam(FHyperAIStudioService::GetProjectRoot(), /*bUpdateOnly=*/false);

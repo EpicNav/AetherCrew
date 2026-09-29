@@ -315,7 +315,7 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 			[
 				SNew(SCheckBox)
 				.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-				.ToolTipText(LOCTEXT("TeamTooltip", "Send your messages to HyperAI's team, not to this agent alone. The director plans the work, the programmer, level designer, lighting artist and technical artist build their parts at once, the QA tester proves each part, and the director reviews it all against the team's quality bar. The first time, this adds the team to the project."))
+				.ToolTipText(LOCTEXT("TeamTooltip", "Send your messages to HyperAI's team, not to this agent alone. The director plans the work, the programmer, level designer, lighting artist, technical artist and UI designer build their parts at once, the QA tester proves each part, and the director reviews it all against the team's quality bar. The first time, this adds the team to the project."))
 				.IsChecked_Lambda([this]() { return bTeam ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
 				.OnCheckStateChanged_Lambda([this](const ECheckBoxState State) { bTeam = State == ECheckBoxState::Checked; })
 				[

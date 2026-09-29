@@ -78,7 +78,8 @@ log(`Matching ${plan.domain} against ${plan.reference} in ${plan.mode} mode, tar
 
 phase('Match')
 // A scene's look is its light; an environment is its layout; the rest is surfaces, effects and interface.
-const builder = plan.domain === 'scene' ? 'lighting-artist' : plan.domain === 'environment' ? 'level-designer' : 'technical-artist'
+const builder = plan.domain === 'scene' ? 'lighting-artist' : plan.domain === 'environment' ? 'level-designer'
+  : plan.domain === 'ui' ? 'ui-designer' : 'technical-artist'
 const match = await agent(
   `Run the image-match loop from the image-match skill until it stops.\n\n` +
   `Reference: ${plan.reference}\nWhat makes its look: ${plan.look}\nDomain: ${plan.domain}\nMode: ${plan.mode}, target ${plan.targetScore}\n` +

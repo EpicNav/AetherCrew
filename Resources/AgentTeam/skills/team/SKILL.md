@@ -1,10 +1,10 @@
 ---
 name: team
-description: Run a request through HyperAI's team for this Unreal project, the way a studio would. The director plans it, then the programmer, level designer, lighting artist and technical artist build their parts at once. The QA tester proves each part against its checks and quality bar, and failures go back to their builder for up to three rounds. Any new level gets a lighting pass, and the director reviews it all. Use it for a request with more than one part, or whenever the user asks for the team.
+description: Run a request through HyperAI's team for this Unreal project, the way a studio would. The director plans it, then the programmer, level designer, lighting artist, technical artist and UI designer build their parts at once. The QA tester proves each part against its checks and quality bar, and failures go back to their builder for up to three rounds. Any new level gets a lighting pass, and the director reviews it all. Use it for a request with more than one part, or whenever the user asks for the team.
 ---
 # Run a request through the team
 
-The team's agents live in `.hyperai/agents`: `director`, `programmer`, `level-designer`, `lighting-artist`, `technical-artist` and `qa-tester`. Each carries its role's quality bar. If one is missing, stop and ask the user to add the team: HyperAI workbench, Agents tab, *Add the Team*.
+The team's agents live in `.hyperai/agents`: `director`, `programmer`, `level-designer`, `lighting-artist`, `technical-artist`, `ui-designer` and `qa-tester`. Each carries its role's quality bar. If one is missing, stop and ask the user to add the team: HyperAI workbench, Agents tab, *Add the Team*.
 
 In Claude Code, the same flow runs as a workflow, `/hyperai-team <request>`. Prefer that when it is available.
 

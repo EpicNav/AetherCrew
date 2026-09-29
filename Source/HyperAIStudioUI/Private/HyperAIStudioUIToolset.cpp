@@ -1317,8 +1317,8 @@ FHyperAIUIApplyPlanReport FHyperAIStudioUIContracts::BuildFittedPlan(
 	}
 	FHyperAIUIApplyPlanReport Report = Fit.FreshOperationId(Request, [](const FHyperAIUIApplyPlanRequest& Planned)
 	{
-		// Widget animation plans execute; everything else keeps the persisted-shadow route.
-		return HyperAIStudio::UI::Animation::IsAnimationPlan(Planned.Operations)
+		// Widget Blueprint edit plans execute; renames, deletes and bindings keep the persisted-shadow route.
+		return HyperAIStudio::UI::Animation::IsExecutablePlan(Planned.Operations)
 			? HyperAIStudio::UI::Animation::BuildPlan(Planned)
 			: FHyperAIStudioUIContracts::BuildPlan(Planned);
 	});

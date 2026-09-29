@@ -2,6 +2,8 @@
 
 #include "HyperAIStudioUIAnimation.h"
 
+#include "Animation/MovieScene2DTransformSection.h"
+#include "Animation/MovieScene2DTransformTrack.h"
 #include "Animation/WidgetAnimation.h"
 #include "Animation/WidgetAnimationBinding.h"
 #include "Blueprint/WidgetTree.h"
@@ -12,6 +14,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioUIWidgetOps.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/PackageName.h"
@@ -43,8 +46,8 @@ namespace HyperAIStudio::UI::Animation
 		constexpr const TCHAR* ValidateResultTypeId = TEXT("hyperai.result.ui.validate.v1");
 		constexpr int32 MaxKeys = 64;
 		constexpr double MaxLengthSeconds = 600.0;
-		// ponytail: RenderOpacity only; add translation or colour tracks when a task needs them.
 		const FName OpacityProperty(TEXT("RenderOpacity"));
+		const FName TransformProperty(TEXT("RenderTransform"));
 
 		FString Seal(const TCHAR* Canonical)
 		{
@@ -53,7 +56,7 @@ namespace HyperAIStudio::UI::Animation
 
 		const FString& PayloadSchema()
 		{
-			static const FString Value = Seal(TEXT("ui.widget_animation.payload.v1|target|base_revision|operations[animation.create(name,seconds|frames),animation.add_float_track(widget,animation,RenderOpacity,keys,cubic)]"));
+			static const FString Value = Seal(TEXT("ui.widget_edit.payload.v2|target|base_revision|operations[animation.create(name,seconds|frames),animation.add_float_track(widget,animation,float_property,keys,cubic),animation.add_transform_track(widget,animation,channel,keys,cubic),widget.add(name,parent,class),widget.set_property(widget,id,value),widget.set_style(widget,id,color),widget.set_slot(widget,id,value),widget.set_navigation(widget,direction,rule,target)]"));
 			return Value;
 		}
 
@@ -97,11 +100,6 @@ namespace HyperAIStudio::UI::Animation
 			return static_cast<int32>(FMath::Clamp<int64>(Bytes, 1, MAX_int32));
 		}
 
-		FString WidgetNameOf(const FString& Subject)
-		{
-			return Subject.StartsWith(TEXT("name:"), ESearchCase::CaseSensitive) ? Subject.RightChop(5) : Subject;
-		}
-
 		bool IsIdentifier(const FString& Value)
 		{
 			if (Value.IsEmpty() || Value.Len() > 64 || FChar::IsDigit(Value[0])) return false;
@@ -112,14 +110,19 @@ namespace HyperAIStudio::UI::Animation
 			return true;
 		}
 
+		bool IsTrackKind(const FString& Kind)
+		{
+			return Kind == TEXT("animation.add_float_track") || Kind == TEXT("animation.add_transform_track");
+		}
+
 		struct FKey
 		{
 			double Time = 0.0;
 			float Value = 0.f;
 		};
 
-		/** "0=0.3, 1=1": seconds=value pairs, commas or semicolons between them. */
-		bool ParseKeys(const FString& Text, const double Length, TArray<FKey>& Out, FString& OutError)
+		/** "0=0.3, 1=1": seconds=value pairs, commas or semicolons between them. Opacity and progress run 0 to 1. */
+		bool ParseKeys(const FString& Text, const double Length, const bool bUnitRange, TArray<FKey>& Out, FString& OutError)
 		{
 			TArray<FString> Parts;
 			Text.Replace(TEXT(";"), TEXT(",")).ParseIntoArray(Parts, TEXT(","), /*CullEmpty=*/true);
@@ -145,9 +148,9 @@ namespace HyperAIStudio::UI::Animation
 					OutError = FString::Printf(TEXT("A key at %g s lies outside the animation's 0 to %g s."), Key.Time, Length);
 					return false;
 				}
-				if (Key.Value < 0.f || Key.Value > 1.f)
+				if (bUnitRange && (Key.Value < 0.f || Key.Value > 1.f))
 				{
-					OutError = FString::Printf(TEXT("RenderOpacity keys run from 0 to 1; %g is outside."), Key.Value);
+					OutError = FString::Printf(TEXT("Keys for this property run from 0 to 1; %g is outside."), Key.Value);
 					return false;
 				}
 				if (Out.ContainsByPredicate([&Key](const FKey& Other) { return FMath::IsNearlyEqual(Other.Time, Key.Time); }))
@@ -159,6 +162,11 @@ namespace HyperAIStudio::UI::Animation
 			}
 			Out.Sort([](const FKey& A, const FKey& B) { return A.Time < B.Time; });
 			return true;
+		}
+
+		bool IsUnitRange(const FName Property)
+		{
+			return Property == OpacityProperty || Property == FName(TEXT("Percent"));
 		}
 
 		/** Seconds from number_value, or else start/end frames at the project's widget animation frame rate. */
@@ -188,22 +196,80 @@ namespace HyperAIStudio::UI::Animation
 
 		UWidget* FindWidget(const UWidgetBlueprint& Blueprint, const FString& Subject)
 		{
-			return Blueprint.WidgetTree ? Blueprint.WidgetTree->FindWidget(FName(*WidgetNameOf(Subject))) : nullptr;
+			return Blueprint.WidgetTree ? Blueprint.WidgetTree->FindWidget(FName(*WidgetOps::WidgetNameOf(Subject))) : nullptr;
 		}
 
-		UMovieSceneFloatSection* FindOpacitySection(const UWidgetAnimation& Animation, const UWidget& Widget)
+		struct FTransformChannel
 		{
-			const UMovieScene* Scene = Animation.GetMovieScene();
+			const TCHAR* Name;
+			EMovieScene2DTransformChannel Bit;
+		};
+
+		const FTransformChannel TransformChannels[] = {
+			{TEXT("translation_x"), EMovieScene2DTransformChannel::TranslationX}, {TEXT("translation_y"), EMovieScene2DTransformChannel::TranslationY},
+			{TEXT("angle"), EMovieScene2DTransformChannel::Rotation}, {TEXT("scale_x"), EMovieScene2DTransformChannel::ScaleX},
+			{TEXT("scale_y"), EMovieScene2DTransformChannel::ScaleY}, {TEXT("shear_x"), EMovieScene2DTransformChannel::ShearX},
+			{TEXT("shear_y"), EMovieScene2DTransformChannel::ShearY}};
+
+		const FTransformChannel* FindTransformChannel(const FString& Name)
+		{
+			for (const FTransformChannel& Channel : TransformChannels)
+			{
+				if (Name.Equals(Channel.Name, ESearchCase::IgnoreCase)) return &Channel;
+			}
+			return nullptr;
+		}
+
+		FMovieSceneFloatChannel& ChannelOf(UMovieScene2DTransformSection& Section, const EMovieScene2DTransformChannel Bit)
+		{
+			switch (Bit)
+			{
+			case EMovieScene2DTransformChannel::TranslationX: return Section.Translation[0];
+			case EMovieScene2DTransformChannel::TranslationY: return Section.Translation[1];
+			case EMovieScene2DTransformChannel::Rotation: return Section.Rotation;
+			case EMovieScene2DTransformChannel::ScaleX: return Section.Scale[0];
+			case EMovieScene2DTransformChannel::ScaleY: return Section.Scale[1];
+			case EMovieScene2DTransformChannel::ShearX: return Section.Shear[0];
+			default: return Section.Shear[1];
+			}
+		}
+
+		/** The binding a widget has in an animation: one possessable per widget, by name, not through its slot. */
+		FGuid FindBinding(const UWidgetAnimation& Animation, const FName Widget)
+		{
 			for (const FWidgetAnimationBinding& Binding : Animation.AnimationBindings)
 			{
-				if (!Scene || Binding.WidgetName != Widget.GetFName() || !Binding.SlotWidgetName.IsNone()) continue;
-				for (UMovieSceneTrack* Track : Scene->FindTracks(UMovieSceneFloatTrack::StaticClass(), Binding.AnimationGuid))
+				if (Binding.WidgetName == Widget && Binding.SlotWidgetName.IsNone()) return Binding.AnimationGuid;
+			}
+			return FGuid();
+		}
+
+		UMovieSceneFloatSection* FindFloatSection(const UWidgetAnimation& Animation, const FName Widget, const FName Property)
+		{
+			const UMovieScene* Scene = Animation.GetMovieScene();
+			const FGuid Guid = FindBinding(Animation, Widget);
+			if (!Scene || !Guid.IsValid()) return nullptr;
+			for (UMovieSceneTrack* Track : Scene->FindTracks(UMovieSceneFloatTrack::StaticClass(), Guid))
+			{
+				const UMovieSceneFloatTrack* Float = Cast<UMovieSceneFloatTrack>(Track);
+				if (Float && Float->GetPropertyName() == Property && !Float->GetAllSections().IsEmpty())
 				{
-					const UMovieSceneFloatTrack* Float = Cast<UMovieSceneFloatTrack>(Track);
-					if (Float && Float->GetPropertyName() == OpacityProperty && !Float->GetAllSections().IsEmpty())
-					{
-						return Cast<UMovieSceneFloatSection>(Float->GetAllSections()[0]);
-					}
+					return Cast<UMovieSceneFloatSection>(Float->GetAllSections()[0]);
+				}
+			}
+			return nullptr;
+		}
+
+		UMovieScene2DTransformSection* FindTransformSection(const UWidgetAnimation& Animation, const FName Widget)
+		{
+			const UMovieScene* Scene = Animation.GetMovieScene();
+			const FGuid Guid = FindBinding(Animation, Widget);
+			if (!Scene || !Guid.IsValid()) return nullptr;
+			for (UMovieSceneTrack* Track : Scene->FindTracks(UMovieScene2DTransformTrack::StaticClass(), Guid))
+			{
+				if (Track && !Track->GetAllSections().IsEmpty())
+				{
+					return Cast<UMovieScene2DTransformSection>(Track->GetAllSections()[0]);
 				}
 			}
 			return nullptr;
@@ -215,8 +281,13 @@ namespace HyperAIStudio::UI::Animation
 			return Editors && Editors->FindEditorForAsset(&Blueprint, /*bFocusIfOpen=*/false) != nullptr;
 		}
 
+		/**
+		 * Checks every op in order against the Widget Blueprint as the earlier ops leave it: widgets the plan adds
+		 * can be laid out, given navigation and animated in the same plan.
+		 */
 		bool ValidateOps(const UWidgetBlueprint& Blueprint, const TArray<FHyperAIUIPlanOperation>& Operations, TArray<FString>& OutNotes, FString& OutError)
 		{
+			WidgetOps::FPlannedTree Tree(Blueprint);
 			TMap<FString, double> Lengths;
 			for (const UWidgetAnimation* Animation : Blueprint.Animations)
 			{
@@ -231,11 +302,19 @@ namespace HyperAIStudio::UI::Animation
 					OutError = FString::Printf(TEXT("Op %d (%s): %s"), Index, *Operation.Kind, *Message);
 					return false;
 				};
+				if (WidgetOps::IsWidgetOp(Operation.Kind))
+				{
+					FString Note;
+					FString Error;
+					if (!WidgetOps::Validate(Operation, Blueprint, Tree, Note, Error)) return Fail(Error);
+					OutNotes.Add(Note);
+					continue;
+				}
 				if (Operation.Kind == TEXT("animation.create"))
 				{
 					if (!IsIdentifier(Operation.Name)) return Fail(TEXT("name must be an identifier (letters, digits and _, up to 64)."));
 					if (Lengths.Contains(Operation.Name)) return Fail(FString::Printf(TEXT("the blueprint already has an animation named %s."), *Operation.Name));
-					if (Blueprint.WidgetTree && Blueprint.WidgetTree->FindWidget(FName(*Operation.Name)))
+					if (Tree.Widgets.Contains(FName(*Operation.Name)))
 					{
 						return Fail(FString::Printf(TEXT("%s is already a widget's name; animations are variables and need their own."), *Operation.Name));
 					}
@@ -248,44 +327,74 @@ namespace HyperAIStudio::UI::Animation
 					OutNotes.Add(FString::Printf(TEXT("%s: %g s"), *Operation.Name, Length));
 					continue;
 				}
-				const UWidget* Widget = FindWidget(Blueprint, Operation.SubjectId);
-				if (!Widget)
+				if (!IsTrackKind(Operation.Kind))
 				{
-					TArray<FString> Names;
-					if (Blueprint.WidgetTree)
-					{
-						Blueprint.WidgetTree->ForEachWidget([&Names](const UWidget* Each) { if (Each && Names.Num() < 32) Names.Add(Each->GetName()); });
-					}
-					return Fail(FString::Printf(TEXT("no widget named '%s'; it has %s."), *WidgetNameOf(Operation.SubjectId),
-						Names.IsEmpty() ? TEXT("none") : *FString::Join(Names, TEXT(", "))));
+					return Fail(TEXT("this kind does not run in an edit plan."));
+				}
+				const FString WidgetName = WidgetOps::WidgetNameOf(Operation.SubjectId);
+				const WidgetOps::FPlannedWidget* Widget = Tree.Find(WidgetName);
+				if (!Widget || !Widget->Class)
+				{
+					return Fail(FString::Printf(TEXT("no widget named '%s'; it has %s."), *WidgetName, *Tree.Names()));
 				}
 				const double* Length = Lengths.Find(Operation.SecondaryName);
 				if (!Length)
 				{
 					return Fail(FString::Printf(TEXT("no animation named '%s'; create it first in this plan with animation.create."), *Operation.SecondaryName));
 				}
-				if (!FName(*Operation.Name).IsEqual(OpacityProperty, ENameCase::IgnoreCase))
+				const bool bTransform = Operation.Kind == TEXT("animation.add_transform_track");
+				FName Property = OpacityProperty;
+				if (bTransform)
 				{
-					return Fail(TEXT("name must be RenderOpacity, the one property float tracks animate so far."));
+					if (!FindTransformChannel(Operation.Name))
+					{
+						return Fail(TEXT("name is the transform channel: translation_x, translation_y, angle, scale_x, scale_y, shear_x or shear_y."));
+					}
+				}
+				else
+				{
+					const FProperty* Float = WidgetOps::FindAnimatableFloat(*Widget->Class, Operation.Name);
+					if (!Float)
+					{
+						return Fail(FString::Printf(TEXT("%s is not a float property of %s that an animation can key. It has: %s. Move, turn and scale widgets with animation.add_transform_track."),
+							*Operation.Name, *Widget->Class->GetName(), *WidgetOps::AnimatableFloatNames(*Widget->Class)));
+					}
+					Property = Float->GetFName();
 				}
 				TArray<FKey> Keys;
 				FString KeyError;
-				if (!ParseKeys(Operation.StringValue, *Length, Keys, KeyError)) return Fail(KeyError);
-				const FString Track = Operation.SecondaryName + TEXT("|") + Widget->GetName();
-				if (Tracks.Contains(Track)) return Fail(TEXT("the plan already sets this widget's RenderOpacity track in that animation."));
+				if (!ParseKeys(Operation.StringValue, *Length, !bTransform && IsUnitRange(Property), Keys, KeyError)) return Fail(KeyError);
+				const FString Track = Operation.SecondaryName + TEXT("|") + WidgetName + TEXT("|") + (bTransform ? Operation.Name.ToLower() : Property.ToString());
+				if (Tracks.Contains(Track)) return Fail(TEXT("the plan already keys this widget's channel in that animation."));
 				Tracks.Add(Track);
-				OutNotes.Add(FString::Printf(TEXT("%s: %s.RenderOpacity %g to %g over %d keys"), *Operation.SecondaryName, *Widget->GetName(),
-					Keys[0].Value, Keys.Last().Value, Keys.Num()));
+				OutNotes.Add(FString::Printf(TEXT("%s: %s.%s %g to %g over %d keys"), *Operation.SecondaryName, *WidgetName,
+					bTransform ? *Operation.Name.ToLower() : *Property.ToString(), Keys[0].Value, Keys.Last().Value, Keys.Num()));
 			}
 			return true;
 		}
 
-		void ApplyOps(UWidgetBlueprint& Blueprint, const TArray<FHyperAIUIPlanOperation>& Operations)
+		void AddKeys(FMovieSceneFloatChannel& Channel, const UMovieScene& Scene, const TArray<FKey>& Keys, const bool bCubic)
+		{
+			Channel.Reset();
+			for (const FKey& Key : Keys)
+			{
+				const FFrameNumber Frame = (Key.Time * Scene.GetTickResolution()).RoundToFrame();
+				if (bCubic) Channel.AddCubicKey(Frame, Key.Value);
+				else Channel.AddLinearKey(Frame, Key.Value);
+			}
+		}
+
+		bool ApplyOps(UWidgetBlueprint& Blueprint, const TArray<FHyperAIUIPlanOperation>& Operations, FString& OutError)
 		{
 			Blueprint.Modify();
 			const int32 DisplayRate = FMath::Max(1, GetDefault<UUMGEditorProjectSettings>()->DefaultWidgetAnimationFrameRate);
 			for (const FHyperAIUIPlanOperation& Operation : Operations)
 			{
+				if (WidgetOps::IsWidgetOp(Operation.Kind))
+				{
+					if (!WidgetOps::Apply(Blueprint, Operation, OutError)) return false;
+					continue;
+				}
 				if (Operation.Kind == TEXT("animation.create"))
 				{
 					// The Animations tab's recipe: its own movie scene, a playback range, then a blueprint variable.
@@ -307,15 +416,16 @@ namespace HyperAIStudio::UI::Animation
 				}
 				UWidgetAnimation* Animation = FindAnimation(Blueprint, Operation.SecondaryName);
 				UWidget* Widget = FindWidget(Blueprint, Operation.SubjectId);
-				UMovieScene* Scene = Animation->GetMovieScene();
+				UMovieScene* Scene = Animation ? Animation->GetMovieScene() : nullptr;
+				if (!Scene || !Widget)
+				{
+					OutError = FString::Printf(TEXT("%s or its animation %s is gone."), *Operation.SubjectId, *Operation.SecondaryName);
+					return false;
+				}
 				Animation->Modify();
 				Scene->Modify();
 				// A direct binding by widget name, the shape BindPossessableObject writes for a non-slot widget.
-				FGuid Guid;
-				for (const FWidgetAnimationBinding& Binding : Animation->AnimationBindings)
-				{
-					if (Binding.WidgetName == Widget->GetFName() && Binding.SlotWidgetName.IsNone()) Guid = Binding.AnimationGuid;
-				}
+				FGuid Guid = FindBinding(*Animation, Widget->GetFName());
 				if (!Guid.IsValid())
 				{
 					Guid = Scene->AddPossessable(Widget->GetName(), Widget->GetClass());
@@ -325,34 +435,85 @@ namespace HyperAIStudio::UI::Animation
 					Binding.bIsRootWidget = false;
 					Animation->AnimationBindings.Add(Binding);
 				}
+				TArray<FKey> Keys;
+				FString Unused;
+				const bool bCubic = Operation.bHasBoolValue && Operation.bBoolValue;
+				if (Operation.Kind == TEXT("animation.add_transform_track"))
+				{
+					const FTransformChannel* Channel = FindTransformChannel(Operation.Name);
+					ParseKeys(Operation.StringValue, LengthOf(*Animation), /*bUnitRange=*/false, Keys, Unused);
+					UMovieScene2DTransformSection* Section = FindTransformSection(*Animation, Widget->GetFName());
+					if (!Section)
+					{
+						UMovieScene2DTransformTrack* Track = Scene->AddTrack<UMovieScene2DTransformTrack>(Guid);
+						Track->SetPropertyNameAndPath(TransformProperty, TransformProperty.ToString());
+						Section = CastChecked<UMovieScene2DTransformSection>(Track->CreateNewSection());
+						Section->SetRange(Scene->GetPlaybackRange());
+						// Only keyed channels animate; the rest keep the widget's own transform.
+						Section->SetMask(FMovieScene2DTransformMask(EMovieScene2DTransformChannel::None));
+						Track->AddSection(*Section);
+					}
+					Section->Modify();
+					Section->SetMask(FMovieScene2DTransformMask(Section->GetMask().GetChannels() | Channel->Bit));
+					AddKeys(ChannelOf(*Section, Channel->Bit), *Scene, Keys, bCubic);
+					continue;
+				}
+				const FProperty* Float = WidgetOps::FindAnimatableFloat(*Widget->GetClass(), Operation.Name);
+				const FName Property = Float ? Float->GetFName() : OpacityProperty;
+				ParseKeys(Operation.StringValue, LengthOf(*Animation), IsUnitRange(Property), Keys, Unused);
 				for (UMovieSceneTrack* Existing : Scene->FindTracks(UMovieSceneFloatTrack::StaticClass(), Guid))
 				{
-					const UMovieSceneFloatTrack* Float = Cast<UMovieSceneFloatTrack>(Existing);
-					if (Float && Float->GetPropertyName() == OpacityProperty) Scene->RemoveTrack(*Existing);
+					const UMovieSceneFloatTrack* Previous = Cast<UMovieSceneFloatTrack>(Existing);
+					if (Previous && Previous->GetPropertyName() == Property) Scene->RemoveTrack(*Existing);
 				}
 				UMovieSceneFloatTrack* Track = Scene->AddTrack<UMovieSceneFloatTrack>(Guid);
-				Track->SetPropertyNameAndPath(OpacityProperty, OpacityProperty.ToString());
+				Track->SetPropertyNameAndPath(Property, Property.ToString());
 				UMovieSceneFloatSection* Section = CastChecked<UMovieSceneFloatSection>(Track->CreateNewSection());
 				Section->SetRange(Scene->GetPlaybackRange());
 				Track->AddSection(*Section);
-				TArray<FKey> Keys;
-				FString Unused;
-				ParseKeys(Operation.StringValue, LengthOf(*Animation), Keys, Unused);
-				const bool bCubic = Operation.bHasBoolValue && Operation.bBoolValue;
-				for (const FKey& Key : Keys)
-				{
-					const FFrameNumber Frame = (Key.Time * Scene->GetTickResolution()).RoundToFrame();
-					if (bCubic) Section->GetChannel().AddCubicKey(Frame, Key.Value);
-					else Section->GetChannel().AddLinearKey(Frame, Key.Value);
-				}
+				AddKeys(Section->GetChannel(), *Scene, Keys, bCubic);
 			}
 			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(&Blueprint);
+			return true;
+		}
+
+		/** After compile: every op's effect is in the Widget Blueprint, or the name of the first that is not. */
+		bool AllLanded(const UWidgetBlueprint& Blueprint, const TArray<FHyperAIUIPlanOperation>& Operations, FString& OutMissing)
+		{
+			for (const FHyperAIUIPlanOperation& Operation : Operations)
+			{
+				if (WidgetOps::IsWidgetOp(Operation.Kind))
+				{
+					if (!WidgetOps::Landed(Blueprint, Operation, OutMissing)) return false;
+					continue;
+				}
+				const bool bCreate = Operation.Kind == TEXT("animation.create");
+				const UWidgetAnimation* Animation = FindAnimation(Blueprint, bCreate ? Operation.Name : Operation.SecondaryName);
+				const UWidget* Widget = bCreate ? nullptr : FindWidget(Blueprint, Operation.SubjectId);
+				OutMissing = bCreate ? Operation.Name : Operation.SecondaryName + TEXT(" ") + Operation.SubjectId + TEXT(".") + Operation.Name;
+				if (!Animation) return false;
+				if (bCreate) continue;
+				if (!Widget) return false;
+				if (Operation.Kind == TEXT("animation.add_transform_track"))
+				{
+					UMovieScene2DTransformSection* Section = FindTransformSection(*Animation, Widget->GetFName());
+					const FTransformChannel* Channel = FindTransformChannel(Operation.Name);
+					if (!Section || !Channel || !EnumHasAnyFlags(Section->GetMask().GetChannels(), Channel->Bit)
+						|| ChannelOf(*Section, Channel->Bit).GetNumKeys() == 0) return false;
+					continue;
+				}
+				const FProperty* Float = WidgetOps::FindAnimatableFloat(*Widget->GetClass(), Operation.Name);
+				const UMovieSceneFloatSection* Section = Float ? FindFloatSection(*Animation, Widget->GetFName(), Float->GetFName()) : nullptr;
+				if (!Section || Section->GetChannel().GetNumKeys() == 0) return false;
+			}
+			OutMissing.Reset();
+			return true;
 		}
 
 		FString ComputeSemanticFingerprint(const FHyperAIStudioUIAnimationPayload& Payload)
 		{
 			FString Canonical;
-			AppendToken(Canonical, TEXT("hyperai.ui.widget-animation-intent.v1"));
+			AppendToken(Canonical, TEXT("hyperai.ui.widget-edit-intent.v2"));
 			AppendToken(Canonical, Payload.TargetPath);
 			AppendToken(Canonical, Payload.BaseRevision);
 			for (const FHyperAIUIPlanOperation& Operation : Payload.Operations)
@@ -362,8 +523,10 @@ namespace HyperAIStudio::UI::Animation
 				AppendToken(Canonical, Operation.SecondaryName);
 				AppendToken(Canonical, Operation.Name);
 				AppendToken(Canonical, Operation.StringValue);
-				AppendToken(Canonical, FString::Printf(TEXT("%d|%.17g|%d|%d|%d|%d"), Operation.bHasNumberValue ? 1 : 0, Operation.NumberValue,
-					Operation.StartFrame, Operation.EndFrame, Operation.bHasBoolValue ? 1 : 0, Operation.bBoolValue ? 1 : 0));
+				AppendToken(Canonical, Operation.ExpectedElementFingerprint);
+				AppendToken(Canonical, FString::Printf(TEXT("%d|%.17g|%d|%d|%d|%d|%d|%.9g|%.9g|%.9g|%.9g"), Operation.bHasNumberValue ? 1 : 0, Operation.NumberValue,
+					Operation.StartFrame, Operation.EndFrame, Operation.bHasBoolValue ? 1 : 0, Operation.bBoolValue ? 1 : 0, Operation.bHasColorValue ? 1 : 0,
+					Operation.ColorValue.R, Operation.ColorValue.G, Operation.ColorValue.B, Operation.ColorValue.A));
 			}
 			return FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(Canonical);
 		}
@@ -374,7 +537,7 @@ namespace HyperAIStudio::UI::Animation
 			auto Finish = [&](const EHyperAIStudioDomainDispatchOutcome Outcome, const FString& Status, const FString& Diagnostic,
 				const TCHAR* ResultPhase = nullptr, const FString& Key = FString())
 			{
-				UE_LOG(LogHyperAIStudioUIAnimation, Log, TEXT("Widget animation phase %d finished %s. %s"), static_cast<int32>(Phase), *Status, *Diagnostic);
+				UE_LOG(LogHyperAIStudioUIAnimation, Log, TEXT("Widget edit phase %d finished %s. %s"), static_cast<int32>(Phase), *Status, *Diagnostic);
 				Result.Outcome = Outcome;
 				Result.StatusCode = Status.Left(FHyperAIStudioDomainLimits::MaxStatusCodeChars);
 				Result.Diagnostic = Diagnostic.Left(FHyperAIStudioDomainLimits::MaxDiagnosticChars);
@@ -394,7 +557,7 @@ namespace HyperAIStudio::UI::Animation
 				: EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect;
 			if (!IsInGameThread())
 			{
-				return Finish(FailedOutcome, TEXT("game_thread_required"), TEXT("Widget animation edits run on the game thread."));
+				return Finish(FailedOutcome, TEXT("game_thread_required"), TEXT("Widget Blueprint edits run on the game thread."));
 			}
 			UWidgetBlueprint* Blueprint = FindObject<UWidgetBlueprint>(nullptr, *Payload.TargetPath);
 			if (!Blueprint)
@@ -415,9 +578,15 @@ namespace HyperAIStudio::UI::Animation
 				{
 					return Finish(FailedOutcome, TEXT("stale_revision"), TEXT("The Widget Blueprint changed after planning; nothing was applied. ") + Error);
 				}
+				bool bApplied = false;
 				{
-					const FScopedTransaction Transaction(LOCTEXT("ApplyWidgetAnimationPlan", "HyperAI: Apply Widget Animation Plan"));
-					ApplyOps(*Blueprint, Payload.Operations);
+					const FScopedTransaction Transaction(LOCTEXT("ApplyWidgetAnimationPlan", "HyperAI: Apply Widget Blueprint Plan"));
+					bApplied = ApplyOps(*Blueprint, Payload.Operations, Error);
+				}
+				if (!bApplied)
+				{
+					return Finish(EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect, TEXT("edit_op_failed"),
+						Error + TEXT(" Earlier ops of the plan are in memory; undo reverts them."));
 				}
 				return Finish(EHyperAIStudioDomainDispatchOutcome::Succeeded, TEXT("applied"), FString::Join(Notes, TEXT("; ")), TEXT("applied"));
 			}
@@ -430,55 +599,53 @@ namespace HyperAIStudio::UI::Animation
 				}
 				return Finish(EHyperAIStudioDomainDispatchOutcome::Succeeded, TEXT("compiled"), TEXT("Compiled."), TEXT("compiled"));
 			case EHyperAIStudioDomainExecutionActionKind::Validate:
-				for (const FHyperAIUIPlanOperation& Operation : Payload.Operations)
+			{
+				FString Missing;
+				if (!AllLanded(*Blueprint, Payload.Operations, Missing))
 				{
-					const bool bCreate = Operation.Kind == TEXT("animation.create");
-					const UWidgetAnimation* Animation = FindAnimation(*Blueprint, bCreate ? Operation.Name : Operation.SecondaryName);
-					const UWidget* Widget = bCreate ? nullptr : FindWidget(*Blueprint, Operation.SubjectId);
-					const UMovieSceneFloatSection* Section = Animation && Widget ? FindOpacitySection(*Animation, *Widget) : nullptr;
-					if (!Animation || (!bCreate && (!Section || Section->GetChannel().GetNumKeys() == 0)))
-					{
-						return Finish(EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect, TEXT("animation_missing"),
-							FString::Printf(TEXT("%s did not land in the Widget Blueprint; undo reverts the edit."),
-								bCreate ? *Operation.Name : *(Operation.SecondaryName + TEXT(" ") + WidgetNameOf(Operation.SubjectId) + TEXT(".RenderOpacity"))));
-					}
+					return Finish(EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect, TEXT("edit_missing"),
+						FString::Printf(TEXT("%s did not land in the Widget Blueprint; undo reverts the edit."), *Missing));
 				}
-				return Finish(EHyperAIStudioDomainDispatchOutcome::Succeeded, TEXT("validated"), TEXT("Every animation and track is in place."), TEXT("validated"));
+				return Finish(EHyperAIStudioDomainDispatchOutcome::Succeeded, TEXT("validated"), TEXT("Every widget, setting, animation and track is in place."), TEXT("validated"));
+			}
 			case EHyperAIStudioDomainExecutionActionKind::Save:
 				if (!UEditorLoadingAndSavingUtils::SavePackages({Blueprint->GetOutermost()}, /*bOnlyDirty=*/false))
 				{
 					return Finish(EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect, TEXT("save_failed"),
-						TEXT("The animation changed but did not save; it remains in memory."));
+						TEXT("The Widget Blueprint changed but did not save; it remains in memory."));
 				}
 				return Finish(EHyperAIStudioDomainDispatchOutcome::Succeeded, TEXT("saved"), TEXT("Package saved."), TEXT("saved"));
 			case EHyperAIStudioDomainExecutionActionKind::VerifyFresh:
-				return Finish(EHyperAIStudioDomainDispatchOutcome::Succeeded, TEXT("fresh_captured"), TEXT("Animations captured for verification."),
+				return Finish(EHyperAIStudioDomainDispatchOutcome::Succeeded, TEXT("fresh_captured"), TEXT("Widget Blueprint captured for verification."),
 					TEXT("completed"), ComputeRevision(*Blueprint));
 			default:
-				return Finish(FailedOutcome, TEXT("unsupported_phase"), TEXT("Widget animation plans have no such phase."));
+				return Finish(FailedOutcome, TEXT("unsupported_phase"), TEXT("Widget Blueprint plans have no such phase."));
 			}
 		}
 	}
 
-	bool IsAnimationPlan(const TArray<FHyperAIUIPlanOperation>& Operations)
+	bool IsExecutablePlan(const TArray<FHyperAIUIPlanOperation>& Operations)
 	{
 		return !Operations.IsEmpty() && !Operations.ContainsByPredicate([](const FHyperAIUIPlanOperation& Operation)
 		{
-			return Operation.Kind != TEXT("animation.create") && Operation.Kind != TEXT("animation.add_float_track");
+			const bool bWidget = WidgetOps::IsWidgetOp(Operation.Kind);
+			// A widget op with a per-element fingerprint is the older staged-only contract; it keeps that route.
+			return !(Operation.Kind == TEXT("animation.create") || IsTrackKind(Operation.Kind)
+				|| (bWidget && Operation.ExpectedElementFingerprint.IsEmpty()));
 		});
 	}
 
 	FString ComputeRevision(const UWidgetBlueprint& Blueprint)
 	{
 		FString Canonical;
-		AppendToken(Canonical, TEXT("hyperai.ui.widget-animation-revision.v1"));
+		AppendToken(Canonical, TEXT("hyperai.ui.widget-edit-revision.v2"));
 		AppendToken(Canonical, Blueprint.GetPathName());
+		// The saved package and whether it is dirty catch any property edit made outside a plan since.
+		const UPackage* Package = Blueprint.GetOutermost();
+		AppendToken(Canonical, Package ? LexToString(Package->GetSavedHash()) : FString());
+		AppendToken(Canonical, Package && Package->IsDirty() ? TEXT("dirty") : TEXT("clean"));
 		TArray<FString> Widgets;
-		if (Blueprint.WidgetTree)
-		{
-			Blueprint.WidgetTree->ForEachWidget([&Widgets](const UWidget* Widget) { if (Widget) Widgets.Add(Widget->GetName()); });
-		}
-		Widgets.Sort();
+		WidgetOps::AppendTreeRevision(Blueprint, Widgets);
 		for (const FString& Widget : Widgets) AppendToken(Canonical, Widget);
 		for (const UWidgetAnimation* Animation : Blueprint.Animations)
 		{
@@ -494,21 +661,39 @@ namespace HyperAIStudio::UI::Animation
 			for (const FWidgetAnimationBinding& Binding : Animation->AnimationBindings)
 			{
 				AppendToken(Canonical, Binding.WidgetName.ToString() + TEXT("|") + Binding.SlotWidgetName.ToString() + TEXT("|") + Binding.AnimationGuid.ToString());
+				auto AppendChannel = [&Canonical](const TCHAR* Label, const FMovieSceneFloatChannel& Channel)
+				{
+					AppendToken(Canonical, Label);
+					const TArrayView<const FFrameNumber> Times = Channel.GetTimes();
+					const TArrayView<const FMovieSceneFloatValue> Values = Channel.GetValues();
+					for (int32 Index = 0; Index < Times.Num() && Index < Values.Num(); ++Index)
+					{
+						AppendToken(Canonical, FString::Printf(TEXT("%d=%.9g/%d"), Times[Index].Value, Values[Index].Value, static_cast<int32>(Values[Index].InterpMode)));
+					}
+				};
 				for (UMovieSceneTrack* Track : Scene->FindTracks(UMovieSceneFloatTrack::StaticClass(), Binding.AnimationGuid))
 				{
 					const UMovieSceneFloatTrack* Float = Cast<UMovieSceneFloatTrack>(Track);
 					if (!Float) continue;
-					AppendToken(Canonical, Float->GetPropertyName().ToString());
 					for (const UMovieSceneSection* Section : Float->GetAllSections())
 					{
-						const UMovieSceneFloatSection* FloatSection = Cast<UMovieSceneFloatSection>(Section);
-						if (!FloatSection) continue;
-						const FMovieSceneFloatChannel& Channel = FloatSection->GetChannel();
-						const TArrayView<const FFrameNumber> Times = Channel.GetTimes();
-						const TArrayView<const FMovieSceneFloatValue> Values = Channel.GetValues();
-						for (int32 Index = 0; Index < Times.Num() && Index < Values.Num(); ++Index)
+						if (const UMovieSceneFloatSection* FloatSection = Cast<UMovieSceneFloatSection>(Section))
 						{
-							AppendToken(Canonical, FString::Printf(TEXT("%d=%.9g/%d"), Times[Index].Value, Values[Index].Value, static_cast<int32>(Values[Index].InterpMode)));
+							AppendChannel(*Float->GetPropertyName().ToString(), FloatSection->GetChannel());
+						}
+					}
+				}
+				for (UMovieSceneTrack* Track : Scene->FindTracks(UMovieScene2DTransformTrack::StaticClass(), Binding.AnimationGuid))
+				{
+					if (!Track) continue;
+					for (UMovieSceneSection* Section : Track->GetAllSections())
+					{
+						UMovieScene2DTransformSection* Transform = Cast<UMovieScene2DTransformSection>(Section);
+						if (!Transform) continue;
+						AppendToken(Canonical, FString::Printf(TEXT("transform|%u"), static_cast<uint32>(Transform->GetMask().GetChannels())));
+						for (const FTransformChannel& Channel : TransformChannels)
+						{
+							AppendChannel(Channel.Name, ChannelOf(*Transform, Channel.Bit));
 						}
 					}
 				}
@@ -533,7 +718,7 @@ namespace HyperAIStudio::UI::Animation
 		};
 		if (!IsInGameThread())
 		{
-			return Reject(TEXT("game_thread_required"), TEXT("Widget animation planning runs on the game thread."));
+			return Reject(TEXT("game_thread_required"), TEXT("Widget Blueprint planning runs on the game thread."));
 		}
 		if (!FHyperAIStudioUIContracts::IsCanonicalProjectObjectPath(Request.TargetPath)
 			|| Request.Operations.Num() > FHyperAIStudioUIContracts::MaxOperations
@@ -553,11 +738,11 @@ namespace HyperAIStudio::UI::Animation
 		UWidgetBlueprint* Blueprint = Cast<UWidgetBlueprint>(FSoftObjectPath(Request.TargetPath).TryLoad());
 		if (!Blueprint || Blueprint->GetPathName() != Request.TargetPath)
 		{
-			return Reject(TEXT("target_not_found"), FString::Printf(TEXT("No Widget Blueprint at %s; create it (and its widgets) first."), *Request.TargetPath));
+			return Reject(TEXT("target_not_found"), FString::Printf(TEXT("No Widget Blueprint at %s; create it first (Epic's UMGToolSet or the Content Browser)."), *Request.TargetPath));
 		}
 		if (IsOpenInEditor(*Blueprint))
 		{
-			return Reject(TEXT("target_open_in_editor"), TEXT("Close the Widget Blueprint's editor tab first, so its animations change in one place."));
+			return Reject(TEXT("target_open_in_editor"), TEXT("Close the Widget Blueprint's editor tab first, so it changes in one place."));
 		}
 		TArray<FString> Notes;
 		FString Error;
@@ -571,12 +756,22 @@ namespace HyperAIStudio::UI::Animation
 		Payload->BaseRevision = ComputeRevision(*Blueprint);
 		Payload->Operations = Request.Operations;
 		Payload->SemanticFingerprint = ComputeSemanticFingerprint(*Payload);
+		if (Payload->GetBoundedByteSize() > FHyperAIStudioDomainLimits::MaxRequestBytes)
+		{
+			return Reject(TEXT("payload_bound_exceeded"), TEXT("The ops exceed the bounded request size; split them into smaller plans."));
+		}
 		Report.BasePersistedFingerprint = Payload->BaseRevision;
 		Report.SemanticFingerprint = Payload->SemanticFingerprint;
 		Report.PlanHash = Payload->SemanticFingerprint;
 		for (const FHyperAIUIPlanOperation& Operation : Request.Operations)
 		{
-			++(Operation.Kind == TEXT("animation.create") ? Report.Effects.AnimationCreates : Report.Effects.AnimationEdits);
+			if (Operation.Kind == TEXT("animation.create")) ++Report.Effects.AnimationCreates;
+			else if (IsTrackKind(Operation.Kind)) ++Report.Effects.AnimationEdits;
+			else if (Operation.Kind == TEXT("widget.add")) ++Report.Effects.WidgetAdds;
+			else if (Operation.Kind == TEXT("widget.set_style")) ++Report.Effects.StyleEdits;
+			else if (Operation.Kind == TEXT("widget.set_slot")) ++Report.Effects.SlotEdits;
+			else if (Operation.Kind == TEXT("widget.set_navigation")) ++Report.Effects.NavigationEdits;
+			else ++Report.Effects.PropertyEdits;
 		}
 		Report.Effects.OperationCount = Request.Operations.Num();
 		Report.Effects.bWouldCompileOnce = Report.Effects.bWouldSaveOnce = Report.Effects.bWouldValidateOnce = Report.Effects.bWouldVerifyFreshOnce = true;
@@ -618,12 +813,12 @@ namespace HyperAIStudio::UI::Animation
 			Report.bOk = true;
 			Report.Status = TEXT("planned");
 			Report.Diagnostic = FString::Join(Notes, TEXT("; "))
-				+ TEXT(". Nothing changed. To apply, resubmit with bDryRun false and an operation_id (expected_plan_hash optional), then call hyper_operation_wait.");
+				+ TEXT(". Nothing changed. To apply, resubmit with bDryRun false and an operation_id (expected_plan_hash optional).");
 			return Report;
 		}
 		if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 		{
-			return Reject(TEXT("plan_hash_mismatch"), TEXT("The plan changed since its dry run (ops or the blueprint's animations). Dry-run again and review it."));
+			return Reject(TEXT("plan_hash_mismatch"), TEXT("The plan changed since its dry run (ops or the Widget Blueprint). Dry-run again and review it."));
 		}
 		if (FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::Edit))
 		{
@@ -659,7 +854,7 @@ namespace HyperAIStudio::UI::Animation
 		Report.bOk = true;
 		Report.Status = QueueStatus;
 		Report.Diagnostic = FString::Join(Notes, TEXT("; "))
-			+ TEXT(". The edit, compile and save run over the next editor ticks. Call hyper_operation_wait with operation_id.");
+			+ TEXT(". The edit, compile and save run over the next editor ticks.");
 		return Report;
 	}
 }
@@ -679,7 +874,8 @@ int32 FHyperAIStudioUIAnimationPayload::GetBoundedByteSize() const
 	int64 Size = 256 + 2ll * (TargetPath.Len() + BaseRevision.Len() + SemanticFingerprint.Len());
 	for (const FHyperAIUIPlanOperation& Operation : Operations)
 	{
-		Size += 96 + 2ll * (Operation.Kind.Len() + Operation.SubjectId.Len() + Operation.SecondaryName.Len() + Operation.Name.Len() + Operation.StringValue.Len());
+		Size += 128 + 2ll * (Operation.Kind.Len() + Operation.SubjectId.Len() + Operation.SecondaryName.Len() + Operation.Name.Len()
+			+ Operation.StringValue.Len() + Operation.ExpectedElementFingerprint.Len());
 	}
 	return HyperAIStudio::UI::Animation::ClampBytes(Size);
 }
@@ -745,8 +941,8 @@ const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioUIAnimationAdapter::D
 		FHyperAIStudioDomainAdapterDescriptor Value;
 		Value.PackId = FHyperAIStudioUIContracts::PackId;
 		Value.AdapterId = TEXT("adapter.ui.widget_animation.ue58");
-		Value.SemanticVersion = TEXT("1.0.0");
-		Value.AdapterVersion = 1;
+		Value.SemanticVersion = TEXT("2.0.0");
+		Value.AdapterVersion = 2;
 		Value.Variants.Add({TEXT("hyper_ui_inspect"), InspectVariantId, InspectPayloadTypeId, InspectPayloadSchema(),
 			InspectResultTypeId, InspectResultSchema(), EHyperAIStudioDomainSafety::Read});
 		Value.Variants.Add({TEXT("hyper_ui_apply_plan"), VariantId, PayloadTypeId, PayloadSchema(),
@@ -796,16 +992,16 @@ FHyperAIStudioDomainAdapterResult FHyperAIStudioUIAnimationAdapter::Execute(
 	if (Matches(TEXT("hyper_ui_apply_plan"), VariantId, EHyperAIStudioDomainSafety::Edit, PayloadTypeId, PayloadSchema()))
 	{
 		const FHyperAIStudioUIAnimationPayload& Typed = static_cast<const FHyperAIStudioUIAnimationPayload&>(Payload);
-		if (!IsAnimationPlan(Typed.Operations) || ComputeSemanticFingerprint(Typed) != Typed.SemanticFingerprint)
+		if (!IsExecutablePlan(Typed.Operations) || ComputeSemanticFingerprint(Typed) != Typed.SemanticFingerprint)
 		{
 			Result.StatusCode = TEXT("typed_payload_drift");
-			Result.Diagnostic = TEXT("The sealed widget animation payload drifted.");
+			Result.Diagnostic = TEXT("The sealed Widget Blueprint plan drifted.");
 			return Result;
 		}
 		return ExecutePhase(Context.ActionKind, Typed);
 	}
 	Result.StatusCode = TEXT("typed_binding_mismatch");
-	Result.Diagnostic = TEXT("Widget animation adapter rejected a non-exact tool, variant, safety, schema, or DTO binding.");
+	Result.Diagnostic = TEXT("Widget Blueprint adapter rejected a non-exact tool, variant, safety, schema, or DTO binding.");
 	return Result;
 }
 
@@ -822,11 +1018,11 @@ bool FHyperAIStudioUIAnimationFreshVerifier::ResolveCanonicalEffectTarget(
 	OutError.Reset();
 	if (Request.GetTypeId() != PayloadTypeId || Request.GetSchemaFingerprint() != PayloadSchema())
 	{
-		OutError = TEXT("Fresh verifier received the wrong typed widget animation request schema.");
+		OutError = TEXT("Fresh verifier received the wrong typed Widget Blueprint request schema.");
 		return false;
 	}
 	const FHyperAIStudioUIAnimationPayload& Typed = static_cast<const FHyperAIStudioUIAnimationPayload&>(Request);
-	if (!FHyperAIStudioUIContracts::IsCanonicalProjectObjectPath(Typed.TargetPath) || !IsAnimationPlan(Typed.Operations)
+	if (!FHyperAIStudioUIContracts::IsCanonicalProjectObjectPath(Typed.TargetPath) || !IsExecutablePlan(Typed.Operations)
 		|| ComputeSemanticFingerprint(Typed) != Typed.SemanticFingerprint)
 	{
 		OutError = TEXT("Fresh verifier rejected the canonical target or semantic seal.");
@@ -844,7 +1040,7 @@ bool FHyperAIStudioUIAnimationFreshVerifier::VerifyFreshExact(
 	OutError.Reset();
 	if (!IsInGameThread())
 	{
-		OutError = TEXT("Fresh widget animation verification requires the game thread.");
+		OutError = TEXT("Fresh Widget Blueprint verification requires the game thread.");
 		return false;
 	}
 	FString Target;
@@ -864,7 +1060,7 @@ bool FHyperAIStudioUIAnimationFreshVerifier::VerifyFreshExact(
 	const FString Key = ComputeRevision(*Blueprint);
 	if (Key != TypedResult.ContentKey)
 	{
-		OutError = TEXT("The Widget Blueprint's animations changed between fresh capture and verification.");
+		OutError = TEXT("The Widget Blueprint changed between fresh capture and verification.");
 		return false;
 	}
 	if (Blueprint->GetOutermost()->IsDirty())
@@ -873,7 +1069,7 @@ bool FHyperAIStudioUIAnimationFreshVerifier::VerifyFreshExact(
 		return false;
 	}
 	OutPostconditionHash = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("hyperai.ui.widget-animation-postcondition.v1|") + Typed.SemanticFingerprint + TEXT("|") + Key);
+		TEXT("hyperai.ui.widget-edit-postcondition.v2|") + Typed.SemanticFingerprint + TEXT("|") + Key);
 	if (!FHyperAIStudioUIContracts::IsCanonicalSha256(OutPostconditionHash))
 	{
 		OutError = TEXT("Bounded postcondition hashing failed.");
@@ -891,7 +1087,7 @@ void FHyperAIStudioUIAnimationBackend::Register()
 	if (!FHyperAIStudioTrustedExecutionFacade::RegisterAdapter(Adapter.ToSharedRef(), AdapterHandle, Error)
 		|| !FHyperAIStudioTrustedExecutionFacade::RegisterLiveProbe(AdapterHandle, FHyperAIStudioUIContracts::LiveProbeId, ProbeHandle, Error))
 	{
-		UE_LOG(LogHyperAIStudioUIAnimation, Warning, TEXT("Widget animation plans stay staged-only: %s"), *Error);
+		UE_LOG(LogHyperAIStudioUIAnimation, Warning, TEXT("Widget Blueprint plans stay staged-only: %s"), *Error);
 		Unregister();
 		return;
 	}
@@ -905,7 +1101,7 @@ void FHyperAIStudioUIAnimationBackend::Register()
 	};
 	if (!ProbePublisher.Start(ProbeHandle, Observe, Error))
 	{
-		UE_LOG(LogHyperAIStudioUIAnimation, Warning, TEXT("Widget animation plans stay staged-only: the live probe did not start: %s"), *Error);
+		UE_LOG(LogHyperAIStudioUIAnimation, Warning, TEXT("Widget Blueprint plans stay staged-only: the live probe did not start: %s"), *Error);
 		Unregister();
 	}
 }

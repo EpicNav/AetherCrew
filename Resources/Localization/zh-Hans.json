@@ -1528,8 +1528,8 @@
   {
    "namespace": "HyperAIStudioUIAnimation",
    "key": "ApplyWidgetAnimationPlan",
-   "source": "HyperAI: Apply Widget Animation Plan",
-   "text": "HyperAI：应用控件动画计划"
+   "source": "HyperAI: Apply Widget Blueprint Plan",
+   "text": "HyperAI：应用控件蓝图计划"
   },
   {
    "namespace": "SHyperAIStudioAgentsPanel",
@@ -1546,8 +1546,8 @@
   {
    "namespace": "SHyperAIStudioAgentsPanel",
    "key": "AddTheTeamTooltip",
-   "source": "Add HyperAI's team: a director, a programmer, a level designer, a lighting artist, a technical artist and a QA tester, each with its quality bar, and the workflow that runs them together. Nothing you already have is overwritten.",
-   "text": "添加 HyperAI 的团队：导演、程序员、关卡设计师、灯光师、技术美术和 QA 测试员，各有自己的质量标准，以及让他们协同工作的工作流。你已有的内容不会被覆盖。"
+   "source": "Add HyperAI's team: a director, a programmer, a level designer, a lighting artist, a technical artist, a UI designer and a QA tester, each with its quality bar, and the workflow that runs them together. Nothing you already have is overwritten.",
+   "text": "添加 HyperAI 的团队：导演、程序员、关卡设计师、灯光师、技术美术、UI 设计师和 QA 测试员，各有自己的质量标准，以及让他们协同工作的工作流。你已有的内容不会被覆盖。"
   },
   {
    "namespace": "SHyperAIStudioAgentsPanel",
@@ -3454,8 +3454,8 @@
   {
    "namespace": "SHyperAIStudioNativeChatView",
    "key": "TeamTooltip",
-   "source": "Send your messages to HyperAI's team, not to this agent alone. The director plans the work, the programmer, level designer, lighting artist and technical artist build their parts at once, the QA tester proves each part, and the director reviews it all against the team's quality bar. The first time, this adds the team to the project.",
-   "text": "把你的消息交给 HyperAI 的团队，而不只是这个智能体。导演规划工作，程序员、关卡设计师、灯光师和技术美术同时完成各自的部分，QA 测试员验证每个部分，导演再按团队的质量标准审查全部成果。第一次使用时，会把团队添加到项目中。"
+   "source": "Send your messages to HyperAI's team, not to this agent alone. The director plans the work, the programmer, level designer, lighting artist, technical artist and UI designer build their parts at once, the QA tester proves each part, and the director reviews it all against the team's quality bar. The first time, this adds the team to the project.",
+   "text": "把你的消息交给 HyperAI 的团队，而不只是这个智能体。导演规划工作，程序员、关卡设计师、灯光师、技术美术和 UI 设计师同时完成各自的部分，QA 测试员验证每个部分，导演再按团队的质量标准审查全部成果。第一次使用时，会把团队添加到项目中。"
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",

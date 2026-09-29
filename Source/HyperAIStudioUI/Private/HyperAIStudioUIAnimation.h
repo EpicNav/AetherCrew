@@ -9,17 +9,19 @@
 class UWidgetBlueprint;
 
 /**
- * Widget animation authoring, the executable slice of ui_slate_mvvm. A plan made only of animation.create and
- * animation.add_float_track runs through the trusted executor: apply as one undo step, compile, check, save, verify
- * fresh. Every other UI plan keeps the persisted-shadow route and stays staged-only.
+ * Widget Blueprint authoring, the executable slice of ui_slate_mvvm. A plan of widget.add, widget.set_property,
+ * widget.set_style, widget.set_slot, widget.set_navigation, animation.create, animation.add_float_track and
+ * animation.add_transform_track runs through the trusted executor: apply as one undo step, compile, check each op
+ * landed, save, verify fresh. Plans with renames, deletes or bindings keep the persisted-shadow route, staged-only.
  */
 namespace HyperAIStudio::UI::Animation
 {
 	static constexpr const TCHAR* VariantId = TEXT("ui.widget_animation_edit.v1");
 
-	bool IsAnimationPlan(const TArray<FHyperAIUIPlanOperation>& Operations);
+	/** Every op is one the executor runs, and no widget op carries the older per-element fingerprint. */
+	bool IsExecutablePlan(const TArray<FHyperAIUIPlanOperation>& Operations);
 	FHyperAIUIApplyPlanReport BuildPlan(const FHyperAIUIApplyPlanRequest& Request);
-	/** Every animation's range, bindings, float tracks and keys, and the widget names, hashed. */
+	/** The saved package and its dirtiness, the widget tree with slots and navigation, and every animation's tracks and keys, hashed. */
 	FString ComputeRevision(const UWidgetBlueprint& Blueprint);
 }
 
