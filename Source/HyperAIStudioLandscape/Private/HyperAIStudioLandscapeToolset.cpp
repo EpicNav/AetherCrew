@@ -12,6 +12,7 @@
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioSourceControl.h"
 #include "ImageCore.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "Landscape.h"
 #include "LandscapeEdit.h"
@@ -19,6 +20,10 @@
 #include "LandscapeInfo.h"
 #include "LandscapeLayerInfoObject.h"
 #include "LandscapeProxy.h"
+#include "LandscapeSplineActor.h"
+#include "LandscapeSplineControlPoint.h"
+#include "LandscapeSplineSegment.h"
+#include "LandscapeSplinesComponent.h"
 #include "LandscapeSubsystem.h"
 #include "LandscapeUtils.h"
 #include "Materials/MaterialInterface.h"
@@ -527,6 +532,133 @@ namespace HyperAIStudio::LandscapeTools::Private
 			Info.EditLayers.IsEmpty() ? TEXT("none") : *FString::Join(Info.EditLayers, TEXT(", ")));
 	}
 
+	/** The ground's height (cm) under a world XY, from whichever of the landscape's proxies holds it. */
+	TOptional<double> GroundAt(ULandscapeInfo& Info, const FVector& Where)
+	{
+		TOptional<float> Height;
+		Info.ForEachLandscapeProxy([&Height, &Where](ALandscapeProxy* Proxy)
+		{
+			Height = Proxy->GetHeightAtLocation(Where, EHeightfieldSource::Editor);
+			return !Height.IsSet();
+		});
+		return Height.IsSet() ? TOptional<double>(Height.GetValue()) : TOptional<double>();
+	}
+
+	/**
+	 * A road as the landscape spline tool makes one: control points on the ground joined by segments, each point turned
+	 * along the road so it curves smoothly, then rendered into the landscape's splines edit layer.
+	 */
+	bool BuildRoad(UWorld& World, ALandscape& Landscape, ULandscapeInfo& Info, const FHyperAILandscapeOp& Op, TArray<FString>& OutNotes, FString& OutError)
+	{
+		TArray<FVector> Points;
+		for (const FVector& Point : Op.Points)
+		{
+			const TOptional<double> Ground = GroundAt(Info, Point);
+			if (!Ground.IsSet())
+			{
+				OutError = FString::Printf(TEXT("(%.0f, %.0f) is off the landscape."), Point.X, Point.Y);
+				return false;
+			}
+			Points.Add(FVector(Point.X, Point.Y, Ground.GetValue()));
+		}
+		// Splines shape the ground only through a splines edit layer.
+		if (!Landscape.FindLayerOfTypeConst(ULandscapeEditLayerSplines::StaticClass()))
+		{
+			if (Landscape.CreateLayer(FName(TEXT("Splines")), ULandscapeEditLayerSplines::StaticClass()) == INDEX_NONE)
+			{
+				OutError = TEXT("The landscape would not take a splines edit layer (it may have reached its edit layer limit).");
+				return false;
+			}
+			OutNotes.Add(FString::Printf(TEXT("%s: a Splines edit layer was added for its roads."), *Landscape.GetActorLabel()));
+		}
+		// World Partition keeps each road in its own spline actor; otherwise the road joins the landscape's splines.
+		ILandscapeSplineInterface* Owner = nullptr;
+		const ULandscapeSubsystem* Subsystem = World.GetSubsystem<ULandscapeSubsystem>();
+		if (Subsystem && Subsystem->IsGridBased())
+		{
+			ALandscapeSplineActor* Actor = Info.CreateSplineActor(Points[0]);
+			if (Actor && !Op.Road.TrimStartAndEnd().IsEmpty()) Actor->SetActorLabel(Op.Road.TrimStartAndEnd());
+			Owner = Actor;
+		}
+		else
+		{
+			Owner = Info.GetCurrentLevelLandscapeProxy(/*bRegistered=*/true);
+		}
+		if (!Owner || !Owner->IsSplineOwnerValid())
+		{
+			OutError = TEXT("The landscape has nowhere to keep a road's spline.");
+			return false;
+		}
+		if (!Owner->GetSplinesComponent()) Owner->CreateSplineComponent();
+		ULandscapeSplinesComponent* Splines = Owner->GetSplinesComponent();
+		if (!Splines)
+		{
+			OutError = TEXT("The landscape would not make a splines component.");
+			return false;
+		}
+		Splines->Modify();
+		UStaticMesh* Mesh = Load<UStaticMesh>(Op.Mesh);
+		const FName LayerName = Op.Layer.TrimStartAndEnd().IsEmpty() ? NAME_None : FName(*Op.Layer.TrimStartAndEnd());
+		const FTransform SplinesToWorld = Splines->GetComponentTransform();
+		TArray<ULandscapeSplineControlPoint*> Controls;
+		for (const FVector& Point : Points)
+		{
+			ULandscapeSplineControlPoint* Control = NewObject<ULandscapeSplineControlPoint>(Splines, NAME_None, RF_Transactional);
+			Splines->GetControlPoints().Add(Control);
+			Control->Location = SplinesToWorld.InverseTransformPosition(Point);
+			// Width is the half-width, and falloffs are in cm.
+			Control->Width = Op.Width * 50.f;
+			Control->SideFalloff = Op.Falloff * 100.f;
+			Control->EndFalloff = Op.Falloff * 100.f;
+			Control->LayerName = LayerName;
+			Control->bRaiseTerrain = true;
+			Control->bLowerTerrain = true;
+			Controls.Add(Control);
+		}
+		const int32 Joins = Op.bClosed ? Controls.Num() : Controls.Num() - 1;
+		for (int32 Index = 0; Index < Joins; ++Index)
+		{
+			ULandscapeSplineControlPoint* Start = Controls[Index];
+			ULandscapeSplineControlPoint* End = Controls[(Index + 1) % Controls.Num()];
+			ULandscapeSplineSegment* Segment = NewObject<ULandscapeSplineSegment>(Splines, NAME_None, RF_Transactional);
+			Splines->GetSegments().Add(Segment);
+			Segment->Connections[0].ControlPoint = Start;
+			Segment->Connections[1].ControlPoint = End;
+			const float Length = static_cast<float>(FVector::Dist(Start->Location, End->Location));
+			Segment->Connections[0].TangentLen = Length;
+			Segment->Connections[1].TangentLen = Length;
+			Segment->LayerName = LayerName;
+			Segment->bRaiseTerrain = true;
+			Segment->bLowerTerrain = true;
+			if (Mesh)
+			{
+				FLandscapeSplineMeshEntry& Entry = Segment->SplineMeshes.AddDefaulted_GetRef();
+				Entry.Mesh = Mesh;
+				Entry.bScaleToWidth = true;
+			}
+			Start->ConnectedSegments.Add(FLandscapeSplineConnection(Segment, 0));
+			End->ConnectedSegments.Add(FLandscapeSplineConnection(Segment, 1));
+			Segment->AutoFlipTangents();
+		}
+		for (ULandscapeSplineControlPoint* Control : Controls)
+		{
+			Control->AutoCalcRotation(/*bAlwaysRotateForward=*/true);
+		}
+		for (ULandscapeSplineControlPoint* Control : Controls)
+		{
+			Control->UpdateSplinePoints();
+		}
+		if (!Splines->IsRegistered()) Splines->RegisterComponent();
+		else Splines->MarkRenderStateDirty();
+		// Render the road into the splines layer and merge it now, so the report and the next op read the result.
+		Landscape.RequestSplineLayerUpdate();
+		Landscape.ForceUpdateLayersContent();
+		OutNotes.Add(FString::Printf(TEXT("%s: road%s through %d points, %g m wide%s%s."), *Landscape.GetActorLabel(),
+			Op.Road.IsEmpty() ? TEXT("") : *(TEXT(" ") + Op.Road), Points.Num(), Op.Width, LayerName.IsNone() ? TEXT("") : *(TEXT(", painted ") + LayerName.ToString()),
+			Mesh ? *(TEXT(", ") + Mesh->GetName() + TEXT(" along it")) : TEXT("")));
+		return true;
+	}
+
 	/** What a plan knows of each landscape it names: its paint layers and edit layers, as they are or will be. */
 	struct FPlanned
 	{
@@ -660,6 +792,16 @@ namespace HyperAIStudio::LandscapeTools::Private
 				if (!IsIdentifier(Op.EditLayer)) return Fail(TEXT("Name the EditLayer: letters, digits and _."));
 				if (Landscape->EditLayers.Contains(Op.EditLayer.ToLower())) return Fail(FString::Printf(TEXT("The landscape has edit layer %s already."), *Op.EditLayer));
 				Landscape->EditLayers.Add(Op.EditLayer.ToLower());
+			}
+			else if (Kind == TEXT("landscape.road"))
+			{
+				if (Op.Points.Num() < (Op.bClosed ? 3 : 2) || Op.Points.Num() > 256) return Fail(TEXT("A road runs through 2 to 256 Points (3 or more when bClosed)."));
+				if (!(Op.Width > 0.f) || !(Op.Falloff >= 0.f)) return Fail(TEXT("Width above 0 and Falloff 0 or more, in meters."));
+				if (!Op.Layer.IsEmpty() && !Landscape->PaintLayers.Contains(Op.Layer.TrimStartAndEnd().ToLower()))
+				{
+					return Fail(FString::Printf(TEXT("The landscape has no paint layer '%s'; add_paint_layer adds one."), *Op.Layer));
+				}
+				if (!Op.Mesh.IsEmpty() && !Load<UStaticMesh>(Op.Mesh)) return Fail(FString::Printf(TEXT("%s is not a static mesh."), *Op.Mesh));
 			}
 			else
 			{
@@ -797,6 +939,10 @@ namespace HyperAIStudio::LandscapeTools::Private
 				return false;
 			}
 			return true;
+		}
+		if (Kind == TEXT("landscape.road"))
+		{
+			return BuildRoad(World, *Landscape, *Info, Op, OutNotes, OutError);
 		}
 		FGuid Layer;
 		if (!EditLayerGuid(*Landscape, Op.EditLayer, Layer, OutError)) return false;

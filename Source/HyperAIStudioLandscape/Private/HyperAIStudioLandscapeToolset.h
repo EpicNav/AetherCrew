@@ -56,7 +56,7 @@ struct FHyperAILandscapeOp
 
 	/**
 	 * landscape.create, landscape.sculpt, landscape.set_material, landscape.add_paint_layer, landscape.paint,
-	 * landscape.add_edit_layer.
+	 * landscape.add_edit_layer, landscape.road.
 	 */
 	UPROPERTY() FString Kind;
 	/** The landscape, by its label in the level; for landscape.create, the new one's label. */
@@ -102,6 +102,17 @@ struct FHyperAILandscapeOp
 	UPROPERTY() TArray<FHyperAILandscapePaintRule> Rules;
 	/** landscape.add_edit_layer: the new edit layer; landscape.sculpt and landscape.paint: the edit layer to change (the first when empty). */
 	UPROPERTY() FString EditLayer;
+	/**
+	 * landscape.road: a landscape spline through Points (cm; each set on the ground), Width meters wide, the ground
+	 * leveled under it and blending back over Falloff meters, the paint layer Layer painted under it, the static Mesh
+	 * laid along it, and back to the first point when bClosed. In a World Partition level it is a spline actor
+	 * labelled Road.
+	 */
+	UPROPERTY() TArray<FVector> Points;
+	UPROPERTY() FString Layer;
+	UPROPERTY() FString Mesh;
+	UPROPERTY() FString Road;
+	UPROPERTY() bool bClosed = false;
 };
 
 USTRUCT(BlueprintType)
@@ -206,7 +217,8 @@ public:
 	 * Builds and shapes landscapes in one plan, one undo step: create one from a 16-bit heightmap texture, fractal noise
 	 * (hills, or ridged mountains) or flat, at a size and resolution; sculpt regions (raise, lower, flatten, smooth, noise,
 	 * terrace, ramp between two points); set the material; add paint layers and paint them by height and slope rules
-	 * (grass on flats, rock on steep slopes, snow up high); add edit layers to sculpt and paint in.
+	 * (grass on flats, rock on steep slopes, snow up high); add edit layers to sculpt and paint in; lay roads along
+	 * points, leveling and painting the ground under them.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|World")
 	static FHyperAILandscapePlanReport hyper_landscape_apply_plan(const FHyperAILandscapePlanRequest& Request);

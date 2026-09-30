@@ -10,6 +10,8 @@
 #include "Landscape.h"
 #include "LandscapeInfo.h"
 #include "LandscapeProxy.h"
+#include "LandscapeSplineActor.h"
+#include "LandscapeSubsystem.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Guid.h"
 #include "Misc/ScopeExit.h"
@@ -89,9 +91,17 @@ bool FHyperAIStudioLandscapeEndToEndTest::RunTest(const FString& Parameters)
 	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
 	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
 	Settings->bRequireApprovalForAgentEdits = false;
+	const FString RoadLabel = TEXT("HyperAI_TestRoad_") + Suffix;
 	ON_SCOPE_EXIT
 	{
 		Settings->bRequireApprovalForAgentEdits = bApproval;
+		if (UWorld* World = GEditor->GetEditorWorldContext().World())
+		{
+			for (TActorIterator<ALandscapeSplineActor> It(World); It; ++It)
+			{
+				if (It->GetActorLabel() == RoadLabel) World->EditorDestroyActor(*It, /*bShouldModifyLevel=*/true);
+			}
+		}
 		if (ALandscape* Left = Find(Label))
 		{
 			if (ULandscapeInfo* Info = Left->GetLandscapeInfo())
@@ -187,6 +197,68 @@ bool FHyperAIStudioLandscapeEndToEndTest::RunTest(const FString& Parameters)
 	TestTrue(FString::Printf(TEXT("the raise adds 3 m over the plateau (it reads %.2f)"), Raised.Get(-1000.f)), Raised.IsSet() && FMath::IsNearlyEqual(Raised.GetValue(), 15.f, 0.3f));
 	const FHyperAILandscapeInspectReport Layers = C::Inspect(Look);
 	TestTrue(TEXT("and the landscape lists the edit layer"), Layers.bOk && Layers.Landscapes.Num() == 1 && Layers.Landscapes[0].EditLayers.Contains(TEXT("Terraces")));
+
+	// A road over the hills, away from the plateau: the ground is leveled across it and painted under it. The middle
+	// point's neighbors are level with each other, so there the road runs along X and its cross-section along Y; it
+	// goes where the hills fall most steeply across it.
+	FVector Middle(0.0, -9000.0, 0.0);
+	float Steepest = -1.f;
+	for (double X = -3000.0; X <= 3000.0; X += 500.0)
+	{
+		const TOptional<float> Low = GroundAt(*Landscape, FVector(X, -9250.0, 0.0));
+		const TOptional<float> High = GroundAt(*Landscape, FVector(X, -8750.0, 0.0));
+		if (Low.IsSet() && High.IsSet() && FMath::Abs(Low.GetValue() - High.GetValue()) > Steepest)
+		{
+			Steepest = FMath::Abs(Low.GetValue() - High.GetValue());
+			Middle.X = X;
+		}
+	}
+	TestTrue(FString::Printf(TEXT("the road crosses a real slope (%.2f m over 5 m)"), Steepest), Steepest > 0.2f);
+	const TOptional<float> NaturalLeft = GroundAt(*Landscape, Middle + FVector(0.0, -250.0, 0.0));
+	const TOptional<float> NaturalRight = GroundAt(*Landscape, Middle + FVector(0.0, 250.0, 0.0));
+	FHyperAILandscapeOp Dirt = Op(TEXT("landscape.add_paint_layer"), Label);
+	Dirt.PaintLayers = {TEXT("Dirt")};
+	Dirt.LayerInfoFolder = Folder;
+	FHyperAILandscapeOp Road = Op(TEXT("landscape.road"), Label);
+	Road.Road = RoadLabel;
+	Road.Points = {FVector(Middle.X - 9000.0, -7000.0, 0.0), Middle, FVector(Middle.X + 9000.0, -7000.0, 0.0)};
+	Road.Width = 8.f;
+	Road.Falloff = 6.f;
+	Road.Layer = TEXT("Dirt");
+	FHyperAILandscapeOp Nowhere = Road;
+	Nowhere.Layer = TEXT("Lava");
+	TestFalse(TEXT("a road painting a layer the landscape lacks is refused"), Run({Nowhere}, /*bDryRun=*/true).bOk);
+	const FHyperAILandscapePlanReport Paved = Run({Dirt, Road});
+	TestTrue(TEXT("the road is laid: ") + Paved.Diagnostic + TEXT(" | ") + FString::Join(Paved.Notes, TEXT(" | ")), Paved.bOk && Paved.Applied == 2);
+	const TOptional<float> Center = GroundAt(*Landscape, Middle);
+	const TOptional<float> Left = GroundAt(*Landscape, Middle + FVector(0.0, -250.0, 0.0));
+	const TOptional<float> Right = GroundAt(*Landscape, Middle + FVector(0.0, 250.0, 0.0));
+	const FString Across = FString::Printf(TEXT("across the road %.2f / %.2f / %.2f m, the sides were %.2f / %.2f m"),
+		Left.Get(-1.f), Center.Get(-1.f), Right.Get(-1.f), NaturalLeft.Get(-1.f), NaturalRight.Get(-1.f));
+	AddInfo(Across);
+	TestTrue(TEXT("the ground is level across the road: ") + Across,
+		Center.IsSet() && Left.IsSet() && Right.IsSet() && FMath::Abs(Left.GetValue() - Center.GetValue()) < 0.15f && FMath::Abs(Right.GetValue() - Center.GetValue()) < 0.15f);
+	const FHyperAILandscapeInspectReport Roads = C::Inspect(Look);
+	const FString* DirtLine = Roads.bOk && Roads.Landscapes.Num() == 1 ? Roads.Landscapes[0].PaintLayers.FindByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("Dirt")); }) : nullptr;
+	float DirtShare = 0.f;
+	if (DirtLine)
+	{
+		FString Share;
+		DirtLine->Split(TEXT(": "), nullptr, &Share, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+		DirtShare = FCString::Atof(*Share);
+	}
+	TestTrue(FString::Printf(TEXT("dirt is painted under the road (%.1f%% of the landscape)"), DirtShare), DirtShare >= 1.f);
+	TestTrue(TEXT("and the landscape has a splines edit layer"), Roads.bOk && Roads.Landscapes.Num() == 1 && Roads.Landscapes[0].EditLayers.Contains(TEXT("Splines")));
+	const ULandscapeSubsystem* Subsystem = GEditor->GetEditorWorldContext().World()->GetSubsystem<ULandscapeSubsystem>();
+	if (Subsystem && Subsystem->IsGridBased())
+	{
+		bool bRoadActor = false;
+		for (TActorIterator<ALandscapeSplineActor> It(GEditor->GetEditorWorldContext().World()); It; ++It)
+		{
+			bRoadActor |= It->GetActorLabel() == RoadLabel;
+		}
+		TestTrue(TEXT("in World Partition the road is its own spline actor"), bRoadActor);
+	}
 	return true;
 }
 
