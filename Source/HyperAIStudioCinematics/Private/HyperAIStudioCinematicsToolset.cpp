@@ -3798,7 +3798,8 @@ FHyperAICinematicsApplyPlanReport FHyperAIStudioCinematicsContracts::BuildPlan(
 	{
 		Report.bOk = true;
 		Report.Status = TEXT("dry_run_valid_execution_blocked");
-		Report.Diagnostic = TEXT("Separate sequence/MRQ persisted and loaded CAS, detached render-ready validation, immutable typed payload, and pure plan hashes are valid. No compile, save, queue mutation, render submission, polling, staging, or execution occurred.");
+		Report.Diagnostic = TEXT("Separate sequence/MRQ persisted and loaded CAS, detached render-ready validation, immutable typed payload, and pure plan hashes are valid. No compile, save, queue mutation, render submission, polling, staging, or execution occurred. "
+			"Sequences are built and cut with hyper_sequence_apply_plan.");
 		return Report;
 	}
 	if (Request.ExpectedPlanHash != Prepared.PlanHash)
@@ -3807,7 +3808,8 @@ FHyperAICinematicsApplyPlanReport FHyperAIStudioCinematicsContracts::BuildPlan(
 			TEXT("Non-dry intent must echo the exact current dry-run plan hash."));
 	}
 	return Reject(NonDryCallableState,
-		TEXT("Zero effects: no artifact was staged or submitted; no Sequencer compile, save, queue mutation, render, poll, cancellation, or output verification ran. A bounded pinned continuation host is required before this lifecycle can execute."));
+		TEXT("Zero effects: no artifact was staged or submitted; no Sequencer compile, save, queue mutation, render, poll, cancellation, or output verification ran. A bounded pinned continuation host is required before this lifecycle can execute. "
+			"Sequences are built and cut with hyper_sequence_apply_plan."));
 }
 
 FHyperAICinematicsInspectReport UHyperAIStudioCinematicsToolset::hyper_cinematics_inspect(

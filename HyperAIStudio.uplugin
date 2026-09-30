@@ -565,6 +565,19 @@
 				"CoreUObject",
 				"Engine"
 			]
+		},
+		{
+			"Name": "HyperAIStudioSequencer",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
 		}
 	],
 	"Plugins": [

@@ -1184,6 +1184,13 @@ private:
 				{}
 			},
 			{
+				TEXT("HyperAIStudioSequencer"),
+				TEXT("cinematics"),
+				TEXT("cohort.source.hyperaistudiosequencertoolset.v1"),
+				{TEXT("hyper_sequence_inspect"), TEXT("hyper_sequence_apply_plan")},
+				{}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),

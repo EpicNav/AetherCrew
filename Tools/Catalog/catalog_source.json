@@ -2584,6 +2584,22 @@
       0,
       0
      ]
+    },
+    {
+     "name": "hyper_sequence_inspect",
+     "cohort": "cohort.source.hyperaistudiosequencertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_sequence_apply_plan",
+     "cohort": "cohort.source.hyperaistudiosequencertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ]
   },
