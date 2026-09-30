@@ -16,6 +16,7 @@ public class HyperAIStudioLevelDesign : ModuleRules
 			"EngineSettings",
 			"HyperAIStudio",
 			"ImageCore",
+			"MessageLog",
 			"NavigationSystem",
 			"RenderCore",
 			"ToolsetRegistry",

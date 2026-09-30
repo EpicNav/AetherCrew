@@ -184,6 +184,7 @@ TArray<FString> FHyperAIStudioLevelDesignContracts::GetCapabilities()
 		TEXT("spawn_sightlines"),
 		TEXT("top_down_preview_with_routes_markers_and_issues"),
 		TEXT("mirror_symmetry_across_an_x_or_y_plane"),
+		TEXT("unreal_map_check_errors_and_warnings_on_their_actors"),
 		TEXT("unsupported:jump_route_checks_encounter_space_sizing_and_custom_meshes")};
 }
 
@@ -220,7 +221,7 @@ FString FHyperAIStudioLevelDesignContracts::EditOpsPayloadSchemaFingerprint()
 FString FHyperAIStudioLevelDesignContracts::ValidatePayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("level_design.validate.payload.v2|editor_world|pawn_class|max_sightline|preview|symmetry_axis_plane_tolerance|output_bytes"));
+		TEXT("level_design.validate.payload.v3|editor_world|pawn_class|max_sightline|preview|symmetry_axis_plane_tolerance|map_check|output_bytes"));
 	return Value;
 }
 
@@ -485,6 +486,13 @@ FHyperAILevelDesignValidateReport FHyperAIStudioLevelDesignContracts::Validate(c
 		SymmetryNote = FString::Printf(TEXT(" Symmetry across %s=%g: %d of %d mesh actors mirrored."), *SymmetryAxis.ToUpper(),
 			Request.SymmetryPlane, 2 * Report.Symmetry.MatchedPairs + Report.Symmetry.SelfSymmetric, Report.Symmetry.ActorsChecked);
 	}
+	FString MapCheckNote;
+	if (Request.bMapCheck)
+	{
+		const int32 Before = Report.Issues.Num();
+		Gate::RunMapCheck(*World, Report);
+		MapCheckNote = FString::Printf(TEXT(" Map Check: %d problem(s)."), Report.Issues.Num() - Before);
+	}
 	FString PreviewNote;
 	if (Request.bCapturePreview && !Gate::WritePreview(*World, Report, Report.PreviewImagePath, PreviewNote))
 	{
@@ -505,9 +513,9 @@ FHyperAILevelDesignValidateReport FHyperAIStudioLevelDesignContracts::Validate(c
 	}
 	Report.bOk = true;
 	Report.Status = Report.ErrorCount > 0 ? TEXT("problems") : TEXT("playable");
-	Report.Diagnostic = FString::Printf(TEXT("%d errors, %d warnings, %d routes checked%s.%s%s"),
+	Report.Diagnostic = FString::Printf(TEXT("%d errors, %d warnings, %d routes checked%s.%s%s%s"),
 		Report.ErrorCount, Report.WarningCount, Report.Routes.Num(),
-		Report.bNavigationReady ? TEXT("") : TEXT(" (no ready navmesh)"), *SymmetryNote, *PreviewNote);
+		Report.bNavigationReady ? TEXT("") : TEXT(" (no ready navmesh)"), *SymmetryNote, *MapCheckNote, *PreviewNote);
 	return Report;
 }
 

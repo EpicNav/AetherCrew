@@ -7,6 +7,7 @@
 #include "Async/TaskGraphInterfaces.h"
 #include "Containers/Ticker.h"
 #include "Editor.h"
+#include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
 #include "HyperAIStudioExtensionRuntime.h"
@@ -418,6 +419,34 @@ bool FHyperAIStudioLevelDesignSymmetryTest::RunTest(const FString& Parameters)
 	Gate::CheckSymmetry(*World, TEXT("x"), 200.0f, 30.0f, Shifted);
 	TestTrue(TEXT("a plane at X = 200 leaves the walls unpaired"),
 		Shifted.Symmetry.Unmatched.Contains(TEXT("LD_WallEast")) && Shifted.Symmetry.Unmatched.Contains(TEXT("LD_WallWest")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioLevelDesignMapCheckTest,
+	"HyperAIStudio.LevelDesign.Validate.MapCheck",
+	HyperAIStudio::LevelDesign::Tests::Flags)
+
+bool FHyperAIStudioLevelDesignMapCheckTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	namespace Gate = HyperAIStudio::LevelDesign::Gate;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAILevelDesignMapCheckWorld"));
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+	// A static mesh actor with no mesh: Map Check warns about it by name.
+	AStaticMeshActor* Empty = World->SpawnActor<AStaticMeshActor>(FVector(100.0, 200.0, 0.0), FRotator::ZeroRotator);
+	if (!TestNotNull(TEXT("an actor is spawned"), Empty)) return false;
+	Empty->SetActorLabel(TEXT("HyperAI_EmptyMesh"));
+	FHyperAILevelDesignValidateReport Report;
+	Gate::RunMapCheck(*World, Report);
+	const FHyperAILevelDesignIssue* Found = Report.Issues.FindByPredicate([](const FHyperAILevelDesignIssue& Issue)
+	{
+		return Issue.Code == TEXT("map_check") && Issue.Subject == TEXT("HyperAI_EmptyMesh");
+	});
+	TestTrue(TEXT("Map Check's warning about the empty mesh comes back on its actor: ") + FString::JoinBy(Report.Issues, TEXT(" | "),
+		[](const FHyperAILevelDesignIssue& Issue) { return Issue.Subject + TEXT(": ") + Issue.Message; }),
+		Found && Found->Severity == TEXT("warning") && Found->Message.Contains(TEXT("StaticMesh")) && !Found->Location.IsEmpty());
+	TestTrue(TEXT("and is counted"), Report.WarningCount >= 1);
 	return true;
 }
 

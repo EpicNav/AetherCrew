@@ -37,6 +37,8 @@ namespace HyperAIStudio::LevelDesign::Gate
 	 * bounds within Tolerance; each actor left over becomes an asymmetric error.
 	 */
 	void CheckSymmetry(UWorld& World, const FString& Axis, float Plane, float Tolerance, FHyperAILevelDesignValidateReport& Report);
+	/** Unreal's Map Check over the loaded level; its errors and warnings become map_check issues, each on its actor. */
+	void RunMapCheck(UWorld& World, FHyperAILevelDesignValidateReport& Report);
 	/** Top-down: height in grey from a depth capture, with markers, routes and issues drawn on. */
 	bool WritePreview(UWorld& World, const FHyperAILevelDesignValidateReport& Report, FString& OutPath, FString& OutError);
 

@@ -18,10 +18,14 @@
 #include "GameMapsSettings.h"
 #include "HAL/FileManager.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "IMessageLogListing.h"
 #include "ImageUtils.h"
+#include "Logging/TokenizedMessage.h"
 #include "Materials/MaterialInterface.h"
+#include "MessageLogModule.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/UObjectToken.h"
 #include "NavigationPath.h"
 #include "NavigationSystem.h"
 #include "RenderingThread.h"
@@ -603,6 +607,40 @@ namespace HyperAIStudio::LevelDesign::Gate
 		const FScopedTransaction Transaction(LOCTEXT("ApplyBlockoutPlan", "HyperAI: Apply Blockout Plan"));
 		Notes.Reset();
 		return RunOps(World, Ops, MaxStepHeight, MaxSlopeDegrees, /*bWrite=*/true, Notes, OutActorsChanged, OutError);
+	}
+
+	void RunMapCheck(UWorld& World, FHyperAILevelDesignValidateReport& Report)
+	{
+		if (!GEditor) return;
+		// The editor's own command, without its results window; it opens a fresh page of the MapCheck log.
+		GEditor->Exec(&World, TEXT("MAP CHECK DONTDISPLAYDIALOG"));
+		FMessageLogModule& MessageLog = FModuleManager::LoadModuleChecked<FMessageLogModule>(TEXT("MessageLog"));
+		const TSharedRef<IMessageLogListing> Listing = MessageLog.GetLogListing(TEXT("MapCheck"));
+		for (const TSharedRef<FTokenizedMessage>& Message : Listing->GetFilteredMessages())
+		{
+			const EMessageSeverity::Type Severity = Message->GetSeverity();
+			const bool bError = Severity == EMessageSeverity::Error;
+			if (!bError && Severity != EMessageSeverity::Warning && Severity != EMessageSeverity::PerformanceWarning)
+			{
+				continue;
+			}
+			FHyperAILevelDesignIssue& Issue = Report.Issues.AddDefaulted_GetRef();
+			Issue.Code = TEXT("map_check");
+			Issue.Severity = bError ? TEXT("error") : TEXT("warning");
+			Issue.Message = Message->ToText().ToString();
+			for (const TSharedRef<IMessageToken>& Token : Message->GetMessageTokens())
+			{
+				const AActor* Actor = Token->GetType() == EMessageToken::Object ? Cast<AActor>(StaticCastSharedRef<FUObjectToken>(Token)->GetObject().Get()) : nullptr;
+				if (Actor)
+				{
+					Issue.Subject = Actor->GetActorLabel();
+					Issue.Location = FormatVector(Actor->GetActorLocation());
+					break;
+				}
+			}
+			if (Issue.Subject.IsEmpty()) Issue.Subject = TEXT("Map Check");
+			++(bError ? Report.ErrorCount : Report.WarningCount);
+		}
 	}
 
 	void CheckSymmetry(UWorld& World, const FString& Axis, const float Plane, const float Tolerance, FHyperAILevelDesignValidateReport& Report)

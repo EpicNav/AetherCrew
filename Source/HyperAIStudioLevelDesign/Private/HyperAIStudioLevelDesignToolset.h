@@ -213,6 +213,11 @@ struct FHyperAILevelDesignValidateRequest
 	UPROPERTY() float SymmetryPlane = 0.f;
 	/** How far (cm) a mirror image may sit from its twin, and how much their bounds may differ. */
 	UPROPERTY() float SymmetryTolerance = 30.f;
+	/**
+	 * Also runs Unreal's Map Check over the loaded level: its errors and warnings (missing meshes, actors out of the world,
+	 * lighting and streaming problems...) join Issues with code map_check and the actor as subject. On unless false.
+	 */
+	UPROPERTY() bool bMapCheck = true;
 	UPROPERTY() int32 MaxOutputBytes = 65536;
 };
 
@@ -300,7 +305,7 @@ public:
 	/**
 	 * Plays the layout against player metrics: markers on walkable floor with room to stand, navmesh routes from each
 	 * start to every goal, corridor widths, long sightlines from spawns, cover heights, and mirror symmetry when
-	 * symmetry_axis is set. Writes a top-down image of it.
+	 * symmetry_axis is set; runs Unreal's Map Check. Writes a top-down image of it.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|LevelDesign")
 	static FHyperAILevelDesignValidateReport hyper_level_design_validate(const FHyperAILevelDesignValidateRequest& Request);
