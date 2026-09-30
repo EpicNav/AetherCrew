@@ -4,7 +4,7 @@ export const meta = {
   whenToUse: 'Any Unreal request with more than one part, such as "a torch-lit crypt with a door that opens when the player finds the key", or when the user asks for the team',
   phases: [
     { title: 'Plan', detail: 'the director splits the request into parts for the roles' },
-    { title: 'Build', detail: 'programmer, level designer, lighting artist, technical artist and UI designer; a part starts once the parts it uses are done' },
+    { title: 'Build', detail: 'programmer, level designer, lighting artist, technical artist, UI designer and cinematographer; a part starts once the parts it uses are done' },
     { title: 'QA', detail: 'the QA tester proves each part against its checks and its role quality bar' },
     { title: 'Fix', detail: 'failures go back to the builder, at most three rounds' },
     { title: 'Light', detail: 'the lighting artist lights any level the team built and nobody lit' },
@@ -13,7 +13,7 @@ export const meta = {
 }
 
 const MAX_FIX_ROUNDS = 3
-const ROLES = ['programmer', 'level-designer', 'lighting-artist', 'technical-artist', 'ui-designer']
+const ROLES = ['programmer', 'level-designer', 'lighting-artist', 'technical-artist', 'ui-designer', 'cinematographer']
 const request = String(typeof args === 'string' ? args : (args && args.request) || '').trim()
 if (!request) {
   log('Say what the team should make, for example: /hyperai-team a torch-lit crypt with a door that opens when the player finds the key')
