@@ -10,7 +10,7 @@ Four tools, each for its own assets:
 | assets | read | edit |
 |---|---|---|
 | montages, sequences, composites, blend spaces, skeleton slots | `hyper_animation_inspect` | `hyper_animation_apply_plan`: one asset per plan |
-| Animation Blueprints: state machines, layers, interfaces | `hyper_anim_blueprint_inspect` | `hyper_anim_blueprint_apply_plan` |
+| Animation Blueprints: state machines, montage slots, upper-body layers, inertialization | `hyper_anim_blueprint_inspect` | `hyper_anim_blueprint_apply_plan` |
 | IK Rigs, IK Retargeters, retargeted animations | `hyper_retarget_inspect` | `hyper_retarget_apply_plan` (IK Rig plugin, on by default) |
 | Pose Search schemas and databases | `hyper_pose_search_inspect` | `hyper_pose_search_apply_plan` (Pose Search plugin) |
 
@@ -42,6 +42,12 @@ branching point where the next attack may start:
 Sequences take notifies, `sequence.add_curve` with `Name` and `Keys` (`[{TimeSeconds, Value}]`), sync markers (`Name`,
 `Minimum` as the time) and `sequence.set_property` (`root_motion`, `root_lock`, `loop`, `rate_scale`). A montage's slot
 must be on its skeleton: `skeleton.add_slot` adds one. `hyper_animation_validate` checks segments, sections and notifies.
+
+A montage only plays where its slot is in the character's Animation Blueprint. After the locomotion state machine,
+one `hyper_anim_blueprint_apply_plan` adds `add_layered_slot` (`Name` UpperBody, `Value` spine_01: attacks on the upper
+body while the legs keep running), `add_slot` (`Name` DefaultSlot: full-body dodges and finishers), then
+`add_inertialization`, and `set_transition_blend` for transitions that should blend by inertialization.
+`.hyperai/docs/HyperAIStudio-AnimationCookbook.md` has the whole recipe.
 
 ## Retargeting a character
 

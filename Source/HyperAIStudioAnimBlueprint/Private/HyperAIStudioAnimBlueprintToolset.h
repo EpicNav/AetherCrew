@@ -49,6 +49,8 @@ struct FHyperAIAnimBlueprintTransition
 	/** The rule as written in the plan; "(custom)" for rules built by hand, "(none)" when it never fires. */
 	UPROPERTY() FString Rule;
 	UPROPERTY() float BlendTime = 0.f;
+	/** standard (a crossfade over BlendTime), inertialization (needs an Inertialization node at the output), or custom. */
+	UPROPERTY() FString BlendLogic;
 };
 
 USTRUCT(BlueprintType)
@@ -57,7 +59,7 @@ struct FHyperAIAnimBlueprintMachine
 	GENERATED_BODY()
 
 	UPROPERTY() FString Name;
-	/** True when its pose feeds the AnimGraph output. */
+	/** True when its pose reaches the AnimGraph output, directly or through slots, layers and cached poses. */
 	UPROPERTY() bool bDrivesOutput = false;
 	UPROPERTY() TArray<FHyperAIAnimBlueprintState> States;
 	UPROPERTY() TArray<FHyperAIAnimBlueprintTransition> Transitions;
@@ -93,6 +95,11 @@ struct FHyperAIAnimBlueprintInspectReport
 	UPROPERTY() bool bPackageDirty = false;
 	UPROPERTY() TArray<FHyperAIAnimBlueprintVariable> Variables;
 	UPROPERTY() TArray<FHyperAIAnimBlueprintMachine> Machines;
+	/**
+	 * What feeds the output pose, from the output back: Inertialization, Slot DefaultSlot, Layered blend per bone (slot
+	 * UpperBody from spine_01), Cached pose, State machine Locomotion.
+	 */
+	UPROPERTY() TArray<FString> OutputChain;
 	UPROPERTY() bool bTruncated = false;
 	UPROPERTY() TArray<FString> Capabilities;
 };
@@ -110,6 +117,12 @@ struct FHyperAIAnimBlueprintInspectReport
  *       Rule: conditions joined by &&, each Var, !Var, or Var > n (>, <, >=, <=); or alone, time_remaining < n
  *   remove_transition: Machine, Name (from), To
  *   remove_state: Machine, Name, with its transitions
+ *   set_transition_blend: Machine, Name (from), To, Value = inertialization or standard
+ * Output layers, each placed in front of the output pose (inside an Inertialization node already there):
+ *   add_layered_slot: Name = a slot on the skeleton (UpperBody), Value = the bone the layer starts at (spine_01);
+ *       montages in the slot play on that bone and those below it while the rest of the pose keeps playing
+ *   add_slot: Name = a slot on the skeleton (DefaultSlot); montages in it play over the whole pose
+ *   add_inertialization: an Inertialization node at the output, which inertialization transitions need
  */
 USTRUCT(BlueprintType)
 struct FHyperAIAnimBlueprintOp
@@ -230,19 +243,26 @@ class HYPERAISTUDIOANIMBLUEPRINT_API UHyperAIStudioAnimBlueprintToolset final : 
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** An Animation Blueprint's skeleton, variables (and their drivers), state machines with states, players, transitions and rules, compile status, and revision. */
+	/**
+	 * An Animation Blueprint's skeleton, variables (and their drivers), state machines with states, players, transitions and
+	 * rules, what feeds the output pose (slots, layered blends, inertialization), compile status, and revision.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|AnimBlueprint")
 	static FHyperAIAnimBlueprintInspectReport hyper_anim_blueprint_inspect(const FHyperAIAnimBlueprintInspectRequest& Request);
 
 	/**
 	 * Closed graph edits, then a compile, as one undo step: create for a skeleton, variables and per-frame drivers,
-	 * state machines, states playing sequences or blend spaces, transitions with rules. Read
-	 * .hyperai/docs/HyperAIStudio-AnimationCookbook.md first. Dry-run, then resubmit: the reply waits for the edit. Then validate.
+	 * state machines, states playing sequences or blend spaces, transitions with rules, montage slots (full body or layered
+	 * from a bone) and inertialization. Read .hyperai/docs/HyperAIStudio-AnimationCookbook.md first. Dry-run, then resubmit:
+	 * the reply waits for the edit. Then validate.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|AnimBlueprint")
 	static UHyperAIAnimBlueprintApplyPlanResult* hyper_anim_blueprint_apply_plan(const FHyperAIAnimBlueprintApplyPlanRequest& Request);
 
-	/** Compile status plus graph checks: output pose wired, entry states, unreachable or dead-end states, rules without a gap between thresholds, instant blends, skeleton mismatches. */
+	/**
+	 * Compile status plus graph checks: output pose wired, entry states, unreachable or dead-end states, rules without a gap
+	 * between thresholds, instant blends, skeleton mismatches, slots the skeleton lacks, inertialization without its node.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|AnimBlueprint")
 	static FHyperAIAnimBlueprintValidateReport hyper_anim_blueprint_validate(const FHyperAIAnimBlueprintValidateRequest& Request);
 };

@@ -54,7 +54,7 @@ namespace HyperAIStudio::AnimBlueprint::Private
 		}
 		for (const FHyperAIAnimBlueprintTransition& Transition : Machine.Transitions)
 		{
-			Size += 32 + EstimateBytes(Transition.From) + EstimateBytes(Transition.To) + EstimateBytes(Transition.Rule);
+			Size += 32 + EstimateBytes(Transition.From) + EstimateBytes(Transition.To) + EstimateBytes(Transition.Rule) + EstimateBytes(Transition.BlendLogic);
 		}
 		return Size;
 	}
@@ -212,9 +212,12 @@ TArray<FString> FHyperAIStudioAnimBlueprintContracts::GetCapabilities()
 		TEXT("state_machines_driving_the_output_pose"),
 		TEXT("states_playing_sequences_or_blend_spaces_bound_to_variables"),
 		TEXT("transitions_with_variable_rules_or_time_remaining_and_blend_times"),
+		TEXT("transitions_blending_by_crossfade_or_inertialization"),
+		TEXT("montage_slots_full_body_or_layered_from_a_bone_over_a_cached_pose"),
+		TEXT("inertialization_node_at_the_output"),
 		TEXT("compile_with_errors_reported_as_one_undo_step"),
-		TEXT("checks_entry_reachability_dead_ends_hysteresis_blend_times_skeletons"),
-		TEXT("unsupported:linked_anim_layers_pose_search_retargeting_montage_slots_and_custom_nodes")};
+		TEXT("checks_entry_reachability_dead_ends_hysteresis_blend_times_skeletons_slots_inertialization"),
+		TEXT("unsupported:linked_anim_layers_aim_offsets_motion_matching_node_and_custom_nodes")};
 }
 
 bool FHyperAIStudioAnimBlueprintContracts::IsCanonicalProjectObjectPath(const FString& Path)
@@ -255,7 +258,7 @@ FString FHyperAIStudioAnimBlueprintContracts::InspectPayloadSchemaFingerprint()
 FString FHyperAIStudioAnimBlueprintContracts::EditOpsPayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("anim_blueprint.edit_ops.payload.v1|one_target|base_revision_or_create|skeleton|parent|ordered_closed_ops|compile|save|deep_clone|bounded"));
+		TEXT("anim_blueprint.edit_ops.payload.v2|one_target|base_revision_or_create|skeleton|parent|ordered_closed_ops|slots_layers_inertialization|compile|save|deep_clone|bounded"));
 	return Value;
 }
 
@@ -268,7 +271,7 @@ FString FHyperAIStudioAnimBlueprintContracts::ValidatePayloadSchemaFingerprint()
 FString FHyperAIStudioAnimBlueprintContracts::InspectResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("anim_blueprint.inspect.result.v1|revision|skeleton|parent|compile_status|variables_drivers|machines_states_transitions|bounded"));
+		TEXT("anim_blueprint.inspect.result.v2|revision|skeleton|parent|compile_status|variables_drivers|machines_states_transitions_blend_logic|output_chain|bounded"));
 	return Value;
 }
 
@@ -415,8 +418,10 @@ FHyperAIAnimBlueprintInspectReport FHyperAIStudioAnimBlueprintContracts::Inspect
 	Report.bPackageDirty = Blueprint->GetOutermost()->IsDirty();
 	TArray<FHyperAIAnimBlueprintMachine> Machines;
 	Gate::Read(*Blueprint, Report.Variables, Machines);
+	Report.OutputChain = Gate::OutputChain(*Blueprint);
 	int64 Budget = 2048;
 	for (const FHyperAIAnimBlueprintVariable& Variable : Report.Variables) Budget += 32 + EstimateBytes(Variable.Name) + EstimateBytes(Variable.Driver);
+	for (const FString& Entry : Report.OutputChain) Budget += EstimateBytes(Entry);
 	for (FHyperAIAnimBlueprintMachine& Machine : Machines)
 	{
 		const int64 Bytes = EstimateMachineBytes(Machine);
