@@ -2600,6 +2600,22 @@
      "safety": [
       "Edit"
      ]
+    },
+    {
+     "name": "hyper_movie_render_inspect",
+     "cohort": "cohort.source.hyperaistudiomovierendertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_movie_render_apply_plan",
+     "cohort": "cohort.source.hyperaistudiomovierendertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ]
   },

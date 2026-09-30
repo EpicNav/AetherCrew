@@ -1191,6 +1191,13 @@ private:
 				{}
 			},
 			{
+				TEXT("HyperAIStudioMovieRender"),
+				TEXT("cinematics"),
+				TEXT("cohort.source.hyperaistudiomovierendertoolset.v1"),
+				{TEXT("hyper_movie_render_inspect"), TEXT("hyper_movie_render_apply_plan")},
+				{TEXT("MovieRenderPipeline")}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),
