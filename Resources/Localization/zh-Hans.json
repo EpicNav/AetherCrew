@@ -1040,6 +1040,12 @@
    "text": "HyperAIStudio Paper2D 编辑"
   },
   {
+   "namespace": "HyperAIStudioPoseSearch",
+   "key": "PoseSearchPlan",
+   "source": "HyperAI: Edit Motion Matching Data",
+   "text": "HyperAI：编辑运动匹配数据"
+  },
+  {
    "namespace": "HyperAIStudioPreviewPanel",
    "key": "Browse",
    "source": "Browse...",
@@ -1326,6 +1332,12 @@
    "key": "Warning",
    "source": "A paired browser can approve edits. The page is not encrypted, so let other devices open it only on a network you trust; away from it, reach this computer through a VPN such as Tailscale. Browsers pair again after the editor restarts.",
    "text": "已配对的浏览器可以批准编辑。页面未加密，因此只在你信任的网络中允许其他设备打开；不在该网络时，请通过 Tailscale 等 VPN 访问这台电脑。编辑器重启后，浏览器需要重新配对。"
+  },
+  {
+   "namespace": "HyperAIStudioRetarget",
+   "key": "RetargetPlan",
+   "source": "HyperAI: Set Up Retargeting",
+   "text": "HyperAI：设置动画重定向"
   },
   {
    "namespace": "HyperAIStudioSandbox",

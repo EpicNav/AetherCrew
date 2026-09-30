@@ -929,6 +929,24 @@ namespace HyperAIStudio::Animation::Private
 	{
 		return ProjectId + TEXT("\n") + OperationId;
 	}
+
+	/** Where a variant or op this toolset does not edit is edited instead, for the answers that turn it away. */
+	FString EditedElsewhere(const FString& VariantOrOp)
+	{
+		if (VariantOrOp.StartsWith(TEXT("ik_rig")) || VariantOrOp.StartsWith(TEXT("ik_retargeter")))
+		{
+			return TEXT(" IK Rigs and IK Retargeters are read with hyper_retarget_inspect and edited with hyper_retarget_apply_plan (IK Rig plugin).");
+		}
+		if (VariantOrOp.StartsWith(TEXT("pose_search")))
+		{
+			return TEXT(" Pose Search schemas and databases are read with hyper_pose_search_inspect and edited with hyper_pose_search_apply_plan (Pose Search plugin).");
+		}
+		if (VariantOrOp.StartsWith(TEXT("control_rig")) || VariantOrOp.StartsWith(TEXT("rigvm")))
+		{
+			return TEXT(" Control Rig hierarchies and graphs are edited with Epic's AnimationAssistantToolset.");
+		}
+		return FString();
+	}
 }
 
 const TArray<FHyperAIStudioAnimationVariantDescriptor>&
@@ -978,16 +996,16 @@ FHyperAIStudioAnimationFacade::GetVariantDescriptors()
 			{TEXT("typed_gap_adapter_not_implemented"), TEXT("reflection_fallback_prohibited")}},
 		{TEXT("ik_rig"), {TEXT("IKRig")},
 			{TEXT("IKRig"), TEXT("IKRigDeveloper"), TEXT("IKRigEditor")}, false, false, false, {}, {},
-			{TEXT("typed_chain_solver_adapter_not_implemented"), TEXT("reflection_fallback_prohibited")}},
+			{TEXT("edited_with_hyper_retarget_apply_plan"), TEXT("reflection_fallback_prohibited")}},
 		{TEXT("ik_retargeter"), {TEXT("IKRig")},
 			{TEXT("IKRig"), TEXT("IKRigDeveloper"), TEXT("IKRigEditor")}, false, false, false, {}, {},
-			{TEXT("typed_chain_mapping_adapter_not_implemented"), TEXT("reflection_fallback_prohibited")}},
+			{TEXT("edited_with_hyper_retarget_apply_plan"), TEXT("reflection_fallback_prohibited")}},
 		{TEXT("pose_search_schema"), {TEXT("PoseSearch")},
 			{TEXT("PoseSearch"), TEXT("PoseSearchEditor")}, false, false, false, {}, {},
-			{TEXT("typed_schema_channel_adapter_not_implemented"), TEXT("reflection_fallback_prohibited")}},
+			{TEXT("edited_with_hyper_pose_search_apply_plan"), TEXT("reflection_fallback_prohibited")}},
 		{TEXT("pose_search_database"), {TEXT("PoseSearch")},
 			{TEXT("PoseSearch"), TEXT("PoseSearchEditor")}, false, false, false, {}, {},
-			{TEXT("typed_database_asset_adapter_not_implemented"), TEXT("reflection_fallback_prohibited")}}
+			{TEXT("edited_with_hyper_pose_search_apply_plan"), TEXT("reflection_fallback_prohibited")}}
 	};
 	return Descriptors;
 }
@@ -1022,7 +1040,8 @@ TArray<FHyperAIAnimationVariantStatus> FHyperAIStudioAnimationFacade::ResolveVar
 		if (!Descriptor.bInspectImplemented)
 		{
 			Status.State = TEXT("adapter_unavailable");
-			Status.Remediation = TEXT("The exact optional typed adapter is not implemented; prerequisite observations are informational and no fallback is attempted.");
+			Status.Remediation = TEXT("This toolset does not edit this variant; prerequisite observations are informational and no fallback is attempted.")
+				+ HyperAIStudio::Animation::Private::EditedElsewhere(Descriptor.Variant);
 		}
 		else if (!Status.bPluginsInstalled)
 		{
@@ -1124,7 +1143,8 @@ bool FHyperAIStudioAnimationFacade::CaptureLoaded(
 		if (!Descriptor->bInspectImplemented)
 		{
 			OutStatus = TEXT("variant_adapter_unavailable");
-			OutDiagnostic = TEXT("The selected optional variant has no linked typed inspector; no reflection fallback is attempted.");
+			OutDiagnostic = TEXT("This toolset does not inspect the selected variant; no reflection fallback is attempted.")
+				+ HyperAIStudio::Animation::Private::EditedElsewhere(Variant);
 			return false;
 		}
 	}
@@ -1842,7 +1862,7 @@ bool FHyperAIStudioAnimationContracts::ValidateOperationShape(
 		|| Operation.Type.StartsWith(TEXT("pose_search.")))
 	{
 		return Fail(TEXT("variant_adapter_unavailable"),
-			TEXT("Operation belongs to an optional typed variant that is not linked; no reflection or script fallback is attempted."));
+			*(TEXT("This toolset does not edit this operation's variant; no reflection or script fallback is attempted.") + EditedElsewhere(Operation.Type)));
 	}
 	else
 	{

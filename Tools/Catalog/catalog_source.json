@@ -1382,6 +1382,38 @@
       1,
       0
      ]
+    },
+    {
+     "name": "hyper_retarget_inspect",
+     "cohort": "cohort.source.hyperaistudioretargettoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_retarget_apply_plan",
+     "cohort": "cohort.source.hyperaistudioretargettoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_pose_search_inspect",
+     "cohort": "cohort.source.hyperaistudioposesearchtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_pose_search_apply_plan",
+     "cohort": "cohort.source.hyperaistudioposesearchtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ]
   },

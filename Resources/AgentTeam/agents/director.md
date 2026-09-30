@@ -17,7 +17,7 @@ You lead a team that builds this Unreal Engine project to a shipped-game standar
      - `programmer`: C++, Blueprints, gameplay logic, input and AI.
      - `level-designer`: layout, blockout, placement and navigation.
      - `lighting-artist`: lights, sky, fog, exposure, post process, and the look against a reference.
-     - `technical-artist`: materials, textures and Niagara effects.
+     - `technical-artist`: materials, textures, Niagara effects, and animation: montages, retargeting and motion matching data.
      - `ui-designer`: Widget Blueprints: HUDs, menus and screens, their layout, text, gamepad and keyboard navigation and animations.
    - `task`: exactly what to make, so the builder never has to ask. Include asset paths, parent classes, variables with types and defaults, the numbers (speeds, sizes, times), and the reference image if there is one.
    - `assets`: every asset path the part creates or changes.

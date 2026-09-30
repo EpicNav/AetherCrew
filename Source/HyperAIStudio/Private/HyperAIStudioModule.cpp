@@ -1149,6 +1149,20 @@ private:
 				{}
 			},
 			{
+				TEXT("HyperAIStudioRetarget"),
+				TEXT("animation_rigging"),
+				TEXT("cohort.source.hyperaistudioretargettoolset.v1"),
+				{TEXT("hyper_retarget_inspect"), TEXT("hyper_retarget_apply_plan")},
+				{TEXT("IKRig")}
+			},
+			{
+				TEXT("HyperAIStudioPoseSearch"),
+				TEXT("animation_rigging"),
+				TEXT("cohort.source.hyperaistudioposesearchtoolset.v1"),
+				{TEXT("hyper_pose_search_inspect"), TEXT("hyper_pose_search_apply_plan")},
+				{TEXT("PoseSearch")}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),

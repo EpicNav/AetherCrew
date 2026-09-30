@@ -397,7 +397,8 @@ public:
 	 * operation_id waits for the edit. Montages: create from a sequence or skeleton, segments, slot, blend times, sections
 	 * and their links, notifies (named events, notify classes, notify states, branching points). Sequences: notifies,
 	 * curves with keys, sync markers, root motion and loop settings. Composites, blend spaces (create, axes, samples),
-	 * skeleton slots and compatible skeletons. Animation Blueprints are hyper_anim_blueprint_apply_plan's.
+	 * skeleton slots and compatible skeletons. Animation Blueprints are hyper_anim_blueprint_apply_plan's, IK Rigs and
+	 * retargeting hyper_retarget_apply_plan's, and motion matching data hyper_pose_search_apply_plan's.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Animation")
 	static UHyperAIAnimationApplyPlanResult* hyper_animation_apply_plan(
