@@ -1,6 +1,6 @@
 ---
 name: unreal-level-design
-description: Build and dress levels with HyperAI's world tools - landscapes from heightmaps or noise, sculpted and painted by height and slope, with roads laid as splines; foliage types scattered by density, slope, height and paint layer, placed at points, thinned and erased; World Partition data layers, streaming, HLOD layers, runtime grids and editor regions; blockouts; and checks against player metrics and Map Check. Use for terrain, open worlds, set dressing and level layout.
+description: Build and dress levels with HyperAI's world tools - landscapes from heightmaps or noise, sculpted and painted by height and slope, with roads laid as splines; foliage types scattered by density, slope, height and paint layer, placed at points, thinned and erased; procedural PCG scatter over large areas, retuned and regenerated; World Partition data layers, streaming, HLOD layers, runtime grids and editor regions; blockouts; and checks against player metrics and Map Check. Use for terrain, open worlds, set dressing and level layout.
 ---
 
 # Levels: terrain, roads, foliage and streaming
@@ -9,6 +9,7 @@ description: Build and dress levels with HyperAI's world tools - landscapes from
 |---|---|---|
 | landscapes: make, sculpt, paint, edit layers, roads | `hyper_landscape_inspect` | `hyper_landscape_apply_plan` |
 | foliage: types, scatter, place, thin, erase | `hyper_foliage_inspect` | `hyper_foliage_apply_plan` |
+| procedural scatter: PCG graphs and volumes | `hyper_pcg_scatter_inspect` | `hyper_pcg_scatter_apply_plan` |
 | World Partition: data layers, streaming, HLOD layers, grids, editor regions | `hyper_world_partition_inspect` | `hyper_world_partition_apply_plan` |
 | blockouts: blocks, ramps, stairs, markers | `hyper_level_design_inspect` | `hyper_level_blockout_apply_plan` |
 | player metrics, routes, sightlines, Map Check | | `hyper_level_design_validate` |
@@ -26,7 +27,8 @@ name themselves are meters. `Settings` are Unreal's own properties, in Unreal's 
 
 1. **Ground.** Make or shape the landscape, then paint it.
 2. **Roads.** Lay roads and paths through the landscape, so the ground under them is leveled and painted.
-3. **Foliage.** Scatter it last, so it reads the final ground, slopes and paint.
+3. **Foliage and scatter.** Scatter last, so it reads the final ground, slopes and paint. Dress areas by hand with
+   foliage, and cover large areas you will retune with a PCG scatter.
 4. **Streaming.** In a World Partition level, set up data layers, always-loaded actors and HLOD layers.
 5. **Check.** Run `hyper_level_design_validate`, and look at the level from where the player stands.
 
@@ -83,6 +85,33 @@ Pines on the grass that stay off the road, rocks on slopes, the camp kept clear,
 - Each scatter's note says how many spots it tried and why the rest were turned away (too steep, off its layers,
   crowded, in a clearing). Read it and adjust before scattering more.
 - `foliage.erase` with `Fraction` 0.5 thins a region. `foliage_type.remove` takes a type out of the level.
+
+## Procedural scatter
+
+A PCG scatter follows rules over a whole area: change a rule and regenerate, rather than editing instances. Rocks over
+the valley, two meshes weighted 3 to 1, kept off slopes past 35 degrees:
+
+```json
+{"Operations": [
+ {"Kind": "graph.create", "Graph": "/Game/PCG/PCG_ValleyRocks",
+  "Meshes": [{"Mesh": "/Game/Env/SM_Rock_A", "Weight": 3}, {"Mesh": "/Game/Env/SM_Rock_B", "Weight": 1}],
+  "Density": 0.05, "Spacing": 4, "SlopeMax": 35, "Scale": {"X": 0.7, "Y": 1.4}, "RandomYaw": "true", "Seed": 11},
+ {"Kind": "volume.create", "Graph": "/Game/PCG/PCG_ValleyRocks", "Volume": "ValleyRocks",
+  "Center": {"X": 0, "Y": 0, "Z": 0}, "Size": {"X": 400, "Y": 400}, "Height": 600}],
+ "bDryRun": false, "OperationId": "valley-rocks"}
+```
+
+- `Density` is points per square meter, where foliage counts per 100 m2: 0.02 for sparse trees, 0.05 to 0.5 for
+  rocks, 4 for grass. `Spacing` keeps instances that many meters apart. `SlopeMax` keeps them off steeper ground,
+  and 0 allows any. `Scale` is a uniform range, Min (X) to Max (Y).
+- The volume generates after the plan, as a job: call `hyper_operation_wait` with the `OperationId`. Its result says
+  how many instances of how many meshes came from how many points, and why, when none did.
+- To change a scatter, send `graph.set` and `volume.generate` in one plan. Every volume running the graph follows
+  the new rules when it regenerates. `volume.clear` removes a volume's instances.
+- A volume scatters over the landscape inside it, so make it tall enough to hold the ground. Landscapes made with
+  `hyper_landscape_apply_plan` are found at once. In a World Partition level, PCG finds a landscape kept whole (not
+  split into streaming proxies) only once the level is saved, and `bSave: true` saves it before generating.
+- Foliage does what this scatter does not: paint layers, clearings, keeping out from under roofs, and hero pieces.
 
 ## World Partition
 

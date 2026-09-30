@@ -1198,6 +1198,13 @@ private:
 				{TEXT("MovieRenderPipeline")}
 			},
 			{
+				TEXT("HyperAIStudioPCGScatter"),
+				TEXT("pcg"),
+				TEXT("cohort.source.hyperaistudiopcgscattertoolset.v1"),
+				{TEXT("hyper_pcg_scatter_inspect"), TEXT("hyper_pcg_scatter_apply_plan")},
+				{TEXT("PCG")}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),

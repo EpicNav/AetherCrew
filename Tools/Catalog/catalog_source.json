@@ -2431,6 +2431,22 @@
       1,
       1
      ]
+    },
+    {
+     "name": "hyper_pcg_scatter_inspect",
+     "cohort": "cohort.source.hyperaistudiopcgscattertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_pcg_scatter_apply_plan",
+     "cohort": "cohort.source.hyperaistudiopcgscattertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ]
   },

@@ -1046,6 +1046,12 @@
    "text": "不支持的操作类型。"
   },
   {
+   "namespace": "HyperAIStudioPCGScatter",
+   "key": "ScatterPlan",
+   "source": "HyperAI: PCG Scatter",
+   "text": "HyperAI：PCG 散布"
+  },
+  {
    "namespace": "HyperAIStudioPaper2D",
    "key": "FastReversibleEdit",
    "source": "HyperAIStudio Paper2D Edit",
