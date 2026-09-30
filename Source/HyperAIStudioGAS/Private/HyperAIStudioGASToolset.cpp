@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioGASToolset.h"
+#include "HyperAIStudioGASAuthoring.h"
 
 // Every direct GameplayAbilities dependency is isolated in this LoadingPhase=None editor module.
 
@@ -757,7 +758,7 @@ namespace HyperAIStudio::GAS::Private
 					AddIssue(Snapshot.CaptureIssues, FHyperAIStudioGASContracts::MaxIssues,
 						bIssueTruncated, TEXT("asset_not_loaded"), TEXT("warning"), Path,
 						TEXT("gas:asset:") + Path, -1,
-						TEXT("Exact GAS asset is not already loaded; inspection never synchronously loads it."));
+						TEXT("No Blueprint is at this path (inspect loads the ones that exist)."));
 					continue;
 				}
 				if (!IsRelevantBlueprint(Blueprint))
@@ -1309,6 +1310,8 @@ FHyperAIGASInspectReport UHyperAIStudioGASToolset::hyper_gas_inspect(
 		UniquePaths.Add(Path);
 	}
 
+	// Named assets are loaded first, so an agent reads what is on disk, not only what an editor tab happens to hold.
+	HyperAIStudio::GAS::Authoring::LoadRequested(Request.AssetPaths);
 	FHyperAIStudioGASValueSnapshot Snapshot = CaptureSnapshot(Request);
 	Report.Revision = Snapshot.Revision;
 	Report.bRevisionComplete = Snapshot.bComplete;
@@ -1438,6 +1441,7 @@ FHyperAIGASValidateReport UHyperAIStudioGASToolset::hyper_gas_validate(
 	CaptureRequest.MaxGameThreadMs = Request.MaxGameThreadMs;
 	CaptureRequest.PageSize = FHyperAIStudioGASContracts::MaxPageSize;
 	CaptureRequest.MaxOutputBytes = FHyperAIStudioGASContracts::MaxOutputBytes;
+	HyperAIStudio::GAS::Authoring::LoadRequested(Request.AssetPaths);
 	FHyperAIStudioGASValueSnapshot Snapshot = CaptureSnapshot(CaptureRequest);
 	Report.bFreshCapture = true;
 	Report.Revision = Snapshot.Revision;
@@ -2438,7 +2442,8 @@ FHyperAIGASApplyPlanReport FHyperAIStudioGASContracts::BuildPlan(
 FHyperAIGASApplyPlanReport UHyperAIStudioGASToolset::hyper_gas_apply_plan(
 	const FHyperAIGASApplyPlanRequest& Request)
 {
-	return FHyperAIStudioGASContracts::BuildPlan(Request);
+	// Agents author through the executing path; BuildPlan remains the strict exact-revision planner its tests prove.
+	return HyperAIStudio::GAS::Authoring::Run(Request);
 }
 
 FString FHyperAIStudioGASTypedPayload::GetTypeId() const

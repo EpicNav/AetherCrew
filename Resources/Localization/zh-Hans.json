@@ -662,6 +662,12 @@
    "text": "HyperAI：编辑 Decibel 会话"
   },
   {
+   "namespace": "HyperAIStudioGASAuthoring",
+   "key": "GASPlan",
+   "source": "HyperAI: Edit Gameplay Abilities and Effects",
+   "text": "HyperAI：编辑游戏玩法能力与效果"
+  },
+  {
    "namespace": "HyperAIStudioImageGenModule",
    "key": "ImagesPage",
    "source": "Images",

@@ -10,6 +10,7 @@ public class HyperAIStudioGAS : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
+			"AssetRegistry",
 			"Core",
 			"CoreUObject",
 			"Engine",
