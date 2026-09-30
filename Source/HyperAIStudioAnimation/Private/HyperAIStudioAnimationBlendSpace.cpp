@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioAnimationBlendSpace.h"
+#include "HyperAIStudioAnimationTimeline.h"
 
 #include "Animation/AnimSequence.h"
 #include "Animation/BlendSpace.h"
@@ -327,11 +328,13 @@ bool FHyperAIStudioAnimationFreshVerifier::ResolveCanonicalEffectTarget(
 		return false;
 	}
 	const FHyperAIStudioAnimationTypedPayload& Typed = static_cast<const FHyperAIStudioAnimationTypedPayload&>(Request);
-	if (!HyperAIStudio::Animation::BlendSpace::IsExecutablePlan(Typed.Operations)
+	const bool bExecutable = HyperAIStudio::Animation::BlendSpace::IsExecutablePlan(Typed.Operations)
+		|| HyperAIStudio::Animation::Timeline::IsExecutablePlan(Typed.Operations);
+	if (!bExecutable
 		|| Contracts::ComputePayloadSemanticFingerprint(Typed.Operations, Typed.BaseRevision) != Typed.SemanticFingerprint
 		|| !Contracts::IsCanonicalProjectObjectPath(HyperAIStudio::Animation::BlendSpace::EffectTarget(Typed)))
 	{
-		OutError = TEXT("Fresh verifier rejected a non-blend-space plan, its target, or its semantic seal.");
+		OutError = TEXT("Fresh verifier rejected a plan that does not execute, its target, or its semantic seal.");
 		return false;
 	}
 	OutCanonicalEffectTarget = HyperAIStudio::Animation::BlendSpace::EffectTarget(Typed);
@@ -364,19 +367,21 @@ bool FHyperAIStudioAnimationFreshVerifier::VerifyFreshExact(
 		OutError = TEXT("Only a completed fresh-capture result may be verified.");
 		return false;
 	}
-	const FString Key = BlendSpace::ContentKey(Typed);
+	const bool bBlendSpace = BlendSpace::IsExecutablePlan(Typed.Operations);
+	const FString Key = bBlendSpace ? BlendSpace::ContentKey(Typed) : HyperAIStudio::Animation::Timeline::ContentKey(Typed);
 	if (Key != TypedResult.Revision)
 	{
-		OutError = TEXT("The blend space changed between fresh capture and verification.");
+		OutError = TEXT("The asset changed between fresh capture and verification.");
 		return false;
 	}
-	const UBlendSpace* Space = FindObject<UBlendSpace>(nullptr, *Target);
-	if (!Space || Space->GetOutermost()->IsDirty())
+	const UObject* Asset = FindObject<UObject>(nullptr, *Target);
+	if (!Asset || Asset->GetOutermost()->IsDirty())
 	{
-		OutError = TEXT("The blend space still has unsaved changes after the save phase.");
+		OutError = TEXT("The asset still has unsaved changes after the save phase.");
 		return false;
 	}
-	FString Canonical = TEXT("hyperai.animation.blend-space-postcondition.v1|") + Typed.SemanticFingerprint + TEXT("|") + Key;
+	FString Canonical = (bBlendSpace ? TEXT("hyperai.animation.blend-space-postcondition.v1|") : TEXT("hyperai.animation.timeline-postcondition.v1|"))
+		+ Typed.SemanticFingerprint + TEXT("|") + Key;
 	OutPostconditionHash = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(Canonical);
 	if (!Contracts::IsCanonicalSha256(OutPostconditionHash))
 	{

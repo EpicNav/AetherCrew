@@ -2,10 +2,14 @@
 
 #include "HyperAIStudioAnimationToolset.h"
 
+#include "Animation/AnimMontage.h"
+#include "Animation/AnimNotifies/AnimNotify.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimationAsset.h"
 #include "Animation/BlendSpace1D.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetToolsModule.h"
+#include "IAssetTools.h"
 #include "Containers/Ticker.h"
 #include "Animation/Skeleton.h"
 #include "HAL/PlatformTime.h"
@@ -756,6 +760,259 @@ bool FHyperAIStudioAnimationBlendSpaceTest::RunTest(const FString& Parameters)
 		TestEqual(FString::Printf(TEXT("sample %d plays its clip"), Index), Sample.Animation ? Sample.Animation->GetPathName() : FString(), Clips[Index]);
 	}
 	TestFalse(TEXT("and it is saved"), Space->GetOutermost()->IsDirty());
+	return true;
+}
+
+namespace HyperAIStudio::Animation::Tests
+{
+	/** Submits one plan for real and ticks until it finishes; returns the operation's final status and diagnostic. */
+	FString RunPlan(TArray<FHyperAIAnimationPlanOperation> Operations, const FString& OperationId)
+	{
+		FHyperAIAnimationApplyPlanRequest Request;
+		Request.Operations = MoveTemp(Operations);
+		Request.bDryRun = false;
+		Request.OperationId = OperationId;
+		const FHyperAIAnimationApplyPlanReport Submitted = FHyperAIStudioAnimationContracts::BuildFittedPlan(Request);
+		if (Submitted.Status != TEXT("submitted"))
+		{
+			FString Issues;
+			for (const FHyperAIAnimationIssue& Issue : Submitted.Issues) Issues += Issue.Code + TEXT(": ") + Issue.Message + TEXT(" ");
+			return Submitted.Status + TEXT(" ") + Submitted.Diagnostic + TEXT(" ") + Issues;
+		}
+		FHyperAIStudioTypedArtifactOperationStatus Status;
+		FString Error;
+		const double Deadline = FPlatformTime::Seconds() + 60.0;
+		while (FPlatformTime::Seconds() < Deadline)
+		{
+			FTSTicker::GetCoreTicker().Tick(0.01f);
+			if (FHyperAIStudioTrustedExecutionFacade::QueryStatus(OperationId, Status, Error) && Status.bTerminal) break;
+		}
+		return Status.Status == TEXT("completed") ? Status.Status : Status.Status + TEXT(" ") + Status.Diagnostic;
+	}
+
+	FString RevisionOf(const FString& Path)
+	{
+		FHyperAIAnimationInspectRequest Request;
+		Request.AssetPaths = {Path};
+		const FHyperAIAnimationInspectReport Report = UHyperAIStudioAnimationToolset::hyper_animation_inspect(Request);
+		return Report.Records.Num() == 1 ? Report.Records[0].Revision : FString();
+	}
+
+	const FHyperAIAnimationElementView* FindElement(const FString& Path, const TCHAR* Kind, const TCHAR* Name)
+	{
+		static FHyperAIAnimationInspectReport Report;
+		FHyperAIAnimationInspectRequest Request;
+		Request.AssetPaths = {Path};
+		Request.MaxOutputBytes = FHyperAIStudioAnimationContracts::MaxOutputBytes;
+		Report = UHyperAIStudioAnimationToolset::hyper_animation_inspect(Request);
+		return Report.Records.Num() == 1 ? Report.Records[0].Elements.FindByPredicate([Kind, Name](const FHyperAIAnimationElementView& Element)
+		{
+			return Element.Kind == Kind && Element.Name == Name;
+		}) : nullptr;
+	}
+
+	FHyperAIAnimationPlanOperation PlanOp(const TCHAR* Type, const FString& Target, const FString& Revision = FString())
+	{
+		FHyperAIAnimationPlanOperation Operation;
+		Operation.Type = Type;
+		Operation.TargetPath = Target;
+		Operation.ExpectedRevision = Revision;
+		return Operation;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAnimationTimelineTest,
+	"HyperAIStudio.NativeTools.AnimationRigging.MontageSequenceSkeletonEndToEnd",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioAnimationTimelineTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::Animation::Tests;
+	// Two non-additive sequences of one skeleton under /Game; the Third Person template's Manny has them.
+	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	TArray<FAssetData> Assets;
+	Registry.GetAssetsByClass(UAnimSequence::StaticClass()->GetClassPathName(), Assets);
+	Assets.Sort([](const FAssetData& A, const FAssetData& B) { return A.PackageName.LexicalLess(B.PackageName); });
+	TMap<FString, TArray<UAnimSequence*>> BySkeleton;
+	TArray<UAnimSequence*> Clips;
+	for (const FAssetData& Asset : Assets)
+	{
+		if (!Asset.PackageName.ToString().StartsWith(TEXT("/Game/")) || Asset.PackageName.ToString().StartsWith(TEXT("/Game/__"))) continue;
+		UAnimSequence* Sequence = Cast<UAnimSequence>(Asset.GetAsset());
+		if (!Sequence || Sequence->IsValidAdditive() || !Sequence->GetSkeleton() || Sequence->GetPlayLength() < 0.6f) continue;
+		TArray<UAnimSequence*>& Found = BySkeleton.FindOrAdd(Sequence->GetSkeleton()->GetPathName());
+		Found.Add(Sequence);
+		if (Found.Num() == 2)
+		{
+			Clips = Found;
+			break;
+		}
+	}
+	if (Clips.Num() < 2)
+	{
+		AddInfo(TEXT("Skipped: no skeleton under /Game has two non-additive Animation Sequences of 0.6 s or more."));
+		return true;
+	}
+	USkeleton* OriginalSkeleton = Clips[0]->GetSkeleton();
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	auto TestPath = [&Suffix](const TCHAR* Prefix)
+	{
+		const FString Name = FString::Printf(TEXT("%s_%s"), Prefix, *Suffix);
+		return FString::Printf(TEXT("/Game/__HyperAIStudioTests/%s.%s"), *Name, *Name);
+	};
+	// Edited copies, never the template's own assets.
+	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
+	UObject* SequenceCopy = AssetTools.DuplicateAsset(FPackageName::ObjectPathToObjectName(TestPath(TEXT("A_Copy"))), TEXT("/Game/__HyperAIStudioTests"), Clips[0]);
+	UObject* SkeletonCopy = AssetTools.DuplicateAsset(FPackageName::ObjectPathToObjectName(TestPath(TEXT("SK_Copy"))), TEXT("/Game/__HyperAIStudioTests"), OriginalSkeleton);
+	const FString MontagePath = TestPath(TEXT("AM_Combo"));
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
+	const bool bOneShot = Settings->bAllowOneShotAgentEdits;
+	Settings->bRequireApprovalForAgentEdits = false;
+	Settings->bAllowOneShotAgentEdits = true;
+	ON_SCOPE_EXIT
+	{
+		Settings->bRequireApprovalForAgentEdits = bApproval;
+		Settings->bAllowOneShotAgentEdits = bOneShot;
+		TArray<UObject*> Made;
+		for (UObject* Object : {SequenceCopy, SkeletonCopy, FSoftObjectPath(MontagePath).ResolveObject()})
+		{
+			if (IsValid(Object)) Made.Add(Object);
+		}
+		if (!Made.IsEmpty()) ObjectTools::ForceDeleteObjects(Made, /*ShowConfirmation=*/false);
+	};
+	if (!TestTrue(TEXT("copies made"), SequenceCopy && SkeletonCopy))
+	{
+		return false;
+	}
+
+	// A two-hit combo montage: both clips back to back, the first section renamed, a second where the second clip starts,
+	// the first ending unless the combo continues, a branching-point combo window, a sound and a notify state.
+	const float FirstLength = Clips[0]->GetPlayLength();
+	FHyperAIAnimationPlanOperation Create = PlanOp(TEXT("montage.create"), MontagePath);
+	Create.ReferencePath = Clips[0]->GetPathName();
+	FHyperAIAnimationPlanOperation Segments = PlanOp(TEXT("montage.set_segments"), MontagePath);
+	Segments.Segments = {{Clips[0]->GetPathName(), 0.0, -1.0, 1.0, 1}, {Clips[1]->GetPathName(), 0.0, 0.5, 1.25, 1}};
+	FHyperAIAnimationPlanOperation BlendIn = PlanOp(TEXT("montage.set_property"), MontagePath);
+	BlendIn.Name = TEXT("blend_in");
+	BlendIn.Value = TEXT("0.1");
+	FHyperAIAnimationPlanOperation AutoOut = PlanOp(TEXT("montage.set_property"), MontagePath);
+	AutoOut.Name = TEXT("auto_blend_out");
+	AutoOut.Value = TEXT("false");
+	FHyperAIAnimationPlanOperation Rename = PlanOp(TEXT("montage.rename_section"), MontagePath);
+	Rename.Name = TEXT("Default");
+	Rename.SecondaryName = TEXT("Attack1");
+	FHyperAIAnimationPlanOperation Second = PlanOp(TEXT("montage.add_section"), MontagePath);
+	Second.Name = TEXT("Attack2");
+	Second.Minimum = FirstLength;
+	FHyperAIAnimationPlanOperation Ends = PlanOp(TEXT("montage.link_sections"), MontagePath);
+	Ends.Name = TEXT("Attack1");
+	FHyperAIAnimationPlanOperation Window = PlanOp(TEXT("montage.add_notify"), MontagePath);
+	Window.Notify.Kind = TEXT("named_event");
+	Window.Notify.Name = TEXT("ComboWindow");
+	Window.Notify.TimeSeconds = 0.2;
+	Window.Notify.bBranchingPoint = true;
+	FHyperAIAnimationPlanOperation Sound = PlanOp(TEXT("montage.add_notify"), MontagePath);
+	Sound.Notify.Kind = TEXT("notify");
+	Sound.Notify.NotifyClass = TEXT("/Script/Engine.AnimNotify_PlaySound");
+	Sound.Notify.TimeSeconds = 0.3;
+	Sound.Notify.Track = TEXT("Audio");
+	Sound.Notify.Properties = {{TEXT("VolumeMultiplier"), TEXT("0.5")}};
+	FHyperAIAnimationPlanOperation State = PlanOp(TEXT("montage.add_notify"), MontagePath);
+	State.Notify.Kind = TEXT("notify_state");
+	State.Notify.NotifyClass = TEXT("/Script/Engine.AnimNotifyState_DisableRootMotion");
+	State.Notify.TimeSeconds = 0.1;
+	State.Notify.DurationSeconds = 0.2;
+
+	// Refused before anything is made: a notify class that is not one, and a section on another's start.
+	FHyperAIAnimationPlanOperation NotANotify = Sound;
+	NotANotify.Notify.NotifyClass = TEXT("/Script/Engine.Actor");
+	FHyperAIAnimationApplyPlanRequest Refused;
+	Refused.Operations = {Create, NotANotify};
+	TestFalse(TEXT("An Actor class is refused as a notify"), FHyperAIStudioAnimationContracts::BuildFittedPlan(Refused).bOk);
+	FHyperAIAnimationPlanOperation Clash = Second;
+	Clash.Minimum = 0.0;
+	Refused.Operations = {Create, Clash};
+	const FHyperAIAnimationApplyPlanReport ClashReport = FHyperAIStudioAnimationContracts::BuildFittedPlan(Refused);
+	TestTrue(TEXT("A section on Default's start is refused, naming it"), !ClashReport.bOk && ClashReport.Issues.ContainsByPredicate(
+		[](const FHyperAIAnimationIssue& Issue) { return Issue.Code == TEXT("montage_section_time_taken"); }));
+
+	const FString Made = RunPlan({Create, Segments, BlendIn, AutoOut, Rename, Second, Ends, Window, Sound, State}, TEXT("anim-montage-") + Suffix);
+	if (!TestEqual(TEXT("the montage plan completes"), Made, FString(TEXT("completed"))))
+	{
+		return false;
+	}
+	const UAnimMontage* Montage = Cast<UAnimMontage>(FSoftObjectPath(MontagePath).ResolveObject());
+	if (!TestNotNull(TEXT("the montage exists"), Montage)) return false;
+	TestEqual(TEXT("two segments"), Montage->SlotAnimTracks[0].AnimTrack.AnimSegments.Num(), 2);
+	TestTrue(TEXT("the second plays 0.5 s at 1.25x"), Montage->SlotAnimTracks[0].AnimTrack.AnimSegments.Num() == 2
+		&& FMath::IsNearlyEqual(Montage->SlotAnimTracks[0].AnimTrack.AnimSegments[1].AnimPlayRate, 1.25f)
+		&& FMath::IsNearlyEqual(Montage->SlotAnimTracks[0].AnimTrack.AnimSegments[1].AnimEndTime, 0.5f));
+	TestTrue(TEXT("sections Attack1 at 0 and Attack2 where the second clip starts"), Montage->CompositeSections.Num() == 2
+		&& Montage->CompositeSections[0].SectionName == TEXT("Attack1") && FMath::IsNearlyZero(Montage->CompositeSections[0].GetTime())
+		&& Montage->CompositeSections[1].SectionName == TEXT("Attack2") && FMath::IsNearlyEqual(Montage->CompositeSections[1].GetTime(), FirstLength, 0.01f));
+	TestTrue(TEXT("Attack1 ends unless the combo continues"), Montage->CompositeSections.Num() == 2 && Montage->CompositeSections[0].NextSectionName.IsNone());
+	TestTrue(TEXT("blends in over 0.1 s, no auto blend out"), FMath::IsNearlyEqual(Montage->BlendIn.GetBlendTime(), 0.1f) && !Montage->bEnableAutoBlendOut);
+	const FAnimNotifyEvent* ComboWindow = Montage->Notifies.FindByPredicate([](const FAnimNotifyEvent& Event) { return Event.NotifyName == TEXT("ComboWindow"); });
+	TestTrue(TEXT("the combo window is a branching point at 0.2 s"), ComboWindow && ComboWindow->IsBranchingPoint() && FMath::IsNearlyEqual(ComboWindow->GetTriggerTime(), 0.2f, 0.01f));
+	const FAnimNotifyEvent* SoundEvent = Montage->Notifies.FindByPredicate([](const FAnimNotifyEvent& Event) { return Event.Notify != nullptr; });
+	const FFloatProperty* Volume = SoundEvent ? FindFProperty<FFloatProperty>(SoundEvent->Notify->GetClass(), TEXT("VolumeMultiplier")) : nullptr;
+	TestTrue(TEXT("the sound notify plays at half volume on the Audio track"), Volume && FMath::IsNearlyEqual(Volume->GetPropertyValue_InContainer(SoundEvent->Notify), 0.5f)
+		&& Montage->AnimNotifyTracks.IsValidIndex(SoundEvent->TrackIndex) && Montage->AnimNotifyTracks[SoundEvent->TrackIndex].TrackName == TEXT("Audio"));
+	TestTrue(TEXT("the notify state lasts 0.2 s"), Montage->Notifies.ContainsByPredicate([](const FAnimNotifyEvent& Event)
+	{
+		return Event.NotifyStateClass != nullptr && FMath::IsNearlyEqual(Event.GetDuration(), 0.2f, 0.01f);
+	}));
+	TestFalse(TEXT("and it is saved"), Montage->GetOutermost()->IsDirty());
+
+	// The sequence copy: a footstep, a curve with keys, root motion, and a sync marker; then the notify removed by its id.
+	const FString SequencePath = SequenceCopy->GetPathName();
+	FHyperAIAnimationPlanOperation Step = PlanOp(TEXT("sequence.add_notify"), SequencePath, RevisionOf(SequencePath));
+	Step.Notify.Kind = TEXT("named_event");
+	Step.Notify.Name = TEXT("Footstep");
+	Step.Notify.TimeSeconds = 0.1;
+	Step.Notify.Track = TEXT("Feet");
+	FHyperAIAnimationPlanOperation Curve = PlanOp(TEXT("sequence.add_curve"), SequencePath, Step.ExpectedRevision);
+	Curve.Name = TEXT("HyperAITestWeight");
+	Curve.Keys = {{0.0, 0.0}, {0.2, 1.0}};
+	FHyperAIAnimationPlanOperation Root = PlanOp(TEXT("sequence.set_property"), SequencePath, Step.ExpectedRevision);
+	Root.Name = TEXT("root_motion");
+	Root.Value = TEXT("true");
+	FHyperAIAnimationPlanOperation Rate = PlanOp(TEXT("sequence.set_property"), SequencePath, Step.ExpectedRevision);
+	Rate.Name = TEXT("rate_scale");
+	Rate.Value = TEXT("1.5");
+	FHyperAIAnimationPlanOperation Marker = PlanOp(TEXT("sequence.add_sync_marker"), SequencePath, Step.ExpectedRevision);
+	Marker.Name = TEXT("Foot_L");
+	Marker.Minimum = 0.1;
+	TestEqual(TEXT("the sequence plan completes"), RunPlan({Step, Curve, Root, Rate, Marker}, TEXT("anim-sequence-") + Suffix), FString(TEXT("completed")));
+	const UAnimSequence* Sequence = Cast<UAnimSequence>(SequenceCopy);
+	TestTrue(TEXT("root motion on, rate 1.5"), Sequence->bEnableRootMotion && FMath::IsNearlyEqual(Sequence->RateScale, 1.5f));
+	TestTrue(TEXT("the Foot_L marker"), Sequence->AuthoredSyncMarkers.ContainsByPredicate([](const FAnimSyncMarker& M) { return M.MarkerName == TEXT("Foot_L"); }));
+	const FHyperAIAnimationElementView* CurveView = FindElement(SequencePath, TEXT("curve.float"), TEXT("HyperAITestWeight"));
+	TestTrue(TEXT("the curve with its two keys"), CurveView && CurveView->SecondaryIndex == 2);
+	const FHyperAIAnimationElementView* StepView = FindElement(SequencePath, TEXT("notify"), TEXT("Footstep"));
+	TestTrue(TEXT("the footstep on the Feet track"), StepView && StepView->SecondaryName == TEXT("Feet"));
+	if (StepView)
+	{
+		FHyperAIAnimationPlanOperation Remove = PlanOp(TEXT("sequence.remove_notify"), SequencePath, RevisionOf(SequencePath));
+		Remove.StableId = StepView->StableId;
+		TestEqual(TEXT("removing it by its id completes"), RunPlan({Remove}, TEXT("anim-sequence-remove-") + Suffix), FString(TEXT("completed")));
+		TestFalse(TEXT("and it is gone"), Sequence->Notifies.ContainsByPredicate([](const FAnimNotifyEvent& Event) { return Event.NotifyName == TEXT("Footstep"); }));
+	}
+
+	// The skeleton copy: a new slot in its own group, and compatibility with the original.
+	const FString SkeletonPath = SkeletonCopy->GetPathName();
+	FHyperAIAnimationPlanOperation Slot = PlanOp(TEXT("skeleton.add_slot"), SkeletonPath, RevisionOf(SkeletonPath));
+	Slot.Name = TEXT("HyperAITestUpper");
+	Slot.SecondaryName = TEXT("Body");
+	FHyperAIAnimationPlanOperation Compatible = PlanOp(TEXT("skeleton.add_compatible"), SkeletonPath, Slot.ExpectedRevision);
+	Compatible.ReferencePath = OriginalSkeleton->GetPathName();
+	TestEqual(TEXT("the skeleton plan completes"), RunPlan({Slot, Compatible}, TEXT("anim-skeleton-") + Suffix), FString(TEXT("completed")));
+	const USkeleton* Copy = Cast<USkeleton>(SkeletonCopy);
+	TestTrue(TEXT("HyperAITestUpper sits in the Body group"), Copy->ContainsSlotName(TEXT("HyperAITestUpper")) && Copy->GetSlotGroupName(TEXT("HyperAITestUpper")) == TEXT("Body"));
+	TestTrue(TEXT("and the copy is compatible with the original"), Copy->GetCompatibleSkeletons().ContainsByPredicate(
+		[OriginalSkeleton](const TSoftObjectPtr<USkeleton>& Other) { return Other.ToSoftObjectPath() == FSoftObjectPath(OriginalSkeleton); }));
 	return true;
 }
 

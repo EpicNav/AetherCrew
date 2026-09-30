@@ -193,17 +193,47 @@ struct FHyperAIAnimationTransitionRuleSpec
 	UPROPERTY() bool bExpectedValue = true;
 };
 
-/** Closed notify shape. Named events are data and cannot instantiate arbitrary classes. */
+USTRUCT(BlueprintType)
+struct FHyperAIAnimationNameMapping
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString Source;
+	UPROPERTY() FString Target;
+};
+
+/** A notify: a named event, or an instance of an AnimNotify or AnimNotifyState class (never any other class). */
 USTRUCT(BlueprintType)
 struct FHyperAIAnimationNotifySpec
 {
 	GENERATED_BODY()
 
-	/** named_event only in the base adapter. */
+	/**
+	 * named_event: fires AnimNotify_<Name> in the Animation Blueprint. notify: an AnimNotify class (play a sound or an effect).
+	 * notify_state: an AnimNotifyState class over DurationSeconds (a hit window, a weapon trail, invulnerability frames).
+	 */
 	UPROPERTY() FString Kind;
 	UPROPERTY() FString Name;
 	UPROPERTY() double TimeSeconds = -1.0;
 	UPROPERTY() double DurationSeconds = 0.0;
+	/** notify and notify_state: the class, such as /Script/Engine.AnimNotify_PlaySound or /Game/Combat/ANS_HitWindow.ANS_HitWindow_C. */
+	UPROPERTY() FString NotifyClass;
+	/** The notify track it goes on, made when missing; empty for the first track. */
+	UPROPERTY() FString Track;
+	/** Montages: fire as a branching point, on its exact frame (combo windows, cancels, root motion changes). */
+	UPROPERTY() bool bBranchingPoint = false;
+	/** The notify object's properties as name and Unreal text value: Sound /Game/SFX/S_Swing.S_Swing, SocketName hand_r. */
+	UPROPERTY() TArray<FHyperAIAnimationNameMapping> Properties;
+};
+
+/** One key of a sequence's float curve. */
+USTRUCT(BlueprintType)
+struct FHyperAIAnimationCurveKey
+{
+	GENERATED_BODY()
+
+	UPROPERTY() double TimeSeconds = 0.0;
+	UPROPERTY() double Value = 0.0;
 };
 
 USTRUCT(BlueprintType)
@@ -227,15 +257,6 @@ struct FHyperAIAnimationBlendSampleSpec
 	UPROPERTY() FVector Position = FVector::ZeroVector;
 };
 
-USTRUCT(BlueprintType)
-struct FHyperAIAnimationNameMapping
-{
-	GENERATED_BODY()
-
-	UPROPERTY() FString Source;
-	UPROPERTY() FString Target;
-};
-
 /** Strict discriminated operation. Unused fields must remain at their defaults. */
 USTRUCT(BlueprintType)
 struct FHyperAIAnimationPlanOperation
@@ -243,14 +264,11 @@ struct FHyperAIAnimationPlanOperation
 	GENERATED_BODY()
 
 	/**
-	 * Base operations: animbp.create|set_skeleton|add_state_machine|add_state|add_transition|
-	 * set_transition_rule|add_interface|add_layer|compile_repair; montage.create|add_section|
-	 * remove_section|link_sections|add_notify|remove_notify; composite.create|set_segments;
-	 * blend_space.create|set_axis|set_samples (executable for one blend space per plan; bFlag on create makes it
-	 * 1D); pose_asset.create|set_source|set_pose_names;
-	 * sequence.add_curve|remove_curve|add_notify|remove_notify; skeleton.add_compatible|
-	 * remove_compatible. Optional ControlRig/IK/PoseSearch prefixes are recognized and fail
-	 * with variant_adapter_unavailable until their exact typed facade is linked.
+	 * Executable, one asset per plan: montage.create|set_segments|set_property|add_section|remove_section|rename_section|
+	 * link_sections|add_notify|remove_notify; sequence.add_notify|remove_notify|add_curve|remove_curve|set_property|
+	 * add_sync_marker|remove_sync_marker; composite.create|set_segments; blend_space.create|set_axis|set_samples (bFlag on
+	 * create makes it 1D); skeleton.add_compatible|remove_compatible|add_slot.
+	 * Checked only: animbp.* (hyper_anim_blueprint_apply_plan edits Animation Blueprints) and pose_asset.*.
 	 */
 	UPROPERTY() FString Type;
 	UPROPERTY() FString TargetPath;
@@ -270,6 +288,13 @@ struct FHyperAIAnimationPlanOperation
 	UPROPERTY() TArray<FHyperAIAnimationSegmentSpec> Segments;
 	UPROPERTY() TArray<FHyperAIAnimationBlendSampleSpec> Samples;
 	UPROPERTY() TArray<FHyperAIAnimationNameMapping> Mappings;
+	/** sequence.add_curve: the curve's keys. */
+	UPROPERTY() TArray<FHyperAIAnimationCurveKey> Keys;
+	/**
+	 * montage.set_property (Name blend_in, blend_out, blend_out_trigger, auto_blend_out, rate_scale or slot) and
+	 * sequence.set_property (root_motion, root_lock, force_root_lock, loop or rate_scale): the value as text.
+	 */
+	UPROPERTY() FString Value;
 };
 
 USTRUCT(BlueprintType)
@@ -358,16 +383,21 @@ class HYPERAISTUDIOANIMATION_API UHyperAIStudioAnimationToolset final : public U
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** Loaded animation assets (montages, composites, blend spaces, pose assets, sequences, skeletons) with revisions and elements. */
+	/**
+	 * Animation assets (montages with sections, slots, segments, blend settings and notifies; sequences with notifies,
+	 * curves, sync markers and root motion settings; composites, blend spaces, pose assets; skeletons with bones, slots and
+	 * compatible skeletons) with each asset's revision and its elements' stable ids. AssetPaths are loaded when named.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Animation")
 	static FHyperAIAnimationInspectReport hyper_animation_inspect(
 		const FHyperAIAnimationInspectRequest& Request);
 
 	/**
-	 * Closed animation asset plans. One blend space's blend_space.create (ReferencePath = Skeleton; bFlag true for 1D),
-	 * set_axis (AxisIndex, Name, Minimum, Maximum) and set_samples (SequencePath and Position each) run for real: submit
-	 * with bDryRun false and an operation_id, and the reply waits for the edit. Other types only dry-run; use
-	 * hyper_anim_blueprint_apply_plan for Animation Blueprints.
+	 * Animation asset plans, one asset per plan, applied as one undo step, checked and saved; bDryRun false with an
+	 * operation_id waits for the edit. Montages: create from a sequence or skeleton, segments, slot, blend times, sections
+	 * and their links, notifies (named events, notify classes, notify states, branching points). Sequences: notifies,
+	 * curves with keys, sync markers, root motion and loop settings. Composites, blend spaces (create, axes, samples),
+	 * skeleton slots and compatible skeletons. Animation Blueprints are hyper_anim_blueprint_apply_plan's.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Animation")
 	static UHyperAIAnimationApplyPlanResult* hyper_animation_apply_plan(
@@ -409,7 +439,14 @@ enum class EHyperAIStudioAnimationOperationKind : uint8
 	SequenceAddNotify,
 	SequenceRemoveNotify,
 	SkeletonAddCompatible,
-	SkeletonRemoveCompatible
+	SkeletonRemoveCompatible,
+	MontageSetSegments,
+	MontageSetProperty,
+	MontageRenameSection,
+	SequenceSetProperty,
+	SequenceAddSyncMarker,
+	SequenceRemoveSyncMarker,
+	SkeletonAddSlot
 };
 
 struct FHyperAIStudioAnimationBackendOperation
@@ -431,6 +468,8 @@ struct FHyperAIStudioAnimationBackendOperation
 	TArray<FHyperAIAnimationSegmentSpec> Segments;
 	TArray<FHyperAIAnimationBlendSampleSpec> Samples;
 	TArray<FHyperAIAnimationNameMapping> Mappings;
+	TArray<FHyperAIAnimationCurveKey> Keys;
+	FString Value;
 	bool bCreatesTarget = false;
 };
 

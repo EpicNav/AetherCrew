@@ -650,6 +650,12 @@
    "text": "HyperAI：应用混合空间计划"
   },
   {
+   "namespace": "HyperAIStudioAnimationTimeline",
+   "key": "ApplyAnimationPlan",
+   "source": "HyperAI: Apply Animation Plan",
+   "text": "HyperAI：应用动画计划"
+  },
+  {
    "namespace": "HyperAIStudioBlueprintStructure",
    "key": "StructurePlan",
    "source": "HyperAI: Edit Blueprint Structure",
