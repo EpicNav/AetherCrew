@@ -668,6 +668,12 @@
    "text": "HyperAI：编辑 Decibel 会话"
   },
   {
+   "namespace": "HyperAIStudioFoliage",
+   "key": "FoliagePlan",
+   "source": "HyperAI: Edit Foliage",
+   "text": "HyperAI：编辑植被"
+  },
+  {
    "namespace": "HyperAIStudioGASAuthoring",
    "key": "GASPlan",
    "source": "HyperAI: Edit Gameplay Abilities and Effects",

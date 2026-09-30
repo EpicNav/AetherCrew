@@ -800,7 +800,8 @@ public:
 	/**
 	 * Checks worldbuilding plans (landscape, foliage, World Partition, data layer, HLOD, water, spline, level instance,
 	 * optimize, environment ops) and their effects without changing the level: a real run returns staged_backend_required.
-	 * To change the level: landscapes with hyper_landscape_apply_plan, blockouts with hyper_level_blockout_apply_plan.
+	 * To change the level: landscapes with hyper_landscape_apply_plan, foliage with hyper_foliage_apply_plan, blockouts
+	 * with hyper_level_blockout_apply_plan.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Worldbuilding")
 	static FHyperAIWorldApplyPlanReport hyper_worldbuilding_apply_plan(const FHyperAIWorldApplyPlanRequest& Request);

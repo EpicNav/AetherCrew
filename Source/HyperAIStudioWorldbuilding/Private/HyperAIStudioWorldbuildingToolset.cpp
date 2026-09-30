@@ -1815,6 +1815,10 @@ FHyperAIWorldApplyPlanReport FHyperAIStudioWorldbuildingContracts::BuildPlan(
 	{
 		Report.Diagnostic += TEXT(" Landscapes are made and edited with hyper_landscape_apply_plan.");
 	}
+	if (Operations.ContainsByPredicate([](const FHyperAIWorldBackendOperation& Operation) { return Operation.Variant.StartsWith(TEXT("foliage.")); }))
+	{
+		Report.Diagnostic += TEXT(" Foliage types, scatter, placement and erasing are done with hyper_foliage_apply_plan.");
+	}
 	return Report;
 }
 

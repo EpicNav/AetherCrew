@@ -1548,6 +1548,22 @@
      "safety": [
       "Edit"
      ]
+    },
+    {
+     "name": "hyper_foliage_inspect",
+     "cohort": "cohort.source.hyperaistudiofoliagetoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_foliage_apply_plan",
+     "cohort": "cohort.source.hyperaistudiofoliagetoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ]
   },

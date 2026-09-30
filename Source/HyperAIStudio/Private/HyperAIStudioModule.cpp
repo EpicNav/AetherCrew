@@ -1170,6 +1170,13 @@ private:
 				{}
 			},
 			{
+				TEXT("HyperAIStudioFoliage"),
+				TEXT("worldbuilding_navigation"),
+				TEXT("cohort.source.hyperaistudiofoliagetoolset.v1"),
+				{TEXT("hyper_foliage_inspect"), TEXT("hyper_foliage_apply_plan")},
+				{}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),
