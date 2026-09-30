@@ -1532,6 +1532,22 @@
       0,
       1
      ]
+    },
+    {
+     "name": "hyper_landscape_inspect",
+     "cohort": "cohort.source.hyperaistudiolandscapetoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_landscape_apply_plan",
+     "cohort": "cohort.source.hyperaistudiolandscapetoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ]
   },

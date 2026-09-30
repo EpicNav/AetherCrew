@@ -1163,6 +1163,13 @@ private:
 				{TEXT("PoseSearch")}
 			},
 			{
+				TEXT("HyperAIStudioLandscape"),
+				TEXT("worldbuilding_navigation"),
+				TEXT("cohort.source.hyperaistudiolandscapetoolset.v1"),
+				{TEXT("hyper_landscape_inspect"), TEXT("hyper_landscape_apply_plan")},
+				{}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),

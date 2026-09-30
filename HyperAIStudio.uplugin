@@ -526,6 +526,19 @@
 				"CoreUObject",
 				"Engine"
 			]
+		},
+		{
+			"Name": "HyperAIStudioLandscape",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
 		}
 	],
 	"Plugins": [

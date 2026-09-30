@@ -790,12 +790,22 @@ class HYPERAISTUDIOWORLDBUILDING_API UHyperAIStudioWorldbuildingToolset final : 
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
+	/**
+	 * The open world's records by variant (World Partition, landscapes, foliage, data layers, HLOD, water, splines, level
+	 * instances, environment actors): identity, package, counts, bounds and details, each with a revision.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Worldbuilding")
 	static FHyperAIWorldInspectReport hyper_worldbuilding_inspect(const FHyperAIWorldInspectRequest& Request);
 
+	/**
+	 * Checks worldbuilding plans (landscape, foliage, World Partition, data layer, HLOD, water, spline, level instance,
+	 * optimize, environment ops) and their effects without changing the level: a real run returns staged_backend_required.
+	 * To change the level: landscapes with hyper_landscape_apply_plan, blockouts with hyper_level_blockout_apply_plan.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Worldbuilding")
 	static FHyperAIWorldApplyPlanReport hyper_worldbuilding_apply_plan(const FHyperAIWorldApplyPlanRequest& Request);
 
+	/** Checks the loaded world's worldbuilding records by variant for problems, up to MaxIssues. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Worldbuilding")
 	static FHyperAIWorldValidateReport hyper_worldbuilding_validate(const FHyperAIWorldValidateRequest& Request);
 };
@@ -808,12 +818,18 @@ class HYPERAISTUDIOWORLDBUILDING_API UHyperAIStudioNavigationToolset final : pub
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
+	/** The open level's navigation records: navmesh data and bounds, nav areas, nav links and agents, each with a revision. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Navigation")
 	static FHyperAINavigationInspectReport hyper_navigation_inspect(const FHyperAINavigationInspectRequest& Request);
 
+	/**
+	 * Checks navigation plans (navmesh build and configure, nav areas, nav links) and their effects without changing the
+	 * level: a real run returns staged_backend_required.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Navigation")
 	static FHyperAINavigationApplyPlanReport hyper_navigation_apply_plan(const FHyperAINavigationApplyPlanRequest& Request);
 
+	/** Checks the loaded navigation records for problems. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Navigation")
 	static FHyperAINavigationValidateReport hyper_navigation_validate(const FHyperAINavigationValidateRequest& Request);
 };

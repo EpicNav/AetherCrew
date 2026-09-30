@@ -698,6 +698,12 @@
    "text": "没有参考图？用关卡本身做一张：图像模型按你的描述为这个视角重新布光，然后你的首选智能体把关卡的光照匹配到这张图。"
   },
   {
+   "namespace": "HyperAIStudioLandscape",
+   "key": "LandscapePlan",
+   "source": "HyperAI: Edit Landscapes",
+   "text": "HyperAI：编辑地形"
+  },
+  {
    "namespace": "HyperAIStudioLevelDesign",
    "key": "ApplyBlockoutPlan",
    "source": "HyperAI: Apply Blockout Plan",

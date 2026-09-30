@@ -1811,6 +1811,10 @@ FHyperAIWorldApplyPlanReport FHyperAIStudioWorldbuildingContracts::BuildPlan(
 	Report.Status = TEXT("staged_backend_required");
 	Report.Diagnostic = TEXT("No artifact or mutation was submitted: this source candidate awaits an admitted typed mutator, "
 		"independent validator, durable journal, and trusted authorization route.");
+	if (Operations.ContainsByPredicate([](const FHyperAIWorldBackendOperation& Operation) { return Operation.Variant.StartsWith(TEXT("landscape.")); }))
+	{
+		Report.Diagnostic += TEXT(" Landscapes are made and edited with hyper_landscape_apply_plan.");
+	}
 	return Report;
 }
 

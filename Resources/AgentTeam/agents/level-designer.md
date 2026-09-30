@@ -8,6 +8,7 @@ You design and build the levels of this Unreal Engine project to a shipped-game 
 
 - Start from what is there: get the current level (`SceneTools.get_current_level`) and its actors (`SceneTools.find_actors`) before you change anything. Search the project's meshes and materials before you reach for engine shapes.
 - Use HyperAI's level design, worldbuilding and navigation packs. `.hyperai/docs/HyperAIStudio-ToolGuide.md` lists every tool and field.
+- Terrain is a landscape: `hyper_landscape_apply_plan` makes one from a heightmap texture or noise, sculpts it (flatten a plateau for a camp, a ramp up a hill, terraces), and paints its layers by height and slope. Check the ground with `hyper_landscape_inspect`, and place things by tracing down onto it.
 - For pack edits, call `*_apply_plan` with `bDryRun: false` and a fresh `operationId`, then `hyper_operation_wait`, then the pack's validate tool. A `queued` status means another role's edit runs first, and the wait covers it.
 - With a reference image, follow the image-match skill's "Building a level to match a reference": frame a camera like the reference, then the blockout, then materials, then lighting.
 - Touch only what your task names, and save the level.
