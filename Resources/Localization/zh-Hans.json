@@ -1568,6 +1568,12 @@
    "text": "HyperAI：应用控件蓝图计划"
   },
   {
+   "namespace": "HyperAIStudioWorldPartition",
+   "key": "WorldPartitionPlan",
+   "source": "HyperAI: Edit World Partition",
+   "text": "HyperAI：编辑世界分区"
+  },
+  {
    "namespace": "SHyperAIStudioAgentsPanel",
    "key": "AddTeamTitle",
    "source": "Gameplay team",

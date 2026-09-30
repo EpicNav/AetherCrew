@@ -1564,6 +1564,22 @@
      "safety": [
       "Edit"
      ]
+    },
+    {
+     "name": "hyper_world_partition_inspect",
+     "cohort": "cohort.source.hyperaistudioworldpartitiontoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_world_partition_apply_plan",
+     "cohort": "cohort.source.hyperaistudioworldpartitiontoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ]
   },

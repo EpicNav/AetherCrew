@@ -1177,6 +1177,13 @@ private:
 				{}
 			},
 			{
+				TEXT("HyperAIStudioWorldPartition"),
+				TEXT("worldbuilding_navigation"),
+				TEXT("cohort.source.hyperaistudioworldpartitiontoolset.v1"),
+				{TEXT("hyper_world_partition_inspect"), TEXT("hyper_world_partition_apply_plan")},
+				{}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),

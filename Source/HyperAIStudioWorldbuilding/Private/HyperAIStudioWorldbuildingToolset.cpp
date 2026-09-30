@@ -1819,6 +1819,13 @@ FHyperAIWorldApplyPlanReport FHyperAIStudioWorldbuildingContracts::BuildPlan(
 	{
 		Report.Diagnostic += TEXT(" Foliage types, scatter, placement and erasing are done with hyper_foliage_apply_plan.");
 	}
+	if (Operations.ContainsByPredicate([](const FHyperAIWorldBackendOperation& Operation)
+		{
+			return Operation.Variant.StartsWith(TEXT("world_partition.")) || Operation.Variant.StartsWith(TEXT("data_layer.")) || Operation.Variant.StartsWith(TEXT("hlod."));
+		}))
+	{
+		Report.Diagnostic += TEXT(" Data layers, HLOD layers, streaming and editor regions are set up with hyper_world_partition_apply_plan.");
+	}
 	return Report;
 }
 
