@@ -48,6 +48,23 @@ struct FHyperAIBlueprintTimelineTrack
 	UPROPERTY() FString Interp;
 };
 
+/** One field of a user-defined struct. */
+USTRUCT(BlueprintType)
+struct FHyperAIBlueprintStructField
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString Name;
+	/** As for parameters: float, int, bool, name, string, text, vector, rotator, linearcolor, object:, struct: or enum: with a path; [] for an array. */
+	UPROPERTY() FString Type;
+	/**
+	 * Its default: 100, true, 1,2,3 for a vector, 0,90,0 for a rotator (pitch, yaw, roll), (R=1,G=0.5,B=0,A=1) for a color,
+	 * an enum's value by name, an asset by path. Empty keeps the type's own default.
+	 */
+	UPROPERTY() FString Default;
+	UPROPERTY() FString Tooltip;
+};
+
 USTRUCT(BlueprintType)
 struct FHyperAIBlueprintStructureOp
 {
@@ -56,20 +73,31 @@ struct FHyperAIBlueprintStructureOp
 	/**
 	 * interface.create, interface.add_function, interface.implement, interface.remove; timeline.add, timeline.remove;
 	 * event.add, event.set_rpc; variable.set_replication; component.set_replicated; graph.collapse, graph.expand;
-	 * pins.connect.
+	 * pins.connect; struct.create, struct.add_field, struct.set_field, struct.rename_field, struct.remove_field;
+	 * enum.create, enum.add_value, enum.rename_value, enum.remove_value.
 	 */
 	UPROPERTY() FString Kind;
 	/**
 	 * pins.connect: an output pin and the input pin it drives, each as Node.Pin: the node by name (K2Node_Timeline_0) or by
 	 * its title when only one node has it (Event BeginPlay, a timeline's name), such as "Event BeginPlay.then" and "Open.Play".
+	 * struct.rename_field, enum.rename_value: To is the new name.
 	 */
 	UPROPERTY() FString From;
 	UPROPERTY() FString To;
 	/**
 	 * The member the op is about: the interface function, the timeline, the custom event, the variable, the component (its
-	 * variable name), or the graph graph.collapse makes.
+	 * variable name), the graph graph.collapse makes, a struct's field, or an enum's value (as it reads, such as Idle).
 	 */
 	UPROPERTY() FString Name;
+	/** struct.* and enum.*: the struct or enum asset, such as /Game/Data/S_Weapon or /Game/Data/E_AIState. */
+	UPROPERTY() FString Asset;
+	/**
+	 * struct.create and struct.add_field: the fields, in order. struct.set_field: one entry with the field's new Type, Default
+	 * or Tooltip (an empty one stays as it is).
+	 */
+	UPROPERTY() TArray<FHyperAIBlueprintStructField> Fields;
+	/** enum.create and enum.add_value: the values' names, in order (Idle, Chase, Attack). */
+	UPROPERTY() TArray<FString> Values;
 	/** interface.*: the Blueprint Interface asset, such as /Game/Interfaces/BPI_Interactable. */
 	UPROPERTY() FString Interface;
 	/** interface.add_function, event.add: the inputs; interface.add_function: its outputs too (a function with none is an event). */
@@ -118,7 +146,7 @@ struct FHyperAIBlueprintStructurePlanRequest
 {
 	GENERATED_BODY()
 
-	/** The Blueprint to edit, such as /Game/Blueprints/BP_Door. Not needed when every op makes or edits an interface. */
+	/** The Blueprint to edit, such as /Game/Blueprints/BP_Door. Not needed when every op makes or edits an interface, a struct or an enum. */
 	UPROPERTY() FString BlueprintPath;
 	UPROPERTY() TArray<FHyperAIBlueprintStructureOp> Operations;
 	/** Save what the plan changed, once it compiles (the default). Off leaves it changed in the editor, unsaved. */
@@ -153,7 +181,7 @@ struct FHyperAIBlueprintStructurePlanReport
 	UPROPERTY() FString OperationId;
 	UPROPERTY() FString BlueprintPath;
 	UPROPERTY() int32 Applied = 0;
-	/** What each op made, by name, so the next step can wire it: a timeline node and its pins, a collapsed node, a graph. */
+	/** What each op made, by name, so the next step can wire it: a timeline node and its pins, a collapsed node, a graph, a struct's fields. */
 	UPROPERTY() TArray<FString> Made;
 	UPROPERTY() TArray<FString> Notes;
 	/** up_to_date, up_to_date_with_warnings or error, for the Blueprint (and any interface the plan touched). */
@@ -167,10 +195,13 @@ struct FHyperAIBlueprintStructureInspectRequest
 {
 	GENERATED_BODY()
 
+	/** A Blueprint or Blueprint Interface, or a user-defined struct or enum. */
 	UPROPERTY() FString BlueprintPath;
 	/** List the nodes too (with their links), in this graph when set; a large graph pages with Offset and Limit. */
 	UPROPERTY() bool bNodes = false;
 	UPROPERTY() FString Graph;
+	/** With bNodes: only the nodes whose name, title or class contains this, case-insensitively ("Timeline", "SetActorLocation"). */
+	UPROPERTY() FString Find;
 	UPROPERTY() int32 Offset = 0;
 	UPROPERTY() int32 Limit = 200;
 };
@@ -202,6 +233,12 @@ struct FHyperAIBlueprintStructureInspectReport
 	UPROPERTY() FString BlueprintPath;
 	UPROPERTY() FString ParentClass;
 	UPROPERTY() bool bIsInterface = false;
+	/** blueprint, interface, struct or enum. */
+	UPROPERTY() FString AssetType;
+	/** A struct's fields, each Name: type = default (tooltip). */
+	UPROPERTY() TArray<FString> Fields;
+	/** An enum's values in order, each index, the name it reads as, and its own name (NewEnumerator0). */
+	UPROPERTY() TArray<FString> EnumValues;
 	/** Each graph: its name, kind (event, function, macro, collapsed, interface) and node count. */
 	UPROPERTY() TArray<FString> Graphs;
 	/** For an interface asset: its functions with inputs and outputs. For a Blueprint: the interfaces it implements. */
@@ -220,8 +257,9 @@ struct FHyperAIBlueprintStructureInspectReport
 };
 
 /**
- * What Epic's Blueprint tools leave out: timelines, Blueprint interfaces, RPC events and replication conditions, and folding
- * nodes into functions, macros and collapsed graphs (and back). Each plan is one undo step, compiled, reported and saved.
+ * What Epic's Blueprint tools leave out: timelines, Blueprint interfaces, RPC events and replication conditions, folding
+ * nodes into functions, macros and collapsed graphs (and back), and user-defined structs and enums. Each plan is one undo
+ * step, compiled, reported and saved.
  */
 UCLASS()
 class HYPERAISTUDIOBLUEPRINTSTRUCTURE_API UHyperAIStudioBlueprintStructureToolset final : public UToolsetDefinition
@@ -234,7 +272,8 @@ public:
 	/**
 	 * A Blueprint's structure: graphs, interfaces (implemented, or an interface asset's functions), timelines and their
 	 * tracks, custom events and their replication, replicated variables, components, compile status; with bNodes, its
-	 * nodes by name with their links, paged, for large graphs and for graph.collapse.
+	 * nodes by name with their titles and links, paged, for large graphs and for graph.collapse; Find keeps only the nodes
+	 * whose name, title or class contains it. Given a user-defined struct or enum instead, its fields or values.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Blueprint")
 	static FHyperAIBlueprintStructureInspectReport hyper_blueprint_structure_inspect(const FHyperAIBlueprintStructureInspectRequest& Request);
@@ -243,8 +282,10 @@ public:
 	 * Edits a Blueprint's structure as one undo step, compiles it and saves it: makes Blueprint Interfaces and their
 	 * functions and implements them; adds timelines with float, vector, color and event tracks and their keys; adds custom
 	 * events as RPCs (server, client, multicast, reliable) or sets an event's replication; sets a variable's replication
-	 * and condition and a component's; collapses nodes into a function, macro or collapsed graph, or expands one. The report
-	 * names what each op made, and the compiler's messages. Wire the new nodes with Epic's Blueprint tools.
+	 * and condition and a component's; collapses nodes into a function, macro or collapsed graph, or expands one; makes
+	 * user-defined structs (typed fields with defaults and tooltips) and enums, and adds, changes, renames or removes their
+	 * fields and values. The report names what each op made, and the compiler's messages. Wire the new nodes with Epic's
+	 * Blueprint tools.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Blueprint")
 	static FHyperAIBlueprintStructurePlanReport hyper_blueprint_structure_apply_plan(const FHyperAIBlueprintStructurePlanRequest& Request);

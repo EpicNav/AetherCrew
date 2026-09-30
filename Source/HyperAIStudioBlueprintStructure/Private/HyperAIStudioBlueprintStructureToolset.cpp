@@ -20,6 +20,7 @@
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/TimelineTemplate.h"
+#include "Engine/UserDefinedEnum.h"
 #include "GameFramework/Actor.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
@@ -36,8 +37,10 @@
 #include "K2Node_Tunnel.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/CompilerResultsLog.h"
+#include "Kismet2/EnumEditorUtils.h"
 #include "Kismet2/Kismet2NameValidators.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Kismet2/StructureEditorUtils.h"
 #include "Logging/TokenizedMessage.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Guid.h"
@@ -45,9 +48,11 @@
 #include "Misc/ScopeExit.h"
 #include "Misc/UObjectToken.h"
 #include "ScopedTransaction.h"
+#include "StructUtils/UserDefinedStruct.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
 #include "UObject/Interface.h"
+#include "UserDefinedStructure/UserDefinedStructEditorData.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 
@@ -1212,14 +1217,516 @@ namespace HyperAIStudio::BlueprintStructure::Private
 	}
 
 	/** Applies one op; Touched collects the Blueprints to compile and save, interfaces first. */
-	bool ApplyOp(UBlueprint* Target, const FHyperAIBlueprintStructureOp& Op, TArray<UBlueprint*>& Touched, TArray<FString>& OutMade,
-		TArray<FString>& OutNotes, FString& OutError)
+	// ------------------------------------------------------------------------------------------------ structs and enums
+
+	UUserDefinedStruct* LoadStruct(const FString& Path)
+	{
+		return Path.TrimStartAndEnd().IsEmpty() ? nullptr : LoadObject<UUserDefinedStruct>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	}
+
+	UUserDefinedEnum* LoadEnum(const FString& Path)
+	{
+		return Path.TrimStartAndEnd().IsEmpty() ? nullptr : LoadObject<UUserDefinedEnum>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	}
+
+	/** The package for a new struct or enum; refused when an asset is there already. */
+	UPackage* NewAssetPackage(const FString& Path, FString& OutError)
+	{
+		if (!IsProjectPath(Path, OutError))
+		{
+			return nullptr;
+		}
+		const FString Package = PackageOf(Path);
+		if (FindObject<UObject>(nullptr, *ObjectPath(Package)) || FPackageName::DoesPackageExist(Package))
+		{
+			OutError = FString::Printf(TEXT("%s exists already."), *Package);
+			return nullptr;
+		}
+		return CreatePackage(*Package);
+	}
+
+	const FStructVariableDescription* FindField(const UUserDefinedStruct& Struct, const FString& Name)
+	{
+		return FStructureEditorUtils::GetVarDesc(&Struct).FindByPredicate([Wanted = Name.TrimStartAndEnd()](const FStructVariableDescription& Field)
+		{
+			return Field.FriendlyName.Equals(Wanted, ESearchCase::IgnoreCase);
+		});
+	}
+
+	FString FieldNames(const UUserDefinedStruct& Struct)
+	{
+		TArray<FString> Names;
+		for (const FStructVariableDescription& Field : FStructureEditorUtils::GetVarDesc(&Struct))
+		{
+			Names.Add(Field.FriendlyName);
+		}
+		return FString::Join(Names, TEXT(", "));
+	}
+
+	FString DescribeField(const FStructVariableDescription& Field)
+	{
+		FString Line = FString::Printf(TEXT("%s: %s"), *Field.FriendlyName, *TypeName(Field.ToPinType()));
+		if (!Field.DefaultValue.IsEmpty())
+		{
+			Line += TEXT(" = ") + Field.DefaultValue;
+		}
+		if (!Field.ToolTip.IsEmpty())
+		{
+			Line += TEXT(" (") + Field.ToolTip + TEXT(")");
+		}
+		return Line;
+	}
+
+	FString DescribeStruct(const UUserDefinedStruct& Struct)
+	{
+		TArray<FString> Fields;
+		for (const FStructVariableDescription& Field : FStructureEditorUtils::GetVarDesc(&Struct))
+		{
+			Fields.Add(DescribeField(Field));
+		}
+		return FString::Printf(TEXT("struct %s: %s"), *Struct.GetPathName(), *FString::Join(Fields, TEXT(", ")));
+	}
+
+	/** An enum field's default may name a value as it reads (Idle); the struct keeps the value's own name (NewEnumerator0). */
+	FString EnumDefault(const FEdGraphPinType& Type, const FString& Default)
+	{
+		if (const UEnum* Enum = Cast<UEnum>(Type.PinSubCategoryObject.Get()))
+		{
+			for (int32 Index = 0; Index < Enum->NumEnums() - 1; ++Index)
+			{
+				if (Enum->GetDisplayNameTextByIndex(Index).ToString().Equals(Default, ESearchCase::IgnoreCase))
+				{
+					return Enum->GetNameStringByIndex(Index);
+				}
+			}
+		}
+		return Default;
+	}
+
+	bool SetFieldDetails(UUserDefinedStruct& Struct, const FGuid Guid, const FHyperAIBlueprintStructField& Field, FString& OutError)
+	{
+		const FStructVariableDescription* Current = FStructureEditorUtils::GetVarDescByGuid(&Struct, Guid);
+		if (!Current)
+		{
+			OutError = TEXT("The field went missing while it was being set.");
+			return false;
+		}
+		const FString Default = EnumDefault(Current->ToPinType(), Field.Default.TrimStartAndEnd());
+		if (!Default.IsEmpty() && Default != Current->DefaultValue && !FStructureEditorUtils::ChangeVariableDefaultValue(&Struct, Guid, Default))
+		{
+			OutError = FString::Printf(TEXT("'%s' is not a default a %s field takes: numbers as 100, bools as true, vectors 1,2,3, rotators 0,90,0, ")
+				TEXT("colors (R=1,G=0,B=0,A=1), an enum's value by name, an asset by its path."), *Field.Default, *TypeName(Current->ToPinType()));
+			return false;
+		}
+		if (!Field.Tooltip.IsEmpty())
+		{
+			FStructureEditorUtils::ChangeVariableTooltip(&Struct, Guid, Field.Tooltip);
+		}
+		return true;
+	}
+
+	bool AddFields(UUserDefinedStruct& Struct, const TArray<FHyperAIBlueprintStructField>& Fields, FString& OutError)
+	{
+		for (const FHyperAIBlueprintStructField& Field : Fields)
+		{
+			FEdGraphPinType Type;
+			FString Why;
+			if (!ParseType(Field.Type, Type, OutError))
+			{
+				return false;
+			}
+			if (!FStructureEditorUtils::CanHaveAMemberVariableOfType(&Struct, Type, &Why) || !FStructureEditorUtils::AddVariable(&Struct, Type))
+			{
+				OutError = FString::Printf(TEXT("%s can't have a %s field %s. %s"), *Struct.GetName(), *Field.Type, *Field.Name, *Why);
+				return false;
+			}
+			const FGuid Guid = FStructureEditorUtils::GetVarDesc(&Struct).Last().VarGuid;
+			if (!FStructureEditorUtils::RenameVariable(&Struct, Guid, Field.Name.TrimStartAndEnd()))
+			{
+				OutError = FString::Printf(TEXT("%s can't name a field '%s': each field's name is its own (it has %s)."), *Struct.GetName(), *Field.Name, *FieldNames(Struct));
+				return false;
+			}
+			if (!SetFieldDetails(Struct, Guid, Field, OutError))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	UUserDefinedStruct* CreateStruct(const FHyperAIBlueprintStructureOp& Op, FString& OutError)
+	{
+		UPackage* Package = NewAssetPackage(Op.Asset, OutError);
+		if (!Package)
+		{
+			return nullptr;
+		}
+		UUserDefinedStruct* Struct = FStructureEditorUtils::CreateUserDefinedStruct(Package, FName(*FPackageName::GetShortName(Package)),
+			RF_Public | RF_Standalone | RF_Transactional);
+		if (!Struct)
+		{
+			OutError = TEXT("Unreal did not make the struct.");
+			return nullptr;
+		}
+		FAssetRegistryModule::AssetCreated(Struct);
+		Package->MarkPackageDirty();
+		// A new struct starts with one bool field, MemberVar_0; the plan's fields take its place.
+		const FGuid Placeholder = FStructureEditorUtils::GetVarDesc(Struct).IsEmpty() ? FGuid() : FStructureEditorUtils::GetVarDesc(Struct)[0].VarGuid;
+		if (!AddFields(*Struct, Op.Fields, OutError))
+		{
+			return nullptr;
+		}
+		if (Placeholder.IsValid())
+		{
+			FStructureEditorUtils::RemoveVariable(Struct, Placeholder);
+		}
+		return Struct;
+	}
+
+	/** An enum's value by the name it reads as (Idle), or by its own (NewEnumerator0). */
+	int32 FindValue(const UUserDefinedEnum& Enum, const FString& Name)
+	{
+		const FString Wanted = Name.TrimStartAndEnd();
+		for (int32 Index = 0; Index < Enum.NumEnums() - 1; ++Index)
+		{
+			if (Enum.GetDisplayNameTextByIndex(Index).ToString().Equals(Wanted, ESearchCase::IgnoreCase)
+				|| Enum.GetNameStringByIndex(Index).Equals(Wanted, ESearchCase::IgnoreCase))
+			{
+				return Index;
+			}
+		}
+		return INDEX_NONE;
+	}
+
+	TArray<FString> DescribeValues(const UUserDefinedEnum& Enum)
+	{
+		TArray<FString> Values;
+		for (int32 Index = 0; Index < Enum.NumEnums() - 1; ++Index)
+		{
+			Values.Add(FString::Printf(TEXT("%d %s (%s)"), Index, *Enum.GetDisplayNameTextByIndex(Index).ToString(), *Enum.GetNameStringByIndex(Index)));
+		}
+		return Values;
+	}
+
+	bool AddValues(UUserDefinedEnum& Enum, const TArray<FString>& Values, FString& OutError)
+	{
+		for (const FString& Value : Values)
+		{
+			FEnumEditorUtils::AddNewEnumeratorForUserDefinedEnum(&Enum);
+			// The new value sits last, before the hidden _MAX entry.
+			if (!FEnumEditorUtils::SetEnumeratorDisplayName(&Enum, Enum.NumEnums() - 2, FText::FromString(Value.TrimStartAndEnd())))
+			{
+				OutError = FString::Printf(TEXT("%s can't have a value named '%s': each value's name is its own."), *Enum.GetName(), *Value);
+				return false;
+			}
+		}
+		return true;
+	}
+
+	UUserDefinedEnum* CreateEnum(const FHyperAIBlueprintStructureOp& Op, FString& OutError)
+	{
+		UPackage* Package = NewAssetPackage(Op.Asset, OutError);
+		if (!Package)
+		{
+			return nullptr;
+		}
+		UUserDefinedEnum* Enum = Cast<UUserDefinedEnum>(FEnumEditorUtils::CreateUserDefinedEnum(Package, FName(*FPackageName::GetShortName(Package)),
+			RF_Public | RF_Standalone | RF_Transactional));
+		if (!Enum)
+		{
+			OutError = TEXT("Unreal did not make the enum.");
+			return nullptr;
+		}
+		FAssetRegistryModule::AssetCreated(Enum);
+		Package->MarkPackageDirty();
+		return AddValues(*Enum, Op.Values, OutError) ? Enum : nullptr;
+	}
+
+	/** struct.* and enum.*, through the struct and enum editors' own code. */
+	bool ApplyTypeOp(const FString& Kind, const FHyperAIBlueprintStructureOp& Op, TArray<UObject*>& TouchedAssets, TArray<FString>& OutMade, FString& OutError)
+	{
+		if (Kind.StartsWith(TEXT("struct.")))
+		{
+			UUserDefinedStruct* Struct = Kind == TEXT("struct.create") ? CreateStruct(Op, OutError) : LoadStruct(Op.Asset);
+			if (!Struct)
+			{
+				OutError = OutError.IsEmpty() ? FString::Printf(TEXT("%s is not a struct: struct.create makes one."), *Op.Asset) : OutError;
+				return false;
+			}
+			TouchedAssets.AddUnique(Struct);
+			if (Kind == TEXT("struct.add_field"))
+			{
+				if (!AddFields(*Struct, Op.Fields, OutError))
+				{
+					return false;
+				}
+			}
+			else if (Kind != TEXT("struct.create"))
+			{
+				const FStructVariableDescription* Field = FindField(*Struct, Op.Name);
+				if (!Field)
+				{
+					OutError = FString::Printf(TEXT("%s has no field %s; it has %s."), *Struct->GetName(), *Op.Name, *FieldNames(*Struct));
+					return false;
+				}
+				const FGuid Guid = Field->VarGuid;
+				if (Kind == TEXT("struct.remove_field"))
+				{
+					if (!FStructureEditorUtils::RemoveVariable(Struct, Guid))
+					{
+						OutError = FString::Printf(TEXT("%s keeps at least one field."), *Struct->GetName());
+						return false;
+					}
+				}
+				else if (Kind == TEXT("struct.rename_field"))
+				{
+					if (!FStructureEditorUtils::RenameVariable(Struct, Guid, Op.To.TrimStartAndEnd()))
+					{
+						OutError = FString::Printf(TEXT("%s can't rename %s to '%s': each field's name is its own (it has %s)."), *Struct->GetName(), *Op.Name, *Op.To, *FieldNames(*Struct));
+						return false;
+					}
+				}
+				else if (Kind == TEXT("struct.set_field") && Op.Fields.Num() == 1)
+				{
+					const FHyperAIBlueprintStructField& Change = Op.Fields[0];
+					if (!Change.Type.TrimStartAndEnd().IsEmpty())
+					{
+						FEdGraphPinType Type;
+						if (!ParseType(Change.Type, Type, OutError))
+						{
+							return false;
+						}
+						if (Type != Field->ToPinType() && !FStructureEditorUtils::ChangeVariableType(Struct, Guid, Type))
+						{
+							FString Why;
+							FStructureEditorUtils::CanHaveAMemberVariableOfType(Struct, Type, &Why);
+							OutError = FString::Printf(TEXT("%s's field %s can't become a %s. %s"), *Struct->GetName(), *Op.Name, *Change.Type, *Why);
+							return false;
+						}
+					}
+					if (!SetFieldDetails(*Struct, Guid, Change, OutError))
+					{
+						return false;
+					}
+				}
+				else
+				{
+					OutError = FString::Printf(TEXT("Unknown struct op '%s', or struct.set_field without exactly one entry in Fields."), *Op.Kind);
+					return false;
+				}
+			}
+			if (Struct->Status == UDSS_Error)
+			{
+				OutError = FString::Printf(TEXT("%s does not compile: %s"), *Struct->GetName(), *Struct->ErrorMessage);
+				return false;
+			}
+			OutMade.Add(DescribeStruct(*Struct));
+			return true;
+		}
+		UUserDefinedEnum* Enum = Kind == TEXT("enum.create") ? CreateEnum(Op, OutError) : LoadEnum(Op.Asset);
+		if (!Enum)
+		{
+			OutError = OutError.IsEmpty() ? FString::Printf(TEXT("%s is not an enum: enum.create makes one."), *Op.Asset) : OutError;
+			return false;
+		}
+		TouchedAssets.AddUnique(Enum);
+		if (Kind == TEXT("enum.add_value"))
+		{
+			if (!AddValues(*Enum, Op.Values, OutError))
+			{
+				return false;
+			}
+		}
+		else if (Kind != TEXT("enum.create"))
+		{
+			const int32 Index = FindValue(*Enum, Op.Name);
+			if (Index == INDEX_NONE)
+			{
+				OutError = FString::Printf(TEXT("%s has no value %s; it has %s."), *Enum->GetName(), *Op.Name, *FString::Join(DescribeValues(*Enum), TEXT(", ")));
+				return false;
+			}
+			if (Kind == TEXT("enum.remove_value"))
+			{
+				FEnumEditorUtils::RemoveEnumeratorFromUserDefinedEnum(Enum, Index);
+			}
+			else if (Kind == TEXT("enum.rename_value"))
+			{
+				if (!FEnumEditorUtils::SetEnumeratorDisplayName(Enum, Index, FText::FromString(Op.To.TrimStartAndEnd())))
+				{
+					OutError = FString::Printf(TEXT("%s can't rename %s to '%s': each value's name is its own."), *Enum->GetName(), *Op.Name, *Op.To);
+					return false;
+				}
+			}
+			else
+			{
+				OutError = FString::Printf(TEXT("Unknown enum op '%s'."), *Op.Kind);
+				return false;
+			}
+		}
+		OutMade.Add(FString::Printf(TEXT("enum %s: %s"), *Enum->GetPathName(), *FString::Join(DescribeValues(*Enum), TEXT(", "))));
+		return true;
+	}
+
+	/** A struct or enum op, checked against the asset as it is and against what the plan's earlier ops make of it. */
+	bool CheckTypeOp(const FString& Kind, const FHyperAIBlueprintStructureOp& Op, TMap<FString, TSet<FString>>& Members, FString& OutError)
+	{
+		static const TSet<FString> Kinds = {TEXT("struct.create"), TEXT("struct.add_field"), TEXT("struct.set_field"), TEXT("struct.rename_field"),
+			TEXT("struct.remove_field"), TEXT("enum.create"), TEXT("enum.add_value"), TEXT("enum.rename_value"), TEXT("enum.remove_value")};
+		if (!Kinds.Contains(Kind))
+		{
+			OutError = FString::Printf(TEXT("Unknown op '%s'."), *Op.Kind);
+			return false;
+		}
+		const bool bStruct = Kind.StartsWith(TEXT("struct."));
+		const FString Key = (bStruct ? TEXT("struct:") : TEXT("enum:")) + PackageOf(Op.Asset).ToLower();
+		TSet<FString>* Known = Members.Find(Key);
+		if (Kind.EndsWith(TEXT(".create")))
+		{
+			if (!IsProjectPath(Op.Asset, OutError))
+			{
+				return false;
+			}
+			if (Known || FPackageName::DoesPackageExist(PackageOf(Op.Asset)) || FindObject<UObject>(nullptr, *ObjectPath(PackageOf(Op.Asset))))
+			{
+				OutError = FString::Printf(TEXT("%s exists already."), *Op.Asset);
+				return false;
+			}
+			Known = &Members.Add(Key);
+		}
+		else if (!Known)
+		{
+			TSet<FString> Names;
+			if (bStruct)
+			{
+				const UUserDefinedStruct* Struct = LoadStruct(Op.Asset);
+				if (!Struct)
+				{
+					OutError = FString::Printf(TEXT("%s is not a struct, and the plan does not make it."), *Op.Asset);
+					return false;
+				}
+				for (const FStructVariableDescription& Field : FStructureEditorUtils::GetVarDesc(Struct))
+				{
+					Names.Add(Field.FriendlyName.ToLower());
+				}
+			}
+			else
+			{
+				const UUserDefinedEnum* Enum = LoadEnum(Op.Asset);
+				if (!Enum)
+				{
+					OutError = FString::Printf(TEXT("%s is not an enum, and the plan does not make it."), *Op.Asset);
+					return false;
+				}
+				for (int32 Index = 0; Index < Enum->NumEnums() - 1; ++Index)
+				{
+					Names.Add(Enum->GetDisplayNameTextByIndex(Index).ToString().ToLower());
+				}
+			}
+			Known = &Members.Add(Key, MoveTemp(Names));
+		}
+		auto AddName = [&](const FString& Name)
+		{
+			const FString Trimmed = Name.TrimStartAndEnd();
+			if (Trimmed.IsEmpty() || Known->Contains(Trimmed.ToLower()))
+			{
+				OutError = Trimmed.IsEmpty() ? FString(TEXT("Every field and value needs a name.")) : FString::Printf(TEXT("%s has %s already."), *Op.Asset, *Trimmed);
+				return false;
+			}
+			Known->Add(Trimmed.ToLower());
+			return true;
+		};
+		auto Has = [&](const FString& Name)
+		{
+			if (!Known->Contains(Name.TrimStartAndEnd().ToLower()))
+			{
+				// Names are matched without case, so they are listed that way.
+				TArray<FString> Names = Known->Array();
+				Names.Sort();
+				OutError = FString::Printf(TEXT("%s has no %s %s; it has %s."), *Op.Asset, bStruct ? TEXT("field") : TEXT("value"), *Name,
+					*FString::Join(Names, TEXT(", ")));
+				return false;
+			}
+			return true;
+		};
+		// A field may be a struct or enum an earlier op of the plan makes, which exists only once the plan runs.
+		auto CheckType = [&](const FString& TypeText)
+		{
+			FString Text = TypeText.TrimStartAndEnd();
+			Text.RemoveFromEnd(TEXT("[]"));
+			FString Prefix, Path;
+			if (Text.Split(TEXT(":"), &Prefix, &Path))
+			{
+				Prefix = Prefix.TrimStartAndEnd().ToLower();
+				if ((Prefix == TEXT("struct") || Prefix == TEXT("enum")) && Members.Contains(Prefix + TEXT(":") + PackageOf(Path).ToLower()))
+				{
+					return true;
+				}
+			}
+			FEdGraphPinType Type;
+			return ParseType(TypeText, Type, OutError);
+		};
+		if (Kind == TEXT("struct.create") || Kind == TEXT("struct.add_field"))
+		{
+			if (Op.Fields.IsEmpty())
+			{
+				OutError = TEXT("Give the struct its Fields, each a Name and a Type.");
+				return false;
+			}
+			for (const FHyperAIBlueprintStructField& Field : Op.Fields)
+			{
+				if (!AddName(Field.Name) || !CheckType(Field.Type))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+		if (Kind == TEXT("enum.create") || Kind == TEXT("enum.add_value"))
+		{
+			if (Op.Values.IsEmpty())
+			{
+				OutError = TEXT("Give the enum its Values.");
+				return false;
+			}
+			for (const FString& Value : Op.Values)
+			{
+				if (!AddName(Value))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+		if (!Has(Op.Name))
+		{
+			return false;
+		}
+		if (Kind == TEXT("struct.set_field"))
+		{
+			if (Op.Fields.Num() != 1)
+			{
+				OutError = TEXT("struct.set_field takes one entry in Fields: the field's new Type, Default or Tooltip.");
+				return false;
+			}
+			return Op.Fields[0].Type.TrimStartAndEnd().IsEmpty() || CheckType(Op.Fields[0].Type);
+		}
+		// What is left is a rename, which takes its new name, or a removal.
+		Known->Remove(Op.Name.TrimStartAndEnd().ToLower());
+		return Kind == TEXT("struct.rename_field") || Kind == TEXT("enum.rename_value") ? AddName(Op.To) : true;
+	}
+
+	bool ApplyOp(UBlueprint* Target, const FHyperAIBlueprintStructureOp& Op, TArray<UBlueprint*>& Touched, TArray<UObject*>& TouchedAssets,
+		TArray<FString>& OutMade, TArray<FString>& OutNotes, FString& OutError)
 	{
 		const FString Kind = Op.Kind.TrimStartAndEnd().ToLower();
 		auto Touch = [&Touched](UBlueprint* Blueprint)
 		{
 			Touched.AddUnique(Blueprint);
 		};
+		if (Kind.StartsWith(TEXT("struct.")) || Kind.StartsWith(TEXT("enum.")))
+		{
+			return ApplyTypeOp(Kind, Op, TouchedAssets, OutMade, OutError);
+		}
 		if (Kind == TEXT("interface.create"))
 		{
 			UBlueprint* Interface = CreateInterface(Op.Interface, OutError);
@@ -1413,7 +1920,8 @@ namespace HyperAIStudio::BlueprintStructure::Private
 			return Connect(*Target, Op, OutMade, OutError);
 		}
 		OutError = FString::Printf(TEXT("Unknown op '%s': interface.create, interface.add_function, interface.implement, interface.remove, timeline.add, ")
-			TEXT("timeline.remove, event.add, event.set_rpc, variable.set_replication, component.set_replicated, graph.collapse, graph.expand or pins.connect."), *Op.Kind);
+			TEXT("timeline.remove, event.add, event.set_rpc, variable.set_replication, component.set_replicated, graph.collapse, graph.expand, pins.connect, ")
+			TEXT("struct.* or enum.*."), *Op.Kind);
 		return false;
 	}
 
@@ -1427,10 +1935,13 @@ namespace HyperAIStudio::BlueprintStructure::Private
 		}
 		if (!Request.BlueprintPath.TrimStartAndEnd().IsEmpty() && !Target)
 		{
-			OutError = FString::Printf(TEXT("%s is not a Blueprint."), *Request.BlueprintPath);
+			OutError = LoadStruct(Request.BlueprintPath) || LoadEnum(Request.BlueprintPath)
+				? FString::Printf(TEXT("%s is a struct or enum: leave BlueprintPath empty and give it as each struct or enum op's Asset."), *Request.BlueprintPath)
+				: FString::Printf(TEXT("%s is not a Blueprint."), *Request.BlueprintPath);
 			return false;
 		}
 		TSet<FString> NewInterfaces, NewNames;
+		TMap<FString, TSet<FString>> TypeMembers;
 		for (int32 Index = 0; Index < Request.Operations.Num(); ++Index)
 		{
 			const FHyperAIBlueprintStructureOp& Op = Request.Operations[Index];
@@ -1450,6 +1961,14 @@ namespace HyperAIStudio::BlueprintStructure::Private
 				}
 				return true;
 			};
+			if (Kind.StartsWith(TEXT("struct.")) || Kind.StartsWith(TEXT("enum.")))
+			{
+				if (!CheckTypeOp(Kind, Op, TypeMembers, Error))
+				{
+					return Fail(Error);
+				}
+				continue;
+			}
 			const bool bInterfaceKnown = NewInterfaces.Contains(PackageOf(Op.Interface)) || (LoadBlueprint(Op.Interface) && FBlueprintEditorUtils::IsInterfaceBlueprint(LoadBlueprint(Op.Interface)));
 			if (Kind == TEXT("interface.create"))
 			{
@@ -1612,9 +2131,10 @@ namespace HyperAIStudio::BlueprintStructure::Private
 		return Blueprint.Status == BS_Error ? TEXT("error") : Blueprint.Status == BS_UpToDateWithWarnings ? TEXT("up_to_date_with_warnings") : TEXT("up_to_date");
 	}
 
-	bool Save(UBlueprint& Blueprint, FString& OutError)
+	/** A Blueprint, struct or enum, saved to its package. */
+	bool Save(UObject& Asset, FString& OutError)
 	{
-		UPackage* Package = Blueprint.GetOutermost();
+		UPackage* Package = Asset.GetOutermost();
 		if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, OutError))
 		{
 			return false;
@@ -1622,7 +2142,7 @@ namespace HyperAIStudio::BlueprintStructure::Private
 		FSavePackageArgs Args;
 		Args.TopLevelFlags = RF_Public | RF_Standalone;
 		const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
-		if (!UPackage::SavePackage(Package, &Blueprint, *File, Args))
+		if (!UPackage::SavePackage(Package, &Asset, *File, Args))
 		{
 			OutError = FString::Printf(TEXT("%s could not be saved."), *Package->GetName());
 			return false;
@@ -1656,12 +2176,13 @@ namespace HyperAIStudio::BlueprintStructure::Private
 		UBlueprint* Target = LoadBlueprint(Request.BlueprintPath);
 		Report.BlueprintPath = Target ? Target->GetPathName() : FString();
 		TArray<UBlueprint*> Touched;
+		TArray<UObject*> TouchedAssets;
 		{
 			const FScopedTransaction Transaction(LOCTEXT("StructurePlan", "HyperAI: Edit Blueprint Structure"));
 			for (int32 Index = 0; Index < Request.Operations.Num(); ++Index)
 			{
 				FString Error;
-				if (!ApplyOp(Target, Request.Operations[Index], Touched, Report.Made, Report.Notes, Error))
+				if (!ApplyOp(Target, Request.Operations[Index], Touched, TouchedAssets, Report.Made, Report.Notes, Error))
 				{
 					Report.Status = TEXT("operation_failed");
 					Report.Diagnostic = FString::Printf(TEXT("Operation %d (%s): %s%s"), Index, *Request.Operations[Index].Kind, *Error,
@@ -1688,16 +2209,18 @@ namespace HyperAIStudio::BlueprintStructure::Private
 		}
 		if (Request.bSave)
 		{
-			for (UBlueprint* Blueprint : Touched)
+			TArray<UObject*> ToSave(TouchedAssets);
+			ToSave.Append(Touched);
+			for (UObject* Asset : ToSave)
 			{
 				FString Error;
-				if (!Save(*Blueprint, Error))
+				if (!Save(*Asset, Error))
 				{
 					Report.Status = TEXT("save_failed");
 					Report.Diagnostic = Error;
 					return Report;
 				}
-				Report.Saved.Add(Blueprint->GetPathName());
+				Report.Saved.Add(Asset->GetPathName());
 			}
 		}
 		Report.bOk = true;
@@ -1728,12 +2251,33 @@ FHyperAIBlueprintStructureInspectReport FHyperAIStudioBlueprintStructureContract
 	UBlueprint* Blueprint = LoadBlueprint(Request.BlueprintPath);
 	if (!Blueprint)
 	{
-		Report.Diagnostic = FString::Printf(TEXT("%s is not a Blueprint."), *Request.BlueprintPath);
+		if (const UUserDefinedStruct* Struct = LoadStruct(Request.BlueprintPath))
+		{
+			Report.BlueprintPath = Struct->GetPathName();
+			Report.AssetType = TEXT("struct");
+			for (const FStructVariableDescription& Field : FStructureEditorUtils::GetVarDesc(Struct))
+			{
+				Report.Fields.Add(DescribeField(Field));
+			}
+			Report.CompileStatus = Struct->Status == UDSS_Error ? TEXT("error: ") + Struct->ErrorMessage : TEXT("up_to_date");
+			Report.bOk = true;
+			return Report;
+		}
+		if (const UUserDefinedEnum* Enum = LoadEnum(Request.BlueprintPath))
+		{
+			Report.BlueprintPath = Enum->GetPathName();
+			Report.AssetType = TEXT("enum");
+			Report.EnumValues = DescribeValues(*Enum);
+			Report.bOk = true;
+			return Report;
+		}
+		Report.Diagnostic = FString::Printf(TEXT("%s is not a Blueprint, a struct or an enum."), *Request.BlueprintPath);
 		return Report;
 	}
 	Report.BlueprintPath = Blueprint->GetPathName();
 	Report.ParentClass = Blueprint->ParentClass ? Blueprint->ParentClass->GetPathName() : FString();
 	Report.bIsInterface = FBlueprintEditorUtils::IsInterfaceBlueprint(Blueprint);
+	Report.AssetType = Report.bIsInterface ? TEXT("interface") : TEXT("blueprint");
 	TArray<UEdGraph*> Graphs;
 	Blueprint->GetAllGraphs(Graphs);
 	for (const UEdGraph* Graph : Graphs)
@@ -1814,6 +2358,8 @@ FHyperAIBlueprintStructureInspectReport FHyperAIStudioBlueprintStructureContract
 			Report.Diagnostic = FString::Printf(TEXT("%s has no graph '%s'."), *Blueprint->GetName(), *Request.Graph);
 			return Report;
 		}
+		// Find keeps the nodes whose name, title or class contains it, so one call finds a node in a large graph.
+		const FString Find = Request.Find.TrimStartAndEnd();
 		TArray<UEdGraphNode*> Nodes;
 		for (const UEdGraph* Graph : NodeGraphs)
 		{
@@ -1823,7 +2369,8 @@ FHyperAIBlueprintStructureInspectReport FHyperAIStudioBlueprintStructureContract
 			}
 			for (UEdGraphNode* Node : Graph->Nodes)
 			{
-				if (Node)
+				if (Node && (Find.IsEmpty() || Node->GetName().Contains(Find) || Title(*Node).Contains(Find)
+					|| Node->GetClass()->GetName().Contains(Find)))
 				{
 					Nodes.Add(Node);
 				}
@@ -1890,11 +2437,13 @@ FHyperAIBlueprintStructurePlanReport FHyperAIStudioBlueprintStructureContracts::
 		Summary.Safety = EHyperAIStudioDomainSafety::Edit;
 		Summary.EffectTarget = Report.BlueprintPath;
 		Summary.Effects.Add(FString::Printf(TEXT("Edit the structure of %s: %d operation(s), one undo step, compiled%s"),
-			Report.BlueprintPath.IsEmpty() ? TEXT("Blueprint Interfaces") : *Report.BlueprintPath, Request.Operations.Num(), Request.bSave ? TEXT(" and saved") : TEXT("")));
+			Report.BlueprintPath.IsEmpty() ? TEXT("Blueprint types (interfaces, structs, enums)") : *Report.BlueprintPath, Request.Operations.Num(),
+			Request.bSave ? TEXT(" and saved") : TEXT("")));
 		for (int32 Index = 0; Index < Request.Operations.Num() && Index < 24; ++Index)
 		{
 			const FHyperAIBlueprintStructureOp& Op = Request.Operations[Index];
-			Summary.Effects.Add(FString::Printf(TEXT("| %s %s%s"), *Op.Kind, *Op.Name, Op.Interface.IsEmpty() ? TEXT("") : *(TEXT(" ") + Op.Interface)));
+			const FString& Asset = Op.Interface.IsEmpty() ? Op.Asset : Op.Interface;
+			Summary.Effects.Add(FString::Printf(TEXT("| %s %s%s"), *Op.Kind, *Op.Name, Asset.IsEmpty() ? TEXT("") : *(TEXT(" ") + Asset)));
 		}
 		const FString OperationId = Report.OperationId;
 		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId]()

@@ -774,19 +774,23 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 	}
 
 	TSet<FString> ReportNames;
+	// Animation, material, Niagara and UI plans apply their edits, so they are no longer reported as plan-only.
 	const TSet<FString> ExpectedPlanOnlyNames = {
-		TEXT("hyper_actor_modifier_apply_plan"), TEXT("hyper_animation_apply_plan"),
+		TEXT("hyper_actor_modifier_apply_plan"),
 		TEXT("hyper_audio_apply_plan"), TEXT("hyper_character_apply_plan"),
 		TEXT("hyper_cinematics_apply_plan"), TEXT("hyper_dynamic_material_apply_plan"),
 		TEXT("hyper_game_framework_apply_plan"), TEXT("hyper_gameplay_ai_apply_plan"),
 		TEXT("hyper_gameplay_systems_apply_plan"), TEXT("hyper_gas_apply_plan"),
 		TEXT("hyper_geometry_apply_plan"), TEXT("hyper_interchange_apply_plan"),
-		TEXT("hyper_live_production_apply_plan"), TEXT("hyper_material_apply_plan"),
+		TEXT("hyper_live_production_apply_plan"),
 		TEXT("hyper_navigation_apply_plan"), TEXT("hyper_network_apply_plan"),
-		TEXT("hyper_niagara_apply_plan"),
 		TEXT("hyper_physics_apply_plan"), TEXT("hyper_property_animation_apply_plan"),
-		TEXT("hyper_scene_apply_plan"), TEXT("hyper_ui_apply_plan"),
+		TEXT("hyper_scene_apply_plan"),
 		TEXT("hyper_worldbuilding_apply_plan")
+	};
+	const TSet<FString> ExpectedApplyingNames = {
+		TEXT("hyper_animation_apply_plan"), TEXT("hyper_material_apply_plan"),
+		TEXT("hyper_niagara_apply_plan"), TEXT("hyper_ui_apply_plan")
 	};
 	const TSet<FString> ExpectedLimitedDirectEditNames = {
 		TEXT("hyper_data_apply_plan"),
@@ -834,6 +838,11 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 			TestTrue(TEXT("Only audited plan-only apply tools use PlanOnly"),
 				ExpectedPlanOnlyNames.Contains(Tool.Name));
 		}
+		if (ExpectedApplyingNames.Contains(Tool.Name))
+		{
+			TestEqual(*FString::Printf(TEXT("%s applies its edits, so it is reported per operation"), *Tool.Name),
+				Tool.ExecutionSupport, FString(TEXT("OperationSpecific")));
+		}
 		if (Tool.ExecutionSupport == TEXT("LimitedDirectEdit"))
 		{
 			++ReportedLimitedDirectEditTools;
@@ -856,7 +865,7 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 	}
 	TestEqual(TEXT("Every generated catalog name appears exactly once"),
 		ReportNames.Num(), Catalog.Tools.Num());
-	TestEqual(TEXT("Exactly 23 audited apply tools are plan-only"),
+	TestEqual(TEXT("Exactly the audited apply tools are plan-only"),
 		ReportedPlanOnlyTools, ExpectedPlanOnlyNames.Num());
 	TestEqual(TEXT("Exactly three audited apply tools have limited direct editing"),
 		ReportedLimitedDirectEditTools, ExpectedLimitedDirectEditNames.Num());

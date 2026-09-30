@@ -1,6 +1,6 @@
 ---
 name: unreal-blueprint
-description: Build or change a gameplay Blueprint through the Unreal MCP tools in two calls - class, components, variables, defaults and event logic in one script. Use for any Blueprint work - pickups, doors, spawners, health, projectiles, triggers, timers.
+description: Build or change a gameplay Blueprint through the Unreal MCP tools in two calls - class, components, variables, defaults and event logic in one script; timelines, interfaces, replication, structs and enums with HyperAI's structure tool. Use for any Blueprint work - pickups, doors, spawners, health, projectiles, triggers, timers, data types.
 ---
 
 # Build a Blueprint in two calls
@@ -114,7 +114,7 @@ HyperAI Studio lays out the nodes you add when the Blueprint compiles (`write_gr
 
 There is no Timeline node in the DSL: add timelines with HyperAI's structure tool below.
 
-## Timelines, interfaces, RPCs, replication and collapsing: HyperAI's structure tool
+## Timelines, interfaces, RPCs, replication, collapsing, structs and enums: HyperAI's structure tool
 
 `hyper_blueprint_structure_apply_plan` (toolset `HyperAIStudioBlueprintStructure.HyperAIStudioBlueprintStructureToolset`) does
 what the DSL and Epic's tools leave out. A plan is one undo step; it is checked before anything changes, compiled after, and
@@ -144,6 +144,14 @@ saved (`bSave` false leaves it unsaved). The report's `Made` names every node it
   only one node has it: a timeline's or custom event's title is its name, and a new Actor Blueprint's events are
   `Event BeginPlay`, `Event ActorBeginOverlap` and `Event Tick` (so `"Event ActorBeginOverlap.then"` to `"Open.Play"`).
   The K2 schema checks every link.
+- **Structs and enums** (no `BlueprintPath`; each op's `Asset` is the struct or enum): `enum.create` with `Values`
+  (`["Idle", "Chase", "Attack"]`), `enum.add_value`, `enum.rename_value` (`Name` to `To`), `enum.remove_value`;
+  `struct.create` with `Fields`, each `{Name, Type, Default, Tooltip}`, `struct.add_field`, `struct.set_field` (`Name` and one
+  entry in `Fields` with the new `Type`, `Default` or `Tooltip`), `struct.rename_field` (`Name` to `To`),
+  `struct.remove_field`. Defaults: `100`, `true`, vectors `1,2,3`, rotators `0,90,0`, colors `(R=1,G=0,B=0,A=1)`, an enum
+  value by its name (`Chase`), an asset by path. One plan can make an enum and then a struct with an
+  `enum:/Game/Data/E_State.E_State` field. Blueprints then use them as variable types (`struct:` or `enum:` with the path)
+  and through the DSL's Make, Break and Switch nodes that `find_node_types` lists.
 
 A door that swings on a timeline: `add_function_graph` `ApplyOpen`, `add_function_param` `Alpha` float, write
 `(fn ApplyOpen (Alpha) (Transformation|SetRelativeRotation :self (Variables|Default|GetDoor) :NewRotation (Math|Rotator|MakeRotator :Yaw (* Alpha 90.0))))`,
@@ -161,8 +169,9 @@ Types for parameters: `bool`, `int`, `int64`, `float`, `byte`, `name`, `string`,
 `hyper_blueprint_structure_inspect` reads a Blueprint's graphs, interfaces (an interface asset's functions, or the ones it
 implements), timelines and tracks, custom events with their replication, replicated variables and components; with `bNodes`
 it lists every node with its name, title, graph and links, paged by `Offset` and `Limit`, which is how to read a large graph
-and pick the nodes to collapse. A node name is unique only in its own graph: when a plan's node name is found in two graphs it
-is refused, so give `Graph` then.
+and pick the nodes to collapse; `Find` (`"SetActorLocation"`, `"Timeline"`) keeps only the nodes whose name, title or class
+contains it. A node name is unique only in its own graph: when a plan's node name is found in two graphs it is refused, so
+give `Graph` then. Given a struct or enum as `BlueprintPath`, it lists the struct's `Fields` or the enum's `EnumValues`.
 
 Event dispatchers are in Epic's tools: `BlueprintTools.add_event_dispatcher`, its parameters with `add_function_param` on
 the dispatcher's graph, then the Call and Bind nodes `find_node_types` lists.

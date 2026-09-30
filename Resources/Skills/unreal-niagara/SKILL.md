@@ -28,9 +28,9 @@ before anything changes, applied as one undo step, compiled, saved and verified.
 `{"assetName": "NS_Sparks", "assetPath": "/Game/VFX", "templateSystem": {"refPath":
 "/Niagara/DefaultAssets/Templates/Systems/DirectionalBurst.DirectionalBurst"}}`. Its emitters come along: disable the
 ones you do not want (`set_emitter_property` `enabled` `false`) or remove them with Epic's `RemoveEmitter`. Save it
-(`AssetTools.save_assets`) before the first plan: plans start from a saved, compiled System that is not open in the
-Niagara editor. Just after a save, inspect can answer `revision_incomplete` once while the asset registry catches up;
-inspect again.
+(`AssetTools.save_assets`) before the first plan: plans start from a saved System that is not open in the Niagara editor
+and not compiling (`compile_not_terminal` means wait and plan again). Just after a save, inspect can answer
+`revision_incomplete` once while the asset registry catches up; inspect again.
 
 ## Ops
 
@@ -83,8 +83,10 @@ Particles.Velocity += float3(-P.y, P.x, 0.0) * 2.0 * Engine.DeltaTime;
 - Order matters: the module runs where it is appended, last in its stack. In `ParticleUpdateScript` it runs after
   `Particle State`, so a change to `Particles.Age` or `Particles.Lifetime` takes effect the next frame.
 - CPU emitters compile the HLSL to the VM: plain math only. Texture sampling and data interface calls need a GPU emitter.
-- HLSL errors appear in `hyper_niagara_validate` (authoring) after the compile. Add a corrected module and remove the
-  broken one with Epic's `RemoveModule`.
+- HLSL errors appear in `hyper_niagara_validate` (authoring) after the compile. A System with compile errors still takes
+  plans, so repair it in one: `set_module_enabled` `false` on the broken module (disabled modules are not compiled) and
+  `add_hlsl_module` with a new name and the corrected code. Validate again; remove the broken one with Epic's
+  `RemoveModule` once the compile is clean.
 
 ## Simulation stages (GPU)
 

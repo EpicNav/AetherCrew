@@ -621,30 +621,70 @@ class HYPERAISTUDIO_API UHyperAIStudioBlueprintWorkflowToolset final : public UT
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
+	/**
+	 * A loaded Blueprint's graphs, nodes, pins and links by stable id, paged with PageSize and Cursor (GraphPath keeps one
+	 * graph), with its revision (the ExpectedRevision a patch needs) and compile status. SnapshotToken is what
+	 * hyper_blueprint_diff compares against later. For node titles, search, timelines, interfaces and replicated events,
+	 * use hyper_blueprint_structure_inspect.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Blueprint")
 	static FHyperAIBlueprintSnapshotReport hyper_blueprint_snapshot(const FHyperAIBlueprintSnapshotRequest& Request);
 
+	/**
+	 * The nodes a patch's create_node can add to a graph (branch, sequence and reroute) with their pins, filtered by
+	 * Query. Calls, events, variables and every other node are written with Epic's write_graph_dsl.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Blueprint")
 	static FHyperAIBlueprintActionReport hyper_blueprint_discover_actions(const FHyperAIBlueprintDiscoverActionsRequest& Request);
 
+	/**
+	 * Checks a patch against the Blueprint's exact revision without changing anything and returns its PlanHash and effects.
+	 * Operations: create_node (branch, sequence, reroute), move_node, connect_pins, break_pin_link, set_literal_default and
+	 * layout_nodes, addressed by the stable ids hyper_blueprint_snapshot lists. delete_node is checked but not applied by
+	 * this route; delete nodes with Epic's Blueprint tools.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Blueprint")
 	static FHyperAIBlueprintPatchReport hyper_blueprint_validate_patch(const FHyperAIBlueprintPatchInput& Patch);
 
+	/**
+	 * Applies a patch hyper_blueprint_validate_patch accepted: the same Patch, a new OperationId, and ExpectedPlanHash set to
+	 * its PlanHash. It runs as one undo step, compiles once, saves and re-checks the saved Blueprint; follow it with
+	 * hyper_operation_wait, and read compiler messages with hyper_blueprint_debug_inspect.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Blueprint")
 	static FHyperAIBlueprintPatchReport hyper_blueprint_apply_patch(const FHyperAIBlueprintMutationRequest& Request);
 
+	/** hyper_blueprint_apply_patch for a patch that creates at least one node; refused otherwise. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Blueprint")
 	static FHyperAIBlueprintPatchReport hyper_blueprint_build_batch(const FHyperAIBlueprintMutationRequest& Request);
 
+	/**
+	 * Compiles a Blueprint at its exact revision. Without ExpectedPlanHash it only previews and returns the PlanHash; send it
+	 * again with that hash and an OperationId to compile, then hyper_operation_wait. Compiler messages come from
+	 * hyper_blueprint_debug_inspect.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Blueprint")
 	static FHyperAIBlueprintPatchReport hyper_blueprint_compile_validate(const FHyperAIBlueprintCompileValidateRequest& Request);
 
+	/**
+	 * Finds layout damage (nodes stacked on the same spot) at the exact revision. Mode suggest lists the findings and the
+	 * repair patch; stage_safe with ExpectedPlanHash and an OperationId applies the deterministic ones.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Blueprint")
 	static FHyperAIBlueprintPatchReport hyper_blueprint_repair(const FHyperAIBlueprintRepairRequest& Request);
 
+	/**
+	 * What changed in a Blueprint since a hyper_blueprint_snapshot: nodes, pins, links and defaults added, removed or
+	 * changed, compared with that snapshot's SnapshotToken (kept for five minutes).
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Blueprint")
 	static FHyperAIBlueprintDiffReport hyper_blueprint_diff(const FHyperAIBlueprintDiffRequest& Request);
 
+	/**
+	 * Lays the listed nodes of one graph on a grid (Columns, spacing, origin) at the exact revision; previews without
+	 * ExpectedPlanHash, applies with it and an OperationId. Nodes Epic's write_graph_dsl adds are already laid out when the
+	 * Blueprint compiles.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Blueprint")
 	static FHyperAIBlueprintPatchReport hyper_blueprint_layout(const FHyperAIBlueprintLayoutRequest& Request);
 };

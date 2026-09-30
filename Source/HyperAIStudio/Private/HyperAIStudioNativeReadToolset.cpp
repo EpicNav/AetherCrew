@@ -162,11 +162,11 @@ namespace HyperAIStudio::NativeReadTools::Private
 		return Sorted;
 	}
 
+	/** Apply tools that still stop at a checked, staged plan; the ones that apply their edits are not listed. */
 	const TSet<FString>& PlanOnlyToolNames()
 	{
 		static const TSet<FString> Names = {
 			TEXT("hyper_actor_modifier_apply_plan"),
-			TEXT("hyper_animation_apply_plan"),
 			TEXT("hyper_audio_apply_plan"),
 			TEXT("hyper_character_apply_plan"),
 			TEXT("hyper_cinematics_apply_plan"),
@@ -178,14 +178,11 @@ namespace HyperAIStudio::NativeReadTools::Private
 			TEXT("hyper_geometry_apply_plan"),
 			TEXT("hyper_interchange_apply_plan"),
 			TEXT("hyper_live_production_apply_plan"),
-			TEXT("hyper_material_apply_plan"),
 			TEXT("hyper_navigation_apply_plan"),
 			TEXT("hyper_network_apply_plan"),
-			TEXT("hyper_niagara_apply_plan"),
 			TEXT("hyper_physics_apply_plan"),
 			TEXT("hyper_property_animation_apply_plan"),
 			TEXT("hyper_scene_apply_plan"),
-			TEXT("hyper_ui_apply_plan"),
 			TEXT("hyper_worldbuilding_apply_plan")
 		};
 		return Names;
@@ -232,7 +229,10 @@ namespace HyperAIStudio::NativeReadTools::Private
 			TEXT("hyper_run_audit"),
 			TEXT("hyper_test_run")
 		};
-		return Tool.bMayCauseExternalEffects || OperationSpecificNames.Contains(Tool.Name)
+		// A tool the catalog lets edit or delete is never reported as a read, whatever list it was left out of.
+		const bool bEdits = Tool.AllowedSafetyClasses.Contains(EHyperAIStudioCapabilitySafetyClass::Edit)
+			|| Tool.AllowedSafetyClasses.Contains(EHyperAIStudioCapabilitySafetyClass::Destructive);
+		return Tool.bMayCauseExternalEffects || bEdits || OperationSpecificNames.Contains(Tool.Name)
 			? TEXT("OperationSpecific")
 			: TEXT("Read");
 	}

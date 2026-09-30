@@ -244,6 +244,16 @@ bool FHyperAIStudioBlueprintStructureMembersTest::RunTest(const FString& Paramet
 		&& Inspected.ReplicatedVariables.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("rep_notify OnRep_Health, condition owner_only")); })
 		&& Inspected.Components.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("Mesh")) && Line.Contains(TEXT("replicated")); })
 		&& Inspected.TotalNodes > 0 && Inspected.CompileStatus != TEXT("error"));
+	FHyperAIBlueprintStructureInspectRequest Search = Look;
+	Search.Find = TEXT("timeline");
+	const FHyperAIBlueprintStructureInspectReport Found = C::Inspect(Search);
+	TestTrue(*FString::Printf(TEXT("Find keeps the timeline node and only matching ones (%d of %d)"), Found.TotalNodes, Inspected.TotalNodes),
+		Found.bOk && Found.TotalNodes < Inspected.TotalNodes
+		&& Found.Nodes.ContainsByPredicate([](const FHyperAIBlueprintNodeInfo& Node) { return Node.Class == TEXT("K2Node_Timeline"); })
+		&& !Found.Nodes.ContainsByPredicate([](const FHyperAIBlueprintNodeInfo& Node)
+		{
+			return !Node.Name.Contains(TEXT("timeline")) && !Node.Title.Contains(TEXT("timeline")) && !Node.Class.Contains(TEXT("timeline"));
+		}));
 	FHyperAIBlueprintStructureInspectRequest LookInterface;
 	LookInterface.BlueprintPath = UsePath;
 	const FHyperAIBlueprintStructureInspectReport Interface = C::Inspect(LookInterface);
@@ -403,6 +413,113 @@ bool FHyperAIStudioBlueprintStructureCollapseTest::RunTest(const FString& Parame
 	const FHyperAIBlueprintStructurePlanReport Unmacroed = Run(Unmacro);
 	TestTrue(TEXT("and the macro instance opens back out, still run by BeginPlay: ") + Unmacroed.Diagnostic, Unmacroed.bOk
 		&& CountCalls(EventGraph, PrintString) == 2 && BeginPlayRunsAPrint());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioBlueprintStructureTypesTest,
+	"HyperAIStudio.BlueprintStructure.StructsAndEnums",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioBlueprintStructureTypesTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::BlueprintStructureTests;
+	using C = FHyperAIStudioBlueprintStructureContracts;
+	const FNoApproval NoApproval;
+	const FString StatePath = NewPath(TEXT("E_State"));
+	const FString WeaponPath = NewPath(TEXT("S_Weapon"));
+	auto Find = [](const FString& Path) { return FindObject<UObject>(nullptr, *(Path + TEXT(".") + FPackageName::GetShortName(Path))); };
+	ON_SCOPE_EXIT { Clean({Find(WeaponPath), Find(StatePath)}); };
+	auto Field = [](const TCHAR* Name, const TCHAR* Type, const TCHAR* Default = TEXT(""), const TCHAR* Tooltip = TEXT(""))
+	{
+		FHyperAIBlueprintStructField Out;
+		Out.Name = Name;
+		Out.Type = Type;
+		Out.Default = Default;
+		Out.Tooltip = Tooltip;
+		return Out;
+	};
+	auto Run = [](TArray<FHyperAIBlueprintStructureOp> Ops, const bool bDryRun = false)
+	{
+		FHyperAIBlueprintStructurePlanRequest Plan;
+		Plan.Operations = MoveTemp(Ops);
+		Plan.bDryRun = bDryRun;
+		return C::ApplyPlan(Plan);
+	};
+	auto Inspect = [](const FString& Path)
+	{
+		FHyperAIBlueprintStructureInspectRequest Look;
+		Look.BlueprintPath = Path;
+		return C::Inspect(Look);
+	};
+
+	// One plan: an enum, then a struct with a field of that enum, by the value's name as it reads.
+	FHyperAIBlueprintStructureOp State = Op(TEXT("enum.create"));
+	State.Asset = StatePath;
+	State.Values = {TEXT("Idle"), TEXT("Chase"), TEXT("Attack")};
+	FHyperAIBlueprintStructureOp Weapon = Op(TEXT("struct.create"));
+	Weapon.Asset = WeaponPath;
+	Weapon.Fields = {Field(TEXT("Name"), TEXT("name"), TEXT("Sword")), Field(TEXT("Damage"), TEXT("float"), TEXT("12.5"), TEXT("Damage per hit")),
+		Field(TEXT("Mood"), *(TEXT("enum:") + StatePath + TEXT(".") + FPackageName::GetShortName(StatePath)), TEXT("Chase")),
+		Field(TEXT("Offset"), TEXT("vector"), TEXT("1,2,3")), Field(TEXT("Tags"), TEXT("name[]"))};
+	const FHyperAIBlueprintStructurePlanReport Made = Run({State, Weapon});
+	if (!TestTrue(TEXT("An enum and a struct that uses it, in one plan: ") + Made.Diagnostic, Made.bOk && Made.Saved.Num() == 2))
+	{
+		return false;
+	}
+	const FHyperAIBlueprintStructureInspectReport Enum = Inspect(StatePath);
+	TestTrue(TEXT("The enum reads its three values in order: ") + FString::Join(Enum.EnumValues, TEXT(", ")), Enum.bOk && Enum.AssetType == TEXT("enum")
+		&& Enum.EnumValues.Num() == 3 && Enum.EnumValues[0].StartsWith(TEXT("0 Idle")) && Enum.EnumValues[2].StartsWith(TEXT("2 Attack")));
+	const FHyperAIBlueprintStructureInspectReport Struct = Inspect(WeaponPath);
+	const FString Fields = FString::Join(Struct.Fields, TEXT(" | "));
+	TestTrue(TEXT("The struct has exactly its five fields, the starting bool gone: ") + Fields, Struct.bOk && Struct.AssetType == TEXT("struct")
+		&& Struct.Fields.Num() == 5 && Struct.CompileStatus == TEXT("up_to_date"));
+	TestTrue(TEXT("with their types, defaults and tooltip: ") + Fields, Struct.Fields.Num() == 5 && Struct.Fields[0] == TEXT("Name: name = Sword")
+		&& Struct.Fields[1].StartsWith(TEXT("Damage: float = 12.5")) && Struct.Fields[1].EndsWith(TEXT("(Damage per hit)"))
+		&& Struct.Fields[2].Contains(TEXT("= NewEnumerator1")) && Struct.Fields[3].StartsWith(TEXT("Offset: vector = "))
+		&& Struct.Fields[4] == TEXT("Tags: name[]"));
+
+	// A second plan edits both: a new field, a changed default, a rename and a removal; a value added, renamed, removed.
+	FHyperAIBlueprintStructureOp AddSpeed = Op(TEXT("struct.add_field"));
+	AddSpeed.Asset = WeaponPath;
+	AddSpeed.Fields = {Field(TEXT("Speed"), TEXT("float"), TEXT("1.5"))};
+	FHyperAIBlueprintStructureOp Harder = Op(TEXT("struct.set_field"), TEXT("Damage"));
+	Harder.Asset = WeaponPath;
+	Harder.Fields = {Field(TEXT(""), TEXT(""), TEXT("20"))};
+	FHyperAIBlueprintStructureOp Rename = Op(TEXT("struct.rename_field"), TEXT("Damage"));
+	Rename.Asset = WeaponPath;
+	Rename.To = TEXT("BaseDamage");
+	FHyperAIBlueprintStructureOp Drop = Op(TEXT("struct.remove_field"), TEXT("Offset"));
+	Drop.Asset = WeaponPath;
+	FHyperAIBlueprintStructureOp Dead = Op(TEXT("enum.add_value"));
+	Dead.Asset = StatePath;
+	Dead.Values = {TEXT("Dead")};
+	FHyperAIBlueprintStructureOp Pursue = Op(TEXT("enum.rename_value"), TEXT("Chase"));
+	Pursue.Asset = StatePath;
+	Pursue.To = TEXT("Pursue");
+	FHyperAIBlueprintStructureOp NoAttack = Op(TEXT("enum.remove_value"), TEXT("Attack"));
+	NoAttack.Asset = StatePath;
+
+	// Refused before anything changes: a field that is not there, and a name the struct has.
+	FHyperAIBlueprintStructureOp Missing = Op(TEXT("struct.remove_field"), TEXT("Nope"));
+	Missing.Asset = WeaponPath;
+	const FHyperAIBlueprintStructurePlanReport Refused = Run({AddSpeed, Missing});
+	TestTrue(TEXT("A missing field is refused by name: ") + Refused.Diagnostic, !Refused.bOk && Refused.Status == TEXT("invalid_request")
+		&& Refused.Diagnostic.Contains(TEXT("Nope")) && Inspect(WeaponPath).Fields.Num() == 5);
+	FHyperAIBlueprintStructureOp Twice = AddSpeed;
+	Twice.Fields = {Field(TEXT("Name"), TEXT("string"))};
+	TestFalse(TEXT("and so is a second field called Name"), Run({Twice}, /*bDryRun=*/true).bOk);
+
+	const FHyperAIBlueprintStructurePlanReport Edited = Run({AddSpeed, Harder, Rename, Drop, Dead, Pursue, NoAttack});
+	TestTrue(TEXT("The edit plan applies: ") + Edited.Diagnostic, Edited.bOk);
+	const TArray<FString> AfterFields = Inspect(WeaponPath).Fields;
+	const FString After = FString::Join(AfterFields, TEXT(" | "));
+	TestTrue(TEXT("Speed added, Damage renamed BaseDamage at 20, Offset gone: ") + After, After.Contains(TEXT("Speed: float = 1.5"))
+		&& After.Contains(TEXT("BaseDamage: float = 20")) && !After.Contains(TEXT("Offset"))
+		&& !AfterFields.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("Damage:")); }));
+	const FHyperAIBlueprintStructureInspectReport Values = Inspect(StatePath);
+	TestTrue(TEXT("Idle, Pursue, Dead: ") + FString::Join(Values.EnumValues, TEXT(", ")), Values.EnumValues.Num() == 3
+		&& Values.EnumValues[0].StartsWith(TEXT("0 Idle")) && Values.EnumValues[1].StartsWith(TEXT("1 Pursue")) && Values.EnumValues[2].StartsWith(TEXT("2 Dead")));
 	return true;
 }
 

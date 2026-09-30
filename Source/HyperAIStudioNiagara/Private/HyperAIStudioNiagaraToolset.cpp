@@ -1857,11 +1857,22 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 		return Reject(TEXT("persisted_clean_base_required"),
 			TEXT("Save or revert pending changes first: edits start from one clean saved System."));
 	}
-	if (!Snapshot.Health.bCompileStateKnown || Snapshot.Health.bCompileActive
-		|| Snapshot.Health.bCompileStale || Snapshot.Health.bCompileHasErrors)
+	if (!Snapshot.Health.bCompileStateKnown || Snapshot.Health.bCompileActive)
 	{
-		return Reject(TEXT("compile_not_clean_terminal"),
-			TEXT("Planning never waits for compilation and needs a finished, error-free compile."));
+		return Reject(TEXT("compile_not_terminal"),
+			TEXT("The System is still compiling. Planning never waits for a compile; plan again once hyper_niagara_validate stops reporting compile_in_progress."));
+	}
+	// A plan is how a broken System gets repaired, so a finished compile with errors, or one a change left out of date,
+	// no longer blocks it. The plan compiles again; hyper_niagara_validate then shows whether the errors cleared.
+	if ((Snapshot.Health.bCompileHasErrors || Snapshot.Health.bCompileStale) && Report.Issues.Num() < MaxIssues)
+	{
+		FHyperAINiagaraIssue Issue;
+		Issue.Code = Snapshot.Health.bCompileHasErrors ? TEXT("compile_errors_before_plan") : TEXT("compile_out_of_date_before_plan");
+		Issue.Severity = TEXT("warning");
+		Issue.Summary = Snapshot.Health.bCompileHasErrors
+			? TEXT("The System had compile errors before this plan. After it compiles, hyper_niagara_validate shows whether they cleared.")
+			: TEXT("The System's last compile was out of date before this plan; the plan compiles it again.");
+		Report.Issues.Add(MoveTemp(Issue));
 	}
 	UNiagaraSystem* System = Cast<UNiagaraSystem>(FSoftObjectPath(Request.TargetPath).ResolveObject());
 	if (!System)

@@ -1510,9 +1510,10 @@ namespace HyperAIStudio::Private
 			TEXT("hyper_data_apply_plan"),
 			TEXT("hyper_input_apply_plan"),
 			TEXT("hyper_paper2d_apply_plan")};
+		// Packs whose apply_plan still stops at a checked, staged plan. Those that apply their edits (Niagara, UI,
+		// materials, animation assets and the rest) are left out, so the tool list does not send agents elsewhere.
 		static const TSet<FString> PlanOnlyTools = {
 			TEXT("hyper_actor_modifier_apply_plan"),
-			TEXT("hyper_animation_apply_plan"),
 			TEXT("hyper_audio_apply_plan"),
 			TEXT("hyper_character_apply_plan"),
 			TEXT("hyper_cinematics_apply_plan"),
@@ -1524,14 +1525,11 @@ namespace HyperAIStudio::Private
 			TEXT("hyper_geometry_apply_plan"),
 			TEXT("hyper_interchange_apply_plan"),
 			TEXT("hyper_live_production_apply_plan"),
-			TEXT("hyper_material_apply_plan"),
 			TEXT("hyper_navigation_apply_plan"),
 			TEXT("hyper_network_apply_plan"),
-			TEXT("hyper_niagara_apply_plan"),
 			TEXT("hyper_physics_apply_plan"),
 			TEXT("hyper_property_animation_apply_plan"),
 			TEXT("hyper_scene_apply_plan"),
-			TEXT("hyper_ui_apply_plan"),
 			TEXT("hyper_worldbuilding_apply_plan")};
 
 		if (LimitedDirectFastEditTools.Contains(ToolName))
