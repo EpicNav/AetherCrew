@@ -6,6 +6,7 @@
 #include "AnimGraphNode_DeadBlending.h"
 #include "AnimGraphNode_Inertialization.h"
 #include "AnimGraphNode_LayeredBoneBlend.h"
+#include "AnimGraphNode_LinkedAnimLayer.h"
 #include "AnimGraphNode_Root.h"
 #include "AnimGraphNode_SaveCachedPose.h"
 #include "AnimGraphNode_SequencePlayer.h"
@@ -17,12 +18,15 @@
 #include "AnimStateEntryNode.h"
 #include "AnimStateNode.h"
 #include "AnimStateTransitionNode.h"
+#include "AnimationGraph.h"
+#include "AnimationGraphSchema.h"
 #include "AnimationStateGraph.h"
 #include "AnimationStateMachineGraph.h"
 #include "AnimationTransitionGraph.h"
 #include "Animation/AnimBlueprint.h"
 #include "Animation/AnimData/BoneMaskFilter.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimLayerInterface.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSequenceBase.h"
 #include "Animation/BlendSpace.h"
@@ -31,6 +35,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "EdGraphSchema_K2.h"
 #include "Editor.h"
+#include "Engine/MemberReference.h"
 #include "Factories/AnimBlueprintFactory.h"
 #include "GameFramework/NavMovementComponent.h"
 #include "GameFramework/Pawn.h"
@@ -396,6 +401,104 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 			return Found;
 		}
 
+		// ---------------------------------------------------------------- linked anim layers
+
+		/** A layer graph: an animation graph other than the AnimGraph. */
+		bool IsLayerGraph(const UEdGraph* Graph)
+		{
+			return Graph && Graph->IsA<UAnimationGraph>() && Graph->GetFName() != UEdGraphSchema_K2::GN_AnimGraph;
+		}
+
+		FString InterfaceName(const UClass* Interface)
+		{
+			FString Name = Interface ? Interface->GetName() : FString(TEXT("(missing)"));
+			Name.RemoveFromEnd(TEXT("_C"));
+			return Name;
+		}
+
+		/** Each layer the Blueprint has, with where it comes from: self for its own, or the interface that declares it. */
+		TArray<TPair<UEdGraph*, FString>> LayerGraphs(const UAnimBlueprint& Blueprint)
+		{
+			TArray<TPair<UEdGraph*, FString>> Found;
+			for (UEdGraph* Graph : Blueprint.FunctionGraphs)
+			{
+				if (IsLayerGraph(Graph)) Found.Emplace(Graph, TEXT("self"));
+			}
+			for (const FBPInterfaceDescription& Description : Blueprint.ImplementedInterfaces)
+			{
+				for (UEdGraph* Graph : Description.Graphs)
+				{
+					if (IsLayerGraph(Graph)) Found.Emplace(Graph, InterfaceName(Description.Interface));
+				}
+			}
+			return Found;
+		}
+
+		UEdGraph* FindLayerGraph(const UAnimBlueprint& Blueprint, const FString& Name)
+		{
+			for (const TPair<UEdGraph*, FString>& Layer : LayerGraphs(Blueprint))
+			{
+				if (Layer.Key->GetName().Equals(Name, ESearchCase::IgnoreCase)) return Layer.Key;
+			}
+			return nullptr;
+		}
+
+		/** The layers an Animation Layer Interface declares. */
+		TArray<FString> InterfaceLayers(const UAnimBlueprint& Interface)
+		{
+			TArray<FString> Names;
+			for (const UEdGraph* Graph : Interface.FunctionGraphs)
+			{
+				if (IsLayerGraph(Graph)) Names.Add(Graph->GetName());
+			}
+			return Names;
+		}
+
+		bool IsLayerInterface(const UAnimBlueprint* Blueprint)
+		{
+			return Blueprint && Blueprint->BlueprintType == BPTYPE_Interface;
+		}
+
+		/**
+		 * A Linked Anim Layer node set up the way the engine's own menu action sets one up (SetupFromLayerId, which is not
+		 * exported): the layer, the interface that declares it (none for a self layer), the interface graph's guid, and the
+		 * function it calls, through the node's reflected FunctionReference.
+		 */
+		void SetUpLinkedLayer(UAnimGraphNode_LinkedAnimLayer& Node, const UAnimBlueprint& Blueprint, const FName Layer)
+		{
+			Node.Node.Layer = Layer;
+			UClass* Interface = nullptr;
+			FGuid Guid;
+			for (const FBPInterfaceDescription& Description : Blueprint.ImplementedInterfaces)
+			{
+				for (const UEdGraph* Graph : Description.Graphs)
+				{
+					if (Graph && Graph->GetFName() == Layer)
+					{
+						Interface = Description.Interface;
+						Guid = Graph->InterfaceGuid;
+					}
+				}
+			}
+			Node.Node.Interface = Interface;
+			Node.InterfaceGuid = Guid;
+			if (!Interface) Node.Node.InstanceClass = nullptr;
+			const FStructProperty* ReferenceProperty = FindFProperty<FStructProperty>(UAnimGraphNode_LinkedAnimLayer::StaticClass(), TEXT("FunctionReference"));
+			FMemberReference* Reference = ReferenceProperty && ReferenceProperty->Struct == FMemberReference::StaticStruct()
+				? ReferenceProperty->ContainerPtrToValuePtr<FMemberReference>(&Node) : nullptr;
+			if (!Reference) return;
+			if (Interface)
+			{
+				FGuid FunctionGuid;
+				FBlueprintEditorUtils::GetFunctionGuidFromClassByFieldName(FBlueprintEditorUtils::GetMostUpToDateClass(Interface), Layer, FunctionGuid);
+				Reference->SetExternalMember(Layer, Interface, FunctionGuid);
+			}
+			else
+			{
+				Reference->SetSelfMember(Layer);
+			}
+		}
+
 		FString DescribePoseSource(const UEdGraphNode* Node)
 		{
 			if (const UAnimGraphNode_Slot* Slot = Cast<UAnimGraphNode_Slot>(Node)) return TEXT("slot ") + Slot->Node.SlotName.ToString();
@@ -483,14 +586,16 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 			return NodeProperty ? FindFProperty<FBoolProperty>(NodeProperty->Struct, TEXT("bLoopAnimation")) : nullptr;
 		}
 
-		void ReadState(const UAnimStateNode& Node, FHyperAIAnimBlueprintState& Out)
+		/** What plays into a pose input: a sequence, a blend space and its axis variables, a linked layer, nothing, or anything else. */
+		void ReadPlayer(UEdGraphNode* Source, FHyperAIAnimBlueprintState& Out)
 		{
-			Out.Name = Node.GetStateName();
 			Out.Player = TEXT("empty");
-			UAnimationStateGraph* Graph = Cast<UAnimationStateGraph>(Node.BoundGraph);
-			UAnimGraphNode_StateResult* Result = Graph ? Graph->GetResultNode() : nullptr;
-			UEdGraphNode* Source = Result ? LinkedNode(PosePin(*Result, EGPD_Input)) : nullptr;
-			if (UAnimGraphNode_SequencePlayer* Sequence = Cast<UAnimGraphNode_SequencePlayer>(Source))
+			if (const UAnimGraphNode_LinkedAnimLayer* Layer = Cast<UAnimGraphNode_LinkedAnimLayer>(Source))
+			{
+				Out.Player = TEXT("layer");
+				Out.Asset = Layer->Node.Layer.ToString();
+			}
+			else if (UAnimGraphNode_SequencePlayer* Sequence = Cast<UAnimGraphNode_SequencePlayer>(Source))
 			{
 				Out.Player = TEXT("sequence");
 				Out.Asset = Sequence->GetAnimationAsset() ? Sequence->GetAnimationAsset()->GetPathName() : FString();
@@ -508,6 +613,21 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 			{
 				Out.Player = TEXT("custom");
 			}
+		}
+
+		void ReadState(const UAnimStateNode& Node, FHyperAIAnimBlueprintState& Out)
+		{
+			Out.Name = Node.GetStateName();
+			UAnimationStateGraph* Graph = Cast<UAnimationStateGraph>(Node.BoundGraph);
+			UAnimGraphNode_StateResult* Result = Graph ? Graph->GetResultNode() : nullptr;
+			ReadPlayer(Result ? LinkedNode(PosePin(*Result, EGPD_Input)) : nullptr, Out);
+		}
+
+		/** A layer graph's output: what feeds its output pose node. */
+		UEdGraphPin* LayerOutput(const UEdGraph& Layer)
+		{
+			UAnimGraphNode_Root* Root = FindFirst<UAnimGraphNode_Root>(Layer);
+			return Root ? PosePin(*Root, EGPD_Input) : nullptr;
 		}
 
 		FString RuleOf(const UAnimStateTransitionNode& Transition)
@@ -663,13 +783,11 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 			}
 		}
 
-		void SetPlayer(UAnimBlueprint& Blueprint, UAnimStateNode& State, UAnimationAsset* Asset, const FString& X, const FString& Y, const bool bOnce)
+		/** Empties a pose input: whatever fed it goes, with the variable reads that fed that node's inputs. */
+		void ClearPoseInput(UAnimBlueprint& Blueprint, UEdGraphPin& In)
 		{
-			UAnimationStateGraph* Graph = CastChecked<UAnimationStateGraph>(State.BoundGraph);
-			UEdGraphPin* In = PosePin(*Graph->GetResultNode(), EGPD_Input);
-			// Replace whatever feeds the state, and the variable reads that fed its axes.
 			TArray<UEdGraphNode*> Old;
-			for (UEdGraphPin* Linked : In->LinkedTo)
+			for (UEdGraphPin* Linked : In.LinkedTo)
 			{
 				UEdGraphNode* Player = Linked->GetOwningNode();
 				Old.Add(Player);
@@ -678,8 +796,33 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 					if (Input->Direction == EGPD_Input && Cast<UK2Node_VariableGet>(LinkedNode(Input))) Old.AddUnique(LinkedNode(Input));
 				}
 			}
-			In->BreakAllPinLinks();
+			In.BreakAllPinLinks();
 			RemoveNodes(Blueprint, Old);
+		}
+
+		/** A pose input (a state's or a layer's output) fed by a Linked Anim Layer node playing Layer. */
+		void SetLinkedLayer(UAnimBlueprint& Blueprint, UEdGraph& Graph, UEdGraphPin& In, const FString& Layer)
+		{
+			ClearPoseInput(Blueprint, In);
+			UAnimGraphNode_LinkedAnimLayer* Linked = Place<UAnimGraphNode_LinkedAnimLayer>(Graph, -400, 0,
+				[&Blueprint, &Layer](UAnimGraphNode_LinkedAnimLayer& Node) { SetUpLinkedLayer(Node, Blueprint, FName(*Layer)); });
+			PosePin(*Linked, EGPD_Output)->MakeLinkTo(&In);
+		}
+
+		void SetPlayer(UAnimBlueprint& Blueprint, UEdGraph& Graph, UEdGraphPin* In, UAnimationAsset* Asset, const FString& X, const FString& Y, const bool bOnce);
+
+		void SetPlayer(UAnimBlueprint& Blueprint, UAnimStateNode& State, UAnimationAsset* Asset, const FString& X, const FString& Y, const bool bOnce)
+		{
+			UAnimationStateGraph* Graph = CastChecked<UAnimationStateGraph>(State.BoundGraph);
+			SetPlayer(Blueprint, *Graph, PosePin(*Graph->GetResultNode(), EGPD_Input), Asset, X, Y, bOnce);
+		}
+
+		/** A pose input fed by a sequence or blend space player, the blend space's axes read from variables; null Asset empties it. */
+		void SetPlayer(UAnimBlueprint& Blueprint, UEdGraph& GraphRef, UEdGraphPin* In, UAnimationAsset* Asset, const FString& X, const FString& Y, const bool bOnce)
+		{
+			UEdGraph* Graph = &GraphRef;
+			// Replace whatever feeds it, and the variable reads that fed its axes.
+			ClearPoseInput(Blueprint, *In);
 			if (!Asset) return;
 			UEdGraphNode* Player = nullptr;
 			if (UBlendSpace* BlendSpace = Cast<UBlendSpace>(Asset))
@@ -817,12 +960,29 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 			TSet<FString> Slots;
 			bool bOutputFed = false;
 			bool bInertialization = false;
+			/** An Animation Layer Interface, which declares layers and nothing else. */
+			bool bInterface = false;
+			/** Layers (lower case), each with where it comes from: self, or the interface that declares it; and the interfaces implemented. */
+			TMap<FString, FString> Layers;
+			TSet<FString> Interfaces;
 		};
 
 		FModel ModelOf(const UAnimBlueprint* Blueprint)
 		{
 			FModel Model;
 			if (!Blueprint) return Model;
+			Model.bInterface = IsLayerInterface(Blueprint);
+			for (const TPair<UEdGraph*, FString>& Layer : LayerGraphs(*Blueprint))
+			{
+				Model.Layers.Add(Layer.Key->GetName().ToLower(), Layer.Value);
+			}
+			for (const FBPInterfaceDescription& Description : Blueprint->ImplementedInterfaces)
+			{
+				if (const UBlueprint* Interface = Description.Interface ? UBlueprint::GetBlueprintFromClass(Description.Interface) : nullptr)
+				{
+					Model.Interfaces.Add(Interface->GetPathName().ToLower());
+				}
+			}
 			if (const UEdGraph* AnimGraph = FindAnimGraph(*Blueprint))
 			{
 				for (const UEdGraphNode* Node : AnimGraph->Nodes)
@@ -904,9 +1064,11 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 			return true;
 		}
 
-		bool RunOps(UAnimBlueprint* Blueprint, const USkeleton* Skeleton, const TArray<FHyperAIAnimBlueprintOp>& Ops, const bool bWrite, FString& OutError)
+		bool RunOps(UAnimBlueprint* Blueprint, const USkeleton* Skeleton, const TArray<FHyperAIAnimBlueprintOp>& Ops, const bool bWrite, FString& OutError,
+			const bool bCreatingInterface = false)
 		{
 			FModel Model = ModelOf(Blueprint);
+			Model.bInterface |= bCreatingInterface;
 			for (int32 Index = 0; Index < Ops.Num(); ++Index)
 			{
 				const FHyperAIAnimBlueprintOp& Op = Ops[Index];
@@ -918,6 +1080,64 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 				if (Op.Kind != TEXT("add_inertialization") && !IsIdentifier(Op.Name)) return Fail(TEXT("name must be an identifier: letters, digits and _, up to 64."));
 				const FString Name = Op.Name.ToLower();
 				const FString MachineKey = Op.Machine.ToLower();
+				if (Model.bInterface && Op.Kind != TEXT("add_layer"))
+				{
+					return Fail(TEXT("an Animation Layer Interface only declares layers (add_layer); an Animation Blueprint implements it with implement_interface."));
+				}
+
+				if (Op.Kind == TEXT("add_layer"))
+				{
+					const bool bTaken = Model.Layers.Contains(Name) || Name == UEdGraphSchema_K2::GN_AnimGraph.ToString().ToLower()
+						|| (Blueprint && Blueprint->FunctionGraphs.ContainsByPredicate([&Op](const UEdGraph* Graph) { return Graph && Graph->GetName().Equals(Op.Name, ESearchCase::IgnoreCase); }));
+					if (bTaken) return Fail(TEXT("a layer or graph already has that name."));
+					Model.Layers.Add(Name, TEXT("self"));
+					if (!bWrite) continue;
+					UEdGraph* Layer = FBlueprintEditorUtils::CreateNewGraph(Blueprint, FName(*Op.Name), UAnimationGraph::StaticClass(), UAnimationGraphSchema::StaticClass());
+					FBlueprintEditorUtils::AddDomainSpecificGraph(Blueprint, Layer);
+					continue;
+				}
+				if (Op.Kind == TEXT("implement_interface"))
+				{
+					const UAnimBlueprint* Interface = Op.Asset.IsEmpty() ? nullptr : LoadObject<UAnimBlueprint>(nullptr, *Op.Asset);
+					if (!IsLayerInterface(Interface) || !Interface->GeneratedClass)
+					{
+						return Fail(FString::Printf(TEXT("%s is not a compiled Animation Layer Interface."), *Op.Asset));
+					}
+					if (Model.Interfaces.Contains(Interface->GetPathName().ToLower())) return Fail(TEXT("the Blueprint implements that interface already."));
+					const USkeleton* InterfaceSkeleton = Interface->TargetSkeleton;
+					if (Skeleton && InterfaceSkeleton && InterfaceSkeleton != Skeleton && !Skeleton->IsCompatibleForEditor(InterfaceSkeleton))
+					{
+						return Fail(FString::Printf(TEXT("the interface is for skeleton %s, not the Blueprint's %s."), *InterfaceSkeleton->GetName(), *Skeleton->GetName()));
+					}
+					const TArray<FString> Declared = InterfaceLayers(*Interface);
+					if (Declared.IsEmpty()) return Fail(TEXT("the interface declares no layers yet; add_layer them in it first."));
+					for (const FString& Layer : Declared)
+					{
+						if (Model.Layers.Contains(Layer.ToLower())) return Fail(FString::Printf(TEXT("the Blueprint has a layer %s already."), *Layer));
+						Model.Layers.Add(Layer.ToLower(), Interface->GetName());
+					}
+					Model.Interfaces.Add(Interface->GetPathName().ToLower());
+					if (!bWrite) continue;
+					if (!FBlueprintEditorUtils::ImplementNewInterface(Blueprint, Interface->GeneratedClass->GetClassPathName()))
+					{
+						return Fail(TEXT("the Blueprint refused the interface."));
+					}
+					continue;
+				}
+				if (Op.Kind == TEXT("set_layer_asset"))
+				{
+					if (!Model.Layers.Contains(Name)) return Fail(TEXT("the Blueprint has no layer of that name; implement_interface or add_layer first."));
+					if (Op.Asset.IsEmpty()) return Fail(TEXT("set_layer_asset needs an asset."));
+					UAnimationAsset* Asset = nullptr;
+					FString Error;
+					if (!CheckAsset(Op, Skeleton, Model, Asset, Error)) return Fail(Error);
+					if (!bWrite) continue;
+					UEdGraph* Layer = FindLayerGraph(*Blueprint, Op.Name);
+					UEdGraphPin* Output = Layer ? LayerOutput(*Layer) : nullptr;
+					if (!Output) return Fail(TEXT("the layer has no output pose."));
+					SetPlayer(*Blueprint, *Layer, Output, Asset, Op.XVariable, Op.YVariable, Op.Value == TEXT("once"));
+					continue;
+				}
 
 				if (Op.Kind == TEXT("add_variable") || Op.Kind == TEXT("bind_variable"))
 				{
@@ -1049,6 +1269,19 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 					Entry->MakeLinkTo(FindState(*Graph, Op.Name)->GetInputPin());
 					continue;
 				}
+				if (Op.Kind == TEXT("set_state_layer"))
+				{
+					if (!bStateExists) return Fail(TEXT("no state has that name."));
+					if (!Model.Layers.Contains(Op.Value.ToLower()))
+					{
+						return Fail(FString::Printf(TEXT("value names a layer, and the Blueprint has no layer '%s'; implement_interface or add_layer first."), *Op.Value));
+					}
+					Machine->States[Name].bPlaysSequence = false;
+					if (!bWrite) continue;
+					UAnimationStateGraph* StateGraph = CastChecked<UAnimationStateGraph>(FindState(*Graph, Op.Name)->BoundGraph);
+					SetLinkedLayer(*Blueprint, *StateGraph, *PosePin(*StateGraph->GetResultNode(), EGPD_Input), FindLayerGraph(*Blueprint, Op.Value)->GetName());
+					continue;
+				}
 				if (Op.Kind == TEXT("set_transition_blend"))
 				{
 					if (!Machine->Transitions.Contains(Name + TEXT(">") + Op.To.ToLower()))
@@ -1155,8 +1388,9 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 					Transition->bCommentBubbleVisible = true;
 					continue;
 				}
-				return Fail(TEXT("unknown kind: use add_variable, bind_variable, add_state_machine, add_state, set_state_asset, set_entry_state, add_transition, ")
-					TEXT("remove_transition, remove_state, set_transition_blend, add_layered_slot, add_slot or add_inertialization."));
+				return Fail(TEXT("unknown kind: use add_variable, bind_variable, add_state_machine, add_state, set_state_asset, set_state_layer, set_entry_state, ")
+					TEXT("add_transition, remove_transition, remove_state, set_transition_blend, add_layered_slot, add_slot, add_inertialization, add_layer, ")
+					TEXT("implement_interface or set_layer_asset."));
 			}
 			if (bWrite)
 			{
@@ -1336,9 +1570,65 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 		return ReadOutputChain(Blueprint);
 	}
 
-	bool ValidateOps(const UAnimBlueprint* Blueprint, const USkeleton* Skeleton, const TArray<FHyperAIAnimBlueprintOp>& Ops, FString& OutError)
+	void ReadLayers(const UAnimBlueprint& Blueprint, TArray<FString>& OutInterfaces, TArray<FString>& OutLayers)
 	{
-		return RunOps(const_cast<UAnimBlueprint*>(Blueprint), Skeleton, Ops, /*bWrite=*/false, OutError);
+		OutInterfaces.Reset();
+		OutLayers.Reset();
+		for (const FBPInterfaceDescription& Description : Blueprint.ImplementedInterfaces)
+		{
+			if (const UBlueprint* Interface = Description.Interface ? UBlueprint::GetBlueprintFromClass(Description.Interface) : nullptr)
+			{
+				OutInterfaces.Add(Interface->GetPathName());
+			}
+		}
+		const bool bInterface = IsLayerInterface(&Blueprint);
+		for (const TPair<UEdGraph*, FString>& Layer : LayerGraphs(Blueprint))
+		{
+			if (bInterface)
+			{
+				OutLayers.Add(Layer.Key->GetName() + TEXT(" (declared)"));
+				continue;
+			}
+			FHyperAIAnimBlueprintState Player;
+			const UEdGraphPin* Output = LayerOutput(*Layer.Key);
+			ReadPlayer(Output ? LinkedNode(Output) : nullptr, Player);
+			FString What = Player.Player;
+			if (!Player.Asset.IsEmpty()) What += TEXT(" ") + Player.Asset;
+			if (!Player.XVariable.IsEmpty()) What += TEXT(" by ") + Player.XVariable + (Player.YVariable.IsEmpty() ? FString() : TEXT(", ") + Player.YVariable);
+			if (Player.Player == TEXT("sequence") && !Player.bLooping) What += TEXT(", once");
+			OutLayers.Add(FString::Printf(TEXT("%s (%s): %s"), *Layer.Key->GetName(), *Layer.Value, *What));
+		}
+	}
+
+	bool IsLayerInterfaceClass(const FString& ParentClassPath)
+	{
+		return ParentClassPath.Equals(UAnimLayerInterface::StaticClass()->GetPathName(), ESearchCase::IgnoreCase);
+	}
+
+	bool ValidateOps(const UAnimBlueprint* Blueprint, const USkeleton* Skeleton, const TArray<FHyperAIAnimBlueprintOp>& Ops, FString& OutError,
+		const bool bCreatingInterface)
+	{
+		return RunOps(const_cast<UAnimBlueprint*>(Blueprint), Skeleton, Ops, /*bWrite=*/false, OutError, bCreatingInterface);
+	}
+
+	UAnimBlueprint* CreateLayerInterface(const FString& Path, USkeleton* Skeleton, FString& OutError)
+	{
+		UPackage* Package = CreatePackage(*FPackageName::ObjectPathToPackageName(Path));
+		UAnimBlueprintFactory* Factory = NewObject<UAnimBlueprintFactory>();
+		Factory->BlueprintType = BPTYPE_Interface;
+		Factory->TargetSkeleton = Skeleton;
+		Factory->bTemplate = Skeleton == nullptr;
+		Factory->ParentClass = UAnimInstance::StaticClass();
+		UAnimBlueprint* Interface = Package ? Cast<UAnimBlueprint>(Factory->FactoryCreateNew(UAnimBlueprint::StaticClass(), Package,
+			FName(*FPackageName::ObjectPathToObjectName(Path)), RF_Public | RF_Standalone | RF_Transactional, nullptr, GWarn)) : nullptr;
+		if (!Interface)
+		{
+			OutError = TEXT("Could not create the Animation Layer Interface.");
+			return nullptr;
+		}
+		FAssetRegistryModule::AssetCreated(Interface);
+		Package->MarkPackageDirty();
+		return Interface;
 	}
 
 	UAnimBlueprint* Create(const FString& Path, USkeleton& Skeleton, UClass& ParentClass, FString& OutError)
@@ -1399,6 +1689,15 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 		{
 			Add(TEXT("compile_error"), true, Blueprint.GetName(), TEXT("The last compile failed; open the Blueprint's compiler results, or fix the graph and apply again."));
 		}
+		if (IsLayerInterface(&Blueprint))
+		{
+			// An interface only declares layers; there is no graph to check.
+			if (InterfaceLayers(Blueprint).IsEmpty())
+			{
+				Add(TEXT("no_layers"), false, Blueprint.GetName(), TEXT("The interface declares no layers yet; add_layer declares them."));
+			}
+			return Issues;
+		}
 		const UEdGraph* AnimGraph = FindAnimGraph(Blueprint);
 		const UAnimGraphNode_Root* Root = AnimGraph ? FindFirst<UAnimGraphNode_Root>(*AnimGraph) : nullptr;
 		if (!Root || !LinkedNode(PosePin(*Root, EGPD_Input)))
@@ -1431,7 +1730,7 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 					{
 						if (Blend->Node.LayerSetup[Layer].BranchFilters.IsEmpty())
 						{
-							Add(TEXT("empty_layer"), false, FString::Printf(TEXT("Layered blend layer %d"), Layer), TEXT("The layer names no bone, so its pose never shows."));
+							Add(TEXT("empty_blend_layer"), false, FString::Printf(TEXT("Layered blend layer %d"), Layer), TEXT("The layer names no bone, so its pose never shows."));
 						}
 					}
 				}
@@ -1461,6 +1760,19 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 		}
 		const TArray<FString> Chain = ReadOutputChain(Blueprint);
 		const bool bInertialOutput = Chain.ContainsByPredicate([](const FString& Entry) { return Entry == TEXT("Inertialization") || Entry == TEXT("Dead blending"); });
+
+		// Linked anim layers: each layer this Blueprint fills should play something.
+		TSet<FString> LayerNames;
+		for (const TPair<UEdGraph*, FString>& Layer : LayerGraphs(Blueprint))
+		{
+			LayerNames.Add(Layer.Key->GetName().ToLower());
+			const UEdGraphPin* Output = LayerOutput(*Layer.Key);
+			if (!IsLayerInterface(&Blueprint) && (!Output || Output->LinkedTo.IsEmpty()))
+			{
+				Add(TEXT("empty_anim_layer"), false, Layer.Key->GetName(),
+					TEXT("The layer plays nothing, so it holds the reference pose unless a linked layer class fills it; set_layer_asset fills it here."));
+			}
+		}
 
 		TArray<FHyperAIAnimBlueprintVariable> Variables;
 		TArray<FHyperAIAnimBlueprintMachine> Machines;
@@ -1518,6 +1830,10 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 				if (State.Player == TEXT("empty"))
 				{
 					Add(TEXT("empty_state"), true, Subject, TEXT("The state outputs no pose; give it a sequence or blend space."));
+				}
+				if (State.Player == TEXT("layer") && !LayerNames.Contains(State.Asset.ToLower()))
+				{
+					Add(TEXT("unknown_layer"), true, Subject, FString::Printf(TEXT("It plays layer %s, which the Blueprint neither has nor implements."), *State.Asset));
 				}
 				if (State.Player == TEXT("blend_space") && State.XVariable.IsEmpty())
 				{

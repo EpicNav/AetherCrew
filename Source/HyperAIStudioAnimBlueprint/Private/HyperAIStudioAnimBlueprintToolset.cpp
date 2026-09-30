@@ -107,11 +107,13 @@ namespace HyperAIStudio::AnimBlueprint::Private
 			FString Error;
 			USkeleton* Skeleton = nullptr;
 			UClass* Parent = nullptr;
+			const bool bInterface = Payload.bCreate && Gate::IsLayerInterfaceClass(Payload.ParentClassPath);
 			if (Payload.bCreate)
 			{
 				Skeleton = Gate::ResolveSkeleton(Payload.SkeletonPath);
-				Parent = Gate::ResolveParentClass(Payload.ParentClassPath, Error);
-				if (Blueprint || FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(Payload.TargetPath)) || !Skeleton || !Parent)
+				Parent = bInterface ? nullptr : Gate::ResolveParentClass(Payload.ParentClassPath, Error);
+				if (Blueprint || FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(Payload.TargetPath))
+					|| (!Skeleton && !(bInterface && Payload.SkeletonPath.IsEmpty())) || (!bInterface && !Parent))
 				{
 					return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("create_precondition_changed"),
 						TEXT("The target appeared, or the skeleton or parent class went away, after planning; nothing was created."));
@@ -133,7 +135,7 @@ namespace HyperAIStudio::AnimBlueprint::Private
 					: LOCTEXT("EditAnimBlueprint", "HyperAI: Edit Animation Blueprint"));
 				if (Payload.bCreate)
 				{
-					Blueprint = Gate::Create(Payload.TargetPath, *Skeleton, *Parent, Error);
+					Blueprint = bInterface ? Gate::CreateLayerInterface(Payload.TargetPath, Skeleton, Error) : Gate::Create(Payload.TargetPath, *Skeleton, *Parent, Error);
 					if (!Blueprint)
 					{
 						return Finish(EHyperAIStudioDomainDispatchOutcome::FailedBeforeEffect, TEXT("create_failed"), Error);
@@ -215,9 +217,10 @@ TArray<FString> FHyperAIStudioAnimBlueprintContracts::GetCapabilities()
 		TEXT("transitions_blending_by_crossfade_or_inertialization"),
 		TEXT("montage_slots_full_body_or_layered_from_a_bone_over_a_cached_pose"),
 		TEXT("inertialization_node_at_the_output"),
+		TEXT("anim_layer_interfaces_declared_implemented_filled_and_played_by_states"),
 		TEXT("compile_with_errors_reported_as_one_undo_step"),
 		TEXT("checks_entry_reachability_dead_ends_hysteresis_blend_times_skeletons_slots_inertialization"),
-		TEXT("unsupported:linked_anim_layers_aim_offsets_motion_matching_node_and_custom_nodes")};
+		TEXT("unsupported:layer_input_poses_aim_offsets_motion_matching_node_and_custom_nodes")};
 }
 
 bool FHyperAIStudioAnimBlueprintContracts::IsCanonicalProjectObjectPath(const FString& Path)
@@ -258,7 +261,7 @@ FString FHyperAIStudioAnimBlueprintContracts::InspectPayloadSchemaFingerprint()
 FString FHyperAIStudioAnimBlueprintContracts::EditOpsPayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("anim_blueprint.edit_ops.payload.v2|one_target|base_revision_or_create|skeleton|parent|ordered_closed_ops|slots_layers_inertialization|compile|save|deep_clone|bounded"));
+		TEXT("anim_blueprint.edit_ops.payload.v3|one_target|base_revision_or_create|skeleton|parent_or_layer_interface|ordered_closed_ops|slots_layers_inertialization|anim_layers|compile|save|deep_clone|bounded"));
 	return Value;
 }
 
@@ -271,7 +274,7 @@ FString FHyperAIStudioAnimBlueprintContracts::ValidatePayloadSchemaFingerprint()
 FString FHyperAIStudioAnimBlueprintContracts::InspectResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("anim_blueprint.inspect.result.v2|revision|skeleton|parent|compile_status|variables_drivers|machines_states_transitions_blend_logic|output_chain|bounded"));
+		TEXT("anim_blueprint.inspect.result.v3|revision|skeleton|parent|compile_status|variables_drivers|machines_states_transitions_blend_logic|output_chain|interfaces_layers|bounded"));
 	return Value;
 }
 
@@ -419,9 +422,12 @@ FHyperAIAnimBlueprintInspectReport FHyperAIStudioAnimBlueprintContracts::Inspect
 	TArray<FHyperAIAnimBlueprintMachine> Machines;
 	Gate::Read(*Blueprint, Report.Variables, Machines);
 	Report.OutputChain = Gate::OutputChain(*Blueprint);
+	Gate::ReadLayers(*Blueprint, Report.Interfaces, Report.Layers);
 	int64 Budget = 2048;
 	for (const FHyperAIAnimBlueprintVariable& Variable : Report.Variables) Budget += 32 + EstimateBytes(Variable.Name) + EstimateBytes(Variable.Driver);
 	for (const FString& Entry : Report.OutputChain) Budget += EstimateBytes(Entry);
+	for (const FString& Entry : Report.Interfaces) Budget += EstimateBytes(Entry);
+	for (const FString& Entry : Report.Layers) Budget += EstimateBytes(Entry);
 	for (FHyperAIAnimBlueprintMachine& Machine : Machines)
 	{
 		const int64 Bytes = EstimateMachineBytes(Machine);
@@ -559,6 +565,7 @@ FHyperAIAnimBlueprintApplyPlanReport FHyperAIStudioAnimBlueprintContracts::Build
 	const UAnimBlueprint* Blueprint = Gate::Resolve(Request.TargetPath, /*bLoad=*/false);
 	const USkeleton* Skeleton = nullptr;
 	FString Error;
+	const bool bCreatingInterface = Request.bCreate && Gate::IsLayerInterfaceClass(Request.ParentClassPath);
 	if (Request.bCreate)
 	{
 		if (Blueprint || FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(Request.TargetPath)))
@@ -566,11 +573,11 @@ FHyperAIAnimBlueprintApplyPlanReport FHyperAIStudioAnimBlueprintContracts::Build
 			return Reject(TEXT("target_exists"), TEXT("An asset already exists at target_path; inspect and edit it instead."));
 		}
 		Skeleton = Gate::ResolveSkeleton(Request.SkeletonPath);
-		if (!Skeleton)
+		if (!Skeleton && !(bCreatingInterface && Request.SkeletonPath.IsEmpty()))
 		{
-			return Reject(TEXT("invalid_skeleton"), TEXT("Creating needs skeleton_path naming a Skeleton asset."));
+			return Reject(TEXT("invalid_skeleton"), TEXT("Creating needs skeleton_path naming a Skeleton asset (an Animation Layer Interface may leave it empty)."));
 		}
-		if (!Gate::ResolveParentClass(Request.ParentClassPath, Error))
+		if (!bCreatingInterface && !Gate::ResolveParentClass(Request.ParentClassPath, Error))
 		{
 			return Reject(TEXT("invalid_parent_class"), Error);
 		}
@@ -593,7 +600,7 @@ FHyperAIAnimBlueprintApplyPlanReport FHyperAIStudioAnimBlueprintContracts::Build
 		}
 		Skeleton = Blueprint->TargetSkeleton;
 	}
-	if (!Gate::ValidateOps(Blueprint, Skeleton, Request.Ops, Error))
+	if (!Gate::ValidateOps(Blueprint, Skeleton, Request.Ops, Error, bCreatingInterface))
 	{
 		return Reject(TEXT("invalid_op"), Error);
 	}

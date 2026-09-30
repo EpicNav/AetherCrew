@@ -122,6 +122,23 @@ namespace HyperAIStudio::AnimBlueprint::Tests
 	{
 		if (Asset) ObjectTools::ForceDeleteObjects({Asset}, /*bShowConfirmation=*/false);
 	}
+
+	/** The first non-additive animation sequence under /Game (not the tests' own folders). */
+	UAnimSequence* AnyClip()
+	{
+		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		TArray<FAssetData> Assets;
+		Registry.GetAssetsByClass(UAnimSequence::StaticClass()->GetClassPathName(), Assets);
+		Assets.Sort([](const FAssetData& A, const FAssetData& B) { return A.PackageName.LexicalLess(B.PackageName); });
+		for (const FAssetData& Asset : Assets)
+		{
+			const FString Package = Asset.PackageName.ToString();
+			if (!Package.StartsWith(TEXT("/Game/")) || Package.StartsWith(TEXT("/Game/__"))) continue;
+			UAnimSequence* Sequence = Cast<UAnimSequence>(Asset.GetAsset());
+			if (Sequence && !Sequence->IsValidAdditive() && Sequence->GetSkeleton()) return Sequence;
+		}
+		return nullptr;
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -515,6 +532,111 @@ bool FHyperAIStudioAnimBlueprintLayersTest::RunTest(const FString& Parameters)
 			*FString::Join(Gone, TEXT(" / ")).Left(1500), *FString::Join(New, TEXT(" / ")).Left(1500)), Gate::ComputeRevision(*Blueprint), Built);
 		TestEqual(TEXT("and the state machine feeds the output again"), FString::Join(Gate::OutputChain(*Blueprint), TEXT(" | ")), FString(TEXT("State machine Locomotion")));
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAnimBlueprintLinkedLayersTest,
+	"HyperAIStudio.AnimBlueprint.Graph.LinkedAnimLayers",
+	HyperAIStudio::AnimBlueprint::Tests::Flags)
+
+bool FHyperAIStudioAnimBlueprintLinkedLayersTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::AnimBlueprint::Tests;
+	namespace Gate = HyperAIStudio::AnimBlueprint::Gate;
+	UAnimSequence* Clip = AnyClip();
+	if (!Clip)
+	{
+		AddInfo(TEXT("Skipped: no non-additive animation sequence under /Game."));
+		return true;
+	}
+	USkeleton* TargetSkeleton = Clip->GetSkeleton();
+	const FString ClipPath = Clip->GetPathName();
+	FString Error;
+	UAnimBlueprint* Interface = Gate::CreateLayerInterface(TestPath(), /*Skeleton=*/nullptr, Error);
+	UAnimBlueprint* Main = Gate::Create(TestPath(), *TargetSkeleton, *UAnimInstance::StaticClass(), Error);
+	UAnimBlueprint* Weapon = Gate::Create(TestPath(), *TargetSkeleton, *UAnimInstance::StaticClass(), Error);
+	ON_SCOPE_EXIT { Discard(Weapon); Discard(Main); Discard(Interface); };
+	if (!TestTrue(TEXT("an interface and two Animation Blueprints are created: ") + Error, Interface && Main && Weapon)) return false;
+	const FString InterfacePath = Interface->GetPathName();
+	FString FirstError;
+	int32 Errors = 0;
+	int32 Warnings = 0;
+	auto Rejects = [&](const UAnimBlueprint* Target, const TArray<FHyperAIAnimBlueprintOp>& Ops, const TCHAR* Expected)
+	{
+		FString Why;
+		const bool bValid = Gate::ValidateOps(Target, TargetSkeleton, Ops, Why);
+		TestTrue(*FString::Printf(TEXT("rejected with '%s' (got '%s')"), Expected, *Why), !bValid && Why.Contains(Expected));
+	};
+	Rejects(Interface, {Op(TEXT("add_state_machine"), TEXT(""), TEXT("M"))}, TEXT("only declares layers"));
+	Rejects(Main, {Op(TEXT("implement_interface"), TEXT(""), TEXT("I"), TEXT(""), TEXT(""), TEXT(""), *Main->GetPathName())}, TEXT("not a compiled Animation Layer Interface"));
+	Rejects(Main, {Op(TEXT("implement_interface"), TEXT(""), TEXT("I"), TEXT(""), TEXT(""), TEXT(""), *InterfacePath)}, TEXT("declares no layers yet"));
+
+	// The interface names two layers.
+	{
+		const FScopedTransaction Transaction(NSLOCTEXT("HyperAIStudioAnimBlueprintTests", "Interface", "Interface"));
+		TestTrue(TEXT("the interface declares its layers: ") + Error, Gate::ApplyOps(*Interface, {
+			Op(TEXT("add_layer"), TEXT(""), TEXT("FullBody_Idle")), Op(TEXT("add_layer"), TEXT(""), TEXT("FullBody_Move"))}, Error));
+	}
+	TestTrue(*FString::Printf(TEXT("and compiles (%d errors, first: %s)"), Errors, *FirstError), Gate::Compile(*Interface, FirstError, Errors, Warnings));
+	TArray<FString> Interfaces;
+	TArray<FString> Layers;
+	Gate::ReadLayers(*Interface, Interfaces, Layers);
+	TestTrue(TEXT("It reads back its two layers as declared: ") + FString::Join(Layers, TEXT(" | ")),
+		Layers.Num() == 2 && Layers.Contains(TEXT("FullBody_Idle (declared)")) && Layers.Contains(TEXT("FullBody_Move (declared)")));
+
+	// The main Blueprint implements it, fills each layer with a default, and its states play the layers.
+	const TArray<FHyperAIAnimBlueprintOp> MainOps = {
+		Op(TEXT("implement_interface"), TEXT(""), TEXT("ItemLayers"), TEXT(""), TEXT(""), TEXT(""), *InterfacePath),
+		Op(TEXT("bind_variable"), TEXT(""), TEXT("Speed"), TEXT(""), TEXT(""), TEXT("speed")),
+		Op(TEXT("add_state_machine"), TEXT(""), TEXT("Locomotion")),
+		Op(TEXT("add_state"), TEXT("Locomotion"), TEXT("Idle")),
+		Op(TEXT("add_state"), TEXT("Locomotion"), TEXT("Move")),
+		Op(TEXT("add_transition"), TEXT("Locomotion"), TEXT("Idle"), TEXT("Move"), TEXT("Speed > 10")),
+		Op(TEXT("add_transition"), TEXT("Locomotion"), TEXT("Move"), TEXT("Idle"), TEXT("Speed < 5")),
+		Op(TEXT("set_layer_asset"), TEXT(""), TEXT("FullBody_Idle"), TEXT(""), TEXT(""), TEXT(""), *ClipPath),
+		Op(TEXT("set_layer_asset"), TEXT(""), TEXT("FullBody_Move"), TEXT(""), TEXT(""), TEXT(""), *ClipPath),
+		Op(TEXT("set_state_layer"), TEXT("Locomotion"), TEXT("Idle"), TEXT(""), TEXT(""), TEXT("FullBody_Idle")),
+		Op(TEXT("set_state_layer"), TEXT("Locomotion"), TEXT("Move"), TEXT(""), TEXT(""), TEXT("FullBody_Move"))};
+	TArray<FHyperAIAnimBlueprintOp> NoSuchLayer = MainOps;
+	NoSuchLayer.Add(Op(TEXT("set_state_layer"), TEXT("Locomotion"), TEXT("Idle"), TEXT(""), TEXT(""), TEXT("FullBody_Swim")));
+	Rejects(Main, NoSuchLayer, TEXT("has no layer 'FullBody_Swim'"));
+	{
+		const FScopedTransaction Transaction(NSLOCTEXT("HyperAIStudioAnimBlueprintTests", "Main", "Main"));
+		TestTrue(TEXT("the main Blueprint's plan applies: ") + Error, Gate::ApplyOps(*Main, MainOps, Error));
+	}
+	TestTrue(*FString::Printf(TEXT("and compiles (%d errors, first: %s)"), Errors, *FirstError), Gate::Compile(*Main, FirstError, Errors, Warnings));
+	TestEqual(TEXT("with no warnings: every linked layer node is set up whole"), Warnings, 0);
+	TArray<FHyperAIAnimBlueprintVariable> Variables;
+	TArray<FHyperAIAnimBlueprintMachine> Machines;
+	Gate::Read(*Main, Variables, Machines);
+	TestTrue(TEXT("Its states play the layers"), Machines.Num() == 1 && Machines[0].States.ContainsByPredicate([](const FHyperAIAnimBlueprintState& State)
+	{
+		return State.Name == TEXT("Idle") && State.Player == TEXT("layer") && State.Asset == TEXT("FullBody_Idle");
+	}));
+	Gate::ReadLayers(*Main, Interfaces, Layers);
+	const FString InterfaceName = Interface->GetName();
+	TestTrue(TEXT("It implements the interface, each layer playing its default: ") + FString::Join(Layers, TEXT(" | ")),
+		Interfaces.Num() == 1 && Interfaces[0] == InterfacePath && Layers.Num() == 2
+		&& Layers.Contains(FString::Printf(TEXT("FullBody_Idle (%s): sequence %s"), *InterfaceName, *ClipPath)));
+	TArray<FHyperAIAnimBlueprintIssue> Issues = Gate::Check(*Main);
+	TestFalse(TEXT("The main Blueprint has no errors: ") + FString::JoinBy(Issues, TEXT(" | "), [](const FHyperAIAnimBlueprintIssue& Issue) { return Issue.Code; }),
+		Issues.ContainsByPredicate([](const FHyperAIAnimBlueprintIssue& Issue) { return Issue.Severity == TEXT("error"); }));
+
+	// A weapon's layer Blueprint implements the interface and changes one layer; the one it leaves is flagged.
+	{
+		const FScopedTransaction Transaction(NSLOCTEXT("HyperAIStudioAnimBlueprintTests", "Weapon", "Weapon"));
+		TestTrue(TEXT("the weapon's layers apply: ") + Error, Gate::ApplyOps(*Weapon, {
+			Op(TEXT("implement_interface"), TEXT(""), TEXT("ItemLayers"), TEXT(""), TEXT(""), TEXT(""), *InterfacePath),
+			Op(TEXT("set_layer_asset"), TEXT(""), TEXT("FullBody_Idle"), TEXT(""), TEXT(""), TEXT(""), *ClipPath)}, Error));
+	}
+	TestTrue(*FString::Printf(TEXT("and compile (%d errors, first: %s)"), Errors, *FirstError), Gate::Compile(*Weapon, FirstError, Errors, Warnings));
+	Issues = Gate::Check(*Weapon);
+	TestTrue(TEXT("The layer it leaves empty is flagged"), Issues.ContainsByPredicate([](const FHyperAIAnimBlueprintIssue& Issue)
+	{
+		return Issue.Code == TEXT("empty_anim_layer") && Issue.Subject == TEXT("FullBody_Move");
+	}));
 	return true;
 }
 

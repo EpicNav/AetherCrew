@@ -28,7 +28,7 @@ Written by HyperAIStudio for agents building character animation. Use it with `h
   then an additive aim offset, then a Slot (`DefaultSlot`) for montages, then an Inertialization node, then the
   output pose. These tools build all of it but the aim offset: see section 8.
 - Per-weapon or per-stance animation belongs in Linked Anim Layers (Lyra: the `ALI_ItemAnimLayers` interface), so
-  the main graph never changes when a weapon does; each weapon links its own layer class.
+  the main graph never changes when a weapon does; each weapon links its own layer class (section 9).
 
 ## 2. Variables
 
@@ -115,8 +115,8 @@ TEXT(R"(
 3. `hyper_anim_blueprint_validate`: fix errors, then warnings (hysteresis, blends, `never_set`, unreachable).
 4. Play in the editor and watch feet and transitions, with the Animation Blueprint debugger on the character.
 
-Not built by these tools yet: linked anim layers, aim offsets and the Motion Matching node; build those in the
-Animation Blueprint editor. Pose Search data is `hyper_pose_search_apply_plan`'s, retargeting `hyper_retarget_apply_plan`'s.
+Not built by these tools yet: layers that take an input pose, aim offsets and the Motion Matching node; build those
+in the Animation Blueprint editor. Pose Search data is `hyper_pose_search_apply_plan`'s, retargeting `hyper_retarget_apply_plan`'s.
 )"),
 TEXT(R"(
 ## 8. Montages over locomotion
@@ -145,7 +145,35 @@ Attacks, hit reactions and emotes are montages; they play in a slot, and the slo
 Inspect's `output_chain` then reads, from the output back: Inertialization; Slot DefaultSlot; Layered blend per bone:
 slot UpperBody from spine_01 (mesh-space rotation); Cached pose UpperBodyBase; State machine Locomotion. Validate
 flags slots the skeleton lacks (`unknown_slot`), a slot played twice (`duplicate_slot`), layers with no bone
-(`empty_layer`) and cached poses nothing uses (`unused_cached_pose`).
+(`empty_blend_layer`) and cached poses nothing uses (`unused_cached_pose`).
+)"),
+TEXT(R"(
+## 9. Linked anim layers
+
+Lyra's pattern for animation that changes with the weapon or stance: the main Animation Blueprint's states play
+layers, an Animation Layer Interface names the layers, and each weapon's layer Blueprint fills them. Equipping a weapon
+links its layer class (`Link Anim Class Layers` on the mesh's anim instance, in gameplay code); the main graph never
+changes.
+
+1. The interface: `apply_plan` with `bCreate`, `parent_class_path` `/Script/Engine.AnimLayerInterface` (and no
+   `skeleton_path` for any skeleton), ops `add_layer` for each layer: `FullBody_Idle`, `FullBody_Move`, `FullBody_Jump`.
+2. The main Blueprint: `implement_interface` with `asset` the interface; `set_layer_asset` gives each layer a default
+   (the unarmed animation); `set_state_layer` makes each locomotion state play its layer (`value` the layer).
+3. Each weapon: a new Animation Blueprint with `implement_interface` and `set_layer_asset` for the layers it changes.
+
+```json
+[
+  {"kind":"implement_interface","asset":"/Game/Anim/ALI_ItemLayers.ALI_ItemLayers"},
+  {"kind":"set_layer_asset","name":"FullBody_Idle","asset":"/Game/Anim/MM_Idle.MM_Idle"},
+  {"kind":"set_layer_asset","name":"FullBody_Move","asset":"/Game/Anim/BS_Jog.BS_Jog","x_variable":"Speed"},
+  {"kind":"set_state_layer","machine":"Locomotion","name":"Idle","value":"FullBody_Idle"},
+  {"kind":"set_state_layer","machine":"Locomotion","name":"Move","value":"FullBody_Move"}
+]
+```
+
+A layer's blend space reads the variables of the Blueprint that fills it, so each weapon's layer Blueprint drives its
+own `Speed` (`bind_variable`). Inspect lists `interfaces` and `layers` (each with what plays in it); validate flags a
+state playing a layer the Blueprint lacks (`unknown_layer`) and layers that play nothing (`empty_anim_layer`).
 )")};
 	}
 

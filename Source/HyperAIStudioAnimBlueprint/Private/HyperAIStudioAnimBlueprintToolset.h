@@ -30,7 +30,7 @@ struct FHyperAIAnimBlueprintState
 	GENERATED_BODY()
 
 	UPROPERTY() FString Name;
-	/** sequence, blend_space, empty, or custom for graphs this toolset did not build. */
+	/** sequence, blend_space, layer (a linked anim layer; Asset is its name), empty, or custom for graphs this toolset did not build. */
 	UPROPERTY() FString Player;
 	UPROPERTY() FString Asset;
 	UPROPERTY() FString XVariable;
@@ -100,6 +100,10 @@ struct FHyperAIAnimBlueprintInspectReport
 	 * UpperBody from spine_01), Cached pose, State machine Locomotion.
 	 */
 	UPROPERTY() TArray<FString> OutputChain;
+	/** The Animation Layer Interfaces it implements. */
+	UPROPERTY() TArray<FString> Interfaces;
+	/** Each layer as Name (self, or the interface declaring it): what plays in it; an interface lists its layers as declared. */
+	UPROPERTY() TArray<FString> Layers;
 	UPROPERTY() bool bTruncated = false;
 	UPROPERTY() TArray<FString> Capabilities;
 };
@@ -123,6 +127,12 @@ struct FHyperAIAnimBlueprintInspectReport
  *       montages in the slot play on that bone and those below it while the rest of the pose keeps playing
  *   add_slot: Name = a slot on the skeleton (DefaultSlot); montages in it play over the whole pose
  *   add_inertialization: an Inertialization node at the output, which inertialization transitions need
+ * Linked anim layers (swap a character's animation per weapon or stance without touching its main graph):
+ *   add_layer: Name; in an Animation Layer Interface (create with ParentClassPath /Script/Engine.AnimLayerInterface),
+ *       declares a layer; in an Animation Blueprint, adds a layer of its own. An interface takes nothing else.
+ *   implement_interface: Asset = the interface's object path; its layers become layers of this Blueprint
+ *   set_layer_asset: Name = a layer, Asset (sequence or blend space) with XVariable/YVariable, Value = once
+ *   set_state_layer: Machine, Name (state), Value = the layer the state plays
  */
 USTRUCT(BlueprintType)
 struct FHyperAIAnimBlueprintOp
@@ -149,7 +159,10 @@ struct FHyperAIAnimBlueprintApplyPlanRequest
 	UPROPERTY() FString OperationId;
 	UPROPERTY() FString ExpectedPlanHash;
 	UPROPERTY() FString TargetPath;
-	/** Create the Animation Blueprint for SkeletonPath (parent ParentClassPath, default AnimInstance). */
+	/**
+	 * Create the Animation Blueprint for SkeletonPath (parent ParentClassPath, default AnimInstance); ParentClassPath
+	 * /Script/Engine.AnimLayerInterface creates an Animation Layer Interface instead, for any skeleton when SkeletonPath is empty.
+	 */
 	UPROPERTY() bool bCreate = false;
 	UPROPERTY() FString SkeletonPath;
 	UPROPERTY() FString ParentClassPath;
@@ -245,16 +258,17 @@ public:
 
 	/**
 	 * An Animation Blueprint's skeleton, variables (and their drivers), state machines with states, players, transitions and
-	 * rules, what feeds the output pose (slots, layered blends, inertialization), compile status, and revision.
+	 * rules, what feeds the output pose (slots, layered blends, inertialization), its linked anim layers and interfaces,
+	 * compile status, and revision.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|AnimBlueprint")
 	static FHyperAIAnimBlueprintInspectReport hyper_anim_blueprint_inspect(const FHyperAIAnimBlueprintInspectRequest& Request);
 
 	/**
-	 * Closed graph edits, then a compile, as one undo step: create for a skeleton, variables and per-frame drivers,
-	 * state machines, states playing sequences or blend spaces, transitions with rules, montage slots (full body or layered
-	 * from a bone) and inertialization. Read .hyperai/docs/HyperAIStudio-AnimationCookbook.md first. Dry-run, then resubmit:
-	 * the reply waits for the edit. Then validate.
+	 * Closed graph edits, then a compile, as one undo step: create for a skeleton (or an Animation Layer Interface),
+	 * per-frame variables, state machines, states playing sequences, blend spaces or linked layers, transitions, montage
+	 * slots, inertialization, layers implemented and filled. Read .hyperai/docs/HyperAIStudio-AnimationCookbook.md first.
+	 * Dry-run, then resubmit (the reply waits), then validate.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|AnimBlueprint")
 	static UHyperAIAnimBlueprintApplyPlanResult* hyper_anim_blueprint_apply_plan(const FHyperAIAnimBlueprintApplyPlanRequest& Request);
