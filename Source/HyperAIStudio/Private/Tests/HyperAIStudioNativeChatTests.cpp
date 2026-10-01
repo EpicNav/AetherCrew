@@ -1304,6 +1304,33 @@ for line in iter(sys.stdin.readline, ""):
         send({"id": i, "result": {"thread": {"id": m["params"]["threadId"], "turns": [turn]}, "model": "fake"}})
 )PY");
 
+	/**
+	 * Codex 0.159 asks before an MCP tool runs, through an elicitation; the turn then says what it was answered.
+	 * A reply of decline is what Codex reports to the model as "user rejected MCP tool call".
+	 */
+	const TCHAR* const FakeCodexToolApproval = TEXT(R"PY(import json, sys
+def send(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+for line in iter(sys.stdin.readline, ""):
+    m = json.loads(line); method = m.get("method"); i = m.get("id")
+    if method == "initialize":
+        send({"id": i, "result": {"userAgent": "fake"}})
+    elif method == "thread/start":
+        send({"id": i, "result": {"thread": {"id": "thread-mcp"}, "model": "fake"}})
+    elif method == "turn/start":
+        send({"id": i, "result": {"turn": {"id": "turn-1", "status": "inProgress", "items": []}}})
+        send({"id": 700, "method": "mcpServer/elicitation/request", "params": {"threadId": "thread-mcp", "turnId": "turn-1", "serverName": "unreal-mcp",
+              "mode": "form", "message": "Allow the unreal-mcp MCP server to run tool \"call_tool\"?", "requestedSchema": {"type": "object", "properties": {}},
+              "_meta": {"codex_approval_kind": "mcp_tool_call", "persist": ["session", "always"], "toolTitle": "call_tool",
+                        "toolParams": {"toolset_name": "HyperAIStudioLighting.HyperAIStudioLightingToolset", "tool_name": "hyper_lighting_inspect",
+                                       "arguments": {"request": {"cameraActorLabel": "HyperAI_MatchCamera"}}}}}})
+    elif i == 700 and "result" in m:
+        r = m["result"]
+        said = "action=%s content=%s persist=%s" % (r.get("action"), json.dumps(r.get("content")), (r.get("_meta") or {}).get("persist"))
+        send({"method": "item/completed", "params": {"item": {"type": "agentMessage", "id": "m-" + str(i), "text": said}}})
+        send({"method": "turn/completed", "params": {"turn": {"id": "turn-1", "status": "completed", "items": []}}})
+)PY");
+
 	/** Ticks the chat and runs what other threads handed back to the game thread, until Done holds. */
 	bool PumpWithTasksUntil(const TFunction<bool()>& Done)
 	{
@@ -1400,6 +1427,51 @@ bool FHyperAIStudioNativeChatResumeHistoryTest::RunTest(const FString& Parameter
 	TestTrue(TEXT("with its command and reply"), IndexOf(*Codex, EKind::Command, TEXT("git status")) > 0 && IndexOf(*Codex, EKind::Agent, TEXT("door opens")) > 0);
 	TestTrue(TEXT("above the chat that goes on"), IndexOf(*Codex, EKind::Notice, TEXT("Resuming")) > IndexOf(*Codex, EKind::Agent, TEXT("door opens")));
 	Codex->Stop();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNativeChatCodexToolApprovalTest,
+	"HyperAIStudio.NativeChat.CodexToolApproval",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioNativeChatCodexToolApprovalTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::NativeChatTests;
+	using EKind = FHyperAIStudioChatItem::EKind;
+	if (!HasPython())
+	{
+		AddWarning(TEXT("python is not on PATH, so the scripted Codex stand-in cannot run."));
+		return true;
+	}
+	const FScratch Scratch;
+	UseStandIn(Scratch.Dir, FakeCodexToolApproval, TEXT("fake_codex_tool_approval.py"));
+	// Once remembered for the chat, and once refused: the refusal is what blocked a Match job's lighting inspection.
+	for (const FString& Answer : {FString(TEXT("Allow, and stop asking this chat")), FString(TEXT("Don't allow"))})
+	{
+		const TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(TEXT("Codex"), Scratch.Dir, FString(), FString());
+		FString Error;
+		if (!TestTrue(TEXT("The Codex stand-in starts"), Chat.IsValid() && Chat->Start(Error)) || !TestTrue(TEXT("and is ready"), PumpUntil([&Chat]() { return Chat->IsReady(); })))
+		{
+			return false;
+		}
+		Chat->Send(TEXT("Inspect the lighting"));
+		TestTrue(TEXT("Codex's MCP tool approval is asked in the chat, not declined unseen"), PumpUntil([&Chat]() { return Chat->HasOpenApproval(); }));
+		const TSharedPtr<FHyperAIStudioChatItem> Asked = FindKind(*Chat, EKind::Approval);
+		if (!TestNotNull(TEXT("an approval card"), Asked.Get()))
+		{
+			return false;
+		}
+		TestTrue(TEXT("naming the Unreal tool it runs and its arguments"), Asked->Title.Contains(TEXT("unreal-mcp"))
+			&& Asked->Text.Contains(TEXT("hyper_lighting_inspect")) && Asked->Text.Contains(TEXT("HyperAI_MatchCamera")));
+		TestEqual(TEXT("with Allow, for this chat, always, and no"), Asked->Choices.Num(), 4);
+		Chat->Answer(Asked->Id, Asked->Choices.IndexOfByKey(Answer));
+		TestTrue(TEXT("The turn goes on and ends"), PumpUntil([&Chat]() { return !Chat->IsBusy(); }));
+		const TSharedPtr<FHyperAIStudioChatItem> Said = FindKind(*Chat, EKind::Agent);
+		const FString Expected = Answer.StartsWith(TEXT("Allow")) ? TEXT("action=accept content={} persist=session") : TEXT("action=decline content=null persist=None");
+		TestEqual(FString::Printf(TEXT("Codex hears \"%s\" as"), *Answer), Said.IsValid() ? Said->Text : FString(), Expected);
+		Chat->Stop();
+	}
 	return true;
 }
 

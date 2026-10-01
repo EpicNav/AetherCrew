@@ -1153,6 +1153,11 @@ namespace HyperAIStudio::NativeChat::Private
 					Compact(Params->TryGetField(TEXT("permissions"))) + (Reason.IsEmpty() ? FString() : TEXT("\n\n") + Reason),
 					{TEXT("Allow"), TEXT("Deny")}, {TEXT("allow"), TEXT("deny")});
 			}
+			else if (Method == TEXT("mcpServer/elicitation/request")
+				&& StringField(ObjectField(Params, TEXT("_meta")), TEXT("codex_approval_kind")) == TEXT("mcp_tool_call"))
+			{
+				AskToolApproval(RequestId, Params);
+			}
 			else if (Method == TEXT("mcpServer/elicitation/request"))
 			{
 				Respond(RequestId, Object({{TEXT("action"), Str(TEXT("decline"))}}));
@@ -1168,12 +1173,83 @@ namespace HyperAIStudio::NativeChat::Private
 			}
 		}
 
+		/**
+		 * Codex asks before an MCP tool runs, as an elicitation that carries the tool and its arguments. It is shown as an
+		 * approval, with "for this chat" and "always" where Codex says it can remember the answer.
+		 */
+		void AskToolApproval(const TSharedPtr<FJsonValue>& RequestId, const TSharedPtr<FJsonObject>& Params)
+		{
+			const TSharedPtr<FJsonObject> Meta = ObjectField(Params, TEXT("_meta"));
+			TArray<FString> Persist;
+			if (const TSharedPtr<FJsonValue> Field = Meta->TryGetField(TEXT("persist")); Field.IsValid() && Field->Type == EJson::String)
+			{
+				Persist.Add(Field->AsString());
+			}
+			for (const TSharedPtr<FJsonValue>& Value : ArrayField(Meta, TEXT("persist")))
+			{
+				if (Value.IsValid() && Value->Type == EJson::String)
+				{
+					Persist.Add(Value->AsString());
+				}
+			}
+			TArray<FString> Choices = {TEXT("Allow")};
+			TArray<FString> ChoiceIds = {TEXT("accept")};
+			if (Persist.Contains(TEXT("session")))
+			{
+				Choices.Add(TEXT("Allow, and stop asking this chat"));
+				ChoiceIds.Add(TEXT("session"));
+			}
+			if (Persist.Contains(TEXT("always")))
+			{
+				Choices.Add(TEXT("Always allow this tool"));
+				ChoiceIds.Add(TEXT("always"));
+			}
+			Choices.Add(TEXT("Don't allow"));
+			ChoiceIds.Add(TEXT("decline"));
+			// Unreal's call_tool names the tool it runs, and that tool's own arguments, in its arguments.
+			const TSharedPtr<FJsonObject> ToolParams = ObjectField(Meta, TEXT("toolParams"));
+			const bool bCallTool = ToolParams.IsValid() && ToolParams->HasField(TEXT("tool_name"));
+			const FString Tool = bCallTool
+				? StringField(ToolParams, TEXT("toolset_name")) + TEXT(".") + StringField(ToolParams, TEXT("tool_name"))
+				: StringField(Meta, TEXT("toolTitle"));
+			TArray<FString> Lines;
+			if (!Tool.IsEmpty())
+			{
+				Lines.Add(TEXT("Tool: ") + Tool);
+			}
+			const FString Description = StringField(Meta, TEXT("toolDescription"));
+			if (!Description.IsEmpty())
+			{
+				Lines.Add(Description.Left(300));
+			}
+			const FString Arguments = Compact(bCallTool ? ToolParams->TryGetField(TEXT("arguments")) : Meta->TryGetField(TEXT("toolParams")));
+			if (!Arguments.IsEmpty())
+			{
+				Lines.Add(TEXT("Arguments: ") + (Arguments.Len() > 2000 ? Arguments.Left(2000) + TEXT("...") : Arguments));
+			}
+			const FString Id = TEXT("mcp-") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			ToolApprovals.Add(Id + TEXT("#approval"));
+			const FString Question = StringField(Params, TEXT("message"));
+			AskApproval(RequestId, Id, Question.IsEmpty() ? FString(TEXT("Allow this MCP tool to run?")) : Question, FString::Join(Lines, TEXT("\n\n")), Choices, ChoiceIds);
+		}
+
 		virtual TSharedRef<FJsonObject> AnswerPayload(const FHyperAIStudioChatItem& Item, const int32 Choice) override
 		{
 			if (const TSharedPtr<FJsonObject>* Requested = RequestedPermissions.Find(Item.Id))
 			{
 				const bool bAllow = Item.ChoiceIds[Choice] == TEXT("allow");
 				return Object({{TEXT("permissions"), Obj(bAllow && Requested->IsValid() ? Requested->ToSharedRef() : MakeShared<FJsonObject>())}});
+			}
+			if (ToolApprovals.Remove(Item.Id) > 0)
+			{
+				// An approval answers an elicitation: accepted with an empty form, and how long Codex should remember it.
+				const FString Picked = Item.ChoiceIds[Choice];
+				const bool bAccept = Picked != TEXT("decline");
+				const bool bRemember = Picked == TEXT("session") || Picked == TEXT("always");
+				const TSharedPtr<FJsonValue> None = MakeShared<FJsonValueNull>();
+				return Object({{TEXT("action"), Str(bAccept ? TEXT("accept") : TEXT("decline"))},
+					{TEXT("content"), bAccept ? Obj(MakeShared<FJsonObject>()) : None},
+					{TEXT("_meta"), bRemember ? Obj(Object({{TEXT("persist"), Str(Picked)}})) : None}});
 			}
 			return Object({{TEXT("decision"), Str(Item.ChoiceIds[Choice])}});
 		}
@@ -1183,6 +1259,8 @@ namespace HyperAIStudio::NativeChat::Private
 		FString TokensText;
 		FString LimitsText;
 		TMap<FString, TSharedPtr<FJsonObject>> RequestedPermissions;
+		/** Open approvals that answer Codex's MCP tool elicitations. */
+		TSet<FString> ToolApprovals;
 	};
 
 	// ------------------------------------------------------------------------------------------------------ ACP agents
