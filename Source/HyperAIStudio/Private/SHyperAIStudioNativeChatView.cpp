@@ -196,6 +196,7 @@ FString SHyperAIStudioNativeChatView::StepMarkdown(const FHyperAIStudioChatItem&
 void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 {
 	Chat = InArgs._Chat;
+	OnRoute = InArgs._OnRoute;
 	check(Chat.IsValid());
 	ChildSlot
 	[
@@ -448,6 +449,13 @@ void SHyperAIStudioNativeChatView::Submit()
 			Notice = TEXT("Added HyperAI's team to this project, in .hyperai/agents, with its skill and workflow.");
 		}
 		Message = HyperAIStudio::Agents::TeamRequest(bAdded ? FString() : Chat->GetAgentName(), Text);
+	}
+	// A request to the team is the team's to share out; anything else may first go to the agent its task fits.
+	else if (OnRoute.IsBound() && OnRoute.Execute(Message, Attached))
+	{
+		Attached.Reset();
+		RebuildAttachments();
+		return;
 	}
 	Chat->Send(Message, Attached);
 	Attached.Reset();

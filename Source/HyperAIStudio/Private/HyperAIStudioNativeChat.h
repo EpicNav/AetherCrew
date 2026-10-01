@@ -90,6 +90,13 @@ public:
 	void Interrupt();
 	/** Answers an open approval with one of its choices. */
 	void Answer(const FString& ItemId, int32 Choice);
+	/** A line in the transcript from HyperAI itself, such as which agent a task was routed to. */
+	void AddNotice(const FString& Text);
+	/**
+	 * What goes with a message beside what was typed: the project notes and past tasks it matches, the skills made for
+	 * its kind of work and the HyperAI tools for it, each once per chat (Given). OutSummary says in a few words what was added.
+	 */
+	static FString ContextFor(const FString& Root, const FString& Text, TSet<FString>& Given, FString& OutSummary);
 
 	bool IsRunning() const;
 	bool IsReady() const { return bReady; }
@@ -181,7 +188,7 @@ private:
 	bool Pump(float DeltaTime);
 	void Dispatch(const FString& Line);
 	void ClosePipes();
-	/** What project memory knows about Text and the skills that fit it, that this chat has not had yet, to send with it. */
+	/** ContextFor Text, with what this chat has not had yet, to send with it; a notice says what went. */
 	FString MemoryFor(const FString& Text);
 	/** Records the turn that just ended in the project's task history. */
 	void RecordTurn();

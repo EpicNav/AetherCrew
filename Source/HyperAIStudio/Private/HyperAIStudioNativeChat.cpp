@@ -11,6 +11,7 @@
 #include "HyperAIStudioSkills.h"
 #include "HyperAIStudioService.h"
 #include "HyperAIStudioSettings.h"
+#include "HyperAIStudioTaskRouter.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Base64.h"
 #include "Misc/FileHelper.h"
@@ -359,8 +360,68 @@ FString FHyperAIStudioNativeChat::MemoryFor(const FString& Text)
 	{
 		return FString();
 	}
-	return HyperAIStudio::Memory::ContextFor(ProjectRoot, Text, GivenMemory, GetDefault<UHyperAIStudioSettings>()->AgentMemory)
-		+ HyperAIStudio::Skills::HintFor(ProjectRoot, Text, GivenMemory);
+	FString Summary;
+	const FString Context = ContextFor(ProjectRoot, Text, GivenMemory, Summary);
+	if (!Summary.IsEmpty())
+	{
+		// The transcript keeps what was typed; this line says what went with it.
+		AddNotice(TEXT("Sent with it: ") + Summary + TEXT("."));
+	}
+	return Context;
+}
+
+FString FHyperAIStudioNativeChat::ContextFor(const FString& Root, const FString& Text, TSet<FString>& Given, FString& OutSummary)
+{
+	using namespace HyperAIStudio;
+	const TSet<FString> Before = Given;
+	const TArray<TaskRouter::FPackFit> Packs = TaskRouter::PacksFor(Text);
+	const FString Context = Memory::ContextFor(Root, Text, Given, GetDefault<UHyperAIStudioSettings>()->AgentMemory)
+		+ Skills::HintFor(Root, Text, Given, TaskRouter::SkillsForPacks(Packs))
+		+ TaskRouter::ToolHintFor(Packs, Given);
+	TArray<FString> SkillNames;
+	TArray<FString> PackIds;
+	int32 Notes = 0;
+	for (const FString& Key : Given)
+	{
+		if (Before.Contains(Key))
+		{
+			continue;
+		}
+		if (Key.StartsWith(TEXT("skill:")))
+		{
+			SkillNames.Add(Key.RightChop(6));
+		}
+		else if (Key.StartsWith(TEXT("tools:")))
+		{
+			PackIds.Add(Key.RightChop(6));
+		}
+		else
+		{
+			++Notes;
+		}
+	}
+	SkillNames.Sort();
+	PackIds.Sort();
+	TArray<FString> Parts;
+	if (!SkillNames.IsEmpty())
+	{
+		Parts.Add(FString::Printf(TEXT("the %s skill%s"), *FString::Join(SkillNames, TEXT(" and ")), SkillNames.Num() > 1 ? TEXT("s") : TEXT("")));
+	}
+	if (!PackIds.IsEmpty())
+	{
+		Parts.Add(FString::Printf(TEXT("the %s tools"), *FString::Join(PackIds, TEXT(" and "))));
+	}
+	if (Notes > 0)
+	{
+		Parts.Add(Notes == 1 ? FString(TEXT("1 note from project memory")) : FString::Printf(TEXT("%d notes from project memory"), Notes));
+	}
+	OutSummary = FString::Join(Parts, TEXT(", "));
+	return Context;
+}
+
+void FHyperAIStudioNativeChat::AddNotice(const FString& Text)
+{
+	AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(), Text);
 }
 
 void FHyperAIStudioNativeChat::RecordTurn()

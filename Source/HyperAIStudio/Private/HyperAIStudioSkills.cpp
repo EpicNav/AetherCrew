@@ -340,7 +340,7 @@ TArray<FHyperAIStudioSkill> ListPersonalSkills()
 	return Skills;
 }
 
-FString HintFor(const FString& ProjectRoot, const FString& Message, TSet<FString>& Given)
+FString HintFor(const FString& ProjectRoot, const FString& Message, TSet<FString>& Given, const TArray<FString>& Preferred)
 {
 	// Project memory's search: a skill fits with two of the message's words, or one that few skills hold.
 	TArray<FString> Words;
@@ -357,6 +357,24 @@ FString HintFor(const FString& ProjectRoot, const FString& Message, TSet<FString
 	if (Words.IsEmpty() || Skills.IsEmpty())
 	{
 		return FString();
+	}
+	TArray<FString> Lines;
+	auto PointAt = [&ProjectRoot, &Given, &Lines](const FHyperAIStudioSkill& Skill)
+	{
+		Given.Add(TEXT("skill:") + Skill.Name);
+		FString Folder = Skill.Folder;
+		FPaths::MakePathRelativeTo(Folder, *(ProjectRoot / TEXT("")));
+		const FString Description = Skill.Description.Len() > 300 ? Skill.Description.Left(300) + TEXT("...") : Skill.Description;
+		Lines.Add(FString::Printf(TEXT("- `%s`: %s Read `%s/SKILL.md` before you start."), *Skill.Name, *Description, *Folder));
+	};
+	// The skill made for the task's kind of work, when the project has it, before any that only share its words.
+	for (const FString& Wanted : Preferred)
+	{
+		const FHyperAIStudioSkill* Skill = Skills.FindByPredicate([&Wanted](const FHyperAIStudioSkill& Each) { return Each.Name == Wanted; });
+		if (Skill && Lines.Num() < 2 && !Given.Contains(TEXT("skill:") + Skill->Name))
+		{
+			PointAt(*Skill);
+		}
 	}
 	TArray<TArray<FString>> Documents;
 	for (const FHyperAIStudioSkill& Skill : Skills)
@@ -375,7 +393,6 @@ FString HintFor(const FString& ProjectRoot, const FString& Message, TSet<FString
 	}
 	Order.StableSort([&Ranks](const int32 A, const int32 B) { return Ranks[A].Score > Ranks[B].Score; });
 	const int32 NeedWords = FMath::Min(2, Words.Num());
-	TArray<FString> Lines;
 	for (const int32 Index : Order)
 	{
 		const Memory::FRank& Found = Ranks[Index];
@@ -388,11 +405,7 @@ FString HintFor(const FString& ProjectRoot, const FString& Message, TSet<FString
 		{
 			continue;
 		}
-		Given.Add(TEXT("skill:") + Skill.Name);
-		FString Folder = Skill.Folder;
-		FPaths::MakePathRelativeTo(Folder, *(ProjectRoot / TEXT("")));
-		const FString Description = Skill.Description.Len() > 300 ? Skill.Description.Left(300) + TEXT("...") : Skill.Description;
-		Lines.Add(FString::Printf(TEXT("- `%s`: %s Read `%s/SKILL.md` before you start."), *Skill.Name, *Description, *Folder));
+		PointAt(Skill);
 	}
 	return Lines.IsEmpty() ? FString()
 		: TEXT("\n\n<skills>\nProject skills that fit this message. Use them without being asked.\n") + FString::Join(Lines, TEXT("\n")) + TEXT("\n</skills>");

@@ -600,6 +600,14 @@ public:
 	TArray<FHyperAIStudioAgentTaskRoute> AgentTaskRoutes;
 
 	/**
+	 * In the native view, a new chat's first message picks the task route that fits it and starts that route's agent: the
+	 * one the route names, else the one with the best record on its packs, else the preferred agent. A chat whose agent
+	 * you picked, opened for a task, or resumed keeps its agent.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing", meta = (DisplayName = "Route New Chats by Task"))
+	bool bRouteNewChatsByTask = true;
+
+	/**
 	 * During a handoff between tabs, send each prompt (plan, implement, review) as soon as the receiving agent is
 	 * idle. Off, or while that agent is busy, the prompt is only typed in for you to send.
 	 */

@@ -4743,6 +4743,18 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RouteNewChats",
+   "source": "Route New Chats by Task",
+   "text": "按任务分配新对话"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RouteNewChatsTooltip",
+   "source": "In the native view, a new chat's first message picks the task route that fits it and starts that route's agent: the one the route names, else the one with the best record on its packs, else your preferred agent. A chat whose agent you picked, opened for a task, or resumed keeps its agent.",
+   "text": "在原生视图中，新对话的第一条消息会选出最适合它的任务路线，并启动该路线的智能体：路线指定的智能体；若未指定，则选在这些包上记录最好的智能体；否则使用你的首选智能体。你手动选择过智能体、为某项任务打开或恢复的对话会保留原来的智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "RoutedNoAgent",
    "source": "no agent set up",
    "text": "未设置智能体"

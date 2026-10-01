@@ -42,6 +42,7 @@
 #include "HyperAIStudioNativeChat.h"
 #include "SHyperAIStudioNativeChatView.h"
 #include "HyperAIStudioSkills.h"
+#include "HyperAIStudioTaskRouter.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "STerminal.h"
@@ -459,6 +460,12 @@ void SHyperAIStudioQuickActionWindow::Construct(const FArguments& InArgs)
 								ResumeTitle.Reset();
 								ResumeBackgroundId.Reset();
 								ActiveChatSessionId.Reset();
+								// A task the last chat's first message routed this tab to is not this one's.
+								if (bAutoRouted)
+								{
+									RouteCategory.Reset();
+									bAutoRouted = false;
+								}
 								LastMessage = LOCTEXT("NewChatStarted", "Starting a new chat.");
 								AddTranscriptLine(LastMessage.ToString());
 								QueueTerminalStartup(true, true);
@@ -621,6 +628,11 @@ void SHyperAIStudioQuickActionWindow::ResumeChat(const FHyperAIStudioChatSession
 
 	ResumeAgentName = Session.AgentName;
 	ResumeSessionId = Session.SessionId;
+	if (bAutoRouted)
+	{
+		RouteCategory.Reset();
+		bAutoRouted = false;
+	}
 	const FString RenamedTitle = UHyperAIStudioChatHistoryPrefs::GetTitle(Session.SessionId);
 	ResumeTitle = RenamedTitle.IsEmpty() ? Session.Title : RenamedTitle;
 	ResumeBackgroundId = Session.Live.IsBackground() ? Session.Live.ShortId : FString();
@@ -1312,6 +1324,21 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildNewTabMenu()
 	}
 	Menu.AddMenuSeparator();
 	Menu.AddMenuEntry(
+		LOCTEXT("RouteNewChats", "Route New Chats by Task"),
+		LOCTEXT("RouteNewChatsTooltip", "In the native view, a new chat's first message picks the task route that fits it and starts that route's agent: the one the route names, else the one with the best record on its packs, else your preferred agent. A chat whose agent you picked, opened for a task, or resumed keeps its agent."),
+		FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateLambda([]()
+			{
+				UHyperAIStudioSettings* MutableSettings = GetMutableDefault<UHyperAIStudioSettings>();
+				MutableSettings->bRouteNewChatsByTask = !MutableSettings->bRouteNewChatsByTask;
+				MutableSettings->SaveConfig();
+			}),
+			FCanExecuteAction(),
+			FIsActionChecked::CreateLambda([]() { return GetDefault<UHyperAIStudioSettings>()->bRouteNewChatsByTask; })),
+		NAME_None,
+		EUserInterfaceActionType::ToggleButton);
+	Menu.AddMenuEntry(
 		LOCTEXT("EditRouting", "Edit Task Routing..."),
 		LOCTEXT("EditRoutingTooltip", "Pick an agent and model per kind of task, or leave the agent empty to choose by track record."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Edit"),
@@ -1708,6 +1735,7 @@ void SHyperAIStudioQuickActionWindow::SelectModel(FString ModelId)
 	// This tab starts with it; the saved choice is what new tabs start with.
 	TabModel = ModelId;
 	TabModelAgent = AgentName;
+	bAgentChosenHere = true;
 	Route->SelectedModel = ModelId;
 	Settings->SaveConfig();
 
@@ -1760,6 +1788,8 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildAgentSelector()
 					{
 						return;
 					}
+					// Picked by hand: a new chat's first message no longer moves this tab to another agent.
+					bAgentChosenHere = true;
 
 					LastMessage = FText::Format(
 						LOCTEXT("TerminalAgentSwitching", "Switching embedded terminal to {0}."),
@@ -2462,10 +2492,17 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 	const TArray<FString> PromptImages = MoveTemp(PendingImages);
 	PendingImages.Reset();
 
+	const FString Notice = MoveTemp(PendingNotice);
+	PendingNotice.Reset();
+
 	// A native chat that cannot start falls back to the terminal.
 	if (GetDefault<UHyperAIStudioSettings>()->bUseNativeChatView && FHyperAIStudioNativeChat::IsSupported(AgentName)
 		&& !HyperAIStudio::QuickAction::NeedsTerminal(AgentName, SessionId, AttachId) && StartNativeChat(SessionId))
 	{
+		if (!Notice.IsEmpty() && NativeView.IsValid() && NativeView->GetChat().IsValid())
+		{
+			NativeView->GetChat()->AddNotice(Notice);
+		}
 		if (!Continue.IsEmpty() && NativeView.IsValid() && NativeView->GetChat().IsValid())
 		{
 			NativeView->GetChat()->Send(Continue);
@@ -2709,11 +2746,14 @@ bool SHyperAIStudioQuickActionWindow::StartNativeChat(const FString& ResumeId)
 	bTerminalStartupSent = true;
 	ActiveTerminalAgentName = Agent;
 	ActiveTerminalModel = ChatModel;
+	bChatResumed = !ResumeId.IsEmpty();
 	// Claude Code's id is known from the start; the others' arrive with their handshake.
 	ActiveChatSessionId = Chat->GetSessionId().IsEmpty() ? ResumeId : Chat->GetSessionId();
 	if (TerminalHost.IsValid())
 	{
-		TerminalHost->SetContent(SAssignNew(NativeView, SHyperAIStudioNativeChatView).Chat(Chat));
+		TerminalHost->SetContent(SAssignNew(NativeView, SHyperAIStudioNativeChatView)
+			.Chat(Chat)
+			.OnRoute(this, &SHyperAIStudioQuickActionWindow::RouteFirstMessage));
 		NativeView->FocusComposer();
 	}
 	LastMessage = FText::Format(LOCTEXT("NativeStarted", "{0} is running in the native view."), FText::FromString(Agent));
@@ -2733,6 +2773,79 @@ void SHyperAIStudioQuickActionWindow::StopNativeChat()
 		Chat->Stop();
 	}
 	NativeView.Reset();
+}
+
+bool SHyperAIStudioQuickActionWindow::RouteFirstMessage(const FString& Message, const TArray<FString>& Images)
+{
+	const TSharedPtr<FHyperAIStudioNativeChat> Chat = NativeView.IsValid() ? NativeView->GetChat() : nullptr;
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	// Only a new chat's first message, in a tab no one picked an agent or a task for: a conversation keeps its agent.
+	const bool bFirst = Chat.IsValid() && !bChatResumed && !Chat->IsBusy() && Chat->NumQueued() == 0
+		&& !Chat->GetItems().ContainsByPredicate([](const TSharedPtr<FHyperAIStudioChatItem>& Item)
+		{
+			return Item.IsValid() && Item->Kind == FHyperAIStudioChatItem::EKind::User;
+		});
+	if (!Settings->bRouteNewChatsByTask || bAgentChosenHere || !RouteCategory.IsEmpty() || !bFirst || Message.StartsWith(TEXT("/")))
+	{
+		return false;
+	}
+	if (Settings->EnsureDefaultTaskRoutes())
+	{
+		Settings->SaveConfig();
+	}
+	const TOptional<HyperAIStudio::TaskRouter::FRouteDecision> Decision = HyperAIStudio::TaskRouter::Decide(Message, Settings->AgentTaskRoutes,
+		GetUsableAgentNames(), Settings->PreferredAgent);
+	const TSharedPtr<FString>* Option = Decision.IsSet() ? AgentOptions.FindByPredicate([&Decision](const TSharedPtr<FString>& Each)
+	{
+		return Each.IsValid() && Each->Equals(Decision->Choice.Agent, ESearchCase::IgnoreCase);
+	}) : nullptr;
+	if (!Option)
+	{
+		return false;
+	}
+	const FHyperAIStudioAgentTaskRoute& Route = Settings->AgentTaskRoutes[Decision->RouteIndex];
+	const FHyperAIStudioRouteChoice& Choice = Decision->Choice;
+	const FString Subagent = HyperAIStudio::QuickAction::IsClaudeAgent(Choice.Agent) && HyperAIStudio::Skills::IsValidName(Route.Subagent) ? Route.Subagent : FString();
+	RouteCategory = Route.Category;
+	bAutoRouted = true;
+	const FString Agent = Choice.Model.IsEmpty() ? Choice.Agent : FString::Printf(TEXT("%s (%s)"), *Choice.Agent, *Choice.Model);
+	const FString Notice = FString::Printf(TEXT("Routed to %s: %s. %s"), *Route.Category, *Agent, *Choice.Reason);
+	LastMessage = FText::FromString(Notice);
+	AddTranscriptLine(Notice);
+	UE_LOG(LogHyperAIStudioChat, Display, TEXT("Chat %d: %s"), TabIndex, *Notice);
+	if (Choice.Agent.Equals(Chat->GetAgentName(), ESearchCase::IgnoreCase) && (Choice.Model.IsEmpty() || Choice.Model == Chat->GetModel()) && Subagent == TabSubagent)
+	{
+		// This chat already runs the task's agent: the message goes here.
+		Chat->AddNotice(Notice);
+		return false;
+	}
+	// Another agent fits the task: this blank chat ends, and that agent starts here with the message.
+	SelectedAgent = *Option;
+	if (AgentComboBox.IsValid())
+	{
+		AgentComboBox->SetSelectedItem(SelectedAgent);
+	}
+	if (!Choice.Model.IsEmpty())
+	{
+		TabModel = Choice.Model;
+		TabModelAgent = Choice.Agent;
+	}
+	TabSubagent = Subagent;
+	PendingPrompt = Message;
+	PendingImages = Images;
+	PendingNotice = Notice;
+	// Once this click is handled: starting again replaces the view the message was typed in.
+	const TWeakPtr<SHyperAIStudioQuickActionWindow> WeakThis = SharedThis(this);
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakThis](float)
+	{
+		if (const TSharedPtr<SHyperAIStudioQuickActionWindow> This = WeakThis.Pin())
+		{
+			This->StopNativeChat();
+			This->QueueTerminalStartup(/*bForce=*/true, /*bResetTerminal=*/true);
+		}
+		return false;
+	}));
+	return true;
 }
 
 void SHyperAIStudioQuickActionWindow::SetNativeView(const bool bNative)
@@ -3107,6 +3220,7 @@ int32 SHyperAIStudioQuickActionWindow::OpenJobChat(const FString& Category, cons
 	{
 		// An open tab is not built again, so it takes the job's route here, as a new tab does as it is built.
 		Window->RouteCategory = Route ? Route->Category : Category;
+		Window->bAutoRouted = false;
 		Window->TabSubagent.Reset();
 	}
 	Window->SelectAgentByName(Choice.Agent);

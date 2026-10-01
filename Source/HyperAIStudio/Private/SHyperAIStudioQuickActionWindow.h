@@ -227,8 +227,16 @@ private:
 	bool bPlanAutoAcceptSent = false;
 	bool bPlanAutoAcceptConfirmed = false;
 	double PlanAutoAcceptSentTime = 0.0;
-	/** Kind of task this tab was opened for from the new-tab menu; shown on the tab. */
+	/** Kind of task this tab was opened for from the new-tab menu, or its chat's first message routed it to; shown on the tab. */
 	FString RouteCategory;
+	/** RouteCategory came from the first message, so a new chat in this tab is routed again. */
+	bool bAutoRouted = false;
+	/** You picked this tab's agent or model: a task never moves it to another. */
+	bool bAgentChosenHere = false;
+	/** The native chat running here continues an earlier conversation. */
+	bool bChatResumed = false;
+	/** Said in the next native chat as it starts, such as which agent a task was routed to. */
+	FString PendingNotice;
 	/** Claude Code subagent this tab's new chats start as (claude --agent). */
 	FString TabSubagent;
 	/** After an editor restart: what this tab's chat is told when it runs again. */
@@ -246,6 +254,11 @@ private:
 	/** Replaces the terminal with a native chat for the selected agent, resuming ResumeId when set. */
 	bool StartNativeChat(const FString& ResumeId);
 	void StopNativeChat();
+	/**
+	 * A new chat's first message, before it is sent: the task route it fits starts its agent here, the chat starting
+	 * again on that agent with the message when it is another. True when it took the message.
+	 */
+	bool RouteFirstMessage(const FString& Message, const TArray<FString>& Images);
 	/** Model chosen in this tab (or by its route) for TabModelAgent; other tabs keep their own. */
 	FString TabModel;
 	FString TabModelAgent;

@@ -49,9 +49,10 @@ namespace HyperAIStudio::Skills
 	FString InvocationPrefix(const FString& AgentName);
 	/**
 	 * The project skills that fit Message and the chat was not pointed at yet, as a short block to send with it, or
-	 * empty. Only skills an agent may start on its own; Given holds what the chat already got.
+	 * empty. Only skills an agent may start on its own; Given holds what the chat already got. Preferred names the
+	 * skills made for the task's kind of work, which come first when the project has them.
 	 */
-	FString HintFor(const FString& ProjectRoot, const FString& Message, TSet<FString>& Given);
+	FString HintFor(const FString& ProjectRoot, const FString& Message, TSet<FString>& Given, const TArray<FString>& Preferred = {});
 
 	struct FSyncReport
 	{

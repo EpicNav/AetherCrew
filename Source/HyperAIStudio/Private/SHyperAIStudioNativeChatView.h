@@ -9,12 +9,16 @@
 
 class SMultiLineEditableTextBox;
 
+/** Sees a typed message before it is sent; true when it took the message, as a chat that starts again on another agent does. */
+DECLARE_DELEGATE_RetVal_TwoParams(bool, FOnHyperAIStudioRouteMessage, const FString& /*Message*/, const TArray<FString>& /*Images*/);
+
 /** The chat tab's native view of a Codex, Gemini or Claude Code chat: transcript, plan, approvals and a composer. */
 class SHyperAIStudioNativeChatView : public SCompoundWidget
 {
 public:
 	SLATE_BEGIN_ARGS(SHyperAIStudioNativeChatView) {}
 		SLATE_ARGUMENT(TSharedPtr<FHyperAIStudioNativeChat>, Chat)
+		SLATE_EVENT(FOnHyperAIStudioRouteMessage, OnRoute)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -61,6 +65,7 @@ private:
 	TSharedRef<SWidget> BuildPlan();
 
 	TSharedPtr<FHyperAIStudioNativeChat> Chat;
+	FOnHyperAIStudioRouteMessage OnRoute;
 	TArray<FItemPtr> Rows;
 	TSharedPtr<class SScrollBox> Scroll;
 	TSharedPtr<class SVerticalBox> Transcript;
