@@ -3963,6 +3963,36 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "AutoMode",
+   "source": "Auto",
+   "text": "自动"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "AutoModeTooltip",
+   "source": "Auto: Claude Code and Codex approve their own routine commands and tool calls instead of asking you at every step. Claude Code runs in its auto mode, where a safety check approves or stops each action; Codex has its own reviewer judge each approval. Risky actions are still stopped. Switching it restarts this chat on the same conversation; other tabs switch when their chats next start.",
+   "text": "自动：Claude Code 和 Codex 自行批准常规命令和工具调用，不再每一步都询问你。Claude Code 在其自动模式下运行，由安全检查批准或阻止每个操作；Codex 由它自己的审核者判断每次批准。有风险的操作仍会被阻止。切换后，此对话会在同一会话上重新启动；其他标签页中的对话在下次启动时切换。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "AutoOffToast",
+   "source": "Auto off: agents ask before their commands and tool calls again.",
+   "text": "自动已关闭：智能体在运行命令和调用工具前会再次询问。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "AutoOnToast",
+   "source": "Auto on: Claude Code and Codex approve their own routine commands and tool calls.",
+   "text": "自动已开启：Claude Code 和 Codex 会自行批准常规命令和工具调用。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "AutoWaitsForTurn",
+   "source": "Auto switches when the agent finishes its current turn.",
+   "text": "智能体完成当前回合后，自动模式才会切换。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "BackgroundChatFailed",
    "source": "The background session did not start, so this remote chat runs in the tab and stops with it. {0}",
    "text": "后台会话未能启动，因此这个远程对话在标签页中运行，并会随标签页一起停止。{0}"

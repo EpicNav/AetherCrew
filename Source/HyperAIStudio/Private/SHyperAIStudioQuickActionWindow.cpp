@@ -317,6 +317,12 @@ namespace HyperAIStudio::QuickAction
 		return AgentName.Equals(TEXT("Claude Code"), ESearchCase::IgnoreCase);
 	}
 
+	/** Agents whose own reviewed mode Auto Mode turns on. */
+	bool IsAutoModeAgent(const FString& AgentName)
+	{
+		return IsClaudeAgent(AgentName) || AgentName.Equals(TEXT("Codex"), ESearchCase::IgnoreCase);
+	}
+
 	/** A Claude Code chat with Remote Control, or one running in the background, stays in the terminal, where those run. */
 	bool NeedsTerminal(const FString& AgentName, const FString& SessionId, const FString& BackgroundId)
 	{
@@ -810,6 +816,13 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildHeader()
 		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
 		[
 			BuildRemoteToggle()
+		]
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+		[
+			BuildAutoToggle()
 		]
 		+ SHorizontalBox::Slot()
 		.AutoWidth()
@@ -2379,6 +2392,12 @@ FString SHyperAIStudioQuickActionWindow::GetTerminalLaunchCommandForAgent(const 
 	if (const HyperAIStudio::QuickAction::FAgentRoute* Route = HyperAIStudio::QuickAction::FindBuiltInRoute(AgentName))
 	{
 		FString LaunchCommand = FHyperAIStudioService::GetAgentTerminalLaunchCommand(Route->Name);
+		// Right after the launcher, where Codex's root options must go to reach its resume subcommand.
+		const FString AutoMode = UHyperAIStudioSettings::GetAutoModeArguments(Route->Name);
+		if (!LaunchCommand.IsEmpty() && !AutoMode.IsEmpty())
+		{
+			LaunchCommand += TEXT(" ") + AutoMode;
+		}
 		if (!LaunchCommand.IsEmpty() && !ChatArguments.IsEmpty())
 		{
 			LaunchCommand += TEXT(" ") + ChatArguments;
@@ -2536,6 +2555,11 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 	{
 		BackgroundArguments += TEXT(" ") + ModelArgument;
 	}
+	const FString AutoMode = UHyperAIStudioSettings::GetAutoModeArguments(AgentName);
+	if (!AutoMode.IsEmpty())
+	{
+		BackgroundArguments += TEXT(" ") + AutoMode;
+	}
 	bBackgroundStarting = true;
 	LastMessage = LOCTEXT("StartingBackgroundChat", "Starting this remote chat in the background...");
 	AddTranscriptLine(LastMessage.ToString());
@@ -2621,6 +2645,49 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildNativeToggle()
 			.Text(LOCTEXT("NativeView", "Native View"))
 			.Margin(FMargin(6.0f, 1.0f))
 		];
+}
+
+TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildAutoToggle()
+{
+	return SNew(SCheckBox)
+		.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+		// The agents with a reviewed mode of their own; others keep asking.
+		.Visibility_Lambda([this]() { return HyperAIStudio::QuickAction::IsAutoModeAgent(GetSelectedAgentName()) ? EVisibility::Visible : EVisibility::Collapsed; })
+		.IsChecked_Lambda([]() { return GetDefault<UHyperAIStudioSettings>()->bAgentAutoMode ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+		.ToolTipText(LOCTEXT("AutoModeTooltip", "Auto: Claude Code and Codex approve their own routine commands and tool calls instead of asking you at every step. Claude Code runs in its auto mode, where a safety check approves or stops each action; Codex has its own reviewer judge each approval. Risky actions are still stopped. Switching it restarts this chat on the same conversation; other tabs switch when their chats next start."))
+		.OnCheckStateChanged_Lambda([this](const ECheckBoxState State) { SetAutoMode(State == ECheckBoxState::Checked); })
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("AutoMode", "Auto"))
+			.Margin(FMargin(6.0f, 1.0f))
+		];
+}
+
+void SHyperAIStudioQuickActionWindow::SetAutoMode(const bool bAuto)
+{
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	if (Settings->bAgentAutoMode == bAuto)
+	{
+		return;
+	}
+	Settings->bAgentAutoMode = bAuto;
+	Settings->SaveConfig();
+	HyperAIStudio::QuickAction::Toast(bAuto
+		? LOCTEXT("AutoOnToast", "Auto on: Claude Code and Codex approve their own routine commands and tool calls.")
+		: LOCTEXT("AutoOffToast", "Auto off: agents ask before their commands and tool calls again."));
+	// The running chat started in the other mode: it restarts on the same conversation, after its turn if one is going.
+	if (!bTerminalStartupSent || ActiveChatSessionId.IsEmpty() || !HyperAIStudio::QuickAction::IsAutoModeAgent(ActiveTerminalAgentName))
+	{
+		return;
+	}
+	if (IsTurnActive())
+	{
+		bRemoteRelaunchPending = true;
+		LastMessage = LOCTEXT("AutoWaitsForTurn", "Auto switches when the agent finishes its current turn.");
+		AddTranscriptLine(LastMessage.ToString());
+		return;
+	}
+	RelaunchActiveChat();
 }
 
 bool SHyperAIStudioQuickActionWindow::StartNativeChat(const FString& ResumeId)

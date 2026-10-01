@@ -764,6 +764,11 @@ namespace HyperAIStudio::NativeChat::Private
 				Params->SetStringField(TEXT("sandbox"), TEXT("read-only"));
 				Params->SetStringField(TEXT("developerInstructions"), HeadlessInstructions);
 			}
+			else if (GetDefault<UHyperAIStudioSettings>()->bAgentAutoMode)
+			{
+				// Auto Mode: Codex's own reviewer answers its approvals, so the chat does not stop at each one.
+				Params->SetStringField(TEXT("approvalsReviewer"), TEXT("auto_review"));
+			}
 			if (bResume)
 			{
 				Params->SetStringField(TEXT("threadId"), ResumeSessionId);
@@ -1748,6 +1753,12 @@ namespace HyperAIStudio::NativeChat::Private
 			if (!ModelArgument.IsEmpty())
 			{
 				Command += TEXT(" ") + ModelArgument;
+			}
+			// Auto Mode: Claude's own safety check approves routine actions, so the chat does not stop at each one.
+			const FString AutoMode = UHyperAIStudioSettings::GetAutoModeArguments(AgentName);
+			if (!AutoMode.IsEmpty())
+			{
+				Command += TEXT(" ") + AutoMode;
 			}
 			Command += (ResumeSessionId.IsEmpty() ? TEXT(" --session-id ") : TEXT(" --resume ")) + SessionId;
 			// A resumed chat keeps what it started as.

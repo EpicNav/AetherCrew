@@ -155,6 +155,9 @@ private:
 	/** The agent is producing output, or is stopped at a question or a plan. */
 	bool IsTurnActive() const;
 	TSharedRef<SWidget> BuildRemoteToggle();
+	/** Auto Mode for Claude Code and Codex; switching it restarts this tab's chat on the same conversation. */
+	TSharedRef<SWidget> BuildAutoToggle();
+	void SetAutoMode(bool bAuto);
 	/** This agent's skills: picking one types its command into the prompt. */
 	TSharedRef<SWidget> BuildSkillsMenu();
 	FText GetRemoteToolTip() const;

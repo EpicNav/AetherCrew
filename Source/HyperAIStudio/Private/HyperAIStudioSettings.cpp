@@ -5,6 +5,25 @@
 #include "HyperAIStudioLocalization.h"
 #include "HyperAIStudioSandbox.h"
 
+FString UHyperAIStudioSettings::GetAutoModeArguments(const FString& AgentName)
+{
+	if (!GetDefault<UHyperAIStudioSettings>()->bAgentAutoMode)
+	{
+		return FString();
+	}
+	// Both agents' own reviewed modes: each still stops what it judges risky.
+	if (AgentName.Equals(TEXT("Claude Code"), ESearchCase::IgnoreCase))
+	{
+		return TEXT("--permission-mode auto");
+	}
+	// A root override, so it reaches Codex's resume subcommand too; a bare word is taken as the string it spells.
+	if (AgentName.Equals(TEXT("Codex"), ESearchCase::IgnoreCase))
+	{
+		return TEXT("-c approvals_reviewer=auto_review");
+	}
+	return FString();
+}
+
 FString UHyperAIStudioSettings::GetGeminiCliImageModelId() const
 {
 	switch (GeminiCliImageModel)

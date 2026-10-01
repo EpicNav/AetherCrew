@@ -1331,6 +1331,24 @@ for line in iter(sys.stdin.readline, ""):
         send({"method": "turn/completed", "params": {"turn": {"id": "turn-1", "status": "completed", "items": []}}})
 )PY");
 
+	/** Codex as far as Auto Mode goes: a turn says which reviewer the thread was started with. */
+	const TCHAR* const FakeCodexReviewer = TEXT(R"PY(import json, sys
+def send(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+reviewer = None
+for line in iter(sys.stdin.readline, ""):
+    m = json.loads(line); method = m.get("method"); i = m.get("id")
+    if method == "initialize":
+        send({"id": i, "result": {"userAgent": "fake"}})
+    elif method == "thread/start":
+        reviewer = m["params"].get("approvalsReviewer")
+        send({"id": i, "result": {"thread": {"id": "thread-auto"}, "model": "fake"}})
+    elif method == "turn/start":
+        send({"id": i, "result": {"turn": {"id": "turn-1", "status": "inProgress", "items": []}}})
+        send({"method": "item/completed", "params": {"item": {"type": "agentMessage", "id": "m1", "text": "reviewer=%s" % reviewer}}})
+        send({"method": "turn/completed", "params": {"turn": {"id": "turn-1", "status": "completed", "items": []}}})
+)PY");
+
 	/** Ticks the chat and runs what other threads handed back to the game thread, until Done holds. */
 	bool PumpWithTasksUntil(const TFunction<bool()>& Done)
 	{
@@ -1470,6 +1488,54 @@ bool FHyperAIStudioNativeChatCodexToolApprovalTest::RunTest(const FString& Param
 		const TSharedPtr<FHyperAIStudioChatItem> Said = FindKind(*Chat, EKind::Agent);
 		const FString Expected = Answer.StartsWith(TEXT("Allow")) ? TEXT("action=accept content={} persist=session") : TEXT("action=decline content=null persist=None");
 		TestEqual(FString::Printf(TEXT("Codex hears \"%s\" as"), *Answer), Said.IsValid() ? Said->Text : FString(), Expected);
+		Chat->Stop();
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNativeChatAutoModeTest,
+	"HyperAIStudio.NativeChat.AutoMode",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioNativeChatAutoModeTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::NativeChatTests;
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bWasAuto = Settings->bAgentAutoMode;
+	ON_SCOPE_EXIT
+	{
+		Settings->bAgentAutoMode = bWasAuto;
+	};
+	Settings->bAgentAutoMode = false;
+	TestTrue(TEXT("Off, no agent's command line changes"), UHyperAIStudioSettings::GetAutoModeArguments(TEXT("Claude Code")).IsEmpty()
+		&& UHyperAIStudioSettings::GetAutoModeArguments(TEXT("Codex")).IsEmpty());
+	Settings->bAgentAutoMode = true;
+	TestEqual(TEXT("On, Claude Code runs in its auto mode"), UHyperAIStudioSettings::GetAutoModeArguments(TEXT("Claude Code")), FString(TEXT("--permission-mode auto")));
+	TestEqual(TEXT("and Codex has its own reviewer answer"), UHyperAIStudioSettings::GetAutoModeArguments(TEXT("Codex")), FString(TEXT("-c approvals_reviewer=auto_review")));
+	TestTrue(TEXT("Other agents ask as before"), UHyperAIStudioSettings::GetAutoModeArguments(TEXT("Gemini")).IsEmpty());
+
+	if (!HasPython())
+	{
+		AddWarning(TEXT("python is not on PATH, so the scripted Codex stand-in cannot run."));
+		return true;
+	}
+	const FScratch Scratch;
+	UseStandIn(Scratch.Dir, FakeCodexReviewer, TEXT("fake_codex_reviewer.py"));
+	for (const bool bAuto : {true, false})
+	{
+		Settings->bAgentAutoMode = bAuto;
+		const TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(TEXT("Codex"), Scratch.Dir, FString(), FString());
+		FString Error;
+		if (!TestTrue(TEXT("The Codex stand-in starts"), Chat.IsValid() && Chat->Start(Error)) || !TestTrue(TEXT("and is ready"), PumpUntil([&Chat]() { return Chat->IsReady(); })))
+		{
+			return false;
+		}
+		Chat->Send(TEXT("Hello"));
+		PumpUntil([&Chat]() { return !Chat->IsBusy() && FindKind(*Chat, FHyperAIStudioChatItem::EKind::Agent).IsValid(); });
+		const TSharedPtr<FHyperAIStudioChatItem> Said = FindKind(*Chat, FHyperAIStudioChatItem::EKind::Agent);
+		TestEqual(bAuto ? TEXT("A native Codex chat in Auto Mode starts with Codex's reviewer") : TEXT("and without it otherwise"),
+			Said.IsValid() ? Said->Text : FString(), FString(bAuto ? TEXT("reviewer=auto_review") : TEXT("reviewer=None")));
 		Chat->Stop();
 	}
 	return true;

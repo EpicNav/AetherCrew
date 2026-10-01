@@ -470,6 +470,17 @@ public:
 	bool bRequireApprovalForAgentEdits = true;
 
 	/**
+	 * Claude Code and Codex approve their own routine commands and tool calls instead of asking at every step. Claude
+	 * Code runs in its auto mode, where a safety check approves or stops each action; Codex has its own reviewer judge
+	 * each approval. Risky actions are still stopped, and other agents ask as before. The chat's Auto button switches it.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow", meta = (DisplayName = "Auto Mode"))
+	bool bAgentAutoMode = false;
+
+	/** What Auto Mode adds to an agent's command line: Claude Code's permission mode, Codex's reviewer. Empty when it is off. */
+	static FString GetAutoModeArguments(const FString& AgentName);
+
+	/**
 	 * Lines that mean an agent is waiting for an answer: a permission prompt, a choice, a confirmation.
 	 * Matched case-insensitively against the last rows of that tab's terminal. Empty restores the built-in list.
 	 * These exist because agent CLIs change their wording; editing them here beats waiting for a plugin build.
