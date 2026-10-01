@@ -5,13 +5,14 @@
 #include "CoreMinimal.h"
 #include "HyperAIStudioAgentActivity.h"
 
+struct FHyperAIStudioAgentDefinition;
 struct FHyperAIStudioAgentTaskRoute;
 struct FHyperAIStudioRuntimeToolBinding;
 
 /**
- * What kind of task a message is, from its words: the capability packs it needs, the task route its chat should start
- * on, and the skills and tools made for that work. A search, not a model: the words HyperAI's memory search uses,
- * against what each pack is for and how people ask for it. Game thread only.
+ * What kind of task a message is, from its words: the capability packs it needs, the project agent it is for, the task
+ * route its chat should start on, and the skills and tools made for that work. A search, not a model: the words
+ * HyperAI's memory search uses, against what each pack and agent is for and how people ask for it. Game thread only.
  */
 namespace HyperAIStudio::TaskRouter
 {
@@ -36,6 +37,16 @@ namespace HyperAIStudio::TaskRouter
 		FHyperAIStudioRouteChoice Choice;
 	};
 
+	/** The project agent (.hyperai/agents) a task is for. */
+	struct FAgentPick
+	{
+		/** The agent to hand the task to; empty when the team takes it. */
+		FString Agent;
+		FString Description;
+		/** Its parts are for several roles, so HyperAI's team runs it: the director splits it into parts. */
+		bool bTeam = false;
+	};
+
 	/** The packs a message's task needs, best first: at most Limit, each a clear fit. None for a message about nothing in particular. */
 	TArray<FPackFit> PacksFor(const FString& Message, int32 Limit = 2);
 
@@ -55,13 +66,33 @@ namespace HyperAIStudio::TaskRouter
 	 */
 	FString ToolHintFor(const TArray<FPackFit>& Packs, TSet<FString>& Given);
 
+	/**
+	 * The project agent a message's task is for: by what the agent says it does and the work of its role's packs, or of
+	 * its skills' for an agent of the project's own. A request that asks first to test or to plan goes to the QA tester
+	 * or the director whatever it is about; one with parts for two builders that fit about as well, neither able to do
+	 * the other's, goes to the team when bTeam (the director and the team skill are in the project). Unset when no agent
+	 * clearly fits: then the chat's agent does the work itself.
+	 */
+	TOptional<FAgentPick> AgentFor(const FString& Message, const TArray<FHyperAIStudioAgentDefinition>& ProjectAgents, bool bTeam,
+		const TArray<FPackDocument>& Documents);
+	/**
+	 * The project agent for a message's task, as a block to send with it: hand the task to that agent in ChatAgent's own
+	 * way (Claude Code's Agent tool, Codex's multi-agent tools, or the agent's file for any other). Nothing in a chat that
+	 * runs as a project agent already (StartedAs), for a request to the team, or for an agent this chat was already
+	 * pointed at (Given holds "agent:<name>", or "agent:team").
+	 */
+	FString AgentHintFor(const FString& Message, const FString& ProjectRoot, const FString& ChatAgent, const FString& StartedAs, TSet<FString>& Given);
+
 	// Pure pieces, exposed for tests.
 	/** How people ask for a pack's kind of work, beyond its tools' own words; empty for a pack with none. */
 	FString PackWords(const FString& PackId);
-	/** Every pack's words, from the generated catalog and the tools registered now. */
-	TArray<FPackDocument> PackDocuments();
+	/** Every pack's words, from the generated catalog and, with bToolDescriptions, what the tools registered now say they do. */
+	TArray<FPackDocument> PackDocuments(bool bToolDescriptions = true);
 	TArray<FPackFit> RankPacks(const FString& Message, const TArray<FPackDocument>& Documents, int32 Limit);
 	int32 RankRoutes(const FString& Message, const TArray<FHyperAIStudioAgentTaskRoute>& Routes, const TArray<FPackDocument>& Documents);
 	FString ToolHintFrom(const TArray<FPackFit>& Packs, const TArray<FHyperAIStudioRuntimeToolBinding>& Bindings, const TMap<FString, FString>& PackOfTool,
 		TSet<FString>& Given);
+	/** The block AgentHintFor sends for a pick, with the agent's definition from ProjectAgents. */
+	FString AgentHintFrom(const FAgentPick& Pick, const TArray<FHyperAIStudioAgentDefinition>& ProjectAgents, const FString& ProjectRoot,
+		const FString& ChatAgent, TSet<FString>& Given);
 }

@@ -413,7 +413,7 @@ TArray<FString> ReadRecentLines(const FString& Path, const int64 MaxBytes, bool&
 FString StripInjectedContext(const FString& Message)
 {
 	FString Typed = Message;
-	for (const TCHAR* Marker : {TEXT("\n\n<project-memory>"), TEXT("\n\n<skills>"), TEXT("\n\n<tools>")})
+	for (const TCHAR* Marker : {TEXT("\n\n<project-memory>"), TEXT("\n\n<agents>"), TEXT("\n\n<skills>"), TEXT("\n\n<tools>")})
 	{
 		const int32 At = Typed.Find(Marker, ESearchCase::CaseSensitive);
 		if (At != INDEX_NONE)

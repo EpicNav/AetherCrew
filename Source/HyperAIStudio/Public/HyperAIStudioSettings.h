@@ -600,12 +600,21 @@ public:
 	TArray<FHyperAIStudioAgentTaskRoute> AgentTaskRoutes;
 
 	/**
-	 * In the native view, a new chat's first message picks the task route that fits it and starts that route's agent: the
-	 * one the route names, else the one with the best record on its packs, else the preferred agent. A chat whose agent
-	 * you picked, opened for a task, or resumed keeps its agent.
+	 * In the native view, each message goes with a note handing its task to the project agent made for it (.hyperai/agents:
+	 * the QA tester for a playtest, the lighting artist for lighting, and so on), and a request with parts for several
+	 * roles to HyperAI's team. The chat's agent starts that agent itself: Claude Code with its Agent tool, Codex with its
+	 * multi-agent tools. A chat started as a project agent keeps its tasks.
 	 */
-	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing", meta = (DisplayName = "Route New Chats by Task"))
-	bool bRouteNewChatsByTask = true;
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing", meta = (DisplayName = "Hand Tasks to Project Agents"))
+	bool bHandTasksToProjectAgents = true;
+
+	/**
+	 * In the native view, a new chat's first message picks the task route that fits it and switches the chat to that
+	 * route's coding agent (Claude Code, Codex or another): the one the route names, else the one with the best record on
+	 * its packs, else the preferred agent. A chat whose agent you picked, opened for a task, or resumed keeps its agent.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing", meta = (DisplayName = "Switch Coding Agent by Task"))
+	bool bRouteNewChatsByTask = false;
 
 	/**
 	 * During a handoff between tabs, send each prompt (plan, implement, review) as soon as the receiving agent is

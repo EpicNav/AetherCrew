@@ -2,10 +2,12 @@
 
 #include "HyperAIStudioTaskRouter.h"
 
+#include "HyperAIStudioAgents.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioProjectMemory.h"
 #include "HyperAIStudioSettings.h"
+#include "HyperAIStudioSkills.h"
 
 namespace HyperAIStudio::TaskRouter
 {
@@ -62,7 +64,7 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("character"), TEXT("character characters player movement walk run jump double crouch sprint pawn capsule camera third first person controller")},
 			{TEXT("paper2d"), TEXT("2d sprite sprites paper2d flipbook flipbooks tilemap tileset tile pixel")},
 			{TEXT("actor_modifier_property_animation"), TEXT("modifier modifiers property animate rotate rotating spin spinning bob motion design")},
-			{TEXT("automation_profiling_build"), TEXT("test tests testing automation profile profiling performance fps frame stat stats build cook package packaging compile fail")},
+			{TEXT("automation_profiling_build"), TEXT("test tests testing automation profile profiling performance fps frame stat stats build cook package packaging compile fail rate framerate low slow lag laggy hitch hitches stutter stuttering")},
 			{TEXT("uaf_graph"), TEXT("uaf animation framework animnext graph")},
 			{TEXT("image_generation"), TEXT("image images picture pictures generate draw concept art reference illustration")},
 			{TEXT("mesh_generation"), TEXT("3d model models generate generated mesh prop props asset text")},
@@ -97,6 +99,168 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("sound_design"), TEXT("sound-design")},
 			{TEXT("audio_metasound"), TEXT("sound-design")},
 		};
+
+		/**
+		 * The packs each of HyperAI's team roles works with. A role's skills serve it and add nothing: the UI designer's
+		 * Blueprint skill wires its buttons and does not make it a programmer. The QA tester is found by what it is asked
+		 * to do (LeadWordList); the playtest tools are not among its packs, since their "play" reads like "player".
+		 */
+		const TPair<const TCHAR*, const TCHAR*> RolePackList[] = {
+			{TEXT("programmer"), TEXT("blueprint blueprint_structure gameplay_systems gas gameplay_ai enhanced_input networking_game_framework character physics_chaos data_config_localization scripting diagnostics")},
+			{TEXT("level-designer"), TEXT("level_design worldbuilding_navigation pcg mesh_terrain geometry_interchange")},
+			{TEXT("lighting-artist"), TEXT("lighting_lookdev")},
+			{TEXT("technical-artist"), TEXT("materials_dynamic_material texture_graph niagara_vfx animation_rigging anim_blueprint uaf_graph actor_modifier_property_animation")},
+			{TEXT("ui-designer"), TEXT("ui_slate_mvvm")},
+			{TEXT("cinematographer"), TEXT("cinematics")},
+			{TEXT("qa-tester"), TEXT("automation_profiling_build")},
+		};
+
+		/**
+		 * A request whose first word asks to test or to plan is the QA tester's or the director's, whatever it tests or
+		 * plans. The word must match exactly: "plant" is not "plan", nor "special" "spec".
+		 */
+		const TPair<const TCHAR*, const TCHAR*> LeadWordList[] = {
+			{TEXT("director"), TEXT("plan plans planning planned architecture architect roadmap spec specs specification outline strategy approach proposal propose review reviews overview")},
+			{TEXT("qa-tester"), TEXT("test tests testing tester playtest playtests playtesting qa verify verification check checks prove")},
+		};
+
+		/** First words that lead to a role only with one of its lead words later: "Play the level and check the doors", not "Play a sound". */
+		const TPair<const TCHAR*, const TCHAR*> OpenerList[] = {
+			{TEXT("qa-tester"), TEXT("play run")},
+		};
+
+		/** Words for where the work goes, which any role's requests use: "add rain to the level" is not level design. */
+		const TCHAR* const PlaceWords[] = {TEXT("level"), TEXT("levels")};
+
+		/** A project agent fits when its words and its packs' work score this much together. */
+		constexpr double MinAgentScore = 5.0;
+		/** Two builders' roles that fit this nearly as well as each other make a request the team's. */
+		constexpr double TeamShare = 0.65;
+		constexpr int32 MaxAgentDescriptionChars = 300;
+
+		template <int32 Num>
+		FString Lookup(const TPair<const TCHAR*, const TCHAR*> (&List)[Num], const FString& Key)
+		{
+			for (const TPair<const TCHAR*, const TCHAR*>& Entry : List)
+			{
+				if (Key == Entry.Key) return Entry.Value;
+			}
+			return FString();
+		}
+
+		/** Skills every role carries: they say nothing about which role a request is for. */
+		bool IsCrossCuttingSkill(const FString& Skill)
+		{
+			return Skill == TEXT("image-match") || Skill == TEXT("hyperai-memory");
+		}
+
+		/** A job title several roles share counts once in an agent's name; what the role works on counts three times. */
+		bool IsRoleTitle(const FString& Word)
+		{
+			return Word == TEXT("designer") || Word == TEXT("artist");
+		}
+
+		/** The packs whose work an agent does: its role's for one of HyperAI's team, else those its skills are made for. */
+		TArray<FString> PacksOfAgent(const FHyperAIStudioAgentDefinition& Agent)
+		{
+			TArray<FString> Packs;
+			const FString Role = Lookup(RolePackList, Agent.Name);
+			if (!Role.IsEmpty())
+			{
+				Role.ParseIntoArrayWS(Packs);
+				return Packs;
+			}
+			for (const FString& Skill : Agent.Skills)
+			{
+				if (IsCrossCuttingSkill(Skill)) continue;
+				for (const TPair<const TCHAR*, const TCHAR*>& Entry : PackSkillList)
+				{
+					if (Skill == Entry.Value) Packs.AddUnique(Entry.Key);
+				}
+			}
+			return Packs;
+		}
+
+		/** What an agent says it is and does. */
+		TArray<FString> OwnWords(const FHyperAIStudioAgentDefinition& Agent)
+		{
+			TArray<FString> Words;
+			for (const FString& Word : Memory::SearchWords(Agent.Name.Replace(TEXT("-"), TEXT(" "))))
+			{
+				for (int32 Times = IsRoleTitle(Word) ? 1 : 3; Times > 0; --Times)
+				{
+					Words.Add(Word);
+				}
+			}
+			Words.Append(Memory::SearchWords(Agent.Description));
+			return Words;
+		}
+
+		template <int32 Num>
+		bool IsListed(const TPair<const TCHAR*, const TCHAR*> (&List)[Num], const FString& AgentName, const FString& Word)
+		{
+			TArray<FString> Words;
+			Lookup(List, AgentName).ParseIntoArrayWS(Words);
+			return Words.Contains(Word);
+		}
+
+		/** The role a request leads to by what it asks first, if any. */
+		bool LeadsTo(const FString& AgentName, const TArray<FString>& Query)
+		{
+			if (IsListed(LeadWordList, AgentName, Query[0]))
+			{
+				return true;
+			}
+			return IsListed(OpenerList, AgentName, Query[0])
+				&& Query.ContainsByPredicate([&AgentName](const FString& Word) { return IsListed(LeadWordList, AgentName, Word); });
+		}
+
+		bool IsPlaceWord(const FString& Word)
+		{
+			for (const TCHAR* Place : PlaceWords)
+			{
+				if (Word == Place) return true;
+			}
+			return false;
+		}
+
+		/** A builder makes a part of a request; the director plans and judges, and the QA tester proves. */
+		bool IsBuilder(const FString& AgentName)
+		{
+			return Lookup(LeadWordList, AgentName).IsEmpty();
+		}
+
+		/** Agents::TeamRequest's message, in any agent's way. */
+		bool IsTeamRequest(const FString& Message)
+		{
+			for (const TCHAR* Agent : {TEXT("Claude Code"), TEXT("Codex"), TEXT("")})
+			{
+				if (Message.StartsWith(Agents::TeamRequest(Agent, FString()), ESearchCase::CaseSensitive))
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		/** The CLI can start the agent by name: its own copy of the definition is there, HyperAI's or edited there. */
+		bool CanStartByName(const FHyperAIStudioAgentDefinition& Agent, const FString& ChatAgent)
+		{
+			const FString Prefix = Skills::InvocationPrefix(ChatAgent);
+			const bool bClaude = Prefix == TEXT("/");
+			if (Agent.Scope == TEXT("claude"))
+			{
+				return bClaude;
+			}
+			const FString& State = bClaude ? Agent.ClaudeState : Agent.CodexState;
+			return !Prefix.IsEmpty() && (State == TEXT("synced") || State == TEXT("stale") || State == TEXT("edited"));
+		}
+
+		FString Shortened(const FString& Text, const int32 MaxChars)
+		{
+			const FString Line = Text.Replace(TEXT("\r"), TEXT(" ")).Replace(TEXT("\n"), TEXT(" ")).TrimStartAndEnd();
+			return Line.Len() > MaxChars ? Line.Left(MaxChars - 3) + TEXT("...") : Line;
+		}
 
 		/** The pack every task uses (plans, operations, memory): it says nothing about which task a message is. */
 		bool IsFoundation(const FString& PackId)
@@ -181,15 +345,18 @@ namespace HyperAIStudio::TaskRouter
 		return FString();
 	}
 
-	TArray<FPackDocument> PackDocuments()
+	TArray<FPackDocument> PackDocuments(const bool bToolDescriptions)
 	{
-		TArray<FHyperAIStudioRuntimeToolBinding> Bindings;
-		TArray<FString> Diagnostics;
-		FHyperAIStudioCapabilityRuntimeIndex::BuildSnapshot(Bindings, Diagnostics);
 		TMap<FString, FString> Descriptions;
-		for (const FHyperAIStudioRuntimeToolBinding& Binding : Bindings)
+		if (bToolDescriptions)
 		{
-			Descriptions.Add(Binding.ToolName, Binding.Description);
+			TArray<FHyperAIStudioRuntimeToolBinding> Bindings;
+			TArray<FString> Diagnostics;
+			FHyperAIStudioCapabilityRuntimeIndex::BuildSnapshot(Bindings, Diagnostics);
+			for (const FHyperAIStudioRuntimeToolBinding& Binding : Bindings)
+			{
+				Descriptions.Add(Binding.ToolName, Binding.Description);
+			}
 		}
 		TArray<FPackDocument> Documents;
 		for (const FHyperAIStudioCapabilityPackDefinition& Pack : FHyperAIStudioCapabilityPackRegistry::GetCatalog().Packs)
@@ -403,5 +570,144 @@ namespace HyperAIStudio::TaskRouter
 			PackOfTool.Add(Tool.Name, Tool.PackId);
 		}
 		return ToolHintFrom(Packs, Bindings, PackOfTool, Given);
+	}
+
+	TOptional<FAgentPick> AgentFor(const FString& Message, const TArray<FHyperAIStudioAgentDefinition>& ProjectAgents, const bool bTeam,
+		const TArray<FPackDocument>& Documents)
+	{
+		TArray<FString> Query = QueryWords(Message);
+		if (Query.IsEmpty() || ProjectAgents.IsEmpty())
+		{
+			return {};
+		}
+		auto Pick = [](const FHyperAIStudioAgentDefinition& Agent)
+		{
+			FAgentPick Picked;
+			Picked.Agent = Agent.Name;
+			Picked.Description = Agent.Description;
+			return Picked;
+		};
+		// Asked first to test or to plan: the QA tester's or the director's, whatever is tested or planned.
+		for (const FHyperAIStudioAgentDefinition& Agent : ProjectAgents)
+		{
+			if (LeadsTo(Agent.Name, Query))
+			{
+				return Pick(Agent);
+			}
+		}
+		Query.RemoveAll([](const FString& Word) { return IsPlaceWord(Word); });
+		if (Query.IsEmpty())
+		{
+			return {};
+		}
+		struct FScored
+		{
+			int32 Index = INDEX_NONE;
+			double Score = 0.0;
+			TArray<FString> Packs;
+			/** The best of its packs that fit the message clearly, and that pack's score. */
+			FString PackId;
+			double PackScore = 0.0;
+			bool bClear = false;
+		};
+		TArray<TArray<FString>> Own;
+		for (const FHyperAIStudioAgentDefinition& Agent : ProjectAgents)
+		{
+			Own.Add(OwnWords(Agent));
+		}
+		const TArray<Memory::FRank> OwnRanks = Memory::Rank(Query, Own);
+		const TArray<Memory::FRank> PackRanks = Memory::Rank(Query, WordsOf(Documents));
+		TArray<FScored> Scored;
+		for (int32 Index = 0; Index < ProjectAgents.Num(); ++Index)
+		{
+			FScored& Each = Scored.AddDefaulted_GetRef();
+			Each.Index = Index;
+			Each.Packs = PacksOfAgent(ProjectAgents[Index]);
+			for (const FString& Pack : Each.Packs)
+			{
+				const int32 Found = Documents.IndexOfByPredicate([&Pack](const FPackDocument& Document) { return Document.PackId == Pack; });
+				if (Found != INDEX_NONE && PackRanks[Found].Score >= MinPackScore && PackRanks[Found].Score > Each.PackScore)
+				{
+					Each.PackId = Pack;
+					Each.PackScore = PackRanks[Found].Score;
+				}
+			}
+			Each.Score = OwnRanks[Index].Score + Each.PackScore;
+			Each.bClear = IsClearFit(OwnRanks[Index], Query.Num()) || Each.PackScore > 0.0;
+		}
+		Scored.StableSort([](const FScored& A, const FScored& B) { return A.Score > B.Score; });
+		const FScored& Top = Scored[0];
+		if (!Top.bClear || Top.Score < MinAgentScore)
+		{
+			return {};
+		}
+		const FHyperAIStudioAgentDefinition& TopAgent = ProjectAgents[Top.Index];
+		// Parts for two builders that fit about as well, neither able to do the other's: the team shares them out.
+		TArray<const FScored*> Builders;
+		for (const FScored& Each : Scored)
+		{
+			if (Each.PackScore > 0.0 && IsBuilder(ProjectAgents[Each.Index].Name))
+			{
+				Builders.Add(&Each);
+			}
+		}
+		if (bTeam && IsBuilder(TopAgent.Name) && Builders.Num() >= 2 && Builders[1]->Score >= Builders[0]->Score * TeamShare
+			&& !Builders[0]->Packs.Contains(Builders[1]->PackId) && !Builders[1]->Packs.Contains(Builders[0]->PackId))
+		{
+			FAgentPick Team;
+			Team.bTeam = true;
+			return Team;
+		}
+		return Pick(TopAgent);
+	}
+
+	FString AgentHintFrom(const FAgentPick& Pick, const TArray<FHyperAIStudioAgentDefinition>& ProjectAgents, const FString& ProjectRoot,
+		const FString& ChatAgent, TSet<FString>& Given)
+	{
+		const FString Key = TEXT("agent:") + (Pick.bTeam ? FString(TEXT("team")) : Pick.Agent);
+		if (Given.Contains(Key))
+		{
+			return FString();
+		}
+		Given.Add(Key);
+		if (Pick.bTeam)
+		{
+			return TEXT("\n\n<agents>\nThis request has parts for several of the project's agents. Run it as HyperAI's team with the `team` skill: read `.agents/skills/team/SKILL.md` first. The director plans the parts, each part goes to its agent, and the QA tester proves it.\n</agents>");
+		}
+		const FHyperAIStudioAgentDefinition* Agent = ProjectAgents.FindByPredicate([&Pick](const FHyperAIStudioAgentDefinition& Each) { return Each.Name == Pick.Agent; });
+		FString Lines = FString::Printf(TEXT("\n\n<agents>\nThis task is for the project's `%s` agent: %s\n"), *Pick.Agent, *Shortened(Pick.Description, MaxAgentDescriptionChars));
+		if (Agent && CanStartByName(*Agent, ChatAgent))
+		{
+			Lines += Skills::InvocationPrefix(ChatAgent) == TEXT("/")
+				? FString::Printf(TEXT("Hand it to that agent with your Agent tool, `%s` as the agent type."), *Pick.Agent)
+				: FString::Printf(TEXT("Spawn the `%s` agent with your multi-agent tools and hand it the task."), *Pick.Agent);
+			Lines += TEXT(" Give it the request as it was asked, with the skills and tools listed here, and report what it did.");
+		}
+		else
+		{
+			FString File = Agent && !Agent->File.IsEmpty() ? Agent->File : FPaths::Combine(Agents::CanonicalDirectory(ProjectRoot), Pick.Agent + TEXT(".md"));
+			FPaths::MakePathRelativeTo(File, *(ProjectRoot / TEXT("")));
+			Lines += FString::Printf(TEXT("Read `%s` first and do the task as that agent, to its instructions and quality bar."), *File);
+		}
+		return Lines + TEXT(" Answer yourself only a question you can answer without doing the work.\n</agents>");
+	}
+
+	FString AgentHintFor(const FString& Message, const FString& ProjectRoot, const FString& ChatAgent, const FString& StartedAs, TSet<FString>& Given)
+	{
+		// A chat started as a project agent is that agent's own; a request to the team is the team's to share out.
+		if (!StartedAs.IsEmpty() || IsTeamRequest(Message))
+		{
+			return FString();
+		}
+		const TArray<FHyperAIStudioAgentDefinition> ProjectAgents = Agents::List(ProjectRoot);
+		if (ProjectAgents.IsEmpty())
+		{
+			return FString();
+		}
+		const bool bTeam = ProjectAgents.ContainsByPredicate([](const FHyperAIStudioAgentDefinition& Agent) { return Agent.Name == TEXT("director"); })
+			&& FPaths::FileExists(FPaths::Combine(Skills::CanonicalDirectory(ProjectRoot), TEXT("team"), TEXT("SKILL.md")));
+		// How people ask for each pack's work and its tools' names: tool descriptions, written for agents, mislead about roles.
+		const TOptional<FAgentPick> Pick = AgentFor(Message, ProjectAgents, bTeam, PackDocuments(/*bToolDescriptions=*/false));
+		return Pick ? AgentHintFrom(*Pick, ProjectAgents, ProjectRoot, ChatAgent, Given) : FString();
 	}
 }

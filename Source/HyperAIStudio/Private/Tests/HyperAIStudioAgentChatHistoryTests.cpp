@@ -279,6 +279,8 @@ bool FHyperAIStudioChatListTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("What HyperAI sent along with a message is not part of what was typed"),
 		StripInjectedContext(TEXT("Fix the ramp\n\n<project-memory>\nNotes\n</project-memory>\n\n<skills>\nA skill\n</skills>")), FString(TEXT("Fix the ramp")));
+	TestEqual(TEXT("including the agent it was handed to"),
+		StripInjectedContext(TEXT("Playtest the ramp\n\n<agents>\nFor the qa-tester.\n</agents>\n\n<tools>\nA tool\n</tools>")), FString(TEXT("Playtest the ramp")));
 	return true;
 }
 

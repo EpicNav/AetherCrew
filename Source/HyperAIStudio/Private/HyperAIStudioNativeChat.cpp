@@ -361,7 +361,7 @@ FString FHyperAIStudioNativeChat::MemoryFor(const FString& Text)
 		return FString();
 	}
 	FString Summary;
-	const FString Context = ContextFor(ProjectRoot, Text, GivenMemory, Summary);
+	const FString Context = ContextFor(ProjectRoot, Text, AgentName, StartedAs, GivenMemory, Summary);
 	if (!Summary.IsEmpty())
 	{
 		// The transcript keeps what was typed; this line says what went with it.
@@ -370,14 +370,18 @@ FString FHyperAIStudioNativeChat::MemoryFor(const FString& Text)
 	return Context;
 }
 
-FString FHyperAIStudioNativeChat::ContextFor(const FString& Root, const FString& Text, TSet<FString>& Given, FString& OutSummary)
+FString FHyperAIStudioNativeChat::ContextFor(const FString& Root, const FString& Text, const FString& ChatAgent, const FString& StartedAs,
+	TSet<FString>& Given, FString& OutSummary)
 {
 	using namespace HyperAIStudio;
+	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
 	const TSet<FString> Before = Given;
 	const TArray<TaskRouter::FPackFit> Packs = TaskRouter::PacksFor(Text);
-	const FString Context = Memory::ContextFor(Root, Text, Given, GetDefault<UHyperAIStudioSettings>()->AgentMemory)
-		+ Skills::HintFor(Root, Text, Given, TaskRouter::SkillsForPacks(Packs))
-		+ TaskRouter::ToolHintFor(Packs, Given);
+	// Each piece marks what it adds in Given under its own prefix, so the order they run in does not matter.
+	const FString Recalled = Memory::ContextFor(Root, Text, Given, Settings->AgentMemory);
+	const FString HandOff = Settings->bHandTasksToProjectAgents ? TaskRouter::AgentHintFor(Text, Root, ChatAgent, StartedAs, Given) : FString();
+	const FString Context = Recalled + HandOff + Skills::HintFor(Root, Text, Given, TaskRouter::SkillsForPacks(Packs)) + TaskRouter::ToolHintFor(Packs, Given);
+	FString HandedTo;
 	TArray<FString> SkillNames;
 	TArray<FString> PackIds;
 	int32 Notes = 0;
@@ -387,7 +391,11 @@ FString FHyperAIStudioNativeChat::ContextFor(const FString& Root, const FString&
 		{
 			continue;
 		}
-		if (Key.StartsWith(TEXT("skill:")))
+		if (Key.StartsWith(TEXT("agent:")))
+		{
+			HandedTo = Key.RightChop(6);
+		}
+		else if (Key.StartsWith(TEXT("skill:")))
 		{
 			SkillNames.Add(Key.RightChop(6));
 		}
@@ -403,6 +411,10 @@ FString FHyperAIStudioNativeChat::ContextFor(const FString& Root, const FString&
 	SkillNames.Sort();
 	PackIds.Sort();
 	TArray<FString> Parts;
+	if (!HandedTo.IsEmpty())
+	{
+		Parts.Add(HandedTo == TEXT("team") ? FString(TEXT("a hand-off to HyperAI's team")) : FString::Printf(TEXT("a hand-off to the %s agent"), *HandedTo));
+	}
 	if (!SkillNames.IsEmpty())
 	{
 		Parts.Add(FString::Printf(TEXT("the %s skill%s"), *FString::Join(SkillNames, TEXT(" and ")), SkillNames.Num() > 1 ? TEXT("s") : TEXT("")));
@@ -1777,8 +1789,8 @@ namespace HyperAIStudio::NativeChat::Private
 	public:
 		FClaudeChat(const FString& InProjectRoot, const FString& InModel, const FString& InResumeSessionId, const FString& InSubagent)
 			: FHyperAIStudioNativeChat(TEXT("Claude Code"), InProjectRoot, InModel, InResumeSessionId)
-			, Subagent(InSubagent)
 		{
+			StartedAs = InSubagent;
 			// A chat Claude never wrote down (nothing was sent yet) cannot be resumed, so it starts again. The id is
 			// chosen here, so the tab has it before the first message, as it does in the terminal.
 			if (!HyperAIStudio::ChatHistory::ClaudeSessionExists(ProjectRoot, ResumeSessionId))
@@ -1823,9 +1835,9 @@ namespace HyperAIStudio::NativeChat::Private
 			}
 			Command += (ResumeSessionId.IsEmpty() ? TEXT(" --session-id ") : TEXT(" --resume ")) + SessionId;
 			// A resumed chat keeps what it started as.
-			if (ResumeSessionId.IsEmpty() && !Subagent.IsEmpty())
+			if (ResumeSessionId.IsEmpty() && !StartedAs.IsEmpty())
 			{
-				Command += TEXT(" --agent ") + Subagent;
+				Command += TEXT(" --agent ") + StartedAs;
 			}
 			return Command;
 		}
@@ -2568,7 +2580,6 @@ namespace HyperAIStudio::NativeChat::Private
 			TurnFinished();
 		}
 
-		FString Subagent;
 		/** The message now streaming, and every message this turn that streamed. */
 		FString MessageId;
 		TSet<FString> Streamed;

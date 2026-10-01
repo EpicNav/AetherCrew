@@ -93,10 +93,12 @@ public:
 	/** A line in the transcript from HyperAI itself, such as which agent a task was routed to. */
 	void AddNotice(const FString& Text);
 	/**
-	 * What goes with a message beside what was typed: the project notes and past tasks it matches, the skills made for
-	 * its kind of work and the HyperAI tools for it, each once per chat (Given). OutSummary says in a few words what was added.
+	 * What goes with a message beside what was typed: the project notes and past tasks it matches, the project agent its
+	 * task is for (unless the chat runs as one, StartedAs), the skills made for its kind of work and the HyperAI tools
+	 * for it, each once per chat (Given). ChatAgent is the agent the chat runs on. OutSummary says in a few words what was added.
 	 */
-	static FString ContextFor(const FString& Root, const FString& Text, TSet<FString>& Given, FString& OutSummary);
+	static FString ContextFor(const FString& Root, const FString& Text, const FString& ChatAgent, const FString& StartedAs, TSet<FString>& Given,
+		FString& OutSummary);
 
 	bool IsRunning() const;
 	bool IsReady() const { return bReady; }
@@ -166,6 +168,8 @@ protected:
 	FString AgentName;
 	FString ProjectRoot;
 	FString Model;
+	/** The project agent the chat runs as (Claude Code's --agent), so its tasks are that agent's own. */
+	FString StartedAs;
 	FString ResumeSessionId;
 	FString SessionId;
 	FString Usage;

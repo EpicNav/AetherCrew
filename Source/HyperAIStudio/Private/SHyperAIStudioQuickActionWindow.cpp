@@ -1324,18 +1324,18 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildNewTabMenu()
 	}
 	Menu.AddMenuSeparator();
 	Menu.AddMenuEntry(
-		LOCTEXT("RouteNewChats", "Route New Chats by Task"),
-		LOCTEXT("RouteNewChatsTooltip", "In the native view, a new chat's first message picks the task route that fits it and starts that route's agent: the one the route names, else the one with the best record on its packs, else your preferred agent. A chat whose agent you picked, opened for a task, or resumed keeps its agent."),
+		LOCTEXT("HandTasksToAgents", "Hand Tasks to Project Agents"),
+		LOCTEXT("HandTasksToAgentsTooltip", "In the native view, each message's task goes to the project agent made for it: the QA tester for a playtest, the lighting artist for lighting, the level designer for a layout. A request with parts for several roles goes to HyperAI's team. The chat's agent starts that agent itself, and a chat started as a project agent keeps its tasks."),
 		FSlateIcon(),
 		FUIAction(
 			FExecuteAction::CreateLambda([]()
 			{
 				UHyperAIStudioSettings* MutableSettings = GetMutableDefault<UHyperAIStudioSettings>();
-				MutableSettings->bRouteNewChatsByTask = !MutableSettings->bRouteNewChatsByTask;
+				MutableSettings->bHandTasksToProjectAgents = !MutableSettings->bHandTasksToProjectAgents;
 				MutableSettings->SaveConfig();
 			}),
 			FCanExecuteAction(),
-			FIsActionChecked::CreateLambda([]() { return GetDefault<UHyperAIStudioSettings>()->bRouteNewChatsByTask; })),
+			FIsActionChecked::CreateLambda([]() { return GetDefault<UHyperAIStudioSettings>()->bHandTasksToProjectAgents; })),
 		NAME_None,
 		EUserInterfaceActionType::ToggleButton);
 	Menu.AddMenuEntry(

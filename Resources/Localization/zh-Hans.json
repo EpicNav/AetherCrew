@@ -4227,6 +4227,18 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "HandTasksToAgents",
+   "source": "Hand Tasks to Project Agents",
+   "text": "将任务交给项目智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "HandTasksToAgentsTooltip",
+   "source": "In the native view, each message's task goes to the project agent made for it: the QA tester for a playtest, the lighting artist for lighting, the level designer for a layout. A request with parts for several roles goes to HyperAI's team. The chat's agent starts that agent itself, and a chat started as a project agent keeps its tasks.",
+   "text": "在原生视图中，每条消息的任务都会交给专为它设计的项目智能体：试玩交给 QA 测试员，照明交给照明美术师，布局交给关卡设计师。包含多个角色工作的请求会交给 HyperAI 的团队。由对话的智能体自行启动该智能体；以某个项目智能体身份启动的对话会保留自己的任务。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "HandoffButton",
    "source": "Hand Off",
    "text": "交接"
@@ -4740,18 +4752,6 @@
    "key": "ResumingChat",
    "source": "Resuming {0} chat: {1}",
    "text": "正在继续 {0} 对话：{1}"
-  },
-  {
-   "namespace": "SHyperAIStudioQuickActionWindow",
-   "key": "RouteNewChats",
-   "source": "Route New Chats by Task",
-   "text": "按任务分配新对话"
-  },
-  {
-   "namespace": "SHyperAIStudioQuickActionWindow",
-   "key": "RouteNewChatsTooltip",
-   "source": "In the native view, a new chat's first message picks the task route that fits it and starts that route's agent: the one the route names, else the one with the best record on its packs, else your preferred agent. A chat whose agent you picked, opened for a task, or resumed keeps its agent.",
-   "text": "在原生视图中，新对话的第一条消息会选出最适合它的任务路线，并启动该路线的智能体：路线指定的智能体；若未指定，则选在这些包上记录最好的智能体；否则使用你的首选智能体。你手动选择过智能体、为某项任务打开或恢复的对话会保留原来的智能体。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",

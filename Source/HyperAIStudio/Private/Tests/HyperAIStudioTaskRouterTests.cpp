@@ -4,6 +4,7 @@
 
 #include "HAL/FileManager.h"
 #include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioAgents.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioNativeChat.h"
 #include "HyperAIStudioSettings.h"
@@ -46,6 +47,34 @@ namespace HyperAIStudio::TaskRouterTests
 		Result.Description = Description;
 		Result.bToolEnabled = bEnabled;
 		return Result;
+	}
+
+	/** HyperAI's team as the plugin ships it, by name. */
+	TArray<FHyperAIStudioAgentDefinition> TeamAgents()
+	{
+		const FString Folder = FPaths::Combine(Agents::TeamDirectory(), TEXT("agents"));
+		TArray<FString> Files;
+		IFileManager::Get().FindFiles(Files, *FPaths::Combine(Folder, TEXT("*.md")), /*Files=*/true, /*Directories=*/false);
+		TArray<FHyperAIStudioAgentDefinition> Team;
+		for (const FString& File : Files)
+		{
+			FString Text;
+			FString Error;
+			FHyperAIStudioAgentDefinition Agent;
+			if (FFileHelper::LoadFileToString(Text, *FPaths::Combine(Folder, File)) && Agents::Parse(Text, Agent, Error))
+			{
+				Team.Add(MoveTemp(Agent));
+			}
+		}
+		Team.Sort([](const FHyperAIStudioAgentDefinition& A, const FHyperAIStudioAgentDefinition& B) { return A.Name < B.Name; });
+		return Team;
+	}
+
+	FString PickName(const FString& Message, const TArray<FHyperAIStudioAgentDefinition>& ProjectAgents, const bool bTeam,
+		const TArray<TaskRouter::FPackDocument>& Documents)
+	{
+		const TOptional<TaskRouter::FAgentPick> Pick = TaskRouter::AgentFor(Message, ProjectAgents, bTeam, Documents);
+		return !Pick ? FString(TEXT("none")) : Pick->bTeam ? FString(TEXT("team")) : Pick->Agent;
 	}
 }
 
@@ -226,9 +255,147 @@ bool FHyperAIStudioTaskRouterToolsTest::RunTest(const FString& Parameters)
 	// What a message carries, and the one line that says so.
 	TSet<FString> ChatGiven;
 	FString Summary;
-	const FString Context = FHyperAIStudioNativeChat::ContextFor(Root, TEXT("Make the explosion bigger with more sparks"), ChatGiven, Summary);
+	const FString Context = FHyperAIStudioNativeChat::ContextFor(Root, TEXT("Make the explosion bigger with more sparks"), TEXT("Claude Code"), FString(),
+		ChatGiven, Summary);
 	TestTrue(TEXT("A message carries the tools for its task"), Context.Contains(TEXT("<tools>")) && Context.Contains(TEXT("hyper_niagara_apply_plan")));
 	TestTrue(TEXT("and says so in a line: ") + Summary, Summary.Contains(TEXT("the niagara_vfx tools")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioTaskRouterAgentsTest,
+	"HyperAIStudio.TaskRouter.Agents",
+	HyperAIStudio::TaskRouterTests::Flags)
+
+bool FHyperAIStudioTaskRouterAgentsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio;
+	using namespace HyperAIStudio::TaskRouterTests;
+	const TArray<TaskRouter::FPackDocument> Documents = TaskRouter::PackDocuments(/*bToolDescriptions=*/false);
+	const TArray<FHyperAIStudioAgentDefinition> Team = TeamAgents();
+	TestEqual(TEXT("The plugin ships the team's eight agents"), Team.Num(), 8);
+	// What people ask for, and the member of the team made for it.
+	const TPair<const TCHAR*, const TCHAR*> Cases[] = {
+		{TEXT("Playtest the level and check the doors open"), TEXT("qa-tester")},
+		{TEXT("Verify the inventory saves and loads"), TEXT("qa-tester")},
+		{TEXT("Can you test whether the AI guards see the player through walls?"), TEXT("qa-tester")},
+		{TEXT("Profile the frame time in the forest level"), TEXT("qa-tester")},
+		{TEXT("Why is the frame rate so low?"), TEXT("qa-tester")},
+		{TEXT("Play the level and check the doors open"), TEXT("qa-tester")},
+		{TEXT("Light the castle courtyard at night with torches"), TEXT("lighting-artist")},
+		{TEXT("Make the floor look wet and glossy at dusk"), TEXT("lighting-artist")},
+		{TEXT("Match the lighting to this reference image"), TEXT("lighting-artist")},
+		{TEXT("Block out a small arena with cover and two ramps"), TEXT("level-designer")},
+		{TEXT("Scatter rocks and trees over the landscape"), TEXT("level-designer")},
+		{TEXT("Plant trees along the road"), TEXT("level-designer")},
+		{TEXT("Make the explosion bigger with more sparks"), TEXT("technical-artist")},
+		{TEXT("Create a material for a mossy stone wall"), TEXT("technical-artist")},
+		{TEXT("Retarget the Manny animations onto my new character"), TEXT("technical-artist")},
+		{TEXT("Create a dodge ability with a stamina cost and a cooldown"), TEXT("programmer")},
+		{TEXT("Make enemies patrol and chase the player when they see them"), TEXT("programmer")},
+		{TEXT("Make the door open with a timeline"), TEXT("programmer")},
+		{TEXT("Fix the crash when the player respawns"), TEXT("programmer")},
+		{TEXT("Make the player jump higher"), TEXT("programmer")},
+		{TEXT("Let the player open doors with the E key"), TEXT("programmer")},
+		{TEXT("Play a sound when the door opens"), TEXT("programmer")},
+		{TEXT("Give the main menu a settings screen"), TEXT("ui-designer")},
+		{TEXT("Make the health bar red when health is low"), TEXT("ui-designer")},
+		{TEXT("Add a cutscene where the camera pans over the castle"), TEXT("cinematographer")},
+		{TEXT("Render a trailer of the boss fight"), TEXT("cinematographer")},
+		// Asked first to plan or to test: the director's or the QA tester's, whatever is planned or tested.
+		{TEXT("Plan a stealth system for the guards"), TEXT("director")},
+		{TEXT("Review what the team built against the request"), TEXT("director")},
+		{TEXT("Check that the lights in the hall are not too bright"), TEXT("qa-tester")},
+		// Parts for two builders, neither able to do the other's: the team shares them out.
+		{TEXT("Build a small arena, light it at dusk and add a health bar"), TEXT("team")},
+		{TEXT("Make a fire VFX and light the room with it"), TEXT("team")},
+		{TEXT("Add a health system and a health bar"), TEXT("team")},
+		// Work no member is made for, a place rather than a kind of work, or no task at all: the chat's agent keeps it.
+		{TEXT("Make a footstep sound for gravel"), TEXT("none")},
+		{TEXT("Add rain to the level"), TEXT("none")},
+		{TEXT("Special effects for the boss fight"), TEXT("none")},
+		{TEXT("What time is it?"), TEXT("none")},
+		{TEXT("Thanks!"), TEXT("none")},
+	};
+	for (const TPair<const TCHAR*, const TCHAR*>& Case : Cases)
+	{
+		TestEqual(FString::Printf(TEXT("'%s' is for"), Case.Key), PickName(Case.Key, Team, /*bTeam=*/true, Documents), FString(Case.Value));
+	}
+	TestEqual(TEXT("Without the team, the role that fits best takes it all"),
+		PickName(TEXT("Build a small arena, light it at dusk and add a health bar"), Team, /*bTeam=*/false, Documents), FString(TEXT("lighting-artist")));
+	// An agent of the project's own is matched by its name, what it says it does, and its skills' work.
+	TArray<FHyperAIStudioAgentDefinition> Custom = Team;
+	FHyperAIStudioAgentDefinition& Vfx = Custom.AddDefaulted_GetRef();
+	Vfx.Name = TEXT("vfx-artist");
+	Vfx.Description = TEXT("Makes the game's visual effects: fire, smoke, sparks, magic and impacts.");
+	Vfx.Skills = {TEXT("unreal-niagara")};
+	TestEqual(TEXT("A custom agent takes its own work"), PickName(TEXT("Make the explosion bigger with more sparks"), Custom, true, Documents), FString(TEXT("vfx-artist")));
+	TestEqual(TEXT("No agents, no pick"), PickName(TEXT("Playtest the level"), {}, true, Documents), FString(TEXT("none")));
+
+	// The hand-off, in each chat agent's own way.
+	TArray<FHyperAIStudioAgentDefinition> Synced = Team;
+	for (FHyperAIStudioAgentDefinition& Agent : Synced)
+	{
+		Agent.Scope = TEXT("project");
+		Agent.ClaudeState = TEXT("synced");
+		Agent.CodexState = TEXT("missing");
+	}
+	const FString Root = FPaths::Combine(FPaths::ConvertRelativePathToFull(FPaths::AutomationTransientDir()), TEXT("AgentRouterTest-") + FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	TaskRouter::FAgentPick Tester;
+	Tester.Agent = TEXT("qa-tester");
+	Tester.Description = TEXT("Tests what the team built.");
+	TSet<FString> Given;
+	const FString Claude = TaskRouter::AgentHintFrom(Tester, Synced, Root, TEXT("Claude Code"), Given);
+	TestTrue(TEXT("Claude Code hands the task to the agent with its Agent tool: ") + Claude, Claude.StartsWith(TEXT("\n\n<agents>\nThis task is for the project's `qa-tester` agent: Tests what the team built."))
+		&& Claude.Contains(TEXT("with your Agent tool, `qa-tester` as the agent type")) && Claude.EndsWith(TEXT("</agents>")));
+	TestTrue(TEXT("A chat is pointed at an agent once"), TaskRouter::AgentHintFrom(Tester, Synced, Root, TEXT("Claude Code"), Given).IsEmpty());
+	TSet<FString> CodexGiven;
+	const FString Unsynced = TaskRouter::AgentHintFrom(Tester, Synced, Root, TEXT("Codex"), CodexGiven);
+	TestTrue(TEXT("Codex without its copy of the agent reads the role's file: ") + Unsynced, Unsynced.Contains(TEXT("Read `.hyperai/agents/qa-tester.md` first")));
+	for (FHyperAIStudioAgentDefinition& Agent : Synced)
+	{
+		Agent.CodexState = TEXT("synced");
+	}
+	CodexGiven.Reset();
+	TestTrue(TEXT("Codex with it spawns the agent"), TaskRouter::AgentHintFrom(Tester, Synced, Root, TEXT("Codex"), CodexGiven)
+		.Contains(TEXT("Spawn the `qa-tester` agent with your multi-agent tools")));
+	TSet<FString> GeminiGiven;
+	TestTrue(TEXT("Any other agent reads the role's file"), TaskRouter::AgentHintFrom(Tester, Synced, Root, TEXT("Gemini"), GeminiGiven)
+		.Contains(TEXT("Read `.hyperai/agents/qa-tester.md` first")));
+	TaskRouter::FAgentPick Whole;
+	Whole.bTeam = true;
+	TSet<FString> TeamGiven;
+	TestTrue(TEXT("The team runs a request with parts for several roles"), TaskRouter::AgentHintFrom(Whole, Synced, Root, TEXT("Codex"), TeamGiven)
+		.Contains(TEXT("`team` skill")) && TeamGiven.Contains(TEXT("agent:team")));
+
+	// From the project's own agents on disk, as a chat sends it.
+	Agents::InstallTeam(Root, /*bUpdateOnly=*/false);
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bWasHanding = Settings->bHandTasksToProjectAgents;
+	Settings->bHandTasksToProjectAgents = true;
+	TSet<FString> ChatGiven;
+	FString Summary;
+	const FString Context = FHyperAIStudioNativeChat::ContextFor(Root, TEXT("Playtest the level and check the doors open"), TEXT("Claude Code"), FString(),
+		ChatGiven, Summary);
+	TestTrue(TEXT("A message carries its agent: ") + Context, Context.Contains(TEXT("<agents>")) && Context.Contains(TEXT("`qa-tester` as the agent type")));
+	TestTrue(TEXT("and says so in a line: ") + Summary, Summary.StartsWith(TEXT("a hand-off to the qa-tester agent")));
+	TSet<FString> AsTester;
+	TestTrue(TEXT("A chat started as a project agent keeps its tasks"), TaskRouter::AgentHintFor(TEXT("Light the hall at dusk"), Root, TEXT("Claude Code"),
+		TEXT("qa-tester"), AsTester).IsEmpty());
+	TSet<FString> TeamChat;
+	TestTrue(TEXT("A request with parts for several roles goes to the team"), TaskRouter::AgentHintFor(
+		TEXT("Build a small arena, light it at dusk and add a health bar"), Root, TEXT("Codex"), FString(), TeamChat).Contains(TEXT("`team` skill")));
+	TSet<FString> ToTeam;
+	TestTrue(TEXT("A request sent to the team is the team's"), TaskRouter::AgentHintFor(Agents::TeamRequest(TEXT("Codex"), TEXT("Playtest the level")), Root,
+		TEXT("Codex"), FString(), ToTeam).IsEmpty());
+	Settings->bHandTasksToProjectAgents = false;
+	TSet<FString> Off;
+	FString OffSummary;
+	TestFalse(TEXT("Turned off, nothing is handed off"), FHyperAIStudioNativeChat::ContextFor(Root, TEXT("Playtest the level and check the doors open"),
+		TEXT("Claude Code"), FString(), Off, OffSummary).Contains(TEXT("<agents>")));
+	Settings->bHandTasksToProjectAgents = bWasHanding;
+	IFileManager::Get().DeleteDirectory(*Root, /*RequireExists=*/false, /*Tree=*/true);
 	return true;
 }
 

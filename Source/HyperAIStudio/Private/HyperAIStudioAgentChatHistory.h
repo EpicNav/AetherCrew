@@ -56,7 +56,7 @@ namespace HyperAIStudio::ChatHistory
 	 * subagent logs beside it. False, with OutError, when nothing could be moved.
 	 */
 	bool DeleteSession(const FHyperAIStudioChatSession& Session, FString& OutError);
-	/** A message as it was typed, without the project memory, skill and tool notes HyperAI's chat sends along with it. */
+	/** A message as it was typed, without the project memory, agent, skill and tool notes HyperAI's chat sends along with it. */
 	FString StripInjectedContext(const FString& Message);
 	/** The whole lines in the last MaxBytes of a log; bOutCut says the log goes back further. */
 	TArray<FString> ReadRecentLines(const FString& Path, int64 MaxBytes, bool& bOutCut);

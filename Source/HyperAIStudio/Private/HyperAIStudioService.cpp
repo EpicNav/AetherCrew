@@ -4857,7 +4857,7 @@ void BuildAgentInstructionBlocks(
 		TEXT("## Context Packs") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("- Only read `.hyperai/context/` files when the prompt explicitly references them.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Domain Guides") LINE_TERMINATOR LINE_TERMINATOR +
-		TEXT("- The project's skills (`.agents/skills`, which Claude Code also sees in `.claude/skills`) are yours to use: pick the ones a task needs without being told. A message sent from HyperAI's chat names the skills and the HyperAI tools that fit it, each tool with the `toolset_name` to call it through.") LINE_TERMINATOR +
+		TEXT("- The project's skills (`.agents/skills`, which Claude Code also sees in `.claude/skills`) are yours to use: pick the ones a task needs without being told. So are its agents (`.hyperai/agents`, which Claude Code runs from `.claude/agents` and Codex from `.codex/agents`): hand a task to the agent made for it, and a request with parts for several roles to the `team` skill when the project has one. A message sent from HyperAI's chat names the agent, the skills and the HyperAI tools that fit it, each tool with the `toolset_name` to call it through.") LINE_TERMINATOR +
 		TEXT("- To build or change a gameplay Blueprint, follow the `unreal-blueprint` skill (`.agents/skills/unreal-blueprint/SKILL.md`): the whole Blueprint in one script, with the node IDs it needs.") LINE_TERMINATOR +
 		TEXT("- Before designing or changing an Animation Blueprint, read `.hyperai/docs/HyperAIStudio-AnimationCookbook.md`.") LINE_TERMINATOR +
 		TEXT("- Before designing or changing a UAF (Unreal Animation Framework) animation graph, read `.hyperai/docs/HyperAIStudio-UAFCookbook.md`.") LINE_TERMINATOR +
