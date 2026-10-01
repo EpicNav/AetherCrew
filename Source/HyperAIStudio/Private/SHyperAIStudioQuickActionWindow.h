@@ -149,6 +149,8 @@ private:
 	void SetChatRemote(const FString& SessionId, bool bRemote);
 	void RelaunchActiveChat();
 	void StopBackgroundChat(const FString& ShortId, TFunction<void()> Then);
+	/** Deletes a chat the user confirmed, unless a tab has it open; every tab's chat list then shows it gone. */
+	void DeleteChat(const struct FHyperAIStudioChatSession& Session);
 	bool IsActiveChatRemote() const;
 	/** The agent is producing output, or is stopped at a question or a plan. */
 	bool IsTurnActive() const;

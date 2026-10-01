@@ -39,13 +39,27 @@ struct FHyperAIStudioChatSession
 /**
  * Reads the agents' own session stores; nothing is copied or persisted by the plugin.
  * Claude Code: <CLAUDE_CONFIG_DIR or ~/.claude>/projects/<root with non-alphanumerics as '-'>/<id>.jsonl.
- * Codex: <CODEX_HOME or ~/.codex>/sessions/**\/rollout-*.jsonl whose session_meta cwd is the root; titles from
- * session_index.jsonl. Gemini only resumes by list index, which shifts, so it is not offered.
+ * Codex: <CODEX_HOME or ~/.codex>/sessions/**\/rollout-*.jsonl whose session_meta cwd is the root, leaving out the
+ * threads Codex runs for itself (subagents such as its approval reviewer); titles from session_index.jsonl. Gemini
+ * only resumes by list index, which shifts, so it is not offered.
  * Safe to call off the game thread.
  */
 namespace HyperAIStudio::ChatHistory
 {
-	TArray<FHyperAIStudioChatSession> ListSessions(const FString& ProjectRoot, int32 MaxSessions = 50);
+	/** Newest first. What each file holds is remembered while it is unchanged, so listing again reads only what moved. */
+	TArray<FHyperAIStudioChatSession> ListSessions(const FString& ProjectRoot, int32 MaxSessions = 400);
+
+	/** The agent's own log of a chat, found from its id; empty when it has none. */
+	FString SessionFile(const FString& AgentName, const FString& ProjectRoot, const FString& SessionId);
+	/**
+	 * Deletes a chat: its log goes to the Recycle Bin, where it can be restored, and for Claude Code the folder of
+	 * subagent logs beside it. False, with OutError, when nothing could be moved.
+	 */
+	bool DeleteSession(const FHyperAIStudioChatSession& Session, FString& OutError);
+	/** A message as it was typed, without the project memory and skill notes HyperAI's chat sends along with it. */
+	FString StripInjectedContext(const FString& Message);
+	/** The whole lines in the last MaxBytes of a log; bOutCut says the log goes back further. */
+	TArray<FString> ReadRecentLines(const FString& Path, int64 MaxBytes, bool& bOutCut);
 
 	/** CLI arguments that resume the session, e.g. "--resume <id>"; empty when the id or agent is not resumable. */
 	FString BuildResumeArguments(const FString& AgentName, const FString& SessionId);

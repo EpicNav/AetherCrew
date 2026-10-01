@@ -445,6 +445,7 @@ void SHyperAIStudioQuickActionWindow::Construct(const FArguments& InArgs)
 									}
 								});
 							})
+							.OnDeleteChat(this, &SHyperAIStudioQuickActionWindow::DeleteChat)
 							.OnNewChat_Lambda([this]()
 							{
 								ResumeAgentName.Reset();
@@ -2900,6 +2901,37 @@ void SHyperAIStudioQuickActionWindow::StopBackgroundChat(const FString& ShortId,
 			}
 		});
 	});
+}
+
+void SHyperAIStudioQuickActionWindow::DeleteChat(const FHyperAIStudioChatSession& Session)
+{
+	// A chat open in a tab is still being written to; deleting its log there would leave half a chat behind.
+	for (const TWeakPtr<SHyperAIStudioQuickActionWindow>& Weak : HyperAIStudio::QuickAction::LiveWindows())
+	{
+		const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = Weak.Pin();
+		if (Window.IsValid() && !Session.SessionId.IsEmpty() && Window->ActiveChatSessionId == Session.SessionId)
+		{
+			HyperAIStudio::QuickAction::Toast(FText::Format(LOCTEXT("DeleteOpenChat", "That chat is open in {0}. Start a new chat there, then delete it."),
+				FText::FromString(Window->GetTabDescription())));
+			return;
+		}
+	}
+	FString Error;
+	if (!HyperAIStudio::ChatHistory::DeleteSession(Session, Error))
+	{
+		HyperAIStudio::QuickAction::Toast(FText::Format(LOCTEXT("DeleteFailed", "The chat was not deleted: {0}"), FText::FromString(Error)));
+		return;
+	}
+	UHyperAIStudioChatHistoryPrefs::Forget(Session.SessionId);
+	UE_LOG(LogHyperAIStudioChat, Display, TEXT("Deleted the %s chat %s; its log is in the Recycle Bin."), *Session.AgentName, *Session.SessionId);
+	for (const TWeakPtr<SHyperAIStudioQuickActionWindow>& Weak : HyperAIStudio::QuickAction::LiveWindows())
+	{
+		const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = Weak.Pin();
+		if (Window.IsValid() && Window->ChatSidebar.IsValid())
+		{
+			Window->ChatSidebar->Refresh();
+		}
+	}
 }
 
 FName SHyperAIStudioQuickActionWindow::GetPageId(const int32 TabIndex)

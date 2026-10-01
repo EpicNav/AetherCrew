@@ -2,6 +2,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Async/TaskGraphInterfaces.h"
 #include "Containers/Ticker.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
@@ -1282,6 +1283,123 @@ bool FHyperAIStudioNativeChatClaudeLiveTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("and keeps running, waiting for a message"), Chat->IsRunning());
 	Chat->Stop();
 	TestFalse(TEXT("A chat that sent nothing leaves no session behind"), HyperAIStudio::ChatHistory::ClaudeSessionExists(Directory, Chat->GetSessionId()));
+	return true;
+}
+
+namespace HyperAIStudio::NativeChatTests
+{
+	/** Codex's app-server as a resumed thread sees it: the thread comes back with its earlier turn. */
+	const TCHAR* const FakeCodexResume = TEXT(R"PY(import json, sys
+def send(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+for line in iter(sys.stdin.readline, ""):
+    m = json.loads(line); method = m.get("method"); i = m.get("id")
+    if method == "initialize":
+        send({"id": i, "result": {"userAgent": "fake"}})
+    elif method == "thread/resume":
+        turn = {"id": "t1", "status": "completed", "items": [
+            {"type": "userMessage", "id": "u1", "content": [{"type": "text", "text": "Make the door open\n\n<skills>\nProject skills that fit.\n</skills>"}]},
+            {"type": "commandExecution", "id": "c1", "command": "git status", "status": "completed", "aggregatedOutput": "nothing to commit", "exitCode": 0},
+            {"type": "agentMessage", "id": "a1", "text": "The door opens now."}]}
+        send({"id": i, "result": {"thread": {"id": m["params"]["threadId"], "turns": [turn]}, "model": "fake"}})
+)PY");
+
+	/** Ticks the chat and runs what other threads handed back to the game thread, until Done holds. */
+	bool PumpWithTasksUntil(const TFunction<bool()>& Done)
+	{
+		return PumpUntil([&Done]()
+		{
+			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+			return Done();
+		});
+	}
+
+	int32 IndexOf(const FHyperAIStudioNativeChat& Chat, const FHyperAIStudioChatItem::EKind Kind, const FString& Text)
+	{
+		return Chat.GetItems().IndexOfByPredicate([Kind, &Text](const TSharedPtr<FHyperAIStudioChatItem>& Item)
+		{
+			return Item->Kind == Kind && (Item->Text.Contains(Text) || Item->Title.Contains(Text));
+		});
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNativeChatResumeHistoryTest,
+	"HyperAIStudio.NativeChat.ResumeShowsHistory",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioNativeChatResumeHistoryTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::NativeChatTests;
+	using EKind = FHyperAIStudioChatItem::EKind;
+	if (!HasPython())
+	{
+		AddWarning(TEXT("python is not on PATH, so the scripted agents cannot run."));
+		return true;
+	}
+	const FScratch Scratch;
+	const FString PreviousClaude = FPlatformMisc::GetEnvironmentVariable(TEXT("CLAUDE_CONFIG_DIR"));
+	FPlatformMisc::SetEnvironmentVar(TEXT("CLAUDE_CONFIG_DIR"), *FPaths::Combine(Scratch.Dir, TEXT("claude")));
+	ON_SCOPE_EXIT
+	{
+		FPlatformMisc::SetEnvironmentVar(TEXT("CLAUDE_CONFIG_DIR"), *PreviousClaude);
+	};
+
+	// A Claude Code chat's log as Claude writes it, with what HyperAI sent along and what a subagent did.
+	const FString SessionId = TEXT("7350db99-a8d7-4f9d-9c85-9b141c4163a6");
+	const FString Log = FString::Join(TArray<FString>{
+		TEXT("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"Build the arena ramp\\n\\n<project-memory>\\nNotes\\n</project-memory>\"}}"),
+		TEXT("{\"type\":\"user\",\"isMeta\":true,\"message\":{\"role\":\"user\",\"content\":\"Caveat: injected\"}}"),
+		TEXT("{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"I'll check the level first.\"}]}}"),
+		TEXT("{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"Bash\",\"input\":{\"command\":\"git status\"}}]}}"),
+		TEXT("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_1\",\"content\":\"nothing to commit\",\"is_error\":false}]}}"),
+		TEXT("{\"type\":\"assistant\",\"isSidechain\":true,\"message\":{\"id\":\"m9\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"A subagent's own step\"}]}}"),
+		TEXT("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"[Request interrupted by user]\"}]}}"),
+		TEXT("{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"content\":\"Conversation compacted\"}"),
+		TEXT("{\"type\":\"assistant\",\"message\":{\"id\":\"m2\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"The ramp is at 35 degrees now.\"}]}}")}, TEXT("\n"));
+	FFileHelper::SaveStringToFile(Log + TEXT("\n"), *FPaths::Combine(Scratch.Dir, TEXT("claude/projects"),
+		HyperAIStudio::ChatHistory::ClaudeProjectDirectoryName(Scratch.Dir), SessionId + TEXT(".jsonl")));
+
+	UseStandIn(Scratch.Dir, FakeClaude, TEXT("fake_claude.py"));
+	const TSharedPtr<FHyperAIStudioNativeChat> Claude = FHyperAIStudioNativeChat::Create(TEXT("Claude Code"), Scratch.Dir, FString(), SessionId);
+	FString Error;
+	if (!TestTrue(TEXT("The resumed Claude Code chat starts: ") + Error, Claude.IsValid() && Claude->Start(Error)))
+	{
+		return false;
+	}
+	const bool bShown = PumpWithTasksUntil([&Claude]() { return IndexOf(*Claude, EKind::Agent, TEXT("35 degrees")) != INDEX_NONE; });
+	const FHyperAIStudioNativeChat& Shown = *Claude;
+	TestTrue(TEXT("Its earlier conversation shows"), bShown);
+	const int32 Asked = IndexOf(Shown, EKind::User, TEXT("Build the arena ramp"));
+	const int32 Ran = IndexOf(Shown, EKind::Command, TEXT("git status"));
+	const int32 Answered = IndexOf(Shown, EKind::Agent, TEXT("35 degrees"));
+	const int32 Resuming = IndexOf(Shown, EKind::Notice, TEXT("Resuming"));
+	TestTrue(TEXT("in order: what was typed, the command it ran, the last reply"), Asked == 0 && Ran > Asked && Answered > Ran);
+	TestTrue(TEXT("above the chat that goes on"), Resuming > Answered);
+	TestEqual(TEXT("What was typed shows without what HyperAI sent along"), Shown.GetItems()[0]->Text, FString(TEXT("Build the arena ramp")));
+	TestTrue(TEXT("The command shows its output and finished"), Ran != INDEX_NONE && Shown.GetItems()[Ran]->Text.Contains(TEXT("nothing to commit"))
+		&& Shown.GetItems()[Ran]->Status == TEXT("completed"));
+	TestTrue(TEXT("The stop and the compaction show"), IndexOf(Shown, EKind::Notice, TEXT("Stopped by the user")) != INDEX_NONE
+		&& IndexOf(Shown, EKind::Notice, TEXT("compacted")) != INDEX_NONE);
+	TestEqual(TEXT("Injected context and a subagent's steps stay out"), IndexOf(Shown, EKind::Agent, TEXT("subagent's own")) + IndexOf(Shown, EKind::User, TEXT("Caveat")), -2);
+	const FString Shot = HyperAIStudio::Tests::SaveWidgetShot(SNew(SHyperAIStudioNativeChatView).Chat(Claude), FIntPoint(900, 760), TEXT("step20-resumed-chat"));
+	if (!Shot.IsEmpty())
+	{
+		AddInfo(TEXT("Picture resumed-chat: ") + Shot);
+	}
+	Claude->Stop();
+
+	UseStandIn(Scratch.Dir, FakeCodexResume, TEXT("fake_codex_resume.py"));
+	const TSharedPtr<FHyperAIStudioNativeChat> Codex = FHyperAIStudioNativeChat::Create(TEXT("Codex"), Scratch.Dir, FString(), TEXT("01a0975b-2c7e-7e72-a9ce-13cfc8c4a95d"));
+	if (!TestTrue(TEXT("The resumed Codex chat starts: ") + Error, Codex.IsValid() && Codex->Start(Error)))
+	{
+		return false;
+	}
+	TestTrue(TEXT("It becomes ready"), PumpWithTasksUntil([&Codex]() { return Codex->IsReady(); }));
+	TestEqual(TEXT("Codex's earlier turn shows first, as typed"), Codex->GetItems().IsEmpty() ? FString() : Codex->GetItems()[0]->Text, FString(TEXT("Make the door open")));
+	TestTrue(TEXT("with its command and reply"), IndexOf(*Codex, EKind::Command, TEXT("git status")) > 0 && IndexOf(*Codex, EKind::Agent, TEXT("door opens")) > 0);
+	TestTrue(TEXT("above the chat that goes on"), IndexOf(*Codex, EKind::Notice, TEXT("Resuming")) > IndexOf(*Codex, EKind::Agent, TEXT("door opens")));
+	Codex->Stop();
 	return true;
 }
 

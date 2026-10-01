@@ -11,8 +11,15 @@
 #include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeLock.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <shellapi.h>
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
 
 namespace HyperAIStudio::ChatHistory
 {
@@ -21,6 +28,46 @@ namespace
 	constexpr int64 HeadBytes = 512 * 1024;
 	constexpr int64 TailBytes = 256 * 1024;
 	constexpr int32 MaxTitleChars = 90;
+
+	/** What a session file says, kept while it stays the same size and age. */
+	struct FFileFacts
+	{
+		int64 Size = -1;
+		FDateTime Stamp;
+		FString Title;
+		bool bUsedUnrealMcp = false;
+		/** Codex: the thread id, its working directory, and whether Codex ran it for itself. */
+		FString Id;
+		FString Cwd;
+		bool bSubagent = false;
+	};
+
+	FCriticalSection FactsLock;
+
+	TMap<FString, FFileFacts>& KnownFacts()
+	{
+		static TMap<FString, FFileFacts> Facts;
+		return Facts;
+	}
+
+	/** Facts about Path, read again only when the file changed since they were last read. */
+	FFileFacts FactsFor(const FString& Path, const FDateTime& Stamp, TFunctionRef<FFileFacts()> Read)
+	{
+		const int64 Size = IFileManager::Get().FileSize(*Path);
+		{
+			FScopeLock Lock(&FactsLock);
+			if (const FFileFacts* Known = KnownFacts().Find(Path); Known && Known->Size == Size && Known->Stamp == Stamp)
+			{
+				return *Known;
+			}
+		}
+		FFileFacts Fresh = Read();
+		Fresh.Size = Size;
+		Fresh.Stamp = Stamp;
+		FScopeLock Lock(&FactsLock);
+		KnownFacts().Add(Path, Fresh);
+		return Fresh;
+	}
 
 	FString NormalizeRoot(const FString& Path)
 	{
@@ -127,21 +174,31 @@ namespace
 			&& !Trimmed.StartsWith(TEXT("/"));
 	}
 
-	TArray<FString> FilesNewestFirst(TArray<FString> Files)
+	/** Files with their last-write times, newest first. */
+	TArray<TPair<FString, FDateTime>> FilesNewestFirst(const TArray<FString>& Files)
 	{
-		TMap<FString, FDateTime> Stamps;
+		TArray<TPair<FString, FDateTime>> Stamped;
 		for (const FString& File : Files)
 		{
-			Stamps.Add(File, IFileManager::Get().GetTimeStamp(*File));
+			Stamped.Emplace(File, IFileManager::Get().GetTimeStamp(*File));
 		}
-		Files.Sort([&Stamps](const FString& A, const FString& B) { return Stamps[A] > Stamps[B]; });
-		return Files;
+		Stamped.Sort([](const TPair<FString, FDateTime>& A, const TPair<FString, FDateTime>& B) { return A.Value > B.Value; });
+		return Stamped;
+	}
+
+	FString ClaudeProjectsDirectory()
+	{
+		return ConfigDirectory(TEXT("CLAUDE_CONFIG_DIR"), TEXT(".claude")) / TEXT("projects");
+	}
+
+	FString CodexSessionsDirectory()
+	{
+		return ConfigDirectory(TEXT("CODEX_HOME"), TEXT(".codex")) / TEXT("sessions");
 	}
 
 	void AddClaudeSessions(const FString& Root, const int32 MaxSessions, TArray<FHyperAIStudioChatSession>& Out)
 	{
-		const FString Directory = ConfigDirectory(TEXT("CLAUDE_CONFIG_DIR"), TEXT(".claude")) / TEXT("projects")
-			/ ClaudeProjectDirectoryName(Root);
+		const FString Directory = ClaudeProjectsDirectory() / ClaudeProjectDirectoryName(Root);
 		TArray<FString> Names;
 		IFileManager::Get().FindFiles(Names, *(Directory / TEXT("*.jsonl")), /*Files=*/true, /*Directories=*/false);
 		TArray<FString> Paths;
@@ -150,19 +207,28 @@ namespace
 			Paths.Add(Directory / Name);
 		}
 		int32 Found = 0;
-		for (const FString& Path : FilesNewestFirst(MoveTemp(Paths)))
+		for (const TPair<FString, FDateTime>& File : FilesNewestFirst(Paths))
 		{
-			const FString SessionId = FPaths::GetBaseFilename(Path);
-			const FString Text = IsSafeSessionId(SessionId) ? ReadHeadAndTail(Path) : FString();
-			const FString Title = ExtractClaudeTitle(Text);
-			// No title means no typed prompt: an aborted launch, not a conversation worth resuming.
-			if (Title.IsEmpty())
+			const FString SessionId = FPaths::GetBaseFilename(File.Key);
+			if (!IsSafeSessionId(SessionId))
 			{
 				continue;
 			}
-			Out.Add({TEXT("Claude Code"), SessionId, Title, IFileManager::Get().GetTimeStamp(*Path),
-				MentionsUnrealMcpCall(Text)});
-			Out.Last().Path = Path;
+			const FFileFacts Facts = FactsFor(File.Key, File.Value, [&File]()
+			{
+				const FString Text = ReadHeadAndTail(File.Key);
+				FFileFacts Read;
+				Read.Title = ExtractClaudeTitle(Text);
+				Read.bUsedUnrealMcp = MentionsUnrealMcpCall(Text);
+				return Read;
+			});
+			// No title means no typed prompt: an aborted launch, not a conversation worth resuming.
+			if (Facts.Title.IsEmpty())
+			{
+				continue;
+			}
+			Out.Add({TEXT("Claude Code"), SessionId, Facts.Title, File.Value, Facts.bUsedUnrealMcp});
+			Out.Last().Path = File.Key;
 			if (++Found >= MaxSessions)
 			{
 				return;
@@ -194,34 +260,168 @@ namespace
 		TArray<FString> Paths;
 		IFileManager::Get().FindFilesRecursive(Paths, *(CodexHome / TEXT("sessions")), TEXT("rollout-*.jsonl"), true, false);
 		int32 Found = 0;
-		for (const FString& Path : FilesNewestFirst(MoveTemp(Paths)))
+		for (const TPair<FString, FDateTime>& File : FilesNewestFirst(Paths))
 		{
-			const FString Head = ReadRange(Path, 0, FMath::Min(HeadBytes, IFileManager::Get().FileSize(*Path)));
-			int32 Break = INDEX_NONE;
-			const TSharedPtr<FJsonObject> Meta = Head.FindChar(TEXT('\n'), Break) ? ParseLine(Head.Left(Break)) : nullptr;
-			const TSharedPtr<FJsonObject>* Payload = nullptr;
-			FString Id;
-			FString Cwd;
-			if (!Meta || !Meta->TryGetObjectField(TEXT("payload"), Payload)
-				|| !(*Payload)->TryGetStringField(TEXT("id"), Id) || !(*Payload)->TryGetStringField(TEXT("cwd"), Cwd)
-				|| !IsSafeSessionId(Id) || !NormalizeRoot(Cwd).Equals(Root, ESearchCase::IgnoreCase))
+			const FFileFacts Facts = FactsFor(File.Key, File.Value, [&File]()
+			{
+				FFileFacts Read;
+				const FString Head = ReadRange(File.Key, 0, FMath::Min(HeadBytes, IFileManager::Get().FileSize(*File.Key)));
+				int32 Break = INDEX_NONE;
+				const TSharedPtr<FJsonObject> Meta = Head.FindChar(TEXT('\n'), Break) ? ParseLine(Head.Left(Break)) : nullptr;
+				const TSharedPtr<FJsonObject>* Payload = nullptr;
+				if (!Meta || !Meta->TryGetObjectField(TEXT("payload"), Payload))
+				{
+					return Read;
+				}
+				(*Payload)->TryGetStringField(TEXT("id"), Read.Id);
+				(*Payload)->TryGetStringField(TEXT("cwd"), Read.Cwd);
+				// Threads Codex starts for itself, such as the reviewer that judges its own approvals.
+				FString ThreadSource;
+				const TSharedPtr<FJsonObject>* Source = nullptr;
+				Read.bSubagent = ((*Payload)->TryGetStringField(TEXT("thread_source"), ThreadSource) && ThreadSource == TEXT("subagent"))
+					|| ((*Payload)->TryGetObjectField(TEXT("source"), Source) && (*Source)->HasField(TEXT("subagent")));
+				Read.Title = ExtractCodexFirstPrompt(Head);
+				Read.bUsedUnrealMcp = MentionsUnrealMcpCall(Head);
+				return Read;
+			});
+			if (Facts.bSubagent || !IsSafeSessionId(Facts.Id) || !NormalizeRoot(Facts.Cwd).Equals(Root, ESearchCase::IgnoreCase))
 			{
 				continue;
 			}
-			const FString* ThreadName = ThreadNames.Find(Id);
-			const FString Title = OneLine(ThreadName ? *ThreadName : ExtractCodexFirstPrompt(Head));
+			const FString* ThreadName = ThreadNames.Find(Facts.Id);
+			const FString Title = OneLine(ThreadName ? *ThreadName : Facts.Title);
 			if (Title.IsEmpty())
 			{
 				continue;
 			}
-			Out.Add({TEXT("Codex"), Id, Title, IFileManager::Get().GetTimeStamp(*Path), MentionsUnrealMcpCall(Head)});
-			Out.Last().Path = Path;
+			Out.Add({TEXT("Codex"), Facts.Id, Title, File.Value, Facts.bUsedUnrealMcp});
+			Out.Last().Path = File.Key;
 			if (++Found >= MaxSessions)
 			{
 				return;
 			}
 		}
 	}
+
+	/** Moves files and folders to the Recycle Bin, so a deleted chat can still be restored. */
+	bool MoveToRecycleBin(const TArray<FString>& Paths, FString& OutError)
+	{
+#if PLATFORM_WINDOWS
+		// The shell takes the paths as one buffer: each ended by a null, and the list by another.
+		TArray<TCHAR> From;
+		for (const FString& Path : Paths)
+		{
+			const FString Full = FPaths::ConvertRelativePathToFull(Path).Replace(TEXT("/"), TEXT("\\"));
+			From.Append(*Full, Full.Len());
+			From.Add(TEXT('\0'));
+		}
+		From.Add(TEXT('\0'));
+		SHFILEOPSTRUCTW Operation = {};
+		Operation.wFunc = FO_DELETE;
+		Operation.pFrom = From.GetData();
+		Operation.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT;
+		const int32 Result = SHFileOperationW(&Operation);
+		if (Result != 0 || Operation.fAnyOperationsAborted)
+		{
+			OutError = FString::Printf(TEXT("Windows could not move it to the Recycle Bin (error %d)."), Result);
+			return false;
+		}
+		return true;
+#else
+		for (const FString& Path : Paths)
+		{
+			const bool bGone = IFileManager::Get().DirectoryExists(*Path) ? IFileManager::Get().DeleteDirectory(*Path, false, true)
+				: IFileManager::Get().Delete(*Path, false, true);
+			if (!bGone)
+			{
+				OutError = FString::Printf(TEXT("%s could not be deleted."), *Path);
+				return false;
+			}
+		}
+		return true;
+#endif
+	}
+}
+
+FString SessionFile(const FString& AgentName, const FString& ProjectRoot, const FString& SessionId)
+{
+	if (!IsSafeSessionId(SessionId))
+	{
+		return FString();
+	}
+	if (AgentName == TEXT("Claude Code"))
+	{
+		const FString Path = ClaudeProjectsDirectory() / ClaudeProjectDirectoryName(ProjectRoot) / (SessionId + TEXT(".jsonl"));
+		return IFileManager::Get().FileExists(*Path) ? Path : FString();
+	}
+	if (AgentName == TEXT("Codex"))
+	{
+		// A rollout's name ends with its thread id.
+		TArray<FString> Paths;
+		IFileManager::Get().FindFilesRecursive(Paths, *CodexSessionsDirectory(), *(TEXT("rollout-*") + SessionId + TEXT(".jsonl")), true, false);
+		return Paths.IsEmpty() ? FString() : Paths[0];
+	}
+	return FString();
+}
+
+bool DeleteSession(const FHyperAIStudioChatSession& Session, FString& OutError)
+{
+	// Only a log inside the agent's own store, named for the chat, is ever touched.
+	const FString Store = Session.AgentName == TEXT("Claude Code") ? ClaudeProjectsDirectory()
+		: Session.AgentName == TEXT("Codex") ? CodexSessionsDirectory() : FString();
+	const FString Full = FPaths::ConvertRelativePathToFull(Session.Path);
+	if (Store.IsEmpty() || !IsSafeSessionId(Session.SessionId) || !FPaths::IsUnderDirectory(Full, FPaths::ConvertRelativePathToFull(Store))
+		|| !FPaths::GetBaseFilename(Full).EndsWith(Session.SessionId) || !IFileManager::Get().FileExists(*Full))
+	{
+		OutError = TEXT("Its log is not where this chat list read it from.");
+		return false;
+	}
+	TArray<FString> Paths = {Full};
+	// Claude Code keeps a chat's subagent and tool logs in a folder named like it.
+	const FString Folder = FPaths::GetPath(Full) / Session.SessionId;
+	if (Session.AgentName == TEXT("Claude Code") && IFileManager::Get().DirectoryExists(*Folder))
+	{
+		Paths.Add(Folder);
+	}
+	if (!MoveToRecycleBin(Paths, OutError))
+	{
+		return false;
+	}
+	FScopeLock Lock(&FactsLock);
+	KnownFacts().Remove(Session.Path);
+	return true;
+}
+
+TArray<FString> ReadRecentLines(const FString& Path, const int64 MaxBytes, bool& bOutCut)
+{
+	const int64 Size = IFileManager::Get().FileSize(*Path);
+	bOutCut = Size > MaxBytes;
+	TArray<FString> Lines;
+	if (Size <= 0 || MaxBytes <= 0)
+	{
+		return Lines;
+	}
+	ReadRange(Path, bOutCut ? Size - MaxBytes : 0, FMath::Min(Size, MaxBytes)).ParseIntoArrayLines(Lines);
+	// Reading from the middle of the log starts partway through a line.
+	if (bOutCut && !Lines.IsEmpty())
+	{
+		Lines.RemoveAt(0);
+	}
+	return Lines;
+}
+
+FString StripInjectedContext(const FString& Message)
+{
+	FString Typed = Message;
+	for (const TCHAR* Marker : {TEXT("\n\n<project-memory>"), TEXT("\n\n<skills>")})
+	{
+		const int32 At = Typed.Find(Marker, ESearchCase::CaseSensitive);
+		if (At != INDEX_NONE)
+		{
+			Typed.LeftInline(At);
+		}
+	}
+	return Typed.TrimEnd();
 }
 
 TArray<FHyperAIStudioChatSession> ListSessions(const FString& ProjectRoot, const int32 MaxSessions)

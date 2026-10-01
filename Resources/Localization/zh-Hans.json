@@ -2103,6 +2103,42 @@
   },
   {
    "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "AgentAll",
+   "source": "All",
+   "text": "全部"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "AgentAllTooltip",
+   "source": "Chats with every agent",
+   "text": "所有智能体的对话"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "AgentClaude",
+   "source": "Claude Code",
+   "text": "Claude Code"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "AgentClaudeTooltip",
+   "source": "Only Claude Code chats",
+   "text": "仅显示 Claude Code 对话"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "AgentCodex",
+   "source": "Codex",
+   "text": "Codex"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "AgentCodexTooltip",
+   "source": "Only Codex chats",
+   "text": "仅显示 Codex 对话"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
    "key": "BackgroundBadgeTooltip",
    "source": "Running in the background. Click to open it here; right-click to stop it.",
    "text": "正在后台运行。点击在这里打开；右键点击可停止。"
@@ -2121,15 +2157,57 @@
   },
   {
    "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "DeleteConfirm",
+   "source": "Delete \"{0}\"?\n\nIts {1} log goes to the Recycle Bin, so it can be restored from there. Nothing in the project changes.",
+   "text": "删除“{0}”？\n\n它的 {1} 日志会移到回收站，可以从那里恢复。项目中的任何内容都不会改变。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "DeleteConfirmTitle",
+   "source": "Delete Chat",
+   "text": "删除对话"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "DeleteRunning",
+   "source": "This chat is running. Stop it first, then delete it.",
+   "text": "此对话正在运行。请先停止它，再删除。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "DeleteTooltip",
+   "source": "Delete this chat. Its log goes to the Recycle Bin.",
+   "text": "删除此对话。它的日志会移到回收站。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
    "key": "Empty",
    "source": "No Claude Code or Codex chats have run in this project yet.",
    "text": "此项目中还没有运行过 Claude Code 或 Codex 对话。"
   },
   {
    "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "EmptyAgent",
+   "source": "No {0} chats have run in this project yet.",
+   "text": "此项目中还没有运行过 {0} 对话。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "GroupHeadingTooltip",
+   "source": "Click to fold or open this group. Right-click to rename or delete it.",
+   "text": "点击可折叠或展开此分组。右键点击可重命名或删除它。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
    "key": "GroupMonth",
    "source": "Previous 30 Days",
    "text": "过去 30 天"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "GroupNameTaken",
+   "source": "That group name is empty, too long or already used.",
+   "text": "该分组名称为空、过长或已被使用。"
   },
   {
    "namespace": "SHyperAIStudioChatHistorySidebar",
@@ -2181,6 +2259,60 @@
   },
   {
    "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuDelete",
+   "source": "Delete Chat...",
+   "text": "删除对话..."
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuDeleteGroup",
+   "source": "Delete Group",
+   "text": "删除分组"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuDeleteGroupTooltip",
+   "source": "Its chats go back under their dates. No chat is deleted.",
+   "text": "其中的对话会回到各自的日期下。不会删除任何对话。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuDeleteRunningTooltip",
+   "source": "This chat is running. Stop it first, then delete it.",
+   "text": "此对话正在运行。请先停止它，再删除。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuDeleteTooltip",
+   "source": "Delete this chat. Its log goes to the Recycle Bin, where it can be restored.",
+   "text": "删除此对话。它的日志会移到回收站，可以从那里恢复。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuMoveToGroup",
+   "source": "Move to Group",
+   "text": "移到分组"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuMoveToGroupTooltip",
+   "source": "Keep this chat in one of your groups instead of under its date.",
+   "text": "将此对话放在你的某个分组中，而不是放在它的日期下。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuNewGroup",
+   "source": "New Group...",
+   "text": "新建分组..."
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuNewGroupTooltip",
+   "source": "Make a group and move this chat into it.",
+   "text": "新建一个分组，并将此对话移入其中。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
    "key": "MenuPin",
    "source": "Pin to Top",
    "text": "置顶"
@@ -2211,6 +2343,12 @@
   },
   {
    "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuRenameGroup",
+   "source": "Rename Group...",
+   "text": "重命名分组..."
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
    "key": "MenuRenameTooltip",
    "source": "Rename this chat here. The agent's own log is not touched.",
    "text": "在这里重命名此对话。不会改动智能体自己的日志。"
@@ -2235,6 +2373,18 @@
   },
   {
    "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuUngroup",
+   "source": "Remove from Group",
+   "text": "移出分组"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "MenuUngroupTooltip",
+   "source": "Show this chat under its date again.",
+   "text": "将此对话重新显示在它的日期下。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
    "key": "MenuUnpin",
    "source": "Unpin",
    "text": "取消置顶"
@@ -2250,6 +2400,18 @@
    "key": "NewChatTooltip",
    "source": "Start a new chat with the selected agent",
    "text": "用所选智能体开始新对话"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "NewGroupLabel",
+   "source": "New group",
+   "text": "新建分组"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "NewGroupTooltip",
+   "source": "New group, to keep chats together. Move a chat into it from its right-click menu.",
+   "text": "新建分组，把对话归在一起。可从对话的右键菜单将其移入分组。"
   },
   {
    "namespace": "SHyperAIStudioChatHistorySidebar",
@@ -2280,6 +2442,12 @@
    "key": "RemoteBadgeTooltip",
    "source": "Remote Control is on: while it runs, this chat is at claude.ai/code and in the Claude app.",
    "text": "远程控制已开启：运行期间，此对话可在 claude.ai/code 和 Claude 应用中访问。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "RenameGroupLabel",
+   "source": "Group name",
+   "text": "分组名称"
   },
   {
    "namespace": "SHyperAIStudioChatHistorySidebar",
@@ -2316,6 +2484,12 @@
    "key": "SearchHint",
    "source": "Search chats",
    "text": "搜索对话"
+  },
+  {
+   "namespace": "SHyperAIStudioChatHistorySidebar",
+   "key": "SectionHeadingTooltip",
+   "source": "Click to fold or open this section.",
+   "text": "点击可折叠或展开此部分。"
   },
   {
    "namespace": "SHyperAIStudioChatHistorySidebar",
@@ -3984,6 +4158,18 @@
    "key": "CopyPromptTooltip",
    "source": "Copy a context prompt for pasting into an agent outside Unreal.",
    "text": "复制一段上下文提示词，用于粘贴到 Unreal 之外的智能体中。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "DeleteFailed",
+   "source": "The chat was not deleted: {0}",
+   "text": "未删除该对话：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "DeleteOpenChat",
+   "source": "That chat is open in {0}. Start a new chat there, then delete it.",
+   "text": "该对话已在 {0} 中打开。请先在那里开始新对话，再删除它。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",

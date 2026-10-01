@@ -2,6 +2,7 @@
 
 #include "HyperAIStudioNativeChat.h"
 
+#include "Async/Async.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformTime.h"
 #include "CoreGlobals.h"
@@ -25,6 +26,9 @@ DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioNativeChat, Log, All);
 namespace HyperAIStudio::NativeChat::Private
 {
 	constexpr int32 MaxItems = 600;
+	/** How much of a resumed chat comes back: its latest items, read from at most the end of its log. */
+	constexpr int32 MaxEarlierItems = 300;
+	constexpr int64 MaxHistoryBytes = 3 * 1024 * 1024;
 
 	FString& CommandForTests()
 	{
@@ -231,7 +235,52 @@ bool FHyperAIStudioNativeChat::Start(FString& OutError)
 	AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(),
 		ResumeSessionId.IsEmpty() ? FString::Printf(TEXT("Starting %s..."), *AgentName) : FString::Printf(TEXT("Resuming this %s chat..."), *AgentName));
 	Handshake();
+	if (!ResumeSessionId.IsEmpty())
+	{
+		LoadHistory();
+	}
 	return true;
+}
+
+void FHyperAIStudioNativeChat::ShowEarlier(TFunctionRef<void()> Replay, bool bMoreBefore)
+{
+	using namespace HyperAIStudio::NativeChat::Private;
+	const int32 Before = Items.Num();
+	bReplaying = true;
+	Replay();
+	bReplaying = false;
+	TArray<TSharedPtr<FHyperAIStudioChatItem>> Earlier(Items.GetData() + Before, Items.Num() - Before);
+	Items.SetNum(Before);
+	if (!Earlier.IsEmpty())
+	{
+		// The latest of it fits on screen with room for the chat that goes on.
+		if (Earlier.Num() > MaxEarlierItems)
+		{
+			Earlier.RemoveAt(0, Earlier.Num() - MaxEarlierItems);
+			bMoreBefore = true;
+		}
+		for (const TSharedPtr<FHyperAIStudioChatItem>& Item : Earlier)
+		{
+			// A step that was still going when that session ended never finished.
+			if (Item->Status == TEXT("running"))
+			{
+				Item->Status = TEXT("stopped");
+			}
+		}
+		if (bMoreBefore)
+		{
+			Earlier.Insert(MakeShared<FHyperAIStudioChatItem>(), 0);
+			Earlier[0]->Id = FGuid::NewGuid().ToString();
+			Earlier[0]->Text = FString::Printf(TEXT("Earlier messages of this chat are in %s's own history; the latest are shown."), *AgentName);
+		}
+		Items.Insert(Earlier, 0);
+		if (Items.Num() > MaxItems)
+		{
+			Items.RemoveAt(0, Items.Num() - MaxItems);
+		}
+	}
+	// Announced once, items or not: a replayed plan or context size is news too.
+	Changed();
 }
 
 void FHyperAIStudioNativeChat::Stop()
@@ -454,7 +503,8 @@ TSharedRef<FHyperAIStudioChatItem> FHyperAIStudioNativeChat::NewItem(const FHype
 	Item->Text = HyperAIStudio::NativeChat::Private::Clip(Text);
 	Item->Status = Status;
 	Items.Add(Item);
-	if (Items.Num() > HyperAIStudio::NativeChat::Private::MaxItems)
+	// ShowEarlier keeps the length in check once its replay is moved into place.
+	if (!bReplaying && Items.Num() > HyperAIStudio::NativeChat::Private::MaxItems)
 	{
 		Items.RemoveAt(0, Items.Num() - HyperAIStudio::NativeChat::Private::MaxItems);
 	}
@@ -484,7 +534,10 @@ void FHyperAIStudioNativeChat::CloseApproval(const FString& ItemId, const FStrin
 
 void FHyperAIStudioNativeChat::Changed()
 {
-	OnChanged.Broadcast();
+	if (!bReplaying)
+	{
+		OnChanged.Broadcast();
+	}
 }
 
 void FHyperAIStudioNativeChat::Request(const FString& Method, const TSharedRef<FJsonObject>& Params, FOnResult OnResult)
@@ -729,8 +782,57 @@ namespace HyperAIStudio::NativeChat::Private
 					AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(), TEXT("Codex could not start a chat: ") + Error);
 					return;
 				}
-				Ready(StringField(ObjectField(Result, TEXT("thread")), TEXT("id")));
+				const TSharedPtr<FJsonObject> Thread = ObjectField(Result, TEXT("thread"));
+				if (bResume)
+				{
+					// A resumed thread comes back with its turns, items as they streamed live.
+					ShowEarlier([this, &Thread]()
+					{
+						for (const TSharedPtr<FJsonValue>& Turn : ArrayField(Thread, TEXT("turns")))
+						{
+							for (const TSharedPtr<FJsonValue>& Item : ArrayField(Turn.IsValid() && Turn->Type == EJson::Object ? Turn->AsObject() : nullptr, TEXT("items")))
+							{
+								ReplayItem(Item.IsValid() && Item->Type == EJson::Object ? Item->AsObject() : nullptr);
+							}
+						}
+					}, /*bMoreBefore=*/false);
+				}
+				Ready(StringField(Thread, TEXT("id")));
 			});
+		}
+
+		/** One item of a resumed thread: what the user sent, or anything else as it showed live. */
+		void ReplayItem(const TSharedPtr<FJsonObject>& Item)
+		{
+			if (!Item.IsValid())
+			{
+				return;
+			}
+			if (StringField(Item, TEXT("type")) != TEXT("userMessage"))
+			{
+				UpdateItem(Item, /*bCompleted=*/true);
+				return;
+			}
+			FString Text;
+			TArray<FString> Images;
+			for (const TSharedPtr<FJsonValue>& Input : ArrayField(Item, TEXT("content")))
+			{
+				const TSharedPtr<FJsonObject> Part = Input.IsValid() && Input->Type == EJson::Object ? Input->AsObject() : nullptr;
+				const FString Kind = StringField(Part, TEXT("type"));
+				if (Kind == TEXT("text"))
+				{
+					Text += StringField(Part, TEXT("text"));
+				}
+				else if (Kind == TEXT("localImage"))
+				{
+					Images.Add(StringField(Part, TEXT("path")));
+				}
+			}
+			Text = HyperAIStudio::ChatHistory::StripInjectedContext(Text).TrimStartAndEnd();
+			if (!Text.IsEmpty() || !Images.IsEmpty())
+			{
+				AddItem(FHyperAIStudioChatItem::EKind::User, StringField(Item, TEXT("id")), FString(), Text)->Images = Images;
+			}
 		}
 
 		virtual void SendNow(const FString& Text, const TArray<FString>& Images) override
@@ -893,7 +995,7 @@ namespace HyperAIStudio::NativeChat::Private
 				}
 				FString Saved = StringField(Item, TEXT("savedPath"));
 				const FString Data = StringField(Item, TEXT("result"));
-				if (Saved.IsEmpty() && bCompleted && !Data.IsEmpty())
+				if (Saved.IsEmpty() && bCompleted && !Data.IsEmpty() && !bReplaying)
 				{
 					Saved = SaveImageData(Data, TEXT("codex-") + Id);
 				}
@@ -1703,7 +1805,111 @@ namespace HyperAIStudio::NativeChat::Private
 			return true;
 		}
 
+		/** Claude Code resumes without sending the conversation back, so it is read from the end of the chat's log. */
+		virtual void LoadHistory() override
+		{
+			const FString File = HyperAIStudio::ChatHistory::SessionFile(AgentName, ProjectRoot, ResumeSessionId);
+			if (File.IsEmpty())
+			{
+				return;
+			}
+			const TWeakPtr<FHyperAIStudioNativeChat> Weak = AsShared();
+			Async(EAsyncExecution::ThreadPool, [Weak, This = this, File]()
+			{
+				// A long chat's log runs to many megabytes: only its end is read, and it is parsed here, off the game thread.
+				bool bCut = false;
+				TArray<TSharedPtr<FJsonObject>> Records;
+				for (const FString& Line : HyperAIStudio::ChatHistory::ReadRecentLines(File, MaxHistoryBytes, bCut))
+				{
+					// The conversation's own records; a subagent's steps stay inside its card, as they do live.
+					const bool bWanted = Line.Contains(TEXT("\"type\":\"user\"")) || Line.Contains(TEXT("\"type\":\"assistant\""))
+						|| Line.Contains(TEXT("\"subtype\":\"compact_boundary\""));
+					TSharedPtr<FJsonObject> Record;
+					if (bWanted && !Line.Contains(TEXT("\"isSidechain\":true"))
+						&& FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Line), Record) && Record.IsValid())
+					{
+						Records.Add(Record);
+					}
+				}
+				AsyncTask(ENamedThreads::GameThread, [Weak, This, Records = MoveTemp(Records), bCut]()
+				{
+					if (const TSharedPtr<FHyperAIStudioNativeChat> Alive = Weak.Pin())
+					{
+						This->Replay(Records, bCut);
+					}
+				});
+			});
+		}
+
 	private:
+		/** The log's records shown as they were live: what was typed, Claude's replies, its tools and their results. */
+		void Replay(const TArray<TSharedPtr<FJsonObject>>& Records, const bool bCut)
+		{
+			ShowEarlier([this, &Records]()
+			{
+				for (const TSharedPtr<FJsonObject>& Record : Records)
+				{
+					const FString Type = StringField(Record, TEXT("type"));
+					if (Type == TEXT("assistant"))
+					{
+						ShowMessage(ObjectField(Record, TEXT("message")));
+					}
+					else if (Type == TEXT("system") && StringField(Record, TEXT("subtype")) == TEXT("compact_boundary"))
+					{
+						ShowSystem(Record.ToSharedRef());
+					}
+					else if (Type == TEXT("user"))
+					{
+						const FString Typed = TypedPrompt(Record);
+						if (Typed.StartsWith(TEXT("[Request interrupted")))
+						{
+							AddItem(EKind::Notice, FString(), FString(), TEXT("Stopped by the user."));
+						}
+						else if (!Typed.IsEmpty())
+						{
+							AddItem(EKind::User, FString(), FString(), Typed);
+						}
+						else
+						{
+							ShowResults(Record.ToSharedRef());
+						}
+					}
+				}
+			}, bCut);
+		}
+
+		/** What the user typed in a log record; empty for a tool result, injected context or a slash command. */
+		static FString TypedPrompt(const TSharedPtr<FJsonObject>& Record)
+		{
+			bool bMeta = false;
+			Record->TryGetBoolField(TEXT("isMeta"), bMeta);
+			const TSharedPtr<FJsonObject> Message = ObjectField(Record, TEXT("message"));
+			if (bMeta || !Message.IsValid())
+			{
+				return FString();
+			}
+			FString Text;
+			if (!Message->TryGetStringField(TEXT("content"), Text))
+			{
+				for (const TSharedPtr<FJsonValue>& Part : ArrayField(Message, TEXT("content")))
+				{
+					const TSharedPtr<FJsonObject> Piece = Part.IsValid() && Part->Type == EJson::Object ? Part->AsObject() : nullptr;
+					const FString PieceType = StringField(Piece, TEXT("type"));
+					if (PieceType == TEXT("tool_result"))
+					{
+						return FString();
+					}
+					if (PieceType == TEXT("text"))
+					{
+						Text += (Text.IsEmpty() ? FString() : FString(TEXT("\n"))) + StringField(Piece, TEXT("text"));
+					}
+				}
+			}
+			Text = HyperAIStudio::ChatHistory::StripInjectedContext(Text).TrimStartAndEnd();
+			// Command output, reminders and the like arrive as tags, not as anything typed.
+			return Text.StartsWith(TEXT("<")) ? FString() : Text;
+		}
+
 		struct FAsk
 		{
 			FString RequestId;
@@ -2086,7 +2292,7 @@ namespace HyperAIStudio::NativeChat::Private
 						{
 							Text += (Text.IsEmpty() ? FString() : FString(TEXT("\n"))) + StringField(Piece, TEXT("text"));
 						}
-						else if (StringField(Piece, TEXT("type")) == TEXT("image"))
+						else if (StringField(Piece, TEXT("type")) == TEXT("image") && !bReplaying)
 						{
 							const FString PictureId = FString::Printf(TEXT("%s#image%d"), *Id, Pictures++);
 							const FString File = FindItem(PictureId).IsValid() ? FString()

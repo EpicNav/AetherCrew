@@ -2,14 +2,21 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Async/TaskGraphInterfaces.h"
+#include "Containers/Ticker.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformMisc.h"
+#include "HAL/PlatformTime.h"
 #include "HyperAIStudioAgentChatHistory.h"
+#include "HyperAIStudioChatHistoryPrefs.h"
+#include "HyperAIStudioWidgetShot.h"
+#include "SHyperAIStudioChatHistorySidebar.h"
 #include "HAL/PlatformProcess.h"
 #include "HyperAIStudioService.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "Internationalization/Regex.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -186,6 +193,258 @@ bool FHyperAIStudioRemoteChatsLiveTest::RunTest(const FString& Parameters)
 	int32 ReturnCode = 0;
 	FString Output;
 	FPlatformProcess::ExecProcess(TEXT("cmd.exe"), *FString::Printf(TEXT("/d /s /c \"%s rm %s\""), *Claude, *ShortId), &ReturnCode, &Output, nullptr);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioChatListTest,
+	"HyperAIStudio.Chat.ChatList",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioChatListTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ChatHistory;
+	const FString Scratch = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudioTests/ChatList"));
+	IFileManager::Get().DeleteDirectory(*Scratch, false, true);
+	const FString Root = TEXT("E:/Some Project");
+	const FString ClaudeDir = Scratch / TEXT("claude/projects") / ClaudeProjectDirectoryName(Root);
+	auto ClaudeLog = [](const FString& Prompt)
+	{
+		return FString::Printf(TEXT("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"%s\"}}\n"), *Prompt);
+	};
+	// More chats than the list used to keep. The oldest, like a long-running main chat, must still be listed.
+	TArray<FString> Ids;
+	for (int32 Index = 0; Index < 60; ++Index)
+	{
+		Ids.Add(FString::Printf(TEXT("%08x-0000-4000-8000-000000000000"), Index));
+		const FString Path = ClaudeDir / Ids.Last() + TEXT(".jsonl");
+		FFileHelper::SaveStringToFile(ClaudeLog(FString::Printf(TEXT("Chat number %d"), Index)), *Path);
+		IFileManager::Get().SetTimeStamp(*Path, FDateTime::UtcNow() - FTimespan::FromMinutes(60 - Index));
+	}
+	FFileHelper::SaveStringToFile(TEXT("{}"), *(ClaudeDir / Ids[0] / TEXT("subagents/agent-a.jsonl")));
+	auto CodexLog = [](const FString& Id, const FString& Cwd, const bool bReviewer)
+	{
+		return FString::Printf(TEXT("{\"type\":\"session_meta\",\"payload\":{\"id\":\"%s\",\"cwd\":\"%s\"%s}}\n"), *Id, *Cwd.Replace(TEXT("/"), TEXT("\\\\")),
+			bReviewer ? TEXT(",\"thread_source\":\"subagent\",\"source\":{\"subagent\":{\"other\":\"guardian\"}}") : TEXT(""))
+			+ TEXT("{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Build the title screen\"}]}}\n");
+	};
+	const FString CodexId = TEXT("01a0975b-2c7e-7e72-a9ce-13cfc8c4a95d");
+	const FString ReviewerId = TEXT("01a0975b-2c7e-7e72-a9ce-13cfc8c4a95e");
+	FFileHelper::SaveStringToFile(CodexLog(CodexId, Root, false), *(Scratch / TEXT("codex/sessions/2026/09/12/rollout-2026-09-12T10-00-00-") + CodexId + TEXT(".jsonl")));
+	FFileHelper::SaveStringToFile(CodexLog(ReviewerId, Root, true), *(Scratch / TEXT("codex/sessions/2026/09/12/rollout-2026-09-12T10-05-00-") + ReviewerId + TEXT(".jsonl")));
+
+	const FString PreviousClaude = FPlatformMisc::GetEnvironmentVariable(TEXT("CLAUDE_CONFIG_DIR"));
+	const FString PreviousCodex = FPlatformMisc::GetEnvironmentVariable(TEXT("CODEX_HOME"));
+	FPlatformMisc::SetEnvironmentVar(TEXT("CLAUDE_CONFIG_DIR"), *(Scratch / TEXT("claude")));
+	FPlatformMisc::SetEnvironmentVar(TEXT("CODEX_HOME"), *(Scratch / TEXT("codex")));
+	ON_SCOPE_EXIT
+	{
+		FPlatformMisc::SetEnvironmentVar(TEXT("CLAUDE_CONFIG_DIR"), *PreviousClaude);
+		FPlatformMisc::SetEnvironmentVar(TEXT("CODEX_HOME"), *PreviousCodex);
+		IFileManager::Get().DeleteDirectory(*Scratch, false, true);
+	};
+	auto Listed = [&Root](const FString& Id)
+	{
+		return ListSessions(Root).FindByPredicate([&Id](const FHyperAIStudioChatSession& Session) { return Session.SessionId == Id; }) != nullptr;
+	};
+
+	TArray<FHyperAIStudioChatSession> Sessions = ListSessions(Root);
+	TestEqual(TEXT("Every chat is listed, past the old cap of 50"), Sessions.Num(), 61);
+	TestTrue(TEXT("the oldest too"), Listed(Ids[0]));
+	TestFalse(TEXT("The thread Codex runs to review its own approvals is not a chat"), Listed(ReviewerId));
+
+	// A rename lands at the end of the log: listing again reads the changed file instead of what it remembered.
+	FFileHelper::SaveStringToFile(ClaudeLog(TEXT("Chat number 59")) + TEXT("{\"type\":\"custom-title\",\"customTitle\":\"Main Chat\"}\n"), *(ClaudeDir / Ids[59] + TEXT(".jsonl")));
+	Sessions = ListSessions(Root);
+	const FHyperAIStudioChatSession* Renamed = Sessions.FindByPredicate([&Ids](const FHyperAIStudioChatSession& Session) { return Session.SessionId == Ids[59]; });
+	TestTrue(TEXT("A changed log is read again"), Renamed && Renamed->Title == TEXT("Main Chat"));
+
+	TestTrue(TEXT("A Claude Code chat's log is found from its id"), FPaths::IsSamePath(SessionFile(TEXT("Claude Code"), Root, Ids[3]), ClaudeDir / Ids[3] + TEXT(".jsonl")));
+	TestTrue(TEXT("and a Codex thread's"), SessionFile(TEXT("Codex"), Root, CodexId).EndsWith(CodexId + TEXT(".jsonl")));
+	TestTrue(TEXT("and a chat with no log has none"), SessionFile(TEXT("Claude Code"), Root, TEXT("ffffffff-0000-4000-8000-000000000000")).IsEmpty());
+
+	const FHyperAIStudioChatSession* Oldest = Sessions.FindByPredicate([&Ids](const FHyperAIStudioChatSession& Session) { return Session.SessionId == Ids[0]; });
+	FString Error;
+	TestTrue(TEXT("A chat is deleted: ") + Error, Oldest && DeleteSession(*Oldest, Error));
+	TestFalse(TEXT("its log is gone"), IFileManager::Get().FileExists(*(ClaudeDir / Ids[0] + TEXT(".jsonl"))));
+	TestFalse(TEXT("with its subagents' logs"), IFileManager::Get().DirectoryExists(*(ClaudeDir / Ids[0])));
+	TestFalse(TEXT("and it is no longer listed"), Listed(Ids[0]));
+
+	// Only a log inside the agent's own store, named for the chat, is ever touched.
+	FHyperAIStudioChatSession Stray = Sessions[0];
+	Stray.Path = Scratch / TEXT("elsewhere") / Stray.SessionId + TEXT(".jsonl");
+	FFileHelper::SaveStringToFile(TEXT("{}"), *Stray.Path);
+	TestFalse(TEXT("A log outside the agent's store is refused"), DeleteSession(Stray, Error));
+	TestTrue(TEXT("and left where it is"), IFileManager::Get().FileExists(*Stray.Path));
+
+	TestEqual(TEXT("What HyperAI sent along with a message is not part of what was typed"),
+		StripInjectedContext(TEXT("Fix the ramp\n\n<project-memory>\nNotes\n</project-memory>\n\n<skills>\nA skill\n</skills>")), FString(TEXT("Fix the ramp")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioChatGroupsTest,
+	"HyperAIStudio.Chat.ChatGroups",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioChatGroupsTest::RunTest(const FString& Parameters)
+{
+	using FPrefs = UHyperAIStudioChatHistoryPrefs;
+	FPrefs* Prefs = GetMutableDefault<FPrefs>();
+	// The user's own groups, folds and names are kept aside and put back.
+	const TArray<FString> Groups = Prefs->Groups;
+	const TMap<FString, FString> ChatGroups = Prefs->ChatGroups;
+	const TArray<FString> Collapsed = Prefs->Collapsed;
+	const FString AgentFilter = Prefs->AgentFilter;
+	const TMap<FString, FString> Titles = Prefs->Titles;
+	const TArray<FString> Pinned = Prefs->Pinned;
+	const TArray<FString> Remote = Prefs->Remote;
+	ON_SCOPE_EXIT
+	{
+		Prefs->Groups = Groups;
+		Prefs->ChatGroups = ChatGroups;
+		Prefs->Collapsed = Collapsed;
+		Prefs->AgentFilter = AgentFilter;
+		Prefs->Titles = Titles;
+		Prefs->Pinned = Pinned;
+		Prefs->Remote = Remote;
+		Prefs->SaveConfig();
+	};
+	Prefs->Groups.Reset();
+	Prefs->ChatGroups.Reset();
+	Prefs->Collapsed.Reset();
+	const FString Chat = TEXT("7350db99-a8d7-4f9d-9c85-9b141c4163a6");
+
+	TestTrue(TEXT("A group is made"), FPrefs::AddGroup(TEXT("Combat")));
+	TestFalse(TEXT("not twice, whatever the case"), FPrefs::AddGroup(TEXT(" combat ")));
+	TestFalse(TEXT("nor blank"), FPrefs::AddGroup(TEXT("   ")));
+	TestFalse(TEXT("nor too long"), FPrefs::AddGroup(FString::ChrN(FPrefs::MaxGroupNameChars + 1, TEXT('x'))));
+	FPrefs::SetGroup(Chat, TEXT("Combat"));
+	TestEqual(TEXT("A chat moves into it"), FPrefs::GetGroup(Chat), FString(TEXT("Combat")));
+	FPrefs::SetCollapsed(TEXT("group:Combat"), true);
+	TestTrue(TEXT("A renamed group keeps its chats and stays folded"), FPrefs::RenameGroup(TEXT("Combat"), TEXT("Melee"))
+		&& FPrefs::GetGroup(Chat) == TEXT("Melee") && FPrefs::IsCollapsed(TEXT("group:Melee")) && !FPrefs::IsCollapsed(TEXT("group:Combat")));
+	FPrefs::RemoveGroup(TEXT("Melee"));
+	TestTrue(TEXT("A deleted group sends its chats back to their dates"), FPrefs::GetGroup(Chat).IsEmpty() && !FPrefs::IsCollapsed(TEXT("group:Melee")));
+	FPrefs::SetGroup(Chat, TEXT("Nowhere"));
+	TestTrue(TEXT("A chat cannot move into a group that does not exist"), FPrefs::GetGroup(Chat).IsEmpty());
+
+	FPrefs::AddGroup(TEXT("Combat"));
+	FPrefs::SetGroup(Chat, TEXT("Combat"));
+	FPrefs::SetTitle(Chat, TEXT("Main Chat"));
+	if (!FPrefs::IsPinned(Chat))
+	{
+		FPrefs::TogglePinned(Chat);
+	}
+	FPrefs::Forget(Chat);
+	TestTrue(TEXT("A deleted chat leaves no name, pin or group behind"),
+		FPrefs::GetGroup(Chat).IsEmpty() && FPrefs::GetTitle(Chat).IsEmpty() && !FPrefs::IsPinned(Chat));
+
+	FPrefs::SetAgentFilter(TEXT("Codex"));
+	TestEqual(TEXT("The list remembers whose chats it shows"), FPrefs::GetAgentFilter(), FString(TEXT("Codex")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioChatSidebarShotTest,
+	"HyperAIStudio.Chat.SidebarShot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioChatSidebarShotTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ChatHistory;
+	using FPrefs = UHyperAIStudioChatHistoryPrefs;
+	const FString Scratch = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudioTests/ChatSidebar"));
+	IFileManager::Get().DeleteDirectory(*Scratch, false, true);
+	const FString Root = FHyperAIStudioService::GetProjectRoot();
+	struct FChat
+	{
+		const TCHAR* Title;
+		bool bCodex;
+		double HoursAgo;
+	};
+	const FChat Chats[] = {
+		{TEXT("Arena ramp and cover pass"), false, 0.2}, {TEXT("Knockdown get-up timing"), false, 1.5}, {TEXT("Title screen UMG"), true, 2.0},
+		{TEXT("Main Chat"), false, 30.0}, {TEXT("Boss roar layers"), false, 50.0}, {TEXT("Combat VFX: sword trails"), true, 100.0},
+		{TEXT("Parry window tuning"), false, 120.0}, {TEXT("Level streaming setup"), false, 300.0}, {TEXT("Inventory widget"), true, 400.0},
+		{TEXT("Dodge roll i-frames"), false, 900.0}, {TEXT("Lighting look dev"), false, 1500.0}};
+	TMap<FString, FString> Ids;
+	int32 Index = 0;
+	for (const FChat& Chat : Chats)
+	{
+		const FString Id = FString::Printf(TEXT("%08x-0000-4000-8000-0000000000%02d"), 0x51de0000 + Index, Index);
+		++Index;
+		Ids.Add(Chat.Title, Id);
+		const FString Path = Chat.bCodex
+			? Scratch / TEXT("codex/sessions/2026/09/30/rollout-2026-09-30T10-00-00-") + Id + TEXT(".jsonl")
+			: Scratch / TEXT("claude/projects") / ClaudeProjectDirectoryName(Root) / Id + TEXT(".jsonl");
+		const FString Log = Chat.bCodex
+			? FString::Printf(TEXT("{\"type\":\"session_meta\",\"payload\":{\"id\":\"%s\",\"cwd\":\"%s\"}}\n{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"%s\"}]}}\n"),
+				*Id, *Root.Replace(TEXT("/"), TEXT("\\\\")), Chat.Title)
+			: FString::Printf(TEXT("{\"type\":\"ai-title\",\"aiTitle\":\"%s\"}\n{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"%s\"}}\n%s"), Chat.Title, Chat.Title,
+				Index % 3 == 0 ? TEXT("{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"mcp__unreal-mcp__call_tool\"}]}}\n") : TEXT(""));
+		FFileHelper::SaveStringToFile(Log, *Path);
+		IFileManager::Get().SetTimeStamp(*Path, FDateTime::UtcNow() - FTimespan::FromHours(Chat.HoursAgo));
+	}
+
+	// A pinned chat, a group of two, and a folded section, kept aside from the user's own and put back after.
+	FPrefs* Prefs = GetMutableDefault<FPrefs>();
+	const TArray<FString> Groups = Prefs->Groups;
+	const TMap<FString, FString> ChatGroups = Prefs->ChatGroups;
+	const TArray<FString> Collapsed = Prefs->Collapsed;
+	const FString AgentFilter = Prefs->AgentFilter;
+	const TArray<FString> Pinned = Prefs->Pinned;
+	const FString PreviousClaude = FPlatformMisc::GetEnvironmentVariable(TEXT("CLAUDE_CONFIG_DIR"));
+	const FString PreviousCodex = FPlatformMisc::GetEnvironmentVariable(TEXT("CODEX_HOME"));
+	ON_SCOPE_EXIT
+	{
+		Prefs->Groups = Groups;
+		Prefs->ChatGroups = ChatGroups;
+		Prefs->Collapsed = Collapsed;
+		Prefs->AgentFilter = AgentFilter;
+		Prefs->Pinned = Pinned;
+		Prefs->SaveConfig();
+		FPlatformMisc::SetEnvironmentVar(TEXT("CLAUDE_CONFIG_DIR"), *PreviousClaude);
+		FPlatformMisc::SetEnvironmentVar(TEXT("CODEX_HOME"), *PreviousCodex);
+		IFileManager::Get().DeleteDirectory(*Scratch, false, true);
+	};
+	Prefs->Groups.Reset();
+	Prefs->ChatGroups.Reset();
+	Prefs->Collapsed.Reset();
+	Prefs->AgentFilter.Reset();
+	FPrefs::AddGroup(TEXT("Combat"));
+	FPrefs::SetGroup(Ids[TEXT("Combat VFX: sword trails")], TEXT("Combat"));
+	FPrefs::SetGroup(Ids[TEXT("Parry window tuning")], TEXT("Combat"));
+	if (!FPrefs::IsPinned(Ids[TEXT("Main Chat")]))
+	{
+		FPrefs::TogglePinned(Ids[TEXT("Main Chat")]);
+	}
+	FPrefs::SetCollapsed(TEXT("month"), true);
+	FPlatformMisc::SetEnvironmentVar(TEXT("CLAUDE_CONFIG_DIR"), *(Scratch / TEXT("claude")));
+	FPlatformMisc::SetEnvironmentVar(TEXT("CODEX_HOME"), *(Scratch / TEXT("codex")));
+
+	const TSharedRef<SHyperAIStudioChatHistorySidebar> Sidebar = SNew(SHyperAIStudioChatHistorySidebar)
+		.ActiveSessionId(Ids[TEXT("Arena ramp and cover pass")]);
+	Sidebar->Refresh();
+	const double End = FPlatformTime::Seconds() + 30.0;
+	while (Sidebar->IsLoading() && FPlatformTime::Seconds() < End)
+	{
+		FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+		FTSTicker::GetCoreTicker().Tick(0.05f);
+		FPlatformProcess::Sleep(0.02f);
+	}
+	TestFalse(TEXT("The chats are read"), Sidebar->IsLoading());
+	const FString All = HyperAIStudio::Tests::SaveWidgetShot(Sidebar, FIntPoint(300, 760), TEXT("step20-chat-sidebar"));
+	FPrefs::SetAgentFilter(TEXT("Codex"));
+	Sidebar->RebuildFiltered();
+	const FString Codex = HyperAIStudio::Tests::SaveWidgetShot(Sidebar, FIntPoint(300, 420), TEXT("step20-chat-sidebar-codex"));
+	if (All.IsEmpty())
+	{
+		AddWarning(TEXT("This editor cannot draw off screen, so the chat list was not pictured."));
+		return true;
+	}
+	AddInfo(TEXT("Picture chat-sidebar: ") + All);
+	AddInfo(TEXT("Picture chat-sidebar-codex: ") + Codex);
 	return true;
 }
 

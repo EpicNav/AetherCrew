@@ -61,6 +61,8 @@ public class HyperAIStudio : ModuleRules
 			// N edition without the Media Feature Pack still loads the plugin and only recording is unavailable.
 			PublicSystemLibraries.AddRange(new[] { "mfplat.lib", "mfreadwrite.lib", "mfuuid.lib" });
 			PublicDelayLoadDLLs.AddRange(new[] { "mfplat.dll", "mfreadwrite.dll" });
+			// A deleted chat's log goes to the Recycle Bin through the shell.
+			PublicSystemLibraries.Add("shell32.lib");
 		}
 	}
 }

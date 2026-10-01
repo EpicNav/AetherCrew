@@ -124,6 +124,13 @@ protected:
 	virtual TSharedRef<FJsonObject> AnswerPayload(const FHyperAIStudioChatItem& Item, int32 Choice) = 0;
 	/** Sees every message before it is read as JSON-RPC; true when it was handled. */
 	virtual bool HandleLine(const TSharedRef<FJsonObject>& /*Line*/) { return false; }
+	/** A resumed chat brings back what was said before, for an agent that does not send it back itself. */
+	virtual void LoadHistory() {}
+	/**
+	 * Shows an earlier part of the chat above everything on screen: Replay adds its items as the live chat would, and
+	 * they move to the top. bMoreBefore says the conversation goes back further than what is shown.
+	 */
+	void ShowEarlier(TFunctionRef<void()> Replay, bool bMoreBefore);
 
 	/** One message to the agent, as a line. */
 	void Write(const TSharedRef<FJsonObject>& Message);
@@ -158,6 +165,8 @@ protected:
 	TArray<FHyperAIStudioChatPlanStep> Plan;
 	bool bHeadless = false;
 	FString HeadlessInstructions;
+	/** Set while ShowEarlier replays: nothing is announced, and pictures are not written to disk again. */
+	bool bReplaying = false;
 
 private:
 	struct FQueuedMessage
