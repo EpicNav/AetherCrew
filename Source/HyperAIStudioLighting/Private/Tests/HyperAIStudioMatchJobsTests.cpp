@@ -60,6 +60,92 @@ bool FHyperAIStudioMatchJobsPromptTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioMatchStudiesTest,
+	"HyperAIStudio.Lighting.MatchJobs.Studies",
+	HyperAIStudio::Lighting::MatchJobTests::Flags)
+
+bool FHyperAIStudioMatchStudiesTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Lighting::MatchJobTests;
+	namespace Jobs = HyperAIStudio::Lighting::MatchJobs;
+	namespace Studies = HyperAIStudio::Lighting::Studies;
+	auto Noted = [](const int32 Index, const float Score, const TCHAR* Note)
+	{
+		FHyperAIImageIteration Iteration = Attempt(Index, Score);
+		Iteration.Note = Note;
+		return Iteration;
+	};
+	const TArray<FHyperAIImageIteration> History = {Noted(0, 50.f, TEXT("locked EV100 12")), Noted(1, 58.f, TEXT("sun pitch -12, 3800 K")),
+		Noted(2, 55.f, TEXT("fog density 0.05")), Noted(3, 57.5f, TEXT("sky light 1.5")), Noted(4, 63.f, TEXT("Roughness 0.85 -> 0.2 on M_Floor")),
+		Noted(5, 60.f, TEXT("line one\nline two"))};
+	TArray<FString> Helped;
+	TArray<FString> Hurt;
+	Studies::Learn(History, Helped, Hurt);
+	TestTrue(TEXT("what raised the best, biggest gain first, with its note and attempt"), Helped.Num() == 2
+		&& Helped[0] == TEXT("+8: sun pitch -12, 3800 K (attempt 1)") && Helped[1] == TEXT("+5: Roughness 0.85 -> 0.2 on M_Floor (attempt 4)"));
+	TestTrue(TEXT("what lost two points or more against the best before it, on one line"), Hurt.Num() == 2
+		&& Hurt[0] == TEXT("-3: fog density 0.05 (attempt 2)") && Hurt[1] == TEXT("-3: line one line two (attempt 5)"));
+
+	FHyperAIStudioAgentJobInfo Job;
+	Job.Id = 7;
+	Job.State = EHyperAIStudioAgentJobState::Stopped;
+	Job.Status = TEXT("Best 63 of 78 after 6 attempts. Two rounds gained under a point, so the job stopped at its best.");
+	TestFalse(TEXT("a job that scored nothing leaves no study"),
+		Jobs::StudyOf(Jobs::EGoal::Lighting, TEXT("s"), TEXT("Content/References/dusk.png"), TEXT("/Game/Maps/Ruins"), 78.f, Job, {}, {}, {}).IsSet());
+	const TOptional<Studies::FStudy> Study = Jobs::StudyOf(Jobs::EGoal::Lighting, TEXT("match_lighting_20261001_101500"), TEXT("Content/References/dusk.png"),
+		TEXT("/Game/Maps/Ruins"), 78.f, Job, History, {TEXT("top left: darker by 0.8 EV, cooler")}, {TEXT("Brighten by 0.8 EV.")});
+	if (!TestTrue(TEXT("one that scored leaves one"), Study.IsSet()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("stopped at its best, after every attempt"), Study->Result == TEXT("stopped") && Study->Best == 63.f && Study->Attempts == 6 && Study->Helped == Helped);
+	Studies::FStudy Read;
+	TestTrue(TEXT("it reads back as written"), Studies::Parse(Studies::Format(*Study), Read));
+	TestTrue(TEXT("every field of it"), Read.Goal == TEXT("lighting") && Read.Reference == Study->Reference && Read.Level == Study->Level && Read.Session == Study->Session
+		&& Read.Result == Study->Result && Read.Status == Study->Status && Read.Best == 63.f && Read.Target == 78.f && Read.Attempts == 6 && Read.Date == Study->Date
+		&& Read.Helped == Study->Helped && Read.Hurt == Study->Hurt && Read.StillDiffered == Study->StillDiffered && Read.NextSteps == Study->NextSteps);
+
+	const FString Project = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Tests/StudiesProject_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8));
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*Project, /*RequireExists=*/false, /*Tree=*/true);
+	};
+	FString Path;
+	FString Error;
+	TestTrue(TEXT("it is written: ") + Error, Studies::Write(Project, *Study, Path, Error));
+	TestTrue(TEXT("under .hyperai/memory/studies, named for its date, goal, reference and time: ") + Path,
+		Path.Contains(TEXT("/.hyperai/memory/studies/")) && Path.EndsWith(Study->Date + TEXT("-lighting-dusk-101500.md")));
+	Studies::FStudy Harbour = *Study;
+	Harbour.Goal = TEXT("level");
+	Harbour.Level = TEXT("/Game/Maps/Harbour");
+	Harbour.Session = TEXT("match_level_20260930_090000");
+	Harbour.Date = TEXT("2026-09-30");
+	Harbour.Helped = {TEXT("+6: harbour crane added (attempt 2)")};
+	TestTrue(TEXT("a second is written: ") + Error, Studies::Write(Project, Harbour, Path, Error));
+	const TArray<Studies::FStudy> Loaded = Studies::Load(Project, 10);
+	TestTrue(TEXT("both load, newest first"), Loaded.Num() == 2 && Loaded[0].Date >= Loaded[1].Date);
+	const FString Lessons = Studies::Lessons(Loaded, TEXT("lighting"), TEXT("/Game/Maps/Ruins"));
+	TestTrue(TEXT("a lighting job on the same level learns what helped"), Lessons.Contains(TEXT("Helped: +8: sun pitch -12, 3800 K (attempt 1)")));
+	TestTrue(TEXT("what hurt"), Lessons.Contains(TEXT("Hurt: -3: fog density 0.05 (attempt 2)")));
+	TestTrue(TEXT("and where it fell short"), Lessons.Contains(TEXT("Still differed: top left: darker by 0.8 EV, cooler.")));
+	TestFalse(TEXT("another level's study for another goal is left out"), Lessons.Contains(TEXT("Harbour")));
+	const FString Elsewhere = Studies::Lessons(Loaded, TEXT("level"), TEXT("/Game/Maps/Elsewhere"));
+	TestTrue(TEXT("another level's study for the same goal is kept"), Elsewhere.Contains(TEXT("Harbour")) && !Elsewhere.Contains(TEXT("Ruins")));
+	TestTrue(TEXT("no studies, no lessons"), Studies::Lessons({}, TEXT("lighting"), TEXT("/Game/Maps/Ruins")).IsEmpty());
+
+	Jobs::FRoundState State;
+	const FHyperAIStudioAgentJobVerdict Verdict = Jobs::Judge(State, Jobs::EGoal::Lighting, TEXT("s"), 78.f, 2, History, {}, {});
+	TestTrue(TEXT("a round's message says what lowered the score, so it is not repeated"),
+		Verdict.NextMessage.Contains(TEXT("What lowered the score this session, so do not do it again:\n- -3: fog density 0.05 (attempt 2)")));
+	TestTrue(TEXT("and what raised it"), Verdict.NextMessage.Contains(TEXT("What raised it, to build on:\n- +8: sun pitch -12, 3800 K (attempt 1)")));
+	const FString Prompt = Jobs::BuildPrompt(Jobs::EGoal::Lighting, TEXT("Content/References/dusk.png"), TEXT("s"), 78.f, FString(), FString(), Lessons);
+	TestTrue(TEXT("the next job's prompt carries the lessons"), Prompt.Contains(Lessons));
+	TestTrue(TEXT("and how to tune what the light lands on"), Prompt.Contains(TEXT("set_material_parameter")) && Prompt.Contains(TEXT("emissive_light_source")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHyperAIStudioMatchJobsJudgeTest,
 	"HyperAIStudio.Lighting.MatchJobs.Judge",
 	HyperAIStudio::Lighting::MatchJobTests::Flags)

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "HyperAIStudioAgentJobs.h"
 #include "HyperAIStudioLightingToolset.h"
+#include "HyperAIStudioMatchStudies.h"
 #include "HyperAIStudioPreviewPanel.h"
 
 class UWorld;
@@ -12,7 +13,8 @@ class UWorld;
 /**
  * Match it: a reference image handed to the preferred agent, which changes the level until hyper_image_compare scores
  * it at the target. HyperAI reads the match session after each turn and sends the agent back to work with what still
- * differs, until the target, two rounds without a gain, or the round limit.
+ * differs, until the target, two rounds without a gain, or the round limit. When the job ends, HyperAI keeps a study of
+ * it (Studies), and the next job starts from the studies that bear on it.
  */
 namespace HyperAIStudio::Lighting::MatchJobs
 {
@@ -50,8 +52,9 @@ namespace HyperAIStudio::Lighting::MatchJobs
 	 * view for every attempt, from the capture.json beside the picture it changed; empty otherwise.
 	 */
 	FString SameViewNote(const FString& ReferenceImagePath);
+	/** Lessons are what earlier jobs' studies teach this one (Studies::Lessons), empty without any. */
 	FString BuildPrompt(EGoal Goal, const FString& ReferenceProjectPath, const FString& SessionId, float Target, const FString& SkyNote,
-		const FString& SameView = FString());
+		const FString& SameView = FString(), const FString& Lessons = FString());
 
 	struct FRoundState
 	{
@@ -64,8 +67,14 @@ namespace HyperAIStudio::Lighting::MatchJobs
 	};
 	/**
 	 * The verdict after a turn from the session's history. Weakest and Suggestions describe its best attempt. NextRound
-	 * numbers the round the message would start.
+	 * numbers the round the message would start, which also says what raised and what lowered the score so far.
 	 */
 	FHyperAIStudioAgentJobVerdict Judge(FRoundState& State, EGoal Goal, const FString& SessionId, float Target, int32 NextRound,
 		const TArray<FHyperAIImageIteration>& History, const TArray<FString>& Weakest, const TArray<FString>& Suggestions);
+	/**
+	 * The study of an ended job, from its session's history: how it ended, what raised and lowered the score, where the
+	 * best attempt still differed and what was suggested next. Unset when no attempt was scored.
+	 */
+	TOptional<Studies::FStudy> StudyOf(EGoal Goal, const FString& SessionId, const FString& ReferenceProjectPath, const FString& Level, float Target,
+		const FHyperAIStudioAgentJobInfo& Job, const TArray<FHyperAIImageIteration>& History, const TArray<FString>& Weakest, const TArray<FString>& Suggestions);
 }

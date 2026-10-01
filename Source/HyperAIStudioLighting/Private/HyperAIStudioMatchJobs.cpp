@@ -4,6 +4,7 @@
 
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
+#include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
@@ -194,20 +195,21 @@ FString SkyNote(UWorld& World)
 	return Note;
 }
 
-FString BuildPrompt(const EGoal Goal, const FString& Reference, const FString& SessionId, const float Target, const FString& Sky, const FString& SameView)
+FString BuildPrompt(const EGoal Goal, const FString& Reference, const FString& SessionId, const float Target, const FString& Sky, const FString& SameView,
+	const FString& Lessons)
 {
 	const FString Loop = FString::Printf(
 		TEXT("This is a HyperAI Match job. After each of your turns HyperAI scores the session and, until the best attempt reaches %d, sends you back to work with what still differs. So work in rounds of up to 12 attempts, and end each turn with a one-line status.\n\n"),
 		Points(Target));
 	const FString Compare = FString::Printf(
-		TEXT("call hyper_image_compare with referenceImagePath %s, sessionId %s, mode look, targetScore %d and a note saying what changed. Open its side-by-side and heat map before choosing the next change."),
+		TEXT("call hyper_image_compare with referenceImagePath %s, sessionId %s, mode look, targetScore %d and a note naming what changed and its new values, such as \"sun pitch -12, 3800 K\": HyperAI learns from those notes which changes helped. Open its side-by-side and heat map before choosing the next change."),
 		*Reference, *SessionId, Points(Target));
 	if (Goal == EGoal::Lighting)
 	{
 		return FString::Printf(TEXT("Match the lighting of the open level to the reference image %s (attached).\n\n"), *Reference) + Loop
 			+ TEXT("How to work (the image-match skill has the details):\n")
 			+ TEXT("1. Look at the reference and say in one sentence what makes its look: time of day, key light direction and colour, palette, contrast, fog and mood.\n")
-			+ TEXT("2. Call hyper_lighting_inspect to see how the level is lit.") + Sky + TEXT("\n")
+			+ TEXT("2. Call hyper_lighting_inspect to see how the level is lit, which materials the view shows, and how the project renders light (its rendering list: GI and reflection method, tracing).") + Sky + TEXT("\n")
 			+ TEXT("3. Lock exposure first with lock_exposure, or every change is undone by the eye adapting. For lights in physical units that is about 15 EV100 for noon sun, 12 overcast, 8 a bright interior, 4 a dim one, -2 moonlight. A sky whose lights are not physical, such as Ultra Dynamic Sky, sits far lower, often -3 to 3: capture after locking and move the EV100 until the frame's luminanceP50 is near 0.18. A black or white capture means the EV100 is wrong, not the light.\n")
 			+ (SameView.IsEmpty()
 				? FString(TEXT("4. Frame the view once: a camera where the reference's camera would stand, captured with hyper_capture_view (source camera, the reference's aspect ratio). Use that same capture for every attempt.\n"))
@@ -216,12 +218,14 @@ FString BuildPrompt(const EGoal Goal, const FString& Reference, const FString& S
 			+ TEXT("6. Light it as a lighting artist does, with every tool rather than one:\n")
 			+ TEXT("   - The key light first: the sun's pitch, yaw, temperature and intensity, and source_angle for how soft its shadows fall.\n")
 			+ TEXT("   - Tell assets from light. The reference may show finished assets where the level has blockout shapes: foliage lets light through where a solid sphere blocks it, textures break light up, and bounce light fills real shadows. Do not chase an asset difference with light: set_actor_shadow false on a shape that stands for foliage, cloth or glass, and leave surface detail to the materials.\n")
+			+ TEXT("   - Surfaces take the light. Where the reference shows a surface glossier, wetter, rougher, brighter, darker or glowing where the level's is not, change its material, not the light. hyper_lighting_inspect lists the materials in view with their parameters and notes on what keeps each from taking light as the real surface would. set_material_parameter changes one wherever the level shows it (Roughness, Specular, Metallic, a base colour or tint, an emissive strength) on an instance the level owns, never the project's material; set_actor_material_parameter changes one actor's alone. Under Lumen, a roughness above lumen_max_roughness_to_trace reflects only a blur, and a non-metal's base colour belongs between 0.02 and 0.81. A small glowing mesh that should light its surroundings needs set_actor_lighting emissive_light_source true. Reflection captures help only where reflection_method is not lumen: then add_reflection_capture covers each room or street with shiny surfaces.\n")
 			+ TEXT("   - The atmosphere: set_sky_atmosphere (rayleigh_scale, mie_scale, MieAnisotropy for the glow around the sun); set_fog DirectionalInscatteringExponent and DirectionalInscatteringLuminance for haze the sun lights, SecondFogData for low mist, volumetric_fog with the sun's VolumetricScatteringIntensity for shafts; set_sun light_shaft_bloom with BloomScale and BloomThreshold for god rays; set_clouds with material:Cloud_GlobalCoverage, material:Cloud_GlobalDensity and LayerBottomAltitude for the sky.\n")
 			+ TEXT("   - Shadows darker than the reference: soften them with several tools together, not one: the sun's source_angle, and its ShadowAmount below 1, which lets part of its light into every shadow; set_sky_light intensity with MinOcclusion and OcclusionTint, IndirectLightingIntensity on the sun and in post process, fills that cast no shadow, set_post_process LocalExposureShadowContrastScale below 1 and a lower AmbientOcclusionIntensity, then the grade's shadows_gain.\n")
 			+ TEXT("   - Interiors, night scenes and practicals run on local lights: hyper_lighting_inspect lists the point, spot and rect lights lighting the camera's view first. set_light changes one by label (intensity in its intensity_units, color, temperature, attenuation_radius, source_radius, cone angles, source_width and source_height, cast_shadows, volumetric_scattering, location, aim_at), add_light places a new key, fill, rim or practical, and enabled false turns one off: nothing is deleted.\n")
 			+ TEXT("   - Any setting the Details panel shows on the sun, sky light, fog, sky atmosphere, clouds or post process can be set by name, such as set_sun BloomScale or set_post_process FilmToe; hyper_lighting_inspect lists what differs from the defaults.\n")
 			+ TEXT("7. Grade last, as a colourist would. Once the light is close, compare with bFitLut true: it fits a colour-grading LUT to the reference and says what the attempt would score through it. If that is higher, apply it with set_post_process color_grading_lut <lutPath>, keep refining the light, and fit again after a big change of light. Bloom, vignette and white balance finish it.\n")
 			+ FString::Printf(TEXT("8. Keep edits unsaved while you iterate. When the score reaches %d, save with bSave true and say so.\n\n"), Points(Target))
+			+ Lessons
 			+ TEXT("A high score with an image that looks wrong is not a match: say what you see.");
 	}
 	return FString::Printf(TEXT("Build the open level so that it matches the reference image %s (attached): its layout, big shapes, materials and light, as a level designer and then a lighting artist would.\n\n"), *Reference) + Loop
@@ -232,9 +236,10 @@ FString BuildPrompt(const EGoal Goal, const FString& Reference, const FString& S
 			? FString(TEXT("3. Place a CineCameraActor labelled HyperAI_MatchCamera where the reference's camera would stand, and capture it with hyper_capture_view (source camera, camera_actor_label HyperAI_MatchCamera, the reference's aspect ratio). Use that capture for every attempt.\n"))
 			: TEXT("3. ") + SameView + TEXT("\n"))
 		+ TEXT("4. Block out at real scale, biggest forms first, then mid-size forms, then detail (the level design pack's player metrics: a person is 180 cm, a door 220 cm high). Put things on the ground by tracing down, not by guessing heights, and keep the space playable.\n")
-		+ TEXT("5. Materials next, and lighting last: lock exposure and light it to the reference as the image-match skill's lighting steps say. Lamps, windows and fires in the reference are local lights: add_light places them and set_light shapes them.") + Sky + TEXT("\n")
+		+ TEXT("5. Materials next, and lighting last: lock exposure and light it to the reference as the image-match skill's lighting steps say, and where a surface takes the light differently from the reference's (glossier, rougher, glowing), tune it with set_material_parameter. Lamps, windows and fires in the reference are local lights: add_light places them and set_light shapes them.") + Sky + TEXT("\n")
 		+ TEXT("6. Each attempt: change one group, capture, and ") + Compare + TEXT("\n")
 		+ FString::Printf(TEXT("7. Save the level when the score reaches %d, and say what you built.\n\n"), Points(Target))
+		+ Lessons
 		+ TEXT("A high score with an image that looks wrong is not a match: say what you see.");
 }
 
@@ -303,15 +308,102 @@ FHyperAIStudioAgentJobVerdict Judge(FRoundState& State, const EGoal Goal, const 
 			Message += TEXT("- ") + Suggestions[Index] + TEXT("\n");
 		}
 	}
+	// What this session's own attempts taught, from the notes they were scored with: build on one, do not repeat the other.
+	TArray<FString> Helped;
+	TArray<FString> Hurt;
+	Studies::Learn(History, Helped, Hurt);
+	if (!Hurt.IsEmpty())
+	{
+		Message += TEXT("\nWhat lowered the score this session, so do not do it again:\n");
+		for (int32 Index = 0; Index < Hurt.Num() && Index < 3; ++Index)
+		{
+			Message += TEXT("- ") + Hurt[Index] + TEXT("\n");
+		}
+	}
+	if (!Helped.IsEmpty())
+	{
+		Message += TEXT("\nWhat raised it, to build on:\n");
+		for (int32 Index = 0; Index < Helped.Num() && Index < 3; ++Index)
+		{
+			Message += TEXT("- ") + Helped[Index] + TEXT("\n");
+		}
+	}
 	if (State.FlatRounds == 1)
 	{
 		Message += Goal == EGoal::Level
 			? TEXT("\nThe last round gained under a point, so switch to another kind of lever: add the shapes still missing, change materials, or move to the light.\n")
-			: TEXT("\nThe last round gained under a point, so switch to another kind of lever: from the sun to the atmosphere, fog and clouds; from darker shadows to softer ones (sky light occlusion, indirect light, local exposure); from a blockout shape's shadow to set_actor_shadow; or from the light to the grade, with a LUT fitted by hyper_image_compare's bFitLut.\n");
+			: TEXT("\nThe last round gained under a point, so switch to another kind of lever: from the sun to the atmosphere, fog and clouds; from darker shadows to softer ones (sky light occlusion, indirect light, local exposure); from a blockout shape's shadow to set_actor_shadow; from the light to the surfaces, with set_material_parameter where the reference's are glossier, rougher or glowing; or from the light to the grade, with a LUT fitted by hyper_image_compare's bFitLut.\n");
 	}
 	Message += TEXT("\nOpen each side-by-side before choosing the next change, and end the turn with a one-line status.");
 	Verdict.NextMessage = Message;
 	return Verdict;
+}
+
+TOptional<Studies::FStudy> StudyOf(const EGoal Goal, const FString& SessionId, const FString& ReferenceProjectPath, const FString& Level, const float Target,
+	const FHyperAIStudioAgentJobInfo& Job, const TArray<FHyperAIImageIteration>& History, const TArray<FString>& Weakest, const TArray<FString>& Suggestions)
+{
+	if (History.IsEmpty())
+	{
+		return {};
+	}
+	Studies::FStudy Study;
+	Study.Goal = Goal == EGoal::Lighting ? TEXT("lighting") : TEXT("level");
+	Study.Reference = ReferenceProjectPath;
+	Study.Level = Level;
+	Study.Session = SessionId;
+	Study.Result = Job.State == EHyperAIStudioAgentJobState::Succeeded ? TEXT("matched") : Job.State == EHyperAIStudioAgentJobState::Failed ? TEXT("failed") : TEXT("stopped");
+	Study.Status = Job.Status;
+	Study.Target = Target;
+	Study.Attempts = History.Num();
+	for (const FHyperAIImageIteration& Iteration : History)
+	{
+		Study.Best = FMath::Max(Study.Best, Iteration.Score);
+	}
+	Study.Date = FDateTime::Now().ToString(TEXT("%Y-%m-%d"));
+	Studies::Learn(History, Study.Helped, Study.Hurt);
+	Study.StillDiffered = Weakest;
+	Study.NextSteps = Suggestions;
+	return Study;
+}
+
+namespace
+{
+	/** What a job leaves for the next one: its study, from the session it scored in. */
+	void WriteStudy(const EGoal Goal, const FString& SessionId, const FString& Reference, const FString& Level, const float Target, const FHyperAIStudioAgentJobInfo& Job,
+		const TArray<FString>& Weakest, const TArray<FString>& Suggestions, const FString& ProjectDir)
+	{
+		FString SessionReference;
+		FString Mode;
+		TArray<FHyperAIImageIteration> History;
+		float SessionTarget = Target;
+		Match::ReadSession(SessionId, SessionReference, Mode, History, SessionTarget);
+		const TOptional<Studies::FStudy> Study = StudyOf(Goal, SessionId, Reference, Level, Target, Job, History, Weakest, Suggestions);
+		if (!Study.IsSet())
+		{
+			UE_LOG(LogHyperAIStudioMatchJobs, Display, TEXT("Match job %d scored no attempt, so it leaves no study."), Job.Id);
+			return;
+		}
+		FString Path;
+		FString Error;
+		if (Studies::Write(ProjectDir, *Study, Path, Error))
+		{
+			UE_LOG(LogHyperAIStudioMatchJobs, Display, TEXT("Match job %d left its study at %s."), Job.Id, *Path);
+		}
+		else
+		{
+			UE_LOG(LogHyperAIStudioMatchJobs, Warning, TEXT("Match job %d's study was not written: %s"), Job.Id, *Error);
+		}
+	}
+
+	/** Follows a job from the moment it starts, and writes its study once it ends, however it ends. */
+	struct FEnding
+	{
+		int32 JobId = 0;
+		FDelegateHandle Handle;
+		bool bWritten = false;
+		TArray<FString> Weakest;
+		TArray<FString> Suggestions;
+	};
 }
 
 bool Start(const EGoal Goal, const FString& ReferenceImagePath, FString& OutError)
@@ -332,11 +424,16 @@ bool Start(const EGoal Goal, const FString& ReferenceImagePath, FString& OutErro
 		*FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S")));
 	const float Target = Goal == EGoal::Lighting ? LightingTarget : LevelTarget;
 	UWorld* World = Gate::GetEditorWorld();
+	const FString Relative = ProjectRelative(Full);
+	const FString Level = World ? World->GetOutermost()->GetName() : FString();
+	const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+	// The studies earlier jobs left: this level's first.
+	const FString Lessons = Studies::Lessons(Studies::Load(ProjectDir, 60), Goal == EGoal::Lighting ? TEXT("lighting") : TEXT("level"), Level);
 
 	FHyperAIStudioAgentJobSpec Spec;
 	Spec.Title = FString::Printf(TEXT("%s: %s"), Goal == EGoal::Lighting ? TEXT("Match the lighting") : TEXT("Build the level to match"), *FPaths::GetCleanFilename(Full));
 	Spec.Category = Goal == EGoal::Lighting ? TEXT("Lighting") : TEXT("Level Design");
-	Spec.Prompt = BuildPrompt(Goal, ProjectRelative(Full), SessionId, Target, World ? SkyNote(*World) : FString(), SameViewNote(Full));
+	Spec.Prompt = BuildPrompt(Goal, Relative, SessionId, Target, World ? SkyNote(*World) : FString(), SameViewNote(Full), Lessons);
 	Spec.Images = {Full};
 	Spec.Key = Full;
 	Spec.MaxFollowUps = MaxFollowUps;
@@ -346,7 +443,8 @@ bool Start(const EGoal Goal, const FString& ReferenceImagePath, FString& OutErro
 	// Once the agent is up, the Match page follows the job: each attempt appears in its strip as it is scored.
 	Spec.OnStarted = [Full]() { FHyperAIStudioPreviewPanel::Open(FName(TEXT("image_match")), Full); };
 	const TSharedRef<FRoundState> State = MakeShared<FRoundState>();
-	Spec.OnTurnEnded = [State, Goal, SessionId, Target, Full](const int32 TurnsDone)
+	const TSharedRef<FEnding> Ending = MakeShared<FEnding>();
+	Spec.OnTurnEnded = [State, Ending, Goal, SessionId, Target, Full](const int32 TurnsDone)
 	{
 		FString Reference;
 		FString Mode;
@@ -378,10 +476,37 @@ bool Start(const EGoal Goal, const FString& ReferenceImagePath, FString& OutErro
 				Suggestions.Add(Report.Suggestions[Index]);
 			}
 		}
+		Ending->Weakest = Weakest;
+		Ending->Suggestions = Suggestions;
 		return Judge(*State, Goal, SessionId, Target, TurnsDone + 1, History, Weakest, Suggestions);
 	};
 	const int32 Id = FHyperAIStudioAgentJobs::Start(MoveTemp(Spec), OutError);
 	UE_LOG(LogHyperAIStudioMatchJobs, Display, TEXT("Match job %d for %s, session %s: %s"), Id, *Full, *SessionId, Id > 0 ? TEXT("started") : *OutError);
+	if (Id > 0)
+	{
+		// However it ends, matched, stopped by its owner or by the user, or failed, the job leaves a study for the next one.
+		Ending->JobId = Id;
+		Ending->Handle = FHyperAIStudioAgentJobs::OnChanged().AddLambda([Ending, Goal, SessionId, Target, Relative, Level, ProjectDir]()
+		{
+			if (Ending->bWritten)
+			{
+				return;
+			}
+			for (const FHyperAIStudioAgentJobInfo& Job : FHyperAIStudioAgentJobs::List())
+			{
+				if (Job.Id != Ending->JobId || Job.IsRunning()) continue;
+				Ending->bWritten = true;
+				WriteStudy(Goal, SessionId, Relative, Level, Target, Job, Ending->Weakest, Ending->Suggestions, ProjectDir);
+				// Let go on the next tick: removing a handler while the change is still being announced to it would free it mid-call.
+				FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Handle = Ending->Handle](float)
+				{
+					FHyperAIStudioAgentJobs::OnChanged().Remove(Handle);
+					return false;
+				}));
+				return;
+			}
+		});
+	}
 	return Id > 0;
 }
 
@@ -391,7 +516,7 @@ TArray<FHyperAIStudioPreviewPanel::FAgentAction> Actions()
 	Light.Id = FName(TEXT("match_lighting"));
 	Light.Label = NSLOCTEXT("HyperAIStudioMatchJobs", "MatchLighting", "Match the lighting");
 	Light.Tooltip = NSLOCTEXT("HyperAIStudioMatchJobs", "MatchLightingTip",
-		"Your preferred agent relights the level until it scores 78 against the reference: sun, sky, fog, exposure and grade, or an Ultra Dynamic Sky's own settings. HyperAI checks after every round and sends it back to work until it matches. Its lighting edits are approved for you while it runs, and stay unsaved until it matches.");
+		"Your preferred agent relights the level until it scores 78 against the reference: sun, sky, fog, exposure and grade, or an Ultra Dynamic Sky's own settings, and how its surfaces take the light. HyperAI checks after every round and sends it back to work until it matches, and keeps a study of each job so the next one starts from it. Its lighting edits are approved for you while it runs, and stay unsaved until it matches.");
 	Light.Start = [](const FString& Reference, FString& OutError) { return Start(EGoal::Lighting, Reference, OutError); };
 
 	FHyperAIStudioPreviewPanel::FAgentAction Level;

@@ -4,8 +4,11 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Camera/CameraComponent.h"
+#include "Components/BoxReflectionCaptureComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/MeshComponent.h"
+#include "Components/ReflectionCaptureComponent.h"
+#include "Components/SphereReflectionCaptureComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
@@ -15,6 +18,7 @@
 #include "Components/VolumetricCloudComponent.h"
 #include "Editor.h"
 #include "Engine/Texture2D.h"
+#include "Engine/BoxReflectionCapture.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Engine/Light.h"
@@ -23,12 +27,14 @@
 #include "Engine/RectLight.h"
 #include "Engine/Scene.h"
 #include "Engine/SkyLight.h"
+#include "Engine/SphereReflectionCapture.h"
 #include "Engine/SpotLight.h"
 #include "Engine/TextureLightProfile.h"
 #include "EngineUtils.h"
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioLightingLookDev.h"
 #include "ImageCore.h"
 #include "ImageUtils.h"
 #include "LevelEditorViewport.h"
@@ -39,6 +45,7 @@
 #include "Misc/StringOutputDevice.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "RenderUtils.h"
 #include "ScopedTransaction.h"
 #include "TextureCompiler.h"
 #include "UObject/Package.h"
@@ -406,6 +413,7 @@ namespace HyperAIStudio::Lighting::Gate
 			if (ASkyLight* Sky = Cast<ASkyLight>(&Actor)) return Sky->GetLightComponent();
 			if (AExponentialHeightFog* Fog = Cast<AExponentialHeightFog>(&Actor)) return Fog->GetComponent();
 			if (ASkyAtmosphere* Atmosphere = Cast<ASkyAtmosphere>(&Actor)) return Atmosphere->GetComponent();
+			if (AReflectionCapture* Capture = Cast<AReflectionCapture>(&Actor)) return Capture->GetCaptureComponent();
 			return Actor.IsA<AVolumetricCloud>() ? Actor.FindComponentByClass<UVolumetricCloudComponent>() : nullptr;
 		}
 
@@ -768,6 +776,33 @@ namespace HyperAIStudio::Lighting::Gate
 
 		/** Lights add_light places: the level can tell them from its own. */
 		const FName AddedLightTag(TEXT("HyperAI.AddedLight"));
+		/** Reflection captures add_reflection_capture places. */
+		const FName AddedCaptureTag(TEXT("HyperAI.AddedReflectionCapture"));
+
+		enum ECaptureShape : uint8
+		{
+			NoShape = 0,
+			SphereShape = 1,
+			BoxShape = 2,
+			PlaneShape = 3,
+		};
+
+		/** set_actor_lighting's settings: how a placed mesh takes part in the level's light, by its Details-panel flag. */
+		struct FActorLightingSpec
+		{
+			const TCHAR* Key;
+			const TCHAR* Property;
+		};
+
+		const FActorLightingSpec ActorLightingSpecs[] = {
+			{TEXT("cast_shadow"), TEXT("CastShadow")},
+			// Lumen leaves small meshes out of its scene, so a small glowing one stops lighting its surroundings off screen.
+			{TEXT("emissive_light_source"), TEXT("bEmissiveLightSource")},
+			{TEXT("affect_indirect_lighting"), TEXT("bAffectDynamicIndirectLighting")},
+			{TEXT("affect_distance_field_lighting"), TEXT("bAffectDistanceFieldLighting")},
+			{TEXT("visible_in_reflection_captures"), TEXT("bVisibleInReflectionCaptures")},
+			{TEXT("visible_in_ray_tracing"), TEXT("bVisibleInRayTracing")},
+		};
 
 		struct FParsedOp
 		{
@@ -795,6 +830,15 @@ namespace HyperAIStudio::Lighting::Gate
 			// A stock kind's setting beyond the fixed keys: any its Details panel shows, found by name when the plan runs.
 			FString DetailName;
 			FString DetailValue;
+			// set_material_parameter and set_actor_material_parameter: the parameter on the slot's material, and whether the
+			// actor's slot alone changes.
+			FString ParameterName;
+			bool bActorOnly = false;
+			// set_actor_lighting: the mesh flag.
+			const FActorLightingSpec* ActorLighting = nullptr;
+			// add_reflection_capture: its shape. set_reflection_capture: location or box_extent, else a Details setting.
+			uint8 CaptureShape = NoShape;
+			FString CaptureKey;
 		};
 
 		bool ParseNumber(const FString& Text, const float Min, const float Max, float& Out)
@@ -997,6 +1041,130 @@ namespace HyperAIStudio::Lighting::Gate
 				}
 				return true;
 			}
+			if (Op.Kind == TEXT("set_material_parameter") || Op.Kind == TEXT("set_actor_material_parameter"))
+			{
+				Out.Kind = TEXT("material_parameter");
+				Out.bActorOnly = Op.Kind == TEXT("set_actor_material_parameter");
+				const FString Grammar = Op.Kind + TEXT(" property is [component:<name>/][slot:<index or name>/]<parameter>, such as Roughness or slot:1/BaseColor; value is a number, linear \"r,g,b[,a]\", a texture's path, or default.");
+				if (Op.ActorLabel.IsEmpty())
+				{
+					OutError = Op.Kind + TEXT(" needs actor_label: a placed actor showing the material (hyper_lighting_inspect lists them with each material in view).");
+					return false;
+				}
+				FString Rest = Op.Property.TrimStartAndEnd();
+				if (Rest.StartsWith(TEXT("component:")) && (!Rest.RightChop(10).Split(TEXT("/"), &Out.ComponentName, &Rest) || Out.ComponentName.IsEmpty()))
+				{
+					OutError = Grammar;
+					return false;
+				}
+				if (Rest.StartsWith(TEXT("slot:")))
+				{
+					FString SlotValue;
+					if (!Rest.RightChop(5).Split(TEXT("/"), &SlotValue, &Rest) || SlotValue.IsEmpty())
+					{
+						OutError = Grammar;
+						return false;
+					}
+					if (SlotValue.IsNumeric())
+					{
+						Out.SlotIndex = FCString::Atoi(*SlotValue);
+					}
+					else
+					{
+						Out.SlotName = FName(*SlotValue);
+					}
+				}
+				Out.ParameterName = Rest.TrimStartAndEnd();
+				Out.DetailValue = Op.Value.TrimStartAndEnd();
+				if (Out.ParameterName.IsEmpty() || Out.DetailValue.IsEmpty())
+				{
+					OutError = Grammar;
+					return false;
+				}
+				return true;
+			}
+			if (Op.Kind == TEXT("set_actor_lighting"))
+			{
+				Out.Kind = TEXT("actor_lighting");
+				FString Key = Op.Property.TrimStartAndEnd();
+				if (Op.ActorLabel.IsEmpty() || (Key.StartsWith(TEXT("component:")) && (!Key.RightChop(10).Split(TEXT("/"), &Out.ComponentName, &Key) || Out.ComponentName.IsEmpty())))
+				{
+					OutError = TEXT("set_actor_lighting needs actor_label, a placed actor, and property [component:<name>/]<setting>; value true or false.");
+					return false;
+				}
+				TArray<FString> Keys;
+				for (const FActorLightingSpec& Spec : ActorLightingSpecs)
+				{
+					Keys.Add(Spec.Key);
+					Out.ActorLighting = Key == Spec.Key ? &Spec : Out.ActorLighting;
+				}
+				if (!Out.ActorLighting)
+				{
+					OutError = FString::Printf(TEXT("set_actor_lighting has no setting '%s'; use one of %s."), *Key.Left(64), *FString::Join(Keys, TEXT(", ")));
+					return false;
+				}
+				const FString Flag = Op.Value.TrimStartAndEnd();
+				Out.bFlag = Flag.Equals(TEXT("true"), ESearchCase::IgnoreCase) || Flag == TEXT("1");
+				if (!Out.bFlag && !Flag.Equals(TEXT("false"), ESearchCase::IgnoreCase) && Flag != TEXT("0"))
+				{
+					OutError = FString::Printf(TEXT("set_actor_lighting %s takes true or false."), Out.ActorLighting->Key);
+					return false;
+				}
+				return true;
+			}
+			if (Op.Kind == TEXT("add_reflection_capture"))
+			{
+				Out.Kind = TEXT("add_reflection_capture");
+				Out.CaptureShape = Op.Property == TEXT("sphere") ? SphereShape : Op.Property == TEXT("box") ? BoxShape : NoShape;
+				if (Op.ActorLabel.IsEmpty() || Op.ActorLabel != Op.ActorLabel.TrimStartAndEnd())
+				{
+					OutError = TEXT("add_reflection_capture needs actor_label: the new capture's label, such as Capture_Hall.");
+					return false;
+				}
+				if (Out.CaptureShape == NoShape)
+				{
+					OutError = TEXT("add_reflection_capture property is its shape: sphere or box.");
+					return false;
+				}
+				if (!ParseVector(Op.Value, Out.Vector))
+				{
+					OutError = TEXT("add_reflection_capture value is where it goes, as world \"x,y,z\" in centimetres.");
+					return false;
+				}
+				return true;
+			}
+			if (Op.Kind == TEXT("set_reflection_capture"))
+			{
+				Out.Kind = TEXT("reflection_capture");
+				Out.CaptureKey = Op.Property.TrimStartAndEnd();
+				if (Op.ActorLabel.IsEmpty() || Out.CaptureKey.IsEmpty() || Op.Value.TrimStartAndEnd().IsEmpty())
+				{
+					OutError = TEXT("set_reflection_capture needs actor_label, the capture; property location, box_extent or a setting its Details panel shows, such as Brightness or InfluenceRadius; and value.");
+					return false;
+				}
+				if (Out.CaptureKey == TEXT("location"))
+				{
+					if (ParseVector(Op.Value, Out.Vector)) return true;
+					OutError = TEXT("set_reflection_capture location needs world \"x,y,z\" in centimetres.");
+					return false;
+				}
+				if (Out.CaptureKey == TEXT("box_extent"))
+				{
+					TArray<FString> Parts;
+					Op.Value.ParseIntoArray(Parts, TEXT(","));
+					float X = 0.f, Y = 0.f, Z = 0.f;
+					if (Parts.Num() == 3 && ParseNumber(Parts[0], 10.f, 1000000.f, X) && ParseNumber(Parts[1], 10.f, 1000000.f, Y) && ParseNumber(Parts[2], 10.f, 1000000.f, Z))
+					{
+						Out.Vector = FVector(X, Y, Z);
+						return true;
+					}
+					OutError = TEXT("set_reflection_capture box_extent needs the box's half sizes \"x,y,z\" in centimetres, each from 10 to 1000000.");
+					return false;
+				}
+				Out.DetailName = Out.CaptureKey;
+				Out.DetailValue = Op.Value.TrimStartAndEnd();
+				return true;
+			}
 			if (Op.Kind == TEXT("set_sky_system"))
 			{
 				Out.Kind = TEXT("sky_system");
@@ -1068,7 +1236,7 @@ namespace HyperAIStudio::Lighting::Gate
 			Out.Kind = Op.Kind.RightChop(4);
 			if (!ClassOf(Out.Kind))
 			{
-				OutError = FString::Printf(TEXT("Unknown kind '%s': use set_sun, set_sky_light, set_fog, set_sky_atmosphere, set_clouds, set_post_process, lock_exposure, unlock_exposure, set_light, add_light, set_actor_material, set_actor_shadow or set_sky_system."), *Op.Kind);
+				OutError = FString::Printf(TEXT("Unknown kind '%s': use set_sun, set_sky_light, set_fog, set_sky_atmosphere, set_clouds, set_post_process, lock_exposure, unlock_exposure, set_light, add_light, set_actor_material, set_material_parameter, set_actor_material_parameter, set_actor_shadow, set_actor_lighting, add_reflection_capture, set_reflection_capture or set_sky_system."), *Op.Kind);
 				return false;
 			}
 			for (const FPropertySpec& Spec : PropertySpecs)
@@ -1495,7 +1663,7 @@ namespace HyperAIStudio::Lighting::Gate
 			return true;
 		}
 
-		/** The meshes a set_actor_shadow op names: all of the labelled actor's, or its one component by name. */
+		/** The meshes a set_actor_shadow or set_actor_lighting op names: all of the labelled actor's, or its one component by name. */
 		bool ResolveShadowMeshes(UWorld& World, const FString& Label, const FParsedOp& Op, TArray<UMeshComponent*>& OutMeshes, FString& OutError)
 		{
 			TArray<AActor*> Matches;
@@ -1519,7 +1687,7 @@ namespace HyperAIStudio::Lighting::Gate
 			}
 			if (OutMeshes.IsEmpty())
 			{
-				OutError = Meshes.IsEmpty() ? FString::Printf(TEXT("'%s' has no mesh to cast a shadow."), *Label)
+				OutError = Meshes.IsEmpty() ? FString::Printf(TEXT("'%s' has no mesh, so it neither casts shadows nor takes light."), *Label)
 					: FString::Printf(TEXT("'%s' has no mesh component '%s'; it has %s."), *Label, *Op.ComponentName, *FString::Join(Names, TEXT(", ")));
 				return false;
 			}
@@ -1864,6 +2032,71 @@ namespace HyperAIStudio::Lighting::Gate
 			}
 		}
 
+		uint8 ShapeOf(const AReflectionCapture& Capture)
+		{
+			return Capture.IsA<ABoxReflectionCapture>() ? BoxShape : Capture.IsA<ASphereReflectionCapture>() ? SphereShape : PlaneShape;
+		}
+
+		const TCHAR* ShapeName(const uint8 Shape)
+		{
+			return Shape == BoxShape ? TEXT("box") : Shape == SphereShape ? TEXT("sphere") : TEXT("plane");
+		}
+
+		/** Reflection captures in the level, in path order. */
+		TArray<AReflectionCapture*> ReflectionCaptures(UWorld& World)
+		{
+			TArray<AReflectionCapture*> Captures;
+			for (TActorIterator<AReflectionCapture> It(&World); It; ++It)
+			{
+				if (IsValid(*It) && !It->IsTemplate()) Captures.Add(*It);
+			}
+			Captures.Sort([](const AReflectionCapture& A, const AReflectionCapture& B) { return A.GetPathName() < B.GetPathName(); });
+			return Captures;
+		}
+
+		AActor* SpawnCapture(UWorld& World, const uint8 Shape, const FVector& Location, const FString& Label)
+		{
+			FActorSpawnParameters Params;
+			Params.ObjectFlags |= RF_Transactional;
+			UClass* Class = Shape == BoxShape ? ABoxReflectionCapture::StaticClass() : ASphereReflectionCapture::StaticClass();
+			AActor* Actor = World.SpawnActor(Class, &Location, nullptr, Params);
+			if (!Actor) return nullptr;
+			Actor->SetActorLabel(Label);
+			Actor->Tags.AddUnique(AddedCaptureTag);
+			// A box's scale is its half size in centimetres; the editor's own placement starts it at 10 by 10 by 4 metres.
+			Actor->SetActorScale3D(Shape == BoxShape ? FVector(1000.0, 1000.0, 400.0) : FVector::OneVector);
+			CastChecked<AReflectionCapture>(Actor)->GetCaptureComponent()->MarkDirtyForRecapture();
+			return Actor;
+		}
+
+		void ReadCapture(const AReflectionCapture& Capture, TArray<FHyperAILightingProperty>& Out)
+		{
+			auto Add = [&Out](const TCHAR* Key, const FString& Value) { Out.Add({Key, Value}); };
+			const UReflectionCaptureComponent* Component = Capture.GetCaptureComponent();
+			const FVector Location = Capture.GetActorLocation();
+			Add(TEXT("shape"), ShapeName(ShapeOf(Capture)));
+			Add(TEXT("location"), FString::Printf(TEXT("%.1f,%.1f,%.1f"), Location.X, Location.Y, Location.Z));
+			if (const USphereReflectionCaptureComponent* Sphere = Cast<USphereReflectionCaptureComponent>(Component))
+			{
+				Add(TEXT("InfluenceRadius"), Number(Sphere->InfluenceRadius));
+			}
+			if (const UBoxReflectionCaptureComponent* Box = Cast<UBoxReflectionCaptureComponent>(Component))
+			{
+				const FVector Extent = Capture.GetActorScale3D();
+				Add(TEXT("box_extent"), FString::Printf(TEXT("%.1f,%.1f,%.1f"), Extent.X, Extent.Y, Extent.Z));
+				Add(TEXT("BoxTransitionDistance"), Number(Box->BoxTransitionDistance));
+			}
+			if (Component)
+			{
+				Add(TEXT("Brightness"), Number(Component->Brightness));
+				Add(TEXT("source"), Component->ReflectionSourceType == EReflectionSourceType::CapturedScene ? TEXT("captured_scene") : TEXT("specified_cubemap"));
+			}
+			if (Capture.Tags.Contains(AddedCaptureTag))
+			{
+				Add(TEXT("added_by_hyperai"), TEXT("true"));
+			}
+		}
+
 		/** Where the scene is looked at from, to list first the local lights that light what is seen. */
 		struct FLightView
 		{
@@ -1918,6 +2151,9 @@ namespace HyperAIStudio::Lighting::Gate
 			TMap<FString, bool> ManualLock;
 			TSet<FString> PlannedSpawns;
 			TMap<FString, uint8> PlannedLights;
+			TMap<FString, uint8> PlannedCaptures;
+			// While validating, what an earlier set_actor_material puts in a slot, so a later parameter op is checked against it.
+			TMap<TPair<UMeshComponent*, int32>, UMaterialInterface*> PlannedMaterials;
 			for (int32 Index = 0; Index < Ops.Num(); ++Index)
 			{
 				const FHyperAILightingOp& Op = Ops[Index];
@@ -1937,11 +2173,125 @@ namespace HyperAIStudio::Lighting::Gate
 						OutError = FString::Printf(TEXT("Op %d: %s"), Index, *Error);
 						return false;
 					}
+					PlannedMaterials.Add(TPair<UMeshComponent*, int32>(Mesh, Slot), Parsed.Material);
 					if (bWrite)
 					{
 						// The Details panel's route, not a raw OverrideMaterials write: undo, render state and cleanup all follow.
 						Edit(*Mesh, FName(TEXT("OverrideMaterials")), [&] { Mesh->SetMaterial(Slot, Parsed.Material); });
 						OutTouched.AddUnique(Mesh->GetOwner());
+					}
+					continue;
+				}
+				if (Parsed.Kind == TEXT("material_parameter"))
+				{
+					UMeshComponent* Mesh = nullptr;
+					int32 Slot = INDEX_NONE;
+					if (!ResolveMaterialSlot(World, Op.ActorLabel, Parsed, Mesh, Slot, Error))
+					{
+						OutError = FString::Printf(TEXT("Op %d: %s"), Index, *Error);
+						return false;
+					}
+					UMaterialInterface* const* Planned = bWrite ? nullptr : PlannedMaterials.Find(TPair<UMeshComponent*, int32>(Mesh, Slot));
+					if (!LookDev::SetParameter(World, *Mesh, Slot, Parsed.bActorOnly, Parsed.ParameterName, Parsed.DetailValue, Planned ? *Planned : nullptr, bWrite,
+						OutTouched, Error))
+					{
+						OutError = FString::Printf(TEXT("Op %d: %s"), Index, *Error);
+						return false;
+					}
+					continue;
+				}
+				if (Parsed.Kind == TEXT("actor_lighting"))
+				{
+					TArray<UMeshComponent*> Meshes;
+					if (!ResolveShadowMeshes(World, Op.ActorLabel, Parsed, Meshes, Error))
+					{
+						OutError = FString::Printf(TEXT("Op %d: %s"), Index, *Error);
+						return false;
+					}
+					if (bWrite)
+					{
+						FBoolProperty* Flag = FindFProperty<FBoolProperty>(UPrimitiveComponent::StaticClass(), Parsed.ActorLighting->Property);
+						for (UMeshComponent* Mesh : Meshes)
+						{
+							// The Details panel's route: undo, then the mesh registers again with the new flag.
+							Edit(*Mesh, Flag->GetFName(), [&] { Flag->SetPropertyValue_InContainer(Mesh, Parsed.bFlag); });
+						}
+						OutTouched.AddUnique(Meshes[0]->GetOwner());
+					}
+					continue;
+				}
+				if (Parsed.Kind == TEXT("add_reflection_capture"))
+				{
+					if (PlannedCaptures.Contains(Op.ActorLabel) || PlannedLights.Contains(Op.ActorLabel) || !Labelled(World, Op.ActorLabel).IsEmpty())
+					{
+						OutError = FString::Printf(TEXT("Op %d: an actor is already labelled '%s'; give the new capture its own label."), Index, *Op.ActorLabel);
+						return false;
+					}
+					PlannedCaptures.Add(Op.ActorLabel, Parsed.CaptureShape);
+					if (bWrite)
+					{
+						AActor* Added = SpawnCapture(World, Parsed.CaptureShape, Parsed.Vector, Op.ActorLabel);
+						if (!Added)
+						{
+							OutError = FString::Printf(TEXT("Op %d: the level refused a new %s reflection capture."), Index, ShapeName(Parsed.CaptureShape));
+							return false;
+						}
+						OutTouched.AddUnique(Added);
+					}
+					continue;
+				}
+				if (Parsed.Kind == TEXT("reflection_capture"))
+				{
+					const TArray<AActor*> Found = Labelled(World, Op.ActorLabel);
+					AReflectionCapture* Capture = Found.Num() == 1 ? Cast<AReflectionCapture>(Found[0]) : nullptr;
+					const uint8* PlannedShape = Found.IsEmpty() ? PlannedCaptures.Find(Op.ActorLabel) : nullptr;
+					if (!Capture && !PlannedShape)
+					{
+						OutError = FString::Printf(TEXT("Op %d: %s"), Index, Found.Num() > 1
+							? *FString::Printf(TEXT("%d actors are labelled '%s'; give the capture a unique label first."), Found.Num(), *Op.ActorLabel)
+							: *FString::Printf(TEXT("no reflection capture is labelled '%s'; hyper_lighting_inspect lists them, and add_reflection_capture places one."), *Op.ActorLabel));
+						return false;
+					}
+					const uint8 Shape = Capture ? ShapeOf(*Capture) : *PlannedShape;
+					if (Parsed.CaptureKey == TEXT("box_extent") && Shape != BoxShape)
+					{
+						OutError = FString::Printf(TEXT("Op %d: '%s' is a %s capture, and box_extent sizes only a box; a sphere's reach is InfluenceRadius."), Index, *Op.ActorLabel, ShapeName(Shape));
+						return false;
+					}
+					if (!Parsed.DetailName.IsEmpty())
+					{
+						// Checked on the capture, or, before the plan adds it, on its class's default, which has the same settings.
+						AActor& Target = Capture ? static_cast<AActor&>(*Capture) : Shape == BoxShape ? static_cast<AActor&>(*GetMutableDefault<ABoxReflectionCapture>())
+							: static_cast<AActor&>(*GetMutableDefault<ASphereReflectionCapture>());
+						if (!DetailOp(World, Target, Parsed, bWrite, Error))
+						{
+							OutError = FString::Printf(TEXT("Op %d: set_reflection_capture %s."), Index, *Error);
+							return false;
+						}
+					}
+					if (bWrite)
+					{
+						if (!Capture)
+						{
+							OutError = FString::Printf(TEXT("Op %d: '%s' was not there to change."), Index, *Op.ActorLabel);
+							return false;
+						}
+						if (Parsed.DetailName.IsEmpty())
+						{
+							Capture->Modify();
+							if (Parsed.CaptureKey == TEXT("location"))
+							{
+								Capture->SetActorLocation(Parsed.Vector);
+							}
+							else
+							{
+								Capture->SetActorScale3D(Parsed.Vector);
+							}
+							Capture->PostEditMove(true);
+						}
+						// Captured again on the next editor tick, so the next capture of the view shows it.
+						Capture->GetCaptureComponent()->MarkDirtyForRecapture();
+						OutTouched.AddUnique(Capture);
 					}
 					continue;
 				}
@@ -2407,7 +2757,96 @@ namespace HyperAIStudio::Lighting::Gate
 				}
 			}
 		}
+		const TArray<AReflectionCapture*> Captures = ReflectionCaptures(World);
+		for (int32 Index = 0; Index < FMath::Min(Captures.Num(), MaxActorsPerKind); ++Index)
+		{
+			FHyperAILightingActorRecord& Record = Records.AddDefaulted_GetRef();
+			Record.Kind = TEXT("reflection_capture");
+			Record.Label = Captures[Index]->GetActorLabel();
+			Record.Path = Captures[Index]->GetPathName();
+			ReadCapture(*Captures[Index], Record.Properties);
+		}
 		return Records;
+	}
+
+	TArray<FHyperAILightingProperty> ReadRendering(UWorld& World)
+	{
+		auto Setting = [](const TCHAR* Name)
+		{
+			const IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Name);
+			return Variable ? Variable->GetInt() : 0;
+		};
+		auto Flag = [](const bool bValue) { return bValue ? FString(TEXT("true")) : FString(TEXT("false")); };
+		int32 Gi = Setting(TEXT("r.DynamicGlobalIlluminationMethod"));
+		int32 Reflections = Setting(TEXT("r.ReflectionMethod"));
+		float MaxRoughness = DefaultPostProcess().LumenMaxRoughnessToTraceReflections;
+		bool bFrontLayer = false;
+		// The level's unbound volumes override the project, the highest priority last.
+		TArray<AActor*> Volumes = ActorsOfKind(World, TEXT("post_process"));
+		Volumes.StableSort([](const AActor& A, const AActor& B) { return CastChecked<APostProcessVolume>(&A)->Priority < CastChecked<APostProcessVolume>(&B)->Priority; });
+		for (const AActor* Actor : Volumes)
+		{
+			const APostProcessVolume& Volume = *CastChecked<APostProcessVolume>(Actor);
+			if (!Volume.bEnabled || Volume.BlendWeight <= 0.f) continue;
+			const FPostProcessSettings& S = Volume.Settings;
+			Gi = S.bOverride_DynamicGlobalIlluminationMethod ? static_cast<int32>(S.DynamicGlobalIlluminationMethod) : Gi;
+			Reflections = S.bOverride_ReflectionMethod ? static_cast<int32>(S.ReflectionMethod) : Reflections;
+			MaxRoughness = S.bOverride_LumenMaxRoughnessToTraceReflections ? S.LumenMaxRoughnessToTraceReflections : MaxRoughness;
+			bFrontLayer = S.bOverride_LumenFrontLayerTranslucencyReflections ? static_cast<bool>(S.LumenFrontLayerTranslucencyReflections) : bFrontLayer;
+		}
+		const TCHAR* const GiNames[] = {TEXT("none"), TEXT("lumen"), TEXT("screen_space"), TEXT("plugin")};
+		const TCHAR* const ReflectionNames[] = {TEXT("none"), TEXT("lumen"), TEXT("screen_space")};
+		const bool bHardware = Setting(TEXT("r.Lumen.HardwareRayTracing")) != 0 && IsRayTracingEnabled();
+		const int32 Captures = ReflectionCaptures(World).Num();
+		TArray<FHyperAILightingProperty> Out;
+		Out.Add({TEXT("gi_method"), GiNames[FMath::Clamp(Gi, 0, 3)]});
+		Out.Add({TEXT("reflection_method"), ReflectionNames[FMath::Clamp(Reflections, 0, 2)]});
+		Out.Add({TEXT("lumen_tracing"), bHardware ? TEXT("hardware") : TEXT("software")});
+		Out.Add({TEXT("lumen_max_roughness_to_trace"), Number(MaxRoughness)});
+		Out.Add({TEXT("mesh_distance_fields"), Flag(Setting(TEXT("r.GenerateMeshDistanceFields")) != 0)});
+		Out.Add({TEXT("substrate"), Flag(Setting(TEXT("r.Substrate")) != 0)});
+		Out.Add({TEXT("virtual_shadow_maps"), Flag(Setting(TEXT("r.Shadow.Virtual.Enable")) != 0)});
+		Out.Add({TEXT("megalights"), Flag(Setting(TEXT("r.MegaLights.EnableForProject")) != 0)});
+		Out.Add({TEXT("static_lighting"), Flag(Setting(TEXT("r.AllowStaticLighting")) != 0)});
+		Out.Add({TEXT("translucency_front_layer_reflections"), Flag(Setting(TEXT("r.Lumen.TranslucencyReflections.FrontLayer.EnableForProject")) != 0 || bFrontLayer)});
+		Out.Add({TEXT("reflection_captures"), FString::FromInt(Captures)});
+		// What that means for a match, in a lighting artist's words.
+		if (Reflections == 1)
+		{
+			Out.Add({TEXT("note"), FString::Printf(TEXT("Lumen reflections: surfaces smoother than roughness %s reflect their surroundings, rougher ones a blur; reflection captures add little. %s"),
+				*Number(MaxRoughness), bHardware ? TEXT("Hardware tracing reflects detail from off screen too.")
+					: TEXT("Software tracing reflects what is off screen only coarsely, from distance fields: a mirror shows sharp detail only of what is on screen."))});
+		}
+		else
+		{
+			Out.Add({TEXT("note"), Captures == 0
+				? FString(TEXT("No Lumen reflections and no reflection captures: shiny surfaces reflect only the sky and what is on screen. add_reflection_capture fills a room or street."))
+				: FString(TEXT("No Lumen reflections: reflection captures and screen-space reflections give surfaces their reflections, so place captures where reflective surfaces are."))});
+		}
+		if (Gi == 1 && Setting(TEXT("r.GenerateMeshDistanceFields")) == 0 && !bHardware)
+		{
+			Out.Add({TEXT("note"), TEXT("Software Lumen without mesh distance fields traces almost nothing: bounce light and reflections fall back to the sky.")});
+		}
+		return Out;
+	}
+
+	TArray<FHyperAILightingMaterialRecord> ReadMaterials(UWorld& World, const FString& CameraLabel, const int32 Limit, int32& OutTotal)
+	{
+		OutTotal = 0;
+		const FLightView View = FindView(World, CameraLabel);
+		if (!View.bValid || Limit <= 0)
+		{
+			return {};
+		}
+		bool bLumenReflections = false;
+		float MaxRoughness = DefaultPostProcess().LumenMaxRoughnessToTraceReflections;
+		for (const FHyperAILightingProperty& Fact : ReadRendering(World))
+		{
+			bLumenReflections = Fact.Key == TEXT("reflection_method") ? Fact.Value == TEXT("lumen") : bLumenReflections;
+			MaxRoughness = Fact.Key == TEXT("lumen_max_roughness_to_trace") ? FCString::Atof(*Fact.Value) : MaxRoughness;
+		}
+		return LookDev::ReadMaterials(World, View.Origin, [&View](const FVector& Center, const double Radius) { return InView(View, Center, Radius); },
+			Limit, bLumenReflections, MaxRoughness, OutTotal);
 	}
 
 	TArray<FHyperAILightingActorRecord> ReadLocalLights(UWorld& World, const FString& CameraLabel, const FString& LabelFilter, const int32 Limit,
@@ -2475,6 +2914,8 @@ namespace HyperAIStudio::Lighting::Gate
 				Canonical += Property.Key + TEXT("=") + Property.Value + TEXT("\n");
 			}
 		}
+		// The surfaces a plan tuned: the level's own material instances and what they hold, as a hash so they add little.
+		Canonical += TEXT("look_dev=") + FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(LookDev::RevisionText(World)) + TEXT("\n");
 		return FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(Canonical);
 	}
 
@@ -2551,7 +2992,19 @@ namespace HyperAIStudio::Lighting::Gate
 				if (ResolveSkyOp(World, Op.ActorLabel, Parsed, Sky, Property, Import, Error)) Actors.AddUnique(Sky);
 				continue;
 			}
-			if (Parsed.Kind == TEXT("light") || Parsed.Kind == TEXT("add_light") || Parsed.Kind == TEXT("actor_shadow"))
+			if (Parsed.Kind == TEXT("material_parameter"))
+			{
+				if (!ResolveMaterialSlot(World, Op.ActorLabel, Parsed, Mesh, Slot, Error)) continue;
+				Actors.AddUnique(Mesh->GetOwner());
+				// A level-wide change reaches every actor showing the instance; those it changed are unsaved, the rest saved before.
+				if (const UMaterialInstanceConstant* Instance = LookDev::InstanceFor(World, *Mesh, Slot, Parsed.bActorOnly))
+				{
+					for (AActor* User : LookDev::UnsavedUsers(World, *Instance)) Actors.AddUnique(User);
+				}
+				continue;
+			}
+			if (Parsed.Kind == TEXT("light") || Parsed.Kind == TEXT("add_light") || Parsed.Kind == TEXT("actor_shadow") || Parsed.Kind == TEXT("actor_lighting")
+				|| Parsed.Kind == TEXT("add_reflection_capture") || Parsed.Kind == TEXT("reflection_capture"))
 			{
 				const TArray<AActor*> Found = Labelled(World, Op.ActorLabel);
 				if (Found.Num() == 1) Actors.AddUnique(Found[0]);
@@ -2570,20 +3023,45 @@ namespace HyperAIStudio::Lighting::Gate
 	{
 		// ponytail: the last op on a slot wins, so a plan setting one slot twice checks only the second material.
 		TMap<TPair<UMeshComponent*, int32>, UMaterialInterface*> Expected;
+		// The last value a plan gave each instance's parameter, as the op wrote it.
+		struct FParameterCheck
+		{
+			UMeshComponent* Mesh = nullptr;
+			int32 Slot = INDEX_NONE;
+			bool bActorOnly = false;
+			FString Value;
+		};
+		TMap<TPair<UMaterialInstanceConstant*, FString>, FParameterCheck> Parameters;
 		for (const FHyperAILightingOp& Op : Ops)
 		{
 			FParsedOp Parsed;
 			UMeshComponent* Mesh = nullptr;
 			int32 Slot = INDEX_NONE;
-			if (!ParseOp(Op, Parsed, OutError) || Parsed.Kind != TEXT("actor_material")) continue;
+			if (!ParseOp(Op, Parsed, OutError) || (Parsed.Kind != TEXT("actor_material") && Parsed.Kind != TEXT("material_parameter"))) continue;
 			if (!ResolveMaterialSlot(World, Op.ActorLabel, Parsed, Mesh, Slot, OutError)) return false;
-			Expected.Add(TPair<UMeshComponent*, int32>(Mesh, Slot), Parsed.Material);
+			if (Parsed.Kind == TEXT("actor_material"))
+			{
+				Expected.Add(TPair<UMeshComponent*, int32>(Mesh, Slot), Parsed.Material);
+				continue;
+			}
+			UMaterialInstanceConstant* Instance = LookDev::InstanceFor(World, *Mesh, Slot, Parsed.bActorOnly);
+			Parameters.Add(TPair<UMaterialInstanceConstant*, FString>(Instance, Parsed.ParameterName.ToLower()),
+				FParameterCheck{Mesh, Slot, Parsed.bActorOnly, Parsed.DetailValue});
 		}
 		for (const TPair<TPair<UMeshComponent*, int32>, UMaterialInterface*>& Entry : Expected)
 		{
 			if (Entry.Key.Key->GetMaterial(Entry.Key.Value) != Entry.Value)
 			{
 				OutError = FString::Printf(TEXT("%s slot %d does not hold %s."), *Entry.Key.Key->GetPathName(), Entry.Key.Value, *Entry.Value->GetPathName());
+				return false;
+			}
+		}
+		for (const TPair<TPair<UMaterialInstanceConstant*, FString>, FParameterCheck>& Entry : Parameters)
+		{
+			if (!LookDev::Holds(Entry.Key.Key, Entry.Key.Value, Entry.Value.Value))
+			{
+				OutError = FString::Printf(TEXT("%s slot %d shows no look-dev instance holding %s = %s."), *Entry.Value.Mesh->GetPathName(), Entry.Value.Slot,
+					*Entry.Key.Value, *Entry.Value.Value);
 				return false;
 			}
 		}
@@ -2611,6 +3089,10 @@ namespace HyperAIStudio::Lighting::Gate
 			if (const UVolumetricCloudComponent* Cloud = Actor && Actor->IsA<AVolumetricCloud>() ? Actor->FindComponentByClass<UVolumetricCloudComponent>() : nullptr)
 			{
 				AddMade(Cloud->Material.Get());
+			}
+			if (Actor)
+			{
+				LookDev::AddUnsaved(*Actor, Packages);
 			}
 		}
 		return Packages;

@@ -27,11 +27,45 @@ struct FHyperAILightingActorRecord
 {
 	GENERATED_BODY()
 
-	/** sun, sky_light, fog, sky_atmosphere, post_process, sky_system, or point_light, spot_light and rect_light. */
+	/** sun, sky_light, fog, sky_atmosphere, post_process, sky_system, reflection_capture, or point_light, spot_light and rect_light. */
 	UPROPERTY() FString Kind;
 	UPROPERTY() FString Label;
 	UPROPERTY() FString Path;
 	UPROPERTY() TArray<FHyperAILightingProperty> Properties;
+};
+
+/** A material on what the view shows: what it is, how much of the frame it covers, and the parameters set_material_parameter changes. */
+USTRUCT(BlueprintType)
+struct FHyperAILightingMaterialRecord
+{
+	GENERATED_BODY()
+
+	/** The material or material instance the slots show. */
+	UPROPERTY() FString Path;
+	/**
+	 * material, material_instance, look_dev (this level's own instance of a material, which every slot that showed the
+	 * material shows instead), look_dev_actor (one actor's own), or dynamic (made by a construction script; not changed here).
+	 */
+	UPROPERTY() FString Kind;
+	/** The base material its instances are made from. */
+	UPROPERTY() FString BaseMaterial;
+	/** opaque, masked, translucent, additive, modulate or alpha_composite. */
+	UPROPERTY() FString BlendMode;
+	/** default_lit, unlit, subsurface, clear_coat, two_sided_foliage and the rest, joined with + when it has several. */
+	UPROPERTY() FString ShadingModel;
+	UPROPERTY() bool bTwoSided = false;
+	/** Rough share of the view it covers, 0-1: how much a change to it moves the picture. */
+	UPROPERTY() float ViewShare = 0.f;
+	/** Placed actors showing it anywhere in the level; set_material_parameter changes it on all of them. */
+	UPROPERTY() int32 ActorCount = 0;
+	/** The nearest few in view, any of which set_material_parameter takes as actor_label. */
+	UPROPERTY() TArray<FString> Actors;
+	/** Where it is on the first of them, as the material ops' property starts: slot:<index>, or component:<name>/slot:<index>. */
+	UPROPERTY() FString Slot;
+	/** Its parameters and their values now: numbers, linear colours "r,g,b,a" and texture paths, by name. */
+	UPROPERTY() TArray<FHyperAILightingProperty> Parameters;
+	/** What in its setup or values keeps it from taking light as the real surface would. */
+	UPROPERTY() TArray<FString> Notes;
 };
 
 USTRUCT(BlueprintType)
@@ -46,6 +80,8 @@ struct FHyperAILightingInspectRequest
 	UPROPERTY() FString LabelFilter;
 	/** Point, spot and rect lights to list, 0-128: those in view first, nearest first. */
 	UPROPERTY() int32 MaxLocalLights = 32;
+	/** Materials on what the same view shows to list, 0-48, most of the frame first, each with its parameters; 0 lists none. */
+	UPROPERTY() int32 MaxMaterials = 12;
 };
 
 USTRUCT(BlueprintType)
@@ -67,6 +103,16 @@ struct FHyperAILightingInspectReport
 	UPROPERTY() int32 LocalLightCount = 0;
 	/** What the local lights were ordered from: a camera's label, or level_viewport; empty for path order. */
 	UPROPERTY() FString LightView;
+	/** Materials on what that view shows, most of the frame first; MaterialCount counts every one there, listed or not. */
+	UPROPERTY() TArray<FHyperAILightingMaterialRecord> Materials;
+	UPROPERTY() int32 MaterialCount = 0;
+	/**
+	 * How the project renders light, which decides what a change can do: gi_method and reflection_method (lumen,
+	 * screen_space or none, as the level's post process leaves them), lumen_tracing (software or hardware),
+	 * lumen_max_roughness_to_trace, mesh_distance_fields, substrate, virtual_shadow_maps, megalights, static_lighting,
+	 * translucency_front_layer_reflections, and reflection_captures in the level.
+	 */
+	UPROPERTY() TArray<FHyperAILightingProperty> Rendering;
 	UPROPERTY() TArray<FString> Capabilities;
 };
 
@@ -159,6 +205,20 @@ struct FHyperAILightingCompareReport
  *   lock_exposure: value is the exposure bias in EV (default 0); unlock_exposure: no value
  *   set_actor_material: actor_label (required) names any placed actor; property is empty (slot 0),
  *     slot:<index or name>, or component:<name>/slot:<index or name>; value is the material's path
+ *   set_material_parameter: makes a surface take light as the reference's does (glossier, rougher, a truer colour, a
+ *     brighter glow) without changing the project's materials. actor_label names a placed actor showing the material;
+ *     property is [component:<name>/][slot:<index or name>/]<parameter>; value is a number, linear "r,g,b[,a]", a
+ *     texture's path, or default to drop the change. The level's own instance of the material, made under
+ *     /Game/HyperAI/LookDev/<level>/ the first time, takes the value, and every slot in the level that showed the
+ *     material shows that instance instead. set_actor_material_parameter gives the one actor's slot its own instance.
+ *     hyper_lighting_inspect lists the materials in view with their parameters.
+ *   set_actor_lighting: actor_label names a placed actor; property is [component:<name>/]<setting>: cast_shadow,
+ *     emissive_light_source (a small glowing mesh keeps lighting the scene under Lumen), affect_indirect_lighting,
+ *     affect_distance_field_lighting, visible_in_reflection_captures or visible_in_ray_tracing; value true or false
+ *   add_reflection_capture: actor_label is the new capture's label, property sphere or box, value its world "x,y,z".
+ *     Captures light surfaces' reflections where Lumen reflections are off (reflection_method screen_space or none).
+ *   set_reflection_capture: a capture by actor_label: location (x,y,z), box_extent (x,y,z half sizes in cm; box only),
+ *     or any setting its Details panel shows, such as Brightness, InfluenceRadius or BoxTransitionDistance
  *   set_sky_system: a Blueprint sky such as Ultra Dynamic Sky, which owns its sun, sky light and fog. Property is a
  *     variable by the name its Details panel shows (Time of Day, Cloud Coverage, Sun Light Intensity, ...), value is
  *     a number, true/false, an enum's display name or Unreal's text form; empty actor_label takes the first sky that
@@ -478,18 +538,19 @@ public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
 	/**
-	 * Sun, sky light, fog, sky atmosphere, post process and any Blueprint sky (Ultra Dynamic Sky and Weather) in the open
-	 * level, then its point, spot and rect lights, those lighting the view of camera_actor_label (else HyperAI_MatchCamera,
-	 * else the level viewport) first; whether exposure is locked, and the revision apply_plan needs.
+	 * Sun, sky light, fog, atmosphere, post process, reflection captures and any Blueprint sky (Ultra Dynamic Sky) in the
+	 * open level; the point, spot and rect lights and the materials, with their parameters, on what the view of
+	 * camera_actor_label (else HyperAI_MatchCamera, else the level viewport) shows; how the project renders light; whether
+	 * exposure is locked, and the revision apply_plan needs.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
 	static FHyperAILightingInspectReport hyper_lighting_inspect(const FHyperAILightingInspectRequest& Request);
 
 	/**
-	 * Closed lighting edits as one undo step: sun, sky light, fog, sky atmosphere, clouds and post process (fixed keys,
-	 * or any Details-panel setting by name; a LUT too), exposure lock, point, spot and rect lights, set_actor_material,
-	 * set_actor_shadow, and set_sky_system for a Blueprint sky. Submit with bDryRun false and an operation_id: the reply
-	 * waits for the edit. Then compare. Unsaved unless bSave.
+	 * Closed lighting edits as one undo step: sun, sky light, fog, atmosphere, clouds, post process (any Details setting by
+	 * name; a LUT), exposure lock, local lights, reflection captures, Blueprint skies, and surfaces: materials, parameters
+	 * on the level's own instances, mesh lighting flags. Submit with bDryRun false and an operation_id; the reply waits.
+	 * Unsaved unless bSave.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
 	static UHyperAILightingApplyPlanResult* hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& Request);

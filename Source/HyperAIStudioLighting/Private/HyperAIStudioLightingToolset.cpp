@@ -334,6 +334,11 @@ TArray<FString> FHyperAIStudioLightingContracts::GetCapabilities()
 		TEXT("closed_lighting_edits_as_one_undo_step"),
 		TEXT("missing_lighting_actors_added_on_demand"),
 		TEXT("material_assignment_to_a_placed_actor_mesh_slot"),
+		TEXT("materials_in_view_with_parameters_and_what_keeps_them_from_taking_light"),
+		TEXT("material_parameters_tuned_on_instances_the_level_owns_for_every_slot_or_one_actor"),
+		TEXT("mesh_lighting_flags_emissive_light_source_indirect_lighting_and_distance_fields"),
+		TEXT("reflection_captures_listed_added_and_shaped"),
+		TEXT("project_rendering_methods_gi_reflections_tracing_and_substrate"),
 		TEXT("point_spot_and_rect_lights_listed_by_view_edited_added_aimed_and_switched_off"),
 		TEXT("volumetric_fog_for_light_shafts"),
 		TEXT("any_details_panel_setting_of_the_sun_sky_light_fog_atmosphere_clouds_and_post_process_by_name"),
@@ -368,14 +373,15 @@ bool FHyperAIStudioLightingContracts::IsCanonicalSha256(const FString& Value)
 
 FString FHyperAIStudioLightingContracts::InspectPayloadSchemaFingerprint()
 {
-	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(TEXT("lighting.inspect.payload.v2|editor_world|output_bytes|camera_view|label_filter|local_light_limit"));
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("lighting.inspect.payload.v3|editor_world|output_bytes|camera_view|label_filter|local_light_limit|material_limit"));
 	return Value;
 }
 
 FString FHyperAIStudioLightingContracts::EditOpsPayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("lighting.edit_ops.payload.v3|level_path|base_revision|ordered_closed_ops|local_lights|details_by_name|clouds|lut|actor_shadow|save|deep_clone|bounded"));
+		TEXT("lighting.edit_ops.payload.v4|level_path|base_revision|ordered_closed_ops|local_lights|details_by_name|clouds|lut|actor_shadow|material_parameters|actor_lighting|reflection_captures|save|deep_clone|bounded"));
 	return Value;
 }
 
@@ -389,7 +395,7 @@ FString FHyperAIStudioLightingContracts::ComparePayloadSchemaFingerprint()
 FString FHyperAIStudioLightingContracts::InspectResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("lighting.inspect.result.v3|level|revision|exposure_lock|actors_properties|changed_details|clouds|local_lights_by_view|bounded"));
+		TEXT("lighting.inspect.result.v4|level|revision|exposure_lock|actors_properties|changed_details|clouds|local_lights_by_view|reflection_captures|materials_in_view|rendering|bounded"));
 	return Value;
 }
 
@@ -607,6 +613,15 @@ int32 FHyperAIStudioLightingInspectResultPayload::GetBoundedByteSize() const
 		Size += 32 + EstimateBytes(Actor.Kind) + EstimateBytes(Actor.Label) + EstimateBytes(Actor.Path);
 		for (const FHyperAILightingProperty& Property : Actor.Properties) Size += EstimateBytes(Property.Key) + EstimateBytes(Property.Value);
 	}
+	for (const FHyperAILightingMaterialRecord& Material : Report.Materials)
+	{
+		Size += 64 + EstimateBytes(Material.Path) + EstimateBytes(Material.Kind) + EstimateBytes(Material.BaseMaterial) + EstimateBytes(Material.BlendMode)
+			+ EstimateBytes(Material.ShadingModel) + EstimateBytes(Material.Slot);
+		for (const FHyperAILightingProperty& Property : Material.Parameters) Size += EstimateBytes(Property.Key) + EstimateBytes(Property.Value);
+		for (const FString& Text : Material.Actors) Size += EstimateBytes(Text);
+		for (const FString& Text : Material.Notes) Size += EstimateBytes(Text);
+	}
+	for (const FHyperAILightingProperty& Fact : Report.Rendering) Size += EstimateBytes(Fact.Key) + EstimateBytes(Fact.Value);
 	return ClampBytes(Size);
 }
 
@@ -679,6 +694,8 @@ FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHy
 	FHyperAIStudioRequestFit Fit;
 	Fit.ClampOrDefault(Request.MaxOutputBytes, MinOutputBytes, MaxOutputBytes, FHyperAILightingInspectRequest().MaxOutputBytes, TEXT("max_output_bytes"));
 	Fit.ClampOrDefault(Request.MaxLocalLights, 1, 128, FHyperAILightingInspectRequest().MaxLocalLights, TEXT("max_local_lights"));
+	// 0 asks for no materials, so it is kept rather than read as unset.
+	Fit.Clamp(Request.MaxMaterials, 0, 48, TEXT("max_materials"));
 	FHyperAILightingInspectReport Report;
 	Report.Capabilities = GetCapabilities();
 	auto Reject = [&](const TCHAR* Status, const FString& Diagnostic)
@@ -701,14 +718,16 @@ FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHy
 	{
 		return Reject(TEXT("no_editor_world"), TEXT("No level is open in the editor."));
 	}
-	if (Request.MaxLocalLights < 0 || Request.MaxLocalLights > 128 || Request.CameraActorLabel.Len() > 128 || Request.LabelFilter.Len() > 128)
+	if (Request.MaxLocalLights < 0 || Request.MaxLocalLights > 128 || Request.MaxMaterials < 0 || Request.MaxMaterials > 48
+		|| Request.CameraActorLabel.Len() > 128 || Request.LabelFilter.Len() > 128)
 	{
-		return Reject(TEXT("invalid_bounds"), TEXT("max_local_lights is 0 to 128, and camera_actor_label and label_filter are up to 128 characters."));
+		return Reject(TEXT("invalid_bounds"), TEXT("max_local_lights is 0 to 128, max_materials 0 to 48, and camera_actor_label and label_filter are up to 128 characters."));
 	}
 	Report.LevelPath = World->GetPathName();
 	Report.Revision = Gate::ComputeRevision(*World);
 	Report.bExposureLocked = Gate::IsExposureLocked(*World);
 	Report.Actors = Gate::ReadActors(*World);
+	Report.Rendering = Gate::ReadRendering(*World);
 	TArray<FHyperAILightingActorRecord> LocalLights = Gate::ReadLocalLights(*World, Request.CameraActorLabel, Request.LabelFilter,
 		Request.MaxLocalLights, Report.LocalLightCount, Report.LightView);
 	if (!Request.CameraActorLabel.IsEmpty() && Report.LightView != Request.CameraActorLabel)
@@ -716,7 +735,8 @@ FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHy
 		return Reject(TEXT("camera_not_found"), FString::Printf(TEXT("No camera is labelled '%s'; leave camera_actor_label empty to use HyperAI_MatchCamera or the level viewport."),
 			*Request.CameraActorLabel));
 	}
-	// Local lights fill what the output bound leaves, in view order, so a level with hundreds of them still answers.
+	TArray<FHyperAILightingMaterialRecord> Materials = Gate::ReadMaterials(*World, Request.CameraActorLabel, Request.MaxMaterials, Report.MaterialCount);
+	// Materials, then local lights, fill what the output bound leaves, in view order, so a level with hundreds of them still answers.
 	auto Bytes = [](const FHyperAILightingActorRecord& Record)
 	{
 		int32 Size = 64 + Record.Kind.Len() + Record.Label.Len() + Record.Path.Len();
@@ -726,10 +746,37 @@ FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHy
 		}
 		return Size;
 	};
+	auto MaterialBytes = [](const FHyperAILightingMaterialRecord& Record)
+	{
+		int32 Size = 160 + Record.Path.Len() + Record.Kind.Len() + Record.BaseMaterial.Len() + Record.BlendMode.Len() + Record.ShadingModel.Len() + Record.Slot.Len();
+		for (const FHyperAILightingProperty& Property : Record.Parameters)
+		{
+			Size += 24 + Property.Key.Len() + Property.Value.Len();
+		}
+		for (const FString& Text : Record.Actors)
+		{
+			Size += 8 + Text.Len();
+		}
+		for (const FString& Text : Record.Notes)
+		{
+			Size += 8 + Text.Len();
+		}
+		return Size;
+	};
 	int32 Used = 2048;
 	for (const FHyperAILightingActorRecord& Record : Report.Actors)
 	{
 		Used += Bytes(Record);
+	}
+	for (const FHyperAILightingProperty& Fact : Report.Rendering)
+	{
+		Used += 24 + Fact.Key.Len() + Fact.Value.Len();
+	}
+	for (FHyperAILightingMaterialRecord& Material : Materials)
+	{
+		Used += MaterialBytes(Material);
+		if (Used > Request.MaxOutputBytes) break;
+		Report.Materials.Add(MoveTemp(Material));
 	}
 	const int32 StockActors = Report.Actors.Num();
 	int32 Listed = 0;
@@ -757,10 +804,14 @@ FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHy
 		: FString::Printf(TEXT(" %d point, spot and rect lights, %d listed%s%s."), Report.LocalLightCount, Listed,
 			Report.LightView.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(", those lighting the view of %s first"), *Report.LightView),
 			Listed < Report.LocalLightCount ? TEXT("; label_filter or max_local_lights (up to 128) lists others") : TEXT(""));
-	Report.Diagnostic = FString::Printf(TEXT("%d lighting actors.%s%s%s%s"), StockActors,
+	const FString Surfaces = Request.MaxMaterials == 0 ? FString()
+		: Report.LightView.IsEmpty() ? FString(TEXT(" No view to list materials from: place HyperAI_MatchCamera or open a perspective level viewport."))
+		: FString::Printf(TEXT(" %d materials in view, %d listed with their parameters, most of the frame first; set_material_parameter tunes one wherever the level shows it, without changing the material itself."),
+			Report.MaterialCount, Report.Materials.Num());
+	Report.Diagnostic = FString::Printf(TEXT("%d lighting actors.%s%s%s%s%s"), StockActors,
 		Sky.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" The sky is %s: it owns the sun, sky light and fog, so light it with set_sky_system and its variables."), *Sky),
 		Missing.IsEmpty() ? TEXT("") : *(TEXT(" None of: ") + FString::Join(Missing, TEXT(", ")) + TEXT("; the first op on one adds it.")),
-		*Local,
+		*Local, *Surfaces,
 		Report.bExposureLocked ? TEXT("") : TEXT(" Auto exposure is on: lock_exposure before comparing (it also turns off a sky's own exposure)."));
 	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
 	return Report;

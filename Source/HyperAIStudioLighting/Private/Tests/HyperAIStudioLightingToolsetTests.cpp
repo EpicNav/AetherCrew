@@ -37,8 +37,20 @@
 #include "HAL/IConsoleManager.h"
 #include "HAL/FileManager.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionSine.h"
+#include "Materials/MaterialExpressionStaticSwitchParameter.h"
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialExpressionTime.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
+#include "Components/BoxReflectionCaptureComponent.h"
+#include "Components/SphereReflectionCaptureComponent.h"
+#include "Engine/BoxReflectionCapture.h"
+#include "Engine/SphereReflectionCapture.h"
+#include "HyperAIStudioLightingLookDev.h"
+#include "UObject/UObjectIterator.h"
 #include "MaterialShared.h"
 #include "SceneInterface.h"
 #include "ShaderCompiler.h"
@@ -102,6 +114,90 @@ namespace HyperAIStudio::Lighting::Tests
 			FlushRenderingCommands();
 		}
 		return true;
+	}
+
+	/** A lit material with the parameters a look-dev change takes, in an unsaved package of its own, as a project's material would be. */
+	UMaterial* MakeLookDevMaterial(const FString& Name)
+	{
+		UPackage* Package = CreatePackage(*(TEXT("/Temp/HyperAILookDevTests/") + Name));
+		UMaterial* Material = NewObject<UMaterial>(Package, *Name, RF_Public | RF_Standalone);
+		auto Scalar = [Material](const TCHAR* ParameterName, const float Value)
+		{
+			UMaterialExpressionScalarParameter* Expression = NewObject<UMaterialExpressionScalarParameter>(Material);
+			Expression->ParameterName = ParameterName;
+			Expression->DefaultValue = Value;
+			return Expression;
+		};
+		UMaterialExpressionScalarParameter* Roughness = Scalar(TEXT("Roughness"), 0.8f);
+		UMaterialExpressionScalarParameter* Specular = Scalar(TEXT("Specular"), 0.1f);
+		UMaterialExpressionVectorParameter* Colour = NewObject<UMaterialExpressionVectorParameter>(Material);
+		Colour->ParameterName = TEXT("BaseColor");
+		Colour->DefaultValue = FLinearColor(0.5f, 0.5f, 0.5f, 0.25f);
+		UMaterialExpressionTextureSampleParameter2D* Detail = NewObject<UMaterialExpressionTextureSampleParameter2D>(Material);
+		Detail->ParameterName = TEXT("Detail");
+		Detail->Texture = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
+		UMaterialExpressionMultiply* Tinted = NewObject<UMaterialExpressionMultiply>(Material);
+		Tinted->A.Expression = Colour;
+		Tinted->B.Expression = Detail;
+		UMaterialExpressionConstant* One = NewObject<UMaterialExpressionConstant>(Material);
+		One->R = 1.f;
+		UMaterialExpressionConstant* Zero = NewObject<UMaterialExpressionConstant>(Material);
+		UMaterialExpressionStaticSwitchParameter* Wet = NewObject<UMaterialExpressionStaticSwitchParameter>(Material);
+		Wet->ParameterName = TEXT("Wet");
+		Wet->A.Expression = One;
+		Wet->B.Expression = Zero;
+		for (UMaterialExpression* Expression : TArray<UMaterialExpression*>{Roughness, Specular, Colour, Detail, Tinted, One, Zero, Wet})
+		{
+			Material->GetExpressionCollection().AddExpression(Expression);
+		}
+		UMaterialEditorOnlyData* Inputs = Material->GetEditorOnlyData();
+		Inputs->BaseColor.Expression = Tinted;
+		Inputs->Roughness.Expression = Roughness;
+		Inputs->Specular.Expression = Specular;
+		Inputs->Metallic.Expression = Wet;
+		Material->PostEditChange();
+		return Material;
+	}
+
+	/** What a test made is never saved, so it is only forgotten. */
+	void Forget(UObject* Object)
+	{
+		FAssetRegistryModule::AssetDeleted(Object);
+		Object->GetPackage()->SetDirtyFlag(false);
+		Object->ClearFlags(RF_Public | RF_Standalone);
+		Object->MarkAsGarbage();
+	}
+
+	AStaticMeshActor* PlaceMesh(UWorld& World, UStaticMesh* Mesh, const FVector& Location, const TCHAR* Label, UMaterialInterface* Material = nullptr)
+	{
+		FActorSpawnParameters Spawn;
+		Spawn.ObjectFlags |= RF_Transactional;
+		AStaticMeshActor* Actor = World.SpawnActor<AStaticMeshActor>(Location, FRotator::ZeroRotator, Spawn);
+		UStaticMeshComponent* Component = Actor->GetStaticMeshComponent();
+		Component->UnregisterComponent();
+		Component->SetStaticMesh(Mesh);
+		if (Material)
+		{
+			Component->SetMaterial(0, Material);
+		}
+		Component->RegisterComponent();
+		Actor->SetActorLabel(Label);
+		return Actor;
+	}
+
+	FString ParameterOf(const FHyperAILightingMaterialRecord& Record, const TCHAR* Name)
+	{
+		const FHyperAILightingProperty* Found = Record.Parameters.FindByPredicate([Name](const FHyperAILightingProperty& Property) { return Property.Key == Name; });
+		return Found ? Found->Value : FString(TEXT("<missing>"));
+	}
+
+	FString RenderingFact(UWorld& World, const TCHAR* Key)
+	{
+		for (const FHyperAILightingProperty& Fact : HyperAIStudio::Lighting::Gate::ReadRendering(World))
+		{
+			if (Fact.Key == Key) return Fact.Value;
+		}
+		return TEXT("<missing>");
 	}
 }
 
@@ -1254,6 +1350,261 @@ bool FHyperAIStudioLightingMadeAssetsTest::RunTest(const FString& Parameters)
 	if (GEditor && GEditor->UndoTransaction())
 	{
 		TestTrue(TEXT("one undo puts the LUT back"), Volume->Settings.ColorGradingLUT.Get() == Texture);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioLightingMaterialParameterTest,
+	"HyperAIStudio.Lighting.Ops.MaterialParameters",
+	HyperAIStudio::Lighting::Tests::Flags)
+
+bool FHyperAIStudioLightingMaterialParameterTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Lighting::Tests;
+	namespace Gate = HyperAIStudio::Lighting::Gate;
+	namespace LookDev = HyperAIStudio::Lighting::LookDev;
+	UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+	UMaterialInterface* Shape = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAILightingLookDevWorld"));
+	if (!World || !PlaneMesh || !Shape)
+	{
+		AddError(TEXT("Needs a test world, the engine plane and its material."));
+		return false;
+	}
+	UMaterial* Floor = MakeLookDevMaterial(TEXT("M_LookDevFloor_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8));
+	const FString Folder = LookDev::FolderFor(*World);
+	ON_SCOPE_EXIT
+	{
+		World->DestroyWorld(/*bInformEngineOfWorld=*/false);
+		for (TObjectIterator<UMaterialInstanceConstant> It; It; ++It)
+		{
+			if (IsValid(*It) && It->GetPathName().StartsWith(Folder)) Forget(*It);
+		}
+		Forget(Floor);
+	};
+	AStaticMeshActor* FloorA = PlaceMesh(*World, PlaneMesh, FVector(0.0, 0.0, 0.0), TEXT("Floor_A"), Floor);
+	AStaticMeshActor* FloorB = PlaceMesh(*World, PlaneMesh, FVector(0.0, 150.0, 0.0), TEXT("Floor_B"), Floor);
+	AStaticMeshActor* Wall = PlaceMesh(*World, PlaneMesh, FVector(0.0, -150.0, 0.0), TEXT("Wall"), Shape);
+	UStaticMeshComponent* SlotA = FloorA->GetStaticMeshComponent();
+	UStaticMeshComponent* SlotB = FloorB->GetStaticMeshComponent();
+
+	// Without a view there is nothing to list; HyperAI_MatchCamera gives one.
+	int32 Total = 0;
+	TestTrue(TEXT("no view, no materials"), Gate::ReadMaterials(*World, FString(), 12, Total).IsEmpty() && Total == 0);
+	FActorSpawnParameters Spawn;
+	ACameraActor* Camera = World->SpawnActor<ACameraActor>(FVector(-400.0, 0.0, 300.0), (FVector::ZeroVector - FVector(-400.0, 0.0, 300.0)).Rotation(), Spawn);
+	Camera->SetActorLabel(TEXT("HyperAI_MatchCamera"));
+	const TArray<FHyperAILightingMaterialRecord> Seen = Gate::ReadMaterials(*World, FString(), 12, Total);
+	const FHyperAILightingMaterialRecord* Record = Seen.FindByPredicate([Floor](const FHyperAILightingMaterialRecord& Each) { return Each.Path == Floor->GetPathName(); });
+	if (!TestTrue(FString::Printf(TEXT("the floor's material is listed among the %d in view"), Total), Record != nullptr && Total >= 2))
+	{
+		return false;
+	}
+	TestEqual(TEXT("as a material"), Record->Kind, FString(TEXT("material")));
+	TestEqual(TEXT("shown by both floors"), Record->ActorCount, 2);
+	TestTrue(TEXT("the nearest named, with the slot the ops take"), Record->Actors.Contains(TEXT("Floor_A")) && Record->Slot == TEXT("slot:0"));
+	// Substrate may name a converted material's model its own way, so this asks only that it is lit.
+	TestTrue(TEXT("lit and opaque: ") + Record->ShadingModel + TEXT(" ") + Record->BlendMode,
+		!Record->ShadingModel.IsEmpty() && Record->ShadingModel != TEXT("unlit") && Record->BlendMode == TEXT("opaque"));
+	TestTrue(TEXT("covering part of the view"), Record->ViewShare > 0.f && Record->ViewShare <= 1.f);
+	TestEqual(TEXT("its roughness"), ParameterOf(*Record, TEXT("Roughness")), FString(TEXT("0.8")));
+	TestEqual(TEXT("its colour, linear with alpha"), ParameterOf(*Record, TEXT("BaseColor")), FString(TEXT("0.5,0.5,0.5,0.25")));
+	TestTrue(TEXT("and its texture"), ParameterOf(*Record, TEXT("Detail")).Contains(TEXT("DefaultTexture")));
+	TestTrue(TEXT("a dull specular is noted"), Record->Notes.ContainsByPredicate([](const FString& Note) { return Note.StartsWith(TEXT("Specular 0.10 dulls")); }));
+	if (RenderingFact(*World, TEXT("reflection_method")) == TEXT("lumen"))
+	{
+		TestTrue(TEXT("under Lumen reflections, so is a roughness above the trace limit"),
+			Record->Notes.ContainsByPredicate([](const FString& Note) { return Note.Contains(TEXT("above Lumen's reflection trace limit")); }));
+	}
+
+	auto Rejects = [&](const TArray<FHyperAILightingOp>& Ops, const TCHAR* Expected)
+	{
+		FString Error;
+		const bool bValid = Gate::ValidateOps(*World, Ops, Error);
+		TestTrue(*FString::Printf(TEXT("rejected with '%s' (got '%s')"), Expected, *Error), !bValid && Error.Contains(Expected));
+	};
+	Rejects({Op(TEXT("set_material_parameter"), TEXT("Roughness"), TEXT("0.2"))}, TEXT("needs actor_label"));
+	Rejects({Op(TEXT("set_material_parameter"), TEXT(""), TEXT("0.2"), TEXT("Floor_A"))}, TEXT("[component:<name>/][slot:<index or name>/]<parameter>"));
+	Rejects({Op(TEXT("set_material_parameter"), TEXT("Glossiness"), TEXT("0.2"), TEXT("Floor_A"))}, TEXT("has no parameter 'Glossiness'; its parameters are BaseColor, Detail, Roughness, Specular"));
+	Rejects({Op(TEXT("set_material_parameter"), TEXT("Wet"), TEXT("true"), TEXT("Floor_A"))}, TEXT("static switch"));
+	Rejects({Op(TEXT("set_material_parameter"), TEXT("Roughness"), TEXT("shiny"), TEXT("Floor_A"))}, TEXT("takes a number"));
+	Rejects({Op(TEXT("set_material_parameter"), TEXT("BaseColor"), TEXT("1,2"), TEXT("Floor_A"))}, TEXT("takes a linear colour"));
+	Rejects({Op(TEXT("set_material_parameter"), TEXT("Detail"), TEXT("/Game/NoSuchTexture"), TEXT("Floor_A"))}, TEXT("is not a texture"));
+	Rejects({Op(TEXT("set_material_parameter"), TEXT("slot:3/Roughness"), TEXT("0.2"), TEXT("Floor_A"))}, TEXT("its slots are 0"));
+	// A plan that first gives the slot another material is checked against that one.
+	Rejects({Op(TEXT("set_actor_material"), TEXT(""), TEXT("/Engine/BasicShapes/BasicShapeMaterial"), TEXT("Floor_A")),
+		Op(TEXT("set_material_parameter"), TEXT("Detail"), TEXT("/Engine/EngineResources/WhiteSquareTexture"), TEXT("Floor_A"))}, TEXT("has no parameter 'Detail'"));
+	TestEqual(TEXT("checking changes nothing"), SlotA->GetMaterial(0), static_cast<UMaterialInterface*>(Floor));
+
+	// Level-wide: the level's own instance, shown wherever the material was.
+	const TArray<FHyperAILightingOp> Glossy = {Op(TEXT("set_material_parameter"), TEXT("roughness"), TEXT("0.2"), TEXT("Floor_A"))};
+	TArray<AActor*> Touched;
+	FString Error;
+	if (!TestTrue(TEXT("a level-wide change applies: ") + Error, Gate::ApplyOps(*World, Glossy, Touched, Error)))
+	{
+		return false;
+	}
+	UMaterialInstanceConstant* Level = Cast<UMaterialInstanceConstant>(SlotA->GetMaterial(0));
+	if (!TestNotNull(TEXT("the floor shows a material instance"), Level))
+	{
+		return false;
+	}
+	TestTrue(TEXT("the level's own, in its LookDev folder: ") + Level->GetPathName(), Level->GetPathName().StartsWith(Folder + TEXT("MI_") + Floor->GetName()));
+	TestEqual(TEXT("made from the floor's material"), Level->Parent.Get(), static_cast<UMaterialInterface*>(Floor));
+	TestEqual(TEXT("every other slot that showed it shows it too"), SlotB->GetMaterial(0), static_cast<UMaterialInterface*>(Level));
+	TestEqual(TEXT("a slot showing another material keeps it"), Wall->GetStaticMeshComponent()->GetMaterial(0), Shape);
+	float Value = 0.f;
+	TestTrue(TEXT("the instance holds the roughness, by the parameter's own name"),
+		Level->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("Roughness")), Value) && FMath::IsNearlyEqual(Value, 0.2f));
+	TestTrue(TEXT("the project's material is unchanged"), Floor->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("Roughness")), Value) && FMath::IsNearlyEqual(Value, 0.8f));
+	TestTrue(TEXT("both floors were touched, the wall not"), Touched.Contains(FloorA) && Touched.Contains(FloorB) && !Touched.Contains(Wall));
+	TestTrue(TEXT("the Validate phase sees it: ") + Error, Gate::CheckMaterialOps(*World, Glossy, Error));
+	TestTrue(TEXT("and the instance saves with the plan"), Gate::PackagesOf(Gate::ResolveTargets(*World, Glossy)).Contains(Level->GetPackage()));
+	const TArray<FHyperAILightingMaterialRecord> Tuned = Gate::ReadMaterials(*World, FString(), 12, Total);
+	const FHyperAILightingMaterialRecord* Shown = Tuned.FindByPredicate([Level](const FHyperAILightingMaterialRecord& Each) { return Each.Path == Level->GetPathName(); });
+	if (TestNotNull(TEXT("inspect lists the level's instance"), Shown))
+	{
+		TestEqual(TEXT("as its look-dev instance"), Shown->Kind, FString(TEXT("look_dev")));
+		TestEqual(TEXT("with the roughness it holds"), ParameterOf(*Shown, TEXT("Roughness")), FString(TEXT("0.2")));
+	}
+
+	Touched.Reset();
+	TestTrue(TEXT("a colour by the other floor applies: ") + Error,
+		Gate::ApplyOps(*World, {Op(TEXT("set_material_parameter"), TEXT("base_color"), TEXT("0.3,0.25,0.2"), TEXT("Floor_B"))}, Touched, Error));
+	FLinearColor Colour;
+	TestTrue(TEXT("on the same instance, keeping its alpha"), SlotB->GetMaterial(0) == Level
+		&& Level->GetVectorParameterValue(FHashedMaterialParameterInfo(TEXT("BaseColor")), Colour) && Colour.Equals(FLinearColor(0.3f, 0.25f, 0.2f, 0.25f)));
+	Touched.Reset();
+	TestTrue(TEXT("a texture applies: ") + Error,
+		Gate::ApplyOps(*World, {Op(TEXT("set_material_parameter"), TEXT("Detail"), TEXT("/Engine/EngineResources/WhiteSquareTexture"), TEXT("Floor_A"))}, Touched, Error));
+	UTexture* Detail = nullptr;
+	TestTrue(TEXT("by its path"), Level->GetTextureParameterValue(FHashedMaterialParameterInfo(TEXT("Detail")), Detail) && Detail && Detail->GetName() == TEXT("WhiteSquareTexture"));
+
+	// One actor alone: its own instance, made from the level's.
+	const TArray<FHyperAILightingOp> Polished = {Op(TEXT("set_actor_material_parameter"), TEXT("slot:0/Roughness"), TEXT("0.05"), TEXT("Floor_B"))};
+	Touched.Reset();
+	TestTrue(TEXT("an actor's own change applies: ") + Error, Gate::ApplyOps(*World, Polished, Touched, Error));
+	UMaterialInstanceConstant* Own = Cast<UMaterialInstanceConstant>(SlotB->GetMaterial(0));
+	if (!TestTrue(TEXT("the floor has its own instance, in Actors"), Own && Own != Level && Own->GetPathName().StartsWith(Folder + TEXT("Actors/MI_Floor_B_0"))))
+	{
+		return false;
+	}
+	TestEqual(TEXT("made from the level's, so it takes what the level changes"), Own->Parent.Get(), static_cast<UMaterialInterface*>(Level));
+	TestEqual(TEXT("the other floor keeps the level's"), SlotA->GetMaterial(0), static_cast<UMaterialInterface*>(Level));
+	TestTrue(TEXT("its roughness is its own"), Own->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("Roughness")), Value) && FMath::IsNearlyEqual(Value, 0.05f));
+	TestTrue(TEXT("the level's is unchanged"), Level->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("Roughness")), Value) && FMath::IsNearlyEqual(Value, 0.2f));
+	TestTrue(TEXT("the Validate phase sees it: ") + Error, Gate::CheckMaterialOps(*World, Polished, Error));
+	Touched.Reset();
+	TestTrue(TEXT("a level-wide change through that floor applies: ") + Error,
+		Gate::ApplyOps(*World, {Op(TEXT("set_material_parameter"), TEXT("Specular"), TEXT("0.5"), TEXT("Floor_B"))}, Touched, Error));
+	TestTrue(TEXT("on the level's instance"), Level->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("Specular")), Value) && FMath::IsNearlyEqual(Value, 0.5f));
+	TestTrue(TEXT("which the floor's own takes"), Own->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("Specular")), Value) && FMath::IsNearlyEqual(Value, 0.5f));
+	const TArray<FHyperAILightingOp> Dropped = {Op(TEXT("set_actor_material_parameter"), TEXT("Roughness"), TEXT("default"), TEXT("Floor_B"))};
+	Touched.Reset();
+	TestTrue(TEXT("default applies: ") + Error, Gate::ApplyOps(*World, Dropped, Touched, Error));
+	TestTrue(TEXT("default drops the floor's own roughness for the level's"),
+		Own->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("Roughness")), Value) && FMath::IsNearlyEqual(Value, 0.2f));
+	TestTrue(TEXT("the Validate phase sees that too: ") + Error, Gate::CheckMaterialOps(*World, Dropped, Error));
+
+	const FString Revision = Gate::ComputeRevision(*World);
+	Touched.Reset();
+	TestTrue(TEXT("one more change applies: ") + Error, Gate::ApplyOps(*World, {Op(TEXT("set_material_parameter"), TEXT("Roughness"), TEXT("0.3"), TEXT("Floor_A"))}, Touched, Error));
+	TestNotEqual(TEXT("the revision covers the surfaces"), Gate::ComputeRevision(*World), Revision);
+	FlushAsyncLoading();
+	if (GEditor && GEditor->UndoTransaction())
+	{
+		TestTrue(TEXT("one undo puts the roughness back"), Level->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("Roughness")), Value) && FMath::IsNearlyEqual(Value, 0.2f));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioLightingCapturesTest,
+	"HyperAIStudio.Lighting.Ops.ReflectionCapturesAndMeshFlags",
+	HyperAIStudio::Lighting::Tests::Flags)
+
+bool FHyperAIStudioLightingCapturesTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Lighting::Tests;
+	namespace Gate = HyperAIStudio::Lighting::Gate;
+	UStaticMesh* SphereMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAILightingCapturesWorld"));
+	if (!World || !SphereMesh)
+	{
+		AddError(TEXT("Needs a test world and the engine sphere."));
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		World->DestroyWorld(/*bInformEngineOfWorld=*/false);
+	};
+	AStaticMeshActor* Lamp = PlaceMesh(*World, SphereMesh, FVector(0.0, 0.0, 300.0), TEXT("Neon_Sign"));
+	auto Rejects = [&](const TArray<FHyperAILightingOp>& Ops, const TCHAR* Expected)
+	{
+		FString Error;
+		const bool bValid = Gate::ValidateOps(*World, Ops, Error);
+		TestTrue(*FString::Printf(TEXT("rejected with '%s' (got '%s')"), Expected, *Error), !bValid && Error.Contains(Expected));
+	};
+	Rejects({Op(TEXT("set_actor_lighting"), TEXT("emissive_light_source"), TEXT("true"))}, TEXT("needs actor_label"));
+	Rejects({Op(TEXT("set_actor_lighting"), TEXT("glow"), TEXT("true"), TEXT("Neon_Sign"))}, TEXT("has no setting 'glow'"));
+	Rejects({Op(TEXT("set_actor_lighting"), TEXT("emissive_light_source"), TEXT("maybe"), TEXT("Neon_Sign"))}, TEXT("takes true or false"));
+	Rejects({Op(TEXT("add_reflection_capture"), TEXT("plane"), TEXT("0,0,0"), TEXT("Capture_Hall"))}, TEXT("sphere or box"));
+	Rejects({Op(TEXT("add_reflection_capture"), TEXT("sphere"), TEXT("0,0,0"), TEXT("Neon_Sign"))}, TEXT("already labelled 'Neon_Sign'"));
+	Rejects({Op(TEXT("set_reflection_capture"), TEXT("Brightness"), TEXT("2"), TEXT("Nobody"))}, TEXT("no reflection capture is labelled 'Nobody'"));
+	Rejects({Op(TEXT("add_reflection_capture"), TEXT("sphere"), TEXT("0,0,200"), TEXT("Capture_Hall")),
+		Op(TEXT("set_reflection_capture"), TEXT("box_extent"), TEXT("500,400,300"), TEXT("Capture_Hall"))}, TEXT("box_extent sizes only a box"));
+	Rejects({Op(TEXT("add_reflection_capture"), TEXT("sphere"), TEXT("0,0,200"), TEXT("Capture_Hall")),
+		Op(TEXT("set_reflection_capture"), TEXT("Radiance"), TEXT("2"), TEXT("Capture_Hall"))}, TEXT("no setting 'Radiance'"));
+
+	const TArray<FHyperAILightingOp> Ops = {
+		Op(TEXT("set_actor_lighting"), TEXT("emissive_light_source"), TEXT("true"), TEXT("Neon_Sign")),
+		Op(TEXT("set_actor_lighting"), TEXT("affect_indirect_lighting"), TEXT("false"), TEXT("Neon_Sign")),
+		Op(TEXT("add_reflection_capture"), TEXT("sphere"), TEXT("0,0,200"), TEXT("Capture_Hall")),
+		Op(TEXT("set_reflection_capture"), TEXT("InfluenceRadius"), TEXT("1500"), TEXT("Capture_Hall")),
+		Op(TEXT("set_reflection_capture"), TEXT("Brightness"), TEXT("2"), TEXT("Capture_Hall")),
+		Op(TEXT("add_reflection_capture"), TEXT("box"), TEXT("800,0,200"), TEXT("Capture_Room")),
+		Op(TEXT("set_reflection_capture"), TEXT("box_extent"), TEXT("500,400,300"), TEXT("Capture_Room"))};
+	TArray<AActor*> Touched;
+	FString Error;
+	if (!TestTrue(TEXT("the plan applies: ") + Error, Gate::ApplyOps(*World, Ops, Touched, Error)))
+	{
+		return false;
+	}
+	const UStaticMeshComponent* Mesh = Lamp->GetStaticMeshComponent();
+	TestTrue(TEXT("the sign is an emissive light source"), Mesh->bEmissiveLightSource);
+	TestFalse(TEXT("and takes no part in bounce light"), Mesh->bAffectDynamicIndirectLighting);
+	ASphereReflectionCapture* Hall = nullptr;
+	ABoxReflectionCapture* Room = nullptr;
+	for (AActor* Actor : Touched)
+	{
+		Hall = Hall ? Hall : Cast<ASphereReflectionCapture>(Actor);
+		Room = Room ? Room : Cast<ABoxReflectionCapture>(Actor);
+	}
+	if (!TestTrue(TEXT("a sphere and a box capture were added"), Hall && Room))
+	{
+		return false;
+	}
+	TestEqual(TEXT("labelled as asked"), Hall->GetActorLabel(), FString(TEXT("Capture_Hall")));
+	TestTrue(TEXT("and marked as added"), Hall->Tags.Contains(FName(TEXT("HyperAI.AddedReflectionCapture"))));
+	TestEqual(TEXT("where asked"), Hall->GetActorLocation(), FVector(0.0, 0.0, 200.0));
+	const USphereReflectionCaptureComponent* Sphere = Cast<USphereReflectionCaptureComponent>(Hall->GetCaptureComponent());
+	TestTrue(TEXT("its reach by the Details panel's name"), Sphere && Sphere->InfluenceRadius == 1500.f);
+	TestEqual(TEXT("and its brightness"), Hall->GetCaptureComponent()->Brightness, 2.f);
+	TestEqual(TEXT("the box's half sizes are its scale"), Room->GetActorScale3D(), FVector(500.0, 400.0, 300.0));
+	const TArray<FHyperAILightingActorRecord> Records = Gate::ReadActors(*World);
+	TestEqual(TEXT("inspect lists both captures"), Records.FilterByPredicate([](const FHyperAILightingActorRecord& Each) { return Each.Kind == TEXT("reflection_capture"); }).Num(), 2);
+	TestEqual(TEXT("and the rendering counts them"), RenderingFact(*World, TEXT("reflection_captures")), FString(TEXT("2")));
+	TestNotEqual(TEXT("the rendering says how the project lights"), RenderingFact(*World, TEXT("gi_method")), FString(TEXT("<missing>")));
+	TestTrue(TEXT("and what that means"), RenderingFact(*World, TEXT("note")) != TEXT("<missing>"));
+	TestTrue(TEXT("each capture is a target the plan saves"), Gate::ResolveTargets(*World, Ops).Contains(Hall) && Gate::ResolveTargets(*World, Ops).Contains(Room));
+	FlushAsyncLoading();
+	if (GEditor && GEditor->UndoTransaction())
+	{
+		TestFalse(TEXT("one undo takes the flag back"), Mesh->bEmissiveLightSource);
+		TestEqual(TEXT("and the captures away"), Gate::ReadActors(*World).FilterByPredicate([](const FHyperAILightingActorRecord& Each) { return Each.Kind == TEXT("reflection_capture"); }).Num(), 0);
 	}
 	return true;
 }

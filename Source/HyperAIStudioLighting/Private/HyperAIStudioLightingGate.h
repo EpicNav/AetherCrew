@@ -29,9 +29,17 @@ namespace HyperAIStudio::Lighting::Gate
 	UWorld* GetEditorWorld();
 	/**
 	 * Directional lights, sky lights, height fogs, sky atmospheres and unbound post-process volumes, then Blueprint skies
-	 * (kind sky_system: Ultra Dynamic Sky and Weather, Sun Sky, Sky Sphere) with the variables that move their look.
+	 * (kind sky_system: Ultra Dynamic Sky and Weather, Sun Sky, Sky Sphere) with the variables that move their look, then
+	 * reflection captures.
 	 */
 	TArray<FHyperAILightingActorRecord> ReadActors(UWorld& World);
+	/** How the project renders light, as the level's post process leaves it, and what that means for a match. */
+	TArray<FHyperAILightingProperty> ReadRendering(UWorld& World);
+	/**
+	 * Materials on what the view of CameraLabel's camera (else HyperAI_MatchCamera, else the level viewport) shows, most of
+	 * the frame first, up to Limit; OutTotal counts every one there. None without a view.
+	 */
+	TArray<FHyperAILightingMaterialRecord> ReadMaterials(UWorld& World, const FString& CameraLabel, int32 Limit, int32& OutTotal);
 	/**
 	 * Point, spot and rect lights: light actors, and lights held inside other actors such as a torch Blueprint. With a view
 	 * (CameraLabel's camera, else HyperAI_MatchCamera, else the level viewport) those whose light reaches into it come
@@ -54,13 +62,16 @@ namespace HyperAIStudio::Lighting::Gate
 	bool ValidateOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, FString& OutError);
 	/** Applies ops in order as one undo step, adding a missing actor where an op needs one. */
 	bool ApplyOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, TArray<AActor*>& OutTouched, FString& OutError);
-	/** Every set_actor_material op's slot holds its material; the Validate phase's postcondition. */
+	/**
+	 * Every set_actor_material op's slot holds its material, and every material parameter op's instance holds its value;
+	 * the Validate phase's postcondition.
+	 */
 	bool CheckMaterialOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, FString& OutError);
-	/** The actors ops resolve to now, without adding any. */
+	/** The actors ops resolve to now, without adding any; for a level-wide material change, those it left unsaved too. */
 	TArray<AActor*> ResolveTargets(UWorld& World, const TArray<FHyperAILightingOp>& Ops);
 	/**
 	 * Packages holding these actors (their own under One File Per Actor, otherwise the level's), and the unsaved assets a
-	 * plan made for them: a volume's colour-grading LUT, the clouds' material instance.
+	 * plan made for them: a volume's colour-grading LUT, the clouds' material instance, the level's look-dev instances.
 	 */
 	TArray<UPackage*> PackagesOf(const TArray<AActor*>& Actors);
 
@@ -69,6 +80,9 @@ namespace HyperAIStudio::Lighting::Gate
 	 * post-process volume that sets one. False, with the identity, when there is none. OutPath names its texture.
 	 */
 	bool ReadLevelLut(UWorld& World, Lut::FTable& OutTable, FString& OutPath);
-	/** Where made assets go: the LUTs set_post_process color_grading_lut imports, and the clouds' material instances. */
+	/**
+	 * Where made assets go: the LUTs set_post_process color_grading_lut imports, the clouds' material instances, and the
+	 * look-dev instances set_material_parameter makes, under LookDev/<level>.
+	 */
 	inline const TCHAR* const MadeAssetsRoot = TEXT("/Game/HyperAI/");
 }

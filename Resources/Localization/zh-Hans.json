@@ -1000,8 +1000,8 @@
   {
    "namespace": "HyperAIStudioMatchJobs",
    "key": "MatchLightingTip",
-   "source": "Your preferred agent relights the level until it scores 78 against the reference: sun, sky, fog, exposure and grade, or an Ultra Dynamic Sky's own settings. HyperAI checks after every round and sends it back to work until it matches. Its lighting edits are approved for you while it runs, and stay unsaved until it matches.",
-   "text": "你的首选智能体会为关卡重新布光，直到与参考图像的得分达到 78：太阳、天空、雾、曝光和调色，或 Ultra Dynamic Sky 自身的设置。HyperAI 会在每一轮之后检查，并让它继续工作，直到匹配为止。它运行期间的光照修改会替你批准，并在匹配之前保持未保存。"
+   "source": "Your preferred agent relights the level until it scores 78 against the reference: sun, sky, fog, exposure and grade, or an Ultra Dynamic Sky's own settings, and how its surfaces take the light. HyperAI checks after every round and sends it back to work until it matches, and keeps a study of each job so the next one starts from it. Its lighting edits are approved for you while it runs, and stay unsaved until it matches.",
+   "text": "你的首选智能体会为关卡重新布光，直到与参考图像的得分达到 78：太阳、天空、雾、曝光和调色，或 Ultra Dynamic Sky 自身的设置，以及各个表面如何承接光线。HyperAI 会在每一轮之后检查，并让它继续工作，直到匹配为止；它还会为每个任务保留一份研究记录，让下一个任务从中起步。它运行期间的光照修改会替你批准，并在匹配之前保持未保存。"
   },
   {
    "namespace": "HyperAIStudioMatchJobs",

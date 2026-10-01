@@ -1,6 +1,6 @@
 ---
 name: image-match
-description: Make a scene, environment, level layout, material, effect or UI look like a reference image, and prove it. Capture the attempt, score it against the reference with hyper_image_compare in a session, change one thing, and compare again until the score reaches the target or stops improving. Use it when the user has concept art, a photo or a generated image and says "make it look like this", "match this lighting" or "build this level", and for any HyperAI Match job. Covers Ultra Dynamic Sky, the point, spot and rect lights of interiors and night scenes, atmosphere, fog and clouds, softer shadows, and a colour-grading LUT fitted to the reference.
+description: Make a scene, environment, level layout, material, effect or UI look like a reference image, and prove it. Capture the attempt, score it against the reference with hyper_image_compare in a session, change one thing, and compare again until the score reaches the target or stops improving. Use it when the user has concept art, a photo or a generated image and says "make it look like this", "match this lighting" or "build this level", and for any HyperAI Match job. Covers Ultra Dynamic Sky, the point, spot and rect lights of interiors and night scenes, atmosphere, fog and clouds, softer shadows, surfaces that must reflect or glow (material parameters on the level's own instances, Lumen and reflection captures), a colour-grading LUT fitted to the reference, and the studies earlier matches left.
 ---
 # Match a reference image
 
@@ -33,7 +33,7 @@ A match is a loop with a scorekeeper. You make the changes. `hyper_image_compare
 | Domain | Capture | Levers, strongest first |
 |---|---|---|
 | Scene, environment | `hyper_capture_view` from a camera framed like the reference (source `camera`, the reference's aspect ratio) | `hyper_lighting_apply_plan`: sun pitch, yaw, temperature and intensity; the point, spot and rect lights that carry interiors and night scenes (`set_light`, `add_light`); sky light; fog; sky atmosphere; clouds; post process, and any setting their Details panels show. For a painted grade, such as a warm sky over violet shadows, grade apart with `shadows_gain`, `shadows_offset` and `highlights_gain`, and last a LUT fitted to the reference. Then placement and materials. See "Light it with every tool" below. |
-| Material | A camera on a preview mesh in the level, captured with `hyper_capture_view`; or the asset preview a material edit writes | Base colour, roughness, metallic, normal strength, emissive, texture tiling: the material tools or parameter edits |
+| Material | A camera on a preview mesh in the level, captured with `hyper_capture_view`; or the asset preview a material edit writes | Base colour, roughness, metallic, normal strength, emissive, texture tiling: in a level, `set_material_parameter` on the level's own instance; the asset itself with the material tools |
 | Effect (Niagara) | `hyper_capture_view` with `frameCount` 3-4 and `intervalSeconds` 0.25; compare the frame at the reference's moment | Spawn rate, colour over life, size, lifetime, velocity: the Niagara tools |
 | UI | A playtest `Capture` step in PIE, at the mock's resolution | Widget layout, colours, fonts, sizes: the UI tools |
 
@@ -119,6 +119,19 @@ A real frame is never one light. When the score stalls on the sun, the missing p
 - A post-process setting takes effect with its override on, as ticking its checkbox would. The value `default` unticks it.
 - `hyper_lighting_inspect` lists the settings that differ from the defaults. Exposure stays with `lock_exposure`.
 
+### Surfaces and reflections
+
+Light shows only where it lands. When the light is right and the frame still looks wrong, such as a dull floor where the reference's is wet, chalky walls, or a window that does not glow, the surface is wrong. Tune the surface; do not push the light to make up for it. `lighting-lookdev.md` beside this skill has the full reference: physical material values, every Lumen setting, and the mistakes earlier matches made.
+
+- **See the surfaces.** `hyper_lighting_inspect` lists the `materials` on what the view shows, most of the frame first, with their parameters and `notes` on what keeps each from taking light as the real surface would. Its `rendering` list says how the project carries light: `gi_method`, `reflection_method`, `lumen_tracing`, `lumen_max_roughness_to_trace`.
+- **Tune one.** `set_material_parameter` with an `actor_label` showing the material and the parameter as the property, such as `Roughness` or `slot:1/BaseColor`.
+  - Every slot in the level that showed the material shows the level's own instance of it, under `/Game/HyperAI/LookDev/<level>/`. The project's material is never changed.
+  - `set_actor_material_parameter` changes one actor's slot alone. The value `default` drops a change.
+  - A value the material fixes, or a static switch, needs the material tools, or another material with `set_actor_material`.
+- **Glow that lights.** Raise the emissive strength. A small glowing mesh stops lighting its surroundings under Lumen unless `set_actor_lighting` `emissive_light_source` is true; a strong source lights best with a local light inside it.
+- **Reflections.** Under Lumen, a surface rougher than `lumen_max_roughness_to_trace` (0.4) reflects only a blur, so a wet or polished look needs a lower roughness. Glass and water reflect sharply only with `LumenFrontLayerTranslucencyReflections`. Where `reflection_method` is not lumen, `add_reflection_capture` gives each room or street its reflections.
+- **Quality.** Lumen's own settings (`LumenReflectionQuality`, `LumenFinalGatherQuality`, `LumenSceneDetail` and the rest) are `set_post_process` settings by name. Reach for them when the result is noisy or blotchy, not to change the look.
+
 ### Grade last: a LUT fitted to the reference
 
 Much of a reference's look is its colour grade, which no light reaches. Once the light is close:
@@ -136,7 +149,7 @@ Much of a reference's look is its colour grade, which no light reaches. Once the
 
 ## 3. The loop
 
-Call `hyper_image_compare` every iteration with the same `sessionId` (letters, digits, - and _) and a `note` saying what you changed:
+Call `hyper_image_compare` every iteration with the same `sessionId` (letters, digits, - and _) and a `note` saying what you changed, with its values: `Roughness 0.85 -> 0.2 on M_Floor`, not `tweaks`. The note is what the job's study learns from.
 
 ```json
 {"request": {"referenceImagePath": "Content/References/Generated/dusk/dusk_01.png",
@@ -158,7 +171,7 @@ Each call:
 Stop when:
 
 - `bMatched` is true: the score reached the target. Keep that iteration.
-- `bPlateau` is true: three iterations without a point gained. Change lever categories, for example from the sun to the atmosphere and clouds, from darker shadows to softer ones, from light to a fitted LUT, or from light to materials or placement. If a second plateau follows, stop and keep the best iteration.
+- `bPlateau` is true: three iterations without a point gained. Change lever categories, for example from the sun to the atmosphere and clouds, from darker shadows to softer ones, from light to the surfaces it lands on, from light to a fitted LUT, or to placement. If a second plateau follows, stop and keep the best iteration.
 - You reach 12 iterations. Stop and keep the best (`bestIteration`, `bestScore`).
 - The report says `session_reference_changed`: that session belongs to another reference. Start a new `sessionId`.
 
@@ -173,9 +186,18 @@ When the reference is a place to build, not only a light to match, work as a lev
    - Block out the largest forms first, then the mid-size forms, then detail. The level design pack's player metrics give the scale: a person is 180 cm, a door 220 cm high.
    - Put things on the ground by tracing down.
    - Keep the space playable, with paths a player can walk.
-5. **Materials next, lighting last,** with the lighting steps above.
+5. **Materials next, lighting last,** with the lighting steps above. Tune how a surface takes the light with `set_material_parameter`.
 6. **Levers by kind:** layout and silhouette (placement, scale, the shapes still missing), then materials (colour, roughness), then light, then the grade. A plateau means the next kind.
 7. **Save the level** when the score reaches the target.
+
+## Learn from earlier matches
+
+Each Match job leaves a study, so the next one does not repeat its mistakes:
+
+- When a job ends, however it ends, HyperAI writes `.hyperai/memory/studies/<date>-<goal>-<reference>-<time>.md`: the best score against the target, what raised it and what lowered it (from each attempt's note and score), where the best attempt still differed, and what was suggested next. The project shares these through Git.
+- A new Match job's prompt carries the studies that bear on it, this level's first. During a job, each round's message lists what raised and what lowered the score so far.
+- Outside a job, read this level's studies before the first attempt.
+- When you learn something lasting about the project, such as the EV100 its sky needs once exposure is locked, or a master material without a roughness parameter, save it with `hyper_memory_remember`.
 
 ## 4. Report
 
