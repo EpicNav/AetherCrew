@@ -18,10 +18,12 @@
 #include "Misc/Guid.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Misc/StringOutputDevice.h"
 #include "SourceControlOperations.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
 #include "UObject/ObjectSaveContext.h"
 #include "UObject/Package.h"
+#include "UObject/SavePackage.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioSourceControl, Log, All);
 
@@ -400,6 +402,33 @@ bool FHyperAIStudioSourceControl::MakeEditable(const TArray<FString>& PackageNam
 		return false;
 	}
 	Current.AgentFiles.Append(Existing);
+	return true;
+}
+
+bool FHyperAIStudioSourceControl::SaveAsset(UObject& Asset, FString& OutError)
+{
+	UPackage* Package = Asset.GetOutermost();
+	if (!MakeEditable({Package->GetName()}, OutError))
+	{
+		return false;
+	}
+	if (!Package->IsFullyLoaded())
+	{
+		Package->FullyLoad();
+	}
+	FStringOutputDevice Refusal;
+	FSavePackageArgs Args;
+	Args.TopLevelFlags = RF_Public | RF_Standalone;
+	Args.Error = &Refusal;
+	const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
+	if (!UPackage::SavePackage(Package, &Asset, *File, Args))
+	{
+		const FString Why = Refusal.TrimStartAndEnd();
+		OutError = Why.IsEmpty()
+			? FString::Printf(TEXT("%s could not be saved."), *Package->GetName())
+			: FString::Printf(TEXT("%s could not be saved: %s"), *Package->GetName(), *Why);
+		return false;
+	}
 	return true;
 }
 

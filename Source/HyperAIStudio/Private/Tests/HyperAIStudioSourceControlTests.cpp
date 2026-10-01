@@ -173,4 +173,38 @@ bool FHyperAIStudioSourceControlLoreTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSourceControlSaveAssetTest,
+	"HyperAIStudio.SourceControl.SaveAsset",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioSourceControlSaveAssetTest::RunTest(const FString& Parameters)
+{
+	const FString Name = TEXT("/Game/HyperAITests/SourceControl/SC_Save_") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8);
+	UPackage* Package = CreatePackage(*Name);
+	UCurveFloat* Curve = NewObject<UCurveFloat>(Package, *FPackageName::GetShortName(Name), RF_Public | RF_Standalone);
+	FAssetRegistryModule::AssetCreated(Curve);
+	ON_SCOPE_EXIT
+	{
+		ObjectTools::ForceDeleteObjects(TArray<UObject*>{Curve}, /*ShowConfirmation=*/false);
+		// The full load still holds the package this frame, so the delete above leaves its file behind.
+		IFileManager::Get().Delete(*HyperAIStudio::SourceControlTests::File(Name), /*RequireExists=*/false, /*EvenReadOnly=*/true, /*Quiet=*/true);
+	};
+	FString Error;
+	const bool bMade = FHyperAIStudioSourceControl::SaveAsset(*Curve, Error);
+	TestTrue(TEXT("A new asset is saved: ") + Error, bMade);
+	// As another asset's load leaves a package it needed only a class from: Epic's save refuses it, by default through a
+	// fatal error, which once crashed the editor as a Blueprint's layout was saved.
+	Package->MarkAsUnloaded();
+	TestFalse(TEXT("The package now reads as partly loaded"), Package->IsFullyLoaded());
+	Curve->FloatCurve.AddKey(1.f, 2.f);
+	Curve->MarkPackageDirty();
+	Error.Reset();
+	const bool bEdited = FHyperAIStudioSourceControl::SaveAsset(*Curve, Error);
+	TestTrue(TEXT("An edit to it is still saved, the package loaded in full first: ") + Error, bEdited);
+	TestEqual(TEXT("with the edit kept"), Curve->FloatCurve.GetNumKeys(), 1);
+	TestFalse(TEXT("and nothing left unsaved"), Package->IsDirty());
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

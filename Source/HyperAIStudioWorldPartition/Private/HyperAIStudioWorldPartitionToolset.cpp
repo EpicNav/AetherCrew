@@ -19,7 +19,6 @@
 #include "ScopedTransaction.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
 #include "UObject/Package.h"
-#include "UObject/SavePackage.h"
 #include "WorldPartition/DataLayer/DataLayerAsset.h"
 #include "WorldPartition/DataLayer/DataLayerInstance.h"
 #include "WorldPartition/DataLayer/WorldDataLayers.h"
@@ -969,21 +968,6 @@ namespace HyperAIStudio::WorldPartitionTools::Private
 		return false;
 	}
 
-	bool SaveAsset(UObject& Asset, FString& OutError)
-	{
-		UPackage* Package = Asset.GetOutermost();
-		if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, OutError)) return false;
-		FSavePackageArgs Args;
-		Args.TopLevelFlags = RF_Public | RF_Standalone;
-		const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
-		if (!UPackage::SavePackage(Package, &Asset, *File, Args))
-		{
-			OutError = FString::Printf(TEXT("%s could not be saved."), *Package->GetName());
-			return false;
-		}
-		return true;
-	}
-
 	/** The plan for real: regions loaded, every edit as one undo step, regions unloaded, then saved as asked. */
 	FHyperAIWorldPartitionPlanReport Execute(const FHyperAIWorldPartitionPlanRequest& Request, const FString& OperationId)
 	{
@@ -1033,7 +1017,7 @@ namespace HyperAIStudio::WorldPartitionTools::Private
 		for (UObject* Asset : Assets)
 		{
 			FString Error;
-			if (!SaveAsset(*Asset, Error))
+			if (!FHyperAIStudioSourceControl::SaveAsset(*Asset, Error))
 			{
 				Report.Status = TEXT("save_failed");
 				Report.Diagnostic = Error;

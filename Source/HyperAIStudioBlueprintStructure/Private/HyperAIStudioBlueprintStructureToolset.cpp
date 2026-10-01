@@ -54,7 +54,6 @@
 #include "UObject/Interface.h"
 #include "UserDefinedStructure/UserDefinedStructEditorData.h"
 #include "UObject/Package.h"
-#include "UObject/SavePackage.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioBlueprintStructure, Log, All);
 
@@ -2131,25 +2130,6 @@ namespace HyperAIStudio::BlueprintStructure::Private
 		return Blueprint.Status == BS_Error ? TEXT("error") : Blueprint.Status == BS_UpToDateWithWarnings ? TEXT("up_to_date_with_warnings") : TEXT("up_to_date");
 	}
 
-	/** A Blueprint, struct or enum, saved to its package. */
-	bool Save(UObject& Asset, FString& OutError)
-	{
-		UPackage* Package = Asset.GetOutermost();
-		if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, OutError))
-		{
-			return false;
-		}
-		FSavePackageArgs Args;
-		Args.TopLevelFlags = RF_Public | RF_Standalone;
-		const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
-		if (!UPackage::SavePackage(Package, &Asset, *File, Args))
-		{
-			OutError = FString::Printf(TEXT("%s could not be saved."), *Package->GetName());
-			return false;
-		}
-		return true;
-	}
-
 	void RecordOutcome(const TCHAR* Tool, const FString& OperationId, const FString& Target, const bool bOk, const FString& Detail)
 	{
 		FHyperAIStudioActivityEntry Entry;
@@ -2214,7 +2194,7 @@ namespace HyperAIStudio::BlueprintStructure::Private
 			for (UObject* Asset : ToSave)
 			{
 				FString Error;
-				if (!Save(*Asset, Error))
+				if (!FHyperAIStudioSourceControl::SaveAsset(*Asset, Error))
 				{
 					Report.Status = TEXT("save_failed");
 					Report.Diagnostic = Error;

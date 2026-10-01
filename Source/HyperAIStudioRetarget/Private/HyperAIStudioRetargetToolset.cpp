@@ -30,7 +30,6 @@
 #include "StructUtils/InstancedStruct.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
 #include "UObject/Package.h"
-#include "UObject/SavePackage.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioRetarget, Log, All);
 
@@ -716,25 +715,6 @@ namespace HyperAIStudio::Retarget::Private
 		return true;
 	}
 
-	/** One rig, retargeter or retargeted animation saved to its package. */
-	bool Save(UObject& Asset, FString& OutError)
-	{
-		UPackage* Package = Asset.GetOutermost();
-		if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, OutError))
-		{
-			return false;
-		}
-		FSavePackageArgs Args;
-		Args.TopLevelFlags = RF_Public | RF_Standalone;
-		const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
-		if (!UPackage::SavePackage(Package, &Asset, *File, Args))
-		{
-			OutError = FString::Printf(TEXT("%s could not be saved."), *Package->GetName());
-			return false;
-		}
-		return true;
-	}
-
 	/** One rig or retargeter op, inside the plan's undo step. */
 	bool ApplyEdit(const FHyperAIRetargetOp& Op, TMap<FString, UObject*>& Made, TArray<UObject*>& Touched, TArray<FString>& OutNotes, FString& OutError)
 	{
@@ -985,7 +965,7 @@ namespace HyperAIStudio::Retarget::Private
 				}
 			}
 			FString Error;
-			if (!Save(*Asset, Error))
+			if (!FHyperAIStudioSourceControl::SaveAsset(*Asset, Error))
 			{
 				Report.Status = TEXT("save_failed");
 				Report.Diagnostic = Error;

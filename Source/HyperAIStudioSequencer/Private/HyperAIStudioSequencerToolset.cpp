@@ -41,7 +41,6 @@
 #include "Tracks/MovieSceneFloatTrack.h"
 #include "Tracks/MovieScenePropertyTrack.h"
 #include "UObject/Package.h"
-#include "UObject/SavePackage.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioSequencer, Log, All);
 
@@ -1343,21 +1342,6 @@ namespace HyperAIStudio::SequencerTools::Private
 		return false;
 	}
 
-	bool SaveAsset(UObject& Asset, FString& OutError)
-	{
-		UPackage* Package = Asset.GetOutermost();
-		if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, OutError)) return false;
-		FSavePackageArgs Args;
-		Args.TopLevelFlags = RF_Public | RF_Standalone;
-		const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
-		if (!UPackage::SavePackage(Package, &Asset, *File, Args))
-		{
-			OutError = FString::Printf(TEXT("%s could not be saved."), *Package->GetName());
-			return false;
-		}
-		return true;
-	}
-
 	/** The plan for real: every op as one undo step, the cut reviewed, the sequence saved, and the level if asked. */
 	FHyperAISequencePlanReport Execute(const FHyperAISequencePlanRequest& Request, const FString& OperationId)
 	{
@@ -1399,7 +1383,7 @@ namespace HyperAIStudio::SequencerTools::Private
 		}
 		Report.Review = Review(*World, *Sequence);
 		FString Error;
-		if (!SaveAsset(*Sequence, Error))
+		if (!FHyperAIStudioSourceControl::SaveAsset(*Sequence, Error))
 		{
 			Report.Status = TEXT("save_failed");
 			Report.Diagnostic = Error;

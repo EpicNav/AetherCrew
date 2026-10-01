@@ -15,22 +15,27 @@
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/FileHelper.h"
-#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "UObject/Package.h"
-#include "UObject/SavePackage.h"
 #include "UObject/UObjectGlobals.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioBlueprintTidy, Log, All);
 
 namespace HyperAIStudio::BlueprintTidy::Private
 {
+	struct FPending
+	{
+		TWeakObjectPtr<UBlueprint> Blueprint;
+		/** Its package held unsaved changes as the compile began: the compile followed an edit. */
+		bool bEdited = false;
+	};
+
 	struct FState
 	{
 		/** Per Blueprint, per graph, the nodes that were there when HyperAI last looked. */
 		TMap<TWeakObjectPtr<UBlueprint>, TMap<FGuid, TSet<FGuid>>> Known;
-		TArray<TWeakObjectPtr<UBlueprint>> Pending;
+		TArray<FPending> Pending;
 		FDelegateHandle Loaded;
 		FDelegateHandle Created;
 		FDelegateHandle PreCompile;
@@ -42,24 +47,6 @@ namespace HyperAIStudio::BlueprintTidy::Private
 	{
 		static FState Instance;
 		return Instance;
-	}
-
-	bool SaveLayout(UBlueprint& Blueprint, FString& OutError)
-	{
-		UPackage* Package = Blueprint.GetOutermost();
-		if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, OutError))
-		{
-			return false;
-		}
-		FSavePackageArgs Args;
-		Args.TopLevelFlags = RF_Public | RF_Standalone;
-		const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
-		if (!UPackage::SavePackage(Package, &Blueprint, *File, Args))
-		{
-			OutError = FString::Printf(TEXT("%s could not be saved."), *Package->GetName());
-			return false;
-		}
-		return true;
 	}
 
 	TArray<UEdGraph*> GraphsOf(UBlueprint* Blueprint)
@@ -150,13 +137,30 @@ namespace HyperAIStudio::BlueprintTidy::Private
 
 	void RunPending()
 	{
-		TArray<TWeakObjectPtr<UBlueprint>> Pending = MoveTemp(State().Pending);
+		TArray<FPending> Pending = MoveTemp(State().Pending);
 		State().Pending.Reset();
-		for (const TWeakObjectPtr<UBlueprint>& Blueprint : Pending)
+		for (const FPending& Entry : Pending)
 		{
-			if (Blueprint.IsValid())
+			UBlueprint* Blueprint = Entry.Blueprint.Get();
+			if (!Blueprint)
 			{
-				FHyperAIStudioBlueprintTidy::Tidy(Blueprint.Get());
+				continue;
+			}
+			// A compile that followed no edit (a recompile, or a dependency's) has no new nodes to place.
+			if (!Entry.bEdited)
+			{
+				FHyperAIStudioBlueprintTidy::Remember(Blueprint);
+				continue;
+			}
+			// Saved since the edit compiled, as an agent saves straight after its edit: the layout is saved with it.
+			const bool bSavedSince = !Blueprint->GetOutermost()->IsDirty();
+			if (FHyperAIStudioBlueprintTidy::Tidy(Blueprint) > 0 && bSavedSince)
+			{
+				FString Error;
+				if (!FHyperAIStudioSourceControl::SaveAsset(*Blueprint, Error))
+				{
+					UE_LOG(LogHyperAIStudioBlueprintTidy, Warning, TEXT("Arranged %s, but could not save the layout: %s"), *Blueprint->GetPathName(), *Error);
+				}
 			}
 		}
 	}
@@ -167,8 +171,24 @@ namespace HyperAIStudio::BlueprintTidy::Private
 		{
 			return;
 		}
+		// Compiled as it loads, it is as it was saved, and perhaps loaded only in part for another asset: remember it, never
+		// arrange or save it.
+		if (Blueprint->bIsRegeneratingOnLoad)
+		{
+			FHyperAIStudioBlueprintTidy::Remember(Blueprint);
+			return;
+		}
+		const UPackage* Package = Blueprint->GetOutermost();
+		const bool bEdited = Package && Package->IsDirty();
+		if (FPending* Queued = State().Pending.FindByPredicate([Blueprint](const FPending& Entry) { return Entry.Blueprint == Blueprint; }))
+		{
+			Queued->bEdited |= bEdited;
+		}
+		else
+		{
+			State().Pending.Add({Blueprint, bEdited});
+		}
 		// After the compile, on the next tick: never inside the edit or the script that caused it.
-		State().Pending.AddUnique(Blueprint);
 		if (!State().Tick.IsValid())
 		{
 			State().Tick = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([](float)
@@ -253,18 +273,11 @@ int32 FHyperAIStudioBlueprintTidy::Tidy(UBlueprint* Blueprint)
 	}
 	if (!Groups.IsEmpty())
 	{
-		UPackage* Package = Blueprint->GetOutermost();
-		const bool bWasSaved = !Package->IsDirty();
 		if (Arrange(Groups))
 		{
 			// Only positions moved: the compiled Blueprint is unchanged, so its status stays up to date; the package holds the
-			// new layout. An agent that saved right after its edit (this runs on the next tick) gets the layout saved too.
+			// new layout.
 			Blueprint->MarkPackageDirty();
-			FString Error;
-			if (bWasSaved && !SaveLayout(*Blueprint, Error))
-			{
-				UE_LOG(LogHyperAIStudioBlueprintTidy, Warning, TEXT("Arranged %s, but could not save the layout: %s"), *Blueprint->GetPathName(), *Error);
-			}
 			UE_LOG(LogHyperAIStudioBlueprintTidy, Log, TEXT("Arranged %d new node(s) in %s."), Moved, *Blueprint->GetPathName());
 		}
 		else

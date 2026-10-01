@@ -24,7 +24,6 @@
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
 #include "UObject/Package.h"
-#include "UObject/SavePackage.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UnrealType.h"
 
@@ -782,24 +781,6 @@ namespace HyperAIStudio::GAS::Authoring
 			return true;
 		}
 
-		bool Save(UBlueprint& Blueprint, FString& OutError)
-		{
-			UPackage* Package = Blueprint.GetOutermost();
-			if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, OutError))
-			{
-				return false;
-			}
-			FSavePackageArgs Args;
-			Args.TopLevelFlags = RF_Public | RF_Standalone;
-			const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
-			if (!UPackage::SavePackage(Package, &Blueprint, *File, Args))
-			{
-				OutError = FString::Printf(TEXT("%s could not be saved."), *Package->GetName());
-				return false;
-			}
-			return true;
-		}
-
 		/** The plan for real: one undo step, then every Blueprint it touched compiled and, when all compile, saved. */
 		FHyperAIGASApplyPlanReport Execute(const FHyperAIGASApplyPlanRequest& Request, const FString& OperationId)
 		{
@@ -867,7 +848,7 @@ namespace HyperAIStudio::GAS::Authoring
 			for (UBlueprint* Blueprint : Touched)
 			{
 				FString Error;
-				if (!Save(*Blueprint, Error))
+				if (!FHyperAIStudioSourceControl::SaveAsset(*Blueprint, Error))
 				{
 					Report.Status = TEXT("save_failed");
 					Report.Diagnostic = Error;

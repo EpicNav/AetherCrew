@@ -552,9 +552,10 @@ public:
 	bool bCheckOutBeforeAgentEdits = true;
 
 	/**
-	 * Lay out the Blueprint nodes agents add when the Blueprint compiles: flow left to right, branches fanned out, no node
-	 * on another, and the nodes already there left where they are. In a Blueprint open in its editor, the new nodes move
-	 * only when they lie on something, so nodes you drop by hand stay put.
+	 * Lay out the Blueprint nodes agents add when the Blueprint compiles after an edit: flow left to right, branches
+	 * fanned out, no node on another, and the nodes already there left where they are. In a Blueprint open in its editor,
+	 * the new nodes move only when they lie on something, so nodes you drop by hand stay put. A Blueprint no one edited is
+	 * never moved or saved.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Blueprints", meta = (DisplayName = "Arrange Agents' Blueprint Nodes"))
 	bool bArrangeAgentBlueprintNodes = true;

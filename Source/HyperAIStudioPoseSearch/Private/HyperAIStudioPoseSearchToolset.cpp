@@ -23,7 +23,6 @@
 #include "ScopedTransaction.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
 #include "UObject/Package.h"
-#include "UObject/SavePackage.h"
 #include "UObject/UObjectIterator.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioPoseSearch, Log, All);
@@ -745,25 +744,6 @@ namespace HyperAIStudio::MotionMatching::Private
 		return true;
 	}
 
-	/** One schema or database saved to its package. */
-	bool Save(UObject& Asset, FString& OutError)
-	{
-		UPackage* Package = Asset.GetOutermost();
-		if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, OutError))
-		{
-			return false;
-		}
-		FSavePackageArgs Args;
-		Args.TopLevelFlags = RF_Public | RF_Standalone;
-		const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
-		if (!UPackage::SavePackage(Package, &Asset, *File, Args))
-		{
-			OutError = FString::Printf(TEXT("%s could not be saved."), *Package->GetName());
-			return false;
-		}
-		return true;
-	}
-
 	/** One schema or database op, inside the plan's undo step. */
 	bool ApplyEdit(const FHyperAIPoseSearchOp& Op, TMap<FString, UObject*>& Made, TArray<UObject*>& Touched, FString& OutError)
 	{
@@ -978,7 +958,7 @@ namespace HyperAIStudio::MotionMatching::Private
 				Report.Notes.Append(Info.Notes);
 			}
 			FString Error;
-			if (!Save(*Asset, Error))
+			if (!FHyperAIStudioSourceControl::SaveAsset(*Asset, Error))
 			{
 				Report.Status = TEXT("save_failed");
 				Report.Diagnostic = Error;

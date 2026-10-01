@@ -33,7 +33,6 @@
 #include "ScopedTransaction.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
 #include "UObject/Package.h"
-#include "UObject/SavePackage.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioLandscape, Log, All);
 
@@ -961,21 +960,6 @@ namespace HyperAIStudio::LandscapeTools::Private
 		return true;
 	}
 
-	bool SaveAsset(UObject& Asset, FString& OutError)
-	{
-		UPackage* Package = Asset.GetOutermost();
-		if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, OutError)) return false;
-		FSavePackageArgs Args;
-		Args.TopLevelFlags = RF_Public | RF_Standalone;
-		const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
-		if (!UPackage::SavePackage(Package, &Asset, *File, Args))
-		{
-			OutError = FString::Printf(TEXT("%s could not be saved."), *Package->GetName());
-			return false;
-		}
-		return true;
-	}
-
 	/** The plan for real: every op as one undo step, the merged result read back, then saved as asked. */
 	FHyperAILandscapePlanReport Execute(const FHyperAILandscapePlanRequest& Request, const FString& OperationId)
 	{
@@ -1012,7 +996,7 @@ namespace HyperAIStudio::LandscapeTools::Private
 		for (UObject* Asset : Assets)
 		{
 			FString Error;
-			if (!SaveAsset(*Asset, Error))
+			if (!FHyperAIStudioSourceControl::SaveAsset(*Asset, Error))
 			{
 				Report.Status = TEXT("save_failed");
 				Report.Diagnostic = Error;

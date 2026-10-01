@@ -29,7 +29,6 @@
 #include "MoviePipelineSetting.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
 #include "UObject/Package.h"
-#include "UObject/SavePackage.h"
 #include "UObject/StrongObjectPtr.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioMovieRender, Log, All);
@@ -706,21 +705,6 @@ namespace HyperAIStudio::MovieRenderTools::Private
 		return true;
 	}
 
-	bool SaveAsset(UObject& Asset, FString& OutError)
-	{
-		UPackage* Package = Asset.GetOutermost();
-		if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, OutError)) return false;
-		FSavePackageArgs Args;
-		Args.TopLevelFlags = RF_Public | RF_Standalone;
-		const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
-		if (!UPackage::SavePackage(Package, &Asset, *File, Args))
-		{
-			OutError = FString::Printf(TEXT("%s could not be saved."), *Package->GetName());
-			return false;
-		}
-		return true;
-	}
-
 	/** One op; configs and graphs are saved as they change, and a render starts last. */
 	bool Apply(UWorld& World, const FHyperAIMovieRenderOp& Op, const FString& OperationId, FHyperAIMovieRenderPlanReport& Report, FString& OutError)
 	{
@@ -774,7 +758,7 @@ namespace HyperAIStudio::MovieRenderTools::Private
 		}
 		if (Saved)
 		{
-			if (!SaveAsset(*Saved, OutError)) return false;
+			if (!FHyperAIStudioSourceControl::SaveAsset(*Saved, OutError)) return false;
 			Report.Saved.Add(Saved->GetPathName());
 		}
 		return true;

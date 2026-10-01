@@ -33,7 +33,6 @@
 #include "ScopedTransaction.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
 #include "UObject/Package.h"
-#include "UObject/SavePackage.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioPCGScatter, Log, All);
 
@@ -480,21 +479,6 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		return true;
 	}
 
-	bool SaveAsset(UObject& Asset, FString& OutError)
-	{
-		UPackage* Package = Asset.GetOutermost();
-		if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, OutError)) return false;
-		FSavePackageArgs Args;
-		Args.TopLevelFlags = RF_Public | RF_Standalone;
-		const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
-		if (!UPackage::SavePackage(Package, &Asset, *File, Args))
-		{
-			OutError = FString::Printf(TEXT("%s could not be saved."), *Package->GetName());
-			return false;
-		}
-		return true;
-	}
-
 	/** One op; graphs are saved as they change, and a volume to generate is handed back to start once the plan is done. */
 	bool Apply(UWorld& World, const FHyperAIPCGScatterOp& Op, FHyperAIPCGScatterPlanReport& Report, APCGVolume*& OutGenerate, FString& OutError)
 	{
@@ -518,7 +502,7 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			}
 			if (!ShapeGraph(*Graph, Op, bNew, OutError)) return false;
 			Graph->MarkPackageDirty();
-			if (!SaveAsset(*Graph, OutError)) return false;
+			if (!FHyperAIStudioSourceControl::SaveAsset(*Graph, OutError)) return false;
 			Report.Saved.Add(Graph->GetPathName());
 			Report.Notes.Add(FString::Printf(TEXT("Graph %s: %s."), *Graph->GetName(), *FString::Join(DescribeGraph(*Graph), TEXT("; ")).Left(800)));
 			return true;

@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 
+class UObject;
+
 /** What source control says about one file, as far as an agent's edit is concerned. */
 struct FHyperAIStudioSourceControlFileState
 {
@@ -28,6 +30,12 @@ class HYPERAISTUDIO_API FHyperAIStudioSourceControl
 public:
 	/** Before an edit or a save: true when every package may be changed; OutError says who holds one, or what to do. */
 	static bool MakeEditable(const TArray<FString>& PackageNames, FString& OutError);
+	/**
+	 * Saves the asset's package as the editor's Save does: made editable as above, and loaded in full first, since Epic
+	 * refuses a package loaded only in part (one another asset needed only a class from). Epic's save raises a refusal
+	 * through a fatal error device unless told otherwise; this returns it in OutError.
+	 */
+	static bool SaveAsset(UObject& Asset, FString& OutError);
 	/** unreal (with the provider's name), lore (with the workspace), or none. */
 	static FString DescribeBackend();
 	/** Files agents made editable or added this session, as absolute paths. */
