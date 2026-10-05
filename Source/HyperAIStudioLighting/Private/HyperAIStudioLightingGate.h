@@ -58,8 +58,11 @@ namespace HyperAIStudio::Lighting::Gate
 	 */
 	FString LightOwningSky(UWorld& World);
 
-	/** Checks every op against the level as it would be at that point in the plan; changes nothing. */
-	bool ValidateOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, FString& OutError);
+	/**
+	 * Checks every op against the level as it would be at that point in the plan; changes nothing. OutNotes gets what a
+	 * valid plan sets that is rarely meant, op by op: a sky atmosphere scattering scale far past the engine's default.
+	 */
+	bool ValidateOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, FString& OutError, TArray<FString>* OutNotes = nullptr);
 	/** Applies ops in order as one undo step, adding a missing actor where an op needs one. */
 	bool ApplyOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, TArray<AActor*>& OutTouched, FString& OutError);
 	/**

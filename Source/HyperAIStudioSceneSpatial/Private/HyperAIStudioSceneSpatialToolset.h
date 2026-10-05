@@ -88,7 +88,10 @@ struct FHyperAISceneCostReport
 	UPROPERTY() FString LevelPath;
 	UPROPERTY() FString World;
 	UPROPERTY() FString Scope;
-	/** The report stopped early or lists were cut: TruncatedReason says why (max_actors, deadline_reached, max_output_bytes). */
+	/**
+	 * The report stopped early, left out meshes still compiling, or cut lists: TruncatedReason says why (max_actors,
+	 * deadline_reached, meshes_compiling, max_output_bytes).
+	 */
 	UPROPERTY() bool bTruncated = false;
 	UPROPERTY() FString TruncatedReason;
 	UPROPERTY() int32 ActorsScanned = 0;
@@ -110,7 +113,7 @@ struct FHyperAISceneCostReport
 	UPROPERTY() int32 NanitePrimitives = 0;
 	UPROPERTY() int32 NonNanitePrimitives = 0;
 
-	/** Static mesh LOD0 triangles times instances, for meshes drawn without Nanite: the worst case, before LOD. */
+	/** Static mesh LOD0 triangles times instances, for meshes drawn without Nanite: the worst case, before LODs and cull distances. */
 	UPROPERTY() int64 TrianglesNonNanite = 0;
 	/** Nanite source triangles times instances: what was imported, not what Nanite draws. */
 	UPROPERTY() int64 TrianglesNaniteSource = 0;
@@ -125,6 +128,7 @@ struct FHyperAISceneCostReport
 
 	UPROPERTY() FHyperAISceneCostLights Lights;
 
+	/** Materials a game draws: the editor's own, such as the landscape tools' brush and selection materials, are left out. */
 	UPROPERTY() int32 TranslucentMaterials = 0;
 	UPROPERTY() int32 TranslucentPrimitives = 0;
 	UPROPERTY() int32 MaskedNanitePrimitives = 0;
@@ -151,7 +155,10 @@ struct FHyperAISceneCostReport
 	UPROPERTY() TArray<FString> TranslucentList;
 	/** Other primitive classes: class xN. */
 	UPROPERTY() TArray<FString> OtherClasses;
-	/** code: message. */
+	/**
+	 * code: message. non_nanite_heavy (one copy is heavy), non_nanite_instances (a mesh's copies are heavy together),
+	 * many_sections, translucent_on_nanite, small_shadow_casters, many_shadow_lights, unloaded_actors and the stops.
+	 */
 	UPROPERTY() TArray<FString> Findings;
 };
 
