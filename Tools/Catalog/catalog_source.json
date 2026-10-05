@@ -3568,6 +3568,49 @@
    ]
   },
   {
+   "id": "mesh_modeling",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [
+    {
+     "id": "geometry_script",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "plugin.GeometryScripting"
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "hyper_model_inspect",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_model_apply_plan",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_model_validate",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    }
+   ]
+  },
+  {
    "id": "sound_design",
    "tier": "Optional",
    "dependsOn": [

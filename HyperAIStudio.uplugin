@@ -604,6 +604,19 @@
 				"CoreUObject",
 				"Engine"
 			]
+		},
+		{
+			"Name": "HyperAIStudioModeling",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
 		}
 	],
 	"Plugins": [
@@ -645,6 +658,10 @@
 		},
 		{
 			"Name": "GeometryScripting",
+			"Enabled": false
+		},
+		{
+			"Name": "MeshModelingToolset",
 			"Enabled": false
 		},
 		{
