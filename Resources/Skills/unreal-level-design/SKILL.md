@@ -52,6 +52,11 @@ A valley: rolling noise, a flat camp site, paint by slope and height, and a dirt
 ```
 
 - The material's layer blend must name the paint layers. Without it the landscape is grey, however it is painted.
+  With no such material yet, `landscape.create_material` makes one: `{"Kind": "landscape.create_material",
+  "Landscape": "Valley", "Material": "/Game/Landscape/M_ValleyColors"}` shows each of the landscape's paint layers
+  in a flat color and sets it on the landscape. `PaintLayers` names other layers, `LayerColors` gives their colors
+  in order (R, G, B 0 to 1; picked from the name otherwise: grass green, rock grey, snow white), and without
+  `Landscape` a later `landscape.create` or `landscape.set_material` in the same plan can take it.
 - Rules later in the list win where they overlap. `Breakup` (0 to 1) roughens band edges so they do not read as lines.
 - Paint biomes as a mosaic, not bands: `Patch` (meters across) and `Coverage` (the share of the ground) lay a layer in
   patches, such as forest in 150 m patches over 60% of the gentle ground with meadow between. `DistanceMax` keeps a
@@ -119,7 +124,7 @@ meadow over the valley, off the road and clear of tagged buildings, the volume c
 ```json
 {"Operations": [
  {"Kind": "ecosystem.create", "Graph": "/Game/PCG/PCG_Valley",
-  "AvoidLayers": ["Dirt"], "AvoidTags": ["Building"], "AvoidMargin": 3,
+  "AvoidLayers": ["Dirt"], "AvoidTags": ["Building"], "AvoidMargin": 3, "RoadMargin": 3,
   "Biomes": [
    {"Name": "Forest", "Layer": "Grass", "SlopeMax": 30, "Height": {"X": 0, "Y": 140},
     "Species": [
@@ -160,13 +165,15 @@ meadow over the valley, off the road and clear of tagged buildings, the volume c
   random lean in degrees, and `Sink` pushes bases into the ground in cm so they do not float.
 - `Height` bands (meters above zero) and `SlopeMax` place biomes by elevation: the treeline, scree on the heights,
   reeds just above the water. `LayerMin` (0.5) is how much paint a biome needs.
-- `AvoidLayers` keeps everything off road and riverbank layers. `AvoidTags` keeps `AvoidMargin` meters clear around
-  tagged actors, such as houses and camps. Trees stand up to a layer's edge and their crowns reach past it, so to keep
-  a road open paint a verge layer within a few meters of it (`landscape.paint` with `DistanceMax`) and avoid that too.
+- `RoadMargin` keeps every species that many meters from the paved edge of the landscape's roads (all its landscape
+  splines), measured to each footprint: 2 to 5 keeps tree crowns, which reach past their footprint, off a road.
+  `AvoidLayers` keeps everything off road and riverbank layers too. `AvoidTags` keeps `AvoidMargin` meters clear
+  around tagged actors, such as houses and camps.
 - The same names and `Seed` grow the same way every time; change `Seed` for another arrangement.
 - `Cover` sizes a volume to a landscape. `Partitioned: "true"` generates in World Partition cells that stream with
-  the world: use it in a World Partition level more than a few hundred meters across. Species keep out of each other
-  within a cell, so two may rarely meet at a cell's edge.
+  the world: use it in a World Partition level more than a few hundred meters across. Species that later ones keep
+  out of, and clumps, are sampled a few meters past each cell, so species keep out of each other across its edge;
+  the plan's note says how far (at most 128 m).
 
 Reading and changing:
 
