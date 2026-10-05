@@ -8,7 +8,10 @@ class UWorld;
 struct FHyperAISceneCostReport;
 struct FHyperAISceneCostRequest;
 
-/** What a world's loaded actors cost to render, in one bounded pass over them. Game thread only; nothing is loaded. */
+/**
+ * What a world's loaded actors cost to render, in one bounded pass over them. Game thread only; nothing is loaded, and
+ * meshes still compiling are left out rather than waited for.
+ */
 namespace HyperAIStudio::SceneSpatial::Cost
 {
 	/** Findings kept, at most. */

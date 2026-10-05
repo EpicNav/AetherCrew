@@ -41,8 +41,18 @@ namespace HyperAIStudio::SceneSpatial::Plan
 	bool Check(UWorld& World, const FHyperAISpatialPlanRequest& Request, TArray<FMove>& OutMoves, FHyperAISpatialPlanReport& Report);
 
 	/**
-	 * Applies Checked in one undo step after computing the plan again: if the level changed since the check so that
-	 * any move would differ (by 1 cm or half a degree), nothing is applied. Saves the level when the request asks.
+	 * Applies Checked in one undo step. With bRecheck the plan is computed again first, as after an approval: if the
+	 * level changed since the check so that any move would differ (by 1 cm or half a degree), nothing is applied.
+	 * Without it Checked is applied as it is, for a caller that checked it in the same call; its Notes are the caller's
+	 * to add. Saves the level when the request asks.
 	 */
-	FHyperAISpatialPlanReport Execute(UWorld& World, const FHyperAISpatialPlanRequest& Request, const TArray<FMove>& Checked, const FString& OperationId);
+	FHyperAISpatialPlanReport Execute(UWorld& World, const FHyperAISpatialPlanRequest& Request, const TArray<FMove>& Checked, const FString& OperationId,
+		bool bRecheck = true);
+
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Checks run so far, so tests see how often one call computes its plan. */
+	int32 GetCheckCountForTests();
+	/** The seconds every clear-spot search of one check may take together; unset restores 15. */
+	void SetClearSpotBudgetForTests(TOptional<double> Seconds);
+#endif
 }

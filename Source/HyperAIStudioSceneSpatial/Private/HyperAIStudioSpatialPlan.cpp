@@ -32,6 +32,21 @@ namespace HyperAIStudio::SceneSpatial::Plan
 		constexpr double RotationToleranceDegrees = 0.5;
 		/** Seconds every clear-spot search of one check may take together; a plan of many crowded actors stops there. */
 		constexpr double ClearSpotBudgetSeconds = 15.0;
+		/** Said of a search that budget stopped, so a recheck can tell running out of time from a level that changed. */
+		const TCHAR* const SearchTimeRanOut = TEXT("the plan's search time ran out");
+
+#if WITH_DEV_AUTOMATION_TESTS
+		int32 ChecksRun = 0;
+		TOptional<double> BudgetForTests;
+#endif
+
+		double ClearSpotBudget()
+		{
+#if WITH_DEV_AUTOMATION_TESTS
+			if (BudgetForTests.IsSet()) return BudgetForTests.GetValue();
+#endif
+			return ClearSpotBudgetSeconds;
+		}
 
 		UStaticMesh* LoadMesh(const FString& Path)
 		{
@@ -96,6 +111,9 @@ namespace HyperAIStudio::SceneSpatial::Plan
 
 	bool Check(UWorld& World, const FHyperAISpatialPlanRequest& Request, TArray<FMove>& OutMoves, FHyperAISpatialPlanReport& Report)
 	{
+#if WITH_DEV_AUTOMATION_TESTS
+		++ChecksRun;
+#endif
 		OutMoves.Reset();
 		Report.Moves.Reset();
 		Report.Notes.Reset();
@@ -258,7 +276,7 @@ namespace HyperAIStudio::SceneSpatial::Plan
 		}
 		TArray<TArray<FMove>> OpMoves;
 		OpMoves.SetNum(Count);
-		const double SearchDeadline = FPlatformTime::Seconds() + ClearSpotBudgetSeconds;
+		const double SearchDeadline = FPlatformTime::Seconds() + ClearSpotBudget();
 		for (const int32 Index : Order)
 		{
 			const FHyperAISpatialOp& Op = Request.Operations[Index];
@@ -356,7 +374,7 @@ namespace HyperAIStudio::SceneSpatial::Plan
 				if (!Found.bFound)
 				{
 					NoSpot.Add(FString::Printf(TEXT("%s (%d spots tried: %s%s)"), *Move.Name, Found.Candidates, *Found.Rejected(),
-						Found.bDeadline ? TEXT("; the plan's search time ran out") : TEXT("")));
+						Found.bDeadline ? *FString::Printf(TEXT("; %s"), SearchTimeRanOut) : TEXT("")));
 					continue;
 				}
 				// The box's middle onto the spot, and its bottom onto the spot's floor; the pivot keeps its offset.
@@ -385,7 +403,7 @@ namespace HyperAIStudio::SceneSpatial::Plan
 		}
 		if (Spatial::IsLandscapePending(World))
 		{
-			Report.Notes.Add(TEXT("A landscape is still merging its edit layers, so its collision may lag behind its shape; the apply traces again."));
+			Report.Notes.Add(TEXT("A landscape is still merging its edit layers, so its collision, and the ground found on it, may lag behind its shape."));
 		}
 		for (const FMove& Move : OutMoves)
 		{
@@ -394,7 +412,8 @@ namespace HyperAIStudio::SceneSpatial::Plan
 		return true;
 	}
 
-	FHyperAISpatialPlanReport Execute(UWorld& World, const FHyperAISpatialPlanRequest& Request, const TArray<FMove>& Checked, const FString& OperationId)
+	FHyperAISpatialPlanReport Execute(UWorld& World, const FHyperAISpatialPlanRequest& Request, const TArray<FMove>& Checked, const FString& OperationId,
+		const bool bRecheck)
 	{
 		FHyperAISpatialPlanReport Report;
 		Report.OperationId = OperationId;
@@ -405,36 +424,46 @@ namespace HyperAIStudio::SceneSpatial::Plan
 			Report.Diagnostic = Why;
 			return Report;
 		};
-		// Computed again: another agent or the user may have changed the level since the check, or while it awaited approval.
+		// Computed again: another agent or the user may have changed the level while the plan awaited approval.
 		TArray<FMove> Now;
-		FHyperAISpatialPlanReport Recheck;
-		if (!Check(World, Request, Now, Recheck))
+		if (bRecheck)
 		{
-			return Fail(TEXT("The level changed after the plan was checked, and the plan no longer passes: ") + Recheck.Diagnostic);
-		}
-		if (Now.Num() != Checked.Num())
-		{
-			return Fail(TEXT("The level changed after the plan was checked; nothing was changed. Check the plan again."));
-		}
-		for (int32 Index = 0; Index < Now.Num(); ++Index)
-		{
-			const FMove& Was = Checked[Index];
-			const FMove& Is = Now[Index];
-			const bool bSame = Was.Actor == Is.Actor && Was.Name == Is.Name
-				&& Was.To.GetLocation().Equals(Is.To.GetLocation(), LocationTolerance)
-				&& FMath::RadiansToDegrees(Was.To.GetRotation().AngularDistance(Is.To.GetRotation())) <= RotationToleranceDegrees
-				&& Was.To.GetScale3D().Equals(Is.To.GetScale3D(), 0.001);
-			if (!bSame)
+			FHyperAISpatialPlanReport Recheck;
+			if (!Check(World, Request, Now, Recheck))
 			{
-				return Fail(FString::Printf(TEXT("%s would now go to %s rather than the checked %s: the level changed after the check. Nothing was changed; check the plan again."),
-					*Is.Name, *Spatial::FormatVector(Is.To.GetLocation()), *Spatial::FormatVector(Was.To.GetLocation())));
+				// The search running out of time again says nothing about the level, which may be as it was.
+				if (Recheck.Status == TEXT("no_clear_spot") && Recheck.Diagnostic.Contains(SearchTimeRanOut))
+				{
+					return Fail(TEXT("The clear-spot search ran out of time when the plan was computed again before applying; nothing was changed. Ask for approval again, or narrow the plan (fewer actors to move, a smaller MaxRadius, or Near): ")
+						+ Recheck.Diagnostic);
+				}
+				return Fail(TEXT("The level changed after the plan was checked, and the plan no longer passes: ") + Recheck.Diagnostic);
 			}
+			if (Now.Num() != Checked.Num())
+			{
+				return Fail(TEXT("The level changed after the plan was checked; nothing was changed. Check the plan again."));
+			}
+			for (int32 Index = 0; Index < Now.Num(); ++Index)
+			{
+				const FMove& Was = Checked[Index];
+				const FMove& Is = Now[Index];
+				const bool bSame = Was.Actor == Is.Actor && Was.Name == Is.Name
+					&& Was.To.GetLocation().Equals(Is.To.GetLocation(), LocationTolerance)
+					&& FMath::RadiansToDegrees(Was.To.GetRotation().AngularDistance(Is.To.GetRotation())) <= RotationToleranceDegrees
+					&& Was.To.GetScale3D().Equals(Is.To.GetScale3D(), 0.001);
+				if (!bSame)
+				{
+					return Fail(FString::Printf(TEXT("%s would now go to %s rather than the checked %s: the level changed after the check. Nothing was changed; check the plan again."),
+						*Is.Name, *Spatial::FormatVector(Is.To.GetLocation()), *Spatial::FormatVector(Was.To.GetLocation())));
+				}
+			}
+			Report.Notes = Recheck.Notes;
 		}
 		int32 Moved = 0;
 		int32 Placed = 0;
 		{
 			const FScopedTransaction Transaction(LOCTEXT("SpatialPlan", "HyperAI: Spatial Placement"));
-			for (const FMove& Move : Now)
+			for (const FMove& Move : bRecheck ? Now : Checked)
 			{
 				if (Move.Kind == TEXT("place"))
 				{
@@ -469,11 +498,22 @@ namespace HyperAIStudio::SceneSpatial::Plan
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("completed");
-		Report.Notes = Recheck.Notes;
 		Report.Diagnostic = FString::Printf(TEXT("%d actor(s) moved and %d placed in one undo step%s."), Moved, Placed,
 			Request.bSave ? TEXT(", and the level saved") : TEXT("; the level is unsaved"));
 		return Report;
 	}
+
+#if WITH_DEV_AUTOMATION_TESTS
+	int32 GetCheckCountForTests()
+	{
+		return ChecksRun;
+	}
+
+	void SetClearSpotBudgetForTests(const TOptional<double> Seconds)
+	{
+		BudgetForTests = Seconds;
+	}
+#endif
 }
 
 #undef LOCTEXT_NAMESPACE

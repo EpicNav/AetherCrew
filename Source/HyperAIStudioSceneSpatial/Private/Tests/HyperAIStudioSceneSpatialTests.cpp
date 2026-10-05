@@ -263,6 +263,47 @@ bool FHyperAIStudioSceneCostNaniteTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSceneCostCompilingTest,
+	"HyperAIStudio.SceneSpatial.Cost.SkipsCompilingMeshes",
+	HyperAIStudio::SceneSpatial::Tests::Flags)
+
+bool FHyperAIStudioSceneCostCompilingTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::SceneSpatial::Tests;
+	// A copy of the engine cube, built once so a cube can show it, then built again so it is compiling while measured.
+	UStaticMesh* Building = DuplicateObject<UStaticMesh>(Cube(), GetTransientPackage(),
+		MakeUniqueObjectName(GetTransientPackage(), UStaticMesh::StaticClass(), TEXT("HyperAISceneCostBuildingCube")));
+	if (!TestNotNull(TEXT("the cube copies"), Building)) return false;
+	const TArray<UStaticMesh*> Built = {Building};
+	Building->Build(/*bInSilent=*/true);
+	FStaticMeshCompilingManager::Get().FinishCompilation(Built);
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAISceneCostCompilingWorld"));
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+	AddCube(*World, TEXT("Ready"), FVector::ZeroVector);
+	AddCube(*World, TEXT("Building"), FVector(500.0, 0.0, 0.0), FVector::OneVector, FRotator::ZeroRotator, Building);
+	Building->Build(/*bInSilent=*/true);
+	// The build ends before the world it shows in goes.
+	ON_SCOPE_EXIT { FStaticMeshCompilingManager::Get().FinishCompilation(Built); };
+	if (!Building->IsCompiling())
+	{
+		AddInfo(TEXT("Static meshes build synchronously here; skipped."));
+		return true;
+	}
+
+	const FHyperAISceneCostReport Report = Measure(*World);
+	TestTrue(TEXT("the report did not wait for the build"), Building->IsCompiling());
+	TestTrue(*FString::Printf(TEXT("measured (%s)"), *Report.Diagnostic), Report.bOk);
+	TestEqual(TEXT("the ready cube is counted, the compiling one left out"), Report.StaticMeshComponents, 1);
+	TestEqual(TEXT("so is its mesh"), Report.UniqueMeshes, 1);
+	TestTrue(*FString::Printf(TEXT("one finding says how many were left out: %s"), *FString::Join(Report.Findings, TEXT(" | "))),
+		Report.Findings.FilterByPredicate([](const FString& Finding) { return Finding.StartsWith(TEXT("meshes_compiling: 1 mesh component(s)")); }).Num() == 1);
+	TestFalse(TEXT("not as a mesh without render data"), Report.Findings.ContainsByPredicate([](const FString& Finding) { return Finding.StartsWith(TEXT("no_render_data:")); }));
+	TestTrue(*FString::Printf(TEXT("and the report says it is partial (%s)"), *Report.TruncatedReason), Report.bTruncated && Report.TruncatedReason == TEXT("meshes_compiling"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHyperAIStudioSceneCostShadowsTest,
 	"HyperAIStudio.SceneSpatial.Cost.ShadowsLightsTranslucency",
 	HyperAIStudio::SceneSpatial::Tests::Flags)
@@ -1115,6 +1156,102 @@ bool FHyperAIStudioSpatialApprovalTest::RunTest(const FString& Parameters)
 	TestTrue(FString::Printf(TEXT("approved (%s)"), *Error), bApprovedStale);
 	TestEqual(TEXT("and places nothing over the label taken meanwhile"), CountLabelled(Place.Label), 1);
 	World->EditorDestroyActor(Squatter, /*bShouldModifyLevel=*/false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSpatialRecheckTest,
+	"HyperAIStudio.SceneSpatial.Plan.RecheckOnlyAfterApproval",
+	HyperAIStudio::SceneSpatial::Tests::Flags)
+
+bool FHyperAIStudioSpatialRecheckTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::SceneSpatial;
+	using namespace HyperAIStudio::SceneSpatial::Tests;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAISpatialRecheckWorld"));
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+	ON_SCOPE_EXIT { Plan::SetClearSpotBudgetForTests({}); };
+	AddFloor(*World);
+	AddCube(*World, TEXT("Wall"), FVector(0.0, 0.0, 150.0), FVector(1.0, 10.0, 3.0));
+	AStaticMeshActor* Crate = AddCube(*World, TEXT("Crate"), FVector(30.0, 0.0, 50.0));
+	const FVector Before = Crate->GetActorLocation();
+	const FHyperAISpatialPlanRequest Request = PlanOf({Op(TEXT("move_to_clear_spot"), {TEXT("Crate")})});
+	TArray<Plan::FMove> Moves;
+	FHyperAISpatialPlanReport Checked;
+	if (!TestTrue(*FString::Printf(TEXT("the move checks (%s)"), *Checked.Diagnostic), Plan::Check(*World, Request, Moves, Checked) && Moves.Num() == 1))
+	{
+		return false;
+	}
+
+	// Approved later, the plan is computed again; a search out of time then is not taken for a level that changed.
+	Plan::SetClearSpotBudgetForTests(-1.0);
+	int32 Checks = Plan::GetCheckCountForTests();
+	const FHyperAISpatialPlanReport Late = Plan::Execute(*World, Request, Moves, TEXT("spatial-test-late"));
+	TestEqual(TEXT("an approved plan is computed again, once"), Plan::GetCheckCountForTests() - Checks, 1);
+	TestTrue(*FString::Printf(TEXT("running out of search time is said as such (%s)"), *Late.Diagnostic), !Late.bOk && Late.Status == TEXT("operation_failed")
+		&& Late.Diagnostic.Contains(TEXT("ran out of time")) && Late.Diagnostic.Contains(TEXT("approval again")) && !Late.Diagnostic.Contains(TEXT("level changed")));
+	TestTrue(TEXT("and nothing moved"), Crate->GetActorLocation().Equals(Before, 0.01));
+	Plan::SetClearSpotBudgetForTests({});
+
+	// Checked in the same call, the plan is applied as checked: the search does not run a second time.
+	Checks = Plan::GetCheckCountForTests();
+	const FHyperAISpatialPlanReport Applied = Plan::Execute(*World, Request, Moves, TEXT("spatial-test-direct"), /*bRecheck=*/false);
+	TestTrue(*FString::Printf(TEXT("applied as checked (%s)"), *Applied.Diagnostic), Applied.bOk && Applied.Applied == 1);
+	TestEqual(TEXT("without computing the plan again"), Plan::GetCheckCountForTests() - Checks, 0);
+	TestTrue(*FString::Printf(TEXT("the crate went where the check said (%s)"), *Crate->GetActorLocation().ToString()), Crate->GetActorLocation().Equals(Moves[0].To.GetLocation(), 0.01));
+	TestTrue(TEXT("clear of the wall"), IsClear(*World, Crate->GetActorLocation(), FVector(45.0), Crate));
+	FlushAsyncLoading();
+	if (TestTrue(TEXT("undo is available"), GEditor && GEditor->UndoTransaction()))
+	{
+		TestTrue(TEXT("one undo puts the crate back"), Crate->GetActorLocation().Equals(Before, 0.01));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSpatialDirectApplyTest,
+	"HyperAIStudio.SceneSpatial.Plan.DirectApplySearchesOnce",
+	HyperAIStudio::SceneSpatial::Tests::Flags)
+
+bool FHyperAIStudioSpatialDirectApplyTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::SceneSpatial;
+	using namespace HyperAIStudio::SceneSpatial::Tests;
+	using C = FHyperAIStudioSceneSpatialContracts;
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World || GEditor->PlayWorld)
+	{
+		AddInfo(TEXT("No editor level is open, or Play In Editor runs; skipped."));
+		return true;
+	}
+	// Agent edits apply at once, as they do with approval turned off.
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bWasRequired = Settings->bRequireApprovalForAgentEdits;
+	Settings->bRequireApprovalForAgentEdits = false;
+	TArray<AActor*> Made;
+	ON_SCOPE_EXIT
+	{
+		Settings->bRequireApprovalForAgentEdits = bWasRequired;
+		for (AActor* Actor : Made)
+		{
+			if (IsValid(Actor)) World->EditorDestroyActor(Actor, /*bShouldModifyLevel=*/false);
+		}
+	};
+	// Far below the level, so nothing of it is in the way: a floor, a wall, and a crate stuck in the wall.
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8);
+	const FVector Base(0.0, 0.0, -100000.0);
+	Made.Add(AddCube(*World, *(TEXT("HyperAI_SpatialDirectFloor_") + Suffix), Base + FVector(0.0, 0.0, -50.0), FVector(40.0, 40.0, 1.0)));
+	Made.Add(AddCube(*World, *(TEXT("HyperAI_SpatialDirectWall_") + Suffix), Base + FVector(0.0, 0.0, 150.0), FVector(1.0, 10.0, 3.0)));
+	AStaticMeshActor* Crate = AddCube(*World, *(TEXT("HyperAI_SpatialDirectCrate_") + Suffix), Base + FVector(30.0, 0.0, 50.0));
+	Made.Add(Crate);
+
+	const int32 Checks = Plan::GetCheckCountForTests();
+	const FHyperAISpatialPlanReport Applied = C::ApplyPlan(PlanOf({Op(TEXT("move_to_clear_spot"), {Crate->GetActorLabel()})}));
+	TestTrue(*FString::Printf(TEXT("the plan applies at once (%s)"), *Applied.Diagnostic), Applied.bOk && Applied.Status == TEXT("completed") && Applied.Applied == 1);
+	TestEqual(TEXT("computed once, so the clear-spot search ran once"), Plan::GetCheckCountForTests() - Checks, 1);
+	TestTrue(*FString::Printf(TEXT("the crate is clear of the wall at %s"), *Crate->GetActorLocation().ToString()), IsClear(*World, Crate->GetActorLocation(), FVector(45.0), Crate));
 	return true;
 }
 

@@ -88,7 +88,10 @@ struct FHyperAISceneCostReport
 	UPROPERTY() FString LevelPath;
 	UPROPERTY() FString World;
 	UPROPERTY() FString Scope;
-	/** The report stopped early or lists were cut: TruncatedReason says why (max_actors, deadline_reached, max_output_bytes). */
+	/**
+	 * The report stopped early, left out meshes still compiling, or cut lists: TruncatedReason says why (max_actors,
+	 * deadline_reached, meshes_compiling, max_output_bytes).
+	 */
 	UPROPERTY() bool bTruncated = false;
 	UPROPERTY() FString TruncatedReason;
 	UPROPERTY() int32 ActorsScanned = 0;

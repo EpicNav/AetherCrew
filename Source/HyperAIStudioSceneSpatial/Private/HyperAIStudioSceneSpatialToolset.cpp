@@ -234,7 +234,10 @@ FHyperAISpatialPlanReport FHyperAIStudioSceneSpatialContracts::ApplyPlan(const F
 		Report.Diagnostic = TEXT("Agent edits need approval here. Waiting in HyperAI Chat, Activity panel; nothing ran yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true.");
 		return Report;
 	}
-	return Plan::Execute(*World, Request, Moves, Report.OperationId);
+	// Checked a moment ago in this same call, so it is applied as checked rather than searched for again.
+	FHyperAISpatialPlanReport Done = Plan::Execute(*World, Request, Moves, Report.OperationId, /*bRecheck=*/false);
+	Done.Notes = Report.Notes;
+	return Done;
 }
 
 FHyperAISceneCostReport UHyperAIStudioSceneSpatialToolset::hyper_scene_cost_report(const FHyperAISceneCostRequest& Request)

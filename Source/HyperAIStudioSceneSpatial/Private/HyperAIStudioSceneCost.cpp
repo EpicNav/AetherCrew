@@ -94,7 +94,7 @@ namespace HyperAIStudio::SceneSpatial::Cost
 			return static_cast<int32>(FMath::Clamp<int64>(Value, 0, MAX_int32));
 		}
 
-		/** Findings about the whole report (loaded share, lights, a stop) are added last, so room is kept for them. */
+		/** Findings about the whole report (loaded share, lights, a stop, meshes still compiling) are added last, so room is kept for them. */
 		constexpr int32 ReportFindings = 6;
 
 		void AddFinding(FHyperAISceneCostReport& Out, const FString& Finding, const bool bWholeReport = false)
@@ -305,6 +305,7 @@ namespace HyperAIStudio::SceneSpatial::Cost
 		const UClass* PCGPartitionClass = Spatial::PCGPartitionActorClass();
 		int32 SmallCasters = 0;
 		int32 MostLocalShadowLights = 0;
+		int32 MeshesCompiling = 0;
 		TArray<FString> Stops;
 
 		for (TActorIterator<AActor> It(&World); It; ++It)
@@ -417,10 +418,16 @@ namespace HyperAIStudio::SceneSpatial::Cost
 					// A Nanite landscape draws through a static mesh of its own, already counted with its landscape components.
 					if (!Instanced && Actor->IsA<ALandscapeProxy>()) return;
 					const UStaticMesh* Mesh = StaticMesh->GetStaticMesh();
+					// Every read of a mesh still building (render data, Nanite, materials) waits for the build, so it is left out.
+					if (Mesh && Mesh->IsCompiling())
+					{
+						++MeshesCompiling;
+						return;
+					}
 					const FStaticMeshRenderData* RenderData = Mesh ? Mesh->GetRenderData() : nullptr;
 					if (!RenderData || RenderData->LODResources.IsEmpty())
 					{
-						// Only what is already loaded is read; a mesh still compiling or missing has nothing to count.
+						// No mesh, or one never built: there is nothing to count.
 						AddFinding(Out, FString::Printf(TEXT("no_render_data: %s on %s has no render data yet."),
 							Mesh ? *Mesh->GetPathName() : TEXT("no mesh"), *Spatial::LabelOf(*Actor)));
 						return;
@@ -508,6 +515,11 @@ namespace HyperAIStudio::SceneSpatial::Cost
 				if (const USkinnedMeshComponent* Skinned = Cast<USkinnedMeshComponent>(Component))
 				{
 					const USkinnedAsset* Asset = Skinned->GetSkinnedAsset();
+					if (Asset && Asset->IsCompiling())
+					{
+						++MeshesCompiling;
+						return;
+					}
 					const FSkeletalMeshRenderData* RenderData = Asset ? Asset->GetResourceForRendering() : nullptr;
 					if (!RenderData || RenderData->LODRenderData.IsEmpty())
 					{
@@ -648,6 +660,13 @@ namespace HyperAIStudio::SceneSpatial::Cost
 			AddFinding(Out, Stop == TEXT("max_actors")
 				? FString::Printf(TEXT("max_actors: stopped after %d actors; raise MaxActors or narrow the scope."), Out.ActorsScanned)
 				: FString::Printf(TEXT("deadline_reached: stopped after %d ms; raise DeadlineMs or narrow the scope."), Request.DeadlineMs), true);
+		}
+		// Left out rather than waited for, so the totals miss them and the report says it is partial.
+		if (MeshesCompiling > 0)
+		{
+			Stops.Add(TEXT("meshes_compiling"));
+			AddFinding(Out, FString::Printf(TEXT("meshes_compiling: %d mesh component(s) were left out because their meshes are still building; run the report again when they finish."),
+				MeshesCompiling), true);
 		}
 
 		// The last frame a viewport rendered, as stat unit reads it; nothing when no frame was drawn.

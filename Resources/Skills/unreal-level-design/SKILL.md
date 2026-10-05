@@ -257,7 +257,8 @@ Then place and settle props in one undo step with `hyper_spatial_apply_plan`:
 `hyper_scene_cost_report` says what the loaded level, a box or named actors cost to render: triangles with and without
 Nanite, estimated draw and shadow draws, instances per mesh, lights, translucent materials, the heaviest actors and
 meshes, and findings such as heavy meshes drawn without Nanite. Draw calls are estimates; `MeasuredLastFrameDrawCalls`
-is what the last rendered frame drew. In World Partition it covers loaded actors only and says how many are not.
+is what the last rendered frame drew. In World Partition it covers loaded actors only and says how many are not. Meshes
+still compiling are left out rather than waited for (`meshes_compiling`); run it again once they finish.
 
 ## Checking
 
