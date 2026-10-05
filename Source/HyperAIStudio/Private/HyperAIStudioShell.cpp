@@ -10,6 +10,7 @@
 #include "Framework/Docking/TabManager.h"
 #include "HAL/PlatformProcess.h"
 #include "HyperAIStudioAsyncJobHost.h"
+#include "HyperAIStudioPromptPresets.h"
 #include "HyperAIStudioStyle.h"
 #include "HyperAIStudioWidgets.h"
 #include "HAL/IConsoleManager.h"
@@ -19,6 +20,7 @@
 #include "Interfaces/IPluginManager.h"
 #include "Misc/ConfigCacheIni.h"
 #include "SHyperAIStudioActivitySidebar.h"
+#include "SHyperAIStudioQuickActionWindow.h"
 #include "SHyperAIStudioShell.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
@@ -95,6 +97,8 @@ namespace HyperAIStudio::Shell
 	/** Narrower than this, the search box shrinks. */
 	constexpr float NarrowBelow = 780.0f;
 	constexpr double StatusSeconds = 2.0;
+	/** Prompt presets in search: a few that fit, never enough to bury the pages and actions. */
+	constexpr int32 MaxPresetResults = 6;
 	const TCHAR* ConfigSection = TEXT("HyperAIStudio.Studio");
 	const FName HomePage(TEXT("Home"));
 
@@ -675,6 +679,20 @@ void SHyperAIStudioShell::Search(const FString& Query)
 			{
 				Results.Add(MakeShared<FResult>(FResult{Action.Label, Action.Description, Action.Icon, Action.Run}));
 			}
+		}
+		// The prompt library, last: running one puts it in the chat page open now, or the first chat.
+		const HyperAIStudio::PromptPresets::FLibrary& Library = HyperAIStudio::PromptPresets::Get(FHyperAIStudioService::GetProjectRoot());
+		for (const int32 Index : HyperAIStudio::PromptPresets::Search(Library, Needle, FString(), nullptr, HyperAIStudio::Shell::MaxPresetResults))
+		{
+			const FHyperAIStudioPromptPreset& Preset = Library.Presets[Index];
+			const FHyperAIStudioPromptCategory* Category = Library.FindCategory(Preset.Category);
+			int32 Tab = 1;
+			for (int32 Each = 1; Each <= SHyperAIStudioQuickActionWindow::MaxChatTabs; ++Each)
+			{
+				Tab = CurrentPage == SHyperAIStudioQuickActionWindow::GetPageId(Each) ? Each : Tab;
+			}
+			Results.Add(MakeShared<FResult>(FResult{Preset.DisplayTitle(), FText::Format(LOCTEXT("PresetResult", "Prompt: {0}"), Preset.DisplaySummary()),
+				Category ? Category->Icon : FName(TEXT("HyperAIStudio.Icon.Chat")), [Tab, Preset]() { SHyperAIStudioQuickActionWindow::InsertPreset(Tab, Preset); }}));
 		}
 	}
 	if (ResultList.IsValid())
