@@ -74,11 +74,14 @@ struct FHyperAILandscapeOp
 	GENERATED_BODY()
 
 	/**
-	 * landscape.create, landscape.sculpt, landscape.set_material, landscape.add_paint_layer, landscape.paint,
-	 * landscape.add_edit_layer, landscape.road.
+	 * landscape.create, landscape.sculpt, landscape.create_material, landscape.set_material, landscape.add_paint_layer,
+	 * landscape.paint, landscape.add_edit_layer, landscape.road.
 	 */
 	UPROPERTY() FString Kind;
-	/** The landscape, by its label in the level; for landscape.create, the new one's label. */
+	/**
+	 * The landscape, by its label in the level; for landscape.create, the new one's label. landscape.create_material
+	 * gives the new material to it when named.
+	 */
 	UPROPERTY() FString Landscape;
 	/**
 	 * landscape.create: centered on Location (cm), Size meters a side at Resolution cm between vertices (100 is Unreal's
@@ -94,14 +97,23 @@ struct FHyperAILandscapeOp
 	 */
 	UPROPERTY() FString Heightmap;
 	UPROPERTY() FHyperAILandscapeNoise Noise;
-	/** landscape.create, landscape.set_material: the landscape material. */
+	/**
+	 * landscape.create, landscape.set_material: the landscape material, one made earlier in the plan too.
+	 * landscape.create_material: the new material's path under /Game (/Game/Landscape/M_Valley).
+	 */
 	UPROPERTY() FString Material;
 	/**
 	 * landscape.create, landscape.add_paint_layer: paint layers by the names the material's layer blend uses (the first
 	 * covers everything at first); their layer info assets go in LayerInfoFolder (/Game/Landscape/LayerInfos by default).
+	 * landscape.create_material: the layers its blend names, the Landscape's own when empty.
 	 */
 	UPROPERTY() TArray<FString> PaintLayers;
 	UPROPERTY() FString LayerInfoFolder;
+	/**
+	 * landscape.create_material: each paint layer's flat color, in PaintLayers' order (R, G, B 0 to 1), so painted
+	 * ground reads without textures; picked from the layer's name (grass green, rock grey, snow white) when missing.
+	 */
+	UPROPERTY() TArray<FLinearColor> LayerColors;
 	/**
 	 * landscape.sculpt: raise, lower, flatten, smooth, noise, terrace or ramp, in a circle at Center (cm) of Radius meters
 	 * whose edge fades over Falloff meters. Amount: meters to raise or lower, the noise's size, or a terrace's step.
@@ -233,11 +245,10 @@ public:
 	static FHyperAILandscapeInspectReport hyper_landscape_inspect(const FHyperAILandscapeInspectRequest& Request);
 
 	/**
-	 * Builds and shapes landscapes in one plan, one undo step: create one from a 16-bit heightmap texture, fractal noise
-	 * (hills, or ridged mountains) or flat, at a size and resolution; sculpt regions (raise, lower, flatten, smooth, noise,
-	 * terrace, ramp between two points); set the material; add paint layers and paint them by height and slope rules
-	 * (grass on flats, rock on steep slopes, snow up high); add edit layers to sculpt and paint in; lay roads along
-	 * points, leveling and painting the ground under them.
+	 * Builds and shapes landscapes in one undoable plan: create one from a 16-bit heightmap, fractal noise or flat; sculpt
+	 * regions (raise, lower, flatten, smooth, noise, terrace, ramp); make a material showing each paint layer in a color,
+	 * or set one; paint layers by height, slope, distance from roads and in patches; add edit layers; lay roads through
+	 * points, leveling and painting under them.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|World")
 	static FHyperAILandscapePlanReport hyper_landscape_apply_plan(const FHyperAILandscapePlanRequest& Request);
