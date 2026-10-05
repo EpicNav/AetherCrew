@@ -24,6 +24,8 @@ public class HyperAIStudio : ModuleRules
 			"AssetRegistry",
 			"BlueprintGraph",
 			"ContentBrowser",
+			// The Content Browser's current folder, for the prompt presets' {{content_folder}}.
+			"ContentBrowserData",
 			"DesktopPlatform",
 			"EnhancedInput",
 			"GraphEditor",

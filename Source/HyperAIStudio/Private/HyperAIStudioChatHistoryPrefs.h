@@ -55,6 +55,12 @@ public:
 	UPROPERTY(Config)
 	FString AgentFilter;
 
+	static constexpr int32 MaxRecentPromptPresets = 12;
+
+	/** Prompt presets put in a chat, newest first, for the prompt picker's Recent list. */
+	UPROPERTY(Config)
+	TArray<FString> RecentPromptPresets;
+
 	static FString GetTitle(const FString& SessionId);
 	static bool IsPinned(const FString& SessionId);
 	static bool IsRemote(const FString& SessionId);
@@ -80,4 +86,7 @@ public:
 	static void SetAgentFilter(const FString& AgentName);
 	/** Drops everything kept about a chat that was deleted. */
 	static void Forget(const FString& SessionId);
+	static TArray<FString> GetRecentPromptPresets();
+	/** Puts the preset first in the recent list, which keeps MaxRecentPromptPresets. */
+	static void AddRecentPromptPreset(const FString& PresetId);
 };

@@ -256,3 +256,25 @@ void UHyperAIStudioChatHistoryPrefs::Forget(const FString& SessionId)
 	Prefs->ChatGroups.Remove(SessionId);
 	Prefs->SaveConfig();
 }
+
+TArray<FString> UHyperAIStudioChatHistoryPrefs::GetRecentPromptPresets()
+{
+	const UHyperAIStudioChatHistoryPrefs* Prefs = GetDefault<UHyperAIStudioChatHistoryPrefs>();
+	return Prefs ? Prefs->RecentPromptPresets : TArray<FString>();
+}
+
+void UHyperAIStudioChatHistoryPrefs::AddRecentPromptPreset(const FString& PresetId)
+{
+	UHyperAIStudioChatHistoryPrefs* Prefs = GetMutableDefault<UHyperAIStudioChatHistoryPrefs>();
+	if (!Prefs || PresetId.IsEmpty() || !HyperAIStudio::ChatPrefs::IsSaneTitle(PresetId))
+	{
+		return;
+	}
+	Prefs->RecentPromptPresets.Remove(PresetId);
+	Prefs->RecentPromptPresets.Insert(PresetId, 0);
+	if (Prefs->RecentPromptPresets.Num() > MaxRecentPromptPresets)
+	{
+		Prefs->RecentPromptPresets.SetNum(MaxRecentPromptPresets);
+	}
+	Prefs->SaveConfig();
+}

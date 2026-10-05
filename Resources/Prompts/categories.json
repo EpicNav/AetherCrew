@@ -1,0 +1,240 @@
+{
+ "schema": "hyperai.prompt-categories.v1",
+ "categories": [
+  {
+   "id": "level-blockout",
+   "title": "Level blockout",
+   "order": 10,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 19,
+   "route": "Level Design"
+  },
+  {
+   "id": "landscape-terrain",
+   "title": "Landscape and terrain",
+   "order": 20,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 14,
+   "route": "Level Design"
+  },
+  {
+   "id": "pcg-foliage",
+   "title": "PCG and foliage",
+   "order": 30,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 19,
+   "route": "Level Design"
+  },
+  {
+   "id": "world-partition",
+   "title": "World Partition and navigation",
+   "order": 40,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 6,
+   "route": "Level Design"
+  },
+  {
+   "id": "modelling-geometry",
+   "title": "Modelling and geometry",
+   "order": 50,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 20,
+   "route": "Level Design"
+  },
+  {
+   "id": "environment-recipes",
+   "title": "Environment recipes",
+   "order": 60,
+   "icon": "HyperAIStudio.Icon.Images",
+   "min": 11,
+   "route": "Level Design"
+  },
+  {
+   "id": "materials-textures",
+   "title": "Materials and textures",
+   "order": 70,
+   "icon": "HyperAIStudio.Icon.Match",
+   "min": 17,
+   "route": "Materials"
+  },
+  {
+   "id": "lighting-lookdev",
+   "title": "Lighting and look-dev",
+   "order": 80,
+   "icon": "HyperAIStudio.Icon.Match",
+   "min": 16,
+   "route": "Lighting"
+  },
+  {
+   "id": "vfx-niagara",
+   "title": "VFX with Niagara",
+   "order": 90,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 16,
+   "route": "VFX"
+  },
+  {
+   "id": "blueprints",
+   "title": "Blueprints",
+   "order": 100,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 20,
+   "route": "Gameplay"
+  },
+  {
+   "id": "cpp-build",
+   "title": "C++ and builds",
+   "order": 110,
+   "icon": "HyperAIStudio.Icon.Terminal",
+   "min": 11
+  },
+  {
+   "id": "gameplay-systems",
+   "title": "Gameplay systems",
+   "order": 120,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 16,
+   "route": "Gameplay"
+  },
+  {
+   "id": "gas",
+   "title": "Gameplay Ability System",
+   "order": 130,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 11,
+   "route": "Gameplay"
+  },
+  {
+   "id": "ai-behavior",
+   "title": "AI and behaviour",
+   "order": 140,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 11,
+   "route": "Gameplay"
+  },
+  {
+   "id": "animation",
+   "title": "Animation and rigging",
+   "order": 150,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 11,
+   "route": "Animation"
+  },
+  {
+   "id": "anim-blueprints",
+   "title": "Animation Blueprints",
+   "order": 160,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 9,
+   "route": "Animation"
+  },
+  {
+   "id": "uaf",
+   "title": "Unreal Animation Framework",
+   "order": 170,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 6,
+   "route": "Animation"
+  },
+  {
+   "id": "ui-umg",
+   "title": "UI and UMG",
+   "order": 180,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 12
+  },
+  {
+   "id": "cinematics",
+   "title": "Cinematics",
+   "order": 190,
+   "icon": "HyperAIStudio.Icon.Images",
+   "min": 11
+  },
+  {
+   "id": "audio",
+   "title": "Audio",
+   "order": 200,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 8
+  },
+  {
+   "id": "physics-chaos",
+   "title": "Physics and Chaos",
+   "order": 210,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 6,
+   "route": "Gameplay"
+  },
+  {
+   "id": "networking-framework",
+   "title": "Networking and game framework",
+   "order": 220,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 8,
+   "route": "Gameplay"
+  },
+  {
+   "id": "data-config-l10n",
+   "title": "Data, config and localization",
+   "order": 230,
+   "icon": "HyperAIStudio.Icon.File",
+   "min": 6
+  },
+  {
+   "id": "playtest-qa",
+   "title": "Playtest and QA",
+   "order": 240,
+   "icon": "HyperAIStudio.Icon.Playtest",
+   "min": 11
+  },
+  {
+   "id": "diagnostics-perf",
+   "title": "Diagnostics and performance",
+   "order": 250,
+   "icon": "HyperAIStudio.Icon.Report",
+   "min": 9
+  },
+  {
+   "id": "project-search-memory-scm",
+   "title": "Search, memory and source control",
+   "order": 260,
+   "icon": "HyperAIStudio.Icon.Memory",
+   "min": 6
+  },
+  {
+   "id": "paper2d",
+   "title": "Paper2D",
+   "order": 270,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 4
+  },
+  {
+   "id": "motion-design",
+   "title": "Motion design",
+   "order": 280,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 4
+  },
+  {
+   "id": "images-reference",
+   "title": "Images and reference",
+   "order": 290,
+   "icon": "HyperAIStudio.Icon.Images",
+   "min": 4
+  },
+  {
+   "id": "live-production",
+   "title": "Live production",
+   "order": 300,
+   "icon": "HyperAIStudio.Icon.Tools",
+   "min": 3
+  },
+  {
+   "id": "team-builds",
+   "title": "Team builds",
+   "order": 310,
+   "icon": "HyperAIStudio.Icon.Agents",
+   "min": 8
+  }
+ ]
+}
