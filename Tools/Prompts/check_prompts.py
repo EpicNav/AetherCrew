@@ -18,8 +18,9 @@ The rules are the C++ PromptPresets::Validate's (HyperAIStudio.PromptPresets.* t
 packs and tools against Tools/Catalog/catalog_source.json (a tool must belong to one of the preset's packs or to a
 foundation pack, and the prompt must name it), skills against Resources/Skills and Resources/AgentTeam/skills, agents
 against Resources/AgentTeam/agents, category routes against EnsureDefaultTaskRoutes in HyperAIStudioSettings.h, and
-each plan op kind against a TEXT("<kind>") somewhere in Source. Every category needs at least its "min" presets.
-Standard library only; nothing here runs the engine. Run it beside build_catalog.py check and gather.py check.
+each plan op kind against a TEXT("<kind>") somewhere in Source. Every category needs at least its "min" presets, and
+the example preset in Resources/Prompts/README.md keeps the same rules. Standard library only; nothing here runs the
+engine. Run it beside build_catalog.py check and gather.py check.
 """
 import json
 import re
@@ -272,7 +273,25 @@ def check(plugin, prompts, translations):
     for cid, category in categories.items():
         if len(library[cid]) < category.get("min", 0):
             errors.append("%s: %d presets, fewer than its min of %d" % (cid, len(library[cid]), category.get("min", 0)))
+    check_readme_example(plugin, errors)
     return categories, library, errors, warnings
+
+
+def check_readme_example(plugin, errors):
+    """The README's example preset is copied as a template, so it keeps the same rules (its id is a shipped one's)."""
+    readme = PLUGIN / "Resources" / "Prompts" / "README.md"
+    match = re.search(r"```json\r?\n(.*?)\r?\n```", readme.read_text(encoding="utf-8"), re.S)
+    if not match:
+        errors.append("README.md: no ```json example preset")
+        return
+    try:
+        preset = json.loads(match.group(1))
+    except ValueError as error:
+        errors.append("README.md: the example preset is not JSON: %s" % error)
+        return
+    category = str(preset.get("id", "")).split(".")[0]
+    zh = read_json(PLUGIN / "Tools" / "Prompts" / "zh-Hans" / (category + ".json"), errors) or {}
+    check_preset(plugin, preset, 0, category, "README.md example", zh, {}, errors)
 
 
 def stats(plugin, categories, library):
