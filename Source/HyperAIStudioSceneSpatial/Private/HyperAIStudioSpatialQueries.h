@@ -40,7 +40,10 @@ namespace HyperAIStudio::SceneSpatial::Spatial
 
 	/** Sprites, arrows, debug drawing and other editor helpers: not what an actor looks like, and never drawn in a game. */
 	bool IsHelperPrimitive(const UPrimitiveComponent& Component);
-	/** What an actor looks like, in the world and in its own space (unscaled): its registered components' bounds, helpers left out. */
+	/**
+	 * What an actor looks like, in the world and in its own space (unscaled): its registered components' bounds, helpers
+	 * left out, and shapes that block nothing (a pickup's overlap sphere) too unless the actor has nothing else.
+	 */
 	FBox WorldBounds(const AActor& Actor);
 	FBox LocalBounds(const AActor& Actor);
 

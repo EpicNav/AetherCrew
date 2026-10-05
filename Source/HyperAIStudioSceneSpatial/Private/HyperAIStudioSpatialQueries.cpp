@@ -5,6 +5,7 @@
 #include "CollisionShape.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/ShapeComponent.h"
 #include "Debug/DebugDrawComponent.h"
 #include "Engine/Brush.h"
 #include "Engine/CollisionProfile.h"
@@ -96,6 +97,21 @@ namespace HyperAIStudio::SceneSpatial::Spatial
 		bool IsEditorOnlyHit(const UPrimitiveComponent* Component)
 		{
 			return Component && Component->GetCollisionEnabled() == ECollisionEnabled::NoCollision;
+		}
+
+		/**
+		 * A shape that blocks no kind of object, such as a pickup's overlap sphere: never drawn, and nothing stands on it.
+		 * Only the engine's object types are asked, since a channel a project never set up answers Block.
+		 */
+		bool IsTriggerShape(const UPrimitiveComponent& Component)
+		{
+			if (!Component.IsA<UShapeComponent>()) return false;
+			if (!Component.IsCollisionEnabled()) return true;
+			for (const ECollisionChannel Type : {ECC_WorldStatic, ECC_WorldDynamic, ECC_Pawn, ECC_PhysicsBody, ECC_Vehicle, ECC_Destructible})
+			{
+				if (Component.GetCollisionResponseToChannel(Type) == ECR_Block) return false;
+			}
+			return true;
 		}
 
 		FString Lower(const FString& Value)
@@ -486,29 +502,32 @@ namespace HyperAIStudio::SceneSpatial::Spatial
 
 	FBox WorldBounds(const AActor& Actor)
 	{
+		// Trigger shapes count only for an actor that has nothing else, such as a trigger box.
 		FBox Box(ForceInit);
-		Actor.ForEachComponent<UPrimitiveComponent>(/*bIncludeFromChildActors=*/true, [&Box](const UPrimitiveComponent* Component)
+		FBox Triggers(ForceInit);
+		Actor.ForEachComponent<UPrimitiveComponent>(/*bIncludeFromChildActors=*/true, [&Box, &Triggers](const UPrimitiveComponent* Component)
 		{
 			if (Component->IsRegistered() && !IsHelperPrimitive(*Component))
 			{
-				Box += Component->Bounds.GetBox();
+				(IsTriggerShape(*Component) ? Triggers : Box) += Component->Bounds.GetBox();
 			}
 		});
-		return Box;
+		return Box.IsValid ? Box : Triggers;
 	}
 
 	FBox LocalBounds(const AActor& Actor)
 	{
 		FBox Box(ForceInit);
+		FBox Triggers(ForceInit);
 		const FTransform WorldToActor = Actor.GetActorTransform().Inverse();
-		Actor.ForEachComponent<UPrimitiveComponent>(/*bIncludeFromChildActors=*/true, [&Box, &WorldToActor](const UPrimitiveComponent* Component)
+		Actor.ForEachComponent<UPrimitiveComponent>(/*bIncludeFromChildActors=*/true, [&Box, &Triggers, &WorldToActor](const UPrimitiveComponent* Component)
 		{
 			if (Component->IsRegistered() && !IsHelperPrimitive(*Component))
 			{
-				Box += Component->CalcBounds(Component->GetComponentTransform() * WorldToActor).GetBox();
+				(IsTriggerShape(*Component) ? Triggers : Box) += Component->CalcBounds(Component->GetComponentTransform() * WorldToActor).GetBox();
 			}
 		});
-		return Box;
+		return Box.IsValid ? Box : Triggers;
 	}
 
 	bool PlanDrop(const UWorld& World, const FDropSubject& Subject, const FDropSettings& Settings, FTransform& OutTransform)
@@ -621,6 +640,12 @@ namespace HyperAIStudio::SceneSpatial::Spatial
 		FString Error;
 		FCollisionQueryParams Params(SCENE_QUERY_STAT(HyperAISpatialQuery), Query.bTraceComplex);
 		Params.bReturnPhysicalMaterial = true;
+		// Each name is looked for among every loaded actor, so the list is bounded.
+		if (Query.IgnoreActors.Num() > FHyperAIStudioSceneSpatialContracts::MaxScopeActors)
+		{
+			Fail(FString::Printf(TEXT("IgnoreActors holds at most %d actors."), FHyperAIStudioSceneSpatialContracts::MaxScopeActors));
+			return;
+		}
 		for (const FString& Name : Query.IgnoreActors)
 		{
 			const AActor* Ignored = FindActor(World, Name, Error);

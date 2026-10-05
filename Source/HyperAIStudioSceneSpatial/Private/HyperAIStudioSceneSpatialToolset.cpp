@@ -216,6 +216,11 @@ FHyperAISpatialPlanReport FHyperAIStudioSceneSpatialContracts::ApplyPlan(const F
 				Done.Status = TEXT("operation_failed");
 				if (!Target) Done.Diagnostic = TEXT("No level is open in the editor.");
 				else if (GEditor && GEditor->PlayWorld) Done.Diagnostic = TEXT("Play In Editor was running when the plan was approved; nothing was changed.");
+				// A placement has no actor to recognise, so another level open by now would take it.
+				else if (Target->GetOutermost()->GetName() != LevelPath)
+				{
+					Done.Diagnostic = FString::Printf(TEXT("The plan was checked in %s, but %s is open now; nothing was changed."), *LevelPath, *Target->GetOutermost()->GetName());
+				}
 				else Done = Plan::Execute(*Target, Request, Moves, OperationId);
 				Private::Record(OperationId, LevelPath, Done);
 			}, Error))

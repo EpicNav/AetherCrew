@@ -182,7 +182,7 @@ struct FHyperAISpatialQuery
 	UPROPERTY() bool bTraceComplex = false;
 	/** trace, sweep: every hit along the way (up to 16), not only the first. */
 	UPROPERTY() bool bMulti = false;
-	/** Actors passed through, by label or path. */
+	/** Actors passed through, by label or path; at most 64. */
 	UPROPERTY() TArray<FString> IgnoreActors;
 	/** Pass through foliage and PCG-generated instances. */
 	UPROPERTY() bool bIgnoreFoliage = false;
@@ -348,7 +348,7 @@ struct FHyperAISpatialOp
 	UPROPERTY() float TraceDistance = 50000.f;
 	/** The collision channel ground is found on; Visibility by default. */
 	UPROPERTY() FString Channel;
-	/** Actors the ground traces pass through, by label or path. */
+	/** Actors the ground traces pass through, by label or path; at most 64. */
 	UPROPERTY() TArray<FString> IgnoreActors;
 	/** Foliage and PCG-generated instances count as ground; by default traces pass through them, so a rock never lands on a tree. */
 	UPROPERTY() bool bIncludeFoliage = false;
@@ -368,7 +368,7 @@ struct FHyperAISpatialPlanRequest
 {
 	GENERATED_BODY()
 
-	/** 1 to 32, each computed against the level as it was before the plan. */
+	/** 1 to 32, each computed against the level as it was before the plan; clear spots keep off where it places and drops things. */
 	UPROPERTY() TArray<FHyperAISpatialOp> Operations;
 	/** Only check the plan and return the new transforms: nothing changes. */
 	UPROPERTY() bool bDryRun = false;

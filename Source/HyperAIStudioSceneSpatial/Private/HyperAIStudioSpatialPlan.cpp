@@ -111,6 +111,20 @@ namespace HyperAIStudio::SceneSpatial::Plan
 		{
 			return Refuse(TEXT("invalid_request"), FString::Printf(TEXT("A plan has 1 to %d operations."), C::MaxOperations));
 		}
+		// Each name is looked for among every loaded actor, so the lists are bounded before any is read.
+		int32 Named = 0;
+		for (const FHyperAISpatialOp& Op : Request.Operations)
+		{
+			Named += Op.Actors.Num();
+			if (Op.IgnoreActors.Num() > C::MaxScopeActors)
+			{
+				return Refuse(TEXT("invalid_request"), FString::Printf(TEXT("IgnoreActors holds at most %d actors per operation."), C::MaxScopeActors));
+			}
+		}
+		if (Named > C::MaxPlanActors)
+		{
+			return Refuse(TEXT("invalid_request"), FString::Printf(TEXT("The plan names %d actors; at most %d per plan."), Named, C::MaxPlanActors));
+		}
 
 		// Every name is resolved and every field checked before any move is computed, so a refusal names all it can.
 		TArray<TArray<AActor*>> OpActors;
@@ -213,10 +227,6 @@ namespace HyperAIStudio::SceneSpatial::Plan
 				OpActors[Index].Add(Actor);
 			}
 		}
-		if (PlanActors.Num() > C::MaxPlanActors)
-		{
-			return Refuse(TEXT("invalid_request"), FString::Printf(TEXT("The plan moves %d actors; at most %d per plan."), PlanActors.Num(), C::MaxPlanActors));
-		}
 		if (!Problems.IsEmpty()) return Refuse(TEXT("invalid_request"), FString::Join(Problems, TEXT(" ")));
 		if (!Locked.IsEmpty())
 		{
@@ -236,9 +246,20 @@ namespace HyperAIStudio::SceneSpatial::Plan
 		TOptional<FCollisionQueryParams> WithoutFoliage;
 		TArray<FString> NoGround;
 		TArray<FString> NoSpot;
+		// Where the plan puts things. Placements and drops are worked out first, so no clear spot is found where one lands.
 		TArray<FBox> Claimed;
+		TArray<int32> Order;
+		for (const bool bSearch : {false, true})
+		{
+			for (int32 Index = 0; Index < Count; ++Index)
+			{
+				if ((Request.Operations[Index].Kind.TrimStartAndEnd().ToLower() == TEXT("move_to_clear_spot")) == bSearch) Order.Add(Index);
+			}
+		}
+		TArray<TArray<FMove>> OpMoves;
+		OpMoves.SetNum(Count);
 		const double SearchDeadline = FPlatformTime::Seconds() + ClearSpotBudgetSeconds;
-		for (int32 Index = 0; Index < Count; ++Index)
+		for (const int32 Index : Order)
 		{
 			const FHyperAISpatialOp& Op = Request.Operations[Index];
 			const FString Kind = Op.Kind.TrimStartAndEnd().ToLower();
@@ -264,7 +285,7 @@ namespace HyperAIStudio::SceneSpatial::Plan
 
 			if (Kind == TEXT("place"))
 			{
-				FMove& Move = OutMoves.AddDefaulted_GetRef();
+				FMove& Move = OpMoves[Index].AddDefaulted_GetRef();
 				Move.Operation = Index;
 				Move.Kind = Kind;
 				Move.Name = Op.Label.TrimStartAndEnd();
@@ -280,11 +301,12 @@ namespace HyperAIStudio::SceneSpatial::Plan
 					Drop.Params = Ground;
 					if (!Spatial::PlanDrop(World, Subject, Drop, Move.To)) NoGround.Add(Move.Name);
 				}
+				Claimed.Add(OpMeshes[Index]->GetBoundingBox().TransformBy(Move.To));
 				continue;
 			}
 			for (AActor* Actor : OpActors[Index])
 			{
-				FMove& Move = OutMoves.AddDefaulted_GetRef();
+				FMove& Move = OpMoves[Index].AddDefaulted_GetRef();
 				Move.Operation = Index;
 				Move.Kind = Kind;
 				Move.Actor = Actor;
@@ -301,6 +323,7 @@ namespace HyperAIStudio::SceneSpatial::Plan
 					Subject.Transform = Move.From;
 					Drop.Params = Own;
 					if (!Spatial::PlanDrop(World, Subject, Drop, Move.To)) NoGround.Add(Move.Name);
+					else if (Local.IsValid) Claimed.Add(Local.TransformBy(Move.To));
 					continue;
 				}
 
@@ -344,6 +367,11 @@ namespace HyperAIStudio::SceneSpatial::Plan
 				Move.To.SetLocation(Location);
 				Claimed.Add(Found.Box);
 			}
+		}
+		// Reported in the plan's order, whatever order they were worked out in.
+		for (TArray<FMove>& Moves : OpMoves)
+		{
+			OutMoves.Append(MoveTemp(Moves));
 		}
 		if (!NoGround.IsEmpty())
 		{

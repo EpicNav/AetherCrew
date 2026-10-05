@@ -94,9 +94,12 @@ namespace HyperAIStudio::SceneSpatial::Cost
 			return static_cast<int32>(FMath::Clamp<int64>(Value, 0, MAX_int32));
 		}
 
-		void AddFinding(FHyperAISceneCostReport& Out, const FString& Finding)
+		/** Findings about the whole report (loaded share, lights, a stop) are added last, so room is kept for them. */
+		constexpr int32 ReportFindings = 6;
+
+		void AddFinding(FHyperAISceneCostReport& Out, const FString& Finding, const bool bWholeReport = false)
 		{
-			if (Out.Findings.Num() < MaxFindings) Out.Findings.AddUnique(Finding);
+			if (Out.Findings.Num() < MaxFindings - (bWholeReport ? 0 : ReportFindings)) Out.Findings.AddUnique(Finding);
 		}
 
 		/** Editor helpers, debug drawing and collision that never draw in a game: trigger shapes, volumes, landscape collision. */
@@ -288,7 +291,7 @@ namespace HyperAIStudio::SceneSpatial::Cost
 		if (LocalShadowLights > MaxShadowLights)
 		{
 			ShadowLights.RemoveAll([](const FShadowLight& Light) { return !Light.bDirectional; });
-			AddFinding(Out, FString::Printf(TEXT("many_lights: %d local lights cast dynamic shadows; shadow draws count directional lights only."), LocalShadowLights));
+			AddFinding(Out, FString::Printf(TEXT("many_lights: %d local lights cast dynamic shadows; shadow draws count directional lights only."), LocalShadowLights), true);
 		}
 
 		TMap<const UStaticMesh*, FMeshTally> Meshes;
@@ -629,22 +632,22 @@ namespace HyperAIStudio::SceneSpatial::Cost
 			if (Out.WPActorDescs > Out.WPLoadedActorDescs)
 			{
 				AddFinding(Out, FString::Printf(TEXT("unloaded_actors: %d of %d World Partition actors%s are not loaded; these figures cover loaded actors only."),
-					Out.WPActorDescs - Out.WPLoadedActorDescs, Out.WPActorDescs, bBox ? TEXT(" in the box") : TEXT("")));
+					Out.WPActorDescs - Out.WPLoadedActorDescs, Out.WPActorDescs, bBox ? TEXT(" in the box") : TEXT("")), true);
 			}
 		}
 		if (SmallCasters > ManySmallCasters)
 		{
-			AddFinding(Out, FString::Printf(TEXT("small_shadow_casters: %d shadow casters are under %.0f cm across; turn off Cast Shadow on the small ones."), SmallCasters, SmallCasterRadius * 2.0));
+			AddFinding(Out, FString::Printf(TEXT("small_shadow_casters: %d shadow casters are under %.0f cm across; turn off Cast Shadow on the small ones."), SmallCasters, SmallCasterRadius * 2.0), true);
 		}
 		if (MostLocalShadowLights > ManyShadowLights)
 		{
-			AddFinding(Out, FString::Printf(TEXT("many_shadow_lights: up to %d movable shadow-casting local lights reach one primitive, each drawing its shadows again."), MostLocalShadowLights));
+			AddFinding(Out, FString::Printf(TEXT("many_shadow_lights: up to %d movable shadow-casting local lights reach one primitive, each drawing its shadows again."), MostLocalShadowLights), true);
 		}
 		for (const FString& Stop : Stops)
 		{
 			AddFinding(Out, Stop == TEXT("max_actors")
 				? FString::Printf(TEXT("max_actors: stopped after %d actors; raise MaxActors or narrow the scope."), Out.ActorsScanned)
-				: FString::Printf(TEXT("deadline_reached: stopped after %d ms; raise DeadlineMs or narrow the scope."), Request.DeadlineMs));
+				: FString::Printf(TEXT("deadline_reached: stopped after %d ms; raise DeadlineMs or narrow the scope."), Request.DeadlineMs), true);
 		}
 
 		// The last frame a viewport rendered, as stat unit reads it; nothing when no frame was drawn.

@@ -5,23 +5,30 @@
 #include "HyperAIStudioSceneSpatialToolset.h"
 
 #include "Components/BoxComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PointLightComponent.h"
+#include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Editor.h"
+#include "Engine/CollisionProfile.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/PointLight.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/TriggerBox.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Helpers/PCGHelpers.h"
+#include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioSceneCost.h"
+#include "HyperAIStudioSettings.h"
 #include "HyperAIStudioSpatialPlan.h"
 #include "HyperAIStudioSpatialQueries.h"
 #include "InstancedFoliageActor.h"
 #include "Materials/Material.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Guid.h"
 #include "Misc/ScopeExit.h"
 #include "Modules/ModuleManager.h"
 #include "StaticMeshCompiler.h"
@@ -387,6 +394,22 @@ bool FHyperAIStudioSceneCostScopeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("lists are cut to fit"), Cut.bTruncated && Cut.TruncatedReason.Contains(TEXT("max_output_bytes")) && Cut.HeaviestActors.Num() < 43);
 	TestTrue(*FString::Printf(TEXT("and the answer fits (%lld bytes)"), Cost::EstimateBytes(Cut)), Cost::EstimateBytes(Cut) <= 4096);
 	TestEqual(TEXT("the counts still cover everything"), Cut.StaticMeshComponents, 43);
+
+	// Many per-mesh findings leave room for the ones about the whole report, which come last.
+	UWorld* Bare = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAISceneCostFindingsWorld"));
+	ON_SCOPE_EXIT { Bare->DestroyWorld(false); };
+	for (int32 Index = 0; Index < 40; ++Index)
+	{
+		AStaticMeshActor* Meshless = Bare->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), FTransform(FVector(Index * 200.0, 0.0, 0.0)));
+		if (Meshless) Meshless->SetActorLabel(FString::Printf(TEXT("Meshless%02d"), Index));
+	}
+	FHyperAISceneCostRequest Capped;
+	Capped.MaxActors = 32;
+	const FHyperAISceneCostReport Busy = Measure(*Bare, Capped);
+	const int32 NoRenderData = Busy.Findings.FilterByPredicate([](const FString& Finding) { return Finding.StartsWith(TEXT("no_render_data:")); }).Num();
+	TestTrue(*FString::Printf(TEXT("meshless components are found (%d), within the cap (%d findings)"), NoRenderData, Busy.Findings.Num()),
+		NoRenderData > 10 && Busy.Findings.Num() <= Cost::MaxFindings);
+	TestTrue(TEXT("and the stop is still said"), Busy.Findings.ContainsByPredicate([](const FString& Finding) { return Finding.StartsWith(TEXT("max_actors:")); }));
 	return true;
 }
 
@@ -707,6 +730,14 @@ bool FHyperAIStudioSpatialRefusalsTest::RunTest(const FString& Parameters)
 	const FHyperAISpatialPlanReport Unknown = Refusal(Op(TEXT("drop_to_ground"), {TEXT("Nobody")}));
 	TestTrue(TEXT("an unknown actor is refused by name"), Unknown.Status == TEXT("invalid_request") && Unknown.Diagnostic.Contains(TEXT("Nobody")));
 	TestEqual(TEXT("an unknown kind is refused"), Refusal(Op(TEXT("stack"), {TEXT("Lower")})).Status, FString(TEXT("invalid_request")));
+	FHyperAISpatialOp Crowd = Op(TEXT("drop_to_ground"));
+	Crowd.Actors.Init(TEXT("Lower"), FHyperAIStudioSceneSpatialContracts::MaxPlanActors + 1);
+	const FHyperAISpatialPlanReport TooMany = Refusal(Crowd);
+	TestTrue(*FString::Printf(TEXT("more names than a plan moves are refused before any is looked up (%s)"), *TooMany.Diagnostic),
+		TooMany.Status == TEXT("invalid_request") && TooMany.Diagnostic.Contains(TEXT("at most 256")));
+	FHyperAISpatialOp Ignoring = Op(TEXT("drop_to_ground"), {TEXT("Lower")});
+	Ignoring.IgnoreActors.Init(TEXT("Upper"), FHyperAIStudioSceneSpatialContracts::MaxScopeActors + 1);
+	TestTrue(TEXT("so are more ignored actors than the limit"), Refusal(Ignoring).Diagnostic.Contains(TEXT("IgnoreActors")));
 
 	// Stacked crates: each passes through the other, so both land on the floor rather than one on the other.
 	TArray<Plan::FMove> Moves;
@@ -877,6 +908,213 @@ bool FHyperAIStudioSceneSpatialFrontDoorTest::RunTest(const FString& Parameters)
 	Bad.bDryRun = true;
 	const FHyperAISpatialPlanReport Refused = C::ApplyPlan(Bad);
 	TestTrue(TEXT("a plan naming no actor is refused, with an operation id"), Refused.Status == TEXT("invalid_request") && Refused.OperationId.StartsWith(TEXT("spatial-")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSpatialFoliageGroundTest,
+	"HyperAIStudio.SceneSpatial.Plan.DropThroughFoliage",
+	HyperAIStudio::SceneSpatial::Tests::Flags)
+
+bool FHyperAIStudioSpatialFoliageGroundTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::SceneSpatial;
+	using namespace HyperAIStudio::SceneSpatial::Tests;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAISpatialFoliageGroundWorld"));
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+	AddFloor(*World);
+	// A foliage canopy over one spot and a PCG-generated one over another: a cube instance 3 m up, its top at 350 cm.
+	AddInstanced(*World, TEXT("Canopy"), 0, AInstancedFoliageActor::StaticClass())->AddInstance(FTransform(FVector(0.0, 1000.0, 300.0)));
+	AddInstanced(*World, TEXT("Generated"), 0, AActor::StaticClass(), Spatial::PCGGeneratedTag())->AddInstance(FTransform(FVector(0.0, -1000.0, 300.0)));
+	for (const double Y : {1000.0, -1000.0})
+	{
+		FHyperAISpatialQuery Down = Query(TEXT("trace"));
+		Down.Start = FVector(0.0, Y, 1000.0);
+		Down.End = FVector(0.0, Y, -500.0);
+		const FHyperAISpatialResult Blocked = Ask(*World, Down);
+		TestTrue(*FString::Printf(TEXT("the instances at Y %.0f stop a plain trace (%s)"), Y, *Blocked.Diagnostic), Blocked.bHit && FMath::IsNearlyEqual(Blocked.Location.Z, 350.0, 1.0));
+		Down.bIgnoreFoliage = true;
+		const FHyperAISpatialResult Through = Ask(*World, Down);
+		TestTrue(*FString::Printf(TEXT("and bIgnoreFoliage passes through them to the floor (%s)"), *Through.Diagnostic), Through.bHit && FMath::IsNearlyEqual(Through.Location.Z, 0.0, 1.0));
+	}
+
+	AddCube(*World, TEXT("UnderTree"), FVector(0.0, 1000.0, 800.0));
+	AddCube(*World, TEXT("UnderPCG"), FVector(0.0, -1000.0, 800.0));
+	TArray<Plan::FMove> Moves;
+	FHyperAISpatialPlanReport Checked;
+	if (!TestTrue(TEXT("the drops check"), Plan::Check(*World, PlanOf({Op(TEXT("drop_to_ground"), {TEXT("UnderTree"), TEXT("UnderPCG")})}), Moves, Checked) && Moves.Num() == 2))
+	{
+		return false;
+	}
+	TestTrue(*FString::Printf(TEXT("a crate under foliage lands on the floor (%.1f)"), Moves[0].To.GetLocation().Z), FMath::IsNearlyEqual(Moves[0].To.GetLocation().Z, 50.0, 0.5));
+	TestTrue(*FString::Printf(TEXT("and one under PCG instances too (%.1f)"), Moves[1].To.GetLocation().Z), FMath::IsNearlyEqual(Moves[1].To.GetLocation().Z, 50.0, 0.5));
+	FHyperAISpatialOp Onto = Op(TEXT("drop_to_ground"), {TEXT("UnderTree")});
+	Onto.bIncludeFoliage = true;
+	TestTrue(TEXT("bIncludeFoliage makes the canopy ground"), Plan::Check(*World, PlanOf({Onto}), Moves, Checked) && Moves.Num() == 1
+		&& FMath::IsNearlyEqual(Moves[0].To.GetLocation().Z, 400.0, 0.5));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSpatialTriggerTest,
+	"HyperAIStudio.SceneSpatial.Plan.TriggerShapesDoNotLift",
+	HyperAIStudio::SceneSpatial::Tests::Flags)
+
+bool FHyperAIStudioSpatialTriggerTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::SceneSpatial;
+	using namespace HyperAIStudio::SceneSpatial::Tests;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAISpatialTriggerWorld"));
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+	AddFloor(*World);
+	// A pickup: a cube with a 2 m overlap sphere around it, as a pickup's trigger is.
+	AStaticMeshActor* Pickup = AddCube(*World, TEXT("Pickup"), FVector(0.0, 0.0, 500.0));
+	USphereComponent* Trigger = NewObject<USphereComponent>(Pickup, TEXT("PickupTrigger"));
+	Trigger->InitSphereRadius(200.f);
+	Trigger->SetCollisionProfileName(UCollisionProfile::OverlapAll_ProfileName);
+	Trigger->SetupAttachment(Pickup->GetRootComponent());
+	Pickup->AddInstanceComponent(Trigger);
+	Trigger->RegisterComponent();
+	TestTrue(TEXT("the trigger reaches below the cube"), Pickup->GetComponentsBoundingBox(/*bNonColliding=*/true).Min.Z < 400.0);
+	TestTrue(TEXT("but what the pickup looks like is the cube"), FMath::IsNearlyEqual(Spatial::WorldBounds(*Pickup).Min.Z, 450.0, 0.5));
+	// A guard whose body is a blocking capsule, as a character's is: the capsule is what it stands on.
+	AStaticMeshActor* Guard = AddCube(*World, TEXT("Guard"), FVector(500.0, 0.0, 500.0));
+	UCapsuleComponent* Body = NewObject<UCapsuleComponent>(Guard, TEXT("GuardBody"));
+	Body->InitCapsuleSize(40.f, 150.f);
+	Body->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
+	Body->SetupAttachment(Guard->GetRootComponent());
+	Guard->AddInstanceComponent(Body);
+	Body->RegisterComponent();
+
+	TArray<Plan::FMove> Moves;
+	FHyperAISpatialPlanReport Checked;
+	if (!TestTrue(TEXT("the drops check"), Plan::Check(*World, PlanOf({Op(TEXT("drop_to_ground"), {TEXT("Pickup"), TEXT("Guard")})}), Moves, Checked) && Moves.Num() == 2))
+	{
+		return false;
+	}
+	TestTrue(*FString::Printf(TEXT("the cube rests on the floor, not the sphere (%.1f)"), Moves[0].To.GetLocation().Z), FMath::IsNearlyEqual(Moves[0].To.GetLocation().Z, 50.0, 0.5));
+	TestTrue(*FString::Printf(TEXT("the guard stands on its capsule (%.1f)"), Moves[1].To.GetLocation().Z), FMath::IsNearlyEqual(Moves[1].To.GetLocation().Z, 150.0, 0.5));
+	ATriggerBox* Box = World->SpawnActor<ATriggerBox>(FVector(1000.0, 0.0, 300.0), FRotator::ZeroRotator);
+	TestTrue(TEXT("an actor that is only a trigger keeps its trigger's bounds"), Box && Spatial::WorldBounds(*Box).IsValid);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSpatialClaimTest,
+	"HyperAIStudio.SceneSpatial.Plan.ClearSpotsKeepOffPlacements",
+	HyperAIStudio::SceneSpatial::Tests::Flags)
+
+bool FHyperAIStudioSpatialClaimTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::SceneSpatial;
+	using namespace HyperAIStudio::SceneSpatial::Tests;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAISpatialClaimWorld"));
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+	AddFloor(*World);
+	AddCube(*World, TEXT("Wall"), FVector(0.0, 0.0, 150.0), FVector(1.0, 10.0, 3.0));
+	AStaticMeshActor* Barrel = AddCube(*World, TEXT("Barrel"), FVector(30.0, 0.0, 50.0));
+	const FHyperAISpatialOp Move = Op(TEXT("move_to_clear_spot"), {TEXT("Barrel")});
+	TArray<Plan::FMove> Moves;
+	FHyperAISpatialPlanReport Checked;
+	if (!TestTrue(TEXT("the barrel alone finds a spot"), Plan::Check(*World, PlanOf({Move}), Moves, Checked) && Moves.Num() == 1))
+	{
+		return false;
+	}
+	const FVector Alone = Moves[0].To.GetLocation();
+
+	// The same plan places a crate there, listed after the move: the barrel keeps off where the crate lands.
+	FHyperAISpatialOp Place = Op(TEXT("place"));
+	Place.Mesh = TEXT("/Engine/BasicShapes/Cube");
+	Place.Label = TEXT("NewCrate");
+	Place.Location = FVector(Alone.X, Alone.Y, 600.0);
+	Place.bDropToGround = true;
+	const FHyperAISpatialPlanRequest Both = PlanOf({Move, Place});
+	if (!TestTrue(*FString::Printf(TEXT("the plan checks (%s)"), *Checked.Diagnostic), Plan::Check(*World, Both, Moves, Checked) && Moves.Num() == 2))
+	{
+		return false;
+	}
+	TestTrue(TEXT("moves are reported in the plan's order"), Moves[0].Name == TEXT("Barrel") && Moves[1].Name == TEXT("NewCrate"));
+	const FVector BarrelAt = Moves[0].To.GetLocation();
+	const FVector CrateAt = Moves[1].To.GetLocation();
+	TestTrue(*FString::Printf(TEXT("the crate lands where the barrel would have gone (%s)"), *CrateAt.ToString()), CrateAt.Equals(FVector(Alone.X, Alone.Y, 50.0), 1.0));
+	TestTrue(*FString::Printf(TEXT("so the barrel goes elsewhere (%s)"), *BarrelAt.ToString()), FMath::Abs(BarrelAt.X - CrateAt.X) >= 100.0 || FMath::Abs(BarrelAt.Y - CrateAt.Y) >= 100.0);
+	const FHyperAISpatialPlanReport Applied = Plan::Execute(*World, Both, Moves, TEXT("spatial-test-claim"));
+	TestTrue(*FString::Printf(TEXT("and the plan applies (%s)"), *Applied.Diagnostic), Applied.bOk && Applied.Applied == 2);
+	TestTrue(TEXT("leaving the barrel clear of the wall and the crate"), IsClear(*World, Barrel->GetActorLocation(), FVector(45.0), Barrel));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSpatialApprovalTest,
+	"HyperAIStudio.SceneSpatial.Plan.WaitsForApproval",
+	HyperAIStudio::SceneSpatial::Tests::Flags)
+
+bool FHyperAIStudioSpatialApprovalTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::SceneSpatial::Tests;
+	using C = FHyperAIStudioSceneSpatialContracts;
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World || GEditor->PlayWorld)
+	{
+		AddInfo(TEXT("No editor level is open, or Play In Editor runs; skipped."));
+		return true;
+	}
+	// Agent edits wait for the user, as they do by default.
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bWasRequired = Settings->bRequireApprovalForAgentEdits;
+	Settings->bRequireApprovalForAgentEdits = true;
+	TArray<FString> Asked;
+	ON_SCOPE_EXIT
+	{
+		Settings->bRequireApprovalForAgentEdits = bWasRequired;
+		for (const FString& OperationId : Asked)
+		{
+			if (FHyperAIStudioApprovalGate::HasPending(OperationId)) FHyperAIStudioApprovalGate::Reject(OperationId, TEXT("Test finished."));
+		}
+	};
+	auto CountLabelled = [World](const FString& Label)
+	{
+		int32 Count = 0;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			Count += IsValid(*It) && It->GetActorLabel() == Label ? 1 : 0;
+		}
+		return Count;
+	};
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8);
+	FHyperAISpatialOp Place = Op(TEXT("place"));
+	Place.Mesh = TEXT("/Engine/BasicShapes/Cube");
+	Place.Label = TEXT("HyperAI_SpatialApproval_") + Suffix;
+	Place.Location = FVector(0.0, 0.0, -100000.0);
+	FHyperAISpatialPlanRequest Request = PlanOf({Place});
+	Request.OperationId = TEXT("spatial-test-approve-") + Suffix;
+	const FHyperAISpatialPlanReport Waiting = C::ApplyPlan(Request);
+	Asked.Add(Waiting.OperationId);
+	TestEqual(TEXT("with approval required, the plan waits"), Waiting.Status, FString(TEXT("awaiting_user_approval")));
+	TestTrue(TEXT("saying what it will do"), Waiting.Moves.Num() == 1 && Waiting.Moves[0].StartsWith(Place.Label));
+	TestEqual(TEXT("and nothing is placed before approval"), CountLabelled(Place.Label), 0);
+	FString Error;
+	const bool bApproved = FHyperAIStudioApprovalGate::Approve(Waiting.OperationId, Error);
+	TestTrue(FString::Printf(TEXT("approved (%s)"), *Error), bApproved);
+	TestEqual(TEXT("approval places it"), CountLabelled(Place.Label), 1);
+	if (AActor* Placed = Labelled(*World, *Place.Label)) World->EditorDestroyActor(Placed, /*bShouldModifyLevel=*/false);
+
+	// The label is taken while the plan waits: approved, the plan checks again and changes nothing.
+	Place.Label += TEXT("_Taken");
+	Request = PlanOf({Place});
+	Request.OperationId = TEXT("spatial-test-stale-") + Suffix;
+	const FHyperAISpatialPlanReport Stale = C::ApplyPlan(Request);
+	Asked.Add(Stale.OperationId);
+	TestEqual(TEXT("a second plan waits too"), Stale.Status, FString(TEXT("awaiting_user_approval")));
+	AStaticMeshActor* Squatter = AddCube(*World, *Place.Label, FVector(0.0, 0.0, -100000.0));
+	const bool bApprovedStale = FHyperAIStudioApprovalGate::Approve(Stale.OperationId, Error);
+	TestTrue(FString::Printf(TEXT("approved (%s)"), *Error), bApprovedStale);
+	TestEqual(TEXT("and places nothing over the label taken meanwhile"), CountLabelled(Place.Label), 1);
+	World->EditorDestroyActor(Squatter, /*bShouldModifyLevel=*/false);
 	return true;
 }
 

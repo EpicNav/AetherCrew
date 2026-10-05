@@ -34,8 +34,9 @@ namespace HyperAIStudio::SceneSpatial::Plan
 	};
 
 	/**
-	 * Checks the plan against World and computes every move, each against the level as it is now, into OutMoves and
-	 * Report's Moves and Notes. False when it is refused, with Report's Status and Diagnostic saying why.
+	 * Checks the plan against World and computes every move, each against the level as it is now (a clear spot also
+	 * keeps off where the plan places and drops things), into OutMoves and Report's Moves and Notes, in the plan's
+	 * order. False when it is refused, with Report's Status and Diagnostic saying why.
 	 */
 	bool Check(UWorld& World, const FHyperAISpatialPlanRequest& Request, TArray<FMove>& OutMoves, FHyperAISpatialPlanReport& Report);
 
