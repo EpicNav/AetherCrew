@@ -301,6 +301,22 @@ bool FHyperAIStudioModelingSelectionOpsTest::RunTest(const FString& Parameters)
 	const FHyperAIModelPlanReport Mirrored = Run({Half, Mirror}, true);
 	const FHyperAIModelMeshStats* Wings = Find(Mirrored, TEXT("Wing"));
 	TestTrue(TEXT("mirroring across X doubles the wing: ") + (Wings ? Wings->Size : Mirrored.Diagnostic), Wings && Parse(Wings->Size).Equals(FVector(200.0, 50.0, 20.0), 0.5));
+	// Profiles and paths, whichever way their points run.
+	FHyperAIModelOp Lathe = Op(TEXT("add.revolve"), TEXT("Drum"), TEXT("Steps=24"));
+	Lathe.Points = TEXT("0,50; 30,50; 30,0; 0,0");
+	FHyperAIModelOp Pipe = Op(TEXT("add.sweep"), TEXT("Pipe"), TEXT("EndScale=0.5"));
+	Pipe.Points = TEXT("circle:10,12");
+	Pipe.Path = TEXT("0,0,0; 0,0,100; 50,0,150; 100,0,150");
+	FHyperAIModelOp Outline = Op(TEXT("add.extrude_polygon"), TEXT("Slab"), TEXT("Height=20"));
+	Outline.Points = TEXT("0,0; 0,100; 60,100; 100,0");
+	const FHyperAIModelPlanReport Profiles = Run({Lathe, Pipe, Outline}, true);
+	for (const TCHAR* Name : {TEXT("Drum"), TEXT("Pipe"), TEXT("Slab")})
+	{
+		const FHyperAIModelMeshStats* Shape = Find(Profiles, Name);
+		TestTrue(FString::Printf(TEXT("%s is closed, even with its profile on the axis or running clockwise: %s"), Name, *Profiles.Diagnostic), Shape && Shape->bClosed);
+	}
+	const FHyperAIModelMeshStats* Drum = Find(Profiles, TEXT("Drum"));
+	TestTrue(TEXT("the drum is 60 cm across and 50 tall"), Drum && Parse(Drum->Size).Equals(FVector(60.0, 60.0, 50.0), 1.0));
 	return true;
 }
 
@@ -550,9 +566,13 @@ bool FHyperAIStudioModelingSkillExamplesTest::RunTest(const FString& Parameters)
 		Request.bDryRun = true;
 		const FHyperAIModelPlanReport Report = C::ApplyPlan(Request);
 		TestTrue(TEXT("the skill's example builds: ") + Report.Diagnostic, Report.bOk && !Report.Meshes.IsEmpty());
+		for (const FHyperAIModelMeshStats& Mesh : Report.Meshes)
+		{
+			TestTrue(FString::Printf(TEXT("the example's %s is watertight (%d open edges)"), *Mesh.Name, Mesh.OpenEdges), Mesh.bClosed);
+		}
 		++Plans;
 	}
-	TestTrue(TEXT("the skill shows plans"), Plans >= 2);
+	TestTrue(TEXT("the skill shows plans"), Plans >= 3);
 	return true;
 }
 

@@ -1415,7 +1415,17 @@ namespace HyperAIStudio::Modeling::Gate
 			}
 			else
 			{
-				UPrim::AppendRevolvePath(Part, Options, Identity, Step.Points, Revolve, Step.Int(TEXT("Steps"), 24), Step.Bool(TEXT("Capped"), true), Debug);
+				// A profile that starts or ends on the axis would leave a pinched, open pole there: those ends move a hair
+				// off it, so the caps close them.
+				TArray<FVector2D> Profile = Step.Points;
+				double Widest = 0.0;
+				for (const FVector2D& Point : Profile) Widest = FMath::Max(Widest, Point.X);
+				const double Hair = FMath::Max(Widest * 0.002, 0.01);
+				for (FVector2D* End : {&Profile[0], &Profile.Last()})
+				{
+					End->X = FMath::Max(End->X, Hair);
+				}
+				UPrim::AppendRevolvePath(Part, Options, Identity, Profile, Revolve, Step.Int(TEXT("Steps"), 24), Step.Bool(TEXT("Capped"), true), Debug);
 			}
 		}
 		else if (K == TEXT("add.sweep"))

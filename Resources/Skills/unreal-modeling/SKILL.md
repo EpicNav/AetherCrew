@@ -131,10 +131,16 @@ A lantern post from primitives: a post with a bevelled cap, a cross arm, a lante
  "bDryRun": false, "OperationId": "lantern-post"}
 ```
 
-A vase turned from a profile, smoothed, glazed blue:
+A vase turned from a profile, smoothed, glazed blue. The profile starts and ends half a centimeter off the axis, so
+its ends cap closed:
 
 ```json
-{"Kind": "add.revolve", "Mesh": "Vase", "Points": "0,0; 18,0; 22,10; 14,40; 9,52; 12,60; 0,60", "Params": "Steps=32; Color=#3a5f9e"}
+{"Operations": [
+ {"Kind": "add.revolve", "Mesh": "Vase", "Points": "0.5,0; 18,0; 22,10; 14,40; 9,52; 12,60; 0.5,60", "Params": "Steps=32; Color=#3a5f9e"},
+ {"Kind": "normals", "Mesh": "Vase", "Params": "Mode=smooth"},
+ {"Kind": "uv", "Mesh": "Vase", "Params": "Mode=cylinder; Scale=60"},
+ {"Kind": "write_asset", "Mesh": "Vase", "Asset": "/Game/Env/Props/SM_Vase"}],
+ "bDryRun": false, "OperationId": "vase"}
 ```
 
 ## Scale, budgets and quality
