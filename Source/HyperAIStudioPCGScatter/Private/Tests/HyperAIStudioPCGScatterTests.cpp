@@ -764,7 +764,7 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("graph.set will not reshape an ecosystem"), Run({Reshape}, /*bDryRun=*/true).bOk);
 	Look.Detail = TEXT("full");
 	const FHyperAIPCGScatterInspectReport Full = C::Inspect(Look);
-	TestTrue(FString::Printf(TEXT("full detail lists every node and edge (%d, %d)"), Full.Nodes.Num(), Full.Edges.Num()), Full.Nodes.Num() >= 55 && Full.Edges.Num() >= 60 && !Full.bTruncated);
+	TestTrue(FString::Printf(TEXT("full detail lists every node and edge (%d, %d)"), Full.Nodes.Num(), Full.Edges.Num()), Full.Nodes.Num() >= 50 && Full.Edges.Num() >= 60 && !Full.bTruncated);
 	Look.Detail = TEXT("nodes");
 	Look.Filter = TEXT("Bushes");
 	const FHyperAIPCGScatterInspectReport Bush = C::Inspect(Look);

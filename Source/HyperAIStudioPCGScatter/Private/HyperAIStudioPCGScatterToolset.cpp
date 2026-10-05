@@ -36,7 +36,6 @@
 #include "Elements/PCGExecuteBlueprint.h"
 #include "Elements/PCGNormalToDensity.h"
 #include "Elements/PCGProjectionElement.h"
-#include "Elements/PCGSelfPruning.h"
 #include "Elements/PCGSpatialNoise.h"
 #include "Elements/PCGStaticMeshSpawner.h"
 #include "Elements/PCGSurfaceSampler.h"
@@ -708,17 +707,8 @@ namespace HyperAIStudio::PCGScatterTools::Private
 				Touched(*Transform);
 				if (!Chain(Place, In, Out)) return false;
 			}
-			// Spaced: boxes of the footprint, grown with the instance's scale, never overlap. Clump members stand close by
-			// design, and the sampler already kept clumps apart.
-			if (!bClumps)
-			{
-				UPCGNode* Prune = nullptr;
-				UPCGSelfPruningSettings* Pruning = Add<UPCGSelfPruningSettings>(Next(), Y, Prune);
-				if (!Pruning) return Fail(TEXT("This engine's PCG has no Self Pruning node."), OutError);
-				Pruning->Seed = NodeSeed ^ 0x7f4a;
-				Touched(*Pruning);
-				if (!Chain(Prune, In, Out)) return false;
-			}
+			// No self pruning: the sampler already stands each point in a cell of its own a footprint wide. Pruning after the
+			// turn and scale would compare world boxes grown by the turn, and thin a dense species well below its Density.
 			// Out of the room earlier species take, and clear of tagged actors.
 			TArray<UPCGNode*> Exclusions = Avoided;
 			const bool bNone = Species.KeepOutOf.ContainsByPredicate([](const FString& Name) { return Name.TrimStartAndEnd().Equals(TEXT("none"), ESearchCase::IgnoreCase); });
