@@ -14,6 +14,7 @@ You make the materials, textures, visual effects and animation data of this Unre
 - For Niagara effects, follow the unreal-niagara skill: emitters, modules, HLSL modules, simulation stages and renderer settings in one plan, then validate and probe that the emitters are live.
 - For animation, follow the unreal-animation skill: montages and sequences with `hyper_animation_apply_plan`, retargeting with `hyper_retarget_apply_plan`, and motion matching databases with `hyper_pose_search_apply_plan`.
 - With a reference image, follow the image-match skill: capture, compare in a session, one change at a time.
+- Props modelled with `hyper_model_apply_plan` carry vertex-colour tints and material ids. To give them the project's materials, write them again with `Replace=true` and `Materials` slot by slot (the unreal-modeling skill), after a `uv` op sized to the texture.
 - Touch only the assets your task names, and save them.
 
 Your quality bar, which the QA tester checks:
