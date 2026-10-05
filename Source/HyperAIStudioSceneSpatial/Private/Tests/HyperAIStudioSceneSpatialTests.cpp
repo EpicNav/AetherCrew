@@ -26,7 +26,11 @@
 #include "HyperAIStudioSpatialPlan.h"
 #include "HyperAIStudioSpatialQueries.h"
 #include "InstancedFoliageActor.h"
+#include "Landscape.h"
+#include "LandscapeComponent.h"
+#include "MaterialShared.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Guid.h"
 #include "Misc/ScopeExit.h"
@@ -77,25 +81,48 @@ namespace HyperAIStudio::SceneSpatial::Tests
 		return AddCube(World, TEXT("Floor"), FVector(0.0, 0.0, -50.0), FVector(Size / 100.0, Size / 100.0, 1.0));
 	}
 
-	/** Count cubes instanced on a new actor of OwnerClass, 120 cm apart along X at Y = 1000. */
-	UInstancedStaticMeshComponent* AddInstanced(UWorld& World, const TCHAR* Label, const int32 Count, UClass* OwnerClass, const FName Tag = NAME_None)
+	/** Count cubes (or Mesh) instanced on a new actor of OwnerClass, 120 cm apart along X at Y = 1000. */
+	UInstancedStaticMeshComponent* AddInstanced(UWorld& World, const TCHAR* Label, const int32 Count, UClass* OwnerClass, const FName Tag = NAME_None,
+		UStaticMesh* Mesh = nullptr)
 	{
 		FActorSpawnParameters Params;
 		Params.ObjectFlags |= RF_Transactional;
 		AActor* Owner = World.SpawnActor<AActor>(OwnerClass, FTransform::Identity, Params);
 		UInstancedStaticMeshComponent* Component = NewObject<UInstancedStaticMeshComponent>(Owner, TEXT("Instances"));
-		Component->SetStaticMesh(Cube());
+		Component->SetStaticMesh(Mesh ? Mesh : Cube());
 		if (!Tag.IsNone()) Component->ComponentTags.Add(Tag);
 		if (USceneComponent* Root = Owner->GetRootComponent()) Component->SetupAttachment(Root);
 		else Owner->SetRootComponent(Component);
 		Owner->AddInstanceComponent(Component);
 		Component->RegisterComponent();
+		TArray<FTransform> Transforms;
+		Transforms.Reserve(Count);
 		for (int32 Index = 0; Index < Count; ++Index)
 		{
-			Component->AddInstance(FTransform(FVector(Index * 120.0, 1000.0, 0.0)));
+			Transforms.Add(FTransform(FVector(Index * 120.0, 1000.0, 0.0)));
 		}
+		Component->AddInstances(Transforms, /*bShouldReturnIndices=*/false);
 		Owner->SetActorLabel(Label);
 		return Component;
+	}
+
+	/** A flat landscape of one component, 63 quads a side, labelled. */
+	ALandscape* AddLandscape(UWorld& World, const TCHAR* Label)
+	{
+		constexpr int32 Size = 64;
+		TArray<uint16> Heights;
+		Heights.Init(32768, Size * Size);
+		ALandscape* Landscape = World.SpawnActor<ALandscape>(FVector::ZeroVector, FRotator::ZeroRotator);
+		if (!Landscape) return nullptr;
+		Landscape->SetActorRelativeScale3D(FVector(100.0, 100.0, 100.0));
+		TMap<FGuid, TArray<uint16>> HeightData;
+		HeightData.Add(FGuid(), MoveTemp(Heights));
+		TMap<FGuid, TArray<FLandscapeImportLayerInfo>> Layers;
+		Layers.Add(FGuid(), TArray<FLandscapeImportLayerInfo>());
+		Landscape->Import(FGuid::NewGuid(), 0, 0, Size - 1, Size - 1, 1, 63, HeightData, TEXT(""), Layers, ELandscapeImportAlphamapType::Additive,
+			TArrayView<const FLandscapeLayer>());
+		Landscape->SetActorLabel(Label);
+		return Landscape;
 	}
 
 	FHyperAISceneCostReport Measure(UWorld& World, const FHyperAISceneCostRequest& Request = FHyperAISceneCostRequest())
@@ -326,7 +353,8 @@ bool FHyperAIStudioSceneCostShadowsTest::RunTest(const FString& Parameters)
 	ADirectionalLight* Sun = World->SpawnActor<ADirectionalLight>(FVector(0.0, 0.0, 1000.0), FRotator(-45.0, 0.0, 0.0));
 	if (!TestNotNull(TEXT("a sun"), Sun)) return false;
 	Sun->GetLightComponent()->SetMobility(EComponentMobility::Static);
-	UMaterial* Glass = NewObject<UMaterial>(GetTransientPackage(), MakeUniqueObjectName(GetTransientPackage(), UMaterial::StaticClass(), TEXT("HyperAISceneCostGlass")));
+	// In the level's package, as a project's material is: the editor's transient materials are not counted.
+	UMaterial* Glass = NewObject<UMaterial>(World->GetOutermost(), MakeUniqueObjectName(World->GetOutermost(), UMaterial::StaticClass(), TEXT("HyperAISceneCostGlass")));
 	Glass->BlendMode = BLEND_Translucent;
 	Far->GetStaticMeshComponent()->SetMaterial(0, Glass);
 
@@ -374,6 +402,126 @@ bool FHyperAIStudioSceneCostFoliageTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("foliage is passed through when asked"), Spatial::IsFoliageOrPCG(*Foliage));
 	TestTrue(TEXT("so is a tagged PCG component"), Spatial::IsFoliageOrPCG(*Generated));
 	TestFalse(TEXT("a placed mesh is not"), Spatial::IsFoliageOrPCG(*Plain->GetStaticMeshComponent()));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSceneCostLandscapeMaterialsTest,
+	"HyperAIStudio.SceneSpatial.Cost.LandscapeToolMaterials",
+	HyperAIStudio::SceneSpatial::Tests::Flags)
+
+bool FHyperAIStudioSceneCostLandscapeMaterialsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::SceneSpatial::Tests;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAISceneCostLandscapeWorld"));
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+	ALandscape* Landscape = AddLandscape(*World, TEXT("Ground"));
+	if (!TestNotNull(TEXT("a landscape"), Landscape) || !TestFalse(TEXT("with a component"), Landscape->LandscapeComponents.IsEmpty()))
+	{
+		return false;
+	}
+	// What the report counted before: in the editor every landscape component lists the landscape tools' brush, selection
+	// and layer materials among its used materials, and some of them are translucent.
+	TArray<UMaterialInterface*> Used;
+	Landscape->LandscapeComponents[0]->GetUsedMaterials(Used);
+	const int32 ToolTranslucent = Used.FilterByPredicate([](const UMaterialInterface* Material) { return Material && IsTranslucentBlendMode(*Material); }).Num();
+	TestTrue(*FString::Printf(TEXT("the editor lists translucent tool materials on a landscape component (%d of %d)"), ToolTranslucent, Used.Num()), ToolTranslucent > 0);
+
+	// A window whose glass is a dynamic instance, made in the transient package as game code makes one: it still counts.
+	UMaterial* Glass = NewObject<UMaterial>(World->GetOutermost(), MakeUniqueObjectName(World->GetOutermost(), UMaterial::StaticClass(), TEXT("HyperAISceneCostWindowGlass")));
+	Glass->BlendMode = BLEND_Translucent;
+	UMaterialInstanceDynamic* Pane = UMaterialInstanceDynamic::Create(Glass, nullptr);
+	AStaticMeshActor* Window = AddCube(*World, TEXT("Window"), FVector(0.0, 0.0, 2000.0));
+	Window->GetStaticMeshComponent()->SetMaterial(0, Pane);
+
+	const FHyperAISceneCostReport Report = Measure(*World);
+	TestTrue(*FString::Printf(TEXT("measured (%s)"), *Report.Diagnostic), Report.bOk);
+	TestEqual(TEXT("the landscape's components are counted"), Report.LandscapeComponents, Landscape->LandscapeComponents.Num());
+	TestEqual(*FString::Printf(TEXT("only the window's material is translucent: %s"), *FString::Join(Report.TranslucentList, TEXT(", "))), Report.TranslucentMaterials, 1);
+	TestEqual(TEXT("on the window alone"), Report.TranslucentPrimitives, 1);
+	TestTrue(TEXT("and it is the one listed"), Report.TranslucentList.Num() == 1 && Report.TranslucentList[0].Contains(Pane->GetName()));
+	const FHyperAISceneCostEntry* Ground = Report.HeaviestActors.FindByPredicate([](const FHyperAISceneCostEntry& Entry) { return Entry.Name == TEXT("Ground"); });
+	TestTrue(*FString::Printf(TEXT("the landscape counts its own materials, not the tools' (%d of %d)"), Ground ? Ground->Materials : -1, Used.Num()),
+		Ground && Ground->Materials >= 1 && Ground->Materials < Used.Num());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSceneCostHeavyInstancedTest,
+	"HyperAIStudio.SceneSpatial.Cost.HeavyInstancedMeshes",
+	HyperAIStudio::SceneSpatial::Tests::Flags)
+
+bool FHyperAIStudioSceneCostHeavyInstancedTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::SceneSpatial;
+	using namespace HyperAIStudio::SceneSpatial::Tests;
+	// Ground cover: four meshes light one by one (the engine sphere and three copies of it), each instanced just past the
+	// bar, as a scatter puts grass and ferns down.
+	UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	if (!TestNotNull(TEXT("the engine sphere loads"), Sphere)) return false;
+	TArray<UStaticMesh*> Meshes = {Sphere};
+	TArray<UStaticMesh*> Copies;
+	for (int32 Index = 1; Index < 4; ++Index)
+	{
+		UStaticMesh* Copy = DuplicateObject<UStaticMesh>(Sphere, GetTransientPackage(),
+			MakeUniqueObjectName(GetTransientPackage(), UStaticMesh::StaticClass(), *FString::Printf(TEXT("HyperAISceneCostTuft%d"), Index)));
+		if (!TestNotNull(TEXT("the sphere copies"), Copy)) return false;
+		Copy->Build(/*bInSilent=*/true);
+		Copies.Add(Copy);
+		Meshes.Add(Copy);
+	}
+	FStaticMeshCompilingManager::Get().FinishCompilation(Copies);
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAISceneCostInstancedWorld"));
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+	// Each just past the bar, the sphere the heaviest and each copy lighter than the one before.
+	TArray<int32> Counts;
+	int64 Expected = 0;
+	for (int32 Index = 0; Index < Meshes.Num(); ++Index)
+	{
+		const int64 Triangles = Meshes[Index]->GetNumTriangles(0);
+		if (!TestTrue(TEXT("the mesh has triangles"), Triangles > 0)) return false;
+		Counts.Add(static_cast<int32>(Cost::HeavyInstancedTriangles / Triangles) + 1 + (Meshes.Num() - Index) * 10);
+		Expected += Triangles * Counts.Last();
+	}
+	TArray<UInstancedStaticMeshComponent*> Components;
+	// The sphere's instances are split over two components, one culled at 50 m: still one mesh, every instance counted.
+	Components.Add(AddInstanced(*World, TEXT("Tufts0"), Counts[0] / 2, AActor::StaticClass(), NAME_None, Sphere));
+	Components.Add(AddInstanced(*World, TEXT("Tufts0Far"), Counts[0] - Counts[0] / 2, AActor::StaticClass(), NAME_None, Sphere));
+	Components.Last()->SetCullDistances(0, 5000);
+	for (int32 Index = 1; Index < Meshes.Num(); ++Index)
+	{
+		Components.Add(AddInstanced(*World, *FString::Printf(TEXT("Tufts%d"), Index), Counts[Index], AActor::StaticClass(), NAME_None, Meshes[Index]));
+	}
+	// And pebbles well under it.
+	Components.Add(AddInstanced(*World, TEXT("Pebbles"), 100, AActor::StaticClass()));
+	Expected += Cube()->GetNumTriangles(0) * 100;
+	for (UInstancedStaticMeshComponent* Component : Components)
+	{
+		Component->SetForceDisableNanite(true);
+	}
+
+	const FHyperAISceneCostReport Report = Measure(*World);
+	TestTrue(*FString::Printf(TEXT("measured (%s)"), *Report.Diagnostic), Report.bOk);
+	TestEqual(TEXT("every instance counts, culled or not"), Report.TrianglesNonNanite, Expected);
+	TestTrue(TEXT("and the report says cull distances are not applied"), Report.Diagnostic.Contains(TEXT("before cull distances")));
+	const TArray<FString> Heavy = Report.Findings.FilterByPredicate([](const FString& Finding) { return Finding.StartsWith(TEXT("non_nanite_instances: ")); });
+	TestEqual(*FString::Printf(TEXT("three meshes named and the fourth summed: %s"), *FString::Join(Report.Findings, TEXT(" | "))), Heavy.Num(), 4);
+	if (Heavy.Num() == 4)
+	{
+		TestTrue(TEXT("the heaviest first, by its path"), Heavy[0].StartsWith(FString::Printf(TEXT("non_nanite_instances: %s draws "), *Sphere->GetPathName())));
+		TestTrue(TEXT("with the instances of both its components"), Heavy[0].Contains(FString::Printf(TEXT("%lld at LOD0 x %d instances in 2 component(s)"),
+			static_cast<int64>(Sphere->GetNumTriangles(0)), Counts[0])));
+		TestTrue(TEXT("saying which has no cull distance"), Heavy[0].Contains(TEXT("1 without a cull distance")) && Heavy[0].Contains(TEXT("set cull distances")));
+		TestTrue(TEXT("and what would cut it"), Heavy[0].Contains(TEXT("Nanite")) && Heavy[0].Contains(TEXT("thin the instances")) && Heavy[0].Contains(TEXT("simplify it")));
+		TestTrue(TEXT("and that the total is before cull distances"), Heavy[0].Contains(TEXT("before cull distances and LODs")));
+		TestTrue(TEXT("a mesh in one component without a cull distance says so"), Heavy[1].Contains(TEXT("which has no cull distance")));
+		TestTrue(TEXT("the next two by their paths"), Heavy[1].Contains(Meshes[1]->GetPathName()) && Heavy[2].Contains(Meshes[2]->GetPathName()));
+		TestTrue(TEXT("and the rest summed in one"), Heavy[3].StartsWith(TEXT("non_nanite_instances: 1 more mesh(es) draw ")) && Heavy[3].Contains(Meshes[3]->GetPathName()));
+	}
+	TestFalse(TEXT("pebbles under the bar are not named"), Heavy.ContainsByPredicate([](const FString& Finding) { return Finding.Contains(Cube()->GetPathName()); }));
+	TestTrue(TEXT("within the findings cap"), Report.Findings.Num() <= Cost::MaxFindings);
 	return true;
 }
 

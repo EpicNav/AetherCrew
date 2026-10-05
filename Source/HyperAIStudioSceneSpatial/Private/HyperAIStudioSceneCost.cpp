@@ -25,14 +25,18 @@
 #include "InstancedFoliageActor.h"
 #include "LandscapeComponent.h"
 #include "LandscapeHeightfieldCollisionComponent.h"
+#include "LandscapeMaterialInstanceConstant.h"
 #include "LandscapeProxy.h"
 #include "MaterialShared.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "RHIStats.h"
 #include "Rendering/NaniteResourcesHelper.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "StaticMeshResources.h"
+#include "UObject/Package.h"
 #include "UObject/UObjectHash.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
@@ -51,6 +55,8 @@ namespace HyperAIStudio::SceneSpatial::Cost
 		constexpr int32 ManyShadowLights = 4;
 		/** Sections an instanced mesh may have before each instance batch draws too often. */
 		constexpr int32 ManySections = 4;
+		/** Meshes heavy for their instances together that are named one by one; the rest share one finding. */
+		constexpr int32 NamedInstancedMeshes = 3;
 
 		/** A light that casts dynamic shadows: on everything when directional, inside its radius otherwise. */
 		struct FShadowLight
@@ -72,6 +78,11 @@ namespace HyperAIStudio::SceneSpatial::Cost
 			int32 Materials = 0;
 			bool bNanite = false;
 			bool bShadow = false;
+			/** What its components drawn without Nanite add up to: LOD0 triangles, copies (instances, or one per plain mesh), components, and those with no cull distance. */
+			int64 NonNaniteTriangles = 0;
+			int64 NonNaniteInstances = 0;
+			int32 NonNaniteComponents = 0;
+			int32 Unculled = 0;
 		};
 
 		struct FActorTally
@@ -94,8 +105,11 @@ namespace HyperAIStudio::SceneSpatial::Cost
 			return static_cast<int32>(FMath::Clamp<int64>(Value, 0, MAX_int32));
 		}
 
-		/** Findings about the whole report (loaded share, lights, a stop, meshes still compiling) are added last, so room is kept for them. */
-		constexpr int32 ReportFindings = 6;
+		/**
+		 * Findings about the whole report (loaded share, lights, a stop, meshes still compiling, and the instanced meshes,
+		 * named and summed) are added last, so room is kept for them.
+		 */
+		constexpr int32 ReportFindings = 6 + NamedInstancedMeshes + 1;
 
 		void AddFinding(FHyperAISceneCostReport& Out, const FString& Finding, const bool bWholeReport = false)
 		{
@@ -107,6 +121,72 @@ namespace HyperAIStudio::SceneSpatial::Cost
 		{
 			return Spatial::IsHelperPrimitive(Component) || Component.IsA<UShapeComponent>() || Component.IsA<UBrushComponent>()
 				|| Component.IsA<ULandscapeHeightfieldCollisionComponent>();
+		}
+
+		/**
+		 * Whether a game draws Material. In the editor, GetUsedMaterials also returns the editor's own: the landscape tools'
+		 * brush, selection and layer materials, made for the session in the transient package, and anything made from the
+		 * engine's editor content. A dynamic instance is kept wherever it lives, since game code makes those as it runs.
+		 */
+		bool IsGameMaterial(const UMaterialInterface& Material)
+		{
+			if (const ULandscapeMaterialInstanceConstant* Landscape = Cast<ULandscapeMaterialInstanceConstant>(&Material);
+				Landscape && (Landscape->bEditorToolUsage || Landscape->bIsLayerThumbnail))
+			{
+				return false;
+			}
+			if (Material.GetOutermost() == GetTransientPackage() && !Material.IsA<UMaterialInstanceDynamic>())
+			{
+				return false;
+			}
+			if (IsEditorOnlyObject(&Material))
+			{
+				return false;
+			}
+			const UMaterial* Base = Material.GetMaterial();
+			return !Base || !Base->GetOutermost()->GetName().StartsWith(TEXT("/Engine/Editor"));
+		}
+
+		/**
+		 * What a game draws a landscape component with: its material instances (the dynamic ones when its landscape uses
+		 * them), or its landscape material before they are made.
+		 */
+		void LandscapeMaterials(const ULandscapeComponent& Component, TArray<UMaterialInterface*>& Out)
+		{
+			for (int32 Index = 0; Index < Component.GetMaterialInstanceCount(); ++Index)
+			{
+				if (UMaterialInstance* Instance = Component.GetMaterialInstance(Index)) Out.AddUnique(Instance);
+			}
+			if (Out.IsEmpty())
+			{
+				if (UMaterialInterface* Material = Component.GetLandscapeMaterial()) Out.Add(Material);
+			}
+		}
+
+		/** Its total of LOD0 triangles over every copy drawn without Nanite. */
+		int64 NonNaniteTotal(const FMeshTally& Tally)
+		{
+			return Tally.NonNaniteTriangles * Tally.NonNaniteInstances;
+		}
+
+		FString Millions(const int64 Triangles)
+		{
+			return FString::Printf(TEXT("%.1fM"), Triangles / 1.0e6);
+		}
+
+		/** A mesh heavy for its copies together: what it draws, and the changes that would cut it. */
+		FString InstancedFinding(const FMeshTally& Tally)
+		{
+			const UStaticMesh& Mesh = *Tally.Mesh;
+			const FString Culled = Tally.Unculled == Tally.NonNaniteComponents
+				? FString(Tally.NonNaniteComponents == 1 ? TEXT("which has no cull distance") : TEXT("none with a cull distance"))
+				: Tally.Unculled > 0 ? FString::Printf(TEXT("%d without a cull distance"), Tally.Unculled)
+				: FString(Tally.NonNaniteComponents == 1 ? TEXT("which has a cull distance") : TEXT("all with cull distances"));
+			return FString::Printf(TEXT("non_nanite_instances: %s draws %s triangles without Nanite, %lld at LOD0 x %lld instances in %d component(s), %s. %s, thin the instances, %s or simplify it%s. The total counts LOD0 on every instance, before cull distances and LODs."),
+				*Mesh.GetPathName(), *Millions(NonNaniteTotal(Tally)), Tally.NonNaniteTriangles, Tally.NonNaniteInstances, Tally.NonNaniteComponents, *Culled,
+				Mesh.HasValidNaniteData() ? TEXT("Let its components draw it with Nanite (it has Nanite data)") : TEXT("Enable Nanite on it"),
+				Tally.Unculled > 0 ? TEXT("set cull distances") : TEXT("cull them nearer"),
+				Mesh.GetNumLODs() <= 1 ? TEXT(" (it has one LOD)") : TEXT(""));
 		}
 
 		/** Instances of Component whose middle is inside Box. */
@@ -298,6 +378,8 @@ namespace HyperAIStudio::SceneSpatial::Cost
 		TArray<FActorTally> Actors;
 		TSet<const UMaterialInterface*> NaniteBins;
 		TMap<const UMaterialInterface*, int32> Translucent;
+		// Whether a game draws each material met, asked once per material.
+		TMap<const UMaterialInterface*, bool> GameMaterials;
 		TMap<FString, int32> Others;
 		int64 Instances = 0;
 		int64 FoliageInstances = 0;
@@ -351,16 +433,21 @@ namespace HyperAIStudio::SceneSpatial::Cost
 				MostLocalShadowLights = FMath::Max(MostLocalShadowLights, Local);
 				Out.EstimatedShadowDrawCalls += Sections * Reaching;
 			};
-			// Translucent and masked materials, and Nanite's shading bins; returns how many materials it has.
+			// Translucent and masked materials, and Nanite's shading bins, among those a game draws; returns how many those are.
 			auto CountMaterials = [&](const UPrimitiveComponent& Component, const bool bNanite, bool& bOutTranslucent)
 			{
 				TArray<UMaterialInterface*> Used;
-				Component.GetUsedMaterials(Used);
+				if (const ULandscapeComponent* Landscape = Cast<ULandscapeComponent>(&Component)) LandscapeMaterials(*Landscape, Used);
+				else Component.GetUsedMaterials(Used);
 				bool bMasked = false;
 				bOutTranslucent = false;
+				int32 Drawn = 0;
 				for (const UMaterialInterface* Material : Used)
 				{
 					if (!Material) continue;
+					const bool* Known = GameMaterials.Find(Material);
+					if (!(Known ? *Known : GameMaterials.Add(Material, IsGameMaterial(*Material)))) continue;
+					++Drawn;
 					if (bNanite) NaniteBins.Add(Material);
 					if (IsTranslucentBlendMode(*Material))
 					{
@@ -374,7 +461,7 @@ namespace HyperAIStudio::SceneSpatial::Cost
 				}
 				Out.TranslucentPrimitives += bOutTranslucent ? 1 : 0;
 				Out.MaskedNanitePrimitives += bNanite && bMasked ? 1 : 0;
-				return Used.Num();
+				return Drawn;
 			};
 
 			Actor->ForEachComponent<UPrimitiveComponent>(/*bIncludeFromChildActors=*/false, [&](UPrimitiveComponent* Component)
@@ -482,6 +569,14 @@ namespace HyperAIStudio::SceneSpatial::Cost
 						Tally.Triangles += Triangles * Count;
 						Tally.DrawCalls += Sections;
 						Tally.Sections += Sections;
+						// Every instance counts, near or far: a cull distance is only noted, never applied.
+						MeshTally.NonNaniteTriangles = FMath::Max(MeshTally.NonNaniteTriangles, Triangles);
+						MeshTally.NonNaniteInstances += Count;
+						++MeshTally.NonNaniteComponents;
+						int32 StartCull = 0;
+						int32 EndCull = 0;
+						if (Instanced) Instanced->GetCullDistances(StartCull, EndCull);
+						MeshTally.Unculled += EndCull <= 0 && StaticMesh->CachedMaxDrawDistance <= 0.f ? 1 : 0;
 						if (Triangles > HeavyTriangles)
 						{
 							AddFinding(Out, FString::Printf(TEXT("non_nanite_heavy: %s draws %lld triangles at LOD0 without Nanite."), *Mesh->GetPathName(), Triangles));
@@ -630,6 +725,30 @@ namespace HyperAIStudio::SceneSpatial::Cost
 			Out.HeaviestMeshes.Add(MeshEntry(MeshList[Index]));
 		}
 
+		// Meshes light one by one and heavy together, as scattered grass and ground cover are: by their copies' LOD0
+		// triangles, the heaviest named, the rest summed. One heavy copy alone is non_nanite_heavy's.
+		TArray<const FMeshTally*> HeavyInstanced;
+		for (const FMeshTally& Tally : MeshList)
+		{
+			if (Tally.NonNaniteInstances > 1 && NonNaniteTotal(Tally) > HeavyInstancedTriangles) HeavyInstanced.Add(&Tally);
+		}
+		Algo::Sort(HeavyInstanced, [](const FMeshTally* A, const FMeshTally* B)
+		{
+			return NonNaniteTotal(*A) != NonNaniteTotal(*B) ? NonNaniteTotal(*A) > NonNaniteTotal(*B) : A->Mesh->GetPathName() < B->Mesh->GetPathName();
+		});
+		int64 RestTriangles = 0;
+		for (int32 Index = 0; Index < HeavyInstanced.Num(); ++Index)
+		{
+			if (Index < NamedInstancedMeshes) AddFinding(Out, InstancedFinding(*HeavyInstanced[Index]), true);
+			else RestTriangles += NonNaniteTotal(*HeavyInstanced[Index]);
+		}
+		if (HeavyInstanced.Num() > NamedInstancedMeshes)
+		{
+			const int32 Rest = HeavyInstanced.Num() - NamedInstancedMeshes;
+			AddFinding(Out, FString::Printf(TEXT("non_nanite_instances: %d more mesh(es) draw %s triangles without Nanite between them, the heaviest %s; the same changes apply."),
+				Rest, *Millions(RestTriangles), *HeavyInstanced[NamedInstancedMeshes]->Mesh->GetPathName()), true);
+		}
+
 		if (UWorldPartition* Partition = World.GetWorldPartition())
 		{
 			Out.bWorldPartition = true;
@@ -679,7 +798,7 @@ namespace HyperAIStudio::SceneSpatial::Cost
 		{
 			Out.bTruncated = !Stops.IsEmpty();
 			Out.TruncatedReason = FString::Join(Stops, TEXT(", "));
-			Out.Diagnostic = FString::Printf(TEXT("%d actor(s), %d primitive(s): %lld non-Nanite triangles, %lld Nanite source triangles, about %d draw calls and %d shadow draws%s. Draw calls are estimates; MeasuredLastFrameDrawCalls is what the last rendered frame drew."),
+			Out.Diagnostic = FString::Printf(TEXT("%d actor(s), %d primitive(s): %lld non-Nanite triangles, %lld Nanite source triangles, about %d draw calls and %d shadow draws%s. Triangles count LOD0 on every instance, before cull distances and LODs, and draw calls are estimates; MeasuredLastFrameDrawCalls is what the last rendered frame drew."),
 				Out.Actors, Out.PrimitiveComponents, Out.TrianglesNonNanite + Out.TrianglesSkeletal + Out.TrianglesLandscape, Out.TrianglesNaniteSource,
 				Out.EstimatedDrawCalls, Out.EstimatedShadowDrawCalls, Out.bTruncated ? *FString::Printf(TEXT(" (truncated: %s)"), *Out.TruncatedReason) : TEXT(""));
 		};

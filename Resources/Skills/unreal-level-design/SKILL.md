@@ -256,9 +256,12 @@ Then place and settle props in one undo step with `hyper_spatial_apply_plan`:
 
 `hyper_scene_cost_report` says what the loaded level, a box or named actors cost to render: triangles with and without
 Nanite, estimated draw and shadow draws, instances per mesh, lights, translucent materials, the heaviest actors and
-meshes, and findings such as heavy meshes drawn without Nanite. Draw calls are estimates; `MeasuredLastFrameDrawCalls`
-is what the last rendered frame drew. In World Partition it covers loaded actors only and says how many are not. Meshes
-still compiling are left out rather than waited for (`meshes_compiling`); run it again once they finish.
+meshes, and findings such as heavy meshes drawn without Nanite, one copy at a time (`non_nanite_heavy`) or all their
+instances together (`non_nanite_instances`, as scattered grass and ground cover are). Triangles count LOD0 on every
+instance, before cull distances and LODs, and draw calls are estimates; `MeasuredLastFrameDrawCalls` is what the last
+rendered frame drew. Translucency counts the materials a game draws, not the editor's own (the landscape tools'). In
+World Partition it covers loaded actors only and says how many are not. Meshes still compiling are left out rather than
+waited for (`meshes_compiling`); run it again once they finish.
 
 ## Checking
 

@@ -18,6 +18,11 @@ namespace HyperAIStudio::SceneSpatial::Cost
 	constexpr int32 MaxFindings = 24;
 	/** Local lights compared against every primitive for the shadow estimate, at most. */
 	constexpr int32 MaxShadowLights = 512;
+	/**
+	 * LOD0 triangles over all of a mesh's copies drawn without Nanite past which the mesh is heavy for its instances
+	 * together (non_nanite_instances): a sizeable share of a level's whole non-Nanite budget, a few million.
+	 */
+	constexpr int64 HeavyInstancedTriangles = 2000000;
 
 	/**
 	 * Measures World for the request's scope into Out. The request's limits are taken as given: the tool fits them
