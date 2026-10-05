@@ -581,6 +581,13 @@ bool FHyperAIStudioModelingReplaceLodsTest::RunTest(const FString& Parameters)
 		DeleteFolder(Folder);
 		return false;
 	}
+	// Verify is the backstop: a write that left them behind fails, rather than passing as the plan's mesh.
+	FHyperAIModelAssetResult Expected;
+	Expected.Path = Path;
+	Expected.Triangles = SourceTriangles(*Mesh);
+	FString Error;
+	const bool bVerified = HyperAIStudio::Modeling::Gate::Verify({Mesh}, {Expected}, Error);
+	TestTrue(TEXT("verify refuses a mesh that still holds them: ") + Error, !bVerified && Error.Contains(TEXT("holds 3 source LOD(s) and a hi-res source")));
 	const FHyperAIModelPlanReport Second = Run({Sized(TEXT("add.sphere"), TEXT("Prop"), TEXT("100"), TEXT("Steps=24")), Write(TEXT("Prop"), Path, TEXT("Replace=true"))}, false);
 	FStaticMeshCompilingManager::Get().FinishCompilation(Compile);
 	if (!TestTrue(TEXT("a sphere replaces it: ") + Second.Diagnostic, Second.bOk && Second.Assets.Num() == 1 && Second.Assets[0].bReplaced))
