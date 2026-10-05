@@ -504,6 +504,28 @@ namespace HyperAIStudio::TaskRouter
 		return Decision;
 	}
 
+	TOptional<FRouteDecision> DecideNamed(const FString& Category, const TArray<FHyperAIStudioAgentTaskRoute>& Routes, const TArray<FString>& UsableAgents,
+		const FString& PreferredAgent)
+	{
+		const int32 Index = Category.IsEmpty() ? INDEX_NONE : Routes.IndexOfByPredicate([&Category](const FHyperAIStudioAgentTaskRoute& Route)
+		{
+			return Route.Category.Equals(Category, ESearchCase::IgnoreCase);
+		});
+		if (Index == INDEX_NONE)
+		{
+			return {};
+		}
+		const FHyperAIStudioAgentTaskRoute& Route = Routes[Index];
+		FRouteDecision Decision;
+		Decision.RouteIndex = Index;
+		Decision.Choice = FHyperAIStudioAgentScoreboard::ChooseAgent(Route.AgentName, Route.ModelId, Route.Packs, UsableAgents, PreferredAgent);
+		if (Decision.Choice.Agent.IsEmpty())
+		{
+			return {};
+		}
+		return Decision;
+	}
+
 	TArray<FString> SkillsForPacks(const TArray<FPackFit>& Packs)
 	{
 		TArray<FString> Skills;
@@ -711,5 +733,34 @@ namespace HyperAIStudio::TaskRouter
 		// How people ask for each pack's work and its tools' names: tool descriptions, written for agents, mislead about roles.
 		const TOptional<FAgentPick> Pick = AgentFor(Message, ProjectAgents, bTeam, PackDocuments(/*bToolDescriptions=*/false));
 		return Pick ? AgentHintFrom(*Pick, ProjectAgents, ProjectRoot, ChatAgent, Given) : FString();
+	}
+
+	FString AgentHintNamed(const FString& Agent, const FString& Message, const FString& ProjectRoot, const FString& ChatAgent, const FString& StartedAs,
+		TSet<FString>& Given)
+	{
+		if (!StartedAs.IsEmpty() || IsTeamRequest(Message))
+		{
+			return FString();
+		}
+		const TArray<FHyperAIStudioAgentDefinition> ProjectAgents = Agents::List(ProjectRoot);
+		FAgentPick Pick;
+		if (Agent == TEXT("team"))
+		{
+			// The team runs only where it was added: the Team switch adds it, a hint never does.
+			if (!Agents::IsTeamInstalled(ProjectRoot))
+			{
+				return FString();
+			}
+			Pick.bTeam = true;
+			return AgentHintFrom(Pick, ProjectAgents, ProjectRoot, ChatAgent, Given);
+		}
+		const FHyperAIStudioAgentDefinition* Named = ProjectAgents.FindByPredicate([&Agent](const FHyperAIStudioAgentDefinition& Each) { return Each.Name == Agent; });
+		if (!Named)
+		{
+			return AgentHintFor(Message, ProjectRoot, ChatAgent, StartedAs, Given);
+		}
+		Pick.Agent = Named->Name;
+		Pick.Description = Named->Description;
+		return AgentHintFrom(Pick, ProjectAgents, ProjectRoot, ChatAgent, Given);
 	}
 }

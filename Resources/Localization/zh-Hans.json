@@ -1280,6 +1280,234 @@
    "text": "擦除对比"
   },
   {
+   "namespace": "HyperAIStudioPromptPresets",
+   "key": "TokenContentFolder",
+   "source": "Content folder",
+   "text": "内容文件夹"
+  },
+  {
+   "namespace": "HyperAIStudioPromptPresets",
+   "key": "TokenLevel",
+   "source": "Level",
+   "text": "关卡"
+  },
+  {
+   "namespace": "HyperAIStudioPromptPresets",
+   "key": "TokenProject",
+   "source": "Project",
+   "text": "项目"
+  },
+  {
+   "namespace": "HyperAIStudioPromptPresets",
+   "key": "TokenSelectedActor",
+   "source": "Selected actor",
+   "text": "所选 Actor"
+  },
+  {
+   "namespace": "HyperAIStudioPromptPresets",
+   "key": "TokenSelectedActors",
+   "source": "Selected actors",
+   "text": "所选 Actor（多个）"
+  },
+  {
+   "namespace": "HyperAIStudioPromptPresets",
+   "key": "TokenSelectedAsset",
+   "source": "Selected asset",
+   "text": "所选资产"
+  },
+  {
+   "namespace": "HyperAIStudioPromptPresets",
+   "key": "TokenSelectedAssets",
+   "source": "Selected assets",
+   "text": "所选资产（多个）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.ai-behavior",
+   "source": "AI and behaviour",
+   "text": "AI 与行为"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.anim-blueprints",
+   "source": "Animation Blueprints",
+   "text": "动画蓝图"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.animation",
+   "source": "Animation and rigging",
+   "text": "动画与绑定"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.audio",
+   "source": "Audio",
+   "text": "音频"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.blueprints",
+   "source": "Blueprints",
+   "text": "蓝图"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.cinematics",
+   "source": "Cinematics",
+   "text": "过场动画"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.cpp-build",
+   "source": "C++ and builds",
+   "text": "C++ 与构建"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.data-config-l10n",
+   "source": "Data, config and localization",
+   "text": "数据、配置与本地化"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.diagnostics-perf",
+   "source": "Diagnostics and performance",
+   "text": "诊断与性能"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.environment-recipes",
+   "source": "Environment recipes",
+   "text": "环境配方"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.gameplay-systems",
+   "source": "Gameplay systems",
+   "text": "玩法系统"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.gas",
+   "source": "Gameplay Ability System",
+   "text": "Gameplay 技能系统"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.images-reference",
+   "source": "Images and reference",
+   "text": "图像与参考"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.landscape-terrain",
+   "source": "Landscape and terrain",
+   "text": "地形与地貌"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.level-blockout",
+   "source": "Level blockout",
+   "text": "关卡白盒"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.lighting-lookdev",
+   "source": "Lighting and look-dev",
+   "text": "光照与外观开发"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.live-production",
+   "source": "Live production",
+   "text": "现场制作"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.materials-textures",
+   "source": "Materials and textures",
+   "text": "材质与纹理"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.modelling-geometry",
+   "source": "Modelling and geometry",
+   "text": "建模与几何体"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.motion-design",
+   "source": "Motion design",
+   "text": "动态设计"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.networking-framework",
+   "source": "Networking and game framework",
+   "text": "网络与游戏框架"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.paper2d",
+   "source": "Paper2D",
+   "text": "Paper2D"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.pcg-foliage",
+   "source": "PCG and foliage",
+   "text": "PCG 与植被"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.physics-chaos",
+   "source": "Physics and Chaos",
+   "text": "物理与 Chaos"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.playtest-qa",
+   "source": "Playtest and QA",
+   "text": "试玩与质量保证"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.project-search-memory-scm",
+   "source": "Search, memory and source control",
+   "text": "搜索、记忆与源代码管理"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.team-builds",
+   "source": "Team builds",
+   "text": "团队协作构建"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.uaf",
+   "source": "Unreal Animation Framework",
+   "text": "Unreal 动画框架"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.ui-umg",
+   "source": "UI and UMG",
+   "text": "UI 与 UMG"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.vfx-niagara",
+   "source": "VFX with Niagara",
+   "text": "Niagara 视效"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "category.world-partition",
+   "source": "World Partition and navigation",
+   "text": "世界分区与导航"
+  },
+  {
    "namespace": "HyperAIStudioRemote",
    "key": "Addresses",
    "source": "Open:\n{0}",
@@ -1518,6 +1746,12 @@
    "key": "NavTip",
    "source": "{0}\n{1}",
    "text": "{0}\n{1}"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
+   "key": "PresetResult",
+   "source": "Prompt: {0}",
+   "text": "提示词：{0}"
   },
   {
    "namespace": "HyperAIStudioShell",
@@ -3591,6 +3825,36 @@
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
+   "key": "PresetBlanks",
+   "source": "Fill in: {0}",
+   "text": "请填写：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "PresetBlanksLeft",
+   "source": "Fill in: {0}. Send again to send it as it is.",
+   "text": "请填写：{0}。再次发送即按原样发出。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "PresetTeamOn",
+   "source": "Team is on: this prompt is for HyperAI's team. Turn it off to send it to this agent alone.",
+   "text": "团队已开启：这条提示词是给 HyperAI 团队的。关闭它即可只发给这个智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "Prompts",
+   "source": "Prompts",
+   "text": "提示词"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "PromptsTooltip",
+   "source": "Start from a tested prompt for any kind of work; it fills in what you have selected. Ctrl+Space opens it too.",
+   "text": "从经过测试的提示词开始任何工作；它会填入你当前选中的内容。也可以按 Ctrl+Space 打开。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
    "key": "Queue",
    "source": "Queue",
    "text": "排队"
@@ -3924,6 +4188,138 @@
    "key": "Title",
    "source": "Playtest",
    "text": "试玩"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "Advanced",
+   "source": "Advanced",
+   "text": "高级"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "AgentTag",
+   "source": "The project agent this task is handed to, when the project has it.",
+   "text": "这项任务会交给的项目智能体（项目里有它时）。"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "AllPrompts",
+   "source": "All prompts",
+   "text": "全部提示词"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "FitsTooltip",
+   "source": "Made for what you have selected.",
+   "text": "适用于你当前选中的内容。"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "ForSelection",
+   "source": "For your selection",
+   "text": "适合当前选择"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "Insert",
+   "source": "Insert",
+   "text": "插入"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "InsertBlanks",
+   "source": "Insert and edit blanks",
+   "text": "插入并编辑空白项"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "InsertBlanksTooltip",
+   "source": "Put the prompt in the composer with every field you did not type left as a [blank] to fill there.",
+   "text": "把提示词放进输入框，你没有填写的字段都保留为 [空白]，在输入框里再填。"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "InsertTooltip",
+   "source": "Put the prompt in the composer as shown. Nothing is sent until you send it.",
+   "text": "按显示的内容把提示词放进输入框。在你发送之前不会发出任何内容。"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "LibraryErrors",
+   "source": "Some prompts could not be read: {0}",
+   "text": "部分提示词无法读取：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "NeedsPack",
+   "source": "Needs the {0} pack, which is not loaded in this project.",
+   "text": "需要 {0} 能力包，但它在这个项目中没有加载。"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "NoLibrary",
+   "source": "No prompts are installed. The plugin's Resources/Prompts holds them.",
+   "text": "没有安装任何提示词。它们位于插件的 Resources/Prompts 中。"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "NoMatch",
+   "source": "No prompt matches. Try other words or another category.",
+   "text": "没有匹配的提示词。换个词或换个分类试试。"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "PreviewTooltip",
+   "source": "The prompt as it goes in the composer. Edit it there before you send.",
+   "text": "提示词放进输入框后的样子。发送前可以在输入框里修改。"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "Recent",
+   "source": "Recent",
+   "text": "最近"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "SearchHint",
+   "source": "Search prompts",
+   "text": "搜索提示词"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "SkillTag",
+   "source": "A skill the agent is pointed at.",
+   "text": "会指引智能体使用的技能。"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "Standard",
+   "source": "Standard",
+   "text": "标准"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "Starter",
+   "source": "Starter",
+   "text": "入门"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "TeamTag",
+   "source": "Goes to HyperAI's team: the Team switch turns on.",
+   "text": "交给 HyperAI 团队：团队开关会打开。"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "TokenHint",
+   "source": "From what you have selected in the editor.",
+   "text": "来自你在编辑器中选中的内容。"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
+   "key": "ToolTag",
+   "source": "A HyperAI tool the prompt uses.",
+   "text": "提示词会用到的 HyperAI 工具。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
@@ -4623,6 +5019,24 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "PresetInserted",
+   "source": "Inserted the prompt \"{0}\".",
+   "text": "已插入提示词“{0}”。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "PresetNotHeld",
+   "source": "The prompt was not inserted: this chat runs in the terminal. Skills > Prompts puts one in its prompt.",
+   "text": "提示词未插入：这个对话在终端中运行。用“技能 › 提示词”可以把提示词放进它的输入框。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "PresetWaits",
+   "source": "The prompt goes in the chat once its agent starts.",
+   "text": "智能体启动后，提示词会放进对话。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "ProjectSkills",
    "source": "Project",
    "text": "项目"
@@ -4632,6 +5046,18 @@
    "key": "PromptCopyFailed",
    "source": "Prompt copy failed: {0}",
    "text": "复制提示词失败：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "PromptsMenu",
+   "source": "Prompts",
+   "text": "提示词"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "PromptsMenuTooltip",
+   "source": "Start from a tested prompt for any kind of work; it fills in what you have selected.",
+   "text": "从经过测试的提示词开始任何工作；它会填入你当前选中的内容。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",

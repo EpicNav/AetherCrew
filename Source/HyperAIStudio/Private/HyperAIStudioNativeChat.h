@@ -49,6 +49,25 @@ struct FHyperAIStudioChatPlanStep
 };
 
 /**
+ * What a message says about itself beyond its words, as a prompt preset does: its packs, skills and project agent
+ * go with it as they are named, instead of the task router's guess from the words.
+ */
+struct FHyperAIStudioMessageHints
+{
+	/** The preset it was written from, named in the line that says what went with the message. */
+	FString PresetId;
+	/** Catalog pack ids, the main one first. */
+	TArray<FString> Packs;
+	TArray<FString> Skills;
+	/** A project agent's name, or "team". */
+	FString Agent;
+	/** The task route (by its category's name) a new chat's first message takes. */
+	FString Route;
+
+	bool IsEmpty() const { return PresetId.IsEmpty() && Packs.IsEmpty() && Skills.IsEmpty() && Agent.IsEmpty() && Route.IsEmpty(); }
+};
+
+/**
  * A chat HyperAIStudio hosts itself instead of in a terminal, over the CLI's stdin and stdout: Codex through its
  * app-server, and Gemini, GitHub Copilot, OpenCode and other agents through the Agent Client Protocol, all
  * newline-delimited JSON-RPC, and Claude Code through the stream-json protocol its Agent SDK uses. Game thread only.
@@ -67,6 +86,8 @@ public:
 #if WITH_DEV_AUTOMATION_TESTS
 	/** Runs Command instead of the agent's CLI, so protocol tests can use a scripted stand-in. Empty restores it. */
 	static void SetCommandForTests(const FString& Command);
+	/** Sends ContextFor with messages in tests too, which otherwise send exactly what they script. */
+	static void SetContextInTestsForTests(bool bEnabled);
 #endif
 	/**
 	 * Null for an agent without a native protocol. ResumeSessionId continues an earlier chat. Subagent is for Claude
@@ -85,8 +106,8 @@ public:
 	void SetHeadless(const FString& Instructions);
 	bool Start(FString& OutError);
 	void Stop();
-	/** Sends now, or once the running turn ends. Images are files the agent sees with the text. */
-	void Send(const FString& Text, const TArray<FString>& Images = {});
+	/** Sends now, or once the running turn ends. Images are files the agent sees with the text; Hints go with it either way. */
+	void Send(const FString& Text, const TArray<FString>& Images = {}, const FHyperAIStudioMessageHints& Hints = {});
 	void Interrupt();
 	/** Answers an open approval with one of its choices. */
 	void Answer(const FString& ItemId, int32 Choice);
@@ -99,6 +120,13 @@ public:
 	 */
 	static FString ContextFor(const FString& Root, const FString& Text, const FString& ChatAgent, const FString& StartedAs, TSet<FString>& Given,
 		FString& OutSummary);
+	/**
+	 * ContextFor a message that names its own packs, skills and agent (Hints): their tools and skills go with it whatever
+	 * its words, and its agent takes the hand-off when the project has it (the team when it is installed). Anything
+	 * Hints leave out is found from the words as above.
+	 */
+	static FString ContextFor(const FString& Root, const FString& Text, const FHyperAIStudioMessageHints& Hints, const FString& ChatAgent,
+		const FString& StartedAs, TSet<FString>& Given, FString& OutSummary);
 
 	bool IsRunning() const;
 	bool IsReady() const { return bReady; }
@@ -184,6 +212,7 @@ private:
 	{
 		FString Text;
 		TArray<FString> Images;
+		FHyperAIStudioMessageHints Hints;
 	};
 
 	/** Adds an item without announcing it; AddItem and AskApproval announce it once it is complete. */
@@ -192,8 +221,8 @@ private:
 	bool Pump(float DeltaTime);
 	void Dispatch(const FString& Line);
 	void ClosePipes();
-	/** ContextFor Text, with what this chat has not had yet, to send with it; a notice says what went. */
-	FString MemoryFor(const FString& Text);
+	/** ContextFor Text and its Hints, with what this chat has not had yet, to send with it; a notice says what went. */
+	FString MemoryFor(const FString& Text, const FHyperAIStudioMessageHints& Hints);
 	/** Records the turn that just ended in the project's task history. */
 	void RecordTurn();
 

@@ -22,11 +22,13 @@
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "SHyperAIStudioPromptPicker.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/StyleColors.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Images/SImage.h"
@@ -298,11 +300,35 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 					SAssignNew(Composer, SMultiLineEditableTextBox)
 					.AutoWrapText(true)
 					.HintText(FText::Format(LOCTEXT("ComposerHint", "Message {0}. Enter sends; Shift+Enter starts a new line."), FText::FromString(Chat->GetAgentName())))
+					.OnTextChanged_Lambda([this](const FText& Text)
+					{
+						// A composer typed empty starts over: the preset no longer describes what is in it, and what it turned on
+						// and said goes with it.
+						if (Text.IsEmpty())
+						{
+							if (PendingPreset.IsSet())
+							{
+								bTeam = bTeamFromPreset ? false : bTeam;
+								Notice = Notice == PresetNotice ? FString() : Notice;
+							}
+							PendingPreset.Reset();
+							PendingRoute.Reset();
+							PendingBlanks.Reset();
+							bBlanksNoted = false;
+							bTeamFromPreset = false;
+						}
+					})
 					.OnKeyDownHandler_Lambda([this](const FGeometry&, const FKeyEvent& KeyEvent)
 					{
 						if (KeyEvent.GetKey() == EKeys::Enter && !KeyEvent.IsShiftDown() && !KeyEvent.IsControlDown() && !KeyEvent.IsAltDown())
 						{
 							Submit();
+							return FReply::Handled();
+						}
+						// Ctrl+Space, not "/": a slash starts the agent's own commands and skills.
+						if (KeyEvent.GetKey() == EKeys::SpaceBar && KeyEvent.IsControlDown() && !KeyEvent.IsShiftDown() && !KeyEvent.IsAltDown())
+						{
+							OpenPrompts();
 							return FReply::Handled();
 						}
 						return FReply::Unhandled();
@@ -318,13 +344,32 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 				.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
 				.ToolTipText(LOCTEXT("TeamTooltip", "Send your messages to HyperAI's team, not to this agent alone. The director plans the work, the programmer, level designer, lighting artist, technical artist and UI designer build their parts at once, the QA tester proves each part, and the director reviews it all against the team's quality bar. The first time, this adds the team to the project."))
 				.IsChecked_Lambda([this]() { return bTeam ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-				.OnCheckStateChanged_Lambda([this](const ECheckBoxState State) { bTeam = State == ECheckBoxState::Checked; })
+				.OnCheckStateChanged_Lambda([this](const ECheckBoxState State)
+				{
+					bTeam = State == ECheckBoxState::Checked;
+					// The user's own choice from here on.
+					bTeamFromPreset = false;
+				})
 				[
 					SNew(SBox)
 					.Padding(FMargin(8.0f, 2.0f))
 					[
 						SNew(STextBlock).Text(LOCTEXT("Team", "Team"))
 					]
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Bottom)
+			.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SAssignNew(PromptsButton, SComboButton)
+				.ToolTipText(LOCTEXT("PromptsTooltip", "Start from a tested prompt for any kind of work; it fills in what you have selected. Ctrl+Space opens it too."))
+				.MenuPlacement(MenuPlacement_AboveAnchor)
+				.OnGetMenuContent(this, &SHyperAIStudioNativeChatView::BuildPromptPicker)
+				.ButtonContent()
+				[
+					SNew(STextBlock).Text(LOCTEXT("Prompts", "Prompts"))
 				]
 			]
 			+ SHorizontalBox::Slot()
@@ -420,12 +465,118 @@ void SHyperAIStudioNativeChatView::InsertText(const FString& Text)
 	}
 }
 
+void SHyperAIStudioNativeChatView::InsertPreset(const FHyperAIStudioPromptPreset& Preset, const FString& Text, const TArray<FString>& Blanks)
+{
+	if (!Composer.IsValid() || Text.TrimStartAndEnd().IsEmpty())
+	{
+		return;
+	}
+	const FString Current = Composer->GetText().ToString().TrimEnd();
+	Composer->SetText(FText::FromString(Current.TrimStart().IsEmpty() ? Text : Current + TEXT("\n\n") + Text));
+	// After the text, which may have reset it.
+	PendingPreset = Preset;
+	const HyperAIStudio::PromptPresets::FLibrary& Library = HyperAIStudio::PromptPresets::Get(FHyperAIStudioService::GetProjectRoot());
+	const FHyperAIStudioPromptCategory* Category = Library.FindCategory(Preset.Category);
+	PendingRoute = Category ? Category->Route : FString();
+	PendingBlanks = Blanks;
+	bBlanksNoted = false;
+	HyperAIStudio::PromptPresets::NoteUsed(Preset.Id);
+	TArray<FString> Lines;
+	if (Preset.Agent == TEXT("team") && !bTeam)
+	{
+		// Visibly, so the user can turn it off and keep the work with this agent.
+		bTeam = true;
+		bTeamFromPreset = true;
+		Lines.Add(LOCTEXT("PresetTeamOn", "Team is on: this prompt is for HyperAI's team. Turn it off to send it to this agent alone.").ToString());
+	}
+	FocusComposer();
+	if (!Blanks.IsEmpty())
+	{
+		Composer->GoTo(ETextLocation::BeginningOfDocument);
+		Composer->BeginSearch(FText::FromString(TEXT("[") + Blanks[0] + TEXT("]")), ESearchCase::CaseSensitive);
+		TArray<FString> Bracketed;
+		for (const FString& Blank : Blanks)
+		{
+			Bracketed.Add(TEXT("[") + Blank + TEXT("]"));
+		}
+		Lines.Add(FText::Format(LOCTEXT("PresetBlanks", "Fill in: {0}"), FText::FromString(FString::Join(Bracketed, TEXT(", ")))).ToString());
+	}
+	Notice = FString::Join(Lines, TEXT(" "));
+	PresetNotice = Notice;
+}
+
+void SHyperAIStudioNativeChatView::OpenPrompts()
+{
+	if (!PromptsButton.IsValid())
+	{
+		return;
+	}
+	PromptsButton->SetIsOpen(true);
+	if (const TSharedPtr<SHyperAIStudioPromptPicker> Opened = Picker.Pin())
+	{
+		FSlateApplication::Get().SetKeyboardFocus(Opened->GetSearchBox(), EFocusCause::SetDirectly);
+	}
+}
+
+TSharedRef<SWidget> SHyperAIStudioNativeChatView::BuildPromptPicker()
+{
+	const TSharedRef<SHyperAIStudioPromptPicker> Built = SNew(SHyperAIStudioPromptPicker)
+		.ProjectRoot(FHyperAIStudioService::GetProjectRoot())
+		.OnPresetChosen_Lambda([this](const FHyperAIStudioPromptPreset& Preset, const FString& Text, const TArray<FString>& Blanks)
+		{
+			InsertPreset(Preset, Text, Blanks);
+			if (PromptsButton.IsValid())
+			{
+				PromptsButton->SetIsOpen(false);
+			}
+			FocusComposer();
+		})
+		.OnClose_Lambda([this]()
+		{
+			if (PromptsButton.IsValid())
+			{
+				PromptsButton->SetIsOpen(false);
+			}
+			FocusComposer();
+		});
+	Picker = Built;
+	if (PromptsButton.IsValid())
+	{
+		PromptsButton->SetMenuContentWidgetToFocus(Built->GetSearchBox());
+	}
+	return SNew(SBox)
+		.WidthOverride(720.0f)
+		.HeightOverride(460.0f)
+		[
+			Built
+		];
+}
+
 void SHyperAIStudioNativeChatView::FocusComposer()
 {
 	if (Composer.IsValid())
 	{
 		FSlateApplication::Get().SetKeyboardFocus(Composer, EFocusCause::SetDirectly);
 	}
+}
+
+FString SHyperAIStudioNativeChatView::GetComposerText() const
+{
+	return Composer.IsValid() ? Composer->GetText().ToString() : FString();
+}
+
+FHyperAIStudioMessageHints SHyperAIStudioNativeChatView::GetPendingHints() const
+{
+	FHyperAIStudioMessageHints Hints;
+	if (PendingPreset.IsSet())
+	{
+		Hints.PresetId = PendingPreset->Id;
+		Hints.Packs = PendingPreset->Packs;
+		Hints.Skills = PendingPreset->Skills;
+		Hints.Agent = PendingPreset->Agent;
+		Hints.Route = PendingRoute;
+	}
+	return Hints;
 }
 
 void SHyperAIStudioNativeChatView::Submit()
@@ -435,6 +586,41 @@ void SHyperAIStudioNativeChatView::Submit()
 	{
 		return;
 	}
+	// A preset's blanks: the first send says what is left to fill, the next sends it as it is.
+	if (PendingPreset.IsSet() && !bBlanksNoted)
+	{
+		TArray<FString> Left;
+		for (const FString& Blank : PendingBlanks)
+		{
+			if (Text.Contains(TEXT("[") + Blank + TEXT("]"), ESearchCase::CaseSensitive))
+			{
+				Left.Add(TEXT("[") + Blank + TEXT("]"));
+			}
+		}
+		if (!Left.IsEmpty())
+		{
+			bBlanksNoted = true;
+			Notice = FText::Format(LOCTEXT("PresetBlanksLeft", "Fill in: {0}. Send again to send it as it is."), FText::FromString(FString::Join(Left, TEXT(", ")))).ToString();
+			PresetNotice = Notice;
+			return;
+		}
+	}
+	FHyperAIStudioMessageHints Hints = GetPendingHints();
+	if (!bTeam && Hints.Agent == TEXT("team"))
+	{
+		// Team turned off: the work stays with this agent, so no hand-off to the team goes with it.
+		Hints.Agent.Reset();
+	}
+	if (!Hints.IsEmpty())
+	{
+		Notice.Reset();
+	}
+	// Forgotten before the composer empties, or emptying it would also turn off the Team the preset turned on.
+	PendingPreset.Reset();
+	PendingRoute.Reset();
+	PendingBlanks.Reset();
+	bBlanksNoted = false;
+	bTeamFromPreset = false;
 	Composer->SetText(FText::GetEmpty());
 	bFollow = true;
 	FString Message = Text;
@@ -451,13 +637,13 @@ void SHyperAIStudioNativeChatView::Submit()
 		Message = HyperAIStudio::Agents::TeamRequest(bAdded ? FString() : Chat->GetAgentName(), Text);
 	}
 	// A request to the team is the team's to share out; anything else may first go to the agent its task fits.
-	else if (OnRoute.IsBound() && OnRoute.Execute(Message, Attached))
+	else if (OnRoute.IsBound() && OnRoute.Execute(Message, Attached, Hints))
 	{
 		Attached.Reset();
 		RebuildAttachments();
 		return;
 	}
-	Chat->Send(Message, Attached);
+	Chat->Send(Message, Attached, Hints);
 	Attached.Reset();
 	RebuildAttachments();
 }

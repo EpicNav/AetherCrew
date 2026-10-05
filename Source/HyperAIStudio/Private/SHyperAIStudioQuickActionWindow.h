@@ -7,6 +7,8 @@
 #include "Containers/Ticker.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioAgentState.h"
+#include "HyperAIStudioNativeChat.h"
+#include "HyperAIStudioPromptPresets.h"
 #include "HyperAIStudioService.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
@@ -70,6 +72,11 @@ public:
 	static void InterruptTab(int32 TabIndex);
 	/** The chat a tab's HyperAI chat view runs; null for a closed tab or a terminal one. */
 	static TSharedPtr<FHyperAIStudioNativeChat> GetTabChat(int32 TabIndex);
+	/**
+	 * Puts a prompt preset, filled from the selection, in a chat tab's prompt for the user to finish, opening the tab
+	 * if needed; never sends it. A tab whose agent has not started yet gets it in its chat view once that starts.
+	 */
+	static bool InsertPreset(int32 TabIndex, const FHyperAIStudioPromptPreset& Preset);
 
 	virtual FReply OnPreviewKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	/** Assets and actors dropped on the panel become object paths in the agent's prompt. */
@@ -90,6 +97,11 @@ private:
 	TSharedRef<SWidget> BuildMcpStatusMenu();
 	/** Paste text into the running agent's prompt without sending it. */
 	bool InsertIntoAgentPrompt(const FString& Text, const FString& Label, bool bFocusTerminal = true);
+	/**
+	 * A preset's text into this tab's prompt: the chat view's composer with the preset's hints, the terminal's prompt
+	 * as plain text (a terminal sends no hints), or held for the chat view while the agent starts.
+	 */
+	bool InsertPresetHere(const FHyperAIStudioPromptPreset& Preset, const FString& Text, const TArray<FString>& Blanks);
 	/** Handoff prompts: sent when the agent is idle and auto-send is on, otherwise typed in for the user to send. */
 	bool DeliverHandoffPrompt(const FString& Text, const FString& Label);
 	TSharedRef<SWidget> BuildNewTabMenu();
@@ -246,6 +258,16 @@ private:
 	/** A prompt sent before the agent started (HyperAIStudio.ChatSend, a job): the agent gets it as it starts. */
 	FString PendingPrompt;
 	TArray<FString> PendingImages;
+	/** What PendingPrompt's preset names, when the first message came from one. */
+	FHyperAIStudioMessageHints PendingHints;
+	/** A preset put in this tab before its chat view started, waiting for the composer. */
+	struct FPendingPreset
+	{
+		FHyperAIStudioPromptPreset Preset;
+		FString Text;
+		TArray<FString> Blanks;
+	};
+	TOptional<FPendingPreset> PendingPresetInsert;
 	/** Codex, Gemini and Claude Code can run in HyperAI's own chat view instead of the terminal. */
 	TSharedPtr<class SHyperAIStudioNativeChatView> NativeView;
 	TSharedRef<SWidget> BuildNativeToggle();
@@ -256,9 +278,10 @@ private:
 	void StopNativeChat();
 	/**
 	 * A new chat's first message, before it is sent: the task route it fits starts its agent here, the chat starting
-	 * again on that agent with the message when it is another. True when it took the message.
+	 * again on that agent with the message when it is another. A preset's message takes its category's route (Hints).
+	 * True when it took the message.
 	 */
-	bool RouteFirstMessage(const FString& Message, const TArray<FString>& Images);
+	bool RouteFirstMessage(const FString& Message, const TArray<FString>& Images, const FHyperAIStudioMessageHints& Hints);
 	/** Model chosen in this tab (or by its route) for TabModelAgent; other tabs keep their own. */
 	FString TabModel;
 	FString TabModelAgent;

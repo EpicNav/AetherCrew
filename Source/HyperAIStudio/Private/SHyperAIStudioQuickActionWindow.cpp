@@ -41,6 +41,7 @@
 #include "HyperAIStudioLocalModels.h"
 #include "HyperAIStudioNativeChat.h"
 #include "SHyperAIStudioNativeChatView.h"
+#include "SHyperAIStudioPromptPicker.h"
 #include "HyperAIStudioSkills.h"
 #include "HyperAIStudioTaskRouter.h"
 #include "Serialization/JsonReader.h"
@@ -1201,6 +1202,48 @@ bool SHyperAIStudioQuickActionWindow::InsertIntoAgentPrompt(const FString& Text,
 		FSlateApplication::Get().SetKeyboardFocus(TerminalWidget, EFocusCause::SetDirectly);
 	}
 	return true;
+}
+
+bool SHyperAIStudioQuickActionWindow::InsertPresetHere(const FHyperAIStudioPromptPreset& Preset, const FString& Text, const TArray<FString>& Blanks)
+{
+	if (NativeView.IsValid())
+	{
+		NativeView->InsertPreset(Preset, Text, Blanks);
+		LastMessage = FText::Format(LOCTEXT("PresetInserted", "Inserted the prompt \"{0}\"."), Preset.DisplayTitle());
+		AddTranscriptLine(LastMessage.ToString());
+		return true;
+	}
+	if (TerminalWidget.IsValid() && TerminalWidget->IsSessionRunning())
+	{
+		// A terminal's agent gets the text alone: the packs, skills and agent travel only with HyperAI's chat view.
+		const bool bInserted = InsertIntoAgentPrompt(Text, TEXT("prompt"));
+		if (bInserted)
+		{
+			HyperAIStudio::PromptPresets::NoteUsed(Preset.Id);
+		}
+		return bInserted;
+	}
+	// Held only for a chat view that is about to start; a terminal's prompt takes it once its agent runs.
+	if (!GetDefault<UHyperAIStudioSettings>()->bUseNativeChatView || !FHyperAIStudioNativeChat::IsSupported(GetSelectedAgentName()))
+	{
+		LastMessage = LOCTEXT("ContextNoAgentPrompt", "Nothing inserted: no agent prompt is accepting input. Start the agent first.");
+		AddTranscriptLine(LastMessage.ToString());
+		return false;
+	}
+	PendingPresetInsert = FPendingPreset{Preset, Text, Blanks};
+	LastMessage = LOCTEXT("PresetWaits", "The prompt goes in the chat once its agent starts.");
+	AddTranscriptLine(LastMessage.ToString());
+	return true;
+}
+
+bool SHyperAIStudioQuickActionWindow::InsertPreset(const int32 TabIndex, const FHyperAIStudioPromptPreset& Preset)
+{
+	// Filled from the selection as it is now, before the chat page comes forward.
+	TArray<FString> Blanks;
+	const FString Text = HyperAIStudio::PromptPresets::Fill(Preset, HyperAIStudio::PromptPresets::CaptureContext(), {}, Blanks);
+	FHyperAIStudioShell::Open(GetPageId(TabIndex));
+	const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = FindTab(TabIndex);
+	return Window.IsValid() && Window->InsertPresetHere(Preset, Text, Blanks);
 }
 
 bool SHyperAIStudioQuickActionWindow::GetRunningAgent(FString& OutAgent, FString& OutModel) const
@@ -2491,6 +2534,8 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 	PendingPrompt.Reset();
 	const TArray<FString> PromptImages = MoveTemp(PendingImages);
 	PendingImages.Reset();
+	const FHyperAIStudioMessageHints PromptHints = MoveTemp(PendingHints);
+	PendingHints = FHyperAIStudioMessageHints();
 
 	const FString Notice = MoveTemp(PendingNotice);
 	PendingNotice.Reset();
@@ -2510,9 +2555,16 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 		}
 		if (!Prompt.IsEmpty() && NativeView.IsValid() && NativeView->GetChat().IsValid())
 		{
-			NativeView->GetChat()->Send(Prompt, PromptImages);
+			NativeView->GetChat()->Send(Prompt, PromptImages, PromptHints);
 		}
 		return;
+	}
+	// A preset held for a chat view that did not start: dropped, or a later chat view would get it unasked.
+	if (PendingPresetInsert.IsSet())
+	{
+		PendingPresetInsert.Reset();
+		LastMessage = LOCTEXT("PresetNotHeld", "The prompt was not inserted: this chat runs in the terminal. Skills > Prompts puts one in its prompt.");
+		AddTranscriptLine(LastMessage.ToString());
 	}
 	// A first message reaches a terminal agent the way a restart's does: as its opening prompt, one line pointing at a file.
 	FString FirstArgument = ContinueArgument;
@@ -2755,6 +2807,12 @@ bool SHyperAIStudioQuickActionWindow::StartNativeChat(const FString& ResumeId)
 			.Chat(Chat)
 			.OnRoute(this, &SHyperAIStudioQuickActionWindow::RouteFirstMessage));
 		NativeView->FocusComposer();
+		// A preset picked from search while the agent was starting.
+		if (PendingPresetInsert.IsSet())
+		{
+			NativeView->InsertPreset(PendingPresetInsert->Preset, PendingPresetInsert->Text, PendingPresetInsert->Blanks);
+			PendingPresetInsert.Reset();
+		}
 	}
 	LastMessage = FText::Format(LOCTEXT("NativeStarted", "{0} is running in the native view."), FText::FromString(Agent));
 	AddTranscriptLine(LastMessage.ToString());
@@ -2775,7 +2833,7 @@ void SHyperAIStudioQuickActionWindow::StopNativeChat()
 	NativeView.Reset();
 }
 
-bool SHyperAIStudioQuickActionWindow::RouteFirstMessage(const FString& Message, const TArray<FString>& Images)
+bool SHyperAIStudioQuickActionWindow::RouteFirstMessage(const FString& Message, const TArray<FString>& Images, const FHyperAIStudioMessageHints& Hints)
 {
 	const TSharedPtr<FHyperAIStudioNativeChat> Chat = NativeView.IsValid() ? NativeView->GetChat() : nullptr;
 	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
@@ -2793,8 +2851,10 @@ bool SHyperAIStudioQuickActionWindow::RouteFirstMessage(const FString& Message, 
 	{
 		Settings->SaveConfig();
 	}
-	const TOptional<HyperAIStudio::TaskRouter::FRouteDecision> Decision = HyperAIStudio::TaskRouter::Decide(Message, Settings->AgentTaskRoutes,
-		GetUsableAgentNames(), Settings->PreferredAgent);
+	// A preset's category names its route; any other message's words choose one.
+	const TOptional<HyperAIStudio::TaskRouter::FRouteDecision> Decision = Hints.Route.IsEmpty()
+		? HyperAIStudio::TaskRouter::Decide(Message, Settings->AgentTaskRoutes, GetUsableAgentNames(), Settings->PreferredAgent)
+		: HyperAIStudio::TaskRouter::DecideNamed(Hints.Route, Settings->AgentTaskRoutes, GetUsableAgentNames(), Settings->PreferredAgent);
 	const TSharedPtr<FString>* Option = Decision.IsSet() ? AgentOptions.FindByPredicate([&Decision](const TSharedPtr<FString>& Each)
 	{
 		return Each.IsValid() && Each->Equals(Decision->Choice.Agent, ESearchCase::IgnoreCase);
@@ -2833,6 +2893,7 @@ bool SHyperAIStudioQuickActionWindow::RouteFirstMessage(const FString& Message, 
 	TabSubagent = Subagent;
 	PendingPrompt = Message;
 	PendingImages = Images;
+	PendingHints = Hints;
 	PendingNotice = Notice;
 	// Once this click is handled: starting again replaces the view the message was typed in.
 	const TWeakPtr<SHyperAIStudioQuickActionWindow> WeakThis = SharedThis(this);
@@ -2928,6 +2989,31 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildSkillsMenu()
 	FMenuBuilder Menu(/*bInShouldCloseWindowAfterMenuSelection=*/true, nullptr);
 	const FString Agent = ActiveTerminalAgentName.IsEmpty() ? GetSelectedAgentName() : ActiveTerminalAgentName;
 	const FString Prefix = HyperAIStudio::Skills::InvocationPrefix(Agent);
+	// The prompt library, for the terminal too: the chat view's own Prompts button does the same beside its composer.
+	Menu.AddSubMenu(
+		LOCTEXT("PromptsMenu", "Prompts"),
+		LOCTEXT("PromptsMenuTooltip", "Start from a tested prompt for any kind of work; it fills in what you have selected."),
+		FNewMenuDelegate::CreateSPLambda(this, [this](FMenuBuilder& Prompts)
+		{
+			Prompts.AddWidget(
+				SNew(SBox)
+				.WidthOverride(720.0f)
+				.HeightOverride(460.0f)
+				[
+					SNew(SHyperAIStudioPromptPicker)
+					.ProjectRoot(FHyperAIStudioService::GetProjectRoot())
+					.OnPresetChosen_Lambda([this](const FHyperAIStudioPromptPreset& Preset, const FString& Text, const TArray<FString>& Blanks)
+					{
+						InsertPresetHere(Preset, Text, Blanks);
+						FSlateApplication::Get().DismissAllMenus();
+					})
+					.OnClose_Lambda([]() { FSlateApplication::Get().DismissAllMenus(); })
+				],
+				FText::GetEmpty(), /*bNoIndent=*/true);
+		}),
+		/*bInOpenSubMenuOnClick=*/false,
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Documentation"));
+	Menu.AddMenuSeparator();
 	if (Prefix.IsEmpty())
 	{
 		Menu.AddMenuEntry(LOCTEXT("SkillsUnavailable", "Skills work with Claude Code and Codex"), FText::GetEmpty(), FSlateIcon(),
@@ -3235,6 +3321,8 @@ int32 SHyperAIStudioQuickActionWindow::OpenJobChat(const FString& Category, cons
 	}
 	Window->PendingPrompt = Prompt;
 	Window->PendingImages = Images;
+	// A job's prompt names nothing of a preset's.
+	Window->PendingHints = FHyperAIStudioMessageHints();
 	if (bReused)
 	{
 		// A job is new work, never the conversation the tab was reopened with.
@@ -3323,6 +3411,7 @@ bool SHyperAIStudioQuickActionWindow::SendToChat(const int32 TabIndex, const FSt
 	{
 		Window->PendingPrompt = Text;
 		Window->PendingImages = Images;
+		Window->PendingHints = FHyperAIStudioMessageHints();
 		OutMessage = FString::Printf(TEXT("Chat %d gets it as its agent starts."), TabIndex);
 		return true;
 	}

@@ -56,6 +56,9 @@ namespace HyperAIStudio::TaskRouter
 	/** The route a new chat's first message fits and the agent it starts with; unset when no route fits or no agent is set up. */
 	TOptional<FRouteDecision> Decide(const FString& Message, const TArray<FHyperAIStudioAgentTaskRoute>& Routes, const TArray<FString>& UsableAgents,
 		const FString& PreferredAgent);
+	/** Decide for a message that names its route, as a prompt preset's category does: that route by its category, whatever the words. */
+	TOptional<FRouteDecision> DecideNamed(const FString& Category, const TArray<FHyperAIStudioAgentTaskRoute>& Routes, const TArray<FString>& UsableAgents,
+		const FString& PreferredAgent);
 
 	/** The bundled skills made for these packs' kind of work, best pack first. */
 	TArray<FString> SkillsForPacks(const TArray<FPackFit>& Packs);
@@ -82,6 +85,13 @@ namespace HyperAIStudio::TaskRouter
 	 * pointed at (Given holds "agent:<name>", or "agent:team").
 	 */
 	FString AgentHintFor(const FString& Message, const FString& ProjectRoot, const FString& ChatAgent, const FString& StartedAs, TSet<FString>& Given);
+	/**
+	 * AgentHintFor an agent the message names, as a prompt preset does: that project agent's block, or the team's when
+	 * Agent is "team" and the team is in the project (nothing when it is not). An agent the project lacks falls back to
+	 * the pick by the words. Nothing in a chat started as a project agent, or for a request to the team already.
+	 */
+	FString AgentHintNamed(const FString& Agent, const FString& Message, const FString& ProjectRoot, const FString& ChatAgent, const FString& StartedAs,
+		TSet<FString>& Given);
 
 	// Pure pieces, exposed for tests.
 	/** How people ask for a pack's kind of work, beyond its tools' own words; empty for a pack with none. */
