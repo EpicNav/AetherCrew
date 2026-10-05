@@ -91,6 +91,9 @@ namespace HyperAIStudio::Modeling::Gate
 		void Remove(const FString& Name);
 		UDynamicMesh* RequestTemp();
 		void ReturnTemp(UDynamicMesh* Mesh);
+		/** A write_asset's mesh as it was at its op, so later ops on the working mesh (a drop too) leave the asset as planned. */
+		void Keep(int32 StepIndex, const UDynamicMesh& Mesh);
+		UDynamicMesh* Kept(int32 StepIndex) const;
 		/** Names in the order they were made, as the plan wrote them. */
 		TArray<FString> Names;
 		int32 BuildMs = 0;
@@ -98,6 +101,7 @@ namespace HyperAIStudio::Modeling::Gate
 	private:
 		TStrongObjectPtr<UDynamicMeshPool> Pool;
 		TMap<FString, UDynamicMesh*> Meshes;
+		TMap<int32, UDynamicMesh*> Writes;
 	};
 
 	/** Runs the plan's ops on meshes in memory; stops at the first op that fails or passes a limit, naming it. */
@@ -111,6 +115,8 @@ namespace HyperAIStudio::Modeling::Gate
 	 */
 	bool Write(const FPlan& Plan, FBuilt& Built, TArray<FHyperAIModelAssetResult>& OutAssets, TArray<UStaticMesh*>& OutWritten,
 		TArray<UStaticMesh*>& OutCreated, TArray<FString>& OutNotes, FString& OutError);
+	/** New assets a failed plan made, deleted again: a plan never leaves one half-written. */
+	void Discard(TArray<UStaticMesh*>& Created);
 	/** Finished compiling: render data, LOD0 triangles near the plan's, the collision asked for. */
 	bool Verify(const TArray<UStaticMesh*>& Written, const TArray<FHyperAIModelAssetResult>& Expected, FString& OutError);
 	/** The vertex-colour material; made and saved on first use when bCreate. */

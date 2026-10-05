@@ -44,7 +44,7 @@ struct FHyperAIModelOp
 	UPROPERTY() FString Select;
 	/** "Name=Value; Name=Value", the names each kind takes (hyper_model_inspect lists them). */
 	UPROPERTY() FString Params;
-	/** write_asset: the static mesh to write, under /Game (/Game/HyperAI/Models/SM_Rock). */
+	/** write_asset: the static mesh to write, under /Game (/Game/HyperAI/Models/SM_Rock), from the mesh as it is at this op. */
 	UPROPERTY() FString Asset;
 };
 

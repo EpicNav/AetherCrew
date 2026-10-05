@@ -40,6 +40,7 @@
 #include "MeshDescription.h"
 #include "Misc/PackageName.h"
 #include "Misc/SecureHash.h"
+#include "ObjectTools.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "StaticMeshCompiler.h"
 #include "StaticMeshResources.h"
@@ -863,8 +864,12 @@ namespace HyperAIStudio::Modeling::Gate
 				return false;
 			}
 			Step.Size = Values.Num() == 1 ? FVector(Values[0]) : FVector(Values[0], Values[1], Values[2]);
-			const bool bFlat = Spec.Kind == FString(TEXT("add.disc")) || Spec.Kind == FString(TEXT("add.curved_stairs"));
-			if (Step.Size.GetMin() < (bFlat ? 0.0 : 0.01) || Step.Size.GetMax() > 100000.0)
+			// A disc ignores Size Z and curved stairs Size X, so those may be 0; a 0 on an axis the shape uses would flatten
+			// it to nothing, which builds no render data.
+			FVector Used = Step.Size;
+			if (Spec.Kind == FString(TEXT("add.disc"))) Used.Z = 1.0;
+			if (Spec.Kind == FString(TEXT("add.curved_stairs"))) Used.X = 1.0;
+			if (Step.Size.GetMin() < 0.0 || Used.GetMin() < 0.01 || Step.Size.GetMax() > 100000.0)
 			{
 				OutError = TEXT("Size is above 0 and at most 100000 cm on each axis.");
 				return false;
@@ -990,6 +995,12 @@ namespace HyperAIStudio::Modeling::Gate
 		if (Assets.Num() >= C::MaxAssets)
 		{
 			OutError = FString::Printf(TEXT("a plan writes at most %d assets."), C::MaxAssets);
+			return false;
+		}
+		// Made by the same write when it is missing, and a static mesh cannot share its name.
+		if (Path.Equals(C::VertexColorMaterial, ESearchCase::IgnoreCase))
+		{
+			OutError = FString::Printf(TEXT("%s is the placeholders' vertex-colour material; write the mesh to another path."), C::VertexColorMaterial);
 			return false;
 		}
 		if (PackageExists(Path))
@@ -1219,6 +1230,19 @@ namespace HyperAIStudio::Modeling::Gate
 	void FBuilt::ReturnTemp(UDynamicMesh* Mesh)
 	{
 		if (Mesh) Pool->ReturnMesh(Mesh);
+	}
+
+	void FBuilt::Keep(const int32 StepIndex, const UDynamicMesh& Mesh)
+	{
+		UDynamicMesh* Copy = Pool->RequestMesh();
+		Copy->SetMesh(Mesh.GetMeshRef());
+		Writes.Add(StepIndex, Copy);
+	}
+
+	UDynamicMesh* FBuilt::Kept(const int32 StepIndex) const
+	{
+		UDynamicMesh* const* Found = Writes.Find(StepIndex);
+		return Found ? *Found : nullptr;
 	}
 
 	// --- Building --------------------------------------------------------------------------------------------------
@@ -1543,7 +1567,17 @@ namespace HyperAIStudio::Modeling::Gate
 	bool RunStep(const FStep& Step, FBuilt& Built, UGeometryScriptDebug* Debug, FString& OutError)
 	{
 		const FString& K = Step.Kind;
-		if (K == TEXT("write_asset")) return true;
+		if (K == TEXT("write_asset"))
+		{
+			const UDynamicMesh* Written = Built.Find(Step.Mesh);
+			if (!Written)
+			{
+				OutError = FString::Printf(TEXT("mesh %s does not exist here."), *Step.Mesh);
+				return false;
+			}
+			Built.Keep(Step.Index, *Written);
+			return true;
+		}
 		if (K == TEXT("drop"))
 		{
 			Built.Remove(Step.Mesh);
@@ -1927,6 +1961,24 @@ namespace HyperAIStudio::Modeling::Gate
 		const TStrongObjectPtr<UGeometryScriptDebug> Debug(NewObject<UGeometryScriptDebug>(GetTransientPackage()));
 		for (const FStep& Step : Plan.Steps)
 		{
+			// Copies and splits multiply what is there, and an extrude or bevel before them can leave more than Check
+			// guessed: these are checked against the meshes as built before they run, not only after.
+			const FString& K = Step.Kind;
+			if (K == TEXT("append") || K == TEXT("copy") || K == TEXT("array.linear") || K == TEXT("array.radial") || K == TEXT("scatter_on") || K == TEXT("tessellate"))
+			{
+				TMap<FString, int64> Actual;
+				for (const FString* Name : {&Step.Mesh, &Step.Source})
+				{
+					if (const UDynamicMesh* Each = Name->IsEmpty() ? nullptr : Built.Find(*Name)) Actual.Add(KeyOf(*Name), Each->GetTriangleCount());
+				}
+				const int64 Predicted = Predict(Step, Actual);
+				if (Predicted > C::MaxTrianglesPerMesh)
+				{
+					OutError = FString::Printf(TEXT("%s would make about %lld triangles in %s from the meshes as built, over the %d one mesh may hold; lower Count or Level, or simplify first. Nothing was changed."),
+						*Step.Describe(), Predicted, *Step.Mesh, C::MaxTrianglesPerMesh);
+					return false;
+				}
+			}
 			Debug->Messages.Reset();
 			FString Error;
 			const bool bRan = RunStep(Step, Built, Debug.Get(), Error);
@@ -2071,7 +2123,7 @@ namespace HyperAIStudio::Modeling::Gate
 		for (const FStep& Step : Plan.Steps)
 		{
 			if (Step.Kind != TEXT("write_asset")) continue;
-			UDynamicMesh* Mesh = Built.Find(Step.Mesh);
+			UDynamicMesh* Mesh = Built.Kept(Step.Index);
 			if (!Mesh) continue;
 			const FWriteSettings Settings = SettingsOf(Step);
 			FHyperAIModelAssetResult& Result = OutAssets.AddDefaulted_GetRef();
@@ -2182,10 +2234,10 @@ namespace HyperAIStudio::Modeling::Gate
 		for (const FStep& Step : Plan.Steps)
 		{
 			if (Step.Kind != TEXT("write_asset")) continue;
-			UDynamicMesh* Mesh = Built.Find(Step.Mesh);
+			UDynamicMesh* Mesh = Built.Kept(Step.Index);
 			if (!Mesh)
 			{
-				OutError = FString::Printf(TEXT("%s: mesh %s is gone."), *Step.Describe(), *Step.Mesh);
+				OutError = FString::Printf(TEXT("%s: mesh %s was not built for it."), *Step.Describe(), *Step.Mesh);
 				return false;
 			}
 			const FWriteSettings Settings = SettingsOf(Step);
@@ -2206,7 +2258,11 @@ namespace HyperAIStudio::Modeling::Gate
 					OutError = FString::Printf(TEXT("%s: %s is no longer a static mesh."), *Step.Describe(), *Settings.Path);
 					return false;
 				}
-				if (!FHyperAIStudioSourceControl::MakeEditable({Asset->GetPackage()->GetName()}, OutError)) return false;
+				if (!FHyperAIStudioSourceControl::MakeEditable({Asset->GetPackage()->GetName()}, OutError))
+				{
+					OutError = FString::Printf(TEXT("%s: %s"), *Step.Describe(), *OutError);
+					return false;
+				}
 				// Inside the plan's undo step: the asset, its mesh description and its body are recorded before they change.
 				Asset->Modify();
 				FGeometryScriptCopyMeshToAssetOptions Options;
@@ -2304,17 +2360,37 @@ namespace HyperAIStudio::Modeling::Gate
 		return true;
 	}
 
+	void Discard(TArray<UStaticMesh*>& Created)
+	{
+		TArray<UObject*> Objects;
+		for (UStaticMesh* Mesh : Created)
+		{
+			if (Mesh) Objects.Add(Mesh);
+		}
+		if (!Objects.IsEmpty()) ObjectTools::ForceDeleteObjects(Objects, /*ShowConfirmation=*/false);
+		Created.Reset();
+	}
+
 	bool Verify(const TArray<UStaticMesh*>& Written, const TArray<FHyperAIModelAssetResult>& Expected, FString& OutError)
 	{
 		TArray<UStaticMesh*> Meshes = Written;
 		FStaticMeshCompilingManager::Get().FinishCompilation(Meshes);
 		for (int32 Index = 0; Index < Written.Num() && Index < Expected.Num(); ++Index)
 		{
-			const UStaticMesh* Mesh = Written[Index];
+			UStaticMesh* Mesh = Written[Index];
 			const FStaticMeshRenderData* Render = Mesh ? Mesh->GetRenderData() : nullptr;
 			if (!Render || Render->LODResources.IsEmpty() || Mesh->GetNumTriangles(0) == 0)
 			{
 				OutError = FString::Printf(TEXT("%s built no render data."), *Expected[Index].Path);
+				return false;
+			}
+			// The source mesh, not LOD0: with Nanite, LOD0 is the reduced fallback.
+			const FMeshDescription* Source = Mesh->GetMeshDescription(0);
+			const int32 Triangles = Source ? Source->Triangles().Num() : 0;
+			const int32 Planned = Expected[Index].Triangles;
+			if (FMath::Abs(Triangles - Planned) > FMath::Max(1, Planned / 100))
+			{
+				OutError = FString::Printf(TEXT("%s holds %d triangles, not the %d the plan built."), *Expected[Index].Path, Triangles, Planned);
 				return false;
 			}
 			const FString& Collision = Expected[Index].Collision;
@@ -2354,12 +2430,15 @@ namespace HyperAIStudio::Modeling::Gate
 		const FMeshDescription* Source = Mesh.GetMeshDescription(0);
 		const int32 Triangles = Source ? Source->Triangles().Num() : Mesh.GetNumTriangles(0);
 		if (Triangles == 0) Issue(TEXT("error"), TEXT("empty_mesh"), TEXT("It has no triangles."));
-		const int32 Cap = bNanite ? C::MaxTrianglesPerNaniteAsset * 4 : C::MaxTrianglesPerAsset;
+		// Production wants heavy meshes on Nanite: past 50000 triangles without it is an error there, a warning for a placeholder.
+		const int32 HeavyWithoutNanite = 50000;
+		const int32 Cap = bNanite ? C::MaxTrianglesPerNaniteAsset * 4 : bProduction ? HeavyWithoutNanite : C::MaxTrianglesPerAsset;
 		if (Triangles > Cap)
 		{
-			Issue(TEXT("error"), TEXT("too_many_triangles"), FString::Printf(TEXT("%d triangles, over the %d a %s prop may have."), Triangles, Cap, bNanite ? TEXT("Nanite") : TEXT("non-Nanite")));
+			Issue(TEXT("error"), TEXT("too_many_triangles"), FString::Printf(TEXT("%d triangles, over the %d a %s%s prop may have."), Triangles, Cap,
+				bProduction ? TEXT("production ") : TEXT(""), bNanite ? TEXT("Nanite") : TEXT("non-Nanite")));
 		}
-		else if (!bNanite && Triangles > 50000)
+		else if (!bNanite && Triangles > HeavyWithoutNanite)
 		{
 			Issue(TEXT("warning"), TEXT("nanite_off"), FString::Printf(TEXT("%d triangles without Nanite; turn Nanite on, or simplify."), Triangles));
 		}

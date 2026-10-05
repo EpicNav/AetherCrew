@@ -86,7 +86,8 @@ namespace HyperAIStudio::Modeling::Recipes
 
 			int32 Seed(const int32 Offset) const
 			{
-				return P.Seed * 7919 + Offset;
+				// In 64 bits and folded back into the +-1e9 a Seed param takes, however large the recipe's own seed.
+				return static_cast<int32>((static_cast<int64>(P.Seed) * 7919 + Offset) % 1000000000);
 			}
 
 			/** The colour varied a little, so repeated parts do not read as copies. */

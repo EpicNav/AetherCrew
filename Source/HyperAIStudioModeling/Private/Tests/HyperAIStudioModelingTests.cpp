@@ -165,8 +165,10 @@ bool FHyperAIStudioModelingParseAndRefuseTest::RunTest(const FString& Parameters
 		TEXT("Op 1"), TEXT("bevel takes no Path")));
 	TestTrue(TEXT("a required param is asked for"), Refused(Run({Box, Op(TEXT("boolean"), TEXT("Block"))}, true), TEXT("Op 1"), TEXT("boolean needs Source")));
 	TestTrue(TEXT("an asset outside /Game is refused"), Refused(Run({Box, Write(TEXT("Block"), TEXT("/Engine/SM_Block"))}, true), TEXT("Op 1"), TEXT("not a path under /Game")));
-	TestTrue(TEXT("an existing asset is not overwritten without Replace"), Refused(Run({Box, Write(TEXT("Block"), TEXT("/Game/HyperAI/Modeling/M_HyperAIVertexColor"))}, true),
-		TEXT("Op 1"), TEXT("exists; give Replace=true")) || !FPackageName::DoesPackageExist(C::VertexColorMaterial));
+	// Writing there would make a static mesh beside the material of the same name, which the engine cannot survive.
+	TestTrue(TEXT("the vertex-colour material's path is refused, even with Replace"), Refused(Run({Box, Write(TEXT("Block"), C::VertexColorMaterial, TEXT("Replace=true"))}, true),
+		TEXT("Op 1"), TEXT("is the placeholders' vertex-colour material")));
+	TestTrue(TEXT("a disc with no width is refused"), Refused(Run({Sized(TEXT("add.disc"), TEXT("Plate"), TEXT("0,100,0"))}, true), TEXT("Op 0"), TEXT("Size is above 0")));
 	TestTrue(TEXT("a material that is not one is refused"), Refused(Run({Box, Write(TEXT("Block"), TestFolder() + TEXT("/SM_Block"), TEXT("Materials=0:/Engine/BasicShapes/Cube"))}, true),
 		TEXT("Op 1"), TEXT("is not a material")));
 	TestTrue(TEXT("a value out of range is refused"), Refused(Run({Sized(TEXT("add.sphere"), TEXT("Ball"), TEXT("100"), TEXT("Steps=512"))}, true), TEXT("Op 0"), TEXT("Steps is a whole number from 3 to 128")));
@@ -208,6 +210,14 @@ bool FHyperAIStudioModelingBudgetsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("a plan past the ops limit after its recipes expand is refused: ") + Expanded.Diagnostic, !Expanded.bOk && Expanded.Diagnostic.Contains(TEXT("after recipes")));
 	const FHyperAIModelPlanReport Heavy = Run({Dense, Op(TEXT("tessellate"), TEXT("Block"), TEXT("Level=1")), Write(TEXT("Block"), TestFolder() + TEXT("/SM_Heavy"))}, true);
 	TestTrue(TEXT("an asset over 100000 triangles without Nanite is refused: ") + Heavy.Diagnostic, Refused(Heavy, TEXT("Op 2"), TEXT("without Nanite")));
+	// Extruding every face on its own makes about seven triangles of each, where Check guesses two: 64 copies of the
+	// result pass Check, but are refused against the meshes as built before they are made.
+	FHyperAIModelOp Copies = Op(TEXT("array.linear"), TEXT("Many"), TEXT("Count=64"));
+	Copies.Source = TEXT("Block");
+	Copies.Location = TEXT("200,0,0");
+	const FHyperAIModelPlanReport Grown = Run({Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"), TEXT("Steps=10")),
+		Op(TEXT("extrude"), TEXT("Block"), TEXT("Distance=2; Area=face")), Copies}, true);
+	TestTrue(TEXT("copies past the cap are refused before they are made: ") + Grown.Diagnostic, Refused(Grown, TEXT("Op 2"), TEXT("from the meshes as built")));
 	return true;
 }
 
@@ -262,6 +272,9 @@ bool FHyperAIStudioModelingDeterministicTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("and builds the same mesh"), A && B && A->Triangles == B->Triangles && A->Size == B->Size && Find(First, TEXT("Lump"))->Max == Find(Again, TEXT("Lump"))->Max);
 	TestTrue(TEXT("a recipe lists the ops it expanded into"), First.ExpandedOps.Num() > 5 && First.ExpandedOps.ContainsByPredicate(
 		[](const FString& Line) { return Line.Contains(TEXT("scatter_on")) && Line.Contains(TEXT("<- op 2 recipe")); }));
+	// A recipe's seed reaches its noise and scatter ops multiplied: the largest seed still gives seeds those ops take.
+	const FHyperAIModelPlanReport Large = Run({Op(TEXT("recipe"), TEXT("Crystals"), TEXT("Shape=crystal_cluster; Seed=1000000000"))}, true);
+	TestTrue(TEXT("the largest seed builds: ") + Large.Diagnostic, Large.bOk);
 	return true;
 }
 
@@ -483,7 +496,8 @@ bool FHyperAIStudioModelingValidateTest::RunTest(const FString& Parameters)
 	FHyperAIModelOp Raised = Sized(TEXT("add.box"), TEXT("Raised"), TEXT("100"));
 	Raised.Location = TEXT("0,0,100");
 	const FHyperAIModelPlanReport Made = Run({Sized(TEXT("add.disc"), TEXT("Plate"), TEXT("200,200,0")), Write(TEXT("Plate"), Folder + TEXT("/SM_Plate"), TEXT("Collision=none")),
-		Sized(TEXT("add.box"), TEXT("Speck"), TEXT("0.5")), Write(TEXT("Speck"), Folder + TEXT("/SM_Speck")), Raised, Write(TEXT("Raised"), Folder + TEXT("/SM_Raised"))}, false);
+		Sized(TEXT("add.box"), TEXT("Speck"), TEXT("0.5")), Write(TEXT("Speck"), Folder + TEXT("/SM_Speck")), Raised, Write(TEXT("Raised"), Folder + TEXT("/SM_Raised")),
+		Sized(TEXT("add.box"), TEXT("Dense"), TEXT("100"), TEXT("Steps=44")), Op(TEXT("tessellate"), TEXT("Dense")), Write(TEXT("Dense"), Folder + TEXT("/SM_Dense"), TEXT("Collision=box"))}, false);
 	if (!TestTrue(TEXT("the fixtures are written: ") + Made.Diagnostic, Made.bOk))
 	{
 		DeleteFolder(Folder);
@@ -494,16 +508,19 @@ bool FHyperAIStudioModelingValidateTest::RunTest(const FString& Parameters)
 		return Report.Issues.ContainsByPredicate([&](const FHyperAIModelIssue& Issue) { return Issue.Asset.StartsWith(Asset) && Issue.Code == Code && Issue.Severity == Severity; });
 	};
 	FHyperAIModelValidateRequest Request;
-	Request.Assets = {Folder + TEXT("/SM_Plate"), Folder + TEXT("/SM_Speck"), Folder + TEXT("/SM_Raised")};
+	Request.Assets = {Folder + TEXT("/SM_Plate"), Folder + TEXT("/SM_Speck"), Folder + TEXT("/SM_Raised"), Folder + TEXT("/SM_Dense")};
 	const FHyperAIModelValidateReport Placeholder = C::Validate(Request);
 	for (const FHyperAIModelIssue& Issue : Placeholder.Issues) AddInfo(FString::Printf(TEXT("%s %s %s"), *Issue.Severity, *Issue.Code, *Issue.Asset));
 	TestTrue(TEXT("a flat plate has open edges"), Has(Placeholder, Folder + TEXT("/SM_Plate"), TEXT("open_edges"), TEXT("warning")));
 	TestTrue(TEXT("and no collision, a warning for a placeholder"), Has(Placeholder, Folder + TEXT("/SM_Plate"), TEXT("no_collision"), TEXT("warning")));
 	TestTrue(TEXT("a speck half a centimeter across is too small"), Has(Placeholder, Folder + TEXT("/SM_Speck"), TEXT("too_small"), TEXT("error")));
 	TestTrue(TEXT("a box floating a meter over its pivot is flagged"), Has(Placeholder, Folder + TEXT("/SM_Raised"), TEXT("pivot_not_at_base"), TEXT("warning")));
+	TestTrue(TEXT("a placeholder of 88752 triangles without Nanite is a warning"), Has(Placeholder, Folder + TEXT("/SM_Dense"), TEXT("nanite_off"), TEXT("warning")));
 	TestFalse(TEXT("the errors fail validation"), Placeholder.bOk);
 	Request.Policy = TEXT("production");
-	TestTrue(TEXT("for production, no collision is an error"), Has(C::Validate(Request), Folder + TEXT("/SM_Plate"), TEXT("no_collision"), TEXT("error")));
+	const FHyperAIModelValidateReport Production = C::Validate(Request);
+	TestTrue(TEXT("for production, no collision is an error"), Has(Production, Folder + TEXT("/SM_Plate"), TEXT("no_collision"), TEXT("error")));
+	TestTrue(TEXT("and so are 88752 triangles without Nanite"), Has(Production, Folder + TEXT("/SM_Dense"), TEXT("too_many_triangles"), TEXT("error")));
 	if (UStaticMesh* Raised2 = LoadMesh(Folder + TEXT("/SM_Raised")))
 	{
 		Raised2->GetStaticMaterials()[0].MaterialInterface = nullptr;
@@ -533,6 +550,64 @@ bool FHyperAIStudioModelingFailureTest::RunTest(const FString& Parameters)
 		Write(TEXT("Near"), Folder + TEXT("/SM_Second"), TEXT("Replace=true"))}, false);
 	TestTrue(TEXT("an intersection of boxes a meter apart fails, naming the op: ") + Report.Diagnostic, !Report.bOk && Report.Diagnostic.Contains(TEXT("Op 3 (boolean")));
 	TestFalse(TEXT("and the first write_asset, before it, wrote nothing"), FPackageName::DoesPackageExist(Folder + TEXT("/SM_First")) || FindPackage(nullptr, *(Folder + TEXT("/SM_First"))));
+	DeleteFolder(Folder);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingFailedWriteTest, "HyperAIStudio.NativeTools.Modeling.FailedWriteRollsBack", HyperAIStudio::ModelingTests::Flags)
+
+bool FHyperAIStudioModelingFailedWriteTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelingTests;
+	namespace Gate = HyperAIStudio::Modeling::Gate;
+	const FString Folder = TestFolder();
+	const FString First = Folder + TEXT("/SM_First");
+	// Both writes checked, but only the first one's mesh built: the second fails after the first made its asset.
+	const TArray<FHyperAIModelOp> Ops = {Sized(TEXT("add.box"), TEXT("A"), TEXT("50")), Write(TEXT("A"), First), Sized(TEXT("add.box"), TEXT("B"), TEXT("50")),
+		Write(TEXT("B"), Folder + TEXT("/SM_Second"))};
+	Gate::FPlan Plan;
+	Gate::FPlan FirstOnly;
+	FString Error;
+	if (!TestTrue(TEXT("the plans check: ") + Error, Gate::Check(Ops, Plan, Error) && Gate::Check({Ops[0], Ops[1]}, FirstOnly, Error))) return false;
+	Gate::FBuilt Built;
+	if (!TestTrue(TEXT("the first write's mesh builds: ") + Error, Gate::Build(FirstOnly, Built, Error))) return false;
+	TArray<FHyperAIModelAssetResult> Assets;
+	TArray<UStaticMesh*> Written;
+	TArray<UStaticMesh*> Created;
+	TArray<FString> Notes;
+	const bool bWritten = Gate::Write(Plan, Built, Assets, Written, Created, Notes, Error);
+	TestTrue(TEXT("the second write fails, naming its op: ") + Error, !bWritten && Error.Contains(TEXT("Op 3")));
+	TestEqual(TEXT("after the first made its asset"), Created.Num(), 1);
+	Gate::Discard(Created);
+	const FString ObjectPath = First + TEXT(".") + FPackageName::GetShortName(First);
+	TestTrue(TEXT("which is deleted again, never saved"), Created.IsEmpty() && !IsValid(FindObject<UStaticMesh>(nullptr, *ObjectPath)) && !FPackageName::DoesPackageExist(First));
+	DeleteFolder(Folder);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingWriteAtItsOpTest, "HyperAIStudio.NativeTools.Modeling.WriteTakesTheMeshAtItsOp", HyperAIStudio::ModelingTests::Flags)
+
+bool FHyperAIStudioModelingWriteAtItsOpTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelingTests;
+	const FString Folder = TestFolder();
+	const FString Crate = Folder + TEXT("/SM_Crate");
+	// The crate is written as a plain box: the sphere added after the write, and the drop, change only the working mesh.
+	FHyperAIModelOp Lid = Sized(TEXT("add.sphere"), TEXT("Crate"), TEXT("60"), TEXT("Steps=24"));
+	Lid.Location = TEXT("0,0,100");
+	const TArray<FHyperAIModelOp> Ops = {Sized(TEXT("add.box"), TEXT("Crate"), TEXT("100")), Write(TEXT("Crate"), Crate), Lid, Op(TEXT("drop"), TEXT("Crate"))};
+	const FHyperAIModelPlanReport Dry = Run(Ops, true);
+	TestTrue(TEXT("the dry run reports the write with the box's 12 triangles: ") + Dry.Diagnostic, Dry.bOk && Dry.Assets.Num() == 1 && Dry.Assets[0].Triangles == 12);
+	TestNull(TEXT("and leaves no working mesh"), Find(Dry, TEXT("Crate")));
+	const FHyperAIModelPlanReport Done = Run(Ops, false);
+	UStaticMesh* Mesh = Done.bOk ? LoadMesh(Crate) : nullptr;
+	TestTrue(TEXT("the box is what is written: ") + Done.Diagnostic, Mesh && SourceTriangles(*Mesh) == 12);
+	// Written under the cap without Nanite, then tessellated past it: the asset is the mesh as written.
+	const FHyperAIModelPlanReport Grown = Run({Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"), TEXT("Steps=64")), Write(TEXT("Block"), Folder + TEXT("/SM_Block")),
+		Op(TEXT("tessellate"), TEXT("Block"))}, true);
+	const FHyperAIModelMeshStats* Block = Find(Grown, TEXT("Block"));
+	TestTrue(TEXT("a mesh tessellated after its write is written as it was: ") + Grown.Diagnostic, Grown.bOk && Block && Grown.Assets.Num() == 1
+		&& Grown.Assets[0].Triangles * 4 == Block->Triangles && Grown.Assets[0].Triangles <= C::MaxTrianglesPerAsset && Block->Triangles > C::MaxTrianglesPerAsset);
 	DeleteFolder(Folder);
 	return true;
 }

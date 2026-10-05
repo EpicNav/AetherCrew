@@ -14,7 +14,6 @@
 #include "Misc/CoreDelegates.h"
 #include "Misc/Guid.h"
 #include "Misc/PackageName.h"
-#include "ObjectTools.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "ScopedTransaction.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
@@ -59,6 +58,9 @@ namespace HyperAIStudio::ModelingTools::Private
 		const FString Trimmed = Reference.TrimStartAndEnd();
 		if (!Trimmed.StartsWith(TEXT("/"))) return nullptr;
 		const FString ObjectPath = Trimmed.Contains(TEXT(".")) ? Trimmed : Trimmed + TEXT(".") + FPackageName::GetShortName(Trimmed);
+		if (UStaticMesh* Found = FindObject<UStaticMesh>(nullptr, *ObjectPath)) return Found;
+		// A path with nothing on disk is never loaded: the failed load would leave an empty package behind.
+		if (!FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(ObjectPath))) return nullptr;
 		return LoadObject<UStaticMesh>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
 
@@ -72,18 +74,6 @@ namespace HyperAIStudio::ModelingTools::Private
 	bool IsPlaying()
 	{
 		return GEditor && GEditor->PlayWorld != nullptr;
-	}
-
-	/** Deleted again when a plan fails after making them: a new asset is never left half-written. */
-	void DeleteCreated(TArray<UStaticMesh*>& Created)
-	{
-		TArray<UObject*> Objects;
-		for (UStaticMesh* Mesh : Created)
-		{
-			if (Mesh) Objects.Add(Mesh);
-		}
-		if (!Objects.IsEmpty()) ObjectTools::ForceDeleteObjects(Objects, /*ShowConfirmation=*/false);
-		Created.Reset();
 	}
 
 	FHyperAIModelPlanReport Execute(const FHyperAIModelPlanRequest& Request, const FString& OperationId, Gate::FPlan* Checked, Gate::FBuilt* Prebuilt)
@@ -132,7 +122,7 @@ namespace HyperAIStudio::ModelingTools::Private
 		}
 		if (!bWritten)
 		{
-			DeleteCreated(Created);
+			Gate::Discard(Created);
 			Report.Status = TEXT("operation_failed");
 			Report.Diagnostic = Error + (Written.Num() > 0 ? TEXT(" New assets the plan made were deleted; replaced ones stay in the plan's undo step.")
 				: TEXT(" Nothing was written."));
@@ -141,8 +131,10 @@ namespace HyperAIStudio::ModelingTools::Private
 		}
 		if (!Gate::Verify(Written, Report.Assets, Error))
 		{
+			Gate::Discard(Created);
 			Report.Status = TEXT("operation_failed");
-			Report.Diagnostic = Error + TEXT(" The assets stay in memory, unsaved; undo takes back replaced ones.");
+			Report.Diagnostic = Error + TEXT(" New assets the plan made were deleted; replaced ones stay in memory, unsaved, and undo takes them back.");
+			Report.Assets.Reset();
 			return Report;
 		}
 		for (UStaticMesh* Mesh : Written)
