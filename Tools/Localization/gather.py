@@ -157,15 +157,15 @@ def prompt_translations(culture):
 
 
 def merge(culture, gathered, existing, prompt_texts=None):
-    """New entries keep any translation whose English source is unchanged; others start empty. Prompt strings take
-    their translation from prompt_texts when it has one."""
+    """New entries keep any translation whose English source is unchanged; others start empty. For a culture with
+    prompt translations (prompt_texts), the prompt strings take theirs from there alone, so the two never drift."""
     known = {(entry["namespace"], entry["key"]): entry for entry in existing.get("entries", [])}
     merged = []
     for entry in gathered:
         previous = known.get((entry["namespace"], entry["key"]), {})
         text = previous.get("text", "") if previous.get("source") == entry["source"] else ""
-        if entry["namespace"] == PROMPT_NAMESPACE and prompt_texts and prompt_texts.get(entry["key"]):
-            text = prompt_texts[entry["key"]]
+        if entry["namespace"] == PROMPT_NAMESPACE and prompt_texts is not None:
+            text = prompt_texts.get(entry["key"], "")
         merged.append({"namespace": entry["namespace"], "key": entry["key"], "source": entry["source"], "text": text})
     return {"culture": culture, "entries": merged}
 
