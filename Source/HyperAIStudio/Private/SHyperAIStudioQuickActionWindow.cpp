@@ -1223,6 +1223,13 @@ bool SHyperAIStudioQuickActionWindow::InsertPresetHere(const FHyperAIStudioPromp
 		}
 		return bInserted;
 	}
+	// Held only for a chat view that is about to start; a terminal's prompt takes it once its agent runs.
+	if (!GetDefault<UHyperAIStudioSettings>()->bUseNativeChatView || !FHyperAIStudioNativeChat::IsSupported(GetSelectedAgentName()))
+	{
+		LastMessage = LOCTEXT("ContextNoAgentPrompt", "Nothing inserted: no agent prompt is accepting input. Start the agent first.");
+		AddTranscriptLine(LastMessage.ToString());
+		return false;
+	}
 	PendingPresetInsert = FPendingPreset{Preset, Text, Blanks};
 	LastMessage = LOCTEXT("PresetWaits", "The prompt goes in the chat once its agent starts.");
 	AddTranscriptLine(LastMessage.ToString());
