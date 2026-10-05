@@ -17,6 +17,7 @@
 #include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
 #include "Grid/PCGPartitionActor.h"
+#include "HAL/IConsoleManager.h"
 #include "Helpers/PCGHelpers.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioAsyncJobHost.h"
@@ -67,12 +68,13 @@ namespace HyperAIStudio::PCGScatterTests
 	}
 
 	/**
-	 * A 63 m square landscape, flat on its first 32 m along X and rising at about 56 degrees beyond. Split, it is cut into
-	 * World Partition streaming proxies, as hyper_landscape_apply_plan cuts new landscapes.
+	 * A 63 m square landscape, flat on its first 32 m along X and rising at about 56 degrees beyond, or flat throughout.
+	 * Split, it is cut into World Partition streaming proxies, as hyper_landscape_apply_plan cuts new landscapes.
 	 */
-	ALandscape* MakeLandscape(UWorld& World, const FVector& Corner, const FString& Label, const bool bSplit)
+	ALandscape* MakeLandscape(UWorld& World, const FVector& Corner, const FString& Label, const bool bSplit, const bool bFlat = false)
 	{
 		constexpr int32 Size = 64;
+		const int32 RiseFrom = bFlat ? Size : 32;
 		TArray<uint16> Heights;
 		Heights.SetNumUninitialized(Size * Size);
 		for (int32 Y = 0; Y < Size; ++Y)
@@ -80,7 +82,7 @@ namespace HyperAIStudio::PCGScatterTests
 			for (int32 X = 0; X < Size; ++X)
 			{
 				// At a Z scale of 100, 128 units are a meter: 192 units per meter across is a rise of 1.5.
-				Heights[Y * Size + X] = static_cast<uint16>(32768 + (X < 32 ? 0 : (X - 32) * 192));
+				Heights[Y * Size + X] = static_cast<uint16>(32768 + (X < RiseFrom ? 0 : (X - RiseFrom) * 192));
 			}
 		}
 		ALandscape* Landscape = World.SpawnActor<ALandscape>(Corner, FRotator::ZeroRotator);
@@ -575,6 +577,10 @@ namespace HyperAIStudio::PCGScatterTests
 		/** The actors the first generation put meshes on, to check the clear and clean up. */
 		TArray<TWeakObjectPtr<AActor>> Outputs;
 		int32 Trees = 0;
+		/** Frames waited before generating, so PCG has taken in the new ground first. */
+		int32 Frames = 0;
+		/** Times PCG cancelled the volume's generation, to run it again. */
+		int32 Cancels = 0;
 	};
 
 	TArray<AActor*> Pinned(const TArray<TWeakObjectPtr<AActor>>& Actors)
@@ -585,6 +591,59 @@ namespace HyperAIStudio::PCGScatterTests
 			if (Actor.IsValid()) Out.Add(Actor.Get());
 		}
 		return Out;
+	}
+
+	/** A test ecosystem gone: its volume, the partition actors it made once nothing generates into them, its ground and assets. */
+	void RemoveEcosystem(UWorld& World, const FString& VolumeLabel, const TArray<TWeakObjectPtr<AActor>>& Outputs, const FString& GroundLabel, const FString& Folder)
+	{
+		if (APCGVolume* Volume = FindVolume(VolumeLabel)) World.EditorDestroyActor(Volume, /*bShouldModifyLevel=*/true);
+		for (AActor* Actor : Pinned(Outputs))
+		{
+			const APCGPartitionActor* Cell = Cast<APCGPartitionActor>(Actor);
+			if (Cell && !Cell->HasGraphInstances()) World.EditorDestroyActor(Actor, /*bShouldModifyLevel=*/true);
+		}
+		DestroyLandscape(GroundLabel);
+		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		TArray<FAssetData> Assets;
+		Registry.GetAssetsByPath(FName(*Folder), Assets, /*bRecursive=*/true);
+		TArray<UObject*> Objects;
+		for (const FAssetData& Asset : Assets)
+		{
+			if (UObject* Object = Asset.GetAsset()) Objects.Add(Object);
+		}
+		if (!Objects.IsEmpty()) ObjectTools::ForceDeleteObjects(Objects, /*ShowConfirmation=*/false);
+	}
+
+	/**
+	 * A species placed on a lattice: one point a square meter with a 1 m footprint at scale 1 leaves the sampler's
+	 * cells a meter wide with no room to wander, so every point stands on a whole meter of the world, partition cell
+	 * lines included, whatever the seed.
+	 */
+	FHyperAIPCGSpecies LatticeSpecies(const TCHAR* Name, const TCHAR* Mesh)
+	{
+		FHyperAIPCGSpecies Out;
+		Out.Name = Name;
+		FHyperAIPCGScatterMesh Entry;
+		Entry.Mesh = Mesh;
+		Out.Meshes = {Entry};
+		Out.Density = 1.f;
+		Out.Footprint = 1.f;
+		Out.Scale = FVector2D(1.0, 1.0);
+		return Out;
+	}
+
+	/** The partition grid's cell size in this world, in cm. */
+	double PartitionGridSize(UWorld& World)
+	{
+		const APCGWorldActor* PCGWorld = PCGHelpers::FindPCGWorldActor(&World);
+		return static_cast<double>(PCGWorld ? PCGWorld->PartitionGridSize : GetDefault<APCGWorldActor>()->PartitionGridSize);
+	}
+
+	/** Whether a partitioned PCG volume generates in World Partition cells in this level. */
+	bool HasPartitionCells(UWorld& World)
+	{
+		const ULandscapeSubsystem* LandscapeSubsystem = World.GetSubsystem<ULandscapeSubsystem>();
+		return LandscapeSubsystem && LandscapeSubsystem->IsGridBased() && World.GetWorldPartition();
 	}
 }
 
@@ -1319,6 +1378,405 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 		const int32 Left = CountPlaced(ComponentsOn(Pinned(State->Outputs)));
 		if (Left > 0 && FPlatformTime::Seconds() - State->Began < 30.0) return false;
 		TestEqual(TEXT("and no instance is left in any cell"), Left, 0);
+		Cleanup();
+		return true;
+	}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioPCGEcosystemCellEdgesTest,
+	"HyperAIStudio.NativeTools.PCG.EcosystemCellEdges",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioPCGEcosystemCellEdgesTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::PCGScatterTests;
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World || !HasPartitionCells(*World))
+	{
+		AddInfo(TEXT("Skipped: cell edges need a World Partition level."));
+		return true;
+	}
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	const FString Folder = TEXT("/Game/__HyperAIStudioTests/PCGEdges_") + Suffix;
+	const FString Graph = Folder + TEXT("/PCG_Edges");
+	const FString VolumeLabel = TEXT("HyperAI_TestEdges_") + Suffix;
+	const FString GroundLabel = TEXT("HyperAI_TestEdgesGround_") + Suffix;
+	// Far from the other tests' grounds. Four partition cells meet in the middle of this flat one: their lines cross it
+	// 31 m from its corner, along X and along Y.
+	const double Line = FMath::CeilToDouble(2100000.0 / PartitionGridSize(*World)) * PartitionGridSize(*World);
+	const FVector Corner(Line - 3100.0, Line - 3100.0, 30000.0);
+	if (!TestNotNull(TEXT("the flat ground is made"), MakeLandscape(*World, Corner, GroundLabel, /*bSplit=*/true, /*bFlat=*/true))) return false;
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
+	const TSharedRef<FEcosystemState> State = MakeShared<FEcosystemState>();
+	auto Cleanup = [World, VolumeLabel, GroundLabel, Folder, State]() { RemoveEcosystem(*World, VolumeLabel, State->Outputs, GroundLabel, Folder); };
+
+	// Points on every whole meter, cell lines included. The lattice samples a meter past its cell, since Under keeps out
+	// of its room (0.71 m to a turned corner, and Under's own 0.14 m), and culls back to its cell; Open samples its cell alone.
+	FHyperAIPCGSpecies Under;
+	Under.Name = TEXT("Under");
+	FHyperAIPCGScatterMesh UnderMesh;
+	UnderMesh.Mesh = Eco::BushMesh;
+	Under.Meshes = {UnderMesh};
+	Under.Density = 2.f;
+	Under.Footprint = 0.2f;
+	Under.Scale = FVector2D(1.0, 1.0);
+	Under.KeepOutOf = {TEXT("Lattice")};
+	FHyperAIPCGBiome Kept;
+	Kept.Name = TEXT("Kept");
+	Kept.Species = {LatticeSpecies(TEXT("Lattice"), Eco::RockMesh), Under};
+	FHyperAIPCGBiome Bare;
+	Bare.Name = TEXT("Bare");
+	Bare.Species = {LatticeSpecies(TEXT("Open"), Eco::GrassMesh)};
+	FHyperAIPCGScatterOp Make = Op(TEXT("ecosystem.create"));
+	Make.Graph = Graph;
+	Make.Biomes = {Kept, Bare};
+	FHyperAIPCGScatterOp Place = Op(TEXT("volume.create"));
+	Place.Graph = Graph;
+	Place.Volume = VolumeLabel;
+	Place.Cover = GroundLabel;
+	Place.Partitioned = TEXT("true");
+
+	// A few frames first, so PCG has taken in the new ground before it generates.
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([State]() { return ++State->Frames > 5; }));
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, State, Make, Place, VolumeLabel, Settings, bApproval]()
+	{
+		Settings->bRequireApprovalForAgentEdits = false;
+		const FHyperAIPCGScatterPlanReport Started = Run({Make, Place});
+		Settings->bRequireApprovalForAgentEdits = bApproval;
+		const FString Notes = FString::Join(Started.Notes, TEXT(" | "));
+		if (!TestTrue(TEXT("the lattice ecosystem starts generating: ") + Started.Diagnostic + TEXT(" | ") + Notes, Started.bOk && Started.Status == TEXT("generating")))
+		{
+			State->OperationId.Reset();
+			return true;
+		}
+		TestTrue(TEXT("only the lattice samples past its cell, by a meter: ") + Notes, Started.Notes.ContainsByPredicate([](const FString& Note)
+		{
+			return Note.StartsWith(TEXT("Partition seams")) && Note.Contains(TEXT("(Kept: Lattice 1 m)"));
+		}));
+		if (APCGVolume* Volume = FindVolume(VolumeLabel)) Volume->PCGComponent->OnPCGGraphCancelledDelegate.AddLambda([State](UPCGComponent*) { ++State->Cancels; });
+		State->OperationId = Started.OperationId;
+		State->Began = FPlatformTime::Seconds();
+		return true;
+	}));
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, State, VolumeLabel, Line, Cleanup]()
+	{
+		if (FHyperAIStudioAsyncJobHost::IsRunning(State->OperationId) && FPlatformTime::Seconds() - State->Began < 240.0) return false;
+		if (State->OperationId.IsEmpty())
+		{
+			Cleanup();
+			return true;
+		}
+		AddInfo(FString::Printf(TEXT("Generated (PCG restarted it %d time(s)): %s"), State->Cancels, *JobSaid(State->OperationId)));
+		for (AActor* Actor : OutputActors(FindVolume(VolumeLabel))) State->Outputs.Add(Actor);
+		const TMap<FString, TArray<FPlaced>> All = Placed(Generated(FindVolume(VolumeLabel)));
+		auto Of = [&All](const TCHAR* Mesh)
+		{
+			const TArray<FPlaced>* Found = All.Find(Mesh);
+			return Found ? *Found : TArray<FPlaced>();
+		};
+		int32 Twice = 0;
+		for (const TPair<FString, TArray<FPlaced>>& Pair : All) Twice += MadeTwice(Pair.Value);
+		TestEqual(TEXT("no instance is made twice"), Twice, 0);
+
+		// The 11 x 11 whole meters about the corner where the four cells meet: each has exactly one instance of each
+		// lattice, 21 of them on the cell lines, made by the cell that holds it from its min up to, not including, its max.
+		struct FLatticeCheck
+		{
+			const TCHAR* What;
+			const TCHAR* Mesh;
+		};
+		const FLatticeCheck Checks[] = {{TEXT("the lattice, sampled past its cell and culled to it"), Eco::RockMesh}, {TEXT("Open, sampled in its cell"), Eco::GrassMesh}};
+		for (const FLatticeCheck& Check : Checks)
+		{
+			TMap<FIntPoint, int32> Seen;
+			int32 OffNode = 0;
+			int32 OnLines = 0;
+			int32 WrongCell = 0;
+			for (const FPlaced& Item : Of(Check.Mesh))
+			{
+				const FVector At = Item.Transform.GetLocation();
+				const FVector2D FromCorner((At.X - Line) / 100.0, (At.Y - Line) / 100.0);
+				if (FMath::Abs(FromCorner.X) > 5.5 || FMath::Abs(FromCorner.Y) > 5.5) continue;
+				const FIntPoint Node(FMath::RoundToInt(FromCorner.X), FMath::RoundToInt(FromCorner.Y));
+				if (FVector2D::Distance(FromCorner, FVector2D(Node)) > 0.001)
+				{
+					++OffNode;
+					continue;
+				}
+				++Seen.FindOrAdd(Node);
+				OnLines += Node.X == 0 || Node.Y == 0 ? 1 : 0;
+				const APCGPartitionActor* Cell = Cast<APCGPartitionActor>(Item.Owner);
+				const FBox Bounds = Cell ? Cell->GetFixedBounds() : FBox(EForceInit::ForceInit);
+				const bool bHeld = Bounds.IsValid && At.X >= Bounds.Min.X && At.X < Bounds.Max.X && At.Y >= Bounds.Min.Y && At.Y < Bounds.Max.Y;
+				WrongCell += bHeld ? 0 : 1;
+			}
+			int32 Missing = 0;
+			int32 Extra = 0;
+			for (int32 X = -5; X <= 5; ++X)
+			{
+				for (int32 Y = -5; Y <= 5; ++Y)
+				{
+					const int32 Count = Seen.FindRef(FIntPoint(X, Y));
+					Missing += Count == 0 ? 1 : 0;
+					Extra += FMath::Max(Count - 1, 0);
+				}
+			}
+			TestTrue(FString::Printf(TEXT("%s: one instance on each whole meter about the corner, %d on the cell lines (%d missing, %d extra, %d off a whole meter)"),
+				Check.What, OnLines, Missing, Extra, OffNode), Missing == 0 && Extra == 0 && OffNode == 0 && OnLines == 21);
+			TestEqual(FString::Printf(TEXT("%s: each made by the cell holding it from its min up to its max"), Check.What), WrongCell, 0);
+		}
+
+		// Under keeps out of the lattice's room across the lines too: beside a line, a cell sees the lattice on it, which
+		// the next cell makes, only through its halo.
+		const TArray<FPlaced> Lattice = Of(Eco::RockMesh);
+		int32 Near = 0;
+		int32 Inside = 0;
+		int32 Across = 0;
+		for (const FPlaced& Item : Of(Eco::BushMesh))
+		{
+			const FVector At = Item.Transform.GetLocation();
+			if (FMath::Min(FMath::Abs(At.X - Line), FMath::Abs(At.Y - Line)) > 100.0) continue;
+			++Near;
+			for (const FPlaced& Room : Lattice)
+			{
+				if (FVector::Dist2D(At, Room.Transform.GetLocation()) > 75.0) continue;
+				const FVector Local = Room.Transform.InverseTransformPosition(At);
+				if (FMath::Abs(Local.X) < 49.0 && FMath::Abs(Local.Y) < 49.0)
+				{
+					++Inside;
+					Across += Room.Owner != Item.Owner ? 1 : 0;
+				}
+			}
+		}
+		TestEqual(FString::Printf(TEXT("nothing that keeps out of the lattice stands in its room within a meter of a cell line (%d there; %d inside, %d of them across a line)"),
+			Near, Inside, Across), Inside, 0);
+		Cleanup();
+		return true;
+	}));
+	return true;
+}
+
+namespace HyperAIStudio::PCGScatterTests
+{
+	/** Shared across the restarted-generation test's latent steps. */
+	struct FRestartState : FEcosystemState
+	{
+		TWeakObjectPtr<AStaticMeshActor> Hut;
+		/** Frame since which a cell has been partway through its pass; INDEX_NONE while none is. */
+		int64 PartwaySince = INDEX_NONE;
+		/** Frame the hut was moved on, the volume's generation partway through; INDEX_NONE until then. */
+		int64 MovedOn = INDEX_NONE;
+		/** Instances of each mesh after the restarted generation, to compare with a clean one. */
+		TMap<FString, int32> Counts;
+		/** The PCG settings the test slows generation with, as they were. */
+		float FrameTime = 0.f;
+		bool bMultithreading = true;
+		bool bSlowed = false;
+	};
+
+	/**
+	 * A cell of the volume partway through its first pass: a mesh spawner has finished there (PCG sets a resource's
+	 * reuse count as a spawner ends; a spawner cancelled midway releases what it touched), but the cell has not.
+	 */
+	bool CellPartway(const APCGVolume* Volume)
+	{
+		const UPCGComponent* Component = Volume ? Volume->PCGComponent.Get() : nullptr;
+		if (!Component) return false;
+		for (TActorIterator<APCGPartitionActor> It(Volume->GetWorld()); It; ++It)
+		{
+			const UPCGComponent* Local = It->GetLocalComponent(Component);
+			if (!Local || Local->bGenerated || !Local->IsGenerating()) continue;
+			bool bSpawned = false;
+			Local->ForEachConstManagedResource([&bSpawned](const UPCGManagedResource* Resource)
+			{
+				const UPCGManagedISMComponent* Managed = Cast<UPCGManagedISMComponent>(Resource);
+				const UInstancedStaticMeshComponent* Instanced = Managed ? Managed->GetComponent() : nullptr;
+				bSpawned |= Instanced && Instanced->GetInstanceCount() > 0 && Managed->GetCrcReuseCount() > 0;
+			});
+			if (bSpawned) return true;
+		}
+		return false;
+	}
+
+	/** PCG slowed to a task or so a frame on the game thread, so a pass can be caught partway; or set back. */
+	void SlowPCG(FRestartState& State, const bool bSlow)
+	{
+		IConsoleVariable* FrameTime = IConsoleManager::Get().FindConsoleVariable(TEXT("pcg.EditorFrameTime"));
+		IConsoleVariable* Threads = IConsoleManager::Get().FindConsoleVariable(TEXT("pcg.GraphMultithreading"));
+		if (!FrameTime || !Threads || bSlow == State.bSlowed) return;
+		if (bSlow)
+		{
+			State.FrameTime = FrameTime->GetFloat();
+			State.bMultithreading = Threads->GetBool();
+			FrameTime->Set(0.5f, ECVF_SetByCode);
+			Threads->Set(false, ECVF_SetByCode);
+		}
+		else
+		{
+			FrameTime->Set(State.FrameTime, ECVF_SetByCode);
+			Threads->Set(State.bMultithreading, ECVF_SetByCode);
+		}
+		State.bSlowed = bSlow;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioPCGEcosystemRestartedTest,
+	"HyperAIStudio.NativeTools.PCG.EcosystemRestartedPartway",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioPCGEcosystemRestartedTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::PCGScatterTests;
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World || !HasPartitionCells(*World))
+	{
+		AddInfo(TEXT("Skipped: a partitioned generation needs a World Partition level."));
+		return true;
+	}
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	const FString Folder = TEXT("/Game/__HyperAIStudioTests/PCGRestart_") + Suffix;
+	const FString Graph = Folder + TEXT("/PCG_Restart");
+	const FString VolumeLabel = TEXT("HyperAI_TestRestart_") + Suffix;
+	const FString GroundLabel = TEXT("HyperAI_TestRestartGround_") + Suffix;
+	const FString HutLabel = TEXT("HyperAI_TestRestartHut_") + Suffix;
+	const FString HutTag = TEXT("HyperAITestRestartHut") + Suffix;
+	constexpr double HutScale = 4.0;
+	constexpr double HutMargin = 1.0;
+	// Far from the other tests' grounds, the corner where four cells meet 10 m in from the flat ground's corner: one
+	// small cell and three big ones. A 4 m hut stands on that corner, kept 1 m clear of.
+	const double Line = FMath::CeilToDouble(2700000.0 / PartitionGridSize(*World)) * PartitionGridSize(*World);
+	const FVector Corner(Line - 1000.0, Line - 1000.0, 30000.0);
+	if (!TestNotNull(TEXT("the flat ground is made"), MakeLandscape(*World, Corner, GroundLabel, /*bSplit=*/true, /*bFlat=*/true))) return false;
+	const TSharedRef<FRestartState> State = MakeShared<FRestartState>();
+	State->Hut = World->SpawnActor<AStaticMeshActor>(FVector(Line, Line, Corner.Z), FRotator::ZeroRotator);
+	if (!TestTrue(TEXT("a hut stands where the cells meet"), State->Hut.IsValid()))
+	{
+		DestroyLandscape(GroundLabel);
+		return false;
+	}
+	State->Hut->GetStaticMeshComponent()->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, Eco::RockMesh));
+	State->Hut->SetActorScale3D(FVector(HutScale));
+	State->Hut->Tags.Add(FName(*HutTag));
+	State->Hut->SetActorLabel(HutLabel);
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
+	auto Cleanup = [World, VolumeLabel, GroundLabel, Folder, State]()
+	{
+		SlowPCG(*State, false);
+		RemoveEcosystem(*World, VolumeLabel, State->Outputs, GroundLabel, Folder);
+		if (AStaticMeshActor* Hut = State->Hut.Get()) World->EditorDestroyActor(Hut, /*bShouldModifyLevel=*/true);
+	};
+
+	// A lattice that is quick to make and a dense carpet that is slow, so cells spawn the lattice well before they finish.
+	FHyperAIPCGSpecies Carpet;
+	Carpet.Name = TEXT("Carpet");
+	FHyperAIPCGScatterMesh CarpetMesh;
+	CarpetMesh.Mesh = Eco::GrassMesh;
+	Carpet.Meshes = {CarpetMesh};
+	Carpet.Density = 5.f;
+	Carpet.Footprint = 0.4f;
+	Carpet.Scale = FVector2D(1.0, 1.0);
+	Carpet.KeepOutOf = {TEXT("none")};
+	FHyperAIPCGBiome Field;
+	Field.Name = TEXT("Field");
+	Field.Species = {LatticeSpecies(TEXT("Lattice"), Eco::RockMesh), Carpet};
+	FHyperAIPCGScatterOp Make = Op(TEXT("ecosystem.create"));
+	Make.Graph = Graph;
+	Make.Biomes = {Field};
+	Make.AvoidTags = {HutTag};
+	Make.AvoidMargin = static_cast<float>(HutMargin);
+	FHyperAIPCGScatterOp Place = Op(TEXT("volume.create"));
+	Place.Graph = Graph;
+	Place.Volume = VolumeLabel;
+	Place.Cover = GroundLabel;
+	Place.Partitioned = TEXT("true");
+
+	// A few frames first, so PCG has taken in the new ground and hut before it generates.
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([State]() { return ++State->Frames > 5; }));
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, State, Make, Place, VolumeLabel, Settings, bApproval]()
+	{
+		SlowPCG(*State, true);
+		Settings->bRequireApprovalForAgentEdits = false;
+		const FHyperAIPCGScatterPlanReport Started = Run({Make, Place});
+		Settings->bRequireApprovalForAgentEdits = bApproval;
+		if (!TestTrue(TEXT("the ecosystem starts generating: ") + Started.Diagnostic, Started.bOk && Started.Status == TEXT("generating")))
+		{
+			State->OperationId.Reset();
+			return true;
+		}
+		if (APCGVolume* Volume = FindVolume(VolumeLabel)) Volume->PCGComponent->OnPCGGraphCancelledDelegate.AddLambda([State](UPCGComponent*) { ++State->Cancels; });
+		State->OperationId = Started.OperationId;
+		State->Began = FPlatformTime::Seconds();
+		return true;
+	}));
+	// Partway through, once a cell holds what a finished spawner made (for a few frames, so PCG is done with that spawner
+	// and a cancel no longer releases what it touched), the hut moves 3 m: PCG cancels the pass and runs it again.
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, State, VolumeLabel, Line, HutScale, HutMargin, Settings, bApproval]()
+	{
+		const bool bRunning = FHyperAIStudioAsyncJobHost::IsRunning(State->OperationId);
+		AStaticMeshActor* Hut = State->Hut.Get();
+		const int64 Frame = static_cast<int64>(GFrameCounter);
+		const bool bPartway = bRunning && State->MovedOn == INDEX_NONE && CellPartway(FindVolume(VolumeLabel));
+		State->PartwaySince = bPartway ? (State->PartwaySince == INDEX_NONE ? Frame : State->PartwaySince) : INDEX_NONE;
+		if (bPartway && Hut && Frame - State->PartwaySince >= 4)
+		{
+			State->MovedOn = static_cast<int64>(GFrameCounter);
+			AddInfo(FString::Printf(TEXT("Moved the hut partway, %d cancel(s) before it."), State->Cancels));
+			Hut->Modify();
+			Hut->SetActorLocation(Hut->GetActorLocation() + FVector(300.0, 300.0, 0.0));
+			Hut->PostEditChange();
+		}
+		if (bRunning && FPlatformTime::Seconds() - State->Began < 240.0) return false;
+		SlowPCG(*State, false);
+		if (State->OperationId.IsEmpty()) return true;
+		AddInfo(FString::Printf(TEXT("Generated (PCG cancelled it %d time(s)): %s"), State->Cancels, *JobSaid(State->OperationId)));
+		TestTrue(TEXT("the hut moved while a cell was partway through its first pass"), State->MovedOn != INDEX_NONE);
+		TestTrue(FString::Printf(TEXT("and PCG cancelled the pass to run it again (%d)"), State->Cancels), State->Cancels > 0);
+		for (AActor* Actor : OutputActors(FindVolume(VolumeLabel))) State->Outputs.Add(Actor);
+		const TMap<FString, TArray<FPlaced>> All = Placed(Generated(FindVolume(VolumeLabel)));
+		int32 Twice = 0;
+		int32 AtHut = 0;
+		const FVector2D HutAt = Hut ? FVector2D(Hut->GetActorLocation()) : FVector2D(Line + 300.0, Line + 300.0);
+		const double Kept = (0.5 * HutScale + HutMargin) * 100.0 - 1.0;
+		for (const TPair<FString, TArray<FPlaced>>& Pair : All)
+		{
+			Twice += MadeTwice(Pair.Value);
+			State->Counts.Add(Pair.Key, Pair.Value.Num());
+			for (const FPlaced& Item : Pair.Value)
+			{
+				const FVector2D Away = FVector2D(Item.Transform.GetLocation()) - HutAt;
+				AtHut += FMath::Max(FMath::Abs(Away.X), FMath::Abs(Away.Y)) < Kept ? 1 : 0;
+			}
+		}
+		TestEqual(TEXT("nothing the cancelled pass spawned is left: no instance is made twice"), Twice, 0);
+		TestEqual(TEXT("and none stands where the hut has moved to"), AtHut, 0);
+		TestTrue(TEXT("both species grow"), State->Counts.Num() == 2);
+		// Generated again, with nothing cancelled: the same instances.
+		FHyperAIPCGScatterOp Again = Op(TEXT("volume.generate"));
+		Again.Volume = VolumeLabel;
+		Settings->bRequireApprovalForAgentEdits = false;
+		const FHyperAIPCGScatterPlanReport Regenerating = Run({Again});
+		Settings->bRequireApprovalForAgentEdits = bApproval;
+		TestTrue(TEXT("the volume generates again: ") + Regenerating.Diagnostic, Regenerating.bOk && Regenerating.Status == TEXT("generating"));
+		State->OperationId = Regenerating.OperationId;
+		State->Began = FPlatformTime::Seconds();
+		return true;
+	}));
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, State, VolumeLabel, Cleanup]()
+	{
+		if (FHyperAIStudioAsyncJobHost::IsRunning(State->OperationId) && FPlatformTime::Seconds() - State->Began < 240.0) return false;
+		if (!State->OperationId.IsEmpty())
+		{
+			AddInfo(TEXT("Generated again: ") + JobSaid(State->OperationId));
+			for (const TPair<FString, TArray<FPlaced>>& Pair : Placed(Generated(FindVolume(VolumeLabel))))
+			{
+				TestEqual(FString::Printf(TEXT("a clean generation makes as many of %s"), *Pair.Key), State->Counts.FindRef(Pair.Key), Pair.Value.Num());
+			}
+		}
 		Cleanup();
 		return true;
 	}));

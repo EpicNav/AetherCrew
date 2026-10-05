@@ -1564,6 +1564,33 @@ namespace HyperAIStudio::PCGScatterTools::Private
 	}
 
 	/**
+	 * Whether the volume, or one of its partition cells, holds what a pass spawned without having finished a generation.
+	 * PCG cleans a component before it generates only once that component has generated, so when PCG cancels such a pass
+	 * and runs it again, the new pass spawns beside what the cancelled one left: what it makes the same way stands twice
+	 * (a spawner adds to the instanced mesh component it finds for its mesh), and what it no longer makes stays.
+	 */
+	bool HoldsUnfinishedPass(const UPCGComponent& Component)
+	{
+		auto Holds = [](const UPCGComponent& Each)
+		{
+			bool bHolds = false;
+			if (!Each.bGenerated) Each.ForEachConstManagedResource([&bHolds](const UPCGManagedResource* Resource) { bHolds |= Resource != nullptr; });
+			return bHolds;
+		};
+		if (Holds(Component)) return true;
+		UWorld* World = Component.GetWorld();
+		if (World && Component.IsPartitioned())
+		{
+			for (TActorIterator<APCGPartitionActor> It(World); It; ++It)
+			{
+				const UPCGComponent* Local = It->GetLocalComponent(&Component);
+				if (Local && Holds(*Local)) return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * What a generation job hears from PCG. PCG can cancel a generation it has started, when a change it tracks lands, and
 	 * run it again from a refresh a frame later; the job ends when PCG says the volume generated, or after a quiet spell.
 	 */
@@ -1574,6 +1601,10 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		FDelegateHandle Cancelled;
 		bool bGenerated = false;
 		bool bCancelled = false;
+		/** PCG cancelled a pass that had spawned in a cell never generated before, so its rerun stands beside what it left. */
+		bool bLeftBehind = false;
+		/** Generations the job started again to clear that away. */
+		int32 Settles = 0;
 		double QuietSince = 0.0;
 
 		void Stop()
@@ -1590,6 +1621,8 @@ namespace HyperAIStudio::PCGScatterTools::Private
 
 	/** Seconds a volume may sit idle without PCG saying it generated before the job takes what is there. */
 	constexpr double GenerateQuietSeconds = 3.0;
+	/** Times a job generates again to clear what passes PCG cancelled left behind. */
+	constexpr int32 MaxSettles = 2;
 
 	/**
 	 * Landscapes under the volume that PCG passes over. A landscape split into streaming proxies is measured from its
@@ -1622,7 +1655,12 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		const TSharedRef<FGenerationWatch> Watch = MakeShared<FGenerationWatch>();
 		Watch->Component = Component;
 		Watch->Generated = Component->OnPCGGraphGeneratedDelegate.AddLambda([Watch](UPCGComponent*) { Watch->bGenerated = true; });
-		Watch->Cancelled = Component->OnPCGGraphCancelledDelegate.AddLambda([Watch](UPCGComponent*) { Watch->bCancelled = true; });
+		Watch->Cancelled = Component->OnPCGGraphCancelledDelegate.AddLambda([Watch](UPCGComponent* Cancelled)
+		{
+			Watch->bCancelled = true;
+			// PCG cancels a volume's cells before the volume, so what they hold here is what the cancelled pass left.
+			Watch->bLeftBehind |= Cancelled && HoldsUnfinishedPass(*Cancelled);
+		});
 		// PCG declines quietly (no graph, inactive, no subsystem): catch that before a job is shown.
 		if (Component->GenerateLocalGetTaskId(/*bForce=*/true) == InvalidPCGTaskId)
 		{
@@ -1670,6 +1708,24 @@ namespace HyperAIStudio::PCGScatterTools::Private
 						return EHyperAIStudioAsyncJobPoll::Running;
 					}
 				}
+				// Every cell has generated now, so PCG cleans each before the next pass, which drops what the cancelled one left.
+				if (Watch->bGenerated && Watch->bLeftBehind && Watch->Settles < MaxSettles)
+				{
+					Watch->bGenerated = false;
+					Watch->bCancelled = false;
+					Watch->bLeftBehind = false;
+					Watch->QuietSince = 0.0;
+					++Watch->Settles;
+					UPCGComponent* Again = Watch->Component.Get();
+					if (Again && Again->GenerateLocalGetTaskId(/*bForce=*/true) != InvalidPCGTaskId)
+					{
+						OutProgress = TEXT("generating again: PCG restarted the generation partway, so this pass clears what the cancelled one spawned");
+						return EHyperAIStudioAsyncJobPoll::Running;
+					}
+					// PCG would not start it: report what is there, as when it did not run the cancelled pass again.
+					Watch->bGenerated = true;
+					Watch->bLeftBehind = true;
+				}
 				Watch->Stop();
 				int32 Meshes = 0;
 				TMap<FString, int32> PerMesh;
@@ -1684,6 +1740,10 @@ namespace HyperAIStudio::PCGScatterTools::Private
 				if (Watch->bCancelled && !Watch->bGenerated)
 				{
 					Why = TEXT(": PCG cancelled the generation and did not run it again, so generate the volume again (volume.generate)");
+				}
+				else if (Watch->bLeftBehind)
+				{
+					Why = TEXT(": PCG restarted it partway, and what the cancelled pass spawned may stand beside it, so generate the volume again (volume.generate)");
 				}
 				else if (Instances == 0 && Points == 0)
 				{
