@@ -47,6 +47,7 @@
 #include "MeshSelectors/PCGMeshSelectorWeighted.h"
 #include "Metadata/PCGMetadataTypesConstantStruct.h"
 #include "PCGComponent.h"
+#include "PCGManagedResource.h"
 #include "PCGData.h"
 #include "PCGEdge.h"
 #include "PCGGraph.h"
@@ -1229,39 +1230,48 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			Budget.bTruncated ? TEXT("; some lines were left out, narrow them with Filter") : TEXT(""));
 	}
 
-	/** The actors a volume's generation puts its meshes on: the volume, and for a partitioned one its cells' partition actors. */
-	TArray<const AActor*> OutputActors(const APCGVolume& Volume)
+	/**
+	 * The instanced mesh components a volume's generation made: its own and, when partitioned, those of its local
+	 * components. Partition actors are shared by every partitioned volume on the same grid, so only what PCG manages for
+	 * this volume counts, never everything on the actor.
+	 */
+	TArray<const UInstancedStaticMeshComponent*> GeneratedComponents(const APCGVolume& Volume)
 	{
-		TArray<const AActor*> Actors = {&Volume};
+		TArray<const UInstancedStaticMeshComponent*> Out;
 		const UPCGComponent* Component = Volume.PCGComponent;
+		if (!Component) return Out;
+		TArray<const UPCGComponent*> Sources = {Component};
 		UWorld* World = Volume.GetWorld();
-		if (Component && World && Component->IsPartitioned())
+		if (World && Component->IsPartitioned())
 		{
 			for (TActorIterator<APCGPartitionActor> It(World); It; ++It)
 			{
-				if (It->GetLocalComponent(Component)) Actors.Add(*It);
+				if (const UPCGComponent* Local = It->GetLocalComponent(Component)) Sources.Add(Local);
 			}
 		}
-		return Actors;
+		for (const UPCGComponent* Source : Sources)
+		{
+			Source->ForEachConstManagedResource([&Out](const UPCGManagedResource* Resource)
+			{
+				const UPCGManagedISMComponent* Managed = Cast<UPCGManagedISMComponent>(Resource);
+				if (const UInstancedStaticMeshComponent* Instanced = Managed ? Managed->GetComponent() : nullptr) Out.AddUnique(Instanced);
+			});
+		}
+		return Out;
 	}
 
-	/** Instances the volume's generation made, over every instanced mesh component it owns; per mesh when asked. */
+	/** Instances the volume's generation made; per mesh when asked. */
 	int32 CountInstances(const APCGVolume& Volume, int32* OutMeshes = nullptr, TMap<FString, int32>* OutPerMesh = nullptr)
 	{
 		int32 Instances = 0;
 		TSet<const UStaticMesh*> Meshes;
-		for (const AActor* Actor : OutputActors(Volume))
+		for (const UInstancedStaticMeshComponent* Component : GeneratedComponents(Volume))
 		{
-			TArray<UInstancedStaticMeshComponent*> Components;
-			Actor->GetComponents<UInstancedStaticMeshComponent>(Components);
-			for (const UInstancedStaticMeshComponent* Component : Components)
-			{
-				if (!Component || Component->GetInstanceCount() == 0) continue;
-				Instances += Component->GetInstanceCount();
-				const UStaticMesh* Mesh = Component->GetStaticMesh();
-				Meshes.Add(Mesh);
-				if (OutPerMesh) OutPerMesh->FindOrAdd(Mesh ? Mesh->GetName() : FString(TEXT("(none)"))) += Component->GetInstanceCount();
-			}
+			if (!Component || Component->GetInstanceCount() == 0) continue;
+			Instances += Component->GetInstanceCount();
+			const UStaticMesh* Mesh = Component->GetStaticMesh();
+			Meshes.Add(Mesh);
+			if (OutPerMesh) OutPerMesh->FindOrAdd(Mesh ? Mesh->GetName() : FString(TEXT("(none)"))) += Component->GetInstanceCount();
 		}
 		if (OutMeshes) *OutMeshes = Meshes.Num();
 		return Instances;

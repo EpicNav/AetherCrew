@@ -23,6 +23,7 @@
 #include "Misc/Guid.h"
 #include "ObjectTools.h"
 #include "PCGComponent.h"
+#include "PCGManagedResource.h"
 #include "PCGVolume.h"
 #include "Tests/AutomationCommon.h"
 #include "WorldPartition/WorldPartition.h"
@@ -265,36 +266,69 @@ namespace HyperAIStudio::PCGScatterTests
 		return Actors;
 	}
 
-	/** Every instance on these actors, by mesh path. */
-	TMap<FString, TArray<FPlaced>> Placed(const TArray<AActor*>& Actors)
+	/** Every instance on these actors' mesh components, by mesh path. */
+	TMap<FString, TArray<FPlaced>> Placed(const TArray<const UInstancedStaticMeshComponent*>& Components)
 	{
 		TMap<FString, TArray<FPlaced>> Out;
-		for (const AActor* Actor : Actors)
+		for (const UInstancedStaticMeshComponent* Component : Components)
 		{
-			if (!IsValid(Actor)) continue;
-			TArray<UInstancedStaticMeshComponent*> Components;
-			Actor->GetComponents<UInstancedStaticMeshComponent>(Components);
-			for (const UInstancedStaticMeshComponent* Component : Components)
+			const UStaticMesh* Mesh = IsValid(Component) ? Component->GetStaticMesh() : nullptr;
+			if (!Mesh || Component->GetInstanceCount() == 0) continue;
+			TArray<FPlaced>& List = Out.FindOrAdd(Mesh->GetPathName());
+			for (int32 Index = 0; Index < Component->GetInstanceCount(); ++Index)
 			{
-				const UStaticMesh* Mesh = Component ? Component->GetStaticMesh() : nullptr;
-				if (!Mesh || Component->GetInstanceCount() == 0) continue;
-				TArray<FPlaced>& List = Out.FindOrAdd(Mesh->GetPathName());
-				for (int32 Index = 0; Index < Component->GetInstanceCount(); ++Index)
-				{
-					FPlaced& Item = List.AddDefaulted_GetRef();
-					Component->GetInstanceTransform(Index, Item.Transform, /*bWorldSpace=*/true);
-					Item.Owner = Actor;
-					Item.EndCull = Component->InstanceEndCullDistance;
-				}
+				FPlaced& Item = List.AddDefaulted_GetRef();
+				Component->GetInstanceTransform(Index, Item.Transform, /*bWorldSpace=*/true);
+				Item.Owner = Component->GetOwner();
+				Item.EndCull = Component->InstanceEndCullDistance;
 			}
 		}
 		return Out;
 	}
 
-	int32 CountPlaced(const TArray<AActor*>& Actors)
+	/** Every instanced mesh component on these actors. */
+	TArray<const UInstancedStaticMeshComponent*> ComponentsOn(const TArray<AActor*>& Actors)
+	{
+		TArray<const UInstancedStaticMeshComponent*> Out;
+		for (const AActor* Actor : Actors)
+		{
+			if (!IsValid(Actor)) continue;
+			TArray<UInstancedStaticMeshComponent*> Components;
+			Actor->GetComponents<UInstancedStaticMeshComponent>(Components);
+			Out.Append(Components);
+		}
+		return Out;
+	}
+
+	/**
+	 * What a volume's generation made, as PCG manages it for the volume and its local components. Partition actors are
+	 * shared by every partitioned volume on the grid, so this is how a tool must count, and the test counts the same way.
+	 */
+	TArray<const UInstancedStaticMeshComponent*> Generated(APCGVolume* Volume)
+	{
+		TArray<const UInstancedStaticMeshComponent*> Out;
+		const UPCGComponent* Component = Volume ? Volume->PCGComponent.Get() : nullptr;
+		if (!Component) return Out;
+		TArray<const UPCGComponent*> Sources = {Component};
+		for (TActorIterator<APCGPartitionActor> It(Volume->GetWorld()); It; ++It)
+		{
+			if (const UPCGComponent* Local = It->GetLocalComponent(Component)) Sources.Add(Local);
+		}
+		for (const UPCGComponent* Source : Sources)
+		{
+			Source->ForEachConstManagedResource([&Out](const UPCGManagedResource* Resource)
+			{
+				const UPCGManagedISMComponent* Managed = Cast<UPCGManagedISMComponent>(Resource);
+				if (const UInstancedStaticMeshComponent* Instanced = Managed ? Managed->GetComponent() : nullptr) Out.AddUnique(Instanced);
+			});
+		}
+		return Out;
+	}
+
+	int32 CountPlaced(const TArray<const UInstancedStaticMeshComponent*>& Components)
 	{
 		int32 Count = 0;
-		for (const TPair<FString, TArray<FPlaced>>& Pair : Placed(Actors)) Count += Pair.Value.Num();
+		for (const TPair<FString, TArray<FPlaced>>& Pair : Placed(Components)) Count += Pair.Value.Num();
 		return Count;
 	}
 
@@ -749,7 +783,10 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 		const TArray<AActor*> Outputs = OutputActors(FindVolume(VolumeLabel));
 		for (AActor* Actor : Outputs) State->Outputs.Add(Actor);
 		if (bPartitioned) TestTrue(FString::Printf(TEXT("the volume generates in World Partition cells (%d actors)"), Outputs.Num()), Outputs.Num() > 1);
-		const TMap<FString, TArray<FPlaced>> All = Placed(Outputs);
+		const TArray<const UInstancedStaticMeshComponent*> Made = Generated(FindVolume(VolumeLabel));
+		const TMap<FString, TArray<FPlaced>> All = Placed(Made);
+		// Nothing else generates into these cells here, so what PCG manages for the volume is all they hold.
+		TestEqual(TEXT("PCG manages every instance in the volume's cells"), CountPlaced(Made), CountPlaced(ComponentsOn(Outputs)));
 		auto Of = [&All](const TCHAR* Mesh)
 		{
 			const TArray<FPlaced>* Found = All.Find(Mesh);
@@ -881,7 +918,7 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 		AddInfo(TEXT("Regenerated: ") + JobSaid(State->OperationId));
 		TArray<AActor*> Outputs = OutputActors(FindVolume(VolumeLabel));
 		for (AActor* Actor : Outputs) State->Outputs.AddUnique(Actor);
-		const TMap<FString, TArray<FPlaced>> All = Placed(Outputs);
+		const TMap<FString, TArray<FPlaced>> All = Placed(Generated(FindVolume(VolumeLabel)));
 		const TArray<FPlaced>* Trees = All.Find(Eco::TreeMesh);
 		const TArray<FPlaced>* Grass = All.Find(Eco::GrassMesh);
 		TestFalse(TEXT("the rocks are gone"), All.Contains(Eco::RockMesh));
@@ -903,7 +940,7 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 	}));
 	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, State, Cleanup]()
 	{
-		const int32 Left = CountPlaced(Pinned(State->Outputs));
+		const int32 Left = CountPlaced(ComponentsOn(Pinned(State->Outputs)));
 		if (Left > 0 && FPlatformTime::Seconds() - State->Began < 30.0) return false;
 		TestEqual(TEXT("and no instance is left in any cell"), Left, 0);
 		Cleanup();
