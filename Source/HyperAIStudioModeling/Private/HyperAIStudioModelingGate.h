@@ -136,8 +136,13 @@ namespace HyperAIStudio::Modeling::Gate
 	/** Exposed for tests. */
 	FCage ReadCage(const UDynamicMesh& Mesh, const FString& Name);
 
-	/** PNGs of written static meshes, after their compiles: each asset's PreviewPath, or a note saying why it has none. Never fails. */
-	void RenderPreviews(const TArray<UStaticMesh*>& Written, TArray<FHyperAIModelAssetResult>& InOutAssets, TArray<FString>& OutNotes);
+	/**
+	 * PNGs of written static meshes, after their compiles: each asset's PreviewPath, or a note saying why it has none.
+	 * Never fails. Returns one short line saying how many were drawn and why any were not, to lead the diagnostic.
+	 */
+	FString RenderPreviews(const TArray<UStaticMesh*>& Written, TArray<FHyperAIModelAssetResult>& InOutAssets, TArray<FString>& OutNotes);
+	/** Where a write draws the asset at AssetPath: the same file every time, so it can be named before the write runs. */
+	FString PreviewPathOf(const FString& AssetPath);
 	/** A dry run's previews: what each write_asset would write, drawn from a temporary static mesh that is never saved. */
 	void RenderDryRunPreviews(const FPlan& Plan, FBuilt& Built, TArray<FHyperAIModelAssetResult>& InOutAssets, TArray<FString>& OutNotes);
 	/** One static mesh drawn to its PNG; false with the reason when nothing can be drawn. */

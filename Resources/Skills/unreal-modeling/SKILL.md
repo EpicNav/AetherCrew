@@ -23,8 +23,9 @@ touches the project until `write_asset`, so build freely and look at the numbers
    draws what each `write_asset` would write as a PNG, `Assets[].PreviewPath` (slower: a temporary mesh each).
 2. The same plan with `bDryRun: false` and a fresh `OperationId` builds it again and writes the assets, saved, in
    one undo step, and draws a PNG of each asset, `Assets[].PreviewPath`: open it with your image reader to see what
-   you made (Notes say when the editor cannot draw). With approval on it waits in the Activity panel: call
-   `hyper_operation_wait` with `bWaitThroughApproval: true`.
+   you made (Notes say when the editor cannot draw). With approval on it waits in the Activity panel, and that
+   reply already names each `Assets[].PreviewPath`: call `hyper_operation_wait` with `bWaitThroughApproval: true`,
+   whose diagnostic starts by saying which were drawn, then open those paths.
 3. `hyper_model_validate` on the assets, `Policy` `placeholder` (the default) or `production`.
    `hyper_model_inspect` with `Asset` and `bPreview: true` draws an existing static mesh again.
 
@@ -62,7 +63,8 @@ that fails while building is named the same way, and nothing is written.
   rest, where `extrude` pushes the whole selection one way: a band around a round shape (a barrel's hoops) needs
   `offset_faces`; a negative Distance sinks the faces into a recess. With no `Select` it swells (or with a negative
   Distance shrinks) a closed mesh, its faces kept parallel (`Mode=parallel`; `face` and `vertex` average the
-  normals instead). Moved faces keep their polygroups.
+  normals instead), and thickens an open sheet into a slab: piece by piece, in a mesh of several. Moved faces keep
+  their polygroups. `Area=face` moves every face on its own with walls of its own: 7 triangles where there was 1.
 - **Deform:** `noise` (`Magnitude` cm, `Frequency` = 1 / feature size in cm, `Seed`), `bend`, `twist`, `flare`,
   `wave`, `smooth`. Noise moves vertices, so give it some: `Style=box` spheres, box `Steps`, `tessellate` or `remesh`
   first. `wave` moves every vertex up to `Magnitude` cm along `Direction` (`0,0,1`) by a sine `Wavelength` cm long:
@@ -220,8 +222,9 @@ A flag on a pole: a thin box with vertices every 6 cm, waved sideways from the p
 - A plan has up to 64 ops (160 once recipes expand), 32 meshes at once and writes up to 8 assets. A working mesh
   holds up to 250000 triangles; an asset up to 100000 without Nanite (250000 with `Nanite=true`). Triangles are
   predicted before anything runs and counted after every op; a plan builds within 8 seconds. `tessellate` and
-  `subdivide` go to Level 3; subdivide's triangles are counted from its cage before it runs. Props for a level want
-  500 to 5000 triangles: `simplify` heavy meshes.
+  `subdivide` go to Level 3; subdivide's triangles are counted from its cage before it runs, and the walls of
+  extrude, inset and offset_faces from the faces they pick. Props for a level want 500 to 5000 triangles:
+  `simplify` heavy meshes.
 - A write draws its PNG previews within 4 seconds all told; an asset past that, or one written while the editor
   cannot draw, has none and a note says so, and the write stands all the same.
 - `bClosed` (no open edges) matters for booleans, solidify, lighting and collision. `self_union` or `repair`

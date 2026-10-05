@@ -148,19 +148,19 @@ namespace HyperAIStudio::ModelingTools::Private
 			Report.Saved.Add(Mesh->GetPathName());
 		}
 		// Drawn last: a saved write stands whether or not it can be drawn.
-		Gate::RenderPreviews(Written, Report.Assets, Report.Notes);
+		const FString Previews = Gate::RenderPreviews(Written, Report.Assets, Report.Notes);
 		Report.bOk = true;
 		Report.Status = TEXT("completed");
 		TArray<FString> Lines;
-		int32 Drawn = 0;
 		for (const FHyperAIModelAssetResult& Asset : Report.Assets)
 		{
 			Lines.Add(FString::Printf(TEXT("%s (%d triangles, %d slot(s), %s collision, %d shape(s)%s)"), *Asset.Path, Asset.Triangles, Asset.Slots, *Asset.Collision,
 				Asset.CollisionShapes, Asset.bNanite ? TEXT(", Nanite") : TEXT("")));
-			if (!Asset.PreviewPath.IsEmpty()) ++Drawn;
 		}
-		Report.Diagnostic = FString::Printf(TEXT("%d asset(s) written and saved: %s. Undo takes back replaced assets; new ones stay until deleted.%s"), Report.Assets.Num(),
-			*FString::Join(Lines, TEXT("; ")), Drawn > 0 ? *FString::Printf(TEXT(" %d preview PNG(s): Assets[].PreviewPath."), Drawn) : TEXT(""));
+		// The previews lead: after an approval, hyper_operation_wait reads this diagnostic from the activity log, cut to
+		// 512 characters, and the asset lines run long.
+		Report.Diagnostic = FString::Printf(TEXT("%d asset(s) written and saved. %s %s. Undo takes back replaced assets; new ones stay until deleted."), Report.Assets.Num(),
+			*Previews, *FString::Join(Lines, TEXT("; ")));
 		return Report;
 	}
 
@@ -308,6 +308,8 @@ FHyperAIModelPlanReport FHyperAIStudioModelingContracts::ApplyPlan(const FHyperA
 	{
 		TArray<FHyperAIModelAssetResult> Preview;
 		Gate::PreviewWrites(Plan, *Built, Preview);
+		// Named now: the reply after an approval comes back through hyper_operation_wait, which has no field for them.
+		for (FHyperAIModelAssetResult& Asset : Preview) Asset.PreviewPath = Gate::PreviewPathOf(Asset.Path);
 		FHyperAIStudioApprovalSummary Summary;
 		Summary.PackId = PackId;
 		Summary.ToolName = PlanToolName;
@@ -334,7 +336,8 @@ FHyperAIModelPlanReport FHyperAIStudioModelingContracts::ApplyPlan(const FHyperA
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = TEXT("Agent edits need approval here. Waiting in HyperAI Chat, Activity panel; nothing ran yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true.");
+		Report.Assets = MoveTemp(Preview);
+		Report.Diagnostic = TEXT("Agent edits need approval here. Waiting in HyperAI Chat, Activity panel; nothing ran yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true. Once it runs, each asset's PNG is at its Assets[].PreviewPath here, and the wait's diagnostic says which were drawn.");
 		return Report;
 	}
 	FHyperAIModelPlanReport Done = Execute(Request, Report.OperationId, &Plan, Built.Get());

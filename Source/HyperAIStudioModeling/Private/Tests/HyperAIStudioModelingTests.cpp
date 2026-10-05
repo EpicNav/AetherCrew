@@ -14,6 +14,7 @@
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioModelingGate.h"
 #include "HyperAIStudioModelingToolset.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioResultPreview.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioSourceControl.h"
@@ -249,14 +250,19 @@ bool FHyperAIStudioModelingBudgetsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("a plan past the ops limit after its recipes expand is refused: ") + Expanded.Diagnostic, !Expanded.bOk && Expanded.Diagnostic.Contains(TEXT("after recipes")));
 	const FHyperAIModelPlanReport Heavy = Run({Dense, Op(TEXT("tessellate"), TEXT("Block"), TEXT("Level=1")), Write(TEXT("Block"), TestFolder() + TEXT("/SM_Heavy"))}, true);
 	TestTrue(TEXT("an asset over 100000 triangles without Nanite is refused: ") + Heavy.Diagnostic, Refused(Heavy, TEXT("Op 2"), TEXT("without Nanite")));
-	// Extruding every face on its own makes about seven triangles of each, where Check guesses two: 64 copies of the
-	// result pass Check, but are refused against the meshes as built before they are made.
+	// Extruding every face on its own makes seven triangles of each. Check cannot tell what a Select picks, so it guesses
+	// two: 64 copies of the result pass Check, but are refused against the meshes as built before they are made.
 	FHyperAIModelOp Copies = Op(TEXT("array.linear"), TEXT("Many"), TEXT("Count=64"));
 	Copies.Source = TEXT("Block");
 	Copies.Location = TEXT("200,0,0");
-	const FHyperAIModelPlanReport Grown = Run({Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"), TEXT("Steps=10")),
-		Op(TEXT("extrude"), TEXT("Block"), TEXT("Distance=2; Area=face")), Copies}, true);
+	FHyperAIModelOp Each = Op(TEXT("extrude"), TEXT("Block"), TEXT("Distance=2; Area=face"));
+	Each.Select = TEXT("box:-60,-60,-10,60,60,110");
+	const FHyperAIModelOp Box10 = Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"), TEXT("Steps=10"));
+	const FHyperAIModelPlanReport Grown = Run({Box10, Each, Copies}, true);
 	TestTrue(TEXT("copies past the cap are refused before they are made: ") + Grown.Diagnostic, Refused(Grown, TEXT("Op 2"), TEXT("from the meshes as built")));
+	// With no Select every face is picked, and Check counts the seven.
+	const FHyperAIModelPlanReport Counted = Run({Box10, Op(TEXT("extrude"), TEXT("Block"), TEXT("Distance=2; Area=face")), Copies}, true);
+	TestTrue(TEXT("without a Select, Check predicts seven triangles a face: ") + Counted.Diagnostic, Refused(Counted, TEXT("Op 2"), TEXT("would make about 650496 triangles")));
 	return true;
 }
 
@@ -914,11 +920,23 @@ bool FHyperAIStudioModelingSubdivideTest::RunTest(const FString& Parameters)
 		TestTrue(FString::Printf(TEXT("a group per triangle is a cage of triangles, 3 corners each (%lld for %d)"), Each.Corners, Triangles), Each.Problem.IsEmpty()
 			&& Each.Polygons == Triangles && Each.Corners == 3 * Triangles);
 	}
-	// Budgets: predicted from the quads before anything runs, and Level stays within 3.
+	// Budgets: counted from the cage before OpenSubdiv runs, and Level stays within 3. 63 x 63 quads a side make 23814.
 	const FHyperAIModelOp Dense = Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"), TEXT("Steps=64; Groups=quad"));
 	const FHyperAIModelPlanReport Heavy = Run({Dense, Op(TEXT("subdivide"), TEXT("Block"), TEXT("Level=3"))}, true);
-	TestTrue(TEXT("too many levels for the mesh are refused before they run: ") + Heavy.Diagnostic, Refused(Heavy, TEXT("Op 1"), TEXT("would make about 3244800 triangles"))
-		&& Heavy.Diagnostic.Contains(TEXT("lower its Level")));
+	TestTrue(TEXT("too many levels for the cage are refused before they run: ") + Heavy.Diagnostic, Refused(Heavy, TEXT("Op 1"), TEXT("its cage of 23814 polygons would make 3048192 triangles"))
+		&& Heavy.Diagnostic.Contains(TEXT("lower its Level")) && Heavy.Meshes.IsEmpty());
+	// Two such boxes are too many even at Level 1, where lowering it is no way out.
+	FHyperAIModelOp Second = Dense;
+	Second.Location = TEXT("200,0,0");
+	const FHyperAIModelPlanReport Once = Run({Dense, Second, Op(TEXT("subdivide"), TEXT("Block"))}, true);
+	TestTrue(TEXT("a cage too big at Level 1 asks for a coarser cage: ") + Once.Diagnostic, Refused(Once, TEXT("Op 2"), TEXT("would make 381024 triangles at Level 1"))
+		&& Once.Diagnostic.Contains(TEXT("coarser cage")) && !Once.Diagnostic.Contains(TEXT("lower its Level")));
+	// A dense box of six face groups is a cube cage all the same: Check does not guess from its triangles, which would
+	// refuse 4^3 times them, and the result fits an asset without Nanite.
+	const FHyperAIModelPlanReport Coarse = Run({Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"), TEXT("Steps=20")), Op(TEXT("subdivide"), TEXT("Block"), TEXT("Level=3")),
+		Write(TEXT("Block"), TestFolder() + TEXT("/SM_Pebble"))}, true);
+	const FHyperAIModelMeshStats* Pebbled = Find(Coarse, TEXT("Block"));
+	TestTrue(TEXT("a coarse cage on many triangles subdivides at Level 3: ") + Coarse.Diagnostic, Coarse.bOk && Pebbled && Pebbled->Triangles == 768 && Coarse.Assets.Num() == 1);
 	TestTrue(TEXT("a Level past 3 is refused"), Refused(Run({Quads, Op(TEXT("subdivide"), TEXT("Block"), TEXT("Level=4"))}, true), TEXT("Op 1"), TEXT("Level is a whole number from 1 to 3")));
 	// Groups that are no cage are refused, naming what fixes them.
 	const FHyperAIModelPlanReport Single = Run({Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"), TEXT("Groups=single")), Op(TEXT("subdivide"), TEXT("Block"))}, true);
@@ -988,6 +1006,49 @@ bool FHyperAIStudioModelingOffsetFacesTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("a band around a cylinder stands out on every side: ") + (Post ? Post->Size : Banded.Diagnostic), Post && Size.X > 63.9 && Size.X < 64.2 && Size.Y > 63.9
 		&& Size.Y < 64.2 && FMath::IsNearlyEqual(Size.Z, 90.0, 0.05) && Post->bClosed);
 	TestTrue(TEXT("a Distance of 0 is refused"), Refused(Run({Box, Offset(TEXT("top"), TEXT("Distance=0"))}, true), TEXT("Op 1"), TEXT("Distance other than 0")));
+	// Piece by piece: in one mesh a closed post swells and an open disc beside it thickens into a slab.
+	const FHyperAIModelOp Lone = Sized(TEXT("add.cylinder"), TEXT("Post"), TEXT("40,40,100"), TEXT("Steps=16"));
+	FHyperAIModelOp Disc = Sized(TEXT("add.disc"), TEXT("Post"), TEXT("60,60,0"), TEXT("Steps=16"));
+	Disc.Location = TEXT("200,0,0");
+	const FHyperAIModelOp Thicken = Op(TEXT("offset_faces"), TEXT("Post"), TEXT("Distance=2"));
+	const FHyperAIModelPlanReport Alone = Run({Lone, Thicken}, true);
+	const FHyperAIModelPlanReport Mixed = Run({Lone, Disc, Thicken}, true);
+	const FHyperAIModelPlanReport Sheet = Run({Disc, Thicken}, true);
+	const FHyperAIModelMeshStats* Swelled = Find(Alone, TEXT("Post"));
+	const FHyperAIModelMeshStats* Both = Find(Mixed, TEXT("Post"));
+	const FHyperAIModelMeshStats* Slab = Find(Sheet, TEXT("Post"));
+	if (TestTrue(TEXT("a post, a disc, and both in one mesh offset: ") + Mixed.Diagnostic, Swelled && Both && Slab))
+	{
+		TestTrue(TEXT("a post alone swells, one closed piece: ") + Swelled->Size, Swelled->Components == 1 && Swelled->bClosed && Parse(Swelled->Size).Equals(FVector(44.0, 44.0, 104.0), 1.0));
+		TestTrue(TEXT("a disc alone thickens into a closed slab: ") + Slab->Size, Slab->Components == 1 && Slab->bClosed && FMath::IsNearlyEqual(Parse(Slab->Size).Z, 2.0, 0.05));
+		TestTrue(FString::Printf(TEXT("beside an open disc the post still swells, not into a hollow shell: %d pieces, %d triangles (%d + %d apart)"), Both->Components, Both->Triangles,
+			Swelled->Triangles, Slab->Triangles), Both->Components == 2 && Both->bClosed && Both->Triangles == Swelled->Triangles + Slab->Triangles
+			&& FMath::IsNearlyEqual(Parse(Both->Min).Z, Parse(Swelled->Min).Z, 0.01));
+	}
+	// Every face on its own: three quads of wall each, seven triangles where there was one. An open box (its top cut off)
+	// is one sheet, where Geometry Script would flood the whole sheet once per face to see whether that face is all of it.
+	FHyperAIModelOp Cut = Op(TEXT("plane_cut"), TEXT("Block"), TEXT("Fill=false"));
+	Cut.Location = TEXT("0,0,99");
+	const FHyperAIModelOp Faces = Op(TEXT("offset_faces"), TEXT("Block"), TEXT("Distance=2; Area=face"));
+	const FHyperAIModelPlanReport Bare = Run({Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"), TEXT("Steps=40")), Cut}, true);
+	const FHyperAIModelPlanReport Tiled = Run({Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"), TEXT("Steps=40")), Cut, Faces}, true);
+	const FHyperAIModelMeshStats* Before = Find(Bare, TEXT("Block"));
+	const FHyperAIModelMeshStats* After = Find(Tiled, TEXT("Block"));
+	if (TestTrue(TEXT("an open box offsets face by face: ") + Tiled.Diagnostic, Before && After && Before->OpenEdges > 0 && Before->Triangles > 12000))
+	{
+		TestEqual(TEXT("into seven triangles a face"), After->Triangles, 7 * Before->Triangles);
+		TestTrue(FString::Printf(TEXT("without flooding the sheet per face (%d ms for %d faces)"), Tiled.BuildMs, Before->Triangles), Tiled.BuildMs < 4000);
+	}
+	// Check counts seven a face when every face is picked; with a Select, the build counts the walls before making them.
+	const FHyperAIModelOp Denser = Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"), TEXT("Steps=64"));
+	const FHyperAIModelPlanReport Predicted = Run({Denser, Cut, Faces}, true);
+	TestTrue(TEXT("every face of a dense sheet on its own is refused before anything runs: ") + Predicted.Diagnostic, Refused(Predicted, TEXT("Op 2"), TEXT("would make about"))
+		&& Predicted.Diagnostic.Contains(TEXT("Area=all")) && Predicted.Meshes.IsEmpty());
+	FHyperAIModelOp Picked = Faces;
+	Picked.Select = TEXT("box:-60,-60,-10,60,60,110");
+	const FHyperAIModelPlanReport Counted = Run({Denser, Cut, Picked}, true);
+	TestTrue(TEXT("and so are the faces a Select picks, counted before the walls are made: ") + Counted.Diagnostic, Refused(Counted, TEXT("Op 2"), TEXT("side walls along"))
+		&& Counted.Meshes.IsEmpty());
 	return true;
 }
 
@@ -1098,20 +1159,23 @@ bool FHyperAIStudioModelingPreviewsTest::RunTest(const FString& Parameters)
 	{
 		TestEqual(TEXT("its preview is the asset's own PNG"), Crate.PreviewPath, FHyperAIStudioResultPreview::GetAssetPreviewPath(Crate.Path));
 		TestTrue(TEXT("a PNG of more than 1 KB, the crate drawn in it: ") + Crate.PreviewPath, IsPng(Crate.PreviewPath));
-		TestTrue(TEXT("and the report says so: ") + Written.Diagnostic, Written.Diagnostic.Contains(TEXT("1 preview PNG")));
+		TestTrue(TEXT("and the report says so first: ") + Written.Diagnostic, Written.Diagnostic.StartsWith(TEXT("1 asset(s) written and saved. Previews: 1 of 1 drawn")));
 	}
 	else
 	{
 		AddInfo(TEXT("No renderer in this run: the write notes that it drew nothing."));
 		TestTrue(TEXT("no preview, and a note says why"), Crate.PreviewPath.IsEmpty() && Written.Notes.ContainsByPredicate([](const FString& Note) { return Note.Contains(TEXT("without rendering")); }));
 	}
-	// An editor that cannot draw writes all the same, and says so.
+	// An editor that cannot draw writes all the same, and says so; the crate's old picture goes, so its path never shows
+	// the crate as it was.
 	Gate::SetPreviewsOffForTests(true);
-	const FHyperAIModelPlanReport Blind = Run({Sized(TEXT("add.box"), TEXT("Crate"), TEXT("60")), Write(TEXT("Crate"), Folder + TEXT("/SM_Blind"))}, false);
+	const FHyperAIModelPlanReport Blind = Run({Sized(TEXT("add.box"), TEXT("Crate"), TEXT("60")), Write(TEXT("Crate"), Folder + TEXT("/SM_Crate"), TEXT("Replace=true"))}, false);
 	Gate::SetPreviewsOffForTests(false);
 	TestTrue(TEXT("without rendering the write still completes: ") + Blind.Diagnostic, Blind.bOk && Blind.Status == TEXT("completed") && Blind.Saved.Num() == 1);
 	TestTrue(TEXT("with no preview, and a note saying why: ") + FString::Join(Blind.Notes, TEXT(" | ")), Blind.Assets.Num() == 1 && Blind.Assets[0].PreviewPath.IsEmpty()
-		&& Blind.Notes.ContainsByPredicate([](const FString& Note) { return Note.Contains(TEXT("No previews: this editor runs without rendering")); }));
+		&& Blind.Notes.ContainsByPredicate([](const FString& Note) { return Note.Contains(TEXT("No previews: this editor runs without rendering")); })
+		&& Blind.Diagnostic.Contains(TEXT("Previews: none")));
+	TestFalse(TEXT("and no earlier PNG is left at its preview path"), IFileManager::Get().FileExists(*Gate::PreviewPathOf(Folder + TEXT("/SM_Crate"))));
 	// A dry run draws only when asked, from a temporary mesh that leaves nothing behind.
 	const FString DryPath = Folder + TEXT("/SM_Dry");
 	FHyperAIModelPlanRequest Dry;
@@ -1144,6 +1208,58 @@ bool FHyperAIStudioModelingPreviewsTest::RunTest(const FString& Parameters)
 	Look.Asset.Reset();
 	const FHyperAIModelInspectReport Nothing = C::Inspect(Look);
 	TestTrue(TEXT("bPreview without an Asset is refused: ") + Nothing.Diagnostic, !Nothing.bOk && Nothing.Diagnostic.Contains(TEXT("give Asset")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingApprovalPreviewsTest, "HyperAIStudio.NativeTools.Modeling.ApprovalNamesPreviews", HyperAIStudio::ModelingTests::Flags)
+
+bool FHyperAIStudioModelingApprovalPreviewsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelingTests;
+	const FString Folder = TestFolder();
+	const FString OperationId = TEXT("model-test-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower();
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bWasRequired = Settings->bRequireApprovalForAgentEdits;
+	ON_SCOPE_EXIT
+	{
+		Settings->bRequireApprovalForAgentEdits = bWasRequired;
+		if (FHyperAIStudioApprovalGate::HasPending(OperationId)) FHyperAIStudioApprovalGate::Reject(OperationId, TEXT("Test finished."));
+		DeleteFolder(Folder);
+	};
+	Settings->bRequireApprovalForAgentEdits = true;
+	// Three assets with long names: their lines alone run past the 512 characters hyper_operation_wait shows.
+	const TArray<FString> Names = {TEXT("SM_Approved_Crate_With_A_Long_Name"), TEXT("SM_Approved_Ball_With_A_Long_Name"), TEXT("SM_Approved_Post_With_A_Long_Name")};
+	FHyperAIModelPlanRequest Request;
+	Request.OperationId = OperationId;
+	Request.Operations = {Sized(TEXT("add.box"), TEXT("Crate"), TEXT("80")), Sized(TEXT("add.sphere"), TEXT("Ball"), TEXT("60")), Sized(TEXT("add.cylinder"), TEXT("Post"), TEXT("20,20,120")),
+		Write(TEXT("Crate"), Folder / Names[0]), Write(TEXT("Ball"), Folder / Names[1]), Write(TEXT("Post"), Folder / Names[2])};
+	const FHyperAIModelPlanReport Waiting = C::ApplyPlan(Request);
+	if (!TestEqual(TEXT("with approval on, the write waits: ") + Waiting.Diagnostic, Waiting.Status, FString(TEXT("awaiting_user_approval")))) return false;
+	bool bNamed = Waiting.Assets.Num() == Names.Num();
+	for (int32 Index = 0; bNamed && Index < Names.Num(); ++Index)
+	{
+		const FString ObjectPath = Folder / Names[Index] + TEXT(".") + Names[Index];
+		bNamed = Waiting.Assets[Index].PreviewPath == FHyperAIStudioResultPreview::GetAssetPreviewPath(ObjectPath) && !IFileManager::Get().FileExists(*Waiting.Assets[Index].PreviewPath);
+	}
+	TestTrue(TEXT("naming each asset's preview PNG, the file the write will draw, before anything runs"), bNamed);
+	TestTrue(TEXT("and saying where to look: ") + Waiting.Diagnostic, Waiting.Diagnostic.Contains(TEXT("Assets[].PreviewPath")));
+	FString Error;
+	if (!TestTrue(TEXT("approved, it writes: ") + Error, FHyperAIStudioApprovalGate::Approve(OperationId, Error))) return false;
+	// What hyper_operation_wait answers the agent: the pack's activity entry, cut to 512 characters.
+	const TSharedRef<TOptional<FHyperAIStudioEditOutcome>> Outcome = MakeShared<TOptional<FHyperAIStudioEditOutcome>>();
+	HyperAIStudio::OperationWait::WhenDone(OperationId, 1000, [Outcome](const FHyperAIStudioEditOutcome& Done) { *Outcome = Done; });
+	if (!TestTrue(TEXT("the wait answers at once, the edit being done"), Outcome->IsSet())) return false;
+	const FHyperAIStudioEditOutcome& Done = Outcome->GetValue();
+	TestTrue(TEXT("as completed: ") + Done.Status + TEXT(" ") + Done.Diagnostic, Done.bOk && Done.Status == TEXT("completed"));
+	const bool bCanRender = FApp::CanEverRender();
+	const FString Previews = bCanRender ? TEXT("Previews: 3 of 3 drawn") : TEXT("Previews: none");
+	TestTrue(TEXT("its diagnostic leads with the previews: ") + Done.Diagnostic, Done.Diagnostic.StartsWith(TEXT("3 asset(s) written and saved. ") + Previews));
+	if (bCanRender)
+	{
+		const bool bDrawn = !Waiting.Assets.ContainsByPredicate([](const FHyperAIModelAssetResult& Asset) { return !IFileManager::Get().FileExists(*Asset.PreviewPath); });
+		TestTrue(TEXT("at the paths it named"), bDrawn);
+	}
+	for (const FHyperAIModelAssetResult& Asset : Waiting.Assets) IFileManager::Get().Delete(*Asset.PreviewPath, false, false, true);
 	return true;
 }
 

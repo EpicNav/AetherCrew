@@ -102,7 +102,10 @@ struct FHyperAIModelAssetResult
 	UPROPERTY() int32 CollisionShapes = 0;
 	/** It replaced an existing asset (Replace=true), which undo takes back. */
 	UPROPERTY() bool bReplaced = false;
-	/** A PNG of the asset (Saved/HyperAIStudio/Previews) to open with an image reader; empty when none was drawn, and Notes say why. */
+	/**
+	 * A PNG of the asset (Saved/HyperAIStudio/Previews) to open with an image reader; empty when none was drawn, and Notes
+	 * say why. A write waiting for approval names it before it is drawn.
+	 */
 	UPROPERTY() FString PreviewPath;
 };
 

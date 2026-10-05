@@ -50,6 +50,7 @@
 #include "Misc/SecureHash.h"
 #include "ObjectTools.h"
 #include "PhysicsEngine/BodySetup.h"
+#include "Selections/MeshConnectedComponents.h"
 #include "StaticMeshCompiler.h"
 #include "StaticMeshResources.h"
 #include "UDynamicMesh.h"
@@ -821,16 +822,26 @@ namespace HyperAIStudio::Modeling::Gate
 		if (K == TEXT("self_union")) return Current * 6 / 5;
 		if (K == TEXT("plane_cut")) return Current + Current / 10 + 16;
 		if (K == TEXT("mirror")) return 2 * Current;
-		if (K == TEXT("extrude") || K == TEXT("inset") || K == TEXT("offset_faces") || K == TEXT("shell")) return 2 * Current + 16;
+		if (K == TEXT("extrude") || K == TEXT("inset") || K == TEXT("offset_faces"))
+		{
+			// Area=face gives every face walls of its own, three quads: seven triangles where there was one. What a Select
+			// picks is not known yet, so the build counts the walls from the selection itself before they are made.
+			const bool bEveryFace = Step.Select.Type == FSelector::EType::All && !Step.Select.bInvert;
+			if (bEveryFace && Step.Text(TEXT("Area"), TEXT("all")).Equals(TEXT("face"), ESearchCase::IgnoreCase)) return 7 * Current;
+			return 2 * Current + 16;
+		}
+		if (K == TEXT("shell")) return 2 * Current + 16;
 		if (K == TEXT("bevel")) return Current * (2 + Step.Int(TEXT("Subdivisions"), 0));
 		if (K == TEXT("tessellate"))
 		{
 			const int64 Split = Step.Int(TEXT("Level"), 1) + 1;
 			return Current * Split * Split;
 		}
-		// Exact for a quad cage (Groups=quad, or a box with Groups=face): each quad's two triangles become four quads. A
-		// cage of triangles makes half as many again; the build counts the cage itself before OpenSubdiv runs.
-		if (K == TEXT("subdivide")) return Current << (2 * Step.Int(TEXT("Level"), 1));
+		// Not counted here: the cage, so what Catmull-Clark makes of it, is known only once the mesh is built, and a guess
+		// from the triangles refuses good plans (a box of 6 face groups and 5000 triangles makes 768 at Level 3, not 4^3
+		// times 5000). The build counts the cage exactly before OpenSubdiv runs, and checks later ops against the meshes
+		// as built.
+		if (K == TEXT("subdivide")) return Current;
 		if (K == TEXT("remesh")) return Step.Int(TEXT("Triangles"), 5000);
 		if (K == TEXT("simplify")) return Step.Has(TEXT("Triangles")) ? FMath::Min<int64>(Current, Step.Int(TEXT("Triangles"), 0)) : Current;
 		if (K == TEXT("solidify") || K == TEXT("morphology"))
@@ -1224,8 +1235,9 @@ namespace HyperAIStudio::Modeling::Gate
 				const int64 Predicted = Predict(Step, Tris);
 				if (Predicted > C::MaxTrianglesPerMesh)
 				{
+					const bool bFaces = Step.Kind == TEXT("extrude") || Step.Kind == TEXT("inset") || Step.Kind == TEXT("offset_faces");
 					return Fail(FString::Printf(TEXT("it would make about %lld triangles in %s, over the %d one mesh may hold; %s, or simplify first."),
-						Predicted, *Step.Mesh, C::MaxTrianglesPerMesh, Step.Kind == TEXT("subdivide") ? TEXT("lower its Level") : TEXT("lower Steps, Level, Count or Resolution")));
+						Predicted, *Step.Mesh, C::MaxTrianglesPerMesh, bFaces ? TEXT("give Area=all or group, or Select fewer faces") : TEXT("lower Steps, Level, Count or Resolution")));
 				}
 				Tris.Add(Key, Predicted);
 				Names.Add(Key, Step.Mesh);
@@ -1763,6 +1775,70 @@ namespace HyperAIStudio::Modeling::Gate
 		}, EDynamicMeshChangeType::GeneralEdit, EDynamicMeshAttributeChangeFlags::Unknown, false);
 	}
 
+	/**
+	 * extrude, inset and offset_faces read before they run. Each area (the whole selection, a polygroup's part of it, or
+	 * one face, as Area says) moves as connected regions, and Geometry Script gives a region that is a whole piece of the
+	 * mesh two surfaces when bSolidsToShells is set, telling by flooding the region's piece: once per face with
+	 * Area=face, which on a large open sheet runs for minutes. Here the pieces are read once.
+	 */
+	struct FAreas
+	{
+		/** Picked faces whose area is a whole open piece (a sheet), a whole closed piece, or neither. */
+		TArray<int32> Sheets;
+		TArray<int32> Solids;
+		TArray<int32> Rest;
+		/** Edges on an area's border, each of which gets a quad of side wall. */
+		int64 BorderEdges = 0;
+	};
+
+	FAreas ReadAreas(const UDynamicMesh& Mesh, const FGeometryScriptMeshSelection& Selection, const EGeometryScriptPolyOperationArea Area)
+	{
+		using EArea = EGeometryScriptPolyOperationArea;
+		FAreas Out;
+		Mesh.ProcessMesh([&Out, &Selection, Area](const FDynamicMesh3& Read)
+		{
+			TArray<int32> Picked;
+			Selection.ProcessByTriangleID(Read, [&Picked](const int32 Tid) { Picked.Add(Tid); }, /*bProcessAllTrisIfSelectionEmpty=*/true);
+			TBitArray<> In(false, Read.MaxTriangleID());
+			for (const int32 Tid : Picked) In[Tid] = true;
+			UE::Geometry::FMeshConnectedComponents Pieces(&Read);
+			Pieces.FindConnectedTriangles();
+			TArray<int32> PieceOf;
+			PieceOf.Init(INDEX_NONE, Read.MaxTriangleID());
+			// Per piece: 0 when no area is all of it, 1 when one is and it is open, 2 when it is closed.
+			TArray<uint8> Whole;
+			Whole.Init(0, Pieces.Num());
+			for (int32 Index = 0; Index < Pieces.Num(); ++Index)
+			{
+				const TArray<int32>& Tris = Pieces[Index].Indices;
+				bool bAll = Area != EArea::PerTriangle || Tris.Num() == 1;
+				bool bOpen = false;
+				const int32 Group = Read.GetTriangleGroup(Tris[0]);
+				for (const int32 Tid : Tris)
+				{
+					PieceOf[Tid] = Index;
+					bAll &= In[Tid] && (Area != EArea::PerPolygroup || Read.GetTriangleGroup(Tid) == Group);
+					const UE::Geometry::FIndex3i Edges = Read.GetTriEdges(Tid);
+					for (int32 Side = 0; Side < 3; ++Side) bOpen |= Read.IsBoundaryEdge(Edges[Side]);
+				}
+				Whole[Index] = !bAll ? 0 : bOpen ? 1 : 2;
+			}
+			for (const int32 Tid : Picked)
+			{
+				const uint8 Kind = Whole[PieceOf[Tid]];
+				(Kind == 1 ? Out.Sheets : Kind == 2 ? Out.Solids : Out.Rest).Add(Tid);
+				const UE::Geometry::FIndex3i Across = Read.GetTriNeighbourTris(Tid);
+				for (int32 Side = 0; Side < 3; ++Side)
+				{
+					const int32 Other = Across[Side];
+					Out.BorderEdges += Area == EArea::PerTriangle || Other == FDynamicMesh3::InvalidID || !In[Other]
+						|| (Area == EArea::PerPolygroup && Read.GetTriangleGroup(Other) != Read.GetTriangleGroup(Tid)) ? 1 : 0;
+				}
+			}
+		});
+		return Out;
+	}
+
 	bool RunStep(const FStep& Step, FBuilt& Built, UGeometryScriptDebug* Debug, FString& OutError)
 	{
 		const FString& K = Step.Kind;
@@ -1885,6 +1961,20 @@ namespace HyperAIStudio::Modeling::Gate
 		}
 		using UModel = UGeometryScriptLibrary_MeshModelingFunctions;
 		using UDeform = UGeometryScriptLibrary_MeshDeformFunctions;
+		FAreas Areas;
+		if (K == TEXT("extrude") || K == TEXT("inset") || K == TEXT("offset_faces"))
+		{
+			// Counted from the selection before anything is made: Check cannot know what a Select picks.
+			Areas = ReadAreas(*Mesh, Selection, AreaOf(Step));
+			const int64 Copies = K == TEXT("inset") ? 0 : Areas.Sheets.Num() + (K == TEXT("extrude") ? Areas.Solids.Num() : 0);
+			const int64 Made = Mesh->GetTriangleCount() + 2 * Areas.BorderEdges + Copies;
+			if (Made > C::MaxTrianglesPerMesh)
+			{
+				OutError = FString::Printf(TEXT("it would make %lld triangles in %s (side walls along %lld edges), over the %d one mesh may hold; give Area=all or group, Select fewer faces, or simplify first."),
+					Made, *Step.Mesh, Areas.BorderEdges, C::MaxTrianglesPerMesh);
+				return false;
+			}
+		}
 		if (K == TEXT("extrude"))
 		{
 			FGeometryScriptMeshLinearExtrudeOptions Options;
@@ -1901,6 +1991,9 @@ namespace HyperAIStudio::Modeling::Gate
 				Options.DirectionMode = EGeometryScriptLinearExtrudeDirection::AverageFaceNormal;
 			}
 			Options.AreaMode = AreaOf(Step);
+			// A whole piece still extrudes into a slab or shell, as Geometry Script makes it; with none, no region is one,
+			// so the flood that would find out is skipped and nothing else changes.
+			Options.bSolidsToShells = !Areas.Sheets.IsEmpty() || !Areas.Solids.IsEmpty();
 			UModel::ApplyMeshLinearExtrudeFaces(Mesh, Options, Selection, Debug);
 			return true;
 		}
@@ -1920,11 +2013,22 @@ namespace HyperAIStudio::Modeling::Gate
 			Options.OffsetType = Mode == TEXT("vertex") ? EGeometryScriptOffsetFacesType::VertexNormal
 				: Mode == TEXT("face") ? EGeometryScriptOffsetFacesType::FaceNormal : EGeometryScriptOffsetFacesType::ParallelFaceOffset;
 			Options.AreaMode = AreaOf(Step);
-			// A whole closed piece swells or shrinks as it is (shell is the op that keeps both surfaces); a whole open sheet
-			// thickens into a slab, as extrude makes it.
-			Options.bSolidsToShells = UQuery::GetNumOpenBorderEdges(Mesh) > 0;
+			// Piece by piece: a whole closed piece swells or shrinks as it is (shell is the op that keeps both surfaces), a
+			// whole open sheet thickens into a slab, as extrude makes it, and every other area moves with side walls.
+			// Geometry Script decides that for a whole call, so the sheets go in a call of their own.
 			const TArray<int32> Groups = GroupsByTriangle(*Mesh);
-			UModel::ApplyMeshOffsetFaces(Mesh, Options, Selection, Debug);
+			TArray<int32> Moved = MoveTemp(Areas.Rest);
+			Moved.Append(Areas.Solids);
+			for (const bool bSheets : {false, true})
+			{
+				const TArray<int32>& Faces = bSheets ? Areas.Sheets : Moved;
+				// An empty selection would move every face.
+				if (Faces.IsEmpty()) continue;
+				FGeometryScriptMeshSelection Part;
+				USel::ConvertIndexArrayToMeshSelection(Mesh, Faces, EGeometryScriptMeshSelectionType::Triangles, Part);
+				Options.bSolidsToShells = bSheets;
+				UModel::ApplyMeshOffsetFaces(Mesh, Options, Part, Debug);
+			}
 			KeepGroupsApart(*Mesh, Groups);
 			return true;
 		}
@@ -2055,12 +2159,13 @@ namespace HyperAIStudio::Modeling::Gate
 				OutError = Cage.Problem;
 				return false;
 			}
-			// Counted from the cage itself before OpenSubdiv allocates anything: Check's estimate assumed quads.
+			// Counted from the cage itself before OpenSubdiv allocates anything: Check cannot know it.
 			const int64 Made = (2 * Cage.Corners) << (2 * (Level - 1));
 			if (Made > C::MaxTrianglesPerMesh)
 			{
-				OutError = FString::Printf(TEXT("its cage of %d polygons would make %lld triangles at Level %d, over the %d one mesh may hold; lower its Level, or simplify first."),
-					Cage.Polygons, Made, Level, C::MaxTrianglesPerMesh);
+				const FString Coarser = TEXT("give it a coarser cage (fewer Steps or polygroups, or simplify it first and give Cage=quads)");
+				OutError = FString::Printf(TEXT("its cage of %d polygons would make %lld triangles at Level %d, over the %d one mesh may hold; %s."),
+					Cage.Polygons, Made, Level, C::MaxTrianglesPerMesh, Level > 1 ? *(TEXT("lower its Level, or ") + Coarser) : *Coarser);
 				return false;
 			}
 			UGeometryScriptLibrary_OpenSubdivFunctions::ApplyPolygroupCatmullClarkSubD(Mesh, Level, FGeometryScriptGroupLayer(), Debug);
@@ -2745,23 +2850,39 @@ namespace HyperAIStudio::Modeling::Gate
 		return false;
 	}
 
-	void NoteCompiling(const UStaticMesh& Mesh, const FString& Path, TArray<FString>& OutNotes)
+	bool NoteCompiling(const UStaticMesh& Mesh, const FString& Path, TArray<FString>& OutNotes)
 	{
-		if (!MaterialsCompiling(Mesh)) return;
+		if (!MaterialsCompiling(Mesh)) return false;
 		OutNotes.Add(FString::Printf(TEXT("%s: its material was still compiling, so the preview may show the engine's default surface; hyper_model_inspect with Asset and bPreview true draws it again."),
 			*Path));
+		return true;
 	}
 
-	void RenderPreviews(const TArray<UStaticMesh*>& Written, TArray<FHyperAIModelAssetResult>& InOutAssets, TArray<FString>& OutNotes)
+	FString PreviewPathOf(const FString& AssetPath)
 	{
-		if (Written.IsEmpty()) return;
+		return FHyperAIStudioResultPreview::GetAssetPreviewPath(ObjectPathOf(AssetPath));
+	}
+
+	FString RenderPreviews(const TArray<UStaticMesh*>& Written, TArray<FHyperAIModelAssetResult>& InOutAssets, TArray<FString>& OutNotes)
+	{
+		if (Written.IsEmpty()) return FString();
+		// An earlier write's picture of the same asset goes first: a path named before this write ran (with approval on)
+		// then holds this write's picture or nothing, never an old one.
+		for (const UStaticMesh* Mesh : Written)
+		{
+			if (Mesh) IFileManager::Get().Delete(*FHyperAIStudioResultPreview::GetAssetPreviewPath(Mesh->GetPathName()), false, false, true);
+		}
 		if (!CanDraw())
 		{
 			OutNotes.Add(FString(CannotDraw) + TEXT("; the assets are written all the same."));
-			return;
+			return TEXT("Previews: none, this editor runs without rendering (null RHI).");
 		}
 		const double Start = FPlatformTime::Seconds();
 		TArray<FString> Skipped;
+		// By name, for the short line that leads the diagnostic.
+		TArray<FString> Missing;
+		TArray<FString> Compiling;
+		int32 Drawn = 0;
 		// Write appends both arrays in step.
 		for (int32 Index = 0; Index < Written.Num() && Index < InOutAssets.Num(); ++Index)
 		{
@@ -2772,21 +2893,29 @@ namespace HyperAIStudio::Modeling::Gate
 			if ((FPlatformTime::Seconds() - Start) * 1000.0 > C::MaxPreviewMs)
 			{
 				Skipped.Add(Asset.Path);
+				Missing.Add(Mesh->GetName() + FString::Printf(TEXT(" (the %d ms limit)"), C::MaxPreviewMs));
 				continue;
 			}
 			FString Reason;
 			if (!RenderPreview(*Mesh, Asset.PreviewPath, Reason))
 			{
 				OutNotes.Add(FString::Printf(TEXT("%s: no preview, %s."), *Asset.Path, *Reason));
+				Missing.Add(FString::Printf(TEXT("%s (%s)"), *Mesh->GetName(), *Reason));
 				continue;
 			}
-			NoteCompiling(*Mesh, Asset.Path, OutNotes);
+			++Drawn;
+			if (NoteCompiling(*Mesh, Asset.Path, OutNotes)) Compiling.Add(Mesh->GetName());
 		}
 		if (!Skipped.IsEmpty())
 		{
 			OutNotes.Add(FString::Printf(TEXT("Previews stopped at the %d ms limit: %s have none; hyper_model_inspect with Asset and bPreview true draws one."), C::MaxPreviewMs,
 				*FString::Join(Skipped, TEXT(", "))));
 		}
+		FString Summary = FString::Printf(TEXT("Previews: %d of %d drawn to Assets[].PreviewPath"), Drawn, Written.Num());
+		if (!Missing.IsEmpty()) Summary += TEXT("; none for ") + FString::Join(Missing, TEXT(", "));
+		if (!Compiling.IsEmpty()) Summary += TEXT("; drawn while the material compiled, so the default surface may show: ") + FString::Join(Compiling, TEXT(", "));
+		if (!Missing.IsEmpty() || !Compiling.IsEmpty()) Summary += TEXT("; hyper_model_inspect with Asset and bPreview true draws one again");
+		return Summary + TEXT(".");
 	}
 
 	void RenderDryRunPreviews(const FPlan& Plan, FBuilt& Built, TArray<FHyperAIModelAssetResult>& InOutAssets, TArray<FString>& OutNotes)
