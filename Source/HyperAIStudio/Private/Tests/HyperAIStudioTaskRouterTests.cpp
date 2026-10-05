@@ -104,6 +104,12 @@ bool FHyperAIStudioTaskRouterPacksTest::RunTest(const FString& Parameters)
 		{TEXT("Make a footstep sound for gravel"), TEXT("sound_design")},
 		{TEXT("Set up the locomotion state machine in the animation blueprint"), TEXT("anim_blueprint")},
 		{TEXT("Add a cutscene where the camera pans over the castle"), TEXT("cinematics")},
+		// Free modelling with Geometry Script, not the paid generator or the import pack.
+		{TEXT("Make a placeholder stone arch"), TEXT("mesh_modeling")},
+		{TEXT("Model a crystal cluster prop"), TEXT("mesh_modeling")},
+		{TEXT("Make a low poly rock mesh"), TEXT("mesh_modeling")},
+		{TEXT("Generate a textured 3D model of a car"), TEXT("mesh_generation")},
+		{TEXT("Import the FBX of the sword"), TEXT("geometry_interchange")},
 		{TEXT("What time is it?"), TEXT("none")},
 		{TEXT("Thanks!"), TEXT("none")},
 	};
@@ -289,6 +295,7 @@ bool FHyperAIStudioTaskRouterAgentsTest::RunTest(const FString& Parameters)
 		{TEXT("Block out a small arena with cover and two ramps"), TEXT("level-designer")},
 		{TEXT("Scatter rocks and trees over the landscape"), TEXT("level-designer")},
 		{TEXT("Plant trees along the road"), TEXT("level-designer")},
+		{TEXT("Model a stone pillar with a plinth"), TEXT("level-designer")},
 		{TEXT("Make the explosion bigger with more sparks"), TEXT("technical-artist")},
 		{TEXT("Create a material for a mossy stone wall"), TEXT("technical-artist")},
 		{TEXT("Retarget the Manny animations onto my new character"), TEXT("technical-artist")},
