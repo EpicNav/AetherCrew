@@ -5007,6 +5007,12 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "PresetNotHeld",
+   "source": "The prompt was not inserted: this chat runs in the terminal. Skills > Prompts puts one in its prompt.",
+   "text": "提示词未插入：这个对话在终端中运行。用“技能 › 提示词”可以把提示词放进它的输入框。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "PresetWaits",
    "source": "The prompt goes in the chat once its agent starts.",
    "text": "智能体启动后，提示词会放进对话。"

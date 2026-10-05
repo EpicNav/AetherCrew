@@ -302,13 +302,20 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 					.HintText(FText::Format(LOCTEXT("ComposerHint", "Message {0}. Enter sends; Shift+Enter starts a new line."), FText::FromString(Chat->GetAgentName())))
 					.OnTextChanged_Lambda([this](const FText& Text)
 					{
-						// A composer typed empty starts over: the preset no longer describes what is in it.
+						// A composer typed empty starts over: the preset no longer describes what is in it, and what it turned on
+						// and said goes with it.
 						if (Text.IsEmpty())
 						{
+							if (PendingPreset.IsSet())
+							{
+								bTeam = bTeamFromPreset ? false : bTeam;
+								Notice = Notice == PresetNotice ? FString() : Notice;
+							}
 							PendingPreset.Reset();
 							PendingRoute.Reset();
 							PendingBlanks.Reset();
 							bBlanksNoted = false;
+							bTeamFromPreset = false;
 						}
 					})
 					.OnKeyDownHandler_Lambda([this](const FGeometry&, const FKeyEvent& KeyEvent)
@@ -337,7 +344,12 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 				.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
 				.ToolTipText(LOCTEXT("TeamTooltip", "Send your messages to HyperAI's team, not to this agent alone. The director plans the work, the programmer, level designer, lighting artist, technical artist and UI designer build their parts at once, the QA tester proves each part, and the director reviews it all against the team's quality bar. The first time, this adds the team to the project."))
 				.IsChecked_Lambda([this]() { return bTeam ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-				.OnCheckStateChanged_Lambda([this](const ECheckBoxState State) { bTeam = State == ECheckBoxState::Checked; })
+				.OnCheckStateChanged_Lambda([this](const ECheckBoxState State)
+				{
+					bTeam = State == ECheckBoxState::Checked;
+					// The user's own choice from here on.
+					bTeamFromPreset = false;
+				})
 				[
 					SNew(SBox)
 					.Padding(FMargin(8.0f, 2.0f))
@@ -474,6 +486,7 @@ void SHyperAIStudioNativeChatView::InsertPreset(const FHyperAIStudioPromptPreset
 	{
 		// Visibly, so the user can turn it off and keep the work with this agent.
 		bTeam = true;
+		bTeamFromPreset = true;
 		Lines.Add(LOCTEXT("PresetTeamOn", "Team is on: this prompt is for HyperAI's team. Turn it off to send it to this agent alone.").ToString());
 	}
 	FocusComposer();
@@ -489,6 +502,7 @@ void SHyperAIStudioNativeChatView::InsertPreset(const FHyperAIStudioPromptPreset
 		Lines.Add(FText::Format(LOCTEXT("PresetBlanks", "Fill in: {0}"), FText::FromString(FString::Join(Bracketed, TEXT(", ")))).ToString());
 	}
 	Notice = FString::Join(Lines, TEXT(" "));
+	PresetNotice = Notice;
 }
 
 void SHyperAIStudioNativeChatView::OpenPrompts()
@@ -587,20 +601,27 @@ void SHyperAIStudioNativeChatView::Submit()
 		{
 			bBlanksNoted = true;
 			Notice = FText::Format(LOCTEXT("PresetBlanksLeft", "Fill in: {0}. Send again to send it as it is."), FText::FromString(FString::Join(Left, TEXT(", ")))).ToString();
+			PresetNotice = Notice;
 			return;
 		}
 	}
-	// Taken before the composer empties, which forgets the preset.
-	const FHyperAIStudioMessageHints Hints = GetPendingHints();
+	FHyperAIStudioMessageHints Hints = GetPendingHints();
+	if (!bTeam && Hints.Agent == TEXT("team"))
+	{
+		// Team turned off: the work stays with this agent, so no hand-off to the team goes with it.
+		Hints.Agent.Reset();
+	}
 	if (!Hints.IsEmpty())
 	{
 		Notice.Reset();
 	}
-	Composer->SetText(FText::GetEmpty());
+	// Forgotten before the composer empties, or emptying it would also turn off the Team the preset turned on.
 	PendingPreset.Reset();
 	PendingRoute.Reset();
 	PendingBlanks.Reset();
 	bBlanksNoted = false;
+	bTeamFromPreset = false;
+	Composer->SetText(FText::GetEmpty());
 	bFollow = true;
 	FString Message = Text;
 	if (bTeam)

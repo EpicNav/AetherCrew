@@ -2559,6 +2559,13 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 		}
 		return;
 	}
+	// A preset held for a chat view that did not start: dropped, or a later chat view would get it unasked.
+	if (PendingPresetInsert.IsSet())
+	{
+		PendingPresetInsert.Reset();
+		LastMessage = LOCTEXT("PresetNotHeld", "The prompt was not inserted: this chat runs in the terminal. Skills > Prompts puts one in its prompt.");
+		AddTranscriptLine(LastMessage.ToString());
+	}
 	// A first message reaches a terminal agent the way a restart's does: as its opening prompt, one line pointing at a file.
 	FString FirstArgument = ContinueArgument;
 	if (FirstArgument.IsEmpty() && !Prompt.IsEmpty())
@@ -3314,6 +3321,8 @@ int32 SHyperAIStudioQuickActionWindow::OpenJobChat(const FString& Category, cons
 	}
 	Window->PendingPrompt = Prompt;
 	Window->PendingImages = Images;
+	// A job's prompt names nothing of a preset's.
+	Window->PendingHints = FHyperAIStudioMessageHints();
 	if (bReused)
 	{
 		// A job is new work, never the conversation the tab was reopened with.
@@ -3402,6 +3411,7 @@ bool SHyperAIStudioQuickActionWindow::SendToChat(const int32 TabIndex, const FSt
 	{
 		Window->PendingPrompt = Text;
 		Window->PendingImages = Images;
+		Window->PendingHints = FHyperAIStudioMessageHints();
 		OutMessage = FString::Printf(TEXT("Chat %d gets it as its agent starts."), TabIndex);
 		return true;
 	}

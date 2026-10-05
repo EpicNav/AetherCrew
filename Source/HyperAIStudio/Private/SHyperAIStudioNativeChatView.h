@@ -38,7 +38,8 @@ public:
 	/**
 	 * Puts a prompt preset's filled text in the composer (after a blank line when it holds something), selects its first
 	 * blank and says which are left; never sends it. The next message goes with the preset's packs, skills and agent, and
-	 * a preset for the team turns Team on. Typing the composer empty forgets the preset.
+	 * a preset for the team turns Team on (sent with Team off, it goes to this agent alone). Typing the composer empty
+	 * forgets the preset, with the Team it turned on and its line under the composer.
 	 */
 	void InsertPreset(const FHyperAIStudioPromptPreset& Preset, const FString& Text, const TArray<FString>& Blanks = {});
 	/** Opens the prompt picker by the composer, as Prompts and Ctrl+Space do. */
@@ -111,6 +112,10 @@ private:
 	TArray<FString> PendingBlanks;
 	/** The first send with blanks left only says so; the next one sends. */
 	bool bBlanksNoted = false;
+	/** Team is on because the pending preset turned it on, not the user; typing the preset away turns it off again. */
+	bool bTeamFromPreset = false;
+	/** The line the pending preset put under the composer, which leaves with it. */
+	FString PresetNotice;
 	/** Items whose details are open. */
 	TSet<FString> Open;
 	FDelegateHandle ChangedHandle;
