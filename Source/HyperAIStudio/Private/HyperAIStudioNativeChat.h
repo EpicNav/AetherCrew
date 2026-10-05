@@ -58,13 +58,15 @@ struct FHyperAIStudioMessageHints
 	FString PresetId;
 	/** Catalog pack ids, the main one first. */
 	TArray<FString> Packs;
+	/** The hyper_* tools its prompt names: listed before the rest of its packs' tools, each with its toolset_name. */
+	TArray<FString> Tools;
 	TArray<FString> Skills;
 	/** A project agent's name, or "team". */
 	FString Agent;
 	/** The task route (by its category's name) a new chat's first message takes. */
 	FString Route;
 
-	bool IsEmpty() const { return PresetId.IsEmpty() && Packs.IsEmpty() && Skills.IsEmpty() && Agent.IsEmpty() && Route.IsEmpty(); }
+	bool IsEmpty() const { return PresetId.IsEmpty() && Packs.IsEmpty() && Tools.IsEmpty() && Skills.IsEmpty() && Agent.IsEmpty() && Route.IsEmpty(); }
 };
 
 /**

@@ -12,7 +12,8 @@ skills for it instead of guessing from the words.
   (lower-case words joined by hyphens), a `title` (60 characters at most), an `order`, an `icon` (a
   `HyperAIStudio.Icon.*` brush), a `min` (how many presets the shipped library must hold for it) and an optional
   `route`, one of the default task routes (`Plan a feature`, `Materials`, `VFX`, `Lighting`, `Level Design`,
-  `Animation`, `Gameplay`). A new chat's first message from a preset takes its category's route.
+  `Animation`, `Gameplay`). A new chat's first message from a preset takes its category's route, or, when the user
+  renamed or removed that route, the route its words fit.
 - `<category>.json`: one file per category, `{"schema": "hyperai.prompt-presets.v1", "category": "<id>", "presets": [...]}`.
   The file's name is its category's id.
 - `Tools/Prompts/zh-Hans/<category>.json`: the Simplified Chinese for each preset, a flat object keyed

@@ -412,7 +412,7 @@ FString FHyperAIStudioNativeChat::ContextFor(const FString& Root, const FString&
 		HandOff = Hints.Agent.IsEmpty() ? TaskRouter::AgentHintFor(Text, Root, ChatAgent, StartedAs, Given)
 			: TaskRouter::AgentHintNamed(Hints.Agent, Text, Root, ChatAgent, StartedAs, Given);
 	}
-	const FString Context = Recalled + HandOff + Skills::HintFor(Root, Text, Given, Preferred) + TaskRouter::ToolHintFor(Packs, Given);
+	const FString Context = Recalled + HandOff + Skills::HintFor(Root, Text, Given, Preferred) + TaskRouter::ToolHintFor(Packs, Given, Hints.Tools);
 	FString HandedTo;
 	TArray<FString> SkillNames;
 	TArray<FString> PackIds;
@@ -434,6 +434,11 @@ FString FHyperAIStudioNativeChat::ContextFor(const FString& Root, const FString&
 		else if (Key.StartsWith(TEXT("tools:")))
 		{
 			PackIds.Add(Key.RightChop(6));
+		}
+		else if (Key.StartsWith(TEXT("tool:")))
+		{
+			// One line of a tools block, which its pack (or the preset) already names.
+			continue;
 		}
 		else
 		{
