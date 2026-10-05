@@ -449,6 +449,101 @@ bool FHyperAIStudioLightingOpsTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioLightingScatteringNotesTest,
+	"HyperAIStudio.Lighting.Ops.SkyAtmosphereScaleNotes",
+	HyperAIStudio::Lighting::Tests::Flags)
+
+bool FHyperAIStudioLightingScatteringNotesTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Lighting::Tests;
+	namespace Gate = HyperAIStudio::Lighting::Gate;
+	// The engine's own defaults, which the notes name, and the Details panel's range, which the ops take.
+	const USkyAtmosphereComponent* Defaults = GetDefault<USkyAtmosphereComponent>();
+	TestTrue(*FString::Printf(TEXT("the engine's default scales are 0.0331 and 0.003996 (%g, %g)"), Defaults->RayleighScatteringScale, Defaults->MieScatteringScale),
+		FMath::IsNearlyEqual(Defaults->RayleighScatteringScale, 0.0331f, 1e-6f) && FMath::IsNearlyEqual(Defaults->MieScatteringScale, 0.003996f, 1e-7f));
+	auto UIMax = [](const FName Name)
+	{
+		const FProperty* Property = FindFProperty<FProperty>(USkyAtmosphereComponent::StaticClass(), Name);
+		return Property ? FCString::Atof(*Property->GetMetaData(TEXT("UIMax"))) : -1.f;
+	};
+	TestEqual(TEXT("the panel slides rayleigh_scale to 2"), UIMax(GET_MEMBER_NAME_CHECKED(USkyAtmosphereComponent, RayleighScatteringScale)), 2.f);
+	TestEqual(TEXT("and mie_scale to 5"), UIMax(GET_MEMBER_NAME_CHECKED(USkyAtmosphereComponent, MieScatteringScale)), 5.f);
+
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAILightingScatteringWorld"));
+	if (!TestNotNull(TEXT("a test world"), World)) return false;
+	ON_SCOPE_EXIT
+	{
+		World->DestroyWorld(/*bInformEngineOfWorld=*/false);
+	};
+	FString Error;
+	TArray<FString> Notes;
+	TestTrue(TEXT("the panel's whole range is taken: ") + Error, Gate::ValidateOps(*World,
+		{Op(TEXT("set_sky_atmosphere"), TEXT("rayleigh_scale"), TEXT("2")), Op(TEXT("set_sky_atmosphere"), TEXT("mie_scale"), TEXT("5"))}, Error));
+	TestTrue(TEXT("and no more"), !Gate::ValidateOps(*World, {Op(TEXT("set_sky_atmosphere"), TEXT("rayleigh_scale"), TEXT("2.5"))}, Error) && Error.Contains(TEXT("from 0 to 2")));
+
+	// The plan that filled a sky with orange haze: valid, and said why.
+	TestTrue(TEXT("the hazy plan checks"), Gate::ValidateOps(*World,
+		{Op(TEXT("set_sun"), TEXT("intensity"), TEXT("8")), Op(TEXT("set_sky_atmosphere"), TEXT("rayleigh_scale"), TEXT("1.1")),
+			Op(TEXT("set_sky_atmosphere"), TEXT("mie_scale"), TEXT("1.4"))}, Error, &Notes));
+	TestEqual(*FString::Printf(TEXT("with a note for each scale: %s"), *FString::Join(Notes, TEXT(" | "))), Notes.Num(), 2);
+	if (Notes.Num() == 2)
+	{
+		TestTrue(TEXT("rayleigh_scale: how far past its default, and what it does"), Notes[0].StartsWith(TEXT("Op 1: set_sky_atmosphere rayleigh_scale 1.1 is 33x the default 0.0331: the sky turns to haze"))
+			&& Notes[0].Contains(TEXT("values near 0.03 are normal")));
+		TestTrue(TEXT("mie_scale too"), Notes[1].StartsWith(TEXT("Op 2: set_sky_atmosphere mie_scale 1.4 is 350x the default 0.003996: "))
+			&& Notes[1].Contains(TEXT("values near 0.004 are normal")));
+	}
+	Notes.Reset();
+	TestTrue(TEXT("values within ten times the default"), Gate::ValidateOps(*World,
+		{Op(TEXT("set_sky_atmosphere"), TEXT("rayleigh_scale"), TEXT("0.3")), Op(TEXT("set_sky_atmosphere"), TEXT("mie_scale"), TEXT("0.03"))}, Error, &Notes));
+	TestEqual(TEXT("pass without a note: ") + FString::Join(Notes, TEXT(" | ")), Notes.Num(), 0);
+
+	// A sky as that plan left it. The same setting by its Details-panel label is noted too.
+	ASkyAtmosphere* Atmosphere = World->SpawnActor<ASkyAtmosphere>();
+	if (!TestTrue(TEXT("a sky atmosphere"), Atmosphere && Atmosphere->GetComponent())) return false;
+	Atmosphere->GetComponent()->RayleighScatteringScale = 1.1f;
+	Notes.Reset();
+	TestTrue(TEXT("Mie Scattering Scale by name checks"), Gate::ValidateOps(*World, {Op(TEXT("set_sky_atmosphere"), TEXT("Mie Scattering Scale"), TEXT("0.2"))}, Error, &Notes));
+	TestTrue(TEXT("and is noted as mie_scale: ") + FString::Join(Notes, TEXT(" | ")), Notes.Num() == 1 && Notes[0].Contains(TEXT("mie_scale 0.2 is 50x the default")));
+
+	// Inspection shows the defaults beside the values, and the note on a scale far past its own.
+	const TArray<FHyperAILightingActorRecord> Actors = Gate::ReadActors(*World);
+	TestEqual(TEXT("the value set"), ValueOf(Actors, TEXT("sky_atmosphere"), TEXT("rayleigh_scale")), FString(TEXT("1.1")));
+	TestEqual(TEXT("its default beside it"), ValueOf(Actors, TEXT("sky_atmosphere"), TEXT("rayleigh_scale_default")), FString(TEXT("0.0331")));
+	TestEqual(TEXT("and mie_scale's"), ValueOf(Actors, TEXT("sky_atmosphere"), TEXT("mie_scale_default")), FString(TEXT("0.003996")));
+	TestTrue(TEXT("with a note on the far one alone: ") + ValueOf(Actors, TEXT("sky_atmosphere"), TEXT("note")),
+		ValueOf(Actors, TEXT("sky_atmosphere"), TEXT("note")).StartsWith(TEXT("rayleigh_scale 1.1 is 33x the default 0.0331"))
+		&& !ValueOf(Actors, TEXT("sky_atmosphere"), TEXT("note")).Contains(TEXT("mie_scale")));
+
+	// The dry run carries the notes, in the open level.
+	const FHyperAILightingInspectReport Inspected = FHyperAIStudioLightingContracts::Inspect({});
+	if (!Inspected.bOk || !FHyperAIStudioLightingContracts::IsRegistrationAllowed(FHyperAIStudioExtensionRuntime::IsPendingNativeToolsDevModeEnabled()))
+	{
+		AddInfo(TEXT("No editor level, or lighting_lookdev is not admitted here; the dry run is skipped. ") + Inspected.Diagnostic);
+		return true;
+	}
+	UWorld* EditorWorld = Gate::GetEditorWorld();
+	if (EditorWorld && !Gate::LightOwningSky(*EditorWorld).IsEmpty())
+	{
+		AddInfo(TEXT("The open level's sky owns its atmosphere; the dry run is skipped."));
+		return true;
+	}
+	FHyperAILightingApplyPlanRequest Plan;
+	Plan.ExpectedRevision = Inspected.Revision;
+	Plan.Ops = {Op(TEXT("set_sky_atmosphere"), TEXT("rayleigh_scale"), TEXT("1.1"))};
+	const FHyperAILightingApplyPlanReport DryRun = FHyperAIStudioLightingContracts::BuildPlan(Plan);
+	TestTrue(*FString::Printf(TEXT("the dry run prepares (%s: %s)"), *DryRun.Status, *DryRun.Diagnostic), DryRun.bOk);
+	TestTrue(TEXT("and notes the scale: ") + FString::Join(DryRun.Notes, TEXT(" | ")),
+		DryRun.Notes.Num() == 1 && DryRun.Notes[0].Contains(TEXT("rayleigh_scale 1.1 is 33x the default 0.0331")));
+	TestTrue(TEXT("pointing at the notes"), DryRun.Diagnostic.Contains(TEXT("Read the notes first")));
+	TestEqual(TEXT("and changes nothing"), FHyperAIStudioLightingContracts::Inspect({}).Revision, Inspected.Revision);
+	Plan.Ops = {Op(TEXT("set_sky_atmosphere"), TEXT("rayleigh_scale"), TEXT("0.04"))};
+	TestEqual(TEXT("a usual value has no note"), FHyperAIStudioLightingContracts::BuildPlan(Plan).Notes.Num(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHyperAIStudioLightingFrontDoorTest,
 	"HyperAIStudio.Lighting.Contracts.PlanFrontDoor",
 	HyperAIStudio::Lighting::Tests::Flags)

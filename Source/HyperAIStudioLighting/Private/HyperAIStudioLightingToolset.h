@@ -21,7 +21,10 @@ struct FHyperAILightingProperty
 	UPROPERTY() FString Value;
 };
 
-/** One lighting actor in the level and the settings the apply ops can change. */
+/**
+ * One lighting actor in the level and the settings the apply ops can change. A sky atmosphere also shows the engine's
+ * defaults (rayleigh_scale_default, mie_scale_default) and, when a scale is far past its default, a note on what it does.
+ */
 USTRUCT(BlueprintType)
 struct FHyperAILightingActorRecord
 {
@@ -188,7 +191,8 @@ struct FHyperAILightingCompareReport
  *   set_sky_light: intensity, color
  *   set_fog: density, height_falloff, start_distance, inscattering_color, and for light shafts volumetric_fog (true/false),
  *     volumetric_scattering_distribution (-0.9 to 0.9), volumetric_albedo (r,g,b), volumetric_extinction_scale
- *   set_sky_atmosphere: rayleigh_scale, mie_scale
+ *   set_sky_atmosphere: rayleigh_scale (0 to 2; the engine's default 0.0331), mie_scale (0 to 5; default 0.003996): raw
+ *     scattering coefficients, so ten times the default already turns the sky to haze
  *   set_clouds: volumetric clouds, added if the level has none; material:<parameter> sets one of their material's, such
  *     as material:Cloud_GlobalCoverage or material:Cloud_GlobalDensity, on a material instance the level owns
  *   set_post_process: exposure_bias (EV), white_temp (K), saturation, contrast, gamma, and grading as r,g,b:
@@ -281,6 +285,8 @@ struct FHyperAILightingApplyPlanReport
 	UPROPERTY() FString BaseRevision;
 	UPROPERTY() FString PlanHash;
 	UPROPERTY() FString AuthorizationPlanHash;
+	/** What the plan sets that is valid but rarely meant, and what it will do: a sky atmosphere scale far past its default. */
+	UPROPERTY() TArray<FString> Notes;
 	UPROPERTY() TArray<FString> Capabilities;
 };
 

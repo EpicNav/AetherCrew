@@ -50,6 +50,7 @@ bool FHyperAIStudioMatchJobsPromptTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("lights with every tool: stand-ins that let light through, clouds, softer shadows"), Light.Contains(TEXT("set_actor_shadow false"))
 		&& Light.Contains(TEXT("set_clouds")) && Light.Contains(TEXT("ShadowAmount")));
 	TestTrue(TEXT("and grades last with a fitted LUT"), Light.Contains(TEXT("bFitLut true")) && Light.Contains(TEXT("color_grading_lut")));
+	TestTrue(TEXT("gives the atmosphere's default scales, so they move a little"), Light.Contains(TEXT("by default 0.0331 and 0.003996")));
 	TestTrue(TEXT("and carries the sky note"), Light.Contains(Sky));
 	const FString Level = Jobs::BuildPrompt(Jobs::EGoal::Level, TEXT("Content/References/town.png"), TEXT("match_level_1"), 72.f, FString());
 	TestTrue(TEXT("the level prompt builds like a level designer"), Level.Contains(TEXT("level designer")) && Level.Contains(TEXT("HyperAI_MatchCamera")));

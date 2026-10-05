@@ -588,6 +588,62 @@ namespace HyperAIStudio::Lighting::Gate
 			}
 		}
 
+		/**
+		 * The sky atmosphere's scattering scales are raw coefficients. Its Details panel slides them from 0 to 2 and 5
+		 * (UIMin and UIMax; only ClampMin 0 binds), and the ops take that range, but the engine's defaults, an Earth sky,
+		 * are far smaller: about ten times one already thickens the sky into haze. A value past that is noted, not refused.
+		 */
+		struct FScatteringScale
+		{
+			const TCHAR* Key;
+			/** The same setting by its C++ name, as the Details path takes it. */
+			const TCHAR* Property;
+			float USkyAtmosphereComponent::* Member;
+			const TCHAR* Effect;
+		};
+
+		const FScatteringScale ScatteringScales[] = {
+			{TEXT("rayleigh_scale"), TEXT("RayleighScatteringScale"), &USkyAtmosphereComponent::RayleighScatteringScale,
+				TEXT("the sky turns to haze, orange where the sun shines through it")},
+			{TEXT("mie_scale"), TEXT("MieScatteringScale"), &USkyAtmosphereComponent::MieScatteringScale,
+				TEXT("the air fills with a pale haze that hides the horizon and blurs the sun")},
+		};
+
+		constexpr float ScatteringNoteRatio = 10.f;
+
+		float ScatteringDefault(const FScatteringScale& Scale)
+		{
+			return GetDefault<USkyAtmosphereComponent>()->*Scale.Member;
+		}
+
+		/** "rayleigh_scale 1.1 is 33x the default 0.0331: ...", or empty while Value is within ten times its default. */
+		FString ScatteringNote(const FScatteringScale& Scale, const float Value)
+		{
+			const float Default = ScatteringDefault(Scale);
+			if (Default <= 0.f || Value <= Default * ScatteringNoteRatio)
+			{
+				return FString();
+			}
+			return FString::Printf(TEXT("%s %g is %.0fx the default %g: %s; values near %.1g are normal."), Scale.Key, Value, Value / Default, Default, Scale.Effect, Default);
+		}
+
+		/** What a valid op sets that is rarely meant, in words, or empty: a sky atmosphere scattering scale far past its default, by key or by name. */
+		FString NoteOp(const FHyperAILightingOp& Op)
+		{
+			if (Op.Kind != TEXT("set_sky_atmosphere"))
+			{
+				return FString();
+			}
+			for (const FScatteringScale& Scale : ScatteringScales)
+			{
+				if (Op.Property != Scale.Key && Plain(Op.Property) != Plain(Scale.Property)) continue;
+				float Value = 0.f;
+				const FString Note = LexTryParseString(Value, *Op.Value.TrimStartAndEnd()) ? ScatteringNote(Scale, Value) : FString();
+				return Note.IsEmpty() ? Note : TEXT("set_sky_atmosphere ") + Note;
+			}
+			return FString();
+		}
+
 		void ReadProperties(AActor& Actor, const FString& Kind, TArray<FHyperAILightingProperty>& Out)
 		{
 			auto Add = [&Out](const TCHAR* Key, const FString& Value) { Out.Add({Key, Value}); };
@@ -627,8 +683,20 @@ namespace HyperAIStudio::Lighting::Gate
 			}
 			else if (const ASkyAtmosphere* Atmosphere = Cast<ASkyAtmosphere>(&Actor); Atmosphere && Atmosphere->GetComponent())
 			{
-				Add(TEXT("rayleigh_scale"), Number(Atmosphere->GetComponent()->RayleighScatteringScale));
-				Add(TEXT("mie_scale"), Number(Atmosphere->GetComponent()->MieScatteringScale));
+				// Raw coefficients: each with the engine's default beside it, and a note when one is far past that.
+				const USkyAtmosphereComponent& Component = *Atmosphere->GetComponent();
+				TArray<FString> Notes;
+				for (const FScatteringScale& Scale : ScatteringScales)
+				{
+					Add(Scale.Key, Number(Component.*Scale.Member));
+					Add(*(FString(Scale.Key) + TEXT("_default")), Number(ScatteringDefault(Scale)));
+					const FString Note = ScatteringNote(Scale, Component.*Scale.Member);
+					if (!Note.IsEmpty()) Notes.Add(Note);
+				}
+				if (!Notes.IsEmpty())
+				{
+					Add(TEXT("note"), FString::Join(Notes, TEXT(" ")));
+				}
 			}
 			else if (const UVolumetricCloudComponent* Cloud = Actor.IsA<AVolumetricCloud>() ? Actor.FindComponentByClass<UVolumetricCloudComponent>() : nullptr)
 			{
@@ -702,6 +770,7 @@ namespace HyperAIStudio::Lighting::Gate
 			{TEXT("fog"), TEXT("volumetric_scattering_distribution"), false, -0.9f, 0.9f},
 			{TEXT("fog"), TEXT("volumetric_albedo"), true, 0.f, 1.f},
 			{TEXT("fog"), TEXT("volumetric_extinction_scale"), false, 0.1f, 10.f},
+			// The engine's Details-panel range; ScatteringScales notes a value far past the engine's default.
 			{TEXT("sky_atmosphere"), TEXT("rayleigh_scale"), false, 0.f, 2.f},
 			{TEXT("sky_atmosphere"), TEXT("mie_scale"), false, 0.f, 5.f},
 			{TEXT("post_process"), TEXT("exposure_bias"), false, -15.f, 15.f},
@@ -2953,10 +3022,19 @@ namespace HyperAIStudio::Lighting::Gate
 		return Sky ? FString::Printf(TEXT("%s ('%s')"), SkySystemOf(Sky->GetClass())->Name, *Sky->GetActorLabel()) : FString();
 	}
 
-	bool ValidateOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, FString& OutError)
+	bool ValidateOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, FString& OutError, TArray<FString>* OutNotes)
 	{
 		TArray<AActor*> Unused;
-		return RunOps(World, Ops, /*bWrite=*/false, Unused, OutError);
+		if (!RunOps(World, Ops, /*bWrite=*/false, Unused, OutError))
+		{
+			return false;
+		}
+		for (int32 Index = 0; OutNotes && Index < Ops.Num(); ++Index)
+		{
+			const FString Note = NoteOp(Ops[Index]);
+			if (!Note.IsEmpty()) OutNotes->Add(FString::Printf(TEXT("Op %d: %s"), Index, *Note));
+		}
+		return true;
 	}
 
 	bool ApplyOps(UWorld& World, const TArray<FHyperAILightingOp>& Ops, TArray<AActor*>& OutTouched, FString& OutError)

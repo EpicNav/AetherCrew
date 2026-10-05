@@ -97,7 +97,7 @@ A real frame is never one light. When the score stalls on the sun, the missing p
 
 | What the reference shows | Levers |
 |---|---|
-| A glow around a low sun | `set_sky_atmosphere` `MieAnisotropy` (0.8 to 0.95) and `mie_scale` |
+| A glow around a low sun | `set_sky_atmosphere` `MieAnisotropy` (0.8 to 0.95) and `mie_scale` (a raw coefficient, 0.003996 by default, as `rayleigh_scale` is 0.0331: a few times the default at most, since ten times turns the sky to haze) |
 | Haze the sun lights | `set_fog` `DirectionalInscatteringExponent`, `DirectionalInscatteringLuminance`, `inscattering_color` and `density` |
 | Low mist over water or a valley | `set_fog` `SecondFogData`, such as `(FogDensity=0.05,FogHeightFalloff=0.5,FogHeightOffset=-200)` |
 | God rays and light shafts | `set_fog` `volumetric_fog` true with the sun's `VolumetricScatteringIntensity`; `set_sun` `light_shaft_bloom` true with `BloomScale` and `BloomThreshold` |

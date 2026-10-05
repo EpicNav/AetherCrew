@@ -975,10 +975,13 @@ FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const
 		return Reject(TEXT("level_never_saved"), TEXT("This level has never been saved, so there is nowhere to save the lighting; save the level first or leave bSave off."));
 	}
 	FString OpError;
-	if (!Gate::ValidateOps(*World, Request.Ops, OpError))
+	TArray<FString> OpNotes;
+	if (!Gate::ValidateOps(*World, Request.Ops, OpError, &OpNotes))
 	{
 		return Reject(TEXT("invalid_op"), OpError);
 	}
+	// On the dry run and on the edit's own reply, which keeps them when it waits: the agent hears why before the level shows it.
+	Report.Notes = MoveTemp(OpNotes);
 
 	const TSharedRef<FHyperAIStudioLightingEditOpsPayload, ESPMode::ThreadSafe> Payload =
 		MakeShared<FHyperAIStudioLightingEditOpsPayload, ESPMode::ThreadSafe>();
@@ -1033,7 +1036,8 @@ FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const
 	{
 		Report.bOk = true;
 		Report.Status = TEXT("planned");
-		Report.Diagnostic = Fit.AppendTo(TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash."));
+		Report.Diagnostic = Fit.AppendTo(FString(TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash."))
+			+ (Report.Notes.IsEmpty() ? TEXT("") : TEXT(" Read the notes first: they say what some of these values will do.")));
 		return Report;
 	}
 	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
