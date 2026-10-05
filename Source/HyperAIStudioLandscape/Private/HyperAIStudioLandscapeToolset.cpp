@@ -200,6 +200,16 @@ namespace HyperAIStudio::LandscapeTools::Private
 		return true;
 	}
 
+	/**
+	 * Whether a layer's weight gives way to the edit layers above it where they paint (Advanced Weight Blending). Otherwise
+	 * the edit layers' weights add up: under a road its layer is added to whatever is painted beneath, and paint on an
+	 * upper edit layer is added to the paint below it rather than covering it.
+	 */
+	bool Covers(const ULandscapeLayerInfoObject& Info)
+	{
+		return Info.GetBlendMethod() == ELandscapeTargetLayerBlendMethod::PremultipliedAlphaBlending;
+	}
+
 	/** An existing layer info asset for the layer name in Folder, or a new one when bMake. */
 	ULandscapeLayerInfoObject* FindOrMakeLayerInfo(const FString& Folder, const FString& Name, const bool bMake)
 	{
@@ -212,7 +222,12 @@ namespace HyperAIStudio::LandscapeTools::Private
 			ULandscapeLayerInfoObject* Info = Cast<ULandscapeLayerInfoObject>(Asset.GetAsset());
 			if (Info && Info->GetLayerName().ToString().Equals(Name, ESearchCase::IgnoreCase)) return Info;
 		}
-		return bMake ? UE::Landscape::CreateTargetLayerInfo(FName(*Name), Folder) : nullptr;
+		if (!bMake) return nullptr;
+		ULandscapeLayerInfoObject* Made = UE::Landscape::CreateTargetLayerInfo(FName(*Name), Folder);
+		// New layers cover one another across edit layers, so a road covers the paint under it. Set without Modify, so an
+		// undo of the plan cannot revert it on the new asset.
+		if (Made) Made->SetBlendMethod(ELandscapeTargetLayerBlendMethod::PremultipliedAlphaBlending, /*bInModify=*/false);
+		return Made;
 	}
 
 	/** The edit layer to change: by name, or the first. */
@@ -387,8 +402,8 @@ namespace HyperAIStudio::LandscapeTools::Private
 		return Meters;
 	}
 
-	/** The landscape's roads and other splines, as segments in its vertex grid. */
-	TArray<TPair<FVector2D, FVector2D>> SplineSegments(const ALandscape& Landscape, const ULandscapeInfo& Info)
+	/** The splines components holding the landscape's roads and other splines. */
+	TSet<ULandscapeSplinesComponent*> SplinesComponents(const ULandscapeInfo& Info)
 	{
 		TSet<ULandscapeSplinesComponent*> Components;
 		Info.ForEachLandscapeProxy([&Components](ALandscapeProxy* Proxy)
@@ -401,8 +416,32 @@ namespace HyperAIStudio::LandscapeTools::Private
 		{
 			if (Owner && Owner->GetSplinesComponent()) Components.Add(Owner->GetSplinesComponent());
 		});
+		return Components;
+	}
+
+	/** The paint layers the landscape's roads paint: each segment's and control point's LayerName. */
+	TArray<FString> PaintedByRoads(const ULandscapeInfo& Info)
+	{
+		TArray<FString> Layers;
+		for (const ULandscapeSplinesComponent* Splines : SplinesComponents(Info))
+		{
+			for (const ULandscapeSplineSegment* Segment : Splines->GetSegments())
+			{
+				if (Segment && !Segment->LayerName.IsNone()) Layers.AddUnique(Segment->LayerName.ToString());
+			}
+			for (const ULandscapeSplineControlPoint* Point : Splines->GetControlPoints())
+			{
+				if (Point && !Point->LayerName.IsNone()) Layers.AddUnique(Point->LayerName.ToString());
+			}
+		}
+		return Layers;
+	}
+
+	/** The landscape's roads and other splines, as segments in its vertex grid. */
+	TArray<TPair<FVector2D, FVector2D>> SplineSegments(const ALandscape& Landscape, const ULandscapeInfo& Info)
+	{
 		TArray<TPair<FVector2D, FVector2D>> Segments;
-		for (ULandscapeSplinesComponent* Splines : Components)
+		for (ULandscapeSplinesComponent* Splines : SplinesComponents(Info))
 		{
 			const FTransform ToWorld = Splines->GetComponentTransform();
 			for (const ULandscapeSplineSegment* Segment : Splines->GetSegments())
@@ -925,10 +964,27 @@ namespace HyperAIStudio::LandscapeTools::Private
 	{
 		TSet<FString> PaintLayers;
 		TSet<FString> EditLayers;
+		/** The roads' edit layer (lowercased): the landscape's Splines layer, or the one its first road in the plan adds. */
+		FString SplinesLayer;
+		/** The layers its roads paint. */
+		TArray<FString> RoadLayers;
+		/** Paint layers whose layer infos add up across edit layers instead of covering (no Advanced Weight Blending). */
+		TArray<FString> Stacking;
+		bool bStackingNoted = false;
 	};
 
-	/** Every op checked before anything changes. */
-	bool Check(UWorld& World, const FHyperAILandscapePlanRequest& Request, FString& OutError)
+	/** The layers of Names whose layer infos in Folder exist already without Advanced Weight Blending: a new layer reuses them. */
+	void AddReusedStacking(const FString& Folder, const TArray<FString>& Names, FPlanned& Planned)
+	{
+		for (const FString& Name : Names)
+		{
+			const ULandscapeLayerInfoObject* Existing = IsIdentifier(Name) ? FindOrMakeLayerInfo(Folder, Name, /*bMake=*/false) : nullptr;
+			if (Existing && !Covers(*Existing)) Planned.Stacking.AddUnique(Name);
+		}
+	}
+
+	/** Every op checked before anything changes; OutNotes gets what the plan should know but is no reason to refuse it. */
+	bool Check(UWorld& World, const FHyperAILandscapePlanRequest& Request, TArray<FString>& OutNotes, FString& OutError)
 	{
 		if (Request.Operations.IsEmpty() || Request.Operations.Num() > C::MaxOperations)
 		{
@@ -946,13 +1002,32 @@ namespace HyperAIStudio::LandscapeTools::Private
 			FPlanned Known;
 			for (const FLandscapeInfoLayerSettings& Settings : Info->Layers)
 			{
-				if (Settings.LayerInfoObj) Known.PaintLayers.Add(Settings.LayerName.ToString().ToLower());
+				if (!Settings.LayerInfoObj) continue;
+				Known.PaintLayers.Add(Settings.LayerName.ToString().ToLower());
+				if (Settings.LayerInfoObj != ALandscapeProxy::VisibilityLayer && !Covers(*Settings.LayerInfoObj)) Known.Stacking.AddUnique(Settings.LayerName.ToString());
 			}
 			for (const ULandscapeEditLayerBase* Layer : Landscape->GetEditLayersConst())
 			{
 				if (Layer) Known.EditLayers.Add(Layer->GetName().ToString().ToLower());
 			}
+			if (const ULandscapeEditLayerBase* Splines = Landscape->FindEditLayerOfTypeConst(ULandscapeEditLayerSplines::StaticClass()))
+			{
+				Known.SplinesLayer = Splines->GetName().ToString().ToLower();
+			}
+			Known.RoadLayers = PaintedByRoads(*Info);
 			return &Plan.Add(Key, MoveTemp(Known));
+		};
+		// Where layer infos add up, roads and upper edit layers mix with the paint beneath them; said once per landscape.
+		auto NoteStacking = [&OutNotes](FPlanned& Landscape, const FString& Label)
+		{
+			if (Landscape.Stacking.IsEmpty() || Landscape.bStackingNoted) return;
+			Landscape.bStackingNoted = true;
+			const FString RoadPaint = Landscape.RoadLayers.IsEmpty() ? FString(TEXT("under a road the road's paint"))
+				: TEXT("under its roads ") + FString::Join(Landscape.RoadLayers, TEXT(" and "));
+			OutNotes.Add(FString::Printf(TEXT("%s: the layer infos of %s have no Advanced Weight Blending, so its edit layers add up instead of covering one another: ")
+				TEXT("%s mixes with the paint beneath, and paint on an upper edit layer mixes with the paint below. ")
+				TEXT("Setting their Blend Method to Advanced Weight Blending makes roads and upper edit layers cover what is beneath."),
+				*Label.TrimStartAndEnd(), *FString::Join(Landscape.Stacking, TEXT(", ")), *RoadPaint));
 		};
 		/** Materials the plan makes, by package path, for later ops to set: named by the package, or package.name. */
 		TSet<FString> Materials;
@@ -1043,6 +1118,7 @@ namespace HyperAIStudio::LandscapeTools::Private
 					Made.PaintLayers.Add(Layer.ToLower());
 				}
 				Made.EditLayers.Add(TEXT("layer"));
+				AddReusedStacking(Op.LayerInfoFolder.IsEmpty() ? FString(DefaultLayerInfoFolder) : Op.LayerInfoFolder, Op.PaintLayers, Made);
 				Plan.Add(Op.Landscape.TrimStartAndEnd().ToLower(), MoveTemp(Made));
 				continue;
 			}
@@ -1052,6 +1128,13 @@ namespace HyperAIStudio::LandscapeTools::Private
 			{
 				return Op.EditLayer.IsEmpty() || Landscape->EditLayers.Contains(Op.EditLayer.TrimStartAndEnd().ToLower());
 			};
+			// The engine rebuilds the Splines edit layer from the roads whenever they change, and its own tools cannot edit it.
+			auto OnSplinesLayer = [Landscape, &Op]()
+			{
+				return !Landscape->SplinesLayer.IsEmpty() && Op.EditLayer.TrimStartAndEnd().ToLower() == Landscape->SplinesLayer;
+			};
+			const FString SplinesRefusal = FString::Printf(TEXT("%s is the roads' edit layer, rebuilt from the roads whenever they change, so what is painted or sculpted there is lost. ")
+				TEXT("Use another edit layer; to paint over a road, add one after the road (landscape.add_edit_layer) and paint there."), *Op.EditLayer.TrimStartAndEnd());
 			if (Kind == TEXT("landscape.sculpt"))
 			{
 				const FString Mode = Op.Mode.TrimStartAndEnd().ToLower();
@@ -1066,6 +1149,7 @@ namespace HyperAIStudio::LandscapeTools::Private
 					return Fail(TEXT("Amount, in meters, above 0."));
 				}
 				if (!KnowsEditLayer()) return Fail(FString::Printf(TEXT("The landscape has no edit layer %s."), *Op.EditLayer));
+				if (OnSplinesLayer()) return Fail(SplinesRefusal);
 			}
 			else if (Kind == TEXT("landscape.set_material"))
 			{
@@ -1080,6 +1164,7 @@ namespace HyperAIStudio::LandscapeTools::Private
 					if (Landscape->PaintLayers.Contains(Layer.ToLower())) return Fail(FString::Printf(TEXT("The landscape has paint layer %s already."), *Layer));
 					Landscape->PaintLayers.Add(Layer.ToLower());
 				}
+				AddReusedStacking(Op.LayerInfoFolder.IsEmpty() ? FString(DefaultLayerInfoFolder) : Op.LayerInfoFolder, Op.PaintLayers, *Landscape);
 			}
 			else if (Kind == TEXT("landscape.paint"))
 			{
@@ -1098,6 +1183,9 @@ namespace HyperAIStudio::LandscapeTools::Private
 					}
 				}
 				if (!KnowsEditLayer()) return Fail(FString::Printf(TEXT("The landscape has no edit layer %s."), *Op.EditLayer));
+				if (OnSplinesLayer()) return Fail(SplinesRefusal);
+				// Roads and named edit layers are where layers that add up mix: under a road, and over the edit layers below.
+				if (!Landscape->RoadLayers.IsEmpty() || !Op.EditLayer.TrimStartAndEnd().IsEmpty()) NoteStacking(*Landscape, Op.Landscape);
 			}
 			else if (Kind == TEXT("landscape.add_edit_layer"))
 			{
@@ -1114,6 +1202,17 @@ namespace HyperAIStudio::LandscapeTools::Private
 					return Fail(FString::Printf(TEXT("The landscape has no paint layer '%s'; add_paint_layer adds one."), *Op.Layer));
 				}
 				if (!Op.Mesh.IsEmpty() && !Load<UStaticMesh>(Op.Mesh)) return Fail(FString::Printf(TEXT("%s is not a static mesh."), *Op.Mesh));
+				// The first road adds the Splines edit layer, on top of the stack.
+				if (Landscape->SplinesLayer.IsEmpty())
+				{
+					Landscape->SplinesLayer = TEXT("splines");
+					Landscape->EditLayers.Add(Landscape->SplinesLayer);
+				}
+				if (!Op.Layer.TrimStartAndEnd().IsEmpty())
+				{
+					Landscape->RoadLayers.AddUnique(Op.Layer.TrimStartAndEnd());
+					NoteStacking(*Landscape, Op.Landscape);
+				}
 			}
 			else
 			{
@@ -1310,11 +1409,12 @@ namespace HyperAIStudio::LandscapeTools::Private
 		return true;
 	}
 
-	/** The plan for real: every op as one undo step, the merged result read back, then saved as asked. */
-	FHyperAILandscapePlanReport Execute(const FHyperAILandscapePlanRequest& Request, const FString& OperationId)
+	/** The plan for real: every op as one undo step, the merged result read back, then saved as asked. Notes start with the check's. */
+	FHyperAILandscapePlanReport Execute(const FHyperAILandscapePlanRequest& Request, const FString& OperationId, const TArray<FString>& CheckNotes)
 	{
 		FHyperAILandscapePlanReport Report;
 		Report.OperationId = OperationId;
+		Report.Notes = CheckNotes;
 		UWorld* World = EditorWorld();
 		if (!World)
 		{
@@ -1428,12 +1528,14 @@ FHyperAILandscapePlanReport FHyperAIStudioLandscapeContracts::ApplyPlan(const FH
 		Report.Diagnostic = TEXT("No level is open in the editor.");
 		return Report;
 	}
-	if (!Check(*World, Request, Error))
+	TArray<FString> CheckNotes;
+	if (!Check(*World, Request, CheckNotes, Error))
 	{
 		Report.Status = TEXT("invalid_request");
 		Report.Diagnostic = Error;
 		return Report;
 	}
+	Report.Notes = CheckNotes;
 	if (Request.bSave && World->GetOutermost()->GetName().StartsWith(TEXT("/Temp/")))
 	{
 		Report.Status = TEXT("invalid_request");
@@ -1467,9 +1569,9 @@ FHyperAILandscapePlanReport FHyperAIStudioLandscapeContracts::ApplyPlan(const FH
 			if (!Op.Landscape.IsEmpty()) Summary.Touches.AddUnique(Op.Landscape);
 		}
 		const FString OperationId = Report.OperationId;
-		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId]()
+		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId, CheckNotes]()
 			{
-				Record(OperationId, Execute(Request, OperationId));
+				Record(OperationId, Execute(Request, OperationId, CheckNotes));
 			}, Error))
 		{
 			Report.Status = TEXT("approval_not_queued");
@@ -1481,7 +1583,7 @@ FHyperAILandscapePlanReport FHyperAIStudioLandscapeContracts::ApplyPlan(const FH
 		Report.Diagnostic = TEXT("Agent edits need approval here. Waiting in HyperAI Chat, Activity panel; nothing ran yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true.");
 		return Report;
 	}
-	return Execute(Request, Report.OperationId);
+	return Execute(Request, Report.OperationId, CheckNotes);
 }
 
 FHyperAILandscapeInspectReport UHyperAIStudioLandscapeToolset::hyper_landscape_inspect(const FHyperAILandscapeInspectRequest& Request)

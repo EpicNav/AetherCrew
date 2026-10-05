@@ -69,6 +69,8 @@ A valley: rolling noise, a flat camp site, paint by slope and height, and a dirt
   (`landscape.add_edit_layer`, then `EditLayer` on sculpt and paint) keeps a change separate and easy to remove.
 - A road follows the ground through its points and levels it across its width. A `Mesh` lays a road surface along
   it. Keep grades walkable: under 30 degrees, per the level designer's bar.
+- A road keeps its paint on the Splines edit layer, which covers the base layer's paint under it, so its layer paints
+  as usual elsewhere; to paint over a road (snow, mud), paint on an edit layer added after it, never on Splines.
 
 ## Foliage
 
