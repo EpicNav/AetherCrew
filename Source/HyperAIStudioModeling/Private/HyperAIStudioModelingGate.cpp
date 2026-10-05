@@ -45,6 +45,7 @@
 #include "StaticMeshCompiler.h"
 #include "StaticMeshResources.h"
 #include "UDynamicMesh.h"
+#include "UObject/ObjectRedirector.h"
 #include "UObject/Package.h"
 
 namespace HyperAIStudio::Modeling::Gate
@@ -684,6 +685,31 @@ namespace HyperAIStudio::Modeling::Gate
 		return Package && FindObject<UObject>(Package, *FPackageName::GetShortName(Path)) != nullptr;
 	}
 
+	/**
+	 * The static mesh Replace overwrites: the asset at Path itself. A load follows the redirector a rename or move leaves
+	 * behind, but the plan was checked and approved against the path, so a mesh that lives elsewhere is refused.
+	 */
+	UStaticMesh* ReplaceTarget(const FString& Path, FString& OutError)
+	{
+		UStaticMesh* Mesh = LoadQuiet<UStaticMesh>(Path);
+		if (!Mesh)
+		{
+			// A redirector made in memory and not saved yet: nothing on disk for the load to follow.
+			const UObjectRedirector* Redirector = FindObject<UObjectRedirector>(nullptr, *ObjectPathOf(Path));
+			OutError = Redirector && Redirector->DestinationObject
+				? FString::Printf(TEXT("%s is a redirector to %s; replace that path, or fix up redirectors first."), *Path, *Redirector->DestinationObject->GetOutermost()->GetName())
+				: FString::Printf(TEXT("%s is not a static mesh, so it cannot be replaced."), *Path);
+			return nullptr;
+		}
+		const FString Real = Mesh->GetOutermost()->GetName();
+		if (!Real.Equals(Path, ESearchCase::IgnoreCase))
+		{
+			OutError = FString::Printf(TEXT("%s is a redirector to %s; replace that path, or fix up redirectors first."), *Path, *Real);
+			return nullptr;
+		}
+		return Mesh;
+	}
+
 	/** write_asset's collision: none, box, convex, hulls:N, auto or complex. */
 	bool ParseCollision(const FString& Text, FString& OutMode, int32& OutHulls)
 	{
@@ -1010,11 +1036,7 @@ namespace HyperAIStudio::Modeling::Gate
 				OutError = FString::Printf(TEXT("%s exists; give Replace=true to overwrite it, or pick a free path."), *Path);
 				return false;
 			}
-			if (!LoadQuiet<UStaticMesh>(Path))
-			{
-				OutError = FString::Printf(TEXT("%s is not a static mesh, so it cannot be replaced."), *Path);
-				return false;
-			}
+			if (!ReplaceTarget(Path, OutError)) return false;
 		}
 		FString Mode;
 		int32 Hulls = 1;
@@ -2252,10 +2274,11 @@ namespace HyperAIStudio::Modeling::Gate
 			UStaticMesh* Asset = nullptr;
 			if (Settings.bReplace)
 			{
-				Asset = LoadQuiet<UStaticMesh>(Settings.Path);
+				// Checked again: a mesh that is not at the path now is not the one the plan was approved against.
+				Asset = ReplaceTarget(Settings.Path, OutError);
 				if (!Asset)
 				{
-					OutError = FString::Printf(TEXT("%s: %s is no longer a static mesh."), *Step.Describe(), *Settings.Path);
+					OutError = FString::Printf(TEXT("%s: %s"), *Step.Describe(), *OutError);
 					return false;
 				}
 				if (!FHyperAIStudioSourceControl::MakeEditable({Asset->GetPackage()->GetName()}, OutError))
@@ -2265,6 +2288,24 @@ namespace HyperAIStudio::Modeling::Gate
 				}
 				// Inside the plan's undo step: the asset, its mesh description and its body are recorded before they change.
 				Asset->Modify();
+				// The plan's mesh is all the asset keeps: LODs of its own, or a Nanite hi-res source, would still show the old
+				// model. Their mesh descriptions are recorded first, so undo brings them back.
+				TArray<FString> Removed;
+				if (Asset->GetNumSourceModels() > 1)
+				{
+					Removed.Add(FString::Printf(TEXT("its %d other LOD(s)"), Asset->GetNumSourceModels() - 1));
+					for (int32 Lod = 1; Lod < Asset->GetNumSourceModels(); ++Lod) Asset->ModifyMeshDescription(Lod);
+					Asset->SetNumSourceModels(1);
+				}
+				if (Asset->IsHiResMeshDescriptionValid())
+				{
+					Removed.Add(TEXT("its hi-res source"));
+					Asset->ModifyHiResMeshDescription();
+					Asset->ClearHiResMeshDescription();
+					Asset->CommitHiResMeshDescription();
+					Asset->GetHiResSourceModel().SourceImportFilename.Empty();
+				}
+				if (!Removed.IsEmpty()) OutNotes.Add(FString::Printf(TEXT("%s: %s removed, so it shows only the plan's mesh."), *Settings.Path, *FString::Join(Removed, TEXT(" and "))));
 				FGeometryScriptCopyMeshToAssetOptions Options;
 				Options.bEmitTransaction = false;
 				Options.bEnableRecomputeTangents = true;
@@ -2384,6 +2425,13 @@ namespace HyperAIStudio::Modeling::Gate
 				OutError = FString::Printf(TEXT("%s built no render data."), *Expected[Index].Path);
 				return false;
 			}
+			// A replaced asset keeps none of the old model: no LODs of its own, no hi-res source for Nanite to build from.
+			if (Mesh->GetNumSourceModels() != 1 || Mesh->IsHiResMeshDescriptionValid())
+			{
+				OutError = FString::Printf(TEXT("%s holds %d source LOD(s)%s, not the plan's mesh alone."), *Expected[Index].Path, Mesh->GetNumSourceModels(),
+					Mesh->IsHiResMeshDescriptionValid() ? TEXT(" and a hi-res source") : TEXT(""));
+				return false;
+			}
 			// The source mesh, not LOD0: with Nanite, LOD0 is the reduced fallback.
 			const FMeshDescription* Source = Mesh->GetMeshDescription(0);
 			const int32 Triangles = Source ? Source->Triangles().Num() : 0;
@@ -2465,9 +2513,14 @@ namespace HyperAIStudio::Modeling::Gate
 			}
 		}
 		if (Mesh.GetNumUVChannels(0) == 0) Issue(TEXT("warning"), TEXT("no_uvs"), TEXT("It has no UVs; textures will not map (uv Mode=box)."));
-		int32 OpenEdges = 0;
-		int32 Components = 0;
-		if (Source)
+		// Unmeasured topology says so, rather than reading as 0 open edges: watertight.
+		FString Topology = TEXT("open edges and pieces not measured (no source mesh)");
+		if (Source && Triangles > C::MaxTrianglesPerMesh)
+		{
+			// Copying a production mesh of millions of triangles would hold the game thread for seconds, and its memory.
+			Topology = FString::Printf(TEXT("open edges and pieces not measured (over %d triangles)"), C::MaxTrianglesPerMesh);
+		}
+		else if (Source)
 		{
 			const TStrongObjectPtr<UDynamicMesh> Copy(NewObject<UDynamicMesh>(GetTransientPackage()));
 			FGeometryScriptCopyMeshFromAssetOptions Options;
@@ -2477,15 +2530,18 @@ namespace HyperAIStudio::Modeling::Gate
 			Lod.LODIndex = 0;
 			EGeometryScriptOutcomePins Outcome = EGeometryScriptOutcomePins::Failure;
 			UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshFromStaticMeshV2(&Mesh, Copy.Get(), Options, Lod, Outcome, true, nullptr);
+			Topology = TEXT("open edges and pieces not measured (its source mesh could not be read)");
 			if (Outcome == EGeometryScriptOutcomePins::Success)
 			{
-				OpenEdges = UQuery::GetNumOpenBorderEdges(Copy.Get());
-				Components = UQuery::GetNumConnectedComponents(Copy.Get());
+				const int32 OpenEdges = UQuery::GetNumOpenBorderEdges(Copy.Get());
+				if (OpenEdges > 0) Issue(TEXT("warning"), TEXT("open_edges"), FString::Printf(TEXT("%d open edges: it is not watertight, so light leaks and booleans fail (repair, or solidify)."), OpenEdges));
+				Topology = FString::Printf(TEXT("%d open edge(s), %d piece(s)"), OpenEdges, UQuery::GetNumConnectedComponents(Copy.Get()));
 			}
+			// Freed now, not at the next garbage collection: validating 64 assets holds one copy at a time.
+			Copy->Reset();
 		}
-		if (OpenEdges > 0) Issue(TEXT("warning"), TEXT("open_edges"), FString::Printf(TEXT("%d open edges: it is not watertight, so light leaks and booleans fail (repair, or solidify)."), OpenEdges));
-		OutLine = FString::Printf(TEXT("%s: %d triangles, %s cm, %d slot(s), %d collision shape(s)%s, %d open edge(s), %d piece(s), Nanite %s"), *Path, Triangles, *Vec(Size),
-			Mesh.GetStaticMaterials().Num(), Shapes, bComplex ? TEXT(" (complex as simple)") : TEXT(""), OpenEdges, Components, bNanite ? TEXT("on") : TEXT("off"));
+		OutLine = FString::Printf(TEXT("%s: %d triangles, %s cm, %d slot(s), %d collision shape(s)%s, %s, Nanite %s"), *Path, Triangles, *Vec(Size),
+			Mesh.GetStaticMaterials().Num(), Shapes, bComplex ? TEXT(" (complex as simple)") : TEXT(""), *Topology, bNanite ? TEXT("on") : TEXT("off"));
 	}
 
 	TArray<FString> DescribeKinds()

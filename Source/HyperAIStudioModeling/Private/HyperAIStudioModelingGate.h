@@ -117,12 +117,12 @@ namespace HyperAIStudio::Modeling::Gate
 		TArray<UStaticMesh*>& OutCreated, TArray<FString>& OutNotes, FString& OutError);
 	/** New assets a failed plan made, deleted again: a plan never leaves one half-written. */
 	void Discard(TArray<UStaticMesh*>& Created);
-	/** Finished compiling: render data, LOD0 triangles near the plan's, the collision asked for. */
+	/** Finished compiling: render data, the plan's mesh as the only source (no other LODs, no hi-res), its triangles near the plan's, the collision asked for. */
 	bool Verify(const TArray<UStaticMesh*>& Written, const TArray<FHyperAIModelAssetResult>& Expected, FString& OutError);
 	/** The vertex-colour material; made and saved on first use when bCreate. */
 	UMaterialInterface* VertexColorMaterial(bool bCreate, FString& OutError);
 
-	/** One static mesh as a prop: issues found, and a line describing it. */
+	/** One static mesh as a prop: issues found, and a line describing it; open edges go unmeasured past a working mesh's triangles. */
 	void CheckAsset(UStaticMesh& Mesh, bool bProduction, TArray<FHyperAIModelIssue>& OutIssues, FString& OutLine);
 	/** One line per op kind and per recipe, for inspect. */
 	TArray<FString> DescribeKinds();

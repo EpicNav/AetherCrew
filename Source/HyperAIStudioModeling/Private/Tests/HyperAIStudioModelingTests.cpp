@@ -6,11 +6,14 @@
 #include "Editor.h"
 #include "Editor/TransBuffer.h"
 #include "Engine/StaticMesh.h"
+#include "GeometryScript/MeshAssetFunctions.h"
+#include "GeometryScript/MeshPrimitiveFunctions.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioModelingGate.h"
 #include "HyperAIStudioModelingToolset.h"
 #include "HyperAIStudioSettings.h"
+#include "HyperAIStudioSourceControl.h"
 #include "Interfaces/IPluginManager.h"
 #include "JsonObjectConverter.h"
 #include "MeshDescription.h"
@@ -22,6 +25,8 @@
 #include "ObjectTools.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "StaticMeshCompiler.h"
+#include "UDynamicMesh.h"
+#include "UObject/ObjectRedirector.h"
 #include "UObject/Package.h"
 
 namespace HyperAIStudio::ModelingTests
@@ -487,6 +492,123 @@ bool FHyperAIStudioModelingReplaceUndoTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingReplaceRedirectorTest, "HyperAIStudio.NativeTools.Modeling.ReplaceRefusesARedirector", HyperAIStudio::ModelingTests::Flags)
+
+bool FHyperAIStudioModelingReplaceRedirectorTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelingTests;
+	namespace Gate = HyperAIStudio::Modeling::Gate;
+	const FString Folder = TestFolder();
+	const FString Target = Folder + TEXT("/SM_Target");
+	const FString Moved = Folder + TEXT("/SM_Moved");
+	const FHyperAIModelPlanReport Made = Run({Sized(TEXT("add.box"), TEXT("Crate"), TEXT("100")), Write(TEXT("Crate"), Target)}, false);
+	UStaticMesh* Mesh = Made.bOk ? LoadMesh(Target) : nullptr;
+	if (!TestTrue(TEXT("a box is written: ") + Made.Diagnostic, Mesh != nullptr))
+	{
+		DeleteFolder(Folder);
+		return false;
+	}
+	// Checked and built while nothing is at the path; a move then leaves a redirector there before the write runs.
+	const TArray<FHyperAIModelOp> Ops = {Sized(TEXT("add.sphere"), TEXT("Ball"), TEXT("100"), TEXT("Steps=24")), Write(TEXT("Ball"), Moved, TEXT("Replace=true"))};
+	Gate::FPlan Plan;
+	Gate::FBuilt Built;
+	FString Error;
+	if (!TestTrue(TEXT("the plan checks and builds: ") + Error, Gate::Check(Ops, Plan, Error) && Gate::Build(Plan, Built, Error)))
+	{
+		DeleteFolder(Folder);
+		return false;
+	}
+	UObjectRedirector* Redirector = NewObject<UObjectRedirector>(CreatePackage(*Moved), *FPackageName::GetShortName(Moved), RF_Public | RF_Standalone);
+	Redirector->DestinationObject = Mesh;
+	FAssetRegistryModule::AssetCreated(Redirector);
+	const FString Named = Moved + TEXT(" is a redirector to ") + Target;
+	const FHyperAIModelPlanReport Unsaved = Run(Ops, true);
+	TestTrue(TEXT("Replace onto a redirector not saved yet is refused, naming its target: ") + Unsaved.Diagnostic, Refused(Unsaved, TEXT("Op 1"), *Named));
+	if (!TestTrue(TEXT("the redirector saves: ") + Error, FHyperAIStudioSourceControl::SaveAsset(*Redirector, Error)))
+	{
+		DeleteFolder(Folder);
+		return false;
+	}
+	// Saved, a load of the path follows it to the box.
+	const FHyperAIModelPlanReport Saved = Run(Ops, true);
+	TestTrue(TEXT("Replace onto a saved redirector is refused, naming its target: ") + Saved.Diagnostic, Refused(Saved, TEXT("Op 1"), *Named));
+	const FHyperAIModelPlanReport Applied = Run(Ops, false);
+	TestTrue(TEXT("and so is the plan itself: ") + Applied.Diagnostic, Refused(Applied, TEXT("Op 1"), *Named) && Applied.Saved.IsEmpty());
+	TArray<FHyperAIModelAssetResult> Assets;
+	TArray<UStaticMesh*> Written;
+	TArray<UStaticMesh*> Created;
+	TArray<FString> Notes;
+	const bool bWritten = Gate::Write(Plan, Built, Assets, Written, Created, Notes, Error);
+	TestTrue(TEXT("a plan checked before the move is refused at its write: ") + Error, !bWritten && Error.StartsWith(TEXT("Op 1")) && Error.Contains(Named));
+	Gate::Discard(Created);
+	TestEqual(TEXT("and the box the redirector points to is untouched"), SourceTriangles(*Mesh), 12);
+	// The redirector first, so the box is deleted with nothing referencing it.
+	ObjectTools::ForceDeleteObjects({Redirector}, /*ShowConfirmation=*/false);
+	DeleteFolder(Folder);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingReplaceLodsTest, "HyperAIStudio.NativeTools.Modeling.ReplaceKeepsOnlyThePlansMesh", HyperAIStudio::ModelingTests::Flags)
+
+bool FHyperAIStudioModelingReplaceLodsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelingTests;
+	const FString Folder = TestFolder();
+	const FString Path = Folder + TEXT("/SM_Imported");
+	const FHyperAIModelPlanReport First = Run({Sized(TEXT("add.box"), TEXT("Prop"), TEXT("100")), Write(TEXT("Prop"), Path)}, false);
+	UStaticMesh* Mesh = First.bOk ? LoadMesh(Path) : nullptr;
+	if (!TestTrue(TEXT("a box is written: ") + First.Diagnostic, Mesh != nullptr))
+	{
+		DeleteFolder(Folder);
+		return false;
+	}
+	// As an import can leave it: two LODs of its own and a hi-res source for Nanite, all of them the old model.
+	const FMeshDescription Old = *Mesh->GetMeshDescription(0);
+	Mesh->SetNumSourceModels(3);
+	for (int32 Lod = 1; Lod < 3; ++Lod)
+	{
+		Mesh->CreateMeshDescription(Lod, Old);
+		Mesh->CommitMeshDescription(Lod);
+	}
+	Mesh->CreateHiResMeshDescription(Old);
+	Mesh->CommitHiResMeshDescription();
+	Mesh->GetHiResSourceModel().SourceImportFilename = TEXT("SM_Imported_HiRes.fbx");
+	Mesh->PostEditChange();
+	TArray<UStaticMesh*> Compile = {Mesh};
+	FStaticMeshCompilingManager::Get().FinishCompilation(Compile);
+	if (!TestTrue(TEXT("the box has three LODs and a hi-res source"), Mesh->GetNumSourceModels() == 3 && Mesh->GetNumLODs() == 3 && Mesh->IsHiResMeshDescriptionValid()))
+	{
+		DeleteFolder(Folder);
+		return false;
+	}
+	const FHyperAIModelPlanReport Second = Run({Sized(TEXT("add.sphere"), TEXT("Prop"), TEXT("100"), TEXT("Steps=24")), Write(TEXT("Prop"), Path, TEXT("Replace=true"))}, false);
+	FStaticMeshCompilingManager::Get().FinishCompilation(Compile);
+	if (!TestTrue(TEXT("a sphere replaces it: ") + Second.Diagnostic, Second.bOk && Second.Assets.Num() == 1 && Second.Assets[0].bReplaced))
+	{
+		DeleteFolder(Folder);
+		return false;
+	}
+	TestEqual(TEXT("leaving exactly one source model"), Mesh->GetNumSourceModels(), 1);
+	TestEqual(TEXT("and one LOD to render"), Mesh->GetNumLODs(), 1);
+	TestFalse(TEXT("and no hi-res description"), Mesh->IsHiResMeshDescriptionValid());
+	TestTrue(TEXT("nor the hi-res file it came from"), Mesh->GetHiResSourceModel().SourceImportFilename.IsEmpty());
+	TestEqual(TEXT("the one source is the sphere"), SourceTriangles(*Mesh), Second.Assets[0].Triangles);
+	TestTrue(TEXT("and the report says what went: ") + FString::Join(Second.Notes, TEXT(" | ")), Second.Notes.ContainsByPredicate([](const FString& Note)
+		{
+			return Note.Contains(TEXT("its 2 other LOD(s) and its hi-res source removed"));
+		}));
+	if (GEditor && GEditor->Trans)
+	{
+		GEditor->UndoTransaction();
+		FStaticMeshCompilingManager::Get().FinishCompilation(Compile);
+		const FMeshDescription* Lod2 = Mesh->GetNumSourceModels() == 3 ? Mesh->GetMeshDescription(2) : nullptr;
+		TestTrue(TEXT("undo brings back the box, its LODs and its hi-res source"), SourceTriangles(*Mesh) == 12 && Lod2 && Lod2->Triangles().Num() == 12
+			&& Mesh->IsHiResMeshDescriptionValid());
+	}
+	DeleteFolder(Folder);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingValidateTest, "HyperAIStudio.NativeTools.Modeling.Validate", HyperAIStudio::ModelingTests::Flags)
 
 bool FHyperAIStudioModelingValidateTest::RunTest(const FString& Parameters)
@@ -530,6 +652,52 @@ bool FHyperAIStudioModelingValidateTest::RunTest(const FString& Parameters)
 	}
 	Request.Policy = TEXT("strict");
 	TestFalse(TEXT("an unknown policy is refused"), C::Validate(Request).bOk);
+	DeleteFolder(Folder);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingHeavyTopologyTest, "HyperAIStudio.NativeTools.Modeling.HeavyMeshTopologyNotMeasured", HyperAIStudio::ModelingTests::Flags)
+
+bool FHyperAIStudioModelingHeavyTopologyTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelingTests;
+	const FString Folder = TestFolder();
+	const FString Path = Folder + TEXT("/SM_Heavy");
+	const FHyperAIModelPlanReport Made = Run({Sized(TEXT("add.box"), TEXT("Heavy"), TEXT("100")), Write(TEXT("Heavy"), Path, TEXT("Collision=box"))}, false);
+	UStaticMesh* Mesh = Made.bOk ? LoadMesh(Path) : nullptr;
+	if (!TestTrue(TEXT("a box is written: ") + Made.Diagnostic, Mesh != nullptr))
+	{
+		DeleteFolder(Folder);
+		return false;
+	}
+	FHyperAIModelValidateRequest Request;
+	Request.Assets = {Path};
+	const FHyperAIModelValidateReport Light = C::Validate(Request);
+	TestTrue(TEXT("under the cap, its open edges and pieces are counted: ") + (Light.Assets.IsEmpty() ? Light.Diagnostic : Light.Assets[0]),
+		Light.Assets.Num() == 1 && Light.Assets[0].Contains(TEXT("0 open edge(s), 1 piece(s)")));
+	// Past what a plan may write, as an imported production mesh is: a box of 150 steps a side, 270000 triangles.
+	const TStrongObjectPtr<UDynamicMesh> Dense(NewObject<UDynamicMesh>(GetTransientPackage()));
+	UGeometryScriptLibrary_MeshPrimitiveFunctions::AppendBox(Dense.Get(), FGeometryScriptPrimitiveOptions(), FTransform::Identity, 100, 100, 100, 149, 149, 149);
+	FGeometryScriptCopyMeshToAssetOptions Options;
+	Options.bEmitTransaction = false;
+	EGeometryScriptOutcomePins Outcome = EGeometryScriptOutcomePins::Failure;
+	UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshToStaticMesh(Dense.Get(), Mesh, Options, FGeometryScriptMeshWriteLOD(), Outcome, /*bUseSectionMaterials=*/false);
+	if (!TestTrue(FString::Printf(TEXT("the asset takes %d triangles, over the cap of %d"), SourceTriangles(*Mesh), C::MaxTrianglesPerMesh),
+		Outcome == EGeometryScriptOutcomePins::Success && SourceTriangles(*Mesh) > C::MaxTrianglesPerMesh))
+	{
+		DeleteFolder(Folder);
+		return false;
+	}
+	const FString NotMeasured = FString::Printf(TEXT("open edges and pieces not measured (over %d triangles)"), C::MaxTrianglesPerMesh);
+	const FHyperAIModelValidateReport Heavy = C::Validate(Request);
+	TestTrue(TEXT("over it, validate says its topology was not measured: ") + (Heavy.Assets.IsEmpty() ? Heavy.Diagnostic : Heavy.Assets[0]),
+		Heavy.Assets.Num() == 1 && Heavy.Assets[0].Contains(NotMeasured) && !Heavy.Assets[0].Contains(TEXT("open edge(s)")));
+	TestFalse(TEXT("rather than counting open edges"), Heavy.Issues.ContainsByPredicate([](const FHyperAIModelIssue& Issue) { return Issue.Code == TEXT("open_edges"); }));
+	FHyperAIModelInspectRequest Look;
+	Look.Folder = Folder;
+	Look.Asset = Path;
+	const FHyperAIModelInspectReport Read = C::Inspect(Look);
+	TestTrue(TEXT("and so does inspect: ") + (Read.Details.IsEmpty() ? Read.Diagnostic : Read.Details[0]), Read.bOk && !Read.Details.IsEmpty() && Read.Details[0].Contains(NotMeasured));
 	DeleteFolder(Folder);
 	return true;
 }
