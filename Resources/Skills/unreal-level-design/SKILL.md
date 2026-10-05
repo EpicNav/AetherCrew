@@ -243,7 +243,9 @@ Then place and settle props in one undo step with `hyper_spatial_apply_plan`:
 - Ground traces pass through foliage and PCG instances, so a rock never lands on a tree (`bIncludeFoliage: true` makes
   them ground), and through the plan's other actors, so a plan never stacks its own actors on each other.
 - Name actors by label or path. A label several actors share, a locked or attached actor (move its parent) and one in
-  an unloaded region are refused by name. Every op is computed against the level as it was before the plan.
+  an unloaded region are refused by name. Every op is computed against the level as it was before the plan, and a
+  clear spot keeps off where the plan places and drops things.
+- A prop's bounds are what it shows: a pickup's overlap sphere or trigger box does not lift it off the ground.
 
 `hyper_scene_cost_report` says what the loaded level, a box or named actors cost to render: triangles with and without
 Nanite, estimated draw and shadow draws, instances per mesh, lights, translucent materials, the heaviest actors and
