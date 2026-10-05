@@ -208,6 +208,19 @@
 			]
 		},
 		{
+			"Name": "HyperAIStudioSceneSpatial",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
 			"Name": "HyperAIStudioMeshTerrain",
 			"Type": "Editor",
 			"LoadingPhase": "None",
