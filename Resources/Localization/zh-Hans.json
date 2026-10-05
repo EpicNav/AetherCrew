@@ -4233,6 +4233,12 @@
   },
   {
    "namespace": "SHyperAIStudioPromptPicker",
+   "key": "LibraryErrors",
+   "source": "Some prompts could not be read: {0}",
+   "text": "部分提示词无法读取：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
    "key": "NeedsPack",
    "source": "Needs the {0} pack, which is not loaded in this project.",
    "text": "需要 {0} 能力包，但它在这个项目中没有加载。"

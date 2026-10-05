@@ -567,7 +567,8 @@ namespace HyperAIStudio::PromptPresets
 		}
 		for (int32 Index = 0; Index < Items->Num(); ++Index)
 		{
-			const TSharedPtr<FJsonObject> Object = (*Items)[Index].IsValid() ? (*Items)[Index]->AsObject() : nullptr;
+			// AsObject on anything else logs an error of its own; a bad entry is this file's error alone.
+			const TSharedPtr<FJsonObject> Object = (*Items)[Index].IsValid() && (*Items)[Index]->Type == EJson::Object ? (*Items)[Index]->AsObject() : nullptr;
 			FHyperAIStudioPromptCategory Category;
 			Category.bBuiltIn = bBuiltIn;
 			FString Icon;

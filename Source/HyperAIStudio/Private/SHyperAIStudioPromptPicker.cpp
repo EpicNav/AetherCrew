@@ -160,6 +160,20 @@ void SHyperAIStudioPromptPicker::Construct(const FArguments& InArgs)
 							: LOCTEXT("NoMatch", "No prompt matches. Try other words or another category.");
 					})
 				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.0f, 4.0f, 0.0f, 0.0f)
+				[
+					// A prompt file that could not be read, such as a project's own with a typo, says so instead of leaving its presets out quietly.
+					SNew(STextBlock)
+					.Visibility(Library.Errors.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+					.AutoWrapText(true)
+					.TextStyle(&Style(), "HyperAIStudio.Text.Caption")
+					.ColorAndOpacity(StatusColor(EStatus::Warning))
+					.ToolTipText(FText::FromString(FString::Join(Library.Errors, TEXT("\n"))))
+					.Text(Library.Errors.IsEmpty() ? FText::GetEmpty()
+						: FText::Format(LOCTEXT("LibraryErrors", "Some prompts could not be read: {0}"), FText::FromString(Library.Errors[0])))
+				]
 			]
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.5f)
