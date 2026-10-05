@@ -3631,6 +3631,14 @@
      "safety": [
       "Read"
      ]
+    },
+    {
+     "name": "hyper_model_handoff",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ]
   },

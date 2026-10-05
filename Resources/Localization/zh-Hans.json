@@ -1023,6 +1023,24 @@
   },
   {
    "namespace": "HyperAIStudioModeling",
+   "key": "HandoffToast",
+   "source": "HyperAI: {0} is selected in Modeling Mode. {1}Edit it, click Accept, then save {2}.",
+   "text": "HyperAI：已在建模模式中选中 {0}。{1}编辑后点击“接受”，然后保存 {2}。"
+  },
+  {
+   "namespace": "HyperAIStudioModeling",
+   "key": "HandoffToastTool",
+   "source": "Open {0} > {1}. ",
+   "text": "打开 {0} > {1}。"
+  },
+  {
+   "namespace": "HyperAIStudioModeling",
+   "key": "ModelHandoff",
+   "source": "HyperAI: Place for Modeling Mode",
+   "text": "HyperAI：放置到关卡以在建模模式中编辑"
+  },
+  {
+   "namespace": "HyperAIStudioModeling",
    "key": "ModelPlan",
    "source": "HyperAI: Model Plan",
    "text": "HyperAI：模型计划"

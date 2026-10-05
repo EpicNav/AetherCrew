@@ -124,7 +124,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingContractsTest, "HyperAISt
 bool FHyperAIStudioModelingContractsTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::ModelingTests;
-	TestEqual(TEXT("three tools"), C::GetToolNames(), TArray<FString>({TEXT("hyper_model_inspect"), TEXT("hyper_model_apply_plan"), TEXT("hyper_model_validate")}));
+	TestEqual(TEXT("four tools"), C::GetToolNames(), TArray<FString>({TEXT("hyper_model_inspect"), TEXT("hyper_model_apply_plan"), TEXT("hyper_model_validate"),
+		TEXT("hyper_model_handoff")}));
 	FHyperAIStudioExtensionCohortAdmission Admission;
 	TestTrue(TEXT("the mesh_modeling pack's cohort is in the generated catalog, exactly: ")
 		+ FHyperAIStudioExtensionRuntime::DescribeExactGeneratedCohortMismatch(C::PackId, C::AtomicCohortId, C::GetToolNames()),
@@ -705,6 +706,43 @@ bool FHyperAIStudioModelingHeavyTopologyTest::RunTest(const FString& Parameters)
 	Look.Asset = Path;
 	const FHyperAIModelInspectReport Read = C::Inspect(Look);
 	TestTrue(TEXT("and so does inspect: ") + (Read.Details.IsEmpty() ? Read.Diagnostic : Read.Details[0]), Read.bOk && !Read.Details.IsEmpty() && Read.Details[0].Contains(NotMeasured));
+	DeleteFolder(Folder);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingFingerprintTest, "HyperAIStudio.NativeTools.Modeling.Fingerprint", HyperAIStudio::ModelingTests::Flags)
+
+bool FHyperAIStudioModelingFingerprintTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelingTests;
+	namespace Gate = HyperAIStudio::Modeling::Gate;
+	const FString Folder = TestFolder();
+	const FString PathA = Folder + TEXT("/SM_A");
+	const FHyperAIModelPlanReport Made = Run({Sized(TEXT("add.box"), TEXT("Box"), TEXT("100")), Write(TEXT("Box"), PathA), Write(TEXT("Box"), Folder + TEXT("/SM_B"))}, false);
+	UStaticMesh* A = Made.bOk ? LoadMesh(PathA) : nullptr;
+	UStaticMesh* B = Made.bOk ? LoadMesh(Folder + TEXT("/SM_B")) : nullptr;
+	if (!TestTrue(TEXT("two identical boxes are written: ") + Made.Diagnostic, A && B))
+	{
+		DeleteFolder(Folder);
+		return false;
+	}
+	const Gate::FGeometryPrint PrintA = Gate::Fingerprint(*A);
+	const Gate::FGeometryPrint PrintB = Gate::Fingerprint(*B);
+	TestTrue(TEXT("a box has a fingerprint: ") + PrintA.Hash + PrintA.Why, PrintA.Hash.StartsWith(TEXT("geo-")) && PrintA.Hash.Len() == 20 && PrintA.Triangles == 12);
+	TestEqual(TEXT("the same geometry at another path has the same one"), PrintB.Hash, PrintA.Hash);
+	// Committed again unchanged, as an editor round trip does: content, not the bulk data's id.
+	A->GetMeshDescription(0);
+	A->CommitMeshDescription(0);
+	TestEqual(TEXT("committing the same source again keeps it"), Gate::Fingerprint(*A).Hash, PrintA.Hash);
+	FHyperAIModelInspectRequest Look;
+	Look.Asset = PathA;
+	const FHyperAIModelInspectReport Read = C::Inspect(Look);
+	TestTrue(TEXT("inspect reports it: ") + Read.Fingerprint, Read.bOk && Read.Fingerprint == PrintA.Hash
+		&& Read.Details.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("Fingerprint geo-")); }));
+	const FHyperAIModelPlanReport Replaced = Run({Sized(TEXT("add.sphere"), TEXT("Ball"), TEXT("100"), TEXT("Steps=24")), Write(TEXT("Ball"), PathA, TEXT("Replace=true"))}, false);
+	const Gate::FGeometryPrint After = Gate::Fingerprint(*A);
+	TestTrue(TEXT("a Replace write changes it: ") + Replaced.Diagnostic, Replaced.bOk && !After.Hash.IsEmpty() && After.Hash != PrintA.Hash && After.Triangles != 12);
+	TestEqual(TEXT("and inspect reads the new one"), C::Inspect(Look).Fingerprint, After.Hash);
 	DeleteFolder(Folder);
 	return true;
 }

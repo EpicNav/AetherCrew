@@ -124,6 +124,22 @@ namespace HyperAIStudio::Modeling::Gate
 
 	/** One static mesh as a prop: issues found, and a line describing it; open edges go unmeasured past a working mesh's triangles. */
 	void CheckAsset(UStaticMesh& Mesh, bool bProduction, TArray<FHyperAIModelIssue>& OutIssues, FString& OutLine);
+
+	/** A static mesh's source geometry, hashed: what a hand edit in Modeling Mode, or a Replace write, changes. */
+	struct FGeometryPrint
+	{
+		/** "geo-" and 16 hex digits; empty when it could not be read, and Why says why. */
+		FString Hash;
+		int32 Triangles = 0;
+		int32 Vertices = 0;
+		FString Why;
+	};
+	/**
+	 * LOD 0's source mesh (and the hi-res source, when there is one): each triangle's corner positions and first-set UVs
+	 * and its material slot, in triangle order, with the counts. Content, not the bulk data's id: committing the same
+	 * geometry again keeps it.
+	 */
+	FGeometryPrint Fingerprint(UStaticMesh& Mesh);
 	/** One line per op kind and per recipe, for inspect. */
 	TArray<FString> DescribeKinds();
 	TArray<FString> DescribeLimits();

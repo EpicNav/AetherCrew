@@ -70,8 +70,9 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("uaf_graph"), TEXT("uaf animation framework animnext graph")},
 			{TEXT("image_generation"), TEXT("image images picture pictures generate draw concept art reference illustration")},
 			{TEXT("mesh_generation"), TEXT("3d model models generate generated textured photo picture realistic tripo meshy hi3d paid")},
-			// No "props" or "placeholder": "place" reads as "placeholder", and props to place are level design's.
-			{TEXT("mesh_modeling"), TEXT("model models modeling modelling modeled mesh meshes kitbash lowpoly poly primitive primitives rock boulder boulders archway pillar pillars column columns crystal crystals mushroom mushrooms tower towers watchtower ruins ruined rubble monolith trunk stump crate crates bevel extrude inset boolean revolve lathe")},
+			// No "props" or "placeholder": "place" reads as "placeholder", and props to place are level design's. PolyEdit and
+			// PolyGroups are Modeling Mode's tools a hand-off points people at; "sculpt" stays the landscape's.
+			{TEXT("mesh_modeling"), TEXT("model models modeling modelling modeled mesh meshes kitbash lowpoly poly primitive primitives rock boulder boulders archway pillar pillars column columns crystal crystals mushroom mushrooms tower towers watchtower ruins ruined rubble monolith trunk stump crate crates bevel extrude inset boolean revolve lathe polyedit polygroup polygroups")},
 			{TEXT("sound_design"), TEXT("sound sounds sfx effect footstep footsteps whoosh impact designer decibel synth layer vocal vocals creature ambiance loop music gravel")},
 			{TEXT("scripting"), TEXT("python script scripting batch automate editor utility")},
 			{TEXT("editor_lifecycle"), TEXT("restart editor rebuild relaunch reopen")},

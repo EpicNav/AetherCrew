@@ -10,6 +10,7 @@
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioModelingGate.h"
+#include "HyperAIStudioModelingHandoff.h"
 #include "HyperAIStudioSourceControl.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Guid.h"
@@ -30,7 +31,7 @@ FString FHyperAIStudioModelingContracts::GetQualifiedToolsetName()
 
 TArray<FString> FHyperAIStudioModelingContracts::GetToolNames()
 {
-	return {InspectToolName, PlanToolName, ValidateToolName};
+	return {InspectToolName, PlanToolName, ValidateToolName, HandoffToolName};
 }
 
 bool FHyperAIStudioModelingContracts::IsRegistrationAllowed(const bool bAllowSourceCandidateForDev)
@@ -230,6 +231,17 @@ FHyperAIModelInspectReport FHyperAIStudioModelingContracts::Inspect(const FHyper
 		}
 		const FString* Hash = Mesh->GetPackage()->GetMetaData().FindValue(Mesh, C::PlanHashKey);
 		Report.Details.Add(Hash ? FString::Printf(TEXT("Made by hyper_model_apply_plan, plan %s."), **Hash) : FString(TEXT("Not made by hyper_model_apply_plan.")));
+		// What tells a hand edit, or any rewrite, apart from the mesh as it was.
+		const Gate::FGeometryPrint Print = Gate::Fingerprint(*Mesh);
+		Report.Fingerprint = Print.Hash;
+		Report.Details.Add(Print.Hash.IsEmpty() ? FString::Printf(TEXT("No fingerprint: %s."), *Print.Why)
+			: FString::Printf(TEXT("Fingerprint %s: %d triangles, %d vertices in its source mesh; it changes when the mesh is edited."), *Print.Hash, Print.Triangles, Print.Vertices));
+		if (Mesh->GetPackage()->IsDirty())
+		{
+			Report.Details.Add(TEXT("It has unsaved changes: save it (File > Save All) to keep them."));
+		}
+		const FString Since = HyperAIStudio::Modeling::Handoff::DescribeSince(Mesh->GetPathName(), Print);
+		if (!Since.IsEmpty()) Report.Details.Add(Since);
 	}
 	Report.bOk = true;
 	Report.Diagnostic = FString::Printf(TEXT("%d op kinds, %d recipes; %d static mesh(es) under %s%s."), Report.Kinds.Num(), Report.Recipes.Num(), Report.Assets.Num(), *Path,
@@ -380,6 +392,11 @@ FHyperAIModelPlanReport UHyperAIStudioModelingToolset::hyper_model_apply_plan(co
 FHyperAIModelValidateReport UHyperAIStudioModelingToolset::hyper_model_validate(const FHyperAIModelValidateRequest& Request)
 {
 	return FHyperAIStudioModelingContracts::Validate(Request);
+}
+
+FHyperAIModelHandoffReport UHyperAIStudioModelingToolset::hyper_model_handoff(const FHyperAIModelHandoffRequest& Request)
+{
+	return FHyperAIStudioModelingContracts::Handoff(Request);
 }
 
 void FHyperAIStudioModelingRegistration::Startup()

@@ -30,6 +30,7 @@
 #include "GeometryScript/MeshUVFunctions.h"
 #include "GeometryScript/MeshVertexColorFunctions.h"
 #include "GeometryScript/MeshVoxelFunctions.h"
+#include "Hash/xxhash.h"
 #include "HyperAIStudioSourceControl.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionConstant.h"
@@ -42,6 +43,7 @@
 #include "Misc/SecureHash.h"
 #include "ObjectTools.h"
 #include "PhysicsEngine/BodySetup.h"
+#include "StaticMeshAttributes.h"
 #include "StaticMeshCompiler.h"
 #include "StaticMeshResources.h"
 #include "UDynamicMesh.h"
@@ -2542,6 +2544,61 @@ namespace HyperAIStudio::Modeling::Gate
 		}
 		OutLine = FString::Printf(TEXT("%s: %d triangles, %s cm, %d slot(s), %d collision shape(s)%s, %s, Nanite %s"), *Path, Triangles, *Vec(Size),
 			Mesh.GetStaticMaterials().Num(), Shapes, bComplex ? TEXT(" (complex as simple)") : TEXT(""), *Topology, bNanite ? TEXT("on") : TEXT("off"));
+	}
+
+	namespace
+	{
+		/** One source mesh into the hash: its counts, then each triangle's corners (position, first UV) and material slot. */
+		void HashSource(const FMeshDescription& Source, FXxHash64Builder& Builder)
+		{
+			const int32 Counts[2] = {Source.Triangles().Num(), Source.Vertices().Num()};
+			Builder.Update(Counts, sizeof(Counts));
+			const auto Positions = Source.GetVertexPositions();
+			const TVertexInstanceAttributesConstRef<FVector2f> UVs = FStaticMeshConstAttributes(Source).GetVertexInstanceUVs();
+			const bool bUVs = UVs.IsValid() && UVs.GetNumChannels() > 0;
+			for (const FTriangleID Triangle : Source.Triangles().GetElementIDs())
+			{
+				for (const FVertexInstanceID Corner : Source.GetTriangleVertexInstances(Triangle))
+				{
+					const FVector3f Position = Positions[Source.GetVertexInstanceVertex(Corner)];
+					Builder.Update(&Position, sizeof(Position));
+					if (bUVs)
+					{
+						const FVector2f UV = UVs.Get(Corner, 0);
+						Builder.Update(&UV, sizeof(UV));
+					}
+				}
+				const int32 Slot = Source.GetTrianglePolygonGroup(Triangle).GetValue();
+				Builder.Update(&Slot, sizeof(Slot));
+			}
+		}
+	}
+
+	FGeometryPrint Fingerprint(UStaticMesh& Mesh)
+	{
+		FGeometryPrint Print;
+		const FMeshDescription* Source = Mesh.GetNumSourceModels() > 0 ? Mesh.GetMeshDescription(0) : nullptr;
+		if (!Source)
+		{
+			Print.Why = TEXT("it has no source mesh");
+			return Print;
+		}
+		Print.Triangles = Source->Triangles().Num();
+		Print.Vertices = Source->Vertices().Num();
+		// Modeling Mode edits the hi-res source of a mesh that has one, so it counts too.
+		const FMeshDescription* HiRes = Mesh.IsHiResMeshDescriptionValid() ? Mesh.GetHiResMeshDescription() : nullptr;
+		const int32 HiResTriangles = HiRes ? HiRes->Triangles().Num() : 0;
+		if (Print.Triangles + HiResTriangles > C::MaxFingerprintTriangles)
+		{
+			// About 64 bytes a triangle: millions would hold the editor while they hash.
+			Print.Why = FString::Printf(TEXT("over %d triangles"), C::MaxFingerprintTriangles);
+			return Print;
+		}
+		FXxHash64Builder Builder;
+		HashSource(*Source, Builder);
+		if (HiRes) HashSource(*HiRes, Builder);
+		Print.Hash = FString::Printf(TEXT("geo-%016llx"), Builder.Finalize().Hash);
+		return Print;
 	}
 
 	TArray<FString> DescribeKinds()

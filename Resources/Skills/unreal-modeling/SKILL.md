@@ -1,6 +1,6 @@
 ---
 name: unreal-modeling
-description: Model 3D props in Unreal with HyperAI's Geometry Script tools, free and offline - rocks, boulders, standing stones, pillars, arches, ruined walls, towers, crystal clusters, mushrooms, tree trunks, trees, bushes, grass tufts from recipes, or any shape from primitives, revolves, sweeps, booleans, plane cuts, mirrors, extrude, inset, bevel, noise and bend/twist/flare warps, remeshing and UVs - written as static meshes with collision and vertex-colour tints. Use for placeholder and stylised props, kitbash parts and set dressing; not for paid textured models (hyper_mesh_generate) or terrain.
+description: Model 3D props in Unreal with HyperAI's Geometry Script tools, free and offline - rocks, boulders, standing stones, pillars, arches, ruined walls, towers, crystal clusters, mushrooms, tree trunks, trees, bushes, grass tufts from recipes, or any shape from primitives, revolves, sweeps, booleans, plane cuts, mirrors, extrude, inset, bevel, noise and bend/twist/flare warps, remeshing and UVs - written as static meshes with collision and vertex-colour tints. Use for placeholder and stylised props, kitbash parts and set dressing, and to hand a mesh to a person in Modeling Mode to edit by hand, then read the change back; not for paid textured models (hyper_mesh_generate) or terrain.
 ---
 
 # Modeling props with Geometry Script
@@ -10,6 +10,7 @@ description: Model 3D props in Unreal with HyperAI's Geometry Script tools, free
 | op kinds with their fields and Params, recipes, limits; the static meshes in a folder; one mesh in full | `hyper_model_inspect` |
 | build meshes from ops and recipes, then write them as static meshes | `hyper_model_apply_plan` |
 | check written meshes as props: triangles, size, pivot, open edges, UVs, slots, collision | `hyper_model_validate` |
+| hand a mesh to a person in Modeling Mode, selected and framed; read the edit back | `hyper_model_handoff` |
 
 Toolset `HyperAIStudioModeling.HyperAIStudioModelingToolset`. The pack needs the Geometry Script plugin.
 
@@ -156,6 +157,39 @@ its ends cap closed:
   made on first use), so tints read without textures; `Materials` replaces it per slot, and `material` ops plus
   `uv` ready a mesh for the project's own materials.
 - Undo takes back a `Replace=true` write. New assets are not deleted by undo; delete them in the content browser.
+
+## Handing a mesh to a person
+
+Some shapes are quicker by hand: a sculpted dent, a few faces pulled out, a cleaner silhouette. Unreal's Modeling
+Mode (the Modeling Tools Editor Mode plugin, Beta) does that, but its tools need a person's clicks and an Accept.
+`hyper_model_handoff` gets the mesh ready for them:
+
+```json
+{"Asset": "/Game/Env/Rocks/SM_Rock_A", "Tool": "Sculpt"}
+```
+
+1. Optionally `bDryRun: true` first: it says which actor it would use or put in the level, and changes nothing.
+2. The hand-off uses an actor already showing the mesh, or puts one in the level (folder `HyperAI/Modeling`, label
+   `HyperAI_Edit_<asset>`, at `Location` or where the level viewport looks; `Label` or `Location` always puts a new
+   one). Putting one there is one undo step, and waits for approval when approval is on. `Actor` hands over an actor
+   in the level by label or path instead.
+3. It selects only that actor, frames it in the level viewports, brings the level editor in front of HyperAI Studio
+   (`bLeaveTabsAlone: true` leaves the tabs as they are) and opens Modeling Mode. Selection, framing and the mode are
+   not undo steps.
+4. No tool is started: `Tool` (PolyEdit, TriEdit, PolyGroups, Sculpt, Smooth, Remesh, Simplify, UVs) names the
+   palette and button in `ToolHint`, and `bToolReady` says whether that button accepts the selection. `NextSteps`
+   is what to tell the person.
+5. The person edits, clicks Accept, and saves (File > Save All). Accept writes into the asset itself, so every actor
+   showing it changes (`SharedBy` counts the others).
+6. Then read it back: `hyper_model_inspect` with `Asset` reports `Fingerprint`; it differs from the hand-off's when
+   the geometry changed, and Details say "changed since" the hand-off, or "unchanged", and whether it is unsaved
+   (the editor remembers hand-offs until it closes; after a restart compare the two Fingerprints yourself).
+   `hyper_model_validate` checks it as a prop again.
+
+A later `write_asset` with `Replace=true` on that path overwrites the person's edit: build on the edited asset
+instead (place it, scatter it, or hand it over again). The hand-off refuses during Play in Editor, with the plugin
+off, in an unattended editor, for an asset outside `/Game` or not a static mesh, and while a Modeling Mode tool is
+open (the person Accepts or Cancels it first).
 
 ## Using the results
 

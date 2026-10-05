@@ -152,6 +152,8 @@ struct FHyperAIModelInspectReport
 	UPROPERTY() TArray<FString> Assets;
 	/** Asset read in full. */
 	UPROPERTY() TArray<FString> Details;
+	/** With Asset: its geometry fingerprint (source positions, triangles, material slots, first UV set), which changes when the mesh is edited by hand or rewritten. */
+	UPROPERTY() FString Fingerprint;
 	UPROPERTY() bool bTruncated = false;
 };
 
@@ -192,11 +194,76 @@ struct FHyperAIModelValidateReport
 	UPROPERTY() TArray<FString> Assets;
 };
 
+USTRUCT(BlueprintType)
+struct FHyperAIModelHandoffRequest
+{
+	GENERATED_BODY()
+
+	/** The static mesh to hand over, under /Game (/Game/HyperAI/Models/SM_Rock). An actor already showing it is used; with none, one is put in the level. Give Asset or Actor. */
+	UPROPERTY() FString Asset;
+	/** Or an actor in the open level, by its label or full path, whose one static mesh is handed over where it stands. */
+	UPROPERTY() FString Actor;
+	/** "x,y,z" cm: put a new actor here. Empty: where the level viewport looks (what it hits within 50 m). */
+	UPROPERTY() FString Location;
+	/** The new actor's label, 1 to 64 letters, digits, _ or -; empty makes HyperAI_Edit_<asset name>. Location or Label always puts a new actor. */
+	UPROPERTY() FString Label;
+	/** A Modeling Mode tool to point the person at: PolyEdit, TriEdit, PolyGroups, Sculpt, Smooth, Remesh, Simplify or UVs. Not started; the reply names its palette and button. */
+	UPROPERTY() FString Tool;
+	/** Leave the editor's tabs as they are: the level editor is not brought in front of HyperAI Studio. */
+	UPROPERTY() bool bLeaveTabsAlone = false;
+	/** Check and say what would happen; nothing is put in the level, selected or switched. */
+	UPROPERTY() bool bDryRun = false;
+	/** Names the hand-off, for hyper_operation_wait; made when empty. */
+	UPROPERTY() FString OperationId;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIModelHandoffReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY() bool bOk = false;
+	/** checked, completed, awaiting_user_approval, approval_not_queued, invalid_request, unavailable, operation_failed. */
+	UPROPERTY() FString Status;
+	UPROPERTY() FString Diagnostic;
+	UPROPERTY() FString OperationId;
+	/** The static mesh handed over. */
+	UPROPERTY() FString Asset;
+	UPROPERTY() FString ActorLabel;
+	/** Empty for an actor not yet put in the level (a dry run, or one waiting for approval). */
+	UPROPERTY() FString ActorPath;
+	/** The actor was put in the level for the hand-off (on a dry run: would be); Edit > Undo takes it away. */
+	UPROPERTY() bool bPlaced = false;
+	/** Where the actor stands, "x,y,z" cm. */
+	UPROPERTY() FString Location;
+	/** It is the only actor selected. */
+	UPROPERTY() bool bSelected = false;
+	/** Modeling Mode is active in the level editor. */
+	UPROPERTY() bool bModeActive = false;
+	/** brought_to_front, already_in_front, left_alone or no_level_editor_tab. */
+	UPROPERTY() FString Viewport;
+	/** Level viewports that now frame the actor. */
+	UPROPERTY() int32 FramedViewports = 0;
+	/** With Tool: its palette and button, "Deform > Vertex Sculpt". */
+	UPROPERTY() FString ToolHint;
+	/** That button accepts the selection now, as Modeling Mode's palette judges it; nothing is started. */
+	UPROPERTY() bool bToolReady = false;
+	/** The asset's geometry as handed over; hyper_model_inspect's Fingerprint differs once the person's edit is accepted. */
+	UPROPERTY() FString Fingerprint;
+	UPROPERTY() int32 Triangles = 0;
+	UPROPERTY() int32 Vertices = 0;
+	/** Other actors in the level showing the asset: an accepted edit changes them too. */
+	UPROPERTY() int32 SharedBy = 0;
+	/** What the person does next, in order. */
+	UPROPERTY() TArray<FString> NextSteps;
+	UPROPERTY() TArray<FString> Notes;
+};
+
 /**
  * 3D modelling with Geometry Script: named meshes built in memory from primitives, sweeps and revolves, booleans,
  * cuts, selection modelling, warps, remeshing, UVs, material ids and vertex colours, with recipe macros for props,
- * then written as static meshes with collision. Driving Modeling Mode's interactive tools is left alone: they need
- * selection, ticks and accepts that an agent cannot give reliably.
+ * then written as static meshes with collision. Modeling Mode's interactive tools are left to people:
+ * hyper_model_handoff hands a mesh over and reads the edit back.
  */
 UCLASS()
 class HYPERAISTUDIOMODELING_API UHyperAIStudioModelingToolset final : public UToolsetDefinition
@@ -208,7 +275,8 @@ public:
 
 	/**
 	 * Lists the model plan's op kinds with their fields and Params, the recipes, the limits, and the static meshes in a
-	 * folder (triangles, size, slots, Nanite); with Asset, one mesh in full: collision, slots and the plan that made it.
+	 * folder (triangles, size, slots, Nanite); with Asset, one mesh in full: collision, slots, the plan that made it, and
+	 * its Fingerprint, which changes when the mesh is edited.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Modeling")
 	static FHyperAIModelInspectReport hyper_model_inspect(const FHyperAIModelInspectRequest& Request);
@@ -227,6 +295,14 @@ public:
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Modeling")
 	static FHyperAIModelValidateReport hyper_model_validate(const FHyperAIModelValidateRequest& Request);
+
+	/**
+	 * Hands a /Game static mesh to a person in Unreal's Modeling Mode to edit by hand: selects an actor showing it (one
+	 * is put in the level when none is, in one undo step), frames it, brings the level viewport in front of the Studio
+	 * and opens the mode. No tool is started. The person edits, Accepts and saves; inspect's Fingerprint then shows the change.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Modeling")
+	static FHyperAIModelHandoffReport hyper_model_handoff(const FHyperAIModelHandoffRequest& Request);
 };
 
 class FHyperAIStudioModelingContracts final
@@ -237,6 +313,7 @@ public:
 	static constexpr const TCHAR* InspectToolName = TEXT("hyper_model_inspect");
 	static constexpr const TCHAR* PlanToolName = TEXT("hyper_model_apply_plan");
 	static constexpr const TCHAR* ValidateToolName = TEXT("hyper_model_validate");
+	static constexpr const TCHAR* HandoffToolName = TEXT("hyper_model_handoff");
 
 	/** Ops a request may send, and ops after recipes expand. */
 	static constexpr int32 MaxOperations = 64;
@@ -265,12 +342,35 @@ public:
 	/** The vertex-colour material placeholders get unless a plan names materials, made on first use. */
 	static constexpr const TCHAR* VertexColorMaterial = TEXT("/Game/HyperAI/Modeling/M_HyperAIVertexColor");
 
+	/**
+	 * UModelingToolsEditorMode::EM_ModelingToolsEditorModeId (ModelingToolsEditorMode.cpp:164 in 5.8), by name: linking
+	 * the Beta plugin would keep this module, and with it the other modeling tools, from loading without it.
+	 */
+	static constexpr const TCHAR* ModelingModeId = TEXT("EM_ModelingToolsEditorMode");
+	static constexpr const TCHAR* ModelingModePlugin = TEXT("ModelingToolsEditorMode");
+	/** The outliner folder, and the label prefix, of an actor a hand-off puts in the level. */
+	static constexpr const TCHAR* HandoffFolder = TEXT("HyperAI/Modeling");
+	static constexpr const TCHAR* HandoffLabelPrefix = TEXT("HyperAI_Edit_");
+	/** How far from the origin a placed actor may stand on each axis, cm (20 km). */
+	static constexpr double MaxHandoffCoordinate = 2000000.0;
+	/** How far the hand-off looks along the viewport's view for somewhere to stand, cm. */
+	static constexpr double HandoffTraceDistance = 5000.0;
+	/** Above this, Modeling Mode's tools are slow; the reply suggests Simplify or Remesh first. */
+	static constexpr int32 HeavyHandoffTriangles = 500000;
+	/** Above this many source triangles a mesh is not fingerprinted: hashing it would hold the editor too long. */
+	static constexpr int32 MaxFingerprintTriangles = 4000000;
+
 	static FString GetQualifiedToolsetName();
 	static TArray<FString> GetToolNames();
 	static bool IsRegistrationAllowed(bool bAllowSourceCandidateForDev);
 	static FHyperAIModelInspectReport Inspect(const FHyperAIModelInspectRequest& Request);
 	static FHyperAIModelPlanReport ApplyPlan(const FHyperAIModelPlanRequest& Request);
 	static FHyperAIModelValidateReport Validate(const FHyperAIModelValidateRequest& Request);
+	static FHyperAIModelHandoffReport Handoff(const FHyperAIModelHandoffRequest& Request);
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Test runs are unattended, which a hand-off refuses: this lets them through, and can name a mode id that does not exist. */
+	static void SetHandoffTestHooks(bool bAllowUnattended, FName ModeId = NAME_None);
+#endif
 };
 
 class FHyperAIStudioModelingRegistration final
