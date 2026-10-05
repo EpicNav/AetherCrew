@@ -36,6 +36,12 @@ namespace HyperAIStudio::NativeChat::Private
 		static FString Command;
 		return Command;
 	}
+
+	bool& ContextInTests()
+	{
+		static bool bEnabled = false;
+		return bEnabled;
+	}
 	constexpr int32 MaxOutputCharacters = 20000;
 
 	FString Quote(const FString& Path)
@@ -329,7 +335,7 @@ bool FHyperAIStudioNativeChat::IsRunning() const
 	return !bStopped && Process.IsValid() && FPlatformProcess::IsProcRunning(const_cast<FProcHandle&>(Process));
 }
 
-void FHyperAIStudioNativeChat::Send(const FString& Text, const TArray<FString>& Images)
+void FHyperAIStudioNativeChat::Send(const FString& Text, const TArray<FString>& Images, const FHyperAIStudioMessageHints& Hints)
 {
 	TArray<FString> Sendable = Images.FilterByPredicate(&HyperAIStudio::NativeChat::Private::IsSendableImage);
 	FString Trimmed = Text.TrimStartAndEnd();
@@ -343,25 +349,26 @@ void FHyperAIStudioNativeChat::Send(const FString& Text, const TArray<FString>& 
 	}
 	if (!bReady || bBusy)
 	{
-		Queued.Add({Trimmed, MoveTemp(Sendable)});
+		// The hints wait with it, so a queued preset still reaches its tools.
+		Queued.Add({Trimmed, MoveTemp(Sendable), Hints});
 		Changed();
 		return;
 	}
 	AddItem(FHyperAIStudioChatItem::EKind::User, FString(), FString(), Trimmed)->Images = Sendable;
 	TurnStarted();
 	// The agent also gets what project memory knows about the message; the transcript keeps what was typed.
-	SendNow(Trimmed + MemoryFor(Trimmed), Sendable);
+	SendNow(Trimmed + MemoryFor(Trimmed, Hints), Sendable);
 }
 
-FString FHyperAIStudioNativeChat::MemoryFor(const FString& Text)
+FString FHyperAIStudioNativeChat::MemoryFor(const FString& Text, const FHyperAIStudioMessageHints& Hints)
 {
 	// A headless chat answers one question for a tool, a slash command has to stay a command, and tests script exact messages.
-	if (bHeadless || Text.StartsWith(TEXT("/")) || GIsAutomationTesting)
+	if (bHeadless || Text.StartsWith(TEXT("/")) || (GIsAutomationTesting && !HyperAIStudio::NativeChat::Private::ContextInTests()))
 	{
 		return FString();
 	}
 	FString Summary;
-	const FString Context = ContextFor(ProjectRoot, Text, AgentName, StartedAs, GivenMemory, Summary);
+	const FString Context = ContextFor(ProjectRoot, Text, Hints, AgentName, StartedAs, GivenMemory, Summary);
 	if (!Summary.IsEmpty())
 	{
 		// The transcript keeps what was typed; this line says what went with it.
@@ -373,14 +380,39 @@ FString FHyperAIStudioNativeChat::MemoryFor(const FString& Text)
 FString FHyperAIStudioNativeChat::ContextFor(const FString& Root, const FString& Text, const FString& ChatAgent, const FString& StartedAs,
 	TSet<FString>& Given, FString& OutSummary)
 {
+	return ContextFor(Root, Text, FHyperAIStudioMessageHints(), ChatAgent, StartedAs, Given, OutSummary);
+}
+
+FString FHyperAIStudioNativeChat::ContextFor(const FString& Root, const FString& Text, const FHyperAIStudioMessageHints& Hints, const FString& ChatAgent,
+	const FString& StartedAs, TSet<FString>& Given, FString& OutSummary)
+{
 	using namespace HyperAIStudio;
 	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
 	const TSet<FString> Before = Given;
-	const TArray<TaskRouter::FPackFit> Packs = TaskRouter::PacksFor(Text);
+	// Packs a preset names are certain; the words are only a guess.
+	TArray<TaskRouter::FPackFit> Packs;
+	for (const FString& Pack : Hints.Packs)
+	{
+		Packs.Add({Pack, 100.0});
+	}
+	if (Packs.IsEmpty())
+	{
+		Packs = TaskRouter::PacksFor(Text);
+	}
+	TArray<FString> Preferred = Hints.Skills;
+	for (const FString& Skill : TaskRouter::SkillsForPacks(Packs))
+	{
+		Preferred.AddUnique(Skill);
+	}
 	// Each piece marks what it adds in Given under its own prefix, so the order they run in does not matter.
 	const FString Recalled = Memory::ContextFor(Root, Text, Given, Settings->AgentMemory);
-	const FString HandOff = Settings->bHandTasksToProjectAgents ? TaskRouter::AgentHintFor(Text, Root, ChatAgent, StartedAs, Given) : FString();
-	const FString Context = Recalled + HandOff + Skills::HintFor(Root, Text, Given, TaskRouter::SkillsForPacks(Packs)) + TaskRouter::ToolHintFor(Packs, Given);
+	FString HandOff;
+	if (Settings->bHandTasksToProjectAgents)
+	{
+		HandOff = Hints.Agent.IsEmpty() ? TaskRouter::AgentHintFor(Text, Root, ChatAgent, StartedAs, Given)
+			: TaskRouter::AgentHintNamed(Hints.Agent, Text, Root, ChatAgent, StartedAs, Given);
+	}
+	const FString Context = Recalled + HandOff + Skills::HintFor(Root, Text, Given, Preferred) + TaskRouter::ToolHintFor(Packs, Given);
 	FString HandedTo;
 	TArray<FString> SkillNames;
 	TArray<FString> PackIds;
@@ -411,6 +443,11 @@ FString FHyperAIStudioNativeChat::ContextFor(const FString& Root, const FString&
 	SkillNames.Sort();
 	PackIds.Sort();
 	TArray<FString> Parts;
+	if (!Hints.PresetId.IsEmpty())
+	{
+		// The transcript says which preset the message came from, every time one does.
+		Parts.Add(TEXT("preset:") + Hints.PresetId);
+	}
 	if (!HandedTo.IsEmpty())
 	{
 		Parts.Add(HandedTo == TEXT("team") ? FString(TEXT("a hand-off to HyperAI's team")) : FString::Printf(TEXT("a hand-off to the %s agent"), *HandedTo));
@@ -510,7 +547,7 @@ void FHyperAIStudioNativeChat::Ready(const FString& InSessionId)
 	{
 		const FQueuedMessage Next = Queued[0];
 		Queued.RemoveAt(0);
-		Send(Next.Text, Next.Images);
+		Send(Next.Text, Next.Images, Next.Hints);
 	}
 }
 
@@ -536,7 +573,7 @@ void FHyperAIStudioNativeChat::TurnFinished()
 	{
 		const FQueuedMessage Next = Queued[0];
 		Queued.RemoveAt(0);
-		Send(Next.Text, Next.Images);
+		Send(Next.Text, Next.Images, Next.Hints);
 		return;
 	}
 	Changed();
@@ -2600,6 +2637,11 @@ namespace HyperAIStudio::NativeChat::Private
 void FHyperAIStudioNativeChat::SetCommandForTests(const FString& Command)
 {
 	HyperAIStudio::NativeChat::Private::CommandForTests() = Command;
+}
+
+void FHyperAIStudioNativeChat::SetContextInTestsForTests(const bool bEnabled)
+{
+	HyperAIStudio::NativeChat::Private::ContextInTests() = bEnabled;
 }
 #endif
 
