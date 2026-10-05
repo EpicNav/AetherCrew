@@ -24,6 +24,9 @@
 #include "Misc/ScopeExit.h"
 #include "SHyperAIStudioNativeChatView.h"
 #include "SHyperAIStudioPromptPicker.h"
+#include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SMultiLineEditableTextBox.h"
+#include "Widgets/Text/STextBlock.h"
 
 namespace HyperAIStudio::PromptPresetsTests
 {
@@ -152,6 +155,27 @@ namespace HyperAIStudio::PromptPresetsTests
 		virtual void HandleMessage(const FString& Method, const TSharedPtr<FJsonObject>& Params, const TSharedPtr<FJsonValue>& RequestId) override {}
 		virtual TSharedRef<FJsonObject> AnswerPayload(const FHyperAIStudioChatItem& Item, int32 Choice) override { return MakeShared<FJsonObject>(); }
 	};
+
+	/** Every widget of Type under Root, depth first. */
+	void FindWidgets(const TSharedRef<SWidget>& Root, const FName Type, TArray<TSharedRef<SWidget>>& Out)
+	{
+		if (Root->GetType() == Type)
+		{
+			Out.Add(Root);
+		}
+		FChildren* Children = Root->GetChildren();
+		for (int32 Index = 0; Children && Index < Children->Num(); ++Index)
+		{
+			FindWidgets(Children->GetChildAt(Index), Type, Out);
+		}
+	}
+
+	TSharedPtr<SWidget> FindWidget(const TSharedRef<SWidget>& Root, const FName Type)
+	{
+		TArray<TSharedRef<SWidget>> Found;
+		FindWidgets(Root, Type, Found);
+		return Found.IsEmpty() ? TSharedPtr<SWidget>() : TSharedPtr<SWidget>(Found[0]);
+	}
 
 	/** The pcg pack's tools are on in this editor, so a tool block can name them. */
 	bool PcgToolsEnabled()
@@ -377,6 +401,11 @@ bool FHyperAIStudioPromptPresetsProjectOverrideTest::RunTest(const FString& Para
 	TestTrue(TEXT("A broken file is an error that names it"),
 		Library.Errors.Num() == 1 && Library.Errors[0].Contains(TEXT("broken.json")));
 	TestNotNull(TEXT("and the built-ins still load"), Library.Find(TEXT("vfx-niagara.campfire")));
+	FLibrary Listed;
+	ParseCategories(TEXT(R"JSON({"schema": "hyperai.prompt-categories.v1", "categories": ["oops", {"id": "ours", "title": "Ours"}]})JSON"), TEXT("categories.json"),
+		/*bBuiltIn=*/false, Listed);
+	TestTrue(TEXT("A category entry that is not an object is its file's error, and the others still load"), Listed.Errors.Num() == 1
+		&& Listed.Errors[0].StartsWith(TEXT("categories.json[0]")) && Listed.FindCategory(TEXT("ours")) != nullptr);
 
 	// Kept until a file changes.
 	SetBuiltInDirectoryForTests(BuiltIn);
@@ -621,18 +650,19 @@ bool FHyperAIStudioPromptPresetsLocalizedTest::RunTest(const FString& Parameters
 	{
 		return false;
 	}
-	TMap<FString, FString> Translated;
+	TMap<FString, L10n::FEntry> Translated;
 	for (const L10n::FEntry& Entry : Entries)
 	{
 		if (Entry.Namespace == TEXT("HyperAIStudioPrompts"))
 		{
-			Translated.Add(Entry.Key, Entry.Source);
+			Translated.Add(Entry.Key, Entry);
 		}
 	}
+	// An entry for today's English, with text: an empty one would show the English in a Chinese picker.
 	auto Expect = [this, &Translated](const FString& Key, const FString& Source)
 	{
-		const FString* Found = Translated.Find(Key);
-		TestTrue(FString::Printf(TEXT("zh-Hans translates %s"), *Key), Found && *Found == Source);
+		const L10n::FEntry* Found = Translated.Find(Key);
+		TestTrue(FString::Printf(TEXT("zh-Hans translates %s"), *Key), Found && Found->Source == Source && !Found->Text.TrimStartAndEnd().IsEmpty());
 	};
 	const FLibrary Shipped = Load(BuiltInDirectory(), FString());
 	for (const FHyperAIStudioPromptCategory& Category : Shipped.Categories)
@@ -802,6 +832,124 @@ bool FHyperAIStudioPromptPresetsPickerTest::RunTest(const FString& Parameters)
 	View->InsertPreset(*Fixture.Find(TEXT("team-builds.arena")), TEXT("Build the arena."));
 	TestTrue(TEXT("A team preset turns Team on, and says so"), View->IsTeam() && View->GetNotice().Contains(TEXT("Team is on")));
 	HyperAIStudio::Tests::SaveWidgetShot(View, FIntPoint(900, 420), TEXT("prompt-inserted"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioPromptPresetsComposerTest,
+	"HyperAIStudio.PromptPresets.Composer",
+	HyperAIStudio::PromptPresetsTests::Flags)
+
+bool FHyperAIStudioPromptPresetsComposerTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio;
+	using namespace HyperAIStudio::PromptPresetsTests;
+	FScratch Scratch;
+	SetBuiltInDirectoryForTests(WriteFixture(Scratch.Dir));
+	const FString Root = FPaths::Combine(Scratch.Dir, TEXT("Project"));
+	Skills::InstallBuiltIns(Root, Skills::BuiltInDirectory());
+	Agents::InstallTeam(Root, /*bUpdateOnly=*/false);
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bWasHanding = Settings->bHandTasksToProjectAgents;
+	Settings->bHandTasksToProjectAgents = true;
+	UHyperAIStudioChatHistoryPrefs* Prefs = GetMutableDefault<UHyperAIStudioChatHistoryPrefs>();
+	const TArray<FString> Recent = Prefs->RecentPromptPresets;
+	FHyperAIStudioNativeChat::SetContextInTestsForTests(true);
+	ON_SCOPE_EXIT
+	{
+		Settings->bHandTasksToProjectAgents = bWasHanding;
+		Prefs->RecentPromptPresets = Recent;
+		Prefs->SaveConfig();
+		FHyperAIStudioNativeChat::SetContextInTestsForTests(false);
+	};
+	const FLibrary Fixture = Load(BuiltInDirectory(), FString());
+	const FHyperAIStudioPromptPreset* Forest = Fixture.Find(TEXT("pcg-foliage.forest-ecosystem"));
+	const FHyperAIStudioPromptPreset* Arena = Fixture.Find(TEXT("team-builds.arena"));
+	if (!TestTrue(TEXT("The fixture has its presets"), Forest && Arena))
+	{
+		return false;
+	}
+
+	// The composer as the user drives it: Enter on its text, and its Team switch.
+	const TSharedRef<FFakeChat> Chat = MakeShared<FFakeChat>(Root);
+	Chat->MakeReady();
+	const TSharedRef<SHyperAIStudioNativeChatView> View = SNew(SHyperAIStudioNativeChatView).Chat(Chat);
+	const TSharedPtr<SWidget> Box = FindWidget(View, TEXT("SMultiLineEditableTextBox"));
+	const TSharedPtr<SWidget> Typing = Box.IsValid() ? FindWidget(Box.ToSharedRef(), TEXT("SMultiLineEditableText")) : nullptr;
+	if (!TestTrue(TEXT("The view has its composer"), Typing.IsValid()))
+	{
+		return false;
+	}
+	auto Enter = [&Typing]()
+	{
+		Typing->OnKeyDown(FGeometry(), FKeyEvent(EKeys::Enter, FModifierKeysState(), 0, /*bIsRepeat=*/false, 0, 0));
+	};
+	auto Checks = [&View]()
+	{
+		TArray<TSharedRef<SWidget>> Found;
+		FindWidgets(View, TEXT("SCheckBox"), Found);
+		TArray<TSharedRef<SCheckBox>> Boxes;
+		for (const TSharedRef<SWidget>& Each : Found)
+		{
+			Boxes.Add(StaticCastSharedRef<SCheckBox>(Each));
+		}
+		return Boxes;
+	};
+
+	View->InsertPreset(*Forest, TEXT("Grow a [Biome] forest on the [Paint layer] layer."), {TEXT("Biome"), TEXT("Paint layer")});
+	Enter();
+	TestTrue(TEXT("The first send with blanks left only says which: ") + View->GetNotice(), Chat->Sent.IsEmpty()
+		&& View->GetNotice().Contains(TEXT("[Biome], [Paint layer]")));
+	Enter();
+	TestTrue(TEXT("The second sends it as it is, with the preset's skill"), Chat->Sent.Num() == 1
+		&& Chat->Sent[0].StartsWith(TEXT("Grow a [Biome] forest")) && Chat->Sent[0].Contains(TEXT("`unreal-level-design`")));
+	TestTrue(TEXT("and the composer forgets the preset"), View->GetComposerText().IsEmpty() && View->GetPendingHints().IsEmpty() && View->GetNotice().IsEmpty());
+	Chat->FinishTurn();
+
+	// A team preset turns Team on; typed away, it takes Team and its line with it.
+	View->InsertPreset(*Arena, TEXT("Do the thing."));
+	TestTrue(TEXT("A team preset turns Team on"), View->IsTeam());
+	StaticCastSharedPtr<SMultiLineEditableTextBox>(Box)->SetText(FText::GetEmpty());
+	TestTrue(TEXT("Typing the composer empty forgets the preset, the Team it turned on and its line"), !View->IsTeam() && View->GetNotice().IsEmpty()
+		&& View->GetPendingHints().IsEmpty());
+
+	// Team switched off by hand: the message stays with this agent, with no hand-off to the team.
+	const TArray<TSharedRef<SCheckBox>> Before = Checks();
+	TArray<bool> WasChecked;
+	for (const TSharedRef<SCheckBox>& Each : Before)
+	{
+		WasChecked.Add(Each->IsChecked());
+	}
+	View->InsertPreset(*Arena, TEXT("Do the thing."));
+	TSharedPtr<SCheckBox> TeamSwitch;
+	for (int32 Index = 0; Index < Before.Num(); ++Index)
+	{
+		TeamSwitch = !WasChecked[Index] && Before[Index]->IsChecked() ? TSharedPtr<SCheckBox>(Before[Index]) : TeamSwitch;
+	}
+	if (!TestTrue(TEXT("The Team switch shows it on"), TeamSwitch.IsValid()))
+	{
+		return false;
+	}
+	TeamSwitch->ToggleCheckedState();
+	TestFalse(TEXT("and the user turns it off"), View->IsTeam());
+	Enter();
+	TestTrue(TEXT("The message goes to this agent"), Chat->Sent.Num() == 2 && Chat->Sent[1].StartsWith(TEXT("Do the thing.")));
+	TestFalse(TEXT("without the team's hand-off: ") + Chat->LastSummary(), Chat->Sent.Num() == 2 && (Chat->Sent[1].Contains(TEXT("`team` skill"))
+		|| Chat->LastSummary().Contains(TEXT("HyperAI's team"))));
+	TestTrue(TEXT("but still named for its preset"), Chat->LastSummary().Contains(TEXT("preset:team-builds.arena")));
+	Chat->FinishTurn();
+
+	// A prompt file that cannot be read is said under the list, naming the file.
+	Write(FPaths::Combine(ProjectDirectory(Root), TEXT("broken.json")), TEXT("{ \"schema\": "));
+	const TSharedRef<SHyperAIStudioPromptPicker> Picker = SNew(SHyperAIStudioPromptPicker).ProjectRoot(Root).Context(FPromptContext());
+	TArray<TSharedRef<SWidget>> Lines;
+	FindWidgets(Picker, TEXT("STextBlock"), Lines);
+	TestTrue(TEXT("The picker says which prompt file it could not read"), Lines.ContainsByPredicate([](const TSharedRef<SWidget>& Each)
+	{
+		const TSharedRef<STextBlock> Line = StaticCastSharedRef<STextBlock>(Each);
+		return Line->GetVisibility().IsVisible() && Line->GetText().ToString().Contains(TEXT("broken.json"));
+	}));
 	return true;
 }
 
