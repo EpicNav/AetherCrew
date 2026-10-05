@@ -847,10 +847,11 @@ public:
 	/** Waits up to Seconds for a refresh in progress to publish its index; true when none is running any more. */
 	bool WaitForRefresh(double Seconds);
 	/**
-	 * Game thread. Waits up to Seconds for the C++ pass and, when asked, the first asset walk. The core ticker cannot
-	 * run while this blocks, so the wait reads asset folders itself. True when the C++ pass is no longer running.
+	 * Game thread. Waits up to Seconds for the parts a search reads: the C++ pass and the first asset walk. The core
+	 * ticker cannot run while this blocks, so the wait reads asset folders itself. True when the C++ pass is no longer
+	 * running.
 	 */
-	bool WaitForFirstIndex(double Seconds, bool bIncludeAssets = true);
+	bool WaitForFirstIndex(double Seconds, bool bIncludeAssets = true, bool bIncludeCpp = true);
 	void Shutdown();
 
 #if WITH_DEV_AUTOMATION_TESTS

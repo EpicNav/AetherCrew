@@ -1267,6 +1267,42 @@ bool FHyperAIContextSearchFirstSearchFindsAssetsTest::RunTest(const FString& Par
 	const FHyperAIProjectIndexStatus Status = Store.GetStatus();
 	AddInfo(FString::Printf(TEXT("First asset search took %.1f ms; the asset index holds %d assets in %d folders (%s)."),
 		ElapsedMs, Status.AssetRecordCount, Status.AssetFolderCount, *Status.AssetIndexStatus));
+	// An asset-only search does not wait for the C++ pass; let it finish so later tests can set their own snapshot.
+	TestTrue(TEXT("the C++ pass the search started finishes"), Store.WaitForRefresh(10.0));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIContextSearchFirstSearchWaitsForKindsTest,
+	"HyperAIStudio.NativeTools.ContextSearch.FirstSearchWaitsOnlyForKindsAsked",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIContextSearchFirstSearchWaitsForKindsTest::RunTest(const FString& Parameters)
+{
+	// A first search sits out only the parts it reads: an asset search does not wait for the C++ pass as well.
+	FHyperAIStudioProjectIndexStore& Store = FHyperAIStudioProjectIndexStore::Get();
+	TestTrue(TEXT("no other refresh is left running"), Store.WaitForRefresh(10.0));
+	Store.ResetAssetIndexForTests();
+	Store.SetSnapshotForTests(FHyperAIProjectIndexValueSnapshot());
+	FString Diagnostic;
+	const bool bStarted = Store.RequestRefresh(Diagnostic);
+	TestTrue(FString::Printf(TEXT("a refresh starts (%s)"), *Diagnostic), bStarted);
+	TestFalse(TEXT("a wait that reads no C++ returns while the C++ pass still runs"),
+		Store.WaitForFirstIndex(10.0, false, false));
+	Store.WaitForFirstIndex(10.0, true, false);
+	const auto Assets = Store.GetAssetSnapshotShared();
+	if (Assets->bRegistryScanning)
+	{
+		AddInfo(TEXT("The Asset Registry is still scanning in this run; the asset walk check was skipped."));
+	}
+	else
+	{
+		TestTrue(FString::Printf(TEXT("a wait for assets alone finishes the asset walk (%s)"), *Assets->Status),
+			Assets->bHasCompletedWalk);
+	}
+	TestTrue(TEXT("the C++ pass finishes on its own"), Store.WaitForRefresh(10.0));
+	Store.ResetAssetIndexForTests();
+	Store.SetSnapshotForTests(FHyperAIProjectIndexValueSnapshot());
 	return true;
 }
 

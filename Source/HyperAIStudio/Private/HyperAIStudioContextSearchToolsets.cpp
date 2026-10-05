@@ -3912,11 +3912,14 @@ bool FHyperAIStudioProjectIndexStore::WaitForRefresh(const double Seconds)
 	return !bWorkerRunning;
 }
 
-bool FHyperAIStudioProjectIndexStore::WaitForFirstIndex(const double Seconds, const bool bIncludeAssets)
+bool FHyperAIStudioProjectIndexStore::WaitForFirstIndex(
+	const double Seconds,
+	const bool bIncludeAssets,
+	const bool bIncludeCpp)
 {
 	if (!IsInGameThread())
 	{
-		return WaitForRefresh(Seconds);
+		return WaitForRefresh(bIncludeCpp ? Seconds : 0.0);
 	}
 	TSharedPtr<FHyperAIStudioProjectAssetIndex, ESPMode::ThreadSafe> Index;
 	{
@@ -3929,7 +3932,9 @@ bool FHyperAIStudioProjectIndexStore::WaitForFirstIndex(const double Seconds, co
 	const double DeadlineSeconds = FPlatformTime::Seconds() + FMath::Max(Seconds, 0.0);
 	for (;;)
 	{
+		// A search that reads no C++ symbols does not wait on the C++ pass, which can take its whole 1.5 s bound.
 		bool bCppRunning = false;
+		if (bIncludeCpp)
 		{
 			FScopeLock Lock(&Mutex);
 			bCppRunning = bWorkerRunning;
@@ -4920,18 +4925,24 @@ FHyperAIReadReport UHyperAIStudioProjectSearchToolset::hyper_project_search(
 	{
 		Store.EnsureAssetIndexStarted();
 	}
-	const bool bWantsAssets = Request.Kinds.IsEmpty()
-		|| Request.Kinds.ContainsByPredicate([](const FString& Kind)
-		{
-			return NormalizeToken(Kind) == TEXT("asset");
-		});
+	const auto WantsKind = [&Request](const TCHAR* Kind)
+	{
+		return Request.Kinds.IsEmpty()
+			|| Request.Kinds.ContainsByPredicate([Kind](const FString& Requested)
+			{
+				return NormalizeToken(Requested) == Kind;
+			});
+	};
+	const bool bWantsAssets = WantsKind(TEXT("asset"));
+	const bool bWantsCpp = WantsKind(TEXT("cpp_symbol"));
 	auto Assets = Store.GetAssetSnapshotShared();
-	// The first search waits out the index build, which is bounded, rather than answering that it is being built.
-	const bool bCppBuilding = Snapshot->Value.Records.IsEmpty() && Snapshot->Status == TEXT("indexing");
+	// The first search waits out the build of the parts it reads, which is bounded, rather than answering that it is
+	// being built.
+	const bool bCppBuilding = bWantsCpp && Snapshot->Value.Records.IsEmpty() && Snapshot->Status == TEXT("indexing");
 	const bool bAssetsBuilding = bWantsAssets && !Assets->bHasCompletedWalk && Assets->Status == TEXT("indexing");
 	if (Request.bStartIndexIfUnavailable && (bCppBuilding || bAssetsBuilding) && IsInGameThread())
 	{
-		Store.WaitForFirstIndex(FirstSearchWaitSeconds, bWantsAssets);
+		Store.WaitForFirstIndex(FirstSearchWaitSeconds, bWantsAssets, bWantsCpp);
 		Snapshot = Store.GetSnapshotShared();
 		Assets = Store.GetAssetSnapshotShared();
 	}
