@@ -1,6 +1,6 @@
 ---
 name: unreal-modeling
-description: Model 3D props in Unreal with HyperAI's Geometry Script tools, free and offline - rocks, boulders, standing stones, pillars, arches, ruined walls, towers, crystal clusters, mushrooms, tree trunks, trees, bushes, grass tufts from recipes, or any shape from primitives, revolves, sweeps, booleans, plane cuts, mirrors, extrude, inset, bevel, noise and bend/twist/flare warps, remeshing and UVs - written as static meshes with collision and vertex-colour tints. Use for placeholder and stylised props, kitbash parts and set dressing; not for paid textured models (hyper_mesh_generate) or terrain.
+description: Model 3D props in Unreal with HyperAI's Geometry Script tools, free and offline - rocks, boulders, standing stones, pillars, arches, ruined walls, towers, crystal clusters, mushrooms, tree trunks, trees, bushes, grass tufts from recipes, or any shape from primitives, revolves, sweeps, booleans, plane cuts, mirrors, extrude, inset, offset, bevel, Catmull-Clark subdivision, noise, bend/twist/flare and ripple warps, remeshing and UVs - written as static meshes with collision and vertex-colour tints. Use for placeholder and stylised props, kitbash parts and set dressing; not for paid textured models (hyper_mesh_generate) or terrain.
 ---
 
 # Modeling props with Geometry Script
@@ -19,11 +19,15 @@ touches the project until `write_asset`, so build freely and look at the numbers
 
 1. `bDryRun: true` builds every mesh and reports each one's `Triangles`, `Size`, `Min`/`Max`, `bClosed`,
    `OpenEdges`, `Components` (separate pieces), `UVSets` and `MaterialIds`, and what each `write_asset` would write
-   (triangles, slots, collision shapes). A recipe's ops are listed in `ExpandedOps`.
+   (triangles, slots, collision shapes). A recipe's ops are listed in `ExpandedOps`. `bPreviewDryRun: true` also
+   draws what each `write_asset` would write as a PNG, `Assets[].PreviewPath` (slower: a temporary mesh each).
 2. The same plan with `bDryRun: false` and a fresh `OperationId` builds it again and writes the assets, saved, in
-   one undo step. With approval on it waits in the Activity panel: call `hyper_operation_wait` with
-   `bWaitThroughApproval: true`.
+   one undo step, and draws a PNG of each asset, `Assets[].PreviewPath`: open it with your image reader to see what
+   you made (Notes say when the editor cannot draw). With approval on it waits in the Activity panel, and that
+   reply already names each `Assets[].PreviewPath`: call `hyper_operation_wait` with `bWaitThroughApproval: true`,
+   whose diagnostic starts by saying which were drawn, then open those paths.
 3. `hyper_model_validate` on the assets, `Policy` `placeholder` (the default) or `production`.
+   `hyper_model_inspect` with `Asset` and `bPreview: true` draws an existing static mesh again.
 
 A mistake is refused before anything is built, naming the op by its number, the field and what it takes; an op
 that fails while building is named the same way, and nothing is written.
@@ -43,7 +47,7 @@ that fails while building is named the same way, and nothing is written.
 - **Shapes:** `add.box`, `add.sphere` (`Style=box` spreads triangles evenly: best before noise), `add.cylinder`,
   `add.cone` (`Top` = top radius as a share of the base), `add.capsule`, `add.torus`, `add.disc`, `add.stairs`,
   `add.curved_stairs`. Each takes `Size`, `Location`, `Rotation`, `Scale`, and `Steps`, `Material`, `Color`,
-  `Groups` (face, quad or single polygroups: bevel and extrude work per group), `Origin`.
+  `Groups` (face, quad or single polygroups: bevel, extrude and subdivide work per group), `Origin`.
 - **Profiles:** `add.revolve` turns `Points` `"r,z; r,z"` (radius, height) about Z: vases, domes, mushroom caps,
   columns. With `Ring=<radius>` the Points are a closed cross-section turned at that radius (`Degrees=180` makes an
   arch's ring). `add.sweep` drags a cross-section (`Points`, or `circle:radius,sides`, or `rect:width,depth`) along
@@ -54,11 +58,23 @@ that fails while building is named the same way, and nothing is written.
   `scatter_on` (copies of `Source` strewn over `Mesh`'s surface where it faces within `Up` degrees of up, `Spacing`
   apart, random `Tilt` and scale), `boolean` (`Op=union|subtract|intersect` with `Source`), `self_union` (fuses
   overlapping parts into one watertight surface), `plane_cut` (cuts away the side `Normal` points to), `mirror`.
-- **Faces:** `extrude`, `inset`, `bevel` (no `Select`: every polygroup edge), `shell`.
+- **Faces:** `extrude`, `inset`, `offset_faces`, `bevel` (no `Select`: every polygroup edge), `shell`.
+  `offset_faces` moves the selected faces `Distance` cm along their own normals, with side walls where they meet the
+  rest, where `extrude` pushes the whole selection one way: a band around a round shape (a barrel's hoops) needs
+  `offset_faces`; a negative Distance sinks the faces into a recess. With no `Select` it swells (or with a negative
+  Distance shrinks) a closed mesh, its faces kept parallel (`Mode=parallel`; `face` and `vertex` average the
+  normals instead), and thickens an open sheet into a slab: piece by piece, in a mesh of several. Moved faces keep
+  their polygroups. `Area=face` moves every face on its own with walls of its own: 7 triangles where there was 1.
 - **Deform:** `noise` (`Magnitude` cm, `Frequency` = 1 / feature size in cm, `Seed`), `bend`, `twist`, `flare`,
-  `smooth`. Noise moves vertices, so give it some: `Style=box` spheres, box `Steps`, `tessellate` or `remesh` first.
-- **Topology:** `tessellate` (Level 1-3), `remesh` (`Triangles`), `simplify` (`Triangles`, `Planar=true` or
-  `Tolerance`), `solidify` (a watertight copy through a voxel grid, `Resolution` 8-256), `morphology`, `repair`.
+  `wave`, `smooth`. Noise moves vertices, so give it some: `Style=box` spheres, box `Steps`, `tessellate` or `remesh`
+  first. `wave` moves every vertex up to `Magnitude` cm along `Direction` (`0,0,1`) by a sine `Wavelength` cm long:
+  `Mode=line` waves travel along `Along` (`1,0,0`: corrugated sheets, flags), `Mode=ripple` rings spread from
+  `Location` (the mesh's center by default); `Phase` in degrees shifts them. It takes no `Select`, and needs vertices
+  too, about 8 or more per Wavelength (box `Steps`, `tessellate`, `subdivide`). A 3D wave is not offered: Unreal 5.8
+  leaves it unimplemented.
+- **Topology:** `tessellate` (Level 1-3), `subdivide` (Level 1-3, `Cage=groups|quads`), `remesh` (`Triangles`),
+  `simplify` (`Triangles`, `Planar=true` or `Tolerance`), `solidify` (a watertight copy through a voxel grid,
+  `Resolution` 8-256), `morphology`, `repair`.
 - **Surface:** `normals` (`Mode=smooth|hard|split`), `uv` (`Mode=box|planar|cylinder|auto`, `Scale` cm per tile),
   `material` (`Id` 0-15 on the selected faces: one material slot per id), `color` (vertex colour; `Glow` 0-1 makes
   it emissive with the default material).
@@ -69,9 +85,26 @@ that fails while building is named the same way, and nothing is written.
   (undoable; its other LODs and hi-res source go too, and a redirector's path is refused), `LightmapUV`. It writes
   the mesh as it is at that op: later ops on it, a `drop` too, leave that asset alone.
 
-`Select` picks faces for extrude, inset, bevel, noise, smooth, uv, material and color: `all`, `top`, `bottom`,
-`normal:nx,ny,nz,maxdeg`, `box:x0,y0,z0,x1,y1,z1`, `sphere:x,y,z,r`, `plane:ox,oy,oz,nx,ny,nz` or `material:id`,
-with Params `Invert=true` and `Grow=n`. Read a dry run's `Min`/`Max` before writing a box or sphere selector.
+`Select` picks faces for extrude, inset, offset_faces, bevel, noise, smooth, uv, material and color: `all`, `top`,
+`bottom`, `normal:nx,ny,nz,maxdeg`, `box:x0,y0,z0,x1,y1,z1`, `sphere:x,y,z,r`, `plane:ox,oy,oz,nx,ny,nz` or
+`material:id`, with Params `Invert=true` and `Grow=n`. Read a dry run's `Min`/`Max` before writing a box or sphere
+selector; a box selector picks the faces whose corners all lie inside it.
+
+### subdivide or tessellate
+
+`tessellate` splits every triangle where it lies: the shape stays (`Mode=pn` rounds it a little from its normals),
+corners stay sharp, and the triangles grow (Level+1)^2 times. `subdivide` is Catmull-Clark: it reads each polygroup
+as one polygon of a cage, only its corners counting, then refines and smooths the cage, so hard shapes come out
+soft and slightly inside their cage; every Level multiplies the faces by 4 (a cage of quads of T triangles makes
+T x 4^Level).
+
+- Build what you subdivide with `Groups=quad`: proportions kept, edges rounded. `Groups=face` turns a box into a
+  pebble. `Groups=single`, and round sides with `Groups=face` (cylinders, cones, capsules, tori, revolves, sweeps),
+  are no cage: they are refused, naming the polygroup and the fix.
+- After booleans, `solidify`, `morphology` or `remesh`, give `Cage=quads`: the triangles are paired into quads first.
+- Hold an edge crisp with more quads near it (box `Steps`) or a `bevel` first. Normals come out smooth
+  (`normals Mode=split` brings hard edges back).
+- The result keeps its groups, so give one subdivide a higher Level rather than subdividing twice.
 
 ## Recipes
 
@@ -144,12 +177,56 @@ its ends cap closed:
  "bDryRun": false, "OperationId": "vase"}
 ```
 
+A cushion: a box of quad groups subdivided at Level 2, so its edges round off and its faces stay flat in the middle
+(a box's `Steps` is the vertices along each edge, so `Steps=4` makes 3 quads a side):
+
+```json
+{"Operations": [
+ {"Kind": "add.box", "Mesh": "Cushion", "Size": "60,60,16", "Params": "Steps=4; Groups=quad; Color=#8a3b3b"},
+ {"Kind": "subdivide", "Mesh": "Cushion", "Params": "Level=2"},
+ {"Kind": "uv", "Mesh": "Cushion", "Params": "Mode=box; Scale=60"},
+ {"Kind": "write_asset", "Mesh": "Cushion", "Asset": "/Game/Env/Props/SM_Cushion"}],
+ "bDryRun": false, "OperationId": "cushion"}
+```
+
+A barrel with iron hoops. `HeightSteps=8` puts a ring of vertices every 10 cm, so each hoop is the band of faces
+between two rings, picked by a box that holds both; `offset_faces` moves it out along the bulging staves, where
+`extrude` would push it one way:
+
+```json
+{"Operations": [
+ {"Kind": "add.cylinder", "Mesh": "Barrel", "Size": "60,60,90", "Params": "Steps=24; HeightSteps=8; Color=#7a5230"},
+ {"Kind": "flare", "Mesh": "Barrel", "Params": "Percent=10"},
+ {"Kind": "offset_faces", "Mesh": "Barrel", "Select": "box:-45,-45,9,45,45,21", "Params": "Distance=1.5"},
+ {"Kind": "offset_faces", "Mesh": "Barrel", "Select": "box:-45,-45,69,45,45,81", "Params": "Distance=1.5"},
+ {"Kind": "color", "Mesh": "Barrel", "Select": "box:-45,-45,9,45,45,21", "Params": "Color=#3a3a3a"},
+ {"Kind": "color", "Mesh": "Barrel", "Select": "box:-45,-45,69,45,45,81", "Params": "Color=#3a3a3a"},
+ {"Kind": "uv", "Mesh": "Barrel", "Params": "Mode=cylinder; Scale=90"},
+ {"Kind": "write_asset", "Mesh": "Barrel", "Asset": "/Game/Env/Props/SM_Barrel"}],
+ "bDryRun": false, "OperationId": "barrel"}
+```
+
+A flag on a pole: a thin box with vertices every 6 cm, waved sideways from the pole, where the wave starts:
+
+```json
+{"Operations": [
+ {"Kind": "add.box", "Mesh": "Flag", "Location": "75,0,250", "Size": "150,2,90", "Params": "Steps=26; Color=#b0302a"},
+ {"Kind": "wave", "Mesh": "Flag", "Location": "0,0,250", "Params": "Magnitude=6; Wavelength=90; Along=1,0,0; Direction=0,1,0"},
+ {"Kind": "add.cylinder", "Mesh": "Flag", "Size": "6,6,350", "Params": "Steps=12; Color=#5a4632"},
+ {"Kind": "write_asset", "Mesh": "Flag", "Asset": "/Game/Env/Props/SM_Flag", "Params": "Collision=hulls:2"}],
+ "bDryRun": false, "OperationId": "flag"}
+```
+
 ## Scale, budgets and quality
 
 - A plan has up to 64 ops (160 once recipes expand), 32 meshes at once and writes up to 8 assets. A working mesh
   holds up to 250000 triangles; an asset up to 100000 without Nanite (250000 with `Nanite=true`). Triangles are
-  predicted before anything runs and counted after every op; a plan builds within 8 seconds. Props for a level
-  want 500 to 5000 triangles: `simplify` heavy meshes.
+  predicted before anything runs and counted after every op; a plan builds within 8 seconds. `tessellate` and
+  `subdivide` go to Level 3; subdivide's triangles are counted from its cage before it runs, and the walls of
+  extrude, inset and offset_faces from the faces they pick. Props for a level want 500 to 5000 triangles:
+  `simplify` heavy meshes.
+- A write draws its PNG previews within 4 seconds all told; an asset past that, or one written while the editor
+  cannot draw, has none and a note says so, and the write stands all the same.
 - `bClosed` (no open edges) matters for booleans, solidify, lighting and collision. `self_union` or `repair`
   closes most; `solidify` rebuilds anything watertight.
 - Placeholders get a lit material whose base colour is the vertex colour (`/Game/HyperAI/Modeling/M_HyperAIVertexColor`,
