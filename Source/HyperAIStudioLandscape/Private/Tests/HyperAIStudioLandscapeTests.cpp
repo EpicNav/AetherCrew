@@ -5,19 +5,25 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Editor.h"
 #include "EngineUtils.h"
+#include "FileHelpers.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioLandscapeToolset.h"
 #include "HyperAIStudioSettings.h"
 #include "Landscape.h"
+#include "LandscapeEdit.h"
+#include "LandscapeEditLayer.h"
 #include "LandscapeInfo.h"
+#include "LandscapeLayerInfoObject.h"
 #include "LandscapeProxy.h"
 #include "LandscapeSplineActor.h"
 #include "LandscapeSubsystem.h"
 #include "LandscapeUtils.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionLandscapeLayerBlend.h"
+#include "Misc/App.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Guid.h"
+#include "Misc/PackageName.h"
 #include "Misc/ScopeExit.h"
 #include "ObjectTools.h"
 
@@ -482,6 +488,247 @@ bool FHyperAIStudioLandscapeMaterialTest::RunTest(const FString& Parameters)
 		TakenNames == TArray<FString>({TEXT("Grass"), TEXT("Rock"), TEXT("Snow")}));
 	TestTrue(TEXT("and the landscape wears it"), Second && Landscape->LandscapeMaterial == Second);
 	return true;
+}
+
+namespace HyperAIStudio::LandscapeTests
+{
+	/** A paint layer's weight (0 to 255) at a world point: in one edit layer, or with no guid in the merged result. */
+	int32 WeightAt(ALandscape& Landscape, const FGuid& EditLayer, const TCHAR* Layer, const FVector& Where)
+	{
+		ULandscapeInfo* Info = Landscape.GetLandscapeInfo();
+		ULandscapeLayerInfoObject* LayerInfo = Info ? Info->GetLayerInfoByName(FName(Layer)) : nullptr;
+		if (!LayerInfo) return -1;
+		const FVector Local = Landscape.GetActorTransform().InverseTransformPosition(Where);
+		const int32 X = FMath::RoundToInt(Local.X);
+		const int32 Y = FMath::RoundToInt(Local.Y);
+		FLandscapeEditDataInterface Edit(Info, EditLayer);
+		uint8 Weight = 0;
+		Edit.GetWeightDataFast(LayerInfo, X, Y, X, Y, &Weight, 0);
+		return Weight;
+	}
+
+	FGuid EditLayerNamed(const ALandscape& Landscape, const TCHAR* Name)
+	{
+		for (const ULandscapeEditLayerBase* Layer : Landscape.GetEditLayersConst())
+		{
+			if (Layer && Layer->GetName().ToString() == Name) return Layer->GetGuid();
+		}
+		return FGuid();
+	}
+
+	bool NotesSay(const FHyperAILandscapePlanReport& Report, const FString& Text)
+	{
+		return Report.Notes.ContainsByPredicate([&Text](const FString& Note) { return Note.Contains(Text); });
+	}
+
+	/**
+	 * Roads against paint: the road's layer paints away from it, its Splines edit layer covers the paint beneath it (the
+	 * tool's layer infos use Advanced Weight Blending), an edit layer added after it paints over it, the Splines layer
+	 * itself is refused, and an older landscape's layer infos without Advanced Weight Blending add up, as the plan notes.
+	 */
+	bool CheckRoadLayers(FAutomationTestBase& Test, const FString& Level)
+	{
+		Test.AddInfo(TEXT("In a level ") + Level + TEXT(":"));
+		const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+		const FString Label = TEXT("HyperAI_TestLandscapeRoads_") + Suffix;
+		const FString Older = TEXT("HyperAI_TestLandscapeOlder_") + Suffix;
+		const FString Folder = TEXT("/Game/__HyperAIStudioTests/LandscapeRoads_") + Suffix;
+		const FString OlderFolder = Folder + TEXT("_Older");
+		const FString RoadLabel = TEXT("HyperAI_TestRoadLayer_") + Suffix;
+		const FString OlderRoadLabel = TEXT("HyperAI_TestRoadOlder_") + Suffix;
+		UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+		const bool bApproval = Settings->bRequireApprovalForAgentEdits;
+		Settings->bRequireApprovalForAgentEdits = false;
+		ON_SCOPE_EXIT
+		{
+			Settings->bRequireApprovalForAgentEdits = bApproval;
+			if (UWorld* World = GEditor->GetEditorWorldContext().World())
+			{
+				for (TActorIterator<ALandscapeSplineActor> It(World); It; ++It)
+				{
+					if (It->GetActorLabel() == RoadLabel || It->GetActorLabel() == OlderRoadLabel) World->EditorDestroyActor(*It, /*bShouldModifyLevel=*/true);
+				}
+			}
+			Remove(Label, Folder);
+			Remove(Older, OlderFolder);
+		};
+
+		// 504 m a side at 1 m: four components of 126 m each way. Verge everywhere, then a road painted Path along the first
+		// row of components, then an edit layer added after it, so above the road's Splines edit layer.
+		const FVector Origin(600000.0, 600000.0, 0.0);
+		const TArray<FString> Layers = {TEXT("Grass"), TEXT("Verge"), TEXT("Path"), TEXT("Snow")};
+		FHyperAILandscapeOp Create = Op(TEXT("landscape.create"), Label);
+		Create.Location = Origin;
+		Create.Size = 504.f;
+		Create.PaintLayers = Layers;
+		Create.LayerInfoFolder = Folder;
+		FHyperAILandscapeOp Verge = Op(TEXT("landscape.paint"), Label);
+		Verge.Rules = {Rule(TEXT("Verge"))};
+		FHyperAILandscapeOp Road = Op(TEXT("landscape.road"), Label);
+		Road.Road = RoadLabel;
+		Road.Points = {Origin + FVector(-22000.0, -20000.0, 0.0), Origin + FVector(22000.0, -20000.0, 0.0)};
+		Road.Width = 6.f;
+		Road.Falloff = 4.f;
+		Road.Layer = TEXT("Path");
+		FHyperAILandscapeOp Above = Op(TEXT("landscape.add_edit_layer"), Label);
+		Above.EditLayer = TEXT("Above");
+		auto Circle = [](const FString& Landscape, const FVector& Center, const TCHAR* Layer, const TCHAR* EditLayer)
+		{
+			FHyperAILandscapeOp Paint = Op(TEXT("landscape.paint"), Landscape);
+			Paint.Center = Center;
+			Paint.Radius = 6.f;
+			Paint.Falloff = 2.f;
+			Paint.Rules = {Rule(Layer)};
+			Paint.EditLayer = EditLayer;
+			return Paint;
+		};
+		const FVector NearRoad = Origin + FVector(-15000.0, -14000.0, 0.0);
+		const FHyperAILandscapeOp OnSplines = Circle(Label, NearRoad, TEXT("Snow"), TEXT("Splines"));
+		const FHyperAILandscapePlanReport Planned = Run({Create, Verge, Road, Above, OnSplines}, /*bDryRun=*/true);
+		Test.TestTrue(TEXT("painting on the Splines edit layer a road in the same plan adds is refused: ") + Planned.Diagnostic,
+			!Planned.bOk && Planned.Diagnostic.Contains(TEXT("the roads' edit layer")));
+		const FHyperAILandscapePlanReport Made = Run({Create, Verge, Road, Above});
+		if (!Test.TestTrue(TEXT("the landscape is made, painted Verge, and the road laid: ") + Made.Diagnostic, Made.bOk && Made.Applied == 4)) return false;
+		ALandscape* Landscape = Find(Label);
+		if (!Test.TestNotNull(TEXT("it is in the level"), Landscape)) return false;
+		bool bAdvanced = true;
+		for (const FString& Name : Layers)
+		{
+			const ULandscapeLayerInfoObject* LayerInfo = Landscape->GetLandscapeInfo()->GetLayerInfoByName(FName(*Name));
+			bAdvanced &= LayerInfo && LayerInfo->GetBlendMethod() == ELandscapeTargetLayerBlendMethod::PremultipliedAlphaBlending;
+		}
+		Test.TestTrue(TEXT("the layer infos the tool makes use Advanced Weight Blending"), bAdvanced);
+		Test.TestFalse(TEXT("so the plan has no note about layers adding up: ") + FString::Join(Made.Notes, TEXT(" | ")), NotesSay(Made, TEXT("Advanced Weight Blending")));
+		TArray<FString> Stack;
+		for (const ULandscapeEditLayerBase* Layer : Landscape->GetEditLayersConst()) Stack.Add(Layer ? Layer->GetName().ToString() : FString());
+		Test.TestEqual(TEXT("its edit layers, bottom to top"), FString::Join(Stack, TEXT(", ")), FString(TEXT("Layer, Splines, Above")));
+		const FGuid Base = EditLayerNamed(*Landscape, TEXT("Layer"));
+
+		// Under the road its Path covers the Verge painted beneath it; the base edit layer keeps its Verge.
+		const FVector OnRoad = Origin + FVector(0.0, -20000.0, 0.0);
+		const int32 RoadPath = WeightAt(*Landscape, FGuid(), TEXT("Path"), OnRoad);
+		const int32 RoadVerge = WeightAt(*Landscape, FGuid(), TEXT("Verge"), OnRoad);
+		const int32 BaseVerge = WeightAt(*Landscape, Base, TEXT("Verge"), OnRoad);
+		const FString UnderRoad = FString::Printf(TEXT("under the road Path covers the Verge beneath (Path %d, Verge %d; the base layer holds Verge %d)"), RoadPath, RoadVerge, BaseVerge);
+		Test.AddInfo(UnderRoad);
+		Test.TestTrue(UnderRoad, RoadPath >= 250 && RoadVerge <= 5 && BaseVerge >= 250);
+
+		// The road's own layer paints away from the road, in a component the road crosses and in one it does not. Snow
+		// painted on the base layer over the road leaves the road showing; painted on the edit layer above Splines, it covers it.
+		const FVector Untouched = Origin + FVector(15000.0, 15000.0, 0.0);
+		const FVector SnowBelow = Origin + FVector(-10000.0, -20000.0, 0.0);
+		const FVector SnowAbove = Origin + FVector(10000.0, -20000.0, 0.0);
+		const FHyperAILandscapePlanReport Painted = Run({Circle(Label, NearRoad, TEXT("Path"), TEXT("")), Circle(Label, Untouched, TEXT("Path"), TEXT("")),
+			Circle(Label, SnowBelow, TEXT("Snow"), TEXT("")), Circle(Label, SnowAbove, TEXT("Snow"), TEXT("Above"))});
+		if (!Test.TestTrue(TEXT("the circles are painted: ") + Painted.Diagnostic, Painted.bOk && Painted.Applied == 4)) return false;
+		struct FProbe { const TCHAR* What; FVector Where; const TCHAR* Shows; const TCHAR* Hides; };
+		const TArray<FProbe> Probes = {
+			{TEXT("Path painted 60 m from the road, in a component it crosses, takes"), NearRoad, TEXT("Path"), TEXT("Verge")},
+			{TEXT("Path painted in a component the road does not reach takes"), Untouched, TEXT("Path"), TEXT("Verge")},
+			{TEXT("Snow painted on the base layer over the road leaves the road"), SnowBelow, TEXT("Path"), TEXT("Snow")},
+			{TEXT("Snow painted on an edit layer above Splines covers the road"), SnowAbove, TEXT("Snow"), TEXT("Path")}};
+		for (const FProbe& Probe : Probes)
+		{
+			const int32 Shown = WeightAt(*Landscape, FGuid(), Probe.Shows, Probe.Where);
+			const int32 Hidden = WeightAt(*Landscape, FGuid(), Probe.Hides, Probe.Where);
+			const FString Line = FString::Printf(TEXT("%s (%s %d, %s %d)"), Probe.What, Probe.Shows, Shown, Probe.Hides, Hidden);
+			Test.AddInfo(Line);
+			Test.TestTrue(Line, Shown >= 250 && Hidden <= 5);
+		}
+
+		// The Splines edit layer is the engine's to rebuild from the roads: no painting or sculpting there.
+		FHyperAILandscapeOp Raise = Op(TEXT("landscape.sculpt"), Label);
+		Raise.Mode = TEXT("raise");
+		Raise.Center = NearRoad;
+		Raise.Radius = 5.f;
+		Raise.Amount = 1.f;
+		Raise.EditLayer = TEXT("splines");
+		for (const FHyperAILandscapeOp& Refused : {OnSplines, Raise})
+		{
+			const FHyperAILandscapePlanReport Report = Run({Refused}, /*bDryRun=*/true);
+			Test.AddInfo(Report.Diagnostic);
+			Test.TestTrue(FString::Printf(TEXT("%s on the Splines edit layer is refused: %s"), *Refused.Kind, *Report.Diagnostic), !Report.bOk && Report.Diagnostic.Contains(TEXT("add one after the road")));
+		}
+
+		// An older landscape's layer infos, reused from its folder, without Advanced Weight Blending: its edit layers add up,
+		// so under the road Verge and Path both show at full weight. The check says so before anything changes.
+		for (const FString& Name : Layers)
+		{
+			if (ULandscapeLayerInfoObject* LayerInfo = UE::Landscape::CreateTargetLayerInfo(FName(*Name), OlderFolder))
+			{
+				LayerInfo->SetBlendMethod(ELandscapeTargetLayerBlendMethod::None, /*bInModify=*/false);
+			}
+		}
+		const FVector OlderOrigin(-600000.0, -600000.0, 0.0);
+		FHyperAILandscapeOp CreateOlder = Create;
+		CreateOlder.Landscape = Older;
+		CreateOlder.Location = OlderOrigin;
+		CreateOlder.LayerInfoFolder = OlderFolder;
+		FHyperAILandscapeOp VergeOlder = Verge;
+		VergeOlder.Landscape = Older;
+		FHyperAILandscapeOp RoadOlder = Road;
+		RoadOlder.Landscape = Older;
+		RoadOlder.Road = OlderRoadLabel;
+		RoadOlder.Points = {OlderOrigin + FVector(-22000.0, -20000.0, 0.0), OlderOrigin + FVector(22000.0, -20000.0, 0.0)};
+		const FHyperAILandscapePlanReport OlderChecked = Run({CreateOlder, VergeOlder, RoadOlder}, /*bDryRun=*/true);
+		Test.TestTrue(TEXT("the dry run notes that its layers add up: ") + FString::Join(OlderChecked.Notes, TEXT(" | ")),
+			OlderChecked.bOk && NotesSay(OlderChecked, Older + TEXT(": the layer infos of Grass, Verge, Path, Snow have no Advanced Weight Blending")));
+		const FHyperAILandscapePlanReport OlderMade = Run({CreateOlder, VergeOlder, RoadOlder});
+		Test.TestTrue(TEXT("and so does the plan when it runs: ") + OlderMade.Diagnostic, OlderMade.bOk && NotesSay(OlderMade, TEXT("Advanced Weight Blending")));
+		ALandscape* OlderLandscape = Find(Older);
+		if (!Test.TestNotNull(TEXT("the older landscape is in the level"), OlderLandscape)) return false;
+		Test.AddInfo(FString::Join(OlderMade.Notes, TEXT(" | ")));
+		const FVector OlderRoad = OlderOrigin + FVector(0.0, -20000.0, 0.0);
+		const int32 OlderRoadPath = WeightAt(*OlderLandscape, FGuid(), TEXT("Path"), OlderRoad);
+		const int32 OlderRoadVerge = WeightAt(*OlderLandscape, FGuid(), TEXT("Verge"), OlderRoad);
+		const FString Added = FString::Printf(TEXT("under its road Path is added to the Verge beneath, not covering it (Path %d, Verge %d)"), OlderRoadPath, OlderRoadVerge);
+		Test.AddInfo(Added);
+		Test.TestTrue(Added, OlderRoadPath >= 250 && OlderRoadVerge >= 250);
+		const FVector OlderAway = OlderOrigin + FVector(-15000.0, -14000.0, 0.0);
+		const FHyperAILandscapePlanReport OlderPainted = Run({Circle(Older, OlderAway, TEXT("Path"), TEXT(""))});
+		const int32 AwayPath = WeightAt(*OlderLandscape, FGuid(), TEXT("Path"), OlderAway);
+		const int32 AwayVerge = WeightAt(*OlderLandscape, FGuid(), TEXT("Verge"), OlderAway);
+		const FString Away = FString::Printf(TEXT("away from its road Path paints there too (Path %d, Verge %d): %s"), AwayPath, AwayVerge, *OlderPainted.Diagnostic);
+		Test.AddInfo(Away);
+		Test.TestTrue(Away, OlderPainted.bOk && AwayPath >= 250 && AwayVerge <= 5);
+		return true;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioLandscapeRoadLayerTest,
+	"HyperAIStudio.NativeTools.Worldbuilding.LandscapeRoadLayer",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioLandscapeRoadLayerTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::LandscapeTests;
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		AddInfo(TEXT("Skipped: no editor world."));
+		return true;
+	}
+	const ULandscapeSubsystem* Subsystem = World->GetSubsystem<ULandscapeSubsystem>();
+	const bool bPartitioned = Subsystem && Subsystem->IsGridBased();
+	const FString Open = World->GetOutermost()->GetName();
+	// Unattended runs check the other kind of level too, in a new untitled map, then load the open level back from disk.
+	// Loading it back drops its unsaved changes, so an editor someone works in checks only the open level.
+	if (FApp::IsUnattended() && FPackageName::DoesPackageExist(Open))
+	{
+		GEditor->NewMap(/*bIsPartitionedWorld=*/!bPartitioned);
+		const bool bOther = CheckRoadLayers(*this, bPartitioned ? TEXT("without World Partition") : TEXT("with World Partition"));
+		FEditorFileUtils::LoadMap(FPackageName::LongPackageNameToFilename(Open, FPackageName::GetMapPackageExtension()), /*LoadAsTemplate=*/false, /*bShowProgress=*/false);
+		if (!TestTrue(TEXT("the open level is loaded back: ") + Open, GEditor->GetEditorWorldContext().World() && GEditor->GetEditorWorldContext().World()->GetOutermost()->GetName() == Open) || !bOther)
+		{
+			return false;
+		}
+	}
+	else
+	{
+		AddInfo(TEXT("Checked the open level only; unattended runs of a saved level check the other kind too."));
+	}
+	return CheckRoadLayers(*this, bPartitioned ? TEXT("with World Partition") : TEXT("without World Partition"));
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
