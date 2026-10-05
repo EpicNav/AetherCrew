@@ -375,6 +375,115 @@ namespace HyperAIStudio::LandscapeTools::Private
 		return Meters;
 	}
 
+	/** The landscape's roads and other splines, as segments in its vertex grid. */
+	TArray<TPair<FVector2D, FVector2D>> SplineSegments(const ALandscape& Landscape, const ULandscapeInfo& Info)
+	{
+		TSet<ULandscapeSplinesComponent*> Components;
+		Info.ForEachLandscapeProxy([&Components](ALandscapeProxy* Proxy)
+		{
+			if (ULandscapeSplinesComponent* Splines = Proxy->GetSplinesComponent()) Components.Add(Splines);
+			return true;
+		});
+		// World Partition keeps each road in a spline actor of its own.
+		Info.ForAllSplineActors([&Components](TScriptInterface<ILandscapeSplineInterface> Owner)
+		{
+			if (Owner && Owner->GetSplinesComponent()) Components.Add(Owner->GetSplinesComponent());
+		});
+		TArray<TPair<FVector2D, FVector2D>> Segments;
+		for (ULandscapeSplinesComponent* Splines : Components)
+		{
+			const FTransform ToWorld = Splines->GetComponentTransform();
+			for (const ULandscapeSplineSegment* Segment : Splines->GetSegments())
+			{
+				if (!Segment) continue;
+				const TArray<FLandscapeSplineInterpPoint>& Points = Segment->GetPoints();
+				for (int32 Index = 1; Index < Points.Num(); ++Index)
+				{
+					Segments.Emplace(ToVertex(Landscape, ToWorld.TransformPosition(Points[Index - 1].Center)), ToVertex(Landscape, ToWorld.TransformPosition(Points[Index].Center)));
+				}
+			}
+		}
+		return Segments;
+	}
+
+	double DistanceToSegment(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
+	{
+		const FVector2D Along = B - A;
+		const double LengthSquared = Along.SizeSquared();
+		const double T = LengthSquared > 0.0 ? FMath::Clamp(FVector2D::DotProduct(Point - A, Along) / LengthSquared, 0.0, 1.0) : 0.0;
+		return FVector2D::Distance(Point, A + Along * T);
+	}
+
+	/** Each vertex's distance in vertex units to the nearest segment, Reach where none is nearer. */
+	TArray<float> DistanceField(const TArray<TPair<FVector2D, FVector2D>>& Segments, const FRegion& Region, const double Reach)
+	{
+		const int32 W = Region.Width();
+		const int32 H = Region.Height();
+		TArray<float> Out;
+		Out.Init(static_cast<float>(Reach), W * H);
+		// Each segment goes in every cell within Reach of it, so a vertex needs only its own cell's segments.
+		const double Cell = FMath::Max(Reach, 8.0);
+		TMap<FIntPoint, TArray<int32>> Cells;
+		for (int32 Index = 0; Index < Segments.Num(); ++Index)
+		{
+			const FVector2D& A = Segments[Index].Key;
+			const FVector2D& B = Segments[Index].Value;
+			const int32 X1 = FMath::FloorToInt((FMath::Min(A.X, B.X) - Reach) / Cell);
+			const int32 X2 = FMath::FloorToInt((FMath::Max(A.X, B.X) + Reach) / Cell);
+			const int32 Y1 = FMath::FloorToInt((FMath::Min(A.Y, B.Y) - Reach) / Cell);
+			const int32 Y2 = FMath::FloorToInt((FMath::Max(A.Y, B.Y) + Reach) / Cell);
+			for (int32 Y = Y1; Y <= Y2; ++Y)
+			{
+				for (int32 X = X1; X <= X2; ++X) Cells.FindOrAdd(FIntPoint(X, Y)).Add(Index);
+			}
+		}
+		for (int32 Y = 0; Y < H; ++Y)
+		{
+			for (int32 X = 0; X < W; ++X)
+			{
+				const FVector2D Point(Region.X1 + X, Region.Y1 + Y);
+				const TArray<int32>* Near = Cells.Find(FIntPoint(FMath::FloorToInt(Point.X / Cell), FMath::FloorToInt(Point.Y / Cell)));
+				if (!Near) continue;
+				double Best = Reach;
+				for (const int32 Index : *Near) Best = FMath::Min(Best, DistanceToSegment(Point, Segments[Index].Key, Segments[Index].Value));
+				Out[Y * W + X] = static_cast<float>(Best);
+			}
+		}
+		return Out;
+	}
+
+	/** How far either side of a patch's edge, in noise units, the layer eases in. */
+	constexpr double PatchFade = 0.04;
+
+	/** A rule's patch noise over the region, and the level Coverage of it lies above; empty when the rule has no patches. */
+	TArray<float> PatchNoise(const FHyperAILandscapePaintRule& Rule, const FRegion& Region, const double MetersPerVertex, double& OutCut)
+	{
+		TArray<float> Noise;
+		OutCut = 0.0;
+		if (!(Rule.Patch > 0.f) || Rule.Coverage >= 1.f) return Noise;
+		FHyperAILandscapeNoise Patches;
+		Patches.Wavelength = Rule.Patch;
+		Patches.Octaves = 4;
+		Patches.Seed = Rule.Seed != 0 ? Rule.Seed : static_cast<int32>(GetTypeHash(Rule.Layer.TrimStartAndEnd().ToLower()) & 0xffff) + 1;
+		const int32 W = Region.Width();
+		const int32 H = Region.Height();
+		Noise.SetNumUninitialized(W * H);
+		for (int32 Y = 0; Y < H; ++Y)
+		{
+			for (int32 X = 0; X < W; ++X)
+			{
+				Noise[Y * W + X] = static_cast<float>(Fbm(Patches, (Region.X1 + X) * MetersPerVertex, (Region.Y1 + Y) * MetersPerVertex));
+			}
+		}
+		// The cut is measured on this ground, so the patches cover what was asked whatever the noise's spread here.
+		TArray<float> Sample;
+		const int32 Stride = FMath::Max(1, Noise.Num() / 65536);
+		for (int32 Index = 0; Index < Noise.Num(); Index += Stride) Sample.Add(Noise[Index]);
+		Sample.Sort();
+		OutCut = Sample[FMath::Clamp(FMath::FloorToInt((1.0 - Rule.Coverage) * Sample.Num()), 0, Sample.Num() - 1)];
+		return Noise;
+	}
+
 	FString Paint(ALandscape& Landscape, const FHyperAILandscapeOp& Op, const FGuid& Layer)
 	{
 		ULandscapeInfo* Info = Landscape.GetLandscapeInfo();
@@ -421,6 +530,27 @@ namespace HyperAIStudio::LandscapeTools::Private
 		FHyperAILandscapeNoise Breakup;
 		Breakup.Wavelength = 20.f;
 		Breakup.Octaves = 3;
+		const double MetersPerVertex = Resolution / 100.0;
+		TArray<TArray<float>> Patches;
+		TArray<double> PatchCuts;
+		Patches.SetNum(Op.Rules.Num());
+		PatchCuts.SetNumZeroed(Op.Rules.Num());
+		double Reach = 0.0;
+		for (int32 RuleIndex = 0; RuleIndex < Op.Rules.Num(); ++RuleIndex)
+		{
+			const FHyperAILandscapePaintRule& Rule = Op.Rules[RuleIndex];
+			Patches[RuleIndex] = PatchNoise(Rule, Region, MetersPerVertex, PatchCuts[RuleIndex]);
+			if (Rule.DistanceMin > 0.f || Rule.DistanceMax > 0.f) Reach = FMath::Max(Reach, FMath::Max(Rule.DistanceMin, Rule.DistanceMax) + Rule.DistanceFade + 1.0);
+		}
+		// Meters from the landscape's roads, as far out as any rule looks.
+		TArray<float> Distance;
+		if (Reach > 0.0)
+		{
+			const TArray<TPair<FVector2D, FVector2D>> Segments = SplineSegments(Landscape, *Info);
+			if (Segments.IsEmpty()) return TEXT("The landscape has no roads or other splines to measure distance from; lay one with landscape.road first.");
+			Distance = DistanceField(Segments, Region, Reach / MetersPerVertex);
+			for (float& Meters : Distance) Meters *= static_cast<float>(MetersPerVertex);
+		}
 		TArray<double> Computed;
 		Computed.SetNum(LayerInfos.Num());
 		for (int32 Y = 0; Y < H; ++Y)
@@ -441,9 +571,17 @@ namespace HyperAIStudio::LandscapeTools::Private
 				{
 					const FHyperAILandscapePaintRule& Rule = Op.Rules[RuleIndex];
 					const double Jitter = Noise * Rule.Breakup;
-					const double Coverage = FMath::Clamp(static_cast<double>(Rule.Strength), 0.0, 1.0)
+					double Coverage = FMath::Clamp(static_cast<double>(Rule.Strength), 0.0, 1.0)
 						* RuleBand(Height + Jitter * Rule.HeightFade, Rule.HeightMin, Rule.HeightMax, Rule.HeightFade, TNumericLimits<double>::Max())
 						* RuleBand(Slope + Jitter * Rule.SlopeFade, Rule.SlopeMin, Rule.SlopeMax, Rule.SlopeFade, 90.0);
+					if (!Distance.IsEmpty())
+					{
+						Coverage *= RuleBand(Distance[Y * W + X] + Jitter * Rule.DistanceFade, Rule.DistanceMin, Rule.DistanceMax, Rule.DistanceFade, TNumericLimits<double>::Max());
+					}
+					if (!Patches[RuleIndex].IsEmpty())
+					{
+						Coverage *= FMath::SmoothStep(PatchCuts[RuleIndex] - PatchFade, PatchCuts[RuleIndex] + PatchFade, Patches[RuleIndex][Y * W + X] + Jitter * PatchFade);
+					}
 					const double Share = RuleIndex == 0 ? Remaining : Remaining * Coverage;
 					Computed[RuleLayer[RuleIndex]] += Share;
 					Remaining -= Share;
@@ -782,6 +920,12 @@ namespace HyperAIStudio::LandscapeTools::Private
 					if (!Landscape->PaintLayers.Contains(Rule.Layer.TrimStartAndEnd().ToLower()))
 					{
 						return Fail(FString::Printf(TEXT("The landscape has no paint layer '%s'; add_paint_layer adds one."), *Rule.Layer));
+					}
+					if (Rule.Patch < 0.f || (Rule.Patch > 0.f && Rule.Patch < 5.f) || Rule.Patch > 10000.f) return Fail(TEXT("A rule's Patch is 0 (none) or 5 to 10000 meters."));
+					if (Rule.Coverage < 0.05f || Rule.Coverage > 1.f) return Fail(TEXT("A rule's Coverage is 0.05 to 1."));
+					if (Rule.DistanceMin < 0.f || Rule.DistanceMax < 0.f || Rule.DistanceFade < 0.f || FMath::Max(Rule.DistanceMin, Rule.DistanceMax) + Rule.DistanceFade > 2000.f)
+					{
+						return Fail(TEXT("A rule's DistanceMin, DistanceMax and DistanceFade are 0 or more, and reach at most 2000 m."));
 					}
 				}
 				if (!KnowsEditLayer()) return Fail(FString::Printf(TEXT("The landscape has no edit layer %s."), *Op.EditLayer));

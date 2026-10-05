@@ -1,6 +1,6 @@
 ---
 name: unreal-level-design
-description: Build and dress levels with HyperAI's world tools - landscapes from heightmaps or noise, sculpted and painted by height and slope, with roads laid as splines; foliage types scattered by density, slope, height and paint layer, placed at points, thinned and erased; procedural PCG scatter and ecosystems over large areas (biomes on paint layers, species layered big to small, stands and clumps), retuned and regenerated, and any PCG graph read back as recipes; World Partition data layers, streaming, HLOD layers, runtime grids and editor regions; blockouts; and checks against player metrics and Map Check. Use for terrain, open worlds, set dressing and level layout.
+description: Build and dress levels with HyperAI's world tools - landscapes from heightmaps or noise, sculpted and painted by height, slope, distance from roads and in patches, with roads laid as splines; foliage types scattered by density, slope, height and paint layer, placed at points, thinned and erased; procedural PCG scatter and ecosystems over large areas (biomes on paint layers, species layered big to small, stands and clumps), retuned and regenerated, and any PCG graph read back as recipes; World Partition data layers, streaming, HLOD layers, runtime grids and editor regions; blockouts; and checks against player metrics and Map Check. Use for terrain, open worlds, set dressing and level layout.
 ---
 
 # Levels: terrain, roads, foliage and streaming
@@ -26,7 +26,8 @@ name themselves are meters. `Settings` are Unreal's own properties, in Unreal's 
 ## Order of work
 
 1. **Ground.** Make or shape the landscape, then paint it.
-2. **Roads.** Lay roads and paths through the landscape, so the ground under them is leveled and painted.
+2. **Roads.** Lay roads and paths through the landscape, so the ground under them is leveled and painted. Paint
+   anything that follows the roads (verges, riverbanks) once they are laid.
 3. **Foliage and scatter.** Scatter last, so it reads the final ground, slopes and paint. Dress areas by hand with
    foliage, and cover large areas you will retune with a PCG ecosystem (or a one-layer PCG scatter).
 4. **Streaming.** In a World Partition level, set up data layers, always-loaded actors and HLOD layers.
@@ -52,6 +53,10 @@ A valley: rolling noise, a flat camp site, paint by slope and height, and a dirt
 
 - The material's layer blend must name the paint layers. Without it the landscape is grey, however it is painted.
 - Rules later in the list win where they overlap. `Breakup` (0 to 1) roughens band edges so they do not read as lines.
+- Paint biomes as a mosaic, not bands: `Patch` (meters across) and `Coverage` (the share of the ground) lay a layer in
+  patches, such as forest in 150 m patches over 60% of the gentle ground with meadow between. `DistanceMax` keeps a
+  layer within that many meters of the roads and other landscape splines (a verge, a riverbank), and `DistanceMin`
+  that far away. A PCG ecosystem then grows a biome on each layer.
 - Sculpt modes are raise, lower, flatten, smooth, noise, terrace, and a ramp from `Center` to `To`. An edit layer
   (`landscape.add_edit_layer`, then `EditLayer` on sculpt and paint) keeps a change separate and easy to remove.
 - A road follows the ground through its points and levels it across its width. A `Mesh` lays a road surface along

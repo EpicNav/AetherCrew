@@ -259,6 +259,40 @@ bool FHyperAIStudioLandscapeEndToEndTest::RunTest(const FString& Parameters)
 		}
 		TestTrue(TEXT("in World Partition the road is its own spline actor"), bRoadActor);
 	}
+
+	// Biomes as a mosaic: meadow in patches over half the ground, and a verge of dirt along the road.
+	FHyperAILandscapeOp Meadow = Op(TEXT("landscape.add_paint_layer"), Label);
+	Meadow.PaintLayers = {TEXT("Meadow")};
+	Meadow.LayerInfoFolder = Folder;
+	FHyperAILandscapeOp Mosaic = Op(TEXT("landscape.paint"), Label);
+	FHyperAILandscapePaintRule Patches = Rule(TEXT("Meadow"));
+	Patches.Patch = 40.f;
+	Patches.Coverage = 0.5f;
+	FHyperAILandscapePaintRule Verge = Rule(TEXT("Dirt"));
+	Verge.DistanceMax = 6.f;
+	Verge.DistanceFade = 2.f;
+	Mosaic.Rules = {Rule(TEXT("Grass")), Patches, Verge};
+	FHyperAILandscapeOp Tiny = Mosaic;
+	Tiny.Rules[1].Patch = 2.f;
+	TestFalse(TEXT("patches under 5 m are refused"), Run({Meadow, Tiny}, /*bDryRun=*/true).bOk);
+	FHyperAILandscapeOp Far = Mosaic;
+	Far.Rules[2].DistanceMax = 5000.f;
+	TestFalse(TEXT("a distance past 2 km is refused"), Run({Meadow, Far}, /*bDryRun=*/true).bOk);
+	const FHyperAILandscapePlanReport Mosaicked = Run({Meadow, Mosaic});
+	TestTrue(TEXT("the mosaic is painted: ") + Mosaicked.Diagnostic, Mosaicked.bOk && Mosaicked.Applied == 2);
+	const FHyperAILandscapeInspectReport Shares = C::Inspect(Look);
+	auto ShareOf = [&Shares](const TCHAR* Layer)
+	{
+		const FString* Line = Shares.bOk && Shares.Landscapes.Num() == 1 ? Shares.Landscapes[0].PaintLayers.FindByPredicate([Layer](const FString& Each) { return Each.StartsWith(Layer); }) : nullptr;
+		FString Share;
+		if (Line) Line->Split(TEXT(": "), nullptr, &Share, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+		return FCString::Atof(*Share);
+	};
+	const float MeadowShare = ShareOf(TEXT("Meadow"));
+	const float VergeShare = ShareOf(TEXT("Dirt"));
+	AddInfo(FString::Printf(TEXT("Mosaic: meadow %.1f%%, dirt %.1f%%, grass %.1f%%."), MeadowShare, VergeShare, ShareOf(TEXT("Grass"))));
+	TestTrue(FString::Printf(TEXT("meadow patches take about half the ground (%.1f%%)"), MeadowShare), MeadowShare > 38.f && MeadowShare < 56.f);
+	TestTrue(FString::Printf(TEXT("dirt lines the road and no more (%.1f%%)"), VergeShare), VergeShare > 1.5f && VergeShare < 10.f);
 	return true;
 }
 

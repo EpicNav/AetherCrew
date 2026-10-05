@@ -24,7 +24,10 @@ struct FHyperAILandscapeNoise
 	UPROPERTY() bool bRidged = false;
 };
 
-/** One paint rule: where a paint layer shows, by height and slope. Rules later in the list win where they overlap. */
+/**
+ * One paint rule: where a paint layer shows, by height, slope and distance from roads, in patches if asked. Rules later
+ * in the list win where they overlap.
+ */
 USTRUCT(BlueprintType)
 struct FHyperAILandscapePaintRule
 {
@@ -43,6 +46,22 @@ struct FHyperAILandscapePaintRule
 	UPROPERTY() float SlopeMin = 0.f;
 	UPROPERTY() float SlopeMax = 0.f;
 	UPROPERTY() float SlopeFade = 5.f;
+	/**
+	 * Distance band in meters from the landscape's roads and other splines, read the same way: DistanceMax 15 alone
+	 * keeps the layer within 15 m of them (a verge, a riverbank), DistanceMin 30 alone at least 30 m away.
+	 * DistanceFade softens its edges.
+	 */
+	UPROPERTY() float DistanceMin = 0.f;
+	UPROPERTY() float DistanceMax = 0.f;
+	UPROPERTY() float DistanceFade = 5.f;
+	/**
+	 * Patches: the layer takes Coverage (0.05 to 1) of the painted ground, in patches about Patch meters across, so
+	 * biomes form a mosaic rather than bands. Patch 0 paints wherever the bands hold. Seed lays the patches out
+	 * another way; 0 takes one from the layer's name.
+	 */
+	UPROPERTY() float Patch = 0.f;
+	UPROPERTY() float Coverage = 1.f;
+	UPROPERTY() int32 Seed = 0;
 	/** 0 to 1: noise that breaks the edges up so bands do not read as lines. */
 	UPROPERTY() float Breakup = 0.3f;
 	/** 0 to 1: how fully the layer covers where the rule holds. */
