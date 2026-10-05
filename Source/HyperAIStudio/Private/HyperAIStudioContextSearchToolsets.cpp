@@ -58,6 +58,8 @@ namespace HyperAIStudio::ContextSearch::Private
 	constexpr double MaxEditorCaptureSeconds = 0.050;
 	constexpr double MaxCppIndexSeconds = 1.500;
 	constexpr double MaxProjectSearchSeconds = 0.010;
+	/** How long a first search waits for the index: the C++ pass and its enumeration, with room to spare. */
+	constexpr double FirstSearchWaitSeconds = MaxCppIndexSeconds + 1.0;
 	constexpr int32 MaxHashTokens = 262144;
 	constexpr int32 MaxHashUtf16Characters = 24 * 1024 * 1024;
 	constexpr int64 MaxHashUtf8Bytes = 64ll * 1024ll * 1024ll;
@@ -3652,6 +3654,24 @@ void FHyperAIStudioProjectIndexStore::CommitWorkerResult(FHyperAIProjectIndexVal
 	bWorkerRunning = false;
 }
 
+bool FHyperAIStudioProjectIndexStore::WaitForRefresh(const double Seconds)
+{
+	{
+		FScopeLock Lock(&Mutex);
+		if (!bWorkerRunning)
+		{
+			return true;
+		}
+	}
+	// The worker commits its index from its own thread, so the game thread may wait on it.
+	if (WorkerFuture.IsValid())
+	{
+		WorkerFuture.WaitFor(FTimespan::FromSeconds(FMath::Max(Seconds, 0.0)));
+	}
+	FScopeLock Lock(&Mutex);
+	return !bWorkerRunning;
+}
+
 void FHyperAIStudioProjectIndexStore::Shutdown()
 {
 	{
@@ -4560,6 +4580,12 @@ FHyperAIReadReport UHyperAIStudioProjectSearchToolset::hyper_project_search(
 	{
 		FString Diagnostic;
 		Store.RequestRefresh(Diagnostic);
+		Snapshot = Store.GetSnapshotShared();
+	}
+	// The first search waits out the index build, which is bounded, rather than answering that it is being built.
+	if (Request.bStartIndexIfUnavailable && Snapshot->Value.Records.IsEmpty() && Snapshot->Status == TEXT("indexing") && IsInGameThread())
+	{
+		Store.WaitForRefresh(HyperAIStudio::ContextSearch::Private::FirstSearchWaitSeconds);
 		Snapshot = Store.GetSnapshotShared();
 	}
 	return FHyperAIStudioContextSearchContracts::SearchProjectIndex(*Snapshot, Request);

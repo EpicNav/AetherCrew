@@ -420,7 +420,7 @@ struct FHyperAIProjectSearchRequest
 	UPROPERTY()
 	int32 MaxOutputBytes = 65536;
 
-	/** Starts a bounded asynchronous refresh when no usable immutable index exists. */
+	/** Starts a bounded asynchronous refresh when no usable immutable index exists, and waits for it (2.5 s at most). */
 	UPROPERTY()
 	bool bStartIndexIfUnavailable = true;
 };
@@ -804,6 +804,8 @@ public:
 	/** Shared immutable view; repeated reads do not deep-copy the complete project index. */
 	TSharedRef<const FHyperAIProjectIndexValueSnapshot, ESPMode::ThreadSafe> GetSnapshotShared() const;
 	bool RequestRefresh(FString& OutDiagnostic);
+	/** Waits up to Seconds for a refresh in progress to publish its index; true when none is running any more. */
+	bool WaitForRefresh(double Seconds);
 	void Shutdown();
 
 #if WITH_DEV_AUTOMATION_TESTS

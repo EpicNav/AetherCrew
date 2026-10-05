@@ -626,6 +626,26 @@ bool FHyperAIContextSearchProjectLifecycleTest::RunTest(const FString& Parameter
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIContextSearchFirstSearchTest,
+	"HyperAIStudio.NativeTools.ContextSearch.FirstSearchAnswers",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIContextSearchFirstSearchTest::RunTest(const FString& Parameters)
+{
+	// From no index, as in a fresh editor: the search builds it and answers, rather than saying it is being built.
+	FHyperAIStudioProjectIndexStore& Store = FHyperAIStudioProjectIndexStore::Get();
+	TestTrue(TEXT("no other refresh is left running"), Store.WaitForRefresh(10.0));
+	Store.SetSnapshotForTests(FHyperAIProjectIndexValueSnapshot());
+	FHyperAIProjectSearchRequest Request;
+	Request.Query = TEXT("HyperAIStudio");
+	Request.Kinds = { TEXT("cpp_symbol") };
+	const FHyperAIReadReport First = UHyperAIStudioProjectSearchToolset::hyper_project_search(Request);
+	TestNotEqual(TEXT("the first search does not answer that the index is being built"), First.Status, FString(TEXT("indexing")));
+	TestTrue(FString::Printf(TEXT("it finds the project's C++ (%s, %d record(s))"), *First.Status, First.TotalRecords), First.bOk && First.TotalRecords > 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHyperAIContextSearchProjectIndexSharedViewTest,
 	"HyperAIStudio.NativeTools.ContextSearch.ProjectIndexSharedView",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
