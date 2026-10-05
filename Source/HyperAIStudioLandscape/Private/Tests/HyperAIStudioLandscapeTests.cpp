@@ -5,6 +5,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Editor.h"
 #include "EngineUtils.h"
+#include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioLandscapeToolset.h"
 #include "HyperAIStudioSettings.h"
 #include "Landscape.h"
@@ -389,7 +390,20 @@ bool FHyperAIStudioLandscapeMaterialTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("a layer named twice is refused"), Run({Twice}, /*bDryRun=*/true).bOk);
 	TestFalse(TEXT("setting a material no op makes is refused"), Run({Create, Set}, /*bDryRun=*/true).bOk);
 	TestTrue(TEXT("setting the material an earlier op makes checks"), Run({Create, Make, Set}, /*bDryRun=*/true).bOk);
+	FHyperAILandscapeOp SetOther = Set;
+	SetOther.Material = Colors + TEXT(".M_Other");
+	TestFalse(TEXT("setting another object in the made material's package is refused"), Run({Create, Make, SetOther}, /*bDryRun=*/true).bOk);
 	TestFalse(TEXT("making the same material twice is refused"), Run({Create, Make, Make}, /*bDryRun=*/true).bOk);
+	{
+		// An asset only in memory, never saved, takes its path as surely as one on disk.
+		const FString Taken = Folder + TEXT("/M_Taken");
+		UMaterial* InMemory = NewObject<UMaterial>(CreatePackage(*Taken), TEXT("M_Taken"), RF_Public | RF_Standalone | RF_Transient);
+		FHyperAILandscapeOp Over = Make;
+		Over.Material = Taken;
+		TestFalse(TEXT("a path an unsaved asset holds is refused"), Run({Over}, /*bDryRun=*/true).bOk);
+		InMemory->ClearFlags(RF_Public | RF_Standalone);
+		InMemory->MarkAsGarbage();
+	}
 
 	const FHyperAILandscapePlanReport Done = Run({Create, Make, Set});
 	if (!TestTrue(TEXT("the landscape is made, and the material made and set on it: ") + Done.Diagnostic + TEXT(" | ") + FString::Join(Done.Notes, TEXT(" | ")),
@@ -417,6 +431,12 @@ bool FHyperAIStudioLandscapeMaterialTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the grass in the red asked for"), Blend->Layers[0].ConstLayerInput.Equals(FVector(0.8, 0.1, 0.1), 0.001));
 	TestTrue(TEXT("the snow white from its name"), Blend->Layers[2].ConstLayerInput.X > 0.8 && Blend->Layers[2].ConstLayerInput.Z > 0.8);
 	TestTrue(TEXT("the blend is the material's base color"), Material->GetEditorOnlyData()->BaseColor.Expression == Blend);
+	bool bBound = true;
+	for (const UMaterialExpression* Expression : Material->GetExpressionCollection().Expressions)
+	{
+		bBound &= Expression && Expression->Material == Material && Expression->HasAnyFlags(RF_Transactional);
+	}
+	TestTrue(TEXT("its nodes are bound to it, as the material editor binds them, and undoable"), bBound && Material->GetExpressionCollection().Expressions.Num() == 2);
 	const TArray<FName> Named = UE::Landscape::RetrieveTargetLayerNamesFromMaterial(Material);
 	TestTrue(TEXT("landscapes read its three layers from it"), Named.Contains(FName(TEXT("Grass"))) && Named.Contains(FName(TEXT("Rock"))) && Named.Contains(FName(TEXT("Snow"))));
 	ALandscape* Landscape = Find(Label);
@@ -442,6 +462,16 @@ bool FHyperAIStudioLandscapeMaterialTest::RunTest(const FString& Parameters)
 	// A second, named on the landscape: its layers are the landscape's own, and it is set on the landscape at once.
 	FHyperAILandscapeOp Mine = Op(TEXT("landscape.create_material"), Label);
 	Mine.Material = Own;
+	// Asked for approval first: nothing is made while it waits, and it names the material and the landscape it is set on.
+	Settings->bRequireApprovalForAgentEdits = true;
+	const FHyperAILandscapePlanReport Waiting = Run({Mine});
+	Settings->bRequireApprovalForAgentEdits = false;
+	const TArray<FHyperAIStudioPendingApproval> Pending = FHyperAIStudioApprovalGate::GetPending();
+	const FHyperAIStudioPendingApproval* Asked = Pending.FindByPredicate([&Waiting](const FHyperAIStudioPendingApproval& Each) { return Each.OperationId == Waiting.OperationId; });
+	TestTrue(TEXT("with approval on, the plan waits, naming the material and the landscape"), Waiting.Status == TEXT("awaiting_user_approval") && Asked
+		&& Asked->Summary.Touches.Contains(Own) && Asked->Summary.Touches.Contains(Label));
+	TestTrue(TEXT("and nothing is made while it waits"), !FPackageName::DoesPackageExist(Own) && !FindObject<UMaterial>(nullptr, *(Own + TEXT(".M_Own"))));
+	FHyperAIStudioApprovalGate::Reject(Waiting.OperationId, TEXT("test"));
 	const FHyperAILandscapePlanReport Given = Run({Mine});
 	TestTrue(TEXT("a material made from the landscape's own layers is set on it: ") + Given.Diagnostic, Given.bOk && Given.Made.Num() == 1);
 	UMaterial* Second = LoadObject<UMaterial>(nullptr, *(Own + TEXT(".M_Own")));

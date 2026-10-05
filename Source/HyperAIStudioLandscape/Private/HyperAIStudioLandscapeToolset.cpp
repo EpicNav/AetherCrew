@@ -851,6 +851,18 @@ namespace HyperAIStudio::LandscapeTools::Private
 	 */
 	UMaterial* MakeLayerMaterial(const FString& Path, const TArray<FName>& Layers, const TArray<FLinearColor>& Colors, TArray<FString>& OutNotes, FString& OutError)
 	{
+		if (Layers.IsEmpty())
+		{
+			OutError = FString::Printf(TEXT("The material %s would show no paint layers."), *Path);
+			return nullptr;
+		}
+		// An object already there, saved or only in memory (an unsaved asset, or one a failed plan made), would be replaced
+		// in place by a new one of its name, or crash the editor when it is not a material.
+		if (FPackageName::DoesPackageExist(Path) || FindObject<UObject>(nullptr, *(Path + TEXT(".") + FPackageName::GetShortName(Path))))
+		{
+			OutError = FString::Printf(TEXT("%s is taken; name a free path for the new material."), *Path);
+			return nullptr;
+		}
 		UPackage* Package = CreatePackage(*Path);
 		UMaterial* Material = Package ? NewObject<UMaterial>(Package, FName(*FPackageName::GetShortName(Path)), RF_Public | RF_Standalone) : nullptr;
 		if (!Material)
@@ -858,8 +870,11 @@ namespace HyperAIStudio::LandscapeTools::Private
 			OutError = FString::Printf(TEXT("The material %s could not be made."), *Path);
 			return nullptr;
 		}
+		// Bound to the material as the material editor binds the nodes it makes; the material tools read that binding.
 		UMaterialExpressionLandscapeLayerBlend* Blend = NewObject<UMaterialExpressionLandscapeLayerBlend>(Material);
 		UMaterialExpressionConstant* Rough = NewObject<UMaterialExpressionConstant>(Material);
+		Blend->Material = Material;
+		Rough->Material = Material;
 		TArray<FLinearColor> Taken;
 		for (int32 Index = 0; Index < Colors.Num() && Index < Layers.Num(); ++Index) Taken.Add(Colors[Index]);
 		TArray<FString> Shown;
@@ -889,6 +904,8 @@ namespace HyperAIStudio::LandscapeTools::Private
 		Material->PostEditChange();
 		FAssetRegistryModule::AssetCreated(Material);
 		Material->MarkPackageDirty();
+		Blend->SetFlags(RF_Transactional);
+		Rough->SetFlags(RF_Transactional);
 		Material->SetFlags(RF_Transactional);
 		OutNotes.Add(FString::Printf(TEXT("%s: a landscape material showing %s."), *Material->GetName(), *FString::Join(Shown, TEXT(", "))));
 		return Material;
@@ -937,11 +954,14 @@ namespace HyperAIStudio::LandscapeTools::Private
 			}
 			return &Plan.Add(Key, MoveTemp(Known));
 		};
-		/** Materials the plan makes, by package path, for later ops to set. */
+		/** Materials the plan makes, by package path, for later ops to set: named by the package, or package.name. */
 		TSet<FString> Materials;
 		auto IsMaterial = [&Materials](const FString& Reference)
 		{
-			return Materials.Contains(PackageOf(Reference).ToLower()) || Load<UMaterialInterface>(Reference) != nullptr;
+			const FString Package = PackageOf(Reference);
+			const FString Object = Reference.TrimStartAndEnd().Mid(Package.Len() + 1);
+			const bool bMade = Materials.Contains(Package.ToLower()) && (Object.IsEmpty() || Object.Equals(FPackageName::GetShortName(Package), ESearchCase::IgnoreCase));
+			return bMade || Load<UMaterialInterface>(Reference) != nullptr;
 		};
 		for (int32 Index = 0; Index < Request.Operations.Num(); ++Index)
 		{
@@ -955,7 +975,9 @@ namespace HyperAIStudio::LandscapeTools::Private
 			if (Kind == TEXT("landscape.create_material"))
 			{
 				const FString Path = PackageOf(Op.Material);
-				if (!Path.StartsWith(TEXT("/Game/")) || !FPackageName::IsValidLongPackageName(Path) || FPackageName::DoesPackageExist(Path) || Materials.Contains(Path.ToLower()))
+				// Taken on disk, or by an object only in memory (an unsaved asset).
+				if (!Path.StartsWith(TEXT("/Game/")) || !FPackageName::IsValidLongPackageName(Path) || FPackageName::DoesPackageExist(Path) || Materials.Contains(Path.ToLower())
+					|| FindObject<UObject>(nullptr, *(Path + TEXT(".") + FPackageName::GetShortName(Path))))
 				{
 					return Fail(TEXT("Name the new Material as a free path under /Game, like /Game/Landscape/M_Valley."));
 				}
@@ -1438,8 +1460,11 @@ FHyperAILandscapePlanReport FHyperAIStudioLandscapeContracts::ApplyPlan(const FH
 		{
 			const FHyperAILandscapeOp& Op = Request.Operations[Index];
 			const bool bMaterial = KindOf(Op) == TEXT("landscape.create_material");
-			Summary.Effects.Add(FString::Printf(TEXT("| %s %s%s"), *Op.Kind, bMaterial ? *Op.Material : *Op.Landscape, Op.Mode.IsEmpty() ? TEXT("") : *(TEXT(" ") + Op.Mode)));
-			Summary.Touches.AddUnique(bMaterial ? Op.Material : Op.Landscape);
+			// A made material is set on the landscape it names, which the approval lists too.
+			const FString Target = !bMaterial ? Op.Landscape : Op.Landscape.IsEmpty() ? Op.Material : Op.Material + TEXT(" on ") + Op.Landscape;
+			Summary.Effects.Add(FString::Printf(TEXT("| %s %s%s"), *Op.Kind, *Target, Op.Mode.IsEmpty() ? TEXT("") : *(TEXT(" ") + Op.Mode)));
+			if (bMaterial) Summary.Touches.AddUnique(Op.Material);
+			if (!Op.Landscape.IsEmpty()) Summary.Touches.AddUnique(Op.Landscape);
 		}
 		const FString OperationId = Report.OperationId;
 		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId]()
