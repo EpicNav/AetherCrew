@@ -464,6 +464,67 @@ bool FHyperAIProjectAssetIndexEventsTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIProjectAssetIndexRewalkTest,
+	"HyperAIStudio.NativeTools.ContextSearch.AssetIndexRefreshRewalks",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIProjectAssetIndexRewalkTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ProjectAssetIndex::Tests;
+	FHyperAIStudioProjectAssetIndex::FLimits Limits = TestLimits();
+	Limits.MaxFoldersPerStep = 2;
+	TUniquePtr<FFakeAssetSource> Tree = MakeTree();
+	FFakeAssetSource* Source = Tree.Get();
+	const FIndexRef Index = MakeIndex(MoveTemp(Tree), Limits);
+	const auto CountRootListings = [Source]()
+	{
+		int32 Count = 0;
+		for (const FName Folder : Source->ChildReads)
+		{
+			Count += Folder == FName(TEXT("/Game")) ? 1 : 0;
+		}
+		return Count;
+	};
+
+	// A refresh asked for while the first walk runs does not start it over.
+	Index->EnsureStarted();
+	Index->Step(10.0, Limits.MaxFoldersPerStep);
+	Index->RequestFullRewalk();
+	Index->Step(10.0, Limits.MaxFoldersPerStep);
+	TestEqual(TEXT("a refresh during the first walk does not restart it"), CountRootListings(), 1);
+	for (int32 Attempt = 0; Attempt < 10 && !Index->GetPublished()->bHasCompletedWalk; ++Attempt)
+	{
+		Index->Step(10.0, Limits.MaxFoldersPerStep);
+	}
+	TestEqual(TEXT("the first walk finishes"), Index->GetPublished()->Status, FString(TEXT("ready")));
+
+	// Changes the registry never announced: a folder gone, and an asset that appeared.
+	Source->Children.FindOrAdd(FName(TEXT("/Game/Env"))).Remove(FName(TEXT("/Game/Env/Cliffs")));
+	Source->Assets.Remove(FName(TEXT("/Game/Env/Cliffs")));
+	Source->AddAsset(TEXT("/Game/Anim"), TEXT("AS_Walk"), TEXT("/Script/Engine.AnimSequence"));
+	Index->RequestFullRewalk();
+	Index->Step(10.0, Limits.MaxFoldersPerStep);
+	TestEqual(TEXT("a refresh walks from the root again"), CountRootListings(), 2);
+	TestEqual(TEXT("the rewalk is reported as indexing"), Index->GetPublished()->Status, FString(TEXT("indexing")));
+	TestNotNull(TEXT("the earlier folders stay searchable during the rewalk"),
+		FindRow(*Index->GetPublished(), TEXT("/Game/Env/SM_Rock.SM_Rock")));
+	for (int32 Attempt = 0; Attempt < 10 && Index->GetPublished()->Status == TEXT("indexing"); ++Attempt)
+	{
+		Index->Step(10.0, Limits.MaxFoldersPerStep);
+	}
+	const auto Rewalked = Index->GetPublished();
+	TestEqual(TEXT("the rewalk finishes ready"), Rewalked->Status, FString(TEXT("ready")));
+	TestNull(TEXT("the sweep drops the folder that is gone"), FindRow(*Rewalked, TEXT("/Game/Env/Cliffs/SM_Cliff.SM_Cliff")));
+	TestNotNull(TEXT("the rewalk finds the unannounced asset"), FindRow(*Rewalked, TEXT("/Game/Anim/AS_Walk.AS_Walk")));
+	TestEqual(TEXT("the count follows"), Rewalked->AssetCount, 5);
+
+	TUniquePtr<FFakeAssetSource> Copy = MakeUnique<FFakeAssetSource>(*Source);
+	const FIndexRef Fresh = MakeIndex(MoveTemp(Copy), Limits);
+	TestEqual(TEXT("the rewalk matches a fresh build"), Rewalked->Fingerprint, BuildAll(*Fresh)->Fingerprint);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHyperAIProjectAssetIndexFingerprintTest,
 	"HyperAIStudio.NativeTools.ContextSearch.AssetIndexFingerprintStable",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
