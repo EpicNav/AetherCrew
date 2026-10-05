@@ -1,0 +1,501 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "audio",
+ "presets": [
+  {
+   "id": "audio.ui-sound-set",
+   "title": "Make a set of UI sounds: click, hover and confirm",
+   "summary": "Three short synth UI sounds from one Decibel session, each rendered to its own SoundWave and MetaSound at one peak, measured and validated.",
+   "packs": [
+    "sound_design",
+    "audio_metasound"
+   ],
+   "skills": [
+    "sound-design"
+   ],
+   "tools": [
+    "hyper_sound_inspect",
+    "hyper_sound_apply_plan",
+    "hyper_operation_wait",
+    "hyper_sound_render",
+    "hyper_audio_inspect",
+    "hyper_audio_validate"
+   ],
+   "ops": [
+    "session.set",
+    "track.add",
+    "device.add",
+    "device.set",
+    "clip.midi",
+    "track.send"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "ui",
+    "menu",
+    "click",
+    "hover",
+    "interface",
+    "sci-fi",
+    "sfx"
+   ],
+   "placeholders": [
+    {
+     "name": "style",
+     "label": "Style",
+     "default": "clean sci-fi"
+    },
+    {
+     "name": "peak",
+     "label": "Peak level (dBFS)",
+     "default": "-3"
+    }
+   ],
+   "prompt": "Make three {{style}} UI sounds from one Decibel session `{{content_folder}}/DS_UISet`: `SW_UI_Click` (a tick under 0.12 s), `SW_UI_Hover` (a soft high blip under 0.2 s) and `SW_UI_Confirm` (two rising notes under 0.5 s), each with a MetaSound. Follow the sound-design skill; if the sound_design pack (Decibel) is unavailable, say so and stop.\n1. hyper_sound_inspect with bCatalog, then with DeviceId gen.synth and each effect you use, for their parameter ids; never guess one.\n2. One hyper_sound_apply_plan (bCreate true, fresh operationId): session.set Bpm 60 so a beat is a second; one instrument track per sound (track.add, device.add gen.synth, device.set for its tone); a clip.midi per sound at beats 0, 2 and 4 within its length limit; a small shared fx return that each track feeds with track.send. If a plan or render reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_sound_render three times, with StartSeconds 0, 2 and 4, DurationSeconds 0.3, 0.3 and 0.6, OutputPath {{content_folder}}/SW_UI_Click, _Hover and _Confirm, bMetaSound true and NormalizePeakDb {{peak}}.\n4. hyper_audio_inspect the three SoundWaves with projection metrics, and hyper_audio_validate the three MetaSound Sources.\n5. Reply with a PASS/FAIL table, one row per sound: PeakDb {{peak}} (within 0.5), not clipped, not silent, LeadingSilenceSeconds under 0.01, notes within the length limit, no render Issues, MetaSound valid. List the asset paths."
+  },
+  {
+   "id": "audio.scifi-door-whoosh",
+   "title": "Design a sci-fi door whoosh with a filter sweep",
+   "summary": "A breathy synth whoosh whose filter opens and closes, a clunk at the end and a small room, rendered with a MetaSound and measured.",
+   "packs": [
+    "sound_design",
+    "audio_metasound"
+   ],
+   "skills": [
+    "sound-design"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_sound_inspect",
+    "hyper_sound_apply_plan",
+    "hyper_operation_wait",
+    "hyper_sound_render",
+    "hyper_audio_validate"
+   ],
+   "ops": [
+    "session.set",
+    "track.add",
+    "device.add",
+    "device.set",
+    "clip.midi",
+    "lane.set",
+    "track.send"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "door",
+    "whoosh",
+    "sci-fi",
+    "filter sweep",
+    "sfx",
+    "spaceship"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Sound name",
+     "default": "DoorWhoosh"
+    }
+   ],
+   "prompt": "Make a sci-fi door-open sound from the Decibel session `{{content_folder}}/DS_{{name}}`: a 0.8-1.2 s airy whoosh whose filter opens then closes, and a mechanical clunk as it ends. Follow the sound-design skill; if the sound_design pack (Decibel) is unavailable, say so and stop.\n1. hyper_memory_recall `audio loudness` for project conventions. hyper_sound_inspect with bCatalog, then DeviceId gen.synth, fx.filter and fx.verb for their parameter ids.\n2. One hyper_sound_apply_plan (bCreate true, fresh operationId): session.set Bpm 60 and OneShot 1; a `Whoosh` instrument track (track.add, device.add gen.synth, device.set for a noisy, breathy tone) with a clip.midi note from beat 0 to 1, then device.add fx.filter whose cutoff a lane.set sweeps up over 0.4 s and down by 1 s (Curve below 0 on the fall); a `Clunk` track with a short low note at 0.9 beats; an fx return with fx.verb as a small room, fed by track.send. If a plan or render reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_sound_render with bMetaSound true, NormalizePeakDb -1 and TailSeconds 0.5.\n4. hyper_audio_validate the MetaSound Source.\n5. Reply with a PASS/FAIL table: length 1-1.7 s, PeakDb -1, not clipped, LeadingSilenceSeconds under 0.02, no render Issues, MetaSound valid, plus RmsDb. If the numbers show a problem (a drone, a late start), change one thing in a new session `DS_{{name}}_v2` and render again."
+  },
+  {
+   "id": "audio.ambience-loop-seamless",
+   "title": "Build a seamless ambience loop from library takes",
+   "summary": "Beds, placed spot sounds, one shared convolution space and moving lanes, rendered as a crossfaded loop with a looping MetaSound.",
+   "packs": [
+    "sound_design",
+    "audio_metasound"
+   ],
+   "skills": [
+    "sound-design"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_sound_inspect",
+    "hyper_sound_apply_plan",
+    "hyper_operation_wait",
+    "hyper_sound_render",
+    "hyper_audio_inspect",
+    "hyper_audio_validate"
+   ],
+   "ops": [
+    "session.set",
+    "track.add",
+    "clip.audio",
+    "track.set",
+    "device.add",
+    "track.send",
+    "lane.set"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "ambience",
+    "loop",
+    "atmosphere",
+    "forest",
+    "environment",
+    "background"
+   ],
+   "placeholders": [
+    {
+     "name": "biome",
+     "label": "Place",
+     "default": "night forest"
+    },
+    {
+     "name": "length",
+     "label": "Loop length (s)",
+     "default": "60"
+    },
+    {
+     "name": "library",
+     "label": "Sound library",
+     "default": "/Game/Audio/Library",
+     "hint": "a project folder of SoundWaves, or a folder of WAV files on disk"
+    }
+   ],
+   "prompt": "Make a seamless {{length}} s {{biome}} ambience loop from the Decibel session `{{content_folder}}/DS_Amb_Loop`, built as the sound-design skill's Ambience recipe from takes in `{{library}}`; if the sound_design pack (Decibel) is unavailable, say so and stop.\n1. hyper_memory_recall `ambience`. hyper_sound_inspect with bCatalog and DeviceId fx.verb and fx.filter. Find beds (wind, leaves, insects) and spot sounds (birds, branches) in {{library}}; if there is no bed, say which are missing and stop.\n2. One hyper_sound_apply_plan (bCreate true, fresh operationId): session.set Bpm 60, Loop 1, LoopStartBeat 0, LoopEndBeat {{length}}; 2-3 audio bed tracks (track.add) whose clip.audio runs the whole loop plus 4 s; 4-8 spot sounds well inside the loop, spread with track.set Pan; one fx return with device.add fx.verb on a forest impulse response if the library has one; every track feeding it with track.send (spots more than beds); a lane.set volume gust on the wind and a pan lane flying one bird across. If a plan or render reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_sound_render with DurationSeconds {{length}}, LoopCrossfadeSeconds 4, bLoop true, bMetaSound true and NormalizePeakDb -6.\n4. hyper_audio_inspect the SoundWave with projection metrics, and hyper_audio_validate the MetaSound.\n5. Reply with a PASS/FAIL table: length {{length}} s (within 0.05); no loop or click Issue; PeakDb -6; RmsDb between -30 and -18; no leading silence; spot sounds spread across the loop (list their beats). List the asset paths."
+  },
+  {
+   "id": "audio.melee-impact-aaa-stack",
+   "title": "Design a layered melee impact with an AAA stack",
+   "summary": "Anticipation, a frame-zero snap, meat, sub-thud and material layer, a debris tail and one space, measured window by window, then rendered.",
+   "packs": [
+    "sound_design",
+    "audio_metasound"
+   ],
+   "skills": [
+    "sound-design"
+   ],
+   "tools": [
+    "hyper_sound_inspect",
+    "hyper_sound_apply_plan",
+    "hyper_operation_wait",
+    "hyper_sound_render",
+    "hyper_audio_validate"
+   ],
+   "ops": [
+    "session.set",
+    "track.add",
+    "clip.audio",
+    "device.add",
+    "device.set",
+    "lane.set",
+    "track.send"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "impact",
+    "melee",
+    "hit",
+    "combat",
+    "layering",
+    "aaa",
+    "sfx"
+   ],
+   "placeholders": [
+    {
+     "name": "material",
+     "label": "Surface material",
+     "default": "stone"
+    },
+    {
+     "name": "name",
+     "label": "Sound name",
+     "default": "Impact_HammerStone"
+    },
+    {
+     "name": "library",
+     "label": "Sound library",
+     "default": "/Game/Audio/Library",
+     "hint": "a project folder of SoundWaves, or a folder of WAV files on disk"
+    }
+   ],
+   "prompt": "Design a hammer hit on {{material}} from the Decibel session `{{content_folder}}/DS_{{name}}`, as the sound-design skill's AAA stack, from takes in `{{library}}`; if the sound_design pack (Decibel) is unavailable, say so and stop.\n1. hyper_sound_inspect with bCatalog and the DeviceIds you use (gen.synth, fx.lowend, fx.filter, fx.verb, fx.limit, fx.shaper). Pick a take per layer, or build it from gen.synth.\n2. One hyper_sound_apply_plan (bCreate true, fresh operationId), each layer its own track (track.add, clip.audio, device.add, device.set), session.set Bpm 60 with the strike at beat 1: a reverse swell ending just before it, well under it; a snap, the meat, a 45-55 Hz fx.lowend sub-thud and the {{material}} layer, each trimmed to speak within 20 ms of its peak; debris under a closing fx.filter lane.set; one fx.verb return high-passed near 160 Hz that every layer feeds with track.send; the master ending in fx.limit at -4 dB and an fx.shaper hard clip. If a plan or render reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Measure windows, unnormalized, into one probe `{{content_folder}}/SW_{{name}}_Probe`: hyper_sound_render StartSeconds 0 and DurationSeconds 0.95 (swell), 1 and 0.15 (strike), 2.5 and 0.5 (after the tail).\n4. Render the whole with NormalizePeakDb -1 and bMetaSound true, then hyper_audio_validate the MetaSound.\n5. Reply with a PASS/FAIL table: strike window LeadingSilenceSeconds under 0.02 (it lands at 1.00 s); swell PeakDb 12 dB or more under the strike's; after-tail window silent or 40 dB under; mix at -1 dB, not clipped, no Issues; MetaSound valid. Say the probe can be deleted."
+  },
+  {
+   "id": "audio.creature-roar-variants",
+   "title": "Make three variants of a creature roar",
+   "summary": "One set of performers across three roars: pitched vocal body with a sub, wet grit, glue and a grained tail in one space, measured per variant.",
+   "packs": [
+    "sound_design",
+    "audio_metasound"
+   ],
+   "skills": [
+    "sound-design"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_sound_inspect",
+    "hyper_sound_apply_plan",
+    "hyper_operation_wait",
+    "hyper_sound_render",
+    "hyper_audio_validate",
+    "hyper_audio_inspect"
+   ],
+   "ops": [
+    "session.set",
+    "track.add",
+    "clip.audio",
+    "device.add",
+    "device.set",
+    "lane.set",
+    "track.send"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "creature",
+    "monster",
+    "roar",
+    "vocal",
+    "fantasy",
+    "variants",
+    "sfx"
+   ],
+   "placeholders": [
+    {
+     "name": "creature",
+     "label": "Creature",
+     "default": "cave troll"
+    },
+    {
+     "name": "library",
+     "label": "Sound library",
+     "default": "/Game/Audio/Library",
+     "hint": "a project folder of SoundWaves, or a folder of WAV files on disk"
+    }
+   ],
+   "prompt": "Make three variants of a {{creature}} roar, Decibel sessions `{{content_folder}}/DS_Roar_A`, `_B` and `_C`, with one set of performers so they sound like one throat. Follow the sound-design skill (vocal body, wet grit, glue, tail, one space); if the sound_design pack (Decibel) is unavailable, say so and stop.\n1. hyper_memory_recall `{{creature}} audio`. hyper_sound_inspect with bCatalog and your DeviceIds. Find vocal, growl and texture takes in `{{library}}`.\n2. Per variant, one hyper_sound_apply_plan (bCreate true, fresh operationId), each layer its own track (track.add, clip.audio, device.add, device.set): session.set Bpm 60 and OneShot 1; the vocal body down 3-7 semitones over a gen.synth sine at 40-55 Hz whose volume lane.set falls with the voice; wet grit micro-layers band-passed about 300 Hz-8 kHz, 6 dB under the voice; a saturated glue layer; a tail of the voice's last moment in StretchMode texture with a closing filter and a sinking pitch lane; one fx.verb return every track feeds with track.send. Variants swap takes, never performers. If a plan or render reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_sound_render each with NormalizePeakDb -1 and bMetaSound true; then, unnormalized, its body (StartSeconds 0.2, DurationSeconds 1) and last 0.5 s into one probe `{{content_folder}}/SW_Roar_Probe`.\n4. hyper_audio_inspect the SoundWaves (projection metrics) and hyper_audio_validate the MetaSounds.\n5. Reply with a PASS/FAIL table per variant: length 2-4 s; PeakDb -1; not clipped; LeadingSilenceSeconds under 0.05; the last 0.5 s at least 10 dB under the body (RmsDb); no drone or click Issue. Say how the three differ; the probe can be deleted."
+  },
+  {
+   "id": "audio.quest-complete-stinger",
+   "title": "Compose a quest-complete stinger in a hall",
+   "summary": "A rising bell arpeggio, a warm pad and a sub on the final chord, humanized, in one hall, rendered as a one-shot with a MetaSound.",
+   "packs": [
+    "sound_design",
+    "audio_metasound"
+   ],
+   "skills": [
+    "sound-design"
+   ],
+   "tools": [
+    "hyper_sound_inspect",
+    "hyper_sound_apply_plan",
+    "hyper_operation_wait",
+    "hyper_sound_render",
+    "hyper_audio_validate"
+   ],
+   "ops": [
+    "session.set",
+    "track.add",
+    "device.add",
+    "device.preset",
+    "device.set",
+    "clip.midi",
+    "track.send",
+    "lane.set"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "music",
+    "stinger",
+    "quest",
+    "reward",
+    "rpg",
+    "jingle"
+   ],
+   "placeholders": [
+    {
+     "name": "key",
+     "label": "Key",
+     "default": "D major"
+    },
+    {
+     "name": "bpm",
+     "label": "Tempo (BPM)",
+     "default": "100"
+    },
+    {
+     "name": "seconds",
+     "label": "Length (s)",
+     "default": "3"
+    }
+   ],
+   "prompt": "Compose a {{seconds}} s quest-complete stinger in {{key}} from the Decibel session `{{content_folder}}/DS_Stinger_Quest`: a rising arpeggio on tuned synth bells, a warm pad, and a sub under the final chord, all in one hall. Follow the sound-design skill's Music recipe; if the sound_design pack (Decibel) is unavailable, say so and stop.\n1. hyper_sound_inspect with bCatalog, then DeviceId gen.synth (with bPresets) and fx.verb, for presets and parameter ids.\n2. One hyper_sound_apply_plan (bCreate true, fresh operationId): session.set Bpm {{bpm}} and OneShot 1; a `Bells` track (track.add, device.add gen.synth, then device.preset or device.set for a bell tone) with a clip.midi arpeggio of the tonic triad over two octaves, humanized by a few ms and a little velocity; a `Pad` holding the tonic chord; a `Sub` on the root an octave down under the last chord; an fx return with fx.verb as a hall that every track feeds with track.send; a lane.set volume fade on the pad over the last beat. If a plan or render reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_sound_render with TailSeconds 2, bMetaSound true and NormalizePeakDb -1.\n4. hyper_audio_validate the MetaSound.\n5. Reply with a PASS/FAIL table: length {{seconds}} s plus the tail (within 0.3); PeakDb -1; not clipped; LeadingSilenceSeconds under 0.02; no Issues; MetaSound valid. List the notes you used with their MIDI numbers."
+  },
+  {
+   "id": "audio.menu-music-loop",
+   "title": "Compose a looping menu music track",
+   "summary": "Whole bars of melody, chords, pad, bass and light percussion in one hall, phrased with lanes and rendered as a seamless music loop.",
+   "packs": [
+    "sound_design",
+    "audio_metasound"
+   ],
+   "skills": [
+    "sound-design"
+   ],
+   "tools": [
+    "hyper_sound_inspect",
+    "hyper_sound_apply_plan",
+    "hyper_operation_wait",
+    "hyper_sound_render",
+    "hyper_audio_inspect",
+    "hyper_audio_validate"
+   ],
+   "ops": [
+    "session.set",
+    "track.add",
+    "device.add",
+    "device.set",
+    "clip.midi",
+    "track.send",
+    "lane.set"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "music",
+    "menu",
+    "loop",
+    "soundtrack",
+    "theme",
+    "composition"
+   ],
+   "placeholders": [
+    {
+     "name": "mood",
+     "label": "Mood",
+     "default": "calm, hopeful"
+    },
+    {
+     "name": "bpm",
+     "label": "Tempo (BPM)",
+     "default": "90"
+    },
+    {
+     "name": "bars",
+     "label": "Bars",
+     "default": "16"
+    }
+   ],
+   "prompt": "Compose a {{bars}}-bar {{mood}} menu music loop at {{bpm}} BPM from the Decibel session `{{content_folder}}/DS_Music_Menu`, looping seamlessly. Follow the sound-design skill's Music recipe; if the sound_design pack (Decibel) is unavailable, say so and stop.\n1. hyper_sound_inspect with bCatalog, then DeviceId gen.synth (with bPresets) and fx.verb, for presets and parameter ids.\n2. One hyper_sound_apply_plan (bCreate true, fresh operationId): session.set Bpm {{bpm}}, TimeSigNumerator 4, TimeSigDenominator 4, Loop 1 from beat 0 to beat {{bars}} x 4; one gen.synth instrument track per part (track.add, device.add, device.set): melody, chords, pad, bass, and light percussion from short noise hits; humanized clip.midi notes; a hall fx return every track feeds with track.send; volume lane.set shaping 4-bar phrases; the last bar's chord leading back to the first. If a plan or render reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_sound_render with bLoop true, LoopTailSeconds 3, bMetaSound true and NormalizePeakDb -1.\n4. hyper_audio_inspect the SoundWave (projection metrics) and hyper_audio_validate the MetaSound.\n5. Reply with a PASS/FAIL table: length {{bars}} x 4 x 60 / {{bpm}} s (within 0.05); PeakDb -1; RmsDb between -20 and -14; not clipped; no loop Issue. List the parts with their note ranges."
+  },
+  {
+   "id": "audio.audit-sound-assets",
+   "title": "Audit the sound assets in a folder",
+   "summary": "Inspect and validate every SoundWave, Sound Cue and MetaSound under the folder: metrics, broken graphs and empty cues, without changing anything.",
+   "packs": [
+    "audio_metasound"
+   ],
+   "tools": [
+    "hyper_project_search",
+    "hyper_audio_inspect",
+    "hyper_audio_validate",
+    "hyper_memory_remember"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "audit",
+    "audio",
+    "metasound",
+    "sound cue",
+    "qa",
+    "cleanup"
+   ],
+   "placeholders": [
+    {
+     "name": "max_seconds",
+     "label": "Longest one-shot (s)",
+     "default": "10"
+    }
+   ],
+   "prompt": "Audit the audio assets under {{content_folder}} and change nothing. If the audio_metasound pack is unavailable, say so and stop.\n1. hyper_project_search with kinds [asset] for SoundWaves, Sound Cues and MetaSounds under {{content_folder}}, to get their object paths.\n2. hyper_audio_inspect with scope loaded_and_on_disk, those objectPaths and projection identity, metrics, references and details; page with the cursor until done.\n3. hyper_audio_validate with the same scope and paths.\n4. Flag: a MetaSound whose frontend is invalid; a Sound Cue with no nodes; a SoundWave with bad metrics (zero length, an unusual sample rate) or a one-shot longer than {{max_seconds}} s; unsaved loaded changes; anything the validator reports.\n5. If one sample rate or channel layout holds for nearly every sound, hyper_memory_remember it as the project's convention, titled as the fact.\nReply with a PASS/FAIL table, one row per asset, worst first: kind, length, sample rate, channels and issues. Then counts per kind and the fixes you suggest; apply none."
+  },
+  {
+   "id": "audio.footstep-attenuation-plan-check",
+   "title": "Check a footstep attenuation and concurrency plan",
+   "summary": "Dry-run an attenuation and a concurrency asset plan for footsteps, report the checked values and effects, and submit only if the build can apply it.",
+   "packs": [
+    "audio_metasound"
+   ],
+   "tools": [
+    "hyper_audio_inspect",
+    "hyper_audio_apply_plan",
+    "hyper_audio_validate"
+   ],
+   "ops": [
+    "sound_attenuation.create",
+    "sound_attenuation.configure",
+    "sound_concurrency.create",
+    "sound_concurrency.configure"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "attenuation",
+    "concurrency",
+    "footsteps",
+    "3d audio",
+    "mixing",
+    "voices"
+   ],
+   "placeholders": [
+    {
+     "name": "inner",
+     "label": "Inner radius (cm)",
+     "default": "200"
+    },
+    {
+     "name": "falloff",
+     "label": "Falloff distance (cm)",
+     "default": "1800"
+    },
+    {
+     "name": "max_count",
+     "label": "Max voices",
+     "default": "6"
+    }
+   ],
+   "prompt": "Check a plan for footstep audio: `{{content_folder}}/ATT_Footsteps.ATT_Footsteps` (inner radius {{inner}} cm, falloff {{falloff}} cm, natural sound curve, spatialized) and `{{content_folder}}/CON_Footsteps.CON_Footsteps` (at most {{max_count}} voices, the farthest stopped first). If the audio_metasound pack is unavailable, say so and stop.\n1. hyper_audio_inspect with scope loaded_and_on_disk and variants sound_attenuation and sound_concurrency, for assets with those names; if they exist, plan only configure ops for them.\n2. hyper_audio_apply_plan with bDryRun true and operations: sound_attenuation.create, then sound_attenuation.configure with parameters inner_radius (float {{inner}}), falloff_distance (float {{falloff}}), distance_algorithm (string natural_sound), spatialize and attenuate (bool true); sound_concurrency.create, then sound_concurrency.configure with max_count (int {{max_count}}) and resolution_rule (string stop_farthest). Fix any operation it refuses, naming the field.\n3. Submit once with bDryRun false, the dry run's planHash as expectedPlanHash and a fresh operationId. If the reply is staged_backend_required, this build's audio pack only checks plans: say so and stop, without making the assets another way.\n4. If it completed, hyper_audio_validate both assets.\nReply with a PASS/FAIL table: the plan valid; its effects (creates and updates); each value as planned; the submit's outcome."
+  },
+  {
+   "id": "audio.loudness-match-renders",
+   "title": "Level-match a set of Decibel sounds to one peak",
+   "summary": "Measure each session as it stands, re-render all to one peak with MetaSounds, and flag the ones whose average level still stands out.",
+   "packs": [
+    "sound_design",
+    "audio_metasound"
+   ],
+   "skills": [
+    "sound-design"
+   ],
+   "tools": [
+    "hyper_sound_inspect",
+    "hyper_sound_render",
+    "hyper_audio_inspect",
+    "hyper_audio_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "loudness",
+    "mixing",
+    "normalize",
+    "peak",
+    "consistency",
+    "batch"
+   ],
+   "placeholders": [
+    {
+     "name": "prefix",
+     "label": "Session name prefix",
+     "default": "DS_"
+    },
+    {
+     "name": "peak",
+     "label": "Peak level (dBFS)",
+     "default": "-1"
+    }
+   ],
+   "prompt": "Re-render the Decibel sessions in {{content_folder}} whose names start with `{{prefix}}` so they sit at one peak of {{peak}} dBFS, each with a MetaSound. Change only their rendered SoundWaves and MetaSounds, never the sessions. Follow the sound-design skill's Measuring section; if the sound_design pack (Decibel) is unavailable, say so and stop.\n1. hyper_sound_inspect with bSessions for the sessions, then each SessionPath for its length and loop settings.\n2. hyper_sound_render each once with no normalizing (fresh operationId) to measure PeakDb and RmsDb as it stands.\n3. Render each again with NormalizePeakDb {{peak}} and bMetaSound true; for a looping session add bLoop with LoopCrossfadeSeconds 4 (a bed) or LoopTailSeconds 3 (music).\n4. A peak does not match loudness: if a sound's RmsDb is more than 6 dB from the set's median, name it and suggest the change (a limiter drive, a quieter layer) instead of editing its session.\n5. hyper_audio_inspect the SoundWaves (projection metrics) and hyper_audio_validate the MetaSounds.\nReply with a PASS/FAIL table, one row per sound: PeakDb before and after, RmsDb, within 6 dB of the median, not clipped, no Issues, MetaSound valid."
+  }
+ ]
+}

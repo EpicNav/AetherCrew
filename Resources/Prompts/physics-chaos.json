@@ -1,0 +1,354 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "physics-chaos",
+ "presets": [
+  {
+   "id": "physics-chaos.audit-physics-asset",
+   "title": "Audit a physics asset's bodies and constraints",
+   "summary": "Read every body, shape, constraint and disabled collision pair of the selected Physics Asset and report structural problems. Changes nothing.",
+   "packs": [
+    "physics_chaos"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_physics_inspect",
+    "hyper_physics_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "physics asset",
+    "ragdoll",
+    "audit",
+    "bodies",
+    "constraints",
+    "collision"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "PhysicsAsset"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "max_shapes",
+     "label": "Most shapes per body",
+     "default": "3",
+     "hint": "Bodies with more shapes than this are listed for a designer to simplify."
+    }
+   ],
+   "prompt": "Audit the Physics Asset {{selected_asset}}. Change nothing.\n1. If hyper_physics_validate is not available, the Physics pack is off: say so and stop. Load it with Epic's AssetTools load_asset: hyper_physics_inspect reads loaded assets only.\n2. hyper_physics_inspect with pageSize 64, following nextCursor until every body and constraint is read. Note per body: bone, shapes by kind, physics type, collision enabled, mass scale, simulate; per constraint: its two bones, linear and angular motions, swing and twist limits; the disabled collision pairs; the solver settings. An asset with unsaved changes gives one page with no cursor and fails validate with dirty_loaded_state_not_cas_complete: say so and ask me to save it first.\n3. hyper_physics_validate with policy structural.\nReport the totals (bodies, shapes, constraints, disabled pairs), then a PASS/FAIL table: every body has at least 1 valid shape; every mass scale is above 0; every constraint joins two existing bodies; solver iterations within range; validate valid with 0 errors. Then list what a designer should look at, by bone: bodies with more than {{max_shapes}} shapes, limb constraints with a Free swing or twist, bodies with collision off, and any issue validate raised."
+  },
+  {
+   "id": "physics-chaos.ragdoll-from-skeletal-mesh",
+   "title": "Generate a ragdoll physics asset from a mesh",
+   "summary": "Create a Physics Asset from the selected Skeletal Mesh, make sure every key bone has a body and a joint, and validate it.",
+   "packs": [
+    "physics_chaos"
+   ],
+   "tools": [
+    "hyper_physics_inspect",
+    "hyper_physics_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "ragdoll",
+    "physics asset",
+    "skeletal mesh",
+    "create",
+    "humanoid"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "SkeletalMesh"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "key_bones",
+     "label": "Bones that need bodies",
+     "default": "pelvis, spine_03, head, upperarm_l, upperarm_r, lowerarm_l, lowerarm_r, thigh_l, thigh_r, calf_l, calf_r"
+    },
+    {
+     "name": "assign",
+     "label": "Assign to the mesh",
+     "default": "true",
+     "hint": "true or false."
+    }
+   ],
+   "prompt": "Make a ragdoll Physics Asset for the Skeletal Mesh {{selected_asset}}.\n1. If hyper_physics_validate is not available, the Physics pack is off: say so and stop. Epic's SkeletalMeshTools get_physics_asset: if the mesh already has one, report it and stop unless I asked to replace it. get_bone_names: confirm each of {{key_bones}} exists.\n2. Epic's PhysicsAssetToolset CreateFromMesh (meshPath = the mesh, bAssignToMesh {{assign}}). It lands beside the mesh, named with the suffix _PhysicsAsset.\n3. hyper_physics_inspect the new asset (pageSize 64, maxOutputBytes 131072). An unsaved asset gives one page with no cursor, bodies first, so read the full lists with GetBodyNames, GetConstraints and GetBodyShapes.\n4. For a key bone with no body: AddBody, a SetCapsule sized like its neighbours' shapes, and AddConstraint to its parent bone's body.\n5. hyper_physics_validate with policy structural. A new asset reports asset_registry_presence_unproven and persisted_revision_incomplete until the editor loads it from disk, and dirty_loaded_state_not_cas_complete while unsaved: those are expected; any other error is a FAIL.\n6. Picture: Epic's EditorAppToolset OpenEditorForAsset on the asset, then SlateInspectorToolset Screenshot.\nReport a PASS/FAIL table: asset created (and assigned when {{assign}} is true); one row per key bone with a body and at least one shape; every key bone except pelvis constrained to a parent body; no validate error beyond those three. Put the screenshot on its own line. Save only if I asked."
+  },
+  {
+   "id": "physics-chaos.tune-ragdoll-joint-limits",
+   "title": "Set believable joint limits on a humanoid ragdoll",
+   "summary": "Apply a table of swing and twist limits to neck, spine, shoulders, elbows, hips and knees, then read every limit back to within half a degree.",
+   "packs": [
+    "physics_chaos"
+   ],
+   "tools": [
+    "hyper_physics_inspect",
+    "hyper_physics_validate"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "ragdoll",
+    "constraints",
+    "joint limits",
+    "swing",
+    "twist",
+    "humanoid"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "PhysicsAsset"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "limits",
+     "label": "Limits per bone",
+     "default": "neck_01 15/15/10, spine_03 20/20/15, upperarm 60/60/40, lowerarm 0/120/10, thigh 45/45/20, calf 0/110/5",
+     "hint": "bone swing1/swing2/twist in degrees; _l and _r share a row; 0 locks that motion."
+    }
+   ],
+   "prompt": "Tune the joint limits of the ragdoll {{selected_asset}} to: {{limits}}.\n1. If hyper_physics_validate is not available, the Physics pack is off: say so and stop. Load it with Epic's AssetTools load_asset: hyper_physics_inspect reads loaded assets only. hyper_physics_inspect it to the last page and hyper_physics_validate it (policy structural) as the baseline. Epic's PhysicsAssetToolset GetConstraints: map each row to the constraint whose child bone it names (both sides for _l and _r) and list rows with no constraint.\n2. For each mapped constraint, one SetConstraintLimits with the two bones as GetConstraints names them: a value of 0 is Locked, any other value is Limited at that many degrees. Touch no other constraint.\n3. GetConstraints again: every edited swing1, swing2 and twist limit within 0.5 degrees of the table, each motion as planned, and every other constraint identical to step 1.\n4. hyper_physics_validate with policy structural. While the edit is unsaved it reports dirty_loaded_state_not_cas_complete and persisted_revision_incomplete, which are expected; any other error is a FAIL. If I asked you to save, save with AssetTools save_assets and validate again: 0 errors.\nReport a PASS/FAIL table with one row per constraint (bones, planned, measured), a row for constraints left untouched, and the validate row. Note any joint whose limit looks wrong for its bone axes after the change."
+  },
+  {
+   "id": "physics-chaos.capsule-limb-bodies",
+   "title": "Replace a creature's limb shapes with clean capsules",
+   "summary": "Swap the boxes and hulls on a quadruped's leg and tail bodies for one named capsule each, sized from the old shape, and prove the swap.",
+   "packs": [
+    "physics_chaos"
+   ],
+   "tools": [
+    "hyper_physics_inspect",
+    "hyper_physics_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "capsule",
+    "collision shapes",
+    "quadruped",
+    "wolf",
+    "creature",
+    "fantasy"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "PhysicsAsset"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "bones",
+     "label": "Bodies to change",
+     "default": "every body whose bone name contains leg, thigh, calf, foot or tail"
+    },
+    {
+     "name": "shape_name",
+     "label": "Capsule name",
+     "default": "Capsule_Main"
+    }
+   ],
+   "prompt": "On the Physics Asset {{selected_asset}}, a four-legged creature such as a dire wolf, give {{bones}} one capsule each in place of its current shapes.\n1. If hyper_physics_validate is not available, the Physics pack is off: say so and stop. Load it with Epic's AssetTools load_asset: hyper_physics_inspect reads loaded assets only. hyper_physics_inspect it to the last page: list the matching bodies with their shape counts by kind.\n2. For each, Epic's PhysicsAssetToolset GetBodyShapes, then size a capsule from its largest shape: radius half its smaller cross-section, length its longest extent minus twice the radius (a capsule's length leaves out its end caps), the same centre, and a rotation that lays the capsule's local Z, its long axis, along that extent. SetCapsule with shapeName `{{shape_name}}`, then RemoveShape each old shape by name; list any unnamed shape you could not remove. Leave every other body alone.\n3. GetBodyShapes on each changed body and hyper_physics_inspect again (pageSize 64: while unsaved it returns one page, bodies first, no cursor). hyper_physics_validate with policy structural: while unsaved it reports dirty_loaded_state_not_cas_complete and persisted_revision_incomplete, which are expected; any other error is a FAIL.\nReport a PASS/FAIL table with one row per changed body: capsuleCount 1 and totalShapeCount 1, radius and length in cm, no invalid shape. Add rows for untouched bodies unchanged and the validate result. Save only if I asked."
+  },
+  {
+   "id": "physics-chaos.preflight-solver-change",
+   "title": "Preflight a physics solver and collision change",
+   "summary": "Dry-run new solver iterations, a collision profile and a simulate flag against the selected Physics Asset and report exactly what would change.",
+   "packs": [
+    "physics_chaos"
+   ],
+   "tools": [
+    "hyper_physics_inspect",
+    "hyper_physics_apply_plan",
+    "hyper_physics_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "solver",
+    "iterations",
+    "collision profile",
+    "preflight",
+    "dry run",
+    "physics asset"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "PhysicsAsset"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "body",
+     "label": "Body bone",
+     "default": "pelvis"
+    },
+    {
+     "name": "profile",
+     "label": "Collision profile",
+     "default": "Ragdoll"
+    },
+    {
+     "name": "position_iterations",
+     "label": "Position iterations",
+     "default": "8"
+    },
+    {
+     "name": "velocity_iterations",
+     "label": "Velocity iterations",
+     "default": "2"
+    },
+    {
+     "name": "projection_iterations",
+     "label": "Projection iterations",
+     "default": "1"
+    }
+   ],
+   "prompt": "Check, without changing anything, whether these settings fit {{selected_asset}}: solver position, velocity and projection iterations {{position_iterations}}, {{velocity_iterations}} and {{projection_iterations}}, and body `{{body}}` on collision profile `{{profile}}` with simulate on.\n1. If hyper_physics_validate is not available, the Physics pack is off: say so and stop. Load it with Epic's AssetTools load_asset: hyper_physics_inspect reads loaded assets only. hyper_physics_inspect it: note the persisted revision, the solver record and its fingerprint, and `{{body}}`'s fingerprint, profile and simulate flag.\n2. hyper_physics_apply_plan with bDryRun true, targetPath, expectedPersistedRevision and one patch: bodyName {{body}} with expectedBodyFingerprint; bSetCollisionProfile with collisionProfileName; bSetSimulatePhysics with bSimulatePhysics true; bSetSolverSettings with expectedSolverFingerprint, the three iteration counts, and every other solver value as inspected. This tool checks patches but does not apply them: the expected reply is dry_run_valid_execution_blocked with a planHash and effects.patchFieldCount. persisted_clean_base_required means the asset has unsaved changes: say so and stop. no_op_patch means it already has every value.\n3. hyper_physics_validate with policy structural, then hyper_physics_inspect again: the persisted revision must be unchanged.\nReport a PASS/FAIL table: patch accepted, each field current and proposed, revision unchanged. Then say where to set each value by hand (the body's Details and the asset's solver settings in the Physics Asset editor), since no tool applies these fields yet."
+  },
+  {
+   "id": "physics-chaos.simulate-creature-tail",
+   "title": "Let a creature's tail swing while its body animates",
+   "summary": "Set a dragon's tail bodies to Simulated with lighter mass and soft limits, keep the rest animated, and prove each body's mode and limit.",
+   "packs": [
+    "physics_chaos"
+   ],
+   "tools": [
+    "hyper_physics_inspect",
+    "hyper_physics_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "tail",
+    "simulated",
+    "kinematic",
+    "dragon",
+    "secondary motion",
+    "fantasy"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "PhysicsAsset"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "tail_prefix",
+     "label": "Tail bone prefix",
+     "default": "tail_"
+    },
+    {
+     "name": "mass_scale",
+     "label": "Tail mass scale",
+     "default": "0.5"
+    },
+    {
+     "name": "swing",
+     "label": "Swing limit (degrees)",
+     "default": "25"
+    },
+    {
+     "name": "twist",
+     "label": "Twist limit (degrees)",
+     "default": "10"
+    }
+   ],
+   "prompt": "On {{selected_asset}}, make every body whose bone starts with `{{tail_prefix}}` swing physically while the rest follows the animation: a dragon's tail (it works the same for a ponytail or a chain).\n1. If hyper_physics_validate is not available, the Physics pack is off: say so and stop. Load it with Epic's AssetTools load_asset: hyper_physics_inspect reads loaded assets only. hyper_physics_inspect it to the last page: list the tail bodies in chain order, the body they hang from, and every body's physics type.\n2. Epic's PhysicsAssetToolset: SetBodyPhysicsMode Simulated and SetBodyMassScale {{mass_scale}} on each tail body; SetBodyPhysicsMode Kinematic on the body the tail hangs from; leave the other bodies as they are. SetConstraintLimits on each tail constraint: swing1 and swing2 Limited at {{swing}} degrees, twist Limited at {{twist}}.\n3. hyper_physics_inspect again (pageSize 64: while unsaved it returns one page, bodies first, no cursor) and GetConstraints for the tail limits. hyper_physics_validate with policy structural: while unsaved it reports dirty_loaded_state_not_cas_complete and persisted_revision_incomplete, which are expected; any other error is a FAIL.\nReport a PASS/FAIL table: one row per tail body (physicsType 2 for simulated, mass scale {{mass_scale}}, its constraint's swing and twist limits); the anchor body kinematic (physicsType 1); every other body unchanged; no other validate error. Save only if I asked."
+  },
+  {
+   "id": "physics-chaos.share-physics-asset",
+   "title": "Share one physics asset across mesh variants",
+   "summary": "Check each selected Skeletal Mesh has the skeleton and bones a Physics Asset needs, assign it to the ones that fit, and read every assignment back.",
+   "packs": [
+    "physics_chaos"
+   ],
+   "tools": [
+    "hyper_physics_inspect",
+    "hyper_physics_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "physics asset",
+    "skeletal mesh",
+    "variants",
+    "crowd",
+    "npc",
+    "assign"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "SkeletalMesh"
+    ],
+    "min": 2
+   },
+   "placeholders": [
+    {
+     "name": "physics_asset",
+     "label": "Physics Asset to share",
+     "default": "the Physics Asset of the first selected mesh",
+     "hint": "Or an object path."
+    }
+   ],
+   "prompt": "Make the Skeletal Meshes {{selected_assets}}, variants of one body such as crowd NPCs, share the Physics Asset {{physics_asset}}.\n1. If hyper_physics_validate is not available, the Physics pack is off: say so and stop. Load the Physics Asset with Epic's AssetTools load_asset and hyper_physics_inspect it to the last page for its body bones.\n2. For each mesh: Epic's SkeletalMeshTools get_skeleton, get_bone_names and get_physics_asset. A mesh fits when it has the skeleton of a mesh that already uses the asset (else the first selected mesh) and every body bone.\n3. assign_physics_asset on each mesh that fits and does not already use it. Skip the rest and say which bones they lack.\n4. get_physics_asset on every mesh to read the result back, and hyper_physics_validate the Physics Asset with policy structural.\nReport a PASS/FAIL table with one row per mesh: skeleton match, missing bones (count and names), Physics Asset before and after; then validate 0 errors. Change no mesh that does not fit, and save only if I asked."
+  },
+  {
+   "id": "physics-chaos.ragdoll-on-death",
+   "title": "Ragdoll an enemy on death and prove it in play",
+   "summary": "Make an enemy Blueprint drop into a simulated ragdoll when its health reaches zero, then defeat it in play and record the fall.",
+   "packs": [
+    "physics_chaos",
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_physics_inspect",
+    "hyper_physics_validate",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_verify_run",
+    "hyper_playtest_run",
+    "hyper_playtest_status",
+    "hyper_blueprint_snapshot"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "ragdoll",
+    "death",
+    "enemy",
+    "blueprint",
+    "playtest",
+    "simulate physics"
+   ],
+   "placeholders": [
+    {
+     "name": "enemy_bp",
+     "label": "Enemy Blueprint",
+     "default": "BP_Enemy"
+    },
+    {
+     "name": "health_var",
+     "label": "Health variable",
+     "default": "Health"
+    }
+   ],
+   "prompt": "Make {{enemy_bp}} fall as a ragdoll when its {{health_var}} reaches 0.\n1. If hyper_physics_validate is not available, the Physics pack is off: say so and stop. Find its mesh component's Skeletal Mesh and that mesh's Physics Asset (Epic's SkeletalMeshTools get_physics_asset); load it, hyper_physics_inspect it and hyper_physics_validate it (policy structural). Stop and report if validate is not valid or it has no bodies; unsaved Physics Asset edits show as dirty_loaded_state_not_cas_complete, so ask me to save them first.\n2. With the unreal-blueprint skill, where {{health_var}} first reaches 0: capsule collision to NoCollision, the mesh's collision profile to Ragdoll, SetSimulatePhysics true on the mesh, stop movement, and a bool `bIsRagdoll` set true. Leave the rest of the Blueprint alone.\n3. hyper_blueprint_compile_validate it (revision from hyper_blueprint_snapshot; preview, then compile with its planHash and an operationId; hyper_operation_wait): 0 errors.\n4. hyper_verify_run (deadlineSeconds 60), case `ragdolls`: Play Defeat on {{enemy_bp}} (healthProperty {{health_var}}, timeoutSeconds 40), then AssertProperty on {{enemy_bp}}: bIsRagdoll == true, and Mesh.IsAnySimulatingPhysics == true (use its mesh component's name if not Mesh). If Defeat fails no_attack_action, say the game has no attack the bot can use and skip step 5.\n5. hyper_playtest_run with the same steps as Bot steps, bRecordVideo true and a Capture after the death; hyper_operation_wait, then hyper_playtest_status.\nReport a PASS/FAIL table: Physics Asset valid, compile clean, Defeat result, both asserts with their evidence lines. Show the capture on its own line and link the video."
+  }
+ ]
+}

@@ -1,0 +1,1139 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "vfx-niagara",
+ "presets": [
+  {
+   "id": "vfx-niagara.campfire-flames-embers-smoke",
+   "title": "Build a looping campfire with flames, embers and smoke",
+   "summary": "A new Niagara System with three named, live emitters in warm colours, placed in the level and captured over time.",
+   "packs": [
+    "niagara_vfx",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "add_emitter",
+    "set_input_value",
+    "set_emitter_property"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "fire",
+    "campfire",
+    "embers",
+    "smoke",
+    "loop",
+    "survival",
+    "fantasy"
+   ],
+   "placeholders": [
+    {
+     "name": "system_name",
+     "label": "System name",
+     "default": "NS_Campfire"
+    },
+    {
+     "name": "location",
+     "label": "Location (cm)",
+     "default": "0,0,0"
+    }
+   ],
+   "prompt": "Build a looping campfire `{{content_folder}}/{{system_name}}` with exactly three emitters: `Flames` (orange to yellow, rising), `Embers` (small bright sparks drifting up) and `Smoke` (soft grey, slow, gone within 4 s). Follow the unreal-niagara skill; if the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_memory_recall `vfx fire` for project conventions. Create the System with Epic's CreateNiagaraSystem (template /Niagara/DefaultAssets/Templates/Systems/DirectionalBurst.DirectionalBurst), save it, then hyper_niagara_inspect with bIncludeTopology true; note the revision and the template's emitters.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): add_emitter from /Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain for each of the three names, and set_emitter_property `enabled` false on each template emitter. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Inspect again (new revision, modules, inputs, renderer indexes), then one plan (at most 16 ops, else split it) of set_input_value: colour, velocity, gravity, size, lifetime and spawn rate per emitter, with input names from the topology.\n4. hyper_niagara_validate with policy runtime_ready, then policy runtime_probe with expectEmitters [Flames, Embers, Smoke] and minParticlesPerEmitter 5.\n5. Place it in {{level}} at {{location}} as an actor labelled `Campfire` with Epic's add_to_scene_from_asset; leave the level unsaved. hyper_capture_view with source transform, 500 cm from the fire and looking at it, frameCount 3, intervalSeconds 0.25.\n6. Reply with a PASS/FAIL table: runtime_ready with 0 errors and 0 warnings; each emitter live with its particle count; changedPixelFraction between frames above 0.01; the flames read orange to yellow in the frames. Show each frame on its own line as ![frame](path)."
+  },
+  {
+   "id": "vfx-niagara.pickup-sparkle-glow",
+   "title": "Add a sparkle and glow loop to a pickup",
+   "summary": "A small looping effect with a soft glow, a point light and twinkling sparkles, placed on the selected pickup and kept under a particle budget.",
+   "packs": [
+    "niagara_vfx",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_scene_inspect",
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "add_emitter",
+    "set_input_value",
+    "add_renderer",
+    "set_renderer_property",
+    "set_emitter_property"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "pickup",
+    "collectible",
+    "sparkle",
+    "glow",
+    "light",
+    "sci-fi",
+    "loot"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "system_name",
+     "label": "System name",
+     "default": "NS_PickupSparkle"
+    },
+    {
+     "name": "color",
+     "label": "Tint (linear RGBA 0-1)",
+     "default": "0.2,0.8,1,1"
+    },
+    {
+     "name": "max_particles",
+     "label": "Particle budget",
+     "default": "60"
+    }
+   ],
+   "prompt": "Give the pickup {{selected_actor}} a looping sparkle effect `{{content_folder}}/{{system_name}}`: a soft `Glow` sprite with a point light and `Sparkles` twinkling around it, tinted {{color}}, never more than {{max_particles}} particles. Follow the unreal-niagara skill; if the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_scene_inspect with scope selected for the pickup's location. Create the System with Epic's CreateNiagaraSystem (template /Niagara/DefaultAssets/Templates/Systems/DirectionalBurst.DirectionalBurst), save it, then hyper_niagara_inspect with bIncludeTopology true; note the revision and the template's emitters.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): add_emitter `Glow` from SingleLoopingParticle and `Sparkles` from HangingParticulates (both in /Niagara/DefaultAssets/Templates/Emitters); add_renderer /Script/Niagara.NiagaraLightRendererProperties on Glow; set_emitter_property `enabled` false on each template emitter. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Inspect again (new revision, modules, inputs, renderer indexes), then one plan (at most 16 ops, else split it): set_input_value for colour, size, spawn rate and a Sparkles spawn shape about 60 cm across; set_renderer_property RadiusScale on Glow's light renderer (its rendererIndex from inspect).\n4. hyper_niagara_validate with policy runtime_ready, then runtime_probe with expectEmitters [Glow, Sparkles].\n5. Place it at the pickup's location with Epic's add_to_scene_from_asset, labelled `{{system_name}}_FX`; leave the level unsaved. hyper_capture_view with source transform, 300 cm away and looking at it, frameCount 2, intervalSeconds 0.5.\n6. Reply with a PASS/FAIL table: both emitters live, total live particles at most {{max_particles}}, a light renderer on Glow, 0 errors and 0 warnings. Show each frame on its own line as ![frame](path)."
+  },
+  {
+   "id": "vfx-niagara.audit-system-health",
+   "title": "Audit a Niagara System's health without changing it",
+   "summary": "Topology, compile state, stack issues with fix ids and live particle counts for the selected System, checked against the effects quality bar.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_niagara_inspect",
+    "hyper_niagara_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "audit",
+    "review",
+    "health",
+    "compile",
+    "stack issues",
+    "budget"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "max_particles",
+     "label": "Live particles per emitter",
+     "default": "2000"
+    }
+   ],
+   "prompt": "Audit the Niagara System {{selected_asset}} and change nothing. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_memory_recall `vfx budget` with target {{selected_asset}} for known issues and the project's VFX budgets.\n2. hyper_niagara_inspect with bIncludeTopology true (load it with Epic's load_asset if it answers target_not_loaded): list each emitter with its sim target, renderers, simulation stages and scratch pad modules, the user parameters and the effect type.\n3. hyper_niagara_validate with policy authoring, then runtime_ready: every issue with its severity and fixIds.\n4. hyper_niagara_validate with policy runtime_probe and probeFrames 120: each emitter's live and spawned counts and their count source (cpu or gpu_estimate).\n5. Flag what breaks the effects bar: any compile error or warning; an enabled emitter that is not live; more than {{max_particles}} live particles in one emitter; a GPU emitter without fixed bounds (Epic's GetEmitterData shows its bounds mode); no effect type.\nReply with a PASS/FAIL table, one row per check and emitter with the numbers, then the fixes you recommend, each named by the plan op kind that would make it (apply_stack_issue_fix, set_emitter_property, set_input_value, set_effect_type). Apply nothing."
+  },
+  {
+   "id": "vfx-niagara.repair-stack-issues",
+   "title": "Repair a broken Niagara System's compile and stack issues",
+   "summary": "Apply the stack's own fixes and replace failing HLSL modules in reviewed plans until the System compiles clean and every emitter spawns.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_validate",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_log_tail"
+   ],
+   "ops": [
+    "apply_stack_issue_fix",
+    "set_module_enabled",
+    "add_hlsl_module"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "fix",
+    "repair",
+    "compile errors",
+    "stack issues",
+    "hlsl",
+    "debug"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "max_rounds",
+     "label": "Repair rounds",
+     "default": "3"
+    }
+   ],
+   "prompt": "Repair the Niagara System {{selected_asset}} so it compiles clean and every enabled emitter spawns. Change only this System; each plan compiles and saves it. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_inspect with bIncludeTopology true and keep the revision. hyper_niagara_validate with policy runtime_ready: list every issue with its issueId and fixIds.\n2. One hyper_niagara_apply_plan, first with bDryRun true because it may touch many modules, then the same ops with bDryRun false, a fresh operationId and expectedRevision: an apply_stack_issue_fix op per fixable issue; for an HLSL module that fails to compile, set_module_enabled false on it and add_hlsl_module with a corrected copy under a new name. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Inspect again for the new revision and repeat step 2, at most {{max_rounds}} rounds, while fixable issues remain.\n4. hyper_niagara_validate with policy runtime_ready, then runtime_probe with minParticlesPerEmitter 1.\n5. hyper_log_tail with contains `Niagara` for compile errors the stack did not report.\nReply with a before/after PASS/FAIL table: error and warning counts, each issue fixed or left (and why), each enabled emitter live. Name any link-style issue that needs the Niagara editor, and any disabled module Epic's RemoveModule could now delete."
+  },
+  {
+   "id": "vfx-niagara.gpu-snowfall-area",
+   "title": "Make GPU snowfall over an area with fixed bounds",
+   "summary": "A GPU snow emitter spawning over a sized box with wind and curl-noise drift, explicit bounds, a bounded count and captured frames.",
+   "packs": [
+    "niagara_vfx",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "add_emitter",
+    "add_module",
+    "set_emitter_property",
+    "set_module_enabled",
+    "set_input_value"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "snow",
+    "weather",
+    "gpu",
+    "winter",
+    "fixed bounds",
+    "environment"
+   ],
+   "placeholders": [
+    {
+     "name": "area",
+     "label": "Area width (cm)",
+     "default": "4000"
+    },
+    {
+     "name": "height",
+     "label": "Spawn height (cm)",
+     "default": "1500"
+    },
+    {
+     "name": "spawn_rate",
+     "label": "Particles per second",
+     "default": "800"
+    }
+   ],
+   "prompt": "Make GPU snowfall `{{content_folder}}/NS_Snowfall` over a {{area}} x {{area}} cm area, falling from {{height}} cm to the ground. Follow the unreal-niagara skill; if the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_memory_recall `weather vfx`. Create the System with Epic's CreateNiagaraSystem (template /Niagara/DefaultAssets/Templates/Systems/DirectionalBurst.DirectionalBurst), save it, then hyper_niagara_inspect with bIncludeTopology true; note the revision and the template's emitters.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): add_emitter `Snow` from /Niagara/DefaultAssets/Templates/Emitters/HangingParticulates.HangingParticulates (WindForce included); add_module /Niagara/Modules/Spawn/Location/BoxLocation.BoxLocation in its ParticleSpawnScript and /Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce in its ParticleUpdateScript; set_emitter_property sim_target gpu and fixed_bounds over the area from 0 to {{height}} cm; set_emitter_property `enabled` false on each template emitter. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Inspect again (new revision, modules, inputs, renderer indexes), then one plan (at most 16 ops, else split it): set_module_enabled false on Snow's ShapeLocation; set_input_value for a box of the whole area at {{height}} cm, about {{spawn_rate}} per second, a WindForce velocity carrying flakes down at 100-200 cm/s with slight drift, gentle curl noise, and a lifetime that reaches the ground.\n4. hyper_niagara_validate with policy runtime_ready, then runtime_probe with expectEmitters [Snow].\n5. Place it at the origin of {{level}} (unsaved) and hyper_capture_view, source transform 1500 cm away at eye height, frameCount 2, intervalSeconds 1.\n6. Reply with a PASS/FAIL table: Snow on GPU with fixed bounds, live count at most {{spawn_rate}} x lifetime, 0 errors and 0 warnings, frames differ. Show each frame on its own line as ![frame](path)."
+  },
+  {
+   "id": "vfx-niagara.rifle-muzzle-flash",
+   "title": "Build a one-shot rifle muzzle flash with sparks and light",
+   "summary": "A burst effect along +X: a bright flash, velocity-aligned sparks and a light, proven alive at frame 3 and gone within a second.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate"
+   ],
+   "ops": [
+    "add_emitter",
+    "set_input_value",
+    "set_renderer_property",
+    "add_renderer",
+    "set_emitter_property"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "weapon",
+    "muzzle flash",
+    "shooter",
+    "burst",
+    "sparks",
+    "light"
+   ],
+   "placeholders": [
+    {
+     "name": "system_name",
+     "label": "System name",
+     "default": "NS_MuzzleFlash_Rifle"
+    },
+    {
+     "name": "flash_color",
+     "label": "Flash colour (linear RGBA 0-1)",
+     "default": "1,0.6,0.2,1"
+    }
+   ],
+   "prompt": "Build a rifle muzzle flash `{{content_folder}}/{{system_name}}` that fires once per activation along +X: `Flash` (one bright sprite, about 0.1 s), `Sparks` (15-30 velocity-aligned sparks, under 0.3 s) and a light flash tinted {{flash_color}}. Follow the unreal-niagara skill; if the niagara_vfx pack is unavailable, say so and stop.\n1. Create the System with Epic's CreateNiagaraSystem (template /Niagara/DefaultAssets/Templates/Systems/DirectionalBurst.DirectionalBurst), save it, then hyper_niagara_inspect with bIncludeTopology true; note the revision and the template's emitters.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): add_emitter `Flash` from SimpleSpriteBurst and `Sparks` from DirectionalBurst (/Niagara/DefaultAssets/Templates/Emitters); set_renderer_property Alignment VelocityAligned on Sparks' sprite renderer (rendererIndex 0); add_renderer /Script/Niagara.NiagaraLightRendererProperties on Flash; set_emitter_property `enabled` false on each template emitter. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Inspect again (new revision, modules, inputs, renderer indexes), then one plan (at most 16 ops, else split it): set_input_value for burst counts, lifetimes, velocity along +X, colour {{flash_color}} and size; set_renderer_property RadiusScale on Flash's light renderer.\n4. hyper_niagara_validate with policy runtime_ready.\n5. hyper_niagara_validate with policy runtime_probe, probeFrames 3 and expectEmitters [Flash, Sparks]: the burst caught alive at 0.05 s.\n6. runtime_probe again with probeFrames 60. It reports not_live by design: every emitter must show 0 particles after 1 s.\nReply with a PASS/FAIL table: both emitters live at frame 3; Sparks totalSpawned 15-30; zero particles alive at 1 s; a light renderer on Flash; 0 errors and 0 warnings."
+  },
+  {
+   "id": "vfx-niagara.arcane-portal-hlsl-vortex",
+   "title": "Swirl an arcane portal with a custom HLSL vortex module",
+   "summary": "Particles spawned on a torus that spiral inward through a scratch pad HLSL module, compiled, proven live and captured in motion.",
+   "packs": [
+    "niagara_vfx",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "add_emitter",
+    "add_module",
+    "add_hlsl_module",
+    "set_renderer_property",
+    "set_emitter_property",
+    "set_module_enabled",
+    "set_input_value"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "magic",
+    "portal",
+    "vortex",
+    "hlsl",
+    "fantasy",
+    "spell"
+   ],
+   "placeholders": [
+    {
+     "name": "system_name",
+     "label": "System name",
+     "default": "NS_ArcanePortal"
+    },
+    {
+     "name": "radius",
+     "label": "Portal radius (cm)",
+     "default": "150"
+    },
+    {
+     "name": "color",
+     "label": "Tint (linear RGBA 0-1)",
+     "default": "0.45,0.2,1,1"
+    }
+   ],
+   "prompt": "Build a swirling arcane portal `{{content_folder}}/{{system_name}}`: particles born on a ring of {{radius}} cm in the YZ plane that spiral inward around the X axis, tinted {{color}}. Follow the unreal-niagara skill and its HLSL rules; if the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_memory_recall `vfx magic`. Create the System with Epic's CreateNiagaraSystem (template /Niagara/DefaultAssets/Templates/Systems/DirectionalBurst.DirectionalBurst), save it, then hyper_niagara_inspect with bIncludeTopology true; note the revision and the template's emitters.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): add_emitter `Swirl` from /Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain; add_module /Niagara/Modules/Spawn/Location/TorusLocation.TorusLocation in its ParticleSpawnScript; add_hlsl_module `PortalVortex` in ParticleUpdateScript that adds a tangential velocity around X and a pull toward the axis, using only Particles.Position, Particles.Velocity and Engine.DeltaTime; set_renderer_property Alignment VelocityAligned (rendererIndex 0); set_emitter_property `enabled` false on each template emitter. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Inspect again (new revision, modules, inputs, renderer indexes), then one plan (at most 16 ops, else split it): set_module_enabled false on Swirl's ShapeLocation and AddVelocity; set_input_value for torus radius {{radius}}, its axis along X, gravity 0, colour {{color}}.\n4. hyper_niagara_validate with policy authoring (the HLSL compiles), runtime_ready, then runtime_probe with expectEmitters [Swirl] and minParticlesPerEmitter 50. Inspect: PortalVortex is last in Particle Update and in scratchPadModules.\n5. Place it in {{level}} (unsaved) and hyper_capture_view, source transform 600 cm along -X looking at it, frameCount 3, intervalSeconds 0.25.\n6. Reply with a PASS/FAIL table of those checks. Show each frame on its own line as ![frame](path)."
+  },
+  {
+   "id": "vfx-niagara.gpu-simulation-stage-ground",
+   "title": "Keep GPU particles above the ground with a simulation stage",
+   "summary": "Switch one emitter to GPU with fixed bounds, add a simulation stage and an HLSL clamp module, and prove it compiles and stays live.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_validate",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "set_emitter_property",
+    "add_simulation_stage",
+    "add_hlsl_module",
+    "set_module_enabled"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "gpu",
+    "simulation stage",
+    "hlsl",
+    "collision",
+    "ground",
+    "constraint"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "emitter",
+     "label": "Emitter name",
+     "default": "Sparks"
+    },
+    {
+     "name": "ground_z",
+     "label": "Ground height (cm)",
+     "default": "0"
+    },
+    {
+     "name": "bounds",
+     "label": "Fixed bounds (minX,minY,minZ,maxX,maxY,maxZ cm)",
+     "default": "-500,-500,0,500,500,600"
+    },
+    {
+     "name": "iterations",
+     "label": "Stage iterations per frame",
+     "default": "4"
+    }
+   ],
+   "prompt": "In the Niagara System {{selected_asset}}, keep the `{{emitter}}` emitter's particles above z = {{ground_z}} cm with a GPU simulation stage. Change only this emitter; each plan compiles and saves the System. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_inspect with bIncludeTopology true: confirm `{{emitter}}` exists and note its sim target and stages; keep the revision. hyper_niagara_validate with policy runtime_probe and expectEmitters [{{emitter}}] as the baseline count.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision), in this order: set_emitter_property sim_target gpu; set_emitter_property fixed_bounds {{bounds}}; add_simulation_stage `Settle` with value {{iterations}}; add_hlsl_module `KeepAboveGround` with stageName Settle that clamps Particles.Position.z to at least {{ground_z}} and reflects Particles.Velocity.z at half speed. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_niagara_inspect: SimTarget GPUComputeSim, simulationStages lists Settle with {{iterations}} iterations and KeepAboveGround.\n4. hyper_niagara_validate with policy authoring, runtime_ready, then runtime_probe with expectEmitters [{{emitter}}] (a gpu_estimate count).\n5. If the HLSL fails to compile, repair it in one plan: set_module_enabled false on it and add_hlsl_module with a corrected copy under a new name.\nReply with a PASS/FAIL table: GPU with fixed bounds {{bounds}}, the stage and module present, 0 errors and 0 warnings, the emitter live, and the baseline and new particle counts."
+  },
+  {
+   "id": "vfx-niagara.effect-type-scalability-budget",
+   "title": "Give ambient effects one scalability budget",
+   "summary": "Create a Niagara effect type with update rate, distance and instance culls, assign it to the selected Systems and record the budget.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate",
+    "hyper_memory_remember"
+   ],
+   "ops": [
+    "create_effect_type",
+    "set_effect_type_setting",
+    "set_effect_type"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "scalability",
+    "effect type",
+    "performance",
+    "culling",
+    "budget",
+    "optimization"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "effect_type",
+     "label": "Effect type name",
+     "default": "EFT_Ambient"
+    },
+    {
+     "name": "update_frequency",
+     "label": "Update frequency",
+     "default": "medium",
+     "hint": "spawn_only, low, medium, high or continuous"
+    },
+    {
+     "name": "cull_reaction",
+     "label": "Cull reaction",
+     "default": "asleep",
+     "hint": "kill, kill_and_clear, asleep or asleep_and_clear"
+    },
+    {
+     "name": "max_distance",
+     "label": "Cull distance (cm)",
+     "default": "5000"
+    },
+    {
+     "name": "max_instances",
+     "label": "Max instances",
+     "default": "20"
+    }
+   ],
+   "prompt": "Give the ambient effects {{selected_assets}} one scalability budget. Change only these Systems and the new effect type. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_memory_recall `niagara scalability` for budgets the project already uses. hyper_niagara_inspect each System (load it with Epic's load_asset if needed) for its revision and the effect type it has now.\n2. For the first System, one hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): create_effect_type at {{content_folder}}/{{effect_type}}.{{effect_type}}; set_effect_type_setting update_frequency {{update_frequency}}, cull_reaction {{cull_reaction}}, max_distance {{max_distance}} and max_instances {{max_instances}}; set_effect_type to it. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. For every other System, its own plan with only set_effect_type {{content_folder}}/{{effect_type}}.{{effect_type}} and a fresh operationId.\n4. hyper_niagara_inspect with targetPath the effect type: its details show those settings. hyper_niagara_validate with policy runtime_ready on each System, and inspect each: effectTypePath is the new type.\n5. hyper_memory_remember the budget as a project convention, titled with its numbers.\nReply with a PASS/FAIL table, one row per System (effect type assigned, 0 errors, 0 warnings), and one for the effect type's settings."
+  },
+  {
+   "id": "vfx-niagara.golden-sim-cache-regression",
+   "title": "Bake a golden sim cache to regression-test an effect",
+   "summary": "Make a CPU effect and its System deterministic, capture and bake its simulation as a golden cache, then prove a fresh capture matches it.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate",
+    "hyper_memory_remember"
+   ],
+   "ops": [
+    "set_emitter_property",
+    "bake_sim_cache"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "sim cache",
+    "regression",
+    "determinism",
+    "testing",
+    "golden",
+    "qa"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "cache_name",
+     "label": "Cache asset name",
+     "default": "NSC_Golden"
+    },
+    {
+     "name": "frames",
+     "label": "Frames to capture",
+     "default": "60"
+    },
+    {
+     "name": "seed",
+     "label": "Random seed",
+     "default": "1234"
+    }
+   ],
+   "prompt": "Lock down the effect {{selected_asset}} with a golden simulation cache so later edits can be regression-tested. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_inspect with bIncludeTopology true and keep the revision. Sim capture takes CPU Systems only: if any emitter is GPUComputeSim, name it and stop.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): set_emitter_property determinism true and random_seed {{seed}} on each enabled emitter. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId. A capture is deterministic only when the System is too: turn on its own Determinism (RandomSeed {{seed}}) with Epic's SetSystemData, save it, and inspect again.\n3. hyper_niagara_validate with policy sim_cache_capture and captureFrames {{frames}}; call again with the returned captureId until its state is complete. framesCaptured must equal {{frames}} and bDeterministic be true.\n4. One hyper_niagara_apply_plan with a fresh operationId and expectedRevision and one bake_sim_cache op: name = the captureId, assetPath {{content_folder}}/{{cache_name}}.{{cache_name}}.\n5. Prove it: start a new sim_cache_capture with the same captureFrames, then poll it with its captureId plus goldenSimCachePath {{content_folder}}/{{cache_name}}.{{cache_name}} and floatTolerance 0.01 until complete: status matches_golden, bMatch true. hyper_niagara_inspect the cache path for its frames and emitters.\n6. hyper_memory_remember that {{cache_name}} is the golden cache for this System and how it was made.\nReply with a PASS/FAIL table: determinism on (System and emitters), frames captured, cache baked at its path, the comparison matching (any differences listed)."
+  },
+  {
+   "id": "vfx-niagara.bullet-impact-data-channel",
+   "title": "Create a Niagara Data Channel for bullet impacts",
+   "summary": "A data channel asset with typed impact variables, made beside the impact effect and verified by inspect, ready for gameplay to write hits.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_project_search",
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate"
+   ],
+   "ops": [
+    "create_data_channel"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "data channel",
+    "impacts",
+    "shooter",
+    "gameplay",
+    "batching",
+    "performance"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "channel_name",
+     "label": "Data channel name",
+     "default": "NDC_BulletImpacts"
+    },
+    {
+     "name": "channel_type",
+     "label": "Channel type",
+     "default": "islands",
+     "hint": "global, islands or gameplay_burst"
+    },
+    {
+     "name": "variables",
+     "label": "Variables (Name:type,...)",
+     "default": "Position:position,Normal:vector,SurfaceType:int32",
+     "hint": "types: float, int32, bool, vector2, vector, vector4, position, linear_color, quat"
+    }
+   ],
+   "prompt": "Create a Niagara Data Channel for bullet impacts beside the impact effect {{selected_asset}}, so gameplay can write hits and one System can draw them all. Change nothing else. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_project_search (kinds asset, query `NDC_`) for data channels that already exist; reuse one that fits instead of adding a second. hyper_niagara_inspect {{selected_asset}} for its revision.\n2. One hyper_niagara_apply_plan on that System (bDryRun false, fresh operationId, expectedRevision) with a create_data_channel op: assetPath {{content_folder}}/{{channel_name}}.{{channel_name}}, valueType {{channel_type}}, value `{{variables}}`. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_niagara_inspect with targetPath the new channel: its details list exactly these variables with these types.\n4. hyper_niagara_validate with policy runtime_ready on {{selected_asset}}: still 0 errors.\n5. Say what remains by hand: a Data Channel reader in the System and the Blueprint write node, which these tools do not add.\nReply with a PASS/FAIL table: channel at its path, type {{channel_type}}, each variable present with its type, the System still clean."
+  },
+  {
+   "id": "vfx-niagara.team-color-variant",
+   "title": "Make a team-coloured copy of an effect",
+   "summary": "Duplicate the selected effect, recolour every colour input to a team tint, keep it live, and prove the palette shift with captures.",
+   "packs": [
+    "niagara_vfx",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "set_input_value"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "recolor",
+    "variant",
+    "team colour",
+    "multiplayer",
+    "palette",
+    "moba"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "team",
+     "label": "Team name",
+     "default": "Blue team"
+    },
+    {
+     "name": "color",
+     "label": "Team tint (linear RGBA 0-1)",
+     "default": "0.1,0.4,1,1"
+    },
+    {
+     "name": "suffix",
+     "label": "Copy suffix",
+     "default": "_Blue"
+    }
+   ],
+   "prompt": "Make a {{team}} copy of the effect {{selected_asset}}, tinted {{color}}, and leave the original untouched. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_inspect the original and note its revision. Duplicate it with Epic's duplicate into the same folder with the suffix `{{suffix}}`, and save the copy. hyper_niagara_inspect the copy with bIncludeTopology true: find every colour input per emitter (Initialize Particle, Color, Scale Color and the like).\n2. One hyper_niagara_apply_plan on the copy (bDryRun false, fresh operationId, expectedRevision): set_input_value with valueType color on each of those inputs (at most 16 ops; split it if more), keeping each emitter's alpha and its brightness relative to the others. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_niagara_validate the copy with policy runtime_ready, then runtime_probe: the same emitters live as in the original.\n4. Place the original and the copy in {{level}} 400 cm apart (leave the level unsaved). hyper_capture_view of each with source transform from the same offset (300 cm in front, looking at it), frameCount 1, warmupFrames 8.\n5. Reply with a PASS/FAIL table: copy exists with the suffix, original unchanged (same revision as before), 0 errors and 0 warnings, all emitters live, the copy's frame shifted toward {{color}} (colorTemperatureK and meanSaturation compared). Show both frames on their own lines."
+  },
+  {
+   "id": "vfx-niagara.match-effect-to-reference",
+   "title": "Match an effect to a reference image",
+   "summary": "Capture the effect, score it against concept art with image compare in a session, and change one Niagara input per plan until the target.",
+   "packs": [
+    "niagara_vfx",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-niagara",
+    "image-match"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_capture_view",
+    "hyper_image_compare",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate"
+   ],
+   "ops": [
+    "set_input_value",
+    "set_renderer_property"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "reference",
+    "match",
+    "concept art",
+    "image compare",
+    "look dev",
+    "explosion"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "reference",
+     "label": "Reference image (project path)",
+     "default": "Saved/Reference/vfx_reference.png"
+    },
+    {
+     "name": "target",
+     "label": "Target score (0-100)",
+     "default": "75"
+    },
+    {
+     "name": "max_iterations",
+     "label": "Max iterations",
+     "default": "8"
+    }
+   ],
+   "prompt": "Make the effect {{selected_asset}} look like the reference `{{reference}}`, following the image-match and unreal-niagara skills. Change only this System. If the niagara_vfx or lighting_lookdev pack is unavailable, say so and stop.\n1. Open the reference and say in one sentence what makes its look: palette, shape, density, brightness. hyper_niagara_inspect with bIncludeTopology true.\n2. Place the System in {{level}} if it is not there and a CameraActor labelled `CAM_VFXMatch` (Epic's add_to_scene_from_class) framing it as the reference does; leave the level unsaved.\n3. Baseline: hyper_capture_view (source camera, cameraActorLabel CAM_VFXMatch, frameCount 4, intervalSeconds 0.25), then hyper_image_compare with mode look, targetScore {{target}}, sessionId `vfx-match`, on the frame nearest the reference's moment.\n4. At most {{max_iterations}} times: one hyper_niagara_apply_plan (bDryRun false, fresh operationId, fresh expectedRevision) changing the one thing the compare ranks worst, with set_input_value (colour, size, spawn count, lifetime, velocity) or set_renderer_property. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId. Capture again and compare in the same session with a note. Keep a change only if the score rises; stop when it reaches {{target}} or stalls twice.\n5. hyper_niagara_validate with policy runtime_ready, then runtime_probe.\nReply with a PASS/FAIL table: final score at least {{target}} (or the best and why it stopped), 0 errors, every emitter live; the score per iteration; the reference and the best frame each on its own line."
+  },
+  {
+   "id": "vfx-niagara.rain-with-ground-splashes",
+   "title": "Build GPU rain with splashes on the ground",
+   "summary": "Velocity-aligned rain streaks on the GPU over an area and short splashes at ground level, with bounded counts and captured frames.",
+   "packs": [
+    "niagara_vfx",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "add_emitter",
+    "add_module",
+    "set_emitter_property",
+    "set_renderer_property",
+    "set_module_enabled",
+    "set_input_value"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "rain",
+    "weather",
+    "splash",
+    "gpu",
+    "storm",
+    "environment"
+   ],
+   "placeholders": [
+    {
+     "name": "area",
+     "label": "Area width (cm)",
+     "default": "3000"
+    },
+    {
+     "name": "rain_rate",
+     "label": "Raindrops per second",
+     "default": "1500"
+    }
+   ],
+   "prompt": "Build rain `{{content_folder}}/NS_Rain`: `Rain` streaks falling about 900 cm/s over {{area}} x {{area}} cm, and `Splashes` at z 0. Follow the unreal-niagara skill; if the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_memory_recall `weather rain`. Create the System with Epic's CreateNiagaraSystem (template /Niagara/DefaultAssets/Templates/Systems/DirectionalBurst.DirectionalBurst), save it, then hyper_niagara_inspect with bIncludeTopology true; note the revision and the template's emitters.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): add_emitter `Rain` and `Splashes`, both from /Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain; add_module /Niagara/Modules/Spawn/Location/BoxLocation.BoxLocation in each ParticleSpawnScript; set_emitter_property sim_target gpu and fixed_bounds covering the area up to 1300 cm on Rain; set_renderer_property Alignment VelocityAligned on Rain (rendererIndex 0); set_emitter_property `enabled` false on each template emitter. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Inspect again (new revision, modules, inputs, renderer indexes), then one plan (at most 16 ops, else split it): set_module_enabled false on each ShapeLocation; set_input_value: Rain about {{rain_rate}} per second from a box at 1200 cm, 900 cm/s straight down, gravity 0, lifetime 1.3 s; Splashes from a flat box at z 0 over the area, small, rising 100-200 cm/s, 0.3 s.\n4. hyper_niagara_validate with policy runtime_ready, then runtime_probe with expectEmitters [Rain, Splashes].\n5. Place it at the origin of {{level}} (unsaved); hyper_capture_view, source transform 800 cm away at eye height, frameCount 3, intervalSeconds 0.2.\n6. Reply with a PASS/FAIL table: Rain on GPU with fixed bounds, both emitters live, Rain under {{rain_rate}} x 1.5, 0 errors and 0 warnings, frames differ. Show each frame on its own line as ![frame](path)."
+  },
+  {
+   "id": "vfx-niagara.sword-swing-ribbon-trail",
+   "title": "Build a ribbon trail for a sword swing",
+   "summary": "A world-space ribbon on a continuous emitter, with width, fade time and tint set and its sprite renderer off, compiled and proven to spawn.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate"
+   ],
+   "ops": [
+    "add_emitter",
+    "add_renderer",
+    "set_renderer_property",
+    "set_emitter_property",
+    "set_module_enabled",
+    "set_input_value"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "ribbon",
+    "trail",
+    "sword",
+    "melee",
+    "weapon",
+    "fantasy",
+    "action"
+   ],
+   "placeholders": [
+    {
+     "name": "system_name",
+     "label": "System name",
+     "default": "NS_SwordTrail"
+    },
+    {
+     "name": "width",
+     "label": "Ribbon width (cm)",
+     "default": "12"
+    },
+    {
+     "name": "lifetime",
+     "label": "Fade time (s)",
+     "default": "0.35"
+    },
+    {
+     "name": "color",
+     "label": "Tint (linear RGBA 0-1)",
+     "default": "1,0.85,0.5,1"
+    }
+   ],
+   "prompt": "Build a sword swing trail `{{content_folder}}/{{system_name}}` to attach to a weapon socket: a `Trail` ribbon about {{width}} cm wide that fades over {{lifetime}} s, tinted {{color}}. Follow the unreal-niagara skill; if the niagara_vfx pack is unavailable, say so and stop.\n1. Create the System with Epic's CreateNiagaraSystem (template /Niagara/DefaultAssets/Templates/Systems/DirectionalBurst.DirectionalBurst), save it, then hyper_niagara_inspect with bIncludeTopology true; note the revision and the template's emitters.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): add_emitter `Trail` from /Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain (it spawns continuously); add_renderer /Script/Niagara.NiagaraRibbonRendererProperties on Trail; set_renderer_property bIsEnabled false on its sprite renderer (rendererIndex 0); set_emitter_property local_space false, so the ribbon stays where the blade passed; set_emitter_property `enabled` false on each template emitter. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Ribbons read Particles.RibbonWidth: add it with Epic's AddSetParametersModule in Trail's ParticleSpawnScript, set to {{width}}, save, and inspect again.\n4. One plan: set_module_enabled false on Trail's ShapeLocation, AddVelocity and GravityForce, so particles stay where they spawn; set_input_value for about 120 particles per second, lifetime {{lifetime}} and colour {{color}}; set_renderer_property FacingMode Screen and Shape Plane on the ribbon renderer (its rendererIndex from inspect).\n5. hyper_niagara_validate with policy runtime_ready, then runtime_probe with expectEmitters [Trail]; inspect lists a NiagaraRibbonRendererProperties renderer on Trail.\nReply with a PASS/FAIL table: ribbon renderer present, sprite renderer off, local space off, RibbonWidth {{width}} and lifetime {{lifetime}} as asked, 0 errors and 0 warnings, Trail live. Then say how to attach it: a Niagara component on the weapon's socket, activated for the swing window of the attack montage."
+  },
+  {
+   "id": "vfx-niagara.room-dust-motes",
+   "title": "Fill a room with drifting dust motes",
+   "summary": "Slow, tiny dust particles sized to the selected room's bounds, gently drifting on curl noise, capped by a budget and captured in place.",
+   "packs": [
+    "niagara_vfx",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "add_emitter",
+    "add_module",
+    "set_emitter_property",
+    "set_module_enabled",
+    "set_input_value"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "dust",
+    "ambient",
+    "interior",
+    "atmosphere",
+    "realistic",
+    "light shafts"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "max_particles",
+     "label": "Particle budget",
+     "default": "300"
+    }
+   ],
+   "prompt": "Fill the room around {{selected_actor}} with slow dust motes `{{content_folder}}/NS_DustMotes`, at most {{max_particles}} particles. Follow the unreal-niagara skill; if the niagara_vfx pack is unavailable, say so and stop.\n1. Read the room's extent in cm with Epic's get_actor_bounds on {{selected_actor}}. Create the System with Epic's CreateNiagaraSystem (template /Niagara/DefaultAssets/Templates/Systems/DirectionalBurst.DirectionalBurst), save it, then hyper_niagara_inspect with bIncludeTopology true; note the revision and the template's emitters.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): add_emitter `Motes` from /Niagara/DefaultAssets/Templates/Emitters/HangingParticulates.HangingParticulates; add_module /Niagara/Modules/Spawn/Location/BoxLocation.BoxLocation in its ParticleSpawnScript and /Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce in its ParticleUpdateScript; set_emitter_property fixed_bounds to the room's bounds relative to its centre; set_emitter_property `enabled` false on each template emitter. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Inspect again (new revision, modules, inputs, renderer indexes), then one plan (at most 16 ops, else split it): set_module_enabled false on Motes' ShapeLocation; set_input_value for a box of the room's extent, sprites 0.3-0.8 cm, lifetime 6-10 s, wind and noise weak enough that motes drift under 20 cm/s, and a spawn rate that keeps the count at most {{max_particles}}.\n4. hyper_niagara_validate with policy runtime_ready, then runtime_probe with probeFrames 600 and expectEmitters [Motes].\n5. Place it at the room's centre (unsaved); hyper_capture_view, source transform inside the room looking toward its light, frameCount 2, intervalSeconds 1.\n6. Reply with a PASS/FAIL table: live count at most {{max_particles}} after 10 s, fixed bounds equal the room, 0 errors and 0 warnings, frames differ only slightly (changedPixelFraction under 0.05). Show each frame on its own line as ![frame](path)."
+  },
+  {
+   "id": "vfx-niagara.firefly-swarm-hlsl",
+   "title": "Make a blinking firefly swarm with HLSL wander",
+   "summary": "Glowing points that wander within a radius and blink, driven by two scratch pad HLSL modules, with a light renderer and a steady count.",
+   "packs": [
+    "niagara_vfx",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "add_emitter",
+    "add_hlsl_module",
+    "add_renderer",
+    "set_emitter_property",
+    "set_input_value",
+    "set_renderer_property",
+    "set_module_enabled"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "fireflies",
+    "swarm",
+    "hlsl",
+    "night",
+    "ambient",
+    "nature"
+   ],
+   "placeholders": [
+    {
+     "name": "count",
+     "label": "Firefly count",
+     "default": "30"
+    },
+    {
+     "name": "radius",
+     "label": "Wander radius (cm)",
+     "default": "400"
+    }
+   ],
+   "prompt": "Build a firefly swarm `{{content_folder}}/NS_Fireflies`: about {{count}} glowing points wandering within {{radius}} cm and blinking. Follow the unreal-niagara skill's HLSL rules; if the niagara_vfx pack is unavailable, say so and stop.\n1. Create the System with Epic's CreateNiagaraSystem (template /Niagara/DefaultAssets/Templates/Systems/DirectionalBurst.DirectionalBurst), save it, then hyper_niagara_inspect with bIncludeTopology true; note the revision and the template's emitters.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): add_emitter `Flies` from /Niagara/DefaultAssets/Templates/Emitters/HangingParticulates.HangingParticulates; add_hlsl_module `Wander` in ParticleUpdateScript steering Particles.Velocity back toward the origin beyond {{radius}} cm, plus a slow swirl; add_hlsl_module `Blink` pulsing the alpha of Particles.Color with sin(Engine.Time * 3 + Particles.Position.x * 0.05); add_renderer /Script/Niagara.NiagaraLightRendererProperties on Flies; set_emitter_property local_space true; set_emitter_property `enabled` false on each template emitter. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Inspect again (new revision, modules, inputs, renderer indexes), then one plan (at most 16 ops, else split it): set_input_value for an 8 s lifetime, {{count}} / 8 per second, a spawn shape inside the radius, weak wind; set_renderer_property RadiusScale 0.5 on the light.\n4. hyper_niagara_validate with policy authoring (repair a failing module: set_module_enabled false, a corrected add_hlsl_module under a new name), runtime_ready, then runtime_probe with probeFrames 600 and expectEmitters [Flies].\n5. Place it in {{level}} (unsaved); hyper_capture_view, source transform 800 cm away, frameCount 4, intervalSeconds 0.5.\n6. Reply with a PASS/FAIL table: live count within 20% of {{count}} at 10 s; Wander and Blink in scratchPadModules; a light renderer; 0 errors and 0 warnings; frames differ. Show each frame on its own line as ![frame](path)."
+  },
+  {
+   "id": "vfx-niagara.stage-effect-for-review",
+   "title": "Stage an effect with a camera for review captures",
+   "summary": "Place the selected effect and a framing camera in the level, prove its emitters are live and capture four frames for review.",
+   "packs": [
+    "niagara_vfx",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_context_snapshot",
+    "hyper_scene_inspect",
+    "hyper_niagara_validate",
+    "hyper_capture_view",
+    "hyper_scene_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "review",
+    "camera",
+    "capture",
+    "presentation",
+    "turntable",
+    "showcase"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "label",
+     "label": "Actor label",
+     "default": "VFX_Review"
+    },
+    {
+     "name": "location",
+     "label": "Location (cm)",
+     "default": "0,0,100"
+    },
+    {
+     "name": "distance",
+     "label": "Camera distance (cm)",
+     "default": "600"
+    }
+   ],
+   "prompt": "Stage the effect {{selected_asset}} for review in {{level}}: an actor labelled `{{label}}` at {{location}} and a camera labelled `CAM_{{label}}` {{distance}} cm away, looking at it. Change nothing in the System. If the niagara_vfx or lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_context_snapshot for the open level and the selection; hyper_scene_inspect with scope world for actors already labelled `{{label}}` or `CAM_{{label}}`, and reuse them rather than adding a second.\n2. Place the System with Epic's add_to_scene_from_asset and a CameraActor with add_to_scene_from_class, aimed with look_at. Leave the level unsaved unless I ask.\n3. hyper_niagara_validate with policy runtime_probe and probeFrames 120: each enabled emitter's live count.\n4. hyper_capture_view with source camera, cameraActorLabel `CAM_{{label}}`, 1280 x 720, frameCount 4, intervalSeconds 0.25, warmupFrames 8.\n5. hyper_scene_validate on the two actors.\nReply with a PASS/FAIL table: both actors exist with those labels; the effect is in the frames (not cut off or hidden); every emitter live; changedPixelFraction above 0.01 between frames. Show the four frames each on its own line."
+  },
+  {
+   "id": "vfx-niagara.folder-budget-audit",
+   "title": "Audit every effect in a folder against a VFX budget",
+   "summary": "Inspect, validate and probe each Niagara System in the folder, flag budget breaks and missing bounds or effect types, and suggest fixes.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_niagara_inspect",
+    "hyper_niagara_validate",
+    "hyper_memory_remember"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "audit",
+    "budget",
+    "performance",
+    "optimization",
+    "batch",
+    "qa"
+   ],
+   "placeholders": [
+    {
+     "name": "max_particles",
+     "label": "Live particles per System",
+     "default": "3000"
+    },
+    {
+     "name": "limit",
+     "label": "Max Systems to check",
+     "default": "40"
+    }
+   ],
+   "prompt": "Audit every Niagara System under {{content_folder}} against the project's VFX budget, and change nothing. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_memory_recall `vfx budget` for the project's limits; without one, use {{max_particles}} live particles per System.\n2. hyper_project_search with kinds [asset] for the Niagara Systems under {{content_folder}}, at most {{limit}}. Load each with Epic's load_asset (inspect reads loaded Systems only).\n3. For each: hyper_niagara_inspect with bIncludeTopology true (emitters, sim targets, renderers, effectTypePath); hyper_niagara_validate with policy runtime_ready (errors, warnings); and policy runtime_probe (live particles per emitter).\n4. Flag: compile errors or warnings; total live particles over {{max_particles}}; a GPU emitter without fixed bounds (Epic's GetEmitterData); no effect type; an enabled emitter that never goes live.\n5. If the project had no budget, hyper_memory_remember the one you applied, titled with its numbers.\nReply with a table, one row per System, worst first: PASS/FAIL per check with the numbers. Then the three fixes that would help most, each named by the Niagara plan op kind that would make it."
+  },
+  {
+   "id": "vfx-niagara.healing-aura-loop",
+   "title": "Build a looping healing aura that follows a character",
+   "summary": "Rising motes from a cylinder, a soft ground glow and a point light in local space, tinted, live and captured over time.",
+   "packs": [
+    "niagara_vfx",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "add_emitter",
+    "add_module",
+    "add_renderer",
+    "set_emitter_property",
+    "set_module_enabled",
+    "set_input_value",
+    "set_renderer_property"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "heal",
+    "aura",
+    "buff",
+    "magic",
+    "rpg",
+    "fantasy",
+    "character"
+   ],
+   "placeholders": [
+    {
+     "name": "system_name",
+     "label": "System name",
+     "default": "NS_HealingAura"
+    },
+    {
+     "name": "radius",
+     "label": "Aura radius (cm)",
+     "default": "80"
+    },
+    {
+     "name": "color",
+     "label": "Tint (linear RGBA 0-1)",
+     "default": "0.3,1,0.5,1"
+    }
+   ],
+   "prompt": "Build a looping healing aura `{{content_folder}}/{{system_name}}` for a character: `Motes` rising gently from a {{radius}} cm disc to about 200 cm, a soft `Glow` at the feet with a point light, all tinted {{color}}. Follow the unreal-niagara skill; if the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_memory_recall `vfx heal buff`. Create the System with Epic's CreateNiagaraSystem (template /Niagara/DefaultAssets/Templates/Systems/DirectionalBurst.DirectionalBurst), save it, then hyper_niagara_inspect with bIncludeTopology true; note the revision and the template's emitters.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): add_emitter `Motes` from Fountain and `Glow` from SingleLoopingParticle (/Niagara/DefaultAssets/Templates/Emitters); add_module /Niagara/Modules/Spawn/Location/CylinderLocation.CylinderLocation in Motes' ParticleSpawnScript; add_renderer /Script/Niagara.NiagaraLightRendererProperties on Glow; set_emitter_property local_space true on both so the aura follows its owner; set_emitter_property `enabled` false on each template emitter. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Inspect again (new revision, modules, inputs, renderer indexes), then one plan (at most 16 ops, else split it): set_module_enabled false on Motes' ShapeLocation; set_input_value for Motes rising at 30-60 cm/s with gravity 0, lifetime 2-3 s, cylinder radius {{radius}}, colours {{color}}; set_renderer_property RadiusScale on Glow's light renderer.\n4. hyper_niagara_validate with policy runtime_ready, then runtime_probe with expectEmitters [Motes, Glow].\n5. Place it in {{level}} (unsaved) and hyper_capture_view, source transform 400 cm away at chest height, frameCount 3, intervalSeconds 0.25.\n6. Reply with a PASS/FAIL table: both emitters live, local space on both, a light renderer on Glow, 0 errors and 0 warnings, frames differ, the tint visible. Show each frame on its own line as ![frame](path)."
+  },
+  {
+   "id": "vfx-niagara.intensity-user-parameter",
+   "title": "Drive an effect's intensity from a user parameter",
+   "summary": "Expose a User float that scales particle size and brightness through HLSL, so Blueprints can set it, and prove two values look different.",
+   "packs": [
+    "niagara_vfx",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "add_hlsl_module",
+    "set_module_enabled"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "user parameter",
+    "gameplay",
+    "blueprint",
+    "hlsl",
+    "intensity",
+    "charge"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "param",
+     "label": "User parameter name",
+     "default": "Intensity"
+    }
+   ],
+   "prompt": "Give the effect {{selected_asset}} a `User.{{param}}` float (default 1) that scales particle size and brightness, so gameplay can turn it up or down. Change only this System; each plan compiles and saves it. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_inspect with bIncludeTopology true. If userParameters lacks {{param}}, add it with Epic's AddUserVariables (float, default 1), save, and inspect again for the revision.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): for each sprite emitter, add_hlsl_module `Scale{{param}}_<Emitter>` in its ParticleSpawnScript (once per particle, so nothing compounds) that multiplies Particles.SpriteSize and the rgb of Particles.Color by User.{{param}}. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_niagara_validate with policy authoring, then runtime_ready; repair a failing module in one plan with set_module_enabled false and a corrected add_hlsl_module under a new name. If a Color module in Particle Update rewrites the colour every frame, say so.\n4. Prove it: place the System in {{level}} (unsaved); with Epic's SetVariable on its component set {{param}} to 0.25 and hyper_capture_view one frame with source transform 400 cm away, then set 2.0 and capture again from the same transform.\nReply with a PASS/FAIL table: the user parameter present with default 1; one module per sprite emitter, last in its spawn stack; 0 errors and 0 warnings; the 2.0 frame brighter than the 0.25 frame (luminanceP95). Show both frames on their own lines."
+  }
+ ]
+}

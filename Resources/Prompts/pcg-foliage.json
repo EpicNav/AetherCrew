@@ -1,0 +1,1554 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "pcg-foliage",
+ "presets": [
+  {
+   "id": "pcg-foliage.forest-ecosystem",
+   "title": "Grow a layered pine forest on a paint layer",
+   "summary": "Build a PCG ecosystem of pines, bush clumps, rocks and ferns on one landscape layer, generate it, and prove density, stands and culling.",
+   "packs": [
+    "pcg",
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_pcg_scatter_inspect",
+    "hyper_project_search",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "ecosystem.create",
+    "volume.create"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pcg",
+    "ecosystem",
+    "forest",
+    "pine",
+    "biome",
+    "fantasy"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "layer",
+     "label": "Paint layer",
+     "default": "Grass"
+    },
+    {
+     "name": "graph_name",
+     "label": "Graph name",
+     "default": "PCG_PineForest"
+    },
+    {
+     "name": "tree_density",
+     "label": "Pine density (per m2)",
+     "default": "0.02"
+    }
+   ],
+   "prompt": "On {{selected_actor}} in {{level}}, grow a pine forest on the `{{layer}}` paint layer with PCG. If the PCG pack is off, say so and stop.\n1. hyper_landscape_inspect: confirm `{{layer}}` exists, report its share, and note road layers. hyper_pcg_scatter_inspect with no Graph for existing volumes; hyper_project_search for pine, bush, rock and fern static meshes (engine shapes if none, saying so).\n2. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `ecosystem.create` Graph {{content_folder}}/{{graph_name}}, AvoidLayers the road layers, one biome `Forest` on `{{layer}}`, SlopeMax 30, species big to small: Pines (Density {{tree_density}}, Footprint 4, Clearance 1.25, Patch 80, Coverage 0.7, CullDistance 400), Bushes (Density 0.01, Footprint 1.5, Cluster 5, ClusterRadius 3, CullDistance 120), Rocks (Density 0.03, Footprint 1.5, bAlignToGround true, Tilt 10, Sink 20, CullDistance 150), Ferns (Density 1, Footprint 0.6, Patch 15, Coverage 0.5, KeepOutOf [Rocks], CullDistance 60); then `volume.create` Volume `PineForest`, Cover the landscape. If the estimated total (Density x growing area, per species) passes 1,000,000, ask me before generating.\n3. hyper_operation_wait on the OperationId for per-mesh counts; hyper_pcg_scatter_inspect with the Graph to read the recipes back.\n4. hyper_capture_view (Source transform) one aerial oblique and one shot from 1.7 m up inside the forest. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: all four species have instances; pine count within 50% of {{tree_density}} x the layer's area x 0.7 (show the sum); every species has a cull distance; the pictures show stands and clearings, not an even carpet. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.rock-scatter-hillside",
+   "title": "Scatter weighted rocks over a hillside with PCG",
+   "summary": "Build a one-layer PCG scatter of the selected rock meshes, kept off cliffs and spaced apart, in a volume you size, then count what grew.",
+   "packs": [
+    "pcg",
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_pcg_scatter_inspect",
+    "hyper_landscape_inspect",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "graph.create",
+    "volume.create"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "pcg",
+    "scatter",
+    "rocks",
+    "props",
+    "volume"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "StaticMesh"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "center",
+     "label": "Volume centre (cm)",
+     "default": "0, 0, 0"
+    },
+    {
+     "name": "size_m",
+     "label": "Volume size (m)",
+     "default": "300"
+    },
+    {
+     "name": "density",
+     "label": "Density (per m2)",
+     "default": "0.05"
+    },
+    {
+     "name": "slope",
+     "label": "Max slope (degrees)",
+     "default": "35"
+    }
+   ],
+   "prompt": "Scatter rocks with PCG in {{level}} using the selected meshes {{selected_assets}}: the first weighted 3, the others 1. If the PCG pack is off, say so and stop.\n1. hyper_pcg_scatter_inspect with no Graph: list volumes and graphs, and stop if a volume `RockScatter` exists. hyper_landscape_inspect to confirm a landscape lies under ({{center}}) cm.\n2. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `graph.create` Graph {{content_folder}}/PCG_RockScatter, Meshes with those weights, Density {{density}}, Spacing 4, SlopeMax {{slope}}, Scale (0.7, 1.4), RandomYaw \"true\", AlignToGround \"true\", Seed 11; then `volume.create` Volume `RockScatter`, Center ({{center}}), Size ({{size_m}}, {{size_m}}), Height 1000 (tall enough to hold the ground).\n3. hyper_operation_wait on that OperationId for instances per mesh.\n4. hyper_capture_view (Source transform) top-down over the volume, and one low shot across the slope. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: total between 30% and 100% of {{density}} x {{size_m}} x {{size_m}} (spacing and slope remove some; show the sum); the first mesh about 3 times each other mesh's count; rocks lean with the ground in the low shot; none on ground steeper than {{slope}} degrees. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.audit-pcg-volumes",
+   "title": "Audit the level's PCG volumes and graphs",
+   "summary": "List every PCG volume with its graph, size and instance count, read each graph's recipes, check graphs for structural issues, and change nothing.",
+   "packs": [
+    "pcg"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_pcg_scatter_inspect",
+    "hyper_pcg_inspect",
+    "hyper_pcg_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "pcg",
+    "audit",
+    "volumes",
+    "graphs",
+    "read-only"
+   ],
+   "placeholders": [
+    {
+     "name": "max_instances",
+     "label": "Instance budget per volume",
+     "default": "200000"
+    }
+   ],
+   "prompt": "Audit PCG in {{level}} and change nothing. If the PCG pack is off, say so and stop.\n1. hyper_memory_recall \"PCG\" for project conventions and past decisions.\n2. hyper_pcg_scatter_inspect with no Graph: every PCG volume (graph, size, instances, generating) and the PCG graphs under /Game.\n3. For each graph a volume runs: hyper_pcg_scatter_inspect with that Graph (Detail summary) for its recipes, meshes and cull distances; hyper_pcg_inspect with its exact GraphPath for the persisted revision; hyper_pcg_validate with Policy structural and that revision as ExpectedPersistedRevision.\n4. Report one table row per volume, with PASS, FAIL or WARN first: has a graph; generated (instances above 0) and not stuck generating; at most {{max_instances}} instances; every spawner has a cull distance above 0 (WARN when small meshes never cull); validate 0 errors. Add one INFO row per graph no volume uses. End with the three most worthwhile fixes, and do not edit or save anything."
+  },
+  {
+   "id": "pcg-foliage.retune-scatter-graph",
+   "title": "Swap meshes and reseed a PCG scatter",
+   "summary": "Change a tool-made scatter graph's meshes, density or seed with graph.set, regenerate its volume, and compare counts and looks before and after.",
+   "packs": [
+    "pcg",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_pcg_scatter_inspect",
+    "hyper_capture_view",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "graph.set",
+    "volume.generate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "pcg",
+    "scatter",
+    "reseed",
+    "meshes",
+    "regenerate"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "PCGVolume"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "meshes",
+     "label": "New meshes (asset paths, or keep)",
+     "default": "keep"
+    },
+    {
+     "name": "density",
+     "label": "New density (per m2, 0 keeps it)",
+     "default": "0"
+    },
+    {
+     "name": "seed",
+     "label": "New seed",
+     "default": "42"
+    }
+   ],
+   "prompt": "Retune the scatter on the PCG volume {{selected_actor}}: meshes {{meshes}}, density {{density}} (0 keeps it), seed {{seed}}. If the PCG pack is off, say so and stop.\n1. hyper_pcg_scatter_inspect with no Graph for the volume's graph and instance count, then with that Graph for its Settings. If it is not a scatter graph this tool built, say graph.set cannot change it and stop. List every other volume running the same graph: they follow the new rules when they regenerate.\n2. hyper_capture_view (Source transform) top-down over the volume, Label `before`. If hyper_capture_view is unavailable, say so.\n3. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `graph.set` on that graph with only what changes (Meshes unless {{meshes}} is keep, Density when above 0, Seed {{seed}}), then `volume.generate` on the volume.\n4. hyper_operation_wait for the new per-mesh counts; recapture from the same transform, Label `after`; hyper_image_compare (Mode aligned) after against before.\n5. Change no other graph and leave the level unsaved. Report a PASS/FAIL table: settings read back as asked; count changed in proportion to density (unchanged density: within 10% of before); the layout moved (compare score under 95); only the asked meshes appear. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.retune-ecosystem-species",
+   "title": "Retune one species in an ecosystem and regrow it",
+   "summary": "Read an ecosystem graph's op, change one species' density, footprint or cull distance, rebuild with ecosystem.set, and compare counts.",
+   "packs": [
+    "pcg",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_pcg_scatter_inspect",
+    "hyper_capture_view",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "ecosystem.set",
+    "volume.generate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pcg",
+    "ecosystem",
+    "species",
+    "density",
+    "retune",
+    "regenerate"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "PCGVolume"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "species",
+     "label": "Species name",
+     "default": "Bushes"
+    },
+    {
+     "name": "change",
+     "label": "Change",
+     "default": "Density x 0.5 and CullDistance 120"
+    }
+   ],
+   "prompt": "In the ecosystem the PCG volume {{selected_actor}} runs, change species `{{species}}`: {{change}}. Leave every other species as it is. If the PCG pack is off, say so and stop.\n1. hyper_pcg_scatter_inspect with no Graph for the volume's graph and instance count, then with that Graph: keep its Ecosystem JSON and note `{{species}}`'s current values. If there is no Ecosystem op (not built by this tool), say so and stop.\n2. hyper_capture_view (Source transform) a shot over ground where `{{species}}` grows, Label `before`. If hyper_capture_view is unavailable, say so.\n3. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `ecosystem.set` with the whole Ecosystem op sent back and only `{{species}}` changed, then `volume.generate` on the volume.\n4. hyper_operation_wait for per-mesh counts; hyper_pcg_scatter_inspect the graph again to read the species back; recapture from the same transform, Label `after`, and hyper_image_compare (Mode aligned) after against before.\n5. Leave the level unsaved. Report a PASS/FAIL table: `{{species}}` reads back with the change; its count moved the expected way (a halved density lands at 35-65% of before); every other species within 10% of before; the compare's most changed cells are where `{{species}}` grows. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.ecosystem-roads-open",
+   "title": "Keep roads open through a PCG forest",
+   "summary": "Make an ecosystem avoid the road layer and keep a margin from the landscape's roads, regenerate, and prove the roads are clear with downward traces.",
+   "packs": [
+    "pcg",
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_pcg_scatter_inspect",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_spatial_query",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "ecosystem.set",
+    "volume.generate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pcg",
+    "ecosystem",
+    "roads",
+    "RoadMargin",
+    "clearance",
+    "traces"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "PCGVolume"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "road_layer",
+     "label": "Road layer",
+     "default": "Dirt"
+    },
+    {
+     "name": "margin",
+     "label": "Clearance (m)",
+     "default": "3"
+    },
+    {
+     "name": "road_points",
+     "label": "Points on the road (cm)",
+     "default": "(-40000,-20000,0), (0,0,0), (30000,25000,0)",
+     "hint": "Points on the road's centreline to test; the Points of its landscape.road op work."
+    },
+    {
+     "name": "road_width",
+     "label": "Road width (m)",
+     "default": "6"
+    }
+   ],
+   "prompt": "Keep the roads open through the ecosystem the PCG volume {{selected_actor}} runs: nothing on the `{{road_layer}}` layer, and every plant's footprint at least {{margin}} m from a road's paved edge. If the PCG pack is off, say so and stop.\n1. hyper_pcg_scatter_inspect with no Graph for the volume's graph and count, then with that Graph for its Ecosystem op; stop if there is none.\n2. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `ecosystem.set` with the whole op sent back, `{{road_layer}}` added to AvoidLayers and RoadMargin {{margin}} (meters from the paved edge of every landscape spline), then `volume.generate`. If RoadMargin is refused as unknown, resend without it and say crowns may overhang the road until a verge layer is painted and avoided.\n3. hyper_operation_wait for per-mesh counts; hyper_pcg_scatter_inspect the Graph again for a `Roads + {{margin}} m` node in its recipes.\n4. Prove it: hyper_spatial_query `trace` down from 30 m above each of {{road_points}}, midway between them, and at both paved edges (half of {{road_width}} m from the centreline): each first hit must be the landscape, not a plant. hyper_capture_view (Source transform) one shot straight down along a road and one at eye level on it. If hyper_spatial_query is unavailable, mark trace rows INFO. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: the op reads back the avoid rules; every trace hits the landscape; the road reads clear in both pictures; each species' count within 20% of before. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.partitioned-open-world-ecosystem",
+   "title": "Grow a seamless ecosystem across World Partition cells",
+   "summary": "Grow a two-biome ecosystem in World Partition cells, read how far each species samples past its cell, and check cell edges for seams.",
+   "packs": [
+    "pcg",
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_world_partition_inspect",
+    "hyper_landscape_inspect",
+    "hyper_project_search",
+    "hyper_world_partition_apply_plan",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "region.load",
+    "region.unload",
+    "ecosystem.create",
+    "volume.create"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "pcg",
+    "ecosystem",
+    "world partition",
+    "open world",
+    "cells",
+    "seams"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "layer",
+     "label": "Lowland layer",
+     "default": "Grass"
+    },
+    {
+     "name": "highland_m",
+     "label": "Highland from (m)",
+     "default": "150"
+    },
+    {
+     "name": "graph_name",
+     "label": "Graph name",
+     "default": "PCG_WorldLife"
+    }
+   ],
+   "prompt": "Grow a two-biome ecosystem over {{selected_actor}} in {{level}}, generated in World Partition cells without seams. If the PCG pack is off or the level is not World Partition, say so and stop.\n1. hyper_world_partition_inspect for loaded regions; hyper_landscape_inspect for StreamingProxies, heights and layers; hyper_project_search for tree, bush, rock and fern meshes. A landscape kept whole (0 proxies) needs saving before PCG sees it: ask me first.\n2. If the landscape is not loaded: hyper_world_partition_apply_plan (fresh OperationId, bDryRun false) with `region.load` over it, Label `PCGWork`.\n3. hyper_pcg_scatter_apply_plan, bDryRun true then false with a fresh OperationId: `ecosystem.create` Graph {{content_folder}}/{{graph_name}}, biome `Lowland` on `{{layer}}`, Height HeightMin to {{highland_m}} (Trees Density 0.01 Footprint 5, Bushes Density 0.004 Cluster 5, Ferns Density 0.05), biome `Highland`, Height {{highland_m}} to HeightMax plus 10 (Rocks Density 0.02 bAlignToGround true, Heather Density 0.05), each species with a CullDistance; `volume.create` Volume `WorldLife`, Cover the landscape, Partitioned \"true\". Over 1,000,000 estimated instances, ask me first.\n4. hyper_operation_wait (TimeoutMs 120000, again while it runs) for per-mesh counts.\n5. hyper_capture_view (Source transform) straight down from 60 m over a PCG cell corner (25600 cm cells from the origin by default) and an aerial oblique. If hyper_capture_view is unavailable, say so. Then `region.unload` `PCGWork` if you loaded it.\n6. Report a PASS/FAIL table: every species has instances; the plan's Partition seams note gives each kept-out species a distance (INFO if absent); no Highland species below {{highland_m}} m; no gap line or doubled trees along cell edges. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.alpine-treeline",
+   "title": "Grow a mountain treeline with scree above it",
+   "summary": "Stack forest, dwarf-pine scrub and scree biomes by height on a mountain landscape so the treeline reads clearly, then verify each band.",
+   "packs": [
+    "pcg",
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_project_search",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_pcg_scatter_inspect",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "ecosystem.create",
+    "volume.create"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pcg",
+    "ecosystem",
+    "treeline",
+    "mountain",
+    "height bands",
+    "biomes"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "treeline_m",
+     "label": "Treeline (m)",
+     "default": "180"
+    },
+    {
+     "name": "scree_m",
+     "label": "Scree from (m)",
+     "default": "240"
+    },
+    {
+     "name": "layer",
+     "label": "Forest layer",
+     "default": "Grass"
+    }
+   ],
+   "prompt": "Grow a mountain treeline on {{selected_actor}}: forest below {{treeline_m}} m, dwarf-pine scrub from {{treeline_m}} to {{scree_m}} m, bare scree above. If the PCG pack is off, say so and stop.\n1. hyper_landscape_inspect: HeightMin, HeightMax and layers; if HeightMax is below {{scree_m}} m, say which bands cannot show. hyper_project_search for fir, shrub and rock meshes.\n2. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `ecosystem.create` Graph {{content_folder}}/PCG_Treeline with biomes `Forest` (Layer `{{layer}}`, Height HeightMin to {{treeline_m}}, SlopeMax 35; Firs Density 0.02 Footprint 4 Patch 100 Coverage 0.8 CullDistance 400, Ferns Density 0.8 Footprint 0.5 CullDistance 60), `Scrub` (Height {{treeline_m}} to {{scree_m}}, SlopeMax 40; DwarfPine Density 0.05 Footprint 2 Cluster 4 ClusterRadius 3 Scale 0.5 to 0.9), `Scree` (no Layer, Height {{scree_m}} to HeightMax plus 10; Rocks Density 0.15 Footprint 1 bAlignToGround true Tilt 15 Sink 15); then `volume.create` Volume `Treeline`, Cover the landscape. If the estimated total (Density x growing area, per species) passes 1,000,000, ask me before generating.\n3. hyper_operation_wait for per-mesh counts; hyper_pcg_scatter_inspect the graph for each biome's recipe and height band.\n4. hyper_capture_view (Source transform) a side-on shot of the slope from 300 m out at mid height, and one top-down over the treeline. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: three biomes read back with their bands; each has instances where its band exists; firs stop at the treeline in the side shot, softened by scrub; no trees on scree. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.haunted-swamp",
+   "title": "Grow a haunted swamp of dead trees and reeds",
+   "summary": "Grow a fantasy swamp on a mud layer: dead trees, sunken logs, reed clumps and mushroom rings, with shore reeds and the path kept clear.",
+   "packs": [
+    "pcg",
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_project_search",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "ecosystem.create",
+    "volume.create"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pcg",
+    "ecosystem",
+    "swamp",
+    "fantasy",
+    "clumps",
+    "horror"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "mud_layer",
+     "label": "Mud layer",
+     "default": "Mud"
+    },
+    {
+     "name": "path_layer",
+     "label": "Path layer",
+     "default": "Path"
+    },
+    {
+     "name": "water_m",
+     "label": "Water level (m)",
+     "default": "0"
+    }
+   ],
+   "prompt": "Grow a haunted swamp on the `{{mud_layer}}` layer of {{selected_actor}}, keeping `{{path_layer}}` clear. If the PCG pack is off, say so and stop.\n1. hyper_landscape_inspect: `{{mud_layer}}` share, HeightMin and HeightMax; hyper_project_search for dead tree, log, reed and mushroom meshes (engine shapes only if none, and say so).\n2. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `ecosystem.create` Graph {{content_folder}}/PCG_Swamp, AvoidLayers [`{{path_layer}}`], biome `Swamp` on `{{mud_layer}}` (LayerMin 0.4, SlopeMax 20), species big to small: DeadTrees (Density 0.008, Footprint 5, Clearance 1.5, Tilt 8, Patch 60, Coverage 0.6, CullDistance 350), Logs (Density 0.02, Footprint 3, bAlignToGround true, Sink 25, CullDistance 150), Reeds (Density 0.05, Footprint 1, Cluster 12, ClusterRadius 2.5, CullDistance 80), Mushrooms (Density 0.01, Footprint 0.5, Cluster 8, ClusterRadius 1.2, KeepOutOf [Logs], CullDistance 60); biome `Shore`, no Layer, Height {{water_m}} to {{water_m}} plus 1.5, with Reeds (Density 0.2, Footprint 0.8, CullDistance 80); then `volume.create` Volume `Swamp`, Cover the landscape. If the estimated total (Density x growing area, per species) passes 1,000,000, ask me before generating.\n3. hyper_operation_wait for per-mesh counts.\n4. hyper_capture_view (Source transform) an eye-level shot from the path and an aerial shot. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: every species has instances; reeds and mushrooms form visible clumps; logs lie on the ground with no floating ends at eye level; `{{path_layer}}` stays clear. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.desert-scrubland",
+   "title": "Dress a desert scrubland with cacti and boulders",
+   "summary": "Grow a sparse western desert on sand: saguaros, half-buried boulders, creosote clumps and dry grass drifts, with long open sightlines.",
+   "packs": [
+    "pcg",
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_project_search",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_pcg_scatter_inspect",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "ecosystem.create",
+    "volume.create"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pcg",
+    "ecosystem",
+    "desert",
+    "western",
+    "cactus",
+    "sparse"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "layer",
+     "label": "Sand layer",
+     "default": "Sand"
+    },
+    {
+     "name": "road_layer",
+     "label": "Road layer",
+     "default": "Dirt"
+    },
+    {
+     "name": "sightline_m",
+     "label": "Sightline (m)",
+     "default": "300"
+    }
+   ],
+   "prompt": "Dress {{selected_actor}} as western desert scrub on `{{layer}}`, sparse enough for {{sightline_m}} m sightlines, with `{{road_layer}}` kept clear. If the PCG pack is off, say so and stop.\n1. hyper_landscape_inspect for `{{layer}}`'s share and the road layer; hyper_project_search for saguaro, boulder, shrub and dry grass meshes (engine shapes only if none, and say so).\n2. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `ecosystem.create` Graph {{content_folder}}/PCG_DesertScrub, AvoidLayers [`{{road_layer}}`], biome `Scrub` on `{{layer}}`, SlopeMax 30, species big to small: Saguaro (Density 0.004, Footprint 3, Clearance 2, Scale 0.7 to 1.3, CullDistance 600), Boulders (Density 0.01, Footprint 3, bAlignToGround true, Tilt 10, Sink 40, Scale 0.6 to 1.8, CullDistance 300), Creosote (Density 0.006, Footprint 1.5, Cluster 4, ClusterRadius 3, CullDistance 150), DryGrass (Density 0.6, Footprint 0.4, Patch 25, Coverage 0.4, CullDistance 50); then `volume.create` Volume `DesertScrub`, Cover the landscape. If the estimated total (Density x growing area, per species) passes 1,000,000, ask me before generating.\n3. hyper_operation_wait for per-mesh counts; hyper_pcg_scatter_inspect the graph for its recipes.\n4. hyper_capture_view (Source transform) one eye-level shot looking across the flats and one aerial shot. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: saguaro count within 50% of 0.004 x the layer's area; boulder bases sunk with no gaps at eye level; open ground visible {{sightline_m}} m out in the eye-level shot; nothing on `{{road_layer}}`. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.flower-meadow-drifts",
+   "title": "Sow a wildflower meadow in drifts",
+   "summary": "Grow grass and wildflower drifts on a meadow layer inside a sized PCG volume, so flowers gather in patches instead of an even sprinkle.",
+   "packs": [
+    "pcg",
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "ecosystem.create",
+    "volume.create"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "pcg",
+    "ecosystem",
+    "meadow",
+    "flowers",
+    "drifts",
+    "patches"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "layer",
+     "label": "Meadow layer",
+     "default": "Grass"
+    },
+    {
+     "name": "center",
+     "label": "Volume centre (cm)",
+     "default": "0, 0, 0"
+    },
+    {
+     "name": "size_m",
+     "label": "Volume size (m)",
+     "default": "150"
+    },
+    {
+     "name": "drift_m",
+     "label": "Drift size (m)",
+     "default": "15"
+    },
+    {
+     "name": "flower_share",
+     "label": "Flower coverage (0.05-1)",
+     "default": "0.35"
+    },
+    {
+     "name": "flower_meshes",
+     "label": "Flower meshes",
+     "default": "/Game/Env/SM_Flowers_A, /Game/Env/SM_Flowers_B"
+    },
+    {
+     "name": "grass_mesh",
+     "label": "Grass mesh",
+     "default": "/Game/Env/SM_Grass"
+    }
+   ],
+   "prompt": "Sow a wildflower meadow on the `{{layer}}` layer of {{selected_actor}}, inside a {{size_m}} m square centred on ({{center}}) cm: flowers in drifts about {{drift_m}} m across over {{flower_share}} of the meadow, grass everywhere else. If the PCG pack is off, say so and stop.\n1. hyper_landscape_inspect: confirm `{{layer}}` exists and report its share, HeightMin and HeightMax. Use {{flower_meshes}} for flowers and {{grass_mesh}} for grass; if a path is not a static mesh, say so and stop.\n2. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `ecosystem.create` Graph {{content_folder}}/PCG_Meadow, biome `Meadow` on `{{layer}}`, SlopeMax 35, species: Flowers (Meshes [{{flower_meshes}}], Density 2, Footprint 0.3, Patch {{drift_m}}, Coverage {{flower_share}}, CullDistance 50), Grass (Meshes [{{grass_mesh}}], Density 3, Footprint 0.3, KeepOutOf [Flowers], CullDistance 50); then `volume.create` Volume `Meadow`, Center ({{center}}), Size ({{size_m}}, {{size_m}}), Height tall enough to hold the ground between HeightMin and HeightMax.\n3. hyper_operation_wait on the OperationId for per-mesh counts.\n4. hyper_capture_view (Source transform) a top-down shot 40 m up and one at 1.7 m looking across the meadow. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: both species have instances; the flower count within 50% of 2 x {{flower_share}} x the meadow ground inside the square ({{size_m}} squared x the layer's share; show the sum); grass outnumbers flowers; drifts read as separate patches in the top-down shot, not an even sprinkle. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.keep-clear-of-buildings",
+   "title": "Keep PCG growth clear of tagged buildings",
+   "summary": "Make an ecosystem keep a set margin around actors with a tag, regenerate, and prove no plant stands in any building's clearance.",
+   "packs": [
+    "pcg",
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_pcg_scatter_inspect",
+    "hyper_spatial_query",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "ecosystem.set",
+    "volume.generate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pcg",
+    "ecosystem",
+    "buildings",
+    "AvoidTags",
+    "clearance",
+    "settlement"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "PCGVolume"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "tag",
+     "label": "Actor tag",
+     "default": "Building"
+    },
+    {
+     "name": "margin",
+     "label": "Clearance (m)",
+     "default": "3"
+    }
+   ],
+   "prompt": "Make the ecosystem the PCG volume {{selected_actor}} runs keep {{margin}} m clear around every actor tagged `{{tag}}`. If the PCG pack is off, say so and stop.\n1. hyper_pcg_scatter_inspect with no Graph for the volume's graph, size and count, then with that Graph for its Ecosystem op (stop if there is none). hyper_spatial_query `nearest` with TagFilter `{{tag}}`, Point the volume's centre, Radius (cm) half its diagonal, MaxResults 32, for the tagged actors and their sizes. If none carry the tag, list the likely buildings and stop so I can tag them.\n2. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `ecosystem.set` with the whole op sent back, AvoidTags [`{{tag}}`] and AvoidMargin {{margin}}, then `volume.generate`.\n3. hyper_operation_wait for per-mesh counts.\n4. Prove it: for each tagged actor, hyper_spatial_query `overlap` with a box at its centre, Extent half its Size plus {{margin}} m less 0.5 m (in cm), Rotation its yaw: no hit may be an instance on {{selected_actor}} or a PCG partition actor. Plants without collision do not show there; judge those from the pictures. hyper_capture_view (Source transform) top-down over the two buildings with the most growth around them. If hyper_spatial_query is unavailable, say so. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: AvoidTags and AvoidMargin read back; one row per tagged actor, PASS when no plant overlaps its clearance (if only scaled actors fail, say this build scales the margin); total within 25% of before. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.read-pcg-generator",
+   "title": "Read a marketplace PCG graph as recipes",
+   "summary": "Explain how the selected PCG graph builds its result: each spawner's node chain, meshes, cull distances and parameters, plus structural health.",
+   "packs": [
+    "pcg"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_pcg_scatter_inspect",
+    "hyper_pcg_inspect",
+    "hyper_pcg_validate",
+    "hyper_memory_recall",
+    "hyper_memory_remember"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pcg",
+    "graph",
+    "recipes",
+    "marketplace",
+    "learn",
+    "read-only"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "PCGGraph"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "focus",
+     "label": "Focus (node, mesh or all)",
+     "default": "all"
+    }
+   ],
+   "prompt": "Explain how the PCG graph {{selected_asset}} works, without changing it. If the PCG pack is off, say so and stop.\n1. hyper_pcg_scatter_inspect with Graph {{selected_asset}} (Detail summary): one recipe per mesh spawner, meshes, cull distances and parameters. If bTruncated, narrow with Filter.\n2. hyper_pcg_scatter_inspect again with Detail nodes and Filter {{focus}} (no Filter when it is all) for the settings that differ from defaults on samplers, filters and spawners.\n3. hyper_pcg_inspect with its exact GraphPath for node, edge and parameter counts and the persisted revision; hyper_pcg_validate with Policy structural and that revision.\n4. hyper_memory_recall \"PCG generator\" for notes about this graph. If you learn something a later chat needs, such as which parameter drives density, save it with hyper_memory_remember, titled as the fact.\n5. Report a short paragraph on the method; a table per spawner (spawner, chain summary, meshes, cull distance); a table of parameters; and a PASS/FAIL table: validate 0 errors; every spawner has meshes; small meshes cull sooner than big ones (WARN otherwise). End with how to rebuild the method as an ecosystem op, naming the matching fields."
+  },
+  {
+   "id": "pcg-foliage.prove-graph-generates",
+   "title": "Prove a PCG volume generates cleanly and leaves nothing",
+   "summary": "Validate the selected PCG component as generation-ready, run generate_validate_cleanup through a dry run and the real job, and report the end state.",
+   "packs": [
+    "pcg"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_scene_inspect",
+    "hyper_pcg_inspect",
+    "hyper_pcg_validate",
+    "hyper_pcg_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pcg",
+    "validate",
+    "generation",
+    "cleanup",
+    "qa",
+    "component"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "PCGVolume"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "deadline_ms",
+     "label": "Deadline (ms)",
+     "default": "120000"
+    }
+   ],
+   "prompt": "Prove the PCG on {{selected_actor}} generates without errors and leaves nothing behind. If the PCG pack is off, say so and stop.\n1. hyper_scene_inspect the actor for its PCG component's exact object path (ending .PCG Component) and graph; hyper_pcg_inspect with GraphPath and ComponentPath for the persisted revision, the component fingerprint, and whether it is generated or generating. The graph must be saved with no unsaved changes and the component idle; otherwise say so and stop. The run ends clean, so say how much output it will clear if the component is generated now.\n2. hyper_pcg_validate with Policy generation_ready, ExpectedPersistedRevision and ExpectedComponentFingerprint: list errors and warnings.\n3. hyper_pcg_apply_plan with bDryRun true, Intent {Lifecycle generate_validate_cleanup, ValidationPolicy generation_ready, ExpectedTerminalState clean}, the revision, the fingerprint and DeadlineMs {{deadline_ms}}; then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash from the dry run's PlanHash. The reply waits for the job; if it reports awaiting approval, call hyper_operation_wait with bWaitThroughApproval true.\n4. hyper_pcg_inspect the component again: it must be clean (not generated, not generating).\n5. Report a PASS/FAIL table: component found; generation_ready validate 0 errors; dry run sealed; real run ended clean; no timeout; warnings as WARN rows. If it fails, quote each issue code with its likely cause in one line."
+  },
+  {
+   "id": "pcg-foliage.regenerate-pcg-component",
+   "title": "Regenerate a PCG volume and keep its output",
+   "summary": "Generate the selected PCG component through a sealed plan, keep the result, and report what it produced with before and after captures.",
+   "packs": [
+    "pcg",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_pcg_scatter_inspect",
+    "hyper_scene_inspect",
+    "hyper_pcg_inspect",
+    "hyper_capture_view",
+    "hyper_pcg_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "pcg",
+    "generate",
+    "regenerate",
+    "component",
+    "volume"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "PCGVolume"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "deadline_ms",
+     "label": "Deadline (ms)",
+     "default": "120000"
+    }
+   ],
+   "prompt": "Regenerate the PCG on {{selected_actor}} and keep the output. If the PCG pack is off, say so and stop.\n1. hyper_pcg_scatter_inspect with no Graph for the volume's current instance count; hyper_scene_inspect for its PCG component's exact object path; hyper_pcg_inspect with GraphPath and ComponentPath for the persisted revision and component fingerprint. The graph must be saved with no unsaved changes and the component idle; otherwise say so and stop.\n2. hyper_capture_view (Source transform) top-down over the volume from 1.2 x its width up, Label `before`. If hyper_capture_view is unavailable, say so.\n3. hyper_pcg_apply_plan with bDryRun true, Intent {Lifecycle generate, ValidationPolicy generation_ready, ExpectedTerminalState generated, bForceGenerate true}, the revision and fingerprint, DeadlineMs {{deadline_ms}}; then bDryRun false with a fresh OperationId and ExpectedPlanHash. The reply waits for the generation; if it reports awaiting approval, call hyper_operation_wait with bWaitThroughApproval true.\n4. hyper_pcg_scatter_inspect again for the new count; recapture from the same transform, Label `after`.\n5. Change nothing else and leave the level unsaved. Report a PASS/FAIL table: the run ended generated; no timeout; instances above 0 (state before and after); validation issues as WARN rows. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.clear-generated-pcg",
+   "title": "Clear generated PCG from selected volumes",
+   "summary": "Remove what the selected PCG volumes generated after a dry run, keeping their graphs and volumes, then prove each volume is empty.",
+   "packs": [
+    "pcg"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_pcg_scatter_inspect",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_scene_inspect",
+    "hyper_pcg_inspect",
+    "hyper_pcg_apply_plan"
+   ],
+   "ops": [
+    "volume.clear"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "pcg",
+    "clear",
+    "cleanup",
+    "volumes",
+    "reset"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "PCGVolume"
+    ],
+    "min": 1
+   },
+   "prompt": "Clear the generated output of these PCG volumes and nothing else:\n{{selected_actors}}\nIf the PCG pack is off, say so and stop.\n1. hyper_pcg_scatter_inspect with no Graph for each volume's graph and instance count.\n2. hyper_pcg_scatter_apply_plan with bDryRun true, then false with a fresh OperationId: one `volume.clear` per volume, by its label; each note says how many instances it cleared. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_pcg_scatter_inspect again. For any volume still above 0: hyper_scene_inspect for its PCG component's exact object path, hyper_pcg_inspect for the revision and fingerprint, then hyper_pcg_apply_plan with bDryRun true, Intent {Lifecycle cleanup, ValidationPolicy generation_ready, ExpectedTerminalState clean, bRemoveGeneratedComponentsOnCleanup true}, and again with bDryRun false, a fresh OperationId and ExpectedPlanHash; that reply waits for the cleanup.\n4. Prove it: hyper_pcg_scatter_inspect once more: each volume at 0 instances and not generating. Keep the graphs and volumes, and leave the level unsaved.\nReport a PASS/FAIL table: one row per volume with instances before and after, PASS at 0, and which step cleared it; graphs and volumes still present."
+  },
+  {
+   "id": "pcg-foliage.foliage-forest-scatter",
+   "title": "Scatter a pine forest with foliage types",
+   "summary": "Make pine and rock foliage types from meshes, scatter them over a landscape off steep ground and roads, keep a camp clear, and count them.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_foliage_inspect",
+    "hyper_landscape_inspect",
+    "hyper_project_search",
+    "hyper_foliage_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "foliage_type.create",
+    "foliage.scatter"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "foliage",
+    "scatter",
+    "trees",
+    "rocks",
+    "clearing",
+    "forest"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "layer",
+     "label": "Pine layer",
+     "default": "Grass"
+    },
+    {
+     "name": "road_layer",
+     "label": "Road layer",
+     "default": "Dirt"
+    },
+    {
+     "name": "camp",
+     "label": "Camp centre (cm)",
+     "default": "0, 0, 0"
+    },
+    {
+     "name": "clearing_m",
+     "label": "Clearing width (m)",
+     "default": "70"
+    },
+    {
+     "name": "tree_mesh",
+     "label": "Pine mesh",
+     "default": "/Game/Env/SM_Pine"
+    },
+    {
+     "name": "rock_mesh",
+     "label": "Rock mesh",
+     "default": "/Game/Env/SM_Rock"
+    }
+   ],
+   "prompt": "Dress {{selected_actor}} with foliage: pines on `{{layer}}`, rocks on slopes, `{{road_layer}}` and a camp clearing {{clearing_m}} m wide around ({{camp}}) cm left empty.\n1. hyper_foliage_inspect for types in the level and unused type assets under {{content_folder}}; hyper_landscape_inspect for layers. If {{tree_mesh}} or {{rock_mesh}} is not a static mesh, hyper_project_search for a pine and a rock.\n2. One hyper_foliage_apply_plan (fresh OperationId, bDryRun false): `foliage_type.create` {{content_folder}}/FT_Pine, Mesh {{tree_mesh}}, Settings Density 1.5, Radius 400, ScaleX (Min=0.8,Max=1.3), AlignToNormal false, GroundSlopeAngle (Min=0,Max=30), LandscapeLayers (\"{{layer}}\"), ExclusionLandscapeLayers (\"{{road_layer}}\"); `foliage_type.create` {{content_folder}}/FT_Rock, Mesh {{rock_mesh}}, Settings Density 2, AlignMaxAngle 25, GroundSlopeAngle (Min=15,Max=60), CullDistance (Min=6000,Max=8000); `foliage.scatter` Types [FT_Pine, FT_Rock], Landscape its label, Clearings [{Center ({{camp}}), Radius half of {{clearing_m}}}]. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Read each scatter note (spots tried, why the rest were turned away); hyper_foliage_inspect for each type's Instances, Min and Max.\n4. hyper_capture_view (Source transform) top-down over the camp and one shot at eye level from it. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: FT_Pine within 50% of 1.5 per 100 m2 over the `{{layer}}` area under 30 degrees; rocks turned away only for slope or crowding; the camp circle empty in the top-down shot; no pine on `{{road_layer}}`. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.foliage-hero-trees",
+   "title": "Place hero trees at exact points",
+   "summary": "Drop one foliage type onto chosen points as hero trees, each landing on the ground below, and confirm every one stands where asked.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_foliage_inspect",
+    "hyper_foliage_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "foliage_type.create",
+    "foliage.place"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "foliage",
+    "hero",
+    "place",
+    "landmark",
+    "trees"
+   ],
+   "placeholders": [
+    {
+     "name": "type",
+     "label": "Foliage type",
+     "default": "FT_Oak_Hero"
+    },
+    {
+     "name": "points",
+     "label": "Points (cm)",
+     "default": "(1800,-900,0), (-2500,1200,0), (400,3600,0)"
+    },
+    {
+     "name": "mesh",
+     "label": "Mesh if the type is new",
+     "default": "/Game/Env/SM_Oak"
+    }
+   ],
+   "prompt": "Place the foliage type `{{type}}` as hero trees at {{points}} (cm) in {{level}}, one at each point, dropped onto the surface below.\n1. hyper_foliage_inspect with Types [`{{type}}`] for its instance count and settings. If the type does not exist, it will be made from {{mesh}} as {{content_folder}}/{{type}}; if {{mesh}} is not a static mesh, say so and stop.\n2. One hyper_foliage_apply_plan (fresh OperationId, bDryRun false): `foliage_type.create` {{content_folder}}/{{type}} with Mesh {{mesh}} and Settings AlignToNormal false, ScaleX (Min=1.1,Max=1.3), CullDistance (Min=0,Max=0) only when it is new; then `foliage.place` Types [`{{type}}`], Points {{points}}. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Prove it: hyper_foliage_inspect again for the count, Min and Max; the plan's Placed count; hyper_capture_view (Source transform) one shot framing each tree from 25 m away at 1.7 m height. If hyper_capture_view is unavailable, say so.\n4. Leave the level unsaved. Report a PASS/FAIL table: Placed equals the number of points; the type's count rose by that number; each point's X and Y lie inside the reported Min and Max; every tree stands on the ground in its picture (no floating roots or buried trunks). Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.foliage-thin-overgrowth",
+   "title": "Thin overgrown foliage around a point by half",
+   "summary": "Remove a share of the foliage instances in a circle at random after a dry run, keep the rest, and prove nothing outside the circle changed.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_foliage_inspect",
+    "hyper_capture_view",
+    "hyper_foliage_apply_plan",
+    "hyper_operation_wait",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "foliage.erase"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "foliage",
+    "thin",
+    "erase",
+    "density",
+    "clearing"
+   ],
+   "placeholders": [
+    {
+     "name": "center",
+     "label": "Centre (cm)",
+     "default": "0, 0, 0"
+    },
+    {
+     "name": "radius_m",
+     "label": "Radius (m)",
+     "default": "40"
+    },
+    {
+     "name": "fraction",
+     "label": "Share to remove (0-1)",
+     "default": "0.5"
+    },
+    {
+     "name": "types",
+     "label": "Foliage types (or all)",
+     "default": "all"
+    }
+   ],
+   "prompt": "Thin the foliage within {{radius_m}} m of ({{center}}) cm in {{level}}: remove {{fraction}} of the instances of {{types}}, chosen at random, and keep the rest.\n1. hyper_foliage_inspect for each type's count in the level.\n2. hyper_capture_view (Source transform) straight down over the circle from 2.5 x {{radius_m}} m up, so the circle fills the middle of the frame and the corners lie outside it, Label `before`. If hyper_capture_view is unavailable, say so.\n3. hyper_foliage_apply_plan with bDryRun true, then bDryRun false with a fresh OperationId: `foliage.erase` Center ({{center}}), Radius {{radius_m}}, Fraction {{fraction}}, Seed 3, Types [{{types}}] (no Types for every type when it is all). Each type loses that share of its instances inside the circle, rounded. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n4. Prove it: the plan's Removed count and note; hyper_foliage_inspect for each type's new count; recapture from the same transform, Label `after`, and hyper_image_compare (Mode aligned, Grid 4) after against before.\n5. Leave the level unsaved. Report a PASS/FAIL table: Removed above 0; the level's totals fell by exactly Removed (nothing else changed); the circle held about Removed / {{fraction}} instances (INFO); the four corner cells of the compare score at least 90 while the centre cells changed; the after picture is thinner but not bare. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.foliage-clear-paths",
+   "title": "Clear foliage from paths, doorways and cover spots",
+   "summary": "Erase every foliage instance in set circles after a dry run so routes, doorways and cover stay open, then prove each spot is empty.",
+   "packs": [
+    "worldbuilding_navigation",
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_foliage_inspect",
+    "hyper_foliage_apply_plan",
+    "hyper_operation_wait",
+    "hyper_spatial_query",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "foliage.erase"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "foliage",
+    "erase",
+    "paths",
+    "cover",
+    "clearings",
+    "gameplay"
+   ],
+   "placeholders": [
+    {
+     "name": "spots",
+     "label": "Spots (cm)",
+     "default": "(1200,300,0), (2400,-600,0), (3600,0,0)"
+    },
+    {
+     "name": "radius_m",
+     "label": "Radius (m)",
+     "default": "3"
+    }
+   ],
+   "prompt": "Clear all foliage from these spots in {{level}}, each a circle of {{radius_m}} m: {{spots}} (cm). They are paths, doorways and cover positions that must stay open.\n1. hyper_foliage_inspect for each type's count.\n2. hyper_foliage_apply_plan with bDryRun true, then bDryRun false with a fresh OperationId: one `foliage.erase` per spot, Center the spot, Radius {{radius_m}}, Fraction 1, no Types (every type); then the same erases again at the end of the plan, each of whose notes must say 0 instances erased. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Prove it: for each spot, hyper_spatial_query `overlap` with a box of Extent ({{radius_m}} x 60, {{radius_m}} x 60, 150) cm centred 1.6 m above the ground there: no hit may be a foliage instance. Foliage without collision, such as grass, does not show there; the repeat erases cover it. hyper_capture_view (Source transform) top-down over the two busiest spots. If hyper_spatial_query is unavailable, say so. If hyper_capture_view is unavailable, say so.\n4. Leave the level unsaved. Tell me which future foliage.scatter ops should add these spots as Clearings so a re-scatter keeps them open.\nReport a PASS/FAIL table: the plan's Removed count; one row per spot, PASS when its repeat erase removed 0 and no foliage overlaps it; type totals fell by exactly Removed. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.foliage-swap-final-art",
+   "title": "Swap placeholder foliage meshes for final art",
+   "summary": "Point the selected foliage types at their final meshes so every placed instance keeps its spot, and check counts stay identical.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_foliage_inspect",
+    "hyper_capture_view",
+    "hyper_foliage_apply_plan",
+    "hyper_operation_wait",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "foliage_type.set"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "foliage",
+    "meshes",
+    "art pass",
+    "swap",
+    "placeholder"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "FoliageType_InstancedStaticMesh"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "mapping",
+     "label": "Type -> mesh pairs",
+     "default": "FT_Pine -> /Game/Art/Trees/SM_Pine_Final"
+    }
+   ],
+   "prompt": "Swap meshes on the selected foliage types {{selected_assets}} for final art: {{mapping}}. Instances keep their transforms; change nothing else.\n1. hyper_foliage_inspect with Types the selected types and bSettings true: each type's Mesh, count, Min and Max. If a new mesh path is not a static mesh, say so and stop.\n2. hyper_capture_view (Source transform) one shot over ground where these types grow, Label `before`. If hyper_capture_view is unavailable, say so.\n3. One hyper_foliage_apply_plan (fresh OperationId, bDryRun false): one `foliage_type.set` per type with Types [the type] and Mesh its new mesh, and no Settings. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n4. Prove it: hyper_foliage_inspect again; recapture from the same transform, Label `after`; hyper_image_compare (Mode aligned) after against before.\n5. Leave the level unsaved; the type assets save themselves, so list them. Report a PASS/FAIL table: one row per type with old mesh, new mesh and PASS when its count, Min and Max are unchanged; the compare score below 98 (the art changed) while layout cells stay similar. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.foliage-remove-type",
+   "title": "Remove a foliage type from the level",
+   "summary": "Take the selected foliage types and all their instances out of the level after a dry run, leaving the type assets on disk.",
+   "packs": [
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_foliage_inspect",
+    "hyper_foliage_apply_plan",
+    "hyper_operation_wait",
+    "hyper_worldbuilding_validate"
+   ],
+   "ops": [
+    "foliage_type.remove"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "foliage",
+    "remove",
+    "cleanup",
+    "types"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "FoliageType_InstancedStaticMesh"
+    ],
+    "min": 1
+   },
+   "prompt": "Remove the foliage types {{selected_assets}} and all their instances from {{level}}. Keep the type assets on disk and touch no other type.\n1. hyper_foliage_inspect for every type's count and the foliage actors holding them; note the counts of the types you will keep.\n2. hyper_foliage_apply_plan with bDryRun true: `foliage_type.remove` Types the selected types. Then the same plan with bDryRun false and a fresh OperationId. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Prove it: hyper_foliage_inspect again: the removed types no longer appear among the level's types and do appear among unused Assets; the kept types' counts are unchanged. hyper_worldbuilding_validate with Variants [\"foliage\", \"foliage_type\"] for errors.\n4. Leave the level unsaved.\nReport a PASS/FAIL table: one row per removed type (instances before, PASS when gone from the level and still on disk); one row for the kept types' counts unchanged; validate 0 errors."
+  },
+  {
+   "id": "pcg-foliage.foliage-moss-on-ruins",
+   "title": "Grow moss and ivy over ruin tops and ledges",
+   "summary": "Scatter moss and trailing ivy onto the upward faces of a ruin's static meshes, under arches too, aligned to the surface, and count what took.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_foliage_inspect",
+    "hyper_project_search",
+    "hyper_foliage_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "foliage_type.create",
+    "foliage.scatter"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "foliage",
+    "moss",
+    "ivy",
+    "ruins",
+    "fantasy",
+    "static mesh"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "StaticMeshActor"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "center",
+     "label": "Area centre (cm)",
+     "default": "0, 0, 0"
+    },
+    {
+     "name": "size_m",
+     "label": "Area size (m)",
+     "default": "40"
+    },
+    {
+     "name": "moss_mesh",
+     "label": "Moss mesh",
+     "default": "/Game/Env/SM_Moss"
+    },
+    {
+     "name": "ivy_mesh",
+     "label": "Ivy mesh",
+     "default": "/Game/Env/SM_Ivy"
+    }
+   ],
+   "prompt": "Grow moss and ivy over the ruin pieces {{selected_actors}} in {{level}}, within a {{size_m}} m square centred on ({{center}}) cm.\n1. hyper_foliage_inspect for existing moss or ivy types; hyper_project_search for small moss and ivy static meshes if {{moss_mesh}} or {{ivy_mesh}} is not one.\n2. One hyper_foliage_apply_plan (fresh OperationId, bDryRun false): `foliage_type.create` {{content_folder}}/FT_Moss (Mesh {{moss_mesh}}; Settings Density 30, Radius 20, AlignToNormal true, AlignMaxAngle 90, GroundSlopeAngle (Min=0,Max=60), CullDistance (Min=2000,Max=3000), CastShadow false); `foliage_type.create` {{content_folder}}/FT_Ivy (Mesh {{ivy_mesh}}; Density 10, AlignToNormal true, AlignMaxAngle 60, GroundSlopeAngle (Min=25,Max=70), CullDistance (Min=2500,Max=3500)); `foliage.scatter` Types [FT_Moss, FT_Ivy], Center ({{center}}), Size ({{size_m}}, {{size_m}}), Surfaces [\"static_mesh\"], bUnderCover true. Scatter drops onto surfaces from above, so sheer walls take nothing: say so if the ruin is mostly walls. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Read the scatter notes (spots tried, why the rest were turned away); hyper_foliage_inspect for counts, Min and Max.\n4. hyper_capture_view (Source transform) two close shots of the ruins at 3 m and 8 m. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: both types have instances; their Min and Max lie inside the square; moss on tops and ledges and ivy on sloped, broken faces in the pictures; nothing on the landscape (Surfaces static_mesh only). Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.foliage-performance-tuning",
+   "title": "Cut foliage cost with cull distances and shadows",
+   "summary": "Measure foliage shadow cost, give each type a cull distance by size and turn off small types' shadows, then measure again against a shadow budget.",
+   "packs": [
+    "worldbuilding_navigation",
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_foliage_inspect",
+    "hyper_scene_cost_report",
+    "hyper_capture_view",
+    "hyper_foliage_apply_plan",
+    "hyper_operation_wait",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "foliage_type.set"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "foliage",
+    "performance",
+    "cull distance",
+    "shadows",
+    "budget",
+    "optimisation"
+   ],
+   "placeholders": [
+    {
+     "name": "shadow_budget",
+     "label": "Shadow draw budget",
+     "default": "1500"
+    },
+    {
+     "name": "camera",
+     "label": "Camera actor label",
+     "default": "CAM_Gameplay"
+    }
+   ],
+   "prompt": "Bring foliage in {{level}} under {{shadow_budget}} estimated shadow draws and give every type a cull distance by its size, with no visible holes near the player at the camera {{camera}}.\n1. hyper_foliage_inspect with bSettings true: each type's mesh, count, cull distance and shadows. hyper_scene_cost_report with Scope level for FoliageInstances, EstimatedDrawCalls, EstimatedShadowDrawCalls, ShadowCastingPrimitives and the heaviest meshes. If hyper_scene_cost_report is unavailable, say so, mark cost rows INFO and tune by the rules below.\n2. hyper_capture_view (Source camera, CameraActorLabel {{camera}}), Label `before`. If hyper_capture_view is unavailable, say so.\n3. One hyper_foliage_apply_plan (fresh OperationId, bDryRun false), one `foliage_type.set` per type: CullDistance \"(Min=A,Max=B)\" in cm with A = 0.8 x B, and B 3000 for grass and flowers, 6000 for rocks and bushes, 25000 for trees; CastShadow false for types under 1 m tall. Change no meshes or densities. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n4. hyper_scene_cost_report again with the same scope; recapture, Label `after`, and hyper_image_compare (Mode aligned) after against before.\n5. Leave the level unsaved. Report a PASS/FAIL table: shadow draws and shadow-casting primitives before and after, PASS when the draws are at most {{shadow_budget}}; each type's new cull distance in its band; compare score at least 90 (no visible holes near the camera). Estimated draw calls count components, which cull distances do not change: give them as INFO. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.match-forest-reference",
+   "title": "Grow a forest that matches a reference image",
+   "summary": "Frame a view like the reference, grow an ecosystem, then retune species round by round until the image score reaches the target.",
+   "packs": [
+    "pcg",
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "image-match"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_memory_recall",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "ecosystem.create",
+    "volume.create",
+    "ecosystem.set",
+    "volume.generate"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "pcg",
+    "ecosystem",
+    "reference",
+    "image match",
+    "forest",
+    "concept art"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "reference",
+     "label": "Reference image (project path)",
+     "default": "Saved/Reference/forest_ref.png",
+     "hint": "An image file inside the project, such as a generated reference, concept art or a photo."
+    },
+    {
+     "name": "layer",
+     "label": "Layer to grow on",
+     "default": "Grass"
+    },
+    {
+     "name": "center",
+     "label": "Volume centre (cm)",
+     "default": "0, 0, 0"
+    },
+    {
+     "name": "size_m",
+     "label": "Volume size (m)",
+     "default": "200"
+    },
+    {
+     "name": "target",
+     "label": "Target score (0-100)",
+     "default": "70"
+    },
+    {
+     "name": "rounds",
+     "label": "Most rounds",
+     "default": "5"
+    }
+   ],
+   "prompt": "Grow vegetation on {{selected_actor}} that matches the reference {{reference}}, following the image-match skill. If the PCG pack is off, say so and stop.\n1. hyper_landscape_inspect for layers and relief; hyper_memory_recall \"forest reference\". Describe the reference: species by size, how dense, stands or even, clumping, open ground share, and the camera height it implies.\n2. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `ecosystem.create` Graph {{content_folder}}/PCG_RefForest with the species you described, big to small, on `{{layer}}`, then `volume.create` Volume `RefForest`, Center ({{center}}), Size ({{size_m}}, {{size_m}}). hyper_operation_wait for counts.\n3. hyper_capture_view (Source transform) framed like the reference inside the volume, Label `forest-0`; hyper_image_compare (Mode look, SessionId `forest-match`, TargetScore {{target}}) against {{reference}}.\n4. Up to {{rounds}} rounds, one change each to the worst cells: `ecosystem.set` with the whole op plus `volume.generate` in one plan, hyper_operation_wait, recapture from the same transform, compare with a Note. Revert a round that lowers the score.\n5. Stop at {{target}} or after {{rounds}} rounds. If hyper_capture_view or hyper_image_compare is unavailable, say so and stop after step 2.\n6. Leave the level unsaved. Report a table of rounds (change, score, PASS when it rose) and a final PASS/FAIL row for {{target}}, then the reference and the final capture each on its own line."
+  },
+  {
+   "id": "pcg-foliage.paint-and-grow-two-biomes",
+   "title": "Paint biome layers and grow an ecosystem on each",
+   "summary": "Paint woodland and heath layers as a patch mosaic, grow a two-biome PCG ecosystem on them, and prove each grows only on its own layer.",
+   "packs": [
+    "pcg",
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.add_paint_layer",
+    "landscape.paint",
+    "ecosystem.create",
+    "volume.create"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "pcg",
+    "ecosystem",
+    "landscape",
+    "paint",
+    "mosaic",
+    "biomes"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "patch_m",
+     "label": "Woodland patch size (m)",
+     "default": "120"
+    },
+    {
+     "name": "wood_share",
+     "label": "Woodland coverage (0.05-1)",
+     "default": "0.5"
+    }
+   ],
+   "prompt": "On {{selected_actor}}, paint a woodland and heath mosaic and grow each biome with PCG. If the PCG pack is off, say so and stop.\n1. hyper_landscape_inspect for its layers, shares and road layers.\n2. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false): `landscape.add_paint_layer` `Woodland` and `Heath` if missing; `landscape.paint` Rules {Layer `Heath`} (first: it fills what the others leave), {Layer `Woodland`, SlopeMax 30, Patch {{patch_m}}, Coverage {{wood_share}}}, and {Layer `Rock`, SlopeMin 40} if it has Rock. If it awaits approval, call hyper_operation_wait with bWaitThroughApproval true. Then hyper_landscape_inspect for the new shares.\n3. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `ecosystem.create` Graph {{content_folder}}/PCG_Mosaic, AvoidLayers the road layers, biome `Woodland` on `Woodland` (Oaks Density 0.015 Footprint 6 CullDistance 450, Hazel Density 0.01 Cluster 4 ClusterRadius 3 CullDistance 150, Bluebells Density 1.5 Patch 12 Coverage 0.5 CullDistance 50) and biome `Heath` on `Heath` (Gorse Density 0.02 Cluster 6 ClusterRadius 2 CullDistance 120, HeathGrass Density 1 CullDistance 50, Stones Density 0.03 bAlignToGround true Sink 10); then `volume.create` Volume `Mosaic`, Cover the landscape. If the estimated total (Density x growing area, per species) passes 1,000,000, ask me before generating.\n4. hyper_operation_wait for per-mesh counts.\n5. hyper_capture_view (Source transform) top-down over a woodland edge and one eye-level shot across it. If hyper_capture_view is unavailable, say so.\n6. Leave the level unsaved. Report a PASS/FAIL table: `Woodland` share near {{wood_share}} of the gentle ground; every species has instances; oaks stop at the woodland edge in the top-down shot; no heath species inside woodland. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.scifi-crystal-field",
+   "title": "Grow an alien crystal field on ash plains",
+   "summary": "Grow a sci-fi ecosystem on an ash layer: tilted crystal spires, crystal clusters, shard debris and alien moss, with slope limits and culling.",
+   "packs": [
+    "pcg",
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_project_search",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_pcg_scatter_inspect",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "ecosystem.create",
+    "volume.create"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pcg",
+    "ecosystem",
+    "sci-fi",
+    "alien",
+    "crystals",
+    "clusters"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "layer",
+     "label": "Ash layer",
+     "default": "Ash"
+    }
+   ],
+   "prompt": "Grow an alien crystal field on the `{{layer}}` layer of {{selected_actor}}. If the PCG pack is off, say so and stop.\n1. hyper_landscape_inspect for `{{layer}}`'s share, HeightMin and HeightMax; hyper_project_search for crystal, shard and moss meshes (engine shapes only if none, and say so).\n2. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `ecosystem.create` Graph {{content_folder}}/PCG_CrystalField, biome `Crystals` on `{{layer}}`, SlopeMax 40, species big to small: Spires (Density 0.006, Footprint 4, Clearance 1.5, Tilt 25, Sink 60, Scale 0.8 to 2.0, Patch 90, Coverage 0.5, CullDistance 800), Clusters (Density 0.008, Footprint 1.5, Cluster 7, ClusterRadius 2.5, Tilt 30, Sink 20, CullDistance 250), Shards (Density 0.2, Footprint 0.4, bAlignToGround true, Tilt 20, CullDistance 60), Moss (Density 1.5, Footprint 0.3, Patch 10, Coverage 0.4, KeepOutOf [Spires], CullDistance 40); then `volume.create` Volume `CrystalField`, Cover the landscape. If the estimated total (Density x growing area, per species) passes 1,000,000, ask me before generating.\n3. hyper_operation_wait for per-mesh counts; hyper_pcg_scatter_inspect the graph for its recipes.\n4. hyper_capture_view (Source transform) one shot at 1.8 m among the spires and one aerial shot 150 m up. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: every species has instances; spires lean at varied angles with bases sunk (no floating); clusters read as clumps; spire count within 50% of 0.006 x the layer's area x 0.5. Show each picture on its own line."
+  },
+  {
+   "id": "pcg-foliage.add-species-to-ecosystem",
+   "title": "Add an understorey species to an existing ecosystem",
+   "summary": "Add one species to a biome of an ecosystem in its big-to-small place, regrow it, and prove the species before it kept their exact counts.",
+   "packs": [
+    "pcg",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_pcg_scatter_inspect",
+    "hyper_project_search",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "ecosystem.set",
+    "volume.generate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pcg",
+    "ecosystem",
+    "species",
+    "understorey",
+    "mushrooms",
+    "ecosystem.set"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "PCGVolume"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "species",
+     "label": "Species name",
+     "default": "Mushrooms"
+    },
+    {
+     "name": "biome",
+     "label": "Biome",
+     "default": "Forest"
+    },
+    {
+     "name": "mesh",
+     "label": "Mesh",
+     "default": "/Game/Env/SM_Mushroom"
+    },
+    {
+     "name": "density",
+     "label": "Density (clumps per m2)",
+     "default": "0.01"
+    },
+    {
+     "name": "footprint",
+     "label": "Footprint (m)",
+     "default": "0.4"
+    },
+    {
+     "name": "cluster",
+     "label": "Per clump",
+     "default": "6"
+    }
+   ],
+   "prompt": "Add a species `{{species}}` to biome `{{biome}}` of the ecosystem the PCG volume {{selected_actor}} runs, using {{mesh}}, and leave every other species as it is. If the PCG pack is off, say so and stop.\n1. hyper_pcg_scatter_inspect with no Graph for the volume's graph and count, then with that Graph: keep its Ecosystem op and each mesh's count. Stop if there is no Ecosystem op or no biome `{{biome}}`. If {{mesh}} is not a static mesh, hyper_project_search for one and say which you used.\n2. Species run big to small, each keeping out of the room of those before it unless KeepOutOf says otherwise. Insert `{{species}}` by size: Meshes [{{mesh}}], Density {{density}} (clumps per square meter), Footprint {{footprint}}, Cluster {{cluster}}, ClusterRadius 1.5, Sink 5, CullDistance 60, KeepOutOf the earlier species it must not overlap (rocks and logs, not the canopy above it).\n3. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `ecosystem.set` with the whole op sent back plus the new species, then `volume.generate`.\n4. hyper_operation_wait for per-mesh counts; hyper_pcg_scatter_inspect the Graph again to read `{{species}}` back.\n5. hyper_capture_view (Source transform) one shot at 1.7 m where `{{biome}}` grows and one from 15 m up. If hyper_capture_view is unavailable, say so.\n6. Leave the level unsaved. Report a PASS/FAIL table: `{{species}}` reads back and has instances; meshes of species listed before it keep exactly their counts; species after it within 15% of before; clumps of about {{cluster}} in the pictures. Show each picture on its own line."
+  }
+ ]
+}

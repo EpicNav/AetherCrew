@@ -1,0 +1,828 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "anim-blueprints",
+ "presets": [
+  {
+   "id": "anim-blueprints.idle-move-locomotion",
+   "title": "Create an idle-to-move locomotion Animation Blueprint",
+   "summary": "A new Animation Blueprint for a skeleton: Speed driven every frame, Idle and Move states with a 10/5 hysteresis gap, compiled clean.",
+   "packs": [
+    "anim_blueprint",
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_animation_inspect",
+    "hyper_anim_blueprint_apply_plan",
+    "hyper_operation_wait",
+    "hyper_anim_blueprint_inspect",
+    "hyper_anim_blueprint_validate"
+   ],
+   "ops": [
+    "bind_variable",
+    "add_variable",
+    "add_state_machine",
+    "add_state",
+    "add_transition"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "animation blueprint",
+    "locomotion",
+    "state machine",
+    "idle",
+    "walk",
+    "run",
+    "third person"
+   ],
+   "placeholders": [
+    {
+     "name": "abp_name",
+     "label": "Animation Blueprint name",
+     "default": "ABP_Hero"
+    },
+    {
+     "name": "skeleton",
+     "label": "Skeleton",
+     "default": "/Game/Characters/Mannequins/Meshes/SK_Mannequin.SK_Mannequin"
+    },
+    {
+     "name": "idle_clip",
+     "label": "Idle clip",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle.MM_Idle"
+    },
+    {
+     "name": "move_blend_space",
+     "label": "Move blend space",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/BS_Idle_Walk_Run.BS_Idle_Walk_Run",
+     "hint": "1D on Speed, or 2D on Direction and Speed like the template's BS_Idle_Walk_Run."
+    }
+   ],
+   "prompt": "Create {{content_folder}}/Animation/{{abp_name}}.{{abp_name}} for {{skeleton}}, following .hyperai/docs/HyperAIStudio-AnimationCookbook.md sections 2-3. If the anim_blueprint or animation_rigging pack is off, say so and stop.\n1. hyper_memory_recall animation conventions. hyper_project_search for {{abp_name}} (if it exists, stop and ask) and confirm {{idle_clip}} and {{move_blend_space}} exist. hyper_animation_inspect the blend space's axes: the template's BS_Idle_Walk_Run is 2D, X Direction (-180 to 180) and Y Speed (0 to 600).\n2. One hyper_anim_blueprint_apply_plan with bCreate true, SkeletonPath {{skeleton}} and these ops: bind_variable Speed = speed; for a 2D blend space also add_variable Direction, Value float; add_state_machine Locomotion; add_state Idle (Asset {{idle_clip}}); add_state Move (Asset {{move_blend_space}}, XVariable and YVariable in its axis order, or XVariable Speed alone if it is 1D); add_transition Idle to Move, Rule `Speed > 10`, Value 0.2; add_transition Move to Idle, Rule `Speed < 5`, Value 0.25. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_anim_blueprint_inspect it (bLoad true) and hyper_anim_blueprint_validate it.\n4. Report a PASS/FAIL table: CompileStatus up_to_date, Speed driven by speed, Locomotion drives the output, Idle is the entry state, two transitions with the 10/5 gap and their blends, 0 errors and no no_hysteresis, instant_blend or skeleton_mismatch. With a 2D blend space, never_set on Direction is WARN: it reads 0 (forward) until the event graph sets it with Calculate Direction."
+  },
+  {
+   "id": "anim-blueprints.jump-fall-land-states",
+   "title": "Add jump, fall and land states to an Anim Blueprint",
+   "summary": "Drive IsFalling every frame and add Fall and a play-once Land state with the cookbook's rules and blends, then prove it in a jump.",
+   "packs": [
+    "anim_blueprint"
+   ],
+   "skills": [
+    "unreal-animation",
+    "unreal-playtest"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_anim_blueprint_inspect",
+    "hyper_anim_blueprint_apply_plan",
+    "hyper_operation_wait",
+    "hyper_anim_blueprint_validate",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "bind_variable",
+    "add_state",
+    "add_transition"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "animation blueprint",
+    "jump",
+    "fall",
+    "land",
+    "state machine",
+    "platformer",
+    "playtest"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "machine",
+     "label": "State machine",
+     "default": "Locomotion"
+    },
+    {
+     "name": "fall_clip",
+     "label": "Fall loop clip",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Fall_Loop.MM_Fall_Loop"
+    },
+    {
+     "name": "land_clip",
+     "label": "Land clip",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Land.MM_Land"
+    },
+    {
+     "name": "jump_action",
+     "label": "Jump input action",
+     "default": "IA_Jump"
+    }
+   ],
+   "prompt": "Add jumping to the Animation Blueprint {{selected_asset}}, per the cookbook's locomotion table. If the anim_blueprint pack is off, say so and stop.\n1. hyper_anim_blueprint_inspect it (bLoad true): Revision, variables (a float Speed is required) and machine `{{machine}}` with Idle and Move states. Stop if any is missing.\n2. One hyper_anim_blueprint_apply_plan with ExpectedRevision, all in `{{machine}}`: bind_variable IsFalling = is_falling; add_state Fall (Asset {{fall_clip}}); add_state Land (Asset {{land_clip}}, Value once); add_transition Idle to Fall and Move to Fall, Rule `IsFalling`, Value 0.15; Fall to Land, `!IsFalling`, 0.1; Land to Idle, `time_remaining < 0.2`, 0.2; Land to Move, `Speed > 10 && !IsFalling`, 0.15. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_anim_blueprint_validate it and inspect it again.\n4. If the player character in {{level}} uses this Blueprint, hyper_playtest_run (Mode StartInProcess, bRecordVideo true): Press {{jump_action}}, Wait 0.25 s, Capture `airborne`, Wait 1.5 s, Capture `landed`; hyper_operation_wait, then hyper_playtest_status, and open the captures. Otherwise mark it INFO.\n5. Report a PASS/FAIL table: 4 states, the 5 new transitions with these rules and blends, Land exits by time_remaining (no frozen_pose), compile up_to_date, 0 errors; then each capture and the video on its own line."
+  },
+  {
+   "id": "anim-blueprints.stealth-crouch-states",
+   "title": "Add crouch idle and crouch walk for a stealth character",
+   "summary": "Drive IsCrouching, add crouch states with soft blends and rules that never compete, keeping the Speed hysteresis gap.",
+   "packs": [
+    "anim_blueprint"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_anim_blueprint_inspect",
+    "hyper_project_search",
+    "hyper_anim_blueprint_apply_plan",
+    "hyper_operation_wait",
+    "hyper_anim_blueprint_validate"
+   ],
+   "ops": [
+    "bind_variable",
+    "add_state",
+    "add_transition",
+    "remove_transition"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "animation blueprint",
+    "crouch",
+    "stealth",
+    "state machine",
+    "sneak"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "machine",
+     "label": "State machine",
+     "default": "Locomotion"
+    },
+    {
+     "name": "crouch_idle",
+     "label": "Crouch idle clip",
+     "default": "/Game/Characters/Stealth/Anims/Crouch_Idle.Crouch_Idle",
+     "hint": "A looping sequence on the Blueprint's skeleton."
+    },
+    {
+     "name": "crouch_move",
+     "label": "Crouch walk blend space",
+     "default": "/Game/Characters/Stealth/Anims/BS_Crouch_Walk.BS_Crouch_Walk",
+     "hint": "A 1D blend space on Speed."
+    }
+   ],
+   "prompt": "Add crouching to {{selected_asset}} for a stealth character. If the anim_blueprint pack is off, say so and stop.\n1. hyper_anim_blueprint_inspect it (bLoad true): Revision, variables (a float Speed is required), machine `{{machine}}` with Idle and Move. hyper_project_search confirms {{crouch_idle}} and {{crouch_move}} exist; stop if not.\n2. One hyper_anim_blueprint_apply_plan with ExpectedRevision, all in `{{machine}}`: bind_variable IsCrouching = is_crouching; add_state CrouchIdle (Asset {{crouch_idle}}); add_state CrouchMove (Asset {{crouch_move}}, XVariable Speed); add_transition Idle to CrouchIdle and Move to CrouchMove, Rule `IsCrouching`, Value 0.25; CrouchIdle to Idle and CrouchMove to Move, `!IsCrouching`, 0.25; CrouchIdle to CrouchMove, `Speed > 10`, 0.2; CrouchMove to CrouchIdle, `Speed < 5`, 0.25; and remove_transition then add_transition Idle to Move as `Speed > 10 && !IsCrouching` with its old blend, so rules from one state never compete. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_anim_blueprint_validate it and inspect it again.\n4. Report a PASS/FAIL table: IsCrouching driven by is_crouching, both new states reachable, the 6 new transitions and the changed Idle to Move rule, the 10/5 Speed gap kept (no no_hysteresis), no unbound_axis, compile up_to_date, 0 errors."
+  },
+  {
+   "id": "anim-blueprints.upper-body-attack-slot",
+   "title": "Play attacks on the upper body while the legs keep running",
+   "summary": "Add an UpperBody layered slot from spine_01, a full-body DefaultSlot and an Inertialization node, adding the skeleton slot if missing.",
+   "packs": [
+    "anim_blueprint",
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_anim_blueprint_inspect",
+    "hyper_animation_inspect",
+    "hyper_animation_apply_plan",
+    "hyper_anim_blueprint_apply_plan",
+    "hyper_operation_wait",
+    "hyper_anim_blueprint_validate"
+   ],
+   "ops": [
+    "skeleton.add_slot",
+    "add_layered_slot",
+    "add_slot",
+    "add_inertialization",
+    "montage.set_property"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "animation blueprint",
+    "montage",
+    "slot",
+    "upper body",
+    "layered blend",
+    "melee",
+    "fantasy"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "slot",
+     "label": "Upper-body slot",
+     "default": "UpperBody"
+    },
+    {
+     "name": "bone",
+     "label": "Layer starts at bone",
+     "default": "spine_01"
+    },
+    {
+     "name": "attack_montage",
+     "label": "Attack montage to move into the slot",
+     "default": "/Game/Combat/AM_SwordCombo.AM_SwordCombo",
+     "hint": "Optional; skipped when it does not exist."
+    }
+   ],
+   "prompt": "Let montages play over locomotion in {{selected_asset}}: attacks in slot `{{slot}}` on the upper body from `{{bone}}` up, full-body moves in `DefaultSlot`. If the anim_blueprint or animation_rigging pack is off, say so and stop.\n1. hyper_anim_blueprint_inspect it (bLoad true): Revision, skeleton and OutputChain; a state machine must already drive the output. hyper_animation_inspect the skeleton: its slots, and that bone `{{bone}}` exists.\n2. If `{{slot}}` is missing: one hyper_animation_apply_plan on the skeleton (bDryRun false, fresh OperationId, ExpectedRevision from that inspect) with skeleton.add_slot.\n3. One hyper_anim_blueprint_apply_plan with ExpectedRevision, in this order: add_layered_slot Name `{{slot}}` Value `{{bone}}`; add_slot `DefaultSlot` unless OutputChain has it; add_inertialization unless present. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n4. If {{attack_montage}} exists and plays another slot: one hyper_animation_apply_plan on it (bDryRun false, fresh OperationId, ExpectedRevision from hyper_animation_inspect) with montage.set_property slot `{{slot}}`.\n5. hyper_anim_blueprint_validate and inspect the Blueprint again.\n6. Report a PASS/FAIL table: OutputChain starts at Inertialization and holds Slot DefaultSlot and Layered blend per bone (slot {{slot}} from {{bone}}), DefaultSlot nearer the output (INFO if an older DefaultSlot sits deeper); no unknown_slot, duplicate_slot, empty_blend_layer or unused_cached_pose; compile up_to_date; 0 errors."
+  },
+  {
+   "id": "anim-blueprints.inertialized-transitions",
+   "title": "Smooth big pose changes with inertialization blends",
+   "summary": "Add an Inertialization node and switch the stop and landing transitions to inertialization, so large pose changes stop popping.",
+   "packs": [
+    "anim_blueprint"
+   ],
+   "skills": [
+    "unreal-animation",
+    "unreal-playtest"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_anim_blueprint_inspect",
+    "hyper_anim_blueprint_apply_plan",
+    "hyper_operation_wait",
+    "hyper_anim_blueprint_validate",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "add_inertialization",
+    "set_transition_blend"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "animation blueprint",
+    "inertialization",
+    "blending",
+    "popping",
+    "transitions",
+    "playtest"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "transitions",
+     "label": "Transitions to inertialize",
+     "default": "Locomotion: Move to Idle, Fall to Land, Land to Idle",
+     "hint": "Machine: From to To, comma separated."
+    },
+    {
+     "name": "move_action",
+     "label": "Move input action",
+     "default": "IA_Move"
+    }
+   ],
+   "prompt": "In {{selected_asset}}, blend these transitions by inertialization instead of crossfade: {{transitions}}. If the anim_blueprint pack is off, say so and stop.\n1. hyper_anim_blueprint_inspect it (bLoad true): Revision, OutputChain, and each transition's BlendTime and BlendLogic. Drop any listed transition that does not exist and say so.\n2. One hyper_anim_blueprint_apply_plan with ExpectedRevision: add_inertialization if OutputChain has no Inertialization node, then set_transition_blend Value inertialization for each listed transition (Machine, Name the source state, To). Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_anim_blueprint_validate it and inspect it again.\n4. If the player character in {{level}} uses this Blueprint, hyper_playtest_run (Mode StartInProcess, bRecordVideo true): Hold {{move_action}} value 0,1 for 2 s, Wait 0.5 s, Capture the stop, Jump, Capture the landing; hyper_operation_wait, then hyper_playtest_status, and open the captures. Otherwise mark the play check INFO.\n5. Report a PASS/FAIL table: Inertialization first in OutputChain, each listed transition's BlendLogic inertialization, no inertialization_missing, instant_blend or slow_blend, compile up_to_date; then each capture and the video on its own line."
+  },
+  {
+   "id": "anim-blueprints.linked-weapon-anim-layers",
+   "title": "Set up linked anim layers for per-weapon locomotion",
+   "summary": "Create an Animation Layer Interface, implement it in the main Blueprint with its current clips, play layers from states and add a rifle layer.",
+   "packs": [
+    "anim_blueprint"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_anim_blueprint_inspect",
+    "hyper_project_search",
+    "hyper_anim_blueprint_apply_plan",
+    "hyper_operation_wait",
+    "hyper_anim_blueprint_validate"
+   ],
+   "ops": [
+    "add_layer",
+    "implement_interface",
+    "set_layer_asset",
+    "set_state_layer",
+    "bind_variable"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "animation blueprint",
+    "linked anim layers",
+    "weapons",
+    "shooter",
+    "Lyra",
+    "interface"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "interface_name",
+     "label": "Layer interface name",
+     "default": "ALI_ItemLayers"
+    },
+    {
+     "name": "weapon",
+     "label": "Weapon",
+     "default": "Rifle"
+    },
+    {
+     "name": "weapon_idle",
+     "label": "Weapon idle clip",
+     "default": "/Game/Characters/Mannequins/Anims/Rifle/MF_Rifle_Idle_ADS.MF_Rifle_Idle_ADS"
+    },
+    {
+     "name": "weapon_move",
+     "label": "Weapon move blend space",
+     "default": "/Game/Characters/Mannequins/Anims/Rifle/BS_Rifle_Jog.BS_Rifle_Jog",
+     "hint": "A 1D Speed blend space on the same skeleton."
+    }
+   ],
+   "prompt": "Move {{selected_asset}}'s Idle and Move animation into linked anim layers (cookbook section 9) and add a {{weapon}} layer. If the anim_blueprint pack is off, say so and stop.\n1. hyper_anim_blueprint_inspect it (bLoad true): Revision, skeleton, the Locomotion states Idle and Move and what they play. hyper_project_search that {{interface_name}} and ABP_{{weapon}}Layers do not exist yet, and that {{weapon_idle}} and {{weapon_move}} do; stop if either is missing.\n2. Plan 1 creates {{content_folder}}/Animation/{{interface_name}}.{{interface_name}} (bCreate true, ParentClassPath /Script/Engine.AnimLayerInterface, no SkeletonPath): add_layer FullBody_Idle and FullBody_Move.\n3. Plan 2 on the main Blueprint (ExpectedRevision): implement_interface (Asset the interface); set_layer_asset FullBody_Idle and FullBody_Move to the assets Idle and Move play now, with the same XVariable and YVariable; set_state_layer Idle to FullBody_Idle and Move to FullBody_Move.\n4. Plan 3 creates {{content_folder}}/Animation/ABP_{{weapon}}Layers.ABP_{{weapon}}Layers on the same skeleton: bind_variable Speed = speed; implement_interface (Asset the interface); set_layer_asset FullBody_Idle {{weapon_idle}} and FullBody_Move {{weapon_move}} with XVariable Speed.\nSend each plan with hyper_anim_blueprint_apply_plan: dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n5. hyper_anim_blueprint_validate all three and inspect them.\n6. Report a PASS/FAIL table: the interface declares 2 layers, both Blueprints implement it, every layer filled, states play their layers, no unknown_layer, empty_anim_layer or no_layers, all up_to_date. Equipping still needs Link Anim Class Layers in gameplay code."
+  },
+  {
+   "id": "anim-blueprints.fix-flicker-and-pops",
+   "title": "Fix flickering states and popping blends in an Anim BP",
+   "summary": "Run the Animation Blueprint checks, then fix shared thresholds, zero or slow blends, frozen one-shot states and unset variables in one plan.",
+   "packs": [
+    "anim_blueprint"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "tools": [
+    "hyper_anim_blueprint_inspect",
+    "hyper_anim_blueprint_validate",
+    "hyper_anim_blueprint_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "remove_transition",
+    "add_transition",
+    "bind_variable"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "animation blueprint",
+    "repair",
+    "hysteresis",
+    "blend times",
+    "flicker",
+    "popping",
+    "validate"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "gap",
+     "label": "Threshold gap",
+     "default": "5",
+     "hint": "How far below the entering threshold the leaving one sits."
+    }
+   ],
+   "prompt": "Repair {{selected_asset}} so its states stop flickering and its blends stop popping. If the anim_blueprint pack is off, say so and stop.\n1. hyper_anim_blueprint_inspect it (bLoad true), then hyper_anim_blueprint_validate it: Revision, variables with their drivers, and every transition's rule, BlendTime and BlendLogic. List the issues by code.\n2. One hyper_anim_blueprint_apply_plan with ExpectedRevision that fixes only these: no_hysteresis, remove_transition and add_transition again with the leaving threshold {{gap}} below the entering one (for example `Speed > 10` in, `Speed < 5` out); instant_blend, re-add with 0.2 s (0.1 into landings); slow_blend, re-add with 0.25 s; frozen_pose, add_transition from that state to its usual next state with `time_remaining < 0.2`; never_set on Speed, IsFalling or IsCrouching, bind_variable to speed, is_falling or is_crouching. Keep every other rule exactly as it was, and skip transitions whose Rule reads (custom), which cannot be re-added. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_anim_blueprint_validate it again.\n4. Report a table of each issue before and after (PASS when gone), each changed transition's old and new rule and blend, and the compile status. Leave issues this cannot fix as WARN with the reason."
+  },
+  {
+   "id": "anim-blueprints.swap-state-assets",
+   "title": "Swap the clips an Animation Blueprint's states play",
+   "summary": "Point named states at new sequences or blend spaces, such as retargeted clips, without touching rules, then prove nothing else changed.",
+   "packs": [
+    "anim_blueprint"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "tools": [
+    "hyper_anim_blueprint_inspect",
+    "hyper_project_search",
+    "hyper_anim_blueprint_apply_plan",
+    "hyper_operation_wait",
+    "hyper_anim_blueprint_validate"
+   ],
+   "ops": [
+    "set_state_asset"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "animation blueprint",
+    "swap",
+    "retarget",
+    "states",
+    "clips"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "swaps",
+     "label": "State to asset swaps",
+     "default": "Locomotion.Idle = /Game/Characters/Mannequins/Anims/Rifle/MF_Rifle_Idle_ADS.MF_Rifle_Idle_ADS",
+     "hint": "Machine.State = asset object path, separated by semicolons."
+    }
+   ],
+   "prompt": "In {{selected_asset}}, make these states play new assets: {{swaps}}. If the anim_blueprint pack is off, say so and stop.\n1. hyper_anim_blueprint_inspect it (bLoad true): Revision, skeleton, and each machine's states with Player, Asset and axis variables. hyper_project_search each new asset and stop on any that is missing.\n2. One hyper_anim_blueprint_apply_plan with ExpectedRevision: set_state_asset per swap (Machine, Name, Asset; for a blend space, XVariable and YVariable naming float variables, keeping the state's current ones). Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_anim_blueprint_inspect and hyper_anim_blueprint_validate it again, and compare with step 1.\n4. Report a PASS/FAIL table: each swapped state's new asset; every other state, transition and variable unchanged; no skeleton_mismatch or unbound_axis; compile up_to_date; 0 errors."
+  },
+  {
+   "id": "anim-blueprints.prune-dead-states",
+   "title": "Prune unreachable and dead-end states safely",
+   "summary": "Find states nothing reaches or nothing leaves, then remove or reconnect them after a dry run, and re-check every machine.",
+   "packs": [
+    "anim_blueprint"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "tools": [
+    "hyper_anim_blueprint_inspect",
+    "hyper_anim_blueprint_validate",
+    "hyper_memory_recall",
+    "hyper_anim_blueprint_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "remove_state",
+    "add_transition",
+    "set_entry_state"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "animation blueprint",
+    "cleanup",
+    "unreachable",
+    "dead end",
+    "state machine"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "fallback_state",
+     "label": "State to return to",
+     "default": "Idle"
+    }
+   ],
+   "prompt": "Clean up the state machines in {{selected_asset}}. If the anim_blueprint pack is off, say so and stop.\n1. hyper_anim_blueprint_inspect it (bLoad true), then hyper_anim_blueprint_validate it: Revision, and the unreachable_state, dead_end, empty_state and no_entry issues with each state's transitions. hyper_memory_recall whether any of these states are work in progress; keep those.\n2. Decide per state: remove an unreachable state; give a dead end an exit to {{fallback_state}} (`time_remaining < 0.2` from a state that plays once, otherwise the opposite of the rule that entered it); set {{fallback_state}} as the entry where a machine has none.\n3. One hyper_anim_blueprint_apply_plan with ExpectedRevision: remove_state, add_transition and set_entry_state as decided. It deletes, so read the dry run's report before you resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to its PlanHash (hyper_operation_wait only if it waits for approval). Keep bSave false.\n4. hyper_anim_blueprint_validate it and inspect it again.\n5. Report a table: state, issue, action (removed, exit added, entry set, kept), PASS when its issue is gone; then compile status and the state count before and after."
+  },
+  {
+   "id": "anim-blueprints.quadruped-gait-abp",
+   "title": "Animate a quadruped creature's walk, trot and gallop",
+   "summary": "Build a Speed blend space from a creature's gait clips at their real speeds, then an Animation Blueprint with idle and gait states.",
+   "packs": [
+    "anim_blueprint",
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_animation_inspect",
+    "hyper_animation_apply_plan",
+    "hyper_operation_wait",
+    "hyper_anim_blueprint_apply_plan",
+    "hyper_animation_validate",
+    "hyper_anim_blueprint_validate",
+    "hyper_anim_blueprint_inspect"
+   ],
+   "ops": [
+    "blend_space.create",
+    "blend_space.set_axis",
+    "blend_space.set_samples",
+    "bind_variable",
+    "add_state_machine",
+    "add_state",
+    "add_transition"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "creature",
+    "quadruped",
+    "wolf",
+    "gait",
+    "blend space",
+    "animation blueprint",
+    "fantasy"
+   ],
+   "placeholders": [
+    {
+     "name": "creature",
+     "label": "Creature",
+     "default": "Wolf"
+    },
+    {
+     "name": "skeleton",
+     "label": "Creature skeleton",
+     "default": "/Game/Creatures/Wolf/SK_Wolf.SK_Wolf"
+    },
+    {
+     "name": "anim_folder",
+     "label": "Gait clips folder",
+     "default": "/Game/Creatures/Wolf/Anims"
+    },
+    {
+     "name": "walk_speed",
+     "label": "Walk speed (cm/s)",
+     "default": "120"
+    },
+    {
+     "name": "trot_speed",
+     "label": "Trot speed (cm/s)",
+     "default": "350"
+    },
+    {
+     "name": "gallop_speed",
+     "label": "Gallop speed (cm/s)",
+     "default": "800"
+    }
+   ],
+   "prompt": "Animate the {{creature}} on {{skeleton}} with the clips in {{anim_folder}}. If the anim_blueprint or animation_rigging pack is off, say so and stop.\n1. hyper_memory_recall creature notes. hyper_project_search {{anim_folder}} for idle, walk, trot and gallop loops and hyper_animation_inspect them: all on {{skeleton}}. Stop if a gait is missing.\n2. hyper_animation_apply_plan (bDryRun false, fresh OperationId; hyper_operation_wait if it is not completed yet): blend_space.create {{content_folder}}/Creatures/{{creature}}/BS_{{creature}}_Gait.BS_{{creature}}_Gait (ReferencePath {{skeleton}}, bFlag true); blend_space.set_axis AxisIndex 0, Speed, 0 to {{gallop_speed}}; blend_space.set_samples walk at {{walk_speed}}, trot at {{trot_speed}}, gallop at {{gallop_speed}}.\n3. hyper_anim_blueprint_apply_plan with bCreate true, SkeletonPath {{skeleton}}, TargetPath {{content_folder}}/Creatures/{{creature}}/ABP_{{creature}}.ABP_{{creature}}: bind_variable Speed = speed; add_state_machine Locomotion; add_state Idle (the idle clip); add_state Gait (the blend space, XVariable Speed); add_transition Idle to Gait, `Speed > 15`, 0.25; Gait to Idle, `Speed < 8`, 0.3. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n4. hyper_animation_validate the blend space; hyper_anim_blueprint_validate and hyper_anim_blueprint_inspect the Blueprint.\n5. Report a PASS/FAIL table: 3 samples at those speeds, both states reachable, the 15/8 gap, Speed driven, compile up_to_date, 0 errors in both checks."
+  },
+  {
+   "id": "anim-blueprints.village-npc-talk-states",
+   "title": "Give a village NPC idle and talking states",
+   "summary": "A simple NPC Animation Blueprint with an IsTalking flag gameplay sets, Idle and Talk states with soft blends, and an honest warning check.",
+   "packs": [
+    "anim_blueprint"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "tools": [
+    "hyper_project_search",
+    "hyper_anim_blueprint_apply_plan",
+    "hyper_operation_wait",
+    "hyper_anim_blueprint_inspect",
+    "hyper_anim_blueprint_validate"
+   ],
+   "ops": [
+    "add_variable",
+    "add_state_machine",
+    "add_state",
+    "add_transition"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "NPC",
+    "dialogue",
+    "village",
+    "animation blueprint",
+    "talk",
+    "fantasy",
+    "RPG"
+   ],
+   "placeholders": [
+    {
+     "name": "abp_name",
+     "label": "Animation Blueprint name",
+     "default": "ABP_VillageNPC"
+    },
+    {
+     "name": "skeleton",
+     "label": "Skeleton",
+     "default": "/Game/Characters/Mannequins/Meshes/SK_Mannequin.SK_Mannequin"
+    },
+    {
+     "name": "idle_clip",
+     "label": "Idle clip",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle.MM_Idle"
+    },
+    {
+     "name": "talk_clip",
+     "label": "Talking loop clip",
+     "default": "/Game/Characters/NPC/Anims/NPC_Talk_Loop.NPC_Talk_Loop"
+    }
+   ],
+   "prompt": "Create {{content_folder}}/NPC/{{abp_name}}.{{abp_name}} for {{skeleton}}: it idles until gameplay sets IsTalking, then plays a talking loop. If the anim_blueprint pack is off, say so and stop.\n1. hyper_project_search for {{abp_name}} (stop if it exists) and confirm {{idle_clip}} and {{talk_clip}} exist; stop if either is missing.\n2. One hyper_anim_blueprint_apply_plan with bCreate true and SkeletonPath {{skeleton}}: add_variable IsTalking, Value bool; add_state_machine Conversation; add_state Idle ({{idle_clip}}); add_state Talk ({{talk_clip}}); add_transition Idle to Talk, Rule `IsTalking`, Value 0.3; add_transition Talk to Idle, Rule `!IsTalking`, Value 0.4. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_anim_blueprint_inspect it (bLoad true) and hyper_anim_blueprint_validate it.\n4. Report a PASS/FAIL table: compile up_to_date, Conversation drives the output, Idle is the entry, 2 transitions with blends 0.3 and 0.4, 0 errors. Expect exactly one warning, never_set on IsTalking, because gameplay sets it on the anim instance: report it as WARN, and any other warning as FAIL."
+  },
+  {
+   "id": "anim-blueprints.playtest-tune-locomotion",
+   "title": "Playtest locomotion and tune its transition blends",
+   "summary": "Run the character in play, capture starts, stops and landings on video, then retune any blend or threshold that pops or flickers.",
+   "packs": [
+    "anim_blueprint"
+   ],
+   "skills": [
+    "unreal-animation",
+    "unreal-playtest"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_anim_blueprint_inspect",
+    "hyper_anim_blueprint_validate",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status",
+    "hyper_anim_blueprint_apply_plan"
+   ],
+   "ops": [
+    "remove_transition",
+    "add_transition"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "playtest",
+    "animation blueprint",
+    "tuning",
+    "blend times",
+    "video",
+    "third person"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "move_action",
+     "label": "Move input action",
+     "default": "IA_Move"
+    }
+   ],
+   "prompt": "Playtest {{selected_asset}} on the player character in {{level}} and tune its transitions. If the anim_blueprint pack is off, say so and stop.\n1. hyper_anim_blueprint_inspect it (bLoad true) and hyper_anim_blueprint_validate it: note every transition's rule and blend. If the player character does not use this Blueprint, stop and say so.\n2. hyper_playtest_run (Mode StartInProcess, bRecordVideo true): Survey; Hold {{move_action}} value 0,1 for 3 s with bBackground true; Wait 1 s; Sample the Player's Speed for 1 s; Capture `running`; Wait 1.3 s; Capture `stopping`; Jump; Capture `landed`. hyper_operation_wait on its OperationId, then hyper_playtest_status for the evidence. Open every capture.\n3. Judge each moment: a T-pose, a one-frame snap, flicker between states or feet sliding at the sampled speed is a FAIL. For each FAIL a transition causes, one hyper_anim_blueprint_apply_plan with ExpectedRevision: remove_transition, then add_transition with the same rule (not one inspect shows as (custom); report that WARN) and a better blend (0.15-0.25 s locomotion, 0.1 into landings, 0.2-0.3 into stops) or a wider threshold gap. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false. Then play once more.\n4. Report a PASS/FAIL table per moment before and after, the sampled speed, and each changed transition (old to new); then each capture and the video on its own line."
+  },
+  {
+   "id": "anim-blueprints.hit-reaction-montage",
+   "title": "Play hit reactions over everything with a full-body slot",
+   "summary": "Build a hit-react montage with Light, Medium, Heavy and Back sections, and make sure the Blueprint's DefaultSlot and inertialization play it.",
+   "packs": [
+    "anim_blueprint",
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_anim_blueprint_inspect",
+    "hyper_project_search",
+    "hyper_animation_inspect",
+    "hyper_animation_apply_plan",
+    "hyper_operation_wait",
+    "hyper_anim_blueprint_apply_plan",
+    "hyper_animation_validate",
+    "hyper_anim_blueprint_validate"
+   ],
+   "ops": [
+    "montage.create",
+    "montage.set_segments",
+    "montage.rename_section",
+    "montage.add_section",
+    "montage.link_sections",
+    "montage.set_property",
+    "add_slot",
+    "add_inertialization"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "hit reaction",
+    "montage",
+    "combat",
+    "DefaultSlot",
+    "animation blueprint",
+    "shooter"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "react_folder",
+     "label": "Hit reaction clips folder",
+     "default": "/Game/Characters/Mannequins/Anims/Rifle/HitReact"
+    },
+    {
+     "name": "montage_name",
+     "label": "Montage name",
+     "default": "AM_HitReact"
+    }
+   ],
+   "prompt": "Make hit reactions play over everything on the character that uses {{selected_asset}}. If the anim_blueprint or animation_rigging pack is off, say so and stop.\n1. hyper_anim_blueprint_inspect it (bLoad true): Revision, skeleton, OutputChain. hyper_project_search {{react_folder}} for a light, a medium and a heavy front reaction and a back reaction; hyper_animation_inspect them: same skeleton, lengths.\n2. One hyper_animation_apply_plan on {{content_folder}}/Combat/{{montage_name}}.{{montage_name}} only (bDryRun false, fresh OperationId; hyper_operation_wait if it is not completed yet): montage.create (ReferencePath the light clip, Name DefaultSlot); montage.set_segments with the four clips; montage.rename_section Default to Light; montage.add_section Medium, Heavy and Back where each clip begins in the montage; montage.link_sections on all four with no SecondaryName, so each plays alone; montage.set_property blend_in 0.05 and blend_out 0.2.\n3. If OutputChain lacks Slot DefaultSlot or an Inertialization node: one hyper_anim_blueprint_apply_plan with ExpectedRevision, add_slot DefaultSlot then add_inertialization, each only if missing. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n4. hyper_animation_validate the montage; hyper_anim_blueprint_validate the Blueprint.\n5. Report a PASS/FAIL table: 4 sections where each clip begins, unlinked, DefaultSlot in OutputChain, Inertialization at the output, 0 errors in both checks. Gameplay picks the section when it plays the montage; do not edit gameplay."
+  },
+  {
+   "id": "anim-blueprints.new-weapon-layer-blueprint",
+   "title": "Add a new weapon's anim layer Blueprint",
+   "summary": "Create a layer Blueprint for one more weapon that implements the project's Animation Layer Interface and fills every layer, ready to link.",
+   "packs": [
+    "anim_blueprint"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_anim_blueprint_inspect",
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_anim_blueprint_apply_plan",
+    "hyper_operation_wait",
+    "hyper_anim_blueprint_validate"
+   ],
+   "ops": [
+    "bind_variable",
+    "implement_interface",
+    "set_layer_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "linked anim layers",
+    "weapon",
+    "pistol",
+    "shooter",
+    "animation blueprint",
+    "interface"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "weapon",
+     "label": "Weapon",
+     "default": "Pistol"
+    },
+    {
+     "name": "skeleton",
+     "label": "Skeleton",
+     "default": "/Game/Characters/Mannequins/Meshes/SK_Mannequin.SK_Mannequin"
+    },
+    {
+     "name": "idle_asset",
+     "label": "Weapon idle clip",
+     "default": "/Game/Characters/Mannequins/Anims/Pistol/MF_Pistol_Idle_ADS.MF_Pistol_Idle_ADS"
+    },
+    {
+     "name": "move_asset",
+     "label": "Weapon move blend space",
+     "default": "/Game/Characters/Mannequins/Anims/Pistol/BS_Pistol_Jog.BS_Pistol_Jog",
+     "hint": "A 1D Speed blend space on the same skeleton."
+    }
+   ],
+   "prompt": "Add a {{weapon}} layer Blueprint for the Animation Layer Interface {{selected_asset}}. If the anim_blueprint pack is off, say so and stop.\n1. hyper_anim_blueprint_inspect the interface (bLoad true): its Layers. hyper_memory_recall how weapon layers are named here, and hyper_project_search an existing ABP_*Layers to see which layers carry idle and move. Confirm {{idle_asset}} and {{move_asset}} exist; stop if either is missing.\n2. One hyper_anim_blueprint_apply_plan with bCreate true, SkeletonPath {{skeleton}}, TargetPath {{content_folder}}/Animation/ABP_{{weapon}}Layers.ABP_{{weapon}}Layers: bind_variable Speed = speed; implement_interface Asset {{selected_asset}}; set_layer_asset the idle layer to {{idle_asset}} and the move layer to {{move_asset}} with XVariable Speed; fill every other declared layer with what the existing layer Blueprint plays there, so none is empty. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_anim_blueprint_validate it and hyper_anim_blueprint_inspect it.\n4. Report a PASS/FAIL table: implements the interface, each layer and what plays in it, no empty_anim_layer or skeleton_mismatch, compile up_to_date, 0 errors. Equipping the {{weapon}} links it with Link Anim Class Layers in gameplay code."
+  }
+ ]
+}

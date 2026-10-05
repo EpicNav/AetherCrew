@@ -1,0 +1,437 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "world-partition",
+ "presets": [
+  {
+   "id": "world-partition.audit-streaming-setup",
+   "title": "Audit this level's World Partition streaming setup",
+   "summary": "Grids, data layers, HLOD layers, always-loaded actors and loaded regions, with worldbuilding issues and what to fix first.",
+   "packs": [
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_world_partition_inspect",
+    "hyper_worldbuilding_inspect",
+    "hyper_worldbuilding_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "world partition",
+    "streaming",
+    "audit",
+    "data layers",
+    "hlod",
+    "open world",
+    "always loaded"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "always_loaded_limit",
+     "label": "Always-loaded limit",
+     "default": "50"
+    }
+   ],
+   "prompt": "Audit how {{level}} streams and tell me what to fix first. Change nothing.\n1. hyper_world_partition_inspect with bActors true and bSettings true. If bWorldPartition is false, say the level is not World Partition and stop.\n2. Report RuntimeHash; each runtime grid with its cell size and loading range (cm); the default HLOD layer; each data layer with its type, initial runtime state, and loaded and total actors; each HLOD layer with its type, cell size and actors; Actors, LoadedActors, AlwaysLoaded with the always-loaded labels; HLODActors; and the loaded Regions.\n3. hyper_worldbuilding_inspect with Variants world_partition, data_layer, hlod and landscape for the records and their revisions, then hyper_worldbuilding_validate over the same variants for issues.\n4. Flag: more than {{always_loaded_limit}} always-loaded actors, or meshes and props among them; runtime data layers with no actors; HLOD layers with no actors; HLODActors 0 while HLOD layers exist (quote inspect's BuildHLODs); a grid whose LoadingRange is under twice its CellSize.\nEnd with a PASS/FAIL table of each check with its number, then the always-loaded actors that should stream instead, then the next three fixes."
+  },
+  {
+   "id": "world-partition.destroyed-state-data-layer",
+   "title": "Put a destroyed version of an area on a runtime data layer",
+   "summary": "Make a runtime data layer that starts unloaded, move the selected wreckage actors onto it, and prove the counts and states.",
+   "packs": [
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_world_partition_inspect",
+    "hyper_world_partition_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "data_layer.create",
+    "data_layer.add_actors"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "data layers",
+    "runtime",
+    "world state",
+    "destruction",
+    "quest",
+    "streaming",
+    "world partition"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "layer_name",
+     "label": "Data layer name",
+     "default": "Village_Destroyed"
+    },
+    {
+     "name": "initial_state",
+     "label": "Initial runtime state",
+     "default": "Unloaded",
+     "hint": "Unloaded, Loaded or Activated when play starts."
+    }
+   ],
+   "prompt": "Put the destroyed version of this area of {{level}} on its own runtime data layer, so the game can swap it in later:\n{{selected_actors}}\n1. hyper_world_partition_inspect: confirm bWorldPartition, list the data layers, and check none is named {{layer_name}}. If the level is not World Partition, say so and stop.\n2. One hyper_world_partition_apply_plan with bDryRun false and a fresh OperationId: data_layer.create DataLayer {{layer_name}}, Type Runtime, InitialRuntimeState {{initial_state}}, Asset {{content_folder}}/DataLayers/{{layer_name}}; then data_layer.add_actors DataLayer {{layer_name}} with the labels above. If the status is awaiting_user_approval, hyper_operation_wait with that OperationId and bWaitThroughApproval true. The new data layer asset is saved; leave the level unsaved.\n3. hyper_world_partition_inspect again.\nEnd with a PASS/FAIL table: {{layer_name}} exists as Runtime with InitialRuntimeState {{initial_state}}, its Actors count equals the number of labels given, every label is on it (name any that are not), no other data layer changed. Then one line on how game code activates it at runtime, by setting the layer's runtime state to Activated."
+  },
+  {
+   "id": "world-partition.always-loaded-managers",
+   "title": "Keep game managers always loaded and stream the rest",
+   "summary": "Mark the selected managers always loaded, and return scenery wrongly marked always loaded to distance streaming.",
+   "packs": [
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_world_partition_inspect",
+    "hyper_world_partition_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "actors.set"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "always loaded",
+    "managers",
+    "streaming",
+    "memory",
+    "world partition",
+    "spatially loaded"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "keep_classes",
+     "label": "Also keep loaded",
+     "default": "GameMode, managers, level scripting, sky and sun",
+     "hint": "Kinds of actor that must stay always loaded besides the selection."
+    }
+   ],
+   "prompt": "In {{level}}, keep these managers always loaded so they exist wherever the player is, and stream everything that does not need to be global:\n{{selected_actors}}\n1. hyper_world_partition_inspect with bActors true: AlwaysLoaded and the always-loaded labels. If bWorldPartition is false, say the level is not World Partition and stop.\n2. From that list, pick the scenery that should stream by distance: static meshes, foliage, props, buildings and decals. Keep {{keep_classes}} always loaded. Show the list before changing anything.\n3. One hyper_world_partition_apply_plan with bDryRun false and a fresh OperationId: actors.set with SpatiallyLoaded false for the selected managers; actors.set with SpatiallyLoaded true for the scenery picked in step 2. If the status is awaiting_user_approval, hyper_operation_wait with that OperationId and bWaitThroughApproval true. Leave the level unsaved.\n4. hyper_world_partition_inspect again with bActors true.\nEnd with a PASS/FAIL table: every selected manager always loaded, AlwaysLoaded before and after, the actors returned to streaming (labels), and nothing else changed."
+  },
+  {
+   "id": "world-partition.hlod-layers-for-distance",
+   "title": "Give distant props and buildings HLOD layers",
+   "summary": "Make an Instancing HLOD layer for props and a MeshMerge layer for the selected buildings, set the default, and check the HLOD build plan.",
+   "packs": [
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_world_partition_inspect",
+    "hyper_world_partition_apply_plan",
+    "hyper_operation_wait",
+    "hyper_worldbuilding_inspect",
+    "hyper_worldbuilding_apply_plan"
+   ],
+   "ops": [
+    "hlod_layer.create",
+    "actors.set",
+    "world_partition.set",
+    "hlod.build"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "hlod",
+    "world partition",
+    "distance",
+    "performance",
+    "open world",
+    "mesh merge",
+    "instancing"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "merge_type",
+     "label": "Building HLOD type",
+     "default": "MeshMerge",
+     "hint": "MeshMerge, MeshSimplify or MeshApproximate."
+    }
+   ],
+   "prompt": "Set up HLODs in {{level}} so distant content stays visible cheaply: props and foliage as instanced stand-ins, and these buildings merged:\n{{selected_actors}}\n1. hyper_world_partition_inspect with bSettings true: existing HLOD layers, the default, HLODActors and BuildHLODs. If bWorldPartition is false, say the level is not World Partition and stop.\n2. One hyper_world_partition_apply_plan with bDryRun false and a fresh OperationId: hlod_layer.create Asset {{content_folder}}/HLOD/HLOD_Instancing with Settings LayerType Instancing; hlod_layer.create Asset {{content_folder}}/HLOD/HLOD_Buildings with LayerType {{merge_type}}; actors.set HLODLayer {{content_folder}}/HLOD/HLOD_Buildings for the buildings above; world_partition.set HLODLayer {{content_folder}}/HLOD/HLOD_Instancing as the level default. If the status is awaiting_user_approval, hyper_operation_wait with that OperationId and bWaitThroughApproval true. New HLOD layer assets are saved; leave the level unsaved.\n3. hyper_world_partition_inspect again.\n4. HLODs are built outside the plan. hyper_worldbuilding_inspect with Variants world_partition for the World Partition record's path and revision, then hyper_worldbuilding_apply_plan with bDryRun true and one hlod.build operation (TargetPath and ExpectedRevision from that record): report the checked status, and quote inspect's BuildHLODs menu and command for me to run.\nEnd with a PASS/FAIL table: both layers exist with the right LayerType, the default is HLOD_Instancing, the buildings assigned (count), the build plan checked, the BuildHLODs command quoted."
+  },
+  {
+   "id": "world-partition.tune-runtime-grid",
+   "title": "Tune the runtime grid for fast traversal",
+   "summary": "Size the main grid's cells and loading range for the player's top speed, dry-run the change, apply it, and record the decision.",
+   "packs": [
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "hyperai-memory"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_world_partition_inspect",
+    "hyper_world_partition_apply_plan",
+    "hyper_operation_wait",
+    "hyper_memory_remember"
+   ],
+   "ops": [
+    "world_partition.set_grid"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "runtime grid",
+    "loading range",
+    "cell size",
+    "vehicles",
+    "streaming",
+    "open world",
+    "traversal"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "speed",
+     "label": "Top speed (cm/s)",
+     "default": "3000"
+    },
+    {
+     "name": "stream_seconds",
+     "label": "Streaming headroom (s)",
+     "default": "6"
+    }
+   ],
+   "prompt": "Players in {{level}} will cross the world at up to {{speed}} cm/s, for example in a vehicle. Retune the main runtime grid so content arrives before they do.\n1. hyper_world_partition_inspect: RuntimeHash and each grid's name, CellSize and LoadingRange. If bWorldPartition is false, say the level is not World Partition and stop.\n2. Work it out: LoadingRange at least {{speed}} x {{stream_seconds}} s plus one cell; CellSize a quarter to a half of the LoadingRange, rounded to a multiple of 3200 cm. Show the old and new numbers and the cost: more cells loaded at once, so more memory.\n3. hyper_world_partition_apply_plan with bDryRun true: world_partition.set_grid, Grid the main grid, Settings CellSize and LoadingRange (cm). Fix any refusal, then apply with bDryRun false and a fresh OperationId. If the status is awaiting_user_approval, hyper_operation_wait with that OperationId and bWaitThroughApproval true. Leave the level unsaved.\n4. hyper_world_partition_inspect again.\n5. hyper_memory_remember the decision with the numbers in its title, such as 'Main grid: 25600 cm cells, 76800 cm range for 3000 cm/s vehicles' (Type decision).\nEnd with a PASS/FAIL table: the grid's CellSize and LoadingRange before and after, LoadingRange at least the required distance, other grids unchanged, decision saved."
+  },
+  {
+   "id": "world-partition.quest-data-layers",
+   "title": "Organize quest content into nested runtime data layers",
+   "summary": "A parent Quests layer with one child per quest stage, the area loaded to edit, each stage's actors assigned, then the region unloaded.",
+   "packs": [
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_world_partition_inspect",
+    "hyper_world_partition_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "region.load",
+    "data_layer.create",
+    "data_layer.add_actors",
+    "region.unload"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "quests",
+    "data layers",
+    "nested",
+    "runtime",
+    "rpg",
+    "world state",
+    "regions"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "quest",
+     "label": "Quest id",
+     "default": "Q01_LostCaravan"
+    },
+    {
+     "name": "area_center",
+     "label": "Area centre (cm)",
+     "default": "0,0,0"
+    },
+    {
+     "name": "stage_one_actors",
+     "label": "Stage 1 actor labels",
+     "default": "Caravan_Wreck, Caravan_Crates"
+    },
+    {
+     "name": "stage_two_actors",
+     "label": "Stage 2 actor labels",
+     "default": "Bandit_Camp, Bandit_Guards"
+    }
+   ],
+   "prompt": "Organize quest {{quest}} in {{level}} into runtime data layers the quest system can drive.\n1. hyper_world_partition_inspect: existing data layers and loaded Regions. If bWorldPartition is false, say the level is not World Partition and stop.\n2. One hyper_world_partition_apply_plan with bDryRun false and a fresh OperationId: region.load Center {{area_center}}, Size 400 x 400 m, Label {{quest}}_Area (regions load before the plan's edits); data_layer.create Quests (Type Runtime, InitialRuntimeState Activated) if it is missing; data_layer.create {{quest}}_Stage1 (Runtime, Parent Quests, InitialRuntimeState Activated) and {{quest}}_Stage2 (Runtime, Parent Quests, InitialRuntimeState Unloaded); data_layer.add_actors {{quest}}_Stage1 with {{stage_one_actors}}; data_layer.add_actors {{quest}}_Stage2 with {{stage_two_actors}}; region.unload Label {{quest}}_Area. If the status is awaiting_user_approval, hyper_operation_wait with that OperationId and bWaitThroughApproval true. Data layer assets are saved; leave the level unsaved.\n3. hyper_world_partition_inspect again.\nEnd with a PASS/FAIL table: Quests exists with both children under it, their states Activated and Unloaded, each stage's Actors equal to its label count (name any missing), {{quest}}_Area no longer loaded. Then list the two runtime state changes the quest code makes when stage 2 starts."
+  },
+  {
+   "id": "world-partition.editor-data-layers",
+   "title": "Sort an area into editor data layers for the team",
+   "summary": "Editor-only data layers for gameplay, set dressing and lighting, filled from the selection, so each discipline can hide the others.",
+   "packs": [
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_world_partition_inspect",
+    "hyper_world_partition_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "data_layer.create",
+    "data_layer.add_actors",
+    "data_layer.set"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "editor data layers",
+    "organization",
+    "team",
+    "workflow",
+    "world partition"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "layer_name",
+     "label": "Layer for the selection",
+     "default": "SetDressing",
+     "hint": "Gameplay, SetDressing, Lighting, or your own name."
+    }
+   ],
+   "prompt": "Organize {{level}} for parallel work with editor data layers named Gameplay, SetDressing and Lighting. Put these actors on {{layer_name}}:\n{{selected_actors}}\n1. hyper_world_partition_inspect: the data layers and their types. If bWorldPartition is false, say the level is not World Partition and stop.\n2. One hyper_world_partition_apply_plan with bDryRun false and a fresh OperationId: data_layer.create for each of Gameplay, SetDressing, Lighting and {{layer_name}} that is missing, with Type Editor and Asset under {{content_folder}}/DataLayers; data_layer.add_actors {{layer_name}} with the labels above; data_layer.set {{layer_name}} with Visible true and LoadedInEditor true. Editor layers organize the editor only and never stream in game. If the status is awaiting_user_approval, hyper_operation_wait with that OperationId and bWaitThroughApproval true. Leave the level unsaved.\n3. hyper_world_partition_inspect again.\nEnd with a PASS/FAIL table: the Editor layers exist, {{layer_name}} holds every selected label (its Actors count), no runtime layer changed. Then one line per discipline saying which layers to hide while they work."
+  },
+  {
+   "id": "world-partition.navigation-audit-link-plan",
+   "title": "Audit navigation and check a jump-down link plan",
+   "summary": "Read the navmesh, areas and links, validate them, check playable routes, and dry-run a nav link for a ledge drop.",
+   "packs": [
+    "worldbuilding_navigation",
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_navigation_inspect",
+    "hyper_navigation_validate",
+    "hyper_level_design_validate",
+    "hyper_navigation_apply_plan"
+   ],
+   "ops": [
+    "nav_link.create"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "navigation",
+    "navmesh",
+    "ai",
+    "nav links",
+    "routes",
+    "audit",
+    "pathfinding"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "link_start",
+     "label": "Link start (cm)",
+     "default": "1200,0,300"
+    },
+    {
+     "name": "link_end",
+     "label": "Link end (cm)",
+     "default": "1600,0,0"
+    }
+   ],
+   "prompt": "Check that AI and players can get around {{level}}, and prepare a jump-down link from a ledge. Change nothing.\n1. hyper_navigation_inspect (Scope loaded_only): the navigation system, navmesh data and bounds, nav areas, nav links and agents, with their revisions. If there is no navmesh, say a NavMeshBoundsVolume over the play space is needed.\n2. hyper_navigation_validate for issues.\n3. If the level_design pack is on, hyper_level_design_validate: bNavigationReady, each route from a start to a goal with PathLength and NarrowestWidth, and every unreachable issue with its location.\n4. hyper_navigation_apply_plan with bDryRun true and one nav_link.create operation: TargetPath a new asset path whose package does not exist yet, such as {{content_folder}}/Navigation/NavLink_Ledge.NavLink_Ledge, no ExpectedRevision, LinkStart {{link_start}} and LinkEnd {{link_end}} (cm). Navigation plans are checked but not yet run (a real run returns staged_backend_required), so report the checked status and effects, and how to place the link by hand: a NavLinkProxy with those two points.\nEnd with a PASS/FAIL table: navmesh present and built, validation issues 0, each route reachable with its narrowest width, link plan checked (valid_dry_run). Then the coverage gaps you found, with locations in cm."
+  },
+  {
+   "id": "world-partition.stream-ecosystem-cells",
+   "title": "Grow an ecosystem that streams in World Partition cells",
+   "summary": "Cover a large landscape with a partitioned PCG volume, save so PCG sees the ground, generate per cell and prove what grew.",
+   "packs": [
+    "worldbuilding_navigation",
+    "pcg"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_world_partition_inspect",
+    "hyper_landscape_inspect",
+    "hyper_pcg_scatter_inspect",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_pcg_inspect",
+    "hyper_pcg_validate"
+   ],
+   "ops": [
+    "volume.create"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "pcg",
+    "world partition",
+    "open world",
+    "ecosystem",
+    "partitioned",
+    "streaming",
+    "forest"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "graph",
+     "label": "PCG graph",
+     "default": "/Game/PCG/PCG_Forest",
+     "hint": "An ecosystem or scatter graph already in the project."
+    },
+    {
+     "name": "volume_name",
+     "label": "Volume label",
+     "default": "WorldLife"
+    }
+   ],
+   "prompt": "Grow {{graph}} over {{selected_actor}} in {{level}} so its instances stream with the world, in World Partition cells.\n1. hyper_world_partition_inspect: confirm bWorldPartition and read the grid's CellSize. hyper_landscape_inspect: the landscape's label, extent and StreamingProxies. If the level is not World Partition, say so and stop.\n2. hyper_pcg_scatter_inspect with Graph {{graph}}: confirm it is a PCG graph and list its species or meshes with their cull distances. If the pcg tools are not available, say the pcg pack is off and stop.\n3. One hyper_pcg_scatter_apply_plan with bSave true and a fresh OperationId: volume.create Volume {{volume_name}}, Graph {{graph}}, Cover the landscape's label, Partitioned true. World Partition shows PCG a landscape kept whole only once it is saved, so this plan saves the level and the volume. Then hyper_operation_wait with the OperationId and TimeoutMs 120000 until generation ends, and read the instances per mesh.\n4. hyper_pcg_inspect the graph and the volume's PCG component for the revision and fingerprint, then hyper_pcg_validate with Policy generation_ready.\nEnd with a PASS/FAIL table: volume partitioned and covering the landscape, generation completed, instances per mesh above 0, validate errors 0, the files listed in Saved. Report the instance total and the cell size used."
+  }
+ ]
+}

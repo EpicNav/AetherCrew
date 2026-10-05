@@ -1,0 +1,1286 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "lighting-lookdev",
+ "presets": [
+  {
+   "id": "lighting-lookdev.audit-lighting",
+   "title": "Audit the level's lighting before you change it",
+   "summary": "Read the sun, sky, fog, post process, local lights and renderer settings, capture the view, and score it against the lighting-artist bar.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_lighting_inspect",
+    "hyper_capture_view"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "audit",
+    "lighting",
+    "exposure",
+    "Lumen",
+    "read-only",
+    "review"
+   ],
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    }
+   ],
+   "prompt": "Audit the lighting of {{level}} from the camera `{{camera}}` without changing anything. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_memory_recall \"lighting\" for earlier decisions and match studies about this level.\n2. hyper_lighting_inspect with CameraActorLabel `{{camera}}`, MaxLocalLights 64, MaxMaterials 12. Summarise: sun or Blueprint sky, sky light, fog, atmosphere, clouds, post process settings that differ from the defaults, local lights in view, whether exposure is locked, and the rendering list (gi_method, reflection_method, lumen_tracing, megalights, static_lighting).\n3. hyper_capture_view with source camera `{{camera}}` (source viewport if that camera does not exist), 1280 x 720.\n4. Judge the frame against the lighting-artist bar from the capture's metrics and what you see.\nReport a PASS/FAIL/WARN table: exposure locked (WARN if not: captures then measure the eye adapting, not the light), LuminanceP95 < 0.95, LuminanceP5 > 0.02, one clear key light direction, no more than 4 shadow-casting local lights overlapping in view, materials with notes (list them), and the frame's ColorTemperatureK with the time of day it suggests. Then the capture on its own line as ![{{camera}}](absolute path), and the three changes you would make first, each naming the lighting plan op that would make it (such as set_sun pitch or set_fog density)."
+  },
+  {
+   "id": "lighting-lookdev.lock-exposure-calibrate",
+   "title": "Lock exposure and calibrate it to mid-grey",
+   "summary": "Turn off auto exposure at an EV100 that puts the frame's median brightness near 18%, so later lighting changes can be measured fairly.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view",
+    "hyper_memory_remember"
+   ],
+   "ops": [
+    "lock_exposure"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "exposure",
+    "EV100",
+    "auto exposure",
+    "calibration",
+    "measurement"
+   ],
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "start_ev",
+     "label": "Starting EV100",
+     "default": "12",
+     "hint": "About 15 noon sun, 12 overcast, 8 bright interior, 4 dim interior, -2 moonlight"
+    },
+    {
+     "name": "target_p50",
+     "label": "Target median brightness",
+     "default": "0.18"
+    }
+   ],
+   "prompt": "Lock the exposure of {{level}} so captures measure the light, not the eye adapting. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`): note bExposureLocked, whether a Blueprint sky such as Ultra Dynamic Sky is present (its lights are not physical, so EV100 often sits between -3 and 3), and the revision.\n2. hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision, bSave false) with one lock_exposure op at EV100 {{start_ev}}. If the reply is still pending, hyper_operation_wait with that OperationId.\n3. hyper_capture_view with source camera `{{camera}}` (viewport if it does not exist) and read LuminanceP50. Set the next EV100 to the current one plus log2(P50 / {{target_p50}}) and lock again, with a fresh inspect revision and OperationId. Repeat until P50 is within 20% of {{target_p50}}, at most 5 times.\n4. hyper_memory_remember the result, titled with the fact itself, such as \"<level> locks at EV100 N from <camera>\".\nReport a PASS/FAIL table: exposure locked, final EV100, P50 within 20% of {{target_p50}}, LuminanceP95 < 0.95, LuminanceP5 > 0.02, memory saved. Then the first and last captures, each on its own line as ![EV100 ...](absolute path). Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.compare-to-reference-metrics",
+   "title": "Measure how far the view is from a reference image",
+   "summary": "Compare the current view with a reference by brightness, contrast, colour temperature and saturation, and list the changes that would close the gap.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_capture_view",
+    "hyper_lighting_compare",
+    "hyper_image_compare"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "reference",
+    "compare",
+    "metrics",
+    "colour temperature",
+    "read-only"
+   ],
+   "placeholders": [
+    {
+     "name": "reference",
+     "label": "Reference image (project path)",
+     "default": "Content/References/look.png"
+    },
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    }
+   ],
+   "prompt": "Tell me how far {{level}} is from the look in `{{reference}}` and what to change first. Change nothing. If the lighting_lookdev pack is unavailable, say so and stop.\n1. Open the reference and describe its key light, shadows, palette and contrast in two sentences.\n2. hyper_lighting_inspect (CameraActorLabel `{{camera}}`): if bExposureLocked is false, say that brightness numbers measure auto exposure and mark them WARN.\n3. hyper_capture_view with source camera `{{camera}}` (viewport if it does not exist), at the reference's aspect ratio.\n4. hyper_lighting_compare with ReferenceImagePath `{{reference}}` and CurrentImagePath the capture: ExposureDeltaEV, ColorTemperatureDeltaK, ContrastRatioDelta, SaturationDelta, HistogramDistance and Suggestions.\n5. hyper_image_compare (mode look, Grid 4) of the capture against the reference: Score, PaletteScore, ToneScore, LayoutScore, DetailScore and the three worst regions.\nReport a table of each measure (reference, current, delta), PASS when |ExposureDeltaEV| <= 0.5, |ColorTemperatureDeltaK| <= 500, |ContrastRatioDelta| <= 15% of the reference's ContrastRatio and |SaturationDelta| <= 0.1, else FAIL. Then the score, the side-by-side on its own line as ![side by side](absolute path), and the first three changes in order, each naming the lighting plan op that would make it (such as set_sun temperature or set_post_process saturation)."
+  },
+  {
+   "id": "lighting-lookdev.lookdev-turntable-captures",
+   "title": "Capture a four-angle look-dev sheet of a prop",
+   "summary": "Frame the selected prop from four sides at one distance under the level's light, and list the materials it shows, for art review.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_scene_inspect",
+    "hyper_capture_view",
+    "hyper_lighting_inspect"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "look-dev",
+    "turntable",
+    "art review",
+    "props",
+    "captures",
+    "read-only"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "size_cm",
+     "label": "Prop size (cm)",
+     "default": "150"
+    },
+    {
+     "name": "distance_cm",
+     "label": "Camera distance (cm)",
+     "default": "300"
+    },
+    {
+     "name": "height_cm",
+     "label": "Camera height above centre (cm)",
+     "default": "60"
+    },
+    {
+     "name": "fov",
+     "label": "Field of view (degrees)",
+     "default": "40"
+    }
+   ],
+   "prompt": "Make a look-dev sheet of {{selected_actor}} for art review. Change nothing in the level. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_scene_inspect (scope selected) for its location; treat it as about {{size_cm}} cm across unless its scale says otherwise.\n2. hyper_capture_view four times with source transform: {{distance_cm}} cm from its centre at yaw 0, 90, 180 and 270 degrees, {{height_cm}} cm above its centre, rotated to look at it, FovDegrees {{fov}}, 1024 x 1024, Label lookdev_<actor label> (letters, digits, - and _ only). Keep bSettle on.\n3. hyper_lighting_inspect (MaxMaterials 24): if the prop is in the inspected view, list the materials it shows, their parameters and notes.\nReport a PASS/FAIL table with one row per capture: the prop fills 40-80% of the frame (adjust the distance once if not), LuminanceP95 < 0.95, LuminanceP5 > 0.02, bShadersStillCompiling false. Then the four captures, each on its own line as ![yaw ...](absolute path), and any material notes worth fixing."
+  },
+  {
+   "id": "lighting-lookdev.blockout-shadow-passthrough",
+   "title": "Let light through blockout foliage and glass",
+   "summary": "Stop the selected blockout shapes that stand in for leaves, cloth or glass from casting solid shadows, and show the before and after.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_capture_view",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "set_actor_shadow"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "blockout",
+    "shadows",
+    "foliage",
+    "glass",
+    "placeholder",
+    "greybox"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    }
+   ],
+   "prompt": "These blockout shapes stand in for foliage, cloth or glass and should not cast solid shadows yet:\n{{selected_actors}}\nIf the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`) for the revision, and note whether exposure is locked.\n2. hyper_capture_view with source camera `{{camera}}` (viewport if it does not exist), Label before_shadows.\n3. One hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision, bSave false) with one set_actor_shadow per actor above: empty property (all its meshes), value false. Touch no other actor. If the reply is still pending, hyper_operation_wait with that OperationId.\n4. hyper_capture_view again from the same camera, Label after_shadows.\nReport a PASS/FAIL table: one row per actor (shadow off), ShadowFraction before -> after (it should fall), and the plan's op count equal to the number of actors (nothing else changed). Then the before and after captures, each on its own line. Remind me that set_actor_shadow with value true puts each shadow back when final art arrives."
+  },
+  {
+   "id": "lighting-lookdev.golden-hour-exterior",
+   "title": "Light an exterior for golden hour",
+   "summary": "Set a low warm sun, softer sky fill, warm haze and a gentle grade at a locked exposure, and prove the frame is warm without clipping.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_capture_view",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_sun",
+    "set_sky_light",
+    "set_fog",
+    "set_sky_atmosphere",
+    "set_post_process",
+    "set_sky_system"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "golden hour",
+    "sunset",
+    "exterior",
+    "warm",
+    "sun",
+    "atmosphere"
+   ],
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "sun_pitch",
+     "label": "Sun pitch (degrees)",
+     "default": "-8",
+     "hint": "Negative points down; -5 to -15 for golden hour"
+    },
+    {
+     "name": "sun_yaw",
+     "label": "Sun yaw (degrees)",
+     "default": "135",
+     "hint": "Pick so the sun rakes across the main view"
+    },
+    {
+     "name": "temperature",
+     "label": "Sun temperature (K)",
+     "default": "3500"
+    },
+    {
+     "name": "ev100",
+     "label": "Locked EV100",
+     "default": "12",
+     "hint": "About 15 noon sun, 12 overcast, 8 bright interior, 4 dim interior, -2 moonlight"
+    }
+   ],
+   "prompt": "Light {{level}} for golden hour, seen from `{{camera}}`. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`). If a Blueprint sky such as Ultra Dynamic Sky owns the sun, use set_sky_system (Time of Day about 1800, Sun Yaw) instead of set_sun, set_sky_light, set_fog and set_sky_atmosphere, and say so. hyper_capture_view (source camera, viewport if it does not exist) as the before frame.\n2. One hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision, bSave false): lock_exposure {{ev100}}; set_sun pitch {{sun_pitch}}, yaw {{sun_yaw}}, temperature {{temperature}}, source_angle 1.5; set_sky_light intensity at half its current value; set_fog inscattering_color 1.0,0.75,0.5 and density 1.5 x its inspected value; set_sky_atmosphere MieAnisotropy 0.85; set_post_process shadows_gain 0.95,0.98,1.05 for cooler shadows. If the reply is still pending, hyper_operation_wait.\n3. hyper_capture_view again. If LuminanceP50 is outside 0.15-0.25 (the sun may not be in physical lux), lock exposure again at EV100 + log2(P50 / 0.2) in a new plan with a fresh inspect revision, at most 3 times, capturing after each.\nReport a PASS/FAIL table: exposure locked (state the final EV100), the frame's ColorTemperatureK below 5000 (warm), LuminanceP50 0.15-0.25, LuminanceP95 < 0.95, LuminanceP5 > 0.02, long shadows (sun pitch between -5 and -15). Then the before and after captures, each on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.moonlit-night-lanterns",
+   "title": "Light a moonlit night with warm lantern pools",
+   "summary": "Turn the level into a cool moonlit night and give each selected lantern a warm point light, so paths read in pools of light.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_scene_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_sun",
+    "set_sky_light",
+    "add_light",
+    "set_light",
+    "set_sky_system"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "night",
+    "moonlight",
+    "lanterns",
+    "fantasy village",
+    "point lights",
+    "practicals"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "ev100",
+     "label": "Locked EV100",
+     "default": "0",
+     "hint": "-2 for pure moonlight; 0 to 3 with lanterns"
+    },
+    {
+     "name": "lift_cm",
+     "label": "Light height above the lantern pivot (cm)",
+     "default": "40"
+    },
+    {
+     "name": "lantern_k",
+     "label": "Lantern temperature (K)",
+     "default": "2200"
+    },
+    {
+     "name": "radius_cm",
+     "label": "Lantern light radius (cm)",
+     "default": "800"
+    }
+   ],
+   "prompt": "Make {{level}} a moonlit night for a fantasy village. The selected actors are lanterns:\n{{selected_actors}}\nIf the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`, MaxLocalLights 64) and hyper_scene_inspect (scope selected) for each lantern's location. If a Blueprint sky owns the sun, set its night through set_sky_system instead of set_sun and set_sky_light, and say so.\n2. One hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision, bSave false): lock_exposure {{ev100}}; set_sun as the moon: pitch -35, temperature 7500, intensity 0.3; set_sky_light intensity 0.3 x its inspected value with a cool color 0.6,0.7,1.0; for each lantern, add_light point labelled `Lantern_Light_<n>` at its location plus {{lift_cm}} cm up, then set_light temperature {{lantern_k}}, attenuation_radius {{radius_cm}}, source_radius 8, and cast_shadows true only for the 4 nearest the camera (false for the rest). If the reply is still pending, hyper_operation_wait.\n3. hyper_capture_view with source camera `{{camera}}` (viewport if it does not exist). Adjust lantern intensity by ratios (x2 or /2) if the pools clip or vanish, one plan per change, each with a fresh inspect revision.\nReport a PASS/FAIL table: one light per lantern, LuminanceP50 between 0.04 and 0.15 (night), LuminanceP95 < 0.95 (lanterns not clipping), at most 4 shadow-casting lantern lights, and WARN if the frame's ColorTemperatureK is below 4000 (lanterns overpowering the moon). Then the capture on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.stormy-overcast-clouds",
+   "title": "Turn the sky stormy and overcast",
+   "summary": "Add heavy volumetric clouds, soften and cool the sun, thicken the fog and mute the grade, then prove the frame reads as overcast.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_capture_view",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_clouds",
+    "set_sun",
+    "set_sky_light",
+    "set_fog",
+    "set_post_process",
+    "set_sky_system"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "overcast",
+    "storm",
+    "clouds",
+    "volumetric clouds",
+    "weather",
+    "moody"
+   ],
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "coverage",
+     "label": "Cloud coverage",
+     "default": "0.85"
+    },
+    {
+     "name": "saturation",
+     "label": "Post-process saturation",
+     "default": "0.8",
+     "hint": "1 is unchanged; lower mutes colour"
+    }
+   ],
+   "prompt": "Make {{level}} a stormy overcast day, seen from `{{camera}}`. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`): clouds, fog and the revision. With a Blueprint sky, use set_sky_system (Cloud Coverage, Fog) instead of set_clouds, set_sun, set_sky_light and set_fog, and say so; with Ultra Dynamic Weather, set the weather there. hyper_capture_view (source camera, viewport if it does not exist) as the before frame.\n2. One hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision, bSave false): lock_exposure 12; set_clouds material:Cloud_GlobalCoverage {{coverage}} and material:Cloud_GlobalDensity 1.5 x its inspected value (volumetric clouds are added if the level has none); set_sun temperature 7000, source_angle 10 for soft shadows, intensity a quarter of now; set_sky_light intensity x1.5; set_fog density x3 with inscattering_color 0.55,0.6,0.65; set_post_process saturation {{saturation}} and contrast 0.9. If the reply is still pending, hyper_operation_wait.\n3. hyper_capture_view again with bSettle on (clouds take many frames to settle).\nReport a PASS/FAIL table: clouds present at coverage {{coverage}}, ContrastRatio lower than before, MeanSaturation lower than before, the frame's ColorTemperatureK above 6000, LuminanceP95 < 0.95, and INFO for bSettleTimedOut (moving clouds) and for the cloud material instance's path under /Game/HyperAI/Clouds/. Then the before and after captures, each on its own line."
+  },
+  {
+   "id": "lighting-lookdev.forest-god-rays",
+   "title": "Add god rays through a forest canopy",
+   "summary": "Turn on volumetric fog and sun scattering with light-shaft bloom so sunbeams cut through the trees, and prove the beams show without washing out the frame.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_capture_view",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_fog",
+    "set_sun",
+    "set_sky_system"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "god rays",
+    "light shafts",
+    "volumetric fog",
+    "forest",
+    "fantasy",
+    "atmosphere"
+   ],
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "ev100",
+     "label": "Locked EV100",
+     "default": "13",
+     "hint": "About 15 noon sun, 12 overcast, 8 bright interior, 4 dim interior, -2 moonlight"
+    },
+    {
+     "name": "anisotropy",
+     "label": "Forward scattering (-0.9 to 0.9)",
+     "default": "0.6"
+    },
+    {
+     "name": "fog_density",
+     "label": "Fog density (0-1)",
+     "default": "0.03"
+    },
+    {
+     "name": "scattering",
+     "label": "Sun volumetric scattering intensity",
+     "default": "2"
+    }
+   ],
+   "prompt": "Add visible sunbeams through the canopy of {{level}}, seen from `{{camera}}`. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`). If a Blueprint sky owns the sun and fog, use its Volumetric Fog variable through set_sky_system and say so. hyper_capture_view (source camera, viewport if it does not exist) as the before frame.\n2. One hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision, bSave false): lock_exposure {{ev100}} if exposure is not locked; set_fog volumetric_fog true, volumetric_scattering_distribution {{anisotropy}} (forward scattering), density {{fog_density}}; set_sun VolumetricScatteringIntensity {{scattering}}, light_shaft_bloom true, BloomScale 0.2, BloomThreshold 4, and pitch between -25 and -45 so beams slant down through gaps in the leaves. If the reply is still pending, hyper_operation_wait.\n3. hyper_capture_view again with WarmupFrames 8, since volumetric fog settles slowly. If no beams show, raise VolumetricScatteringIntensity once (x2) in a new plan with a fresh inspect revision, and capture again.\nReport a PASS/FAIL table: volumetric fog on, LuminanceP50 up by no more than 30% (beams, not a washed-out frame), LuminanceP95 < 0.95, HighlightFraction below 0.05, and distinct beams visible in the after frame (say where). Then the before and after captures, each on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.valley-mist-vista",
+   "title": "Add aerial depth and valley mist to a vista",
+   "summary": "Give a wide landscape view depth with atmospheric haze and a low mist layer in the valleys, and prove the far ridges fade while the foreground holds.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_capture_view",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_sky_atmosphere",
+    "set_fog",
+    "set_sky_system"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "vista",
+    "aerial perspective",
+    "haze",
+    "mist",
+    "landscape",
+    "atmosphere"
+   ],
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "ev100",
+     "label": "Locked EV100",
+     "default": "14",
+     "hint": "About 15 noon sun, 12 overcast, 8 bright interior, 4 dim interior, -2 moonlight"
+    },
+    {
+     "name": "haze_density",
+     "label": "Haze density (0-1)",
+     "default": "0.02"
+    },
+    {
+     "name": "start_cm",
+     "label": "Haze start distance (cm)",
+     "default": "5000"
+    },
+    {
+     "name": "mist_density",
+     "label": "Valley mist density",
+     "default": "0.05"
+    },
+    {
+     "name": "mist_offset_cm",
+     "label": "Mist height offset (cm)",
+     "default": "-200",
+     "hint": "Relative to the fog actor's height"
+    }
+   ],
+   "prompt": "Give the wide view of {{level}} from `{{camera}}` depth: far ridges fade into haze and mist lies low in the valleys. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`). If a Blueprint sky owns the fog, set its Fog and Dust Amount through set_sky_system instead and say so. hyper_capture_view (source camera, viewport if it does not exist) as the before frame.\n2. One hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision, bSave false): lock_exposure {{ev100}} if exposure is not locked; set_sky_atmosphere mie_scale and rayleigh_scale at 2 x and 1.2 x their inspected values (rayleigh_scale is about 0.033 by default) for aerial perspective; set_fog density {{haze_density}}, height_falloff 0.2, start_distance {{start_cm}}; set_fog SecondFogData (FogDensity={{mist_density}},FogHeightFalloff=0.5,FogHeightOffset={{mist_offset_cm}}) for the valley mist. If the reply is still pending, hyper_operation_wait.\n3. hyper_capture_view again from the same camera.\n4. hyper_image_compare the after capture against the before in aligned mode, Grid 4, to see which cells changed.\nReport a PASS/FAIL table: the cells holding the far ridges brightened and lost detail (DetailRatio below 1), the nearest cells' |BrightenEV| below 0.3, ContrastRatio lower than before, LuminanceP95 < 0.95. Then the before, after and side-by-side images, each on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.uds-time-of-day",
+   "title": "Set Ultra Dynamic Sky to dawn, noon and dusk",
+   "summary": "Drive a Blueprint sky's Time of Day through three looks, capture each at a locked exposure, and leave it at the time you choose.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view",
+    "hyper_memory_remember"
+   ],
+   "ops": [
+    "set_sky_system",
+    "lock_exposure"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "Ultra Dynamic Sky",
+    "time of day",
+    "Blueprint sky",
+    "dawn",
+    "dusk"
+   ],
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "keep",
+     "label": "Final Time of Day (0-2400)",
+     "default": "1800"
+    },
+    {
+     "name": "ev100",
+     "label": "Starting EV100",
+     "default": "1",
+     "hint": "Blueprint skies often need -3 to 3"
+    }
+   ],
+   "prompt": "{{level}} has a Blueprint sky such as Ultra Dynamic Sky. Show me dawn, noon and dusk from `{{camera}}`, then leave it at {{keep}}. If the lighting_lookdev pack is unavailable, or hyper_lighting_inspect lists no sky_system record, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`): the sky's variables and its current Time of Day.\n2. For each of 600, 1200 and 1800: one hyper_lighting_apply_plan (fresh OperationId, bDryRun false, fresh ExpectedRevision, bSave false) with set_sky_system Time of Day = that value (empty actor_label), then hyper_capture_view with source camera `{{camera}}` (viewport if it does not exist), Label tod_<time>. If a reply is still pending, hyper_operation_wait. Put lock_exposure {{ev100}} in the first plan.\n3. This sky's lights are not physical: if the noon frame's LuminanceP50 is outside 0.12-0.25, change EV100 by log2(P50 / 0.18) with lock_exposure and capture noon again. Dawn and dusk may stay darker.\n4. Finish with set_sky_system Time of Day {{keep}}, and hyper_memory_remember the EV100 this sky needs once exposure is locked.\nReport a PASS/FAIL table, one row per time: LuminanceP50, LuminanceP95 < 0.95, ColorTemperatureK (dawn and dusk warmer than noon). Then rows for the final Time of Day = {{keep}} and the memory saved, and the three captures, each on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.lift-crushed-shadows",
+   "title": "Lift crushed shadows without flattening the frame",
+   "summary": "Open up shadows that go black using source angle, shadow amount, sky occlusion, bounce and local exposure, one lever at a time, keeping contrast.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_capture_view",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_sun",
+    "set_sky_light",
+    "set_post_process"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "shadows",
+    "contrast",
+    "fill light",
+    "local exposure",
+    "sky light"
+   ],
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "ev100",
+     "label": "EV100 if exposure is unlocked",
+     "default": "12",
+     "hint": "About 15 noon sun, 12 overcast, 8 bright interior, 4 dim interior, -2 moonlight"
+    },
+    {
+     "name": "target_p5",
+     "label": "Target darkest-tone brightness (P5)",
+     "default": "0.03"
+    },
+    {
+     "name": "min_contrast",
+     "label": "Minimum contrast ratio (P95/P5)",
+     "default": "8"
+    }
+   ],
+   "prompt": "Shadows in {{level}} seen from `{{camera}}` crush to black. Lift them so detail reads, without flattening the frame. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`); if exposure is not locked, lock_exposure at {{ev100}} first in its own plan. hyper_capture_view (source camera, viewport if it does not exist): record LuminanceP5, ShadowFraction and ContrastRatio as the baseline.\n2. Apply one lever per hyper_lighting_apply_plan (fresh OperationId and inspect revision each, bDryRun false, bSave false), capturing after each, in this order, and stop once LuminanceP5 >= {{target_p5}}: (a) set_sun source_angle 3 and ShadowAmount 0.85; (b) set_sky_light intensity x1.5, MinOcclusion 0.15, OcclusionTint 0.05,0.06,0.1; (c) set_sun IndirectLightingIntensity 1.3 and set_post_process IndirectLightingIntensity 1.2; (d) set_post_process LocalExposureShadowContrastScale 0.8 and AmbientOcclusionIntensity 0.35; (e) last, set_post_process shadows_gain 1.1,1.1,1.15. Never use LumenDiffuseColorBoost or LumenSkylightLeaking. If a reply is still pending, hyper_operation_wait.\nReport a table with one row per lever applied: LuminanceP5, ShadowFraction and ContrastRatio after it. Then PASS/FAIL: LuminanceP5 >= {{target_p5}}, ContrastRatio still >= {{min_contrast}}, LuminanceP95 < 0.95. Then the baseline and final captures, each on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.lut-grade-from-reference",
+   "title": "Grade the level to a reference with a fitted LUT",
+   "summary": "Fit a colour-grading LUT that takes the current view to a reference's colours, apply it only if it scores higher, and soften it to taste.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "image-match"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_capture_view",
+    "hyper_image_compare",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "set_post_process"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "colour grading",
+    "LUT",
+    "reference",
+    "post process",
+    "grade"
+   ],
+   "placeholders": [
+    {
+     "name": "reference",
+     "label": "Reference image (project path)",
+     "default": "Content/References/look.png"
+    },
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "mode",
+     "label": "Compare mode (look or aligned)",
+     "default": "look",
+     "hint": "aligned only when the reference frames the same view"
+    },
+    {
+     "name": "session",
+     "label": "Match session id",
+     "default": "grade_match"
+    },
+    {
+     "name": "intensity",
+     "label": "LUT intensity (0-1)",
+     "default": "0.8"
+    }
+   ],
+   "prompt": "Grade {{level}} toward the colours of `{{reference}}`, as a colourist would, once the light is already close. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`): exposure must be locked; if it is not, say so and stop, since a LUT fitted to auto exposure is wrong.\n2. hyper_capture_view with source camera `{{camera}}` (viewport if it does not exist), then hyper_image_compare against the reference (mode {{mode}}, SessionId {{session}}, Note \"before LUT\", bFitLut true). Read Score, LutScore, LutPath and LutSideBySidePath, and open the side-by-side.\n3. Only if LutScore beats Score by at least 2 points: one hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision from a fresh inspect, bSave false) with set_post_process color_grading_lut <LutPath>, then set_post_process ColorGradingIntensity {{intensity}}. If the reply is still pending, hyper_operation_wait. Otherwise stop and say the grade is not the gap.\n4. hyper_capture_view again and hyper_image_compare in the same session, with a Note naming the LUT and intensity.\nReport a PASS/FAIL table: exposure locked, score before -> after, after within 3 points of LutScore or better, LuminanceP95 < 0.95, and the LUT texture's path under /Game/HyperAI/LUTs/. Then the before and after side-by-sides, each on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.physical-surface-pass",
+   "title": "Fix surfaces that take light wrongly, in the level only",
+   "summary": "Find materials in view whose base colour, metallic or specular break physical ranges and correct them on the level's own instances, never the project's.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_capture_view",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "set_material_parameter",
+    "set_actor_material_parameter"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "PBR",
+    "look-dev",
+    "materials",
+    "base colour",
+    "physically based",
+    "surfaces"
+   ],
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "max_materials",
+     "label": "Materials to check (up to 48)",
+     "default": "24"
+    }
+   ],
+   "prompt": "Make the surfaces in view of `{{camera}}` in {{level}} take light like real materials, without changing any project material. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`, MaxMaterials {{max_materials}}): each material's viewShare, parameters and notes (non-metal base colour outside 0.02-0.81, metallic between 0 and 1, specular far from 0.5, unlit surfaces, roughness above lumen_max_roughness_to_trace where the surface should mirror). hyper_capture_view as the before frame.\n2. For each material with a note a parameter can fix, largest viewShare first: one hyper_lighting_apply_plan (fresh OperationId and inspect revision, bDryRun false, bSave false) with set_material_parameter on an actor showing it, property [slot:<n>/]<parameter>, using physical values: metallic 0 or 1, specular 0.5 (water 0.255), non-metal base colour inside 0.02-0.81. Use set_actor_material_parameter only when one actor must differ from the rest. If a value is fixed inside the material or is a static switch, list it for the material tools instead. If a reply is still pending, hyper_operation_wait.\n3. hyper_lighting_inspect and hyper_capture_view again.\nReport a table: material, note, parameter, before -> after, PASS/FAIL (note gone). Then PASS/FAIL rows: no project material changed (only instances under /Game/HyperAI/LookDev/), LuminanceP95 < 0.95. Then the before and after captures, each on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.reflection-captures-non-lumen",
+   "title": "Place reflection captures for a non-Lumen project",
+   "summary": "Where reflections are screen-space or off, add a sized box reflection capture to each selected room so shiny floors stop reflecting the sky.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_scene_inspect",
+    "hyper_capture_view",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "add_reflection_capture",
+    "set_reflection_capture"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "reflection capture",
+    "reflections",
+    "interior",
+    "forward rendering",
+    "mobile",
+    "performance"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "height_cm",
+     "label": "Capture height above the marker (cm)",
+     "default": "150"
+    },
+    {
+     "name": "extent",
+     "label": "Box half size x,y,z (cm)",
+     "default": "600,600,200"
+    },
+    {
+     "name": "transition_cm",
+     "label": "Box transition distance (cm)",
+     "default": "100"
+    }
+   ],
+   "prompt": "Give each room of {{level}} its own reflections. Each selected actor marks one room, for example its floor:\n{{selected_actors}}\nIf the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect: rendering.reflection_method and the existing reflection_captures. If reflection_method is lumen, say captures add little under Lumen reflections, suggest lowering roughness on the shiny surfaces instead, and stop.\n2. hyper_scene_inspect (scope selected) for each marker's location. hyper_capture_view with source camera `{{camera}}` (viewport if it does not exist) as the before frame.\n3. One hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision, bSave false): for each room without a capture within 300 cm of its marker, add_reflection_capture labelled `RC_<marker label>`, property box, value the marker's location plus {{height_cm}} cm up; then set_reflection_capture box_extent {{extent}} and BoxTransitionDistance {{transition_cm}}. If the reply is still pending, hyper_operation_wait.\n4. hyper_capture_view again from the same camera.\nReport a PASS/FAIL table: one capture per room that lacked one, each with box_extent {{extent}}, none added under Lumen reflections, and reflective surfaces in the after frame showing the room rather than the sky (say what you see). Then the before and after captures, each on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.horror-corridor-spots",
+   "title": "Light a horror corridor in pools of light and dark",
+   "summary": "Darken a corridor and light it only in sparse, cold spotlight pools with haze, so the player moves from light to dark; measured for contrast.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_scene_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_sky_light",
+    "add_light",
+    "set_light",
+    "set_fog"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "horror",
+    "corridor",
+    "spot lights",
+    "darkness",
+    "contrast",
+    "volumetric"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "ev100",
+     "label": "Locked EV100",
+     "default": "4",
+     "hint": "About 15 noon sun, 12 overcast, 8 bright interior, 4 dim interior, -2 moonlight"
+    },
+    {
+     "name": "height_cm",
+     "label": "Light height above the marker (cm)",
+     "default": "300"
+    },
+    {
+     "name": "cone",
+     "label": "Outer cone angle (degrees)",
+     "default": "35"
+    },
+    {
+     "name": "temperature",
+     "label": "Light temperature (K)",
+     "default": "7500"
+    },
+    {
+     "name": "radius_cm",
+     "label": "Light radius (cm)",
+     "default": "700"
+    },
+    {
+     "name": "lights_off",
+     "label": "Existing lights to switch off",
+     "default": "none",
+     "hint": "Labels separated by commas, or none"
+    }
+   ],
+   "prompt": "Light the corridor of {{level}} for a horror game: mostly dark, with a cold pool of light under each selected marker:\n{{selected_actors}}\nIf the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`, MaxLocalLights 64) for the revision and the lights already there; hyper_scene_inspect (scope selected) for each marker's location.\n2. One hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision, bSave false): lock_exposure {{ev100}}; set_sky_light intensity 0.1 so unlit areas fall to near black; for each marker, add_light spot labelled `Pool_<n>` {{height_cm}} cm above its location, then set_light aim_at the marker's location below it, outer_cone_angle {{cone}}, inner_cone_angle half of that, temperature {{temperature}}, attenuation_radius {{radius_cm}}, volumetric_scattering 2; set_fog volumetric_fog true. Switch off (set_light enabled false) only these existing lights: {{lights_off}}. If the reply is still pending, hyper_operation_wait.\n3. hyper_capture_view with source camera `{{camera}}` (viewport if it does not exist).\nReport a PASS/FAIL table: one spot per marker, ShadowFraction between 0.35 and 0.75, ContrastRatio >= 20, LuminanceP95 < 0.95, at most 4 shadow-casting lights overlapping. Then the capture on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.lighting-regression-check",
+   "title": "Check that lighting still matches approved shots",
+   "summary": "Recapture approved camera views and score each against its approved image, flagging any view whose lighting drifted after a change or update.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_capture_view",
+    "hyper_image_compare"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "regression",
+    "QA",
+    "approved shots",
+    "engine upgrade",
+    "compare",
+    "read-only"
+   ],
+   "placeholders": [
+    {
+     "name": "shots",
+     "label": "Shots (camera = approved image)",
+     "default": "CAM_Hero = Content/References/Approved/hero.png; CAM_Market = Content/References/Approved/market.png",
+     "hint": "Separate shots with semicolons; images are project paths"
+    },
+    {
+     "name": "target",
+     "label": "Pass score (0-100)",
+     "default": "92"
+    },
+    {
+     "name": "change",
+     "label": "Change being checked",
+     "default": "the engine update"
+    }
+   ],
+   "prompt": "Check that the lighting of {{level}} still matches its approved shots after {{change}}. Change nothing. Shots, as camera label = approved image: {{shots}}. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect: whether exposure is locked. If it is not, mark every brightness result WARN, since auto exposure moves with the content.\n2. For each shot: hyper_capture_view with source camera <label> at the approved image's size, bSettle on; then hyper_image_compare with ReferenceImagePath the approved image, CandidateImagePath the capture, mode aligned, TargetScore {{target}}, SessionId regression_<label>, and a Note naming the change being checked.\n3. For each shot below target, read ExposureDeltaEV, ColorTemperatureDeltaK, the worst regions and Suggestions, and say in one line what most likely drifted: sun, sky, fog, post process, local lights or a material.\nReport a table: camera, Score, StructureScore, ExposureDeltaEV, ColorTemperatureDeltaK, and PASS/FAIL against {{target}}. A missing camera or image is a FAIL with the reason. Then the side-by-side of each failing shot on its own line as ![camera](absolute path)."
+  },
+  {
+   "id": "lighting-lookdev.dungeon-torch-readability",
+   "title": "Light a torch-lit dungeon the player can navigate",
+   "summary": "Give each selected torch a warm light, keep the fill low, and prove with eye-height captures and a bot walk that the route reads in play.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_scene_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_sky_light",
+    "set_light",
+    "add_light"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "dungeon",
+    "torches",
+    "fantasy",
+    "navigation",
+    "readability",
+    "playtest"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "ev100",
+     "label": "Locked EV100",
+     "default": "3",
+     "hint": "About 15 noon sun, 12 overcast, 8 bright interior, 4 dim interior, -2 moonlight"
+    },
+    {
+     "name": "offset_cm",
+     "label": "Light offset from the wall (cm)",
+     "default": "30"
+    },
+    {
+     "name": "torch_k",
+     "label": "Torch temperature (K)",
+     "default": "1900"
+    },
+    {
+     "name": "radius_cm",
+     "label": "Torch light radius (cm)",
+     "default": "900"
+    },
+    {
+     "name": "min_p50",
+     "label": "Minimum median brightness between torches",
+     "default": "0.06"
+    }
+   ],
+   "prompt": "Light the dungeon of {{level}} by torchlight. The selected actors are wall torches, in walking order:\n{{selected_actors}}\nIf the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (MaxLocalLights 64) and hyper_scene_inspect (scope selected): each torch's location, and any light it already holds (a torch Blueprint lists under its label with the light's component).\n2. One hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision, bSave false): lock_exposure {{ev100}}; set_sky_light intensity 0.05; for each torch, set_light its own light (property component:<name>/<setting>) if it has one, else add_light point `TorchLight_<n>` {{offset_cm}} cm out from the wall at the flame; temperature {{torch_k}}, attenuation_radius {{radius_cm}}, source_radius 6, and cast_shadows true only on every second torch so no more than 4 shadowed lights overlap. If the reply is still pending, hyper_operation_wait.\n3. hyper_capture_view with source transform at eye height (170 cm above the floor) midway between each pair of torches, looking along the route.\n4. hyper_verify_run with one case: MoveTo each torch in order, then Capture. It plays a copy of the level with the unsaved edits.\nReport a PASS/FAIL table: a light per torch, each midway capture with LuminanceP50 >= {{min_p50}} (the floor reads) and LuminanceP95 < 0.95, the bot reached every torch, at most 4 shadowed lights overlapping. Then the captures on their own lines, the bot's capture last. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.window-lit-interior",
+   "title": "Light an interior from its windows and lamps",
+   "summary": "Key a room with rect lights in its window openings, add warm practical lamps and a shadowless fill, and check the key-to-fill ratio and range.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_scene_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "lock_exposure",
+    "add_light",
+    "set_light"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "interior",
+    "window light",
+    "rect lights",
+    "practicals",
+    "architecture",
+    "key and fill"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "lamps",
+     "label": "Lamp actor labels",
+     "default": "none",
+     "hint": "Labels separated by commas, or none"
+    },
+    {
+     "name": "ev100",
+     "label": "Locked EV100",
+     "default": "8",
+     "hint": "About 15 noon sun, 12 overcast, 8 bright interior, 4 dim interior, -2 moonlight"
+    },
+    {
+     "name": "daylight_k",
+     "label": "Daylight temperature (K)",
+     "default": "6000"
+    }
+   ],
+   "prompt": "Light the room in {{level}} as a lighting artist would: daylight through the windows as the key, warm lamps as practicals, a soft fill. The selected actors are the window openings:\n{{selected_actors}}\nLamp actors: {{lamps}}. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`, MaxLocalLights 64) and hyper_scene_inspect (scope selected) for each window's location, rotation and scale.\n2. One hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision, bSave false): lock_exposure {{ev100}}; per window, add_light rect `WindowKey_<n>` just inside the opening, then set_light aim_at the room's centre, source_width and source_height the opening's size, temperature {{daylight_k}}, barn_door_angle 30, intensity_units candelas; per lamp, set_light its light (or add_light point inside it) temperature 2700, intensity_units candelas, source_radius 5; add_light point `Fill` at the room's centre, cast_shadows false, intensity_units candelas, intensity a third of one key. If the reply is still pending, hyper_operation_wait.\n3. hyper_capture_view with source camera `{{camera}}` (viewport if it does not exist). Change key and fill by ratios (x2 or /2), one plan per change with a fresh inspect revision, until LuminanceP50 is 0.12-0.25.\nReport a PASS/FAIL table: exposure locked at {{ev100}}, key to fill between 2:1 and 4:1 in candelas, LuminanceP95 < 0.95, LuminanceP5 > 0.02, the window side visibly brighter than the far wall, at most 4 shadow-casting lights. Then the capture on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.wet-neon-street",
+   "title": "Make a rainy night street mirror its neon",
+   "summary": "Lower the street's roughness on the level's own instance, make the neon signs glow and light, and check reflections under the project's renderer.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_capture_view",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_material_parameter",
+    "set_actor_lighting",
+    "add_reflection_capture",
+    "set_post_process"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "neon",
+    "wet street",
+    "rain",
+    "reflections",
+    "cyberpunk",
+    "emissive"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "ev100",
+     "label": "Locked EV100",
+     "default": "6",
+     "hint": "About 15 noon sun, 12 overcast, 8 bright interior, 4 dim interior, -2 moonlight"
+    },
+    {
+     "name": "wet_roughness",
+     "label": "Wet ground roughness",
+     "default": "0.12"
+    },
+    {
+     "name": "glow",
+     "label": "Neon emissive multiplier",
+     "default": "3"
+    }
+   ],
+   "prompt": "Make the night street in {{level}} look rain-soaked, mirroring the neon signs selected here:\n{{selected_actors}}\nIf the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`, MaxMaterials 24): the ground material and its parameters, the signs' emissive parameters, and rendering (reflection_method, lumen_max_roughness_to_trace, lumen_tracing). hyper_capture_view as the before frame.\n2. One hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision, bSave false): lock_exposure {{ev100}}; set_material_parameter on a ground actor: its roughness parameter to {{wet_roughness}} (below the trace limit) and its base colour darkened by a third, as wet surfaces darken; for each sign, set_material_parameter its emissive strength x{{glow}} and set_actor_lighting emissive_light_source true. If reflection_method is not lumen, add_reflection_capture box at the street's centre. If the before frame shows no bloom around the signs, add set_post_process BloomIntensity 1. If the reply is still pending, hyper_operation_wait.\n3. hyper_capture_view again, and hyper_lighting_inspect to re-read the ground material's notes.\nReport a PASS/FAIL table: ground roughness <= the trace limit (no roughness note left), signs' emissive raised, HighlightFraction up from before but below 0.08, LuminanceP95 < 0.95, neon colours visibly reflected on the ground (say where), project materials unchanged (look-dev instances only). Then the before and after captures, each on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.character-showcase-rig",
+   "title": "Build a three-point light rig for a character showcase",
+   "summary": "Place key, fill and rim lights around the selected character at set ratios, lock exposure, and capture a hero shot and a profile.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_scene_inspect",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "lock_exposure",
+    "add_light",
+    "set_light"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "character",
+    "three-point lighting",
+    "showcase",
+    "portrait",
+    "rim light",
+    "key light"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "height_cm",
+     "label": "Character height (cm)",
+     "default": "180"
+    },
+    {
+     "name": "distance_cm",
+     "label": "Light distance (cm)",
+     "default": "250"
+    },
+    {
+     "name": "ev100",
+     "label": "Locked EV100",
+     "default": "8",
+     "hint": "About 15 noon sun, 12 overcast, 8 bright interior, 4 dim interior, -2 moonlight"
+    },
+    {
+     "name": "key_k",
+     "label": "Key temperature (K)",
+     "default": "5600"
+    },
+    {
+     "name": "rim_k",
+     "label": "Rim temperature (K)",
+     "default": "7000"
+    },
+    {
+     "name": "key_fill_ratio",
+     "label": "Key to fill ratio",
+     "default": "3"
+    }
+   ],
+   "prompt": "Light {{selected_actor}} for a character showcase with a classic three-point rig. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_scene_inspect (scope selected) for its location and facing; treat it as {{height_cm}} cm tall. hyper_lighting_inspect for the revision and the lights already near it.\n2. One hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision, bSave false): lock_exposure {{ev100}}; add_light rect `Key` {{distance_cm}} cm away, 45 degrees to the character's left of its facing and 30 degrees up, then set_light aim_at its chest (0.75 x height), source_width and source_height 100, temperature {{key_k}}; add_light rect `Fill` on the right, same distance, set_light aim_at the chest, cast_shadows false, intensity the key's divided by {{key_fill_ratio}}; add_light spot `Rim` behind and above, set_light aim_at the head, outer_cone_angle 25, temperature {{rim_k}}, intensity about the key's. Set all three to intensity_units candelas first. If the reply is still pending, hyper_operation_wait.\n3. hyper_capture_view twice with source transform: a hero shot from the front at chest height, 1.5 x {{distance_cm}} cm away, FovDegrees 35; and a profile from 90 degrees.\nReport a PASS/FAIL table: exposure locked, key to fill = {{key_fill_ratio}}:1 in candelas, the rim reads as a bright edge on the silhouette in the profile, LuminanceP95 < 0.95 (no clipped skin), LuminanceP5 > 0.02. Then both shots, each on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.trim-shadow-casting-lights",
+   "title": "Cut the cost of overlapping shadowed lights",
+   "summary": "Find local lights whose shadows overlap past a limit, turn off shadows on fills and trim radii, then prove the frame still looks the same.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_light"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "performance",
+    "optimisation",
+    "shadows",
+    "local lights",
+    "GPU cost"
+   ],
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "max_shadowed",
+     "label": "Most overlapping shadowed lights",
+     "default": "4"
+    },
+    {
+     "name": "min_score",
+     "label": "Look-preserved score (aligned)",
+     "default": "95"
+    },
+    {
+     "name": "ev100",
+     "label": "EV100 if exposure is unlocked",
+     "default": "8",
+     "hint": "About 15 noon sun, 12 overcast, 8 bright interior, 4 dim interior, -2 moonlight"
+    }
+   ],
+   "prompt": "Reduce lighting cost in {{level}}: no spot in view of `{{camera}}` should be lit by more than {{max_shadowed}} shadow-casting local lights, and the look must hold. If the lighting_lookdev pack is unavailable, say so and stop.\n1. hyper_lighting_inspect (CameraActorLabel `{{camera}}`, MaxLocalLights 128): every point, spot and rect light with location, attenuation_radius, intensity, cast_shadows and in_view. If rendering.megalights is true, say many shadowed lights are already cheap there and stop. Find clusters where more than {{max_shadowed}} shadow-casting lights' radii overlap.\n2. If exposure is unlocked, lock_exposure at {{ev100}} in its own hyper_lighting_apply_plan first. hyper_capture_view with source camera `{{camera}}` (viewport if it does not exist) as the before frame.\n3. One hyper_lighting_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision from a fresh inspect, bSave false) with set_light ops only: cast_shadows false on the weakest lights in each cluster (fills and bounce lights), and attenuation_radius cut by up to 30% where a light reaches far past the surfaces it lights. Never switch a light off. If the reply is still pending, hyper_operation_wait.\n4. hyper_capture_view again, then hyper_image_compare after against before in aligned mode, TargetScore {{min_score}}.\nReport a table of changed lights (label, cast_shadows, radius before -> after). Then PASS/FAIL: most overlapping shadowed lights before -> after and <= {{max_shadowed}}, aligned score >= {{min_score}}, no light disabled. Then the before, after and diff heat map images, each on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "lighting-lookdev.match-reference-loop",
+   "title": "Match the level's lighting to a reference image",
+   "summary": "Run the full image-match loop: lock exposure, change one lighting lever at a time, score each capture, and grade last with a fitted LUT.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "image-match"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view",
+    "hyper_image_compare",
+    "hyper_memory_remember"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_sun",
+    "set_sky_light",
+    "set_fog",
+    "set_sky_atmosphere",
+    "set_post_process",
+    "set_light",
+    "set_sky_system"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "image match",
+    "reference",
+    "concept art",
+    "lighting match",
+    "LUT",
+    "iteration"
+   ],
+   "placeholders": [
+    {
+     "name": "reference",
+     "label": "Reference image (project path)",
+     "default": "Content/References/look.png"
+    },
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera",
+     "hint": "The view to judge; the level viewport is used if no camera has this label"
+    },
+    {
+     "name": "mode",
+     "label": "Compare mode (look or aligned)",
+     "default": "look",
+     "hint": "aligned only when the reference frames the same view"
+    },
+    {
+     "name": "target",
+     "label": "Target score",
+     "default": "75",
+     "hint": "About 75 against concept art, 85 for an aligned photo"
+    },
+    {
+     "name": "session",
+     "label": "Match session id",
+     "default": "lighting_match"
+    },
+    {
+     "name": "max_iterations",
+     "label": "Iteration limit",
+     "default": "12"
+    }
+   ],
+   "prompt": "Match the lighting of {{level}} seen from `{{camera}}` to `{{reference}}`, following the image-match skill. If the lighting_lookdev pack is unavailable, say so and stop.\n1. Open the reference and say what makes the look: time of day, key light, palette, contrast, air. hyper_memory_recall \"match\" for earlier studies of this level.\n2. hyper_lighting_inspect (CameraActorLabel `{{camera}}`); if the camera does not exist, say so and use the viewport. hyper_lighting_apply_plan with lock_exposure at a fitting EV100 (fresh OperationId, bDryRun false, ExpectedRevision, bSave false).\n3. Loop at most {{max_iterations}} times: hyper_capture_view of the camera; hyper_image_compare (mode {{mode}}, TargetScore {{target}}, SessionId {{session}}, a Note naming the values just changed); open the side-by-side; then one hyper_lighting_apply_plan with one lever or one coherent group (set_sun angle and temperature, set_sky_light, set_fog, set_sky_atmosphere, set_post_process, set_light, or set_sky_system for a Blueprint sky), with a fresh OperationId and revision each time. If a reply is still pending, hyper_operation_wait. On bPlateau, switch lever category. Stop on bMatched.\n4. When the light is close, compare once with bFitLut true, and apply set_post_process color_grading_lut <LutPath> only if LutScore beats the score.\n5. hyper_memory_remember one lasting fact you learned, such as the EV100 this level needs.\nReport a table of iterations (score and note), then PASS/FAIL: best score >= {{target}}, exposure locked, level unsaved. Then the best side-by-side on its own line as ![best](absolute path)."
+  }
+ ]
+}

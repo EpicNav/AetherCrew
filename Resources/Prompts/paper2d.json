@@ -1,0 +1,293 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "paper2d",
+ "presets": [
+  {
+   "id": "paper2d.sprite-readiness-check",
+   "title": "Check a sprite is ready for the game",
+   "summary": "Read a sprite's pixels per unit, collision and material, validate it for authoring, and list what to fix in the Sprite Editor.",
+   "packs": [
+    "paper2d"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_paper2d_inspect",
+    "hyper_paper2d_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "paper2d",
+    "sprite",
+    "2d",
+    "pixels per unit",
+    "collision",
+    "audit",
+    "read-only"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "PaperSprite"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "ppu",
+     "label": "Expected pixels per unit",
+     "default": "1.0"
+    }
+   ],
+   "prompt": "Check that the sprite {{selected_asset}} is ready for the game. Read-only: this pack has no edit path for sprite settings.\n1. hyper_paper2d_inspect with TargetPath {{selected_asset}} (its exact object path). If the tool is missing, say the paper2d pack is off and stop. If it reports the asset is not loaded, ask me to open it and stop. Read AssetKind (it must be sprite), PixelsPerUnrealUnit, CollisionMode (0 none, 1 deprecated 2D physics, 2 3D physics), CollisionThickness, DefaultMaterialPath, SourceWidth, SourceHeight, RenderVertexCount and the PersistedRevision.\n2. hyper_paper2d_validate with that ExpectedPersistedRevision and Policy `authoring_ready`.\n3. Report a PASS/FAIL table: kind is sprite; PixelsPerUnrealUnit equals {{ppu}}; collision mode is 2 when it should collide or 0 for decoration, never 1; thickness above 0 when it collides; a default material is set; RenderVertexCount under 64 for a simple shape; validation 0 errors. Give the sprite's size in the world in cm (source size divided by pixels per unit). For each FAIL, name the Sprite Editor field to change and the value to give it."
+  },
+  {
+   "id": "paper2d.retime-flipbook-duration",
+   "title": "Retime a flipbook to an exact duration",
+   "summary": "Set a flipbook's frames per second so one loop lasts exactly the time you need, then validate it and confirm the new length.",
+   "packs": [
+    "paper2d"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_paper2d_inspect",
+    "hyper_paper2d_apply_plan",
+    "hyper_paper2d_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "paper2d",
+    "flipbook",
+    "frame rate",
+    "timing",
+    "attack",
+    "2d animation",
+    "platformer"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "PaperFlipbook"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "duration",
+     "label": "Duration in seconds",
+     "default": "0.6"
+    }
+   ],
+   "prompt": "Retime the flipbook {{selected_asset}} so one loop lasts {{duration}} seconds. Change only its frame rate.\n1. hyper_paper2d_inspect with TargetPath {{selected_asset}}. If the tool is missing, say the paper2d pack is off and stop. Read AssetKind (it must be flipbook), NumFrames, FramesPerSecond, the key frames and the PersistedRevision. The asset must be saved and clean; if it has unsaved changes, say so and stop.\n2. The new FramesPerSecond is NumFrames divided by {{duration}}, rounded to 2 decimals. It must stay between 1 and 60; if not, report it and stop.\n3. hyper_paper2d_apply_plan with bDryRun true, a fresh OperationId, ExpectedPersistedRevision, and a Patch with ExpectedKind `flipbook`, bSetFramesPerSecond true and FramesPerSecond set to that value. Expect `dry_run_valid_execution_blocked`, which here means the plan is valid.\n4. Send it with bDryRun false and ExpectedPlanHash set to its PlanHash. Expect `executed_fast_reversible_edit`: the edit is one undo step and saves the asset itself. If the Status is `bounded_rebuild_save_backend_required`, Native Execution Mode is Strict: say it must be Fast for this edit and stop.\n5. hyper_paper2d_inspect again, then hyper_paper2d_validate with Policy `structural`.\n6. Report a PASS/FAIL table: frames per second before and after, NumFrames, the duration afterwards (NumFrames divided by FPS) within 0.01 seconds of {{duration}}, saved with the edit, validation 0 errors."
+  },
+  {
+   "id": "paper2d.folder-flipbook-frame-rate",
+   "title": "Set one frame rate for every flipbook in a folder",
+   "summary": "Find the flipbooks under a folder and retime each one that differs to a shared frame rate, one validated edit per asset.",
+   "packs": [
+    "paper2d"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_project_search",
+    "hyper_paper2d_inspect",
+    "hyper_paper2d_apply_plan",
+    "hyper_paper2d_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "paper2d",
+    "flipbook",
+    "frame rate",
+    "batch",
+    "consistency",
+    "pixel art",
+    "2d animation"
+   ],
+   "placeholders": [
+    {
+     "name": "fps",
+     "label": "Frames per second",
+     "default": "12"
+    },
+    {
+     "name": "max_assets",
+     "label": "Most flipbooks to change",
+     "default": "40"
+    }
+   ],
+   "prompt": "Give every flipbook under `{{content_folder}}` the same frame rate, {{fps}} frames per second, for a consistent pixel-art feel. Change only the frame rate of flipbooks that differ.\n1. hyper_project_search with Query `{{content_folder}}` and Kinds `asset`, paging with Cursor, and keep the PaperFlipbook results in that folder and its subfolders. If the paper2d tools are missing, say the pack is off and stop. If there are more than {{max_assets}}, do the first {{max_assets}} and list the rest.\n2. For each, hyper_paper2d_inspect with its exact object path: read FramesPerSecond, NumFrames and the PersistedRevision. Skip those already at {{fps}}, and list those that are not loaded or have unsaved changes without touching them.\n3. For each one to change: hyper_paper2d_apply_plan with bDryRun true, a fresh OperationId, ExpectedPersistedRevision, and a Patch with ExpectedKind `flipbook`, bSetFramesPerSecond true and FramesPerSecond {{fps}}; then the same with bDryRun false and ExpectedPlanHash set to its PlanHash. Expect `executed_fast_reversible_edit`; each edit saves its own asset. If the Status is `bounded_rebuild_save_backend_required`, Native Execution Mode is Strict: say it must be Fast for this edit and stop.\n4. hyper_paper2d_validate each changed flipbook with Policy `structural`.\n5. Report a table, one row per flipbook: path, frames per second before and after, duration afterwards in seconds, PASS/FAIL, validation errors. End with the counts changed, already right and skipped."
+  },
+  {
+   "id": "paper2d.tile-set-grid-fix",
+   "title": "Fix a tile set's grid to match its sprite sheet",
+   "summary": "Set tile size, spacing and drawing offset on a tile set so its grid lines up with the sheet, then check the tile count.",
+   "packs": [
+    "paper2d"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_paper2d_inspect",
+    "hyper_paper2d_apply_plan",
+    "hyper_paper2d_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "paper2d",
+    "tile set",
+    "tiles",
+    "sprite sheet",
+    "grid",
+    "pixel art",
+    "platformer"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "PaperTileSet"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "tile",
+     "label": "Tile size in pixels",
+     "default": "16"
+    },
+    {
+     "name": "spacing",
+     "label": "Spacing between tiles in pixels",
+     "default": "1"
+    },
+    {
+     "name": "offset",
+     "label": "Drawing offset in pixels (x,y)",
+     "default": "0,0"
+    }
+   ],
+   "prompt": "Make the tile set {{selected_asset}} cut its sheet into {{tile}} x {{tile}} pixel tiles with {{spacing}} pixel spacing and a drawing offset of {{offset}}. Change only those three settings.\n1. hyper_paper2d_inspect with TargetPath {{selected_asset}}. If the tool is missing, say the paper2d pack is off and stop. Read AssetKind (it must be tile_set), TileSheetWidth, TileSheetHeight, TileWidth, TileHeight, SpacingX, SpacingY, the four margins, DrawingOffsetX, DrawingOffsetY, TileCountX, TileCountY and the PersistedRevision. The asset must be saved and clean.\n2. Work out the grid: columns = (sheet width - left margin - right margin + {{spacing}}) / ({{tile}} + {{spacing}}), and rows the same way from the height. If either is not a whole number, these values do not fit this sheet: report them and stop.\n3. hyper_paper2d_apply_plan with bDryRun true, a fresh OperationId, ExpectedPersistedRevision, and a Patch with ExpectedKind `tile_set`, bSetTileSize (TileWidth and TileHeight {{tile}}), bSetTileSpacing (SpacingX and SpacingY {{spacing}}) and bSetTileDrawingOffset (DrawingOffsetX and DrawingOffsetY from {{offset}}), leaving out any group already equal; if all are equal, report PASS and stop. Then send it with bDryRun false and ExpectedPlanHash set to its PlanHash, and expect `executed_fast_reversible_edit` (it saves the asset). If the Status is `bounded_rebuild_save_backend_required`, Native Execution Mode is Strict: say it must be Fast for this edit and stop.\n4. hyper_paper2d_inspect again, and hyper_paper2d_validate with Policy `structural`.\n5. Report a PASS/FAIL table: tile size, spacing and offset before and after; TileCountX and TileCountY equal to the columns and rows worked out; validation 0 errors."
+  },
+  {
+   "id": "paper2d.solid-tile-map-platforms",
+   "title": "Make a tile map's platforms solid for the player",
+   "summary": "Give a tile map 3D collision with a set thickness, validate it, and prove in play that the player stands on it.",
+   "packs": [
+    "paper2d"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "tools": [
+    "hyper_paper2d_inspect",
+    "hyper_paper2d_apply_plan",
+    "hyper_paper2d_validate",
+    "hyper_verify_run"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "paper2d",
+    "tile map",
+    "collision",
+    "platformer",
+    "playtest",
+    "verify",
+    "2d"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "PaperTileMap"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "thickness",
+     "label": "Collision thickness in cm",
+     "default": "50"
+    }
+   ],
+   "prompt": "Make the tile map {{selected_asset}} solid for the player in {{level}}: 3D collision (mode 2) with a thickness of {{thickness}} cm. Change only those two settings.\n1. hyper_paper2d_inspect with TargetPath {{selected_asset}}. If the tool is missing, say the paper2d pack is off and stop. Read AssetKind (it must be tile_map), CollisionMode, CollisionThickness, the layers and which have bCollides, and the PersistedRevision. It must be saved and clean. If no layer collides, say which layer should and stop, because layer edits are outside this pack.\n2. hyper_paper2d_apply_plan with bDryRun true, a fresh OperationId, ExpectedPersistedRevision, and a Patch with ExpectedKind `tile_map`, bSetCollisionMode true with CollisionMode 2, and bSetCollisionThickness true with CollisionThickness {{thickness}}, leaving out a field that already matches. Then send it with bDryRun false and ExpectedPlanHash set to its PlanHash; expect `executed_fast_reversible_edit` (it saves the asset). If the Status is `bounded_rebuild_save_backend_required`, Native Execution Mode is Strict: say it must be Fast for this edit and stop.\n3. hyper_paper2d_validate with Policy `authoring_ready`.\n4. If the level has a player start above the tile map, hyper_verify_run with one case: Wait 2 seconds, then AssertProperty on Player with Property `Speed`, Compare `<` and Value `5`, so a player standing on the tiles passes and one falling through fails, then Capture with Text `tilemap_stand`. Otherwise say no such start exists.\n5. Report a PASS/FAIL table: collision mode 2, thickness {{thickness}} cm, the number of colliding layers, validation 0 errors, and the verify case's result. Show any picture the run wrote on its own line."
+  },
+  {
+   "id": "paper2d.tile-map-layer-review",
+   "title": "Review a tile map's layers before it ships",
+   "summary": "List a tile map's layers with size, collision and visibility, and validate it for authoring, without changing anything.",
+   "packs": [
+    "paper2d"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_paper2d_inspect",
+    "hyper_paper2d_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "paper2d",
+    "tile map",
+    "layers",
+    "collision",
+    "visibility",
+    "audit",
+    "read-only"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "PaperTileMap"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "min_colliding",
+     "label": "Colliding layers needed",
+     "default": "1"
+    }
+   ],
+   "prompt": "Review the tile map {{selected_asset}} before it ships. Read-only: change nothing.\n1. hyper_paper2d_inspect with TargetPath {{selected_asset}}. If the tool is missing, say the paper2d pack is off and stop. Read AssetKind (it must be tile_map), MapWidth, MapHeight, TileWidth, TileHeight, PixelsPerUnrealUnit, ProjectionMode, CollisionMode, CollisionThickness, the material, the PersistedRevision, and every layer: name, size, bCollides, bVisibleInEditor and bVisibleInGame.\n2. hyper_paper2d_validate with that ExpectedPersistedRevision and Policy `authoring_ready`.\n3. Report a table of layers: index, name, size in tiles, collides, visible in editor, visible in game. Mark WARN for a layer visible in the editor but hidden in game, and FAIL for a layer whose size differs from the map's.\n4. Then a PASS/FAIL table for the map: a material is set, at least {{min_colliding}} colliding layer(s), collision mode 2 when any layer collides, thickness above 0, validation 0 errors. Give the map's size in the world in cm (tiles times tile pixels divided by pixels per unit), and each issue code with what to change in the Tile Map Editor."
+  },
+  {
+   "id": "paper2d.folder-health-audit",
+   "title": "Audit every Paper2D asset in a folder",
+   "summary": "Find the sprites, flipbooks, tile sets and tile maps under a folder, validate each one, and rank what to fix first.",
+   "packs": [
+    "paper2d"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_paper2d_inspect",
+    "hyper_paper2d_validate"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "paper2d",
+    "audit",
+    "sprites",
+    "flipbooks",
+    "tile maps",
+    "conventions",
+    "read-only"
+   ],
+   "placeholders": [
+    {
+     "name": "ppu",
+     "label": "Pixels per unit convention",
+     "default": "1.0"
+    },
+    {
+     "name": "fps",
+     "label": "Flipbook frame rate convention",
+     "default": "12"
+    },
+    {
+     "name": "max_assets",
+     "label": "Most assets to check",
+     "default": "100"
+    }
+   ],
+   "prompt": "Audit every Paper2D asset under `{{content_folder}}`: sprites, flipbooks, tile sets and tile maps. Read-only: change nothing.\n1. hyper_memory_recall with \"Paper2D\" for the project's pixels-per-unit and frame-rate conventions; if there are none, use {{ppu}} pixels per unit and {{fps}} frames per second.\n2. hyper_project_search with Query `{{content_folder}}` and Kinds `asset`, paging with Cursor, and keep the PaperSprite, PaperFlipbook, PaperTileSet and PaperTileMap results, at most {{max_assets}}. If the paper2d tools are missing, say the pack is off and stop.\n3. For each, hyper_paper2d_inspect with its exact object path, then hyper_paper2d_validate with its ExpectedPersistedRevision and Policy `authoring_ready`. List assets that are not loaded rather than guessing about them.\n4. Flag convention breaks: sprites and tile maps not at the pixels per unit, flipbooks not at the frame rate, collision mode 1 (deprecated 2D physics), missing materials, and tile sets whose tiles do not fill the sheet.\n5. Report a table, one row per asset: kind, path, errors, warnings, convention breaks, PASS/FAIL. Then give counts per kind and the five fixes to do first, saying which this pack can make (flipbook frame rate, tile set grid, tile map collision) and which need the editor (sprite settings, tile map pixels per unit)."
+  }
+ ]
+}

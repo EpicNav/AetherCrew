@@ -1,0 +1,635 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "team-builds",
+ "presets": [
+  {
+   "id": "team-builds.lighting-pass-with-review",
+   "title": "Give a blockout a lighting pass and a QA check",
+   "summary": "The lighting artist lights an existing blockout to a mood with exposure locked, QA measures the captures, and the director signs off.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "team"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_capture_view",
+    "hyper_memory_remember"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_sun",
+    "set_sky_light",
+    "set_fog",
+    "add_light",
+    "set_sky_system"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "team",
+    "lighting",
+    "mood",
+    "blockout",
+    "review"
+   ],
+   "placeholders": [
+    {
+     "name": "mood",
+     "label": "Mood",
+     "default": "cold moonlit night"
+    },
+    {
+     "name": "goal",
+     "label": "Goal to light (actor label)",
+     "default": "Exit_Door"
+    },
+    {
+     "name": "camera",
+     "label": "Camera (actor label)",
+     "default": "HyperAI_MatchCamera"
+    }
+   ],
+   "prompt": "Run the team skill to give the blockout in {{level}} a lighting pass for {{mood}}, with the way to {{goal}} lit so a player reads it. Touch only lighting actors and post process. If the lighting_lookdev pack is unavailable, say so and stop.\n1. director: hyper_memory_recall \"lighting {{level}}\" for earlier passes; plan light-pass (lighting-artist), then light-check (qa-tester).\n2. lighting-artist: hyper_lighting_inspect with cameraActorLabel {{camera}}, then one hyper_lighting_apply_plan with a fresh operationId: lock_exposure first, then set_sun, set_sky_light and set_fog for {{mood}}, and add_light for one key light on {{goal}}. If the level has a Blueprint sky, use set_sky_system instead of the lights it owns. hyper_capture_view from {{camera}} before and after.\n3. qa-tester: read the after capture's metrics (luminance P5 above 0.02, P95 below 0.95, {{goal}} brighter than its surroundings) and open the picture before judging.\n4. Failures go back to the lighting-artist, up to three rounds.\n5. director review: PASS/FAIL table (exposure locked, luminance range, goal reads, at most four overlapping shadow-casting local lights), the before and after captures on their own lines as ![before](path) and ![after](path), and lasting lessons saved with hyper_memory_remember. Save the level only if I ask."
+  },
+  {
+   "id": "team-builds.locked-crypt-room",
+   "title": "Build a locked crypt room with a key, lit and tested",
+   "summary": "The team blocks out a crypt, scripts a key that unlocks its door, lights it with torches, and proves a player gets through.",
+   "packs": [
+    "level_design",
+    "blueprint",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "team",
+    "unreal-level-design"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_level_design_validate",
+    "hyper_blueprint_compile_validate",
+    "hyper_lighting_apply_plan",
+    "hyper_capture_view",
+    "hyper_verify_run",
+    "hyper_memory_remember"
+   ],
+   "ops": [
+    "add_block",
+    "add_stairs",
+    "add_marker",
+    "lock_exposure",
+    "add_light",
+    "set_light"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "team",
+    "fantasy",
+    "dungeon",
+    "door",
+    "key",
+    "lighting"
+   ],
+   "placeholders": [
+    {
+     "name": "room_size",
+     "label": "Room size (cm, x,y,z)",
+     "default": "1200,1600,500"
+    },
+    {
+     "name": "torches",
+     "label": "Torch lights",
+     "default": "4"
+    }
+   ],
+   "prompt": "Run the team skill to build a locked crypt room in {{level}}: the player finds a key, the door opens, torches light the room. New assets go under {{content_folder}}/Crypt. If the level_design pack is unavailable, say so and stop; without lighting_lookdev, skip the lighting part and say so.\n1. director: hyper_memory_recall \"crypt door key\" and hyper_level_design_inspect for player metrics; plan crypt-blockout (level-designer), key-and-door (programmer), crypt-lighting (lighting-artist, after the blockout) and crypt-test (qa-tester, last).\n2. level-designer: one hyper_level_blockout_apply_plan with a fresh operationId: add_block floor and walls for a {{room_size}} cm room with a 140 x 240 cm doorway, add_stairs down to it, add_marker start, pickup and goal. Then hyper_level_design_validate.\n3. programmer: BP_CryptKey and BP_CryptDoor (bIsOpen; opens over 1 s when a player holding the key interacts), per the unreal-blueprint skill; hyper_blueprint_compile_validate on both.\n4. lighting-artist: one hyper_lighting_apply_plan: lock_exposure, then add_light and set_light for {{torches}} warm point lights near 2700 K; hyper_capture_view from the start marker.\n5. qa-tester: one hyper_verify_run: Play Collect the key; MoveTo the door, Interact, WaitUntil bIsOpen is true; Play Reach the goal.\n6. director review: PASS/FAIL table (doorway at least 120 x 220 cm, routes found, both Blueprints compile, luminance P95 under 0.95, door opens, goal reached), pictures on their own lines as ![view](path), lessons saved with hyper_memory_remember. Save the level only if I ask."
+  },
+  {
+   "id": "team-builds.scifi-player-hud",
+   "title": "Build a sci-fi HUD with health and ammo, wired and tested",
+   "summary": "The UI designer lays out a health bar and ammo counter, the programmer binds them to the player, and QA proves they update in play.",
+   "packs": [
+    "ui_slate_mvvm",
+    "blueprint"
+   ],
+   "skills": [
+    "team",
+    "unreal-umg"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_ui_apply_plan",
+    "hyper_ui_inspect",
+    "hyper_ui_validate",
+    "hyper_blueprint_compile_validate",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "widget.add",
+    "widget.set_slot",
+    "widget.set_property",
+    "widget.set_style",
+    "animation.create",
+    "animation.add_float_track"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "team",
+    "sci-fi",
+    "shooter",
+    "hud",
+    "ui",
+    "ammo"
+   ],
+   "placeholders": [
+    {
+     "name": "accent",
+     "label": "Accent colour",
+     "default": "#3CE0FF"
+    },
+    {
+     "name": "health_property",
+     "label": "Health property",
+     "default": "HealthComponent.Health"
+    },
+    {
+     "name": "ammo_property",
+     "label": "Ammo property",
+     "default": "Ammo"
+    },
+    {
+     "name": "ammo_start",
+     "label": "Ammo at start",
+     "default": "30",
+     "hint": "Exactly what the ammo text shows at the start"
+    }
+   ],
+   "prompt": "Run the team skill to give the player a sci-fi HUD: a health bar and an ammo counter that update in play. Assets go under {{content_folder}}/UI. If the ui_slate_mvvm pack is unavailable, say so and stop.\n1. director: hyper_memory_recall \"HUD fonts colours\" and read the player character's variables; plan hud-widget (ui-designer), hud-binding (programmer, after hud-widget) and hud-test (qa-tester).\n2. ui-designer: Epic's CreateWidgetBlueprint for WBP_PlayerHUD, then one hyper_ui_apply_plan with a fresh operationId: widget.add a CanvasPanel root, a HealthBar ProgressBar anchored bottom_left and an AmmoText TextBlock anchored bottom_right (widget.set_slot), 24 pt text in {{accent}} (widget.set_property, widget.set_style), and a 0.3 s Intro (animation.create, animation.add_float_track on RenderOpacity). Check with hyper_ui_inspect and hyper_ui_validate.\n3. programmer: add the HUD on BeginPlay; update HealthBar from {{health_property}} and AmmoText from {{ammo_property}} on change events, not Tick; hyper_blueprint_compile_validate.\n4. qa-tester: hyper_playtest_run (StartInProcess, bRecordVideo true): UiAssert WBP_PlayerHUD.AmmoText == {{ammo_start}}; Press the fire action; Wait 0.5 s; UiAssert WBP_PlayerHUD.AmmoText != {{ammo_start}}; Capture. Then hyper_operation_wait and hyper_playtest_status.\n5. director review: PASS/FAIL table (anchored inside the 5% safe zone, text at least 18 pt, validate clean, compiles, ammo updates), the capture on its own line as ![hud](path), and the video path. Touch no other widget."
+  },
+  {
+   "id": "team-builds.fireball-spell",
+   "title": "Make a fireball spell: VFX, GAS cost and cooldown",
+   "summary": "The team builds a GAS fireball with a mana cost, cooldown and damage, plus trail and impact effects, then proves it in play.",
+   "packs": [
+    "gas",
+    "niagara_vfx",
+    "blueprint"
+   ],
+   "skills": [
+    "team",
+    "unreal-gas"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_gas_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_niagara_validate",
+    "hyper_gas_apply_plan",
+    "hyper_gas_validate",
+    "hyper_blueprint_compile_validate",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "add_emitter",
+    "set_emitter_property",
+    "create_gameplay_effect_blueprint",
+    "set_effect_duration",
+    "replace_effect_modifiers",
+    "replace_effect_granted_tags",
+    "create_gameplay_ability_blueprint",
+    "set_ability_asset_tags",
+    "set_ability_property"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "team",
+    "fantasy",
+    "spell",
+    "gas",
+    "niagara",
+    "rpg"
+   ],
+   "placeholders": [
+    {
+     "name": "mana_cost",
+     "label": "Mana cost",
+     "default": "20"
+    },
+    {
+     "name": "cooldown_seconds",
+     "label": "Cooldown (s)",
+     "default": "3"
+    },
+    {
+     "name": "damage",
+     "label": "Damage",
+     "default": "35"
+    }
+   ],
+   "prompt": "Run the team skill to add a fireball spell: a GAS ability costing {{mana_cost}} mana with a {{cooldown_seconds}} s cooldown and {{damage}} damage, with trail and impact effects. Assets go under {{content_folder}}/Spells/Fireball. If the gas or niagara_vfx pack is unavailable, say so and stop.\n1. director: hyper_memory_recall \"spell GAS mana VFX\"; hyper_gas_inspect with bIncludeNativeAttributeSets true for the mana and health attributes and their defaults; plan fireball-vfx (technical-artist), fireball-gas (programmer), fireball-wiring (programmer, after both) and fireball-test (qa-tester).\n2. technical-artist: NS_Fireball from a template, then one hyper_niagara_apply_plan with a fresh operationId: add_emitter Trail and Impact, set_emitter_property fixed_bounds. hyper_niagara_validate with policy authoring, then runtime_probe.\n3. programmer: Epic's AddTag for Cooldown.Fireball and Data.Damage, then one hyper_gas_apply_plan: create_gameplay_effect_blueprint GE_Fireball_Cost (instant, -{{mana_cost}} mana via replace_effect_modifiers), GE_Fireball_Cooldown (set_effect_duration {{cooldown_seconds}} s, replace_effect_granted_tags Cooldown.Fireball), GE_Fireball_Damage (Set By Caller Data.Damage); create_gameplay_ability_blueprint GA_Fireball with set_ability_asset_tags and set_ability_property cost_effect and cooldown_effect. hyper_gas_validate. Wiring, per the unreal-blueprint skill: the ability graph, IA_Fireball, and a BP_TargetDummy with 100 health 1500 cm ahead of the start; hyper_blueprint_compile_validate.\n4. qa-tester: one hyper_verify_run: cost (Press IA_Fireball; AssertProperty the player's mana == its default less {{mana_cost}}); cooldown (Press, Wait 0.5 s, Press: mana fell by one cost only); defeat (Play Defeat target BP_TargetDummy inputAction IA_Fireball timeoutSeconds 40).\n5. director review: PASS/FAIL table per check, Play maps on their own lines as ![map](path). Save only the new assets."
+  },
+  {
+   "id": "team-builds.level-intro-cutscene",
+   "title": "Shoot and render a level intro cutscene",
+   "summary": "The lighting artist sets the mood, the cinematographer frames and cuts the shots, and QA checks the cut before a draft render.",
+   "packs": [
+    "cinematics",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "team",
+    "unreal-cinematics"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_sequence_inspect",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_capture_view",
+    "hyper_sequence_apply_plan",
+    "hyper_movie_render_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_sun",
+    "sequence.create",
+    "shot.frame",
+    "fade.add",
+    "config.create",
+    "render"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "team",
+    "cinematics",
+    "cutscene",
+    "intro",
+    "render"
+   ],
+   "placeholders": [
+    {
+     "name": "subject",
+     "label": "Main subject (actor label)",
+     "default": "Hero"
+    },
+    {
+     "name": "landmark",
+     "label": "Landmark (actor label)",
+     "default": "Castle_Gate"
+    },
+    {
+     "name": "mood",
+     "label": "Mood",
+     "default": "golden hour"
+    },
+    {
+     "name": "duration",
+     "label": "Length (s)",
+     "default": "16"
+    }
+   ],
+   "prompt": "Run the team skill to make a {{duration}} s intro cutscene for {{level}}: establish {{landmark}}, then reveal {{subject}}, lit for {{mood}}. If the cinematics pack is unavailable, say so and stop; if lighting_lookdev is, skip the lighting part.\n1. director: hyper_memory_recall \"cinematic intro\" and hyper_sequence_inspect to list existing sequences; plan intro-lighting (lighting-artist), intro-shots (cinematographer, after the lighting) and intro-review (qa-tester).\n2. lighting-artist: hyper_lighting_inspect, then one hyper_lighting_apply_plan with a fresh operationId: lock_exposure and set_sun for {{mood}}. hyper_capture_view from a transform framing {{landmark}}, before and after.\n3. cinematographer: one hyper_sequence_apply_plan on {{content_folder}}/Cinematics/LS_Intro: sequence.create at 24 fps for {{duration}} s; shot.frame wide on {{landmark}} with pull_out (0-5 s); shot.frame full on {{subject}}, three_quarter_left, low angle (5-10 s); shot.frame close on {{subject}} with push_in (10 s to the end); fade.add in and out. Fix every Review note. Then hyper_movie_render_apply_plan: config.create draft, png, 1280 x 720, and render; hyper_operation_wait for the frames.\n4. qa-tester: read the review (no jump cuts, line crossings, hidden subjects or gaps) and open three draft frames.\n5. director review: PASS/FAIL table (review clean, shots 2-6 s, luminance P95 under 0.95, draft rendered), three frames on their own lines as ![frame](path). Render a final, or save the level, only if I ask."
+  },
+  {
+   "id": "team-builds.open-world-outpost",
+   "title": "Build an open-world outpost: terrain, road and forest",
+   "summary": "The team shapes terrain with a flattened camp, lays a road, grows a forest that keeps off it, lights it and proves it is reachable.",
+   "packs": [
+    "worldbuilding_navigation",
+    "pcg",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "team",
+    "unreal-level-design"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_landscape_inspect",
+    "hyper_landscape_apply_plan",
+    "hyper_pcg_scatter_inspect",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_lighting_apply_plan",
+    "hyper_capture_view",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "landscape.create",
+    "landscape.sculpt",
+    "landscape.paint",
+    "landscape.road",
+    "ecosystem.create",
+    "volume.create",
+    "lock_exposure",
+    "set_sun"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "team",
+    "open-world",
+    "survival",
+    "landscape",
+    "pcg",
+    "forest"
+   ],
+   "placeholders": [
+    {
+     "name": "biome",
+     "label": "Forest type",
+     "default": "pine forest"
+    }
+   ],
+   "prompt": "Run the team skill to build a survival outpost in {{level}}: rolling terrain, a flat camp, a dirt road into it, a {{biome}} kept off both, and late-afternoon light. Assets go under {{content_folder}}/Outpost. If the pcg or lighting_lookdev pack is unavailable, skip that part and say so.\n1. director: hyper_memory_recall \"landscape PCG outpost\" and hyper_landscape_inspect; find the project's landscape material with Grass, Dirt, Rock and Verge layers (none: say so and stop); plan outpost-ground (level-designer), outpost-forest (level-designer, after the ground), outpost-light (lighting-artist) and outpost-test (qa-tester, last).\n2. ground: one hyper_landscape_apply_plan with a fresh operationId: landscape.create (Size 1008, noise, that material, PaintLayers Grass, Dirt, Rock, Verge); landscape.sculpt flatten Radius 15 m at the centre for the camp; landscape.road 6 m wide on Dirt into the camp; then landscape.paint Rock steeper than 32 degrees, Verge within 4 m of the road, and Dirt within 15 m of the camp centre.\n3. forest: hyper_pcg_scatter_inspect, then hyper_pcg_scatter_apply_plan: ecosystem.create with the {{biome}} species listed big to small and AvoidLayers Dirt and Verge, plus volume.create covering the landscape; hyper_operation_wait, then read each species' instance count.\n4. light: hyper_lighting_apply_plan with lock_exposure and set_sun (pitch -25, 4500 K); hyper_capture_view from the road and the camp.\n5. qa-tester: hyper_verify_run: Play Reach the camp centre from the start; Play Explore for 40 s.\n6. director review: PASS/FAIL table (camp reached, no falls, no trees on road or camp in the captures, every species grew), captures and maps on their own lines as ![view](path). Save only if I ask."
+  },
+  {
+   "id": "team-builds.lootable-treasure-chest",
+   "title": "Add a lootable chest with a prompt, sparkle and loot",
+   "summary": "A sparkle effect, an on-screen interact prompt and a chest that pays out gold, built by three roles and proven in play.",
+   "packs": [
+    "blueprint",
+    "niagara_vfx",
+    "ui_slate_mvvm"
+   ],
+   "skills": [
+    "team",
+    "unreal-blueprint"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_niagara_apply_plan",
+    "hyper_niagara_validate",
+    "hyper_ui_apply_plan",
+    "hyper_ui_validate",
+    "hyper_blueprint_compile_validate",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "add_emitter",
+    "set_emitter_property",
+    "widget.add",
+    "widget.set_property",
+    "widget.set_slot"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "team",
+    "rpg",
+    "chest",
+    "loot",
+    "interact",
+    "ui"
+   ],
+   "placeholders": [
+    {
+     "name": "gold",
+     "label": "Gold in the chest",
+     "default": "50"
+    },
+    {
+     "name": "prompt_text",
+     "label": "Prompt text",
+     "default": "Press E to open"
+    },
+    {
+     "name": "gold_property",
+     "label": "Gold property",
+     "default": "PlayerState.Gold",
+     "hint": "Where the player's gold lives, as owner.property"
+    }
+   ],
+   "prompt": "Run the team skill to add a treasure chest to {{level}}: a sparkle while it is closed, an on-screen \"{{prompt_text}}\" prompt within 200 cm, and {{gold}} gold when opened. Assets go under {{content_folder}}/Chest. If the niagara_vfx or ui_slate_mvvm pack is unavailable, skip that part and say so.\n1. director: hyper_memory_recall \"interact prompt gold\" to reuse the project's interact action and gold; plan chest-vfx (technical-artist), chest-prompt (ui-designer), chest-logic (programmer, after both) and chest-test (qa-tester).\n2. technical-artist: NS_ChestSparkle from a looping template, then one hyper_niagara_apply_plan with a fresh operationId: add_emitter Sparkle and set_emitter_property fixed_bounds. hyper_niagara_validate with policy runtime_probe: the emitter is live.\n3. ui-designer: Epic's CreateWidgetBlueprint for WBP_InteractPrompt, then one hyper_ui_apply_plan: widget.add a CanvasPanel root and a TextBlock PromptText in it, widget.set_property its text and font_size 20, widget.set_slot anchors bottom, just above the edge; hyper_ui_validate with no errors.\n4. programmer: BP_TreasureChest (bIsOpen, Gold {{gold}}) shows the prompt in range, opens on the interact action, stops the sparkle and adds the gold to {{gold_property}}; hyper_blueprint_compile_validate. Place one 300 cm in front of the player start.\n5. qa-tester: hyper_playtest_run (StartInProcess): MoveTo BP_TreasureChest radius 150; UiAssert WBP_InteractPrompt.PromptText; Interact; WaitUntil bIsOpen is true; AssertProperty {{gold_property}} >= {{gold}}; Capture. Then hyper_operation_wait and hyper_playtest_status.\n6. director review: PASS/FAIL table per check, the capture on its own line as ![chest](path). Save only the new assets."
+  },
+  {
+   "id": "team-builds.replicated-capture-point",
+   "title": "Build a replicated capture point in a symmetric arena",
+   "summary": "A mirror-symmetric arena and a server-driven capture point, proven on a listen-server client that sees the capture complete.",
+   "packs": [
+    "level_design",
+    "blueprint"
+   ],
+   "skills": [
+    "team",
+    "unreal-playtest"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_level_design_validate",
+    "hyper_blueprint_compile_validate",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "add_block",
+    "add_ramp",
+    "add_marker"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "team",
+    "multiplayer",
+    "shooter",
+    "arena",
+    "replication",
+    "objective"
+   ],
+   "placeholders": [
+    {
+     "name": "arena_size",
+     "label": "Arena floor (cm, x,y,z)",
+     "default": "6000,4000,20"
+    },
+    {
+     "name": "capture_seconds",
+     "label": "Seconds to capture",
+     "default": "5"
+    }
+   ],
+   "prompt": "Run the team skill to build a two-team capture-point arena in {{level}}: a mirror-symmetric layout and a point that captures after {{capture_seconds}} s and replicates to every client. Assets go under {{content_folder}}/Arena. If the level_design pack is unavailable, say so and stop.\n1. director: hyper_memory_recall \"multiplayer replication arena\" and hyper_level_design_inspect for player metrics; plan arena-blockout (level-designer), capture-point (programmer) and arena-test (qa-tester, after both).\n2. level-designer: one hyper_level_blockout_apply_plan with a fresh operationId: add_block a {{arena_size}} cm floor plus cover_low and cover_high blocks mirrored across X = 0, add_ramp to two side platforms, add_marker start and spawn at each end and objective at the centre. Then hyper_level_design_validate with symmetryAxis x: symmetric, routes from both starts to the objective, corridors at least 300 cm.\n3. programmer: BP_CapturePoint, replicated, with replicated CaptureProgress (0 to 1) and OwningTeam; progress fills on the server while one team stands inside. hyper_blueprint_compile_validate, then place it on the objective marker.\n4. qa-tester: hyper_playtest_run with mode StartInProcess, netMode ListenServer, numPlayers 2, bRecordVideo true, each step's timeoutMs above its own length: host (pieInstance 0) MoveTo BP_CapturePoint radius 100; Wait {{capture_seconds}} s plus 1; client (pieInstance 1) AssertProperty BP_CapturePoint CaptureProgress >= 1. Then hyper_operation_wait and hyper_playtest_status.\n5. director review: PASS/FAIL table (symmetric, routes found, compiles, client sees the capture), the validate preview on its own line as ![arena](path), and the video path. Save only if I ask."
+  },
+  {
+   "id": "team-builds.stealth-guard-patrol",
+   "title": "Add a stealth guard that patrols, chases and gives up",
+   "summary": "A patrol route, a guard AI that chases on sight and returns to patrol, and parallel bot cases proving each behaviour.",
+   "packs": [
+    "gameplay_ai",
+    "level_design",
+    "blueprint"
+   ],
+   "skills": [
+    "team",
+    "verify"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_level_blockout_apply_plan",
+    "hyper_level_design_validate",
+    "hyper_blueprint_compile_validate",
+    "hyper_gameplay_ai_inspect",
+    "hyper_gameplay_ai_validate",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "add_marker",
+    "add_block"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "team",
+    "stealth",
+    "ai",
+    "patrol",
+    "behavior-tree",
+    "perception"
+   ],
+   "placeholders": [
+    {
+     "name": "patrol_points",
+     "label": "Patrol points",
+     "default": "4"
+    },
+    {
+     "name": "sight_cm",
+     "label": "Sight range (cm)",
+     "default": "1500"
+    },
+    {
+     "name": "search_seconds",
+     "label": "Seconds before giving up",
+     "default": "6"
+    }
+   ],
+   "prompt": "Run the team skill to add a stealth guard to {{level}}: it patrols {{patrol_points}} points, chases the player it sees within {{sight_cm}} cm, and returns to patrol {{search_seconds}} s after losing them. Assets go under {{content_folder}}/Guard. If the gameplay_ai pack is unavailable, skip its two checks and say so; if level_design is, say so and stop.\n1. director: hyper_memory_recall \"AI perception guard patrol\"; plan patrol-route (level-designer), guard-ai (programmer, after patrol-route) and guard-test (qa-tester, last).\n2. level-designer: one hyper_level_blockout_apply_plan with a fresh operationId: add_marker start where the guard begins, add_marker checkpoint at each patrol point (Patrol_1 and on), and add_block cover_high pieces to hide behind. hyper_level_design_validate: routes from the start reach every patrol point.\n3. programmer, per the unreal-blueprint skill: BP_GuardController (an AIController with an AIPerception sight sense of {{sight_cm}} cm) and BP_Guard. The controller walks the patrol points with AI MoveTo, chases on sight, and goes back to patrolling {{search_seconds}} s after losing sight. Place BP_Guard at Patrol_1. hyper_blueprint_compile_validate on both, then hyper_gameplay_ai_inspect and hyper_gameplay_ai_validate with variant ai_controller_perception on BP_GuardController: a sight sense that starts enabled, no errors.\n4. qa-tester, following the verify skill, one hyper_verify_run: guard-patrols (Sample BP_Guard for 10 s: it moves between points); guard-chases (MoveTo within {{sight_cm}} cm in its view, then WaitUntil AssertNear BP_Guard other Player radius 300); guard-gives-up (Play Flee from BP_Guard, range 3000, for {{search_seconds}} s plus 2, then Sample BP_Guard).\n5. director review: PASS/FAIL table per behaviour, Play maps on their own lines as ![map](path). Save only if I ask."
+  },
+  {
+   "id": "team-builds.match-concept-art",
+   "title": "Relight and resurface a level to match concept art",
+   "summary": "The lighting and technical artists work a scored image-match session until the level looks like the reference, then QA checks range.",
+   "packs": [
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "team",
+    "image-match"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_capture_view",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_sun",
+    "set_fog",
+    "set_post_process",
+    "set_material_parameter"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "team",
+    "look-dev",
+    "lighting",
+    "reference",
+    "image-match"
+   ],
+   "placeholders": [
+    {
+     "name": "reference",
+     "label": "Reference image",
+     "default": "Saved/HyperAIStudio/References/concept.png",
+     "hint": "Path to the concept art PNG"
+    },
+    {
+     "name": "camera",
+     "label": "Camera (actor label)",
+     "default": "HyperAI_MatchCamera"
+    },
+    {
+     "name": "target_score",
+     "label": "Target look score",
+     "default": "75"
+    }
+   ],
+   "prompt": "Run the team skill to make {{level}} look like the concept art at {{reference}}, seen from {{camera}}, until the look score reaches {{target_score}}. If the lighting_lookdev pack is unavailable, say so and stop.\n1. director: open the reference and describe its time of day, key light, palette and mood; hyper_memory_recall \"match lighting\" for earlier studies of this level. Plan match-light (lighting-artist), match-surfaces (technical-artist, after match-light) and match-check (qa-tester).\n2. lighting-artist: hyper_lighting_inspect; one hyper_lighting_apply_plan with a fresh operationId and lock_exposure first. hyper_capture_view from {{camera}} at the reference's aspect ratio, then a hyper_image_compare session in look mode with targetScore {{target_score}}. One change per plan (set_sun, set_fog, set_post_process grading), with a capture and a compare after each.\n3. technical-artist: in the same session, set_material_parameter on the level's own instances for surfaces that read wrong (roughness, base colour, emissive); never edit the project's materials.\n4. qa-tester: a final capture and compare; luminance P5 above 0.02 and P95 below 0.95 unless the reference is that dark or bright.\n5. director review: PASS/FAIL table (score at least {{target_score}}, luminance range, project materials untouched), then the reference, the first capture, the final capture and the heat map, each on its own line as ![label](path). Save the level only if I ask."
+  },
+  {
+   "id": "team-builds.time-trial-course",
+   "title": "Build a time-trial course with checkpoints and a timer",
+   "summary": "A checkpoint course, a lap-timer HUD and in-order checkpoint logic, proven by a bot that runs the lap and one that skips a gate.",
+   "packs": [
+    "level_design",
+    "ui_slate_mvvm",
+    "blueprint"
+   ],
+   "skills": [
+    "team",
+    "unreal-level-design"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_level_design_validate",
+    "hyper_ui_apply_plan",
+    "hyper_ui_validate",
+    "hyper_blueprint_compile_validate",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "add_block",
+    "add_ramp",
+    "add_marker",
+    "widget.add",
+    "widget.set_slot",
+    "widget.set_property"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "team",
+    "racing",
+    "time-trial",
+    "checkpoints",
+    "hud"
+   ],
+   "placeholders": [
+    {
+     "name": "checkpoints",
+     "label": "Checkpoints",
+     "default": "6"
+    },
+    {
+     "name": "par_seconds",
+     "label": "Par time (s)",
+     "default": "60"
+    }
+   ],
+   "prompt": "Run the team skill to build an on-foot time trial in {{level}}: a loop through {{checkpoints}} checkpoints in order, a lap timer HUD, and a par of {{par_seconds}} s. Assets go under {{content_folder}}/TimeTrial. If the level_design or ui_slate_mvvm pack is unavailable, say so and stop.\n1. director: hyper_memory_recall \"checkpoint timer HUD\" and hyper_level_design_inspect for jump and step limits; plan course-blockout (level-designer), lap-hud (ui-designer), checkpoint-logic (programmer, after both) and course-test (qa-tester).\n2. level-designer: one hyper_level_blockout_apply_plan with a fresh operationId: add_block track pieces at least 400 cm wide, add_ramp within the walkable slope, add_marker start and one checkpoint marker per gate. hyper_level_design_validate: routes from the start reach every checkpoint.\n3. ui-designer: Epic's CreateWidgetBlueprint for WBP_LapTimer, then one hyper_ui_apply_plan: widget.add a CanvasPanel root with LapTime and Checkpoint TextBlocks, anchored top_right with widget.set_slot, font_size 28 with widget.set_property; hyper_ui_validate.\n4. programmer: BP_Checkpoint (Index) and BP_TimeTrialManager (CurrentCheckpoint, LapTime, bFinished) that counts gates only in order and drives WBP_LapTimer; hyper_blueprint_compile_validate.\n5. qa-tester: one hyper_verify_run: in-order (Play Reach each checkpoint in turn, then AssertProperty BP_TimeTrialManager bFinished is true and LapTime at most {{par_seconds}}); skip-gate (MoveTo the last gate first, then AssertProperty CurrentCheckpoint is 0).\n6. director review: PASS/FAIL table per check, Play maps and the validate preview on their own lines as ![map](path). Save only if I ask."
+  }
+ ]
+}

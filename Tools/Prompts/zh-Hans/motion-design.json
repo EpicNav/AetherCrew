@@ -1,0 +1,23 @@
+{
+ "motion-design.audit-modifier-stack.title": "审查 Motion Design 对象的修改器和动画器",
+ "motion-design.audit-modifier-stack.summary": "按顺序列出所选对象的修改器及其状态、属性动画器，并验证修改器堆栈。",
+ "motion-design.radial-carousel-plan.title": "为产品转盘规划径向排列",
+ "motion-design.radial-carousel-plan.summary": "预检为转盘父对象添加 RadialArrange 修改器，封存计划，并列出需要设置的圆环和朝向参数。",
+ "motion-design.radial-carousel-plan.ph.radius.label": "圆环半径（厘米）",
+ "motion-design.fix-modifier-order.title": "调整修改器顺序，让倒角在挤出之后执行",
+ "motion-design.fix-modifier-order.summary": "在 3D 文字或形状对象上找出两个互相依赖顺序的修改器，并预检把其中一个移到另一个之后。",
+ "motion-design.fix-modifier-order.ph.first.label": "先执行的修改器",
+ "motion-design.fix-modifier-order.ph.second.label": "随后执行的修改器",
+ "motion-design.mute-heavy-modifiers.title": "为性能测试停用高开销几何修改器",
+ "motion-design.mute-heavy-modifiers.summary": "预检在所选对象上禁用 Subdivide、Bevel 和 Boolean 修改器，并给出恢复它们的计划。",
+ "motion-design.mute-heavy-modifiers.ph.names.label": "要停用的修改器",
+ "motion-design.oscillate-sway-animator.title": "规划用 Oscillate 动画器让招牌摇摆",
+ "motion-design.oscillate-sway-animator.summary": "预检在对象上创建 Oscillate 属性动画器并链接其旋转属性，再列出需手动设置的摆动幅度。",
+ "motion-design.oscillate-sway-animator.ph.degrees.label": "摇摆角度（度）",
+ "motion-design.stagger-wave-offsets.title": "让一排动画对象产生波浪起伏",
+ "motion-design.stagger-wave-offsets.summary": "预检为每个对象现有的动画器设置错开的时间偏移，使一排柱体或灯光像波浪一样依次运动。",
+ "motion-design.stagger-wave-offsets.ph.step.label": "偏移步长（秒）",
+ "motion-design.prove-scene-animates.title": "证明 Motion Design 场景确实在动",
+ "motion-design.prove-scene-animates.summary": "从相机每隔半秒截取三帧并测量画面变化，同时列出每个对象已启用的动画器。",
+ "motion-design.prove-scene-animates.ph.camera.label": "相机标签"
+}

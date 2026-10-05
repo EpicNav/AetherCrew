@@ -1,0 +1,693 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "playtest-qa",
+ "presets": [
+  {
+   "id": "playtest-qa.survey-before-testing",
+   "title": "Survey the level before writing playtests",
+   "summary": "Learn the player start, actor classes, controls and whether a target is reachable, so later tests name real things.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_verify_calibrate",
+    "hyper_verify_run"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "survey",
+    "playtest",
+    "bot",
+    "reachability",
+    "controls"
+   ],
+   "placeholders": [
+    {
+     "name": "target",
+     "label": "Target actor",
+     "default": "BP_Goal",
+     "hint": "An actor label, name, tag or class the player should reach"
+    }
+   ],
+   "prompt": "Survey {{level}} so later playtests use real names. Change nothing in the level.\n1. hyper_memory_recall with query \"playtest {{target}}\": past checks, class names and gotchas.\n2. hyper_verify_calibrate with bMeasure false: report limit, the number of cases one batch may hold on this machine.\n3. One hyper_verify_run (deadlineSeconds 30) with a single case named survey: a Survey step with target {{target}}, then a Capture step with text survey-start.\n4. From the Survey evidence list: where the player starts (cm), the camera, the actor census by class, the controls with their keys (Move, Jump, Interact, Fire...), the player's health property, and the distance to {{target}} and whether the navmesh reaches it.\n5. Report a table with PASS/FAIL rows: player found, controls found, {{target}} exists, {{target}} reachable, each with its evidence line. Show the capture on its own line as ![start view](path). If {{target}} is not found, list the closest class names from the census instead of guessing."
+  },
+  {
+   "id": "playtest-qa.pickup-adds-score",
+   "title": "Prove a pickup adds score and disappears",
+   "summary": "Walk the bot to a pickup, check it vanishes and the score rises by the right amount, with a screenshot as proof.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "pickup",
+    "coin",
+    "score",
+    "platformer",
+    "pie"
+   ],
+   "placeholders": [
+    {
+     "name": "pickup",
+     "label": "Pickup actor",
+     "default": "BP_Coin",
+     "hint": "Label, name, tag or class of the pickup"
+    },
+    {
+     "name": "score_owner",
+     "label": "Score owner",
+     "default": "PlayerState",
+     "hint": "PlayerState, GameState, GameMode or an actor label"
+    },
+    {
+     "name": "score_property",
+     "label": "Score property",
+     "default": "Score"
+    },
+    {
+     "name": "points",
+     "label": "Points per pickup",
+     "default": "10"
+    }
+   ],
+   "prompt": "Prove in Play In Editor that picking up {{pickup}} in {{level}} adds {{points}} to {{score_owner}}.{{score_property}} and removes the pickup. Change nothing in the level.\n1. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown StopOwnedSession, wholeTimeoutMs 120000. Bot steps, each with a stepId and timeoutMs up to 30000: Survey target {{pickup}}; Sample target {{score_owner}} property {{score_property}} seconds 0.5 (the starting score); MoveTo target {{pickup}} radius 50 timeoutSeconds 15; WaitUntil until AssertGone target {{pickup}} timeoutSeconds 3; AssertProperty target {{score_owner}} property {{score_property}} compare == value {{points}}; Capture text after-pickup.\n2. hyper_operation_wait with that operationId, timeoutMs 120000 and bWaitThroughApproval true.\n3. hyper_playtest_status with pageSize 64: read every step's evidence.\n4. If the starting score was not 0, run once more with the expected value set to start + {{points}}.\n5. Report a PASS/FAIL table: reached the pickup, pickup gone, score rose by {{points}}, each with its evidence line. Open the capture and show it on its own line as ![after pickup](path). For a failed step give its code (stuck, not_found, assertion_failed) and what the bot saw."
+  },
+  {
+   "id": "playtest-qa.door-opens-on-approach",
+   "title": "Check a door opens when the player walks up",
+   "summary": "Walk to a door, interact, and prove its open flag flips in time, recorded as an MP4 with each step drawn over the game.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "door",
+    "interact",
+    "video",
+    "pie",
+    "regression"
+   ],
+   "placeholders": [
+    {
+     "name": "door",
+     "label": "Door actor",
+     "default": "BP_Door",
+     "hint": "Label, name, tag or class of the door"
+    },
+    {
+     "name": "open_property",
+     "label": "Open flag",
+     "default": "bIsOpen",
+     "hint": "The Blueprint variable that is true when the door is open"
+    },
+    {
+     "name": "open_seconds",
+     "label": "Seconds allowed to open",
+     "default": "3"
+    }
+   ],
+   "prompt": "Prove that {{door}} in {{level}} opens for the player, and record it for review. Change nothing in the level.\n1. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown StopOwnedSession, bRecordVideo true, videoFps 15. Bot steps, each with a stepId and timeoutMs: Survey target {{door}}; AssertProperty target {{door}} property {{open_property}} compare == value false; MoveTo target {{door}} radius 150 timeoutSeconds 15; Interact target {{door}}; WaitUntil until AssertProperty, target {{door}}, property {{open_property}}, compare ==, value true, timeoutSeconds {{open_seconds}}; Wait seconds 1; Capture text door-open.\n2. hyper_operation_wait (timeoutMs 120000, bWaitThroughApproval true), then hyper_playtest_status with pageSize 64.\n3. Report a PASS/FAIL table: closed at start, player reached the door, opened within {{open_seconds}} s, each with its evidence line. Show the capture on its own line as ![door open](path) and give the playtest.mp4 path from the video evidence item.\n4. On a failure, name the step, its code and what the bot saw (distance, value). Do not change the door: this is a test, not a fix."
+  },
+  {
+   "id": "playtest-qa.acceptance-batch",
+   "title": "Verify a feature's requirements in one minute",
+   "summary": "Split acceptance criteria into one bot case each, play them all at once in copies of the level, and judge each from evidence.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "verify",
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_verify_calibrate",
+    "hyper_verify_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "verify",
+    "acceptance",
+    "batch",
+    "requirements",
+    "parallel"
+   ],
+   "placeholders": [
+    {
+     "name": "requirements",
+     "label": "Requirements",
+     "default": "the coin adds 10 to the score and disappears; the door opens when the player walks up to it; the lava pit hurts the player",
+     "hint": "Each requirement one observable thing, separated by semicolons"
+    }
+   ],
+   "prompt": "Verify these requirements in {{level}}: {{requirements}}. Follow the verify skill. Nothing in the level changes, and unsaved edits are included.\n1. hyper_memory_recall with the feature's key words for class names and past results. hyper_verify_calibrate with bMeasure false for limit.\n2. Split the requirements into checks, each one observable thing with one pass condition. If a name is unknown, first run hyper_verify_run with one case holding a Survey step.\n3. Write one case per check, named after the requirement in kebab-case, timeoutSeconds 20: MoveTo, Interact, WaitUntil and Play steps as needed, ending with the Assert step or Play goal that proves it, plus a Capture where a picture helps. No UI or AssertOnScreen steps.\n4. One hyper_verify_run with every case (deadlineSeconds 60, at most limit cases; further checks go in later batches).\n5. Judge each case from its evidence alone: PASS (it holds), FAIL (a game bug) or INCONCLUSIVE (the case could not tell). Rewrite an inconclusive case once and run it again.\n6. Report a table: requirement, verdict, the evidence line it rests on. Show pictures on their own lines as ![case](path)."
+  },
+  {
+   "id": "playtest-qa.can-level-be-finished",
+   "title": "Check a level can be finished from start to goal",
+   "summary": "A bot plays like a person to the goal and collects every pickup, writing maps that show where the level blocks a player.",
+   "packs": [
+    "pie_runtime",
+    "level_design"
+   ],
+   "skills": [
+    "unreal-playtest",
+    "verify"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_level_design_validate",
+    "hyper_verify_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "completion",
+    "reach",
+    "collect",
+    "fantasy",
+    "navmesh",
+    "map"
+   ],
+   "placeholders": [
+    {
+     "name": "goal",
+     "label": "Goal actor",
+     "default": "Shrine_Altar",
+     "hint": "Label, name, tag or class of the goal"
+    },
+    {
+     "name": "collectible",
+     "label": "Collectibles",
+     "default": "BP_SoulShard",
+     "hint": "A tag or class naming every collectible"
+    },
+    {
+     "name": "skill_level",
+     "label": "Bot skill (0-1)",
+     "default": "0.4",
+     "hint": "0 plays like a new player, 1 like a skilled one"
+    }
+   ],
+   "prompt": "Prove a player can finish {{level}}: reach {{goal}} and collect every {{collectible}}. Change nothing.\n1. hyper_level_design_validate with bCapturePreview true: navmesh routes from each start marker to each goal marker, plus the top-down preview. Routes need the blockout's start and goal markers; with none, report the route row as INFO. If the level_design pack is unavailable, say so and continue with the bot alone.\n2. One hyper_verify_run (deadlineSeconds 60) with three cases, timeoutSeconds 50 each: reach-goal: Play goal Reach target {{goal}} radius 200 skill {{skill_level}} seed 1 timeoutSeconds 45; reach-goal-seed2: the same with seed 2; collect-all: Play goal Collect target {{collectible}} skill {{skill_level}} seed 1 timeoutSeconds 45, then Capture text collected.\n3. Read each Play result: time taken, jumps, obstacles gone round, stuck spots (cm) and, for Collect, the ones left behind.\n4. Report a PASS/FAIL table: route found, goal reached with both seeds, all collected, each with its evidence line. Open every Play map and show it on its own line as ![map](path), with the validate preview the same way.\n5. For each stuck spot give its location and the likely cause you can see on the map (a gap, a step too high, a blocked doorway). Do not fix the level."
+  },
+  {
+   "id": "playtest-qa.find-stuck-spots",
+   "title": "Find where players get stuck or fall out",
+   "summary": "Several bots explore the level at once; merge their maps into a list of stuck spots and falls so you know where to fix collision.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_verify_calibrate",
+    "hyper_verify_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "explore",
+    "coverage",
+    "stuck",
+    "collision",
+    "open-world"
+   ],
+   "placeholders": [
+    {
+     "name": "bots",
+     "label": "Bots",
+     "default": "4"
+    },
+    {
+     "name": "explore_seconds",
+     "label": "Seconds each bot explores",
+     "default": "45",
+     "hint": "At most 50"
+    }
+   ],
+   "prompt": "Find where players get trapped or fall out of {{level}}. Change nothing.\n1. hyper_verify_calibrate with bMeasure false; use the smaller of {{bots}} and limit as the case count.\n2. One hyper_verify_run (deadlineSeconds 60) with that many cases named explore-1, explore-2 and on, each with timeoutSeconds {{explore_seconds}} plus 5: Play goal Explore seconds {{explore_seconds}} with a different seed per case, then Capture text explore-N-end.\n3. Merge the results: how many 4 m squares each bot visited, and every stuck spot and fall with its location in cm. Treat spots within 300 cm of each other as one place, and count how many bots hit it.\n4. Report a table: place (x, y, z), stuck or fall, bots affected out of N. PASS when no bot fell and no place trapped two or more bots, otherwise FAIL. Show each Play map on its own line as ![explore N](path).\n5. For the top three places, say what the map shows there (a gap, a ledge, a tight corner) and what a designer should check. Fix nothing."
+  },
+  {
+   "id": "playtest-qa.combat-encounter-bot",
+   "title": "Playtest a combat encounter as new and skilled players",
+   "summary": "Bots at two skill levels fight the encounter; compare wins, accuracy, damage and health left against your targets.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest",
+    "verify"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_verify_calibrate",
+    "hyper_verify_run"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "combat",
+    "shooter",
+    "sci-fi",
+    "balance",
+    "defeat"
+   ],
+   "placeholders": [
+    {
+     "name": "enemies",
+     "label": "Enemies",
+     "default": "BP_Drone",
+     "hint": "A tag or class naming every enemy in the encounter"
+    },
+    {
+     "name": "health_property",
+     "label": "Health property",
+     "default": "HealthComponent.Health",
+     "hint": "Property path the bot reads health from"
+    },
+    {
+     "name": "new_wins",
+     "label": "Wins a new player needs (of 3)",
+     "default": "1"
+    }
+   ],
+   "prompt": "Playtest the {{enemies}} encounter in {{level}} as a new and a skilled player. Change nothing.\n1. hyper_memory_recall with query \"combat {{enemies}} damage\" for known damage-path gotchas. hyper_verify_calibrate with bMeasure false for limit.\n2. hyper_verify_run (deadlineSeconds 60), timeoutSeconds 50 per case: new-1 to new-3: Play goal Defeat target {{enemies}} skill 0.2 healthProperty {{health_property}} timeoutSeconds 45 with seeds 1 to 3; skilled-1 to skilled-3: the same with skill 0.8. End each case with a Capture. If limit is under 6, run the skilled cases as a second batch.\n3. For each case read: passed, or its code (defeated, no_damage, no_attack_action); shots and shots on target; damage dealt and taken; health left; time.\n4. Report a table per skill level: wins of 3, mean accuracy, mean health left, mean time. PASS rows: skilled wins 3 of 3; the new player wins at least {{new_wins}} of 3; no case ends no_damage or no_attack_action. Show each Play map on its own line as ![case](path).\n5. A no_damage result is a bug in the damage path: name the case and its evidence. Do not change enemy or weapon values."
+  },
+  {
+   "id": "playtest-qa.hud-health-updates",
+   "title": "Prove the HUD shows damage when the player is hurt",
+   "summary": "Walk into a hazard, confirm health drops, and check the HUD widget's text changes on screen, with captures before and after.",
+   "packs": [
+    "pie_runtime",
+    "ui_slate_mvvm"
+   ],
+   "skills": [
+    "unreal-playtest",
+    "unreal-umg"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_ui_inspect",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "hud",
+    "ui",
+    "health",
+    "damage",
+    "pie"
+   ],
+   "placeholders": [
+    {
+     "name": "hazard",
+     "label": "Hazard actor",
+     "default": "BP_FireHazard"
+    },
+    {
+     "name": "health_property",
+     "label": "Health property",
+     "default": "HealthComponent.Health"
+    },
+    {
+     "name": "max_health",
+     "label": "Full health",
+     "default": "100"
+    },
+    {
+     "name": "hud_widget",
+     "label": "HUD text widget",
+     "default": "WBP_HUD.HealthText",
+     "hint": "UserWidget.WidgetName of the text that shows health"
+    },
+    {
+     "name": "hud_full_text",
+     "label": "HUD text at full health",
+     "default": "100",
+     "hint": "Exactly what the widget reads at full health"
+    }
+   ],
+   "prompt": "Prove that taking damage from {{hazard}} in {{level}} lowers health and updates {{hud_widget}} on screen. Change nothing.\n1. hyper_ui_inspect on the HUD's Widget Blueprint with bIncludeTree true: confirm the widget named in {{hud_widget}} exists. If the ui_slate_mvvm pack is unavailable, say so and continue.\n2. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown StopOwnedSession. Bot steps with stepIds and timeoutMs: UiAssert widget {{hud_widget}} compare == value {{hud_full_text}}; Capture text hud-before; MoveTo target {{hazard}} radius 50 timeoutSeconds 15; WaitUntil until AssertProperty target Player property {{health_property}} compare < value {{max_health}} timeoutSeconds 5; UiAssert widget {{hud_widget}} compare != value {{hud_full_text}}; Capture text hud-after.\n3. hyper_operation_wait (timeoutMs 120000, bWaitThroughApproval true), then hyper_playtest_status with pageSize 64.\n4. Report a PASS/FAIL table: HUD full at start, player hurt (the health read), HUD changed, each with its evidence line. Open both captures and show them on their own lines as ![before](path) and ![after](path), and say whether the number on screen matches the health read."
+  },
+  {
+   "id": "playtest-qa.door-replicates-to-clients",
+   "title": "Test a door replicates to clients and late joiners",
+   "summary": "Host and client play in one editor; the host opens the door, and checks on the client and a late joiner prove it replicated.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status",
+    "hyper_pie_query"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "multiplayer",
+    "replication",
+    "listen-server",
+    "late-join",
+    "door"
+   ],
+   "placeholders": [
+    {
+     "name": "door",
+     "label": "Door actor",
+     "default": "BP_Door"
+    },
+    {
+     "name": "open_property",
+     "label": "Replicated open flag",
+     "default": "bIsOpen"
+    }
+   ],
+   "prompt": "Prove {{door}} in {{level}} replicates its open state. Change nothing in the level.\n1. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown LeaveSessionRunning, netMode ListenServer, numPlayers 2, bRecordVideo true. Steps, each with a stepId and timeoutMs: host (pieInstance 0) Bot MoveTo target {{door}} radius 150 timeoutSeconds 15; host Bot Interact target {{door}}; client (pieInstance 1) Bot WaitUntil until AssertProperty target {{door}} property {{open_property}} compare == value true timeoutSeconds 3; kind JoinPlayer with timeoutMs 20000; late joiner (pieInstance 2) Bot AssertProperty target {{door}} property {{open_property}} == true; pieInstance 1 Bot Capture text client-view.\n2. hyper_operation_wait (timeoutMs 120000, bWaitThroughApproval true), then hyper_playtest_status with pageSize 64.\n3. While play still runs, hyper_pie_query: list each world's pieInstance and net mode, proving one host and two clients. Then stop play with Epic's StopPIE.\n4. Report a PASS/FAIL table: host opened it, client saw it within 3 s, late joiner saw it, three worlds present. Show the client capture on its own line as ![client view](path) and give the video path. A failure on a client but not the host means the flag or the door's movement does not replicate: say which."
+  },
+  {
+   "id": "playtest-qa.pvp-duel-balance",
+   "title": "Balance-check a 1v1 duel with two bot players",
+   "summary": "Two local bots duel at different skill levels across several seeds; report who wins, accuracy and time to kill.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_verify_calibrate",
+    "hyper_verify_run"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "pvp",
+    "duel",
+    "balance",
+    "arena",
+    "fantasy"
+   ],
+   "placeholders": [
+    {
+     "name": "distance_cm",
+     "label": "Start distance (cm)",
+     "default": "1500"
+    },
+    {
+     "name": "skill_a",
+     "label": "Player 0 skill",
+     "default": "0.7"
+    },
+    {
+     "name": "skill_b",
+     "label": "Player 1 skill",
+     "default": "0.4"
+    },
+    {
+     "name": "ttk_min",
+     "label": "Shortest fair time to kill (s)",
+     "default": "5"
+    },
+    {
+     "name": "ttk_max",
+     "label": "Longest fair time to kill (s)",
+     "default": "30"
+    }
+   ],
+   "prompt": "Balance-check the 1v1 duel in {{level}}. Change nothing.\n1. hyper_verify_calibrate with bMeasure false; run the smaller of 4 and limit cases.\n2. One hyper_verify_run (deadlineSeconds 60). Each case duel-N (timeoutSeconds 50): AddPlayer at location ({{distance_cm}}, 0, 100) in world cm (if the start is far from the origin, use a point {{distance_cm}} cm in front of it); Wait seconds 0.5; Play goal Defeat target Player0 playerIndex 1 skill {{skill_b}} bBackground true timeoutSeconds 40 seed N; Play goal Defeat target Player1 skill {{skill_a}} timeoutSeconds 40 seed N; Capture text duel-N.\n3. For each case read who won (passed means Player0, defeated means Player1), shots, hits, damage dealt and taken, health left and time.\n4. Report a table per case and a summary. PASS rows: the player with skill {{skill_a}} wins at least 3 of 4; mean time to kill between {{ttk_min}} and {{ttk_max}} s; no no_damage or no_attack_action. Show each Play map on its own line as ![duel N](path).\n5. Say what the numbers suggest (one-sided, too fast, too slow) without changing any weapon or health values."
+  },
+  {
+   "id": "playtest-qa.movement-feel",
+   "title": "Measure walk speed, stopping and jump against targets",
+   "summary": "Hold the move input, sample the speed, release, and jump; compare walk speed and stopping with the pawn's settings or your targets.",
+   "packs": [
+    "pie_runtime",
+    "enhanced_input",
+    "level_design"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_input_inspect",
+    "hyper_level_design_inspect",
+    "hyper_verify_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "movement",
+    "game-feel",
+    "input",
+    "speed",
+    "jump"
+   ],
+   "placeholders": [
+    {
+     "name": "move_action",
+     "label": "Move input action",
+     "default": "IA_Move"
+    },
+    {
+     "name": "walk_speed",
+     "label": "Target walk speed (cm/s)",
+     "default": "pawn",
+     "hint": "A number, or pawn to use the pawn's WalkSpeed"
+    },
+    {
+     "name": "tolerance",
+     "label": "Tolerance (%)",
+     "default": "5"
+    }
+   ],
+   "prompt": "Measure movement feel in {{level}} against the design targets. Change nothing.\n1. hyper_input_inspect on the player's mapping context with bIncludeMappings true: confirm {{move_action}} and the jump action exist and what they are bound to. If the enhanced_input pack is unavailable, use a Survey step's control list instead.\n2. hyper_level_design_inspect: the pawn's WalkSpeed and JumpHeight. JumpHeight is the jump target; WalkSpeed is the speed target when {{walk_speed}} is pawn. If the level_design pack is unavailable, say so and check only what has a number.\n3. One hyper_verify_run (deadlineSeconds 40) with three cases: walk-speed: Hold inputAction {{move_action}} value 0,1 seconds 3 bBackground true; Wait seconds 1; Sample seconds 1. stop: Hold {{move_action}} value 0,1 seconds 2; Sample seconds 1. jump: Jump timeoutSeconds 3; Capture text jump.\n4. From the evidence read the steady walk speed (cm/s), the lowest speed in the second after release, and the jump height the Jump step reports (cm).\n5. Report a PASS/FAIL table: walk speed within {{tolerance}}% of the target; speed reaches 0 within 1 s of release; the jump lands and its height is within {{tolerance}}% of JumpHeight. Quote each evidence line, and show the capture on its own line as ![jump](path)."
+  },
+  {
+   "id": "playtest-qa.record-quest-step-video",
+   "title": "Record a reviewable video of a quest step",
+   "summary": "Play a short scripted path through one quest step and save an MP4 with every step's result drawn on it, plus a timeline.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "video",
+    "quest",
+    "rpg",
+    "review",
+    "record"
+   ],
+   "placeholders": [
+    {
+     "name": "npc",
+     "label": "Quest giver",
+     "default": "NPC_Elder",
+     "hint": "Label, name or class of the NPC to talk to"
+    },
+    {
+     "name": "objective",
+     "label": "Quest item",
+     "default": "BP_QuestItem"
+    },
+    {
+     "name": "fps",
+     "label": "Video frames per second (5-30)",
+     "default": "15"
+    }
+   ],
+   "prompt": "Record a reviewable video of the quest step in {{level}}: talk to {{npc}}, then pick up {{objective}}. Change nothing in the level.\n1. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown StopOwnedSession, bRecordVideo true, videoFps {{fps}}. Bot steps, each with a stepId and timeoutMs: MoveTo target {{npc}} radius 200 timeoutSeconds 20; Interact target {{npc}}; Wait seconds 2; Capture text dialogue; MoveTo target {{objective}} radius 100 timeoutSeconds 20; Interact target {{objective}}; WaitUntil until AssertGone target {{objective}} timeoutSeconds 3; Capture text objective-taken.\n2. hyper_operation_wait with timeoutMs 120000 and bWaitThroughApproval true.\n3. hyper_playtest_status with pageSize 64: the last evidence item is the video, with playtest.mp4 under Saved/HyperAIStudio/Playtests/<operationId>/ and timeline.json beside it.\n4. Report a PASS/FAIL table, one row per step, with its evidence line and its start time from the timeline. Give the video and timeline paths, and show both captures on their own lines as ![dialogue](path) and ![objective](path).\n5. If a step fails, the run stops there: report the code and what the bot saw, and still give the video of what was recorded."
+  },
+  {
+   "id": "playtest-qa.ai-chases-and-loses-player",
+   "title": "Check an enemy AI chases and then loses the player",
+   "summary": "Prove the enemy closes in once the player is near, and gives up after the player flees out of range.",
+   "packs": [
+    "pie_runtime",
+    "gameplay_ai"
+   ],
+   "skills": [
+    "unreal-playtest",
+    "verify"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_gameplay_ai_inspect",
+    "hyper_verify_run"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "ai",
+    "stealth",
+    "horror",
+    "chase",
+    "behavior-tree"
+   ],
+   "placeholders": [
+    {
+     "name": "enemy",
+     "label": "Enemy actor",
+     "default": "BP_Stalker"
+    },
+    {
+     "name": "ai_asset",
+     "label": "Behavior Tree or AI Controller",
+     "default": "/Game/AI/BT_Stalker.BT_Stalker",
+     "hint": "Object path of the enemy's Behavior Tree or AI Controller Blueprint"
+    },
+    {
+     "name": "chase_radius",
+     "label": "Caught distance (cm)",
+     "default": "300"
+    },
+    {
+     "name": "flee_range",
+     "label": "Escape distance (cm)",
+     "default": "2500"
+    },
+    {
+     "name": "flee_seconds",
+     "label": "Seconds to stay away",
+     "default": "8"
+    }
+   ],
+   "prompt": "Test that {{enemy}} in {{level}} chases the player and then loses them. Change nothing.\n1. hyper_gameplay_ai_inspect with assetPaths [{{ai_asset}}] and bIncludeDetails true: note the blackboard keys and chase and search branches, or the controller's senses. If the gameplay_ai pack is unavailable, say so and continue with the bot alone.\n2. One hyper_verify_run (deadlineSeconds 60) with two cases:\n- chases (timeoutSeconds 30): Survey target {{enemy}}; MoveTo target {{enemy}} radius 800 timeoutSeconds 15; WaitUntil until AssertNear target {{enemy}} other Player radius {{chase_radius}} timeoutSeconds 6; Capture text caught.\n- loses-player (timeoutSeconds 50): MoveTo target {{enemy}} radius 800 timeoutSeconds 15; Play goal Flee target {{enemy}} range {{flee_range}} seconds {{flee_seconds}}; Sample target {{enemy}} seconds 2; Capture text escaped.\n3. From the evidence read how fast the enemy closed in, the distance when the flee ended, and the enemy's speed and distance moved afterwards.\n4. Report a PASS/FAIL table: enemy reaches {{chase_radius}} cm within 6 s; player escapes (no caught code); enemy stops pursuing (speed near 0 or moving away). Show the captures and the Play map on their own lines as ![case](path)."
+  },
+  {
+   "id": "playtest-qa.blueprint-fix-regression",
+   "title": "Regression-test a Blueprint fix in play",
+   "summary": "Compile the fixed Blueprint, replay the bug's steps in parallel cases, and confirm no new script errors reach the log.",
+   "packs": [
+    "pie_runtime",
+    "blueprint"
+   ],
+   "skills": [
+    "verify",
+    "unreal-blueprint"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_log_tail",
+    "hyper_verify_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "regression",
+    "blueprint",
+    "bugfix",
+    "log",
+    "verify"
+   ],
+   "context": {
+    "selection": "assets",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "bug",
+     "label": "The bug that was fixed",
+     "default": "the turret keeps firing after it is destroyed"
+    },
+    {
+     "name": "cases",
+     "label": "Cases",
+     "default": "3"
+    }
+   ],
+   "prompt": "Regression-test the fix for: {{bug}}. The fixed Blueprint is {{selected_asset}}. Change nothing.\n1. hyper_blueprint_compile_validate on {{selected_asset}}: call it once to preview and get the PlanHash, again with that expectedPlanHash and a fresh operationId, then hyper_operation_wait. It must compile with 0 errors.\n2. hyper_log_tail with categories [LogScript, LogBlueprint], maxVerbosity warning and pageSize 1: keep its nextCursor as the mark before play. A cursor only works with the same categories and verbosity.\n3. Write {{cases}} cases that replay the bug's steps from different starts or seeds, each ending with the Assert step that fails if the bug is back, then a Capture. Run them in one hyper_verify_run with deadlineSeconds 60.\n4. hyper_log_tail from the mark's cursor with the same categories and maxVerbosity, and pageSize 128: list new errors and warnings (Accessed None, infinite loop) with the Blueprint and function they name.\n5. Report a PASS/FAIL table: compiles clean; each case passes, with its evidence line; no new script errors. Show captures on their own lines as ![case](path). If the bug is back, say which case caught it."
+  },
+  {
+   "id": "playtest-qa.menu-click-through",
+   "title": "Click through a menu and check each screen opens",
+   "summary": "Click menu buttons through Slate in Play In Editor, assert the screen each opens and that Back returns, capturing every screen.",
+   "packs": [
+    "pie_runtime",
+    "ui_slate_mvvm"
+   ],
+   "skills": [
+    "unreal-playtest",
+    "unreal-umg"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_ui_inspect",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "menu",
+    "ui",
+    "click",
+    "settings",
+    "navigation"
+   ],
+   "placeholders": [
+    {
+     "name": "menu_widget",
+     "label": "Menu widget",
+     "default": "WBP_MainMenu"
+    },
+    {
+     "name": "open_button",
+     "label": "Button to test",
+     "default": "SettingsButton"
+    },
+    {
+     "name": "screen_widget",
+     "label": "Widget the button should show",
+     "default": "WBP_Settings.Title",
+     "hint": "UserWidget.WidgetName"
+    },
+    {
+     "name": "back_button",
+     "label": "Back button",
+     "default": "WBP_Settings.BackButton"
+    }
+   ],
+   "prompt": "Click through {{menu_widget}} in {{level}} and prove {{open_button}} opens its screen and Back returns. Change nothing.\n1. hyper_ui_inspect on {{menu_widget}} and on the Widget Blueprint of {{screen_widget}} with bIncludeTree true: confirm every widget name used below exists. If the ui_slate_mvvm pack is unavailable, say so and continue.\n2. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown StopOwnedSession. Bot steps with stepIds and timeoutMs: Wait seconds 1; UiAssert widget {{menu_widget}}.{{open_button}}; Capture text menu; UiClick widget {{menu_widget}}.{{open_button}}; Wait seconds 0.5; UiAssert widget {{screen_widget}}; Capture text screen; UiClick widget {{back_button}}; Wait seconds 0.5; UiAssert widget {{menu_widget}}.{{open_button}}; Capture text back.\n3. hyper_operation_wait (timeoutMs 120000, bWaitThroughApproval true), then hyper_playtest_status with pageSize 64.\n4. Report a PASS/FAIL table: menu shown, button clicked, screen shown, back returns, each with its evidence line. Show the three captures on their own lines as ![menu](path), ![screen](path) and ![back](path). A widget_not_found code names a widget that was not on screen: report which."
+  }
+ ]
+}

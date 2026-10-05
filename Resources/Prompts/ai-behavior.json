@@ -1,0 +1,629 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "ai-behavior",
+ "presets": [
+  {
+   "id": "ai-behavior.audit-ai-assets",
+   "title": "Audit behaviour trees, blackboards and AI controllers",
+   "summary": "Load every AI asset in a folder and report broken nodes, blackboard link mismatches, perception gaps and leftover breakpoints. Changes nothing.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_gameplay_ai_inspect",
+    "hyper_gameplay_ai_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "audit",
+    "behavior tree",
+    "blackboard",
+    "ai controller",
+    "breakpoints",
+    "review"
+   ],
+   "prompt": "Audit the AI assets under {{content_folder}} in {{project}}. Change nothing.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. hyper_memory_recall `behavior tree blackboard` for the project's AI conventions.\n2. List the Behavior Trees, Blackboards and AI controller Blueprints there with Epic's AssetTools find_assets and load each with load_asset: hyper_gameplay_ai_inspect reads loaded assets only.\n3. hyper_gameplay_ai_inspect their object paths (variant all, bIncludeDetails true), following nextCursor to the end. Per tree note node count, nodes with an error, breakpoints and its runtime and editor-root blackboard; per Blackboard its keys, types and parent; per controller its senses, max ages, dominant sense and compile status.\n4. hyper_gameplay_ai_validate the same paths with bRequirePackagesClean true.\nReport a table with one row per asset: PASS when validate gives it 0 errors and it has no breakpoint, else FAIL with each issue code (behavior_tree_blackboard_link_mismatch, behavior_node_error, duplicate_or_missing_blackboard_key, dominant_sense_not_configured, package_dirty...) and the fix you recommend. End with totals: assets, errors, warnings, breakpoints."
+  },
+  {
+   "id": "ai-behavior.outline-behavior-tree",
+   "title": "Explain a behaviour tree as a readable outline",
+   "summary": "Turn the selected Behavior Tree into an indented outline of composites, tasks, decorators and services, with its blackboard keys and any errors.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "tools": [
+    "hyper_gameplay_ai_inspect",
+    "hyper_gameplay_ai_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "behavior tree",
+    "explain",
+    "documentation",
+    "outline",
+    "onboarding"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "BehaviorTree"
+    ],
+    "min": 1
+   },
+   "prompt": "Explain the Behavior Tree {{selected_asset}} so a designer can follow it without opening the editor. Change nothing.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Load the tree and its Blackboard with Epic's AssetTools load_asset.\n2. Read its structure with Epic's BehaviorTreeTools: list_nodes and get_node_depths (same order), get_root_decorators, get_blackboard, and get_subtree for every RunBehavior task.\n3. hyper_gameplay_ai_inspect the tree and its Blackboard (bIncludeDetails true) for node kinds, node errors, breakpoints and keys.\n4. hyper_gameplay_ai_validate both.\nWrite: a short paragraph on what the AI does and when it switches behaviour; an indented outline using the depths, one line per node as `kind: name`, with its decorators and services beneath it and the key each reads (ObjectTools get_properties on its key selectors, such as BlackboardKey); a key table (name, type, instance synced); and a PASS/FAIL table: every task, composite, decorator and service has a runtime instance (no runtime_node_missing), the runtime blackboard matches the editor root's, validate 0 errors, 0 breakpoints. Say plainly what the tools could not tell you."
+  },
+  {
+   "id": "ai-behavior.check-ai-feature-readiness",
+   "title": "Check which AI features this project can use",
+   "summary": "Report which Behavior Tree, State Tree, EQS, Smart Object and Gameplay Behavior features HyperAI can inspect or edit here, and what to enable.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "tools": [
+    "hyper_capability_report",
+    "hyper_gameplay_ai_inspect"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "plugins",
+    "state tree",
+    "eqs",
+    "smart objects",
+    "setup",
+    "capabilities"
+   ],
+   "placeholders": [
+    {
+     "name": "goal",
+     "label": "AI you plan to build",
+     "default": "stealth enemies that patrol, hear noises and search for the player"
+    }
+   ],
+   "prompt": "Tell me which AI features {{project}} is ready for, for this goal: {{goal}}. Change nothing and enable nothing.\n1. hyper_capability_report: is the gameplay_ai pack live? If it is not, say what it needs and stop.\n2. hyper_gameplay_ai_inspect with no asset paths, variant all, bIncludePrerequisites true and pageSize 1.\n3. Build a table with one row per variant it reports (behavior_tree, blackboard, ai_controller_perception, state_tree, eqs, smart_object, gameplay_behavior, gameplay_behavior_smart_object, gameplay_interaction): state, plugins installed and enabled, modules loaded, inspect and apply implemented, supported and unsupported cases.\n4. For the goal, say which Unreal systems fit (Behavior Trees, State Trees, EQS, Smart Objects, AI Perception), which plugins to enable in Edit > Plugins, and which parts HyperAI can inspect and validate versus build by hand.\nEnd with a PASS/FAIL table: pack live, behavior_tree inspect ready, blackboard inspect ready, ai_controller_perception inspect ready, and one row per plugin the goal needs (PASS when enabled)."
+  },
+  {
+   "id": "ai-behavior.add-stealth-guard-keys",
+   "title": "Add stealth-guard keys to a blackboard",
+   "summary": "Dry-run and add typed keys for alert, search and patrol state to the selected Blackboard, then prove each key and type by inspection.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gameplay_ai_inspect",
+    "hyper_gameplay_ai_apply_plan",
+    "hyper_gameplay_ai_validate"
+   ],
+   "ops": [
+    "add_blackboard_key"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "blackboard",
+    "keys",
+    "stealth",
+    "guard",
+    "patrol",
+    "modern"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "BlackboardData"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "keys",
+     "label": "Keys to add",
+     "default": "bAlerted bool, AlertLevel float, LastKnownLocation vector, SearchRotation rotator, PatrolIndex int, GuardState name",
+     "hint": "Name and type pairs; types are bool, int, float, name, string, vector or rotator."
+    }
+   ],
+   "prompt": "Give the Blackboard {{selected_asset}} the keys a stealth guard needs: {{keys}}. Change only this asset.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Load it with Epic's AssetTools load_asset, then hyper_gameplay_ai_inspect it: note its record's revision, parent and keys. Skip a key that already exists with the same type; stop and ask if one exists with another type or is inherited.\n2. hyper_gameplay_ai_apply_plan with bDryRun true and one add_blackboard_key op per key (type, targetPath, expectedRevision = the revision from step 1, name, keyType). It must reply valid_dry_run with effects.keysAdded equal to the keys planned.\n3. Run it for real: bDryRun false, a fresh operationId, expectedPlanHash = the dry run's planHash. The pack only stages edits today: a reply of staged_backend_required means nothing changed, so add the same keys with Epic's ObjectTools set_properties on the Blackboard's Keys array (each KeyType as a class path such as /Script/AIModule.BlackboardKeyType_Vector), keeping every existing entry. Save only if I asked.\n4. hyper_gameplay_ai_inspect the Blackboard again and hyper_gameplay_ai_validate it.\nReport a PASS/FAIL table: one row per key (present, type as asked), no duplicate names, the earlier keys untouched, validate 0 errors."
+  },
+  {
+   "id": "ai-behavior.rename-blackboard-key",
+   "title": "Rename a blackboard key and repoint its tree nodes",
+   "summary": "Rename a key on the selected Blackboard, repoint the tree nodes that read it, and prove every selector and asset still validates.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_project_search",
+    "hyper_gameplay_ai_inspect",
+    "hyper_gameplay_ai_apply_plan",
+    "hyper_gameplay_ai_validate"
+   ],
+   "ops": [
+    "rename_blackboard_key"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "blackboard",
+    "rename",
+    "refactor",
+    "behavior tree",
+    "references"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "BlackboardData"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "old_name",
+     "label": "Current key name",
+     "default": "TargetEnemy"
+    },
+    {
+     "name": "new_name",
+     "label": "New key name",
+     "default": "TargetActor"
+    }
+   ],
+   "prompt": "Rename the key `{{old_name}}` to `{{new_name}}` on the Blackboard {{selected_asset}} and repoint the tree nodes that read it.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Find the Behavior Trees and AI controllers that use this Blackboard (Epic's AssetTools get_referencers, or hyper_project_search) and load them and the Blackboard with load_asset.\n2. hyper_gameplay_ai_inspect them all: `{{old_name}}` must be a local key, not inherited, and `{{new_name}}` unused. In each tree, Epic's BehaviorTreeTools list_nodes, then ObjectTools get_properties on each node's key selectors (such as BlackboardKey): note every node that names `{{old_name}}`.\n3. hyper_gameplay_ai_apply_plan with bDryRun true and one rename_blackboard_key op (name {{old_name}}, newName {{new_name}}, the Blackboard's expectedRevision): it must reply valid_dry_run with effects.keysRenamed 1. Run it with bDryRun false, a fresh operationId and the dry run's planHash. The pack only stages edits today: a reply of staged_backend_required means nothing changed, so change that entry's EntryName with Epic's ObjectTools set_properties on the Keys array and nothing else.\n4. On each noted node, set the selector's SelectedKeyName to `{{new_name}}` with set_properties and read it back.\n5. hyper_gameplay_ai_inspect and hyper_gameplay_ai_validate the Blackboard and every tree.\nReport a PASS/FAIL table: old key gone, new key present with the same type, validate 0 errors, and one row per noted node with its selector after (PASS at `{{new_name}}`; a node that refused the edit is FAIL, for me to re-pick in the Behavior Tree editor). Save only if I asked."
+  },
+  {
+   "id": "ai-behavior.shared-parent-blackboard",
+   "title": "Share common keys through a parent blackboard",
+   "summary": "Give orc and goblin Blackboards one parent that holds their shared keys, remove the duplicates and prove every key still resolves.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "skills": [
+    "hyperai-memory"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gameplay_ai_inspect",
+    "hyper_gameplay_ai_apply_plan",
+    "hyper_gameplay_ai_validate",
+    "hyper_memory_remember"
+   ],
+   "ops": [
+    "set_blackboard_parent",
+    "remove_blackboard_key"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "blackboard",
+    "inheritance",
+    "parent",
+    "fantasy",
+    "orc",
+    "goblin",
+    "refactor"
+   ],
+   "placeholders": [
+    {
+     "name": "parent_name",
+     "label": "Parent Blackboard",
+     "default": "BB_EnemyBase"
+    },
+    {
+     "name": "children",
+     "label": "Child Blackboards",
+     "default": "BB_Orc, BB_Goblin",
+     "hint": "Blackboards under the content folder's AI subfolder."
+    }
+   ],
+   "prompt": "Make {{children}} in {{content_folder}}/AI inherit their shared keys from `{{parent_name}}`. Change only these Blackboards.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Load the children with Epic's AssetTools load_asset and hyper_gameplay_ai_inspect them. Shared keys are those every child has with the same name and type.\n2. If `{{parent_name}}` is missing, make it with AssetTools duplicate of the first child, load it, and inspect it.\n3. Plan with hyper_gameplay_ai_apply_plan, bDryRun true first since keys are removed: remove_blackboard_key on the parent for every key that is not shared; set_blackboard_parent on each child (referencePath = the parent); remove_blackboard_key on each child for its now-inherited copies. Each op carries its target's expectedRevision. It must reply valid_dry_run. Then run it with bDryRun false, a fresh operationId and the planHash. The pack only stages edits today: a reply of staged_backend_required means nothing changed, so make the same changes with Epic's ObjectTools set_properties (Parent and the Keys array).\n4. hyper_gameplay_ai_inspect and hyper_gameplay_ai_validate all three, plus any loaded tree using a child.\n5. hyper_memory_remember the convention: enemy Blackboards inherit shared keys from {{parent_name}}.\nReport a PASS/FAIL table: parent holds exactly the shared keys, each child's parent set, no duplicate keys, every child key name still resolves, validate 0 errors. Save only if I asked."
+  },
+  {
+   "id": "ai-behavior.fix-tree-blackboard-links",
+   "title": "Fix behaviour trees that use the wrong blackboard",
+   "summary": "Find trees whose runtime and editor blackboards disagree or are missing, dry-run the relink, and confirm it once each tree is fixed.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "tools": [
+    "hyper_gameplay_ai_inspect",
+    "hyper_gameplay_ai_apply_plan",
+    "hyper_gameplay_ai_validate"
+   ],
+   "ops": [
+    "set_behavior_tree_blackboard"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "behavior tree",
+    "blackboard",
+    "link",
+    "repair",
+    "validation"
+   ],
+   "placeholders": [
+    {
+     "name": "blackboard",
+     "label": "Blackboard to use",
+     "default": "the Blackboard each tree's editor root already names",
+     "hint": "Or one Blackboard object path for every tree."
+    }
+   ],
+   "prompt": "Relink the Behavior Trees under {{content_folder}} whose blackboard is wrong or missing, to {{blackboard}}.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Load the trees and their Blackboards with Epic's AssetTools find_assets and load_asset.\n2. hyper_gameplay_ai_validate them: collect every behavior_tree_blackboard_link_mismatch, invalid_blackboard_reference and invalid_graph_blackboard_reference. hyper_gameplay_ai_inspect each affected tree for its revision, runtime blackboard and editor-root blackboard.\n3. hyper_gameplay_ai_apply_plan with bDryRun true: one set_behavior_tree_blackboard op per affected tree (targetPath, expectedRevision, referencePath = the chosen Blackboard). It must reply valid_dry_run; a tree with other errors (behavior_node_error, runtime_node_missing) fails it with postcondition_invalid, so leave that tree out and report its errors. Then send it with bDryRun false, a fresh operationId and the planHash. The pack only stages edits today: a reply of staged_backend_required means nothing changed. The link is set on each tree's Root node, which no tool edits yet: give me the list (tree, Blackboard to set) and wait until I say it is done.\n4. hyper_gameplay_ai_validate the trees again.\nReport a PASS/FAIL table, one row per tree: the problem found, the Blackboard planned, the dry run result, and validate after (PASS at 0 errors). Change no tree that validated clean."
+  },
+  {
+   "id": "ai-behavior.audit-ai-perception",
+   "title": "Check AI perception settings on every controller",
+   "summary": "Read the senses, max ages and dominant sense of each AI controller and flag the ones that forget too slowly, never see, or fail to compile.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_gameplay_ai_inspect",
+    "hyper_gameplay_ai_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "perception",
+    "sight",
+    "hearing",
+    "ai controller",
+    "audit",
+    "senses"
+   ],
+   "placeholders": [
+    {
+     "name": "required_senses",
+     "label": "Senses every controller needs",
+     "default": "Sight, Hearing"
+    },
+    {
+     "name": "max_age",
+     "label": "Longest memory (s)",
+     "default": "5",
+     "hint": "Upper bound for each sense's max age, in seconds."
+    }
+   ],
+   "prompt": "Check the AI Perception setup of the AI controller Blueprints under {{content_folder}}. Change nothing.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Find them with Epic's AssetTools find_assets and load each with load_asset.\n2. hyper_gameplay_ai_inspect them with variant ai_controller_perception and bIncludeDetails true: per controller, its senses (sense name, config class, max age, starts enabled), dominant sense, default blackboard and compile status.\n3. hyper_gameplay_ai_validate the same paths with that variant: note perception_max_age_invalid, dominant_sense_not_configured, duplicate_perception_sense and ai_controller_compile_error or warning.\n4. This pack reads perception but does not change it, so for each problem give the exact setting to change in the controller's AIPerception component.\nReport a PASS/FAIL table, one row per controller: has each of {{required_senses}}; every sense starts enabled; every max age above 0 and at most {{max_age}} s (0 means it never forgets: WARN); a dominant sense set; compiles clean; validate 0 errors. Then the fixes, most urgent first."
+  },
+  {
+   "id": "ai-behavior.patrol-chase-guard",
+   "title": "Build a guard that patrols and chases on sight",
+   "summary": "Make an AI controller Blueprint with sight perception that walks tagged patrol points and chases the player, then prove both in play.",
+   "packs": [
+    "gameplay_ai",
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "verify"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_gameplay_ai_inspect",
+    "hyper_gameplay_ai_validate",
+    "hyper_verify_run",
+    "hyper_blueprint_snapshot"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "patrol",
+    "chase",
+    "perception",
+    "sight",
+    "guard",
+    "ai controller",
+    "security",
+    "modern"
+   ],
+   "placeholders": [
+    {
+     "name": "patrol_tag",
+     "label": "Patrol point tag",
+     "default": "PatrolPoint"
+    },
+    {
+     "name": "controller_name",
+     "label": "Controller name",
+     "default": "AIC_Guard"
+    },
+    {
+     "name": "pawn_bp",
+     "label": "Guard pawn Blueprint",
+     "default": "BP_Guard",
+     "hint": "A Character Blueprint; made from Character in the AI folder if missing."
+    },
+    {
+     "name": "guard_label",
+     "label": "Guard actor label",
+     "default": "Guard_01"
+    },
+    {
+     "name": "sight_radius",
+     "label": "Sight radius (cm)",
+     "default": "1500"
+    },
+    {
+     "name": "sight_angle",
+     "label": "Peripheral angle (degrees)",
+     "default": "70"
+    }
+   ],
+   "prompt": "Build a security guard for {{level}} that walks the actors tagged `{{patrol_tag}}` in a loop and chases the player on sight.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Epic's SceneTools find_actors: stop if fewer than 2 actors have the tag {{patrol_tag}}, or if no NavMeshBoundsVolume covers them.\n2. With the unreal-blueprint skill, in one script: create `{{content_folder}}/AI/{{controller_name}}` (parent /Script/AIModule.AIController) with an AIPerception component holding one sight sense (radius {{sight_radius}} cm, lose sight 300 cm further, peripheral angle {{sight_angle}}, max age 5 s, dominant). On possess it moves to each patrol point in turn and loops; when perception reports the player it moves to the player, and resumes patrolling once sight is lost. Make {{pawn_bp}} use it (auto possess placed or spawned) and place one labelled `{{guard_label}}` at the first point.\n3. hyper_blueprint_compile_validate both Blueprints (revision from hyper_blueprint_snapshot; preview, then compile with its planHash and an operationId; hyper_operation_wait): 0 errors. Load the controller, hyper_gameplay_ai_inspect it (variant ai_controller_perception) and hyper_gameplay_ai_validate it.\n4. hyper_verify_run (deadlineSeconds 60) with two cases: `patrols` (WaitUntil AssertNear {{guard_label}} at the second point's location, radius 150, within 30 s; then Sample it for 10 s: it moved 400 cm or more) and `chases` (MoveTo {{guard_label}} radius 600, then WaitUntil AssertNear {{guard_label}} other Player radius 200 within 10 s).\nReport a PASS/FAIL table: sight values as asked, both compile clean, validate 0 errors, each case with its evidence line. Save only if I asked."
+  },
+  {
+   "id": "ai-behavior.bt-task-roam-point",
+   "title": "Make a behaviour tree task that picks a roam point",
+   "summary": "Create a Blueprint BT task that finds a random reachable point near a wolf and writes it to a vector key, adding the key if it is missing.",
+   "packs": [
+    "gameplay_ai",
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gameplay_ai_inspect",
+    "hyper_gameplay_ai_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_gameplay_ai_validate",
+    "hyper_blueprint_snapshot"
+   ],
+   "ops": [
+    "add_blackboard_key"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "behavior tree",
+    "task",
+    "roam",
+    "wander",
+    "wolf",
+    "fantasy",
+    "blueprint"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "BlackboardData"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "task_name",
+     "label": "Task Blueprint name",
+     "default": "BTT_FindRoamPoint"
+    },
+    {
+     "name": "key_name",
+     "label": "Vector key",
+     "default": "RoamLocation"
+    },
+    {
+     "name": "radius",
+     "label": "Roam radius (cm)",
+     "default": "1200"
+    }
+   ],
+   "prompt": "Make a Behavior Tree task for wolves that roam around their den, writing to the Blackboard {{selected_asset}}.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Load the Blackboard with Epic's AssetTools load_asset and hyper_gameplay_ai_inspect it. If it lacks a vector key `{{key_name}}`: hyper_gameplay_ai_apply_plan with bDryRun true and one add_blackboard_key (keyType vector, the Blackboard's expectedRevision), which must reply valid_dry_run; run it with bDryRun false, a fresh operationId and the planHash. The pack only stages edits today: a reply of staged_backend_required means nothing changed, so add the key with Epic's ObjectTools set_properties on the Keys array, keeping the others.\n2. With the unreal-blueprint skill, create `{{content_folder}}/AI/{{task_name}}` (parent /Script/AIModule.BTTask_BlueprintBase) with an instance-editable BlackboardKeySelector `RoamKey` and a float `Radius` defaulting to {{radius}}. Receive Execute AI: from the controlled pawn's location, GetRandomReachablePointInRadius with Radius; on success Set Blackboard Value as Vector on RoamKey and Finish Execute true, otherwise Finish Execute false.\n3. hyper_blueprint_compile_validate the task (revision from hyper_blueprint_snapshot; preview, then compile with its planHash and an operationId; hyper_operation_wait): 0 errors. hyper_gameplay_ai_validate the Blackboard: 0 errors.\nReport a PASS/FAIL table: key present as vector, task compiles, Radius default {{radius}}, both result paths end in Finish Execute. Say that dropping the task into a tree is done in the Behavior Tree editor, which no tool edits yet."
+  },
+  {
+   "id": "ai-behavior.bt-service-target-range",
+   "title": "Make a BT service that tracks range to the player",
+   "summary": "Create a Blueprint service that updates DistanceToTarget and bInAttackRange on a combat drone's Blackboard four times a second.",
+   "packs": [
+    "gameplay_ai",
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gameplay_ai_inspect",
+    "hyper_gameplay_ai_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_gameplay_ai_validate",
+    "hyper_blueprint_snapshot"
+   ],
+   "ops": [
+    "add_blackboard_key"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "behavior tree",
+    "service",
+    "distance",
+    "attack range",
+    "drone",
+    "sci-fi",
+    "blueprint"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "BlackboardData"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "service_name",
+     "label": "Service Blueprint name",
+     "default": "BTS_TrackTargetRange"
+    },
+    {
+     "name": "attack_range",
+     "label": "Attack range (cm)",
+     "default": "900"
+    },
+    {
+     "name": "interval",
+     "label": "Tick interval (s)",
+     "default": "0.25"
+    }
+   ],
+   "prompt": "Make a Behavior Tree service for a sci-fi combat drone that keeps its range to the player fresh on the Blackboard {{selected_asset}}.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Load the Blackboard with Epic's AssetTools load_asset and hyper_gameplay_ai_inspect it. For whichever of `DistanceToTarget` (float) and `bInAttackRange` (bool) is missing: hyper_gameplay_ai_apply_plan with bDryRun true and add_blackboard_key ops (the Blackboard's expectedRevision), which must reply valid_dry_run; run it with bDryRun false, a fresh operationId and the planHash. The pack only stages edits today: a reply of staged_backend_required means nothing changed, so add them with Epic's ObjectTools set_properties on the Keys array, keeping the others.\n2. With the unreal-blueprint skill, create `{{content_folder}}/AI/{{service_name}}` (parent /Script/AIModule.BTService_BlueprintBase), Interval {{interval}} s, with instance-editable BlackboardKeySelectors `DistanceKey` and `InRangeKey` and a float `AttackRange` defaulting to {{attack_range}}. Receive Tick AI: distance from the controlled pawn to player 0's pawn; Set Blackboard Value as Float on DistanceKey and as Bool on InRangeKey (distance at most AttackRange). If there is no player pawn, set the bool false.\n3. hyper_blueprint_compile_validate the service (revision from hyper_blueprint_snapshot; preview, then compile with its planHash and an operationId; hyper_operation_wait): 0 errors. hyper_gameplay_ai_validate the Blackboard: 0 errors.\nReport a PASS/FAIL table: both keys with their types, service compiles, Interval {{interval}}, AttackRange {{attack_range}}, the no-player path handled. Say that adding the service to a tree is done in the Behavior Tree editor."
+  },
+  {
+   "id": "ai-behavior.verify-patrol-route",
+   "title": "Prove every patrol point is reachable on the navmesh",
+   "summary": "Check the navmesh covers each tagged patrol point, then walk the route in play and report any leg where a pawn gets stuck.",
+   "packs": [
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "verify"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_navigation_inspect",
+    "hyper_navigation_validate",
+    "hyper_verify_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "navmesh",
+    "patrol",
+    "route",
+    "reachability",
+    "navigation",
+    "playtest"
+   ],
+   "placeholders": [
+    {
+     "name": "patrol_tag",
+     "label": "Patrol point tag",
+     "default": "PatrolPoint"
+    },
+    {
+     "name": "order",
+     "label": "Route order",
+     "default": "by actor label, A to Z"
+    }
+   ],
+   "prompt": "Prove a pawn can walk the patrol route of actors tagged `{{patrol_tag}}` in {{level}}, visiting them {{order}} and back to the first. Change nothing.\n1. Epic's SceneTools find_actors (tag {{patrol_tag}}) and ActorTools get_actor_transform: list each point's label and location in cm.\n2. hyper_navigation_inspect (variants navmesh and nav_system; projection identity, counts and bounds): a navmesh must exist and its bounds must contain every point in X and Y, and within 200 cm in Z. hyper_navigation_validate: note every issue.\n3. hyper_verify_run (deadlineSeconds 60) with one case `route` (timeoutSeconds 55): Survey each point (it says whether the navmesh reaches it), then MoveTo each point in order with radius 100 and timeoutSeconds 15, ending at the first. A stuck result names where. If the walk needs longer, split the legs over several cases (each MoveTo its start, then its end).\n4. For a failed leg, give the likely cause (a hole in the navmesh bounds, a step or slope too steep, a closed door, a missing nav link) and its location.\nReport a PASS/FAIL table: navmesh present, every point inside its bounds, then one row per leg (from, to, straight-line distance in cm, reached or stuck, evidence line). A player-sized pawn walks it, so a narrower AI agent fits wherever it passes."
+  },
+  {
+   "id": "ai-behavior.playtest-enemy-pressure",
+   "title": "Playtest that enemies notice, chase and catch you",
+   "summary": "Verify in play that zombies close in and catch a player who stands still, measure whether they can be outrun, and record a run to review.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "skills": [
+    "unreal-playtest",
+    "verify"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_gameplay_ai_validate",
+    "hyper_verify_calibrate",
+    "hyper_verify_run",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "playtest",
+    "chase",
+    "difficulty",
+    "zombie",
+    "horror",
+    "balance",
+    "video"
+   ],
+   "placeholders": [
+    {
+     "name": "enemy",
+     "label": "Enemy class or tag",
+     "default": "BP_Zombie"
+    },
+    {
+     "name": "aggro_range",
+     "label": "Approach distance (cm)",
+     "default": "1500"
+    },
+    {
+     "name": "catch_radius",
+     "label": "Catch distance (cm)",
+     "default": "150"
+    }
+   ],
+   "prompt": "Test the {{enemy}} enemies in {{level}} the way a player meets them. Change nothing in the level.\n1. If the Gameplay AI pack is on, load the enemies' Behavior Tree, Blackboard and controller with Epic's AssetTools load_asset and hyper_gameplay_ai_validate them; a broken asset explains a failed case.\n2. hyper_verify_calibrate (bMeasure false) for this machine's case limit, then hyper_verify_run (deadlineSeconds 60) with one case per check:\n- `notices`: MoveTo {{enemy}} with radius {{aggro_range}}, then WaitUntil AssertNear {{enemy}} other Player radius {{catch_radius}} within 12 s.\n- `outrun`: Play Flee from {{enemy}}, range 1500, for 20 s.\n- `survive`: Play Survive against {{enemy}} for 30 s.\n3. One hyper_playtest_run with bRecordVideo true running the `notices` steps as Bot steps plus a Capture; hyper_operation_wait, then hyper_playtest_status for the evidence and the video path.\nReport a PASS/FAIL table: validate result, then one row per case with its evidence line (distances, times, caught or not). `notices` must pass. `outrun` and `survive` are balance signals: give PASS or FAIL and say what the numbers mean for difficulty. Show the capture on its own line and link the video."
+  },
+  {
+   "id": "ai-behavior.debug-idle-enemy",
+   "title": "Find out why an enemy stands still in play",
+   "summary": "Diagnose an AI that never moves: its controller, tree and blackboard, the navmesh under it, and its speed and log in play, ranked by likely cause.",
+   "packs": [
+    "gameplay_ai",
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_scene_inspect",
+    "hyper_gameplay_ai_inspect",
+    "hyper_gameplay_ai_validate",
+    "hyper_navigation_inspect",
+    "hyper_verify_run",
+    "hyper_log_tail"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "debug",
+    "stuck",
+    "idle",
+    "behavior tree",
+    "navmesh",
+    "possession",
+    "troubleshooting"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Pawn"
+    ],
+    "min": 1
+   },
+   "prompt": "{{selected_actor}} in {{level}} never moves in play. Find out why, and change nothing until I agree a fix.\n1. hyper_scene_inspect the actor for its class, location and components; Epic's ObjectTools get_properties for AIControllerClass and AutoPossessAI.\n2. If the Gameplay AI pack is on, load its controller Blueprint, Behavior Tree and Blackboard with AssetTools load_asset, hyper_gameplay_ai_inspect them and hyper_gameplay_ai_validate them: node errors, missing runtime nodes, blackboard link mismatches, controller compile state. BlueprintTools find_nodes (title Run Behavior Tree) in the controller's EventGraph.\n3. hyper_navigation_inspect (variants navmesh and nav_system, projection bounds): is there a navmesh, and do its bounds contain the actor?\n4. hyper_verify_run with one case `moves`: Survey the actor by its label (navmesh reach), then Sample it for 10 s (speed and distance moved).\n5. hyper_log_tail with categories LogBehaviorTree, LogNavigation and LogAINavigation and maxVerbosity warning, for what that run printed.\nReport a table of causes checked, each PASS or FAIL with its evidence: possessed by the expected controller, tree assets valid, a tree is started (a Run Behavior Tree call on possess), navmesh under it, moved in play, log clean. Then the most likely cause and the smallest fix, as a proposal."
+  },
+  {
+   "id": "ai-behavior.review-state-tree",
+   "title": "Review a State Tree for dead ends and empty states",
+   "summary": "Walk the selected State Tree's states, tasks and transitions and flag states with no way in, no way out or nothing to do.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "tools": [
+    "hyper_gameplay_ai_inspect"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "state tree",
+    "transitions",
+    "review",
+    "dead end",
+    "logic"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "StateTree"
+    ],
+    "min": 1
+   },
+   "prompt": "Review the State Tree {{selected_asset}} for logic holes. Change nothing.\n1. hyper_gameplay_ai_inspect with no asset paths, variant state_tree and bIncludePrerequisites true. It replies variant_adapter_unavailable, since HyperAI cannot edit State Trees yet, with the state_tree prerequisite row: if its plugins are not enabled, say so and stop. This review reads the tree through Epic's tools.\n2. Load the asset with Epic's AssetTools load_asset. With Epic's StateTreeTools: get_root_states, then get_children down every branch; per state get_tasks, get_enter_conditions and get_transitions; get_evaluators and get_global_tasks; get_node_description for each task and condition.\n3. Build the state graph: a state is entered when it is a root, its parent selects it, or a transition targets it.\nWrite an indented outline (state, tasks, enter conditions, transitions with trigger and target), then a PASS/FAIL table: every leaf state has at least 1 task; every state can be entered; every leaf state has a transition out or ends the tree on purpose; no transition targets a missing state; counts of states, tasks and transitions. For each FAIL, say the state and the smallest change that fixes it."
+  }
+ ]
+}

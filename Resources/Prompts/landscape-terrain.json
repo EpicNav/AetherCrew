@@ -1,0 +1,1290 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "landscape-terrain",
+ "presets": [
+  {
+   "id": "landscape-terrain.rolling-hills-from-noise",
+   "title": "Create a rolling-hills landscape from noise",
+   "summary": "Make a new landscape from fractal noise at a set size and relief, then read its heights back and capture it from above and at eye level.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_worldbuilding_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.create",
+    "landscape.create_material"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "landscape",
+    "terrain",
+    "noise",
+    "hills",
+    "create"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Landscape label",
+     "default": "Hills"
+    },
+    {
+     "name": "size_m",
+     "label": "Size (m a side)",
+     "default": "1008",
+     "hint": "Rounded to whole 126 m components at 100 cm per vertex: 504, 1008, 2016."
+    },
+    {
+     "name": "relief",
+     "label": "Hill relief (m)",
+     "default": "60"
+    },
+    {
+     "name": "wavelength",
+     "label": "Hill spacing (m)",
+     "default": "500"
+    },
+    {
+     "name": "layers",
+     "label": "Paint layers",
+     "default": "Grass, Dirt, Rock"
+    }
+   ],
+   "prompt": "Create a landscape labelled `{{name}}` in {{level}}: rolling hills about {{relief}} m from trough to crest, one every {{wavelength}} m, {{size_m}} m a side.\n1. hyper_landscape_inspect: stop if a landscape is already labelled `{{name}}`. hyper_memory_recall \"landscape material\" for the project's conventions, then hyper_project_search for a landscape material whose layer blend names {{layers}}.\n2. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false): `landscape.create` Landscape `{{name}}`, Location (0, 0, 0), Size {{size_m}}, Resolution 100, HeightRange 512, Noise {Seed 1, Amplitude twice {{relief}}, Wavelength {{wavelength}}, Octaves 5} (fractal noise spans about half its Amplitude), PaintLayers {{layers}}, and Material when you found one. Without one, add `landscape.create_material` Landscape `{{name}}`, Material {{content_folder}}/M_{{name}}_Layers, so each layer shows in a flat colour; if that op is unknown in this build, say the ground will stay grey. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Prove it: hyper_landscape_inspect for vertices, cm per vertex, HeightMin and HeightMax; hyper_worldbuilding_validate with Variants [\"landscape\"]; hyper_capture_view (Source transform) straight down from 1.2 x {{size_m}} m above the centre, and from 2 m above the ground looking across it. If hyper_capture_view is unavailable, say so.\n4. Leave the level unsaved. Report a PASS/FAIL table: label present; width ((vertices - 1) x cm per vertex) equals {{size_m}} m rounded to whole 126 m components (state both); HeightMax - HeightMin within 35% of {{relief}} m; every layer in {{layers}} listed; validate 0 errors. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.import-heightmap",
+   "title": "Import a heightmap texture as a new landscape",
+   "summary": "Build a landscape from the selected 16-bit heightmap at a real-world size and height range, then check its relief and look for stair-stepping.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_worldbuilding_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.create"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "landscape",
+    "heightmap",
+    "import",
+    "terrain",
+    "texture"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Texture2D"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Landscape label",
+     "default": "Imported"
+    },
+    {
+     "name": "size_m",
+     "label": "Size (m a side)",
+     "default": "2016"
+    },
+    {
+     "name": "resolution",
+     "label": "cm per vertex",
+     "default": "100"
+    },
+    {
+     "name": "height_range",
+     "label": "Height range (m)",
+     "default": "800",
+     "hint": "Meters from pure black to pure white in the heightmap."
+    }
+   ],
+   "prompt": "Turn the heightmap {{selected_asset}} into a landscape labelled `{{name}}` in {{level}}: {{size_m}} m a side at {{resolution}} cm per vertex, with {{height_range}} m from black (lowest) to white (highest).\n1. hyper_landscape_inspect: stop if `{{name}}` exists. Confirm {{selected_asset}} is a texture; a 16-bit grayscale source keeps slopes smooth, while an 8-bit one terraces them.\n2. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false): `landscape.create` Landscape `{{name}}`, Heightmap {{selected_asset}}, Location (0, 0, 0), Size {{size_m}}, Resolution {{resolution}}, HeightRange {{height_range}}, PaintLayers [\"Grass\"]. If it refuses the vertex count (over 8129 a side), double Resolution and say so. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Prove it: hyper_landscape_inspect for vertices, Extent, HeightMin and HeightMax; hyper_worldbuilding_validate with Variants [\"landscape\"]; hyper_capture_view (Source transform) straight down from 1.2 x {{size_m}} m above the centre, and one low oblique shot across the highest ground. If hyper_capture_view is unavailable, say so.\n4. Leave the level unsaved. Report a PASS/FAIL table: label present; width ((vertices - 1) x cm per vertex) equals {{size_m}} m rounded to whole components of 126 vertex spacings (state both); HeightMax - HeightMin at most {{height_range}} m and above a tenth of it (not flat); validate 0 errors; no stair-stepping in the oblique shot (if there is, say the source is likely 8-bit). Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.audit-landscapes",
+   "title": "Audit every landscape in the level",
+   "summary": "Read back each landscape's size, relief, material, paint coverage and edit layers, flag problems in a table, and change nothing.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_context_snapshot",
+    "hyper_memory_recall",
+    "hyper_landscape_inspect",
+    "hyper_worldbuilding_inspect",
+    "hyper_worldbuilding_validate",
+    "hyper_capture_view"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "landscape",
+    "audit",
+    "inspect",
+    "coverage",
+    "read-only"
+   ],
+   "placeholders": [
+    {
+     "name": "min_share",
+     "label": "Smallest useful layer share (%)",
+     "default": "2"
+    }
+   ],
+   "prompt": "Audit the landscapes in {{level}} without changing anything.\n1. hyper_context_snapshot for the open map, and hyper_memory_recall \"landscape\" for the project's conventions (material, layer names, resolution).\n2. hyper_landscape_inspect with no labels: for each landscape read its size (vertices x cm per vertex), HeightMin, HeightMax, HeightRange, material, paint layers with their share of the ground, edit layers and streaming proxies.\n3. hyper_worldbuilding_inspect with Variants [\"landscape\", \"landscape_layer\", \"spline\"] and Projection [\"identity\", \"counts\", \"bounds\", \"details\"], then hyper_worldbuilding_validate with the same Variants for errors and warnings (landscape_has_no_components, spline_has_too_few_points, unsaved_loaded_state).\n4. hyper_capture_view (Source transform) one top-down shot per landscape from 1.2 x its width above its centre. If hyper_capture_view is unavailable, say so.\n5. Report one table row per landscape and check, with PASS, FAIL or WARN first: has a material; every paint layer has a layer info asset; no layer under {{min_share}}% unless it is a road or verge layer; ground uses under 90% of HeightRange (room left to sculpt); World Partition levels have streaming proxies; validate 0 errors. Show each picture on its own line. End with the fixes you recommend, most important first. Do not edit or save anything."
+  },
+  {
+   "id": "landscape-terrain.paint-by-height-and-slope",
+   "title": "Paint grass, rock and snow by slope and height",
+   "summary": "Add any missing paint layers to the selected landscape, paint them by slope and elevation bands with broken edges, and measure each layer's share.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_memory_recall",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.add_paint_layer",
+    "landscape.paint"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "landscape",
+    "paint",
+    "slope",
+    "height",
+    "snow",
+    "rock"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "base_layer",
+     "label": "Base layer",
+     "default": "Grass"
+    },
+    {
+     "name": "rock_slope",
+     "label": "Rock from slope (degrees)",
+     "default": "35"
+    },
+    {
+     "name": "snow_m",
+     "label": "Snow above (m)",
+     "default": "250"
+    }
+   ],
+   "prompt": "Paint {{selected_actor}} in {{level}}: `{{base_layer}}` on gentle ground, `Rock` on slopes steeper than {{rock_slope}} degrees, `Snow` above {{snow_m}} m.\n1. hyper_landscape_inspect for its label, HeightMin, HeightMax, material and paint layers; hyper_memory_recall \"landscape layers\". If {{snow_m}} m is above HeightMax, say no snow will show and ask before lowering it.\n2. If any of the three layers is missing, one hyper_landscape_apply_plan (fresh OperationId, bDryRun false) with `landscape.add_paint_layer` for just those. Warn if the material's layer blend does not name them (the ground stays grey).\n3. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false): `landscape.paint` with Rules in this order, later rules winning: {Layer `{{base_layer}}`}, {Layer `Rock`, SlopeMin {{rock_slope}}, SlopeFade 5, Breakup 0.4}, {Layer `Snow`, HeightMin {{snow_m}}, HeightFade 15, Breakup 0.3}. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n4. Prove it: hyper_landscape_inspect again for each layer's share; hyper_capture_view (Source transform) one top-down shot and one oblique shot of the steepest, highest area. If hyper_capture_view is unavailable, say so.\n5. Change nothing else and leave the level unsaved. Report a PASS/FAIL table: three layers present; `{{base_layer}}` has the largest share; `Rock` above 0 where slopes pass {{rock_slope}} degrees; `Snow` above 0 when ground rises above {{snow_m}} m; band edges read broken, not ruled lines. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.biome-mosaic-paint",
+   "title": "Paint a forest and meadow mosaic in patches",
+   "summary": "Lay a forest layer in noise patches over a set share of the gentle ground, meadow between and rock on cliffs, then measure the mosaic.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_memory_recall",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.add_paint_layer",
+    "landscape.paint"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "landscape",
+    "paint",
+    "biome",
+    "mosaic",
+    "patches",
+    "forest"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "meadow_layer",
+     "label": "Meadow layer",
+     "default": "Grass"
+    },
+    {
+     "name": "forest_layer",
+     "label": "Forest layer",
+     "default": "Forest"
+    },
+    {
+     "name": "patch_m",
+     "label": "Patch size (m)",
+     "default": "150"
+    },
+    {
+     "name": "forest_share",
+     "label": "Forest coverage (0.05-1)",
+     "default": "0.6"
+    },
+    {
+     "name": "seed",
+     "label": "Seed",
+     "default": "7"
+    }
+   ],
+   "prompt": "Paint {{selected_actor}} as a mosaic: `{{meadow_layer}}` everywhere, `{{forest_layer}}` in patches about {{patch_m}} m across over {{forest_share}} of the ground under 30 degrees, and `Rock` on slopes over 40 degrees.\n1. hyper_landscape_inspect for its width, paint layers and current shares (patches should be much smaller than the landscape); hyper_memory_recall \"biome layers\".\n2. If layers are missing, one hyper_landscape_apply_plan (fresh OperationId, bDryRun false) with `landscape.add_paint_layer` for just those.\n3. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false): `landscape.paint` Rules {Layer `{{meadow_layer}}`}, {Layer `{{forest_layer}}`, SlopeMax 30, Patch {{patch_m}}, Coverage {{forest_share}}, Seed {{seed}}, Breakup 0.3}, {Layer `Rock`, SlopeMin 40, SlopeFade 5}. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n4. Prove it: hyper_landscape_inspect for each share; hyper_capture_view (Source transform) top-down over the whole landscape. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: `{{forest_layer}}` share close to {{forest_share}} of the gentle ground (state both numbers and your estimate of the gentle share); patches read as separate stands in the picture, not one band; `Rock` only on steep ground; `{{meadow_layer}}` fills the rest. Show each picture on its own line. Suggest a PCG ecosystem on `{{forest_layer}}` as the next step."
+  },
+  {
+   "id": "landscape-terrain.alpine-mountain-range",
+   "title": "Raise a ridged alpine range with snowcaps",
+   "summary": "Create a ridged-noise mountain landscape, soften its spikes, paint scree, rock cliffs and a snow line from the measured relief, then verify.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_project_search",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.create",
+    "landscape.sculpt",
+    "landscape.paint"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "landscape",
+    "mountains",
+    "ridged",
+    "snow",
+    "alpine",
+    "fantasy"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Landscape label",
+     "default": "Alps"
+    },
+    {
+     "name": "size_m",
+     "label": "Size (m a side)",
+     "default": "2016"
+    },
+    {
+     "name": "peak_m",
+     "label": "Valley to summit (m)",
+     "default": "600"
+    },
+    {
+     "name": "snow_pct",
+     "label": "Snow on the top (% of relief)",
+     "default": "20"
+    }
+   ],
+   "prompt": "Create a mountain landscape `{{name}}` in {{level}}: sharp ridged peaks about {{peak_m}} m from valley floor to summit, {{size_m}} m a side, snow on the top {{snow_pct}}% of the relief.\n1. hyper_landscape_inspect (stop if `{{name}}` exists); hyper_project_search for a landscape material with Grass, Scree, Rock and Snow layers.\n2. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false), each op naming Landscape `{{name}}`: `landscape.create` Size {{size_m}}, Resolution 100, HeightRange 2048 (ridged crests rise well above the Location), Noise {Seed 3, Amplitude twice {{peak_m}}, Wavelength 1500, Octaves 7, bRidged true} (fractal noise spans about half its Amplitude), PaintLayers [Grass, Scree, Rock, Snow], Material if found; then `landscape.sculpt` Mode smooth, Strength 0.3, Center (0, 0, 0), Radius half of {{size_m}}, Falloff 50. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_landscape_inspect for HeightMin and HeightMax; snow line = HeightMax minus {{snow_pct}}% of the relief. One plan: `landscape.paint` Rules {Grass}, {Scree, SlopeMin 25}, {Rock, SlopeMin 40, Breakup 0.4}, {Snow, HeightMin the snow line, HeightFade 20, SlopeMax 50}.\n4. Prove it: hyper_landscape_inspect for each share; hyper_capture_view (Source transform) an aerial shot from outside the range looking 30 degrees down, and one top-down. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: relief within 25% of {{peak_m}} m; HeightMax below the 1024 m the range allows above the Location; Rock and Scree each above 5%; Snow above 0 and under twice {{snow_pct}}%; crests read sharp in the aerial shot. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.desert-dunes",
+   "title": "Shape a desert of dunes around a flat outpost pad",
+   "summary": "Create a dune field from ridged noise, flatten a pad for an outpost, paint sand, hardpan and rock, and sample the pad's flatness.",
+   "packs": [
+    "worldbuilding_navigation",
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_memory_recall",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_spatial_query",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.create",
+    "landscape.sculpt",
+    "landscape.paint"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "landscape",
+    "desert",
+    "dunes",
+    "flatten",
+    "outpost",
+    "modern"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Landscape label",
+     "default": "Dunes"
+    },
+    {
+     "name": "size_m",
+     "label": "Size (m a side)",
+     "default": "1008"
+    },
+    {
+     "name": "dune_m",
+     "label": "Dune height (m)",
+     "default": "25"
+    },
+    {
+     "name": "spacing_m",
+     "label": "Dune spacing (m)",
+     "default": "120"
+    },
+    {
+     "name": "pad_m",
+     "label": "Pad width (m)",
+     "default": "60"
+    },
+    {
+     "name": "pad_center",
+     "label": "Pad centre (cm)",
+     "default": "5000, 5000, 0"
+    }
+   ],
+   "prompt": "Create a desert landscape `{{name}}` in {{level}}: dunes about {{dune_m}} m high every {{spacing_m}} m, {{size_m}} m a side, with a flat outpost pad {{pad_m}} m across centred on ({{pad_center}}) cm.\n1. hyper_landscape_inspect (stop if `{{name}}` exists); hyper_memory_recall \"desert\" for the project's layer names.\n2. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false): `landscape.create` Landscape `{{name}}`, Size {{size_m}}, Resolution 100, Noise {Seed 21, Amplitude twice {{dune_m}} (noise spans about half of it), Wavelength {{spacing_m}}, Octaves 4, bRidged true}, PaintLayers [Sand, Hardpan, Rock]. If it awaits approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_spatial_query `ground` at the pad centre; then one plan, each op naming Landscape `{{name}}`: `landscape.sculpt` Mode flatten, Center ({{pad_center}}), Radius half of {{pad_m}}, Falloff 20, Height that ground height in meters; `landscape.paint` Rules {Sand}, {Rock, SlopeMin 32}; `landscape.paint` Center ({{pad_center}}), Radius half of {{pad_m}} plus 5, Rules {Hardpan}. (A paint Center of exactly 0, 0, 0 paints everything.)\n4. Prove it: hyper_spatial_query `ground` at the pad centre and 6 points on a ring at 40% of its radius; hyper_landscape_inspect for relief and shares; hyper_capture_view (Source transform) top-down, and a low shot across the dunes toward the pad. If a tool is unavailable, say so and mark its rows INFO.\n5. Leave the level unsaved. Report a PASS/FAIL table: relief within 30% of {{dune_m}} m; pad samples within 0.3 m of each other with slopes under 3 degrees; a Hardpan disc at the pad in the top-down shot; Rock share under 20%. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.tropical-island",
+   "title": "Build a tropical island with beaches and cliffs",
+   "summary": "Raise an island shelf and peak from a flat sea floor, roughen it, paint sand at the waterline, grass inland and rock on steep slopes, then sample heights.",
+   "packs": [
+    "worldbuilding_navigation",
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_memory_recall",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_spatial_query",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.create",
+    "landscape.sculpt",
+    "landscape.paint"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "landscape",
+    "island",
+    "tropical",
+    "beach",
+    "survival",
+    "coast"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Landscape label",
+     "default": "Island"
+    },
+    {
+     "name": "size_m",
+     "label": "Size (m a side)",
+     "default": "2016"
+    },
+    {
+     "name": "island_m",
+     "label": "Island width (m)",
+     "default": "1200"
+    },
+    {
+     "name": "peak_m",
+     "label": "Summit (m)",
+     "default": "120"
+    },
+    {
+     "name": "beach_m",
+     "label": "Beach up to (m above sea)",
+     "default": "4"
+    }
+   ],
+   "prompt": "Build a tropical island `{{name}}` in {{level}}: about {{island_m}} m across, summit {{peak_m}} m, sea level at Z 0, sand up to {{beach_m}} m, grass inland, rock on steep slopes.\n1. hyper_landscape_inspect (stop if `{{name}}` exists); hyper_memory_recall \"island\".\n2. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false), each op naming Landscape `{{name}}`, centred on the origin: `landscape.create` flat at Location (0, 0, -2000), Size {{size_m}}, Resolution 100, HeightRange 1024, PaintLayers [Sand, Grass, Rock]; `landscape.sculpt` raise, Radius 0.35 x {{island_m}}, Falloff 0.15 x {{island_m}}, Amount 30 (the shelf); `landscape.sculpt` raise, Radius 0.02 x {{island_m}}, Falloff 0.2 x {{island_m}}, Amount {{peak_m}} minus 10 (the peak); `landscape.sculpt` noise, Radius 0.4 x {{island_m}}, Falloff 40, Amount 12, Noise {Seed 5, Wavelength 150}; `landscape.paint` Rules {Sand}, {Grass, HeightMin {{beach_m}}, HeightFade 2}, {Rock, SlopeMin 28}. If it awaits approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Prove it: hyper_landscape_inspect for heights and shares; hyper_spatial_query `ground` at the centre, 8 points on a ring of 0.6 x {{island_m}} (sea) and 8 on a ring of 0.15 x {{island_m}} (the peak's flank); hyper_capture_view (Source transform) an aerial oblique and a beach-level shot. If a tool is unavailable, say so and mark its rows INFO.\n4. Leave the level unsaved (the sea is a separate water step). Report a PASS/FAIL table: HeightMin within 1 m of -20 m; summit within 15% of {{peak_m}} m; sea samples below 0 m; Sand and Grass shares above 3%; Rock above 0 when a flank sample passes 28 degrees. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.flatten-pad-with-ramp",
+   "title": "Level a building pad with a walkable ramp",
+   "summary": "Flatten a pad at its ground height on the selected landscape, grade a ramp under 30 degrees up to it, and sample both.",
+   "packs": [
+    "worldbuilding_navigation",
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_spatial_query",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.sculpt"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "landscape",
+    "flatten",
+    "ramp",
+    "pad",
+    "building",
+    "sculpt"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "pad_center",
+     "label": "Pad centre (cm)",
+     "default": "0, 0, 0"
+    },
+    {
+     "name": "pad_m",
+     "label": "Pad width (m)",
+     "default": "40"
+    },
+    {
+     "name": "ramp_foot",
+     "label": "Ramp foot (cm)",
+     "default": "6000, 0, 0"
+    },
+    {
+     "name": "ramp_width",
+     "label": "Ramp width (m)",
+     "default": "6"
+    }
+   ],
+   "prompt": "On {{selected_actor}}, make a flat pad {{pad_m}} m across centred on ({{pad_center}}) cm, with a {{ramp_width}} m wide ramp from ({{ramp_foot}}) cm up to it.\n1. hyper_landscape_inspect for its label and edit layers; hyper_spatial_query `ground` at the pad centre and the ramp foot for heights and slopes. If the climb over the run is steeper than 30 degrees, move the foot further out along the same line and say so.\n2. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false), each op naming the Landscape, EditLayer empty (flatten and ramp work within the one edit layer they change, so use the base layer): `landscape.sculpt` Mode flatten, Center the pad centre, Radius half of {{pad_m}}, Falloff 10, Height the pad centre's ground height in meters; `landscape.sculpt` Mode ramp, Center the ramp foot, To the pad edge nearest it, Width {{ramp_width}}, Falloff 4. If it awaits approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Prove it: hyper_spatial_query `ground` at the pad centre, at 4 points 40% of the way to its edge, and every 5 m along the ramp's centreline; hyper_capture_view (Source transform) from 3 m above the ramp foot looking up it. If a tool is unavailable, say so and mark its rows INFO.\n4. Leave the level unsaved. Report a PASS/FAIL table: pad samples within 0.3 m of the target height and of each other, with slopes under 3 degrees; ramp samples rising steadily from foot to pad, every one under 30 degrees. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.terraced-hillside",
+   "title": "Cut farm terraces into a hillside",
+   "summary": "Step a hillside into walkable shelves, paint the shelves as farmland, and measure the step heights along the slope.",
+   "packs": [
+    "worldbuilding_navigation",
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_spatial_query",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.add_paint_layer",
+    "landscape.sculpt",
+    "landscape.paint"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "landscape",
+    "terrace",
+    "farm",
+    "rice",
+    "sculpt",
+    "paint"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "center",
+     "label": "Hillside centre (cm)",
+     "default": "0, 0, 0"
+    },
+    {
+     "name": "radius_m",
+     "label": "Radius (m)",
+     "default": "80"
+    },
+    {
+     "name": "step_m",
+     "label": "Step height (m)",
+     "default": "3"
+    },
+    {
+     "name": "field_layer",
+     "label": "Field layer",
+     "default": "Farmland"
+    },
+    {
+     "name": "base_layer",
+     "label": "Base layer",
+     "default": "Grass"
+    }
+   ],
+   "prompt": "On {{selected_actor}}, cut paddy-field terraces into the hillside within {{radius_m}} m of ({{center}}) cm: shelves {{step_m}} m high, painted `{{field_layer}}`.\n1. hyper_landscape_inspect for its paint layers; hyper_spatial_query `ground` at the centre and 8 points on a ring of {{radius_m}} m to confirm the slope there is 10 to 35 degrees. Flat ground makes no terraces: if so, say so and stop.\n2. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false), each op naming the Landscape, with EditLayer empty (terrace reads heights within the one edit layer it changes, so it needs the base layer): `landscape.add_paint_layer` `{{field_layer}}` if missing; `landscape.sculpt` Mode terrace, Center ({{center}}), Radius {{radius_m}}, Falloff 15, Amount {{step_m}}; `landscape.paint` Center ({{center}}; use (1, 0, 0) for the origin, since a Center of exactly 0 paints the whole landscape), Radius {{radius_m}}, Rules {Layer `{{base_layer}}`}, {Layer `{{field_layer}}`, SlopeMax 15, SlopeFade 3}: the first rule fills whatever later rules leave. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Prove it: hyper_spatial_query `ground` every 4 m along a line down the slope through the centre; hyper_capture_view (Source transform) an oblique shot from below the hill. If a tool is unavailable, say so and mark its rows INFO.\n4. Leave the level unsaved. Report a PASS/FAIL table: at least 3 shelves along the line; step heights within 25% of {{step_m}} m; at least 60% of samples under 8 degrees (shelves), steep risers between; `{{field_layer}}` on the shelves in the picture. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.impact-crater-edit-layer",
+   "title": "Blast a sci-fi impact crater on its own edit layer",
+   "summary": "Raise a rim, dig the bowl and add noise on a removable edit layer, paint scorched ground around it, then measure the depth and rim height.",
+   "packs": [
+    "worldbuilding_navigation",
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_spatial_query",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.add_edit_layer",
+    "landscape.add_paint_layer",
+    "landscape.sculpt",
+    "landscape.paint"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "landscape",
+    "crater",
+    "sci-fi",
+    "edit layer",
+    "sculpt",
+    "scorch"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "center",
+     "label": "Impact point (cm)",
+     "default": "0, 0, 0"
+    },
+    {
+     "name": "radius_m",
+     "label": "Crater radius (m)",
+     "default": "60"
+    },
+    {
+     "name": "depth_m",
+     "label": "Crater depth (m)",
+     "default": "18"
+    },
+    {
+     "name": "scorch_layer",
+     "label": "Scorch layer",
+     "default": "Ash"
+    }
+   ],
+   "prompt": "Blast an impact crater into {{selected_actor}} at ({{center}}) cm: {{radius_m}} m radius, {{depth_m}} m deep, with a raised rim and scorched `{{scorch_layer}}` ground. Sculpt it on an edit layer `Crater`, which can be hidden or deleted.\n1. hyper_landscape_inspect for paint and edit layers; hyper_spatial_query `ground` at the centre and 8 rim points for starting heights.\n2. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false), each op naming the Landscape and centred on ({{center}}): `landscape.add_edit_layer` `Crater`; `landscape.add_paint_layer` `{{scorch_layer}}` if missing; then with EditLayer `Crater` (raise, lower and noise add to the ground): `landscape.sculpt` raise, Radius {{radius_m}} plus 10, Falloff 25, Amount 6; `landscape.sculpt` lower, Radius 0.75 x {{radius_m}}, Falloff 0.3 x {{radius_m}}, Amount {{depth_m}} plus 6; `landscape.sculpt` noise, Radius {{radius_m}} plus 20, Falloff 10, Amount 2. On the base layer (no EditLayer): `landscape.paint` Radius {{radius_m}} plus 10, Falloff 20, Rules {Layer `{{scorch_layer}}`}; a paint Center of exactly (0, 0, 0) paints everything, so use (1, 0, 0) there. If it awaits approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Prove it: hyper_spatial_query `ground` at the centre and 8 rim points; hyper_landscape_inspect lists `Crater`; hyper_capture_view (Source transform) an oblique shot from 1.5 x the radius away, 30 m up. If a tool is unavailable, say so and mark its rows INFO.\n4. Leave the level unsaved. Report a PASS/FAIL table: centre {{depth_m}} m below its old ground (within 25%); rim samples 3 to 9 m above theirs; `Crater` edit layer present; a scorched disc in the picture. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.dirt-road-with-verges",
+   "title": "Lay a dirt road with grass verges through points",
+   "summary": "Lay a landscape spline road through points, level and paint it, paint verges by distance from it, and sample its grade.",
+   "packs": [
+    "worldbuilding_navigation",
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_spatial_query",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.add_paint_layer",
+    "landscape.road",
+    "landscape.paint"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "landscape",
+    "road",
+    "spline",
+    "verge",
+    "paint",
+    "distance"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "points",
+     "label": "Road points (cm)",
+     "default": "(-40000,-20000,0), (0,0,0), (30000,25000,0)"
+    },
+    {
+     "name": "width_m",
+     "label": "Road width (m)",
+     "default": "6"
+    },
+    {
+     "name": "road_layer",
+     "label": "Road layer",
+     "default": "Dirt"
+    },
+    {
+     "name": "verge_layer",
+     "label": "Verge layer",
+     "default": "Verge"
+    },
+    {
+     "name": "verge_m",
+     "label": "Verge width (m)",
+     "default": "4"
+    },
+    {
+     "name": "base_layer",
+     "label": "Base layer",
+     "default": "Grass"
+    }
+   ],
+   "prompt": "On {{selected_actor}}, lay a road `Road_Main` {{width_m}} m wide through {{points}} (cm), painted `{{road_layer}}`, with `{{verge_layer}}` verges {{verge_m}} m wide either side.\n1. hyper_landscape_inspect: check every point lies inside Center plus or minus Extent, which layers exist, and each layer's share.\n2. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false), each op naming the Landscape: `landscape.add_paint_layer` for any missing layer; `landscape.road` Road `Road_Main`, Points as given, Width {{width_m}}, Falloff 8, Layer `{{road_layer}}`; then `landscape.paint` over the whole landscape. Paint repaints every layer where it runs and the first rule fills whatever later rules leave, so Rules: {Layer `{{base_layer}}`}, any slope or height rules to keep (such as {Layer `Rock`, SlopeMin 35}), then {Layer `{{verge_layer}}`, DistanceMin half of {{width_m}}, DistanceMax that plus {{verge_m}}, DistanceFade 1} last; distances run from the road's centreline. If it awaits approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Prove it: hyper_spatial_query `ground` every 20 m along the road for the steepest slope; hyper_landscape_inspect for shares and the Splines edit layer; hyper_capture_view (Source transform) one top-down shot over the road and one from 1.7 m above it looking along it. If a tool is unavailable, say so and mark its rows INFO.\n4. Leave the level unsaved. Report a PASS/FAIL table: the road note lists {{width_m}} m and `{{road_layer}}`; steepest sample under 30 degrees (name any steeper stretch); `{{base_layer}}` still the largest share; verges along both sides in the top-down shot (shares are whole percents, so a narrow verge may read 0%). Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.settlement-road-network",
+   "title": "Connect three settlements with a road network",
+   "summary": "Lay a main road and a branch between settlement sites with painted verges, place start and goal markers, and prove navmesh routes reach each site.",
+   "packs": [
+    "worldbuilding_navigation",
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_spatial_query",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_navigation_inspect",
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_level_design_validate",
+    "hyper_navigation_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.add_paint_layer",
+    "landscape.road",
+    "landscape.paint",
+    "add_marker"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "landscape",
+    "road",
+    "network",
+    "settlement",
+    "navmesh",
+    "routes"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "site_a",
+     "label": "Site A (cm)",
+     "default": "-30000, -30000, 0"
+    },
+    {
+     "name": "site_b",
+     "label": "Site B (cm)",
+     "default": "25000, -10000, 0"
+    },
+    {
+     "name": "site_c",
+     "label": "Site C (cm)",
+     "default": "5000, 30000, 0"
+    },
+    {
+     "name": "width_m",
+     "label": "Road width (m)",
+     "default": "7"
+    },
+    {
+     "name": "base_layer",
+     "label": "Base layer",
+     "default": "Grass"
+    }
+   ],
+   "prompt": "On {{selected_actor}}, connect three settlement sites with {{width_m}} m roads: A ({{site_a}}), B ({{site_b}}) and C ({{site_c}}), in cm.\n1. hyper_landscape_inspect for its extent, layers and shares (`Dirt` and `Verge` are needed); hyper_spatial_query `ground` at each site.\n2. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false), each op naming the Landscape: `landscape.add_paint_layer` for a missing layer; `landscape.road` `Road_AB` from A to B through one bend avoiding the steepest ground, Width {{width_m}}, Falloff 8, Layer `Dirt`; `landscape.road` `Road_C` from the middle of Road_AB to C, likewise; `landscape.paint` Rules {Layer `{{base_layer}}`} (the first rule fills whatever later rules leave), any slope rules to keep, then {Layer `Verge`, DistanceMin half of {{width_m}}, DistanceMax that plus 3}. If it awaits approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_navigation_inspect for navmesh covering the sites. hyper_level_design_inspect for the Revision, then hyper_level_blockout_apply_plan (bDryRun false, fresh OperationId, ExpectedRevision): `add_marker` Name `Site_A` Role start, `Site_B` and `Site_C` Role goal, each Location \"x,y,z\" 10 cm above its site's ground.\n4. Prove it: hyper_level_design_validate for routes from the start to both goals; hyper_navigation_validate for navmesh problems; hyper_spatial_query `ground` every 25 m along both roads; hyper_capture_view (Source transform) top-down over the sites. Without navmesh on the roads, mark route rows INFO; if a tool is unavailable, say so.\n5. Leave everything unsaved. Report a PASS/FAIL table: two road notes; steepest grade under 30 degrees; routes to `Site_B` and `Site_C` found; no unreachable, steep_floor or no_floor issues; navigation validate 0 errors; `{{base_layer}}` still the largest share. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.racing-circuit",
+   "title": "Lay a closed racing circuit with a flat paddock",
+   "summary": "Lay a closed spline track through corner points, flatten an infield paddock, paint asphalt and run-off, and check grades and camber.",
+   "packs": [
+    "worldbuilding_navigation",
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_spatial_query",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.add_paint_layer",
+    "landscape.sculpt",
+    "landscape.road",
+    "landscape.paint"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "landscape",
+    "racing",
+    "circuit",
+    "track",
+    "spline",
+    "closed loop"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "points",
+     "label": "Corner points (cm)",
+     "default": "(-30000,-15000,0), (30000,-15000,0), (38000,8000,0), (0,20000,0), (-36000,8000,0)"
+    },
+    {
+     "name": "width_m",
+     "label": "Track width (m)",
+     "default": "12"
+    },
+    {
+     "name": "track_mesh",
+     "label": "Track surface mesh (optional)",
+     "default": "none",
+     "hint": "A static mesh path laid along the track, or none."
+    },
+    {
+     "name": "base_layer",
+     "label": "Base layer",
+     "default": "Grass"
+    }
+   ],
+   "prompt": "Lay a closed racing circuit on {{selected_actor}} through the corners {{points}} (cm): {{width_m}} m of `Asphalt`, 6 m of `Runoff` either side, and a flat paddock in the infield.\n1. hyper_landscape_inspect: every corner inside the landscape; its layers and shares. hyper_spatial_query `ground` at each corner; flag neighbours whose heights differ by over 6% of their distance.\n2. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false), each op naming the Landscape: `landscape.add_paint_layer` for missing layers; `landscape.sculpt` flatten at the corners' centroid, Radius 30 m short of the nearest track, Falloff 20, Height the mean corner height; `landscape.road` Road `Circuit`, Points the corners, bClosed true, Width {{width_m}}, Falloff 10, Layer `Asphalt`, Mesh {{track_mesh}} unless none; `landscape.paint` Rules {Layer `{{base_layer}}`} (the first rule fills whatever later rules leave), any slope rules to keep, then {Layer `Runoff`, DistanceMin half of {{width_m}}, DistanceMax that plus 6}. If it awaits approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Prove it: hyper_spatial_query `ground` every 25 m around the loop, across the track at 3 places, and at 5 paddock points; hyper_capture_view (Source transform) top-down over the circuit and a chase shot 3 m up behind a corner. If a tool is unavailable, say so and mark its rows INFO.\n4. Leave the level unsaved. Report a PASS/FAIL table: the road note shows a closed loop; steepest grade under 8 degrees; camber under 3 degrees; paddock samples within 0.5 m; `Runoff` along both edges in the top-down shot; `{{base_layer}}` still the largest share. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.open-world-streaming-landscape",
+   "title": "Create a 4 km open-world landscape that streams",
+   "summary": "Dry-run then build a large World Partition landscape split into streaming proxies, check proxies, relief and grid, and ask before saving.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_world_partition_inspect",
+    "hyper_memory_recall",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_worldbuilding_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.create"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "landscape",
+    "open world",
+    "world partition",
+    "streaming",
+    "large"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Landscape label",
+     "default": "Mainland"
+    },
+    {
+     "name": "size_m",
+     "label": "Size (m a side)",
+     "default": "4032"
+    },
+    {
+     "name": "resolution",
+     "label": "cm per vertex",
+     "default": "100"
+    },
+    {
+     "name": "relief",
+     "label": "Relief (m)",
+     "default": "300"
+    }
+   ],
+   "prompt": "Create a {{size_m}} m open-world landscape `{{name}}` in the World Partition level {{level}}, streaming in proxies.\n1. hyper_landscape_inspect: bWorldPartition must be true (otherwise say this needs an Open World level and stop) and no landscape labelled `{{name}}`. hyper_world_partition_inspect for the runtime grids' CellSize and LoadingRange and the loaded regions. hyper_memory_recall \"open world landscape\".\n2. hyper_landscape_apply_plan with bDryRun true: `landscape.create` Landscape `{{name}}`, Location (0, 0, 0), Size {{size_m}}, Resolution {{resolution}}, HeightRange 1024, Noise {Seed 9, Amplitude twice {{relief}}, Wavelength 1200, Octaves 7} (fractal noise spans about half its Amplitude), PaintLayers [Grass, Dirt, Rock]. Fix anything refused (over 8129 vertices a side needs a coarser Resolution). Then send the same plan with bDryRun false and a fresh OperationId. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Prove it: hyper_landscape_inspect for vertices, StreamingProxies, HeightMin and HeightMax (shares are not measured above 2049 vertices: say so); hyper_worldbuilding_validate with Variants [\"landscape\"]; hyper_capture_view (Source transform) one shot from 2 km up looking 45 degrees down. If hyper_capture_view is unavailable, say so.\n4. Do not save: it is a large change, so ask me before saving with bSave. Report a PASS/FAIL table: World Partition level; StreamingProxies above 1; width within 2% of {{size_m}} m; relief within 30% of {{relief}} m; validate 0 errors; runtime grid CellSize and LoadingRange as INFO. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.layer-blend-material",
+   "title": "Make a layer-blend material for a landscape",
+   "summary": "Make a landscape material showing each paint layer in a flat colour, set it on the selected landscape, and prove every painted layer shows.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_memory_recall",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_project_search",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "landscape.create_material",
+    "landscape.set_material"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "landscape",
+    "material",
+    "layer blend",
+    "paint layers",
+    "colours"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "material_name",
+     "label": "Material name",
+     "default": "M_Landscape_Layers"
+    }
+   ],
+   "prompt": "Give {{selected_actor}} a material that shows its paint layers, saved as {{content_folder}}/{{material_name}}.\n1. hyper_landscape_inspect for its paint layers (names and shares) and current material; hyper_memory_recall \"landscape material\" for project colours. If its material already blends every listed layer, report that and stop.\n2. One hyper_landscape_apply_plan (fresh OperationId, bDryRun false): `landscape.create_material` Landscape (its label), Material {{content_folder}}/{{material_name}}, and LayerColors (R, G, B 0 to 1) in the order of its paint layers only where the project's palette gives one; the rest are picked from each layer's name (grass green, rock grey, snow white). Naming the Landscape sets the material on it. If the op is refused as unknown, this build lacks it: hyper_project_search for a landscape material whose layer blend names these layers and send `landscape.set_material` with it, or say none exists and stop. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. Prove it: hyper_landscape_inspect shows the new material; read the plan's Notes for any layer it does not show; hyper_capture_view (Source transform) one top-down shot where at least two layers meet, and one over the smallest layer. If hyper_capture_view is unavailable, say so.\n4. Change no other asset or landscape, and leave the level unsaved; say whether the plan's Saved lists the material.\nReport a PASS/FAIL table: material exists at the path; the landscape uses it; one row per paint layer above 1% share, PASS when its colour shows in a picture. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.match-terrain-reference",
+   "title": "Shape and paint terrain to match a reference image",
+   "summary": "Frame a view like the reference, then sculpt and repaint the selected landscape in measured rounds until the image score reaches the target.",
+   "packs": [
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "image-match"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_memory_recall",
+    "hyper_capture_view",
+    "hyper_image_compare",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "landscape.sculpt",
+    "landscape.paint"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "landscape",
+    "reference",
+    "image match",
+    "sculpt",
+    "paint",
+    "concept art"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "reference",
+     "label": "Reference image (project path)",
+     "default": "Saved/Reference/terrain_ref.png",
+     "hint": "An image file inside the project, such as a generated reference, concept art or a photo."
+    },
+    {
+     "name": "target",
+     "label": "Target score (0-100)",
+     "default": "70"
+    },
+    {
+     "name": "rounds",
+     "label": "Most rounds",
+     "default": "5"
+    }
+   ],
+   "prompt": "Make {{selected_actor}} look like the reference {{reference}}, following the image-match skill.\n1. hyper_landscape_inspect for size, relief, layers and material; hyper_memory_recall \"terrain reference\". Describe the reference's landforms (ridges, valleys, plateaus), its palette by layer, and the camera height and angle it implies.\n2. hyper_capture_view (Source transform) from a transform that frames the landscape like the reference (same horizon height and field of view), Label `terrain-0`; hyper_image_compare (Mode look, SessionId `terrain-match`, TargetScore {{target}}) against {{reference}}.\n3. Up to {{rounds}} rounds, one change each: a hyper_landscape_apply_plan (fresh OperationId, bDryRun false) with `landscape.sculpt` (raise, lower, smooth, noise or terrace, on the base edit layer) or `landscape.paint` rules (the first fills what later rules leave) aimed at the worst cells the compare names; recapture from the same transform and compare again with a Note of the change. Undo a round that lowers the score with a corrective plan, and say so. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n4. Stop at {{target}} or after {{rounds}} rounds. If hyper_capture_view or hyper_image_compare is unavailable, say so and stop after step 1.\n5. Leave the level unsaved. Report a table of rounds (change, score, PASS when it rose) and a final PASS/FAIL row for reaching {{target}}, then the reference and the final capture each on its own line."
+  },
+  {
+   "id": "landscape-terrain.mesh-terrain-noise",
+   "title": "Create a Mesh Terrain with rolling noise",
+   "summary": "Create an experimental Mesh Partition terrain of a set size and spacing, add a noise modifier, then validate it and capture the result.",
+   "packs": [
+    "mesh_terrain",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_mesh_terrain_inspect",
+    "hyper_mesh_terrain_apply_plan",
+    "hyper_operation_wait",
+    "hyper_mesh_terrain_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "create_terrain",
+    "add_modifier"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "mesh terrain",
+    "mesh partition",
+    "noise",
+    "experimental",
+    "terrain"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Terrain name",
+     "default": "MeshTerrain_Hills"
+    },
+    {
+     "name": "size_cm",
+     "label": "Size (cm, width,depth)",
+     "default": "100000,100000"
+    },
+    {
+     "name": "spacing",
+     "label": "Vertex spacing (cm)",
+     "default": "100"
+    },
+    {
+     "name": "intensity",
+     "label": "Noise intensity",
+     "default": "800"
+    }
+   ],
+   "prompt": "Create a Mesh Terrain `{{name}}` in {{level}}: {{size_cm}} cm (width,depth), vertices every {{spacing}} cm, shaped by rolling noise. Mesh Terrain is experimental in UE 5.8: if the mesh_terrain pack is unavailable, say so and stop.\n1. hyper_mesh_terrain_inspect for terrains, modifiers and the Revision; stop if `{{name}}` exists.\n2. One hyper_mesh_terrain_apply_plan with bDryRun false, a fresh OperationId and ExpectedRevision from step 1. Ops: `create_terrain` (Name `{{name}}`, Location \"0,0,0\", Size \"{{size_cm}}\", Spacing {{spacing}}), then `add_modifier` (Name `{{name}}_Noise`, Terrain `{{name}}`, Type noise, Location \"0,0,0\", Properties \"Intensity={{intensity}}; NoiseFrequency=(X=0.0005,Y=0.0005)\"). The reply waits for the rebuild. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true. If a property name is refused, read the modifier's Settings with hyper_mesh_terrain_inspect and use the names listed there.\n3. Prove it: hyper_mesh_terrain_validate (0 errors, bBuilding false); hyper_mesh_terrain_inspect shows `{{name}}` with SectionCount above 0 and its noise modifier; hyper_capture_view (Source transform) an oblique shot from a corner, 200 m up. If hyper_capture_view is unavailable, say so.\n4. Leave the level unsaved (bSave false). Report a PASS/FAIL table: terrain and modifier present by name; Size matches {{size_cm}}; validate 0 errors and 0 warnings; relief visible in the picture. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.mesh-terrain-heightmap-stamp",
+   "title": "Stamp a heightmap onto a Mesh Terrain",
+   "summary": "Add a texture_patch modifier that stamps the selected heightmap onto a Mesh Terrain at a set place and scale, then validate and capture it.",
+   "packs": [
+    "mesh_terrain",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_mesh_terrain_inspect",
+    "hyper_mesh_terrain_apply_plan",
+    "hyper_operation_wait",
+    "hyper_mesh_terrain_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "add_modifier"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "mesh terrain",
+    "heightmap",
+    "stamp",
+    "texture patch",
+    "experimental"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Texture2D"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "terrain",
+     "label": "Terrain name",
+     "default": "MeshTerrain_Hills"
+    },
+    {
+     "name": "location",
+     "label": "Stamp centre (cm)",
+     "default": "0,0,0"
+    },
+    {
+     "name": "scale",
+     "label": "Stamp scale (x,y,z)",
+     "default": "10,10,1"
+    }
+   ],
+   "prompt": "Stamp the heightmap {{selected_asset}} onto the Mesh Terrain `{{terrain}}`, centred at ({{location}}) cm with scale {{scale}}. Mesh Terrain is experimental in UE 5.8: if the mesh_terrain pack is unavailable, say so and stop.\n1. hyper_mesh_terrain_inspect for terrains, modifiers and the Revision; if `{{terrain}}` does not exist, list the terrains there are and stop. Confirm {{selected_asset}} is a texture.\n2. One hyper_mesh_terrain_apply_plan with bDryRun false, a fresh OperationId and ExpectedRevision. Ops: `add_modifier` Name `{{terrain}}_Stamp`, Terrain `{{terrain}}`, Type texture_patch, Location \"{{location}}\", Scale \"{{scale}}\", Properties \"HeightChannel.TextureAsset={{selected_asset}}\". The reply waits for the rebuild. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true. If a property name is refused, read the modifier's Settings with hyper_mesh_terrain_inspect and use the names listed.\n3. Prove it: hyper_mesh_terrain_validate (no stamp-without-texture issue, bBuilding false); hyper_mesh_terrain_inspect shows the stamp with its texture in Settings; hyper_capture_view (Source transform) an oblique shot of the stamped area from 150 m out, 60 m up. If hyper_capture_view is unavailable, say so.\n4. Change no other modifier and leave the level unsaved. Report a PASS/FAIL table: stamp present and bound to `{{terrain}}`; texture set; validate 0 errors and 0 warnings; the stamped shape visible in the picture. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.mesh-terrain-spline-channel",
+   "title": "Carve a road or river bed into a Mesh Terrain",
+   "summary": "Add a spline modifier through set points to cut a road or river bed into a Mesh Terrain, tune its width from its own settings, and validate.",
+   "packs": [
+    "mesh_terrain",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_mesh_terrain_inspect",
+    "hyper_mesh_terrain_apply_plan",
+    "hyper_operation_wait",
+    "hyper_mesh_terrain_validate",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "add_modifier",
+    "set_modifier"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "mesh terrain",
+    "spline",
+    "road",
+    "river",
+    "experimental"
+   ],
+   "placeholders": [
+    {
+     "name": "feature",
+     "label": "Feature (Road or River)",
+     "default": "Road"
+    },
+    {
+     "name": "terrain",
+     "label": "Terrain name",
+     "default": "MeshTerrain_Hills"
+    },
+    {
+     "name": "location",
+     "label": "Spline start (cm)",
+     "default": "-20000,0,0"
+    },
+    {
+     "name": "points",
+     "label": "Spline points (cm, relative)",
+     "default": "0,0,0; 20000,5000,0; 40000,0,0"
+    },
+    {
+     "name": "width_m",
+     "label": "Channel width (m)",
+     "default": "8"
+    }
+   ],
+   "prompt": "Carve a {{feature}} into the Mesh Terrain `{{terrain}}` along a spline starting at ({{location}}) cm through the relative points {{points}}. Mesh Terrain is experimental in UE 5.8: if the mesh_terrain pack is unavailable, say so and stop.\n1. hyper_mesh_terrain_inspect for terrains, modifiers and the Revision; stop if `{{terrain}}` is missing.\n2. One hyper_mesh_terrain_apply_plan (bDryRun false, fresh OperationId, ExpectedRevision). Ops: `add_modifier` Name `{{terrain}}_{{feature}}`, Terrain `{{terrain}}`, Type spline, Location \"{{location}}\", Points \"{{points}}\". The reply waits for the rebuild. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_mesh_terrain_inspect: read the new modifier's Settings. If it has width, falloff or depth settings, send one more plan with `set_modifier` Name `{{terrain}}_{{feature}}` and Properties giving a {{width_m}} m wide channel, in the units and names those settings use (cm for lengths). If it has none, say so.\n4. Prove it: hyper_mesh_terrain_validate (no spline without points, nothing unbound or disabled, bBuilding false); hyper_capture_view (Source transform) one shot straight down over the spline and one low shot along it. If hyper_capture_view is unavailable, say so.\n5. Leave the level unsaved. Report a PASS/FAIL table: modifier present with its points; settings read back as set; validate 0 errors; the channel visible and unbroken in both pictures. Show each picture on its own line."
+  },
+  {
+   "id": "landscape-terrain.mesh-terrain-retune",
+   "title": "Retune a Mesh Terrain's modifiers in place",
+   "summary": "Change a terrain's noise intensity, add a remesh pass and remove a stray modifier through a dry run, then prove the rebuild is clean.",
+   "packs": [
+    "mesh_terrain",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_mesh_terrain_inspect",
+    "hyper_capture_view",
+    "hyper_mesh_terrain_apply_plan",
+    "hyper_operation_wait",
+    "hyper_mesh_terrain_validate",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "set_modifier",
+    "add_modifier",
+    "remove_modifier"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "mesh terrain",
+    "modifiers",
+    "remesh",
+    "noise",
+    "experimental",
+    "retune"
+   ],
+   "placeholders": [
+    {
+     "name": "terrain",
+     "label": "Terrain name",
+     "default": "MeshTerrain_Hills"
+    },
+    {
+     "name": "intensity",
+     "label": "New noise intensity",
+     "default": "1200"
+    },
+    {
+     "name": "remove",
+     "label": "Modifier to remove (or none)",
+     "default": "none"
+    }
+   ],
+   "prompt": "Retune the Mesh Terrain `{{terrain}}`: set its noise modifier's Intensity to {{intensity}}, add a remesh pass, and remove the modifier `{{remove}}` (skip that when it is none). Mesh Terrain is experimental in UE 5.8: if the mesh_terrain pack is unavailable, say so and stop.\n1. hyper_mesh_terrain_inspect for the terrain, every modifier bound to it with its Type and Settings, and the Revision. Name the noise modifier you will change; stop if there is none.\n2. hyper_capture_view (Source transform) an oblique shot over the terrain, Label `before`. If hyper_capture_view is unavailable, say so.\n3. hyper_mesh_terrain_apply_plan with bDryRun true and ExpectedRevision. Ops: `set_modifier` (the noise modifier, Properties \"Intensity={{intensity}}\"), `add_modifier` (Name `{{terrain}}_Remesh`, Terrain `{{terrain}}`, Type remesh, Location the terrain's), and `remove_modifier` `{{remove}}` unless none. Read the Notes, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash from the dry run. If a plan returns awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n4. Prove it: hyper_mesh_terrain_validate (0 errors, nothing unbound or disabled, bBuilding false); hyper_mesh_terrain_inspect reads Intensity back; recapture from the same transform, Label `after`, and hyper_image_compare (Mode aligned) after against before.\n5. Change only these modifiers and leave the level unsaved. Report a PASS/FAIL table: Intensity reads {{intensity}}; remesh present; `{{remove}}` gone or skipped; validate 0 errors; the compare shows a change (score under 95). Show each picture on its own line."
+  }
+ ]
+}

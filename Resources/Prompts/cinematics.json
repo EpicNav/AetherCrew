@@ -1,0 +1,805 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "cinematics",
+ "presets": [
+  {
+   "id": "cinematics.two-person-dialogue-coverage",
+   "title": "Shoot a two-person dialogue with shot and reverse shot",
+   "summary": "A level sequence covering two selected characters the classic way: establishing two-shot, over-the-shoulders, a close-up, a reviewed cut and a draft render.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_scene_inspect",
+    "hyper_sequence_inspect",
+    "hyper_sequence_apply_plan",
+    "hyper_operation_wait",
+    "hyper_cinematics_validate",
+    "hyper_movie_render_apply_plan"
+   ],
+   "ops": [
+    "sequence.create",
+    "shot.frame",
+    "fade.add",
+    "render"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "dialogue",
+    "conversation",
+    "shot reverse shot",
+    "over the shoulder",
+    "cutscene",
+    "coverage"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 2
+   },
+   "placeholders": [
+    {
+     "name": "sequence_name",
+     "label": "Sequence name",
+     "default": "LS_Dialogue"
+    },
+    {
+     "name": "duration",
+     "label": "Length (s)",
+     "default": "14"
+    }
+   ],
+   "prompt": "Shoot a two-person dialogue between the first two actors in {{selected_actors}} (A, then B) as `{{content_folder}}/{{sequence_name}}`, {{duration}} s at 24 fps, covered the classic way. Follow the unreal-cinematics skill; if the cinematics pack is unavailable, say so and stop.\n1. hyper_memory_recall `cinematics`. hyper_scene_inspect with scope selected for where both stand and face. hyper_sequence_inspect with no sequence, to avoid a name in use.\n2. One hyper_sequence_apply_plan (fresh operationId, bSave false): sequence.create (24 fps, {{duration}} s); shot.frame ops back to back: a wide two-shot with a slow push_in; a medium_close on A over B's shoulder; the reverse on B over A's other shoulder (Side left), keeping both cameras on one side of the line; a close on A from three_quarter_left at a low angle for the last beat; each shot 2-6 s. fade.add from black over the first 0.75 s. If the reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Fix every Review note by re-framing with the same Camera and Time, or say why it is intended.\n4. hyper_cinematics_validate with policy structural on the sequence's object path. Render a draft with hyper_movie_render_apply_plan (one render op on the sequence: Preset draft, Format png, Resolution 1280 x 720, Executor local), then hyper_operation_wait until it completes, and open the middle frame of each shot.\n5. Reply with a PASS/FAIL table: 4 shots of 2-6 s; no second without a camera; Review clean; frame count = 24 x {{duration}}; level left unsaved. Show each shot's frame on its own line."
+  },
+  {
+   "id": "cinematics.establishing-reveal-shot",
+   "title": "Open a level with an establishing reveal shot",
+   "summary": "An extreme wide camera move onto the selected landmark, a closer second angle and fades in and out, reviewed and draft-rendered.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_scene_inspect",
+    "hyper_sequence_inspect",
+    "hyper_sequence_apply_plan",
+    "hyper_operation_wait",
+    "hyper_cinematics_validate",
+    "hyper_movie_render_apply_plan"
+   ],
+   "ops": [
+    "sequence.create",
+    "shot.frame",
+    "fade.add",
+    "render"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "establishing shot",
+    "intro",
+    "reveal",
+    "landmark",
+    "crane",
+    "opening"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "sequence_name",
+     "label": "Sequence name",
+     "default": "LS_Establish"
+    },
+    {
+     "name": "duration",
+     "label": "Length (s)",
+     "default": "8"
+    },
+    {
+     "name": "move",
+     "label": "Camera move",
+     "default": "crane_down",
+     "hint": "push_in, pull_out, crane_down, crane_up, orbit_left, orbit_right, truck_left..."
+    }
+   ],
+   "prompt": "Open the level with an establishing shot of {{selected_actor}}: `{{content_folder}}/{{sequence_name}}`, {{duration}} s at 24 fps. Follow the unreal-cinematics skill; if the cinematics pack is unavailable, say so and stop.\n1. hyper_scene_inspect with scope selected for the landmark's location and size; hyper_sequence_inspect with no sequence, to avoid a name already used.\n2. One hyper_sequence_apply_plan (fresh operationId, bSave false): sequence.create; shot.frame extreme_wide of {{selected_actor}}, Angle high, Move {{move}}, for the first 60% of the length; shot.frame wide from three_quarter_left, static, for the rest; fade.add from black over the first second and to black over the last second. If the reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Fix any Review note (a camera inside geometry, a hidden subject) by re-framing the same Camera and Time.\n4. hyper_cinematics_validate with policy structural on the sequence's object path. Render a draft with hyper_movie_render_apply_plan (one render op on the sequence: Preset draft, Format png, Resolution 1280 x 720, Executor local), then hyper_operation_wait until it completes; open the first, middle and last frames.\n5. Reply with a PASS/FAIL table: two shots covering 0-{{duration}} s with no gap; the landmark visible and unblocked in the middle frame; the first and last frames black from the fades; Review clean. Show the frames each on its own line."
+  },
+  {
+   "id": "cinematics.boss-reveal-sequence",
+   "title": "Cut a boss reveal with low angles and a dolly zoom",
+   "summary": "Five shots that diminish the hero and empower the boss: high and low angles, an extreme close, a crane, a dolly zoom and a hand-held two-shot.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_scene_inspect",
+    "hyper_sequence_apply_plan",
+    "hyper_operation_wait",
+    "hyper_cinematics_validate",
+    "hyper_movie_render_apply_plan"
+   ],
+   "ops": [
+    "sequence.create",
+    "shot.frame",
+    "render"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "boss",
+    "reveal",
+    "fantasy",
+    "action",
+    "dolly zoom",
+    "low angle",
+    "cutscene"
+   ],
+   "placeholders": [
+    {
+     "name": "hero",
+     "label": "Hero actor label",
+     "default": "Hero"
+    },
+    {
+     "name": "boss",
+     "label": "Boss actor label",
+     "default": "Boss"
+    },
+    {
+     "name": "sequence_name",
+     "label": "Sequence name",
+     "default": "LS_BossReveal"
+    }
+   ],
+   "prompt": "Cut a 12 s boss reveal `{{content_folder}}/{{sequence_name}}` at 24 fps between the actors labelled `{{hero}}` and `{{boss}}` in {{level}}. Follow the unreal-cinematics skill; if the cinematics pack is unavailable, say so and stop.\n1. hyper_memory_recall `cinematics`; hyper_scene_inspect with scope world for both actors' locations and facing.\n2. One hyper_sequence_apply_plan (fresh operationId, bSave false): sequence.create; then shot.frame ops back to back: wide on {{hero}} from a high angle, small and alone, 0-3 s; extreme_close on {{boss}}, static, 3-4.5 s; full on {{boss}} from a low angle with crane_up, the reveal, 4.5-8 s; close on {{hero}} with dolly_zoom, 8-10 s; a medium_wide two-shot, bHandheld, 10-12 s. Keep every camera on one side of the line between them. If the reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Fix each Review note by re-framing the same Camera and Time; the 1.5 s extreme close is intended, so say so if it is flagged.\n4. hyper_cinematics_validate with policy structural on the sequence's object path. Render a draft with hyper_movie_render_apply_plan (one render op on the sequence: Preset draft, Format png, Resolution 1280 x 720, Executor local), then hyper_operation_wait until it completes, and open the middle frame of each shot.\n5. Reply with a PASS/FAIL table: five shots back to back covering 12 s; the boss shot from below; the line kept; no hidden subject; Review clean or each note explained. Show each shot's frame on its own line."
+  },
+  {
+   "id": "cinematics.vehicle-turntable-trailer",
+   "title": "Make a letterboxed turntable of a vehicle and render MP4",
+   "summary": "An orbit and a detail push-in at 2.39:1 on the selected actor, a final-quality MP4 config checked render-ready, and the rendered file.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_scene_inspect",
+    "hyper_movie_render_inspect",
+    "hyper_sequence_apply_plan",
+    "hyper_operation_wait",
+    "hyper_cinematics_validate",
+    "hyper_movie_render_apply_plan"
+   ],
+   "ops": [
+    "sequence.create",
+    "shot.frame",
+    "fade.add",
+    "config.create",
+    "render"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "turntable",
+    "vehicle",
+    "product",
+    "trailer",
+    "marketing",
+    "mp4",
+    "racing"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "sequence_name",
+     "label": "Sequence name",
+     "default": "LS_Turntable"
+    },
+    {
+     "name": "fps",
+     "label": "Frame rate",
+     "default": "30"
+    },
+    {
+     "name": "width",
+     "label": "Width (px)",
+     "default": "1920"
+    },
+    {
+     "name": "height",
+     "label": "Height (px)",
+     "default": "1080"
+    }
+   ],
+   "prompt": "Make a store-trailer turntable of {{selected_actor}}: `{{content_folder}}/{{sequence_name}}`, 12 s at {{fps}} fps, letterboxed at 2.39, rendered to MP4. Follow the unreal-cinematics skill; if the cinematics pack is unavailable, say so and stop.\n1. hyper_scene_inspect with scope selected for its size; hyper_movie_render_inspect to list the configs that exist.\n2. One hyper_sequence_apply_plan (fresh operationId, bSave false): sequence.create ({{fps}} fps, 12 s); shot.frame full with Move orbit_left and AspectRatio 2.39 for 0-8 s; shot.frame medium_close from three_quarter_right with push_in and AspectRatio 2.39 for 8-12 s; fade.add to black over the last second. If the reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_cinematics_validate with policy structural on the sequence's object path. One hyper_movie_render_apply_plan with config.create `{{content_folder}}/MRQ_Turntable` (Preset final, Format mp4, Resolution {{width}} x {{height}}, FrameRate {{fps}}); if mp4 is refused because its plugin is off, use png and say so. hyper_movie_render_inspect the config, then hyper_cinematics_validate with policy render_ready and that renderConfigPath.\n4. A second hyper_movie_render_apply_plan with one render op (the sequence, Asset the config, Executor local), then hyper_operation_wait until it completes.\n5. Reply with a PASS/FAIL table: two shots covering 12 s; the config's format, resolution and frame rate as asked; render_ready valid; the output file exists. Put the output path on its own line."
+  },
+  {
+   "id": "cinematics.rack-focus-shot",
+   "title": "Key a rack focus from a foreground to a background subject",
+   "summary": "A placed cine camera at 85 mm f/1.8 whose manual focus distance is keyed from one actor to another, verified by keys and draft frames.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_scene_inspect",
+    "hyper_sequence_apply_plan",
+    "hyper_operation_wait",
+    "hyper_sequence_inspect",
+    "hyper_cinematics_validate",
+    "hyper_movie_render_apply_plan"
+   ],
+   "ops": [
+    "sequence.create",
+    "camera.add",
+    "cut.add",
+    "keys.property",
+    "render"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "rack focus",
+    "depth of field",
+    "camera",
+    "focus pull",
+    "cinematic",
+    "keys"
+   ],
+   "placeholders": [
+    {
+     "name": "near",
+     "label": "Foreground actor label",
+     "default": "Lantern"
+    },
+    {
+     "name": "far",
+     "label": "Background actor label",
+     "default": "Traveler"
+    },
+    {
+     "name": "sequence_name",
+     "label": "Sequence name",
+     "default": "LS_RackFocus"
+    }
+   ],
+   "prompt": "Make a 6 s rack-focus shot `{{content_folder}}/{{sequence_name}}` that starts sharp on `{{near}}` and pulls focus to `{{far}}` between 2 and 4 s. Follow the unreal-cinematics skill's By hand section; if the cinematics pack is unavailable, say so and stop.\n1. hyper_scene_inspect with scope world for both actors' locations (cm). Choose a camera spot with both in frame and {{near}} 150-300 cm from it, and compute both distances.\n2. One hyper_sequence_apply_plan (fresh operationId, bSave false): sequence.create (24 fps, 6 s); camera.add `CAM_RackFocus` at that Location with LookAt {{far}}, FocalLength 85 and Aperture 1.8; cut.add to CAM_RackFocus at 0 s; keys.property on CAM_RackFocus, Property CineCameraComponent.FocusSettings.ManualFocusDistance: the distance to {{near}} at 0 and 2 s, the distance to {{far}} at 4 and 6 s, Interp auto. If the reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_sequence_inspect: the focus track holds those 4 keys, and one cut covers 0-6 s.\n4. hyper_cinematics_validate with policy structural on the sequence's object path. Render a draft with hyper_movie_render_apply_plan (one render op on the sequence: Preset draft, Format png, Resolution 1280 x 720, Executor local), then hyper_operation_wait until it completes; open the frames at 1 s and 5 s.\n5. Reply with a PASS/FAIL table: key values equal the measured distances (within 5 cm); one camera covering 0-6 s; {{near}} sharp and {{far}} soft at 1 s, the reverse at 5 s. Show both frames on their own lines."
+  },
+  {
+   "id": "cinematics.gate-opening-keyed",
+   "title": "Key a gate swinging open with its sound in a cutscene",
+   "summary": "Transform keys on the selected gate or door, its sound on the timeline and a holding wide shot, checked by inspect and first and last frames.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_scene_inspect",
+    "hyper_sequence_apply_plan",
+    "hyper_operation_wait",
+    "hyper_sequence_inspect",
+    "hyper_cinematics_validate",
+    "hyper_movie_render_apply_plan"
+   ],
+   "ops": [
+    "sequence.create",
+    "actors.bind",
+    "keys.transform",
+    "audio.add",
+    "sequence.set",
+    "shot.frame",
+    "render"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "door",
+    "gate",
+    "drawbridge",
+    "vault",
+    "keyframes",
+    "sound",
+    "cutscene"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "yaw",
+     "label": "Opening yaw (degrees)",
+     "default": "-90"
+    },
+    {
+     "name": "seconds",
+     "label": "Opening time (s)",
+     "default": "4"
+    },
+    {
+     "name": "sound",
+     "label": "Sound asset",
+     "default": "/Game/Audio/SFX/SW_GateOpen"
+    },
+    {
+     "name": "sequence_name",
+     "label": "Sequence name",
+     "default": "LS_GateOpen"
+    }
+   ],
+   "prompt": "Key {{selected_actor}} swinging open by {{yaw}} degrees of yaw over {{seconds}} s in `{{content_folder}}/{{sequence_name}}`, with its sound and a shot that holds on it. Change nothing else. Follow the unreal-cinematics skill; if the cinematics pack is unavailable, say so and stop.\n1. hyper_scene_inspect with scope selected for its location and rotation. Check that `{{sound}}` exists (Epic's exists); if not, skip the sound and say so.\n2. One hyper_sequence_apply_plan (fresh operationId, bSave false): sequence.create (24 fps, {{seconds}} + 2 s); actors.bind it; keys.transform with its current location and rotation at 1 s and the same location with yaw turned by {{yaw}} at 1 + {{seconds}} s, Interp auto; audio.add {{sound}} at 1 s, then sequence.set Duration {{seconds}} + 2 s, since audio.add stretches a sequence to a longer sound; shot.frame wide on it, static, for the whole length. If the reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_sequence_inspect: two transform keys at those times and values, an audio track at 1 s, one cut covering the length.\n4. hyper_cinematics_validate with policy structural on the sequence's object path. Render a draft with hyper_movie_render_apply_plan (one render op on the sequence: Preset draft, Format png, Resolution 1280 x 720, Executor local), then hyper_operation_wait until it completes; open the first and last frames.\n5. Reply with a PASS/FAIL table: those keys and tracks; the gate closed in the first frame and open in the last; Review clean. Show both frames on their own lines."
+  },
+  {
+   "id": "cinematics.assemble-master-sequence",
+   "title": "Assemble shot sequences into a master sequence",
+   "summary": "Place the selected shot sequences back to back in a new master with fades, check timing and structure, and draft-render the whole.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_sequence_inspect",
+    "hyper_sequence_apply_plan",
+    "hyper_operation_wait",
+    "hyper_cinematics_inspect",
+    "hyper_cinematics_validate",
+    "hyper_movie_render_apply_plan"
+   ],
+   "ops": [
+    "sequence.create",
+    "shot.add",
+    "fade.add",
+    "sequence.set",
+    "render"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "master sequence",
+    "shots",
+    "edit",
+    "trailer",
+    "assembly",
+    "timeline"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "LevelSequence"
+    ],
+    "min": 2
+   },
+   "placeholders": [
+    {
+     "name": "master_name",
+     "label": "Master sequence name",
+     "default": "LS_Master"
+    }
+   ],
+   "prompt": "Assemble the shot sequences {{selected_assets}} into a master sequence `{{content_folder}}/{{master_name}}`, in the order listed, back to back. Leave the shots unchanged. Follow the unreal-cinematics skill; if the cinematics pack is unavailable, say so and stop.\n1. hyper_sequence_inspect each shot: its frame rate, length and Review. If their frame rates differ, stop and ask which to use.\n2. One hyper_sequence_apply_plan on the master (fresh operationId, bSave false): sequence.create at that frame rate with Duration the sum of the shots; a shot.add per shot with Asset the shot and Time the running total; fade.add from black over the first 0.5 s and to black over the last second. If the reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_sequence_inspect the master: Shots lists each shot at its start with no gap or overlap, and the length equals the total. If rounding left it short, one plan with sequence.set Duration to the exact total.\n4. hyper_cinematics_inspect on the master's object path (bindings, tracks, sections) and hyper_cinematics_validate with policy structural on the sequence's object path.\n5. Render a draft with hyper_movie_render_apply_plan (one render op on the sequence: Preset draft, Format png, Resolution 1280 x 720, Executor local), then hyper_operation_wait until it completes, and open the first frame of each shot.\nReply with a PASS/FAIL table, one row per shot (start, length, frame present), plus the total length and structural validity. Show each shot's first frame on its own line."
+  },
+  {
+   "id": "cinematics.final-exr-render",
+   "title": "Render a final EXR master with a render-ready preflight",
+   "summary": "Make a final-quality EXR config, prove the sequence and config render-ready with a dry-run preflight, then render and count the frames.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_sequence_inspect",
+    "hyper_movie_render_inspect",
+    "hyper_movie_render_apply_plan",
+    "hyper_operation_wait",
+    "hyper_cinematics_inspect",
+    "hyper_cinematics_validate",
+    "hyper_cinematics_apply_plan"
+   ],
+   "ops": [
+    "config.create",
+    "config.set",
+    "render"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "render",
+    "exr",
+    "final",
+    "movie render queue",
+    "4k",
+    "compositing",
+    "delivery"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "LevelSequence"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "config_name",
+     "label": "Config name",
+     "default": "MRQ_Final"
+    },
+    {
+     "name": "width",
+     "label": "Width (px)",
+     "default": "3840"
+    },
+    {
+     "name": "height",
+     "label": "Height (px)",
+     "default": "2160"
+    },
+    {
+     "name": "samples",
+     "label": "Temporal samples",
+     "default": "8"
+    },
+    {
+     "name": "executor",
+     "label": "Executor",
+     "default": "local",
+     "hint": "local (in this editor, up to ten minutes) or remote (a new process from the saved level)"
+    }
+   ],
+   "prompt": "Render {{selected_asset}} as a final EXR master with `{{content_folder}}/{{config_name}}`: {{width}} x {{height}}, {{samples}} temporal samples, cinematic motion blur and depth of field. Change only the config. If the cinematics pack is unavailable, say so and stop.\n1. hyper_sequence_inspect the sequence for its length, frame rate and Review; hyper_movie_render_inspect for a config of that name.\n2. One hyper_movie_render_apply_plan (fresh operationId, no render op): config.create, or config.set if it exists, with Preset final, Format exr, Resolution {{width}} x {{height}}, Settings anti_aliasing.TemporalSampleCount {{samples}}, ConsoleVariables r.MotionBlurQuality 4 and r.DepthOfFieldQuality 4. If the reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Preflight: hyper_movie_render_inspect the config; hyper_cinematics_inspect with sequencePath and renderConfigPath (object paths; load them with Epic's load_asset if needed) for their revisions; hyper_cinematics_validate with policy render_ready; hyper_cinematics_apply_plan with bDryRun true, those revisions and the default render_validated_sequence intent. That tool only preflights: dry_run_valid_execution_blocked is its pass.\n4. Render: one hyper_movie_render_apply_plan with a render op (the sequence, Asset the config, Executor {{executor}}); a remote render reads the saved level, so ask me before saving it. hyper_operation_wait; while it still reports rendering, hyper_movie_render_inspect for progress.\n5. Reply with a PASS/FAIL table: config values as asked; render_ready valid; preflight valid; EXR frame count = frame rate x length. Put the output folder on its own line."
+  },
+  {
+   "id": "cinematics.draft-render-review",
+   "title": "Render a quick draft of a cutscene and review the cut",
+   "summary": "A fast PNG draft of the selected sequence, a frame per cut checked for framing and holds, and the cut's review notes, with nothing changed.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_sequence_inspect",
+    "hyper_cinematics_validate",
+    "hyper_movie_render_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "render"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "review",
+    "draft",
+    "render",
+    "cut",
+    "dailies",
+    "feedback"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "LevelSequence"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "width",
+     "label": "Width (px)",
+     "default": "1280"
+    },
+    {
+     "name": "height",
+     "label": "Height (px)",
+     "default": "720"
+    }
+   ],
+   "prompt": "Render a quick draft of {{selected_asset}} and review its cut. Change nothing in the sequence. If the cinematics pack is unavailable, say so and stop.\n1. hyper_sequence_inspect it: frame rate, length, the camera cuts and the film editor's Review.\n2. hyper_cinematics_validate with policy structural on its object path.\n3. One hyper_movie_render_apply_plan with a single render op: the sequence, Preset draft, Format png, Resolution {{width}} x {{height}}, Executor local. Then hyper_operation_wait with its operationId until it completes.\n4. Open the first frame after each camera cut and judge it: eyes on the upper third with headroom, lead room, the subject in focus, nothing blocking the view.\nReply with the cut as a table, one row per shot (start, camera, length), with a PASS/FAIL column per check: holds 2-6 s, subject visible, framing, no jump cut, Review note. Add the frame count against frame rate x length. Show each shot's frame on its own line, and end with the three changes that would help most, each named by the sequence plan op kind that would make it."
+  },
+  {
+   "id": "cinematics.movie-render-graph-setup",
+   "title": "Set up a Movie Render Graph and render with it",
+   "summary": "Copy Epic's default render graph, tune its output frame rate by the node names inspect reports, render the selected sequence and count frames.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_movie_render_inspect",
+    "hyper_sequence_inspect",
+    "hyper_movie_render_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "graph.create",
+    "graph.set",
+    "render"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "movie render graph",
+    "render",
+    "pipeline",
+    "frame rate",
+    "graph"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "LevelSequence"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "graph_name",
+     "label": "Graph name",
+     "default": "MRG_Review"
+    },
+    {
+     "name": "fps",
+     "label": "Output frame rate",
+     "default": "30"
+    }
+   ],
+   "prompt": "Set up a Movie Render Graph `{{content_folder}}/{{graph_name}}` that renders {{selected_asset}} at {{fps}} fps, and render with it. Change only the graph. If the cinematics pack is unavailable, say so and stop.\n1. hyper_movie_render_inspect with no asset, to list graphs and configs; hyper_sequence_inspect the sequence for its length and frame rate.\n2. One hyper_movie_render_apply_plan (fresh operationId): graph.create {{content_folder}}/{{graph_name}}, copied from Epic's default graph. If the reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_movie_render_inspect the graph: its nodes and the properties each sets. Then one plan of graph.set with Settings for the output frame rate {{fps}}, using the node and property names the inspect listed; a wrong name is refused with the choices, so fix it and send again.\n4. hyper_movie_render_inspect again to confirm, then one hyper_movie_render_apply_plan with a render op (Sequence the sequence, Asset the graph, Executor local) and hyper_operation_wait until it completes.\n5. Open the first, middle and last frames.\nReply with a PASS/FAIL table: the graph exists; its output frame rate is {{fps}}; the render completed; the frame count equals {{fps}} x the sequence's length. Show the three frames on their own lines."
+  },
+  {
+   "id": "cinematics.fix-cut-review-notes",
+   "title": "Fix jump cuts and line crossings in a cutscene",
+   "summary": "Read the film editor's review of the selected sequence and fix each jump cut, crossed line, gap and buried camera, keeping its length.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_sequence_inspect",
+    "hyper_cinematics_inspect",
+    "hyper_sequence_apply_plan",
+    "hyper_operation_wait",
+    "hyper_cinematics_validate",
+    "hyper_movie_render_apply_plan"
+   ],
+   "ops": [
+    "shot.frame",
+    "cut.add",
+    "render"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "fix",
+    "editing",
+    "jump cut",
+    "180 degree rule",
+    "review",
+    "continuity"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "LevelSequence"
+    ],
+    "min": 1
+   },
+   "prompt": "Fix the cut of {{selected_asset}} so the film editor's review is clean, keeping its story and length. Change only this sequence and its cameras. Follow the unreal-cinematics skill; if the cinematics pack is unavailable, say so and stop.\n1. hyper_sequence_inspect: cuts, bound actors and every Review note. hyper_cinematics_inspect on its object path for the camera cut sections and their frame ranges.\n2. Plan a fix per note: a jump cut, re-frame the second shot two sizes apart or 30 degrees further round (shot.frame with the same Camera and Time); a crossed line, move that camera's Side back to the established side; a gap, cut.add to the nearest fitting camera; a buried camera or hidden subject, re-frame from another side.\n3. One hyper_sequence_apply_plan with all the fixes (fresh operationId, bSave false), with bDryRun true first if it touches more than five shots. If the reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n4. hyper_sequence_inspect again and hyper_cinematics_validate with policy structural on the sequence's object path.\n5. Render a draft with hyper_movie_render_apply_plan (one render op on the sequence: Preset draft, Format png, Resolution 1280 x 720, Executor local), then hyper_operation_wait until it completes, and open the frames on each side of every changed cut.\nReply with a before/after PASS/FAIL table, one row per original note, plus the length unchanged. Show the frame pairs on their own lines."
+  },
+  {
+   "id": "cinematics.car-chase-tracking-shot",
+   "title": "Stage a car chase with a keyed tracking camera",
+   "summary": "Two cars keyed along a straight run, a tracking camera and a bumper camera keyed with them, and frames proving the cars stay in shot.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_scene_inspect",
+    "hyper_sequence_apply_plan",
+    "hyper_operation_wait",
+    "hyper_sequence_inspect",
+    "hyper_cinematics_validate",
+    "hyper_movie_render_apply_plan"
+   ],
+   "ops": [
+    "sequence.create",
+    "keys.transform",
+    "camera.add",
+    "cut.add",
+    "render"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "chase",
+    "car",
+    "racing",
+    "action",
+    "tracking shot",
+    "vehicle",
+    "keys"
+   ],
+   "placeholders": [
+    {
+     "name": "lead",
+     "label": "Lead car label",
+     "default": "Car_Lead"
+    },
+    {
+     "name": "chaser",
+     "label": "Chasing car label",
+     "default": "Car_Chaser"
+    },
+    {
+     "name": "distance",
+     "label": "Distance driven (cm)",
+     "default": "6000"
+    },
+    {
+     "name": "sequence_name",
+     "label": "Sequence name",
+     "default": "LS_Chase"
+    }
+   ],
+   "prompt": "Stage a 6 s chase in `{{content_folder}}/{{sequence_name}}`: `{{lead}}` and `{{chaser}}` drive {{distance}} cm along +X, 600 cm apart. Follow the unreal-cinematics skill; if the cinematics pack is unavailable, say so and stop.\n1. hyper_scene_inspect with scope world for both cars' locations and facing (cm).\n2. One hyper_sequence_apply_plan (fresh operationId, bSave false): sequence.create (24 fps, 6 s); keys.transform on each car from its start at 0 s to {{distance}} cm further along X at 6 s, Interp linear, {{chaser}} 600 cm behind {{lead}}; camera.add `CAM_Track` 500 cm beside {{lead}} at 120 cm, LookAt {{lead}}, FocalLength 35, and `CAM_Bumper` 300 cm ahead of {{chaser}} at 100 cm, Rotation facing -X, FocalLength 24; keys.transform moving both cameras with the cars, rotation held; cut.add to CAM_Track at 0 s, CAM_Bumper at 2.5 s, CAM_Track at 4 s. (shot.frame frames actors at their level positions, not their keys.) If the reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Fix Review notes. hyper_sequence_inspect: two keys per car and camera, three cuts. hyper_cinematics_validate with policy structural on the sequence's object path.\n4. Draft-render it with hyper_movie_render_apply_plan (one render op on the sequence: Preset draft, Format png, Resolution 1280 x 720, Executor local), hyper_operation_wait, and open the frames at 1, 3 and 5 s.\nReply with a PASS/FAIL table: each car moves {{distance}} cm; the gap stays 600 cm (within 50); both cars in frame at 1 and 5 s; the chaser filling CAM_Bumper at 3 s; Review clean. Show the frames on their own lines as ![frame](path)."
+  },
+  {
+   "id": "cinematics.dusk-cue-music-fades",
+   "title": "Add fades, music and a dusk lighting cue to a cutscene",
+   "summary": "Fade in and out, music from the first frame and a keyed light intensity falling to dusk on the selected sequence, leaving its shots unchanged.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_sequence_inspect",
+    "hyper_sequence_apply_plan",
+    "hyper_operation_wait",
+    "hyper_cinematics_validate",
+    "hyper_movie_render_apply_plan"
+   ],
+   "ops": [
+    "fade.add",
+    "audio.add",
+    "sequence.set",
+    "keys.property",
+    "render"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "fade",
+    "music",
+    "lighting cue",
+    "dusk",
+    "mood",
+    "polish"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "LevelSequence"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "music",
+     "label": "Music sound asset",
+     "default": "/Game/Audio/Music/MX_Theme"
+    },
+    {
+     "name": "light",
+     "label": "Light actor label",
+     "default": "Sun"
+    },
+    {
+     "name": "from",
+     "label": "Start intensity",
+     "default": "10"
+    },
+    {
+     "name": "to",
+     "label": "End intensity",
+     "default": "1.5"
+    }
+   ],
+   "prompt": "Finish {{selected_asset}} with fades, music and a dusk lighting cue, leaving its shots and cuts unchanged. If the cinematics pack is unavailable, say so and stop.\n1. hyper_sequence_inspect: length, cuts, and any fades or audio already there. Check that `{{music}}` exists (Epic's exists); if not, skip the music and say so.\n2. One hyper_sequence_apply_plan (fresh operationId, bSave false): fade.add with keys 1 at 0 s and 0 at 1 s, and 0 at 1.5 s before the end and 1 at the end; audio.add {{music}} at 0 s, then sequence.set Duration back to the length you read, since audio.add stretches a sequence to a longer sound; keys.property on `{{light}}`, Property LightComponent.Intensity, {{from}} at 0 s and {{to}} at the end, Interp auto. If the reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_sequence_inspect again: the same cuts as before, the fade keys, the audio track and 2 intensity keys. hyper_cinematics_validate with policy structural on the sequence's object path.\n4. Render a draft with hyper_movie_render_apply_plan (one render op on the sequence: Preset draft, Format png, Resolution 1280 x 720, Executor local), then hyper_operation_wait until it completes; open the first frame, the middle frame and the frame 2 s before the end.\nReply with a PASS/FAIL table: cuts unchanged; the first frame black; the middle frame brighter than the late frame (the light falling); the music track at 0 s; intensity keys {{from}} and {{to}}. Show the frames on their own lines."
+  },
+  {
+   "id": "cinematics.walk-and-talk-tracking",
+   "title": "Stage a walk-and-talk with following shots",
+   "summary": "Two characters keyed walking onto their marks under a hand-keyed leading two-shot, then singles at the marks on one side of the line.",
+   "packs": [
+    "cinematics"
+   ],
+   "skills": [
+    "unreal-cinematics"
+   ],
+   "agent": "cinematographer",
+   "tools": [
+    "hyper_scene_inspect",
+    "hyper_sequence_apply_plan",
+    "hyper_operation_wait",
+    "hyper_sequence_inspect",
+    "hyper_cinematics_validate",
+    "hyper_movie_render_apply_plan"
+   ],
+   "ops": [
+    "sequence.create",
+    "keys.transform",
+    "camera.add",
+    "cut.add",
+    "shot.frame",
+    "render"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "walk and talk",
+    "dialogue",
+    "tracking",
+    "characters",
+    "story",
+    "cutscene"
+   ],
+   "placeholders": [
+    {
+     "name": "a",
+     "label": "First character label",
+     "default": "Guide"
+    },
+    {
+     "name": "b",
+     "label": "Second character label",
+     "default": "Visitor"
+    },
+    {
+     "name": "distance",
+     "label": "Walk distance (cm)",
+     "default": "800"
+    },
+    {
+     "name": "sequence_name",
+     "label": "Sequence name",
+     "default": "LS_WalkAndTalk"
+    }
+   ],
+   "prompt": "Stage a 10 s walk-and-talk in `{{content_folder}}/{{sequence_name}}`: `{{a}}` and `{{b}}` walk side by side for 6 s onto their marks, then talk. Follow the unreal-cinematics skill; if the cinematics pack is unavailable, say so and stop.\n1. hyper_scene_inspect with scope world for both characters' marks and facing.\n2. One hyper_sequence_apply_plan (fresh operationId, bSave false): sequence.create (24 fps, 10 s); keys.transform for each from {{distance}} cm behind its mark at 0 s to the mark at 6 s, Interp linear; camera.add `CAM_Lead` 400 cm ahead of the pair's start at 160 cm, Rotation facing them, FocalLength 35, keys.transform moving it with them over 0-6 s; cut.add to CAM_Lead at 0 s; then at the marks, where shot.frame sees them, shot.frame medium_close on {{a}} from three_quarter_left at 6-8 s and on {{b}} from three_quarter_right at 8-10 s, on one side of the line. If the reply is awaiting_user_approval, hyper_operation_wait with its operationId.\n3. Fix any Review note. hyper_sequence_inspect: 2 keys per walker and on CAM_Lead, 3 cuts. hyper_cinematics_validate with policy structural on the sequence's object path.\n4. Draft-render it with hyper_movie_render_apply_plan (one render op on the sequence: Preset draft, Format png, Resolution 1280 x 720, Executor local), hyper_operation_wait, and open frames at 1, 5, 7 and 9 s.\nReply with a PASS/FAIL table: both walk {{distance}} cm onto their marks; CAM_Lead 400 cm ahead (within 50) while they walk; each subject in frame and in focus; the line kept; Review clean. Show the frames on their own lines as ![frame](path)."
+  }
+ ]
+}

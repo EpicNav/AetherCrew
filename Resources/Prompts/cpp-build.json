@@ -1,0 +1,646 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "cpp-build",
+ "presets": [
+  {
+   "id": "cpp-build.live-coding-change",
+   "title": "Change C++ logic and hot-reload it with Live Coding",
+   "summary": "Edit a function body in the project's C++, compile it with Live Coding in the running editor, and prove the new behaviour in PIE against a baseline.",
+   "packs": [
+    "editor_lifecycle",
+    "automation_profiling_build"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_verify_run",
+    "hyper_editor_restart",
+    "hyper_log_tail",
+    "hyper_build_diagnose"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "c++",
+    "live coding",
+    "hot reload",
+    "iteration",
+    "compile"
+   ],
+   "placeholders": [
+    {
+     "name": "change",
+     "label": "C++ change",
+     "default": "halve the delay between shots in ASentryTurret::TryFire"
+    },
+    {
+     "name": "proof",
+     "label": "How to prove it",
+     "default": "one case that stands near a placed instance for 5 s and Samples the property the change affects"
+    }
+   ],
+   "prompt": "Make this C++ change and hot-reload it without restarting the editor: {{change}}.\n1. hyper_memory_recall \"live coding\"; hyper_project_search (kinds cpp_symbol) for the function the change names, then read its .cpp file.\n2. Baseline before editing: hyper_verify_run with {{proof}}; keep each evidence line.\n3. Edit function bodies in .cpp files only. A change that needs a header edit, a new UPROPERTY or UFUNCTION, or a constructor default cannot be patched by Live Coding: say so and use hyper_editor_restart instead (bBuild true, a Note holding steps 5-7).\n4. Compile with Epic's LiveCodingToolset CompileLiveCoding. If that toolset is not enabled (Preferences, Epic MCP Toolsets, Enable Live Coding Toolset) or Live Coding is off, say so and fall back to hyper_editor_restart as above.\n5. hyper_log_tail with categories LogLiveCoding and maxVerbosity warning: 0 errors. hyper_build_diagnose for the build configuration that ran.\n6. Rerun the step-2 hyper_verify_run case.\n7. Report a PASS/FAIL table: compile result, errors and warnings, each check before and after with its evidence line, and each file changed (file:line)."
+  },
+  {
+   "id": "cpp-build.new-cpp-actor-class",
+   "title": "Add a new C++ actor class and rebuild the editor",
+   "summary": "Write a C++ actor with designer-tunable properties, rebuild through an editor restart, then place it and prove its defaults and behaviour in PIE.",
+   "packs": [
+    "editor_lifecycle",
+    "automation_profiling_build"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_editor_restart",
+    "hyper_log_tail",
+    "hyper_build_diagnose",
+    "hyper_verify_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "c++",
+    "new class",
+    "actor",
+    "uproperty",
+    "build",
+    "restart"
+   ],
+   "placeholders": [
+    {
+     "name": "class_name",
+     "label": "Class name",
+     "default": "AHealthPickup"
+    },
+    {
+     "name": "parent_class",
+     "label": "Parent class",
+     "default": "AActor"
+    },
+    {
+     "name": "module",
+     "label": "Module",
+     "default": "MyGame",
+     "hint": "A game module folder under Source/"
+    },
+    {
+     "name": "behaviour",
+     "label": "What it does",
+     "default": "heals an overlapping pawn by HealAmount, then hides until RespawnSeconds pass"
+    },
+    {
+     "name": "properties",
+     "label": "Tunable properties",
+     "default": "float HealAmount = 25, float RespawnSeconds = 10"
+    }
+   ],
+   "prompt": "Add C++ class `{{class_name}}` (parent {{parent_class}}) to module `{{module}}`: it {{behaviour}}. Expose {{properties}} as UPROPERTY(EditAnywhere, BlueprintReadWrite), each with a Category and a tooltip.\n1. hyper_memory_recall \"C++ conventions\"; hyper_project_search (kinds cpp_symbol) for {{class_name}} (it must not exist yet) and for a sibling class in {{module}} whose include style and API macro you copy.\n2. Write the header in the module's Public folder and the .cpp in Private, following the module's layout. Turn Tick off unless the behaviour needs it.\n3. hyper_editor_restart with bDryRun true: report the packages it would save and the build command. Then hyper_editor_restart with bBuild true and a Note holding the remaining steps; your turn ends there.\n4. When the chat resumes with the build result: on errors, fix only the lines named and restart again (at most twice). hyper_log_tail with maxVerbosity error; hyper_build_diagnose.\n5. Place one with SceneTools add_to_scene_from_class (class /Script/{{module}}.<class name without its A prefix>), labelled `{{class_name}}_1`, 500 cm ahead of the Player Start. hyper_verify_run: AssertExists, one AssertProperty per property default, and one case for the behaviour.\n6. Report a PASS/FAIL table: files written, build result, each property default, the behaviour case. Leave the level unsaved unless I ask."
+  },
+  {
+   "id": "cpp-build.fix-failed-build",
+   "title": "Fix the C++ errors from the last failed build",
+   "summary": "Read the build log the restart left, fix only the lines the compiler names, rebuild, and report each error as fixed or still open.",
+   "packs": [
+    "editor_lifecycle",
+    "automation_profiling_build"
+   ],
+   "skills": [
+    "hyperai-memory"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_build_diagnose",
+    "hyper_editor_restart",
+    "hyper_log_tail",
+    "hyper_diagnose",
+    "hyper_memory_remember"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "c++",
+    "build error",
+    "compile",
+    "fix",
+    "restart",
+    "ubt"
+   ],
+   "placeholders": [
+    {
+     "name": "build_log",
+     "label": "Build log",
+     "default": "Saved/HyperAIStudio/Restart/build.log",
+     "hint": "Relative to the project; a crash recovery build logs under Saved/HyperAIStudio/Recovery"
+    }
+   ],
+   "prompt": "The last build of {{project}} failed. Fix it.\n1. Read `{{build_log}}` and list every error line: file, line, code and message. hyper_memory_recall \"build error\" for known gotchas. hyper_build_diagnose for the engine version, platform and configuration.\n2. Fix only what the errors name, in the fewest files. Never comment code out to silence an error, and do not touch generated files, Intermediate or other plugins.\n3. hyper_editor_restart with bDryRun true (list what it would save), then with bBuild true and a Note listing the errors you fixed and steps 4-5; your turn ends there.\n4. When the chat resumes: if the build still fails, repeat from step 1 at most twice, then stop and report what is left. If it succeeds, hyper_log_tail with maxVerbosity error (no module or startup errors) and hyper_diagnose with checks loaded_blueprint_health (Blueprints built on the C++ still compile).\n5. If a fix teaches a project rule (an include order, an API macro, a module dependency), save it with hyper_memory_remember.\n6. Report a PASS/FAIL table: each original error, the fix (file:line), resolved or not; then the final build result and any new warnings."
+  },
+  {
+   "id": "cpp-build.fix-failing-test",
+   "title": "Make a failing automation test pass again",
+   "summary": "Run a failing test, trace its assertion to the code, fix the cause, rebuild, and prove it and the tests around it now pass.",
+   "packs": [
+    "automation_profiling_build",
+    "editor_lifecycle"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_test_inspect",
+    "hyper_test_validate",
+    "hyper_test_run",
+    "hyper_project_search",
+    "hyper_editor_restart",
+    "hyper_log_tail"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "automation",
+    "tests",
+    "c++",
+    "debugging",
+    "rebuild",
+    "regression"
+   ],
+   "placeholders": [
+    {
+     "name": "test_name",
+     "label": "Failing test",
+     "default": "Project.Combat.DamageFalloff"
+    },
+    {
+     "name": "neighbour_filter",
+     "label": "Tests around it",
+     "default": "Project.Combat.",
+     "hint": "A RunTestsByFilter expression that also covers the tests next to it"
+    }
+   ],
+   "prompt": "Automation test `{{test_name}}` fails. Find the cause and make it pass without weakening the test.\n1. hyper_memory_recall \"{{test_name}}\". Epic's AutomationTestToolset DiscoverTests, then hyper_test_inspect with [{{test_name}}] (present and runnable) and hyper_test_validate on its Snapshot (valid). hyper_test_run with bDryRun true, a fresh OperationId, that name and Snapshot as ExpectedSnapshot: quote its status (it seals the run; it starts no test).\n2. RunTests [{{test_name}}], then GetTestResults: quote every failing assertion with its file:line.\n3. hyper_project_search (kinds cpp_symbol) for the test and the code it calls; read both. Say whether the code or the test is wrong, with the evidence. Fix the code; change the test only if it contradicts documented behaviour, and ask me first.\n4. hyper_editor_restart with bDryRun true (the packages it would save, the build command), then with bBuild true and a Note holding steps 5-6; your turn ends there.\n5. When the chat resumes: hyper_log_tail with maxVerbosity error. If the build failed, fix only what the log names and restart once more. Then DiscoverTests (bForceRediscover true), RunTestsByFilter {{neighbour_filter}}, GetTestStatus until finished, and GetTestResults.\n6. Report a table: test | before | after | duration | first error, each PASS/FAIL, then every file changed (file:line)."
+  },
+  {
+   "id": "cpp-build.write-automation-test",
+   "title": "Write a C++ automation test for a gameplay function",
+   "summary": "Add a simple automation test that pins down a function's behaviour case by case, build it, run it, and show it passing under its exact name.",
+   "packs": [
+    "automation_profiling_build",
+    "editor_lifecycle"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_project_search",
+    "hyper_test_inspect",
+    "hyper_editor_restart",
+    "hyper_test_validate"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "c++",
+    "tests",
+    "automation",
+    "unit test",
+    "regression"
+   ],
+   "placeholders": [
+    {
+     "name": "function",
+     "label": "Function to test",
+     "default": "UCombatLibrary::CalculateDamage"
+    },
+    {
+     "name": "module",
+     "label": "Module",
+     "default": "MyGame"
+    },
+    {
+     "name": "test_name",
+     "label": "Test name",
+     "default": "MyGame.Combat.CalculateDamage"
+    },
+    {
+     "name": "cases",
+     "label": "Cases to check",
+     "default": "base 10, armour 0 gives 10; base 10, armour 50 gives 5; a negative base gives 0"
+    }
+   ],
+   "prompt": "Cover `{{function}}` in module `{{module}}` with an automation test named `{{test_name}}`.\n1. hyper_project_search (kinds cpp_symbol) for {{function}}; read it and any tests already in the module (Private/Tests). Epic's AutomationTestToolset DiscoverTests, then hyper_test_inspect with [{{test_name}}]: it must not be present yet.\n2. Write Private/Tests/<Subject>Test.cpp: IMPLEMENT_SIMPLE_AUTOMATION_TEST inside WITH_DEV_AUTOMATION_TESTS, editor context and product filter flags, one TestEqual or TestTrue per case with a message naming it: {{cases}}.\n3. hyper_editor_restart with bDryRun true: report the packages it would save and the build command. Then hyper_editor_restart with bBuild true and a Note holding the remaining steps; your turn ends there.\n4. After the chat resumes with a clean build: Epic's AutomationTestToolset DiscoverTests (bForceRediscover true); hyper_test_inspect with [{{test_name}}] (present, runnable) and hyper_test_validate on its Snapshot; then RunTests [{{test_name}}] and GetTestResults.\n5. If a case fails, decide from the function's code whether the test or the function is wrong; fix only the test unless I approve a code change.\n6. Report a PASS/FAIL table per case from the result messages, plus the test file and the build result."
+  },
+  {
+   "id": "cpp-build.insights-trace-playtest",
+   "title": "Record an Unreal Insights trace of a playtest",
+   "summary": "Check the trace setup, record CPU and frame events across a bot playtest with a bookmark, and report the .utrace file to open in Insights.",
+   "packs": [
+    "automation_profiling_build",
+    "scripting"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "tools": [
+    "hyper_build_diagnose",
+    "hyper_profile_capture",
+    "hyper_script_run",
+    "hyper_operation_wait",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "profiling",
+    "insights",
+    "trace",
+    "performance",
+    "cpu",
+    "frame time"
+   ],
+   "placeholders": [
+    {
+     "name": "seconds",
+     "label": "Play time (s)",
+     "default": "30",
+     "hint": "Up to 60"
+    },
+    {
+     "name": "channels",
+     "label": "Trace channels",
+     "default": "cpu,frame,bookmark"
+    }
+   ],
+   "prompt": "Profile {{level}} during {{seconds}} s of play. If the scripting pack is unavailable (Allow Agents To Run Python Scripts is off), say so and stop.\n1. hyper_build_diagnose: the build configuration and whether TraceLog is loaded (bTraceLogLoaded). Warn if it is a Debug build: its timings mislead.\n2. hyper_profile_capture with bDryRun true, a fresh OperationId, categories [cpu, frame, bookmark] and durationMs {{seconds}} × 1000: it checks the request and records nothing; quote its status.\n3. hyper_script_run (fresh OperationId): run() calls unreal.SystemLibrary.execute_console_command(None, 'Trace.File {{channels}}') and returns {}. Console commands always wait for my approval: hyper_operation_wait with bWaitThroughApproval true.\n4. hyper_playtest_run (mode StartInProcess): Play Explore in steps of at most 25 s (step timeoutMs 30000) until {{seconds}} s have passed; hyper_operation_wait, then hyper_playtest_status (keep the map).\n5. hyper_script_run again, approved the same way: run 'Trace.Bookmark PlaytestEnd' and 'Trace.Stop', and return the newest .utrace under Saved/Profiling with its size.\n6. Report a table: trace written (path, MB), playtest result, build configuration, each PASS/FAIL; then the trace path on its own line and how to open it in Unreal Insights. Do not delete older traces."
+  },
+  {
+   "id": "cpp-build.python-prefix-rename",
+   "title": "Batch-rename assets to naming conventions with Python",
+   "summary": "Preview, then run one editor script that adds the right prefixes to assets in a folder, and prove the references followed the rename.",
+   "packs": [
+    "scripting"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_script_run",
+    "hyper_operation_wait",
+    "hyper_asset_dependency_graph",
+    "hyper_diagnose"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "python",
+    "naming",
+    "rename",
+    "conventions",
+    "clean up",
+    "batch"
+   ],
+   "placeholders": [
+    {
+     "name": "prefixes",
+     "label": "Prefix per class",
+     "default": "StaticMesh SM_, Material M_, MaterialInstanceConstant MI_, Texture2D T_, Blueprint BP_"
+    }
+   ],
+   "prompt": "Rename assets under {{content_folder}} to these prefixes: {{prefixes}}. If the scripting pack is unavailable (Allow Agents To Run Python Scripts is off), say so and stop. Never run this during PIE: the asset library refuses then.\n1. hyper_memory_recall \"naming convention\" (a project rule overrides the list). hyper_project_search (kinds asset) in {{content_folder}}: assets whose name lacks its class prefix. Show the rename table (old, new) before changing anything; skip names that would collide.\n2. hyper_script_run with bDryRun true on the rename script (unreal.EditorAssetLibrary.rename_asset per row; run() returns renamed and skipped): its Safety should read needs_approval, since renames cannot be undone. Then run it for real with a fresh OperationId and hyper_operation_wait with bWaitThroughApproval true.\n3. For three renamed assets, hyper_asset_dependency_graph with direction referencers: the referencers resolve to the new paths. hyper_diagnose with checks asset_context for those paths and dirty_loaded_packages.\n4. Report a table: old | new | PASS/FAIL; then counts renamed and skipped, and the redirectors left behind (offer Fix Up Redirectors; do not run it)."
+  },
+  {
+   "id": "cpp-build.python-texture-budget",
+   "title": "List textures over a size budget with a read-only script",
+   "summary": "One read-only editor Python script lists textures above a resolution budget in a folder, with size, LOD group and compression, as a table.",
+   "packs": [
+    "scripting"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_script_run"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "python",
+    "textures",
+    "memory",
+    "budget",
+    "audit",
+    "read-only"
+   ],
+   "placeholders": [
+    {
+     "name": "max_size",
+     "label": "Largest side allowed (px)",
+     "default": "2048"
+    }
+   ],
+   "prompt": "Find textures under {{content_folder}} larger than {{max_size}} px on either side; change nothing. If the scripting pack is unavailable (Allow Agents To Run Python Scripts is off), say so and stop.\n1. hyper_memory_recall \"texture budget\": a project rule overrides {{max_size}} for its folders.\n2. hyper_script_run (fresh OperationId, TimeoutSeconds 60): run() finds the Texture2D assets under {{content_folder}} through the Asset Registry, loads each, and returns name, path, size (blueprint_get_size_x and _y), LOD group, compression settings, sRGB and Maximum Texture Size. It edits nothing.\n3. Check the report: Status completed, bRolledBack false, DirtyPackages empty.\n4. Report a table sorted by pixel count: texture | size | LOD group | compression | PASS/FAIL against {{max_size}}; then the totals and a suggested fix for each failure (Maximum Texture Size, LOD group, or re-import), without applying any."
+  },
+  {
+   "id": "cpp-build.python-bulk-edit-actors",
+   "title": "Bulk-edit a property on selected actors in one undo step",
+   "summary": "One undoable editor script sets a component property on every selected actor; a scene check proves each value changed and nothing else did.",
+   "packs": [
+    "scripting"
+   ],
+   "tools": [
+    "hyper_scene_inspect",
+    "hyper_script_run",
+    "hyper_scene_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "python",
+    "bulk edit",
+    "actors",
+    "properties",
+    "undo",
+    "level"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "property",
+     "label": "Property (reflected name)",
+     "default": "CastShadow",
+     "hint": "Python uses its snake_case name, such as cast_shadow"
+    },
+    {
+     "name": "value",
+     "label": "New value",
+     "default": "false"
+    },
+    {
+     "name": "component_class",
+     "label": "Component class",
+     "default": "StaticMeshComponent"
+    }
+   ],
+   "prompt": "On these actors only: {{selected_actors}}, set `{{property}}` to {{value}} on each {{component_class}}. If the scripting pack is unavailable (Allow Agents To Run Python Scripts is off), say so and stop.\n1. hyper_scene_inspect with scope selected and propertyNames [{{property}}]: record the current values, and count the actors and matching components.\n2. hyper_script_run (fresh OperationId): run() takes the selected level actors (EditorActorSubsystem), sets the property with set_editor_property on each {{component_class}}, and returns changed and skipped counts. It runs as one undo step, rolled back if it fails.\n3. hyper_scene_inspect again, and hyper_scene_validate with scope selected: every value is {{value}} and transforms are unchanged.\n4. Report a table: actor | components | before | after | PASS/FAIL. Do not save the level; Ctrl+Z undoes the whole edit."
+  },
+  {
+   "id": "cpp-build.prebuild-health-check",
+   "title": "Check the editor is safe to rebuild before a restart",
+   "summary": "Audit dirty packages, Blueprint health, plugins and the build setup, preview the restart's saves and build, and restart only on your go-ahead.",
+   "packs": [
+    "diagnostics",
+    "editor_lifecycle",
+    "automation_profiling_build"
+   ],
+   "tools": [
+    "hyper_run_audit",
+    "hyper_diagnose",
+    "hyper_sandbox_status",
+    "hyper_log_tail",
+    "hyper_build_diagnose",
+    "hyper_editor_restart"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "restart",
+    "build",
+    "safety",
+    "dirty packages",
+    "audit",
+    "sandbox"
+   ],
+   "prompt": "Before rebuilding {{project}}, check that nothing will be lost or broken. Do not restart yet.\n1. hyper_run_audit with action start, a new auditId and kinds dirty_loaded_packages, loaded_blueprint_health, plugin_readiness (HyperAI's required plugins) and current_map_state; then action status with that auditId until it is complete.\n2. hyper_diagnose with checks dirty_loaded_packages and loaded_blueprint_health for detail. hyper_sandbox_status: if Sandbox Mode holds files, list them, since saves land in the sandbox.\n3. hyper_log_tail with maxVerbosity error: recent errors a restart would hide. hyper_build_diagnose: the engine version, platform and build configuration the rebuild targets.\n4. hyper_editor_restart with bDryRun true and bBuild true: the packages it would save, the build command, the build log path and the chats that reopen.\n5. Report a table: check | PASS/WARN/FAIL | detail (dirty packages, Blueprints with errors, plugins not ready, sandboxed files, recent errors, build configuration). End by asking whether to restart now, and only call hyper_editor_restart for real if I say yes."
+  },
+  {
+   "id": "cpp-build.add-module-dependency",
+   "title": "Add a module dependency and rebuild the project",
+   "summary": "Add an engine module to a game module's Build.cs, enable its plugin if needed, rebuild, and prove the module and plugin load cleanly.",
+   "packs": [
+    "editor_lifecycle",
+    "automation_profiling_build"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_editor_restart",
+    "hyper_build_diagnose",
+    "hyper_log_tail"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "c++",
+    "build.cs",
+    "module",
+    "plugin",
+    "dependency",
+    "build"
+   ],
+   "placeholders": [
+    {
+     "name": "module",
+     "label": "Game module",
+     "default": "MyGame"
+    },
+    {
+     "name": "dep_module",
+     "label": "Module to depend on",
+     "default": "GameplayAbilities"
+    },
+    {
+     "name": "plugin",
+     "label": "Plugin to enable",
+     "default": "GameplayAbilities",
+     "hint": "Leave empty for engine modules that are not in a plugin"
+    }
+   ],
+   "prompt": "Make module `{{module}}` depend on `{{dep_module}}`.\n1. Read Source/{{module}}/{{module}}.Build.cs; if {{dep_module}} is already listed, say so and stop.\n2. If the plugin `{{plugin}}` is named: Epic's PluginToolset IsEnabled for the before state, and SetPluginEnabled true when it is off (it edits the .uproject and takes effect on restart).\n3. Add \"{{dep_module}}\" to PublicDependencyModuleNames (PrivateDependencyModuleNames if only .cpp files will use it); change nothing else.\n4. hyper_editor_restart with bDryRun true: report the packages it would save and the build command. Then hyper_editor_restart with bBuild true and a Note holding the remaining steps; your turn ends there.\n5. When the chat resumes: hyper_build_diagnose; hyper_log_tail with maxVerbosity error: no module failed to load; PluginToolset IsEnabled again for the after state. If the build failed, fix only what the log names and restart once more.\n6. Report a PASS/FAIL table: the Build.cs line added, plugin state before and after, build result, errors."
+  },
+  {
+   "id": "cpp-build.expose-function-to-blueprint",
+   "title": "Expose a C++ function to Blueprints and call it",
+   "summary": "Mark a C++ function BlueprintCallable with a tooltip, rebuild, call it from a test Blueprint, and prove the result in PIE.",
+   "packs": [
+    "editor_lifecycle",
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_project_search",
+    "hyper_editor_restart",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_verify_run"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "c++",
+    "blueprint",
+    "ufunction",
+    "blueprintcallable",
+    "api",
+    "build"
+   ],
+   "placeholders": [
+    {
+     "name": "function",
+     "label": "C++ function",
+     "default": "UCombatLibrary::CalculateDamage"
+    },
+    {
+     "name": "category",
+     "label": "Blueprint category",
+     "default": "Combat"
+    },
+    {
+     "name": "test_bp",
+     "label": "Test Blueprint name",
+     "default": "BP_CppCallTest"
+    }
+   ],
+   "prompt": "Make `{{function}}` callable from Blueprints (category {{category}}) and prove it.\n1. hyper_project_search (kinds cpp_symbol) for {{function}}; read its header. If it is not a member of a UCLASS, say so and stop.\n2. Add UFUNCTION(BlueprintCallable, Category=\"{{category}}\") (BlueprintPure if it returns a value and changes nothing) with a doc comment that becomes its tooltip; change no signatures.\n3. hyper_editor_restart with bDryRun true: report the packages it would save and the build command. Then hyper_editor_restart with bBuild true and a Note holding the remaining steps; your turn ends there.\n4. When the chat resumes with a clean build: one execute_tool_script (unreal-blueprint skill) making `{{content_folder}}/Tests/{{test_bp}}`: on BeginPlay it calls the function with sample inputs and stores the return in variable `Result`; find its node ID with find_node_types.\n5. hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves it. Place one instance; hyper_verify_run: AssertProperty Result == the value the C++ gives for those inputs.\n6. Report a PASS/FAIL table: header change, build result, node found, compile, runtime Result. Leave the level unsaved unless I ask."
+  },
+  {
+   "id": "cpp-build.triage-editor-log",
+   "title": "Triage the editor log's errors and warnings",
+   "summary": "Group the session's errors and warnings by category and pattern, trace each to the asset behind it, and list the fixes worth doing first.",
+   "packs": [
+    "diagnostics",
+    "automation_profiling_build"
+   ],
+   "tools": [
+    "hyper_log_tail",
+    "hyper_diagnose",
+    "hyper_asset_dependency_graph",
+    "hyper_build_diagnose"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "log",
+    "errors",
+    "warnings",
+    "triage",
+    "diagnostics",
+    "read-only"
+   ],
+   "placeholders": [
+    {
+     "name": "top_n",
+     "label": "How many fixes to list",
+     "default": "5"
+    }
+   ],
+   "prompt": "Triage this editor session's log; change nothing.\n1. hyper_log_tail with maxVerbosity warning and pageSize 128, following its cursor until no new entries; then Epic's LogsToolset GetLogEntries with pattern \"Error\" for older entries the ring no longer holds.\n2. Group the entries by category and message pattern (collapse numbers, paths and object names) and count each group.\n3. For groups that name an asset, hyper_diagnose with checks asset_context and those assetPaths (up to 64), and hyper_asset_dependency_graph with direction referencers and maxDepth 1 to see what loads it.\n4. hyper_build_diagnose for the engine version and build configuration.\n5. Report a table: group | category | count | example | asset | likely cause | FAIL/WARN/INFO. Then the top {{top_n}} fixes in order, and the groups that are engine noise safe to ignore."
+  },
+  {
+   "id": "cpp-build.move-tick-logic-to-cpp",
+   "title": "Move a Blueprint's hot Tick logic into a C++ base class",
+   "summary": "Port the selected Blueprint's Tick logic into a native parent class, reparent it, rebuild, and prove behaviour matches with before-and-after samples.",
+   "packs": [
+    "editor_lifecycle",
+    "blueprint",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_blueprint_structure_inspect",
+    "hyper_blueprint_snapshot",
+    "hyper_verify_run",
+    "hyper_editor_restart",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "c++",
+    "performance",
+    "tick",
+    "nativize",
+    "reparent",
+    "optimization"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "class_name",
+     "label": "New C++ base class",
+     "default": "AOrbitingPickupBase"
+    },
+    {
+     "name": "module",
+     "label": "Module",
+     "default": "MyGame"
+    },
+    {
+     "name": "sample_property",
+     "label": "Property to compare",
+     "default": "Speed",
+     "hint": "A number the bot can Sample: Speed, or a float variable of the Blueprint"
+    }
+   ],
+   "prompt": "Move the Event Tick logic of {{selected_asset}} into C++ class `{{class_name}}` in module `{{module}}`, keeping its behaviour identical.\n1. hyper_blueprint_structure_inspect with bNodes and Find \"Tick\" (hyper_blueprint_snapshot if the blueprint_structure pack is unavailable); read the Tick graph with Epic's read_graph_dsl. List the variables it reads and writes, and the Blueprint's current parent.\n2. Baseline: place one instance labelled `TickProbe_1` and run hyper_verify_run with one case that Samples TickProbe_1's {{sample_property}} for 3 s; keep first, last, min and max.\n3. Write {{class_name}} (parent: the Blueprint's current parent) with those variables as UPROPERTY(EditAnywhere, BlueprintReadWrite) and the logic in Tick. hyper_editor_restart with bDryRun true: report the packages it would save and the build command; if it would save anything besides the level holding TickProbe_1, list it and ask first. Then hyper_editor_restart with bBuild true and a Note holding the remaining steps; your turn ends there.\n4. When the chat resumes with a clean build: Epic's BlueprintTools set_parent to {{class_name}}; remove the Blueprint's own copies of those variables and its Tick nodes; compile_blueprint.\n5. hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves the Blueprint. Rerun the step-2 case: min and max within 1% of the baseline.\n6. Report a PASS/FAIL table: build, compile, the samples before and after."
+  },
+  {
+   "id": "cpp-build.rename-cpp-class-redirect",
+   "title": "Rename a C++ class without breaking its Blueprints",
+   "summary": "Rename a native class with a Core Redirect so every Blueprint child and placed actor follows it, then rebuild and prove they all load and compile.",
+   "packs": [
+    "editor_lifecycle",
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_editor_restart",
+    "hyper_log_tail",
+    "hyper_diagnose",
+    "hyper_blueprint_debug_inspect",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "c++",
+    "rename",
+    "core redirects",
+    "refactor",
+    "blueprint",
+    "build"
+   ],
+   "placeholders": [
+    {
+     "name": "old_class",
+     "label": "Current class name",
+     "default": "AEnemyBase"
+    },
+    {
+     "name": "new_class",
+     "label": "New class name",
+     "default": "ACombatEnemyBase"
+    },
+    {
+     "name": "module",
+     "label": "Module",
+     "default": "MyGame"
+    }
+   ],
+   "prompt": "Rename `{{old_class}}` to `{{new_class}}` in module `{{module}}` without breaking content.\n1. hyper_memory_recall \"redirect rename\". hyper_project_search for {{old_class}} (kinds cpp_symbol and asset): every source reference and the Blueprints that derive from it.\n2. Rename the class, its files and every C++ reference. In Config/DefaultEngine.ini under [CoreRedirects] add +ClassRedirects=(OldName=\"/Script/{{module}}.<old name without its A or U prefix>\",NewName=\"/Script/{{module}}.<new name without its prefix>\").\n3. hyper_editor_restart with bDryRun true: report the packages it would save and the build command. Then hyper_editor_restart with bBuild true and a Note holding the remaining steps; your turn ends there.\n4. When the chat resumes: hyper_log_tail with maxVerbosity warning for redirect or load errors. Load each child Blueprint (Epic's AssetTools load_asset), then hyper_diagnose with checks loaded_blueprint_health and hyper_blueprint_debug_inspect on each: parent now {{new_class}}, 0 errors.\n5. Report a table: Blueprint | parent now | compile | PASS/FAIL. Keep the redirect. Ask before baking it in; on my yes, hyper_blueprint_compile_validate each child (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which compiles and saves it."
+  }
+ ]
+}

@@ -1,0 +1,868 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "animation",
+ "presets": [
+  {
+   "id": "animation.three-hit-combo-montage",
+   "title": "Build a three-hit sword combo montage with hit windows",
+   "summary": "One montage from three attack clips: a section per hit, hit-window notify states and branching combo windows, validated.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_animation_inspect",
+    "hyper_animation_apply_plan",
+    "hyper_operation_wait",
+    "hyper_animation_validate"
+   ],
+   "ops": [
+    "skeleton.add_slot",
+    "montage.create",
+    "montage.set_segments",
+    "montage.rename_section",
+    "montage.add_section",
+    "montage.link_sections",
+    "montage.set_property",
+    "montage.add_notify"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "montage",
+    "combo",
+    "melee",
+    "sword",
+    "notify",
+    "hit window",
+    "fantasy",
+    "combat"
+   ],
+   "placeholders": [
+    {
+     "name": "montage_name",
+     "label": "Montage name",
+     "default": "AM_SwordCombo"
+    },
+    {
+     "name": "clip_folder",
+     "label": "Attack clips folder",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/Attack",
+     "hint": "Folder holding the three attack clips, in play order by name."
+    },
+    {
+     "name": "slot",
+     "label": "Montage slot",
+     "default": "UpperBody"
+    },
+    {
+     "name": "hit_window_class",
+     "label": "Hit window notify state",
+     "default": "/Game/Combat/ANS_HitWindow.ANS_HitWindow_C",
+     "hint": "An AnimNotifyState Blueprint class path ending in _C."
+    }
+   ],
+   "prompt": "Build the combo montage {{content_folder}}/Combat/{{montage_name}}.{{montage_name}} from the three attack clips in {{clip_folder}}, played in slot `{{slot}}`. If the animation_rigging pack is off, say so and stop.\n1. hyper_memory_recall combat conventions. Find the clips with hyper_project_search, then hyper_animation_inspect them and their skeleton: clip lengths, and whether the skeleton has `{{slot}}`.\n2. If the slot is missing: one hyper_animation_apply_plan on the skeleton (bDryRun false, fresh OperationId, ExpectedRevision from the inspect) with skeleton.add_slot.\n3. One hyper_animation_apply_plan on the montage only (bDryRun false, fresh OperationId; hyper_operation_wait if it is not completed yet): montage.create (ReferencePath the first clip, Name `{{slot}}`); montage.set_segments with the three clips in order; montage.rename_section Default to Hit1; montage.add_section Hit2 and Hit3 at the montage times where clips 2 and 3 begin (Minimum); montage.link_sections on all three with no SecondaryName, so each hit ends unless gameplay jumps on; montage.set_property blend_in 0.1 and blend_out 0.2; montage.add_notify per hit: a notify_state of {{hit_window_class}} over 35-65% of that hit on track `Combat` (named_event HitStart and HitEnd if the class does not exist), and a named_event `ComboWindow` with bBranchingPoint true at 70% of hits 1 and 2.\n4. hyper_animation_validate the montage, then hyper_animation_inspect it again.\n5. Report a PASS/FAIL table: 3 segments, sections Hit1-Hit3 where each clip begins and unlinked, 3 hit windows inside their hits, 2 combo windows, 0 validate errors. Change no other assets."
+  },
+  {
+   "id": "animation.locomotion-blend-space-1d",
+   "title": "Make a 1D idle-walk-run blend space at true speeds",
+   "summary": "Create a Speed blend space for a skeleton with idle, walk and run samples placed at the speeds the clips travel, so feet do not slide.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_project_search",
+    "hyper_animation_inspect",
+    "hyper_animation_apply_plan",
+    "hyper_operation_wait",
+    "hyper_animation_validate"
+   ],
+   "ops": [
+    "blend_space.create",
+    "blend_space.set_axis",
+    "blend_space.set_samples"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "blend space",
+    "locomotion",
+    "speed",
+    "foot sliding",
+    "1D"
+   ],
+   "placeholders": [
+    {
+     "name": "blend_space_name",
+     "label": "Blend space name",
+     "default": "BS_IdleWalkRun"
+    },
+    {
+     "name": "skeleton",
+     "label": "Skeleton",
+     "default": "/Game/Characters/Mannequins/Meshes/SK_Mannequin.SK_Mannequin"
+    },
+    {
+     "name": "clip_folder",
+     "label": "Clips folder",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed"
+    },
+    {
+     "name": "walk_speed",
+     "label": "Walk speed (cm/s)",
+     "default": "150",
+     "hint": "How fast the walk clip actually travels."
+    },
+    {
+     "name": "run_speed",
+     "label": "Run speed (cm/s)",
+     "default": "500",
+     "hint": "How fast the run or jog clip actually travels; also the axis maximum."
+    }
+   ],
+   "prompt": "Create the 1D blend space {{content_folder}}/Locomotion/{{blend_space_name}}.{{blend_space_name}} for {{skeleton}}. If the animation_rigging pack is off, say so and stop.\n1. Find an idle, a forward walk and a forward run or jog clip under {{clip_folder}} with hyper_project_search, and hyper_animation_inspect them: skeleton and length. Use only clips of {{skeleton}}; stop if one is missing.\n2. One hyper_animation_apply_plan (bDryRun false, fresh OperationId; hyper_operation_wait if it is not completed yet): blend_space.create with ReferencePath {{skeleton}} and bFlag true (1D); blend_space.set_axis AxisIndex 0, Name `Speed`, Minimum 0, Maximum {{run_speed}}; blend_space.set_samples with the idle at X 0, the walk at X {{walk_speed}} and the run at X {{run_speed}}. Each sample sits at the speed its clip travels in cm/s; a sample placed off its real speed slides at every other speed.\n3. hyper_animation_validate the blend space and hyper_animation_inspect it again.\n4. Report a PASS/FAIL table: 1D, axis Speed 0-{{run_speed}}, exactly 3 samples at X 0, {{walk_speed}} and {{run_speed}}, no blend_sample_outside_axis, every clip on {{skeleton}}, 0 errors. Create nothing else."
+  },
+  {
+   "id": "animation.rifle-strafe-blend-space",
+   "title": "Build an 8-way strafe blend space for a rifle character",
+   "summary": "A 2D Direction by Speed blend space with an idle row and eight jog directions, for a shooter character that strafes while aiming.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_animation_inspect",
+    "hyper_animation_apply_plan",
+    "hyper_operation_wait",
+    "hyper_animation_validate"
+   ],
+   "ops": [
+    "blend_space.create",
+    "blend_space.set_axis",
+    "blend_space.set_samples"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "blend space",
+    "strafe",
+    "shooter",
+    "rifle",
+    "8-way",
+    "2D",
+    "locomotion"
+   ],
+   "placeholders": [
+    {
+     "name": "blend_space_name",
+     "label": "Blend space name",
+     "default": "BS_Rifle_Strafe"
+    },
+    {
+     "name": "skeleton",
+     "label": "Skeleton",
+     "default": "/Game/Characters/Mannequins/Meshes/SK_Mannequin.SK_Mannequin"
+    },
+    {
+     "name": "clip_folder",
+     "label": "Rifle clips folder",
+     "default": "/Game/Characters/Mannequins/Anims/Rifle"
+    },
+    {
+     "name": "jog_speed",
+     "label": "Jog speed (cm/s)",
+     "default": "400",
+     "hint": "How fast the jog clips travel; the Speed axis maximum."
+    }
+   ],
+   "prompt": "Create the 2D blend space {{content_folder}}/Locomotion/{{blend_space_name}}.{{blend_space_name}} for {{skeleton}}: X `Direction` -180 to 180, Y `Speed` 0 to {{jog_speed}}. If the animation_rigging pack is off, say so and stop.\n1. hyper_memory_recall locomotion conventions. hyper_project_search {{clip_folder}} for an idle and the eight jog directions (Fwd, Fwd_Right, Right, Bwd_Right, Bwd, Bwd_Left, Left, Fwd_Left); hyper_animation_inspect them to confirm each uses {{skeleton}}.\n2. One hyper_animation_apply_plan (bDryRun false, fresh OperationId; hyper_operation_wait if it is not completed yet): blend_space.create (ReferencePath {{skeleton}}); blend_space.set_axis for AxisIndex 0 and 1 with those names and ranges; blend_space.set_samples with 14 samples: the idle at Speed 0 for Direction -180, -90, 0, 90 and 180, and at Speed {{jog_speed}} the jogs at Fwd 0, Fwd_Right 45, Right 90, Bwd_Right 135, Bwd -180 and 180, Bwd_Left -135, Left -90, Fwd_Left -45.\n3. hyper_animation_validate it and hyper_animation_inspect it again.\n4. Report a PASS/FAIL table: axis names and ranges, 14 samples with unique positions, each jog direction present (Bwd twice), all clips on {{skeleton}}, 0 errors. If a direction clip is missing, FAIL that row and do not substitute another clip."
+  },
+  {
+   "id": "animation.footstep-sync-markers",
+   "title": "Add footstep sync markers and sounds to walk cycles",
+   "summary": "Mark left and right foot plants on looping cycles with sync markers and footstep sound notifies, one sequence per plan.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_animation_inspect",
+    "hyper_animation_apply_plan",
+    "hyper_operation_wait",
+    "hyper_animation_validate"
+   ],
+   "ops": [
+    "sequence.add_sync_marker",
+    "sequence.add_notify"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "sync marker",
+    "footsteps",
+    "notify",
+    "sound",
+    "sequence",
+    "locomotion"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimSequence"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "left_plant",
+     "label": "Left foot plant (fraction)",
+     "default": "0.0",
+     "hint": "Where the left foot lands, as a fraction of the clip length (0-1)."
+    },
+    {
+     "name": "right_plant",
+     "label": "Right foot plant (fraction)",
+     "default": "0.5",
+     "hint": "Where the right foot lands, as a fraction of the clip length (0-1)."
+    },
+    {
+     "name": "footstep_sound",
+     "label": "Footstep sound",
+     "default": "/Game/Audio/SFX/S_Footstep.S_Footstep",
+     "hint": "A Sound Wave or Sound Cue; sounds are skipped when it does not exist."
+    }
+   ],
+   "prompt": "Mark the foot plants on these looping cycles: {{selected_assets}}. If the animation_rigging pack is off, say so and stop.\n1. hyper_animation_inspect each sequence: length, Revision, existing sync markers and notifies. Skip a clip that already has markers named L and R, and say so.\n2. For each remaining clip, one hyper_animation_apply_plan on that clip only (bDryRun false, fresh OperationId, ExpectedRevision from the inspect; hyper_operation_wait if it is not completed yet): sequence.add_sync_marker `L` at {{left_plant}} x length and `R` at {{right_plant}} x length (time in Minimum, SecondaryName track `Sync`); and, if {{footstep_sound}} exists, sequence.add_notify of kind notify with NotifyClass /Script/Engine.AnimNotify_PlaySound and Properties Sound = {{footstep_sound}} at the same two times on track `Footsteps`.\n3. hyper_animation_validate all of them together, then hyper_animation_inspect them again.\n4. Report a PASS/FAIL table per clip: L and R present once each at the expected times within 0.02 s, a footstep at each marker (INFO when sounds were skipped), 0 errors. Touch no other assets. Blended cycles stay in phase only when they share these marker names, so use L and R everywhere."
+  },
+  {
+   "id": "animation.root-motion-dodge-montage",
+   "title": "Turn a dash clip into a root-motion dodge montage",
+   "summary": "Enable root motion on a dash clip and wrap it in a fast full-body montage with invulnerability start and end events.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_animation_inspect",
+    "hyper_animation_apply_plan",
+    "hyper_operation_wait",
+    "hyper_animation_validate"
+   ],
+   "ops": [
+    "sequence.set_property",
+    "montage.create",
+    "montage.set_property",
+    "montage.add_notify"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "root motion",
+    "dodge",
+    "dash",
+    "montage",
+    "i-frames",
+    "action",
+    "combat"
+   ],
+   "placeholders": [
+    {
+     "name": "dodge_clip",
+     "label": "Dash clip",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Dash.MM_Dash"
+    },
+    {
+     "name": "montage_name",
+     "label": "Montage name",
+     "default": "AM_Dodge"
+    },
+    {
+     "name": "iframe_start",
+     "label": "Invulnerability starts (s)",
+     "default": "0.05"
+    },
+    {
+     "name": "iframe_end",
+     "label": "Invulnerability ends (s)",
+     "default": "0.35"
+    }
+   ],
+   "prompt": "Make {{dodge_clip}} a root-motion dodge and wrap it in the montage {{content_folder}}/Combat/{{montage_name}}.{{montage_name}}. If the animation_rigging pack is off, say so and stop.\n1. hyper_animation_inspect the clip and its skeleton: length, Revision, root motion settings, and that the skeleton has `DefaultSlot`.\n2. Plan 1, the clip only: hyper_animation_apply_plan (bDryRun false, fresh OperationId, ExpectedRevision from the inspect) with sequence.set_property root_motion true and root_lock ref_pose.\n3. Plan 2, the new montage only (bDryRun false, fresh OperationId): montage.create (ReferencePath the clip, Name `DefaultSlot`); montage.set_property blend_in 0.05, blend_out 0.15 and auto_blend_out true; montage.add_notify named_event `IFrameStart` at {{iframe_start}} s and `IFrameEnd` at {{iframe_end}} s on track `Combat`. Call hyper_operation_wait for any plan that is not completed yet.\n4. hyper_animation_validate both assets and hyper_animation_inspect them again.\n5. Report a PASS/FAIL table: root motion on with root lock ref_pose, montage in DefaultSlot, blend times as set, both events inside the clip and in order, 0 errors. Gameplay grants invulnerability between AnimNotify_IFrameStart and AnimNotify_IFrameEnd in the Animation Blueprint; do not edit gameplay code."
+  },
+  {
+   "id": "animation.retarget-clip-set",
+   "title": "Retarget a clip set onto a new character with IK Rigs",
+   "summary": "Make IK Rigs for both meshes and an auto-set-up retargeter, copy a folder of animations onto the target and check every chain maps.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_retarget_inspect",
+    "hyper_project_search",
+    "hyper_retarget_apply_plan",
+    "hyper_operation_wait",
+    "hyper_animation_validate"
+   ],
+   "ops": [
+    "ik_rig.create",
+    "retargeter.create",
+    "retarget.animations",
+    "retargeter.auto_map",
+    "retargeter.map_chain"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "retarget",
+    "IK Rig",
+    "retargeter",
+    "character",
+    "orc",
+    "fantasy",
+    "mannequin"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "SkeletalMesh"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "character",
+     "label": "Character name",
+     "default": "Orc",
+     "hint": "Used for the folder, retargeter and clip prefix."
+    },
+    {
+     "name": "source_mesh",
+     "label": "Source mesh",
+     "default": "/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple"
+    },
+    {
+     "name": "anim_folder",
+     "label": "Animations to copy",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed"
+    }
+   ],
+   "prompt": "Retarget the animations in {{anim_folder}} from {{source_mesh}} onto {{selected_asset}} ({{character}}). If the animation_rigging pack is off, say so and stop.\n1. hyper_memory_recall retargeting notes. hyper_retarget_inspect both meshes (skeleton, bone count) and list the clips with hyper_project_search. Reuse IK Rigs or a retargeter that already exist for these meshes.\n2. One hyper_retarget_apply_plan, bDryRun true first, then false with a fresh OperationId (hyper_operation_wait if it waits for approval): ik_rig.create for each mesh without a rig, at {{content_folder}}/Retarget/IK_<mesh name>; retargeter.create {{content_folder}}/Retarget/RTG_To_{{character}} (SourceRig and TargetRig those two rigs); retarget.animations with the clips, OutputFolder {{content_folder}}/Characters/{{character}}/Anims and Prefix `{{character}}_`.\n3. Read Notes (template matched, unmapped chains) and hyper_retarget_inspect the retargeter: every target chain in ChainMap should read Target <- Source. If any reads (nothing), a second plan: retargeter.auto_map Mode fuzzy, then check each new pair (fuzzy can pair toes with fingers) and fix wrong ones with retargeter.map_chain, then retarget.animations again with bOverwrite true.\n4. hyper_animation_validate the new assets listed in Retargeted.\n5. Report a PASS/FAIL table: rigs and the template each matched, mapped/total chains, clips retargeted versus requested, all on the target skeleton, 0 validate errors. Overwrite nothing except in step 3."
+  },
+  {
+   "id": "animation.fix-retarget-chains-ik",
+   "title": "Fix a custom skeleton's retarget chains and IK feet",
+   "summary": "For a skeleton no template knows: correct guessed chains and root, map by fuzzy names, enable the IK pass and re-retarget test clips.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_retarget_inspect",
+    "hyper_retarget_apply_plan",
+    "hyper_operation_wait",
+    "hyper_animation_validate"
+   ],
+   "ops": [
+    "ik_rig.set_root",
+    "ik_rig.set_chain",
+    "ik_rig.add_chain",
+    "ik_rig.remove_chain",
+    "ik_rig.auto_full_body_ik",
+    "retargeter.auto_map",
+    "retargeter.map_chain",
+    "retargeter.enable_op",
+    "retarget.animations"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "retarget",
+    "IK Rig",
+    "chains",
+    "full body IK",
+    "foot sliding",
+    "creature",
+    "custom skeleton"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "IKRetargeter"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "pelvis_bone",
+     "label": "Target pelvis bone",
+     "default": "pelvis"
+    },
+    {
+     "name": "test_clips",
+     "label": "Clips to re-retarget",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle.MM_Idle, /Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Fwd.MF_Unarmed_Walk_Fwd",
+     "hint": "Source clips, comma separated."
+    }
+   ],
+   "prompt": "Repair the retargeter {{selected_asset}}, whose target skeleton no template recognised. If the animation_rigging pack is off, say so and stop.\n1. hyper_retarget_inspect the retargeter and both IK Rigs: Template, RetargetRoot, Chains (start -> end, goal), Goals, ChainMap and Ops. List every target chain that is unmapped or spans the wrong bones.\n2. Plan A on the target rig with hyper_retarget_apply_plan (bDryRun true, then false with a fresh OperationId): ik_rig.set_root `{{pelvis_bone}}`; ik_rig.set_chain, ik_rig.add_chain and ik_rig.remove_chain so the target has Spine, Neck, Head, LeftArm, RightArm, LeftLeg and RightLeg chains (plus any the source also has), with foot and hand Goals; then ik_rig.auto_full_body_ik.\n3. Plan B on the retargeter: retargeter.auto_map Mode fuzzy, retargeter.map_chain for any chain still unmapped or paired wrongly, and retargeter.enable_op OpName FIKRetargetRunIKRigOp.\n4. Plan C: retarget.animations for {{test_clips}} with bOverwrite true. Call hyper_operation_wait for any plan that waits for approval.\n5. hyper_retarget_inspect again, and hyper_animation_validate the clips listed in Retargeted.\n6. Report a PASS/FAIL table: root bone, each target chain and its source, IK op enabled, clips retargeted, 0 validate errors. Edit only these two rigs, this retargeter and those clips."
+  },
+  {
+   "id": "animation.motion-matching-database",
+   "title": "Build and index a motion matching locomotion database",
+   "summary": "Create a Pose Search schema with Epic's default channels and a database of locomotion clips, build its index and report the pose count.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_animation_inspect",
+    "hyper_pose_search_inspect",
+    "hyper_pose_search_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "schema.create",
+    "database.create",
+    "database.add_animations",
+    "database.build",
+    "schema.set_channel"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "motion matching",
+    "pose search",
+    "database",
+    "schema",
+    "locomotion"
+   ],
+   "placeholders": [
+    {
+     "name": "skeleton",
+     "label": "Skeleton",
+     "default": "/Game/Characters/Mannequins/Meshes/SK_Mannequin.SK_Mannequin"
+    },
+    {
+     "name": "anim_folder",
+     "label": "Locomotion clips folder",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed"
+    },
+    {
+     "name": "database_name",
+     "label": "Database name",
+     "default": "PSD_Locomotion"
+    },
+    {
+     "name": "sample_rate",
+     "label": "Schema sample rate",
+     "default": "30"
+    }
+   ],
+   "prompt": "Build motion matching data for {{skeleton}} from the locomotion clips in {{anim_folder}}. If the animation_rigging pack is off, say so and stop. The Pose Search plugin must be on.\n1. hyper_memory_recall motion matching notes. hyper_project_search the folder for idle, walk, jog, start, stop and pivot clips, and hyper_animation_inspect them: keep only locomotion clips on {{skeleton}} (no attacks, jumps or deaths). hyper_pose_search_inspect any existing schema or database there first and reuse it.\n2. One hyper_pose_search_apply_plan (bDryRun false, fresh OperationId; hyper_operation_wait if it waits for approval): schema.create {{content_folder}}/MotionMatching/PSS_Locomotion with Skeleton {{skeleton}}, Epic's default channels and Settings SampleRate {{sample_rate}}; database.create {{content_folder}}/MotionMatching/{{database_name}} on that schema with Tags (\"Locomotion\"); database.add_animations with the chosen clips and MirrorOption UnmirroredOnly; then database.build.\n3. Read Built and Notes, then hyper_pose_search_inspect both assets: Index must read built, and no note may name a missing bone or a clip of another skeleton. If foot bones differ, fix the channel's SampledBones with schema.set_channel and build again.\n4. Report a PASS/FAIL table: schema channels, clips added versus found, index built with a pose count above 0, no notes. Say the database still needs a Motion Matching node in an Animation Blueprint, which these tools do not place."
+  },
+  {
+   "id": "animation.tune-motion-matching",
+   "title": "Tune a motion matching database for steadier picks",
+   "summary": "Add a heading channel, stop looping idles reselecting, strengthen the continuing-pose bias, rebuild and confirm the pose count holds.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_pose_search_inspect",
+    "hyper_asset_dependency_graph",
+    "hyper_pose_search_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "schema.add_channel",
+    "database.set_animations",
+    "database.set",
+    "database.build"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "motion matching",
+    "pose search",
+    "tuning",
+    "cost bias",
+    "heading"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "PoseSearchDatabase"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "heading_weight",
+     "label": "Heading channel weight",
+     "default": "1.0"
+    },
+    {
+     "name": "continuing_bias",
+     "label": "Continuing pose cost bias",
+     "default": "-0.03",
+     "hint": "The engine default is -0.01; more negative keeps the current clip playing longer."
+    }
+   ],
+   "prompt": "Tune the motion matching database {{selected_asset}} so it switches clips less often. If the animation_rigging pack is off, say so and stop.\n1. hyper_pose_search_inspect the database and its schema: animations with their settings, channels, Settings (PoseSearchMode, ContinuingPoseCostBias) and Index with its pose count. Note the starting pose count.\n2. hyper_asset_dependency_graph on the schema (referencers): if another database uses it, or the graph cannot tell, leave the schema alone and say so.\n3. One hyper_pose_search_apply_plan, bDryRun true, then false with a fresh OperationId (hyper_operation_wait if it waits for approval): schema.add_channel Channel Heading with Settings Weight {{heading_weight}}; database.set_animations with bDisableReselection true on looping idle clips only; database.set ContinuingPoseCostBias {{continuing_bias}} (the engine default is -0.01; leave PoseSearchMode as it is); then database.build.\n4. hyper_pose_search_inspect both assets again.\n5. Report a PASS/FAIL table: heading channel present (or skipped), idles marked, ContinuingPoseCostBias as set and PoseSearchMode unchanged, index built, pose count unchanged (no clips were added or removed), no notes. Change nothing else."
+  },
+  {
+   "id": "animation.share-skeleton-animations",
+   "title": "Let two near-identical skeletons share animations",
+   "summary": "Mark two skeletons with matching bone names compatible both ways so clips, montages and blend spaces work on either.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "tools": [
+    "hyper_animation_inspect",
+    "hyper_animation_apply_plan",
+    "hyper_operation_wait",
+    "hyper_animation_validate"
+   ],
+   "ops": [
+    "skeleton.add_compatible"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "skeleton",
+    "compatible skeletons",
+    "share animations",
+    "reuse"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Skeleton"
+    ],
+    "min": 2
+   },
+   "placeholders": [
+    {
+     "name": "max_missing",
+     "label": "Bones allowed to differ",
+     "default": "0",
+     "hint": "Stop when more bones than this are missing from either skeleton."
+    }
+   ],
+   "prompt": "Make the skeletons {{selected_assets}} share animations. If the animation_rigging pack is off, say so and stop.\n1. hyper_animation_inspect both skeletons: Revision, bone count, bone names and compatible skeletons already listed. Compare the bone names; if more than {{max_missing}} bones of either are missing from the other, stop and report the differences, because compatible skeletons need matching bone names.\n2. Two plans, one per skeleton: hyper_animation_apply_plan (bDryRun false, fresh OperationId, ExpectedRevision from the inspect; hyper_operation_wait if it is not completed yet) with skeleton.add_compatible and ReferencePath the other skeleton. Skip a side that already lists the other.\n3. hyper_animation_validate both skeletons and hyper_animation_inspect them again.\n4. Report a PASS/FAIL table: each skeleton lists the other as compatible, matched bone count per side, 0 errors. Edit only these two skeletons."
+  },
+  {
+   "id": "animation.npc-idle-composite",
+   "title": "Chain idle breaks into a long NPC idle composite",
+   "summary": "Build an animation composite that loops a base idle with idle-break clips between, so background NPCs stop looking robotic.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "tools": [
+    "hyper_project_search",
+    "hyper_animation_inspect",
+    "hyper_animation_apply_plan",
+    "hyper_operation_wait",
+    "hyper_animation_validate"
+   ],
+   "ops": [
+    "composite.create",
+    "composite.set_segments"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "composite",
+    "idle",
+    "NPC",
+    "tavern",
+    "crowd",
+    "fantasy"
+   ],
+   "placeholders": [
+    {
+     "name": "composite_name",
+     "label": "Composite name",
+     "default": "AC_TavernIdle"
+    },
+    {
+     "name": "skeleton",
+     "label": "Skeleton",
+     "default": "/Game/Characters/Mannequins/Meshes/SK_Mannequin.SK_Mannequin"
+    },
+    {
+     "name": "idle_clip",
+     "label": "Base idle clip",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle.MM_Idle"
+    },
+    {
+     "name": "break_folder",
+     "label": "Idle breaks folder",
+     "default": "/Game/Characters/NPC/Anims/IdleBreaks"
+    },
+    {
+     "name": "loops",
+     "label": "Idle loops between breaks",
+     "default": "3"
+    }
+   ],
+   "prompt": "Build the composite {{content_folder}}/NPC/{{composite_name}}.{{composite_name}} for {{skeleton}}: {{idle_clip}} looped {{loops}} times, then one idle break, repeated for each break clip in {{break_folder}}. If the animation_rigging pack is off, say so and stop.\n1. hyper_project_search {{break_folder}} for idle-break clips and hyper_animation_inspect them and {{idle_clip}}: skeleton and length. Use at most 3 breaks, all on {{skeleton}}; if none exist, stop and say so.\n2. One hyper_animation_apply_plan (bDryRun false, fresh OperationId; hyper_operation_wait if it is not completed yet): composite.create with ReferencePath {{skeleton}}, then composite.set_segments: for each break, a segment of the idle with LoopCount {{loops}} followed by the break with LoopCount 1, all PlayRate 1, StartSeconds 0 and EndSeconds -1.\n3. hyper_animation_validate the composite and hyper_animation_inspect it again.\n4. Report a PASS/FAIL table: 2 segments per break, total length equal to the sum of its segments within 0.05 s, no segment_outside_clip, 0 errors. Create nothing else, and tell me where the NPC's Animation Blueprint should play it looping."
+  },
+  {
+   "id": "animation.spell-cast-glow-curve",
+   "title": "Key a hand-glow curve on a spell-cast animation",
+   "summary": "Add a float curve keyed to the cast's wind-up and release, so a material or Niagara parameter glows in sync with the animation.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_animation_inspect",
+    "hyper_animation_apply_plan",
+    "hyper_operation_wait",
+    "hyper_animation_validate"
+   ],
+   "ops": [
+    "sequence.remove_curve",
+    "sequence.add_curve"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "curve",
+    "spell",
+    "magic",
+    "glow",
+    "material",
+    "fantasy",
+    "sequence"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimSequence"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "curve_name",
+     "label": "Curve name",
+     "default": "HandGlow"
+    },
+    {
+     "name": "rise_start",
+     "label": "Glow starts rising (s)",
+     "default": "0.2"
+    },
+    {
+     "name": "peak_time",
+     "label": "Glow peak (s)",
+     "default": "0.6"
+    },
+    {
+     "name": "fade_end",
+     "label": "Glow gone (s)",
+     "default": "1.0"
+    }
+   ],
+   "prompt": "Add the float curve `{{curve_name}}` to the spell-cast clip {{selected_asset}}. If the animation_rigging pack is off, say so and stop.\n1. hyper_animation_inspect the clip: length, Revision and existing curves.\n2. One hyper_animation_apply_plan on that clip only (bDryRun false, fresh OperationId, ExpectedRevision from the inspect; hyper_operation_wait if it is not completed yet): sequence.remove_curve `{{curve_name}}` first if it exists, then sequence.add_curve Name `{{curve_name}}` with Keys 0 at 0 s, 0 at {{rise_start}} s, 1 at {{peak_time}} s, 0 at {{fade_end}} s and 0 at the clip's end. If the clip is shorter than {{fade_end}} s, scale those three times to fit and say so.\n3. hyper_animation_validate the clip and hyper_animation_inspect it again.\n4. Report a PASS/FAIL table: the curve present once, 5 keys at the planned times within 0.01 s, peak value 1, first and last value 0, 0 errors. Then say how to read it: Get Curve Value `{{curve_name}}` in the Animation Blueprint, fed to a material or Niagara parameter. Edit nothing but this clip."
+  },
+  {
+   "id": "animation.shotgun-reload-loop-montage",
+   "title": "Build a looping shell-by-shell shotgun reload montage",
+   "summary": "A reload montage with Start, Loop and End sections, a self-linked loop gameplay can exit, and a shell-inserted event per loop.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_animation_inspect",
+    "hyper_animation_apply_plan",
+    "hyper_operation_wait",
+    "hyper_animation_validate"
+   ],
+   "ops": [
+    "skeleton.add_slot",
+    "montage.create",
+    "montage.rename_section",
+    "montage.add_section",
+    "montage.link_sections",
+    "montage.add_notify",
+    "montage.set_property"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "montage",
+    "reload",
+    "shotgun",
+    "shooter",
+    "sections",
+    "loop",
+    "weapon"
+   ],
+   "placeholders": [
+    {
+     "name": "montage_name",
+     "label": "Montage name",
+     "default": "AM_ShotgunReload"
+    },
+    {
+     "name": "reload_clip",
+     "label": "Reload clip",
+     "default": "/Game/Characters/Mannequins/Anims/Rifle/MM_Rifle_Reload.MM_Rifle_Reload",
+     "hint": "Your shotgun's reload clip; the default is the UE template's rifle reload as a stand-in."
+    },
+    {
+     "name": "loop_start",
+     "label": "Loop starts (s)",
+     "default": "0.6"
+    },
+    {
+     "name": "loop_end",
+     "label": "Loop ends (s)",
+     "default": "1.4"
+    },
+    {
+     "name": "slot",
+     "label": "Montage slot",
+     "default": "UpperBody"
+    }
+   ],
+   "prompt": "Build {{content_folder}}/Weapons/{{montage_name}}.{{montage_name}} from {{reload_clip}} with sections Start (0 to {{loop_start}} s), Loop ({{loop_start}} to {{loop_end}} s, one shell) and End (from {{loop_end}} s), in slot `{{slot}}`. If the animation_rigging pack is off, say so and stop.\n1. hyper_memory_recall weapon animation conventions. hyper_animation_inspect the clip and its skeleton: the clip must be longer than {{loop_end}} s; check whether the skeleton has `{{slot}}`.\n2. If the slot is missing: one hyper_animation_apply_plan on the skeleton (bDryRun false, fresh OperationId, ExpectedRevision from the inspect) with skeleton.add_slot.\n3. One hyper_animation_apply_plan on the montage only (bDryRun false, fresh OperationId; hyper_operation_wait if it is not completed yet): montage.create (ReferencePath the clip, Name `{{slot}}`); montage.rename_section Default to Start; montage.add_section Loop at {{loop_start}} and End at {{loop_end}} (Minimum); montage.link_sections Start to Loop, Loop to Loop, and End with no SecondaryName; montage.add_notify named_event `ShellInserted` 0.1 s before {{loop_end}} on track `Weapon`; montage.set_property blend_in 0.15 and blend_out 0.2.\n4. hyper_animation_validate the montage and hyper_animation_inspect it again.\n5. Report a PASS/FAIL table: three sections at the set times, links Start to Loop to Loop and End last, the event inside Loop, 0 errors. Note that gameplay leaves the loop by setting Loop's next section to End when the tube is full."
+  },
+  {
+   "id": "animation.audit-animation-folder",
+   "title": "Audit a folder of animations and dry-run the fixes",
+   "summary": "Validate every montage, sequence, composite and blend space in a folder, then propose fixes as dry-run plans without changing anything.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "tools": [
+    "hyper_project_search",
+    "hyper_animation_inspect",
+    "hyper_animation_validate",
+    "hyper_animation_apply_plan",
+    "hyper_memory_recall"
+   ],
+   "ops": [
+    "montage.link_sections",
+    "montage.remove_section",
+    "montage.remove_notify",
+    "sequence.remove_notify"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "audit",
+    "validate",
+    "animation assets",
+    "cleanup",
+    "dry run"
+   ],
+   "placeholders": [
+    {
+     "name": "max_assets",
+     "label": "Most assets to check",
+     "default": "64"
+    }
+   ],
+   "prompt": "Audit the animation assets under {{content_folder}} and change nothing. If the animation_rigging pack is off, say so and stop.\n1. hyper_project_search the folder for montages, sequences, composites, blend spaces and skeletons (at most {{max_assets}}), then hyper_animation_inspect them, a page at a time.\n2. hyper_animation_validate them all and group the issues by code: missing_skeleton, missing_animation_reference, mesh_skeleton_incompatible, duplicate_or_empty_section, section_time_out_of_range, missing_linked_section, notify_time_out_of_range, duplicate_or_empty_curve.\n3. For each asset with a fixable issue, build its fix as one hyper_animation_apply_plan with bDryRun true only (ExpectedRevision from the inspect, no OperationId): montage.link_sections with no SecondaryName for a missing_linked_section, montage.remove_section for a section_time_out_of_range, montage.remove_notify or sequence.remove_notify by StableId for a notify_time_out_of_range. Mark other codes MANUAL. Record each plan's Status and PlanHash.\n4. hyper_memory_recall whether any flagged asset is known work in progress, and mark those INFO.\n5. Report a table: asset, issue code, severity, proposed fix, dry run PASS or FAIL. Apply nothing; I will say which fixes to run."
+  },
+  {
+   "id": "animation.tidy-montage-sections",
+   "title": "Tidy a montage's sections and stale notifies",
+   "summary": "Rename sections to the project's convention, drop extra sections and a legacy notify track, dry-run first, then apply and re-check.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_animation_inspect",
+    "hyper_asset_dependency_graph",
+    "hyper_animation_apply_plan",
+    "hyper_operation_wait",
+    "hyper_animation_validate"
+   ],
+   "ops": [
+    "montage.rename_section",
+    "montage.remove_section",
+    "montage.link_sections",
+    "montage.remove_notify"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "montage",
+    "sections",
+    "notifies",
+    "cleanup",
+    "naming",
+    "refactor"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimMontage"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "section_names",
+     "label": "Section names in order",
+     "default": "Windup, Strike, Recover"
+    },
+    {
+     "name": "stale_track",
+     "label": "Notify track to clear",
+     "default": "Legacy"
+    }
+   ],
+   "prompt": "Tidy the montage {{selected_asset}}: rename its sections in time order to {{section_names}}, remove sections beyond that list, and remove every notify on track `{{stale_track}}`. If the animation_rigging pack is off, say so and stop.\n1. hyper_memory_recall the project's montage naming. hyper_animation_inspect the montage: sections with times and links, notifies with StableIds and tracks, Revision. hyper_asset_dependency_graph (referencers) lists who uses it, for the report.\n2. One hyper_animation_apply_plan on the montage (ExpectedRevision from the inspect): montage.rename_section for each kept section, montage.remove_section for the extras, montage.link_sections only where a kept section linked to a removed one (renames carry links with them), and montage.remove_notify by StableId for each `{{stale_track}}` notify. It deletes, so dry-run it first (bDryRun true), then apply with bDryRun false and a fresh OperationId; hyper_operation_wait if it is not completed yet.\n3. hyper_animation_validate the montage and hyper_animation_inspect it again.\n4. Report a PASS/FAIL table: section names and order, a section at 0, links as before except those into removed sections, notifies removed versus found, 0 errors; then list the referencing assets as INFO, since code or Blueprints may still name old sections. Change nothing else."
+  }
+ ]
+}

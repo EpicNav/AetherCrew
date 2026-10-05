@@ -1,0 +1,322 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "project-search-memory-scm",
+ "presets": [
+  {
+   "id": "project-search-memory-scm.find-feature-code-and-assets",
+   "title": "Find where a feature lives in code and content",
+   "summary": "Search the project's C++ symbols and assets for a feature, check the index is fresh, and list the files to read first.",
+   "packs": [
+    "context_scene_project_search",
+    "shared_foundation"
+   ],
+   "skills": [
+    "hyperai-memory"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_index_status",
+    "hyper_project_search"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "search",
+    "code",
+    "assets",
+    "onboarding",
+    "index"
+   ],
+   "placeholders": [
+    {
+     "name": "feature",
+     "label": "Feature",
+     "default": "inventory",
+     "hint": "A word or two that names it in code and assets"
+    }
+   ],
+   "prompt": "Find where {{feature}} lives in {{project}}: code, assets and past notes. Read only.\n1. hyper_memory_recall with query \"{{feature}}\": notes, past tasks and recent agent changes that mention it.\n2. hyper_project_index_status: if Status is uninitialized or failed, or bDirty is true, call it with bRequestRefresh true and poll until bRefreshInProgress is false. partial is normal: assets are not indexed yet.\n3. hyper_project_search with query {{feature}}, kinds [cpp_symbol] and pageSize 64; page with cursor. List classes, functions and properties with their file and line.\n4. Assets: the project search does not index assets yet, so use Epic's AssetTools find_assets with name {{feature}}, an empty folder_path and recursive true, then get_asset_class for each hit.\n5. Report two tables, C++ (symbol, kind, file:line) and assets (path, class), then the five places to read first and why.\n6. PASS/FAIL rows: index ready or partial with C++ symbols, code found, assets found, memory checked. Say how many results each search returned and whether any was truncated. Change nothing."
+  },
+  {
+   "id": "project-search-memory-scm.recall-before-task",
+   "title": "Recall what the project knows before a task",
+   "summary": "Pull the project's conventions, gotchas, past tasks and recent agent changes about an area before anyone edits it.",
+   "packs": [
+    "shared_foundation"
+   ],
+   "skills": [
+    "hyperai-memory"
+   ],
+   "tools": [
+    "hyper_memory_recall"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "memory",
+    "recall",
+    "conventions",
+    "gotchas",
+    "onboarding"
+   ],
+   "placeholders": [
+    {
+     "name": "area",
+     "label": "Area of work",
+     "default": "spell VFX"
+    }
+   ],
+   "prompt": "Before I work on {{area}}, tell me what this project already knows about it. Read only.\n1. hyper_memory_recall with query \"{{area}}\", limit 20 and target all.\n2. If a past task or change names an asset, call hyper_memory_recall again with target set to that asset's path to see only its changes (up to three assets).\n3. Report in this order: conventions to follow; gotchas that cost time before, with the fix each note gives; decisions and their reasons; past tasks like this one and how they ended; what agents changed lately in this area (asset, when, what).\n4. Then a checklist of the five things to do or avoid in this task, each tied to the note it comes from.\n5. Finish with a table using INFO rows for notes found, past tasks found and recent changes found, with their counts. If the search finds nothing, try two shorter queries before saying so. Save nothing."
+  },
+  {
+   "id": "project-search-memory-scm.save-team-convention",
+   "title": "Save a team convention to project memory",
+   "summary": "Check memory for an existing note, then save one clear convention every future chat will follow, and confirm it reads back.",
+   "packs": [
+    "shared_foundation"
+   ],
+   "skills": [
+    "hyperai-memory"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_memory_remember"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "memory",
+    "convention",
+    "naming",
+    "team",
+    "remember"
+   ],
+   "placeholders": [
+    {
+     "name": "convention",
+     "label": "Convention",
+     "default": "Pickups live in /Game/Gameplay/Pickups and are named BP_Pickup_<Item>"
+    },
+    {
+     "name": "reason",
+     "label": "Reason",
+     "default": "so designers find them and verify cases can target the BP_Pickup_ prefix"
+    }
+   ],
+   "prompt": "Save this convention for every future chat: {{convention}}. Reason: {{reason}}.\n1. hyper_memory_recall with the convention's key words and limit 20. If a note already says the same, report it and stop. If one says something different, show both and ask me which wins before saving.\n2. hyper_memory_remember with title set to the convention itself in one line (under 120 characters), text holding the convention, the reason and one example, type convention, and replaces new (or the existing note's name when I chose to replace it).\n3. If the status is held (it reads like an instruction to agents), tell me to allow it in HyperAIStudio > Agents > Project Memory; no chat sees it until then.\n4. hyper_memory_recall again with the same words: the new note must come back first (a held note will not, so mark that row WARN).\n5. Report a PASS/FAIL table: no duplicate, saved, reads back; then the note's name and title. Save nothing else, and no task progress."
+  },
+  {
+   "id": "project-search-memory-scm.correct-stale-memory",
+   "title": "Correct or remove a wrong project memory note",
+   "summary": "Find a stale note an agent saved, replace it with the corrected fact or forget it, and prove recall now returns the right one.",
+   "packs": [
+    "shared_foundation"
+   ],
+   "skills": [
+    "hyperai-memory"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_memory_forget",
+    "hyper_memory_remember"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "memory",
+    "forget",
+    "correction",
+    "cleanup",
+    "gotcha"
+   ],
+   "placeholders": [
+    {
+     "name": "topic",
+     "label": "Topic of the wrong note",
+     "default": "Ember Lance VFX"
+    },
+    {
+     "name": "correction",
+     "label": "Correction",
+     "default": "remove it",
+     "hint": "The corrected fact, or remove it"
+    }
+   ],
+   "prompt": "A project memory note about {{topic}} is wrong. Correction: {{correction}}.\n1. hyper_memory_recall with query \"{{topic}}\" and limit 20. List the matching notes with name, type and title.\n2. Pick the wrong note, show it to me and say why it is wrong.\n3. If the correction is remove it, call hyper_memory_forget with its name. Otherwise call hyper_memory_remember with replaces set to its name, the corrected fact as the title, the reason in text, and the same type. If either refuses because I wrote the note, tell me how to edit it myself and stop.\n4. hyper_memory_recall again with the same query: the wrong title must be gone, and the corrected one, if any, must come back.\n5. Report a PASS/FAIL table: note found, corrected or removed, recall confirms. Touch no other note."
+  },
+  {
+   "id": "project-search-memory-scm.review-and-submit-changes",
+   "title": "Review and submit what agents changed",
+   "summary": "List files agents checked out or added, check for unsaved and sandboxed work, dry-run the submit, then submit once you approve.",
+   "packs": [
+    "source_control"
+   ],
+   "tools": [
+    "hyper_source_control_status",
+    "hyper_diagnose",
+    "hyper_sandbox_status",
+    "hyper_source_control_submit",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "source-control",
+    "submit",
+    "perforce",
+    "lore",
+    "review"
+   ],
+   "placeholders": [
+    {
+     "name": "description",
+     "label": "Change description",
+     "default": "Add the Ember Lance VFX and its test level"
+    },
+    {
+     "name": "files",
+     "label": "Files",
+     "default": "all",
+     "hint": "Project-relative paths, comma separated, or all for every file agents changed"
+    }
+   ],
+   "prompt": "Submit the agents' work with the description \"{{description}}\". Files: {{files}}.\n1. hyper_source_control_status with bRefresh true: the provider (unreal, lore or none) and each file agents changed, with its state. If the provider is none, say so and stop. FAIL any file checked_out_by_other or not_current, naming who holds it.\n2. hyper_diagnose with check dirty_loaded_packages: unsaved changes are not submitted. List them and ask whether to save first.\n3. hyper_sandbox_status: if Sandbox Mode holds files, they are not in the project yet. Tell me to approve them in Activity first, and stop.\n4. hyper_source_control_submit with bDryRun true, the description and the files (an empty list for all agent files): show me the exact list.\n5. Only after I say yes: hyper_source_control_submit with bDryRun false and a fresh operationId, then hyper_operation_wait with bWaitThroughApproval true.\n6. Report a PASS/FAIL table: provider found, no conflicts, nothing unsaved, nothing sandboxed, dry run listed N files, submitted. Never submit a file outside the approved list."
+  },
+  {
+   "id": "project-search-memory-scm.snapshot-selected-actors",
+   "title": "Snapshot and validate the selected actors",
+   "summary": "Capture the selection's labels, classes, transforms, components and chosen properties, then re-validate them for a bug report or handoff.",
+   "packs": [
+    "context_scene_project_search"
+   ],
+   "tools": [
+    "hyper_context_snapshot",
+    "hyper_scene_inspect",
+    "hyper_scene_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "selection",
+    "actors",
+    "transforms",
+    "handoff",
+    "bug-report"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "properties",
+     "label": "Properties to read",
+     "default": "bCanBeDamaged",
+     "hint": "Exact variable names, comma separated, such as Health or bIsOpen"
+    }
+   ],
+   "prompt": "Snapshot these selected actors for a handoff:\n{{selected_actors}}\nRead only.\n1. hyper_context_snapshot: the map, the viewport camera and the selection count, so the report says where it was taken.\n2. hyper_scene_inspect with scope selected, propertyNames [{{properties}}], maxActors 64 and maxComponentsPerActor 16: label, class, path, location, rotation and scale (cm and degrees), components, and those property values.\n3. hyper_scene_validate with scope selected and the same propertyNames: errorCount, warningCount and each issue.\n4. Report one table row per actor: label, class, location, rotation, scale, component count, the property values, and PASS when validate found no issue for it, otherwise FAIL with the issue. Note any property that was not found or not readable, and whether results were truncated.\n5. End with a short JSON block mapping each label to its location, ready to paste into a plan. Change nothing."
+  },
+  {
+   "id": "project-search-memory-scm.which-packs-are-live",
+   "title": "Check which HyperAI tool packs are live here",
+   "summary": "Read the capability report and sandbox status to see which packs and tools agents can use in this project, and why others are off.",
+   "packs": [
+    "shared_foundation"
+   ],
+   "tools": [
+    "hyper_capability_report",
+    "hyper_sandbox_status"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "capabilities",
+    "packs",
+    "plugins",
+    "sandbox",
+    "setup"
+   ],
+   "placeholders": [
+    {
+     "name": "needed_packs",
+     "label": "Packs the next task needs",
+     "default": "pcg, niagara_vfx, level_design"
+    }
+   ],
+   "prompt": "Tell me which HyperAI tool packs work in {{project}} now, and whether {{needed_packs}} are ready for my next task. Read only.\n1. hyper_capability_report with pageSize 64; page with cursor to the end. Read every HyperAI pack's tools and health, and the Epic toolsets it lists.\n2. hyper_sandbox_status: whether Sandbox Mode is on and what it holds, since saves then land in the sandbox.\n3. Report a table, one row per pack: pack, live tools of total, health, PASS (all tools live), WARN (some) or FAIL (none), and the reason given for anything off, such as a disabled Unreal plugin.\n4. A second table for {{needed_packs}} alone: ready or not, and what to do (which plugin to enable, whether a restart is needed).\n5. Say how many tools are live in total, and whether Sandbox Mode would hold saves. Change no settings or plugins."
+  },
+  {
+   "id": "project-search-memory-scm.inventory-placed-class",
+   "title": "Inventory every placed actor of one class",
+   "summary": "One batched read lists each loaded instance of a class with its location and properties, flags stacked copies and finds its source.",
+   "packs": [
+    "context_scene_project_search"
+   ],
+   "tools": [
+    "hyper_batch_query"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "inventory",
+    "actors",
+    "class",
+    "spawn points",
+    "multiplayer",
+    "duplicates"
+   ],
+   "placeholders": [
+    {
+     "name": "class_name",
+     "label": "Actor class",
+     "default": "BP_SpawnPoint",
+     "hint": "Blueprint or C++ class name"
+    },
+    {
+     "name": "properties",
+     "label": "Properties to read",
+     "default": "TeamIndex",
+     "hint": "Exact variable names, comma separated"
+    },
+    {
+     "name": "expected_count",
+     "label": "Expected count",
+     "default": "8"
+    },
+    {
+     "name": "min_spacing",
+     "label": "Minimum spacing (cm)",
+     "default": "100"
+    }
+   ],
+   "prompt": "Inventory every placed {{class_name}} in {{level}}: where each one is and its {{properties}} values. Read only.\n1. One hyper_batch_query with three reads: queryId map, primitive context; queryId actors, primitive scene, scope world, propertyNames [{{properties}}], maxItems 128; queryId code, primitive project_search, query {{class_name}}, kinds [cpp_symbol], maxItems 16. Page with nextCursor until every record is read.\n2. Keep the actor records whose class_path ends in {{class_name}} (a Blueprint class adds _C). If none match, list the five most common classes instead of guessing.\n3. Find where the class is defined: a symbol from the code read (file:line), or for a Blueprint, Epic's AssetTools find_assets with name {{class_name}}.\n4. Report one row per instance: label, location (x, y, z in cm), yaw, and each of {{properties}}, saying not readable where a value is missing.\n5. A PASS/FAIL table: count equals {{expected_count}}; no two instances closer than {{min_spacing}} cm (stacked copies), naming each pair; every property readable. Say whether the read was truncated, and that only loaded actors count, so unloaded World Partition cells are not covered.\n6. Change nothing: no moves, deletes or saves."
+  },
+  {
+   "id": "project-search-memory-scm.what-agents-changed",
+   "title": "See what agents changed and hold right now",
+   "summary": "List files agents checked out, locked or added this session, recent agent changes from memory, and the state of an operation.",
+   "packs": [
+    "source_control",
+    "shared_foundation"
+   ],
+   "skills": [
+    "hyperai-memory"
+   ],
+   "tools": [
+    "hyper_source_control_status",
+    "hyper_memory_recall",
+    "hyper_operation_status"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "source-control",
+    "status",
+    "changes",
+    "operations",
+    "locks"
+   ],
+   "placeholders": [
+    {
+     "name": "operation_id",
+     "label": "Operation to check",
+     "default": "none",
+     "hint": "An operationId, or none"
+    }
+   ],
+   "prompt": "Show me what agents changed in {{project}} this session and what they hold. Read only.\n1. hyper_source_control_status with bRefresh false: the provider, and each file agents checked out, locked or added, with its state and anyone else holding it.\n2. hyper_memory_recall with an empty query, limit 20 and target all: the newest notes and what agents changed lately (asset, time, summary).\n3. If {{operation_id}} is not none, hyper_operation_status with it: its state, what it changed and whether it waits for approval.\n4. Report a table of files: path, state, holder, PASS (held by us and current) or FAIL (checked out by someone else, or not current). Then a table of recent agent changes: asset, when, what.\n5. Point out anything risky: assets locked by a teammate, files added but never saved, an operation awaiting approval. Submit, revert or save nothing."
+  }
+ ]
+}

@@ -1,0 +1,1223 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "materials-textures",
+ "presets": [
+  {
+   "id": "materials-textures.audit-material-cost",
+   "title": "Audit a material's shader cost and compile health",
+   "summary": "Read the selected material's graph, compile stats and users, and flag what breaks your budget, without changing anything.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_inspect",
+    "hyper_material_validate",
+    "hyper_asset_dependency_graph"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "audit",
+    "shader cost",
+    "instructions",
+    "samplers",
+    "optimisation",
+    "read-only"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Material"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "max_instructions",
+     "label": "Pixel instruction budget",
+     "default": "300",
+     "hint": "Typical: 150 for foliage, 300 for props, 500 for hero assets"
+    },
+    {
+     "name": "max_samplers",
+     "label": "Sampler budget",
+     "default": "8"
+    }
+   ],
+   "prompt": "Audit the material {{selected_asset}} against a budget of {{max_instructions}} pixel shader instructions and {{max_samplers}} samplers. Change nothing.\n1. hyper_material_inspect (scope loaded_only; if it reports asset_not_loaded, load the asset with Unreal MCP's asset tools and retry): node count, opaque nodes, Custom HLSL nodes, every parameter with its group, and any parameter left ungrouped.\n2. hyper_material_validate: read Stats. While Stats.status is compiling, wait a moment and validate again. Report pixel and vertex shader instructions, samplers, texture samples, errors and warnings.\n3. hyper_asset_dependency_graph on the material (direction referencers, depth 1): how many instances and other assets use it, so I know how far a fix would reach.\n4. Name the three biggest cost drivers you can see in the graph (texture samples, translucency, Custom HLSL, branches that never reach an output) and the change that would cut each.\nReport a PASS/FAIL table: compiles with 0 errors, pixel instructions <= {{max_instructions}}, samplers <= {{max_samplers}}, every parameter grouped, every Custom HLSL node has a stated reason. Then the preview image from validate's PreviewImagePath on its own line as ![preview](absolute path)."
+  },
+  {
+   "id": "materials-textures.compare-two-materials",
+   "title": "Diff two materials node by node",
+   "summary": "Compare two selected materials' graphs, settings and shader cost, and explain every difference that changes the look or the price.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_inspect",
+    "hyper_material_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "diff",
+    "compare",
+    "duplicate masters",
+    "cleanup",
+    "read-only"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Material"
+    ],
+    "min": 2
+   },
+   "prompt": "Compare the two materials selected in the Content Browser; the first is A, the second is B. Change nothing.\n{{selected_assets}}\n1. hyper_material_inspect on A with ComparePath set to B (both must be loaded; if either reports asset_not_loaded, load it with Unreal MCP's asset tools and retry). Read the semantic Diff: nodes added, removed or changed, connections, and material outputs.\n2. hyper_material_validate on each: compile status, pixel and vertex instructions, samplers and texture samples. While Stats.status is compiling, validate again after a moment.\n3. Group the differences into look (base colour, roughness, normal, emissive), settings (blend mode, shading model, two-sided), parameters (names, defaults, groups) and cost.\n4. In two sentences, say which one should stay the master, and whether the other can become an instance of it.\nReport a table with one row per difference: what differs, the value in A, the value in B, and INFO, WARN or FAIL (FAIL when it breaks compilation, WARN when it costs over 10% more pixel instructions). Then both previews, each on its own line as ![A](absolute path) and ![B](absolute path)."
+  },
+  {
+   "id": "materials-textures.instance-colour-variants",
+   "title": "Make colour variants of a material as instances",
+   "summary": "Create material instances of the selected master in your colours, then put one variant on each selected prop and capture them.",
+   "packs": [
+    "materials_dynamic_material",
+    "lighting_lookdev"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_inspect",
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "create_material_instance",
+    "set_actor_material"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "material instance",
+    "variants",
+    "colour",
+    "props",
+    "set dressing"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Material"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "variants",
+     "label": "Variants (name: linear r,g,b)",
+     "default": "Crimson: 0.6,0.05,0.04; Teal: 0.03,0.35,0.33; Gold: 1.0,0.766,0.336",
+     "hint": "Up to 8, separated by semicolons"
+    },
+    {
+     "name": "colour_param",
+     "label": "Colour parameter",
+     "default": "BaseColor"
+    }
+   ],
+   "prompt": "Make colour variants of the master material {{selected_asset}} as instances in {{content_folder}}, one per entry of: {{variants}}\n1. hyper_material_inspect the master (load it with Unreal MCP's asset tools if it reports asset_not_loaded): confirm a vector parameter named `{{colour_param}}` exists. If it does not, stop and tell me which parameter to expose.\n2. One hyper_material_apply_plan (fresh OperationId, bDryRun false) with one create_material_instance per variant (8 at most): TargetPath the object path `{{content_folder}}/MI_<Master>_<Variant>.MI_<Master>_<Variant>`, ParentPath the master's object path, and a vector parameter `{{colour_param}}` set to the variant's linear colour. The tool reads each value back. If the reply is still pending, hyper_operation_wait with that OperationId. Change no other asset.\n3. If props are selected in the level and the lighting_lookdev pack is available: hyper_lighting_inspect for the revision, then one hyper_lighting_apply_plan (fresh OperationId, bSave false) with one set_actor_material per prop (empty property, slot 0), variant i on prop i of: {{selected_actors}}\nThen hyper_capture_view of the level viewport. Otherwise skip this step and say why.\nReport a PASS/FAIL table: every instance exists at its path, its parent is the master, `{{colour_param}}` holds the requested colour, and each prop shows its variant. Then the capture on its own line as ![variants](absolute path)."
+  },
+  {
+   "id": "materials-textures.pbr-master-material",
+   "title": "Build a PBR master material with grouped parameters",
+   "summary": "Create a texture-driven PBR master with tiling, tint and roughness controls plus a first instance, and prove it compiles within budget.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_material_validate"
+   ],
+   "ops": [
+    "create_material",
+    "create_material_instance"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "master material",
+    "PBR",
+    "ORM",
+    "parameters",
+    "instances",
+    "texture set"
+   ],
+   "placeholders": [
+    {
+     "name": "surface",
+     "label": "Surface",
+     "default": "weathered stone"
+    },
+    {
+     "name": "name",
+     "label": "Master name",
+     "default": "M_Surface_Master"
+    },
+    {
+     "name": "instance",
+     "label": "Instance name",
+     "default": "MI_WeatheredStone"
+    },
+    {
+     "name": "max_instructions",
+     "label": "Pixel instruction budget",
+     "default": "250"
+    }
+   ],
+   "prompt": "Build a PBR master material `{{content_folder}}/{{name}}` and one instance `{{content_folder}}/{{instance}}` for {{surface}}. Object paths end in `.<AssetName>`.\n1. hyper_memory_recall \"master material conventions\", then hyper_project_search for existing master materials and for {{surface}} textures (base colour, normal, packed AO/roughness/metallic). If a master already fits, say so and stop instead of building a duplicate.\n2. One hyper_material_apply_plan (fresh OperationId, bDryRun false) with create_material: texture_parameter nodes BaseColor (sampler_type color), Normal (normal) and ORM (masks) in group Textures; a texcoord multiplied by scalar_parameter Tiling (default 1, group UV) feeding all three; vector_parameter Tint multiplying base colour; component_mask R, G and B of ORM into ao, roughness and metallic, roughness through a multiply by scalar_parameter RoughnessScale (default 1, slider 0-2, group Surface). Default textures: those you found, else the engine's `/Engine/EngineMaterials/DefaultDiffuse.DefaultDiffuse`, `DefaultNormal.DefaultNormal` and `DefaultDiffuse_TC_Masks.DefaultDiffuse_TC_Masks`, so each sampler_type matches its texture. In the same plan, create_material_instance {{instance}} with the {{surface}} textures. If the reply is pending, hyper_operation_wait.\n3. hyper_material_validate the master; validate again while Stats.status is compiling.\nReport a PASS/FAIL table: 0 compile errors, pixel instructions <= {{max_instructions}}, samplers <= 3, every parameter grouped, the instance exists with the master as parent. Then the preview on its own line as ![master](absolute path)."
+  },
+  {
+   "id": "materials-textures.expose-constants-as-parameters",
+   "title": "Turn a material's hard-coded values into parameters",
+   "summary": "Replace the constants feeding the selected material's outputs with named, grouped parameters so instances can tune them, keeping the look identical.",
+   "packs": [
+    "materials_dynamic_material",
+    "lighting_lookdev"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_validate",
+    "hyper_material_inspect",
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "edit_graph"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "parameters",
+    "instancing",
+    "refactor",
+    "edit graph",
+    "material instance"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Material"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "group",
+     "label": "Parameter group",
+     "default": "Surface"
+    }
+   ],
+   "prompt": "Make {{selected_asset}} instance-friendly: every constant that feeds a material output becomes a parameter with the same value, so the look does not change.\n1. hyper_material_inspect (load the asset with Unreal MCP's asset tools if it reports asset_not_loaded) for the revision and the constant, constant3 and constant4 nodes wired, directly or through math, into base_color, roughness, metallic, specular, emissive or opacity. Then hyper_material_validate, and copy its PreviewImagePath PNG to a `before_` file beside it: the next validate overwrites that file.\n2. hyper_material_apply_plan with edit_graph at that ExpectedRevision: for each such constant, add a scalar_parameter or vector_parameter with the same default, a clear name (Roughness, BaseTint, EmissiveStrength) and group {{group}}, wire it where the constant was, and list the constant in RemoveNodeIds. Dry run first (bDryRun true) and list the changes, then submit with bDryRun false and a fresh OperationId. If the reply is pending, hyper_operation_wait.\n3. hyper_material_validate again, repeating while Stats.status is compiling. If the lighting_lookdev pack is available, hyper_image_compare the new preview (candidate) against the `before_` copy (reference) in aligned mode.\nReport a PASS/FAIL table: 0 compile errors, constants removed = parameters added, every new parameter in group {{group}}, pixel instructions within 5% of before, aligned score >= 98 (INFO if the compare was skipped). Then before and after previews, each on its own line."
+  },
+  {
+   "id": "materials-textures.emissive-pulse-panel",
+   "title": "Make a pulsing emissive sci-fi panel material",
+   "summary": "Build a dark metal panel whose glow pulses on a timer, put it on the selected mesh, and prove the glow animates from timed captures.",
+   "packs": [
+    "materials_dynamic_material",
+    "lighting_lookdev"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_material_validate",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_scene_inspect",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "create_material",
+    "set_actor_material"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "emissive",
+    "animated",
+    "sci-fi",
+    "pulse",
+    "time",
+    "sine"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Material name",
+     "default": "M_PulsePanel"
+    },
+    {
+     "name": "colour",
+     "label": "Glow colour (linear r,g,b)",
+     "default": "0.1,0.8,1.0"
+    },
+    {
+     "name": "period",
+     "label": "Pulse period (seconds)",
+     "default": "2"
+    },
+    {
+     "name": "strength",
+     "label": "Peak emissive strength",
+     "default": "20"
+    }
+   ],
+   "prompt": "Create `{{content_folder}}/{{name}}.{{name}}`: a dark metal sci-fi panel whose glow pulses in {{colour}} every {{period}} seconds, and show it on {{selected_actor}}.\n1. One hyper_material_apply_plan (fresh OperationId, bDryRun false) with create_material: base_color constant3 0.04,0.04,0.045, metallic 1, roughness 0.35; emissive = vector_parameter GlowColor ({{colour}}) x scalar_parameter GlowStrength ({{strength}}) x a pulse made from time and sine (period {{period}}), mapped from -1..1 to 0..1 with a multiply by 0.5 and an add of 0.5. Put the parameters in group Glow. If the reply is pending, hyper_operation_wait.\n2. hyper_material_validate until Stats.status is compiled: 0 errors and no Custom HLSL.\n3. If the lighting_lookdev pack is available and an actor is selected: hyper_lighting_inspect for the revision, hyper_lighting_apply_plan with set_actor_material on {{selected_actor}} (slot 0, bSave false), then hyper_scene_inspect (scope selected) for its location and hyper_capture_view with source transform framing it, FrameCount 3, TimeMode material_time, MaterialTimes 0, {{period}}/4 and 3x{{period}}/4 (half, full and no glow). Otherwise use the preview PNG and say the animation was not captured.\nReport a PASS/FAIL table: 0 compile errors, 2 parameters in group Glow, ChangedPixelFraction above 0.01 in both frame diffs, the glow brightest in the second frame. Then the frames on their own lines as ![t=...](absolute path)."
+  },
+  {
+   "id": "materials-textures.lava-flow-panner",
+   "title": "Create a flowing lava material with panned layers",
+   "summary": "Build an emissive lava surface from two layers panning at different speeds, and prove on the selected mesh that it flows.",
+   "packs": [
+    "materials_dynamic_material",
+    "lighting_lookdev"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_project_search",
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_material_validate",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "create_material",
+    "set_actor_material"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "lava",
+    "fantasy",
+    "volcano",
+    "panner",
+    "emissive",
+    "animated"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Material name",
+     "default": "M_LavaFlow"
+    },
+    {
+     "name": "flow_speed",
+     "label": "Flow speed (UV per second)",
+     "default": "0.05"
+    },
+    {
+     "name": "heat_colour",
+     "label": "Heat colour (linear HDR r,g,b)",
+     "default": "8,1.6,0.2"
+    }
+   ],
+   "prompt": "Create `{{content_folder}}/{{name}}.{{name}}`, molten lava for a fantasy volcano level, and prove it flows.\n1. hyper_project_search for a grayscale noise or rock texture to drive it. If none exists, use `/Engine/EngineMaterials/T_Default_Material_Grid_M.T_Default_Material_Grid_M` and say the pattern is a placeholder.\n2. One hyper_material_apply_plan (fresh OperationId, bDryRun false) with create_material: two texture_sample nodes of that texture, on texcoords tiled 2x and 3x, each through its own panner (speed_x {{flow_speed}} for the first, -{{flow_speed}}/2 for the second, small speed_y); multiply them into a heat mask, sharpened with power by scalar_parameter Sharpness (default 3); emissive = vector_parameter HeatColor ({{heat_colour}}) x the mask; base_color a lerp from crust (0.02,0.015,0.01) to dark orange (0.3,0.06,0.01) by the mask; roughness a lerp from 0.8 (crust) to 0.3 (molten). Group the parameters under Lava. If the reply is pending, hyper_operation_wait.\n3. hyper_material_validate until Stats.status is compiled.\n4. If the lighting_lookdev pack is available and {{selected_actor}} is a placed mesh: hyper_lighting_inspect, hyper_lighting_apply_plan with set_actor_material on it (bSave false), then hyper_capture_view of the viewport with FrameCount 3, TimeMode material_time, MaterialTimes 0, 2 and 4.\nReport a PASS/FAIL table: 0 compile errors, 2 panners, samplers <= 2, emissive driven by the mask, ChangedPixelFraction > 0.01 in both frame diffs. Then the frames on their own lines."
+  },
+  {
+   "id": "materials-textures.masked-foliage",
+   "title": "Build a two-sided foliage material for leaf cards",
+   "summary": "Create a masked, two-sided foliage material with alpha cutout and subsurface tint from the selected leaf texture, and check its cost per card.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_project_search",
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_material_validate"
+   ],
+   "ops": [
+    "create_material"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "foliage",
+    "leaves",
+    "masked",
+    "two-sided",
+    "subsurface",
+    "trees"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Texture2D"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Material name",
+     "default": "M_Foliage_Leaves"
+    },
+    {
+     "name": "subsurface",
+     "label": "Subsurface colour (linear r,g,b)",
+     "default": "0.25,0.35,0.05"
+    },
+    {
+     "name": "roughness",
+     "label": "Roughness",
+     "default": "0.55"
+    },
+    {
+     "name": "max_instructions",
+     "label": "Pixel instruction budget",
+     "default": "150"
+    }
+   ],
+   "prompt": "Create `{{content_folder}}/{{name}}.{{name}}` for leaf cards from the texture {{selected_asset}}; its alpha is the leaf cutout.\n1. hyper_project_search in that texture's folder for a matching normal map; use it if found, else leave normal unconnected and say so.\n2. One hyper_material_apply_plan (fresh OperationId, bDryRun false) with create_material and MaterialSettings blend_mode masked, shading_model two_sided_foliage, two_sided true. Nodes: texture_parameter LeafColor (that texture, sampler_type color) into base_color through a multiply by vector_parameter Tint (1,1,1); its alpha into opacity_mask; texture_parameter LeafNormal (sampler_type normal) into normal if found; vector_parameter SubsurfaceColor ({{subsurface}}) into subsurface_color; scalar_parameter Roughness ({{roughness}}) into roughness. Group them under Foliage. If the reply is pending, hyper_operation_wait.\n3. hyper_material_validate until Stats.status is compiled.\nReport a PASS/FAIL table: 0 compile errors, blend mode masked, shading model two-sided foliage, two-sided on, opacity_mask wired from the texture's alpha, pixel instructions <= {{max_instructions}} (foliage overdraw makes every instruction count), samplers <= 2. Then the preview on its own line as ![foliage](absolute path)."
+  },
+  {
+   "id": "materials-textures.window-glass",
+   "title": "Make a clear window glass material",
+   "summary": "Create translucent window glass with Fresnel-driven opacity, a tint and low roughness, then check its cost and how it renders on the selected window.",
+   "packs": [
+    "materials_dynamic_material",
+    "lighting_lookdev"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_material_validate",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "create_material",
+    "set_actor_material"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "glass",
+    "translucent",
+    "fresnel",
+    "architecture",
+    "interior",
+    "windows"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Material name",
+     "default": "M_WindowGlass"
+    },
+    {
+     "name": "tint",
+     "label": "Tint (linear r,g,b)",
+     "default": "0.85,0.92,0.95"
+    },
+    {
+     "name": "min_opacity",
+     "label": "Opacity head-on",
+     "default": "0.15"
+    },
+    {
+     "name": "max_opacity",
+     "label": "Opacity at grazing angles",
+     "default": "0.6"
+    },
+    {
+     "name": "max_instructions",
+     "label": "Pixel instruction budget",
+     "default": "200"
+    }
+   ],
+   "prompt": "Create `{{content_folder}}/{{name}}.{{name}}`, window glass for a modern apartment level: clear head-on, more reflective and opaque at grazing angles.\n1. One hyper_material_apply_plan (fresh OperationId, bDryRun false) with create_material and MaterialSettings blend_mode translucent (shading model default_lit): base_color from vector_parameter Tint ({{tint}}); opacity a lerp between scalar_parameter MinOpacity ({{min_opacity}}) and scalar_parameter MaxOpacity ({{max_opacity}}) by a fresnel (exponent 5); roughness from scalar_parameter Roughness (0.05); specular 0.5; metallic 0. Group the parameters under Glass. If the reply is pending, hyper_operation_wait.\n2. hyper_material_validate until Stats.status is compiled.\n3. If the lighting_lookdev pack is available and {{selected_actor}} is the window mesh: hyper_lighting_inspect (note rendering: reflection_method and translucency_front_layer_reflections), hyper_lighting_apply_plan with set_actor_material on it (bSave false), then hyper_capture_view of the viewport.\nReport a PASS/FAIL table: 0 compile errors, blend mode translucent, opacity driven by fresnel between the two parameters, pixel instructions <= {{max_instructions}}, and an INFO row on whether sharp reflections on this glass need LumenFrontLayerTranslucencyReflections in the post process (a lighting change: do not make it here). Then the preview and the capture, each on its own line."
+  },
+  {
+   "id": "materials-textures.puddle-decal",
+   "title": "Create a wet puddle decal material",
+   "summary": "Build a deferred decal that darkens and smooths the ground into a soft-edged puddle, with wetness and edge controls and a ready instance.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_project_search",
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_material_validate"
+   ],
+   "ops": [
+    "create_material",
+    "create_material_instance"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "decal",
+    "puddle",
+    "rain",
+    "wet",
+    "urban",
+    "street"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Material name",
+     "default": "M_Decal_Puddle"
+    },
+    {
+     "name": "instance",
+     "label": "Instance name",
+     "default": "MI_Decal_Puddle_Shallow"
+    },
+    {
+     "name": "wetness",
+     "label": "Instance wetness (0-1)",
+     "default": "0.7"
+    }
+   ],
+   "prompt": "Create `{{content_folder}}/{{name}}.{{name}}`, a deferred decal for rain puddles on city streets, and an instance `{{content_folder}}/{{instance}}.{{instance}}`.\n1. hyper_project_search for a grayscale noise texture to break up the puddle's edge. It is optional: without one, the edge stays a clean radial falloff.\n2. One hyper_material_apply_plan (fresh OperationId, bDryRun false) with create_material and MaterialSettings domain deferred_decal, blend_mode translucent. Mask: the distance between texcoord and constant2 (0.5, 0.5), multiplied by 2, through one_minus and saturate, then power by scalar_parameter EdgeSharpness (default 3), times the noise texture's red channel if you found one. base_color vector_parameter WetTint (0.02,0.02,0.025); roughness scalar_parameter WetRoughness (0.05); opacity = mask x scalar_parameter Wetness (default 1, slider 0-1). Group the parameters under Puddle. In the same plan, create_material_instance {{instance}} with Wetness {{wetness}}. If the reply is pending, hyper_operation_wait.\n3. hyper_material_validate until Stats.status is compiled.\nReport a PASS/FAIL table: 0 compile errors, domain deferred decal, blend mode translucent, opacity from the radial mask, parameters grouped, the instance exists with Wetness {{wetness}}, pixel instructions <= 120. Then the preview on its own line as ![puddle](absolute path)."
+  },
+  {
+   "id": "materials-textures.vertex-paint-wall-blend",
+   "title": "Blend moss and dirt onto walls with vertex paint",
+   "summary": "Create a castle-wall material that blends clean stone into moss and dirt where vertex colour is painted, ready for mesh paint.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_project_search",
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_material_validate",
+    "hyper_memory_remember"
+   ],
+   "ops": [
+    "create_material"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "vertex paint",
+    "vertex colour",
+    "blend",
+    "castle",
+    "modular",
+    "fantasy"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Material name",
+     "default": "M_CastleWall_Paintable"
+    },
+    {
+     "name": "max_samplers",
+     "label": "Sampler budget",
+     "default": "4"
+    },
+    {
+     "name": "max_instructions",
+     "label": "Pixel instruction budget",
+     "default": "220"
+    }
+   ],
+   "prompt": "Create `{{content_folder}}/{{name}}.{{name}}` for modular castle walls: stone everywhere, moss where vertex colour red is painted, dirt where green is painted.\n1. hyper_project_search for stone, moss and dirt base colour textures. Use what exists; for a missing layer, use a vector_parameter colour instead of a texture and say so.\n2. One hyper_material_apply_plan (fresh OperationId, bDryRun false) with create_material: one texture_parameter per layer (StoneColor, MossColor, DirtColor; sampler_type color) on a texcoord multiplied by scalar_parameter Tiling (default 1); vertex_color through component_mask R and G, each through power by scalar_parameter BlendContrast (default 2) and saturate; lerp stone to moss by red, then that to dirt by green, into base_color; roughness a lerp from 0.7 to 0.9 by the moss mask. Group textures under Layers and scalars under Blend. If the reply is pending, hyper_operation_wait.\n3. hyper_material_validate until Stats.status is compiled.\n4. hyper_memory_remember the convention, titled \"{{name}}: vertex colour R paints moss, G paints dirt\".\nReport a PASS/FAIL table: 0 compile errors, vertex colour R and G each drive a lerp, samplers <= {{max_samplers}}, pixel instructions <= {{max_instructions}}, parameters grouped, the convention saved to memory. Then the preview on its own line as ![wall](absolute path)."
+  },
+  {
+   "id": "materials-textures.ui-health-bar-material",
+   "title": "Make a UI health bar fill material",
+   "summary": "Create a user-interface material whose Progress parameter fills a bar left to right with a crisp edge, ready for a UMG Image.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_material_validate"
+   ],
+   "ops": [
+    "create_material"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "UI",
+    "UMG",
+    "HUD",
+    "health bar",
+    "progress",
+    "user interface"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Material name",
+     "default": "M_UI_HealthBar"
+    },
+    {
+     "name": "progress",
+     "label": "Default progress (0-1)",
+     "default": "0.75"
+    },
+    {
+     "name": "edge_sharpness",
+     "label": "Edge sharpness",
+     "default": "200",
+     "hint": "Higher gives a crisper fill edge"
+    },
+    {
+     "name": "empty_colour",
+     "label": "Empty colour (linear r,g,b)",
+     "default": "0.05,0.02,0.02"
+    },
+    {
+     "name": "fill_colour",
+     "label": "Fill colour (linear r,g,b)",
+     "default": "0.8,0.05,0.05"
+    }
+   ],
+   "prompt": "Create `{{content_folder}}/{{name}}.{{name}}`, a user-interface material for a health bar that UMG drives through one scalar parameter, Progress (0 empty, 1 full).\n1. One hyper_material_apply_plan (fresh OperationId, bDryRun false) with create_material and MaterialSettings domain user_interface, blend_mode translucent. Nodes: texcoord through component_mask R (the bar's U); fill = saturate((scalar_parameter Progress - U) x {{edge_sharpness}}), with Progress default {{progress}}, slider_min 0 and slider_max 1; emissive = lerp from vector_parameter EmptyColor ({{empty_colour}}) to vector_parameter FillColor ({{fill_colour}}) by fill; opacity from scalar_parameter Opacity (default 1). Group the parameters under HealthBar. No texture samples and no Custom HLSL. If the reply is pending, hyper_operation_wait.\n2. hyper_material_validate until Stats.status is compiled.\nReport a PASS/FAIL table: 0 compile errors, domain user interface, Progress default {{progress}} with a 0-1 slider, pixel instructions <= 60, 0 texture samples, parameters grouped. Then the preview on its own line as ![health bar](absolute path), and the Blueprint nodes that drive it: the UMG Image's Get Dynamic Material, then Set Scalar Parameter Value with Progress."
+  },
+  {
+   "id": "materials-textures.moss-on-top-edit",
+   "title": "Add world-aligned moss to the tops of a rock material",
+   "summary": "Edit the selected rock master so moss grows on upward-facing surfaces, with coverage controls, after listing the instances it affects.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_asset_dependency_graph",
+    "hyper_material_validate",
+    "hyper_material_inspect",
+    "hyper_project_search",
+    "hyper_material_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "edit_graph"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "moss",
+    "rock",
+    "world aligned",
+    "fantasy forest",
+    "edit graph",
+    "master material"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Material"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "amount",
+     "label": "Default moss amount (0-1)",
+     "default": "0.6"
+    },
+    {
+     "name": "max_extra",
+     "label": "Extra pixel instructions allowed",
+     "default": "40"
+    }
+   ],
+   "prompt": "Add moss on upward-facing surfaces to the rock master {{selected_asset}}, for a fantasy forest. Keep everything else about it unchanged.\n1. hyper_asset_dependency_graph (direction referencers) on it: list the instances and other assets this edit will reach. hyper_material_inspect (load the asset with Unreal MCP's asset tools if it reports asset_not_loaded) for the revision and the nodes feeding base_color and roughness.\n2. hyper_material_validate for its before stats, and copy its PreviewImagePath PNG to a `before_` file (the next validate overwrites it). hyper_project_search for a moss base colour texture; without one, use vector_parameter MossColor (0.08,0.12,0.03).\n3. hyper_material_apply_plan with edit_graph at that ExpectedRevision: pixel_normal_ws through component_mask B, power by scalar_parameter MossSharpness (default 4), multiply by scalar_parameter MossAmount (default {{amount}}, slider 0-1) and saturate, giving the moss mask; lerp the existing base colour to the moss by that mask, and the existing roughness toward 0.9 by it; disconnect the old base_color and roughness outputs and wire the lerps in. Group the new parameters under Moss. Dry run first (bDryRun true) and check Issues, then bDryRun false with a fresh OperationId. If the reply is pending, hyper_operation_wait.\n4. hyper_material_validate until Stats.status is compiled.\nReport a PASS/FAIL table: 0 compile errors, MossAmount 0 leaves the old look (say how the graph guarantees it), pixel instructions grew by at most {{max_extra}}, samplers grew by at most 1, affected assets listed. Then before and after previews, each on its own line."
+  },
+  {
+   "id": "materials-textures.dissolve-enemy",
+   "title": "Build a dissolve material for defeated enemies",
+   "summary": "Create a masked dissolve with a glowing burn edge driven by one Dissolve parameter, and prove on the selected mesh that it cuts the mesh away.",
+   "packs": [
+    "materials_dynamic_material",
+    "lighting_lookdev"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_project_search",
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_material_validate",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_scene_inspect",
+    "hyper_capture_view",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "create_material",
+    "create_material_instance",
+    "set_actor_material"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "dissolve",
+    "death effect",
+    "enemy",
+    "masked",
+    "burn edge",
+    "gameplay"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Name",
+     "default": "Dissolve"
+    },
+    {
+     "name": "edge_colour",
+     "label": "Burn edge colour (linear HDR r,g,b)",
+     "default": "6,1.5,0.3"
+    },
+    {
+     "name": "max_instructions",
+     "label": "Pixel instruction budget",
+     "default": "160"
+    }
+   ],
+   "prompt": "Create `{{content_folder}}/M_{{name}}.M_{{name}}`: enemies dissolve with a glowing edge as Blueprint drives scalar parameter Dissolve from 0 (whole) to 1 (gone).\n1. hyper_project_search for a grayscale noise texture; else use `/Engine/EngineMaterials/T_Default_Material_Grid_M.T_Default_Material_Grid_M` and say the pattern is a placeholder.\n2. One hyper_material_apply_plan (fresh OperationId, bDryRun false): create_material with blend_mode masked. noise = R of a texture_sample of it on a texcoord multiplied by scalar_parameter NoiseTiling (2); Dissolve default 0, slider 0-1; opacity_mask = saturate((noise - Dissolve x 1.02 + 0.01) x 100), so 0 shows everything and 1 nothing; emissive = vector_parameter EdgeColor ({{edge_colour}}) x one_minus(saturate((noise - Dissolve) / scalar_parameter EdgeWidth (0.05))) x ceil(Dissolve); base_color texture_parameter BaseColor (`/Engine/EngineMaterials/DefaultDiffuse.DefaultDiffuse`). Group under Dissolve. Then create_material_instance `{{content_folder}}/MI_{{name}}_Half.MI_{{name}}_Half` with Dissolve 0.5. If pending, hyper_operation_wait.\n3. hyper_material_validate until compiled.\n4. If the lighting_lookdev pack is available and {{selected_actor}} is a mesh: hyper_scene_inspect for its location; hyper_lighting_inspect; hyper_lighting_apply_plan set_actor_material to the master (bSave false), then hyper_capture_view framing it; a second plan (fresh inspect revision) to the half instance and a capture from the same transform; hyper_image_compare half against whole in aligned mode.\nReport a PASS/FAIL table: 0 compile errors, masked, Dissolve 0-1, aligned score below 90, burn edge visible in the half capture, pixel instructions <= {{max_instructions}}. Captures on their own lines."
+  },
+  {
+   "id": "materials-textures.hex-shield-hlsl",
+   "title": "Create a hex-grid energy shield with justified HLSL",
+   "summary": "Build an additive sci-fi shield with a Fresnel rim, scrolling hex cells and a pulse, using Custom HLSL only for the hex pattern.",
+   "packs": [
+    "materials_dynamic_material",
+    "lighting_lookdev"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_material_validate",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "create_material",
+    "set_actor_material"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "shield",
+    "force field",
+    "sci-fi",
+    "hexagon",
+    "custom HLSL",
+    "additive"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Material name",
+     "default": "M_HexShield"
+    },
+    {
+     "name": "colour",
+     "label": "Shield colour (linear r,g,b)",
+     "default": "0.2,0.6,1.0"
+    },
+    {
+     "name": "hex_scale",
+     "label": "Hex cells across the UV",
+     "default": "12"
+    },
+    {
+     "name": "pulse_period",
+     "label": "Pulse period (seconds)",
+     "default": "1.5"
+    },
+    {
+     "name": "max_instructions",
+     "label": "Pixel instruction budget",
+     "default": "180"
+    }
+   ],
+   "prompt": "Create `{{content_folder}}/{{name}}.{{name}}`, a sci-fi energy shield for a dome or bubble mesh: a bright Fresnel rim, a slowly scrolling hex-cell grid, and a pulse.\n1. One hyper_material_apply_plan (fresh OperationId, bDryRun false): create_material with MaterialSettings blend_mode additive, shading_model unlit, two_sided true. Use graph nodes for everything they can express: fresnel (exponent 3) for the rim; a panner (speed_y 0.02) on a texcoord multiplied by scalar_parameter HexScale ({{hex_scale}}); time and sine for a {{pulse_period}} s pulse. Only the hex-cell edge mask is a custom_hlsl node (output_type float1), with a Justification that graph nodes cannot find the nearest hex centre per pixel. emissive = vector_parameter ShieldColor ({{colour}}) x scalar_parameter Intensity (8) x (rim + hex edges x pulse). Group the parameters under Shield. If the authoring mode refuses Custom HLSL (Nodes mode), build a square grid from frac and abs instead and say so. If the reply is pending, hyper_operation_wait.\n2. hyper_material_validate until Stats.status is compiled; list CustomHlslNodeIds.\n3. If the lighting_lookdev pack is available and {{selected_actor}} is the shield mesh: hyper_lighting_inspect, hyper_lighting_apply_plan with set_actor_material (bSave false), then hyper_capture_view of the viewport with FrameCount 3, TimeMode material_time, MaterialTimes 0, 1 and 2.\nReport a PASS/FAIL table: 0 compile errors, at most one Custom HLSL node and it has a justification, additive and unlit, pixel instructions <= {{max_instructions}}, ChangedPixelFraction > 0.01 in both frame diffs. Then the frames on their own lines."
+  },
+  {
+   "id": "materials-textures.cut-shader-cost",
+   "title": "Cut a material's shader cost without changing its look",
+   "summary": "Remove dead branches and redundant math from the selected material until it fits an instruction budget, proving the preview still matches.",
+   "packs": [
+    "materials_dynamic_material",
+    "lighting_lookdev"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_validate",
+    "hyper_asset_dependency_graph",
+    "hyper_material_inspect",
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "edit_graph"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "optimisation",
+    "performance",
+    "shader instructions",
+    "cleanup",
+    "edit graph"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Material"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "max_instructions",
+     "label": "Pixel instruction budget",
+     "default": "200"
+    }
+   ],
+   "prompt": "Bring {{selected_asset}} under {{max_instructions}} pixel shader instructions while keeping its look.\n1. hyper_material_validate (load the asset with Unreal MCP's asset tools first if it reports asset_not_loaded; repeat while Stats.status is compiling): record pixel instructions, samplers and texture samples, and copy its PreviewImagePath PNG to a `before_` file, since the next validate overwrites it. hyper_asset_dependency_graph (direction referencers) so we know which instances inherit the change.\n2. hyper_material_inspect: find nodes that reach no output, duplicate texture samples of the same texture and UVs, math on constants that folds into one constant, and Custom HLSL that a catalog node now covers. Rank them by expected saving.\n3. hyper_material_apply_plan with edit_graph at the inspect revision for the safe wins only (RemoveNodeIds, rewired Edges and Outputs). Never remove a parameter: instances may override it. Dry run first (bDryRun true) and check Issues, then bDryRun false with a fresh OperationId. If the reply is pending, hyper_operation_wait.\n4. hyper_material_validate again. If the lighting_lookdev pack is available, hyper_image_compare the new preview (candidate) against the `before_` copy (reference) in aligned mode, TargetScore 97.\nReport a PASS/FAIL table: 0 compile errors, pixel instructions before -> after and <= {{max_instructions}}, samplers before -> after, no parameter removed, aligned score >= 97. Then before and after previews on their own lines. If the budget cannot be met without changing the look, say what would have to give."
+  },
+  {
+   "id": "materials-textures.repair-broken-graph",
+   "title": "Diagnose and repair a material that won't compile",
+   "summary": "Find why the selected material fails, preview HyperAI's repair as a dry run, fix the graph at its revision, and prove it compiles clean.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_validate",
+    "hyper_log_tail",
+    "hyper_material_inspect",
+    "hyper_material_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "repair_semantic_graph",
+    "edit_graph"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "repair",
+    "compile errors",
+    "broken material",
+    "default material",
+    "debug"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Material"
+    ],
+    "min": 1
+   },
+   "prompt": "{{selected_asset}} is broken: it fails to compile or renders as the default material. Find out why and fix only what is broken.\n1. hyper_material_validate (load the asset with Unreal MCP's asset tools first if it reports asset_not_loaded): errors, warnings, Issues and Stats.CompileErrors. hyper_log_tail for shader compile errors that name it.\n2. hyper_material_inspect for the revision, nodes, edges and outputs. Find the cause: dangling inputs, cycles, duplicate GUIDs, a texture sample with no texture or a sampler_type that does not match its texture, a vector wired into a scalar-only output, or opaque nodes.\n3. Dry run hyper_material_apply_plan (bDryRun true) with repair_semantic_graph at that ExpectedRevision and the RepairKinds that apply (disconnect_dangling_inputs, disconnect_cycles, regenerate_duplicate_guids) to see what it would change. It is evidence only and never runs.\n4. Make the real fix as edit_graph at the same revision (Disconnects, RemoveNodeIds, PropertyEdits such as a texture node's sampler_type, rewired Edges and Outputs), with bDryRun false and a fresh OperationId. If the reply is pending, hyper_operation_wait.\n5. hyper_material_validate until Stats.status is compiled.\nReport a table: each problem found, its cause, the fix, and PASS/FAIL after. Then PASS/FAIL rows for 0 compile errors and for the preview showing the material rather than the default checkerboard, and the preview on its own line as ![fixed](absolute path)."
+  },
+  {
+   "id": "materials-textures.match-surface-to-photo",
+   "title": "Match a material instance to a reference photo",
+   "summary": "Tune an instance of the selected master on a preview mesh, one parameter change at a time, until a capture scores against your photo.",
+   "packs": [
+    "materials_dynamic_material",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "image-match"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_inspect",
+    "hyper_material_apply_plan",
+    "hyper_operation_wait",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_capture_view",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "create_material_instance",
+    "lock_exposure",
+    "set_actor_material",
+    "set_instance_parameters"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "reference",
+    "photo",
+    "image match",
+    "material instance",
+    "look-dev",
+    "PBR"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Material"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "reference",
+     "label": "Reference photo (project path)",
+     "default": "Content/References/surface.png"
+    },
+    {
+     "name": "instance",
+     "label": "Instance name",
+     "default": "MI_MatchedSurface"
+    },
+    {
+     "name": "ev100",
+     "label": "Locked EV100",
+     "default": "12",
+     "hint": "About 15 sunlit, 12 overcast, 8 bright interior"
+    },
+    {
+     "name": "target",
+     "label": "Target score",
+     "default": "75"
+    },
+    {
+     "name": "session",
+     "label": "Match session id",
+     "default": "surface_match"
+    },
+    {
+     "name": "max_iterations",
+     "label": "Iteration limit",
+     "default": "10"
+    }
+   ],
+   "prompt": "Make an instance of the master {{selected_asset}} look like the photo `{{reference}}`, shown on the preview mesh {{selected_actor}}. Follow the image-match skill. If the lighting_lookdev pack is unavailable, or no mesh is selected in the level, say so and stop.\n1. Open the photo and say in one sentence what defines the surface (colour, roughness, pattern scale, wetness). hyper_material_inspect the master for its parameters.\n2. hyper_material_apply_plan (fresh OperationId, bDryRun false): create_material_instance `{{content_folder}}/{{instance}}.{{instance}}` from the master with your first guess. If the reply is pending, hyper_operation_wait.\n3. hyper_lighting_inspect for the revision, then one hyper_lighting_apply_plan with lock_exposure ({{ev100}}) and set_actor_material putting the instance on {{selected_actor}}, bSave false.\n4. Loop at most {{max_iterations}} times: hyper_capture_view framing the mesh close up; hyper_image_compare (mode look, TargetScore {{target}}, SessionId {{session}}, a Note naming the values just changed); then one hyper_material_apply_plan with set_instance_parameters changing one parameter or one coherent pair, with a fresh OperationId. Stop on bMatched or bPlateau.\nReport a table of iterations (score, what changed), then PASS/FAIL: best score >= {{target}}, the instance's parent is the master, the master unchanged, the level left unsaved. Then the best side-by-side on its own line as ![best](absolute path)."
+  },
+  {
+   "id": "materials-textures.tg-noise-mask",
+   "title": "Generate a grunge noise mask with Texture Graph",
+   "summary": "Create a Texture Graph that renders a grayscale noise mask, export it as a linear texture, and prove the texture was written.",
+   "packs": [
+    "texture_graph"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_texture_graph_inspect",
+    "hyper_texture_graph_apply_plan",
+    "hyper_operation_wait",
+    "hyper_texture_graph_validate"
+   ],
+   "ops": [
+    "add_node",
+    "set_pin_value",
+    "connect",
+    "set_output"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "texture graph",
+    "noise",
+    "mask",
+    "procedural texture",
+    "grunge",
+    "export"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Mask name",
+     "default": "Grunge"
+    },
+    {
+     "name": "frequency",
+     "label": "Noise frequency (0-20)",
+     "default": "8"
+    },
+    {
+     "name": "octaves",
+     "label": "Noise octaves (0-10)",
+     "default": "4"
+    },
+    {
+     "name": "size",
+     "label": "Size (pixels)",
+     "default": "1024",
+     "hint": "A power of two from 8 to 8192"
+    }
+   ],
+   "prompt": "Create the Texture Graph `{{content_folder}}/TG_{{name}}.TG_{{name}}` (an object path) that outputs a grayscale grunge noise mask, and export it as the texture `T_{{name}}_Mask`. If the texture_graph pack is unavailable, say so and stop.\n1. hyper_texture_graph_inspect on that path with bIncludeExpressionCatalog true: confirm the asset does not exist yet and that TG_Expression_Noise is in the catalog.\n2. One hyper_texture_graph_apply_plan (fresh OperationId, bDryRun false, bCreate true, bSave true, bExport true; this preset saves because it writes a texture): add_node a TG_Expression_Noise keyed `noise`; set_pin_value its Frequency to {{frequency}} (0-20) and Octaves to {{octaves}} (0-10), and any other pin only by a name inspect listed; connect noise's Output pin to the Source input of the Output node (node_id 0); set_output on node 0 with BaseName `T_{{name}}_Mask`, FolderPath {{content_folder}}, Width and Height {{size}}, bSRGB false (a mask is linear data). If the reply is pending, hyper_operation_wait.\n3. hyper_texture_graph_validate with Policy exported; while ExportsInFlight is above 0, validate again.\nReport a PASS/FAIL table: the graph exists, 0 errors, the output is connected, the texture exists at its TexturePath with TextureState saved, {{size}} x {{size}}, sRGB off. Give the texture's object path so I can use it in a material."
+  },
+  {
+   "id": "materials-textures.tg-output-audit",
+   "title": "Fix a Texture Graph's export settings",
+   "summary": "Check each output of the selected Texture Graph for size, sRGB and naming, fix the wrong ones, re-export, and prove the textures were written.",
+   "packs": [
+    "texture_graph"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_texture_graph_inspect",
+    "hyper_texture_graph_apply_plan",
+    "hyper_operation_wait",
+    "hyper_texture_graph_validate"
+   ],
+   "ops": [
+    "set_output"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "texture graph",
+    "export",
+    "sRGB",
+    "texture size",
+    "naming",
+    "audit"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "TextureGraph"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "max_size",
+     "label": "Largest texture size (pixels)",
+     "default": "2048"
+    }
+   ],
+   "prompt": "Audit and fix the export settings of the Texture Graph {{selected_asset}}. If the texture_graph pack is unavailable, say so and stop.\n1. hyper_memory_recall \"texture naming\" for the project's prefix and suffix conventions.\n2. hyper_texture_graph_inspect with bLoad true. If bOpenInEditor is true, ask me to close its tab and stop. For each output list BaseName, FolderPath, Width x Height (0 is Auto), TextureFormat, bSRGB, bShouldExport, TexturePath and TextureState.\n3. Decide each output's correct settings: sRGB on for colour (base colour, albedo, emissive) and off for masks, roughness, height and normals; Width and Height a power of two no larger than {{max_size}}; BaseName following the recalled convention, else `T_<Name>_<Suffix>`.\n4. One hyper_texture_graph_apply_plan (fresh OperationId, bDryRun false, ExpectedRevision from inspect, bSave true, bExport true) with one set_output per output that needs a change, and nothing else. If the reply is pending, hyper_operation_wait.\n5. hyper_texture_graph_validate with Policy exported; validate again while ExportsInFlight is above 0.\nReport a table with one row per output: before -> after, then PASS/FAIL for sRGB right, power-of-two size <= {{max_size}}, name, and TextureState saved. Mark unchanged outputs INFO."
+  },
+  {
+   "id": "materials-textures.tg-tidy-parameters",
+   "title": "Tidy a Texture Graph and name its parameters",
+   "summary": "Remove dead nodes, give exposed parameters artist-friendly names, then comment and lay out the selected Texture Graph without changing its output.",
+   "packs": [
+    "texture_graph"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_texture_graph_inspect",
+    "hyper_texture_graph_apply_plan",
+    "hyper_operation_wait",
+    "hyper_texture_graph_validate"
+   ],
+   "ops": [
+    "remove_node",
+    "set_pin_alias",
+    "set_node_comment",
+    "move_node"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "texture graph",
+    "cleanup",
+    "parameters",
+    "layout",
+    "handoff"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "TextureGraph"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "naming_hint",
+     "label": "Example parameter names",
+     "default": "GrungeAmount, EdgeWear, TileCount",
+     "hint": "No spaces or commas: Texture Graph names refuse them"
+    },
+    {
+     "name": "row_spacing",
+     "label": "Row spacing (graph units)",
+     "default": "300"
+    }
+   ],
+   "prompt": "Tidy the Texture Graph {{selected_asset}} so another artist can use it, without changing what it renders. If the texture_graph pack is unavailable, say so and stop.\n1. hyper_texture_graph_inspect with bLoad true: nodes, edges, outputs, and every pin with bParam true and its Alias. Note which node and pin feeds each Output node.\n2. Find dead nodes: nodes with no path through edges to any Output node. List them.\n3. hyper_texture_graph_apply_plan as a dry run (bDryRun true, ExpectedRevision from inspect, bExport false, bAutoLayout false): remove_node each dead node; set_pin_alias each parameter pin to a clear PascalCase name without spaces or commas, which Texture Graph refuses (like {{naming_hint}}); set_node_comment on the first node of each output's branch saying what it makes; move_node so each branch reads left to right, one row per output, rows {{row_spacing}} units apart. Check the dry run's Issues are empty, then submit the same ops with bDryRun false, a fresh OperationId, bSave true and bExport false. If the reply is pending, hyper_operation_wait.\n4. hyper_texture_graph_validate (Policy authoring), then hyper_texture_graph_inspect again.\nReport a PASS/FAIL table: 0 errors, dead nodes removed = dead nodes found, every Output node fed by the same node and pin as before, every parameter has an alias, each branch commented."
+  },
+  {
+   "id": "materials-textures.tg-normal-from-height",
+   "title": "Bake a normal map from a height texture with Texture Graph",
+   "summary": "Build a Texture Graph that turns the selected height texture into a normal map, export it, and plug it into a material instance.",
+   "packs": [
+    "texture_graph",
+    "materials_dynamic_material"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_texture_graph_inspect",
+    "hyper_texture_graph_apply_plan",
+    "hyper_operation_wait",
+    "hyper_texture_graph_validate",
+    "hyper_material_apply_plan"
+   ],
+   "ops": [
+    "add_node",
+    "set_pin_value",
+    "connect",
+    "set_output",
+    "set_instance_parameters"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "texture graph",
+    "normal map",
+    "height map",
+    "bake",
+    "material instance"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Texture2D"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Texture name",
+     "default": "RockCliff"
+    },
+    {
+     "name": "strength",
+     "label": "Normal strength (0-2)",
+     "default": "1"
+    },
+    {
+     "name": "size",
+     "label": "Size (pixels)",
+     "default": "2048",
+     "hint": "A power of two from 8 to 8192"
+    },
+    {
+     "name": "instance_path",
+     "label": "Material instance (object path)",
+     "default": "/Game/Materials/MI_RockCliff.MI_RockCliff"
+    },
+    {
+     "name": "normal_param",
+     "label": "Normal texture parameter",
+     "default": "Normal"
+    }
+   ],
+   "prompt": "Turn the height texture {{selected_asset}} into a normal map with Texture Graph, then use it on the material instance `{{instance_path}}`. If the texture_graph pack is unavailable, say so and stop.\n1. hyper_texture_graph_inspect on the object path `{{content_folder}}/TG_{{name}}_Normal.TG_{{name}}_Normal` with bIncludeExpressionCatalog true: confirm the path is free and that TG_Expression_Texture and TG_Expression_NormalFromHeightMap are in the catalog. If either is missing, name what the catalog offers instead and stop.\n2. One hyper_texture_graph_apply_plan (fresh OperationId, bDryRun false, bCreate true, bSave true, bExport true): add_node a TG_Expression_Texture and set_pin_value its Source to the height texture's object path; add_node a TG_Expression_NormalFromHeightMap and set_pin_value its Strength to {{strength}} (0-2); connect the texture node's Output to the normal node's Input, and the normal node's Output to the Source of the Output node (node_id 0); set_output on node 0 with BaseName `T_{{name}}_N`, FolderPath {{content_folder}}, Width and Height {{size}}, bSRGB false. If the reply is pending, hyper_operation_wait.\n3. hyper_texture_graph_validate with Policy exported; validate again while ExportsInFlight is above 0.\n4. hyper_material_apply_plan (fresh OperationId, bDryRun false): set_instance_parameters on `{{instance_path}}`, texture parameter `{{normal_param}}` = the exported texture's object path. The tool reads the value back.\nReport a PASS/FAIL table: graph 0 errors, texture saved at its TexturePath, {{size}} px, sRGB off, `{{normal_param}}` set on the instance, and a WARN row reminding me that a Normal sampler needs the texture's compression set to Normalmap, which this pack cannot confirm."
+  },
+  {
+   "id": "materials-textures.material-designer-audit",
+   "title": "Audit a Material Designer material",
+   "summary": "Read the selected Material Designer material's layers, stages and values, check it compiles, and list what an artist can tune.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_dynamic_material_inspect",
+    "hyper_dynamic_material_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "Material Designer",
+    "dynamic material",
+    "layers",
+    "audit",
+    "read-only"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "DynamicMaterialInstance"
+    ],
+    "min": 1
+   },
+   "prompt": "Audit the Material Designer material {{selected_asset}} without changing it. If the Material Designer (DynamicMaterial) plugin is off, the inspect reply says so: tell me and stop.\n1. hyper_dynamic_material_inspect with TargetFamily dynamic_material_instance (dynamic_material_model if the path is a model). If it reports the asset is not loaded, load it with Unreal MCP's asset tools and inspect again. Page with Cursor until NextCursor is empty.\n2. List each slot's layers in order with their enabled state and stages; then every value: parameter name, type, current value, default, allowed range, and whether it is exposed.\n3. hyper_dynamic_material_validate on the same path: errors, warnings, and whether the generated material compiles.\nReport a table of the values an artist can tune (name, current, default, range). Then a PASS/FAIL table: validates with 0 errors, the generated material compiles without errors, every exposed value has a readable name, and a WARN row for each disabled layer or stage (left off on purpose, or by accident?)."
+  },
+  {
+   "id": "materials-textures.material-designer-plan-tweak",
+   "title": "Plan a Material Designer colour and layer change",
+   "summary": "Check a colour, a value and a layer toggle on the selected Material Designer material as a dry-run plan, with exact values to set.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_dynamic_material_inspect",
+    "hyper_dynamic_material_apply_plan",
+    "hyper_dynamic_material_validate"
+   ],
+   "ops": [
+    "value.set_color",
+    "value.set_scalar",
+    "layer.set_enabled"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "Material Designer",
+    "dynamic material",
+    "dry run",
+    "layers",
+    "colour"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "DynamicMaterialInstance"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "colour_value",
+     "label": "Colour value name",
+     "default": "Base Color"
+    },
+    {
+     "name": "colour",
+     "label": "New colour (linear r,g,b,a)",
+     "default": "0.8,0.1,0.1,1"
+    },
+    {
+     "name": "scalar_value",
+     "label": "Number value name",
+     "default": "Roughness"
+    },
+    {
+     "name": "scalar",
+     "label": "New number",
+     "default": "0.4"
+    },
+    {
+     "name": "layer_action",
+     "label": "Layer action (enable or disable)",
+     "default": "disable"
+    },
+    {
+     "name": "layer",
+     "label": "Layer name",
+     "default": "Dirt"
+    }
+   ],
+   "prompt": "Plan a change to the Material Designer material {{selected_asset}}: set the colour value `{{colour_value}}` to {{colour}}, set the value `{{scalar_value}}` to {{scalar}}, and {{layer_action}} the layer `{{layer}}`. If the DynamicMaterial plugin is off, say so and stop.\n1. hyper_dynamic_material_inspect (TargetFamily dynamic_material_instance): find the exact ComponentPath of each value and of the layer, their current values and ranges, and the Revision.\n2. hyper_dynamic_material_apply_plan with bDryRun true and Operations, each with that ExpectedRevision: value.set_color (VectorValue r,g,b,a) and value.set_scalar (ScalarValue inside its range) on those ComponentPaths, and layer.set_enabled (bBoolValue) for the layer. Read PlanHash, Effects and Issues.\n3. This pack only seals Material Designer plans as evidence: Status bounded_compile_or_runtime_cas_backend_required means nothing ran, and a bDryRun false call would not run either, so send none and do not write the asset any other way. If inspect's bMutationRevisionComplete is false, the plan cannot seal: list MutationRevisionBlockers.\n4. hyper_dynamic_material_validate on the material either way.\nReport a table: each change with its ComponentPath, current -> planned value, PASS/FAIL for in range, and whether the plan sealed (PlanHash) or why not. Then the exact steps to make each change by hand in the Material Designer panel."
+  }
+ ]
+}
