@@ -14,7 +14,7 @@ You make the materials, textures, visual effects and animation data of this Unre
 - For Niagara effects, follow the unreal-niagara skill: emitters, modules, HLSL modules, simulation stages and renderer settings in one plan, then validate and probe that the emitters are live.
 - For animation, follow the unreal-animation skill: montages and sequences with `hyper_animation_apply_plan`, retargeting with `hyper_retarget_apply_plan`, and motion matching databases with `hyper_pose_search_apply_plan`.
 - With a reference image, follow the image-match skill: capture, compare in a session, one change at a time.
-- Props modelled with `hyper_model_apply_plan` carry vertex-colour tints and material ids (slot N holds id N). To give them the project's materials, set each slot's material with Epic's static mesh tools; to change their UVs too, send the plan that made them again with a `uv` op sized to the texture and `write_asset` with `Replace=true` and `Materials` slot by slot (the unreal-modeling skill). The asset keeps only its plan's hash, not the plan.
+- Props modelled with `hyper_model_apply_plan` carry vertex-colour tints and material ids (slot N holds id N). To give them the project's materials, set each slot's material with Epic's static mesh tools; to change their UVs too, send the plan that made them again with a `uv` op sized to the texture and `write_asset` with `Replace=true` and `Materials` slot by slot (`hyper_model_inspect` lists each op's Params). The asset keeps only its plan's hash, not the plan.
 - Touch only the assets your task names, and save them.
 
 Your quality bar, which the QA tester checks:

@@ -59,7 +59,9 @@ Use a token rather than "the selected thing", and a placeholder with a sensible 
 ## What makes a preset give the right result
 
 1. **States the outcome as checkable facts**: exact asset paths under `{{content_folder}}`, exact names and labels,
-   counts, and sizes in the units the tool uses (cm for locations, m for tool sizes, as the skills say).
+   counts, and sizes in the units each tool documents: cm for locations and for the blockout, modelling and spatial
+   tools (`Size`, `Extent`, `Clearance`), m for the landscape, foliage and PCG sizes the level-design skill names
+   (`Patch`, `Spacing`, `RoadMargin`).
 2. **Inspects before it edits**, naming the tool (`hyper_context_snapshot`, `hyper_level_design_inspect` for player
    metrics, `hyper_pcg_scatter_inspect`, ...) and recalling project memory.
 3. **Names the plan tool and its op kinds**, one plan per step with a fresh OperationId, then `hyper_operation_wait`;
@@ -77,13 +79,14 @@ Use a token rather than "the selected thing", and a placeholder with a sensible 
 An example, abbreviated:
 
 ```json
-{"id": "pcg-foliage.forest-ecosystem", "title": "Forest ecosystem on a paint layer",
- "summary": "Grow trees, shrubs and rocks on a landscape layer with PCG, then prove density and clearances.",
- "packs": ["pcg", "worldbuilding_navigation"], "skills": ["unreal-level-design"], "agent": "level-designer",
- "tools": ["hyper_landscape_inspect", "hyper_pcg_scatter_inspect", "hyper_pcg_scatter_apply_plan", "hyper_level_design_validate", "hyper_capture_view"],
+{"id": "pcg-foliage.forest-ecosystem", "title": "Grow a layered pine forest on a paint layer",
+ "summary": "Build a PCG ecosystem of pines, bush clumps, rocks and ferns on one landscape layer, generate it, and prove density, stands and culling.",
+ "packs": ["pcg", "worldbuilding_navigation", "lighting_lookdev"], "skills": ["unreal-level-design"], "agent": "level-designer",
+ "tools": ["hyper_landscape_inspect", "hyper_pcg_scatter_inspect", "hyper_pcg_scatter_apply_plan", "hyper_operation_wait", "hyper_capture_view"],
+ "ops": ["ecosystem.create", "volume.create"],
  "difficulty": "standard", "context": {"selection": "actors", "classes": ["Landscape"], "min": 1},
- "placeholders": [{"name": "layer", "label": "Paint layer", "default": "Grass"}, {"name": "biome", "label": "Biome", "default": "temperate forest"}],
- "prompt": "On {{selected_actor}} in {{level}}, grow a {{biome}} ecosystem on the `{{layer}}` paint layer.\n1. hyper_landscape_inspect: confirm the layer exists and report its coverage.\n2. hyper_pcg_scatter_inspect, then one hyper_pcg_scatter_apply_plan (fresh OperationId) building the ecosystem graph and volume under {{content_folder}}/PCG ...\n3. hyper_operation_wait, then confirm the generated instance counts per species.\n4. Capture two views with hyper_capture_view and report a PASS/FAIL table: density per species, nothing on roads, nothing on slopes over 35 degrees."}
+ "placeholders": [{"name": "layer", "label": "Paint layer", "default": "Grass"}, {"name": "tree_density", "label": "Pine density (per m2)", "default": "0.02"}],
+ "prompt": "On {{selected_actor}} in {{level}}, grow a pine forest on the `{{layer}}` paint layer with PCG. If the PCG pack is off, say so and stop.\n1. hyper_landscape_inspect: confirm `{{layer}}` exists, report its share, and note road layers. hyper_pcg_scatter_inspect with no Graph for existing volumes.\n2. One hyper_pcg_scatter_apply_plan (fresh OperationId, bDryRun false): `ecosystem.create` Graph {{content_folder}}/PCG_PineForest, AvoidLayers the road layers, one biome `Forest` on `{{layer}}`, species big to small: Pines (Density {{tree_density}}, Footprint 4, ...), ...; then `volume.create` Volume `PineForest`, Cover the landscape.\n3. hyper_operation_wait on the OperationId for per-mesh counts.\n4. hyper_capture_view one aerial oblique and one shot from 1.7 m up inside the forest. Report a PASS/FAIL table: all species have instances, each has a cull distance, and the pictures show stands and clearings. Show each picture on its own line."}
 ```
 
 ## A project's own presets
