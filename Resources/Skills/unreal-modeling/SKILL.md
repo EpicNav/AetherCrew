@@ -66,8 +66,8 @@ that fails while building is named the same way, and nothing is written.
 - **Writing:** `write_asset` with `Asset` under `/Game` (`/Game/Env/Props/SM_Crate`), Params `Collision`
   (`convex` by default, `box`, `hulls:N` for concave shapes, `auto`, `complex`, `none`), `Nanite` (off by default),
   `Materials` (`0:/Game/M/MI_Stone,1:/Game/M/MI_Moss`), `Replace=true` to overwrite an existing static mesh
-  (undoable), `LightmapUV`. It writes the mesh as it is at that op: later ops on it, a `drop` too, leave that
-  asset alone.
+  (undoable; its other LODs and hi-res source go too, and a redirector's path is refused), `LightmapUV`. It writes
+  the mesh as it is at that op: later ops on it, a `drop` too, leave that asset alone.
 
 `Select` picks faces for extrude, inset, bevel, noise, smooth, uv, material and color: `all`, `top`, `bottom`,
 `normal:nx,ny,nz,maxdeg`, `box:x0,y0,z0,x1,y1,z1`, `sphere:x,y,z,r`, `plane:ox,oy,oz,nx,ny,nz` or `material:id`,
