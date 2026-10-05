@@ -110,5 +110,6 @@ the engine's property names in Unreal's text form, as `hyper_pose_search_inspect
 - `database.build` indexes the database after the edits are saved; `Built` reports its pose count. A build that fails
   names no single cause: inspect the schema's `Notes` (missing bones) and the database's (animations of another skeleton).
 
-The database is searched by a Motion Matching node in an Animation Blueprint, fed by a Pose History node; build that
-graph with `hyper_anim_blueprint_apply_plan`.
+The database is searched by a Motion Matching node in an Animation Blueprint, fed by a Pose History node.
+`hyper_anim_blueprint_apply_plan` does not build the Motion Matching node yet (it reports it as unsupported): place
+it in the Animation Blueprint editor, then check the graph with `hyper_anim_blueprint_validate`.
