@@ -6,13 +6,16 @@
 #include "HyperAIStudioNativeReadToolset.h"
 
 #include "Dom/JsonObject.h"
+#include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityCatalogCounts.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Guid.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Tests/AutomationCommon.h"
 #include "ToolsetRegistry/ToolsetRegistrySubsystem.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
 #include "UObject/FieldIterator.h"
@@ -1119,6 +1122,55 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 				}
 		}
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNativeReadJobOperationTest,
+	"HyperAIStudio.NativeTools.NativeRead.JobOnlyOperation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioNativeReadJobOperationTest::RunTest(const FString& Parameters)
+{
+	// Work that runs outside the journal, such as a PCG generation, is followed by its job alone.
+	const FString OperationId = TEXT("jobonly-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower();
+	const TSharedRef<bool> bFinish = MakeShared<bool>(false);
+	FHyperAIStudioAsyncJobRequest Request;
+	Request.PackId = TEXT("tests");
+	Request.ToolName = TEXT("hyper_test_job");
+	Request.Target = TEXT("JobOnlyOperation");
+	Request.OperationId = OperationId;
+	Request.DeadlineMs = 30 * 1000;
+	Request.PollIntervalMs = 50;
+	FString JobId;
+	FString Error;
+	const bool bStarted = FHyperAIStudioAsyncJobHost::Start(Request, [bFinish](FString& OutProgress, FString& OutDiagnostic)
+		{
+			if (!*bFinish)
+			{
+				OutProgress = TEXT("working");
+				return EHyperAIStudioAsyncJobPoll::Running;
+			}
+			OutDiagnostic = TEXT("made 12 things");
+			return EHyperAIStudioAsyncJobPoll::Completed;
+		}, JobId, Error);
+	if (!TestTrue(TEXT("the job starts: ") + Error, bStarted)) return false;
+	const FHyperAIOperationStatus Running = UHyperAIStudioNativeReadToolset::hyper_operation_status(OperationId);
+	TestTrue(TEXT("an operation only a job follows is found"), Running.bOk && Running.bFound);
+	TestEqual(TEXT("and reads as running"), Running.Status, FString(TEXT("running")));
+	TestFalse(TEXT("so a wait keeps waiting"), Running.bTerminal);
+	TestEqual(TEXT("from its job"), Running.JournalAccessMode, FString(TEXT("async_job")));
+	*bFinish = true;
+	const double Began = FPlatformTime::Seconds();
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, OperationId, Began]()
+	{
+		if (FHyperAIStudioAsyncJobHost::IsRunning(OperationId) && FPlatformTime::Seconds() - Began < 10.0) return false;
+		const FHyperAIOperationStatus Done = UHyperAIStudioNativeReadToolset::hyper_operation_status(OperationId);
+		TestTrue(TEXT("the finished job's operation is found and done"), Done.bFound && Done.bTerminal);
+		TestEqual(TEXT("as completed"), Done.Status, FString(TEXT("completed")));
+		TestTrue(TEXT("with what the job said: ") + Done.Diagnostic, Done.Diagnostic.Contains(TEXT("made 12 things")));
+		return true;
+	}));
 	return true;
 }
 

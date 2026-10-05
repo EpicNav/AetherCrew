@@ -1,6 +1,6 @@
 ---
 name: unreal-level-design
-description: Build and dress levels with HyperAI's world tools - landscapes from heightmaps or noise, sculpted and painted by height and slope, with roads laid as splines; foliage types scattered by density, slope, height and paint layer, placed at points, thinned and erased; procedural PCG scatter over large areas, retuned and regenerated; World Partition data layers, streaming, HLOD layers, runtime grids and editor regions; blockouts; and checks against player metrics and Map Check. Use for terrain, open worlds, set dressing and level layout.
+description: Build and dress levels with HyperAI's world tools - landscapes from heightmaps or noise, sculpted and painted by height and slope, with roads laid as splines; foliage types scattered by density, slope, height and paint layer, placed at points, thinned and erased; procedural PCG scatter and ecosystems over large areas (biomes on paint layers, species layered big to small, stands and clumps), retuned and regenerated, and any PCG graph read back as recipes; World Partition data layers, streaming, HLOD layers, runtime grids and editor regions; blockouts; and checks against player metrics and Map Check. Use for terrain, open worlds, set dressing and level layout.
 ---
 
 # Levels: terrain, roads, foliage and streaming
@@ -9,7 +9,7 @@ description: Build and dress levels with HyperAI's world tools - landscapes from
 |---|---|---|
 | landscapes: make, sculpt, paint, edit layers, roads | `hyper_landscape_inspect` | `hyper_landscape_apply_plan` |
 | foliage: types, scatter, place, thin, erase | `hyper_foliage_inspect` | `hyper_foliage_apply_plan` |
-| procedural scatter: PCG graphs and volumes | `hyper_pcg_scatter_inspect` | `hyper_pcg_scatter_apply_plan` |
+| procedural scatter and ecosystems: PCG graphs and volumes | `hyper_pcg_scatter_inspect` | `hyper_pcg_scatter_apply_plan` |
 | World Partition: data layers, streaming, HLOD layers, grids, editor regions | `hyper_world_partition_inspect` | `hyper_world_partition_apply_plan` |
 | blockouts: blocks, ramps, stairs, markers | `hyper_level_design_inspect` | `hyper_level_blockout_apply_plan` |
 | player metrics, routes, sightlines, Map Check | | `hyper_level_design_validate` |
@@ -28,7 +28,7 @@ name themselves are meters. `Settings` are Unreal's own properties, in Unreal's 
 1. **Ground.** Make or shape the landscape, then paint it.
 2. **Roads.** Lay roads and paths through the landscape, so the ground under them is leveled and painted.
 3. **Foliage and scatter.** Scatter last, so it reads the final ground, slopes and paint. Dress areas by hand with
-   foliage, and cover large areas you will retune with a PCG scatter.
+   foliage, and cover large areas you will retune with a PCG ecosystem (or a one-layer PCG scatter).
 4. **Streaming.** In a World Partition level, set up data layers, always-loaded actors and HLOD layers.
 5. **Check.** Run `hyper_level_design_validate`, and look at the level from where the player stands.
 
@@ -86,10 +86,11 @@ Pines on the grass that stay off the road, rocks on slopes, the camp kept clear,
   crowded, in a clearing). Read it and adjust before scattering more.
 - `foliage.erase` with `Fraction` 0.5 thins a region. `foliage_type.remove` takes a type out of the level.
 
-## Procedural scatter
+## Procedural scatter and ecosystems
 
-A PCG scatter follows rules over a whole area: change a rule and regenerate, rather than editing instances. Rocks over
-the valley, two meshes weighted 3 to 1, kept off slopes past 35 degrees:
+PCG follows rules over a whole area: change a rule and regenerate, rather than editing instances. A one-layer scatter
+puts one set of meshes on the ground. Rocks over the valley, two meshes weighted 3 to 1, kept off slopes past 35
+degrees:
 
 ```json
 {"Operations": [
@@ -103,15 +104,81 @@ the valley, two meshes weighted 3 to 1, kept off slopes past 35 degrees:
 
 - `Density` is points per square meter, where foliage counts per 100 m2: 0.02 for sparse trees, 0.05 to 0.5 for
   rocks, 4 for grass. `Spacing` keeps instances that many meters apart. `SlopeMax` keeps them off steeper ground,
-  and 0 allows any. `Scale` is a uniform range, Min (X) to Max (Y).
-- The volume generates after the plan, as a job: call `hyper_operation_wait` with the `OperationId`. Its result says
-  how many instances of how many meshes came from how many points, and why, when none did.
-- To change a scatter, send `graph.set` and `volume.generate` in one plan. Every volume running the graph follows
-  the new rules when it regenerates. `volume.clear` removes a volume's instances.
-- A volume scatters over the landscape inside it, so make it tall enough to hold the ground. Landscapes made with
-  `hyper_landscape_apply_plan` are found at once. In a World Partition level, PCG finds a landscape kept whole (not
-  split into streaming proxies) only once the level is saved, and `bSave: true` saves it before generating.
-- Foliage does what this scatter does not: paint layers, clearings, keeping out from under roofs, and hero pieces.
+  and 0 allows any. `Scale` is a uniform range, Min (X) to Max (Y). New graphs stand instances upright;
+  `AlignToGround: "true"` leans them with the slope, for rocks and debris.
+
+An ecosystem is a whole natural environment in one graph: biomes on landscape paint layers, each with its species
+listed big to small, and every species keeping out of the room the ones before it take. A forest and an alpine
+meadow over the valley, off the road and clear of tagged buildings, the volume covering the whole landscape:
+
+```json
+{"Operations": [
+ {"Kind": "ecosystem.create", "Graph": "/Game/PCG/PCG_Valley",
+  "AvoidLayers": ["Dirt"], "AvoidTags": ["Building"], "AvoidMargin": 3,
+  "Biomes": [
+   {"Name": "Forest", "Layer": "Grass", "SlopeMax": 30, "Height": {"X": 0, "Y": 140},
+    "Species": [
+     {"Name": "Pines", "Meshes": [{"Mesh": "/Game/Env/SM_Pine_A", "Weight": 3}, {"Mesh": "/Game/Env/SM_Pine_B"}],
+      "Density": 0.02, "Footprint": 4, "Clearance": 1.25, "Patch": 80, "Coverage": 0.7, "CullDistance": 400},
+     {"Name": "Bushes", "Meshes": [{"Mesh": "/Game/Env/SM_Bush"}], "Density": 0.01, "Footprint": 1.5,
+      "Cluster": 5, "ClusterRadius": 3, "CullDistance": 120},
+     {"Name": "Rocks", "Meshes": [{"Mesh": "/Game/Env/SM_Rock"}], "Density": 0.03, "Footprint": 1.5,
+      "Scale": {"X": 0.5, "Y": 1.5}, "bAlignToGround": true, "Tilt": 10, "Sink": 20, "CullDistance": 150},
+     {"Name": "Ferns", "Meshes": [{"Mesh": "/Game/Env/SM_Fern"}], "Density": 1, "Footprint": 0.6,
+      "Patch": 15, "Coverage": 0.5, "KeepOutOf": ["Rocks"], "CullDistance": 60}]},
+   {"Name": "Meadow", "Layer": "Grass", "Height": {"X": 140, "Y": 400},
+    "Species": [{"Name": "Grass", "Meshes": [{"Mesh": "/Game/Env/SM_Grass"}], "Density": 3, "Footprint": 0.4,
+      "CullDistance": 50}]}]},
+ {"Kind": "volume.create", "Graph": "/Game/PCG/PCG_Valley", "Volume": "ValleyLife", "Cover": "Valley",
+  "Partitioned": "true"}],
+ "bDryRun": false, "OperationId": "valley-life"}
+```
+
+- List species big to small: canopy trees, understory, bushes, rocks, debris, ground cover. Each keeps out of the
+  room (`Footprint` x `Clearance`) of every species before it in its biome; `KeepOutOf` names only some (the ferns
+  above grow under the pines but not on rocks), and `["none"]` none.
+- Starting points, per square meter and meters. With `Cluster`, `Density` counts clumps.
+
+  | species | Density | Footprint | CullDistance |
+  |---|---|---|---|
+  | canopy trees | 0.005 to 0.03 | 4 to 8 | 300 to 600, or 0 with HLOD |
+  | understory trees | 0.01 to 0.05 | 2 to 4 | 200 to 400 |
+  | bushes | 0.1 to 0.5, clumps 0.005 to 0.02 | 1 to 2 | 80 to 150 |
+  | rocks | 0.02 to 0.2 | 0.5 to 3 | 100 to 250 |
+  | debris, branches | 0.1 to 1 | 0.3 to 1 | 30 to 60 |
+  | grass, ground cover | 1 to 5 | 0.2 to 0.6 | 30 to 80 |
+
+- `Patch` and `Coverage` grow a species in stands with clearings between: stands about `Patch` meters across over
+  `Coverage` of the biome. Trees take 50 to 200 m stands, ferns and flowers 10 to 30 m; without them a species spreads
+  evenly. `Cluster` stamps clumps of that many over `ClusterRadius` meters.
+- Trees and bushes stand upright on slopes; `bAlignToGround` leans rocks and debris with the ground. `Tilt` adds a
+  random lean in degrees, and `Sink` pushes bases into the ground in cm so they do not float.
+- `Height` bands (meters above zero) and `SlopeMax` place biomes by elevation: the treeline, scree on the heights,
+  reeds just above the water. `LayerMin` (0.5) is how much paint a biome needs.
+- `AvoidLayers` keeps everything off road and riverbank layers. `AvoidTags` keeps `AvoidMargin` meters clear around
+  tagged actors, such as houses and camps.
+- The same names and `Seed` grow the same way every time; change `Seed` for another arrangement.
+- `Cover` sizes a volume to a landscape. `Partitioned: "true"` generates in World Partition cells that stream with
+  the world: use it in a World Partition level more than a few hundred meters across. Species keep out of each other
+  within a cell, so two may rarely meet at a cell's edge.
+
+Reading and changing:
+
+- `hyper_pcg_scatter_inspect` with a `Graph` reads any PCG graph, a marketplace generator as well as yours: one recipe
+  per mesh spawner, the nodes its points pass through with the settings that differ from defaults, its meshes and
+  cull distances. `Detail: "nodes"` adds every node, `"full"` every edge too, and `Filter` narrows to a name, title or
+  mesh. Read a generator before you copy its method.
+- For an ecosystem, `Ecosystem` in that result is the op that builds it, as `ecosystem.set` takes it. Change what you
+  need and send it back whole, with `volume.generate`: `ecosystem.set` rebuilds the graph from the biomes it is given.
+- The volume generates after the plan, as a job: call `hyper_operation_wait` with the `OperationId`. Its result counts
+  the instances of each mesh, and says why when none grew.
+- To change a scatter, send `graph.set` (or `ecosystem.set`) and `volume.generate` in one plan. Every volume running
+  the graph follows the new rules when it regenerates. `volume.clear` removes a volume's instances.
+- A volume grows on the landscape inside it, so make it tall enough to hold the ground, or `Cover` the landscape.
+  Landscapes made with `hyper_landscape_apply_plan` are found at once. In a World Partition level, PCG finds a
+  landscape kept whole (not split into streaming proxies) only once the level is saved, and `bSave: true` saves it
+  before generating.
+- Foliage does what PCG here does not: keeping out from under roofs, and hero pieces placed at points.
 
 ## World Partition
 

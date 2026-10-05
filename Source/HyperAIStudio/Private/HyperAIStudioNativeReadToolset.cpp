@@ -1884,12 +1884,14 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 		return Report;
 	}
 
+	TOptional<FHyperAIStudioAsyncJobStatus> OperationJob;
 	for (const FHyperAIStudioAsyncJobStatus& Job : FHyperAIStudioAsyncJobHost::GetSnapshot())
 	{
 		if (Job.OperationId == OperationId)
 		{
 			Report.JobProgress = FString::Printf(TEXT("%s: %s%s%s"), FHyperAIStudioAsyncJobHost::LexToString(Job.State),
 				*Job.Progress, Job.Diagnostic.IsEmpty() ? TEXT("") : TEXT(" - "), *Job.Diagnostic);
+			OperationJob = Job;
 			break;
 		}
 	}
@@ -2002,6 +2004,25 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 	Report.ReconciledRecordCount = 0;
 	Report.JournalGeneration = Journal.GetGeneration();
 	const TOptional<FHyperAIStudioOperationRecord> Record = Journal.Find(OperationId);
+	// Work that runs as a job outside the journal, such as a PCG scatter's generation, is recorded by its job alone.
+	if (!Record.IsSet() && OperationJob.IsSet())
+	{
+		const bool bRunning = OperationJob->State == EHyperAIStudioAsyncJobState::Running;
+		const bool bCompleted = OperationJob->State == EHyperAIStudioAsyncJobState::Completed;
+		Report.bOk = true;
+		Report.bFound = true;
+		Report.bTerminal = !bRunning;
+		Report.Status = bRunning ? FString(TEXT("running")) : FString(FHyperAIStudioAsyncJobHost::LexToString(OperationJob->State));
+		Report.State = Report.Status;
+		Report.StatusCode = Report.Status;
+		Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(
+			OperationJob->Diagnostic.IsEmpty() ? OperationJob->Progress : OperationJob->Diagnostic, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+		Report.NextAction = bRunning ? TEXT("Still running; call hyper_operation_wait to wait for it.")
+			: bCompleted ? TEXT("Done: the diagnostic has the result; read what it made with the pack's inspect tool.")
+			: TEXT("The job did not finish; see the diagnostic.");
+		Report.JournalAccessMode = TEXT("async_job");
+		return Report;
+	}
 	if (!Record.IsSet())
 	{
 		Report.bOk = true;

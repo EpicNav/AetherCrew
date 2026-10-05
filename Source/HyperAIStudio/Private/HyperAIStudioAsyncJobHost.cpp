@@ -39,18 +39,17 @@ namespace HyperAIStudio::AsyncJob::Private
 		return Count;
 	}
 
+	/** Keeps the most recent finished jobs, newest last in the list; the oldest go first. */
 	void TrimFinished()
 	{
 		int32 Finished = 0;
-		for (int32 Index = 0; Index < Jobs().Num();)
+		for (int32 Index = Jobs().Num() - 1; Index >= 0; --Index)
 		{
 			const bool bDone = Jobs()[Index].IsValid() && Jobs()[Index]->Status.State != EHyperAIStudioAsyncJobState::Running;
 			if (bDone && ++Finished > MaxFinishedKept)
 			{
 				Jobs().RemoveAt(Index);
-				continue;
 			}
-			++Index;
 		}
 	}
 

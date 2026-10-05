@@ -229,6 +229,28 @@ bool FHyperAIStudioAsyncJobHostTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("and its work was stopped at the deadline"), *Stops, 2);
 	TestTrue(TEXT("which the diagnostic says"), Status.Diagnostic.StartsWith(TEXT("Stopped after")));
 
+	// Past the finished jobs it keeps, the host lets the oldest go; the job that just finished stays queryable.
+	TArray<FString> Quick;
+	for (int32 Index = 0; Index < 20; ++Index)
+	{
+		FString QuickId;
+		FHyperAIStudioAsyncJobRequest Each = Request;
+		Each.ToolName = TEXT("quick_tool");
+		if (FHyperAIStudioAsyncJobHost::Start(Each, [](FString&, FString& OutDiagnostic)
+			{
+				OutDiagnostic = TEXT("quick");
+				return EHyperAIStudioAsyncJobPoll::Completed;
+			}, QuickId, Error))
+		{
+			Quick.Add(QuickId);
+		}
+		Pump(4);
+	}
+	TestEqual(TEXT("Twenty quick jobs ran"), Quick.Num(), 20);
+	TestTrue(TEXT("The newest finished job stays queryable"),
+		!Quick.IsEmpty() && FHyperAIStudioAsyncJobHost::Query(Quick.Last(), Status, Error) && Status.State == EHyperAIStudioAsyncJobState::Completed);
+	TestFalse(TEXT("and the oldest are let go"), !Quick.IsEmpty() && FHyperAIStudioAsyncJobHost::Query(Quick[0], Status, Error));
+
 	FHyperAIStudioAsyncJobHost::Shutdown();
 	return true;
 }

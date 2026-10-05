@@ -15,6 +15,9 @@ public class HyperAIStudioPCGScatter : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"HyperAIStudio",
+			// An ecosystem keeps the op it was built from as JSON, for inspect to hand back.
+			"Json",
+			"JsonUtilities",
 			// Landscapes PCG passes over are named when a scatter finds no ground.
 			"Landscape",
 			"PCG",
