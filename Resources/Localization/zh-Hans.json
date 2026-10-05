@@ -5416,8 +5416,8 @@
   {
    "namespace": "HyperAIStudioPrompts",
    "key": "environment-recipes.coastal-fishing-village.ph.landscape_material.hint",
-   "source": "A landscape material whose layer blend names the paint layers in this recipe; without one the ground shows grey.",
-   "text": "图层混合中包含本配方各绘制图层名称的地形材质；没有它地面会显示为灰色。"
+   "source": "An existing landscape material whose layer blend names this recipe's paint layers, or none to make one that shows each layer in a flat colour.",
+   "text": "图层混合中包含本配方各绘制图层名称的现有地形材质；填 none 则新建一个以纯色显示各图层的材质。"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -5446,8 +5446,8 @@
   {
    "namespace": "HyperAIStudioPrompts",
    "key": "environment-recipes.crystal-canyon-approach.ph.landscape_material.hint",
-   "source": "A landscape material whose layer blend names the paint layers in this recipe; without one the ground shows grey.",
-   "text": "图层混合中包含本配方各绘制图层名称的地形材质；没有它地面会显示为灰色。"
+   "source": "An existing landscape material whose layer blend names this recipe's paint layers, or none to make one that shows each layer in a flat colour.",
+   "text": "图层混合中包含本配方各绘制图层名称的现有地形材质；填 none 则新建一个以纯色显示各图层的材质。"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -5476,8 +5476,8 @@
   {
    "namespace": "HyperAIStudioPrompts",
    "key": "environment-recipes.desert-oasis.ph.landscape_material.hint",
-   "source": "A landscape material whose layer blend names the paint layers in this recipe; without one the ground shows grey.",
-   "text": "图层混合中包含本配方各绘制图层名称的地形材质；没有它地面会显示为灰色。"
+   "source": "An existing landscape material whose layer blend names this recipe's paint layers, or none to make one that shows each layer in a flat colour.",
+   "text": "图层混合中包含本配方各绘制图层名称的现有地形材质；填 none 则新建一个以纯色显示各图层的材质。"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -5506,8 +5506,8 @@
   {
    "namespace": "HyperAIStudioPrompts",
    "key": "environment-recipes.fantasy-glade.ph.landscape_material.hint",
-   "source": "A landscape material whose layer blend names the paint layers in this recipe; without one the ground shows grey.",
-   "text": "图层混合中包含本配方各绘制图层名称的地形材质；没有它地面会显示为灰色。"
+   "source": "An existing landscape material whose layer blend names this recipe's paint layers, or none to make one that shows each layer in a flat colour.",
+   "text": "图层混合中包含本配方各绘制图层名称的现有地形材质；填 none 则新建一个以纯色显示各图层的材质。"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -5734,8 +5734,8 @@
   {
    "namespace": "HyperAIStudioPrompts",
    "key": "environment-recipes.snowy-mountain-pass.ph.landscape_material.hint",
-   "source": "A landscape material whose layer blend names the paint layers in this recipe; without one the ground shows grey.",
-   "text": "图层混合中包含本配方各绘制图层名称的地形材质；没有它地面会显示为灰色。"
+   "source": "An existing landscape material whose layer blend names this recipe's paint layers, or none to make one that shows each layer in a flat colour.",
+   "text": "图层混合中包含本配方各绘制图层名称的现有地形材质；填 none 则新建一个以纯色显示各图层的材质。"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -5800,8 +5800,8 @@
   {
    "namespace": "HyperAIStudioPrompts",
    "key": "environment-recipes.swamp-dead-trees-reeds.ph.landscape_material.hint",
-   "source": "A landscape material whose layer blend names the paint layers in this recipe; without one the ground shows grey.",
-   "text": "图层混合中包含本配方各绘制图层名称的地形材质；没有它地面会显示为灰色。"
+   "source": "An existing landscape material whose layer blend names this recipe's paint layers, or none to make one that shows each layer in a flat colour.",
+   "text": "图层混合中包含本配方各绘制图层名称的现有地形材质；填 none 则新建一个以纯色显示各图层的材质。"
   },
   {
    "namespace": "HyperAIStudioPrompts",
