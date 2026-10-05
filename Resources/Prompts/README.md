@@ -60,8 +60,8 @@ Use a token rather than "the selected thing", and a placeholder with a sensible 
 
 1. **States the outcome as checkable facts**: exact asset paths under `{{content_folder}}`, exact names and labels,
    counts, and sizes in the units each tool documents: cm for locations and for the blockout, modelling and spatial
-   tools (`Size`, `Extent`, `Clearance`), m for the landscape, foliage and PCG sizes the level-design skill names
-   (`Patch`, `Spacing`, `RoadMargin`).
+   tools (`Size`, `Extent`, `Clearance`), m for the landscape, foliage, PCG and World Partition sizes the level-design
+   skill names (`Patch`, `Spacing`, `RoadMargin`, a loaded region's `Size`).
 2. **Inspects before it edits**, naming the tool (`hyper_context_snapshot`, `hyper_level_design_inspect` for player
    metrics, `hyper_pcg_scatter_inspect`, ...) and recalling project memory.
 3. **Names the plan tool and its op kinds**, one plan per step with a fresh OperationId, then `hyper_operation_wait`;
