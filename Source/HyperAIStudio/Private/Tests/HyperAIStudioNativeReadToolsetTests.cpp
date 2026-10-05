@@ -6,6 +6,8 @@
 #include "HyperAIStudioNativeReadToolset.h"
 
 #include "Dom/JsonObject.h"
+#include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityCatalogCounts.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
@@ -1171,6 +1173,49 @@ bool FHyperAIStudioNativeReadJobOperationTest::RunTest(const FString& Parameters
 		TestTrue(TEXT("with what the job said: ") + Done.Diagnostic, Done.Diagnostic.Contains(TEXT("made 12 things")));
 		return true;
 	}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNativeReadApprovedInPlaceTest,
+	"HyperAIStudio.NativeTools.NativeRead.ApprovedInPlaceOperation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioNativeReadApprovedInPlaceTest::RunTest(const FString& Parameters)
+{
+	// A plan an approval runs in place is journaled nowhere: the activity entry its pack records is its status.
+	const FString OperationId = TEXT("inplace-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower();
+	ON_SCOPE_EXIT { if (FHyperAIStudioApprovalGate::HasPending(OperationId)) FHyperAIStudioApprovalGate::Reject(OperationId, TEXT("Test finished.")); };
+	FHyperAIStudioApprovalSummary Summary;
+	Summary.PackId = TEXT("tests");
+	Summary.ToolName = TEXT("hyper_test_plan");
+	Summary.EffectTarget = TEXT("/Game/__HyperAIStudioTests/InPlace");
+	Summary.Effects.Add(TEXT("Test plan: 1 op"));
+	const TSharedRef<FHyperAIOperationStatus> During = MakeShared<FHyperAIOperationStatus>();
+	FString Error;
+	const bool bAsked = FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [OperationId, During]()
+		{
+			*During = UHyperAIStudioNativeReadToolset::hyper_operation_status(OperationId);
+			FHyperAIStudioActivityEntry Entry;
+			Entry.Kind = EHyperAIStudioActivityKind::Completed;
+			Entry.PackId = TEXT("tests");
+			Entry.ToolName = TEXT("hyper_test_plan");
+			Entry.OperationId = OperationId;
+			Entry.StatusCode = TEXT("completed");
+			Entry.Detail = TEXT("made 3 things");
+			FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
+		}, Error);
+	if (!TestTrue(TEXT("the plan waits for approval: ") + Error, bAsked)) return false;
+	TestEqual(TEXT("and reads as waiting"), UHyperAIStudioNativeReadToolset::hyper_operation_status(OperationId).Status, FString(TEXT("awaiting_user_approval")));
+	if (!TestTrue(TEXT("approved, it runs: ") + Error, FHyperAIStudioApprovalGate::Approve(OperationId, Error))) return false;
+	TestTrue(TEXT("while it runs it reads as running, not not_found: ") + During->Status, During->bFound && !During->bTerminal && During->Status == TEXT("running"));
+	const FHyperAIOperationStatus Done = UHyperAIStudioNativeReadToolset::hyper_operation_status(OperationId);
+	TestTrue(TEXT("once done it is found and over: ") + Done.Status, Done.bFound && Done.bTerminal);
+	TestEqual(TEXT("as the pack recorded it"), Done.Status, FString(TEXT("completed")));
+	TestEqual(TEXT("with what the pack said"), Done.Diagnostic, FString(TEXT("made 3 things")));
+	TestEqual(TEXT("read from the activity log"), Done.JournalAccessMode, FString(TEXT("activity_log")));
+	const FHyperAIOperationStatus Unknown = UHyperAIStudioNativeReadToolset::hyper_operation_status(TEXT("inplace-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower());
+	TestTrue(TEXT("an operation nothing recorded is still not found"), !Unknown.bFound && Unknown.Status == TEXT("not_found"));
 	return true;
 }
 

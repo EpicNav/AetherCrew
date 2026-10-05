@@ -2025,6 +2025,31 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 	}
 	if (!Record.IsSet())
 	{
+		// An edit an approval runs in place (FHyperAIStudioApprovalGate::RequestAction: modelling, landscape, foliage,
+		// spatial and other plans) is journaled nowhere: the entry its pack records when it finishes is its outcome. The
+		// approval is recorded just before the edit runs, so that one reads as running.
+		const FHyperAIStudioActivityEntry* Last = Activity.FindByPredicate([&OperationId](const FHyperAIStudioActivityEntry& Entry)
+		{
+			return Entry.OperationId == OperationId;
+		});
+		const bool bApproved = Last && Last->Kind == EHyperAIStudioActivityKind::ApprovalApproved;
+		if (Last && (bApproved || Last->Kind == EHyperAIStudioActivityKind::Completed || Last->Kind == EHyperAIStudioActivityKind::Failed))
+		{
+			const bool bCompleted = Last->Kind == EHyperAIStudioActivityKind::Completed;
+			Report.bOk = true;
+			Report.bFound = true;
+			Report.bTerminal = !bApproved;
+			Report.Status = bApproved ? FString(TEXT("running"))
+				: !Last->StatusCode.IsEmpty() ? Last->StatusCode : FString(bCompleted ? TEXT("completed") : TEXT("failed"));
+			Report.State = Report.Status;
+			Report.StatusCode = Report.Status;
+			Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(Last->Detail, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+			Report.NextAction = bApproved ? TEXT("Still running; call hyper_operation_wait to wait for it.")
+				: bCompleted ? TEXT("Done: the diagnostic has the result; read what it made with the pack's inspect tool.")
+				: TEXT("It did not finish; see the diagnostic.");
+			Report.JournalAccessMode = TEXT("activity_log");
+			return Report;
+		}
 		Report.bOk = true;
 		Report.Status = TEXT("not_found");
 		Report.Diagnostic = TEXT("No pending approval, running edit, or journal record has this operation_id.");
