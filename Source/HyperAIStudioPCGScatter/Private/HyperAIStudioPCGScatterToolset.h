@@ -137,6 +137,11 @@ struct FHyperAIPCGScatterOp
 	/** ecosystem.*: actors with these tags (houses, rocks placed by hand) keep AvoidMargin meters clear around them. */
 	UPROPERTY() TArray<FString> AvoidTags;
 	UPROPERTY() float AvoidMargin = 2.f;
+	/**
+	 * ecosystem.*: meters every species keeps from the edges of the landscape's roads (its landscape splines), measured
+	 * to each footprint; 0 leaves roads to AvoidLayers.
+	 */
+	UPROPERTY() float RoadMargin = 0.f;
 };
 
 USTRUCT(BlueprintType)
@@ -268,6 +273,8 @@ public:
 	static constexpr int32 MaxBiomes = 8;
 	static constexpr int32 MaxSpeciesPerBiome = 12;
 	static constexpr int32 MaxSpecies = 40;
+	/** Meters a species samples past its partition cell at most: half of World Partition's default 256 m PCG cell. */
+	static constexpr int32 MaxHalo = 128;
 
 	static FString GetQualifiedToolsetName();
 	static TArray<FString> GetToolNames();

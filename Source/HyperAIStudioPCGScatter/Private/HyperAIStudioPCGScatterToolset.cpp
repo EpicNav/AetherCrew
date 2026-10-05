@@ -20,6 +20,8 @@
 #include "JsonObjectConverter.h"
 #include "LandscapeInfo.h"
 #include "LandscapeProxy.h"
+#include "LandscapeSplineActor.h"
+#include "LandscapeSplinesComponent.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Guid.h"
 #include "Misc/PackageName.h"
@@ -30,13 +32,16 @@
 #include "Elements/PCGBoundsModifier.h"
 #include "Elements/PCGCopyPoints.h"
 #include "Elements/PCGCreatePointsGrid.h"
+#include "Elements/PCGCullPointsOutsideActorBounds.h"
 #include "Elements/PCGDataFromActor.h"
 #include "Elements/PCGDensityFilter.h"
 #include "Elements/PCGDifferenceElement.h"
 #include "Elements/PCGExecuteBlueprint.h"
+#include "Elements/PCGInnerIntersectionElement.h"
 #include "Elements/PCGNormalToDensity.h"
 #include "Elements/PCGProjectionElement.h"
 #include "Elements/PCGSpatialNoise.h"
+#include "Elements/PCGSplineSampler.h"
 #include "Elements/PCGStaticMeshSpawner.h"
 #include "Elements/PCGSurfaceSampler.h"
 #include "Elements/PCGTransformPoints.h"
@@ -409,6 +414,83 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		return Plan;
 	}
 
+	/** A clump's grid in cm: Side x Side cells, thinned to Cluster members; members stand a cell apart, give or take a fifth of one. */
+	struct FClumpLayout
+	{
+		int32 Side = 1;
+		double Cell = 0.0;
+		double Jitter = 0.0;
+		/** How far a member can stand from its clump's center, along either axis. */
+		double Reach() const { return Side * Cell * 0.5 + Jitter; }
+	};
+
+	FClumpLayout ClumpLayout(const FSpeciesPlan& Plan)
+	{
+		FClumpLayout Layout;
+		if (Plan.Cluster <= 0) return Layout;
+		Layout.Side = FMath::Max(2, FMath::CeilToInt(FMath::Sqrt(static_cast<float>(Plan.Cluster))));
+		Layout.Cell = FMath::Max(2.0 * Plan.ClusterRadius * 100.0 / Layout.Side, 1.25 * Plan.Footprint * 100.0 * Plan.Scale.Y);
+		Layout.Jitter = Layout.Cell * 0.2;
+		return Layout;
+	}
+
+	/** The earlier species of its biome a species keeps out of, by index: all of them, the ones KeepOutOf names, or none. */
+	TArray<int32> KeptOutOf(const FHyperAIPCGBiome& Biome, const int32 Index)
+	{
+		TArray<int32> Out;
+		const FHyperAIPCGSpecies& Species = Biome.Species[Index];
+		if (Species.KeepOutOf.ContainsByPredicate([](const FString& Name) { return Name.TrimStartAndEnd().Equals(TEXT("none"), ESearchCase::IgnoreCase); })) return Out;
+		for (int32 Earlier = 0; Earlier < Index; ++Earlier)
+		{
+			const FString Name = Biome.Species[Earlier].Name.TrimStartAndEnd();
+			if (Species.KeepOutOf.IsEmpty() || Species.KeepOutOf.ContainsByPredicate([&Name](const FString& Other) { return Other.TrimStartAndEnd().Equals(Name, ESearchCase::IgnoreCase); }))
+			{
+				Out.Add(Earlier);
+			}
+		}
+		return Out;
+	}
+
+	/**
+	 * Meters each species of a biome samples past its partition cell, so species keep out of each other across a cell's
+	 * edge. Every cell samples the same world-aligned grid with the same seeds, so a cell's halo holds the very points its
+	 * neighbor makes. A species' points within Need of the cell must see every room they could touch: the rooms of the
+	 * species they keep out of, out to Need + their own footprint's reach + that room's reach, which is that species' Need
+	 * in turn; clumps add the reach of a clump, so the cell holding a member also makes its clump. Worked backward from
+	 * the last species, rounded up to a meter, and capped at MaxHalo.
+	 */
+	TArray<int32> BiomeHalos(const FHyperAIPCGBiome& Biome, bool& bOutCapped)
+	{
+		const int32 Count = Biome.Species.Num();
+		TArray<double> Foot;
+		TArray<double> Room;
+		TArray<double> Need;
+		Foot.SetNumZeroed(Count);
+		Room.SetNumZeroed(Count);
+		Need.SetNumZeroed(Count);
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			// A footprint's corner, turned any way about the up axis, at the largest scale.
+			const FSpeciesPlan Plan = PlanSpecies(Biome, Biome.Species[Index]);
+			Foot[Index] = UE_SQRT_2 * Plan.Footprint * 50.0 * Plan.Scale.Y;
+			Room[Index] = Foot[Index] * FMath::Max(Biome.Species[Index].Clearance, 0.f);
+		}
+		for (int32 Later = Count - 1; Later > 0; --Later)
+		{
+			for (const int32 Earlier : KeptOutOf(Biome, Later)) Need[Earlier] = FMath::Max(Need[Earlier], Need[Later] + Foot[Later] + Room[Earlier]);
+		}
+		TArray<int32> Meters;
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			const FSpeciesPlan Plan = PlanSpecies(Biome, Biome.Species[Index]);
+			const double Clump = Plan.Cluster > 0 ? ClumpLayout(Plan).Reach() + Foot[Index] : 0.0;
+			const int32 Halo = FMath::CeilToInt((Need[Index] + Clump) / 100.0 - UE_KINDA_SMALL_NUMBER);
+			bOutCapped |= Halo > C::MaxHalo;
+			Meters.Add(FMath::Clamp(Halo, 0, C::MaxHalo));
+		}
+		return Meters;
+	}
+
 	/** Builds an ecosystem graph: one shared landscape read, then one chain per species, left to right. */
 	class FEcosystemBuilder
 	{
@@ -417,16 +499,25 @@ namespace HyperAIStudio::PCGScatterTools::Private
 
 		bool Build(FString& OutError)
 		{
-			if (!Add<UPCGGetLandscapeSettings>(-600, 0, Landscape)) return Fail(TEXT("This engine's PCG has no Get Landscape Data node."), OutError);
+			UPCGGetLandscapeSettings* Ground = Add<UPCGGetLandscapeSettings>(-600, 0, Landscape);
+			if (!Ground) return Fail(TEXT("This engine's PCG has no Get Landscape Data node."), OutError);
+			// A species samples past its cell's edge, so the ground is read beyond the landscape proxies the cell overlaps.
+			Ground->ActorSelector.bMustOverlapSelf = false;
+			Touched(*Ground);
 			Landscape->NodeTitle = FName(TEXT("Landscape"));
-			// Actors kept clear of: one point per tagged actor, its bounds widened by the margin.
+			const FName In = PCGPinConstants::DefaultInputLabel;
+			const FName Out = PCGPinConstants::DefaultOutputLabel;
+			// Actors kept clear of: one point per tagged actor, its bounds widened by the margin. The actor's scale goes into
+			// its bounds first, so the margin is in meters whatever the actor's scale.
 			for (int32 Index = 0; Index < Op.AvoidTags.Num(); ++Index)
 			{
 				UPCGNode* Get = nullptr;
-				UPCGDataFromActorSettings* Actors = Add<UPCGDataFromActorSettings>(-600, 300 + Index * 200, &Get);
+				UPCGDataFromActorSettings* Actors = Add<UPCGDataFromActorSettings>(-900, 300 + Index * 200, &Get);
+				UPCGNode* Baked = ApplyScaleToBounds(-600, 300 + Index * 200);
 				UPCGNode* Widen = nullptr;
 				UPCGBoundsModifierSettings* Bounds = Add<UPCGBoundsModifierSettings>(-300, 300 + Index * 200, &Widen);
 				if (!Actors || !Bounds) return Fail(TEXT("This engine's PCG lacks the actor nodes avoiding tags needs."), OutError);
+				if (!Baked) return Fail(NoApplyScale, OutError);
 				Actors->ActorSelector.ActorFilter = EPCGActorFilter::AllWorldActors;
 				Actors->ActorSelector.ActorSelection = EPCGActorSelection::ByTag;
 				Actors->ActorSelector.ActorSelectionTag = FName(*Op.AvoidTags[Index].TrimStartAndEnd());
@@ -439,30 +530,52 @@ namespace HyperAIStudio::PCGScatterTools::Private
 				Touched(*Actors);
 				Touched(*Bounds);
 				Get->NodeTitle = FName(*FString::Printf(TEXT("Avoid tag %s"), *Op.AvoidTags[Index]));
-				if (!Link(Get, PCGPinConstants::DefaultOutputLabel, Widen, PCGPinConstants::DefaultInputLabel, OutError)) return false;
+				if (!Link(Get, Out, Baked, In, OutError) || !Link(Baked, Out, Widen, In, OutError)) return false;
 				Avoided.Add(Widen);
 			}
+			if (Op.RoadMargin > 0.f && !BuildRoads(OutError)) return false;
 			int32 Row = 0;
+			TArray<FString> Reaches;
+			bool bCapped = false;
 			for (const FHyperAIPCGBiome& Biome : Op.Biomes)
 			{
 				TMap<FString, UPCGNode*> Footprints;
 				TArray<FString> Order;
-				for (const FHyperAIPCGSpecies& Species : Biome.Species)
+				const TArray<int32> Halos = BiomeHalos(Biome, bCapped);
+				for (int32 Index = 0; Index < Biome.Species.Num(); ++Index)
 				{
+					const FHyperAIPCGSpecies& Species = Biome.Species[Index];
 					UPCGNode* Footprint = nullptr;
-					if (!BuildSpecies(Biome, Species, Row++, Footprints, Order, Footprint, OutError)) return false;
+					if (!BuildSpecies(Biome, Species, Row++, Footprints, Order, Halos[Index], Footprint, OutError)) return false;
 					Footprints.Add(Species.Name.TrimStartAndEnd().ToLower(), Footprint);
 					Order.Add(Species.Name.TrimStartAndEnd().ToLower());
+					if (Halos[Index] > 0) Reaches.Add(FString::Printf(TEXT("%s: %s %d m"), *Biome.Name, *Species.Name, Halos[Index]));
 				}
+			}
+			if (!Reaches.IsEmpty())
+			{
+				Notes.Add(FString::Printf(TEXT("Partition seams: species sample past their cell, so they keep out of each other across its edge (%s)%s."),
+					*FString::Join(Reaches, TEXT(", ")), bCapped
+						? *FString::Printf(TEXT("; capped at %d m, so species that big can still meet at a cell's edge"), C::MaxHalo) : TEXT("")));
 			}
 			return true;
 		}
+
+		/** What the build has to tell the agent: how far species sample past their cell. */
+		TArray<FString> Notes;
 
 	private:
 		UPCGGraph& Graph;
 		const FHyperAIPCGScatterOp& Op;
 		UPCGNode* Landscape = nullptr;
 		TArray<UPCGNode*> Avoided;
+		/** The cell the graph runs in, its scale in its bounds, and the volume; built for the first species with a halo. */
+		UPCGNode* CellPoint = nullptr;
+		UPCGNode* VolumeShape = nullptr;
+		/** The cell grown by a halo, within the volume, by the halo's meters. */
+		TMap<int32, UPCGNode*> HaloShapes;
+
+		static constexpr const TCHAR* NoApplyScale = TEXT("This engine's PCG has no Apply Scale To Bounds node.");
 
 		static bool Fail(const FString& Message, FString& OutError)
 		{
@@ -516,8 +629,141 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			return Node;
 		}
 
+		/** Apply Scale To Bounds: each point's scale goes into its bounds. PCG does not export the node, so it is made by class path. */
+		UPCGNode* ApplyScaleToBounds(const int32 X, const int32 Y)
+		{
+			UClass* Class = FindObject<UClass>(nullptr, TEXT("/Script/PCG.PCGApplyScaleToBoundsSettings"));
+			UPCGSettings* Settings = nullptr;
+			UPCGNode* Node = Class ? Graph.AddNodeOfType(Class, Settings) : nullptr;
+			if (Node) Node->SetNodePosition(X, Y);
+			return Node;
+		}
+
+		/**
+		 * The landscape's roads, RoadMargin meters wider each side: every landscape spline, in a spline actor of its own
+		 * (World Partition) or in a landscape's splines component, sampled into boxes along it. A sample's box is its
+		 * paved width across (its local Y runs to 1 at the paved edge, beyond to the falloff), one sample long and 1 cm
+		 * tall; the margin and a sample's length more are added once its scale is in its bounds, so curves leave no gaps
+		 * and the boxes reach 50 m up and down over cross-slopes. Every road is sampled whole in every cell.
+		 */
+		bool BuildRoads(FString& OutError)
+		{
+			constexpr double Step = 200.0;
+			constexpr double Tall = 5000.0;
+			const double Margin = Op.RoadMargin * 100.0;
+			const FName In = PCGPinConstants::DefaultInputLabel;
+			const FName Out = PCGPinConstants::DefaultOutputLabel;
+			UPCGNode* Sample = nullptr;
+			UPCGSplineSamplerSettings* Sampler = Add<UPCGSplineSamplerSettings>(-1200, -400, Sample);
+			UPCGNode* Paved = nullptr;
+			UPCGBoundsModifierSettings* Edge = Add<UPCGBoundsModifierSettings>(-900, -400, Paved);
+			UPCGNode* Baked = ApplyScaleToBounds(-600, -400);
+			UPCGNode* Widen = nullptr;
+			UPCGBoundsModifierSettings* Wide = Add<UPCGBoundsModifierSettings>(-300, -400, Widen);
+			if (!Sampler || !Edge || !Wide) return Fail(TEXT("This engine's PCG lacks the spline nodes keeping off roads needs."), OutError);
+			if (!Baked) return Fail(NoApplyScale, OutError);
+			// Two getters: one by the actor class AActor would walk every actor in the world.
+			const TPair<UClass*, const TCHAR*> Owners[] = {{ALandscapeSplineActor::StaticClass(), TEXT("Roads (spline actors)")}, {ALandscapeProxy::StaticClass(), TEXT("Roads (landscape)")}};
+			for (int32 Index = 0; Index < UE_ARRAY_COUNT(Owners); ++Index)
+			{
+				UPCGNode* Get = nullptr;
+				UPCGGetSplineSettings* Splines = Add<UPCGGetSplineSettings>(-1500, -600 + Index * 200, Get);
+				if (!Splines) return Fail(TEXT("This engine's PCG has no Get Spline Data node."), OutError);
+				Splines->ActorSelector.ActorFilter = EPCGActorFilter::AllWorldActors;
+				Splines->ActorSelector.ActorSelection = EPCGActorSelection::ByClass;
+				Splines->ActorSelector.ActorSelectionClass = Owners[Index].Key;
+				Splines->ActorSelector.bSelectMultiple = true;
+				Splines->ActorSelector.bMustOverlapSelf = false;
+				Splines->ComponentSelector.ComponentSelection = EPCGComponentSelection::ByClass;
+				Splines->ComponentSelector.ComponentSelectionClass = ULandscapeSplinesComponent::StaticClass();
+				Touched(*Splines);
+				Get->NodeTitle = FName(Owners[Index].Value);
+				if (!Link(Get, Out, Sample, PCGSplineSamplerConstants::SplineLabel, OutError)) return false;
+			}
+			// Unbounded: the cell would clip off a road's samples just outside it.
+			Sampler->SamplerParams.Dimension = EPCGSplineSamplingDimension::OnSpline;
+			Sampler->SamplerParams.Mode = EPCGSplineSamplingMode::Distance;
+			Sampler->SamplerParams.DistanceIncrement = static_cast<float>(Step);
+			Sampler->SamplerParams.bUnbounded = true;
+			Edge->Mode = EPCGBoundsModifierMode::Intersect;
+			Edge->BoundsMin = FVector(-1e7, -1.0, -1e7);
+			Edge->BoundsMax = FVector(1e7, 1.0, 1e7);
+			Wide->Mode = EPCGBoundsModifierMode::Translate;
+			Wide->BoundsMin = FVector(-Step * 0.5, -Margin, -Tall);
+			Wide->BoundsMax = FVector(Step * 0.5, Margin, Tall);
+			Touched(*Sampler);
+			Touched(*Edge);
+			Touched(*Wide);
+			Sample->NodeTitle = FName(TEXT("Along the roads"));
+			Paved->NodeTitle = FName(TEXT("Paved width"));
+			Widen->NodeTitle = FName(*FString::Printf(TEXT("Roads + %g m"), Op.RoadMargin));
+			if (!Link(Sample, Out, Paved, In, OutError) || !Link(Paved, Out, Baked, In, OutError) || !Link(Baked, Out, Widen, In, OutError)) return false;
+			Avoided.Add(Widen);
+			return true;
+		}
+
+		/**
+		 * The bounding shape a species with a halo samples in: the cell the graph runs in (a partition actor's cell, or
+		 * the volume when it is not partitioned) grown by Meters each way, within the volume. Shared by every species
+		 * with the same halo.
+		 */
+		UPCGNode* HaloShape(const int32 Meters, FString& OutError)
+		{
+			if (UPCGNode* const* Found = HaloShapes.Find(Meters)) return *Found;
+			const FName In = PCGPinConstants::DefaultInputLabel;
+			const FName Out = PCGPinConstants::DefaultOutputLabel;
+			if (!CellPoint)
+			{
+				UPCGNode* Self = nullptr;
+				UPCGDataFromActorSettings* Box = Add<UPCGDataFromActorSettings>(-1200, -800, Self);
+				UPCGNode* Baked = ApplyScaleToBounds(-900, -800);
+				UPCGGetVolumeSettings* Original = Add<UPCGGetVolumeSettings>(-900, -1000, VolumeShape);
+				if (!Box || !Original)
+				{
+					Fail(TEXT("This engine's PCG lacks the actor nodes partition seams need."), OutError);
+					return nullptr;
+				}
+				if (!Baked)
+				{
+					Fail(NoApplyScale, OutError);
+					return nullptr;
+				}
+				Box->ActorSelector.ActorFilter = EPCGActorFilter::Self;
+				Box->Mode = EPCGGetDataFromActorMode::GetSinglePoint;
+				Original->ActorSelector.ActorFilter = EPCGActorFilter::Original;
+				Touched(*Box);
+				Touched(*Original);
+				Self->NodeTitle = FName(TEXT("Cell"));
+				VolumeShape->NodeTitle = FName(TEXT("Volume"));
+				if (!Link(Self, Out, Baked, In, OutError)) return nullptr;
+				CellPoint = Baked;
+			}
+			const int32 Y = -1200 - HaloShapes.Num() * 200;
+			UPCGNode* Grow = nullptr;
+			UPCGBoundsModifierSettings* Grown = Add<UPCGBoundsModifierSettings>(-600, Y, Grow);
+			UPCGNode* Within = nullptr;
+			UPCGInnerIntersectionSettings* Intersection = Add<UPCGInnerIntersectionSettings>(-300, Y, Within);
+			if (!Grown || !Intersection)
+			{
+				Fail(TEXT("This engine's PCG lacks the nodes partition seams need."), OutError);
+				return nullptr;
+			}
+			const double Halo = Meters * 100.0;
+			Grown->Mode = EPCGBoundsModifierMode::Translate;
+			Grown->BoundsMin = FVector(-Halo, -Halo, 0.0);
+			Grown->BoundsMax = FVector(Halo, Halo, 0.0);
+			Touched(*Grown);
+			Touched(*Intersection);
+			Grow->NodeTitle = FName(*FString::Printf(TEXT("Cell + %d m"), Meters));
+			Within->NodeTitle = FName(*FString::Printf(TEXT("Cell + %d m in the volume"), Meters));
+			// The grown cell first: the intersection stays a shape PCG samples, not points.
+			if (!Link(CellPoint, Out, Grow, In, OutError) || !Link(Grow, Out, Within, In, OutError) || !Link(VolumeShape, Out, Within, In, OutError)) return nullptr;
+			HaloShapes.Add(Meters, Within);
+			return Within;
+		}
+
 		bool BuildSpecies(const FHyperAIPCGBiome& Biome, const FHyperAIPCGSpecies& Species, const int32 Row, const TMap<FString, UPCGNode*>& Footprints,
-			const TArray<FString>& Earlier, UPCGNode*& OutFootprint, FString& OutError)
+			const TArray<FString>& Earlier, const int32 Halo, UPCGNode*& OutFootprint, FString& OutError)
 		{
 			const FSpeciesPlan Plan = PlanSpecies(Biome, Species);
 			const int32 Y = Row * 460;
@@ -529,25 +775,34 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			const FName Out = PCGPinConstants::DefaultOutputLabel;
 			const FName Kept = PCGPinConstants::DefaultInFilterLabel;
 
-			// A clump is Side x Side cells, thinned to Cluster members; members stand a cell apart, give or take a fifth of one.
 			const bool bClumps = Plan.Cluster > 0;
-			const int32 Side = bClumps ? FMath::Max(2, FMath::CeilToInt(FMath::Sqrt(static_cast<float>(Plan.Cluster)))) : 1;
-			const double Cell = FMath::Max(2.0 * Plan.ClusterRadius * 100.0 / Side, 1.25 * Plan.Footprint * 100.0 * Plan.Scale.Y);
-			const double Jitter = Cell * 0.2;
+			const FClumpLayout Clump = ClumpLayout(Plan);
+			const int32 Side = Clump.Side;
+			const double Cell = Clump.Cell;
+			const double Jitter = Clump.Jitter;
 			// Sample the ground inside the volume, its up axis the ground's normal. The sampler gives each point a cell of its
-			// own at least as wide as its box: the footprint, or for clumps the whole clump, so clumps never overlap.
+			// own at least as wide as its box: the footprint, or for clumps the whole clump, so clumps never overlap. With a
+			// halo it samples past the partition cell too, on the same world grid and seeds its neighbor samples.
 			UPCGNode* Sample = nullptr;
 			UPCGSurfaceSamplerSettings* Sampler = Add<UPCGSurfaceSamplerSettings>(X, Y, Sample);
 			if (!Sampler) return Fail(TEXT("This engine's PCG has no Surface Sampler."), OutError);
 			Sampler->PointsPerSquaredMeter = Species.Density;
 			const double Half = Plan.Footprint * 50.0;
 			const FVector Extents(Half, Half, FMath::Max(Half, 50.0));
-			const double ClumpHalf = Side * Cell * 0.5 + Jitter;
+			const double ClumpHalf = Clump.Reach();
 			Sampler->PointExtents = bClumps ? FVector(ClumpHalf, ClumpHalf, Extents.Z) : Extents;
 			Sampler->Seed = NodeSeed;
 			Touched(*Sampler);
 			Sample->NodeTitle = FName(*FString::Printf(TEXT("%s: %s"), *Biome.Name, *Species.Name));
-			if (!Link(Graph.GetInputNode(), In, Sample, TEXT("Bounding Shape"), OutError) || !Link(Landscape, Out, Sample, TEXT("Surface"), OutError)) return false;
+			UPCGNode* Shape = Graph.GetInputNode();
+			FName ShapePin = In;
+			if (Halo > 0)
+			{
+				Shape = HaloShape(Halo, OutError);
+				ShapePin = Out;
+				if (!Shape) return false;
+			}
+			if (!Link(Shape, ShapePin, Sample, TEXT("Bounding Shape"), OutError) || !Link(Landscape, Out, Sample, TEXT("Surface"), OutError)) return false;
 			UPCGNode* Last = Sample;
 			FName LastPin = Out;
 			auto Chain = [&](UPCGNode* Node, const FName InPin, const FName OutPin) -> bool
@@ -726,12 +981,29 @@ namespace HyperAIStudio::PCGScatterTools::Private
 				UPCGDifferenceSettings* Difference = Add<UPCGDifferenceSettings>(Next(), Y, Minus);
 				if (!Difference) return Fail(TEXT("This engine's PCG has no Difference node."), OutError);
 				Difference->DensityFunction = EPCGDifferenceDensityFunction::Binary;
+				// Points out, whatever kind of data the first exclusion is.
+				Difference->Mode = EPCGDifferenceMode::Discrete;
 				Touched(*Difference);
 				if (!Chain(Minus, PCGDifferenceConstants::SourceLabel, Out)) return false;
 				for (UPCGNode* Exclusion : Exclusions)
 				{
 					if (!Link(Exclusion, Out, Minus, PCGDifferenceConstants::DifferencesLabel, OutError)) return false;
 				}
+			}
+			// The species' points, its halo's included: the room later species keep out of.
+			UPCGNode* const Grown = Last;
+			const FName GrownPin = LastPin;
+			// Only the points in this cell are spawned: a halo's points and clump members across the edge are the
+			// neighbor's, which makes the same ones.
+			if (Halo > 0)
+			{
+				UPCGNode* Mine = nullptr;
+				UPCGCullPointsOutsideActorBoundsSettings* Cull = Add<UPCGCullPointsOutsideActorBoundsSettings>(Next(), Y, Mine);
+				if (!Cull) return Fail(TEXT("This engine's PCG has no Cull Points Outside Actor Bounds node."), OutError);
+				Cull->BoundsExpansion = 0.f;
+				Touched(*Cull);
+				Mine->NodeTitle = FName(*FString::Printf(TEXT("%s: %s in its cell"), *Biome.Name, *Species.Name));
+				if (!Chain(Mine, In, Out)) return false;
 			}
 			// The meshes, with their cull distances.
 			UPCGNode* Spawn = nullptr;
@@ -768,7 +1040,7 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			Bounds->BoundsMax = FVector(Clearance, Clearance, 1.0);
 			Touched(*Bounds);
 			Room->NodeTitle = FName(*FString::Printf(TEXT("Room of %s"), *Species.Name));
-			if (!Link(Spawn, Out, Room, In, OutError)) return false;
+			if (!Link(Grown, GrownPin, Room, In, OutError)) return false;
 			OutFootprint = Room;
 			return true;
 		}
@@ -787,9 +1059,10 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			}
 			Biomes.Add(FString::Printf(TEXT("%s%s: %s"), *Biome.Name, Biome.Layer.IsEmpty() ? TEXT("") : *(TEXT(" on ") + Biome.Layer), *FString::Join(Species, TEXT(", "))));
 		}
-		return FString::Printf(TEXT("HyperAI ecosystem. %s.%s%s"), *FString::Join(Biomes, TEXT("; ")),
+		return FString::Printf(TEXT("HyperAI ecosystem. %s.%s%s%s"), *FString::Join(Biomes, TEXT("; ")),
 			Op.AvoidLayers.IsEmpty() ? TEXT("") : *(TEXT(" Avoids layers ") + FString::Join(Op.AvoidLayers, TEXT(", ")) + TEXT(".")),
-			Op.AvoidTags.IsEmpty() ? TEXT("") : *(TEXT(" Keeps clear of tags ") + FString::Join(Op.AvoidTags, TEXT(", ")) + TEXT(".")));
+			Op.AvoidTags.IsEmpty() ? TEXT("") : *(TEXT(" Keeps clear of tags ") + FString::Join(Op.AvoidTags, TEXT(", ")) + TEXT(".")),
+			Op.RoadMargin > 0.f ? *FString::Printf(TEXT(" Keeps %g m off landscape roads."), Op.RoadMargin) : TEXT(""));
 	}
 
 	/** Where an ecosystem graph keeps the op it was built from: its package's metadata, saved with the asset. */
@@ -818,6 +1091,7 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		Json->SetArrayField(Key(TEXT("AvoidLayers")), Strings(Op.AvoidLayers));
 		Json->SetArrayField(Key(TEXT("AvoidTags")), Strings(Op.AvoidTags));
 		Json->SetNumberField(Key(TEXT("AvoidMargin")), Op.AvoidMargin);
+		Json->SetNumberField(Key(TEXT("RoadMargin")), Op.RoadMargin);
 		Json->SetNumberField(Key(TEXT("Seed")), Op.Seed);
 		FString Out;
 		const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer = TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Out);
@@ -826,7 +1100,7 @@ namespace HyperAIStudio::PCGScatterTools::Private
 	}
 
 	/** An ecosystem graph built from scratch, or rebuilt: every node but the graph's input and output goes first. */
-	bool BuildEcosystem(UPCGGraph& Graph, const FHyperAIPCGScatterOp& Op, FString& OutError)
+	bool BuildEcosystem(UPCGGraph& Graph, const FHyperAIPCGScatterOp& Op, TArray<FString>& OutNotes, FString& OutError)
 	{
 		TArray<UPCGNode*> Old;
 		for (UPCGNode* Node : Graph.GetNodes())
@@ -838,6 +1112,7 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		Graph.Description = FText::FromString(DescribeEcosystem(Op));
 		FEcosystemBuilder Builder(Graph, Op);
 		if (!Builder.Build(OutError)) return false;
+		OutNotes.Append(Builder.Notes);
 		Graph.GetPackage()->GetMetaData().SetValue(&Graph, EcosystemSpecKey, *EcosystemSpec(Graph, Op));
 		return true;
 	}
@@ -852,6 +1127,7 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		};
 		if (Op.Biomes.IsEmpty() || Op.Biomes.Num() > C::MaxBiomes) return Fail(FString::Printf(TEXT("An ecosystem has 1 to %d biomes."), C::MaxBiomes));
 		if (Op.AvoidMargin < 0.f || Op.AvoidMargin > 100.f) return Fail(TEXT("AvoidMargin is 0 to 100 meters."));
+		if (Op.RoadMargin < 0.f || Op.RoadMargin > 100.f) return Fail(TEXT("RoadMargin is 0 (off) to 100 meters."));
 		int32 Total = 0;
 		TSet<FString> BiomeNames;
 		for (const FHyperAIPCGBiome& Biome : Op.Biomes)
@@ -1584,7 +1860,8 @@ namespace HyperAIStudio::PCGScatterTools::Private
 				Graph = Load<UPCGGraph>(Path);
 				Graph->Modify();
 			}
-			if (!BuildEcosystem(*Graph, Op, OutError)) return false;
+			TArray<FString> Notes;
+			if (!BuildEcosystem(*Graph, Op, Notes, OutError)) return false;
 			Graph->MarkPackageDirty();
 			if (!FHyperAIStudioSourceControl::SaveAsset(*Graph, OutError)) return false;
 			Report.Saved.Add(Graph->GetPathName());
@@ -1592,6 +1869,7 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			for (const FHyperAIPCGBiome& Biome : Op.Biomes) Species += Biome.Species.Num();
 			Report.Notes.Add(FString::Printf(TEXT("Ecosystem %s: %d biome(s), %d species, %d node(s). %s"), *Graph->GetName(), Op.Biomes.Num(), Species,
 				Graph->GetNodes().Num(), *Graph->Description.ToString().Left(600)));
+			Report.Notes.Append(Notes);
 			return true;
 		}
 		if (Kind == TEXT("volume.create"))
