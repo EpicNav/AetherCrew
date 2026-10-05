@@ -161,7 +161,8 @@ meadow over the valley, off the road and clear of tagged buildings, the volume c
 - `Height` bands (meters above zero) and `SlopeMax` place biomes by elevation: the treeline, scree on the heights,
   reeds just above the water. `LayerMin` (0.5) is how much paint a biome needs.
 - `AvoidLayers` keeps everything off road and riverbank layers. `AvoidTags` keeps `AvoidMargin` meters clear around
-  tagged actors, such as houses and camps.
+  tagged actors, such as houses and camps. Trees stand up to a layer's edge and their crowns reach past it, so to keep
+  a road open paint a verge layer within a few meters of it (`landscape.paint` with `DistanceMax`) and avoid that too.
 - The same names and `Seed` grow the same way every time; change `Seed` for another arrangement.
 - `Cover` sizes a volume to a landscape. `Partitioned: "true"` generates in World Partition cells that stream with
   the world: use it in a World Partition level more than a few hundred meters across. Species keep out of each other
