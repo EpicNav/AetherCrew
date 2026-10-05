@@ -7,6 +7,7 @@
 #include "DynamicMesh/DynamicMesh3.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
 #include "Editor.h"
+#include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
 #include "GeometryScript/CollisionFunctions.h"
 #include "GeometryScript/GeometryScriptSelectionTypes.h"
@@ -18,6 +19,7 @@
 #include "GeometryScript/MeshMaterialFunctions.h"
 #include "GeometryScript/MeshModelingFunctions.h"
 #include "GeometryScript/MeshNormalsFunctions.h"
+#include "GeometryScript/MeshPolygroupFunctions.h"
 #include "GeometryScript/MeshPrimitiveFunctions.h"
 #include "GeometryScript/MeshQueryFunctions.h"
 #include "GeometryScript/MeshRemeshFunctions.h"
@@ -30,6 +32,10 @@
 #include "GeometryScript/MeshUVFunctions.h"
 #include "GeometryScript/MeshVertexColorFunctions.h"
 #include "GeometryScript/MeshVoxelFunctions.h"
+#include "GeometryScript/OpenSubdivUtilityFunctions.h"
+#include "GroupTopology.h"
+#include "HAL/FileManager.h"
+#include "HyperAIStudioResultPreview.h"
 #include "HyperAIStudioSourceControl.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionConstant.h"
@@ -37,7 +43,9 @@
 #include "Materials/MaterialExpressionOneMinus.h"
 #include "Materials/MaterialExpressionVertexColor.h"
 #include "Math/RandomStream.h"
+#include "Math/RotationMatrix.h"
 #include "MeshDescription.h"
+#include "Misc/App.h"
 #include "Misc/PackageName.h"
 #include "Misc/SecureHash.h"
 #include "ObjectTools.h"
@@ -168,6 +176,9 @@ namespace HyperAIStudio::Modeling::Gate
 				P(TEXT("Area"), EParam::Choice, 0, 0, TEXT("all"), TEXT("all|group|face"))}, TEXT("the selected faces pushed out Distance cm, with new side walls")},
 			{TEXT("inset"), 0, Select, {Required(TEXT("Distance"), EParam::Float, -100000, 100000), P(TEXT("Area"), EParam::Choice, 0, 0, TEXT("all"), TEXT("all|group|face"))},
 				TEXT("the selected faces shrunk inward Distance cm inside a new border (negative grows them)")},
+			{TEXT("offset_faces"), 0, Select, {Required(TEXT("Distance"), EParam::Float, -100000, 100000),
+				P(TEXT("Mode"), EParam::Choice, 0, 0, TEXT("parallel"), TEXT("parallel|face|vertex")), P(TEXT("Area"), EParam::Choice, 0, 0, TEXT("all"), TEXT("all|group|face"))},
+				TEXT("the selected faces moved Distance cm along their own normals, with side walls where they meet the rest (raised bands on round shapes); with no Select a closed mesh swells or shrinks; parallel keeps faces parallel")},
 			{TEXT("bevel"), 0, Select, {P(TEXT("Distance"), EParam::Float, 0.01, 10000, TEXT("2")), P(TEXT("Subdivisions"), EParam::Int, 0, 8, TEXT("0")),
 				P(TEXT("Round"), EParam::Float, 0, 1, TEXT("1"))}, TEXT("edges bevelled Distance cm: every polygroup edge, or with Select the border of the selected faces")},
 			{TEXT("shell"), 0, 0, {Required(TEXT("Thickness"), EParam::Float, -100000, 100000)}, TEXT("a surface given Thickness cm, inside and outside walls joined")},
@@ -179,9 +190,15 @@ namespace HyperAIStudio::Modeling::Gate
 				P(TEXT("Lock"), EParam::Bool, 0, 0, TEXT("true"))}, TEXT("the mesh twisted Angle degrees about the frame's Z axis over Extent cm")},
 			{TEXT("flare"), 0, Location | Rotation, {Required(TEXT("Percent"), EParam::Float, -100, 1000), P(TEXT("Extent"), EParam::Float, 0.1, 100000, TEXT("half the mesh's height")),
 				P(TEXT("Mode"), EParam::Choice, 0, 0, TEXT("sin"), TEXT("sin|square|triangle"))}, TEXT("the mesh bulged out (or pinched in) by Percent across Extent cm about Location (its center)")},
+			{TEXT("wave"), 0, Location, {P(TEXT("Mode"), EParam::Choice, 0, 0, TEXT("line"), TEXT("line|ripple")), P(TEXT("Magnitude"), EParam::Float, 0.01, 100000, TEXT("5")),
+				P(TEXT("Wavelength"), EParam::Float, 1, 100000, TEXT("100")), P(TEXT("Phase"), EParam::Float, -360, 360, TEXT("0")),
+				P(TEXT("Along"), EParam::Vector, 0, 0, TEXT("1,0,0")), P(TEXT("Direction"), EParam::Vector, 0, 0, TEXT("0,0,1"))},
+				TEXT("every vertex moved up to Magnitude cm along Direction by a sine Wavelength cm long: line waves travel along Along (corrugation, flags), ripple rings spread from Location (the mesh's center by default)")},
 			{TEXT("smooth"), 0, Select, {P(TEXT("Iterations"), EParam::Int, 1, 200, TEXT("10")), P(TEXT("Alpha"), EParam::Float, 0, 1, TEXT("0.2"))}, TEXT("the surface relaxed")},
 			{TEXT("tessellate"), 0, 0, {P(TEXT("Level"), EParam::Int, 1, C::MaxTessellateLevel, TEXT("1")), P(TEXT("Mode"), EParam::Choice, 0, 0, TEXT("uniform"), TEXT("uniform|pn"))},
 				TEXT("each triangle split into (Level+1)^2; pn also rounds the surface")},
+			{TEXT("subdivide"), 0, 0, {P(TEXT("Level"), EParam::Int, 1, C::MaxSubdivideLevel, TEXT("1")), P(TEXT("Cage"), EParam::Choice, 0, 0, TEXT("groups"), TEXT("groups|quads"))},
+				TEXT("Catmull-Clark smoothing: each polygroup is one polygon of a cage (build shapes with Groups=quad; Cage=quads pairs the triangles instead), every Level multiplies the faces by 4 and rounds them")},
 			{TEXT("remesh"), 0, 0, {Required(TEXT("Triangles"), EParam::Int, 100, C::MaxRemeshTriangles)}, TEXT("the surface rebuilt from even triangles, about Triangles of them")},
 			{TEXT("simplify"), 0, 0, {P(TEXT("Triangles"), EParam::Int, 4, C::MaxTrianglesPerMesh, TEXT("")), P(TEXT("Planar"), EParam::Bool, 0, 0, TEXT("false")),
 				P(TEXT("Tolerance"), EParam::Float, 0.001, 10000, TEXT(""))}, TEXT("fewer triangles: down to Triangles, flat areas merged with Planar, or within Tolerance cm of the surface (give one)")},
@@ -804,13 +821,16 @@ namespace HyperAIStudio::Modeling::Gate
 		if (K == TEXT("self_union")) return Current * 6 / 5;
 		if (K == TEXT("plane_cut")) return Current + Current / 10 + 16;
 		if (K == TEXT("mirror")) return 2 * Current;
-		if (K == TEXT("extrude") || K == TEXT("inset") || K == TEXT("shell")) return 2 * Current + 16;
+		if (K == TEXT("extrude") || K == TEXT("inset") || K == TEXT("offset_faces") || K == TEXT("shell")) return 2 * Current + 16;
 		if (K == TEXT("bevel")) return Current * (2 + Step.Int(TEXT("Subdivisions"), 0));
 		if (K == TEXT("tessellate"))
 		{
 			const int64 Split = Step.Int(TEXT("Level"), 1) + 1;
 			return Current * Split * Split;
 		}
+		// Exact for a quad cage (Groups=quad, or a box with Groups=face): each quad's two triangles become four quads. A
+		// cage of triangles makes half as many again; the build counts the cage itself before OpenSubdiv runs.
+		if (K == TEXT("subdivide")) return Current << (2 * Step.Int(TEXT("Level"), 1));
 		if (K == TEXT("remesh")) return Step.Int(TEXT("Triangles"), 5000);
 		if (K == TEXT("simplify")) return Step.Has(TEXT("Triangles")) ? FMath::Min<int64>(Current, Step.Int(TEXT("Triangles"), 0)) : Current;
 		if (K == TEXT("solidify") || K == TEXT("morphology"))
@@ -998,6 +1018,21 @@ namespace HyperAIStudio::Modeling::Gate
 			if (!At.Equals(TEXT("base"), ESearchCase::IgnoreCase) && !At.Equals(TEXT("center"), ESearchCase::IgnoreCase) && !ParseVector(At, Point))
 			{
 				OutError = FString::Printf(TEXT("At is base, center or x,y,z, not '%s'."), *At);
+				return false;
+			}
+		}
+		if (K == TEXT("offset_faces") && FMath::Abs(Step.Float(TEXT("Distance"), 0.0)) < 0.01)
+		{
+			OutError = TEXT("offset_faces needs a Distance other than 0 (negative moves faces inward).");
+			return false;
+		}
+		if (K == TEXT("wave") && !Step.Text(TEXT("Mode"), TEXT("line")).Equals(TEXT("ripple"), ESearchCase::IgnoreCase))
+		{
+			const FVector Along = Step.Vector(TEXT("Along"), FVector::ForwardVector).GetSafeNormal();
+			const FVector Up = Step.Vector(TEXT("Direction"), FVector::UpVector).GetSafeNormal();
+			if (FMath::Abs(FVector::DotProduct(Along, Up)) > 0.999)
+			{
+				OutError = TEXT("Along runs parallel to Direction: line waves travel along Along and move vertices along Direction, so give two directions at an angle.");
 				return false;
 			}
 		}
@@ -1189,8 +1224,8 @@ namespace HyperAIStudio::Modeling::Gate
 				const int64 Predicted = Predict(Step, Tris);
 				if (Predicted > C::MaxTrianglesPerMesh)
 				{
-					return Fail(FString::Printf(TEXT("it would make about %lld triangles in %s, over the %d one mesh may hold; lower Steps, Level, Count or Resolution, or simplify first."),
-						Predicted, *Step.Mesh, C::MaxTrianglesPerMesh));
+					return Fail(FString::Printf(TEXT("it would make about %lld triangles in %s, over the %d one mesh may hold; %s, or simplify first."),
+						Predicted, *Step.Mesh, C::MaxTrianglesPerMesh, Step.Kind == TEXT("subdivide") ? TEXT("lower its Level") : TEXT("lower Steps, Level, Count or Resolution")));
 				}
 				Tris.Add(Key, Predicted);
 				Names.Add(Key, Step.Mesh);
@@ -1586,6 +1621,148 @@ namespace HyperAIStudio::Modeling::Gate
 			: Area == TEXT("face") ? EGeometryScriptPolyOperationArea::PerTriangle : EGeometryScriptPolyOperationArea::EntireSelection;
 	}
 
+	FCage ReadCage(const UDynamicMesh& Mesh, const FString& Name)
+	{
+		using UE::Geometry::FGroupTopology;
+		FCage Out;
+		Mesh.ProcessMesh([&Out, &Name](const FDynamicMesh3& Read)
+		{
+			if (!Read.HasTriangleGroups())
+			{
+				Out.Problem = FString::Printf(TEXT("mesh %s has no polygroups to subdivide (solidify and morphology rebuild a surface without them); give Cage=quads to pair its triangles into a cage, or smooth it with tessellate Mode=pn."), *Name);
+				return;
+			}
+			FGroupTopology Topology(&Read, /*bAutoBuild=*/false);
+			// As Geometry Script builds it: border vertices are corners, so open edges keep their shape.
+			Topology.ShouldAddExtraCornerAtVert = [&Read](const FGroupTopology&, const int32 Vid, const UE::Geometry::FIndex2i&) { return Read.IsBoundaryVertex(Vid); };
+			if (!Topology.RebuildTopology())
+			{
+				Out.Problem = FString::Printf(TEXT("mesh %s's polygroup borders cannot be traced (a bowtie or non-manifold vertex); repair it first, or give Cage=quads."), *Name);
+				return;
+			}
+			// One polygon per group, shaped by its corners alone: the triangles inside a group do not count.
+			Out.Polygons = Topology.Groups.Num();
+			const FGroupTopology::FGroup* First = nullptr;
+			for (const FGroupTopology::FGroup& Group : Topology.Groups)
+			{
+				if (Group.Boundaries.Num() == 1 && Group.Boundaries[0].GroupEdges.Num() >= 3)
+				{
+					Out.Corners += Group.Boundaries[0].GroupEdges.Num();
+					continue;
+				}
+				Out.Bad.Add(Group.GroupID);
+				if (!First) First = &Group;
+			}
+			if (!First) return;
+			FVector Center = FVector::ZeroVector;
+			for (const int32 Tid : First->Triangles) Center += Read.GetTriCentroid(Tid);
+			Center /= FMath::Max(1, First->Triangles.Num());
+			const FString Which = FString::Printf(TEXT("polygroup %d of %s (%d triangles around %s)"), First->GroupID, *Name, First->Triangles.Num(), *Vec(Center));
+			if (First->Boundaries.IsEmpty())
+			{
+				Out.Problem = Which + TEXT(" covers a closed piece with no border, so subdivide finds no corners; build its shapes with Groups=quad (Groups=face also works on boxes), or give Cage=quads.");
+			}
+			else if (First->Boundaries.Num() > 1)
+			{
+				Out.Problem = FString::Printf(TEXT("%s is a band with %d borders, as a cylinder's, cone's, capsule's, torus's, revolve's or sweep's side is with Groups=face, or a face a boolean holed; build round shapes with Groups=quad, or give Cage=quads."),
+					*Which, First->Boundaries.Num());
+			}
+			else
+			{
+				Out.Problem = FString::Printf(TEXT("%s has only %d corner(s), as a disc's or a cap's has with Groups=face; build it with Groups=quad, or give Cage=quads."), *Which,
+					First->Boundaries[0].GroupEdges.Num());
+			}
+			if (Out.Bad.Num() > 1) Out.Problem += FString::Printf(TEXT(" %d of its %d polygroups are like this."), Out.Bad.Num(), Out.Polygons);
+		});
+		return Out;
+	}
+
+	/** Each triangle Split picks given a polygroup of its own. */
+	void OwnGroups(UDynamicMesh& Mesh, const TFunctionRef<void(const FDynamicMesh3&, TSet<int32>&)> Split)
+	{
+		Mesh.EditMesh([&Split](FDynamicMesh3& Edit)
+		{
+			TSet<int32> Picked;
+			Split(Edit, Picked);
+			for (const int32 Tid : Picked) Edit.SetTriangleGroup(Tid, Edit.AllocateTriangleGroup());
+		}, EDynamicMeshChangeType::GeneralEdit, EDynamicMeshAttributeChangeFlags::Unknown, false);
+	}
+
+	/**
+	 * Cage=quads: the triangles paired into quads, the rest kept as triangles, whatever groups the mesh had. A vertex
+	 * that only two of them meet at is no corner, which can leave a triangle with two (often on voxel surfaces): the
+	 * triangles around such groups get groups of their own until every group is a polygon, as every triangle on its own is.
+	 */
+	FCage PairIntoCage(UDynamicMesh& Mesh, const FString& Name, UGeometryScriptDebug* Debug)
+	{
+		using UGroups = UGeometryScriptLibrary_MeshPolygroupFunctions;
+		bool bHasGroups = false;
+		Mesh.ProcessMesh([&bHasGroups](const FDynamicMesh3& Read) { bHasGroups = Read.HasTriangleGroups(); });
+		if (!bHasGroups) UGroups::EnablePolygroups(&Mesh, Debug);
+		UGroups::ComputePolygroupsFromPolygonDetection(&Mesh, FGeometryScriptGroupLayer(), /*bRespectUVSeams=*/true, /*bRespectHardNormals=*/false, 1.0, 1.0, 1, Debug);
+		FCage Cage = ReadCage(Mesh, Name);
+		for (int32 Round = 0; Round < 4 && !Cage.Bad.IsEmpty(); ++Round)
+		{
+			const TSet<int32> Bad(Cage.Bad);
+			OwnGroups(Mesh, [&Bad](const FDynamicMesh3& Read, TSet<int32>& Picked)
+			{
+				for (const int32 Tid : Read.TriangleIndicesItr())
+				{
+					if (!Bad.Contains(Read.GetTriangleGroup(Tid))) continue;
+					const UE::Geometry::FIndex3i Corners = Read.GetTriangle(Tid);
+					for (int32 Each = 0; Each < 3; ++Each)
+					{
+						for (const int32 Around : Read.VtxTrianglesItr(Corners[Each])) Picked.Add(Around);
+					}
+				}
+			});
+			Cage = ReadCage(Mesh, Name);
+		}
+		if (!Cage.Bad.IsEmpty())
+		{
+			OwnGroups(Mesh, [](const FDynamicMesh3& Read, TSet<int32>& Picked)
+			{
+				for (const int32 Tid : Read.TriangleIndicesItr()) Picked.Add(Tid);
+			});
+			Cage = ReadCage(Mesh, Name);
+		}
+		return Cage;
+	}
+
+	/** Each triangle's polygroup by id, INDEX_NONE for gaps; empty when the mesh has none. */
+	TArray<int32> GroupsByTriangle(const UDynamicMesh& Mesh)
+	{
+		TArray<int32> Out;
+		Mesh.ProcessMesh([&Out](const FDynamicMesh3& Read)
+		{
+			if (!Read.HasTriangleGroups()) return;
+			Out.Init(INDEX_NONE, Read.MaxTriangleID());
+			for (const int32 Tid : Read.TriangleIndicesItr()) Out[Tid] = Read.GetTriangleGroup(Tid);
+		});
+		return Out;
+	}
+
+	/**
+	 * The moved faces' polygroups as they were: Geometry Script merges each offset area into one group (the modelling
+	 * tools' single group per area), which leaves subdivide and bevel nothing to work with. Keyed by the area's merged
+	 * group too, so faces of one group offset as separate areas (Area=face) stay separate groups.
+	 */
+	void KeepGroupsApart(UDynamicMesh& Mesh, const TArray<int32>& Before)
+	{
+		if (Before.IsEmpty()) return;
+		Mesh.EditMesh([&Before](FDynamicMesh3& Edit)
+		{
+			TMap<TPair<int32, int32>, int32> Fresh;
+			for (int32 Tid = 0; Tid < Before.Num(); ++Tid)
+			{
+				if (Before[Tid] == INDEX_NONE || !Edit.IsTriangle(Tid) || Edit.GetTriangleGroup(Tid) == Before[Tid]) continue;
+				const TPair<int32, int32> Key(Before[Tid], Edit.GetTriangleGroup(Tid));
+				const int32* Found = Fresh.Find(Key);
+				Edit.SetTriangleGroup(Tid, Found ? *Found : Fresh.Add(Key, Edit.AllocateTriangleGroup()));
+			}
+		}, EDynamicMeshChangeType::GeneralEdit, EDynamicMeshAttributeChangeFlags::Unknown, false);
+	}
+
 	bool RunStep(const FStep& Step, FBuilt& Built, UGeometryScriptDebug* Debug, FString& OutError)
 	{
 		const FString& K = Step.Kind;
@@ -1735,6 +1912,22 @@ namespace HyperAIStudio::Modeling::Gate
 			UModel::ApplyMeshInsetOutsetFaces(Mesh, Options, Selection, Debug);
 			return true;
 		}
+		if (K == TEXT("offset_faces"))
+		{
+			FGeometryScriptMeshOffsetFacesOptions Options;
+			Options.Distance = Step.Float(TEXT("Distance"), 10.0);
+			const FString Mode = Step.Text(TEXT("Mode"), TEXT("parallel")).ToLower();
+			Options.OffsetType = Mode == TEXT("vertex") ? EGeometryScriptOffsetFacesType::VertexNormal
+				: Mode == TEXT("face") ? EGeometryScriptOffsetFacesType::FaceNormal : EGeometryScriptOffsetFacesType::ParallelFaceOffset;
+			Options.AreaMode = AreaOf(Step);
+			// A whole closed piece swells or shrinks as it is (shell is the op that keeps both surfaces); a whole open sheet
+			// thickens into a slab, as extrude makes it.
+			Options.bSolidsToShells = UQuery::GetNumOpenBorderEdges(Mesh) > 0;
+			const TArray<int32> Groups = GroupsByTriangle(*Mesh);
+			UModel::ApplyMeshOffsetFaces(Mesh, Options, Selection, Debug);
+			KeepGroupsApart(*Mesh, Groups);
+			return true;
+		}
 		if (K == TEXT("bevel"))
 		{
 			if (Step.Select.bGiven)
@@ -1805,6 +1998,31 @@ namespace HyperAIStudio::Modeling::Gate
 			UNormals::RecomputeNormals(Mesh, NormalOptions(), false, Debug);
 			return true;
 		}
+		if (K == TEXT("wave"))
+		{
+			const FVector Up = Step.Vector(TEXT("Direction"), FVector::UpVector).GetSafeNormal();
+			FVector Along = Step.Vector(TEXT("Along"), FVector::ForwardVector);
+			Along -= Up * FVector::DotProduct(Along, Up);
+			if (!Along.Normalize())
+			{
+				// A ripple needs only its Direction (Check refused a line whose Along runs with it).
+				FVector Side;
+				Up.FindBestAxisVectors(Along, Side);
+			}
+			// Unit scale, so every vertex moves along Direction alone, by at most Magnitude.
+			const FTransform Frame(FRotationMatrix::MakeFromZX(Up, Along).ToQuat(), Step.bLocation ? Step.Location : Box.GetCenter());
+			const double Wavelength = Step.Float(TEXT("Wavelength"), 100.0);
+			FGeometryScriptMathWarpOptions Options;
+			Options.Magnitude = Step.Float(TEXT("Magnitude"), 5.0);
+			// The engine's sine takes radians per cm and a shift in cm along the wave: one Wavelength is a full turn.
+			Options.Frequency = 2.0 * UE_DOUBLE_PI / Wavelength;
+			Options.FrequencyShift = Step.Float(TEXT("Phase"), 0.0) / 360.0 * Wavelength;
+			const bool bRipple = Step.Text(TEXT("Mode"), TEXT("line")).Equals(TEXT("ripple"), ESearchCase::IgnoreCase);
+			// SinWave3D is left out: Geometry Script 5.8 has no case for it, so it would move nothing.
+			UDeform::ApplyMathWarpToMesh(Mesh, Frame, bRipple ? EGeometryScriptMathWarpType::SinWave2D : EGeometryScriptMathWarpType::SinWave1D, Options, Debug);
+			UNormals::RecomputeNormals(Mesh, NormalOptions(), false, Debug);
+			return true;
+		}
 		if (K == TEXT("smooth"))
 		{
 			FGeometryScriptIterativeMeshSmoothingOptions Options;
@@ -1825,6 +2043,34 @@ namespace HyperAIStudio::Modeling::Gate
 			{
 				UGeometryScriptLibrary_MeshSubdivideFunctions::ApplyUniformTessellation(Mesh, Level, Debug);
 			}
+			return true;
+		}
+		if (K == TEXT("subdivide"))
+		{
+			const int32 Level = Step.Int(TEXT("Level"), 1);
+			const bool bQuads = Step.Text(TEXT("Cage"), TEXT("groups")).Equals(TEXT("quads"), ESearchCase::IgnoreCase);
+			const FCage Cage = bQuads ? PairIntoCage(*Mesh, Step.Mesh, Debug) : ReadCage(*Mesh, Step.Mesh);
+			if (!Cage.Problem.IsEmpty())
+			{
+				OutError = Cage.Problem;
+				return false;
+			}
+			// Counted from the cage itself before OpenSubdiv allocates anything: Check's estimate assumed quads.
+			const int64 Made = (2 * Cage.Corners) << (2 * (Level - 1));
+			if (Made > C::MaxTrianglesPerMesh)
+			{
+				OutError = FString::Printf(TEXT("its cage of %d polygons would make %lld triangles at Level %d, over the %d one mesh may hold; lower its Level, or simplify first."),
+					Cage.Polygons, Made, Level, C::MaxTrianglesPerMesh);
+				return false;
+			}
+			UGeometryScriptLibrary_OpenSubdivFunctions::ApplyPolygroupCatmullClarkSubD(Mesh, Level, FGeometryScriptGroupLayer(), Debug);
+			if (Mesh->GetTriangleCount() == 0)
+			{
+				OutError = TEXT("the subdivision came out empty.");
+				return false;
+			}
+			// A subdivision surface is smooth: one normal per vertex (normals Mode=split brings hard edges back).
+			UNormals::SetPerVertexNormals(Mesh, Debug);
 			return true;
 		}
 		if (K == TEXT("remesh"))
@@ -2451,6 +2697,189 @@ namespace HyperAIStudio::Modeling::Gate
 		return true;
 	}
 
+	// --- Previews ------------------------------------------------------------------------------------------------------
+
+	bool GPreviewsOffForTests = false;
+
+	void SetPreviewsOffForTests(const bool bOff)
+	{
+		GPreviewsOffForTests = bOff;
+	}
+
+	/** Whether this editor can draw at all: not under a null RHI, and on the game thread the thumbnail renderer needs. */
+	bool CanDraw()
+	{
+		return !GPreviewsOffForTests && FApp::CanEverRender() && IsInGameThread();
+	}
+
+	const TCHAR* const CannotDraw = TEXT("No previews: this editor runs without rendering (null RHI), so nothing can be drawn");
+
+	bool RenderPreview(UStaticMesh& Mesh, FString& OutPath, FString& OutReason)
+	{
+		OutPath.Reset();
+		if (!CanDraw())
+		{
+			OutReason = TEXT("this editor runs without rendering (null RHI)");
+			return false;
+		}
+		TArray<UStaticMesh*> Compile = {&Mesh};
+		FStaticMeshCompilingManager::Get().FinishCompilation(Compile);
+		FString Error;
+		if (!FHyperAIStudioResultPreview::WriteAssetPreview(Mesh, OutPath, Error))
+		{
+			OutPath.Reset();
+			OutReason = Error == TEXT("preview_write_failed") ? TEXT("the PNG could not be written (preview_write_failed)")
+				: TEXT("the thumbnail renderer drew nothing (preview_render_failed)");
+			return false;
+		}
+		return true;
+	}
+
+	/** True when a slot's shaders are still compiling, so the picture shows the engine's default surface there. */
+	bool MaterialsCompiling(const UStaticMesh& Mesh)
+	{
+		for (const FStaticMaterial& Slot : Mesh.GetStaticMaterials())
+		{
+			if (Slot.MaterialInterface && Slot.MaterialInterface->IsCompiling()) return true;
+		}
+		return false;
+	}
+
+	void NoteCompiling(const UStaticMesh& Mesh, const FString& Path, TArray<FString>& OutNotes)
+	{
+		if (!MaterialsCompiling(Mesh)) return;
+		OutNotes.Add(FString::Printf(TEXT("%s: its material was still compiling, so the preview may show the engine's default surface; hyper_model_inspect with Asset and bPreview true draws it again."),
+			*Path));
+	}
+
+	void RenderPreviews(const TArray<UStaticMesh*>& Written, TArray<FHyperAIModelAssetResult>& InOutAssets, TArray<FString>& OutNotes)
+	{
+		if (Written.IsEmpty()) return;
+		if (!CanDraw())
+		{
+			OutNotes.Add(FString(CannotDraw) + TEXT("; the assets are written all the same."));
+			return;
+		}
+		const double Start = FPlatformTime::Seconds();
+		TArray<FString> Skipped;
+		// Write appends both arrays in step.
+		for (int32 Index = 0; Index < Written.Num() && Index < InOutAssets.Num(); ++Index)
+		{
+			UStaticMesh* Mesh = Written[Index];
+			FHyperAIModelAssetResult& Asset = InOutAssets[Index];
+			if (!Mesh) continue;
+			// Bounded across assets: one picture cannot be cut short, but the next is not started past the limit.
+			if ((FPlatformTime::Seconds() - Start) * 1000.0 > C::MaxPreviewMs)
+			{
+				Skipped.Add(Asset.Path);
+				continue;
+			}
+			FString Reason;
+			if (!RenderPreview(*Mesh, Asset.PreviewPath, Reason))
+			{
+				OutNotes.Add(FString::Printf(TEXT("%s: no preview, %s."), *Asset.Path, *Reason));
+				continue;
+			}
+			NoteCompiling(*Mesh, Asset.Path, OutNotes);
+		}
+		if (!Skipped.IsEmpty())
+		{
+			OutNotes.Add(FString::Printf(TEXT("Previews stopped at the %d ms limit: %s have none; hyper_model_inspect with Asset and bPreview true draws one."), C::MaxPreviewMs,
+				*FString::Join(Skipped, TEXT(", "))));
+		}
+	}
+
+	void RenderDryRunPreviews(const FPlan& Plan, FBuilt& Built, TArray<FHyperAIModelAssetResult>& InOutAssets, TArray<FString>& OutNotes)
+	{
+		if (InOutAssets.IsEmpty()) return;
+		if (!CanDraw())
+		{
+			OutNotes.Add(FString(CannotDraw) + TEXT("."));
+			return;
+		}
+		const TStrongObjectPtr<UGeometryScriptDebug> Debug(NewObject<UGeometryScriptDebug>(GetTransientPackage()));
+		const double Start = FPlatformTime::Seconds();
+		TArray<FString> Skipped;
+		bool bFallback = false;
+		int32 Index = 0;
+		// In the order PreviewWrites filled the assets: write_asset steps whose mesh was kept.
+		for (const FStep& Step : Plan.Steps)
+		{
+			if (Step.Kind != TEXT("write_asset")) continue;
+			UDynamicMesh* Kept = Built.Kept(Step.Index);
+			if (!Kept) continue;
+			if (Index >= InOutAssets.Num()) break;
+			FHyperAIModelAssetResult& Asset = InOutAssets[Index++];
+			if ((FPlatformTime::Seconds() - Start) * 1000.0 > C::MaxPreviewMs)
+			{
+				Skipped.Add(Asset.Path);
+				continue;
+			}
+			const FWriteSettings Settings = SettingsOf(Step);
+			// The slots' materials as a write would give them; a dry run makes no asset, the vertex-colour material neither.
+			TArray<UMaterialInterface*> Materials;
+			const int32 Slots = SlotsOf(*Kept, Settings);
+			for (int32 Slot = 0; Slot < Slots; ++Slot)
+			{
+				const FString* Named = Settings.Materials.Find(Slot);
+				UMaterialInterface* Material = Named ? LoadQuiet<UMaterialInterface>(*Named) : nullptr;
+				FString Ignored;
+				if (!Material && !Named) Material = VertexColorMaterial(/*bCreate=*/false, Ignored);
+				if (!Material && GEngine)
+				{
+					Material = GEngine->VertexColorMaterial;
+					bFallback = true;
+				}
+				Materials.Add(Material);
+			}
+			// Built, drawn and let go outside any undo step: nothing of it outlives the call but the picture.
+			TGuardValue<ITransaction*> NoUndo(GUndo, nullptr);
+			UStaticMesh* Temp = NewObject<UStaticMesh>(GetTransientPackage(), MakeUniqueObjectName(GetTransientPackage(), UStaticMesh::StaticClass(), TEXT("HyperAIModelPreview")),
+				RF_Transient);
+			FGeometryScriptCopyMeshToAssetOptions Options;
+			Options.bEmitTransaction = false;
+			Options.bEnableRecomputeTangents = true;
+			Options.bReplaceMaterials = true;
+			Options.NewMaterials.Append(Materials);
+			Options.bApplyNaniteSettings = true;
+			Options.NewNaniteSettings.bEnabled = false;
+			Options.GenerateLightmapUVs = EGeometryScriptGenerateLightmapUVOptions::DoNotGenerateLightmapUVs;
+			Options.bDeferMeshPostEditChange = true;
+			Debug->Messages.Reset();
+			EGeometryScriptOutcomePins Outcome = EGeometryScriptOutcomePins::Failure;
+			UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshToStaticMesh(Kept, Temp, Options, FGeometryScriptMeshWriteLOD(), Outcome, /*bUseSectionMaterials=*/false, Debug.Get());
+			if (Outcome != EGeometryScriptOutcomePins::Success)
+			{
+				OutNotes.Add(FString::Printf(TEXT("%s: no preview, the temporary mesh could not take it%s"), *Asset.Path,
+					Debug->Messages.IsEmpty() ? TEXT(".") : *(TEXT(": ") + Debug->Messages[0].Message.ToString())));
+				continue;
+			}
+			// A picture needs no distance field (Nanite is off above).
+			Temp->GetSourceModel(0).BuildSettings.DistanceFieldResolutionScale = 0.f;
+			Temp->PostEditChange();
+			FString Drawn;
+			FString Reason;
+			if (!RenderPreview(*Temp, Drawn, Reason))
+			{
+				OutNotes.Add(FString::Printf(TEXT("%s: no preview, %s."), *Asset.Path, *Reason));
+				continue;
+			}
+			// Named after the asset it stands for, apart from that asset's own preview, and the same file every dry run.
+			const FString Named = FHyperAIStudioResultPreview::GetAssetPreviewPath(ObjectPathOf(Settings.Path) + TEXT(" dry run"));
+			Asset.PreviewPath = IFileManager::Get().Move(*Named, *Drawn, /*bReplace=*/true) ? Named : Drawn;
+			NoteCompiling(*Temp, Asset.Path, OutNotes);
+			// Temp is left to garbage collection: transient, unreferenced, and its pending builds cancel when it goes.
+		}
+		if (bFallback)
+		{
+			OutNotes.Add(FString::Printf(TEXT("Dry-run previews show vertex colours unlit until the first write makes %s."), C::VertexColorMaterial));
+		}
+		if (!Skipped.IsEmpty())
+		{
+			OutNotes.Add(FString::Printf(TEXT("Previews stopped at the %d ms limit: %s have none."), C::MaxPreviewMs, *FString::Join(Skipped, TEXT(", "))));
+		}
+	}
+
 	// --- Props checked -------------------------------------------------------------------------------------------------
 
 	void CheckAsset(UStaticMesh& Mesh, const bool bProduction, TArray<FHyperAIModelIssue>& OutIssues, FString& OutLine)
@@ -2580,9 +3009,10 @@ namespace HyperAIStudio::Modeling::Gate
 			FString::Printf(TEXT("%d ops a request, %d after recipes expand; %d working meshes at once; %d assets a plan."), C::MaxOperations, C::MaxExpandedOperations, C::MaxMeshes, C::MaxAssets),
 			FString::Printf(TEXT("%d triangles a working mesh, %d a plan's meshes together; an asset %d without Nanite, %d with."), C::MaxTrianglesPerMesh, C::MaxTrianglesPerPlan,
 				C::MaxTrianglesPerAsset, C::MaxTrianglesPerNaniteAsset),
-			FString::Printf(TEXT("Profiles %d points, paths %d; arrays %d copies, scatters %d; tessellate level %d; voxel grids %d cells; remesh %d triangles."), C::MaxProfilePoints,
-				C::MaxPathPoints, C::MaxArrayCount, C::MaxScatterCount, C::MaxTessellateLevel, C::MaxGridResolution, C::MaxRemeshTriangles),
+			FString::Printf(TEXT("Profiles %d points, paths %d; arrays %d copies, scatters %d; tessellate level %d, subdivide level %d; voxel grids %d cells; remesh %d triangles."),
+				C::MaxProfilePoints, C::MaxPathPoints, C::MaxArrayCount, C::MaxScatterCount, C::MaxTessellateLevel, C::MaxSubdivideLevel, C::MaxGridResolution, C::MaxRemeshTriangles),
 			FString::Printf(TEXT("A plan's meshes build within %d ms; triangles are predicted before anything runs and counted after every op."), C::MaxBuildMs),
+			FString::Printf(TEXT("A write draws a PNG of each asset within %d ms all told (Assets[].PreviewPath); a dry run draws them with bPreviewDryRun."), C::MaxPreviewMs),
 			TEXT("Units: cm (100 = 1 m), Z up; shapes and recipes sit on their base unless Origin=center."),
 		};
 	}

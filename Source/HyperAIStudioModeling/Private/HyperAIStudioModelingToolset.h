@@ -19,16 +19,16 @@ struct FHyperAIModelOp
 	/**
 	 * add.box, add.sphere, add.cylinder, add.cone, add.capsule, add.torus, add.disc, add.stairs, add.curved_stairs,
 	 * add.revolve, add.sweep, add.extrude_polygon, append, copy, array.linear, array.radial, scatter_on, boolean,
-	 * self_union, plane_cut, mirror, extrude, inset, bevel, shell, noise, bend, twist, flare, smooth, tessellate, remesh,
-	 * simplify, solidify, morphology, transform, pivot, normals, repair, uv, material, color, drop, recipe, write_asset.
-	 * hyper_model_inspect lists each one's fields and Params.
+	 * self_union, plane_cut, mirror, extrude, inset, offset_faces, bevel, shell, noise, bend, twist, flare, wave, smooth,
+	 * tessellate, subdivide, remesh, simplify, solidify, morphology, transform, pivot, normals, repair, uv, material,
+	 * color, drop, recipe, write_asset. hyper_model_inspect lists each one's fields and Params.
 	 */
 	UPROPERTY() FString Kind;
 	/** The working mesh the op makes or changes: 1 to 48 letters, digits, _ or -. */
 	UPROPERTY() FString Mesh;
 	/** append, copy, array.*, scatter_on, boolean: the other mesh, by name. */
 	UPROPERTY() FString Source;
-	/** add.*: where the shape's base center sits (its center with Origin=center); transform, append, copy: a move; plane_cut, mirror: a point on the plane. */
+	/** add.*: where the shape's base center sits (its center with Origin=center); transform, append, copy: a move; plane_cut, mirror: a point on the plane; wave: where its waves start, or the ripple's center (the mesh's center by default). */
 	UPROPERTY() FString Location;
 	/** "pitch,yaw,roll" degrees. */
 	UPROPERTY() FString Rotation;
@@ -57,6 +57,8 @@ struct FHyperAIModelPlanRequest
 	UPROPERTY() TArray<FHyperAIModelOp> Operations;
 	/** Build the meshes in memory and report them; nothing is written. */
 	UPROPERTY() bool bDryRun = false;
+	/** Dry runs only: also draw what each write_asset would write as a PNG (Assets[].PreviewPath), from a temporary static mesh; slower. A write always draws its assets. */
+	UPROPERTY() bool bPreviewDryRun = false;
 	/** Names the edit, for hyper_operation_wait; made when empty. */
 	UPROPERTY() FString OperationId;
 };
@@ -100,6 +102,8 @@ struct FHyperAIModelAssetResult
 	UPROPERTY() int32 CollisionShapes = 0;
 	/** It replaced an existing asset (Replace=true), which undo takes back. */
 	UPROPERTY() bool bReplaced = false;
+	/** A PNG of the asset (Saved/HyperAIStudio/Previews) to open with an image reader; empty when none was drawn, and Notes say why. */
+	UPROPERTY() FString PreviewPath;
 };
 
 USTRUCT(BlueprintType)
@@ -134,6 +138,8 @@ struct FHyperAIModelInspectRequest
 	UPROPERTY() FString Folder;
 	/** One static mesh to read in full: slots, collision, Nanite and the plan that made it. */
 	UPROPERTY() FString Asset;
+	/** With Asset: also draw a PNG of it (PreviewPath). */
+	UPROPERTY() bool bPreview = false;
 };
 
 USTRUCT(BlueprintType)
@@ -153,6 +159,8 @@ struct FHyperAIModelInspectReport
 	/** Asset read in full. */
 	UPROPERTY() TArray<FString> Details;
 	UPROPERTY() bool bTruncated = false;
+	/** With bPreview: the PNG of Asset, to open with an image reader. */
+	UPROPERTY() FString PreviewPath;
 };
 
 USTRUCT(BlueprintType)
@@ -208,15 +216,17 @@ public:
 
 	/**
 	 * Lists the model plan's op kinds with their fields and Params, the recipes, the limits, and the static meshes in a
-	 * folder (triangles, size, slots, Nanite); with Asset, one mesh in full: collision, slots and the plan that made it.
+	 * folder (triangles, size, slots, Nanite); with Asset, one mesh in full: collision, slots and the plan that made it,
+	 * and with bPreview a PNG of it.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Modeling")
 	static FHyperAIModelInspectReport hyper_model_inspect(const FHyperAIModelInspectRequest& Request);
 
 	/**
-	 * Free 3D models in one undo step: primitives, revolve, sweep, booleans, plane cut, mirror, extrude/inset/bevel,
-	 * noise/bend/twist/flare, remesh, simplify, solidify, UVs, material ids, vertex colour, and recipes (rock, arch,
-	 * tower, tree, crystal_cluster...), then write_asset to a /Game static mesh with collision. Dry run builds in memory.
+	 * Free 3D models in one undo step: primitives, revolve, sweep, booleans, plane cut, mirror, extrude/inset/offset/bevel,
+	 * subdivide, noise/bend/twist/flare/wave, remesh, simplify, solidify, UVs, material ids, vertex colour, and recipes
+	 * (rock, arch, tower, tree, crystal_cluster...), then write_asset to a /Game static mesh with collision and a PNG
+	 * preview. Dry run builds in memory.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Modeling")
 	static FHyperAIModelPlanReport hyper_model_apply_plan(const FHyperAIModelPlanRequest& Request);
@@ -254,6 +264,10 @@ public:
 	static constexpr int32 MaxTrianglesPerNaniteAsset = 250000;
 	static constexpr int32 MaxTrianglesPerPlan = 1500000;
 	static constexpr int32 MaxTessellateLevel = 3;
+	/** Catmull-Clark levels one subdivide may run: each multiplies the faces by four. */
+	static constexpr int32 MaxSubdivideLevel = 3;
+	/** Milliseconds a plan's previews may take all told; assets past it go without one, and a note says so. */
+	static constexpr int32 MaxPreviewMs = 4000;
 	/** Voxel grid cells along the longest side, for solidify and morphology. */
 	static constexpr int32 MaxGridResolution = 256;
 	static constexpr int32 MaxRemeshTriangles = 200000;

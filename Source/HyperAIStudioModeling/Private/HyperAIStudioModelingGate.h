@@ -122,6 +122,29 @@ namespace HyperAIStudio::Modeling::Gate
 	/** The vertex-colour material; made and saved on first use when bCreate. */
 	UMaterialInterface* VertexColorMaterial(bool bCreate, FString& OutError);
 
+	/** A mesh's polygroups read as a Catmull-Clark cage, the way Geometry Script reads them. */
+	struct FCage
+	{
+		int32 Polygons = 0;
+		/** Corners summed over the polygons: subdivide makes 2 x Corners x 4^(Level-1) triangles. */
+		int64 Corners = 0;
+		/** Why the groups are no cage, naming the first group that is not a polygon and what fixes it; empty when they are one. */
+		FString Problem;
+		/** The polygroups that are not polygons, by id. */
+		TArray<int32> Bad;
+	};
+	/** Exposed for tests. */
+	FCage ReadCage(const UDynamicMesh& Mesh, const FString& Name);
+
+	/** PNGs of written static meshes, after their compiles: each asset's PreviewPath, or a note saying why it has none. Never fails. */
+	void RenderPreviews(const TArray<UStaticMesh*>& Written, TArray<FHyperAIModelAssetResult>& InOutAssets, TArray<FString>& OutNotes);
+	/** A dry run's previews: what each write_asset would write, drawn from a temporary static mesh that is never saved. */
+	void RenderDryRunPreviews(const FPlan& Plan, FBuilt& Built, TArray<FHyperAIModelAssetResult>& InOutAssets, TArray<FString>& OutNotes);
+	/** One static mesh drawn to its PNG; false with the reason when nothing can be drawn. */
+	bool RenderPreview(UStaticMesh& Mesh, FString& OutPath, FString& OutReason);
+	/** Tests stand in for an editor that cannot draw (null RHI). */
+	void SetPreviewsOffForTests(bool bOff);
+
 	/** One static mesh as a prop: issues found, and a line describing it; open edges go unmeasured past a working mesh's triangles. */
 	void CheckAsset(UStaticMesh& Mesh, bool bProduction, TArray<FHyperAIModelIssue>& OutIssues, FString& OutLine);
 	/** One line per op kind and per recipe, for inspect. */

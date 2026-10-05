@@ -147,16 +147,20 @@ namespace HyperAIStudio::ModelingTools::Private
 			}
 			Report.Saved.Add(Mesh->GetPathName());
 		}
+		// Drawn last: a saved write stands whether or not it can be drawn.
+		Gate::RenderPreviews(Written, Report.Assets, Report.Notes);
 		Report.bOk = true;
 		Report.Status = TEXT("completed");
 		TArray<FString> Lines;
+		int32 Drawn = 0;
 		for (const FHyperAIModelAssetResult& Asset : Report.Assets)
 		{
 			Lines.Add(FString::Printf(TEXT("%s (%d triangles, %d slot(s), %s collision, %d shape(s)%s)"), *Asset.Path, Asset.Triangles, Asset.Slots, *Asset.Collision,
 				Asset.CollisionShapes, Asset.bNanite ? TEXT(", Nanite") : TEXT("")));
+			if (!Asset.PreviewPath.IsEmpty()) ++Drawn;
 		}
-		Report.Diagnostic = FString::Printf(TEXT("%d asset(s) written and saved: %s. Undo takes back replaced assets; new ones stay until deleted."), Report.Assets.Num(),
-			*FString::Join(Lines, TEXT("; ")));
+		Report.Diagnostic = FString::Printf(TEXT("%d asset(s) written and saved: %s. Undo takes back replaced assets; new ones stay until deleted.%s"), Report.Assets.Num(),
+			*FString::Join(Lines, TEXT("; ")), Drawn > 0 ? *FString::Printf(TEXT(" %d preview PNG(s): Assets[].PreviewPath."), Drawn) : TEXT(""));
 		return Report;
 	}
 
@@ -184,6 +188,11 @@ FHyperAIModelInspectReport FHyperAIStudioModelingContracts::Inspect(const FHyper
 		Report.Recipes.Add(FString::Printf(TEXT("%s (Size %g cm): %s."), Recipe.Name, Recipe.DefaultSize, Recipe.What));
 	}
 	Report.Limits = Gate::DescribeLimits();
+	if (Request.bPreview && Request.Asset.TrimStartAndEnd().IsEmpty())
+	{
+		Report.Diagnostic = TEXT("bPreview draws the one static mesh Asset names; give Asset.");
+		return Report;
+	}
 	const FString Path = Folder(Request.Folder);
 	if (!Path.StartsWith(TEXT("/")))
 	{
@@ -230,6 +239,8 @@ FHyperAIModelInspectReport FHyperAIStudioModelingContracts::Inspect(const FHyper
 		}
 		const FString* Hash = Mesh->GetPackage()->GetMetaData().FindValue(Mesh, C::PlanHashKey);
 		Report.Details.Add(Hash ? FString::Printf(TEXT("Made by hyper_model_apply_plan, plan %s."), **Hash) : FString(TEXT("Not made by hyper_model_apply_plan.")));
+		FString Reason;
+		if (Request.bPreview && !Gate::RenderPreview(*Mesh, Report.PreviewPath, Reason)) Report.Details.Add(TEXT("No preview: ") + Reason + TEXT("."));
 	}
 	Report.bOk = true;
 	Report.Diagnostic = FString::Printf(TEXT("%d op kinds, %d recipes; %d static mesh(es) under %s%s."), Report.Kinds.Num(), Report.Recipes.Num(), Report.Assets.Num(), *Path,
@@ -283,12 +294,14 @@ FHyperAIModelPlanReport FHyperAIStudioModelingContracts::ApplyPlan(const FHyperA
 		{
 			Report.Notes.Add(FString::Printf(TEXT("Writing makes the vertex-colour material %s first."), C::VertexColorMaterial));
 		}
+		if (Request.bPreviewDryRun) Gate::RenderDryRunPreviews(Plan, *Built, Report.Assets, Report.Notes);
 		Report.bOk = true;
 		Report.Status = TEXT("checked");
 		int32 Triangles = 0;
 		for (const FHyperAIModelMeshStats& Mesh : Report.Meshes) Triangles += Mesh.Triangles;
-		Report.Diagnostic = FString::Printf(TEXT("%d op(s) built %d mesh(es), %d triangles, in %d ms; %d asset(s) would be written. Nothing was changed."), Plan.Steps.Num(),
-			Report.Meshes.Num(), Triangles, Built->BuildMs, Report.Assets.Num());
+		const int32 Drawn = Report.Assets.FilterByPredicate([](const FHyperAIModelAssetResult& Asset) { return !Asset.PreviewPath.IsEmpty(); }).Num();
+		Report.Diagnostic = FString::Printf(TEXT("%d op(s) built %d mesh(es), %d triangles, in %d ms; %d asset(s) would be written%s. Nothing was changed."), Plan.Steps.Num(),
+			Report.Meshes.Num(), Triangles, Built->BuildMs, Report.Assets.Num(), Request.bPreviewDryRun ? *FString::Printf(TEXT(", %d drawn"), Drawn) : TEXT(""));
 		return Report;
 	}
 	if (FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::Edit))

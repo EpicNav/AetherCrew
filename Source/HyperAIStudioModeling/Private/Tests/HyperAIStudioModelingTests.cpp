@@ -3,20 +3,26 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "DynamicMesh/DynamicMesh3.h"
 #include "Editor.h"
 #include "Editor/TransBuffer.h"
 #include "Engine/StaticMesh.h"
 #include "GeometryScript/MeshAssetFunctions.h"
 #include "GeometryScript/MeshPrimitiveFunctions.h"
+#include "HAL/FileManager.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioModelingGate.h"
 #include "HyperAIStudioModelingToolset.h"
+#include "HyperAIStudioResultPreview.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioSourceControl.h"
+#include "ImageCore.h"
+#include "ImageUtils.h"
 #include "Interfaces/IPluginManager.h"
 #include "JsonObjectConverter.h"
 #include "MeshDescription.h"
+#include "Misc/App.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
@@ -57,18 +63,44 @@ namespace HyperAIStudio::ModelingTests
 		return Out;
 	}
 
-	/** Runs a plan with approval off, as an agent with one-shot edits allowed would. */
-	FHyperAIModelPlanReport Run(TArray<FHyperAIModelOp> Ops, const bool bDryRun)
+	/** Runs a request with approval off, as an agent with one-shot edits allowed would. */
+	FHyperAIModelPlanReport RunWith(const FHyperAIModelPlanRequest& Request)
 	{
 		UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
 		const bool bApproval = Settings->bRequireApprovalForAgentEdits;
 		Settings->bRequireApprovalForAgentEdits = false;
-		FHyperAIModelPlanRequest Request;
-		Request.Operations = MoveTemp(Ops);
-		Request.bDryRun = bDryRun;
 		FHyperAIModelPlanReport Report = C::ApplyPlan(Request);
 		Settings->bRequireApprovalForAgentEdits = bApproval;
 		return Report;
+	}
+
+	FHyperAIModelPlanReport Run(TArray<FHyperAIModelOp> Ops, const bool bDryRun)
+	{
+		FHyperAIModelPlanRequest Request;
+		Request.Operations = MoveTemp(Ops);
+		Request.bDryRun = bDryRun;
+		return RunWith(Request);
+	}
+
+	/** A mesh's vertex positions by vertex id, as the plan builds it in memory. */
+	bool Vertices(const TArray<FHyperAIModelOp>& Ops, const TCHAR* Name, TArray<FVector>& OutPositions, FString& OutError)
+	{
+		namespace Gate = HyperAIStudio::Modeling::Gate;
+		OutPositions.Reset();
+		Gate::FPlan Plan;
+		Gate::FBuilt Built;
+		if (!Gate::Check(Ops, Plan, OutError) || !Gate::Build(Plan, Built, OutError)) return false;
+		const UDynamicMesh* Mesh = Built.Find(Name);
+		if (!Mesh)
+		{
+			OutError = FString::Printf(TEXT("no mesh %s"), Name);
+			return false;
+		}
+		Mesh->ProcessMesh([&OutPositions](const FDynamicMesh3& Read)
+		{
+			for (const int32 Vid : Read.VertexIndicesItr()) OutPositions.Add(Read.GetVertex(Vid));
+		});
+		return true;
 	}
 
 	const FHyperAIModelMeshStats* Find(const FHyperAIModelPlanReport& Report, const FString& Name)
@@ -97,6 +129,8 @@ namespace HyperAIStudio::ModelingTests
 		for (const FAssetData& Asset : Assets)
 		{
 			if (UObject* Object = Asset.GetAsset()) Objects.Add(Object);
+			// Writes draw a preview of each asset: those go with it.
+			IFileManager::Get().Delete(*FHyperAIStudioResultPreview::GetAssetPreviewPath(Asset.GetObjectPathString()), false, false, true);
 		}
 		if (!Objects.IsEmpty()) ObjectTools::ForceDeleteObjects(Objects, /*ShowConfirmation=*/false);
 	}
@@ -823,6 +857,293 @@ bool FHyperAIStudioModelingSkillExamplesTest::RunTest(const FString& Parameters)
 		++Plans;
 	}
 	TestTrue(TEXT("the skill shows plans"), Plans >= 3);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingSubdivideTest, "HyperAIStudio.NativeTools.Modeling.Subdivide", HyperAIStudio::ModelingTests::Flags)
+
+bool FHyperAIStudioModelingSubdivideTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelingTests;
+	namespace Gate = HyperAIStudio::Modeling::Gate;
+	// A box of 54 quad groups (Steps is vertices along an edge: 4 make 3 quads): each quad's 4 corners make 4 quads at
+	// level 1, and 4 times as many at level 2.
+	const FHyperAIModelOp Quads = Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"), TEXT("Steps=4; Groups=quad"));
+	const TArray<FHyperAIModelOp> Cushion = {Quads, Op(TEXT("subdivide"), TEXT("Block"), TEXT("Level=2"))};
+	const FHyperAIModelPlanReport Smooth = Run(Cushion, true);
+	const FHyperAIModelMeshStats* Block = Find(Smooth, TEXT("Block"));
+	if (!TestTrue(TEXT("a box of quad groups subdivides: ") + Smooth.Diagnostic, Smooth.bOk && Block != nullptr)) return false;
+	TestEqual(TEXT("into the triangles predicted: 2 x 54 quads x 4 corners x 4"), Block->Triangles, 1728);
+	TestTrue(TEXT("closed, in one piece, with its UVs"), Block->bClosed && Block->Components == 1 && Block->UVSets >= 1);
+	TestTrue(TEXT("its flat face centers stay where they were: ") + Block->Size, Parse(Block->Size).Equals(FVector(100.0), 0.5));
+	TArray<FVector> Points;
+	FString Error;
+	if (TestTrue(TEXT("its vertices read: ") + Error, Vertices(Cushion, TEXT("Block"), Points, Error)))
+	{
+		double Farthest = 0.0;
+		for (const FVector& Point : Points) Farthest = FMath::Max(Farthest, FMath::Abs(Point.X) + FMath::Abs(Point.Y) + FMath::Abs(Point.Z - 50.0));
+		TestTrue(FString::Printf(TEXT("and its corners are rounded off (%.1f from the center along a diagonal, where a sharp corner is 150)"), Farthest), Farthest < 140.0);
+	}
+	// A box of six face groups is a cube cage: it smooths into a pebble.
+	const FHyperAIModelPlanReport Pebble = Run({Sized(TEXT("add.box"), TEXT("Block"), TEXT("100")), Op(TEXT("subdivide"), TEXT("Block"), TEXT("Level=2"))}, true);
+	const FHyperAIModelMeshStats* Round = Find(Pebble, TEXT("Block"));
+	TestTrue(TEXT("a box of face groups smooths into a pebble: ") + (Round ? Round->Size : Pebble.Diagnostic), Round && Round->Triangles == 192 && Round->bClosed
+		&& Parse(Round->Size).GetMax() < 95.0);
+	// Groups of one triangle are polygons too: each makes three quads.
+	const FHyperAIModelOp Ball = Sized(TEXT("add.sphere"), TEXT("Ball"), TEXT("100"), TEXT("Steps=8; Groups=quad"));
+	Gate::FPlan Plan;
+	Gate::FBuilt Built;
+	if (TestTrue(TEXT("a sphere builds: ") + Error, Gate::Check({Ball}, Plan, Error) && Gate::Build(Plan, Built, Error)))
+	{
+		UDynamicMesh* Sphere = Built.Find(TEXT("Ball"));
+		const Gate::FCage Cage = Gate::ReadCage(*Sphere, TEXT("Ball"));
+		TestTrue(TEXT("its quad groups and its poles' triangles are a cage: ") + Cage.Problem, Cage.Problem.IsEmpty() && Cage.Polygons > 0);
+		const FHyperAIModelPlanReport Once = Run({Ball, Op(TEXT("subdivide"), TEXT("Ball"), TEXT("Level=1"))}, true);
+		const FHyperAIModelMeshStats* Smoothed = Find(Once, TEXT("Ball"));
+		TestTrue(FString::Printf(TEXT("and it subdivides into 2 x its %lld corners: %s"), Cage.Corners, *Once.Diagnostic), Smoothed && Smoothed->Triangles == 2 * Cage.Corners);
+		int32 Triangles = 0;
+		Sphere->EditMesh([&Triangles](FDynamicMesh3& Edit)
+		{
+			for (const int32 Tid : Edit.TriangleIndicesItr())
+			{
+				Edit.SetTriangleGroup(Tid, Edit.AllocateTriangleGroup());
+				++Triangles;
+			}
+		});
+		const Gate::FCage Each = Gate::ReadCage(*Sphere, TEXT("Ball"));
+		TestTrue(FString::Printf(TEXT("a group per triangle is a cage of triangles, 3 corners each (%lld for %d)"), Each.Corners, Triangles), Each.Problem.IsEmpty()
+			&& Each.Polygons == Triangles && Each.Corners == 3 * Triangles);
+	}
+	// Budgets: predicted from the quads before anything runs, and Level stays within 3.
+	const FHyperAIModelOp Dense = Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"), TEXT("Steps=64; Groups=quad"));
+	const FHyperAIModelPlanReport Heavy = Run({Dense, Op(TEXT("subdivide"), TEXT("Block"), TEXT("Level=3"))}, true);
+	TestTrue(TEXT("too many levels for the mesh are refused before they run: ") + Heavy.Diagnostic, Refused(Heavy, TEXT("Op 1"), TEXT("would make about 3244800 triangles"))
+		&& Heavy.Diagnostic.Contains(TEXT("lower its Level")));
+	TestTrue(TEXT("a Level past 3 is refused"), Refused(Run({Quads, Op(TEXT("subdivide"), TEXT("Block"), TEXT("Level=4"))}, true), TEXT("Op 1"), TEXT("Level is a whole number from 1 to 3")));
+	// Groups that are no cage are refused, naming what fixes them.
+	const FHyperAIModelPlanReport Single = Run({Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"), TEXT("Groups=single")), Op(TEXT("subdivide"), TEXT("Block"))}, true);
+	TestTrue(TEXT("one group over a closed box has no border: ") + Single.Diagnostic, Refused(Single, TEXT("Op 1"), TEXT("no border")) && Single.Diagnostic.Contains(TEXT("Groups=quad")));
+	const FHyperAIModelPlanReport Band = Run({Sized(TEXT("add.cylinder"), TEXT("Post"), TEXT("40,40,100")), Op(TEXT("subdivide"), TEXT("Post"))}, true);
+	TestTrue(TEXT("a cylinder's side of one face group is a band: ") + Band.Diagnostic, Refused(Band, TEXT("Op 1"), TEXT("Groups=quad")));
+	const TArray<FHyperAIModelOp> Voxels = {Sized(TEXT("add.box"), TEXT("Block"), TEXT("100")), Op(TEXT("solidify"), TEXT("Block"), TEXT("Resolution=32")),
+		Op(TEXT("subdivide"), TEXT("Block"))};
+	const FHyperAIModelPlanReport Bare = Run(Voxels, true);
+	TestTrue(TEXT("a voxel surface has no cage of its own: ") + Bare.Diagnostic, Refused(Bare, TEXT("Op 2"), TEXT("Cage=quads")));
+	TArray<FHyperAIModelOp> Paired = Voxels;
+	Paired[2].Params = TEXT("Cage=quads");
+	const FHyperAIModelPlanReport Solid = Run({Voxels[0], Voxels[1]}, true);
+	const FHyperAIModelPlanReport Caged = Run(Paired, true);
+	const FHyperAIModelMeshStats* Before = Find(Solid, TEXT("Block"));
+	const FHyperAIModelMeshStats* After = Find(Caged, TEXT("Block"));
+	TestTrue(TEXT("Cage=quads pairs its triangles into one, and it subdivides: ") + Caged.Diagnostic, Before && After && After->bClosed && After->Triangles > Before->Triangles);
+	const FHyperAIModelInspectReport Inspected = C::Inspect(FHyperAIModelInspectRequest());
+	TestTrue(TEXT("inspect lists subdivide with its Level and Cage"), Inspected.Kinds.ContainsByPredicate([](const FString& Line)
+		{
+			return Line.StartsWith(TEXT("subdivide:")) && Line.Contains(TEXT("Level 1-3 =1")) && Line.Contains(TEXT("Cage groups|quads"));
+		}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingOffsetFacesTest, "HyperAIStudio.NativeTools.Modeling.OffsetFaces", HyperAIStudio::ModelingTests::Flags)
+
+bool FHyperAIStudioModelingOffsetFacesTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelingTests;
+	const FHyperAIModelOp Box = Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"));
+	auto Offset = [](const TCHAR* Select, const TCHAR* Params)
+	{
+		FHyperAIModelOp Out = Op(TEXT("offset_faces"), TEXT("Block"), Params);
+		Out.Select = Select;
+		return Out;
+	};
+	const FHyperAIModelPlanReport Raised = Run({Box, Offset(TEXT("top"), TEXT("Distance=25"))}, true);
+	const FHyperAIModelMeshStats* Up = Find(Raised, TEXT("Block"));
+	if (!TestTrue(TEXT("the top of a box moves up: ") + Raised.Diagnostic, Raised.bOk && Up != nullptr)) return false;
+	TestTrue(TEXT("by exactly Distance: ") + Up->Max, Parse(Up->Max).Equals(FVector(50.0, 50.0, 125.0), 0.05) && Parse(Up->Min).Equals(FVector(-50.0, -50.0, 0.0), 0.05));
+	TestTrue(FString::Printf(TEXT("with side walls, two triangles to each of its four edges (%d)"), Up->Triangles), Up->Triangles == 20 && Up->bClosed && Up->Components == 1);
+	// A negative Distance sinks the faces into the mesh: walls from the rim, which stays, down to them.
+	const TArray<FHyperAIModelOp> Pocket = {Box, Offset(TEXT("top"), TEXT("Distance=-30"))};
+	const FHyperAIModelPlanReport Sunk = Run(Pocket, true);
+	const FHyperAIModelMeshStats* Down = Find(Sunk, TEXT("Block"));
+	TArray<FVector> Points;
+	FString Error;
+	TestTrue(TEXT("a negative Distance sinks the top 30 cm below its rim: ") + (Down ? Down->Max : Sunk.Diagnostic), Down && FMath::IsNearlyEqual(Parse(Down->Max).Z, 100.0, 0.05)
+		&& Down->Triangles == 20 && Down->bClosed && Vertices(Pocket, TEXT("Block"), Points, Error)
+		&& Points.FilterByPredicate([](const FVector& Point) { return FMath::IsNearlyEqual(Point.Z, 70.0, 0.01); }).Num() == 4);
+	// No Select: the whole closed box swells with its faces kept parallel, and keeps its six groups.
+	const FHyperAIModelOp Swell = Offset(TEXT(""), TEXT("Distance=10"));
+	const FHyperAIModelPlanReport Swollen = Run({Box, Swell}, true);
+	const FHyperAIModelMeshStats* Big = Find(Swollen, TEXT("Block"));
+	TestTrue(TEXT("with no Select a closed box swells 10 cm on every side: ") + (Big ? Big->Size + TEXT(" from ") + Big->Min : Swollen.Diagnostic), Big
+		&& Parse(Big->Size).Equals(FVector(120.0), 0.05) && Parse(Big->Min).Equals(FVector(-60.0, -60.0, -10.0), 0.05) && Big->Triangles == 12 && Big->bClosed);
+	const FHyperAIModelPlanReport Kept = Run({Box, Swell, Op(TEXT("subdivide"), TEXT("Block"))}, true);
+	const FHyperAIModelMeshStats* Grouped = Find(Kept, TEXT("Block"));
+	TestTrue(TEXT("its faces keep their own groups, so it still subdivides as a cube: ") + Kept.Diagnostic, Grouped && Grouped->Triangles == 48);
+	// A band around a round post moves out along the faces' own normals, where extrude would push it one way.
+	FHyperAIModelOp Hoop = Op(TEXT("offset_faces"), TEXT("Post"), TEXT("Distance=2"));
+	Hoop.Select = TEXT("box:-40,-40,9,40,40,21");
+	const FHyperAIModelPlanReport Banded = Run({Sized(TEXT("add.cylinder"), TEXT("Post"), TEXT("60,60,90"), TEXT("Steps=24; HeightSteps=8")), Hoop}, true);
+	const FHyperAIModelMeshStats* Post = Find(Banded, TEXT("Post"));
+	const FVector Size = Post ? Parse(Post->Size) : FVector::ZeroVector;
+	TestTrue(TEXT("a band around a cylinder stands out on every side: ") + (Post ? Post->Size : Banded.Diagnostic), Post && Size.X > 63.9 && Size.X < 64.2 && Size.Y > 63.9
+		&& Size.Y < 64.2 && FMath::IsNearlyEqual(Size.Z, 90.0, 0.05) && Post->bClosed);
+	TestTrue(TEXT("a Distance of 0 is refused"), Refused(Run({Box, Offset(TEXT("top"), TEXT("Distance=0"))}, true), TEXT("Op 1"), TEXT("Distance other than 0")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingWaveTest, "HyperAIStudio.NativeTools.Modeling.Wave", HyperAIStudio::ModelingTests::Flags)
+
+bool FHyperAIStudioModelingWaveTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelingTests;
+	// 17 vertices along each edge, 12.5 cm apart: a 50 cm wave's crests and troughs fall on them.
+	const FHyperAIModelOp Panel = Sized(TEXT("add.box"), TEXT("Panel"), TEXT("200,200,10"), TEXT("Steps=17"));
+	const FHyperAIModelOp Wave = Op(TEXT("wave"), TEXT("Panel"), TEXT("Magnitude=8; Wavelength=50"));
+	const FHyperAIModelPlanReport First = Run({Panel, Wave}, true);
+	const FHyperAIModelPlanReport Again = Run({Panel, Wave}, true);
+	const FHyperAIModelMeshStats* A = Find(First, TEXT("Panel"));
+	const FHyperAIModelMeshStats* B = Find(Again, TEXT("Panel"));
+	if (!TestTrue(TEXT("a wave runs over a panel: ") + First.Diagnostic, A && B)) return false;
+	TestTrue(TEXT("the same every time"), First.PlanHash == Again.PlanHash && A->Min == B->Min && A->Max == B->Max && A->Size == B->Size);
+	TestTrue(TEXT("its waves rise and fall Magnitude cm, the panel no longer or wider: ") + A->Min + TEXT(" to ") + A->Max, FMath::IsNearlyEqual(Parse(A->Size).X, 200.0, 0.05)
+		&& FMath::IsNearlyEqual(Parse(A->Size).Y, 200.0, 0.05) && FMath::IsNearlyEqual(Parse(A->Max).Z, 18.0, 0.05) && FMath::IsNearlyEqual(Parse(A->Min).Z, -8.0, 0.05));
+	TArray<FVector> Flat;
+	TArray<FVector> Waved;
+	FString Error;
+	if (!TestTrue(TEXT("the vertices read: ") + Error, Vertices({Panel}, TEXT("Panel"), Flat, Error) && Vertices({Panel, Wave}, TEXT("Panel"), Waved, Error)
+		&& Flat.Num() == Waved.Num() && Flat.Num() > 0))
+	{
+		return false;
+	}
+	double Most = 0.0;
+	bool bAlongZ = true;
+	for (int32 Index = 0; Index < Flat.Num(); ++Index)
+	{
+		const FVector Moved = Waved[Index] - Flat[Index];
+		bAlongZ &= FMath::Abs(Moved.X) < 0.001 && FMath::Abs(Moved.Y) < 0.001 && FMath::Abs(Moved.Z) <= 8.001;
+		Most = FMath::Max(Most, FMath::Abs(Moved.Z));
+	}
+	TestTrue(FString::Printf(TEXT("every vertex moves along Direction alone, within Magnitude (at most %.2f)"), Most), bAlongZ && Most > 6.0);
+	// The top's middle vertex, by its id on the flat panel: the waves move vertices, never renumber them.
+	const int32 Middle = Flat.IndexOfByPredicate([](const FVector& Point) { return Point.Equals(FVector(0.0, 0.0, 10.0), 0.01); });
+	if (!TestTrue(TEXT("the panel has a vertex in the middle of its top"), Middle != INDEX_NONE)) return false;
+	auto Height = [Middle](const TArray<FVector>& Points)
+	{
+		return Points.IsValidIndex(Middle) ? Points[Middle].Z : TNumericLimits<double>::Lowest();
+	};
+	// A ripple's rings spread from Location, which stays where it is.
+	FHyperAIModelOp Ripple = Op(TEXT("wave"), TEXT("Panel"), TEXT("Mode=ripple; Magnitude=8; Wavelength=50"));
+	Ripple.Location = TEXT("0,0,10");
+	TArray<FVector> Rippled;
+	if (TestTrue(TEXT("a ripple runs: ") + Error, Vertices({Panel, Ripple}, TEXT("Panel"), Rippled, Error) && Rippled.Num() == Flat.Num()))
+	{
+		bool bWithin = true;
+		for (int32 Index = 0; Index < Flat.Num(); ++Index) bWithin &= FMath::Abs((Rippled[Index] - Flat[Index]).Z) <= 8.001 && FVector2D(Rippled[Index] - Flat[Index]).IsNearlyZero(0.001);
+		TestTrue(TEXT("its center does not move"), FMath::IsNearlyEqual(Height(Rippled), 10.0, 0.01));
+		TestTrue(TEXT("and every vertex moves along Z within Magnitude"), bWithin);
+	}
+	// A quarter turn of Phase lifts what Phase 0 leaves at its start.
+	const FHyperAIModelOp Shifted = Op(TEXT("wave"), TEXT("Panel"), TEXT("Magnitude=8; Wavelength=50; Phase=90"));
+	TArray<FVector> Turned;
+	if (TestTrue(TEXT("a shifted wave runs: ") + Error, Vertices({Panel, Shifted}, TEXT("Panel"), Turned, Error)))
+	{
+		TestTrue(TEXT("Phase 0 leaves the panel's middle where it is"), FMath::IsNearlyEqual(Height(Waved), 10.0, 0.01));
+		TestTrue(TEXT("Phase 90 lifts it Magnitude"), FMath::IsNearlyEqual(Height(Turned), 18.0, 0.01));
+		TestNotEqual(TEXT("and hashes differently"), Run({Panel, Shifted}, true).PlanHash, First.PlanHash);
+	}
+	TestTrue(TEXT("a 3D wave is refused, naming the modes there are"), Refused(Run({Panel, Op(TEXT("wave"), TEXT("Panel"), TEXT("Mode=3d"))}, true), TEXT("Op 1"),
+		TEXT("Mode is line, ripple")));
+	TestTrue(TEXT("a line wave moving vertices the way it travels is refused"), Refused(Run({Panel, Op(TEXT("wave"), TEXT("Panel"), TEXT("Along=0,0,1"))}, true), TEXT("Op 1"),
+		TEXT("parallel")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingPreviewsTest, "HyperAIStudio.NativeTools.Modeling.Previews", HyperAIStudio::ModelingTests::Flags)
+
+bool FHyperAIStudioModelingPreviewsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelingTests;
+	namespace Gate = HyperAIStudio::Modeling::Gate;
+	const FString Folder = TestFolder();
+	TArray<FString> Made;
+	ON_SCOPE_EXIT
+	{
+		Gate::SetPreviewsOffForTests(false);
+		for (const FString& File : Made) IFileManager::Get().Delete(*File, false, false, true);
+		DeleteFolder(Folder);
+	};
+	// A PNG of more than 1 KB with the mesh drawn in it: its middle is not the background its corner shows.
+	auto IsPng = [](const FString& File)
+	{
+		TArray<uint8> Bytes;
+		FImage Image;
+		FImage Pixels;
+		if (!FFileHelper::LoadFileToArray(Bytes, *File) || Bytes.Num() <= 1024 || Bytes[1] != 'P' || Bytes[2] != 'N' || Bytes[3] != 'G'
+			|| !FImageUtils::LoadImage(*File, Image) || Image.SizeX < 8 || Image.SizeY < 8)
+		{
+			return false;
+		}
+		Image.CopyTo(Pixels, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+		const TArrayView64<const FColor> Colors = Pixels.AsBGRA8();
+		const FColor Corner = Colors[0];
+		const FColor Middle = Colors[int64(Pixels.SizeY / 2) * Pixels.SizeX + Pixels.SizeX / 2];
+		return FMath::Abs(Corner.R - Middle.R) + FMath::Abs(Corner.G - Middle.G) + FMath::Abs(Corner.B - Middle.B) > 40;
+	};
+	const bool bCanRender = FApp::CanEverRender();
+	const FHyperAIModelPlanReport Written = Run({Sized(TEXT("add.box"), TEXT("Crate"), TEXT("80")), Write(TEXT("Crate"), Folder + TEXT("/SM_Crate"))}, false);
+	if (!TestTrue(TEXT("a crate is written: ") + Written.Diagnostic, Written.bOk && Written.Status == TEXT("completed") && Written.Assets.Num() == 1)) return false;
+	const FHyperAIModelAssetResult& Crate = Written.Assets[0];
+	Made.Add(Crate.PreviewPath);
+	if (bCanRender)
+	{
+		TestEqual(TEXT("its preview is the asset's own PNG"), Crate.PreviewPath, FHyperAIStudioResultPreview::GetAssetPreviewPath(Crate.Path));
+		TestTrue(TEXT("a PNG of more than 1 KB, the crate drawn in it: ") + Crate.PreviewPath, IsPng(Crate.PreviewPath));
+		TestTrue(TEXT("and the report says so: ") + Written.Diagnostic, Written.Diagnostic.Contains(TEXT("1 preview PNG")));
+	}
+	else
+	{
+		AddInfo(TEXT("No renderer in this run: the write notes that it drew nothing."));
+		TestTrue(TEXT("no preview, and a note says why"), Crate.PreviewPath.IsEmpty() && Written.Notes.ContainsByPredicate([](const FString& Note) { return Note.Contains(TEXT("without rendering")); }));
+	}
+	// An editor that cannot draw writes all the same, and says so.
+	Gate::SetPreviewsOffForTests(true);
+	const FHyperAIModelPlanReport Blind = Run({Sized(TEXT("add.box"), TEXT("Crate"), TEXT("60")), Write(TEXT("Crate"), Folder + TEXT("/SM_Blind"))}, false);
+	Gate::SetPreviewsOffForTests(false);
+	TestTrue(TEXT("without rendering the write still completes: ") + Blind.Diagnostic, Blind.bOk && Blind.Status == TEXT("completed") && Blind.Saved.Num() == 1);
+	TestTrue(TEXT("with no preview, and a note saying why: ") + FString::Join(Blind.Notes, TEXT(" | ")), Blind.Assets.Num() == 1 && Blind.Assets[0].PreviewPath.IsEmpty()
+		&& Blind.Notes.ContainsByPredicate([](const FString& Note) { return Note.Contains(TEXT("No previews: this editor runs without rendering")); }));
+	// A dry run draws only when asked, from a temporary mesh that leaves nothing behind.
+	const FString DryPath = Folder + TEXT("/SM_Dry");
+	FHyperAIModelPlanRequest Dry;
+	Dry.Operations = {Sized(TEXT("add.sphere"), TEXT("Ball"), TEXT("60"), TEXT("Steps=16; Color=#3a5f9e")), Write(TEXT("Ball"), DryPath)};
+	Dry.bDryRun = true;
+	const FHyperAIModelPlanReport Unasked = RunWith(Dry);
+	TestTrue(TEXT("a dry run draws nothing unless asked: ") + Unasked.Diagnostic, Unasked.bOk && Unasked.Assets.Num() == 1 && Unasked.Assets[0].PreviewPath.IsEmpty()
+		&& !Unasked.Notes.ContainsByPredicate([](const FString& Note) { return Note.Contains(TEXT("preview")); }));
+	Dry.bPreviewDryRun = true;
+	const int32 UndoBefore = GEditor && GEditor->Trans ? GEditor->Trans->GetQueueLength() : 0;
+	const FHyperAIModelPlanReport Asked = RunWith(Dry);
+	if (Asked.Assets.Num() == 1) Made.Add(Asked.Assets[0].PreviewPath);
+	TestTrue(TEXT("asked, the dry run still checks: ") + Asked.Diagnostic, Asked.bOk && Asked.Status == TEXT("checked") && Asked.Assets.Num() == 1);
+	if (bCanRender && Asked.Assets.Num() == 1)
+	{
+		TestTrue(TEXT("and draws the asset it would write: ") + Asked.Assets[0].PreviewPath + TEXT(" ") + FString::Join(Asked.Notes, TEXT(" | ")), IsPng(Asked.Assets[0].PreviewPath));
+		TestNotEqual(TEXT("apart from that asset's own preview"), Asked.Assets[0].PreviewPath, FHyperAIStudioResultPreview::GetAssetPreviewPath(DryPath + TEXT(".SM_Dry")));
+	}
+	TestFalse(TEXT("writing no asset"), FPackageName::DoesPackageExist(DryPath) || FindPackage(nullptr, *DryPath) != nullptr);
+	TestEqual(TEXT("and nothing in the undo history"), GEditor && GEditor->Trans ? GEditor->Trans->GetQueueLength() : 0, UndoBefore);
+	// Inspect draws an existing asset on request.
+	FHyperAIModelInspectRequest Look;
+	Look.Folder = Folder;
+	Look.Asset = Folder + TEXT("/SM_Crate");
+	Look.bPreview = true;
+	const FHyperAIModelInspectReport Seen = C::Inspect(Look);
+	Made.Add(Seen.PreviewPath);
+	TestTrue(TEXT("inspect reads the crate: ") + Seen.Diagnostic, Seen.bOk);
+	if (bCanRender) TestTrue(TEXT("and draws it: ") + Seen.PreviewPath, IsPng(Seen.PreviewPath));
+	Look.Asset.Reset();
+	const FHyperAIModelInspectReport Nothing = C::Inspect(Look);
+	TestTrue(TEXT("bPreview without an Asset is refused: ") + Nothing.Diagnostic, !Nothing.bOk && Nothing.Diagnostic.Contains(TEXT("give Asset")));
 	return true;
 }
 

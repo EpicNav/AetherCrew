@@ -13,13 +13,19 @@ public class HyperAIStudioModeling : ModuleRules
 			"AssetRegistry",
 			"Core",
 			"CoreUObject",
+			// FGroupTopology: subdivide reads a mesh's polygroups as a cage before OpenSubdiv runs.
+			"DynamicMesh",
 			"Engine",
 			// FDynamicMesh3, UDynamicMesh and the transient mesh pool the plan builds in.
 			"GeometryCore",
 			"GeometryFramework",
 			// The mesh ops themselves: primitives, booleans, modelling, warps, remeshing, UVs, collision.
 			"GeometryScriptingCore",
+			// Catmull-Clark subdivision (ApplyPolygroupCatmullClarkSubD) lives in Geometry Script's editor module.
+			"GeometryScriptingEditor",
 			"HyperAIStudio",
+			// The tests read the previews' pixels back.
+			"ImageCore",
 			// The tests read the modeling skill's example plans and run them.
 			"Json",
 			"JsonUtilities",
