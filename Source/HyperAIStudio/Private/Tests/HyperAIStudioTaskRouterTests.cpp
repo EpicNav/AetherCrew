@@ -114,9 +114,15 @@ bool FHyperAIStudioTaskRouterPacksTest::RunTest(const FString& Parameters)
 		// Props that are there already are placed with the level design pack's spatial tools, not modelled again.
 		{TEXT("Place some props around the camp"), TEXT("level_design")},
 		{TEXT("Drop the rocks to the ground"), TEXT("level_design")},
+		// A mesh handed to a person in Modeling Mode is the modelling pack's; sculpting the ground stays the landscape's,
+		// and a game mode is not a model.
+		{TEXT("Open the rock mesh in modeling mode so I can sculpt it myself"), TEXT("mesh_modeling")},
+		{TEXT("Let me hand edit the crate with PolyEdit"), TEXT("mesh_modeling")},
+		{TEXT("Sculpt hills into the landscape"), TEXT("worldbuilding_navigation")},
 		{TEXT("What time is it?"), TEXT("none")},
 		{TEXT("Thanks!"), TEXT("none")},
 	};
+	TestNotEqual(TEXT("'Set the game mode for the lobby' is not modelling"), TopPack(TEXT("Set the game mode for the lobby"), Documents), FString(TEXT("mesh_modeling")));
 	for (const TPair<const TCHAR*, const TCHAR*>& Case : Cases)
 	{
 		TestEqual(FString::Printf(TEXT("'%s' needs"), Case.Key), TopPack(Case.Key, Documents), FString(Case.Value));
@@ -157,6 +163,7 @@ bool FHyperAIStudioTaskRouterRoutesTest::RunTest(const FString& Parameters)
 		// Free modelling is the level designer's.
 		{TEXT("Model a ruined watchtower"), TEXT("Level Design")},
 		{TEXT("Boolean modeling for the castle wall"), TEXT("Level Design")},
+		{TEXT("Open the crate in modelling mode so I can reshape it by hand"), TEXT("Level Design")},
 		// No route is made for these, or the message is two tasks at once: the chat keeps its agent. A paid 3D model is
 		// not modelling, nor a material for its "textured".
 		{TEXT("Make a footstep sound for gravel"), TEXT("none")},
