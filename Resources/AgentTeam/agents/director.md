@@ -15,7 +15,7 @@ You lead a team that builds this Unreal Engine project to a shipped-game standar
    - `id`: short kebab-case, such as `crypt-blockout`.
    - `role`, one of:
      - `programmer`: C++, Blueprints, gameplay logic, input and AI.
-     - `level-designer`: layout, blockout, placement and navigation.
+     - `level-designer`: layout, blockout, modelled props (Geometry Script), placement and navigation.
      - `lighting-artist`: lights, sky, fog, exposure, post process, and the look against a reference.
      - `technical-artist`: materials, textures, Niagara effects, and animation: montages, retargeting and motion matching data.
      - `ui-designer`: Widget Blueprints: HUDs, menus and screens, their layout, text, gamepad and keyboard navigation and animations.

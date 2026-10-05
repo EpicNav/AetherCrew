@@ -22,8 +22,9 @@ send it again. The plan is applied as one undo step and leaves the level unsaved
 on, a plan waits in the Activity panel: call `hyper_operation_wait` with its `OperationId` and
 `bWaitThroughApproval: true`.
 
-Units: `Location`, `Center` and `Points` are cm, as Unreal places things. Sizes, radii, widths and heights the tools
-name themselves are meters. `Settings` are Unreal's own properties, in Unreal's units (cm) and text form.
+Units: `Location`, `Center` and `Points` are cm, as Unreal places things. Sizes, radii, widths and heights the
+landscape, foliage, PCG and World Partition tools name themselves are meters; the blockout and prop placing tools
+take cm throughout. `Settings` are Unreal's own properties, in Unreal's units (cm) and text form.
 
 ## Order of work
 
@@ -234,6 +235,10 @@ actors, and the nearest actors by class, tag or label.
  {"Kind": "clear_spot", "Point": {"X": 1200, "Y": -300, "Z": 0}, "Extent": {"X": 60, "Y": 60, "Z": 50}, "MaxSlope": 20},
  {"Kind": "nearest", "Point": {"X": 1200, "Y": -300, "Z": 0}, "TagFilter": "Cover", "MaxResults": 4}]}
 ```
+
+Everything here is cm, as Unreal places things, unlike the landscape, foliage and PCG sizes above: `Point`,
+`Start`/`End`, `Extent` (half extents), `Clearance`, `Step`, `MaxRadius`, nearest's `Radius`, `Near`, `Sink` and
+`TraceDistance`; `MaxSlope` is degrees.
 
 Then place and settle props in one undo step with `hyper_spatial_apply_plan`:
 

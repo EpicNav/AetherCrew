@@ -159,6 +159,16 @@ its ends cap closed:
 
 ## Using the results
 
-The assets are ordinary static meshes: place them with Epic's scene tools, or scatter them over the ground with
-`hyper_pcg_scatter_apply_plan` (an ecosystem species' `Meshes`, rocks with `bAlignToGround`, trees upright) or
-`hyper_foliage_apply_plan`. Write a few seeds of each prop so the scatter does not repeat itself.
+The assets are ordinary static meshes. Scatter them over the ground with `hyper_pcg_scatter_apply_plan` (an ecosystem
+species' `Meshes`, rocks with `bAlignToGround`, trees upright) or `hyper_foliage_apply_plan`. Write a few seeds of each
+prop so the scatter does not repeat itself.
+
+To place one by hand:
+
+- With the level_design pack, use `hyper_spatial_apply_plan` `place` with `bDropToGround: true`, as the
+  unreal-level-design skill says. Give it a Location Z above the ground, such as (HeightMax + 5) x 100 from
+  `hyper_landscape_inspect` (HeightMax is meters, Location cm), because the drop traces only downward.
+- Without that pack, find the ground first with Epic's `SceneTools.trace_world`, from high above down past the lowest
+  ground (the ground is the start's Z less the distance it returns). Then call `add_to_scene_from_asset` at that
+  height. Its `snap_to_ground` searches only a few times the prop's height around the given Z, and it does not say
+  when it misses.

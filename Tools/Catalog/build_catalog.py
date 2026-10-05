@@ -8,7 +8,8 @@ so it cannot drift. The fingerprint mirrors BuildCatalogFingerprint in HyperAISt
 
   python build_catalog.py seed    # one-off: current .inl -> catalog_source.json
   python build_catalog.py build   # catalog_source.json -> .inl + counts header
-  python build_catalog.py check   # fail if generated files are stale or tool names drifted from source
+  python build_catalog.py check   # fail if generated files are stale, tool names drifted from source, or the
+                                  # docs' tool and pack counts (README.md, Docs/index.html, Docs/tools.html) differ
 """
 import glob
 import hashlib
@@ -389,6 +390,48 @@ def declared_tool_names():
     return found
 
 
+# ---------------------------------------------------------------- headline counts the docs repeat by hand
+
+# (file, pattern, what each number counts). A pattern that stops matching is drift too, so rewording is caught.
+DOC_COUNTS = [
+    ("README.md", r"Adds (\d+) tools in (\d+) capability packs", ("tools", "packs")),
+    ("Docs/index.html", r"gives them (\d+) tools across (\d+) capability packs", ("tools", "packs")),
+    ("Docs/index.html", r"<strong>(\d+)</strong><span>capability packs", ("packs",)),
+    ("Docs/index.html", r"<strong>(\d+)</strong><span>HyperAI tools", ("tools",)),
+    ("Docs/index.html", r"<h3>(\d+) tools, (\d+) packs</h3>", ("tools", "packs")),
+    ("Docs/tools.html", r"<h1>(\d+) tools,", ("tools",)),
+    ("Docs/tools.html", r">The (\d+) packs</a>", ("packs",)),
+    ("Docs/tools.html", r"<h2>The (\d+) packs\.</h2>", ("packs",)),
+]
+PACK_ROW_RE = re.compile(r"<tr><td><code>([a-z0-9_]+)</code></td>.*?<td>(\d+)</td></tr>")
+
+
+def doc_count_drift(cat):
+    """Where the docs' tool and pack totals, or a row of tools.html's pack table, disagree with the catalog."""
+    want = {"tools": len(cat["Tools"]), "packs": len(cat["Packs"])}
+    errors = []
+    for rel, pattern, kinds in DOC_COUNTS:
+        m = re.search(pattern, open(os.path.join(PLUGIN, rel), encoding="utf-8").read())
+        if not m:
+            errors.append("%s: nothing matches %r" % (rel, pattern))
+            continue
+        for kind, found in zip(kinds, m.groups()):
+            if int(found) != want[kind]:
+                errors.append("%s says %s %s; the catalog has %d" % (rel, found, kind, want[kind]))
+    text = open(os.path.join(PLUGIN, "Docs", "tools.html"), encoding="utf-8").read()
+    start = text.find('<section id="packs">')
+    rows = dict((pack, int(n)) for pack, n in PACK_ROW_RE.findall(text[start:text.find("</section>", start)]))
+    packs = OrderedDict((p["Id"], len(p["ToolNames"])) for p in cat["Packs"])
+    for pack in sorted(set(rows) | set(packs)):
+        if pack not in rows:
+            errors.append("Docs/tools.html pack table: no row for %s (%d tools)" % (pack, packs[pack]))
+        elif pack not in packs:
+            errors.append("Docs/tools.html pack table: %s is not a catalog pack" % pack)
+        elif rows[pack] != packs[pack]:
+            errors.append("Docs/tools.html pack table: %s has %d tools; the catalog has %d" % (pack, rows[pack], packs[pack]))
+    return errors
+
+
 def load_source():
     with open(SOURCE_JSON, encoding="utf-8") as f:
         return json.load(f, object_pairs_hook=OrderedDict)
@@ -444,6 +487,9 @@ def main(argv):
             write_crlf(path, text)
         print("built %d packs / %d tools, fingerprint %s" % (len(cat["Packs"]), len(cat["Tools"]),
                                                             cat["GeneratedFingerprint"]))
+        drift = doc_count_drift(cat)
+        if drift:
+            print("now update the docs by hand:\n  " + "\n  ".join(drift))
         return 0
     if command == "check":
         # Line endings are git's business (autocrlf); only content counts as stale.
@@ -452,6 +498,10 @@ def main(argv):
                  if not os.path.exists(p) or lf(read_bytes(p)) != lf(text.encode("utf-8"))]
         if stale:
             print("stale generated files (run build): " + ", ".join(stale))
+            return 1
+        drift = doc_count_drift(cat)
+        if drift:
+            print("the docs' counts disagree with the catalog (edit them by hand):\n  " + "\n  ".join(drift))
             return 1
         print("catalog up to date: %d packs / %d tools, %s" % (len(cat["Packs"]), len(cat["Tools"]),
                                                               cat["GeneratedFingerprint"]))

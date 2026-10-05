@@ -103,6 +103,10 @@ A real frame is never one light. When the score stalls on the sun, the missing p
 | God rays and light shafts | `set_fog` `volumetric_fog` true with the sun's `VolumetricScatteringIntensity`; `set_sun` `light_shaft_bloom` true with `BloomScale` and `BloomThreshold` |
 | Clouds, overcast | `set_clouds`, which adds volumetric clouds if the level has none: `material:Cloud_GlobalCoverage` and `material:Cloud_GlobalDensity` set their material's parameters, on an instance the level owns under `/Game/HyperAI/Clouds/` that is saved with the plan; `LayerBottomAltitude` and `LayerHeight` in kilometres |
 
+`set_sky_atmosphere` `rayleigh_scale` and `mie_scale` are the raw scattering coefficients (per kilometre), not
+multipliers: the defaults are 0.0331 and 0.004. Change them a little at a time from there; values near 1 turn the whole
+sky into a thick orange haze.
+
 **Shadows too dark.** Soften them with several tools together, never with the sun's intensity alone:
 
 - The sun's `source_angle` for softer edges, and its `ShadowAmount` below 1, which lets part of its light into every shadow.
