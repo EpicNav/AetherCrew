@@ -26,6 +26,9 @@
 #include "LandscapeSplinesComponent.h"
 #include "LandscapeSubsystem.h"
 #include "LandscapeUtils.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionLandscapeLayerBlend.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Guid.h"
@@ -91,6 +94,15 @@ namespace HyperAIStudio::LandscapeTools::Private
 		if (Trimmed.IsEmpty()) return nullptr;
 		const FString ObjectPath = Trimmed.Contains(TEXT(".")) ? Trimmed : Trimmed + TEXT(".") + FPackageName::GetShortName(Trimmed);
 		return LoadObject<T>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+	}
+
+	/** A material reference as its package path: /Game/Landscape/M_Valley.M_Valley reads /Game/Landscape/M_Valley. */
+	FString PackageOf(const FString& Reference)
+	{
+		FString Path = Reference.TrimStartAndEnd();
+		int32 Dot = INDEX_NONE;
+		if (Path.FindLastChar(TEXT('.'), Dot)) Path.LeftInline(Dot);
+		return Path;
 	}
 
 	bool IsIdentifier(const FString& Name)
@@ -796,6 +808,118 @@ namespace HyperAIStudio::LandscapeTools::Private
 		return true;
 	}
 
+	/** Most paint layers a made material's blend names. */
+	constexpr int32 MaxMaterialLayers = 16;
+
+	/** A paint layer's color when the op gives none: by what its name says (grass green, rock grey), else round the color wheel. */
+	FLinearColor LayerColor(const FString& Name, const TArray<FLinearColor>& Taken)
+	{
+		static const TPair<const TCHAR*, FLinearColor> Named[] = {
+			{TEXT("snow"), FLinearColor(0.85f, 0.87f, 0.9f)}, {TEXT("ice"), FLinearColor(0.6f, 0.75f, 0.85f)},
+			{TEXT("forest"), FLinearColor(0.06f, 0.16f, 0.04f)}, {TEXT("meadow"), FLinearColor(0.3f, 0.4f, 0.1f)},
+			{TEXT("grass"), FLinearColor(0.13f, 0.3f, 0.06f)}, {TEXT("moss"), FLinearColor(0.18f, 0.24f, 0.05f)},
+			{TEXT("gravel"), FLinearColor(0.42f, 0.4f, 0.37f)}, {TEXT("rock"), FLinearColor(0.25f, 0.24f, 0.23f)},
+			{TEXT("stone"), FLinearColor(0.3f, 0.29f, 0.27f)}, {TEXT("cliff"), FLinearColor(0.2f, 0.19f, 0.18f)},
+			{TEXT("sand"), FLinearColor(0.7f, 0.6f, 0.4f)}, {TEXT("beach"), FLinearColor(0.75f, 0.67f, 0.48f)},
+			{TEXT("desert"), FLinearColor(0.65f, 0.48f, 0.3f)}, {TEXT("mud"), FLinearColor(0.16f, 0.11f, 0.07f)},
+			{TEXT("dirt"), FLinearColor(0.3f, 0.2f, 0.11f)}, {TEXT("soil"), FLinearColor(0.24f, 0.16f, 0.09f)},
+			{TEXT("road"), FLinearColor(0.36f, 0.28f, 0.2f)}, {TEXT("path"), FLinearColor(0.4f, 0.31f, 0.2f)},
+			{TEXT("water"), FLinearColor(0.05f, 0.16f, 0.26f)}, {TEXT("river"), FLinearColor(0.06f, 0.2f, 0.3f)}};
+		auto Free = [&Taken](const FLinearColor& Color)
+		{
+			return !Taken.ContainsByPredicate([&Color](const FLinearColor& Other) { return FLinearColor::Dist(Color, Other) < 0.08f; });
+		};
+		const FString Lower = Name.ToLower();
+		for (const TPair<const TCHAR*, FLinearColor>& Each : Named)
+		{
+			if (Lower.Contains(Each.Key) && Free(Each.Value)) return Each.Value;
+		}
+		// Golden-ratio steps round the hue circle stay apart however many layers there are.
+		FLinearColor Color = FLinearColor::White;
+		for (int32 Turn = 0; Turn < 64; ++Turn)
+		{
+			Color = FLinearColor::MakeFromHSV8(static_cast<uint8>(FMath::Frac((Taken.Num() + Turn) * 0.618034) * 255.0), 150, 160);
+			if (Free(Color)) break;
+		}
+		return Color;
+	}
+
+	/**
+	 * A landscape material whose layer blend shows each paint layer in a flat color, so painted ground reads without
+	 * textures. Saved with the plan's other new assets. Its settings go in before it is transactional, so an undo of the
+	 * plan cannot blank it.
+	 */
+	UMaterial* MakeLayerMaterial(const FString& Path, const TArray<FName>& Layers, const TArray<FLinearColor>& Colors, TArray<FString>& OutNotes, FString& OutError)
+	{
+		if (Layers.IsEmpty())
+		{
+			OutError = FString::Printf(TEXT("The material %s would show no paint layers."), *Path);
+			return nullptr;
+		}
+		// An object already there, saved or only in memory (an unsaved asset, or one a failed plan made), would be replaced
+		// in place by a new one of its name, or crash the editor when it is not a material.
+		if (FPackageName::DoesPackageExist(Path) || FindObject<UObject>(nullptr, *(Path + TEXT(".") + FPackageName::GetShortName(Path))))
+		{
+			OutError = FString::Printf(TEXT("%s is taken; name a free path for the new material."), *Path);
+			return nullptr;
+		}
+		UPackage* Package = CreatePackage(*Path);
+		UMaterial* Material = Package ? NewObject<UMaterial>(Package, FName(*FPackageName::GetShortName(Path)), RF_Public | RF_Standalone) : nullptr;
+		if (!Material)
+		{
+			OutError = FString::Printf(TEXT("The material %s could not be made."), *Path);
+			return nullptr;
+		}
+		// Bound to the material as the material editor binds the nodes it makes; the material tools read that binding.
+		UMaterialExpressionLandscapeLayerBlend* Blend = NewObject<UMaterialExpressionLandscapeLayerBlend>(Material);
+		UMaterialExpressionConstant* Rough = NewObject<UMaterialExpressionConstant>(Material);
+		Blend->Material = Material;
+		Rough->Material = Material;
+		TArray<FLinearColor> Taken;
+		for (int32 Index = 0; Index < Colors.Num() && Index < Layers.Num(); ++Index) Taken.Add(Colors[Index]);
+		TArray<FString> Shown;
+		for (int32 Index = 0; Index < Layers.Num(); ++Index)
+		{
+			FLinearColor Color = Colors.IsValidIndex(Index) ? Colors[Index] : LayerColor(Layers[Index].ToString(), Taken);
+			if (!Colors.IsValidIndex(Index)) Taken.Add(Color);
+			// Weights the paint tools set add up to one, so each layer is weight blended; with no texture on its input the
+			// blend takes the constant.
+			FLayerBlendInput& Input = Blend->Layers.AddDefaulted_GetRef();
+			Input.LayerName = Layers[Index];
+			Input.BlendType = LB_WeightBlend;
+			Input.PreviewWeight = Index == 0 ? 1.f : 0.f;
+			Input.ConstLayerInput = FVector(Color.R, Color.G, Color.B);
+			Shown.Add(FString::Printf(TEXT("%s (%.2f, %.2f, %.2f)"), *Layers[Index].ToString(), Color.R, Color.G, Color.B));
+		}
+		Rough->R = 0.9f;
+		Blend->MaterialExpressionEditorX = -400;
+		Rough->MaterialExpressionEditorX = -400;
+		Rough->MaterialExpressionEditorY = 240;
+		Material->GetExpressionCollection().AddExpression(Blend);
+		Material->GetExpressionCollection().AddExpression(Rough);
+		UMaterialEditorOnlyData* Inputs = Material->GetEditorOnlyData();
+		Inputs->BaseColor.Expression = Blend;
+		Inputs->Roughness.Expression = Rough;
+		// Compiles it, and gathers the layer names landscapes read from it.
+		Material->PostEditChange();
+		FAssetRegistryModule::AssetCreated(Material);
+		Material->MarkPackageDirty();
+		Blend->SetFlags(RF_Transactional);
+		Rough->SetFlags(RF_Transactional);
+		Material->SetFlags(RF_Transactional);
+		OutNotes.Add(FString::Printf(TEXT("%s: a landscape material showing %s."), *Material->GetName(), *FString::Join(Shown, TEXT(", "))));
+		return Material;
+	}
+
+	/** A landscape's material set as the details panel sets it, so its streaming proxies take it and its components rebuild their material instances. */
+	void SetMaterial(ALandscape& Landscape, UMaterialInterface* Material)
+	{
+		Landscape.Modify();
+		Landscape.LandscapeMaterial = Material;
+		FPropertyChangedEvent Event(ALandscapeProxy::StaticClass()->FindPropertyByName(GET_MEMBER_NAME_CHECKED(ALandscapeProxy, LandscapeMaterial)), EPropertyChangeType::ValueSet);
+		static_cast<UObject&>(Landscape).PostEditChangeProperty(Event);
+	}
+
 	/** What a plan knows of each landscape it names: its paint layers and edit layers, as they are or will be. */
 	struct FPlanned
 	{
@@ -830,6 +954,15 @@ namespace HyperAIStudio::LandscapeTools::Private
 			}
 			return &Plan.Add(Key, MoveTemp(Known));
 		};
+		/** Materials the plan makes, by package path, for later ops to set: named by the package, or package.name. */
+		TSet<FString> Materials;
+		auto IsMaterial = [&Materials](const FString& Reference)
+		{
+			const FString Package = PackageOf(Reference);
+			const FString Object = Reference.TrimStartAndEnd().Mid(Package.Len() + 1);
+			const bool bMade = Materials.Contains(Package.ToLower()) && (Object.IsEmpty() || Object.Equals(FPackageName::GetShortName(Package), ESearchCase::IgnoreCase));
+			return bMade || Load<UMaterialInterface>(Reference) != nullptr;
+		};
 		for (int32 Index = 0; Index < Request.Operations.Num(); ++Index)
 		{
 			const FHyperAILandscapeOp& Op = Request.Operations[Index];
@@ -839,6 +972,42 @@ namespace HyperAIStudio::LandscapeTools::Private
 				OutError = FString::Printf(TEXT("Operation %d (%s): %s Nothing was changed."), Index, *Op.Kind, *Message);
 				return false;
 			};
+			if (Kind == TEXT("landscape.create_material"))
+			{
+				const FString Path = PackageOf(Op.Material);
+				// Taken on disk, or by an object only in memory (an unsaved asset).
+				if (!Path.StartsWith(TEXT("/Game/")) || !FPackageName::IsValidLongPackageName(Path) || FPackageName::DoesPackageExist(Path) || Materials.Contains(Path.ToLower())
+					|| FindObject<UObject>(nullptr, *(Path + TEXT(".") + FPackageName::GetShortName(Path))))
+				{
+					return Fail(TEXT("Name the new Material as a free path under /Game, like /Game/Landscape/M_Valley."));
+				}
+				int32 Layers = Op.PaintLayers.Num();
+				if (!Op.Landscape.TrimStartAndEnd().IsEmpty())
+				{
+					const FPlanned* Landscape = Track(Op.Landscape);
+					if (!Landscape) return Fail(FString::Printf(TEXT("No landscape is labelled %s."), *Op.Landscape));
+					if (Layers == 0) Layers = Landscape->PaintLayers.Num();
+				}
+				if (Layers == 0) return Fail(TEXT("Name the PaintLayers its blend shows, or a Landscape that has paint layers."));
+				if (Layers > MaxMaterialLayers) return Fail(FString::Printf(TEXT("A material shows at most %d paint layers."), MaxMaterialLayers));
+				TSet<FString> Seen;
+				for (const FString& Layer : Op.PaintLayers)
+				{
+					if (!IsIdentifier(Layer)) return Fail(FString::Printf(TEXT("'%s' is not a layer name: letters, digits and _."), *Layer));
+					if (Seen.Contains(Layer.ToLower())) return Fail(FString::Printf(TEXT("PaintLayers names %s twice."), *Layer));
+					Seen.Add(Layer.ToLower());
+				}
+				if (Op.LayerColors.Num() > Layers) return Fail(TEXT("LayerColors has a color per paint layer at most."));
+				for (const FLinearColor& Color : Op.LayerColors)
+				{
+					if (!(Color.R >= 0.f && Color.R <= 1.f && Color.G >= 0.f && Color.G <= 1.f && Color.B >= 0.f && Color.B <= 1.f))
+					{
+						return Fail(TEXT("A layer color's R, G and B are 0 to 1."));
+					}
+				}
+				Materials.Add(Path.ToLower());
+				continue;
+			}
 			if (Op.Landscape.TrimStartAndEnd().IsEmpty()) return Fail(TEXT("Name the Landscape (its label)."));
 			if (Kind == TEXT("landscape.create"))
 			{
@@ -859,7 +1028,7 @@ namespace HyperAIStudio::LandscapeTools::Private
 				{
 					return Fail(FString::Printf(TEXT("%s is not a texture."), *Op.Heightmap));
 				}
-				if (!Op.Material.IsEmpty() && !Load<UMaterialInterface>(Op.Material))
+				if (!Op.Material.IsEmpty() && !IsMaterial(Op.Material))
 				{
 					return Fail(FString::Printf(TEXT("%s is not a material."), *Op.Material));
 				}
@@ -900,7 +1069,7 @@ namespace HyperAIStudio::LandscapeTools::Private
 			}
 			else if (Kind == TEXT("landscape.set_material"))
 			{
-				if (!Load<UMaterialInterface>(Op.Material)) return Fail(FString::Printf(TEXT("%s is not a material."), *Op.Material));
+				if (!IsMaterial(Op.Material)) return Fail(FString::Printf(TEXT("%s is not a material."), *Op.Material));
 			}
 			else if (Kind == TEXT("landscape.add_paint_layer"))
 			{
@@ -1043,9 +1212,47 @@ namespace HyperAIStudio::LandscapeTools::Private
 			}
 			if (!Landscape->LandscapeMaterial)
 			{
-				OutNotes.Add(FString::Printf(TEXT("%s has no material yet; set_material gives it one whose layer blend names its paint layers."), *Op.Landscape));
+				OutNotes.Add(FString::Printf(TEXT("%s has no material yet; create_material makes one showing its paint layers in colors, or set_material gives it one whose layer blend names them."), *Op.Landscape));
 			}
 			Touched.AddUnique(Landscape);
+			return true;
+		}
+		if (Kind == TEXT("landscape.create_material"))
+		{
+			ALandscape* Landscape = Op.Landscape.TrimStartAndEnd().IsEmpty() ? nullptr : FindLandscape(World, Op.Landscape);
+			ULandscapeInfo* Info = Landscape ? Landscape->GetLandscapeInfo() : nullptr;
+			if (!Op.Landscape.TrimStartAndEnd().IsEmpty() && !Info)
+			{
+				OutError = FString::Printf(TEXT("No landscape is labelled %s."), *Op.Landscape);
+				return false;
+			}
+			// The layers named, or the landscape's own, in its order.
+			TArray<FName> Layers;
+			for (const FString& Layer : Op.PaintLayers) Layers.Add(FName(*Layer.TrimStartAndEnd()));
+			if (Layers.IsEmpty() && Info)
+			{
+				for (const FLandscapeInfoLayerSettings& Settings : Info->Layers)
+				{
+					// Holes are painted on the visibility layer, which a layer blend does not show.
+					if (Settings.LayerInfoObj && Settings.LayerInfoObj != ALandscapeProxy::VisibilityLayer && !Settings.LayerName.IsNone()) Layers.AddUnique(Settings.LayerName);
+				}
+			}
+			UMaterial* Material = MakeLayerMaterial(PackageOf(Op.Material), Layers, Op.LayerColors, OutNotes, OutError);
+			if (!Material) return false;
+			Assets.AddUnique(Material);
+			if (!Landscape) return true;
+			Touched.AddUnique(Landscape);
+			SetMaterial(*Landscape, Material);
+			// Layers the landscape paints that the blend does not name would show black.
+			TArray<FString> Unshown;
+			for (const FLandscapeInfoLayerSettings& Settings : Info->Layers)
+			{
+				if (Settings.LayerInfoObj && Settings.LayerInfoObj != ALandscapeProxy::VisibilityLayer && !Layers.Contains(Settings.LayerName)) Unshown.Add(Settings.LayerName.ToString());
+			}
+			if (!Unshown.IsEmpty())
+			{
+				OutNotes.Add(FString::Printf(TEXT("%s paints %s, which %s does not show."), *Landscape->GetActorLabel(), *FString::Join(Unshown, TEXT(", ")), *Material->GetName()));
+			}
 			return true;
 		}
 		ALandscape* Landscape = FindLandscape(World, Op.Landscape);
@@ -1059,8 +1266,7 @@ namespace HyperAIStudio::LandscapeTools::Private
 		Landscape->Modify();
 		if (Kind == TEXT("landscape.set_material"))
 		{
-			Landscape->LandscapeMaterial = Load<UMaterialInterface>(Op.Material);
-			Landscape->PostEditChange();
+			SetMaterial(*Landscape, Load<UMaterialInterface>(Op.Material));
 			return true;
 		}
 		if (Kind == TEXT("landscape.add_paint_layer"))
@@ -1248,13 +1454,17 @@ FHyperAILandscapePlanReport FHyperAIStudioLandscapeContracts::ApplyPlan(const FH
 		Summary.ToolName = PlanToolName;
 		Summary.VariantId = TEXT("landscape.plan.v1");
 		Summary.Safety = EHyperAIStudioDomainSafety::Edit;
-		Summary.EffectTarget = Request.Operations[0].Landscape;
+		Summary.EffectTarget = Request.Operations[0].Landscape.IsEmpty() ? Request.Operations[0].Material : Request.Operations[0].Landscape;
 		Summary.Effects.Add(FString::Printf(TEXT("Edit landscapes: %d operation(s), one undo step%s"), Request.Operations.Num(), Request.bSave ? TEXT(", then the level saved") : TEXT("")));
 		for (int32 Index = 0; Index < Request.Operations.Num() && Index < 24; ++Index)
 		{
 			const FHyperAILandscapeOp& Op = Request.Operations[Index];
-			Summary.Effects.Add(FString::Printf(TEXT("| %s %s%s"), *Op.Kind, *Op.Landscape, Op.Mode.IsEmpty() ? TEXT("") : *(TEXT(" ") + Op.Mode)));
-			Summary.Touches.AddUnique(Op.Landscape);
+			const bool bMaterial = KindOf(Op) == TEXT("landscape.create_material");
+			// A made material is set on the landscape it names, which the approval lists too.
+			const FString Target = !bMaterial ? Op.Landscape : Op.Landscape.IsEmpty() ? Op.Material : Op.Material + TEXT(" on ") + Op.Landscape;
+			Summary.Effects.Add(FString::Printf(TEXT("| %s %s%s"), *Op.Kind, *Target, Op.Mode.IsEmpty() ? TEXT("") : *(TEXT(" ") + Op.Mode)));
+			if (bMaterial) Summary.Touches.AddUnique(Op.Material);
+			if (!Op.Landscape.IsEmpty()) Summary.Touches.AddUnique(Op.Landscape);
 		}
 		const FString OperationId = Report.OperationId;
 		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId]()

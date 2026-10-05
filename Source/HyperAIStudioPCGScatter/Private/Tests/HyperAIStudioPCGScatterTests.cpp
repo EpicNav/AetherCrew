@@ -4,10 +4,20 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Editor.h"
+#include "Elements/PCGBoundsModifier.h"
+#include "Elements/PCGCullPointsOutsideActorBounds.h"
+#include "Elements/PCGDifferenceElement.h"
+#include "Elements/PCGInnerIntersectionElement.h"
+#include "Elements/PCGSplineSampler.h"
+#include "Elements/PCGSurfaceSampler.h"
+#include "Elements/PCGTypedGetter.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
 #include "Grid/PCGPartitionActor.h"
+#include "Helpers/PCGHelpers.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioPCGScatterToolset.h"
@@ -17,14 +27,23 @@
 #include "LandscapeInfo.h"
 #include "LandscapeLayerInfoObject.h"
 #include "LandscapeProxy.h"
+#include "LandscapeSplineActor.h"
+#include "LandscapeSplineControlPoint.h"
+#include "LandscapeSplineSegment.h"
+#include "LandscapeSplinesComponent.h"
 #include "LandscapeSubsystem.h"
 #include "LandscapeUtils.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Guid.h"
 #include "ObjectTools.h"
 #include "PCGComponent.h"
+#include "PCGEdge.h"
+#include "PCGGraph.h"
 #include "PCGManagedResource.h"
+#include "PCGNode.h"
+#include "PCGPin.h"
 #include "PCGVolume.h"
+#include "PCGWorldActor.h"
 #include "Tests/AutomationCommon.h"
 #include "WorldPartition/WorldPartition.h"
 
@@ -163,6 +182,20 @@ namespace HyperAIStudio::PCGScatterTests
 		/** A road across both, on the vertex rows from RoadFrom up to RoadTo. */
 		constexpr double RoadFrom = 120.0;
 		constexpr double RoadTo = 132.0;
+		/**
+		 * A landscape spline road across both too, along X at LaneY, LaneWidth meters to each side of its center and
+		 * LaneFalloff more of shoulder; nothing is painted under it.
+		 */
+		constexpr double LaneY = 40.0;
+		constexpr double LaneWidth = 3.0;
+		constexpr double LaneFalloff = 2.0;
+		/** A partition cell's edge crosses the flat forest here, along Y, when the level streams. */
+		constexpr double SeamX = 190.0;
+		/** A hut on the flat meadow at HutX, HutY: a 1 m cube HutScale times its size, kept HutMargin meters clear of. */
+		constexpr double HutX = 60.0;
+		constexpr double HutY = 90.0;
+		constexpr double HutScale = 4.0;
+		constexpr double HutMargin = 2.0;
 		/** Flat up to GentleFrom, then 20 degrees up to SteepFrom, then 56 degrees. */
 		constexpr double GentleFrom = 180.0;
 		constexpr double SteepFrom = 220.0;
@@ -173,6 +206,7 @@ namespace HyperAIStudio::PCGScatterTests
 		const TCHAR* const GrassMesh = TEXT("/Engine/BasicShapes/Cone.Cone");
 		const TCHAR* const PebbleMesh = TEXT("/Engine/BasicShapes/Plane.Plane");
 		const TCHAR* const StoneMesh = TEXT("/Engine/EngineMeshes/Sphere.Sphere");
+		const TCHAR* const FernMesh = TEXT("/Engine/EngineMeshes/Cylinder.Cylinder");
 
 		/** Meters above the corner. */
 		double Height(const double Y)
@@ -242,6 +276,66 @@ namespace HyperAIStudio::PCGScatterTests
 		if (Subsystem && Subsystem->IsGridBased()) Subsystem->ChangeGridSize(Info, 2);
 		Landscape->ForceUpdateLayersContent();
 		return Landscape;
+	}
+
+	/**
+	 * The ecosystem ground's lane: a straight landscape spline along X at Eco::LaneY, running 20 m past the ground at
+	 * both ends so its ends play no part, kept as the landscape tool keeps a road (a spline actor labelled Label in World
+	 * Partition, else the landscape's own splines). The ground is not reshaped: PCG reads the spline alone.
+	 */
+	bool MakeLane(UWorld& World, ALandscape& Landscape, const FVector& Corner, const FString& Label)
+	{
+		ULandscapeInfo* Info = Landscape.GetLandscapeInfo();
+		if (!Info) return false;
+		const FVector Ends[] = {Corner + FVector(-2000.0, Eco::LaneY * 100.0, 0.0), Corner + FVector((Eco::Size - 1 + 20) * 100.0, Eco::LaneY * 100.0, 0.0)};
+		ILandscapeSplineInterface* Owner = nullptr;
+		const ULandscapeSubsystem* Subsystem = World.GetSubsystem<ULandscapeSubsystem>();
+		if (Subsystem && Subsystem->IsGridBased())
+		{
+			ALandscapeSplineActor* Actor = Info->CreateSplineActor(Ends[0]);
+			if (Actor) Actor->SetActorLabel(Label);
+			Owner = Actor;
+		}
+		else
+		{
+			Owner = Info->GetCurrentLevelLandscapeProxy(/*bRegistered=*/true);
+		}
+		if (!Owner) return false;
+		if (!Owner->GetSplinesComponent()) Owner->CreateSplineComponent();
+		ULandscapeSplinesComponent* Splines = Owner->GetSplinesComponent();
+		if (!Splines) return false;
+		const FTransform ToWorld = Splines->GetComponentTransform();
+		ULandscapeSplineControlPoint* Controls[2] = {};
+		for (int32 Index = 0; Index < 2; ++Index)
+		{
+			Controls[Index] = NewObject<ULandscapeSplineControlPoint>(Splines, NAME_None, RF_Transactional);
+			Splines->GetControlPoints().Add(Controls[Index]);
+			Controls[Index]->Location = ToWorld.InverseTransformPosition(Ends[Index]);
+			Controls[Index]->Width = static_cast<float>(Eco::LaneWidth * 100.0);
+			Controls[Index]->SideFalloff = static_cast<float>(Eco::LaneFalloff * 100.0);
+		}
+		ULandscapeSplineSegment* Segment = NewObject<ULandscapeSplineSegment>(Splines, NAME_None, RF_Transactional);
+		Splines->GetSegments().Add(Segment);
+		const float Length = static_cast<float>(FVector::Dist(Controls[0]->Location, Controls[1]->Location));
+		for (int32 End = 0; End < 2; ++End)
+		{
+			Segment->Connections[End].ControlPoint = Controls[End];
+			Segment->Connections[End].TangentLen = Length;
+			Controls[End]->ConnectedSegments.Add(FLandscapeSplineConnection(Segment, End));
+		}
+		Segment->AutoFlipTangents();
+		for (ULandscapeSplineControlPoint* Control : Controls) Control->AutoCalcRotation(/*bAlwaysRotateForward=*/true);
+		for (ULandscapeSplineControlPoint* Control : Controls) Control->UpdateSplinePoints();
+		if (!Splines->IsRegistered()) Splines->RegisterComponent();
+		return Segment->GetPoints().Num() > 1;
+	}
+
+	void DestroyLane(UWorld& World, const FString& Label)
+	{
+		for (TActorIterator<ALandscapeSplineActor> It(&World); It; ++It)
+		{
+			if (It->GetActorLabel() == Label) World.EditorDestroyActor(*It, /*bShouldModifyLevel=*/true);
+		}
 	}
 
 	/** One instance a generation made: where it stands and how it turns, the actor it is on, and where it stops drawing. */
@@ -355,19 +449,101 @@ namespace HyperAIStudio::PCGScatterTests
 		return FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(Item.Transform.GetRotation().GetUpVector().Z, -1.0, 1.0)));
 	}
 
-	/** The nearest of Others to Item on the same actor (a partition cell sees only its own), in meters. */
+	/** The nearest of Others to Item, on any actor (species keep out of each other across a partition cell's edge too), in meters. */
 	double Nearest(const FPlaced& Item, const TArray<FPlaced>& Others)
 	{
 		double Best = TNumericLimits<double>::Max();
 		for (const FPlaced& Other : Others)
 		{
-			if (&Other == &Item || Other.Owner != Item.Owner) continue;
+			if (&Other == &Item) continue;
 			Best = FMath::Min(Best, FVector::Dist2D(Item.Transform.GetLocation(), Other.Transform.GetLocation()) / 100.0);
 		}
 		return Best;
 	}
 
-	/** The share of the meadow's 2 m cells, clear of the road and the edges, that have grass. */
+	/** Pairs of an Item and one of Others on different actors (two partition cells) within Meters of each other. */
+	int32 PairsAcrossCells(const TArray<FPlaced>& Items, const TArray<FPlaced>& Others, const double Meters)
+	{
+		int32 Pairs = 0;
+		for (const FPlaced& Item : Items)
+		{
+			for (const FPlaced& Other : Others)
+			{
+				if (Other.Owner != Item.Owner && FVector::Dist2D(Item.Transform.GetLocation(), Other.Transform.GetLocation()) < Meters * 100.0) ++Pairs;
+			}
+		}
+		return Pairs;
+	}
+
+	/** Instances standing where another of the same mesh stands, to the centimeter: made twice, by two cells. */
+	int32 MadeTwice(const TArray<FPlaced>& Items)
+	{
+		TSet<FIntVector> Seen;
+		int32 Twice = 0;
+		for (const FPlaced& Item : Items)
+		{
+			const FVector At = Item.Transform.GetLocation();
+			bool bSeen = false;
+			Seen.Add(FIntVector(FMath::RoundToInt(At.X), FMath::RoundToInt(At.Y), FMath::RoundToInt(At.Z)), &bSeen);
+			if (bSeen) ++Twice;
+		}
+		return Twice;
+	}
+
+	/** Meters from the hut's center along the farther axis: the distance its square box measures. */
+	double FromHut(const FPlaced& Item, const FVector& Corner)
+	{
+		const FVector2D At = OnGround(Item, Corner) - FVector2D(Eco::HutX, Eco::HutY);
+		return FMath::Max(FMath::Abs(At.X), FMath::Abs(At.Y));
+	}
+
+	/** Meters from the lane's center line to the nearest of Items, and how many stand within Band meters past From. */
+	double FromLane(const TArray<FPlaced>& Items, const FVector& Corner, const double From = 0.0, const double Band = 0.0, int32* OutInBand = nullptr)
+	{
+		double Best = TNumericLimits<double>::Max();
+		int32 InBand = 0;
+		for (const FPlaced& Item : Items)
+		{
+			const double Away = FMath::Abs(OnGround(Item, Corner).Y - Eco::LaneY);
+			Best = FMath::Min(Best, Away);
+			if (Away >= From && Away < From + Band) ++InBand;
+		}
+		if (OutInBand) *OutInBand = InBand;
+		return Best;
+	}
+
+	/** The node linked to a pin of Node, upstream when bInput, else downstream; null when none. */
+	const UPCGNode* LinkedTo(const UPCGNode& Node, const FName Pin, const bool bInput)
+	{
+		const UPCGPin* Found = bInput ? Node.GetInputPin(Pin) : Node.GetOutputPin(Pin);
+		const UPCGEdge* Edge = Found && !Found->Edges.IsEmpty() ? Found->Edges[0].Get() : nullptr;
+		const UPCGPin* Other = Edge ? (bInput ? Edge->InputPin.Get() : Edge->OutputPin.Get()) : nullptr;
+		return Other ? Other->Node.Get() : nullptr;
+	}
+
+	/** Every node of a graph whose settings are of type T. */
+	template <typename T>
+	TArray<const UPCGNode*> NodesOf(const UPCGGraph& Graph)
+	{
+		TArray<const UPCGNode*> Out;
+		for (const UPCGNode* Node : Graph.GetNodes())
+		{
+			if (Node && Cast<T>(Node->GetSettings())) Out.Add(Node);
+		}
+		return Out;
+	}
+
+	/** A graph's node by its authored title. */
+	const UPCGNode* Titled(const UPCGGraph& Graph, const FString& Title)
+	{
+		for (const UPCGNode* Node : Graph.GetNodes())
+		{
+			if (Node && Node->HasAuthoredTitle() && Node->NodeTitle.ToString() == Title) return Node;
+		}
+		return nullptr;
+	}
+
+	/** The share of the meadow's 2 m cells, clear of the roads and the edges, that have grass. */
 	double GrassCoverage(const TArray<FPlaced>& Grass, const FVector& Corner)
 	{
 		TSet<FIntPoint> Grown;
@@ -382,7 +558,8 @@ namespace HyperAIStudio::PCGScatterTests
 		{
 			for (int32 Y = 1; Y < 108; ++Y)
 			{
-				if (Y >= 59 && Y < 67) continue;
+				// The painted road, and the lane with the 3 m kept off it.
+				if ((Y >= 59 && Y < 67) || (Y >= 16 && Y < 24)) continue;
 				++Cells;
 				if (Grown.Contains(FIntPoint(X, Y))) ++Covered;
 			}
@@ -595,15 +772,32 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 	const FString Graph = Folder + TEXT("/PCG_Wilds");
 	const FString VolumeLabel = TEXT("HyperAI_TestEcosystem_") + Suffix;
 	const FString GroundLabel = TEXT("HyperAI_TestEcosystemGround_") + Suffix;
-	// Far from the bench level and from the scatter test's ground.
-	const FVector Corner(1500000.0, 900000.0, 30000.0);
+	const FString LaneLabel = TEXT("HyperAI_TestEcosystemLane_") + Suffix;
 	const ULandscapeSubsystem* LandscapeSubsystem = World->GetSubsystem<ULandscapeSubsystem>();
 	const bool bPartitioned = LandscapeSubsystem && LandscapeSubsystem->IsGridBased() && World->GetWorldPartition();
-	if (!TestNotNull(TEXT("the painted ground is made"), MakeEcosystemGround(*World, Corner, GroundLabel, Folder))) return false;
+	// Far from the bench level and from the scatter test's ground, placed so a partition cell's edge crosses the flat forest.
+	const APCGWorldActor* PCGWorld = PCGHelpers::FindPCGWorldActor(World);
+	const double Grid = static_cast<double>(PCGWorld ? PCGWorld->PartitionGridSize : GetDefault<APCGWorldActor>()->PartitionGridSize);
+	const FVector Corner(FMath::CeilToDouble(1500000.0 / Grid) * Grid - Eco::SeamX * 100.0, 900000.0, 30000.0);
+	ALandscape* Ground = MakeEcosystemGround(*World, Corner, GroundLabel, Folder);
+	if (!TestNotNull(TEXT("the painted ground is made"), Ground)) return false;
+	TestTrue(TEXT("a landscape spline lane crosses it"), MakeLane(*World, *Ground, Corner, LaneLabel));
+	// A tagged hut, scaled up: the margin kept clear of it is in meters, whatever its scale.
+	const FString HutLabel = TEXT("HyperAI_TestEcosystemHut_") + Suffix;
+	const FString HutTag = TEXT("HyperAITestHut") + Suffix;
+	AStaticMeshActor* Hut = World->SpawnActor<AStaticMeshActor>(Corner + FVector(Eco::HutX * 100.0, Eco::HutY * 100.0, 0.0), FRotator::ZeroRotator);
+	if (Hut)
+	{
+		Hut->GetStaticMeshComponent()->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, Eco::RockMesh));
+		Hut->SetActorScale3D(FVector(Eco::HutScale));
+		Hut->Tags.Add(FName(*HutTag));
+		Hut->SetActorLabel(HutLabel);
+	}
+	TestNotNull(TEXT("a hut stands on the meadow"), Hut);
 	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
 	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
 	const TSharedRef<FEcosystemState> State = MakeShared<FEcosystemState>();
-	auto Cleanup = [World, VolumeLabel, GroundLabel, Folder, State]()
+	auto Cleanup = [World, VolumeLabel, GroundLabel, LaneLabel, HutLabel, Folder, State]()
 	{
 		if (APCGVolume* Volume = FindVolume(VolumeLabel)) World->EditorDestroyActor(Volume, /*bShouldModifyLevel=*/true);
 		// The partition actors the generation made, once nothing generates into them.
@@ -612,6 +806,11 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 			const APCGPartitionActor* Cell = Cast<APCGPartitionActor>(Actor);
 			if (Cell && !Cell->HasGraphInstances()) World->EditorDestroyActor(Actor, /*bShouldModifyLevel=*/true);
 		}
+		for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
+		{
+			if (It->GetActorLabel() == HutLabel) World->EditorDestroyActor(*It, /*bShouldModifyLevel=*/true);
+		}
+		DestroyLane(*World, LaneLabel);
 		DestroyLandscape(GroundLabel);
 		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 		TArray<FAssetData> Assets;
@@ -653,11 +852,19 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 	Rocks.Tilt = 10.f;
 	Rocks.Sink = 20.f;
 	Rocks.KeepOutOf = {TEXT("Trees")};
+	// Small plants that grow under the trees but keep out of the bushes' clumps, so clumps at a cell's edge are tested.
+	FHyperAIPCGSpecies Ferns;
+	Ferns.Name = TEXT("Ferns");
+	Ferns.Meshes = {Mesh(Eco::FernMesh)};
+	Ferns.Density = 1.f;
+	Ferns.Footprint = 0.5f;
+	Ferns.Scale = FVector2D(0.4, 0.6);
+	Ferns.KeepOutOf = {TEXT("Bushes")};
 	FHyperAIPCGBiome Woods;
 	Woods.Name = TEXT("Woods");
 	Woods.Layer = TEXT("Forest");
 	Woods.SlopeMax = 30.f;
-	Woods.Species = {Trees, Bushes, Rocks};
+	Woods.Species = {Trees, Bushes, Rocks, Ferns};
 	FHyperAIPCGSpecies Grass;
 	Grass.Name = TEXT("Grass");
 	Grass.Meshes = {Mesh(Eco::GrassMesh)};
@@ -693,6 +900,9 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 	Make.Graph = Graph;
 	Make.Biomes = {Woods, Field, Everywhere, Scree};
 	Make.AvoidLayers = {TEXT("Road")};
+	Make.AvoidTags = {HutTag};
+	Make.AvoidMargin = static_cast<float>(Eco::HutMargin);
+	Make.RoadMargin = 3.f;
 	FHyperAIPCGScatterOp Place = Op(TEXT("volume.create"));
 	Place.Graph = Graph;
 	Place.Volume = VolumeLabel;
@@ -712,6 +922,20 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 	Bad = Make;
 	Bad.Biomes[3].Height = FVector2D(400.0, 300.0);
 	TestFalse(TEXT("a height band running down is refused"), Run({Bad}, /*bDryRun=*/true).bOk);
+	for (const float Margin : {-1.f, 101.f})
+	{
+		Bad = Make;
+		Bad.RoadMargin = Margin;
+		const FHyperAIPCGScatterPlanReport Refused = Run({Bad}, /*bDryRun=*/true);
+		TestTrue(FString::Printf(TEXT("a RoadMargin of %g is refused: %s"), Margin, *Refused.Diagnostic),
+			!Refused.bOk && Refused.Diagnostic.Contains(TEXT("RoadMargin is 0 (off) to 100 meters.")));
+	}
+	for (const float Margin : {0.f, 5.f})
+	{
+		Bad = Make;
+		Bad.RoadMargin = Margin;
+		TestTrue(FString::Printf(TEXT("a RoadMargin of %g checks"), Margin), Run({Bad}, /*bDryRun=*/true).bOk);
+	}
 	FHyperAIPCGScatterOp Scatter = Op(TEXT("graph.create"));
 	Scatter.Graph = Graph;
 	Scatter.Meshes = {Mesh(Eco::RockMesh)};
@@ -745,17 +969,105 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 	const FString Recipes = FString::Join(Summary.Recipes, TEXT("\n"));
 	AddInfo(Summary.Diagnostic + TEXT("\n") + Recipes);
 	TestTrue(TEXT("inspect reads the ecosystem"), Summary.bOk);
-	TestEqual(TEXT("a recipe for each species"), Summary.Recipes.Num(), 6);
+	TestEqual(TEXT("a recipe for each species"), Summary.Recipes.Num(), 7);
 	TestTrue(TEXT("the grass grows in stands"), Recipes.Contains(TEXT("Stands 20 m, 40%")));
 	TestTrue(TEXT("the trees stop drawing at 300 m"), Recipes.Contains(TEXT("Cylinder x1 cull 240-300 m")));
 	TestTrue(TEXT("the rocks keep out of the trees' room"), Recipes.Contains(TEXT("Differences: Room of Trees")));
-	TestTrue(TEXT("the description names the biomes"), Summary.Settings.Num() == 1 && Summary.Settings[0].Contains(TEXT("Woods on Forest")));
+	TestTrue(TEXT("every species keeps off the roads"), Recipes.Contains(TEXT("Differences: Roads + 3 m")));
+	TestTrue(TEXT("the description names the biomes and the road margin"), Summary.Settings.Num() == 1 && Summary.Settings[0].Contains(TEXT("Woods on Forest"))
+		&& Summary.Settings[0].Contains(TEXT("Keeps 3 m off landscape roads.")));
+	TestTrue(TEXT("the plan says how far species sample past their cell"), Started.Notes.ContainsByPredicate([](const FString& Note)
+	{
+		return Note.StartsWith(TEXT("Partition seams")) && Note.Contains(TEXT("Woods: Trees 8 m")) && Note.Contains(TEXT("Woods: Bushes 7 m"));
+	}));
 	FHyperAIPCGScatterOp Spec;
 	TestTrue(TEXT("the op that rebuilds it reads as one: ") + Summary.Ecosystem.Left(300), FJsonObjectConverter::JsonObjectStringToUStruct(Summary.Ecosystem, &Spec));
 	TestEqual(TEXT("as ecosystem.set"), Spec.Kind, FString(TEXT("ecosystem.set")));
-	TestTrue(TEXT("with every biome, species and setting"), Spec.Biomes.Num() == 4 && Spec.Biomes[0].Species.Num() == 3 && Spec.Biomes[0].Species[1].Cluster == 5
-		&& Spec.Biomes[0].Species[2].bAlignToGround && Spec.AvoidLayers == TArray<FString>({TEXT("Road")}));
+	TestTrue(TEXT("with every biome, species and setting"), Spec.Biomes.Num() == 4 && Spec.Biomes[0].Species.Num() == 4 && Spec.Biomes[0].Species[1].Cluster == 5
+		&& Spec.Biomes[0].Species[2].bAlignToGround && Spec.AvoidLayers == TArray<FString>({TEXT("Road")}) && Spec.RoadMargin == 3.f);
 	TestTrue(TEXT("and it checks as a plan"), Run({Spec}, /*bDryRun=*/true).bOk);
+
+	// The roads: both kinds of landscape spline, sampled whole along their paved width, then widened by the margin.
+	if (const UPCGGraph* Built = LoadObject<UPCGGraph>(nullptr, *(Graph + TEXT(".PCG_Wilds"))))
+	{
+		const TArray<const UPCGNode*> Getters = NodesOf<UPCGGetSplineSettings>(*Built);
+		TSet<const UClass*> Owners;
+		bool bComponents = true;
+		for (const UPCGNode* Node : Getters)
+		{
+			const UPCGGetSplineSettings* Get = Cast<UPCGGetSplineSettings>(Node->GetSettings());
+			Owners.Add(Get->ActorSelector.ActorSelectionClass.Get());
+			bComponents &= Get->ActorSelector.ActorFilter == EPCGActorFilter::AllWorldActors && !Get->ActorSelector.bMustOverlapSelf
+				&& Get->ComponentSelector.ComponentSelection == EPCGComponentSelection::ByClass && Get->ComponentSelector.ComponentSelectionClass.Get() == ULandscapeSplinesComponent::StaticClass();
+		}
+		TestTrue(TEXT("two spline getters, for spline actors and for landscapes' own splines, every one in the world"), Getters.Num() == 2
+			&& Owners.Contains(ALandscapeSplineActor::StaticClass()) && Owners.Contains(ALandscapeProxy::StaticClass()) && bComponents);
+		const TArray<const UPCGNode*> Samplers = NodesOf<UPCGSplineSamplerSettings>(*Built);
+		const UPCGSplineSamplerSettings* Along = Samplers.Num() == 1 ? Cast<UPCGSplineSamplerSettings>(Samplers[0]->GetSettings()) : nullptr;
+		TestTrue(TEXT("one spline sampler, every 2 m along the roads, whole"), Along && Along->SamplerParams.Dimension == EPCGSplineSamplingDimension::OnSpline
+			&& Along->SamplerParams.Mode == EPCGSplineSamplingMode::Distance && Along->SamplerParams.DistanceIncrement == 200.f && Along->SamplerParams.bUnbounded);
+		const UPCGNode* Paved = Along ? LinkedTo(*Samplers[0], PCGPinConstants::DefaultOutputLabel, false) : nullptr;
+		const UPCGNode* Baked = Paved ? LinkedTo(*Paved, PCGPinConstants::DefaultOutputLabel, false) : nullptr;
+		const UPCGNode* Widened = Baked ? LinkedTo(*Baked, PCGPinConstants::DefaultOutputLabel, false) : nullptr;
+		const UPCGBoundsModifierSettings* Edge = Paved ? Cast<UPCGBoundsModifierSettings>(Paved->GetSettings()) : nullptr;
+		const UPCGBoundsModifierSettings* Margin = Widened ? Cast<UPCGBoundsModifierSettings>(Widened->GetSettings()) : nullptr;
+		TestTrue(TEXT("cut to the paved edge, the scale put in the bounds, then 3 m wider and a sample longer"), Edge && Margin && Baked
+			&& Edge->Mode == EPCGBoundsModifierMode::Intersect && Edge->BoundsMin.Y == -1.0 && Edge->BoundsMax.Y == 1.0
+			&& Baked->GetSettings()->GetClass()->GetName() == TEXT("PCGApplyScaleToBoundsSettings")
+			&& Margin->Mode == EPCGBoundsModifierMode::Translate && Margin->BoundsMax == FVector(100.0, 300.0, 5000.0) && Margin->BoundsMin == FVector(-100.0, -300.0, -5000.0));
+		const TArray<const UPCGNode*> Differences = NodesOf<UPCGDifferenceSettings>(*Built);
+		int32 OffRoads = 0;
+		for (const UPCGNode* Node : Differences)
+		{
+			const UPCGPin* Pin = Node->GetInputPin(PCGDifferenceConstants::DifferencesLabel);
+			const bool bRoads = Pin && Pin->Edges.ContainsByPredicate([Widened](const UPCGEdge* Link) { return Link && Link->InputPin && Link->InputPin->Node.Get() == Widened; });
+			if (bRoads && Cast<UPCGDifferenceSettings>(Node->GetSettings())->Mode == EPCGDifferenceMode::Discrete) ++OffRoads;
+		}
+		TestTrue(FString::Printf(TEXT("every species' difference takes the roads out, as points (%d of %d)"), OffRoads, Differences.Num()), Differences.Num() == 7 && OffRoads == 7);
+
+		// Partition seams. Trees: footprint 4 m at up to 1.2x, room 1.25x; bushes 1.5 m clumped five over 2 m; rocks
+		// keep out of the trees, ferns out of the bushes. Ferns' footprint reach 0.21 m + a bush's room 1.27 m makes the
+		// bushes' Need 1.49 m, and its clump's reach 3.83 m + 1.27 m brings its halo to 7 m; Need 1.49 + 1.27 + the trees'
+		// room 4.24 m is 7.0004 m, so the trees' is 8 m. Rocks and ferns, that nothing keeps out of and that have no clumps, have none.
+		auto HaloOf = [Built](const TCHAR* Species) -> int32
+		{
+			const UPCGNode* Sampler = Titled(*Built, Species);
+			const UPCGNode* Shape = Sampler ? LinkedTo(*Sampler, PCGSurfaceSamplerConstants::BoundingShapeLabel, true) : nullptr;
+			if (!Shape || !Cast<UPCGInnerIntersectionSettings>(Shape->GetSettings())) return 0;
+			const UPCGNode* Grown = LinkedTo(*Shape, PCGPinConstants::DefaultInputLabel, true);
+			const UPCGBoundsModifierSettings* Halo = Grown ? Cast<UPCGBoundsModifierSettings>(Grown->GetSettings()) : nullptr;
+			return Halo ? FMath::RoundToInt(Halo->BoundsMax.X / 100.0) : -1;
+		};
+		const int32 TreeHalo = HaloOf(TEXT("Woods: Trees"));
+		const int32 BushHalo = HaloOf(TEXT("Woods: Bushes"));
+		TestTrue(FString::Printf(TEXT("trees sample 8 m past their cell and the bushes' clumps 7 m (%d, %d)"), TreeHalo, BushHalo), TreeHalo == 8 && BushHalo == 7);
+		const UPCGNode* RockSampler = Titled(*Built, TEXT("Woods: Rocks"));
+		const UPCGNode* FernSampler = Titled(*Built, TEXT("Woods: Ferns"));
+		TestTrue(TEXT("rocks and ferns sample their own cell, as the graph's input gives it"), RockSampler && FernSampler
+			&& LinkedTo(*RockSampler, PCGSurfaceSamplerConstants::BoundingShapeLabel, true) == Built->GetInputNode()
+			&& LinkedTo(*FernSampler, PCGSurfaceSamplerConstants::BoundingShapeLabel, true) == Built->GetInputNode());
+		const TArray<const UPCGNode*> Culls = NodesOf<UPCGCullPointsOutsideActorBoundsSettings>(*Built);
+		TestTrue(FString::Printf(TEXT("only the trees and bushes cull their halo before spawning (%d)"), Culls.Num()), Culls.Num() == 2
+			&& Titled(*Built, TEXT("Woods: Trees in its cell")) && Titled(*Built, TEXT("Woods: Bushes in its cell")));
+		const TArray<const UPCGNode*> Landscapes = NodesOf<UPCGGetLandscapeSettings>(*Built);
+		TestTrue(TEXT("the ground is read past the landscape proxies a cell overlaps"), Landscapes.Num() == 1 && !Cast<UPCGGetLandscapeSettings>(Landscapes[0]->GetSettings())->ActorSelector.bMustOverlapSelf);
+	}
+	else
+	{
+		AddError(TEXT("The ecosystem graph would not load."));
+	}
+	// Without a road margin, or a species with a halo, neither roads nor cells are read.
+	FHyperAIPCGScatterOp Plain = Op(TEXT("ecosystem.create"));
+	Plain.Graph = Folder + TEXT("/PCG_Plain");
+	Plain.Biomes = {Everywhere};
+	Settings->bRequireApprovalForAgentEdits = false;
+	const FHyperAIPCGScatterPlanReport PlainMade = Run({Plain});
+	Settings->bRequireApprovalForAgentEdits = bApproval;
+	const UPCGGraph* PlainGraph = PlainMade.bOk ? LoadObject<UPCGGraph>(nullptr, *(Plain.Graph + TEXT(".PCG_Plain"))) : nullptr;
+	TestTrue(TEXT("an ecosystem with no road margin reads no splines, and its one species samples its cell: ") + PlainMade.Diagnostic, PlainGraph
+		&& NodesOf<UPCGGetSplineSettings>(*PlainGraph).IsEmpty() && NodesOf<UPCGSplineSamplerSettings>(*PlainGraph).IsEmpty()
+		&& NodesOf<UPCGCullPointsOutsideActorBoundsSettings>(*PlainGraph).IsEmpty() && NodesOf<UPCGInnerIntersectionSettings>(*PlainGraph).IsEmpty()
+		&& !PlainMade.Notes.ContainsByPredicate([](const FString& Note) { return Note.StartsWith(TEXT("Partition seams")); }));
 	TestTrue(TEXT("the reading says it is an ecosystem"), Summary.Diagnostic.Contains(TEXT("an ecosystem this tool built")));
 	// Its nodes are a scatter graph's kinds, many times over: graph.set must not reshape it.
 	FHyperAIPCGScatterOp Reshape = Op(TEXT("graph.set"));
@@ -768,7 +1080,9 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 	Look.Detail = TEXT("nodes");
 	Look.Filter = TEXT("Bushes");
 	const FHyperAIPCGScatterInspectReport Bush = C::Inspect(Look);
-	TestTrue(TEXT("a filter narrows the reading to the bushes"), Bush.Recipes.Num() == 1 && Bush.Nodes.Num() >= 3 && Bush.Nodes.Num() < 10);
+	// The bushes' recipe, and the ferns' that keep out of the bushes' room.
+	TestTrue(FString::Printf(TEXT("a filter narrows the reading to the bushes (%d recipes, %d nodes)"), Bush.Recipes.Num(), Bush.Nodes.Num()),
+		Bush.Recipes.Num() == 2 && Bush.Nodes.Num() >= 3 && Bush.Nodes.Num() < 10);
 	FHyperAIPCGScatterInspectRequest BadDetail;
 	BadDetail.Graph = Graph;
 	BadDetail.Detail = TEXT("everything");
@@ -798,14 +1112,21 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 		const TArray<FPlaced> Grass = Of(Eco::GrassMesh);
 		const TArray<FPlaced> Pebbles = Of(Eco::PebbleMesh);
 		const TArray<FPlaced> Stones = Of(Eco::StoneMesh);
-		AddInfo(FString::Printf(TEXT("Trees %d, bushes %d, rocks %d, grass %d, pebbles %d, stones %d."), Trees.Num(), Bushes.Num(), Rocks.Num(), Grass.Num(), Pebbles.Num(), Stones.Num()));
+		const TArray<FPlaced> Ferns = Of(Eco::FernMesh);
+		AddInfo(FString::Printf(TEXT("Trees %d, bushes %d, rocks %d, ferns %d, grass %d, pebbles %d, stones %d."), Trees.Num(), Bushes.Num(), Rocks.Num(), Ferns.Num(),
+			Grass.Num(), Pebbles.Num(), Stones.Num()));
 		State->Trees = Trees.Num();
 		TestTrue(TEXT("trees grow"), Trees.Num() > 100);
 		TestTrue(TEXT("bushes grow"), Bushes.Num() > 100);
 		TestTrue(TEXT("rocks grow"), Rocks.Num() > 200);
+		TestTrue(TEXT("ferns grow"), Ferns.Num() > 3000);
 		TestTrue(TEXT("grass grows"), Grass.Num() > 3000);
 		TestTrue(TEXT("pebbles lie about"), Pebbles.Num() > 1000);
 		TestTrue(TEXT("stones lie on the heights"), Stones.Num() > 100);
+		// Each cell spawns only what stands in it, so nothing is made twice where cells meet.
+		int32 Twice = 0;
+		for (const TPair<FString, TArray<FPlaced>>& Pair : All) Twice += MadeTwice(Pair.Value);
+		TestEqual(TEXT("no instance is made twice"), Twice, 0);
 
 		// Each biome on its paint layer; the pebbles' biome has none and lies on both.
 		const auto West = [](const FVector2D& At) { return At.X < Eco::Middle - 0.5; };
@@ -813,13 +1134,40 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("no tree off the Forest layer"), CountWhere(Trees, Corner, West), 0);
 		TestEqual(TEXT("no bush off the Forest layer"), CountWhere(Bushes, Corner, West), 0);
 		TestEqual(TEXT("no rock off the Forest layer"), CountWhere(Rocks, Corner, West), 0);
+		TestEqual(TEXT("no fern off the Forest layer"), CountWhere(Ferns, Corner, West), 0);
 		TestEqual(TEXT("no grass off the Meadow layer"), CountWhere(Grass, Corner, East), 0);
 		TestTrue(TEXT("pebbles on both layers"), CountWhere(Pebbles, Corner, West) > 300 && CountWhere(Pebbles, Corner, East) > 300);
 		// Nothing on the road.
 		const auto OnRoad = [](const FVector2D& At) { return At.Y > Eco::RoadFrom && At.Y < Eco::RoadTo - 1.0; };
 		int32 Road = 0;
-		for (const TArray<FPlaced>* List : {&Trees, &Bushes, &Rocks, &Grass, &Pebbles, &Stones}) Road += CountWhere(*List, Corner, OnRoad);
+		for (const TArray<FPlaced>* List : {&Trees, &Bushes, &Rocks, &Ferns, &Grass, &Pebbles, &Stones}) Road += CountWhere(*List, Corner, OnRoad);
 		TestEqual(TEXT("nothing grows on the road"), Road, 0);
+		// Nothing within the hut's sides and the margin past them.
+		int32 AtHut = 0;
+		for (const TArray<FPlaced>* List : {&Trees, &Bushes, &Rocks, &Ferns, &Grass, &Pebbles, &Stones})
+		{
+			for (const FPlaced& Item : *List) AtHut += FromHut(Item, Corner) < 0.5 * Eco::HutScale + Eco::HutMargin ? 1 : 0;
+		}
+		TestEqual(TEXT("nothing grows within 2 m of the hut"), AtHut, 0);
+		// Every footprint keeps 3 m from the lane's paved edge, 3 m from its center line: at least half the footprint at
+		// its smallest scale past 6 m. Just past that, ground cover still grows.
+		struct FLaneRule { const TCHAR* Name; const TArray<FPlaced>* Items; double HalfFootprint; };
+		const FLaneRule Rules[] = {{TEXT("trees"), &Trees, 2.0 * 0.8}, {TEXT("bushes"), &Bushes, 0.75 * 0.8}, {TEXT("rocks"), &Rocks, 0.5 * 0.3},
+			{TEXT("ferns"), &Ferns, 0.25 * 0.4}, {TEXT("grass"), &Grass, 0.25 * 0.2}, {TEXT("pebbles"), &Pebbles, 0.5 * 0.2}};
+		TArray<FString> Margins;
+		for (const FLaneRule& Rule : Rules)
+		{
+			const double Kept = Eco::LaneWidth + 3.0 + Rule.HalfFootprint;
+			const double Closest = FromLane(*Rule.Items, Corner);
+			Margins.Add(FString::Printf(TEXT("%s %.2f m"), Rule.Name, Closest));
+			TestTrue(FString::Printf(TEXT("%s keep %.2f m from the lane's center (%.2f m)"), Rule.Name, Kept, Closest), Closest >= Kept - 0.05);
+		}
+		int32 GrassBeside = 0;
+		int32 PebblesBeside = 0;
+		FromLane(Grass, Corner, Eco::LaneWidth + 3.0 + 0.05, 4.0, &GrassBeside);
+		FromLane(Pebbles, Corner, Eco::LaneWidth + 3.0 + 0.1, 4.0, &PebblesBeside);
+		TestTrue(FString::Printf(TEXT("grass and pebbles grow in the 4 m beside the kept margin (%d, %d)"), GrassBeside, PebblesBeside), GrassBeside > 30 && PebblesBeside > 20);
+		AddInfo(TEXT("Nearest to the lane's center: ") + FString::Join(Margins, TEXT(", ")));
 		// The woods keep off ground steeper than 30 degrees; the field has no limit.
 		const auto Steep = [](const FVector2D& At) { return At.Y > Eco::SteepFrom + 1.0; };
 		TestEqual(TEXT("no tree on the steep slope"), CountWhere(Trees, Corner, Steep), 0);
@@ -873,6 +1221,22 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 		double RockToTree = TNumericLimits<double>::Max();
 		for (const FPlaced& Rock : Rocks) RockToTree = FMath::Min(RockToTree, Nearest(Rock, Trees));
 		TestTrue(FString::Printf(TEXT("bushes and rocks keep 1.9 m from trees (%.2f m, %.2f m)"), BushToTree, RockToTree), BushToTree > 1.9 && RockToTree > 1.9);
+		// Ferns keep out of the bushes' room, clump members across a cell's edge too: a bush's 0.6 m at its smallest and a
+		// fern's 0.1 m. Across an edge each cell sees the other's bushes only through the halo.
+		double FernToBush = TNumericLimits<double>::Max();
+		for (const FPlaced& Fern : Ferns) FernToBush = FMath::Min(FernToBush, Nearest(Fern, Bushes));
+		TestTrue(FString::Printf(TEXT("ferns keep 0.65 m from bushes (%.2f m)"), FernToBush), FernToBush > 0.65);
+		const int32 FernsAcross = PairsAcrossCells(Ferns, Bushes, 2.0);
+		const int32 RocksAcross = PairsAcrossCells(Rocks, Trees, 4.0);
+		if (bPartitioned)
+		{
+			TestTrue(FString::Printf(TEXT("ferns stand within 2 m of bushes across a cell's edge, so the edge was tested (%d pairs; rocks within 4 m of trees, %d)"),
+				FernsAcross, RocksAcross), FernsAcross > 5);
+		}
+		else
+		{
+			AddInfo(TEXT("Not a World Partition level: no cell edges to cross."));
+		}
 		// Bushes grow in clumps: most have two others close by, where an even spread at their density would give few.
 		int32 Clumped = 0;
 		for (const FPlaced& Bush : Bushes)
@@ -893,8 +1257,8 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 		// Stands: about the share of the meadow asked for.
 		const double Coverage = GrassCoverage(Grass, Corner);
 		TestTrue(FString::Printf(TEXT("grass stands cover about 40%% of the meadow (%.0f%%)"), Coverage * 100.0), Coverage > 0.28 && Coverage < 0.58);
-		AddInfo(FString::Printf(TEXT("Measured: grass covers %.0f%% of the meadow; %.0f%% of bushes in clumps; trees lean at most %.1f degrees on the slope, rocks %.1f there and %.1f on the flat; nearest bush %.2f m and rock %.2f m from a tree."),
-			Coverage * 100.0, ClumpedShare * 100.0, TreeLean, SlopeLean, FlatLean, BushToTree, RockToTree));
+		AddInfo(FString::Printf(TEXT("Measured: grass covers %.0f%% of the meadow; %.0f%% of bushes in clumps; trees lean at most %.1f degrees on the slope, rocks %.1f there and %.1f on the flat; nearest bush %.2f m and rock %.2f m from a tree, fern %.2f m from a bush; %d fern-bush pairs within 2 m across cells."),
+			Coverage * 100.0, ClumpedShare * 100.0, TreeLean, SlopeLean, FlatLean, BushToTree, RockToTree, FernToBush, FernsAcross));
 
 		// Rebuilt: no rocks, and the grass everywhere on the meadow; then generated again.
 		FHyperAIPCGScatterOp Rebuild = Make;
@@ -925,10 +1289,22 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("the same trees grow again from the same seed"), Trees ? Trees->Num() : 0, State->Trees);
 		const double Coverage = Grass ? GrassCoverage(*Grass, Corner) : 0.0;
 		TestTrue(FString::Printf(TEXT("grass now covers the meadow (%.0f%%)"), Coverage * 100.0), Coverage > 0.85);
+		// The grass, everywhere on the meadow now, keeps the hut's 2 m margin and grows just past it: the margin is not
+		// grown fourfold with the hut's scale, to 8 m.
+		const double HutKept = 0.5 * Eco::HutScale + Eco::HutMargin;
+		int32 AtHut = 0;
+		int32 BesideHut = 0;
+		for (int32 Index = 0; Grass && Index < Grass->Num(); ++Index)
+		{
+			const double Away = FromHut((*Grass)[Index], Corner);
+			AtHut += Away < HutKept ? 1 : 0;
+			BesideHut += Away >= HutKept + 0.15 && Away < HutKept + 2.0 ? 1 : 0;
+		}
+		TestTrue(FString::Printf(TEXT("grass keeps 2 m from the hut and grows just past that (%d within, %d in the next 2 m)"), AtHut, BesideHut), AtHut == 0 && BesideHut > 20);
 		FHyperAIPCGScatterInspectRequest Look;
 		Look.Graph = Graph;
 		const FHyperAIPCGScatterInspectReport Read = C::Inspect(Look);
-		TestTrue(TEXT("inspect reads the rebuilt op"), Read.Recipes.Num() == 5 && !Read.Ecosystem.Contains(TEXT("Rocks")) && Read.Ecosystem.Contains(TEXT("Grass")));
+		TestTrue(TEXT("inspect reads the rebuilt op"), Read.Recipes.Num() == 6 && !Read.Ecosystem.Contains(TEXT("Rocks")) && Read.Ecosystem.Contains(TEXT("Grass")));
 		FHyperAIPCGScatterOp Clear = Op(TEXT("volume.clear"));
 		Clear.Volume = VolumeLabel;
 		Settings->bRequireApprovalForAgentEdits = false;
