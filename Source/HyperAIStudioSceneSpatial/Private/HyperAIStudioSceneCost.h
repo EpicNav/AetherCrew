@@ -1,0 +1,26 @@
+// Games by Hyper 2026.
+
+#pragma once
+
+#include "CoreMinimal.h"
+
+class UWorld;
+struct FHyperAISceneCostReport;
+struct FHyperAISceneCostRequest;
+
+/** What a world's loaded actors cost to render, in one bounded pass over them. Game thread only; nothing is loaded. */
+namespace HyperAIStudio::SceneSpatial::Cost
+{
+	/** Findings kept, at most. */
+	constexpr int32 MaxFindings = 24;
+	/** Local lights compared against every primitive for the shadow estimate, at most. */
+	constexpr int32 MaxShadowLights = 512;
+
+	/**
+	 * Measures World for the request's scope into Out. The request's limits are taken as given: the tool fits them
+	 * into range first, and tests set them as they like.
+	 */
+	void Measure(UWorld& World, const FHyperAISceneCostRequest& Request, FHyperAISceneCostReport& Out);
+	/** About how many bytes the report takes as JSON. */
+	int64 EstimateBytes(const FHyperAISceneCostReport& Report);
+}
