@@ -1213,6 +1213,13 @@ private:
 				{TEXT("PCG")}
 			},
 			{
+				TEXT("HyperAIStudioModeling"),
+				TEXT("mesh_modeling"),
+				TEXT("cohort.source.hyperaistudiomodelingtoolset.v1"),
+				{TEXT("hyper_model_inspect"), TEXT("hyper_model_apply_plan"), TEXT("hyper_model_validate")},
+				{TEXT("GeometryScripting")}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),

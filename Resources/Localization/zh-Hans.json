@@ -1022,6 +1022,12 @@
    "text": "HyperAI：网格地形编辑"
   },
   {
+   "namespace": "HyperAIStudioModeling",
+   "key": "ModelPlan",
+   "source": "HyperAI: Model Plan",
+   "text": "HyperAI：模型计划"
+  },
+  {
    "namespace": "HyperAIStudioNiagaraExternalEditGate",
    "key": "ApplyOpsTransaction",
    "source": "HyperAI Niagara Edit",
