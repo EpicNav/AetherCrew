@@ -234,8 +234,10 @@ FHyperAIModelInspectReport FHyperAIStudioModelingContracts::Inspect(const FHyper
 		// What tells a hand edit, or any rewrite, apart from the mesh as it was.
 		const Gate::FGeometryPrint Print = Gate::Fingerprint(*Mesh);
 		Report.Fingerprint = Print.Hash;
-		Report.Details.Add(Print.Hash.IsEmpty() ? FString::Printf(TEXT("No fingerprint: %s."), *Print.Why)
-			: FString::Printf(TEXT("Fingerprint %s: %d triangles, %d vertices in its source mesh; it changes when the mesh is edited."), *Print.Hash, Print.Triangles, Print.Vertices));
+		const FString HiRes = Print.HiResTriangles > 0 ? FString::Printf(TEXT(", and %d triangles in its hi-res source, which Modeling Mode edits"), Print.HiResTriangles) : FString();
+		Report.Details.Add(Print.Hash.IsEmpty() ? FString::Printf(TEXT("No fingerprint: %s (%d triangles in its source mesh%s)."), *Print.Why, Print.Triangles, *HiRes)
+			: FString::Printf(TEXT("Fingerprint %s: %d triangles, %d vertices in its source mesh%s; it changes when its geometry, UVs, normals, colours, polygroups or other layers are edited."),
+				*Print.Hash, Print.Triangles, Print.Vertices, *HiRes));
 		if (Mesh->GetPackage()->IsDirty())
 		{
 			Report.Details.Add(TEXT("It has unsaved changes: save it (File > Save All) to keep them."));

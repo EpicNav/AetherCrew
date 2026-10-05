@@ -152,7 +152,10 @@ struct FHyperAIModelInspectReport
 	UPROPERTY() TArray<FString> Assets;
 	/** Asset read in full. */
 	UPROPERTY() TArray<FString> Details;
-	/** With Asset: its geometry fingerprint (source positions, triangles, material slots, first UV set), which changes when the mesh is edited by hand or rewritten. */
+	/**
+	 * With Asset: its geometry fingerprint (source positions, triangles, material slots, every UV set, normals, hard
+	 * edges, colours, polygroups and other layers), which changes when the mesh is edited by hand or rewritten.
+	 */
 	UPROPERTY() FString Fingerprint;
 	UPROPERTY() bool bTruncated = false;
 };
@@ -244,14 +247,17 @@ struct FHyperAIModelHandoffReport
 	UPROPERTY() FString Viewport;
 	/** Level viewports that now frame the actor. */
 	UPROPERTY() int32 FramedViewports = 0;
-	/** With Tool: its palette and button, "Deform > Vertex Sculpt". */
+	/** With Tool: its palette and button as the person's Modeling Mode shows them, "Deform > Vertex Sculpt". */
 	UPROPERTY() FString ToolHint;
 	/** That button accepts the selection now, as Modeling Mode's palette judges it; nothing is started. */
 	UPROPERTY() bool bToolReady = false;
 	/** The asset's geometry as handed over; hyper_model_inspect's Fingerprint differs once the person's edit is accepted. */
 	UPROPERTY() FString Fingerprint;
+	/** LOD 0's source. */
 	UPROPERTY() int32 Triangles = 0;
 	UPROPERTY() int32 Vertices = 0;
+	/** Its hi-res source's triangles, 0 without one: Modeling Mode edits that source when it has one. */
+	UPROPERTY() int32 HiResTriangles = 0;
 	/** Other actors in the level showing the asset: an accepted edit changes them too. */
 	UPROPERTY() int32 SharedBy = 0;
 	/** What the person does next, in order. */
@@ -348,6 +354,8 @@ public:
 	 */
 	static constexpr const TCHAR* ModelingModeId = TEXT("EM_ModelingToolsEditorMode");
 	static constexpr const TCHAR* ModelingModePlugin = TEXT("ModelingToolsEditorMode");
+	/** UModelingToolsModeCustomizationSettings, whose bUseLegacyModelingPalette picks the palette a hand-off's hints name. */
+	static constexpr const TCHAR* ModelingPaletteSettingsClass = TEXT("/Script/ModelingToolsEditorMode.ModelingToolsModeCustomizationSettings");
 	/** The outliner folder, and the label prefix, of an actor a hand-off puts in the level. */
 	static constexpr const TCHAR* HandoffFolder = TEXT("HyperAI/Modeling");
 	static constexpr const TCHAR* HandoffLabelPrefix = TEXT("HyperAI_Edit_");
@@ -357,7 +365,7 @@ public:
 	static constexpr double HandoffTraceDistance = 5000.0;
 	/** Above this, Modeling Mode's tools are slow; the reply suggests Simplify or Remesh first. */
 	static constexpr int32 HeavyHandoffTriangles = 500000;
-	/** Above this many source triangles a mesh is not fingerprinted: hashing it would hold the editor too long. */
+	/** Above this many source triangles (LOD 0 and hi-res) a mesh is not fingerprinted, nor unpacked to count: hashing it would hold the editor too long. */
 	static constexpr int32 MaxFingerprintTriangles = 4000000;
 
 	static FString GetQualifiedToolsetName();

@@ -170,26 +170,31 @@ Mode (the Modeling Tools Editor Mode plugin, Beta) does that, but its tools need
 
 1. Optionally `bDryRun: true` first: it says which actor it would use or put in the level, and changes nothing.
 2. The hand-off uses an actor already showing the mesh, or puts one in the level (folder `HyperAI/Modeling`, label
-   `HyperAI_Edit_<asset>`, at `Location` or where the level viewport looks; `Label` or `Location` always puts a new
-   one). Putting one there is one undo step, and waits for approval when approval is on. `Actor` hands over an actor
-   in the level by label or path instead.
+   `HyperAI_Edit_<asset>` with characters a label cannot hold as `_`, at `Location` or where the level viewport looks;
+   `Label` or `Location` always puts a new one). Putting one there is one undo step, and waits for approval when
+   approval is on; approved after another level was opened, or during Play in Editor, it is refused and changes
+   nothing. `Actor` hands over an actor in the level by label or path instead.
 3. It selects only that actor, frames it in the level viewports, brings the level editor in front of HyperAI Studio
    (`bLeaveTabsAlone: true` leaves the tabs as they are) and opens Modeling Mode. Selection, framing and the mode are
    not undo steps.
 4. No tool is started: `Tool` (PolyEdit, TriEdit, PolyGroups, Sculpt, Smooth, Remesh, Simplify, UVs) names the
-   palette and button in `ToolHint`, and `bToolReady` says whether that button accepts the selection. `NextSteps`
-   is what to tell the person.
+   palette and button in `ToolHint` as the person's Modeling Mode shows them (`Model > PolyGroup Edit` on the default
+   palette, `PolyModel > PolyEd` on the legacy one), and `bToolReady` says whether that button accepts the selection.
+   `NextSteps` is what to tell the person.
 5. The person edits, clicks Accept, and saves (File > Save All). Accept writes into the asset itself, so every actor
-   showing it changes (`SharedBy` counts the others).
+   showing it changes (`SharedBy` counts the others). A mesh with a hi-res source is edited there: `HiResTriangles`
+   counts it, and the reply's triangle counts and slow-tool note use it.
 6. Then read it back: `hyper_model_inspect` with `Asset` reports `Fingerprint`; it differs from the hand-off's when
-   the geometry changed, and Details say "changed since" the hand-off, or "unchanged", and whether it is unsaved
-   (the editor remembers hand-offs until it closes; after a restart compare the two Fingerprints yourself).
+   the geometry, UVs, normals, hard edges, colours, polygroups or other layers changed, and Details say "changed
+   since" the hand-off, or "unchanged", and whether it is unsaved (the editor remembers hand-offs until it closes;
+   after a restart compare the two Fingerprints yourself). Material assignments and collision are not in it.
    `hyper_model_validate` checks it as a prop again.
 
 A later `write_asset` with `Replace=true` on that path overwrites the person's edit: build on the edited asset
 instead (place it, scatter it, or hand it over again). The hand-off refuses during Play in Editor, with the plugin
-off, in an unattended editor, for an asset outside `/Game` or not a static mesh, and while a Modeling Mode tool is
-open (the person Accepts or Cancels it first).
+off, in an unattended editor, for an asset outside `/Game` or not a static mesh, and while a tool is open in
+Modeling Mode or any other editor mode, since opening Modeling Mode would cancel it (the person Accepts or Cancels
+it first).
 
 ## Using the results
 

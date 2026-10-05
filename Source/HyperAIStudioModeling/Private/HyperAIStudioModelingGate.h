@@ -130,14 +130,18 @@ namespace HyperAIStudio::Modeling::Gate
 	{
 		/** "geo-" and 16 hex digits; empty when it could not be read, and Why says why. */
 		FString Hash;
+		/** LOD 0's source. */
 		int32 Triangles = 0;
 		int32 Vertices = 0;
+		/** The hi-res source's triangles, 0 without one: Modeling Mode edits that source when there is one. */
+		int32 HiResTriangles = 0;
 		FString Why;
 	};
 	/**
-	 * LOD 0's source mesh (and the hi-res source, when there is one): each triangle's corner positions and first-set UVs
-	 * and its material slot, in triangle order, with the counts. Content, not the bulk data's id: committing the same
-	 * geometry again keeps it.
+	 * LOD 0's source mesh (and the hi-res source, when there is one): each triangle's corners (position, every UV set,
+	 * normal, colour) and material slot in triangle order, hard edges, and the polygroup, label and weight layers
+	 * Modeling Mode's tools write, with the counts. Content, not the bulk data's id: committing the same geometry again
+	 * keeps it. Sources over MaxFingerprintTriangles are counted from what was saved with them, never unpacked.
 	 */
 	FGeometryPrint Fingerprint(UStaticMesh& Mesh);
 	/** One line per op kind and per recipe, for inspect. */

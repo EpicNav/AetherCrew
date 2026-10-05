@@ -2548,55 +2548,153 @@ namespace HyperAIStudio::Modeling::Gate
 
 	namespace
 	{
-		/** One source mesh into the hash: its counts, then each triangle's corners (position, first UV) and material slot. */
+		template <typename ValueType>
+		void HashValue(const ValueType& Value, FXxHash64Builder& Builder)
+		{
+			Builder.Update(&Value, sizeof(Value));
+		}
+
+		/** A name by its lower-case text, which is the same in every session (an FName's index is not). */
+		void HashValue(const FName Value, FXxHash64Builder& Builder)
+		{
+			const FString Text = Value.ToString().ToLower();
+			Builder.Update(*Text, Text.Len() * sizeof(TCHAR));
+		}
+
+		/**
+		 * Every layer of one type the engine does not reserve, by name: the polygroups and polygroup layers, label layers
+		 * and weight maps Modeling Mode's tools write (Generate PolyGroups changes nothing else). Transient ones are left
+		 * out, as they are not saved.
+		 */
+		template <typename ValueType, typename ElementIDType, typename ElementsType>
+		void HashLayers(const TAttributesSet<ElementIDType>& Attributes, const ElementsType& Elements, FXxHash64Builder& Builder)
+		{
+			TArray<FName> Names;
+			Attributes.template ForEachByType<ValueType>([&Names](const FName Name, const auto Values)
+			{
+				if (!FStaticMeshAttributes::IsReservedAttributeName(Name) && !EnumHasAnyFlags(Values.GetFlags(), EMeshAttributeFlags::Transient)) Names.Add(Name);
+			});
+			Names.Sort(FNameLexicalLess());
+			for (const FName Name : Names)
+			{
+				HashValue(Name, Builder);
+				const auto Values = Attributes.template GetAttributesRef<ValueType>(Name);
+				for (const ElementIDType Element : Elements) HashValue(Values.Get(Element), Builder);
+			}
+		}
+
+		/**
+		 * One source mesh into the hash: its counts; each triangle's corners (position, every UV set, normal, colour) and
+		 * material slot; hard edges; then the layers.
+		 */
 		void HashSource(const FMeshDescription& Source, FXxHash64Builder& Builder)
 		{
 			const int32 Counts[2] = {Source.Triangles().Num(), Source.Vertices().Num()};
 			Builder.Update(Counts, sizeof(Counts));
+			const FStaticMeshConstAttributes Attributes(Source);
 			const auto Positions = Source.GetVertexPositions();
-			const TVertexInstanceAttributesConstRef<FVector2f> UVs = FStaticMeshConstAttributes(Source).GetVertexInstanceUVs();
-			const bool bUVs = UVs.IsValid() && UVs.GetNumChannels() > 0;
+			const TVertexInstanceAttributesConstRef<FVector2f> UVs = Attributes.GetVertexInstanceUVs();
+			const int32 UVSets = UVs.IsValid() ? UVs.GetNumChannels() : 0;
+			const TVertexInstanceAttributesConstRef<FVector3f> Normals = Attributes.GetVertexInstanceNormals();
+			const TVertexInstanceAttributesConstRef<FVector4f> Colors = Attributes.GetVertexInstanceColors();
 			for (const FTriangleID Triangle : Source.Triangles().GetElementIDs())
 			{
 				for (const FVertexInstanceID Corner : Source.GetTriangleVertexInstances(Triangle))
 				{
-					const FVector3f Position = Positions[Source.GetVertexInstanceVertex(Corner)];
-					Builder.Update(&Position, sizeof(Position));
-					if (bUVs)
-					{
-						const FVector2f UV = UVs.Get(Corner, 0);
-						Builder.Update(&UV, sizeof(UV));
-					}
+					HashValue(Positions[Source.GetVertexInstanceVertex(Corner)], Builder);
+					for (int32 Set = 0; Set < UVSets; ++Set) HashValue(UVs.Get(Corner, Set), Builder);
+					if (Normals.IsValid()) HashValue(Normals.Get(Corner), Builder);
+					if (Colors.IsValid()) HashValue(Colors.Get(Corner), Builder);
 				}
-				const int32 Slot = Source.GetTrianglePolygonGroup(Triangle).GetValue();
-				Builder.Update(&Slot, sizeof(Slot));
+				HashValue(Source.GetTrianglePolygonGroup(Triangle).GetValue(), Builder);
 			}
+			const TEdgeAttributesConstRef<bool> Hard = Attributes.GetEdgeHardnesses();
+			if (Hard.IsValid())
+			{
+				for (const FEdgeID Edge : Source.Edges().GetElementIDs()) HashValue(Hard.Get(Edge), Builder);
+			}
+			// The main polygroups are a polygon layer (PolyTriGroups), the others triangle layers.
+			HashLayers<int32>(Source.PolygonAttributes(), Source.Polygons().GetElementIDs(), Builder);
+			HashLayers<int32>(Source.TriangleAttributes(), Source.Triangles().GetElementIDs(), Builder);
+			HashLayers<FName>(Source.TriangleAttributes(), Source.Triangles().GetElementIDs(), Builder);
+			HashLayers<float>(Source.VertexAttributes(), Source.Vertices().GetElementIDs(), Builder);
+		}
+
+		/** A source model's triangles without unpacking it: its unpacked mesh's when it has one, else the count saved at its last commit; -1 when neither is known. */
+		int64 KnownTriangles(const FStaticMeshSourceModel& Model)
+		{
+			if (!Model.IsSourceModelInitialized()) return -1;
+			if (const FMeshDescription* Unpacked = Model.GetCachedMeshDescription()) return Unpacked->Triangles().Num();
+			return Model.CacheMeshDescriptionTrianglesCount != MAX_uint32 ? int64(Model.CacheMeshDescriptionTrianglesCount) : -1;
 		}
 	}
 
 	FGeometryPrint Fingerprint(UStaticMesh& Mesh)
 	{
 		FGeometryPrint Print;
-		const FMeshDescription* Source = Mesh.GetNumSourceModels() > 0 ? Mesh.GetMeshDescription(0) : nullptr;
-		if (!Source)
+		if (!Mesh.IsMeshDescriptionValid(0))
 		{
 			Print.Why = TEXT("it has no source mesh");
 			return Print;
 		}
-		Print.Triangles = Source->Triangles().Num();
-		Print.Vertices = Source->Vertices().Num();
 		// Modeling Mode edits the hi-res source of a mesh that has one, so it counts too.
-		const FMeshDescription* HiRes = Mesh.IsHiResMeshDescriptionValid() ? Mesh.GetHiResMeshDescription() : nullptr;
-		const int32 HiResTriangles = HiRes ? HiRes->Triangles().Num() : 0;
-		if (Print.Triangles + HiResTriangles > C::MaxFingerprintTriangles)
+		const bool bHiRes = Mesh.IsHiResMeshDescriptionValid();
+		FStaticMeshSourceModel& HiResModel = Mesh.GetHiResSourceModel();
+		// Counted before anything is unpacked: unpacking a source of millions of triangles holds the editor for seconds,
+		// and the unpacked mesh stays in memory after.
+		const FStaticMeshSourceModel& Lod0Model = Mesh.GetSourceModel(0);
+		const int64 Lod0Known = KnownTriangles(Lod0Model);
+		const int64 HiResKnown = bHiRes ? KnownTriangles(HiResModel) : 0;
+		auto OverCap = [&Print](const int64 Triangles)
 		{
 			// About 64 bytes a triangle: millions would hold the editor while they hash.
+			if (Triangles <= C::MaxFingerprintTriangles) return false;
 			Print.Why = FString::Printf(TEXT("over %d triangles"), C::MaxFingerprintTriangles);
+			return true;
+		};
+		if (Lod0Known >= 0 && HiResKnown >= 0 && OverCap(Lod0Known + HiResKnown))
+		{
+			Print.Triangles = int32(FMath::Min<int64>(Lod0Known, MAX_int32));
+			Print.HiResTriangles = int32(FMath::Min<int64>(HiResKnown, MAX_int32));
+			Print.Vertices = Lod0Model.CacheMeshDescriptionVerticesCount != MAX_uint32 ? int32(FMath::Min<uint32>(Lod0Model.CacheMeshDescriptionVerticesCount, MAX_int32)) : 0;
+			return Print;
+		}
+		const FMeshDescription* Source = Mesh.GetMeshDescription(0);
+		if (!Source)
+		{
+			Print.Why = TEXT("its source mesh could not be read");
+			return Print;
+		}
+		Print.Triangles = Source->Triangles().Num();
+		Print.Vertices = Source->Vertices().Num();
+		if (HiResKnown >= 0)
+		{
+			Print.HiResTriangles = int32(FMath::Min<int64>(HiResKnown, MAX_int32));
+			if (OverCap(int64(Print.Triangles) + HiResKnown)) return Print;
+		}
+		else if (OverCap(Print.Triangles))
+		{
 			return Print;
 		}
 		FXxHash64Builder Builder;
 		HashSource(*Source, Builder);
-		if (HiRes) HashSource(*HiRes, Builder);
+		if (bHiRes)
+		{
+			// Unpacked only to hash it, and let go after; one that Modeling Mode or anything else had unpacked already stays.
+			// Its count was unknown only when it was not unpacked, so it meets the cap here.
+			const bool bWasUnpacked = HiResModel.GetCachedMeshDescription() != nullptr;
+			const FMeshDescription* HiRes = Mesh.GetHiResMeshDescription();
+			Print.HiResTriangles = HiRes ? HiRes->Triangles().Num() : 0;
+			const bool bOver = OverCap(int64(Print.Triangles) + Print.HiResTriangles);
+			if (HiRes && !bOver) HashSource(*HiRes, Builder);
+			if (HiRes && !bWasUnpacked) Mesh.ClearHiResMeshDescription();
+			if (bOver) return Print;
+			if (!HiRes)
+			{
+				Print.Why = TEXT("its hi-res source mesh could not be read");
+				return Print;
+			}
+		}
 		Print.Hash = FString::Printf(TEXT("geo-%016llx"), Builder.Finalize().Hash);
 		return Print;
 	}

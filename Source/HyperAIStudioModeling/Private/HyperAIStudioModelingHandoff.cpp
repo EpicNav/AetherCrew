@@ -48,8 +48,10 @@ namespace HyperAIStudio::Modeling::Handoff
 		/**
 		 * A Modeling Mode tool the reply can point a person at. Each edits the selected mesh in place, so an Accept changes
 		 * the asset itself; tools that make new meshes (Boolean, Duplicate) are left out. In 5.8 the ids are the private
-		 * strings ModelingToolsEditorMode.cpp registers (606-783), the palettes ModelingToolsEditorModeToolkit.cpp's
-		 * (1717-1737, 1918-1992), the buttons ModelingToolsManagerActions.cpp's labels.
+		 * strings ModelingToolsEditorMode.cpp registers (606-783). The default palette is ModelingToolsEditorModeToolkit.cpp's
+		 * ToolkitBuilder one (340-460), its categories and buttons labelled as ModelingToolsManagerActions.cpp registers
+		 * them (115-184, 271-285); the legacy palette's tabs are the toolkit's (1717-1737, 1918-1992), its buttons the
+		 * short names.
 		 */
 		struct FToolHint
 		{
@@ -57,18 +59,20 @@ namespace HyperAIStudio::Modeling::Handoff
 			const TCHAR* Id;
 			const TCHAR* Palette;
 			const TCHAR* Button;
+			const TCHAR* LegacyPalette;
+			const TCHAR* LegacyButton;
 			const TCHAR* For;
 		};
 
 		constexpr FToolHint ToolHints[] = {
-			{TEXT("PolyEdit"), TEXT("BeginPolyEditTool"), TEXT("PolyModel"), TEXT("PolyGroup Edit"), TEXT("faces, edges and vertices by polygroup: extrude, inset, bevel, cut")},
-			{TEXT("TriEdit"), TEXT("BeginTriEditTool"), TEXT("TriModel"), TEXT("Triangle Edit"), TEXT("single triangles, edges and vertices")},
-			{TEXT("PolyGroups"), TEXT("BeginPolyGroupsTool"), TEXT("Attributes"), TEXT("Generate PolyGroups"), TEXT("new polygroups, so PolyGroup Edit picks sensible faces")},
-			{TEXT("Sculpt"), TEXT("BeginSculptMeshTool"), TEXT("Deform"), TEXT("Vertex Sculpt"), TEXT("sculpting with brushes")},
-			{TEXT("Smooth"), TEXT("BeginSmoothMeshTool"), TEXT("Deform"), TEXT("Smooth"), TEXT("smoothing the surface")},
-			{TEXT("Remesh"), TEXT("BeginRemeshMeshTool"), TEXT("MeshOps"), TEXT("Remesh"), TEXT("even triangles at a new density")},
-			{TEXT("Simplify"), TEXT("BeginSimplifyMeshTool"), TEXT("MeshOps"), TEXT("Simplify"), TEXT("fewer triangles")},
-			{TEXT("UVs"), TEXT("BeginGlobalUVGenerateTool"), TEXT("UVs"), TEXT("AutoUV"), TEXT("new UVs")},
+			{TEXT("PolyEdit"), TEXT("BeginPolyEditTool"), TEXT("Model"), TEXT("PolyGroup Edit"), TEXT("PolyModel"), TEXT("PolyEd"), TEXT("faces, edges and vertices by polygroup: extrude, inset, bevel, cut")},
+			{TEXT("TriEdit"), TEXT("BeginTriEditTool"), TEXT("Mesh"), TEXT("Triangle Edit"), TEXT("TriModel"), TEXT("TriEd"), TEXT("single triangles, edges and vertices")},
+			{TEXT("PolyGroups"), TEXT("BeginPolyGroupsTool"), TEXT("Attribs"), TEXT("Generate PolyGroups"), TEXT("Attributes"), TEXT("GrpGen"), TEXT("new polygroups, so PolyGroup Edit picks sensible faces")},
+			{TEXT("Sculpt"), TEXT("BeginSculptMeshTool"), TEXT("Deform"), TEXT("Vertex Sculpt"), TEXT("Deform"), TEXT("VSclpt"), TEXT("sculpting with brushes")},
+			{TEXT("Smooth"), TEXT("BeginSmoothMeshTool"), TEXT("Deform"), TEXT("Smooth"), TEXT("Deform"), TEXT("Smooth"), TEXT("smoothing the surface")},
+			{TEXT("Remesh"), TEXT("BeginRemeshMeshTool"), TEXT("Mesh"), TEXT("Remesh"), TEXT("MeshOps"), TEXT("Remesh"), TEXT("even triangles at a new density")},
+			{TEXT("Simplify"), TEXT("BeginSimplifyMeshTool"), TEXT("Mesh"), TEXT("Simplify"), TEXT("MeshOps"), TEXT("Simplfy"), TEXT("fewer triangles")},
+			{TEXT("UVs"), TEXT("BeginGlobalUVGenerateTool"), TEXT("UVs"), TEXT("AutoUV"), TEXT("UVs"), TEXT("AutoUV"), TEXT("new UVs")},
 		};
 
 		const FToolHint* FindToolHint(const FString& Name)
@@ -78,6 +82,28 @@ namespace HyperAIStudio::Modeling::Handoff
 				if (Name.Equals(Hint.Name, ESearchCase::IgnoreCase)) return &Hint;
 			}
 			return nullptr;
+		}
+
+		/**
+		 * Modeling Mode's bUseLegacyModelingPalette (ModelingToolsEditorModeSettings.h:315 in 5.8, false by default), read
+		 * by name so the Beta plugin is not linked; false when the plugin is not loaded.
+		 */
+		bool UsesLegacyPalette()
+		{
+			const UClass* Settings = FindObject<UClass>(nullptr, C::ModelingPaletteSettingsClass);
+			const FBoolProperty* Legacy = Settings ? FindFProperty<FBoolProperty>(Settings, TEXT("bUseLegacyModelingPalette")) : nullptr;
+			return Legacy && Legacy->GetPropertyValue_InContainer(Settings->GetDefaultObject());
+		}
+
+		/** The palette and the button as the person's editor shows them. */
+		FString PaletteOf(const FToolHint& Tool)
+		{
+			return UsesLegacyPalette() ? Tool.LegacyPalette : Tool.Palette;
+		}
+
+		FString ButtonOf(const FToolHint& Tool)
+		{
+			return UsesLegacyPalette() ? Tool.LegacyButton : Tool.Button;
 		}
 
 		FString ToolNames()
@@ -262,28 +288,33 @@ namespace HyperAIStudio::Modeling::Handoff
 			return true;
 		}
 
-		/** A person's tool open in Modeling Mode or the level editor's tools context: its button or id; empty when none is. */
+		/**
+		 * A person's tool open in any active editor mode, or in the level editor's own tools context: "The Modeling mode
+		 * has a tool open (PolyGroup Edit)"; empty when none is. Opening Modeling Mode exits every other visible mode
+		 * (FEditorModeTools::ActivateMode), and an exiting mode cancels its tool (UEdMode::Exit), so any of them counts.
+		 */
 		FString OpenTool()
 		{
 			FEditorModeTools& Tools = GLevelEditorModeTools();
-			TArray<UEditorInteractiveToolsContext*, TInlineAllocator<3>> Contexts;
-			if (UEdMode* Mode = Tools.GetActiveScriptableMode(ModeId()))
+			auto Describe = [](const UEditorInteractiveToolsContext& Context)
 			{
-				Contexts.Add(Mode->GetInteractiveToolsContext(EToolsContextScope::EdMode));
-				Contexts.Add(Mode->GetInteractiveToolsContext(EToolsContextScope::Editor));
-			}
-			Contexts.Add(Tools.GetInteractiveToolsContext());
-			for (UEditorInteractiveToolsContext* Context : Contexts)
-			{
-				if (!Context || !Context->HasActiveTool()) continue;
-				const FString Id = Context->GetActiveToolName();
+				const FString Id = Context.GetActiveToolName();
 				for (const FToolHint& Hint : ToolHints)
 				{
-					if (Id == Hint.Id) return Hint.Button;
+					if (Id == Hint.Id) return ButtonOf(Hint);
 				}
 				return Id.IsEmpty() ? FString(TEXT("a tool")) : Id;
+			};
+			// Every registered mode, as the mode manager's own list of active ones is protected.
+			const UAssetEditorSubsystem* Editors = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+			for (const FEditorModeInfo& Info : Editors ? Editors->GetEditorModeInfoOrderedByPriority() : TArray<FEditorModeInfo>())
+			{
+				const UEdMode* Mode = Tools.GetActiveScriptableMode(Info.ID);
+				const UEditorInteractiveToolsContext* Context = Mode ? Mode->GetInteractiveToolsContext(EToolsContextScope::EdMode) : nullptr;
+				if (Context && Context->HasActiveTool()) return FString::Printf(TEXT("The %s mode has a tool open (%s)"), *Info.Name.ToString(), *Describe(*Context));
 			}
-			return FString();
+			const UEditorInteractiveToolsContext* Editor = Tools.GetInteractiveToolsContext();
+			return Editor && Editor->HasActiveTool() ? FString::Printf(TEXT("The level editor has a tool open (%s)"), *Describe(*Editor)) : FString();
 		}
 
 		/** Where the level viewport looks: what it hits within HandoffTraceDistance, else a few times the mesh's size ahead. */
@@ -320,21 +351,29 @@ namespace HyperAIStudio::Modeling::Handoff
 			IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 			const FAssetData Data = Registry.GetAssetByObjectPath(FSoftObjectPath(ObjectPath));
 			UStaticMesh* Mesh = FindObject<UStaticMesh>(nullptr, *ObjectPath);
-			if (!Data.IsValid() && !Mesh)
+			// The registry may not have scanned it yet (the editor's startup scan), so the disk is asked too. Never loaded
+			// from a path with nothing on disk: the failed load would leave an empty package behind.
+			const bool bOnDisk = !Mesh && FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(ObjectPath));
+			if (!Data.IsValid() && !Mesh && !bOnDisk)
 			{
 				Refuse(Report, TEXT("invalid_request"), FString::Printf(TEXT("No asset at %s."), *Path));
 				return nullptr;
 			}
-			if (!Mesh && !Data.IsRedirector() && Data.AssetClassPath != UStaticMesh::StaticClass()->GetClassPathName())
+			auto NotAMesh = [&Report, &Path](const FString& Class) -> UStaticMesh*
 			{
-				Refuse(Report, TEXT("invalid_request"), FString::Printf(TEXT("%s is a %s, not a static mesh: only static meshes go to Modeling Mode."), *Path,
-					*Data.AssetClassPath.GetAssetName().ToString()));
+				Refuse(Report, TEXT("invalid_request"), FString::Printf(TEXT("%s is a %s, not a static mesh: only static meshes go to Modeling Mode."), *Path, *Class));
 				return nullptr;
-			}
-			// Never loaded from a path with nothing on disk: the failed load would leave an empty package behind.
-			if (!Mesh && FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(ObjectPath)))
+			};
+			if (!Mesh && Data.IsValid() && !Data.IsRedirector() && Data.AssetClassPath != UStaticMesh::StaticClass()->GetClassPathName())
 			{
-				Mesh = LoadObject<UStaticMesh>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+				return NotAMesh(Data.AssetClassPath.GetAssetName().ToString());
+			}
+			if (!Mesh && bOnDisk)
+			{
+				// Loaded as whatever it is, so an asset the registry could not name is still refused by its class.
+				UObject* Loaded = LoadObject<UObject>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+				Mesh = Cast<UStaticMesh>(Loaded);
+				if (Loaded && !Mesh) return NotAMesh(Loaded->GetClass()->GetName());
 			}
 			if (!Mesh)
 			{
@@ -350,9 +389,32 @@ namespace HyperAIStudio::Modeling::Handoff
 			return Mesh;
 		}
 
-		bool HasSource(UStaticMesh& Mesh)
+		/** Without unpacking it: Modeling Mode does that once a tool starts. */
+		bool HasSource(const UStaticMesh& Mesh)
 		{
-			return Mesh.GetNumSourceModels() > 0 && Mesh.GetMeshDescription(0) != nullptr;
+			return Mesh.IsMeshDescriptionValid(0);
+		}
+
+		/** The label a hand-off gives the actor it puts in the level: HyperAI_Edit_ and the asset's name, within the Label rule. */
+		FString OwnLabel(const UStaticMesh& Mesh)
+		{
+			// Asset names may hold + and letters past ASCII, which the rule does not.
+			FString Label = FString(C::HandoffLabelPrefix) + Mesh.GetName();
+			for (TCHAR& Char : Label)
+			{
+				if (Char > 127 || (!FChar::IsAlnum(Char) && Char != TEXT('_') && Char != TEXT('-'))) Char = TEXT('_');
+			}
+			return Label.Left(64);
+		}
+
+		/**
+		 * What Modeling Mode will edit: "1200 triangles", or its hi-res source's when it has one, which the mode's LOD menu
+		 * (Max Available, its default) picks then (StaticMeshToolTarget.cpp:52-54 in 5.8).
+		 */
+		FString Size(const Gate::FGeometryPrint& Print)
+		{
+			return Print.HiResTriangles > 0 ? FString::Printf(TEXT("%d triangles in its hi-res source, which Modeling Mode edits (LOD 0 has %d)"), Print.HiResTriangles, Print.Triangles)
+				: FString::Printf(TEXT("%d triangles"), Print.Triangles);
 		}
 
 		/**
@@ -401,12 +463,11 @@ namespace HyperAIStudio::Modeling::Handoff
 				return Refuse(Report, TEXT("unavailable"), FString::Printf(TEXT("Modeling Mode is not available: its mode (%s) is not registered in this editor. Nothing was changed."),
 					*ModeId().ToString()));
 			}
-			// Changing the selection under an open tool could lose the person's work.
+			// Changing the selection under an open tool, or opening Modeling Mode over it, could lose the person's work.
 			const FString Open = OpenTool();
 			if (!Open.IsEmpty())
 			{
-				return Refuse(Report, TEXT("unavailable"), FString::Printf(TEXT("Modeling Mode has a tool open (%s); the person should Accept or Cancel it first, then ask again. Nothing was changed."),
-					*Open));
+				return Refuse(Report, TEXT("unavailable"), FString::Printf(TEXT("%s; the person should Accept or Cancel it first, then ask again. Nothing was changed."), *Open));
 			}
 
 			// The request.
@@ -552,7 +613,7 @@ namespace HyperAIStudio::Modeling::Handoff
 						if (Component && Component->GetStaticMesh() == Target.Mesh && IsEditable(*Component) && IsSelectable(*Actor)) Usable.Add(Actor);
 					}
 					// The hand-off's own actor first, then by label, so the same level always gives the same one.
-					const FString Preferred = FString(C::HandoffLabelPrefix) + Target.Mesh->GetName();
+					const FString Preferred = OwnLabel(*Target.Mesh);
 					Algo::Sort(Usable, [](const AActor* A, const AActor* B) { return A->GetActorLabel() < B->GetActorLabel(); });
 					AActor* const* Own = Usable.FindByPredicate([&Preferred](const AActor* Actor) { return Actor->GetActorLabel().Equals(Preferred, ESearchCase::IgnoreCase); });
 					Target.Actor = Own ? *Own : Usable.IsEmpty() ? nullptr : Usable[0];
@@ -573,7 +634,7 @@ namespace HyperAIStudio::Modeling::Handoff
 					Target.Label = Label;
 					if (Target.Label.IsEmpty())
 					{
-						const FString Base = (FString(C::HandoffLabelPrefix) + Target.Mesh->GetName()).Left(64);
+						const FString Base = OwnLabel(*Target.Mesh);
 						Target.Label = Base;
 						for (int32 Suffix = 2; IsLabelTaken(*World, Target.Label); ++Suffix)
 						{
@@ -597,9 +658,13 @@ namespace HyperAIStudio::Modeling::Handoff
 				if (IsValid(*It) && !It->IsTemplate() && *It != Target.Actor && Shows(**It, *Target.Mesh)) ++Target.SharedBy;
 			}
 			Target.Print = Gate::Fingerprint(*Target.Mesh);
-			if (Target.Print.Triangles > C::HeavyHandoffTriangles)
+			if (FMath::Max(Target.Print.Triangles, Target.Print.HiResTriangles) > C::HeavyHandoffTriangles)
 			{
-				Target.Notes.Add(FString::Printf(TEXT("%s has %d triangles: Modeling Mode's tools are slow on it; Simplify or Remesh first."), *Target.Mesh->GetName(), Target.Print.Triangles));
+				Target.Notes.Add(FString::Printf(TEXT("%s has %s: Modeling Mode's tools are slow on that many; Simplify or Remesh first."), *Target.Mesh->GetName(), *Size(Target.Print)));
+			}
+			else if (Target.Print.HiResTriangles > 0)
+			{
+				Target.Notes.Add(FString::Printf(TEXT("%s has %s."), *Target.Mesh->GetName(), *Size(Target.Print)));
 			}
 			if (Target.Mesh->GetPackage()->IsDirty())
 			{
@@ -619,9 +684,10 @@ namespace HyperAIStudio::Modeling::Handoff
 			Report.ActorPath = Target.Actor ? Target.Actor->GetPathName() : FString();
 			Report.bPlaced = Target.bPlace;
 			Report.Location = Vec(Target.Location);
-			if (Target.Tool) Report.ToolHint = FString::Printf(TEXT("%s > %s"), Target.Tool->Palette, Target.Tool->Button);
+			if (Target.Tool) Report.ToolHint = PaletteOf(*Target.Tool) + TEXT(" > ") + ButtonOf(*Target.Tool);
 			Report.Fingerprint = Target.Print.Hash;
 			Report.Triangles = Target.Print.Triangles;
+			Report.HiResTriangles = Target.Print.HiResTriangles;
 			Report.Vertices = Target.Print.Vertices;
 			Report.SharedBy = Target.SharedBy;
 			Report.Notes = Target.Notes;
@@ -684,8 +750,12 @@ namespace HyperAIStudio::Modeling::Handoff
 
 		FString PickTool(const FToolHint* Tool)
 		{
-			return Tool ? FString::Printf(TEXT("Open the %s palette and click %s (%s)."), Tool->Palette, Tool->Button, Tool->For)
-				: FString(TEXT("Pick a tool from Modeling Mode's palettes: PolyModel > PolyGroup Edit for faces and edges, Deform > Vertex Sculpt to sculpt, MeshOps > Remesh or Simplify for its triangles."));
+			if (Tool) return FString::Printf(TEXT("Open the %s palette and click %s (%s)."), *PaletteOf(*Tool), *ButtonOf(*Tool), Tool->For);
+			const FToolHint& Poly = *FindToolHint(TEXT("PolyEdit"));
+			const FToolHint& Sculpt = *FindToolHint(TEXT("Sculpt"));
+			const FToolHint& Remesh = *FindToolHint(TEXT("Remesh"));
+			return FString::Printf(TEXT("Pick a tool from Modeling Mode's palettes: %s > %s for faces and edges, %s > %s to sculpt, %s > %s or %s for its triangles."), *PaletteOf(Poly),
+				*ButtonOf(Poly), *PaletteOf(Sculpt), *ButtonOf(Sculpt), *PaletteOf(Remesh), *ButtonOf(Remesh), *ButtonOf(*FindToolHint(TEXT("Simplify"))));
 		}
 
 		/** The hand-off itself, on the game thread: the request checked again (after an approval the editor may have moved on), then placed, opened, selected and framed. */
@@ -758,7 +828,7 @@ namespace HyperAIStudio::Modeling::Handoff
 				Report.bToolReady = Context && Mode->ShouldToolStartBeAllowed(Target.Tool->Id) && Context->CanStartTool(Target.Tool->Id);
 				if (!Report.bToolReady)
 				{
-					Report.Notes.Add(FString::Printf(TEXT("Modeling Mode says %s cannot start on this selection; the person can still pick another tool."), Target.Tool->Button));
+					Report.Notes.Add(FString::Printf(TEXT("Modeling Mode says %s cannot start on this selection; the person can still pick another tool."), *ButtonOf(*Target.Tool)));
 				}
 			}
 
@@ -772,8 +842,8 @@ namespace HyperAIStudio::Modeling::Handoff
 			const FString AssetName = Target.Mesh->GetName();
 			if (!FApp::IsUnattended())
 			{
-				const FText ToolPart = Target.Tool ? FText::Format(LOCTEXT("HandoffToastTool", "Open {0} > {1}. "), FText::FromString(Target.Tool->Palette),
-					FText::FromString(Target.Tool->Button)) : FText::GetEmpty();
+				const FText ToolPart = Target.Tool ? FText::Format(LOCTEXT("HandoffToastTool", "Open {0} > {1}. "), FText::FromString(PaletteOf(*Target.Tool)),
+					FText::FromString(ButtonOf(*Target.Tool))) : FText::GetEmpty();
 				FNotificationInfo Toast(FText::Format(LOCTEXT("HandoffToast", "HyperAI: {0} is selected in Modeling Mode. {1}Edit it, click Accept, then save {2}."),
 					FText::FromString(Target.Label), ToolPart, FText::FromString(AssetName)));
 				Toast.ExpireDuration = 8.0f;
@@ -782,7 +852,7 @@ namespace HyperAIStudio::Modeling::Handoff
 
 			const FString Shared = Target.SharedBy > 0 ? FString::Printf(TEXT(", and the %d other actor(s) showing it change too"), Target.SharedBy) : FString();
 			const FString Print = Target.Print.Hash.IsEmpty() ? FString::Printf(TEXT("no fingerprint: %s"), *Target.Print.Why)
-				: FString::Printf(TEXT("Fingerprint was %s, %d triangles"), *Target.Print.Hash, Target.Print.Triangles);
+				: FString::Printf(TEXT("Fingerprint was %s, %s"), *Target.Print.Hash, *Size(Target.Print));
 			Report.NextSteps = {
 				FString::Printf(TEXT("Modeling Mode is open in the level editor with %s selected."), *Target.Label),
 				PickTool(Target.Tool),
@@ -796,7 +866,7 @@ namespace HyperAIStudio::Modeling::Handoff
 			const FString Tabs = Report.Viewport == TEXT("brought_to_front") || Report.Viewport == TEXT("already_in_front") ? TEXT("; the level editor is in front of HyperAI Studio")
 				: Report.Viewport == TEXT("left_alone") ? TEXT("; the tabs were left as they are") : TEXT("; bring the level editor forward to see it");
 			const FString Then = Target.Print.Hash.IsEmpty() ? FString::Printf(TEXT("No fingerprint (%s)"), *Target.Print.Why)
-				: FString::Printf(TEXT("Fingerprint %s (%d triangles)"), *Target.Print.Hash, Target.Print.Triangles);
+				: FString::Printf(TEXT("Fingerprint %s (%s)"), *Target.Print.Hash, *Size(Target.Print));
 			Report.bOk = true;
 			Report.Status = TEXT("completed");
 			Report.Diagnostic = FString::Printf(TEXT("%s is in Modeling Mode: %s %s and is the only actor selected, framed in %d level viewport(s)%s. Next: %s Edit, click Accept, then save %s (File > Save All). %s: hyper_model_inspect with Asset reads it again afterwards, and hyper_model_validate checks it."),
@@ -859,12 +929,30 @@ FHyperAIModelHandoffReport FHyperAIStudioModelingContracts::Handoff(const FHyper
 		Summary.EffectTarget = Report.Asset;
 		Summary.Effects.Add(FString::Printf(TEXT("Hand-off: put %s showing %s at %s (one undo step)"), *Target.Label, *Report.Asset, *Report.Location));
 		Summary.Effects.Add(TEXT("| then select only it, frame it and open Modeling Mode (selection and mode are not undo steps)"));
-		if (const UWorld* World = GEditor->GetEditorWorldContext().World()) Summary.Touches.Add(World->GetPackage()->GetName());
+		// Prepare found the level open.
+		const FString LevelPath = GEditor->GetEditorWorldContext().World()->GetOutermost()->GetName();
+		Summary.Touches.Add(LevelPath);
 		const FString OperationId = Report.OperationId;
 		FString Error;
-		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Resolved, OperationId]()
+		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Resolved, OperationId, LevelPath, Asset = Report.Asset]()
 			{
-				Record(OperationId, Execute(Resolved, OperationId));
+				FHyperAIModelHandoffReport Done;
+				Done.OperationId = OperationId;
+				Done.Asset = Asset;
+				Done.Status = TEXT("operation_failed");
+				const UWorld* Open = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+				if (GEditor && (GEditor->PlayWorld || GEditor->IsPlaySessionInProgress()))
+				{
+					Done.Diagnostic = TEXT("Play in Editor was running when the hand-off was approved; nothing was changed.");
+				}
+				// A placement has no actor to recognise, so another level open by now would take it.
+				else if (!Open || Open->GetOutermost()->GetName() != LevelPath)
+				{
+					Done.Diagnostic = FString::Printf(TEXT("The hand-off was checked in %s, but %s is open now; nothing was changed."), *LevelPath,
+						Open ? *Open->GetOutermost()->GetName() : TEXT("no level"));
+				}
+				else Done = Execute(Resolved, OperationId);
+				Record(OperationId, Done);
 			}, Error))
 		{
 			Report.bOk = false;
