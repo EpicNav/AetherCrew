@@ -1195,7 +1195,8 @@ namespace HyperAIStudio::PCGScatterTools::Private
 	/** Lines and characters an inspect returns at most, so a 1000-node generator still answers in one call. */
 	constexpr int32 MaxReadLines = 400;
 	constexpr int32 MaxReadChars = 120000;
-	constexpr int32 MaxRecipeDepth = 18;
+	/** Deep enough for an ecosystem species with every filter, two avoided layers, clumps and its cell's cull. */
+	constexpr int32 MaxRecipeDepth = 24;
 
 	/** Settings every node has, or bookkeeping, that say nothing about what the node does to the points. */
 	bool IsNoisyProperty(const FName Name)

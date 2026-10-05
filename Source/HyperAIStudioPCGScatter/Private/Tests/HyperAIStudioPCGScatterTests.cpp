@@ -4,6 +4,7 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Editor.h"
 #include "Elements/PCGBoundsModifier.h"
 #include "Elements/PCGCullPointsOutsideActorBounds.h"
@@ -13,6 +14,7 @@
 #include "Elements/PCGSurfaceSampler.h"
 #include "Elements/PCGTypedGetter.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
 #include "Grid/PCGPartitionActor.h"
 #include "Helpers/PCGHelpers.h"
@@ -189,6 +191,11 @@ namespace HyperAIStudio::PCGScatterTests
 		constexpr double LaneFalloff = 2.0;
 		/** A partition cell's edge crosses the flat forest here, along Y, when the level streams. */
 		constexpr double SeamX = 190.0;
+		/** A hut on the flat meadow at HutX, HutY: a 1 m cube HutScale times its size, kept HutMargin meters clear of. */
+		constexpr double HutX = 60.0;
+		constexpr double HutY = 90.0;
+		constexpr double HutScale = 4.0;
+		constexpr double HutMargin = 2.0;
 		/** Flat up to GentleFrom, then 20 degrees up to SteepFrom, then 56 degrees. */
 		constexpr double GentleFrom = 180.0;
 		constexpr double SteepFrom = 220.0;
@@ -483,6 +490,13 @@ namespace HyperAIStudio::PCGScatterTests
 		return Twice;
 	}
 
+	/** Meters from the hut's center along the farther axis: the distance its square box measures. */
+	double FromHut(const FPlaced& Item, const FVector& Corner)
+	{
+		const FVector2D At = OnGround(Item, Corner) - FVector2D(Eco::HutX, Eco::HutY);
+		return FMath::Max(FMath::Abs(At.X), FMath::Abs(At.Y));
+	}
+
 	/** Meters from the lane's center line to the nearest of Items, and how many stand within Band meters past From. */
 	double FromLane(const TArray<FPlaced>& Items, const FVector& Corner, const double From = 0.0, const double Band = 0.0, int32* OutInBand = nullptr)
 	{
@@ -768,10 +782,22 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 	ALandscape* Ground = MakeEcosystemGround(*World, Corner, GroundLabel, Folder);
 	if (!TestNotNull(TEXT("the painted ground is made"), Ground)) return false;
 	TestTrue(TEXT("a landscape spline lane crosses it"), MakeLane(*World, *Ground, Corner, LaneLabel));
+	// A tagged hut, scaled up: the margin kept clear of it is in meters, whatever its scale.
+	const FString HutLabel = TEXT("HyperAI_TestEcosystemHut_") + Suffix;
+	const FString HutTag = TEXT("HyperAITestHut") + Suffix;
+	AStaticMeshActor* Hut = World->SpawnActor<AStaticMeshActor>(Corner + FVector(Eco::HutX * 100.0, Eco::HutY * 100.0, 0.0), FRotator::ZeroRotator);
+	if (Hut)
+	{
+		Hut->GetStaticMeshComponent()->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, Eco::RockMesh));
+		Hut->SetActorScale3D(FVector(Eco::HutScale));
+		Hut->Tags.Add(FName(*HutTag));
+		Hut->SetActorLabel(HutLabel);
+	}
+	TestNotNull(TEXT("a hut stands on the meadow"), Hut);
 	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
 	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
 	const TSharedRef<FEcosystemState> State = MakeShared<FEcosystemState>();
-	auto Cleanup = [World, VolumeLabel, GroundLabel, LaneLabel, Folder, State]()
+	auto Cleanup = [World, VolumeLabel, GroundLabel, LaneLabel, HutLabel, Folder, State]()
 	{
 		if (APCGVolume* Volume = FindVolume(VolumeLabel)) World->EditorDestroyActor(Volume, /*bShouldModifyLevel=*/true);
 		// The partition actors the generation made, once nothing generates into them.
@@ -779,6 +805,10 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 		{
 			const APCGPartitionActor* Cell = Cast<APCGPartitionActor>(Actor);
 			if (Cell && !Cell->HasGraphInstances()) World->EditorDestroyActor(Actor, /*bShouldModifyLevel=*/true);
+		}
+		for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
+		{
+			if (It->GetActorLabel() == HutLabel) World->EditorDestroyActor(*It, /*bShouldModifyLevel=*/true);
 		}
 		DestroyLane(*World, LaneLabel);
 		DestroyLandscape(GroundLabel);
@@ -870,6 +900,8 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 	Make.Graph = Graph;
 	Make.Biomes = {Woods, Field, Everywhere, Scree};
 	Make.AvoidLayers = {TEXT("Road")};
+	Make.AvoidTags = {HutTag};
+	Make.AvoidMargin = static_cast<float>(Eco::HutMargin);
 	Make.RoadMargin = 3.f;
 	FHyperAIPCGScatterOp Place = Op(TEXT("volume.create"));
 	Place.Graph = Graph;
@@ -1110,6 +1142,13 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 		int32 Road = 0;
 		for (const TArray<FPlaced>* List : {&Trees, &Bushes, &Rocks, &Ferns, &Grass, &Pebbles, &Stones}) Road += CountWhere(*List, Corner, OnRoad);
 		TestEqual(TEXT("nothing grows on the road"), Road, 0);
+		// Nothing within the hut's sides and the margin past them.
+		int32 AtHut = 0;
+		for (const TArray<FPlaced>* List : {&Trees, &Bushes, &Rocks, &Ferns, &Grass, &Pebbles, &Stones})
+		{
+			for (const FPlaced& Item : *List) AtHut += FromHut(Item, Corner) < 0.5 * Eco::HutScale + Eco::HutMargin ? 1 : 0;
+		}
+		TestEqual(TEXT("nothing grows within 2 m of the hut"), AtHut, 0);
 		// Every footprint keeps 3 m from the lane's paved edge, 3 m from its center line: at least half the footprint at
 		// its smallest scale past 6 m. Just past that, ground cover still grows.
 		struct FLaneRule { const TCHAR* Name; const TArray<FPlaced>* Items; double HalfFootprint; };
@@ -1250,6 +1289,18 @@ bool FHyperAIStudioPCGEcosystemEndToEndTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("the same trees grow again from the same seed"), Trees ? Trees->Num() : 0, State->Trees);
 		const double Coverage = Grass ? GrassCoverage(*Grass, Corner) : 0.0;
 		TestTrue(FString::Printf(TEXT("grass now covers the meadow (%.0f%%)"), Coverage * 100.0), Coverage > 0.85);
+		// The grass, everywhere on the meadow now, keeps the hut's 2 m margin and grows just past it: the margin is not
+		// grown fourfold with the hut's scale, to 8 m.
+		const double HutKept = 0.5 * Eco::HutScale + Eco::HutMargin;
+		int32 AtHut = 0;
+		int32 BesideHut = 0;
+		for (int32 Index = 0; Grass && Index < Grass->Num(); ++Index)
+		{
+			const double Away = FromHut((*Grass)[Index], Corner);
+			AtHut += Away < HutKept ? 1 : 0;
+			BesideHut += Away >= HutKept + 0.15 && Away < HutKept + 2.0 ? 1 : 0;
+		}
+		TestTrue(FString::Printf(TEXT("grass keeps 2 m from the hut and grows just past that (%d within, %d in the next 2 m)"), AtHut, BesideHut), AtHut == 0 && BesideHut > 20);
 		FHyperAIPCGScatterInspectRequest Look;
 		Look.Graph = Graph;
 		const FHyperAIPCGScatterInspectReport Read = C::Inspect(Look);
