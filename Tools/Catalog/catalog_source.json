@@ -2228,6 +2228,30 @@
       0,
       0
      ]
+    },
+    {
+     "name": "hyper_scene_cost_report",
+     "cohort": "cohort.source.hyperaistudioscenespatialtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_spatial_query",
+     "cohort": "cohort.source.hyperaistudioscenespatialtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_spatial_apply_plan",
+     "cohort": "cohort.source.hyperaistudioscenespatialtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ]
   },

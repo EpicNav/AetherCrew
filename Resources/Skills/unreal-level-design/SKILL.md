@@ -1,6 +1,6 @@
 ---
 name: unreal-level-design
-description: Build and dress levels with HyperAI's world tools - landscapes from heightmaps or noise, sculpted and painted by height, slope, distance from roads and in patches, with roads laid as splines; foliage types scattered by density, slope, height and paint layer, placed at points, thinned and erased; procedural PCG scatter and ecosystems over large areas (biomes on paint layers, species layered big to small, stands and clumps), retuned and regenerated, and any PCG graph read back as recipes; World Partition data layers, streaming, HLOD layers, runtime grids and editor regions; blockouts; and checks against player metrics and Map Check. Use for terrain, open worlds, set dressing and level layout.
+description: Build and dress levels with HyperAI's world tools - landscapes from heightmaps or noise, sculpted and painted by height, slope, distance from roads and in patches, with roads laid as splines; foliage types scattered by density, slope, height and paint layer, placed at points, thinned and erased; procedural PCG scatter and ecosystems over large areas (biomes on paint layers, species layered big to small, stands and clumps), retuned and regenerated, and any PCG graph read back as recipes; World Partition data layers, streaming, HLOD layers, runtime grids and editor regions; blockouts; props placed, dropped to the ground and moved to clear spots, spatial questions and rendering cost; and checks against player metrics and Map Check. Use for terrain, open worlds, set dressing and level layout.
 ---
 
 # Levels: terrain, roads, foliage and streaming
@@ -12,6 +12,8 @@ description: Build and dress levels with HyperAI's world tools - landscapes from
 | procedural scatter and ecosystems: PCG graphs and volumes | `hyper_pcg_scatter_inspect` | `hyper_pcg_scatter_apply_plan` |
 | World Partition: data layers, streaming, HLOD layers, grids, editor regions | `hyper_world_partition_inspect` | `hyper_world_partition_apply_plan` |
 | blockouts: blocks, ramps, stairs, markers | `hyper_level_design_inspect` | `hyper_level_blockout_apply_plan` |
+| placing props: place meshes, drop to the ground, move to clear spots | `hyper_spatial_query` | `hyper_spatial_apply_plan` |
+| rendering cost: triangles, draw calls, instances, shadows, lights | `hyper_scene_cost_report` | |
 | player metrics, routes, sightlines, Map Check | | `hyper_level_design_validate` |
 
 Each plan is checked before anything changes. A mistake is refused with the names that do exist, so fix the op and
@@ -219,6 +221,43 @@ always-loaded actors and loaded editor regions.
   it afterwards. Regions load before a plan's edits and unload after them.
 - `world_partition.set_grid` changes a grid's `CellSize` and `LoadingRange` (cm). Change them only with a reason,
   such as a fast vehicle that needs a longer range.
+
+## Placing props
+
+Ask before placing: `hyper_spatial_query` answers up to 32 questions in one call: traces and sweeps, overlaps, the
+ground under a point (height and slope), a clear spot of a given size near a point, the distance and gap between two
+actors, and the nearest actors by class, tag or label.
+
+```json
+{"Queries": [
+ {"Kind": "ground", "Point": {"X": 1200, "Y": -300, "Z": 0}},
+ {"Kind": "clear_spot", "Point": {"X": 1200, "Y": -300, "Z": 0}, "Extent": {"X": 60, "Y": 60, "Z": 50}, "MaxSlope": 20},
+ {"Kind": "nearest", "Point": {"X": 1200, "Y": -300, "Z": 0}, "TagFilter": "Cover", "MaxResults": 4}]}
+```
+
+Then place and settle props in one undo step with `hyper_spatial_apply_plan`:
+
+```json
+{"Operations": [
+ {"Kind": "place", "Mesh": "/Game/Props/SM_Crate", "Label": "Camp_Crate_01", "Folder": "Camp/Props",
+  "Location": {"X": 1200, "Y": -300, "Z": 500}, "Rotation": {"Pitch": 0, "Yaw": 35, "Roll": 0}, "bDropToGround": true},
+ {"Kind": "drop_to_ground", "Actors": ["Camp_Rock_01", "Camp_Rock_02"], "bAlignToNormal": true, "Sink": 5},
+ {"Kind": "move_to_clear_spot", "Actors": ["Camp_Barrel"], "Clearance": 20}],
+ "bDryRun": true}
+```
+
+- A dry run returns `Moves`: where each actor would go. Send the same plan with `bDryRun: false` to apply it.
+- Ground traces pass through foliage and PCG instances, so a rock never lands on a tree (`bIncludeFoliage: true` makes
+  them ground), and through the plan's other actors, so a plan never stacks its own actors on each other.
+- Name actors by label or path. A label several actors share, a locked or attached actor (move its parent) and one in
+  an unloaded region are refused by name. Every op is computed against the level as it was before the plan, and a
+  clear spot keeps off where the plan places and drops things.
+- A prop's bounds are what it shows: a pickup's overlap sphere or trigger box does not lift it off the ground.
+
+`hyper_scene_cost_report` says what the loaded level, a box or named actors cost to render: triangles with and without
+Nanite, estimated draw and shadow draws, instances per mesh, lights, translucent materials, the heaviest actors and
+meshes, and findings such as heavy meshes drawn without Nanite. Draw calls are estimates; `MeasuredLastFrameDrawCalls`
+is what the last rendered frame drew. In World Partition it covers loaded actors only and says how many are not.
 
 ## Checking
 

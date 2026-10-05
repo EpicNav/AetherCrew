@@ -1098,6 +1098,14 @@ private:
 				{}
 			},
 			{
+				TEXT("HyperAIStudioSceneSpatial"),
+				TEXT("level_design"),
+				TEXT("cohort.source.hyperaistudioscenespatialtoolset.v1"),
+				{TEXT("hyper_scene_cost_report"), TEXT("hyper_spatial_query"),
+					TEXT("hyper_spatial_apply_plan")},
+				{}
+			},
+			{
 				TEXT("HyperAIStudioMeshTerrain"),
 				TEXT("mesh_terrain"),
 				TEXT("cohort.source.hyperaistudiomeshterraintoolset.v1"),

@@ -1400,6 +1400,12 @@
    "text": "重新打开该沙盒；其中的更改会显示在 HyperAI 的活动面板中。"
   },
   {
+   "namespace": "HyperAIStudioSceneSpatial",
+   "key": "SpatialPlan",
+   "source": "HyperAI: Spatial Placement",
+   "text": "HyperAI：空间放置"
+  },
+  {
    "namespace": "HyperAIStudioScripting",
    "key": "RunScript",
    "source": "HyperAI: Run Script",
