@@ -572,6 +572,7 @@ FHyperAIStudioMessageHints SHyperAIStudioNativeChatView::GetPendingHints() const
 	{
 		Hints.PresetId = PendingPreset->Id;
 		Hints.Packs = PendingPreset->Packs;
+		Hints.Tools = PendingPreset->Tools;
 		Hints.Skills = PendingPreset->Skills;
 		Hints.Agent = PendingPreset->Agent;
 		Hints.Route = PendingRoute;

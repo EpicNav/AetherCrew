@@ -511,6 +511,7 @@ bool FHyperAIStudioPromptPresetsHintsTest::RunTest(const FString& Parameters)
 	FHyperAIStudioMessageHints Hints;
 	Hints.PresetId = TEXT("pcg-foliage.forest-ecosystem");
 	Hints.Packs = {TEXT("pcg")};
+	Hints.Tools = {TEXT("hyper_pcg_validate")};
 	Hints.Skills = {TEXT("unreal-level-design")};
 	TSet<FString> Given;
 	FString Summary;
@@ -519,6 +520,10 @@ bool FHyperAIStudioPromptPresetsHintsTest::RunTest(const FString& Parameters)
 	if (PcgToolsEnabled())
 	{
 		TestTrue(TEXT("and so do its pack's tools: ") + Context, Given.Contains(TEXT("tools:pcg")) && Context.Contains(TEXT("<tools>")) && Context.Contains(TEXT("hyper_pcg")));
+		// Read, edit, check is the order otherwise: the tool the prompt names goes before the pack's read.
+		const int32 NamedLine = Context.Find(TEXT("`hyper_pcg_validate` (toolset_name"));
+		TestTrue(TEXT("the one its prompt names first"), NamedLine != INDEX_NONE && NamedLine < Context.Find(TEXT("`hyper_pcg_inspect`")));
+		TestFalse(TEXT("and the line under it counts no tool as a note: ") + Summary, Summary.Contains(TEXT("project memory")));
 	}
 	else
 	{
@@ -817,8 +822,9 @@ bool FHyperAIStudioPromptPresetsPickerTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The composer holds the prompt"), Composed(), ChosenText);
 	TestEqual(TEXT("The line under it lists the blanks"), View->GetNotice(), FString(TEXT("Fill in: [Biome], [Paint layer]")));
 	const FHyperAIStudioMessageHints Hints = View->GetPendingHints();
-	TestTrue(TEXT("The next message goes with the preset's packs, skills, agent and route"), Hints.PresetId == TEXT("pcg-foliage.forest-ecosystem")
-		&& Hints.Packs == ChosenCopy.Packs && Hints.Skills == ChosenCopy.Skills && Hints.Agent == TEXT("level-designer") && Hints.Route == TEXT("Level Design"));
+	TestTrue(TEXT("The next message goes with the preset's packs, tools, skills, agent and route"), Hints.PresetId == TEXT("pcg-foliage.forest-ecosystem")
+		&& Hints.Packs == ChosenCopy.Packs && Hints.Tools == ChosenCopy.Tools && Hints.Skills == ChosenCopy.Skills && Hints.Agent == TEXT("level-designer")
+		&& Hints.Route == TEXT("Level Design"));
 	const TArray<FString> Used = HyperAIStudio::PromptPresets::Recent();
 	TestTrue(TEXT("and it is first in Recent"), Used.Num() > 0 && Used[0] == TEXT("pcg-foliage.forest-ecosystem"));
 	View->InsertPreset(ChosenCopy, TEXT("Second."));

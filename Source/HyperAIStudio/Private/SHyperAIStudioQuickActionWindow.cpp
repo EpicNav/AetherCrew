@@ -2851,10 +2851,10 @@ bool SHyperAIStudioQuickActionWindow::RouteFirstMessage(const FString& Message, 
 	{
 		Settings->SaveConfig();
 	}
-	// A preset's category names its route; any other message's words choose one.
+	// A preset's category names its route, while the routes still have it; any other message's words choose one.
 	const TOptional<HyperAIStudio::TaskRouter::FRouteDecision> Decision = Hints.Route.IsEmpty()
 		? HyperAIStudio::TaskRouter::Decide(Message, Settings->AgentTaskRoutes, GetUsableAgentNames(), Settings->PreferredAgent)
-		: HyperAIStudio::TaskRouter::DecideNamed(Hints.Route, Settings->AgentTaskRoutes, GetUsableAgentNames(), Settings->PreferredAgent);
+		: HyperAIStudio::TaskRouter::DecideNamed(Hints.Route, Message, Settings->AgentTaskRoutes, GetUsableAgentNames(), Settings->PreferredAgent);
 	const TSharedPtr<FString>* Option = Decision.IsSet() ? AgentOptions.FindByPredicate([&Decision](const TSharedPtr<FString>& Each)
 	{
 		return Each.IsValid() && Each->Equals(Decision->Choice.Agent, ESearchCase::IgnoreCase);

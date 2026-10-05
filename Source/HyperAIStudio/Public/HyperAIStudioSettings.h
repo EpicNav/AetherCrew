@@ -599,6 +599,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing")
 	TArray<FHyperAIStudioAgentTaskRoute> AgentTaskRoutes;
 
+	/** How many of EnsureDefaultTaskRoutes' one-time changes to the built-in routes the saved routes have had. */
+	UPROPERTY(Config)
+	int32 TaskRoutesVersion = 0;
+
 	/**
 	 * In the native view, each message goes with a note handing its task to the project agent made for it (.hyperai/agents:
 	 * the QA tester for a playtest, the lighting artist for lighting, and so on), and a request with parts for several
@@ -831,13 +835,19 @@ public:
 		return bAdded;
 	}
 
-	/** Seeds the task routes when the list is empty. Returns true if it did. */
+	static constexpr int32 CurrentTaskRoutesVersion = 1;
+
+	/**
+	 * Seeds the task routes when the list is empty, else updates saved ones (UpdateSavedTaskRoutes). Returns true if it
+	 * changed anything.
+	 */
 	bool EnsureDefaultTaskRoutes()
 	{
 		if (!AgentTaskRoutes.IsEmpty())
 		{
-			return false;
+			return UpdateSavedTaskRoutes();
 		}
+		TaskRoutesVersion = CurrentTaskRoutesVersion;
 		auto Add = [this](const TCHAR* Category, TArray<FString> Packs, const TCHAR* Agent = TEXT(""), const TCHAR* Model = TEXT(""))
 		{
 			FHyperAIStudioAgentTaskRoute& Route = AgentTaskRoutes.AddDefaulted_GetRef();
@@ -850,9 +860,32 @@ public:
 		Add(TEXT("Materials"), {TEXT("materials_dynamic_material"), TEXT("texture_graph")});
 		Add(TEXT("VFX"), {TEXT("niagara_vfx")});
 		Add(TEXT("Lighting"), {TEXT("lighting_lookdev")});
-		Add(TEXT("Level Design"), {TEXT("level_design"), TEXT("worldbuilding_navigation"), TEXT("pcg"), TEXT("geometry_interchange"), TEXT("mesh_terrain")});
+		Add(TEXT("Level Design"), {TEXT("level_design"), TEXT("worldbuilding_navigation"), TEXT("pcg"), TEXT("geometry_interchange"), TEXT("mesh_terrain"),
+			TEXT("mesh_modeling")});
 		Add(TEXT("Animation"), {TEXT("anim_blueprint"), TEXT("uaf_graph"), TEXT("animation_rigging"), TEXT("character")});
 		Add(TEXT("Gameplay"), {TEXT("blueprint"), TEXT("gameplay_systems"), TEXT("gas"), TEXT("gameplay_ai"), TEXT("enhanced_input")});
+		return true;
+	}
+
+	/**
+	 * Gives routes saved before a built-in route changed that change, once (TaskRoutesVersion), so a pack the user takes
+	 * out afterwards stays out. Returns true if the routes had any change still to have.
+	 */
+	bool UpdateSavedTaskRoutes()
+	{
+		if (TaskRoutesVersion >= CurrentTaskRoutesVersion)
+		{
+			return false;
+		}
+		// 1: free modelling (mesh_modeling) joined Level Design, beside the import pack its boolean words came from.
+		for (FHyperAIStudioAgentTaskRoute& Route : AgentTaskRoutes)
+		{
+			if (Route.Category.Equals(TEXT("Level Design"), ESearchCase::IgnoreCase) && Route.Packs.Contains(TEXT("geometry_interchange")))
+			{
+				Route.Packs.AddUnique(TEXT("mesh_modeling"));
+			}
+		}
+		TaskRoutesVersion = CurrentTaskRoutesVersion;
 		return true;
 	}
 

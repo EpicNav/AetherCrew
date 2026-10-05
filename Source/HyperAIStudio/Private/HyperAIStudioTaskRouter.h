@@ -56,18 +56,24 @@ namespace HyperAIStudio::TaskRouter
 	/** The route a new chat's first message fits and the agent it starts with; unset when no route fits or no agent is set up. */
 	TOptional<FRouteDecision> Decide(const FString& Message, const TArray<FHyperAIStudioAgentTaskRoute>& Routes, const TArray<FString>& UsableAgents,
 		const FString& PreferredAgent);
-	/** Decide for a message that names its route, as a prompt preset's category does: that route by its category, whatever the words. */
-	TOptional<FRouteDecision> DecideNamed(const FString& Category, const TArray<FHyperAIStudioAgentTaskRoute>& Routes, const TArray<FString>& UsableAgents,
-		const FString& PreferredAgent);
+	/**
+	 * Decide for a message that names its route, as a prompt preset's category does: that route by its category, whatever
+	 * the words, and unset when no agent is set up for it. A category the routes no longer have (the user renamed or
+	 * removed it) is decided by the words, as Decide does.
+	 */
+	TOptional<FRouteDecision> DecideNamed(const FString& Category, const FString& Message, const TArray<FHyperAIStudioAgentTaskRoute>& Routes,
+		const TArray<FString>& UsableAgents, const FString& PreferredAgent);
 
 	/** The bundled skills made for these packs' kind of work, best pack first. */
 	TArray<FString> SkillsForPacks(const TArray<FPackFit>& Packs);
 
 	/**
 	 * The HyperAI tools of these packs that are enabled now, as a block to send with the message: each with the
-	 * toolset_name call_tool takes and what it does. A pack this chat was already pointed at (Given) is left out.
+	 * toolset_name call_tool takes and what it does, the lines shared out among the packs. The tools the message names
+	 * (Named, as a prompt preset does) come first, whatever their pack. A pack this chat was already pointed at, or a tool
+	 * already listed (Given), is left out; a pack is marked pointed at only when a line of it was sent.
 	 */
-	FString ToolHintFor(const TArray<FPackFit>& Packs, TSet<FString>& Given);
+	FString ToolHintFor(const TArray<FPackFit>& Packs, TSet<FString>& Given, const TArray<FString>& Named = {});
 
 	/**
 	 * The project agent a message's task is for: by what the agent says it does and the work of its role's packs, or of
@@ -101,7 +107,7 @@ namespace HyperAIStudio::TaskRouter
 	TArray<FPackFit> RankPacks(const FString& Message, const TArray<FPackDocument>& Documents, int32 Limit);
 	int32 RankRoutes(const FString& Message, const TArray<FHyperAIStudioAgentTaskRoute>& Routes, const TArray<FPackDocument>& Documents);
 	FString ToolHintFrom(const TArray<FPackFit>& Packs, const TArray<FHyperAIStudioRuntimeToolBinding>& Bindings, const TMap<FString, FString>& PackOfTool,
-		TSet<FString>& Given);
+		TSet<FString>& Given, const TArray<FString>& Named = {});
 	/** The block AgentHintFor sends for a pick, with the agent's definition from ProjectAgents. */
 	FString AgentHintFrom(const FAgentPick& Pick, const TArray<FHyperAIStudioAgentDefinition>& ProjectAgents, const FString& ProjectRoot,
 		const FString& ChatAgent, TSet<FString>& Given);

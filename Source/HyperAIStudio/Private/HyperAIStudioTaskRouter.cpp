@@ -6,6 +6,7 @@
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioProjectMemory.h"
+#include "HyperAIStudioPromptPresets.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioSkills.h"
 
@@ -50,7 +51,8 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("niagara_vfx"), TEXT("vfx niagara particle particles effect effects emitter emitters explosion explosions smoke fire flame flames spark sparks magic spell spells trail trails impact impacts muzzle flash weather rain snow dust swarm")},
 			{TEXT("texture_graph"), TEXT("texture graph procedural tileable seamless pattern noise generate")},
 			{TEXT("lighting_lookdev"), TEXT("light lights lighting lit sun sunlight sky skylight fog haze exposure shadow shadows lumen reflection reflections reflective glossy gloss wet mood dusk dawn sunset sunrise night day time atmosphere bloom grade grading lut look reference match relight torch flicker warmer cooler")},
-			{TEXT("level_design"), TEXT("level levels design blockout block greybox graybox whitebox layout room rooms corridor corridors arena cover stairs ramp ramps spawn sightline sightlines player scale playable")},
+			// Placing what is there, too: "spots", not "spot", which reads as "spotlight".
+			{TEXT("level_design"), TEXT("level levels design blockout block greybox graybox whitebox layout room rooms corridor corridors arena cover stairs ramp ramps spawn sightline sightlines player scale playable place placing placed props drop dropped ground settle clear spots spatial")},
 			{TEXT("mesh_terrain"), TEXT("terrain cliff cliffs rock rocks cave caves canyon mountain mountains island mesh")},
 			{TEXT("anim_blueprint"), TEXT("animation blueprint anim abp state machine locomotion graph blend layered aim offset inertialization")},
 			{TEXT("pcg"), TEXT("pcg procedural scatter scattering populate forest biome points generation generator rocks trees")},
@@ -68,7 +70,8 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("uaf_graph"), TEXT("uaf animation framework animnext graph")},
 			{TEXT("image_generation"), TEXT("image images picture pictures generate draw concept art reference illustration")},
 			{TEXT("mesh_generation"), TEXT("3d model models generate generated textured photo picture realistic tripo meshy hi3d paid")},
-			{TEXT("mesh_modeling"), TEXT("model models modeling modelling modeled mesh meshes props placeholder placeholders kitbash lowpoly poly primitive primitives rock boulder boulders archway pillar pillars column columns crystal crystals mushroom mushrooms tower towers watchtower ruins ruined rubble monolith trunk stump crate crates bevel extrude inset boolean revolve lathe")},
+			// No "props" or "placeholder": "place" reads as "placeholder", and props to place are level design's.
+			{TEXT("mesh_modeling"), TEXT("model models modeling modelling modeled mesh meshes kitbash lowpoly poly primitive primitives rock boulder boulders archway pillar pillars column columns crystal crystals mushroom mushrooms tower towers watchtower ruins ruined rubble monolith trunk stump crate crates bevel extrude inset boolean revolve lathe")},
 			{TEXT("sound_design"), TEXT("sound sounds sfx effect footstep footsteps whoosh impact designer decibel synth layer vocal vocals creature ambiance loop music gravel")},
 			{TEXT("scripting"), TEXT("python script scripting batch automate editor utility")},
 			{TEXT("editor_lifecycle"), TEXT("restart editor rebuild relaunch reopen")},
@@ -270,6 +273,16 @@ namespace HyperAIStudio::TaskRouter
 			return PackId == TEXT("shared_foundation");
 		}
 
+		/** A pack any kind of task may use (the scene, diagnostics, playtests), as a preset may whatever its own packs. */
+		bool IsForAnyTask(const FString& PackId)
+		{
+			for (const TCHAR* Pack : PromptPresets::FoundationPacks)
+			{
+				if (PackId == Pack) return true;
+			}
+			return false;
+		}
+
 		TArray<FString> QueryWords(const FString& Message)
 		{
 			TArray<FString> Words;
@@ -423,6 +436,21 @@ namespace HyperAIStudio::TaskRouter
 		}
 		// Each pack is scored once among all packs, so a route of many packs does not read as less like each of them.
 		const TArray<Memory::FRank> PackRanks = Memory::Rank(Query, WordsOf(Documents));
+		// A message whose best pack no route has, such as a paid 3D model, is that pack's work: only the routes' names count
+		// then, or "textured" would send it to Materials. A pack any kind of task uses says nothing about which kind it is.
+		int32 Top = INDEX_NONE;
+		for (int32 Index = 0; Index < PackRanks.Num(); ++Index)
+		{
+			if (Top == INDEX_NONE || PackRanks[Index].Score > PackRanks[Top].Score)
+			{
+				Top = Index;
+			}
+		}
+		const bool bUnrouted = Top != INDEX_NONE && PackRanks[Top].Score >= MinPackScore && !IsForAnyTask(Documents[Top].PackId)
+			&& !Routes.ContainsByPredicate([&Top, &Documents](const FHyperAIStudioAgentTaskRoute& Route)
+			{
+				return !Route.Category.IsEmpty() && Route.Packs.Contains(Documents[Top].PackId);
+			});
 		TArray<TArray<FString>> Names;
 		for (const FHyperAIStudioAgentTaskRoute& Route : Routes)
 		{
@@ -451,7 +479,7 @@ namespace HyperAIStudio::TaskRouter
 			double BestPack = 0.0;
 			for (const FString& Pack : Routes[Index].Packs)
 			{
-				const int32 Found = Documents.IndexOfByPredicate([&Pack](const FPackDocument& Document) { return Document.PackId == Pack; });
+				const int32 Found = bUnrouted ? INDEX_NONE : Documents.IndexOfByPredicate([&Pack](const FPackDocument& Document) { return Document.PackId == Pack; });
 				if (Found != INDEX_NONE && PackRanks[Found].Score >= MinPackScore)
 				{
 					BestPack = FMath::Max(BestPack, PackRanks[Found].Score);
@@ -504,8 +532,8 @@ namespace HyperAIStudio::TaskRouter
 		return Decision;
 	}
 
-	TOptional<FRouteDecision> DecideNamed(const FString& Category, const TArray<FHyperAIStudioAgentTaskRoute>& Routes, const TArray<FString>& UsableAgents,
-		const FString& PreferredAgent)
+	TOptional<FRouteDecision> DecideNamed(const FString& Category, const FString& Message, const TArray<FHyperAIStudioAgentTaskRoute>& Routes,
+		const TArray<FString>& UsableAgents, const FString& PreferredAgent)
 	{
 		const int32 Index = Category.IsEmpty() ? INDEX_NONE : Routes.IndexOfByPredicate([&Category](const FHyperAIStudioAgentTaskRoute& Route)
 		{
@@ -513,7 +541,8 @@ namespace HyperAIStudio::TaskRouter
 		});
 		if (Index == INDEX_NONE)
 		{
-			return {};
+			// Routes are the user's to rename and remove: then the words find the route, by its packs.
+			return Decide(Message, Routes, UsableAgents, PreferredAgent);
 		}
 		const FHyperAIStudioAgentTaskRoute& Route = Routes[Index];
 		FRouteDecision Decision;
@@ -543,35 +572,86 @@ namespace HyperAIStudio::TaskRouter
 	}
 
 	FString ToolHintFrom(const TArray<FPackFit>& Packs, const TArray<FHyperAIStudioRuntimeToolBinding>& Bindings, const TMap<FString, FString>& PackOfTool,
-		TSet<FString>& Given)
+		TSet<FString>& Given, const TArray<FString>& Named)
 	{
 		TArray<FString> Lines;
+		auto List = [&Lines, &Given](const FHyperAIStudioRuntimeToolBinding& Tool)
+		{
+			Given.Add(TEXT("tool:") + Tool.ToolName);
+			Lines.Add(FString::Printf(TEXT("- `%s` (toolset_name `%s`): %s"), *Tool.ToolName, *Tool.QualifiedToolset, *FirstSentence(Tool.Description)));
+		};
+		// The tools the message names come first, whatever their pack: its prompt calls them by name.
+		TMap<FString, int32> NamedOfPack;
+		for (const FString& Name : Named)
+		{
+			const FHyperAIStudioRuntimeToolBinding* Tool = Bindings.FindByPredicate([&Name](const FHyperAIStudioRuntimeToolBinding& Binding) { return Binding.ToolName == Name; });
+			if (Tool && Tool->bToolEnabled && !Given.Contains(TEXT("tool:") + Name))
+			{
+				List(*Tool);
+				if (const FString* Pack = PackOfTool.Find(Name))
+				{
+					++NamedOfPack.FindOrAdd(*Pack);
+				}
+			}
+		}
+		struct FPackTools
+		{
+			FString Key;
+			/** Its enabled tools not listed yet: read, edit, check. */
+			TArray<const FHyperAIStudioRuntimeToolBinding*> Tools;
+			/** Its lines among the tools the message names, and how many more it lists. */
+			int32 NumNamed = 0;
+			int32 Take = 0;
+		};
+		TArray<FPackTools> Listing;
 		for (const FPackFit& Fit : Packs)
 		{
 			const FString Key = TEXT("tools:") + Fit.PackId;
-			if (Given.Contains(Key))
+			if (Given.Contains(Key) || Listing.ContainsByPredicate([&Key](const FPackTools& Each) { return Each.Key == Key; }))
 			{
 				continue;
 			}
-			TArray<const FHyperAIStudioRuntimeToolBinding*> Tools;
+			FPackTools Each;
+			Each.Key = Key;
+			Each.NumNamed = NamedOfPack.FindRef(Fit.PackId);
 			for (const FHyperAIStudioRuntimeToolBinding& Binding : Bindings)
 			{
 				const FString* Pack = PackOfTool.Find(Binding.ToolName);
-				if (Binding.bToolEnabled && Pack && *Pack == Fit.PackId)
+				if (Binding.bToolEnabled && Pack && *Pack == Fit.PackId && !Given.Contains(TEXT("tool:") + Binding.ToolName))
 				{
-					Tools.Add(&Binding);
+					Each.Tools.Add(&Binding);
 				}
 			}
-			if (Tools.IsEmpty())
+			if (Each.Tools.IsEmpty() && Each.NumNamed == 0)
 			{
 				continue;
 			}
-			Tools.StableSort([](const FHyperAIStudioRuntimeToolBinding& A, const FHyperAIStudioRuntimeToolBinding& B) { return Role(A.ToolName) < Role(B.ToolName); });
-			Given.Add(Key);
-			for (int32 Index = 0; Index < Tools.Num() && Index < MaxToolsPerPack && Lines.Num() < MaxToolsListed; ++Index)
+			Each.Tools.StableSort([](const FHyperAIStudioRuntimeToolBinding& A, const FHyperAIStudioRuntimeToolBinding& B) { return Role(A.ToolName) < Role(B.ToolName); });
+			Listing.Add(MoveTemp(Each));
+		}
+		// The lines left are shared out, so the first packs do not starve the last; a share a pack cannot use goes to the next.
+		int32 Left = MaxToolsListed - Lines.Num();
+		const int32 Share = FMath::Max(1, Left / FMath::Max(1, Listing.Num()));
+		for (const bool bShare : {true, false})
+		{
+			for (FPackTools& Each : Listing)
 			{
-				Lines.Add(FString::Printf(TEXT("- `%s` (toolset_name `%s`): %s"), *Tools[Index]->ToolName, *Tools[Index]->QualifiedToolset,
-					*FirstSentence(Tools[Index]->Description)));
+				const int32 Most = FMath::Min(Each.Tools.Num(), FMath::Max(0, MaxToolsPerPack - Each.NumNamed));
+				const int32 More = FMath::Clamp((bShare ? FMath::Min(Most, Share) : Most) - Each.Take, 0, FMath::Max(0, Left));
+				Each.Take += More;
+				Left -= More;
+			}
+		}
+		for (const FPackTools& Each : Listing)
+		{
+			for (int32 Index = 0; Index < Each.Take; ++Index)
+			{
+				List(*Each.Tools[Index]);
+			}
+			// Pointed at a pack only with a line of it: one the lines ran out for can still be listed later.
+			if (Each.NumNamed + Each.Take > 0)
+			{
+				Given.Add(Each.Key);
 			}
 		}
 		return Lines.IsEmpty() ? FString()
@@ -579,9 +659,9 @@ namespace HyperAIStudio::TaskRouter
 				+ FString::Join(Lines, TEXT("\n")) + TEXT("\n</tools>");
 	}
 
-	FString ToolHintFor(const TArray<FPackFit>& Packs, TSet<FString>& Given)
+	FString ToolHintFor(const TArray<FPackFit>& Packs, TSet<FString>& Given, const TArray<FString>& Named)
 	{
-		if (Packs.IsEmpty())
+		if (Packs.IsEmpty() && Named.IsEmpty())
 		{
 			return FString();
 		}
@@ -593,7 +673,7 @@ namespace HyperAIStudio::TaskRouter
 		{
 			PackOfTool.Add(Tool.Name, Tool.PackId);
 		}
-		return ToolHintFrom(Packs, Bindings, PackOfTool, Given);
+		return ToolHintFrom(Packs, Bindings, PackOfTool, Given, Named);
 	}
 
 	TOptional<FAgentPick> AgentFor(const FString& Message, const TArray<FHyperAIStudioAgentDefinition>& ProjectAgents, const bool bTeam,

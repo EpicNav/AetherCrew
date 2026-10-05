@@ -110,6 +110,10 @@ bool FHyperAIStudioTaskRouterPacksTest::RunTest(const FString& Parameters)
 		{TEXT("Make a low poly rock mesh"), TEXT("mesh_modeling")},
 		{TEXT("Generate a textured 3D model of a car"), TEXT("mesh_generation")},
 		{TEXT("Import the FBX of the sword"), TEXT("geometry_interchange")},
+		{TEXT("Model a crate prop"), TEXT("mesh_modeling")},
+		// Props that are there already are placed with the level design pack's spatial tools, not modelled again.
+		{TEXT("Place some props around the camp"), TEXT("level_design")},
+		{TEXT("Drop the rocks to the ground"), TEXT("level_design")},
 		{TEXT("What time is it?"), TEXT("none")},
 		{TEXT("Thanks!"), TEXT("none")},
 	};
@@ -150,8 +154,13 @@ bool FHyperAIStudioTaskRouterRoutesTest::RunTest(const FString& Parameters)
 		{TEXT("Plan a stealth system for the guards"), TEXT("Plan a feature")},
 		{TEXT("Outline the approach for a crafting feature"), TEXT("Plan a feature")},
 		{TEXT("Design a new level with a castle courtyard"), TEXT("Level Design")},
-		// No route is made for these, or the message is two tasks at once: the chat keeps its agent.
+		// Free modelling is the level designer's.
+		{TEXT("Model a ruined watchtower"), TEXT("Level Design")},
+		{TEXT("Boolean modeling for the castle wall"), TEXT("Level Design")},
+		// No route is made for these, or the message is two tasks at once: the chat keeps its agent. A paid 3D model is
+		// not modelling, nor a material for its "textured".
 		{TEXT("Make a footstep sound for gravel"), TEXT("none")},
+		{TEXT("Generate a textured 3D model of a car"), TEXT("none")},
 		{TEXT("Make the fire VFX glow brighter and light the room"), TEXT("none")},
 		{TEXT("What time is it?"), TEXT("none")},
 	};
@@ -165,6 +174,27 @@ bool FHyperAIStudioTaskRouterRoutesTest::RunTest(const FString& Parameters)
 	Sound.Category = TEXT("Audio");
 	Sound.Packs = {TEXT("sound_design"), TEXT("audio_metasound")};
 	TestEqual(TEXT("A route of the user's own takes its work"), RouteName(TEXT("Make a footstep sound for gravel"), Custom, Documents), FString(TEXT("Audio")));
+
+	// Routes saved before free modelling joined Level Design get it once; taken out again, it stays out.
+	UHyperAIStudioSettings* Saved = NewObject<UHyperAIStudioSettings>();
+	Saved->AgentTaskRoutes = Routes;
+	for (FHyperAIStudioAgentTaskRoute& Route : Saved->AgentTaskRoutes)
+	{
+		Route.Packs.Remove(TEXT("mesh_modeling"));
+	}
+	Saved->TaskRoutesVersion = 0;
+	FHyperAIStudioAgentTaskRoute* SavedLevels = Saved->AgentTaskRoutes.FindByPredicate([](const FHyperAIStudioAgentTaskRoute& Route) { return Route.Category == TEXT("Level Design"); });
+	TestTrue(TEXT("Saved routes are brought up to date"), Saved->EnsureDefaultTaskRoutes() && Saved->TaskRoutesVersion == UHyperAIStudioSettings::CurrentTaskRoutesVersion);
+	if (TestNotNull(TEXT("The saved routes have Level Design"), SavedLevels))
+	{
+		TestTrue(TEXT("and it gets the modelling pack"), SavedLevels->Packs.Contains(TEXT("mesh_modeling")));
+		SavedLevels->Packs.Remove(TEXT("mesh_modeling"));
+		TestFalse(TEXT("once: the user's later edit stands"), Saved->EnsureDefaultTaskRoutes() || SavedLevels->Packs.Contains(TEXT("mesh_modeling")));
+	}
+	UHyperAIStudioSettings* Seeded = NewObject<UHyperAIStudioSettings>();
+	Seeded->AgentTaskRoutes.Reset();
+	Seeded->TaskRoutesVersion = 0;
+	TestTrue(TEXT("Seeded routes are up to date"), Seeded->EnsureDefaultTaskRoutes() && Seeded->TaskRoutesVersion == UHyperAIStudioSettings::CurrentTaskRoutesVersion);
 	return true;
 }
 
@@ -205,6 +235,19 @@ bool FHyperAIStudioTaskRouterDecideTest::RunTest(const FString& Parameters)
 		&& Decision->Choice.Model == UHyperAIStudioSettings::SmartModelId);
 	TestFalse(TEXT("With no agent set up, nothing is routed"), TaskRouter::Decide(TEXT("Make the explosion bigger with more sparks"), Routes, {}, FString()).IsSet());
 
+	// A preset names its route by its category; a route the user renamed is found by the words instead.
+	Decision = TaskRouter::DecideNamed(TEXT("Level Design"), TEXT("Make the explosion bigger with more sparks"), Routes, Usable, TEXT("Claude Code"));
+	TestTrue(TEXT("A named route is taken whatever the words say"), Decision.IsSet() && Routes[Decision->RouteIndex].Category == TEXT("Level Design"));
+	TArray<FHyperAIStudioAgentTaskRoute> Renamed = Routes;
+	for (FHyperAIStudioAgentTaskRoute& Route : Renamed)
+	{
+		if (Route.Category == TEXT("Level Design")) Route.Category = TEXT("Levels");
+	}
+	Decision = TaskRouter::DecideNamed(TEXT("Level Design"), TEXT("Scatter rocks and trees over the landscape"), Renamed, Usable, TEXT("Claude Code"));
+	TestTrue(TEXT("A route the user renamed is found by its packs"), Decision.IsSet() && Renamed[Decision->RouteIndex].Category == TEXT("Levels"));
+	TestFalse(TEXT("A named route with no agent set up starts nothing"), TaskRouter::DecideNamed(TEXT("Level Design"), TEXT("Scatter rocks and trees over the landscape"),
+		Routes, {}, FString()).IsSet());
+
 	FHyperAIStudioAgentScoreboard::SetStoragePathForTests(FString());
 	IFileManager::Get().Delete(*Scratch);
 	return true;
@@ -242,6 +285,42 @@ bool FHyperAIStudioTaskRouterToolsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A chat is pointed at a pack's tools once"), TaskRouter::ToolHintFrom({{TEXT("niagara_vfx"), 9.0}}, Bindings, PackOfTool, Given).IsEmpty());
 	TSet<FString> Fresh;
 	TestTrue(TEXT("No pack, no tools"), TaskRouter::ToolHintFrom({}, Bindings, PackOfTool, Fresh).IsEmpty());
+
+	// Three packs of eight tools each, as a preset names them, and a pack of tools the preset's prompt calls by name.
+	TArray<FHyperAIStudioRuntimeToolBinding> Many;
+	TMap<FString, FString> PackOfMany;
+	for (const TCHAR* Pack : {TEXT("a"), TEXT("b"), TEXT("c"), TEXT("f")})
+	{
+		for (int32 Index = 1; Index <= 8; ++Index)
+		{
+			const FString Tool = FString::Printf(TEXT("hyper_%s_tool_%d"), Pack, Index);
+			Many.Add(Binding(*Tool, TEXT("HyperAIStudioTest.HyperAIStudioTestToolset"), TEXT("Does one thing.")));
+			PackOfMany.Add(Tool, FString::Printf(TEXT("pack_%s"), Pack));
+		}
+	}
+	const TArray<TaskRouter::FPackFit> Three = {{TEXT("pack_a"), 100.0}, {TEXT("pack_b"), 100.0}, {TEXT("pack_c"), 100.0}};
+	TSet<FString> Shared;
+	const FString Split = TaskRouter::ToolHintFrom(Three, Many, PackOfMany, Shared);
+	TestTrue(TEXT("Three packs share the lines, so the third gets its tools too: ") + Split, Split.Contains(TEXT("hyper_a_tool_3")) && !Split.Contains(TEXT("hyper_a_tool_4"))
+		&& Split.Contains(TEXT("hyper_c_tool_3")) && Shared.Contains(TEXT("tools:pack_c")));
+	TArray<FString> Named;
+	for (int32 Index = 1; Index <= 8; ++Index)
+	{
+		Named.Add(FString::Printf(TEXT("hyper_f_tool_%d"), Index));
+	}
+	TSet<FString> Crowded;
+	const FString First = TaskRouter::ToolHintFrom(Three, Many, PackOfMany, Crowded, Named);
+	TestTrue(TEXT("The tools the message names come first: ") + First, First.Contains(TEXT("hyper_f_tool_1"))
+		&& First.Find(TEXT("hyper_f_tool_8")) < First.Find(TEXT("hyper_a_tool_1")));
+	TestTrue(TEXT("A pack the lines ran out for is not marked as sent"), Crowded.Contains(TEXT("tools:pack_a")) && !Crowded.Contains(TEXT("tools:pack_b"))
+		&& !Crowded.Contains(TEXT("tools:pack_c")));
+	const FString Later = TaskRouter::ToolHintFrom(Three, Many, PackOfMany, Crowded, Named);
+	TestTrue(TEXT("so a later message lists it, and nothing twice: ") + Later, Later.Contains(TEXT("hyper_b_tool_1")) && Later.Contains(TEXT("hyper_c_tool_1"))
+		&& !Later.Contains(TEXT("hyper_a_tool_")) && !Later.Contains(TEXT("hyper_f_tool_")) && Crowded.Contains(TEXT("tools:pack_c")));
+	TSet<FString> Inside;
+	const FString Own = TaskRouter::ToolHintFrom(Three, Many, PackOfMany, Inside, {TEXT("hyper_b_tool_7")});
+	TestTrue(TEXT("A named tool of a listed pack comes first, once: ") + Own, Own.Find(TEXT("hyper_b_tool_7")) < Own.Find(TEXT("hyper_a_tool_1"))
+		&& Own.Find(TEXT("hyper_b_tool_7")) == Own.Find(TEXT("hyper_b_tool_7"), ESearchCase::CaseSensitive, ESearchDir::FromEnd));
 
 	// The skill made for the task's work comes first, even when the message shares no word with it.
 	const FString Root = FPaths::Combine(FPaths::ConvertRelativePathToFull(FPaths::AutomationTransientDir()), TEXT("RouterTest-") + FGuid::NewGuid().ToString(EGuidFormats::Digits));
