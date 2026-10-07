@@ -9,10 +9,13 @@
 #include "Engine/Blueprint.h"
 #include "GameplayEffect.h"
 #include "GameplayTagsManager.h"
+#include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioSettings.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Materials/Material.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
 #include "ObjectTools.h"
@@ -944,6 +947,55 @@ bool FHyperAIGASAuthoringTest::RunTest(const FString& Parameters)
 	const FHyperAIGASInspectReport Inspected = UHyperAIStudioGASToolset::hyper_gas_inspect(Look);
 	TestTrue(TEXT("Inspect reads the hit back"), Inspected.bOk && Inspected.Records.Num() == 1 && Inspected.Records[0].DurationPolicy == TEXT("duration")
 		&& Inspected.Records[0].GrantedTags.Contains(TEXT("HyperAITest.State.Staggered")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIGASPathTakenTest,
+	"HyperAIStudio.NativeTools.GAS.PathTakenWhileWaiting",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIGASPathTakenTest::RunTest(const FString& Parameters)
+{
+	// A held plan makes its Blueprint only once approved. An asset of another class made at the path meanwhile would stop
+	// the editor when the Blueprint is made over it, so the path is asked about again then.
+	const FString Name = FString::Printf(TEXT("GE_Late_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower());
+	const FString Package = TEXT("/Game/__HyperAIStudioAutomation/") + Name;
+	const FString Path = Package + TEXT(".") + Name;
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
+	UMaterial* Squatter = nullptr;
+	ON_SCOPE_EXIT
+	{
+		Settings->bRequireApprovalForAgentEdits = bApproval;
+		TArray<UObject*> Made;
+		if (IsValid(Squatter)) Made.Add(Squatter);
+		if (UObject* Asset = FindObject<UBlueprint>(nullptr, *Path)) Made.Add(Asset);
+		if (!Made.IsEmpty()) ObjectTools::ForceDeleteObjects(Made, /*ShowConfirmation=*/false);
+	};
+	Settings->bRequireApprovalForAgentEdits = true;
+	FHyperAIGASApplyPlanRequest Plan;
+	FHyperAIGASPlanOperation Create;
+	Create.Type = TEXT("create_gameplay_effect_blueprint");
+	Create.TargetPath = Path;
+	Plan.Operations = {Create};
+	Plan.bDryRun = false;
+	const FHyperAIGASApplyPlanReport Held = UHyperAIStudioGASToolset::hyper_gas_apply_plan(Plan);
+	if (!TestEqual(TEXT("the new effect waits for approval: ") + Held.Diagnostic, Held.Status, FString(TEXT("awaiting_user_approval")))) return false;
+	Squatter = NewObject<UMaterial>(CreatePackage(*Package), FName(*Name), RF_Public | RF_Standalone);
+	FString Error;
+	TestTrue(TEXT("the approval runs: ") + Error, FHyperAIStudioApprovalGate::Approve(Held.OperationId, Error));
+	FString Said;
+	for (const FHyperAIStudioActivityEntry& Entry : FHyperAIStudioAgentActivityLog::GetSnapshot())
+	{
+		if (Entry.OperationId == Held.OperationId && !Entry.Detail.IsEmpty())
+		{
+			Said = Entry.Detail;
+			break;
+		}
+	}
+	TestTrue(TEXT("and refuses the path taken meanwhile instead of making a Blueprint over it: ") + Said, Said.Contains(TEXT("was taken")));
+	TestTrue(TEXT("the asset there is left alone"), FindObject<UMaterial>(nullptr, *Path) == Squatter);
 	return true;
 }
 

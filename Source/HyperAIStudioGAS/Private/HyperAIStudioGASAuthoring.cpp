@@ -615,6 +615,12 @@ namespace HyperAIStudio::GAS::Authoring
 				OutError = FString::Printf(TEXT("A Blueprint can't be made from %s."), *Op.ParentClassPath);
 				return nullptr;
 			}
+			// Asked again here, as an approval can wait: an asset of another class made there meanwhile would stop the editor.
+			if (!FHyperAIStudioNames::IsFreePackage(Package))
+			{
+				OutError = FString::Printf(TEXT("%s was taken before the Blueprint was made; nothing was made there."), *Package);
+				return nullptr;
+			}
 			UPackage* Outer = CreatePackage(*Package);
 			UBlueprint* Blueprint = FKismetEditorUtilities::CreateBlueprint(Parent, Outer, FName(*FPackageName::GetShortName(Package)), BPTYPE_Normal,
 				bEffect ? UBlueprint::StaticClass() : UGameplayAbilityBlueprint::StaticClass(), UBlueprintGeneratedClass::StaticClass(), TEXT("HyperAIStudio"));
