@@ -6,6 +6,7 @@
 #include "AssetRegistry/IAssetRegistry.h"
 #include "ContentBrowserModule.h"
 #include "FileHelpers.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioStyle.h"
 #include "IContentBrowserSingleton.h"
 #include "Misc/MessageDialog.h"
@@ -670,6 +671,11 @@ TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildSandboxCard(const Hy
 
 void SHyperAIStudioChatActivitySidebar::ShowTargetInContentBrowser(const FString& Target)
 {
+	// A target is whatever a tool named for the activity, so an agent's text: one no asset path can be is not looked up.
+	if (!FHyperAIStudioNames::IsObjectPath(Target, nullptr))
+	{
+		return;
+	}
 	const FSoftObjectPath Path(Target);
 	if (Path.IsNull())
 	{

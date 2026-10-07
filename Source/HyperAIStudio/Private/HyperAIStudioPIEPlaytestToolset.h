@@ -132,8 +132,9 @@ struct FHyperAIPIEPlaytestValue
 	UPROPERTY()
 	double Float = 0.0;
 
+	/** Text, not an FName: the JSON import would make an FName of whatever an agent sent, and past 1023 characters that stops the editor. */
 	UPROPERTY()
-	FName Name;
+	FString Name;
 
 	UPROPERTY()
 	FString String;

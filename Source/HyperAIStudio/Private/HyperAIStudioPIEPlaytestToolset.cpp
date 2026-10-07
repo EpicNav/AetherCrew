@@ -18,6 +18,7 @@
 #include "GenericPlatform/GenericPlatformInputDeviceMapper.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioVerify.h"
 #include "UObject/StrongObjectPtr.h"
@@ -206,7 +207,7 @@ namespace HyperAIStudio::PIEPlaytest::Private
 			return false;
 		}
 		if (!ValidateBoundedString(
-			Value.Name.ToString(),
+			Value.Name,
 			FHyperAIStudioPIEPlaytestContracts::MaxNameCharacters,
 			TEXT("value.name"), OutErrorCode, OutError)
 			|| !ValidateBoundedString(
@@ -219,7 +220,8 @@ namespace HyperAIStudio::PIEPlaytest::Private
 		const bool bBooleanPopulated = Value.bBoolean;
 		const bool bIntegerPopulated = Value.Integer != 0;
 		const bool bFloatPopulated = Value.Float != 0.0;
-		const bool bNamePopulated = !Value.Name.IsNone();
+		// As an FName, None was no name.
+		const bool bNamePopulated = !Value.Name.IsEmpty() && !Value.Name.Equals(TEXT("None"));
 		const bool bStringPopulated = !Value.String.IsEmpty();
 		const bool bVectorPopulated = Value.Vector != FVector::ZeroVector;
 		bool bHasIrrelevantUnionField = false;
@@ -280,7 +282,7 @@ namespace HyperAIStudio::PIEPlaytest::Private
 			AppendCanonicalToken(Canonical, NumberToken(Value.Float));
 			break;
 		case EHyperAIPIEPlaytestValueType::Name:
-			AppendCanonicalToken(Canonical, Value.Name.ToString());
+			AppendCanonicalToken(Canonical, Value.Name.IsEmpty() ? FString(TEXT("None")) : Value.Name);
 			break;
 		case EHyperAIPIEPlaytestValueType::String:
 			AppendCanonicalToken(Canonical, Value.String);
@@ -416,6 +418,25 @@ namespace HyperAIStudio::PIEPlaytest::Private
 		{
 			OutErrorCode = TEXT("invalid_transform");
 			OutError = TEXT("Step transforms must contain only finite numbers.");
+			return false;
+		}
+		// Looked up through FSoftObjectPath, which makes FNames of their parts: past 1023 characters that stops the editor.
+		for (const TPair<const FString*, const TCHAR*> Path : {TPair<const FString*, const TCHAR*>(&Step.TargetObjectPath, TEXT("step.target_object_path")),
+			TPair<const FString*, const TCHAR*>(&Step.SecondaryObjectPath, TEXT("step.secondary_object_path"))})
+		{
+			if (!Path.Key->IsEmpty() && !FHyperAIStudioNames::IsObjectPath(*Path.Key, Path.Value, &OutError))
+			{
+				OutErrorCode = TEXT("invalid_object_path");
+				return false;
+			}
+		}
+		// A bot step's target, property and widget names become FNames, and an input action given by its path is loaded.
+		const FHyperAIBotStep& Bot = Step.Bot;
+		if (!FHyperAIStudioNames::IsName(Bot.Target, TEXT("step.bot.target"), &OutError) || !FHyperAIStudioNames::IsName(Bot.Property, TEXT("step.bot.property"), &OutError)
+			|| (Bot.InputAction.StartsWith(TEXT("/")) ? !FHyperAIStudioNames::IsObjectPath(Bot.InputAction, TEXT("step.bot.input_action"), &OutError)
+				: !FHyperAIStudioNames::IsName(Bot.InputAction, TEXT("step.bot.input_action"), &OutError)))
+		{
+			OutErrorCode = TEXT("invalid_bot_step");
 			return false;
 		}
 		if (RequiresTarget(Step.Kind) && Step.TargetObjectPath.IsEmpty())
@@ -1121,7 +1142,7 @@ namespace HyperAIStudio::PIEPlaytest::Private
 		case EHyperAIPIEPlaytestValueType::Boolean: return Value.bBoolean ? TEXT("true") : TEXT("false");
 		case EHyperAIPIEPlaytestValueType::Integer: return FString::FromInt(Value.Integer);
 		case EHyperAIPIEPlaytestValueType::Float: return NumberToken(Value.Float);
-		case EHyperAIPIEPlaytestValueType::Name: return Clip(Value.Name.ToString(), MaxPreviewCharacters);
+		case EHyperAIPIEPlaytestValueType::Name: return Clip(Value.Name, MaxPreviewCharacters);
 		case EHyperAIPIEPlaytestValueType::String: return Clip(Value.String, MaxPreviewCharacters);
 		case EHyperAIPIEPlaytestValueType::Vector:
 			return FString::Printf(TEXT("X=%s Y=%s Z=%s"),
@@ -1192,8 +1213,8 @@ namespace HyperAIStudio::PIEPlaytest::Private
 		if (const FNameProperty* Typed = CastField<FNameProperty>(Property))
 		{
 			OutValue.Type = EHyperAIPIEPlaytestValueType::Name;
-			OutValue.Name = Typed->GetPropertyValue(ValuePtr);
-			return OutValue.Name.ToString().Len() <= FHyperAIStudioPIEPlaytestContracts::MaxValueCharacters;
+			OutValue.Name = Typed->GetPropertyValue(ValuePtr).ToString();
+			return OutValue.Name.Len() <= FHyperAIStudioPIEPlaytestContracts::MaxValueCharacters;
 		}
 		if (const FStrProperty* Typed = CastField<FStrProperty>(Property))
 		{
@@ -1235,7 +1256,7 @@ namespace HyperAIStudio::PIEPlaytest::Private
 		case EHyperAIPIEPlaytestValueType::Boolean: return Actual.bBoolean == Expected.bBoolean;
 		case EHyperAIPIEPlaytestValueType::Integer: return Actual.Integer == Expected.Integer;
 		case EHyperAIPIEPlaytestValueType::Float: return FMath::IsNearlyEqual(Actual.Float, Expected.Float, 1.e-6);
-		case EHyperAIPIEPlaytestValueType::Name: return Actual.Name == Expected.Name;
+		case EHyperAIPIEPlaytestValueType::Name: return Actual.Name.Equals(Expected.Name.IsEmpty() ? FString(TEXT("None")) : Expected.Name);
 		case EHyperAIPIEPlaytestValueType::String: return Actual.String == Expected.String;
 		case EHyperAIPIEPlaytestValueType::Vector: return Actual.Vector.Equals(Expected.Vector, 1.e-4);
 		default: return true;

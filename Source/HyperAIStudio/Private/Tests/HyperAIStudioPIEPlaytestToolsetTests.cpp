@@ -5,6 +5,7 @@
 #include "HyperAIStudioPIEPlaytestToolset.h"
 
 #include "HyperAIStudioCapabilityPackRegistry.h"
+#include "JsonObjectConverter.h"
 #include "Misc/AutomationTest.h"
 #include "UObject/FieldIterator.h"
 #include "UObject/UnrealType.h"
@@ -440,6 +441,23 @@ bool FHyperAIStudioPIEPlaytestNormalizeBoundsTest::RunTest(const FString& Parame
 	TestFalse(TEXT("StopSession must be the terminal typed step"),
 		FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Smuggled, Plan, Code, Error));
 	TestEqual(TEXT("Terminal-step ordering has an exact code"), Code, FString(TEXT("invalid_step_order")));
+
+	// A typed value's name was an FName that the JSON import made before any check ran: past 1023 characters it stopped
+	// the editor. Text now, it reaches the bound and is refused there, as an object path past an FName's length is.
+	const FString Blob = FString::ChrN(1100, TEXT('a'));
+	FHyperAIPIEPlaytestRequest Imported;
+	const FString Json = FString::Printf(TEXT("{\"steps\":[{\"stepId\":\"s1\",\"value\":{\"type\":\"Name\",\"name\":\"%s\"}}]}"), *Blob);
+	TestTrue(TEXT("A value name past an FName's length imports from JSON"), FJsonObjectConverter::JsonObjectStringToUStruct(Json, &Imported));
+	TestTrue(TEXT("as text, whole"), Imported.Steps.Num() == 1 && Imported.Steps[0].Value.Name.Len() == 1100);
+	Smuggled = ReadRequest();
+	Smuggled.Steps[0].Value.Type = EHyperAIPIEPlaytestValueType::Name;
+	Smuggled.Steps[0].Value.Name = Blob;
+	TestFalse(TEXT("and is refused by the bound"), FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Smuggled, Plan, Code, Error));
+	Smuggled = ReadRequest();
+	Smuggled.Steps[0].TargetObjectPath = TEXT("/Game/") + FString::ChrN(1010, TEXT('a'));
+	TestFalse(TEXT("A target path within the 1024 bound but past the name limit is refused"),
+		FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Smuggled, Plan, Code, Error));
+	TestEqual(TEXT("before FSoftObjectPath makes an FName of it"), Code, FString(TEXT("invalid_object_path")));
 
 	const FString Fingerprint = TEXT("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
 	const FString Cursor = FHyperAIStudioPIEPlaytestContracts::MakeCursor(Fingerprint, 12);

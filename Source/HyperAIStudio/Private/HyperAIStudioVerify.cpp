@@ -15,6 +15,7 @@
 #include "HAL/PlatformMemory.h"
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioAsyncJobHost.h"
+#include "HyperAIStudioNames.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -609,7 +610,11 @@ namespace HyperAIStudio::Verify
 						*Name, StepIndex + 1, *FHyperAIBotExecutor::ActionName(Step.Action));
 					return false;
 				}
-				if (!FHyperAIBotExecutor::Validate(Step, StepError))
+				// The bot makes FNames of its target, property and widget names, and loads an input action given by its path.
+				if (!FHyperAIBotExecutor::Validate(Step, StepError)
+					|| !FHyperAIStudioNames::IsName(Step.Target, TEXT("target"), &StepError) || !FHyperAIStudioNames::IsName(Step.Property, TEXT("property"), &StepError)
+					|| (Step.InputAction.StartsWith(TEXT("/")) ? !FHyperAIStudioNames::IsObjectPath(Step.InputAction, TEXT("inputAction"), &StepError)
+						: !FHyperAIStudioNames::IsName(Step.InputAction, TEXT("inputAction"), &StepError)))
 				{
 					OutError = FString::Printf(TEXT("%s, step %d: %s"), *Name, StepIndex + 1, *StepError);
 					return false;

@@ -9,6 +9,7 @@
 #include "Engine/Blueprint.h"
 #include "Engine/World.h"
 #include "HAL/PlatformTime.h"
+#include "HyperAIStudioNames.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/DateTime.h"
 #include "Misc/PackageName.h"
@@ -78,7 +79,8 @@ namespace HyperAIStudio::Diagnose::Private
 		if (Path.IsEmpty() || Path.Len() > FHyperAIStudioDiagnoseContracts::MaxPathCharacters
 			|| FHyperAIStudioDiagnosticsCommon::ContainsEmbeddedNull(Path)
 			|| !FHyperAIStudioDiagnosticsCommon::HasWellFormedUtf16(Path)
-			|| !Path.StartsWith(TEXT("/Game/")) || Path.Contains(TEXT(":")))
+			|| !Path.StartsWith(TEXT("/Game/")) || Path.Contains(TEXT(":"))
+			|| !FHyperAIStudioNames::IsObjectPath(Path, TEXT("asset_paths")))
 		{
 			return false;
 		}
