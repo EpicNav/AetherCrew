@@ -10,6 +10,7 @@
 #include "EngineUtils.h"
 #include "FileHelpers.h"
 #include "GameFramework/WorldSettings.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSceneSpatialToolset.h"
 #include "HyperAIStudioSpatialQueries.h"
 #include "InstancedFoliageActor.h"
@@ -48,10 +49,14 @@ namespace HyperAIStudio::SceneSpatial::Plan
 			return ClearSpotBudgetSeconds;
 		}
 
-		UStaticMesh* LoadMesh(const FString& Path)
+		/** The static mesh at Path; null, with OutReason when Path cannot be looked up at all. */
+		UStaticMesh* LoadMesh(const FString& Path, FString* OutReason = nullptr)
 		{
 			const FString Trimmed = Path.TrimStartAndEnd();
 			if (Trimmed.IsEmpty() || !Trimmed.StartsWith(TEXT("/"))) return nullptr;
+			// The load makes an FName of each part, and the package it looked for: past 1023 characters, or with a double
+			// slash, either stops the editor.
+			if (!FHyperAIStudioNames::IsObjectPath(Trimmed, TEXT("Mesh"), OutReason)) return nullptr;
 			const FString ObjectPath = Trimmed.Contains(TEXT(".")) ? Trimmed : Trimmed + TEXT(".") + FPackageName::GetShortName(Trimmed);
 			return LoadObject<UStaticMesh>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
 		}
@@ -92,7 +97,8 @@ namespace HyperAIStudio::SceneSpatial::Plan
 			Component->SetStaticMesh(Mesh);
 			Component->RegisterComponent();
 			Actor->SetActorLabel(Move.Name);
-			if (!Move.Folder.IsEmpty()) Actor->SetFolderPath(FName(*Move.Folder));
+			// Check refused a longer one; an FName past 1023 characters would stop the editor inside the plan's transaction.
+			if (!Move.Folder.IsEmpty() && FHyperAIStudioNames::IsName(Move.Folder, TEXT("Folder"))) Actor->SetFolderPath(FName(*Move.Folder));
 			return Actor;
 		}
 	}
@@ -189,15 +195,22 @@ namespace HyperAIStudio::SceneSpatial::Plan
 				{
 					return Refuse(TEXT("invalid_request"), Where + TEXT("place makes a new actor from Mesh; Actors is for drop_to_ground and move_to_clear_spot."));
 				}
-				OpMeshes[Index] = LoadMesh(Op.Mesh);
+				FString Reason;
+				OpMeshes[Index] = LoadMesh(Op.Mesh, &Reason);
 				if (!OpMeshes[Index])
 				{
-					return Refuse(TEXT("invalid_request"), Where + FString::Printf(TEXT("%s is not a static mesh asset; give its path, like /Game/Props/SM_Rock."), *Op.Mesh));
+					return Refuse(TEXT("invalid_request"), Where + (Reason.IsEmpty()
+						? FString::Printf(TEXT("%s is not a static mesh asset; give its path, like /Game/Props/SM_Rock."), *Op.Mesh) : Reason));
 				}
 				const FString Label = Op.Label.TrimStartAndEnd();
 				if (Label.IsEmpty() || Label.Len() > 128)
 				{
 					return Refuse(TEXT("invalid_request"), Where + TEXT("place needs Label: the new actor's name in the Outliner, 1 to 128 characters."));
+				}
+				// The Outliner folder is an FName, set inside the plan's transaction after the approval.
+				if (!FHyperAIStudioNames::IsName(Op.Folder.TrimStartAndEnd(), TEXT("Folder"), &Reason))
+				{
+					return Refuse(TEXT("invalid_request"), Where + Reason);
 				}
 				if (NewLabels.Contains(Label.ToLower()) || IsLabelTaken(World, Label))
 				{

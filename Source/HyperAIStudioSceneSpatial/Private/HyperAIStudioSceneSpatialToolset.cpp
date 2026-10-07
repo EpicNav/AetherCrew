@@ -126,6 +126,16 @@ FHyperAISpatialQueryReport FHyperAIStudioSceneSpatialContracts::Query(const FHyp
 		Report.Diagnostic = FString::Printf(TEXT("Queries holds 1 to %d questions; split a longer list over several calls."), MaxQueries);
 		return Report;
 	}
+	for (int32 Index = 0; Index < In.Queries.Num(); ++Index)
+	{
+		FString Why;
+		if (!Spatial::CheckNames(In.Queries[Index], Why))
+		{
+			Report.Status = TEXT("invalid_request");
+			Report.Diagnostic = FString::Printf(TEXT("Queries[%d]: %s"), Index, *Why);
+			return Report;
+		}
+	}
 	FHyperAISpatialQueryRequest Request = In;
 	FHyperAIStudioRequestFit Fit;
 	Fit.ClampOrDefault(Request.DeadlineMs, 100, 5000, 1000, TEXT("deadline_ms"));

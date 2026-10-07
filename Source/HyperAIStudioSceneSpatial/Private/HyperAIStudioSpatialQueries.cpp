@@ -16,6 +16,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/Info.h"
 #include "GameFramework/WorldSettings.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSceneSpatialToolset.h"
 #include "InstancedFoliageActor.h"
 #include "Landscape.h"
@@ -179,9 +180,12 @@ namespace HyperAIStudio::SceneSpatial::Spatial
 		UClass* FindActorClass(const FString& Name)
 		{
 			const FString Wanted = Name.TrimStartAndEnd();
+			// Each lookup makes an FName of the name, and of the name with _C, which stops the editor past 1023 characters.
+			if (Wanted.IsEmpty() || !FHyperAIStudioNames::IsName(Wanted, TEXT("ClassFilter"))) return nullptr;
 			UClass* Class = nullptr;
 			if (Wanted.StartsWith(TEXT("/")))
 			{
+				if (!FHyperAIStudioNames::IsObjectPath(Wanted, TEXT("ClassFilter"))) return nullptr;
 				Class = FindObject<UClass>(nullptr, *Wanted);
 				if (!Class && !Wanted.Contains(TEXT(".")))
 				{
@@ -198,6 +202,18 @@ namespace HyperAIStudio::SceneSpatial::Spatial
 			}
 			return Class && Class->IsChildOf(AActor::StaticClass()) ? Class : nullptr;
 		}
+	}
+
+	bool CheckNames(const FHyperAISpatialQuery& Query, FString& OutError)
+	{
+		for (const FString& Name : Query.IgnoreActors)
+		{
+			if (!FHyperAIStudioNames::IsName(Name.TrimStartAndEnd(), TEXT("IgnoreActors"), &OutError)) return false;
+		}
+		return FHyperAIStudioNames::IsName(Query.ActorA.TrimStartAndEnd(), TEXT("ActorA"), &OutError)
+			&& FHyperAIStudioNames::IsName(Query.ActorB.TrimStartAndEnd(), TEXT("ActorB"), &OutError)
+			&& FHyperAIStudioNames::IsName(Query.ClassFilter.TrimStartAndEnd(), TEXT("ClassFilter"), &OutError)
+			&& FHyperAIStudioNames::IsName(Query.TagFilter.TrimStartAndEnd(), TEXT("TagFilter"), &OutError);
 	}
 
 	FString LabelOf(const AActor& Actor)
@@ -264,7 +280,10 @@ namespace HyperAIStudio::SceneSpatial::Spatial
 			OutError = TEXT("An actor's label or path is empty.");
 			return nullptr;
 		}
-		if (Wanted.StartsWith(TEXT("/")))
+		// No label or path is this long, and a lookup by it would make an FName past 1023 characters, which stops the editor.
+		if (!FHyperAIStudioNames::IsName(Wanted, TEXT("An actor's label or path"), &OutError)) return nullptr;
+		// A path the engine cannot look up (a double slash, say) is still compared as a label below.
+		if (FHyperAIStudioNames::IsObjectPath(Wanted, nullptr))
 		{
 			AActor* ByPath = FindObject<AActor>(nullptr, *Wanted);
 			if (IsValid(ByPath) && ByPath->GetWorld() == &World)
@@ -891,6 +910,11 @@ namespace HyperAIStudio::SceneSpatial::Spatial
 		UClass* Class = AActor::StaticClass();
 		if (!Query.ClassFilter.TrimStartAndEnd().IsEmpty())
 		{
+			if (!FHyperAIStudioNames::IsName(Query.ClassFilter.TrimStartAndEnd(), TEXT("ClassFilter"), &Error))
+			{
+				Fail(Error);
+				return;
+			}
 			Class = FindActorClass(Query.ClassFilter);
 			if (!Class)
 			{
@@ -899,7 +923,14 @@ namespace HyperAIStudio::SceneSpatial::Spatial
 			}
 		}
 		const FString TagText = Query.TagFilter.TrimStartAndEnd();
-		const FName Tag = TagText.IsEmpty() ? NAME_None : FName(*TagText);
+		if (!FHyperAIStudioNames::IsName(TagText, TEXT("TagFilter"), &Error))
+		{
+			Fail(Error);
+			return;
+		}
+		// Found, not added: a tag no actor has is no name yet, so every unmatched filter does not stay in the name table.
+		const FName Tag = TagText.IsEmpty() ? NAME_None : FName(*TagText, FNAME_Find);
+		const bool bTagUnmatched = !TagText.IsEmpty() && Tag.IsNone();
 		const FString LabelText = Query.LabelFilter.TrimStartAndEnd();
 		const ABrush* DefaultBrush = World.GetDefaultBrush();
 		int32 Scanned = 0;
@@ -913,7 +944,7 @@ namespace HyperAIStudio::SceneSpatial::Spatial
 			}
 			const AActor* Actor = *It;
 			if (!IsValid(Actor) || Actor == DefaultBrush || Actor->IsA<AWorldSettings>()) continue;
-			if (!Tag.IsNone() && !Actor->ActorHasTag(Tag)) continue;
+			if (bTagUnmatched || (!Tag.IsNone() && !Actor->ActorHasTag(Tag))) continue;
 			if (!LabelText.IsEmpty() && !LabelOf(*Actor).Contains(LabelText)) continue;
 			const FBox Box = WorldBounds(*Actor);
 			const double Distance = Box.IsValid ? FMath::Sqrt(Box.ComputeSquaredDistanceToPoint(Query.Point)) : FVector::Dist(Actor->GetActorLocation(), Query.Point);
