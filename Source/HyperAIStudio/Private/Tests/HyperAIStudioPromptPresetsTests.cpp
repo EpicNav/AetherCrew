@@ -3,6 +3,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Algo/Find.h"
+#include "ContentBrowserItemPath.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "HyperAIStudioAgents.h"
@@ -358,6 +359,27 @@ bool FHyperAIStudioPromptPresetsFillTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Without defaults, an untyped field is a blank"), NoDefaults.Contains(TEXT("grow a [Biome] on `[Paint layer]`")) && Blanks == TArray<FString>{TEXT("Biome"), TEXT("Paint layer")});
 	TestEqual(TEXT("The names a prompt uses, once each"), FString::Join(UsedNames(Preset.Prompt), TEXT(",")),
 		FString(TEXT("selected_actor,level,biome,layer,content_folder,project,selected_assets,unknown")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioPromptPresetsContentFolderTest,
+	"HyperAIStudio.PromptPresets.ContentFolder",
+	HyperAIStudio::PromptPresetsTests::Flags)
+
+bool FHyperAIStudioPromptPresetsContentFolderTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::PromptPresets;
+	// Opening the picker while the Content Browser showed /All asserted in the engine's GetInternalPathString.
+	TestEqual(TEXT("A Content Browser with no folder gives none"), ContentFolderOf(FContentBrowserItemPath()), FString());
+	const FContentBrowserItemPath All(TEXT("/All"), EContentBrowserPathType::Virtual);
+	TestFalse(TEXT("/All is a virtual folder with no content folder behind it"), All.HasInternalPath());
+	TestEqual(TEXT("so it gives none, without asserting"), ContentFolderOf(All), FString());
+	TestEqual(TEXT("A content folder comes through as it is"),
+		ContentFolderOf(FContentBrowserItemPath(TEXT("/Game/Props"), EContentBrowserPathType::Internal)), FString(TEXT("/Game/Props")));
+	const FPromptContext Context = CaptureContext();
+	TestFalse(TEXT("The captured context always has a folder to write to"), Context.ContentFolder.IsEmpty());
 	return true;
 }
 

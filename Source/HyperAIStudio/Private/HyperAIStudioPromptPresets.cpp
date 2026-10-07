@@ -935,7 +935,7 @@ namespace HyperAIStudio::PromptPresets
 				const UClass* Class = Asset.GetClass();
 				Context.AssetClasses.Add(Class ? ClassChain(Class, nullptr) : Asset.AssetClassPath.GetAssetName().ToString());
 			}
-			Context.ContentFolder = Browser.GetCurrentPath().GetInternalPathString();
+			Context.ContentFolder = ContentFolderOf(Browser.GetCurrentPath());
 			if (Context.ContentFolder.IsEmpty() && !Assets.IsEmpty())
 			{
 				Context.ContentFolder = FPackageName::GetLongPackagePath(Assets[0].PackageName.ToString());
@@ -946,6 +946,11 @@ namespace HyperAIStudio::PromptPresets
 			Context.ContentFolder = DefaultContentFolder;
 		}
 		return Context;
+	}
+
+	FString ContentFolderOf(const FContentBrowserItemPath& Path)
+	{
+		return Path.HasInternalPath() ? Path.GetInternalPathString() : FString();
 	}
 
 	FString ContextValue(const FString& Token, const FPromptContext& Context)

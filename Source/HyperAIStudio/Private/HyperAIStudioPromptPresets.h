@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 
+struct FContentBrowserItemPath;
 struct FHyperAIStudioRuntimeToolBinding;
 
 /** A blank in a preset's prompt, written {{Name}}: filled from the picker, else the selection, else Default. */
@@ -158,6 +159,11 @@ namespace HyperAIStudio::PromptPresets
 
 	/** The selection, level, folder and project now. */
 	FPromptContext CaptureContext();
+	/**
+	 * The content folder a Content Browser path stands for, or empty when it has none: a virtual folder such as /All,
+	 * Favorites or a collection, where the engine's GetInternalPathString would assert.
+	 */
+	FString ContentFolderOf(const FContentBrowserItemPath& Path);
 	/**
 	 * The preset's prompt with each {{name}} filled: from Values (typed in the picker), else the selection or level for a
 	 * context token, else the placeholder's default (with bUseDefaults). Anything left becomes "[Label]", listed in
