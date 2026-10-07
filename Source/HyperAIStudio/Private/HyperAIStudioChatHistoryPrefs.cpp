@@ -260,7 +260,16 @@ void UHyperAIStudioChatHistoryPrefs::Forget(const FString& SessionId)
 TArray<FString> UHyperAIStudioChatHistoryPrefs::GetRecentPromptPresets()
 {
 	const UHyperAIStudioChatHistoryPrefs* Prefs = GetDefault<UHyperAIStudioChatHistoryPrefs>();
-	return Prefs ? Prefs->RecentPromptPresets : TArray<FString>();
+	TArray<FString> Out;
+	if (!Prefs) return Out;
+	// Each once, as the ini may list one twice after a hand edit, a merge or a copied Saved folder: the picker's list
+	// would hold that preset twice, which Slate's list view asserts on. AddUnique ignores case, as the lookups do.
+	for (const FString& Id : Prefs->RecentPromptPresets)
+	{
+		if (Out.Num() >= MaxRecentPromptPresets) break;
+		Out.AddUnique(Id);
+	}
+	return Out;
 }
 
 void UHyperAIStudioChatHistoryPrefs::AddRecentPromptPreset(const FString& PresetId)

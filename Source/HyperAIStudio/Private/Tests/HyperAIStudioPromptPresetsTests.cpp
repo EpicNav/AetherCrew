@@ -819,6 +819,15 @@ bool FHyperAIStudioPromptPresetsPickerTest::RunTest(const FString& Parameters)
 	HyperAIStudio::Tests::SaveWidgetShot(Picker, FIntPoint(720, 460), TEXT("prompt-picker"));
 	Picker->SetCategory(SHyperAIStudioPromptPicker::RecentCategory);
 	TestTrue(TEXT("Recent lists what was used last"), Picker->NumShown() == 1 && Picker->GetShown(0)->Id == TEXT("vfx-niagara.campfire"));
+	// A hand-edited, merged or copied ini can list a preset twice. Listed twice, Slate's list view asserts once it builds
+	// its rows, which the drawing below does.
+	Prefs->RecentPromptPresets = {TEXT("vfx-niagara.campfire"), TEXT("VFX-Niagara.Campfire"), TEXT("vfx-niagara.campfire")};
+	TestEqual(TEXT("Recent reads a preset listed twice once"), HyperAIStudio::PromptPresets::Recent().Num(), 1);
+	Picker->SetCategory(FString());
+	Picker->SetCategory(SHyperAIStudioPromptPicker::RecentCategory);
+	TestEqual(TEXT("and the Recent list shows it once"), Picker->NumShown(), 1);
+	HyperAIStudio::Tests::SaveWidgetShot(Picker, FIntPoint(720, 460), TEXT("prompt-picker-recent"));
+	Prefs->RecentPromptPresets = {TEXT("vfx-niagara.campfire")};
 	Picker->SetCategory(FString());
 	TestEqual(TEXT("All shows every preset"), Picker->NumShown(), 4);
 	Picker->SetSearchText(TEXT("niagara"));
