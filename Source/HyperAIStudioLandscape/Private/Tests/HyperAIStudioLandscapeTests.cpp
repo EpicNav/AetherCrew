@@ -173,7 +173,8 @@ bool FHyperAIStudioLandscapeEndToEndTest::RunTest(const FString& Parameters)
 	Create.Noise.Amplitude = 40.f;
 	Create.Noise.Wavelength = 150.f;
 	Create.PaintLayers = {TEXT("Grass"), TEXT("Rock"), TEXT("Snow")};
-	Create.LayerInfoFolder = Folder;
+	// Given with trailing slashes, which the tool drops: the engine would make Folder//Grass_LayerInfo of them and stop.
+	Create.LayerInfoFolder = Folder + TEXT("//");
 	FHyperAILandscapeOp Flatten = Op(TEXT("landscape.sculpt"), Label);
 	Flatten.Mode = TEXT("flatten");
 	Flatten.Center = FVector(0.0, 0.0, 0.0);
@@ -729,6 +730,67 @@ bool FHyperAIStudioLandscapeRoadLayerTest::RunTest(const FString& Parameters)
 		AddInfo(TEXT("Checked the open level only; unattended runs of a saved level check the other kind too."));
 	}
 	return CheckRoadLayers(*this, bPartitioned ? TEXT("with World Partition") : TEXT("without World Partition"));
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioLandscapeMalformedPathsTest,
+	"HyperAIStudio.NativeTools.Worldbuilding.LandscapeMalformedPaths",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioLandscapeMalformedPathsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::LandscapeTests;
+	if (!GEditor || !GEditor->GetEditorWorldContext().World())
+	{
+		AddInfo(TEXT("Skipped: no editor world."));
+		return true;
+	}
+	// Each of these once reached CreatePackage with a double slash, or an FName past 1023 characters, and stopped the
+	// editor; a dry run checks every op as an apply does, so each is refused here.
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	const FString Label = TEXT("HyperAI_TestMalformed_") + Suffix;
+	const FString Blob = FString::ChrN(1100, TEXT('a'));
+	FHyperAILandscapeOp Create = Op(TEXT("landscape.create"), Label);
+	Create.Size = 126.f;
+	Create.PaintLayers = {TEXT("Grass")};
+	auto Refused = [](const FHyperAILandscapePlanReport& Report, const TCHAR* Op, const TCHAR* Words)
+	{
+		return !Report.bOk && Report.Status == TEXT("invalid_request") && Report.Diagnostic.Contains(Op) && Report.Diagnostic.Contains(Words);
+	};
+	for (const FString& Folder : {FString(TEXT("/Game//Landscape")), FString(TEXT("/Game/Land scape")), FString(TEXT("/Game/Land.scape")), FString(TEXT("/Engine/Landscape"))})
+	{
+		FHyperAILandscapeOp Made = Create;
+		Made.LayerInfoFolder = Folder;
+		const FHyperAILandscapePlanReport Report = Run({Made}, /*bDryRun=*/true);
+		TestTrue(FString::Printf(TEXT("create refuses LayerInfoFolder %s: %s"), *Folder.Left(40), *Report.Diagnostic.Left(200)), Refused(Report, TEXT("Operation 0"), TEXT("LayerInfoFolder")));
+		FHyperAILandscapeOp Added = Op(TEXT("landscape.add_paint_layer"), Label);
+		Added.PaintLayers = {TEXT("Rock")};
+		Added.LayerInfoFolder = Folder;
+		const FHyperAILandscapePlanReport Adding = Run({Create, Added}, /*bDryRun=*/true);
+		TestTrue(FString::Printf(TEXT("and add_paint_layer, which never checked it: %s"), *Adding.Diagnostic.Left(200)), Refused(Adding, TEXT("Operation 1"), TEXT("LayerInfoFolder")));
+	}
+	// Past an FName's length, any field is refused before a check reads it.
+	FHyperAILandscapeOp LongFolder = Create;
+	LongFolder.LayerInfoFolder = TEXT("/Game/") + Blob;
+	TestTrue(TEXT("a LayerInfoFolder past an FName's length is refused, named"), Refused(Run({LongFolder}, /*bDryRun=*/true), TEXT("Operations[0].LayerInfoFolder"), TEXT("characters long")));
+	FHyperAILandscapeOp Trailing = Create;
+	Trailing.LayerInfoFolder = TEXT("/Game/__HyperAIStudioTests/Landscape_") + Suffix + TEXT("//");
+	TestTrue(TEXT("trailing slashes are dropped, not refused"), Run({Trailing}, /*bDryRun=*/true).bOk);
+	FHyperAILandscapeOp Heightmap = Create;
+	Heightmap.Heightmap = TEXT("/Game//T_Heights");
+	TestTrue(TEXT("a heightmap with a double slash is not loaded"), Refused(Run({Heightmap}, /*bDryRun=*/true), TEXT("Operation 0"), TEXT("is not a texture")));
+	Heightmap.Heightmap = TEXT("/Game/") + Blob;
+	TestTrue(TEXT("nor one past an FName's length"), Refused(Run({Heightmap}, /*bDryRun=*/true), TEXT("Operations[0].Heightmap"), TEXT("characters long")));
+	FHyperAILandscapeOp Material = Create;
+	Material.Material = TEXT("/Game//M_Valley");
+	TestTrue(TEXT("nor a material with a double slash"), Refused(Run({Material}, /*bDryRun=*/true), TEXT("Operation 0"), TEXT("is not a material")));
+	FHyperAILandscapeOp NewMaterial = Op(TEXT("landscape.create_material"), FString());
+	NewMaterial.Material = TEXT("/Game/") + Blob;
+	NewMaterial.PaintLayers = {TEXT("Grass")};
+	TestTrue(TEXT("a new material's path past an FName's length is refused"), Refused(Run({NewMaterial}, /*bDryRun=*/true), TEXT("Operations[0].Material"), TEXT("characters long")));
+	NewMaterial.Material = TEXT("/Game//M_Valley");
+	TestTrue(TEXT("and one with a double slash"), Refused(Run({NewMaterial}, /*bDryRun=*/true), TEXT("Operation 0"), TEXT("free path under /Game")));
+	return true;
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
