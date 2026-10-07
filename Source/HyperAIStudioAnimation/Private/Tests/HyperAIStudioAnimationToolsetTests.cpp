@@ -380,7 +380,8 @@ bool FHyperAIStudioAnimationClosedSchemaTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Mutation between pages rejects the stale cursor"),
 			StalePageReport.Status, FString(TEXT("stale_cursor_revision")));
 		SelectorSequence->Notifies.Reset();
-		const FString LongName = FString::ChrN(300, TEXT('L'));
+		// The object path stays within FHyperAIStudioNames::MaxLength: one past it is refused before it is looked up.
+		const FString LongName = FString::ChrN(230, TEXT('L'));
 		UPackage* LongPackage = CreatePackage(
 			*(TEXT("/Game/HyperAIStudioTests/") + LongName));
 		UAnimSequence* LongSequence = NewObject<UAnimSequence>(
@@ -397,6 +398,15 @@ bool FHyperAIStudioAnimationClosedSchemaTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Oversized base record fails without a non-progress cursor"),
 			SmallBudgetReport.Status == TEXT("record_exceeds_output_budget")
 			&& SmallBudgetReport.NextCursor.IsEmpty());
+		FHyperAIAnimationInspectRequest PastNameLength = SmallBudget;
+		PastNameLength.AssetPaths = {TEXT("/Game/HyperAIStudioTests/") + FString::ChrN(1023 - 25, TEXT('L'))};
+		const FHyperAIAnimationInspectReport PastNameLengthReport =
+			UHyperAIStudioAnimationToolset::hyper_animation_inspect(PastNameLength);
+		TestFalse(TEXT("A path at an FName's length is refused, not loaded"), PastNameLengthReport.bOk);
+		FHyperAIAnimationInspectRequest DoubleSlash = SmallBudget;
+		DoubleSlash.AssetPaths = {TEXT("/Game/HyperAIStudioTests//Walk.Walk")};
+		TestFalse(TEXT("and so is one with a double slash, which a load would make a package of"),
+			UHyperAIStudioAnimationToolset::hyper_animation_inspect(DoubleSlash).bOk);
 		SelectorSequence->Notifies.SetNum(
 			FHyperAIStudioAnimationContracts::MaxElementsPerAsset + 128);
 		FHyperAIStudioAnimationValueSnapshot BoundedSnapshot;
