@@ -1993,7 +1993,8 @@ namespace HyperAIStudio::BlueprintStructure::Private
 			const bool bInterfaceKnown = NewInterfaces.Contains(PackageOf(Op.Interface)) || (LoadBlueprint(Op.Interface) && FBlueprintEditorUtils::IsInterfaceBlueprint(LoadBlueprint(Op.Interface)));
 			if (Kind == TEXT("interface.create"))
 			{
-				if (!IsProjectPath(Op.Interface, Error) || FPackageName::DoesPackageExist(PackageOf(Op.Interface)) || NewInterfaces.Contains(PackageOf(Op.Interface)))
+				// Free in memory too, as the struct and enum creates ask: an unsaved asset there is not on disk yet.
+				if (!IsProjectPath(Op.Interface, Error) || !FHyperAIStudioNames::IsFreePackage(PackageOf(Op.Interface)) || NewInterfaces.Contains(PackageOf(Op.Interface)))
 				{
 					return Fail(Error.IsEmpty() ? FString::Printf(TEXT("%s exists already."), *Op.Interface) : Error);
 				}
@@ -2453,6 +2454,14 @@ FHyperAIBlueprintStructurePlanReport FHyperAIStudioBlueprintStructureContracts::
 		const FString OperationId = Report.OperationId;
 		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId]()
 			{
+				// The editor may have moved on while the plan waited (the Blueprint deleted, a path taken), so it is checked
+				// again before anything changes.
+				FString Problem;
+				if (!Check(Request, LoadBlueprint(Request.BlueprintPath), Problem))
+				{
+					RecordOutcome(PlanToolName, OperationId, Request.BlueprintPath, false, TEXT("The editor changed while the plan waited for approval: ") + Problem);
+					return;
+				}
 				const FHyperAIBlueprintStructurePlanReport Done = Execute(Request, OperationId);
 				RecordOutcome(PlanToolName, OperationId, Done.BlueprintPath, Done.bOk, Done.Diagnostic);
 			}, Error))
