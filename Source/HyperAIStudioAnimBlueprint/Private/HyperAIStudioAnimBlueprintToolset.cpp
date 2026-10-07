@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioAnimBlueprintToolset.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 
@@ -112,7 +113,7 @@ namespace HyperAIStudio::AnimBlueprint::Private
 			{
 				Skeleton = Gate::ResolveSkeleton(Payload.SkeletonPath);
 				Parent = bInterface ? nullptr : Gate::ResolveParentClass(Payload.ParentClassPath, Error);
-				if (Blueprint || FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(Payload.TargetPath))
+				if (Blueprint || !FHyperAIStudioNames::IsFreePackage(FPackageName::ObjectPathToPackageName(Payload.TargetPath))
 					|| (!Skeleton && !(bInterface && Payload.SkeletonPath.IsEmpty())) || (!bInterface && !Parent))
 				{
 					return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("create_precondition_changed"),
@@ -235,7 +236,7 @@ bool FHyperAIStudioAnimBlueprintContracts::IsCanonicalProjectObjectPath(const FS
 		if (Character < 0x20 || Character == 0x7F) return false;
 	}
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason)) return false;
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason)) return false;
 	const FString PackageName = FPackageName::ObjectPathToPackageName(Path);
 	const FString ObjectName = FPackageName::ObjectPathToObjectName(Path);
 	return !PackageName.IsEmpty() && !ObjectName.IsEmpty() && FPackageName::GetLongPackageAssetName(PackageName) == ObjectName;
@@ -539,6 +540,12 @@ FHyperAIAnimBlueprintApplyPlanReport FHyperAIStudioAnimBlueprintContracts::Build
 	{
 		return Reject(TEXT("game_thread_required"), TEXT("Animation Blueprint planning runs on the game thread."));
 	}
+	// Ops' names, bones, slots and assets become FNames and lookups, which stop the editor past an FName's length.
+	FString NameReason;
+	if (!FHyperAIStudioNames::CheckRequest(Request, &NameReason))
+	{
+		return Reject(TEXT("invalid_request"), NameReason);
+	}
 	if (Request.bDryRun && (!Request.OperationId.IsEmpty() || !Request.ExpectedPlanHash.IsEmpty()))
 	{
 		return Reject(TEXT("unexpected_submission_fields"), TEXT("A dry run takes no operation_id or expected_plan_hash."));
@@ -568,7 +575,8 @@ FHyperAIAnimBlueprintApplyPlanReport FHyperAIStudioAnimBlueprintContracts::Build
 	const bool bCreatingInterface = Request.bCreate && Gate::IsLayerInterfaceClass(Request.ParentClassPath);
 	if (Request.bCreate)
 	{
-		if (Blueprint || FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(Request.TargetPath)))
+		// Free in memory too: an unsaved asset there of another class would stop the editor when the Blueprint is made.
+		if (Blueprint || !FHyperAIStudioNames::IsFreePackage(FPackageName::ObjectPathToPackageName(Request.TargetPath)))
 		{
 			return Reject(TEXT("target_exists"), TEXT("An asset already exists at target_path; inspect and edit it instead."));
 		}

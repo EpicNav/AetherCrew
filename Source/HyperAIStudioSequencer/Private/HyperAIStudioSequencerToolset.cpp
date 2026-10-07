@@ -17,6 +17,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSourceControl.h"
 #include "LevelSequence.h"
 #include "Misc/CoreDelegates.h"
@@ -90,6 +91,9 @@ namespace HyperAIStudio::SequencerTools::Private
 	{
 		const FString Trimmed = Path.TrimStartAndEnd();
 		if (Trimmed.IsEmpty() || !Trimmed.StartsWith(TEXT("/"))) return nullptr;
+		// The load makes an FName of each part, and the package it looked for: past 1023 characters, or with a double
+		// slash, either stops the editor.
+		if (!FHyperAIStudioNames::IsObjectPath(Trimmed, TEXT("Path"))) return nullptr;
 		const FString ObjectPath = Trimmed.Contains(TEXT(".")) ? Trimmed : Trimmed + TEXT(".") + FPackageName::GetShortName(Trimmed);
 		return LoadObject<T>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
@@ -897,7 +901,8 @@ namespace HyperAIStudio::SequencerTools::Private
 			if (Kind == TEXT("sequence.create"))
 			{
 				if (Plan.bSequence) return Fail(FString::Printf(TEXT("%s exists already; sequence.set changes it."), *Path));
-				if (!Path.StartsWith(TEXT("/Game/")) || !FPackageName::IsValidLongPackageName(Path) || FPackageName::DoesPackageExist(Path))
+				// Free in memory too: an unsaved asset there of another class would stop the editor when the sequence is made.
+				if (!Path.StartsWith(TEXT("/Game/")) || !FHyperAIStudioNames::IsPackagePath(Path, nullptr) || !FHyperAIStudioNames::IsFreePackage(Path))
 				{
 					return Fail(TEXT("Name the plan's Sequence as a free path under /Game, like /Game/Cinematics/LS_Intro."));
 				}
@@ -1457,6 +1462,8 @@ FHyperAISequenceInspectReport FHyperAIStudioSequencerContracts::Inspect(const FH
 {
 	using namespace HyperAIStudio::SequencerTools::Private;
 	FHyperAISequenceInspectReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	UWorld* World = EditorWorld();
 	if (Request.Sequence.TrimStartAndEnd().IsEmpty())
 	{
@@ -1547,6 +1554,8 @@ FHyperAISequencePlanReport FHyperAIStudioSequencerContracts::ApplyPlan(const FHy
 	FHyperAISequencePlanReport Report;
 	Report.OperationId = Request.OperationId.IsEmpty()
 		? FString::Printf(TEXT("sequence-%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower()) : Request.OperationId;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	UWorld* World = EditorWorld();
 	FString Error;
 	if (!World)
@@ -1593,6 +1602,19 @@ FHyperAISequencePlanReport FHyperAIStudioSequencerContracts::ApplyPlan(const FHy
 		const FString OperationId = Report.OperationId;
 		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId]()
 			{
+				// The editor may have moved on while the plan waited (an asset deleted, a path taken, the level closed),
+				// so it is checked again before anything changes.
+				FString Problem;
+				UWorld* Now = EditorWorld();
+				if (!Now || !Check(*Now, Request, Problem))
+				{
+					FHyperAISequencePlanReport Refused;
+					Refused.OperationId = OperationId;
+					Refused.Status = TEXT("invalid_request");
+					Refused.Diagnostic = Now ? TEXT("The editor changed while the plan waited for approval: ") + Problem : FString(TEXT("No level is open in the editor; nothing was changed."));
+					Record(OperationId, Refused);
+					return;
+				}
 				Record(OperationId, Execute(Request, OperationId));
 			}, Error))
 		{

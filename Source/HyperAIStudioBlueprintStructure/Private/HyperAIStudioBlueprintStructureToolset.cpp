@@ -26,6 +26,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSourceControl.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_Composite.h"
@@ -127,6 +128,12 @@ namespace HyperAIStudio::BlueprintStructure::Private
 	{
 		const FString Package = PackageOf(Path);
 		FText Reason;
+		FString NameReason;
+		if (!FHyperAIStudioNames::IsObjectPath(Path.TrimStartAndEnd(), TEXT("The path"), &NameReason))
+		{
+			OutError = NameReason;
+			return false;
+		}
 		if (!FPackageName::IsValidLongPackageName(Package, /*bIncludeReadOnlyRoots=*/false, &Reason)
 			|| Package.StartsWith(TEXT("/Script/")) || Package.StartsWith(TEXT("/Engine/")) || Package.StartsWith(TEXT("/Temp/")))
 		{
@@ -136,9 +143,15 @@ namespace HyperAIStudio::BlueprintStructure::Private
 		return true;
 	}
 
+	/** Whether Path can be loaded at all: the load makes FNames of its parts, and the package it looked for, so a path past an FName's length or with "//" stops the editor. */
+	bool IsLoadable(const FString& Path)
+	{
+		return FHyperAIStudioNames::IsObjectPath(Path.TrimStartAndEnd(), nullptr);
+	}
+
 	UBlueprint* LoadBlueprint(const FString& Path)
 	{
-		return Path.TrimStartAndEnd().IsEmpty() ? nullptr : LoadObject<UBlueprint>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		return !IsLoadable(Path) ? nullptr : LoadObject<UBlueprint>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
 
 	// ------------------------------------------------------------------------------------------------------------- types
@@ -186,6 +199,12 @@ namespace HyperAIStudio::BlueprintStructure::Private
 			}
 			Prefix = Prefix.TrimStartAndEnd().ToLower();
 			Path.TrimStartAndEndInline();
+			// Found, then loaded: an FName past its length, or a package with "//", stops the editor.
+			if (!FHyperAIStudioNames::IsObjectPath(Path, TEXT("The type's path"), &OutError))
+			{
+				OutError += FString::Printf(TEXT(" Give %s: with a path, such as object:/Script/Engine.Actor."), *Prefix);
+				return false;
+			}
 			if (Prefix == TEXT("object") || Prefix == TEXT("class"))
 			{
 				UClass* Class = FindObject<UClass>(nullptr, *Path);
@@ -1220,12 +1239,12 @@ namespace HyperAIStudio::BlueprintStructure::Private
 
 	UUserDefinedStruct* LoadStruct(const FString& Path)
 	{
-		return Path.TrimStartAndEnd().IsEmpty() ? nullptr : LoadObject<UUserDefinedStruct>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		return !IsLoadable(Path) ? nullptr : LoadObject<UUserDefinedStruct>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
 
 	UUserDefinedEnum* LoadEnum(const FString& Path)
 	{
-		return Path.TrimStartAndEnd().IsEmpty() ? nullptr : LoadObject<UUserDefinedEnum>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		return !IsLoadable(Path) ? nullptr : LoadObject<UUserDefinedEnum>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
 
 	/** The package for a new struct or enum; refused when an asset is there already. */
@@ -1311,6 +1330,9 @@ namespace HyperAIStudio::BlueprintStructure::Private
 			return false;
 		}
 		const FString Default = EnumDefault(Current->ToPinType(), Field.Default.TrimStartAndEnd());
+		// The default is imported as the field's type: a name, or an asset loaded by its path.
+		const FProperty* Property = FStructureEditorUtils::GetPropertyByGuid(&Struct, Guid);
+		if (!Default.IsEmpty() && Property && !FHyperAIStudioNames::CanImportText(*Property, Default, TEXT("Default"), &OutError)) return false;
 		if (!Default.IsEmpty() && Default != Current->DefaultValue && !FStructureEditorUtils::ChangeVariableDefaultValue(&Struct, Guid, Default))
 		{
 			OutError = FString::Printf(TEXT("'%s' is not a default a %s field takes: numbers as 100, bools as true, vectors 1,2,3, rotators 0,90,0, ")
@@ -2228,6 +2250,7 @@ FHyperAIBlueprintStructureInspectReport FHyperAIStudioBlueprintStructureContract
 {
 	using namespace HyperAIStudio::BlueprintStructure::Private;
 	FHyperAIBlueprintStructureInspectReport Report;
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	UBlueprint* Blueprint = LoadBlueprint(Request.BlueprintPath);
 	if (!Blueprint)
 	{
@@ -2392,6 +2415,8 @@ FHyperAIBlueprintStructurePlanReport FHyperAIStudioBlueprintStructureContracts::
 	using namespace HyperAIStudio::BlueprintStructure::Private;
 	FHyperAIBlueprintStructurePlanReport Report;
 	Report.OperationId = Request.OperationId.IsEmpty() ? NewOperationId(TEXT("bp-structure")) : Request.OperationId;
+	// Names, types and paths become FNames and lookups: past an FName's length, either stops the editor.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report, {TEXT("Default")})) return Report;
 	UBlueprint* Target = LoadBlueprint(Request.BlueprintPath);
 	Report.BlueprintPath = Target ? Target->GetPathName() : Request.BlueprintPath;
 	FString Error;

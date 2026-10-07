@@ -7,6 +7,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "MeshPartition.h"
 #include "MeshPartitionDefinition.h"
 #include "MeshPartitionEditorComponent.h"
@@ -337,6 +338,8 @@ namespace HyperAIStudio::MeshTerrain::Gate
 
 		bool ImportValue(const FProperty& Property, const FString& Value, UObject* Owner, void* Destination, const FString& Path, FString& OutError)
 		{
+			// The import makes names of the text, and loads an asset it names (making the package when nothing is there).
+			if (!FHyperAIStudioNames::CanImportText(Property, Value, *Path, &OutError)) return false;
 			FStringOutputDevice Errors;
 			const TCHAR* End = Property.ImportText_Direct(*Value, Destination, Owner, PPF_None, &Errors);
 			if (!End || !FString(End).TrimStartAndEnd().IsEmpty() || !Errors.IsEmpty())

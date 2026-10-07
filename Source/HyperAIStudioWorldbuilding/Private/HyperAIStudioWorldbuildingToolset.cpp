@@ -15,6 +15,7 @@
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "InstancedFoliageActor.h"
 #include "Interfaces/IPluginManager.h"
 #include "LandscapeProxy.h"
@@ -1155,8 +1156,9 @@ bool FHyperAIStudioWorldbuildingContracts::IsRegistrationAllowed(const bool bAll
 
 bool FHyperAIStudioWorldbuildingContracts::IsCanonicalProjectObjectPath(const FString& Path)
 {
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
 	if (!HyperAIStudio::Worldbuilding::Private::IsSafeExactObjectPath(Path)
-		|| !FPackageName::IsValidObjectPath(Path)) return false;
+		|| !FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path)) return false;
 	const FSoftObjectPath Reference(Path);
 	const FString PackageName = Reference.GetLongPackageName();
 	const FString AssetName = Reference.GetAssetName();
@@ -1650,6 +1652,8 @@ FHyperAIWorldApplyPlanReport FHyperAIStudioWorldbuildingContracts::BuildPlan(
 	FHyperAIWorldApplyPlanReport Report;
 	Report.bDryRun = Request.bDryRun;
 	Report.OperationId = Clip(Request.OperationId, 128);
+	// Names, layers and paths become FNames and lookups, which stop the editor past an FName's length.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	if (Request.Operations.IsEmpty() || Request.Operations.Num() > MaxOperations)
 	{
 		Report.Status = TEXT("invalid_operation_count");

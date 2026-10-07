@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioNiagaraToolset.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioAgentActivity.h"
 
@@ -705,7 +706,8 @@ bool FHyperAIStudioNiagaraContracts::IsCanonicalProjectObjectPath(const FString&
 		return false;
 	}
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason))
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason))
 	{
 		return false;
 	}
@@ -1601,6 +1603,13 @@ FHyperAINiagaraValidateReport FHyperAIStudioNiagaraContracts::Validate(
 	{
 		return Reject(TEXT("game_thread_required"), TEXT("Niagara validation reads editor state on the game thread."));
 	}
+	// Emitter names become FNames, and a golden sim cache is loaded by its path.
+	FString NameReason;
+	if (!FHyperAIStudioNames::CheckRequest(Request, &NameReason)
+		|| (!Request.GoldenSimCachePath.IsEmpty() && !FHyperAIStudioNames::IsObjectPath(Request.GoldenSimCachePath, TEXT("golden_sim_cache_path"), &NameReason)))
+	{
+		return Reject(TEXT("invalid_request"), NameReason);
+	}
 	if (!IsCanonicalProjectObjectPath(Request.TargetPath))
 	{
 		return Reject(TEXT("invalid_target_path"),
@@ -1756,6 +1765,20 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 	{
 		return Reject(TEXT("game_thread_required"),
 			TEXT("Niagara edit planning reads editor state on the game thread."));
+	}
+	// Ops' names become FNames, and their asset paths are loaded when nothing is in memory: past an FName's length, or a
+	// package with "//", either stops the editor. HLSL bodies and values are text, bounded on their own.
+	FString NameReason;
+	if (!FHyperAIStudioNames::CheckRequest(Request, &NameReason, {TEXT("Hlsl"), TEXT("Value")}))
+	{
+		return Reject(TEXT("invalid_request"), NameReason);
+	}
+	for (const FHyperAINiagaraEditOp& Op : Request.Ops)
+	{
+		if (!Op.AssetPath.IsEmpty() && !FHyperAIStudioNames::IsObjectPath(Op.AssetPath, TEXT("asset_path"), &NameReason))
+		{
+			return Reject(TEXT("invalid_request"), NameReason);
+		}
 	}
 	if (Request.bDryRun
 		&& (!Request.OperationId.IsEmpty() || !Request.ExpectedPlanHash.IsEmpty()))

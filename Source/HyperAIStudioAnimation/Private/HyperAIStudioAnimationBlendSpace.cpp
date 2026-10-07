@@ -12,6 +12,7 @@
 #include "Factories/BlendSpaceFactoryNew.h"
 #include "FileHelpers.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
 #include "UObject/Package.h"
@@ -54,7 +55,8 @@ namespace HyperAIStudio::Animation::BlendSpace
 				return nullptr;
 			}
 			const FString PackageName = FPackageName::ObjectPathToPackageName(Operation.TargetPath);
-			if (FindLoaded(Operation.TargetPath) || FPackageName::DoesPackageExist(PackageName))
+			// Free in memory too: an unsaved asset there of another class would stop the editor when the blend space is made.
+			if (FindLoaded(Operation.TargetPath) || !FHyperAIStudioNames::IsFreePackage(PackageName))
 			{
 				OutError = FString::Printf(TEXT("%s appeared after planning."), *Operation.TargetPath);
 				return nullptr;
@@ -214,7 +216,7 @@ namespace HyperAIStudio::Animation::BlendSpace
 		{
 			const bool bCreates = Payload.Operations[0].Kind == EKind::BlendSpaceCreate;
 			UBlendSpace* Space = FindLoaded(Target);
-			if (bCreates ? (Space || FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(Target))) : !Space)
+			if (bCreates ? (Space || !FHyperAIStudioNames::IsFreePackage(FPackageName::ObjectPathToPackageName(Target))) : !Space)
 			{
 				return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("target_changed"), bCreates
 					? FString::Printf(TEXT("%s appeared after planning; nothing was created."), *Target)

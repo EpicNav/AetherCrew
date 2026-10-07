@@ -6,6 +6,7 @@
 #include "Editor.h"
 #include "Engine/Texture.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "MaterialEditingLibrary.h"
 #include "MaterialGraph/MaterialGraphNode.h"
 #include "MaterialShared.h"
@@ -219,7 +220,7 @@ namespace HyperAIStudio::Materials::Gate
 		T* ResolveAsset(const FString& Path, FString& OutError)
 		{
 			const FString Trimmed = Path.TrimStartAndEnd();
-			if (Trimmed.Len() > 512 || !Trimmed.StartsWith(TEXT("/")) || !FPackageName::IsValidObjectPath(Trimmed))
+			if (!FHyperAIStudioNames::IsObjectPath(Trimmed, nullptr) || !FPackageName::IsValidObjectPath(Trimmed))
 			{
 				OutError = FString::Printf(TEXT("'%s' is not an object path like /Game/Folder/Asset.Asset."), *Trimmed.Left(128));
 				return nullptr;

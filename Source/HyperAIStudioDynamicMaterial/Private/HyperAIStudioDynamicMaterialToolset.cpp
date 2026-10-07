@@ -31,6 +31,7 @@
 #include "Engine/Engine.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "Internationalization/Text.h"
 #include "Interfaces/IPluginManager.h"
 #include "Material/DynamicMaterialInstance.h"
@@ -1827,7 +1828,8 @@ bool FHyperAIStudioDynamicMaterialContracts::IsCanonicalProjectObjectPath(const 
 		|| Path.Contains(TEXT(":")) || Path.Contains(TEXT("*")) || Path.Contains(TEXT("?"))) return false;
 	for (int32 Index = 0; Index < Path.Len(); ++Index) if (Path[Index] == TEXT('\0')) return false;
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason)) return false;
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason)) return false;
 	const FString Package = FPackageName::ObjectPathToPackageName(Path);
 	const FString Object = FPackageName::ObjectPathToObjectName(Path);
 	return !Package.IsEmpty() && FPackageName::GetLongPackageAssetName(Package) == Object;

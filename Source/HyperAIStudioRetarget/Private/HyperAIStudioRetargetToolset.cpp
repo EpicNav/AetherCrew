@@ -11,6 +11,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSourceControl.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Guid.h"
@@ -86,6 +87,12 @@ namespace HyperAIStudio::Retarget::Private
 	{
 		const FString Package = PackageOf(Path);
 		FText Reason;
+		FString NameReason;
+		if (!FHyperAIStudioNames::IsObjectPath(Path.TrimStartAndEnd(), TEXT("The path"), &NameReason))
+		{
+			OutError = NameReason;
+			return false;
+		}
 		if (!FPackageName::IsValidLongPackageName(Package, /*bIncludeReadOnlyRoots=*/false, &Reason)
 			|| Package.StartsWith(TEXT("/Script/")) || Package.StartsWith(TEXT("/Engine/")) || Package.StartsWith(TEXT("/Temp/")))
 		{
@@ -113,7 +120,9 @@ namespace HyperAIStudio::Retarget::Private
 	template <typename T>
 	T* Load(const FString& Path)
 	{
-		return Path.TrimStartAndEnd().IsEmpty() ? nullptr : LoadObject<T>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		// The load makes an FName of each part, and the package it looked for: past 1023 characters, or with "//", either
+		// stops the editor.
+		return !FHyperAIStudioNames::IsObjectPath(Path.TrimStartAndEnd(), nullptr) ? nullptr : LoadObject<T>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
 
 	bool HasBone(const USkeletalMesh* Mesh, const FString& Bone)
@@ -708,6 +717,12 @@ namespace HyperAIStudio::Retarget::Private
 				{
 					return Fail(Why);
 				}
+				// Each copy is named Prefix + the animation's name, its Search replaced, + Suffix, and its package is the
+				// folder and that name: kept short enough that the package's FName always fits.
+				if (Op.Prefix.Len() + Op.Suffix.Len() + Op.Replace.Len() > 128)
+				{
+					return Fail(TEXT("Prefix, Suffix and Replace together are at most 128 characters."));
+				}
 				continue;
 			}
 			return Fail(TEXT("Unknown op; see hyper_retarget_apply_plan's description."));
@@ -998,6 +1013,8 @@ FHyperAIRetargetInspectReport FHyperAIStudioRetargetContracts::Inspect(const FHy
 {
 	using namespace HyperAIStudio::Retarget::Private;
 	FHyperAIRetargetInspectReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	if (Request.Paths.IsEmpty() || Request.Paths.Num() > 64)
 	{
 		Report.Diagnostic = TEXT("Give 1 to 64 Paths: IK Rigs, IK Retargeters or skeletal meshes.");
@@ -1039,6 +1056,8 @@ FHyperAIRetargetPlanReport FHyperAIStudioRetargetContracts::ApplyPlan(const FHyp
 	FHyperAIRetargetPlanReport Report;
 	Report.OperationId = Request.OperationId.IsEmpty()
 		? FString::Printf(TEXT("retarget-%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower()) : Request.OperationId;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	FString Error;
 	if (!Check(Request, Error))
 	{
@@ -1074,6 +1093,18 @@ FHyperAIRetargetPlanReport FHyperAIStudioRetargetContracts::ApplyPlan(const FHyp
 		const FString OperationId = Report.OperationId;
 		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId]()
 			{
+				// The editor may have moved on while the plan waited (an asset deleted, a path taken, the level closed),
+				// so it is checked again before anything changes.
+				FString Problem;
+				if (!Check(Request, Problem))
+				{
+					FHyperAIRetargetPlanReport Refused;
+					Refused.OperationId = OperationId;
+					Refused.Status = TEXT("invalid_request");
+					Refused.Diagnostic = TEXT("The editor changed while the plan waited for approval: ") + Problem;
+					Record(OperationId, Refused);
+					return;
+				}
 				Record(OperationId, Execute(Request, OperationId));
 			}, Error))
 		{

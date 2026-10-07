@@ -14,6 +14,7 @@
 #include "Components/Widget.h"
 #include "Engine/Texture2D.h"
 #include "Fonts/SlateFontInfo.h"
+#include "HyperAIStudioNames.h"
 #include "Internationalization/TextNamespaceUtil.h"
 #include "Internationalization/TextPackageNamespaceUtil.h"
 #include "Materials/MaterialInterface.h"
@@ -354,6 +355,8 @@ namespace HyperAIStudio::UI::WidgetOps
 
 		bool Import(const FProperty& Property, const FString& Text, UObject* Owner, void* Destination)
 		{
+			// The import makes names of the text, and loads an asset it names (making the package when nothing is there).
+			if (!FHyperAIStudioNames::CanImportText(Property, Text, TEXT("value"))) return false;
 			FOutputDeviceNull Quiet;
 			const TCHAR* End = Property.ImportText_Direct(*Text, Destination, Owner, PPF_None, &Quiet);
 			while (End && FChar::IsWhitespace(*End))
@@ -394,7 +397,12 @@ namespace HyperAIStudio::UI::WidgetOps
 			}
 			if (!Text.Contains(TEXT("/")))
 			{
-				return FSoftClassPath(TEXT("/Script/UMG.") + Text).TryLoadClass<UWidget>();
+				return FHyperAIStudioNames::IsName(Text, nullptr) ? FSoftClassPath(TEXT("/Script/UMG.") + Text).TryLoadClass<UWidget>() : nullptr;
+			}
+			// Loaded when nothing is in memory: an FName past its length, or a package with "//", stops the editor.
+			if (!FHyperAIStudioNames::IsObjectPath(Text, nullptr))
+			{
+				return nullptr;
 			}
 			if (UClass* Class = FSoftClassPath(Text).TryLoadClass<UWidget>())
 			{
@@ -454,7 +462,7 @@ namespace HyperAIStudio::UI::WidgetOps
 		/** A texture or material an Image can draw. */
 		UObject* LoadBrushResource(const FString& Path)
 		{
-			UObject* Asset = FSoftObjectPath(Path).TryLoad();
+			UObject* Asset = FHyperAIStudioNames::IsObjectPath(Path, nullptr) ? FSoftObjectPath(Path).TryLoad() : nullptr;
 			return Asset && (Asset->IsA<UTexture2D>() || Asset->IsA<UMaterialInterface>()) ? Asset : nullptr;
 		}
 

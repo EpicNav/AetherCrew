@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioPhysicsToolset.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 #include "HyperAIStudioAgentActivity.h"
@@ -644,7 +645,8 @@ bool FHyperAIStudioPhysicsContracts::IsCanonicalProjectObjectPath(const FString&
 		}
 	}
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason))
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason))
 	{
 		return false;
 	}

@@ -14,6 +14,7 @@
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioDomainAdapter.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "InputAction.h"
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
@@ -1277,7 +1278,7 @@ bool FHyperAIStudioEnhancedInputContracts::IsCanonicalProjectObjectPath(const FS
 {
 	if (Path.IsEmpty() || Path.Len() > MaxPathCharacters || Path.Contains(TEXT(".."))
 		|| !Path.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
-		|| !FPackageName::IsValidObjectPath(Path))
+		|| !FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path))
 	{
 		return false;
 	}
@@ -1618,6 +1619,8 @@ bool FHyperAIStudioEnhancedInputContracts::ValidateOperationShape(
 	OutOperation.bCumulative = Operation.AccumulationBehavior == TEXT("cumulative");
 	if (!Operation.Key.IsEmpty())
 	{
+		// Bounded again later for the ops that take a key; this FName comes first.
+		if (!FHyperAIStudioNames::IsName(Operation.Key, TEXT("key"), &OutError)) return false;
 		OutOperation.Key = FName(*Operation.Key);
 	}
 	auto ParseValueType = [&Operation, &OutOperation]()
@@ -2684,6 +2687,9 @@ FHyperAIInputApplyPlanReport FHyperAIStudioEnhancedInputContracts::BuildPlan(
 		Report.Diagnostic = TEXT("Enhanced Input plan capture and CAS validation require Unreal's game thread.");
 		return Report;
 	}
+	// Keys, actions and paths become FNames and lookups, which stop the editor past an FName's length. The grant token is
+	// opaque and bounded on its own.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report, {TEXT("AuthorizationToken")})) return Report;
 	if (Request.Operations.IsEmpty() || Request.Operations.Num() > MaxOperations
 		|| Request.OperationId.Len() > 128
 		|| Request.AuthorizationToken.Len() > MaxAuthorizationTokenCharacters)

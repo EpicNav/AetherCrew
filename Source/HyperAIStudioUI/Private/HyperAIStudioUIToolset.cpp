@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioUIToolset.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioUIAnimation.h"
 
@@ -543,7 +544,8 @@ bool FHyperAIStudioUIContracts::IsCanonicalProjectObjectPath(const FString& Path
 		|| Path.Contains(TEXT(":"))
 		|| HyperAIStudio::UI::Toolset::Private::HasControlCharacter(Path)) return false;
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason)) return false;
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason)) return false;
 	const FSoftObjectPath SoftPath(Path);
 	return SoftPath.IsValid() && SoftPath.GetSubPathUtf8String().IsEmpty();
 }
@@ -1315,6 +1317,10 @@ FHyperAIUIApplyPlanReport FHyperAIStudioUIContracts::BuildFittedPlan(
 	{
 		Request.ValidationPolicy = Defaults.ValidationPolicy;
 	}
+	// Widget, animation and slot names become FNames, and classes and assets are loaded by their paths: past an FName's
+	// length, or a package with "//", either stops the editor. Values are text, bounded on their own.
+	FHyperAIUIApplyPlanReport Refused;
+	if (FHyperAIStudioNames::RefuseRequest(Request, Refused, {TEXT("StringValue")})) return Refused;
 	FHyperAIUIApplyPlanReport Report = Fit.FreshOperationId(Request, [](const FHyperAIUIApplyPlanRequest& Planned)
 	{
 		// Widget Blueprint edit plans execute; renames, deletes and bindings keep the persisted-shadow route.

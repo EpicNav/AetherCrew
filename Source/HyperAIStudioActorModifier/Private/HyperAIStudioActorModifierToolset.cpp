@@ -9,6 +9,7 @@
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioTrustedExecution.h"
 #include "IO/IoHash.h"
 #include "Misc/CoreDelegates.h"
@@ -71,7 +72,8 @@ namespace HyperAIStudio::ActorModifier::Private
 		if (Path.IsEmpty()
 			|| Path.Len() > FHyperAIStudioActorModifierContracts::MaxPathCharacters
 			|| !Path.StartsWith(TEXT("/Game/")) || Path.Contains(TEXT("\\"))
-			|| Path.Contains(TEXT("..")) || HasControlCharacter(Path)) return false;
+			|| Path.Contains(TEXT("..")) || HasControlCharacter(Path)
+			|| !FHyperAIStudioNames::IsObjectPath(Path, nullptr)) return false;
 		const FSoftObjectPath SoftPath(Path);
 		return SoftPath.IsValid()
 			&& FPackageName::IsValidLongPackageName(SoftPath.GetLongPackageName());

@@ -12,6 +12,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSourceControl.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Guid.h"
@@ -81,6 +82,9 @@ namespace HyperAIStudio::WorldPartitionTools::Private
 	{
 		const FString Trimmed = Path.TrimStartAndEnd();
 		if (Trimmed.IsEmpty() || !Trimmed.StartsWith(TEXT("/"))) return nullptr;
+		// The load makes an FName of each part, and the package it looked for: past 1023 characters, or with a double
+		// slash, either stops the editor.
+		if (!FHyperAIStudioNames::IsObjectPath(Trimmed, TEXT("Path"))) return nullptr;
 		const FString ObjectPath = Trimmed.Contains(TEXT(".")) ? Trimmed : Trimmed + TEXT(".") + FPackageName::GetShortName(Trimmed);
 		return LoadObject<T>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
@@ -96,7 +100,7 @@ namespace HyperAIStudio::WorldPartitionTools::Private
 
 	bool IsNewAssetPath(const FString& Path)
 	{
-		return Path.StartsWith(TEXT("/Game/")) && FPackageName::IsValidLongPackageName(Path);
+		return Path.StartsWith(TEXT("/Game/")) && FHyperAIStudioNames::IsPackagePath(Path, nullptr);
 	}
 
 	bool IsIdentifier(const FString& Name)
@@ -207,6 +211,8 @@ namespace HyperAIStudio::WorldPartitionTools::Private
 				return false;
 			}
 			const FString Before = ExportValue(*Property, Container, Owner);
+			// The import makes names of the text, and loads an asset it names (making the package when nothing is there).
+			if (!FHyperAIStudioNames::CanImportText(*Property, Setting.Value, *Setting.Name, &OutError)) return false;
 			if (bNotify && Owner) Owner->PreEditChange(Property);
 			const TCHAR* Rest = Property->ImportText_InContainer(*Setting.Value, Container, Owner, PPF_None);
 			if (bNotify && Owner)
@@ -545,7 +551,8 @@ namespace HyperAIStudio::WorldPartitionTools::Private
 					if (!Type.IsEmpty() && Existing->IsRuntime() != bRuntime) return Fail(FString::Printf(TEXT("%s is an existing %s data layer asset."), *Path, Existing->IsRuntime() ? TEXT("runtime") : TEXT("editor")));
 					bRuntime = Existing->IsRuntime();
 				}
-				else if (!IsNewAssetPath(Path) || FPackageName::DoesPackageExist(Path))
+				// Free in memory too: an unsaved asset there of another class would stop the editor when the layer is made.
+				else if (!IsNewAssetPath(Path) || !FHyperAIStudioNames::IsFreePackage(Path))
 				{
 					return Fail(FString::Printf(TEXT("%s is not a data layer asset, nor a free /Game path for one."), *Path));
 				}
@@ -607,7 +614,7 @@ namespace HyperAIStudio::WorldPartitionTools::Private
 				if (bCreate)
 				{
 					if (!IsNewAssetPath(Path) || !IsIdentifier(FPackageName::GetShortName(Path))) return Fail(TEXT("A new HLOD layer goes under /Game, as /Game/Folder/HLOD_Name."));
-					if (Plan.NewHLODLayers.Contains(Path.ToLower()) || Load<UHLODLayer>(Path) || FPackageName::DoesPackageExist(Path))
+					if (Plan.NewHLODLayers.Contains(Path.ToLower()) || Load<UHLODLayer>(Path) || !FHyperAIStudioNames::IsFreePackage(Path))
 					{
 						return Fail(FString::Printf(TEXT("%s exists already; hlod_layer.set changes it."), *Path));
 					}
@@ -1059,6 +1066,8 @@ FHyperAIWorldPartitionInspectReport FHyperAIStudioWorldPartitionContracts::Inspe
 {
 	using namespace HyperAIStudio::WorldPartitionTools::Private;
 	FHyperAIWorldPartitionInspectReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	UWorld* World = EditorWorld();
 	if (!World)
 	{
@@ -1159,6 +1168,8 @@ FHyperAIWorldPartitionPlanReport FHyperAIStudioWorldPartitionContracts::ApplyPla
 	FHyperAIWorldPartitionPlanReport Report;
 	Report.OperationId = Request.OperationId.IsEmpty()
 		? FString::Printf(TEXT("world-partition-%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower()) : Request.OperationId;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report, {TEXT("Value")})) return Report;
 	UWorld* World = EditorWorld();
 	FString Error;
 	if (!World)
@@ -1208,6 +1219,19 @@ FHyperAIWorldPartitionPlanReport FHyperAIStudioWorldPartitionContracts::ApplyPla
 		const FString OperationId = Report.OperationId;
 		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId]()
 			{
+				// The editor may have moved on while the plan waited (an asset deleted, a path taken, the level closed),
+				// so it is checked again before anything changes.
+				FString Problem;
+				UWorld* Now = EditorWorld();
+				if (!Now || !Check(*Now, Request, Problem))
+				{
+					FHyperAIWorldPartitionPlanReport Refused;
+					Refused.OperationId = OperationId;
+					Refused.Status = TEXT("invalid_request");
+					Refused.Diagnostic = Now ? TEXT("The editor changed while the plan waited for approval: ") + Problem : FString(TEXT("No level is open in the editor; nothing was changed."));
+					Record(OperationId, Refused);
+					return;
+				}
 				Record(OperationId, Execute(Request, OperationId));
 			}, Error))
 		{

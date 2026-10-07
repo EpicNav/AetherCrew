@@ -12,6 +12,7 @@
 #include "HyperAIStudioExternalService.h"
 #include "HyperAIStudioImageGenCookbook.h"
 #include "HyperAIStudioImageGenGate.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSettings.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Paths.h"
@@ -354,6 +355,8 @@ FHyperAIImageInspectReport FHyperAIStudioImageGenContracts::Inspect(const FHyper
 {
 	using namespace HyperAIStudio::ImageGen::Private;
 	FHyperAIImageInspectReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	Report.Capabilities = GetCapabilities();
 	auto Reject = [&](const TCHAR* Status, const FString& Diagnostic)
 	{
@@ -448,6 +451,8 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 {
 	using namespace HyperAIStudio::ImageGen::Private;
 	FHyperAIImageGenerateReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report, {TEXT("Negative"), TEXT("Value")})) return Report;
 	Report.bDryRun = Request.bDryRun;
 	Report.OperationId = Request.OperationId.Left(FHyperAIStudioDomainLimits::MaxOperationIdChars);
 	Report.ModelId = Request.ModelId;
