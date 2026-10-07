@@ -304,6 +304,20 @@ bool FHyperAIStudioModelingHandoffRefusalsTest::RunTest(const FString& Parameter
 		FHyperAIModelHandoffRequest Nobody = Request(FString());
 		Nobody.Actor = TEXT("NoSuchActor_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 		TestTrue(TEXT("an actor not in the level is refused"), Refused(C::Handoff(Nobody), TEXT("invalid_request"), TEXT("No actor in the open level")));
+		// A pasted blob or a malformed path is refused before the registry or a lookup makes an FName of it: an FName past
+		// 1023 characters, or a load's package with a double slash, stops the editor. A dry run reads them too.
+		const FString Blob = TEXT("/Game/") + FString::ChrN(1100, TEXT('a'));
+		FHyperAIModelHandoffRequest LongAsset = Request(Blob);
+		LongAsset.bDryRun = true;
+		TestTrue(TEXT("an Asset past an FName's length is refused"), Refused(C::Handoff(LongAsset), TEXT("invalid_request"), TEXT("characters long")));
+		TestTrue(TEXT("an Asset with a double slash is refused"), Refused(C::Handoff(Request(TEXT("/Game//SM_Nope"))), TEXT("invalid_request"), TEXT("double slash")));
+		FHyperAIModelHandoffRequest LongActor = Request(FString());
+		LongActor.Actor = Blob;
+		LongActor.bDryRun = true;
+		TestTrue(TEXT("an Actor past an FName's length is refused"), Refused(C::Handoff(LongActor), TEXT("invalid_request"), TEXT("characters long")));
+		FHyperAIModelHandoffRequest SlashActor = Request(FString());
+		SlashActor.Actor = TEXT("/Game//Map.Map:PersistentLevel.Nobody");
+		TestTrue(TEXT("an Actor path with a double slash is looked up by label only"), Refused(C::Handoff(SlashActor), TEXT("invalid_request"), TEXT("No actor in the open level")));
 		// Play In Editor running: refused before the request is read.
 		UWorld* World = GEditor->GetEditorWorldContext().World();
 		if (!GEditor->PlayWorld)

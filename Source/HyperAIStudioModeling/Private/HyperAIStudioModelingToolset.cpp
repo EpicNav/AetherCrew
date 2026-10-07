@@ -11,6 +11,7 @@
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioModelingGate.h"
 #include "HyperAIStudioModelingHandoff.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSourceControl.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Guid.h"
@@ -54,10 +55,13 @@ namespace HyperAIStudio::ModelingTools::Private
 		return Path;
 	}
 
-	UStaticMesh* LoadMesh(const FString& Reference)
+	/** The static mesh at Reference, or null with OutReason when Reference cannot be a path at all. */
+	UStaticMesh* LoadMesh(const FString& Reference, FString* OutReason = nullptr)
 	{
 		const FString Trimmed = Reference.TrimStartAndEnd();
 		if (!Trimmed.StartsWith(TEXT("/"))) return nullptr;
+		// Checked before the lookup: an FName past its length, or a load's package with a double slash, stops the editor.
+		if (!FHyperAIStudioNames::IsObjectPath(Trimmed, TEXT("Asset"), OutReason)) return nullptr;
 		const FString ObjectPath = Trimmed.Contains(TEXT(".")) ? Trimmed : Trimmed + TEXT(".") + FPackageName::GetShortName(Trimmed);
 		if (UStaticMesh* Found = FindObject<UStaticMesh>(nullptr, *ObjectPath)) return Found;
 		// A path with nothing on disk is never loaded: the failed load would leave an empty package behind.
@@ -200,6 +204,14 @@ FHyperAIModelInspectReport FHyperAIStudioModelingContracts::Inspect(const FHyper
 		Report.Diagnostic = FString::Printf(TEXT("Folder '%s' is not a content path, like /Game/HyperAI/Models."), *Request.Folder);
 		return Report;
 	}
+	// Checked before the registry or a lookup makes an FName of them, which stops the editor past 1023 characters.
+	FString Refusal;
+	if ((Path != TEXT("/") && !FHyperAIStudioNames::IsObjectPath(Path, TEXT("Folder"), &Refusal))
+		|| (!Request.Asset.TrimStartAndEnd().IsEmpty() && !FHyperAIStudioNames::IsObjectPath(Request.Asset.TrimStartAndEnd(), TEXT("Asset"), &Refusal)))
+	{
+		Report.Diagnostic = Refusal;
+		return Report;
+	}
 	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 	TArray<FAssetData> Assets;
 	Registry.GetAssetsByPath(FName(*Path), Assets, /*bRecursive=*/true);
@@ -268,6 +280,8 @@ FHyperAIModelPlanReport FHyperAIStudioModelingContracts::ApplyPlan(const FHyperA
 	FHyperAIModelPlanReport Report;
 	Report.OperationId = Request.OperationId.IsEmpty()
 		? FString::Printf(TEXT("model-%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower()) : Request.OperationId;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report, {TEXT("Points"), TEXT("Path"), TEXT("Params")})) return Report;
 	if (IsPlaying())
 	{
 		Report.Status = TEXT("invalid_request");
@@ -376,14 +390,15 @@ FHyperAIModelValidateReport FHyperAIStudioModelingContracts::Validate(const FHyp
 	}
 	for (const FString& Path : Request.Assets)
 	{
-		UStaticMesh* Mesh = LoadMesh(Path);
+		FString Reason;
+		UStaticMesh* Mesh = LoadMesh(Path, &Reason);
 		if (!Mesh)
 		{
 			FHyperAIModelIssue& Missing = Report.Issues.AddDefaulted_GetRef();
-			Missing.Asset = Path;
+			Missing.Asset = Path.Left(FHyperAIStudioNames::MaxLength);
 			Missing.Severity = TEXT("error");
 			Missing.Code = TEXT("not_a_static_mesh");
-			Missing.Message = FString::Printf(TEXT("%s is not a static mesh."), *Path);
+			Missing.Message = Reason.IsEmpty() ? FString::Printf(TEXT("%s is not a static mesh."), *Path) : Reason;
 			continue;
 		}
 		FString Line;
