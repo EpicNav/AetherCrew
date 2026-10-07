@@ -16,6 +16,7 @@
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSourceControl.h"
 #include "JsonObjectConverter.h"
 #include "LandscapeInfo.h"
@@ -125,8 +126,27 @@ namespace HyperAIStudio::PCGScatterTools::Private
 	{
 		const FString Trimmed = Path.TrimStartAndEnd();
 		if (Trimmed.IsEmpty() || !Trimmed.StartsWith(TEXT("/"))) return nullptr;
+		// The load makes an FName of each part, and the package it looked for: past 1023 characters, or with a double
+		// slash, either stops the editor.
+		if (!FHyperAIStudioNames::IsObjectPath(Trimmed, TEXT("Path"))) return nullptr;
 		const FString ObjectPath = Trimmed.Contains(TEXT(".")) ? Trimmed : Trimmed + TEXT(".") + FPackageName::GetShortName(Trimmed);
 		return LoadObject<T>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+	}
+
+	/** Why a new graph cannot go at Path, or empty when it can. */
+	FString NewGraphProblem(const FString& Path, const bool bPlanned)
+	{
+		FString Reason;
+		if (!Path.StartsWith(TEXT("/Game/")) || !FHyperAIStudioNames::IsPackagePath(Path, TEXT("Graph"), &Reason))
+		{
+			return TEXT("Name the new graph as a free path under /Game, like /Game/PCG/PCG_Forest.") + (Reason.IsEmpty() ? FString() : TEXT(" ") + Reason);
+		}
+		if (bPlanned || !FHyperAIStudioNames::IsFreePackage(Path))
+		{
+			return FString::Printf(TEXT("Name the new graph as a free path under /Game, like /Game/PCG/PCG_Forest. %s is taken%s."), *Path,
+				bPlanned ? TEXT(" by an earlier op") : TEXT(" (on disk, or by an asset in memory not saved yet)"));
+		}
+		return FString();
 	}
 
 	FString PackageOf(const FString& Reference)
@@ -1117,6 +1137,9 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		return true;
 	}
 
+	/** Longest biome or species name: node titles name both, and a title is an FName. */
+	constexpr int32 MaxEcosystemName = 128;
+
 	/** An ecosystem op's biomes and species checked before anything changes. */
 	bool CheckEcosystem(const FHyperAIPCGScatterOp& Op, FString& OutError)
 	{
@@ -1134,6 +1157,10 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		{
 			const FString BiomeName = Biome.Name.TrimStartAndEnd();
 			if (BiomeName.IsEmpty() || BiomeNames.Contains(BiomeName.ToLower())) return Fail(TEXT("Name each biome, each name once."));
+			// Node titles are FNames of a biome's and a species' names together.
+			if (BiomeName.Len() > MaxEcosystemName) return Fail(FString::Printf(TEXT("A biome's Name is at most %d characters."), MaxEcosystemName));
+			FString Reason;
+			if (!FHyperAIStudioNames::IsName(Biome.Layer.TrimStartAndEnd(), TEXT("Layer"), &Reason)) return Fail(FString::Printf(TEXT("Biome %s: %s"), *BiomeName, *Reason));
 			BiomeNames.Add(BiomeName.ToLower());
 			if (Biome.Species.IsEmpty() || Biome.Species.Num() > C::MaxSpeciesPerBiome)
 			{
@@ -1151,6 +1178,7 @@ namespace HyperAIStudio::PCGScatterTools::Private
 				const FString Name = Species.Name.TrimStartAndEnd();
 				auto Bad = [&](const FString& Message) { return Fail(FString::Printf(TEXT("%s, species %s: %s"), *BiomeName, Name.IsEmpty() ? TEXT("(unnamed)") : *Name, *Message)); };
 				if (Name.IsEmpty() || Name.Equals(TEXT("none"), ESearchCase::IgnoreCase) || Seen.Contains(Name.ToLower())) return Bad(TEXT("name each species, each name once in its biome."));
+				if (Name.Len() > MaxEcosystemName) return Fail(FString::Printf(TEXT("Biome %s: a species' Name is at most %d characters."), *BiomeName, MaxEcosystemName));
 				if (Species.Meshes.IsEmpty()) return Bad(TEXT("give its Meshes."));
 				for (const FHyperAIPCGScatterMesh& Mesh : Species.Meshes)
 				{
@@ -1179,13 +1207,16 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			}
 		}
 		if (Total > C::MaxSpecies) return Fail(FString::Printf(TEXT("An ecosystem has at most %d species in all."), C::MaxSpecies));
+		FString Reason;
 		for (const FString& Layer : Op.AvoidLayers)
 		{
 			if (Layer.TrimStartAndEnd().IsEmpty()) return Fail(TEXT("AvoidLayers names paint layers."));
+			if (!FHyperAIStudioNames::IsName(Layer.TrimStartAndEnd(), TEXT("AvoidLayers"), &Reason)) return Fail(Reason);
 		}
 		for (const FString& Tag : Op.AvoidTags)
 		{
 			if (Tag.TrimStartAndEnd().IsEmpty()) return Fail(TEXT("AvoidTags names actor tags."));
+			if (!FHyperAIStudioNames::IsName(Tag.TrimStartAndEnd(), TEXT("AvoidTags"), &Reason)) return Fail(Reason);
 		}
 		return true;
 	}
@@ -1502,7 +1533,7 @@ namespace HyperAIStudio::PCGScatterTools::Private
 	 * components. Partition actors are shared by every partitioned volume on the same grid, so only what PCG manages for
 	 * this volume counts, never everything on the actor.
 	 */
-	TArray<const UInstancedStaticMeshComponent*> GeneratedComponents(const APCGVolume& Volume)
+	TArray<const UInstancedStaticMeshComponent*> GeneratedComponents(const APCGVolume& Volume, bool* OutPartial = nullptr)
 	{
 		TArray<const UInstancedStaticMeshComponent*> Out;
 		const UPCGComponent* Component = Volume.PCGComponent;
@@ -1518,6 +1549,13 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		}
 		for (const UPCGComponent* Source : Sources)
 		{
+			// A cleanup PCG runs releases these one per step over several frames, and reading them meanwhile ensures
+			// (PCGManagedResourceContainer.cpp:206 in 5.8); such a component is left out and the count is partial.
+			if (!Source->AreManagedResourcesAccessible())
+			{
+				if (OutPartial) *OutPartial = true;
+				continue;
+			}
 			Source->ForEachConstManagedResource([&Out](const UPCGManagedResource* Resource)
 			{
 				const UPCGManagedISMComponent* Managed = Cast<UPCGManagedISMComponent>(Resource);
@@ -1527,12 +1565,12 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		return Out;
 	}
 
-	/** Instances the volume's generation made; per mesh when asked. */
-	int32 CountInstances(const APCGVolume& Volume, int32* OutMeshes = nullptr, TMap<FString, int32>* OutPerMesh = nullptr)
+	/** Instances the volume's generation made; per mesh when asked. OutPartial says a cell being cleaned up was left out. */
+	int32 CountInstances(const APCGVolume& Volume, int32* OutMeshes = nullptr, TMap<FString, int32>* OutPerMesh = nullptr, bool* OutPartial = nullptr)
 	{
 		int32 Instances = 0;
 		TSet<const UStaticMesh*> Meshes;
-		for (const UInstancedStaticMeshComponent* Component : GeneratedComponents(Volume))
+		for (const UInstancedStaticMeshComponent* Component : GeneratedComponents(Volume, OutPartial))
 		{
 			if (!Component || Component->GetInstanceCount() == 0) continue;
 			Instances += Component->GetInstanceCount();
@@ -1574,7 +1612,11 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		auto Holds = [](const UPCGComponent& Each)
 		{
 			bool bHolds = false;
-			if (!Each.bGenerated) Each.ForEachConstManagedResource([&bHolds](const UPCGManagedResource* Resource) { bHolds |= Resource != nullptr; });
+			// One PCG is cleaning up drops what it held, and reading it meanwhile ensures.
+			if (!Each.bGenerated && Each.AreManagedResourcesAccessible())
+			{
+				Each.ForEachConstManagedResource([&bHolds](const UPCGManagedResource* Resource) { bHolds |= Resource != nullptr; });
+			}
 			return bHolds;
 		};
 		if (Holds(Component)) return true;
@@ -1803,16 +1845,24 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			TOptional<bool> Flag;
 			if (!ParseFlag(Op.RandomYaw, Flag)) return Fail(TEXT("RandomYaw is true or false."));
 			if (!ParseFlag(Op.AlignToGround, Flag)) return Fail(TEXT("AlignToGround is true or false."));
+			// Paths and labels are looked up, or become FNames, below: past 1023 characters, or a load's package with a
+			// double slash, either stops the editor.
+			FString Reason;
+			if ((Path.StartsWith(TEXT("/")) && !FHyperAIStudioNames::IsObjectPath(Path, TEXT("Graph"), &Reason))
+				|| !FHyperAIStudioNames::IsName(Op.Volume.TrimStartAndEnd(), TEXT("Volume"), &Reason) || !FHyperAIStudioNames::IsName(Op.Cover.TrimStartAndEnd(), TEXT("Cover"), &Reason))
+			{
+				return Fail(Reason);
+			}
 			for (const FHyperAIPCGScatterMesh& Mesh : Op.Meshes)
 			{
+				const FString MeshPath = Mesh.Mesh.TrimStartAndEnd();
+				if (MeshPath.StartsWith(TEXT("/")) && !FHyperAIStudioNames::IsObjectPath(MeshPath, TEXT("Mesh"), &Reason)) return Fail(Reason);
 				if (!Load<UStaticMesh>(Mesh.Mesh)) return Fail(FString::Printf(TEXT("%s is not a static mesh."), *Mesh.Mesh));
 			}
 			if (Kind == TEXT("graph.create"))
 			{
-				if (!Path.StartsWith(TEXT("/Game/")) || !FPackageName::IsValidLongPackageName(Path) || FPackageName::DoesPackageExist(Path) || bPlannedGraph)
-				{
-					return Fail(TEXT("Name the new graph as a free path under /Game, like /Game/PCG/PCG_Forest."));
-				}
+				const FString Problem = NewGraphProblem(Path, bPlannedGraph);
+				if (!Problem.IsEmpty()) return Fail(Problem);
 				if (Op.Meshes.IsEmpty()) return Fail(TEXT("Give the Meshes to scatter."));
 				NewGraphs.Add(Path.ToLower(), false);
 			}
@@ -1826,10 +1876,8 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			{
 				if (Kind == TEXT("ecosystem.create"))
 				{
-					if (!Path.StartsWith(TEXT("/Game/")) || !FPackageName::IsValidLongPackageName(Path) || FPackageName::DoesPackageExist(Path) || bPlannedGraph)
-					{
-						return Fail(TEXT("Name the new graph as a free path under /Game, like /Game/PCG/PCG_Forest."));
-					}
+					const FString Problem = NewGraphProblem(Path, bPlannedGraph);
+					if (!Problem.IsEmpty()) return Fail(Problem);
 					NewGraphs.Add(Path.ToLower(), true);
 				}
 				else
@@ -1870,6 +1918,8 @@ namespace HyperAIStudio::PCGScatterTools::Private
 				if (!Volume) return Fail(FString::Printf(TEXT("No PCG volume is labelled %s."), *Op.Volume));
 				if (Kind == TEXT("volume.generate") && Index != Request.Operations.Num() - 1) return Fail(TEXT("A plan generates once, as its last op."));
 				if (Kind == TEXT("volume.generate") && Volume->PCGComponent && Volume->PCGComponent->IsGenerating()) return Fail(TEXT("It is generating already."));
+				// A clear now would skip PCG's own cleanup and still report what it held as cleared.
+				if (Kind == TEXT("volume.clear") && IsBusy(*Volume)) return Fail(TEXT("It is generating or cleaning up; wait for that to finish, then clear it."));
 			}
 			else
 			{
@@ -1890,6 +1940,12 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			const bool bNew = Kind == TEXT("graph.create");
 			if (bNew)
 			{
+				// Asked again here: an asset can take the path while the plan waits for its approval.
+				if (!FHyperAIStudioNames::IsFreePackage(Path))
+				{
+					OutError = FString::Printf(TEXT("%s was taken before the graph was made (on disk, or by an asset in memory not saved yet); nothing was made there."), *Path);
+					return false;
+				}
 				UPackage* Package = CreatePackage(*Path);
 				Graph = NewObject<UPCGGraph>(Package, *FPackageName::GetShortName(Path), RF_Public | RF_Standalone | RF_Transactional);
 				if (!BuildGraph(*Graph, OutError)) return false;
@@ -1898,6 +1954,11 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			else
 			{
 				Graph = Load<UPCGGraph>(Path);
+				if (!Graph)
+				{
+					OutError = FString::Printf(TEXT("%s is no longer a PCG graph (deleted or moved while the plan waited)."), *Op.Graph);
+					return false;
+				}
 				Graph->Modify();
 			}
 			if (!ShapeGraph(*Graph, Op, bNew, OutError)) return false;
@@ -1912,6 +1973,12 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			UPCGGraph* Graph = nullptr;
 			if (Kind == TEXT("ecosystem.create"))
 			{
+				// Asked again here: an asset can take the path while the plan waits for its approval.
+				if (!FHyperAIStudioNames::IsFreePackage(Path))
+				{
+					OutError = FString::Printf(TEXT("%s was taken before the graph was made (on disk, or by an asset in memory not saved yet); nothing was made there."), *Path);
+					return false;
+				}
 				UPackage* Package = CreatePackage(*Path);
 				Graph = NewObject<UPCGGraph>(Package, *FPackageName::GetShortName(Path), RF_Public | RF_Standalone | RF_Transactional);
 				FAssetRegistryModule::AssetCreated(Graph);
@@ -1919,6 +1986,11 @@ namespace HyperAIStudio::PCGScatterTools::Private
 			else
 			{
 				Graph = Load<UPCGGraph>(Path);
+				if (!Graph)
+				{
+					OutError = FString::Printf(TEXT("%s is no longer a PCG graph (deleted or moved while the plan waited)."), *Op.Graph);
+					return false;
+				}
 				Graph->Modify();
 			}
 			TArray<FString> Notes;
@@ -1936,6 +2008,11 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		if (Kind == TEXT("volume.create"))
 		{
 			UPCGGraph* Graph = Load<UPCGGraph>(Path);
+			if (!Graph)
+			{
+				OutError = FString::Printf(TEXT("%s is no longer a PCG graph (deleted or moved while the plan waited)."), *Op.Graph);
+				return false;
+			}
 			FVector Center = Op.Center;
 			FVector2D Size = Op.Size;
 			float Height = Op.Height > 0.f ? Op.Height : DefaultHeight;
@@ -1995,6 +2072,11 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		}
 		if (Kind == TEXT("volume.clear"))
 		{
+			if (IsBusy(*Volume))
+			{
+				OutError = FString::Printf(TEXT("%s is generating or cleaning up; wait for that to finish, then clear it."), *Volume->GetActorLabel());
+				return false;
+			}
 			const int32 Before = CountInstances(*Volume);
 			Volume->PCGComponent->CleanupLocal(/*bRemoveComponents=*/true);
 			Report.Notes.Add(FString::Printf(TEXT("%s cleared of %d instance(s)."), *Volume->GetActorLabel(), Before));
@@ -2063,6 +2145,32 @@ namespace HyperAIStudio::PCGScatterTools::Private
 		return Report;
 	}
 
+	/**
+	 * A plan the person approved, checked again first: while it waited, a graph may have been deleted, its path taken
+	 * by an asset not saved yet, or the level closed or switched.
+	 */
+	FHyperAIPCGScatterPlanReport ExecuteApproved(const FHyperAIPCGScatterPlanRequest& Request, const FString& OperationId)
+	{
+		FHyperAIPCGScatterPlanReport Refused;
+		Refused.OperationId = OperationId;
+		Refused.Status = TEXT("invalid_request");
+		UWorld* World = EditorWorld();
+		FString Problem;
+		if (!World)
+		{
+			Refused.Diagnostic = TEXT("No level is open in the editor; nothing was changed.");
+		}
+		else if (!Check(*World, Request, Problem))
+		{
+			Refused.Diagnostic = TEXT("The editor changed while the plan waited for approval: ") + Problem;
+		}
+		else if (Request.bSave && World->GetOutermost()->GetName().StartsWith(TEXT("/Temp/")))
+		{
+			Refused.Diagnostic = TEXT("This level has never been saved, so there is nowhere to save the volume; nothing was changed.");
+		}
+		return Refused.Diagnostic.IsEmpty() ? Execute(Request, OperationId) : Refused;
+	}
+
 	void Record(const FString& OperationId, const FHyperAIPCGScatterPlanReport& Done)
 	{
 		// A generation's own job reports when it finishes.
@@ -2083,6 +2191,8 @@ FHyperAIPCGScatterInspectReport FHyperAIStudioPCGScatterContracts::Inspect(const
 {
 	using namespace HyperAIStudio::PCGScatterTools::Private;
 	FHyperAIPCGScatterInspectReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	if (!Request.Graph.TrimStartAndEnd().IsEmpty())
 	{
 		const UPCGGraph* Graph = Load<UPCGGraph>(Request.Graph);
@@ -2113,9 +2223,13 @@ FHyperAIPCGScatterInspectReport FHyperAIStudioPCGScatterContracts::Inspect(const
 		{
 			const UPCGComponent* Component = It->PCGComponent;
 			const FBox Bounds = It->GetComponentsBoundingBox(/*bNonColliding=*/true);
-			Report.Volumes.Add(FString::Printf(TEXT("%s: %s, %.0f x %.0f m, %d instance(s)%s"), *It->GetActorLabel(),
+			bool bPartial = false;
+			const int32 Instances = CountInstances(**It, nullptr, nullptr, &bPartial);
+			// While PCG generates or cleans up, what it manages is in flux, and a cleanup's cannot be read at all.
+			const FString Count = IsBusy(**It) || bPartial ? FString(TEXT("busy, count pending")) : FString::Printf(TEXT("%d instance(s)"), Instances);
+			Report.Volumes.Add(FString::Printf(TEXT("%s: %s, %.0f x %.0f m, %s%s"), *It->GetActorLabel(),
 				Component && Component->GetGraph() ? *Component->GetGraph()->GetPathName() : TEXT("no graph"), Bounds.GetSize().X / 100.0, Bounds.GetSize().Y / 100.0,
-				CountInstances(**It), Component && Component->IsGenerating() ? TEXT(", generating") : TEXT("")));
+				*Count, Component && Component->IsGenerating() ? TEXT(", generating") : TEXT("")));
 		}
 	}
 	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
@@ -2137,6 +2251,8 @@ FHyperAIPCGScatterPlanReport FHyperAIStudioPCGScatterContracts::ApplyPlan(const 
 	FHyperAIPCGScatterPlanReport Report;
 	Report.OperationId = Request.OperationId.IsEmpty()
 		? FString::Printf(TEXT("scatter-%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower()) : Request.OperationId;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	UWorld* World = EditorWorld();
 	FString Error;
 	if (!World)
@@ -2182,7 +2298,7 @@ FHyperAIPCGScatterPlanReport FHyperAIStudioPCGScatterContracts::ApplyPlan(const 
 		const FString OperationId = Report.OperationId;
 		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId]()
 			{
-				Record(OperationId, Execute(Request, OperationId));
+				Record(OperationId, ExecuteApproved(Request, OperationId));
 			}, Error))
 		{
 			Report.Status = TEXT("approval_not_queued");
