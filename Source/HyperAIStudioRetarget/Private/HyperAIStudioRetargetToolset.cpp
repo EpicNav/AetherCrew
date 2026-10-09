@@ -125,6 +125,48 @@ namespace HyperAIStudio::Retarget::Private
 		return !FHyperAIStudioNames::IsObjectPath(Path.TrimStartAndEnd(), nullptr) ? nullptr : LoadObject<T>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
 
+	/**
+	 * Whether every copy retarget.animations makes fits the name rule. The batch names a copy as the engine's duplication
+	 * rule does, Prefix + the name with every Search replaced + Suffix, in OutputFolder or the animation's own folder, and
+	 * makes FNames of that package and path: each replacement lengthens the name, so it is worked out per animation, and
+	 * for what a montage or blend space brings along when bIncludeReferenced is set.
+	 */
+	bool CopiesFitNames(const FHyperAIRetargetOp& Op, FString& OutError)
+	{
+		TArray<UAnimationAsset*> Copied;
+		for (const FString& Path : Op.Animations)
+		{
+			if (UAnimationAsset* Animation = Load<UAnimationAsset>(Path))
+			{
+				Copied.AddUnique(Animation);
+			}
+		}
+		// Found as the batch finds them; each adds what it references to the end of the list.
+		for (int32 Index = 0; Op.bIncludeReferenced && Index < Copied.Num(); ++Index)
+		{
+			Copied[Index]->HandleAnimReferenceCollection(Copied, /*bRecursive=*/true);
+		}
+		const FString Folder = Op.OutputFolder.TrimStartAndEnd();
+		for (const UAnimationAsset* Animation : Copied)
+		{
+			if (!IsValid(Animation))
+			{
+				continue;
+			}
+			// FString::Replace, as the rule calls it: every match, whatever its case.
+			const FString Name = Op.Prefix + (Op.Search.IsEmpty() ? Animation->GetName() : Animation->GetName().Replace(*Op.Search, *Op.Replace)) + Op.Suffix;
+			const FString Package = (Folder.IsEmpty() ? FPackageName::GetLongPackagePath(Animation->GetPathName()) : Folder) + TEXT("/") + Name;
+			if (Package.Len() > FHyperAIStudioNames::MaxLength)
+			{
+				OutError = FString::Printf(TEXT("The copy of %s would be %s..., %d characters long; a path is at most %d. Shorten OutputFolder, Prefix or Suffix%s."),
+					*Animation->GetName(), *Package.Left(80), Package.Len(), FHyperAIStudioNames::MaxLength,
+					Op.Search.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(", or Replace, which goes in for each '%s' in the name"), *Op.Search));
+				return false;
+			}
+		}
+		return true;
+	}
+
 	bool HasBone(const USkeletalMesh* Mesh, const FString& Bone)
 	{
 		return Mesh && !Bone.TrimStartAndEnd().IsEmpty() && Mesh->GetRefSkeleton().FindBoneIndex(FName(*Bone.TrimStartAndEnd())) != INDEX_NONE;
@@ -717,11 +759,14 @@ namespace HyperAIStudio::Retarget::Private
 				{
 					return Fail(Why);
 				}
-				// Each copy is named Prefix + the animation's name, its Search replaced, + Suffix, and its package is the
-				// folder and that name: kept short enough that the package's FName always fits.
 				if (Op.Prefix.Len() + Op.Suffix.Len() + Op.Replace.Len() > 128)
 				{
 					return Fail(TEXT("Prefix, Suffix and Replace together are at most 128 characters."));
+				}
+				// Replace goes in once for each match, so only the names themselves say whether the packages' FNames fit.
+				if (!CopiesFitNames(Op, Why))
+				{
+					return Fail(Why);
 				}
 				continue;
 			}
