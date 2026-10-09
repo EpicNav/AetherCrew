@@ -32,6 +32,8 @@ struct FHyperAIStudioStatus
 	bool bToolsListReachable = false;
 	bool bAgentFilesReady = false;
 	bool bProbeInProgress = false;
+	/** The editor has not finished starting, so its own MCP server cannot answer yet; the probe waits for it. */
+	bool bEditorStarting = false;
 	bool bHasProbeRun = false;
 	bool bCapabilityInventoryAvailable = false;
 	bool bCapabilityInventoryInProgress = false;
@@ -195,6 +197,12 @@ public:
 		bool bRuntimeEnabled,
 		bool bProjectDescriptorEnabled);
 	static FString FindUnsupportedCodexServiceTierConfigPath();
+	/**
+	 * Probes this editor's own Unreal MCP server with initialize and tools/list. Until the editor has finished starting
+	 * (FHyperAIStudioEditorStartupGate) nothing is sent: the probe waits and runs as soon as the editor can answer.
+	 * Returns true when it was sent at once. Other servers are probed without waiting (TestExtraMCPServerAsync).
+	 */
+	static bool ProbeOwnServerToolsListAsync(const FString& Endpoint, TFunction<void(bool bReachable, const FString& Message, int32 ToolCount)> OnComplete);
 	static bool FindExecutableOnPath(const FString& ExecutableName, FString& OutPath);
 	static FString GetCodexTerminalLaunchCommand();
 	static FString GetAgentTerminalLaunchCommand(const FString& AgentName);

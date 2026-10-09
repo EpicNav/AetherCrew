@@ -1675,6 +1675,10 @@ FText SHyperAIStudioQuickActionWindow::GetMcpStatusText() const
 	{
 		return FText::Format(LOCTEXT("McpNotListening", "MCP: port {0} closed"), FText::AsNumber(Status.ActivePort, &FNumberFormattingOptions::DefaultNoGrouping()));
 	}
+	if (Status.bEditorStarting)
+	{
+		return LOCTEXT("McpEditorStarting", "MCP: waiting for the editor to start");
+	}
 	if (!Status.bToolsListReachable)
 	{
 		return LOCTEXT("McpUnreachable", "MCP: no tool list");
@@ -1937,7 +1941,8 @@ void SHyperAIStudioQuickActionWindow::RefreshStatus(const bool bSilent)
 			const FString PreviousReadiness = Pinned->GetReadinessText().ToString();
 			Pinned->Status = NewStatus;
 			Pinned->bRefreshing = NewStatus.bProbeInProgress;
-			if (!NewStatus.bProbeInProgress)
+			// A probe waiting for the editor to start can wait a while, so that wait is said rather than left blank.
+			if (!NewStatus.bProbeInProgress || NewStatus.bEditorStarting)
 			{
 				Pinned->StatusHint = NewStatus.IsReady() ? FText::GetEmpty() : GetNextActionTextForStatus(NewStatus, false);
 			}
@@ -2038,7 +2043,11 @@ void SHyperAIStudioQuickActionWindow::ResetTranscript()
 	AddTranscriptLine(FString::Printf(TEXT("Status: %s"), *GetReadinessText().ToString()));
 	AddTranscriptLine(FString::Printf(TEXT("Endpoint: %s"), Status.Endpoint.IsEmpty() ? TEXT("<not configured>") : *Status.Endpoint));
 
-	if (Status.bProbeInProgress || bRefreshing)
+	if (Status.bEditorStarting)
+	{
+		AddTranscriptLine(TEXT("Unreal MCP: waiting for the editor to finish starting, then checking initialize and tools/list."));
+	}
+	else if (Status.bProbeInProgress || bRefreshing)
 	{
 		AddTranscriptLine(TEXT("Unreal MCP: checking initialize and tools/list..."));
 	}
@@ -2314,7 +2323,7 @@ EActiveTimerReturnType SHyperAIStudioQuickActionWindow::RunDeferredTerminalStart
 		const TPair<bool, const TCHAR*> Checks[] = {
 			{Status.bUnrealMCPModuleAvailable, TEXT("MCP module")}, {Status.bUnrealMCPSettingsConfigured, TEXT("MCP settings")},
 			{Status.bRequiredPluginsReady, TEXT("required plugins")}, {Status.bDesiredCapabilityPluginsReady, TEXT("capability plugins")},
-			{Status.bServerRunning, TEXT("MCP server")}, {Status.bPortListening, TEXT("MCP port")}, {Status.bToolsListReachable, TEXT("MCP tools")},
+			{Status.bServerRunning, TEXT("MCP server")}, {Status.bPortListening, TEXT("MCP port")},
 			{Status.bAgentFilesReady, TEXT("agent files")}, {Status.ConfiguredAgentCount > 0, TEXT("a configured agent")}};
 		for (const TPair<bool, const TCHAR*>& Check : Checks)
 		{
@@ -2323,11 +2332,26 @@ EActiveTimerReturnType SHyperAIStudioQuickActionWindow::RunDeferredTerminalStart
 				Missing.Add(Check.Value);
 			}
 		}
-		const FString Wait = FString::Join(Missing, TEXT(", "));
+		TArray<FString> Reasons;
+		if (!Missing.IsEmpty())
+		{
+			Reasons.Add(FString::Printf(TEXT("not ready: %s"), *FString::Join(Missing, TEXT(", "))));
+		}
+		// The tools wait on one of three things, and each needs something different from the person reading the log.
+		if (!Status.bToolsListReachable)
+		{
+			FString ProbeReason = Status.ProbeMessage;
+			ProbeReason.RemoveFromEnd(TEXT("."));
+			Reasons.Add(Status.bEditorStarting ? FString(TEXT("waiting for the editor to finish starting"))
+				: Status.bProbeInProgress ? FString(TEXT("MCP tools still being checked"))
+				: !Status.bHasProbeRun || ProbeReason.IsEmpty() ? FString(TEXT("MCP tools not checked yet"))
+				: FString::Printf(TEXT("MCP tools unreachable: %s"), *ProbeReason));
+		}
+		const FString Wait = FString::Join(Reasons, TEXT("; "));
 		if (Wait != LastStartupWait)
 		{
 			LastStartupWait = Wait;
-			UE_LOG(LogHyperAIStudioChat, Display, TEXT("Chat %d waits to start its agent; not ready: %s. %s"), TabIndex, *Wait, *FString::Join(Status.Warnings, TEXT(" ")));
+			UE_LOG(LogHyperAIStudioChat, Display, TEXT("Chat %d waits to start its agent; %s. %s"), TabIndex, *Wait, *FString::Join(Status.Warnings, TEXT(" ")));
 		}
 		return EActiveTimerReturnType::Stop;
 	}
@@ -3637,6 +3661,10 @@ FText SHyperAIStudioQuickActionWindow::GetNextActionTextForStatus(const FHyperAI
 	{
 		return LOCTEXT("ReadyNextAction", "Next useful action: type to the embedded agent terminal. Copy Prompt is only for manual handoff fallback.");
 	}
+	if (InStatus.bEditorStarting)
+	{
+		return LOCTEXT("EditorStartingNextAction", "Waiting for the editor to finish starting. Unreal MCP is checked as soon as it can answer, and the agent starts then.");
+	}
 	if (bIsRefreshing || InStatus.bProbeInProgress)
 	{
 		return LOCTEXT("CheckingNextAction", "Next useful action: wait for the MCP readiness probe to finish, then choose a handoff action.");
@@ -3652,6 +3680,12 @@ FText SHyperAIStudioQuickActionWindow::GetNextActionTextForStatus(const FHyperAI
 	if (InStatus.ConfiguredAgentCount <= 0)
 	{
 		return LOCTEXT("AgentConfigNextAction", "Next useful action: enable one installed agent with generated config before using Chat / Terminal.");
+	}
+	if (InStatus.bServerRunning && InStatus.bPortListening && InStatus.bHasProbeRun && !InStatus.bToolsListReachable)
+	{
+		return FText::Format(
+			LOCTEXT("ToolsUnreachableNextAction", "Unreal MCP tools are unreachable: {0} The chat checks again every 15 seconds; Reconnect in the MCP menu restarts the server."),
+			FText::FromString(InStatus.ProbeMessage));
 	}
 	return LOCTEXT("ServerNextAction", "Next useful action: start or refresh Unreal MCP from the full workbench.");
 }

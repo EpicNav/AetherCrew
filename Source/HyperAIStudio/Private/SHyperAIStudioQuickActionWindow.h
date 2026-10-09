@@ -204,8 +204,9 @@ private:
 	FText LastMessage;
 	bool bRefreshing = false;
 	/**
-	 * Hint under the header, set only when a probe settles. Every re-probe briefly reports "not ready",
-	 * and binding the line to live status made it expand and collapse on each heartbeat.
+	 * Hint under the header, set only when a probe settles or waits for the editor to finish starting. Every
+	 * re-probe briefly reports "not ready", and binding the line to live status made it expand and collapse on
+	 * each heartbeat.
 	 */
 	FText StatusHint;
 	bool bTerminalStartupSent = false;
