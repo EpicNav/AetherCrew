@@ -44,7 +44,17 @@ bool FHyperAIStudioNamesTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("said so"), Reason.Contains(TEXT("double slash")));
 	TestFalse(TEXT("a short name, which FTopLevelAssetPath ensures on"), N::IsObjectPath(TEXT("StaticMeshActor"), TEXT("Class"), &Reason));
 	TestFalse(TEXT("an export path's quote, which FTopLevelAssetPath ensures on"), N::IsObjectPath(TEXT("/Game/A'"), TEXT("Asset"), &Reason));
-	TestFalse(TEXT("a quoted export path"), N::IsObjectPath(TEXT("StaticMesh'/Game/A.A'"), TEXT("Asset"), &Reason));
+	// The editor's Copy Reference form: every lookup strips the class and quotes, so the path inside is what is checked.
+	TestTrue(TEXT("a copied reference"), N::IsObjectPath(TEXT("/Script/Engine.StaticMesh'/Game/Props/SM_Rock.SM_Rock'"), TEXT("Asset"), &Reason));
+	TestTrue(TEXT("and its short-class form"), N::IsObjectPath(TEXT("StaticMesh'/Game/A.A'"), TEXT("Asset"), &Reason));
+	TestFalse(TEXT("a copied reference whose path has a double slash"), N::IsObjectPath(TEXT("/Script/Engine.StaticMesh'/Game//A.A'"), TEXT("Asset"), &Reason));
+	TestFalse(TEXT("a quoted short name"), N::IsObjectPath(TEXT("StaticMesh'SM_Rock'"), TEXT("Asset"), &Reason));
+	TestFalse(TEXT("a class that is neither a name nor a path"), N::IsObjectPath(TEXT("Static//Mesh'/Game/A.A'"), TEXT("Asset"), &Reason));
+	TestFalse(TEXT("quotes with no class"), N::IsObjectPath(TEXT("'/Game/A.A'"), TEXT("Asset"), &Reason));
+	TestFalse(TEXT("a third quote"), N::IsObjectPath(TEXT("StaticMesh'/Game/A'.A'"), TEXT("Asset"), &Reason));
+	TestFalse(TEXT("a copied reference past the limit"), N::IsObjectPath(TEXT("StaticMesh'/Game/") + FString::ChrN(N::MaxLength, TEXT('a')) + TEXT("'"), TEXT("Asset"), &Reason));
+	TestFalse(TEXT("but it names no package to make"), N::IsPackagePath(TEXT("Package'/Game/A'"), TEXT("Asset"), &Reason));
+	TestFalse(TEXT("nor a free one"), N::IsFreePackage(TEXT("Package'/Game/HyperAINamesTestNothingHere'")));
 	TestFalse(TEXT("a trailing slash"), N::IsObjectPath(TEXT("/Game/A/"), TEXT("Asset"), &Reason));
 	TestFalse(TEXT("a root alone is no package"), N::IsObjectPath(TEXT("/A"), TEXT("Asset"), &Reason));
 	TestFalse(TEXT("empty"), N::IsObjectPath(TEXT(""), TEXT("Asset"), &Reason));

@@ -174,23 +174,41 @@ bool FHyperAIStudioNames::IsObjectPath(const FStringView Path, const TCHAR* Fiel
 		return Fail(OutReason, FString::Printf(TEXT("%s is empty; give a path like /Game/Folder/Asset."), FieldOf(Field)));
 	}
 	if (!FitsLength(Path, Field, OutReason)) return false;
+	// The editor's Copy Reference form, /Script/Engine.StaticMesh'/Game/A.A' (or StaticMesh'/Game/A.A'): every lookup
+	// strips the class and quotes before it makes a name or package, so the path inside them is the one checked.
+	int32 Open = INDEX_NONE;
+	FStringView Bare = Path;
+	if (Path.EndsWith(TEXT('\'')) && Path.FindChar(TEXT('\''), Open) && Open > 0 && Open < Path.Len() - 1)
+	{
+		const FStringView Class = Path.Left(Open);
+		bool bClassName = true;
+		for (const TCHAR Char : Class)
+		{
+			bClassName &= FChar::IsAlnum(Char) || Char == TEXT('_');
+		}
+		if (!bClassName && !(Class.StartsWith(TEXT('/')) && IsObjectPath(Class, Field, nullptr)))
+		{
+			return Fail(OutReason, FString::Printf(TEXT("%s '%s' quotes its path after something that is not a class; give the path alone, like /Game/Folder/Asset.Asset."), FieldOf(Field), *Shown(Path)));
+		}
+		Bare = Path.Mid(Open + 1, Path.Len() - Open - 2);
+	}
 	int32 Quote = INDEX_NONE;
-	if (Path.FindChar(TEXT('\''), Quote) || Path.FindChar(TEXT('"'), Quote))
+	if (Bare.FindChar(TEXT('\''), Quote) || Bare.FindChar(TEXT('"'), Quote))
 	{
 		return Fail(OutReason, FString::Printf(TEXT("%s '%s' has a quote; give the path alone, like /Game/Folder/Asset.Asset."), FieldOf(Field), *Shown(Path)));
 	}
 	// Everything before the first '.' or ':' is the package, which LoadObject makes when nothing is there to load.
-	int32 End = Path.Len();
-	for (int32 Index = 0; Index < Path.Len(); ++Index)
+	int32 End = Bare.Len();
+	for (int32 Index = 0; Index < Bare.Len(); ++Index)
 	{
-		if (Path[Index] == TEXT('.') || Path[Index] == TEXT(':'))
+		if (Bare[Index] == TEXT('.') || Bare[Index] == TEXT(':'))
 		{
 			End = Index;
 			break;
 		}
 	}
 	FPackageName::EErrorCode Code = FPackageName::EErrorCode::PackageNameUnknown;
-	if (!FPackageName::IsValidTextForLongPackageName(Path.Left(End), &Code))
+	if (!FPackageName::IsValidTextForLongPackageName(Bare.Left(End), &Code))
 	{
 		return Fail(OutReason, FString::Printf(TEXT("%s '%s' is not a path: %s."), FieldOf(Field), *Shown(Path), *Describe(Code)));
 	}
@@ -233,7 +251,8 @@ bool FHyperAIStudioNames::IsFolderPath(const FStringView Path, const TCHAR* Fiel
 bool FHyperAIStudioNames::IsFreePackage(const FStringView PackagePath)
 {
 	const FString Path(PackagePath);
-	if (!IsObjectPath(Path, nullptr) || FPackageName::DoesPackageExist(Path)) return false;
+	// A quoted reference is an object to look up, never a package to make.
+	if (Path.Contains(TEXT("'")) || !IsObjectPath(Path, nullptr) || FPackageName::DoesPackageExist(Path)) return false;
 	UPackage* Package = FindPackage(nullptr, *Path);
 	return !Package || !FindObject<UObject>(Package, *FPackageName::GetShortName(Path));
 }

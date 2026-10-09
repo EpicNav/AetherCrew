@@ -29,8 +29,10 @@ struct HYPERAISTUDIO_API FHyperAIStudioNames
 	/**
 	 * An object or package to look up: /Game/A/B, /Game/A/B.B, /Game/Map.Map:PersistentLevel.Actor or
 	 * /Script/Engine.StaticMeshActor. Its package part is a well-formed long package name (a root and a name, no "//",
-	 * no trailing '/', no spaces or other characters packages cannot hold), there are no quotes, and it is at most
-	 * MaxLength characters. Whether anything is there is the caller's question.
+	 * no trailing '/', no spaces or other characters packages cannot hold), there are no quotes but those of the editor's
+	 * Copy Reference form (/Script/Engine.StaticMesh'/Game/A.A' or StaticMesh'/Game/A.A', which every lookup strips to
+	 * the path inside, the path checked), and it is at most MaxLength characters. Whether anything is there is the
+	 * caller's question.
 	 */
 	static bool IsObjectPath(FStringView Path, const TCHAR* Field, FString* OutReason = nullptr);
 
