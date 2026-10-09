@@ -203,6 +203,7 @@ namespace HyperAIStudio::ToolGuide
 		Text += TEXT("- To edit, call the pack's `*_apply_plan` with `bDryRun: false` and a fresh `operationId`: it plans, applies and waits for the edit ")
 			TEXT("in one call (`expectedPlanHash` is optional), and replies `completed` or why not. Then call the pack's validate tool. ")
 			TEXT("Only a reply still `queued`, `running` or `awaiting_user_approval` needs `hyper_operation_wait` with that `operationId`. ")
+			TEXT("When the user has turned on auto-approval for that kind of request, it is approved without a click, and `hyper_operation_status` says `approvedBy: auto_approval`. ")
 			TEXT("Dry-run first only when you want to review a plan before it runs.\n");
 		Text += TEXT("- A limit out of range, or 0 for one you do not care about, is fitted rather than refused, and the reply says what was used.\n");
 		Text += TEXT("- Epic's own toolsets, whose names do not start with `HyperAIStudio`, are in `Epic-ToolGuide.md` beside this file with every field: ")

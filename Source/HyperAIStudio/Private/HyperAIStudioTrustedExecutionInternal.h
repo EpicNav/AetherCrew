@@ -157,14 +157,17 @@ namespace HyperAIStudio::TrustedExecution::Private
 	void BeginEnginePreExit();
 	void ShutdownCore();
 	TSharedPtr<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> GetCoreHost();
-	/** Private core-UI hook; deliberately absent from the exported optional-pack facade. */
-	bool IssueCoreUiAuthorizationGrant(
-		const FHyperAIStudioTypedArtifactStageReceipt& Receipt,
-		FString& OutAuthorizationToken,
-		FString& OutError);
+	/**
+	 * The safety sealed into a prepared plan, as the edit queue's host reads it: what its grant follows, and so what
+	 * auto-approval files it under. False when that host cannot describe it.
+	 */
+	bool DescribeQueuedSafety(
+		const FHyperAIStudioTrustedPreparedArtifact& Prepared,
+		EHyperAIStudioDomainSafety& OutSafety);
 	/**
 	 * The approval gate's route onto the edit queue (HyperAIStudioExecutionQueue.cpp). A risky plan's grant is
-	 * issued when its turn comes; deliberately absent from the exported queue API.
+	 * issued when its turn comes, by the private core-UI boundary of the host that staged it; deliberately absent
+	 * from the exported queue API.
 	 */
 	bool SubmitUserApproved(
 		const FHyperAIStudioTrustedPreparedArtifact& Prepared,

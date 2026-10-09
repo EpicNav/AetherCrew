@@ -3081,22 +3081,6 @@ namespace HyperAIStudio::TrustedExecution::Private
 		return bStored;
 	}
 
-	bool IssueCoreUiAuthorizationGrant(
-		const FHyperAIStudioTypedArtifactStageReceipt& Receipt,
-		FString& OutAuthorizationToken,
-		FString& OutError)
-	{
-		const TSharedPtr<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host = GetCoreHost();
-		if (!Host.IsValid())
-		{
-			OutAuthorizationToken.Reset();
-			OutError = TEXT("Trusted core execution host is unavailable.");
-			return false;
-		}
-		return Host->IssueAuthorizationFromCoreUiApproval(
-			Receipt, OutAuthorizationToken, OutError);
-	}
-
 	void BeginEnginePreExit()
 	{
 		const TSharedPtr<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host = GetCoreHost();

@@ -1777,7 +1777,43 @@ namespace HyperAIStudio::NativeReadTools::Private
 	}
 }
 
+namespace HyperAIStudio::NativeReadTools::Private
+{
+	FHyperAIOperationStatus ReadOperationStatus(const FString& OperationId);
+
+	/** Who approved it, when it waited for approval: the user's click, or the auto-approval they turned on. */
+	void AnnotateApproval(FHyperAIOperationStatus& Report, const FString& OperationId)
+	{
+		if (!Report.bFound || Report.Status == TEXT("awaiting_user_approval") || !Report.ApprovedBy.IsEmpty())
+		{
+			return;
+		}
+		const TOptional<FHyperAIStudioApprovalRecord> Record = FHyperAIStudioApprovalGate::FindApproval(OperationId);
+		if (!Record.IsSet())
+		{
+			return;
+		}
+		Report.ApprovedBy = Record->AutoApprovedAs.IsSet() ? TEXT("auto_approval") : TEXT("user");
+		if (Record->AutoApprovedAs.IsSet() && !Report.Diagnostic.StartsWith(TEXT("Auto-approved")))
+		{
+			Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(
+				FString::Printf(TEXT("Auto-approved (%s) by the auto-approval the user turned on; nobody clicked. "),
+					::LexToString(*Record->AutoApprovedAs)) + Report.Diagnostic,
+				FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+		}
+	}
+}
+
 FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
+	const FString& OperationId)
+{
+	using namespace HyperAIStudio::NativeReadTools::Private;
+	FHyperAIOperationStatus Report = ReadOperationStatus(OperationId);
+	AnnotateApproval(Report, OperationId);
+	return Report;
+}
+
+FHyperAIOperationStatus HyperAIStudio::NativeReadTools::Private::ReadOperationStatus(
 	const FString& OperationId)
 {
 	using namespace HyperAIStudio::NativeReadTools::Private;
@@ -1804,17 +1840,30 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 		}
 		Report.bOk = true;
 		Report.bFound = true;
+		Report.PlanHash = Pending.Summary.PlanHash;
+		Report.CreatedUtc = Pending.RequestedUtc.ToIso8601();
+		Report.JournalAccessMode = TEXT("approval_queue");
+		if (Pending.bAutoApproving)
+		{
+			// Nobody needs to click: waits go on through it as through the edit queue.
+			Report.Status = TEXT("queued");
+			Report.State = Report.Status;
+			Report.StatusCode = TEXT("auto_approval_scheduled");
+			Report.ApprovedBy = TEXT("auto_approval");
+			Report.Diagnostic = FString::Printf(
+				TEXT("Auto-approval covers this request (%s): it is approved on the next quiet editor tick; nobody needs to click."),
+				Pending.Category.IsSet() ? ::LexToString(*Pending.Category) : TEXT("edits"));
+			Report.NextAction = TEXT("Call hyper_operation_wait with this operation_id; it runs without waiting for a person.");
+			return Report;
+		}
 		Report.Status = TEXT("awaiting_user_approval");
 		Report.State = Report.Status;
 		Report.StatusCode = Report.Status;
-		Report.PlanHash = Pending.Summary.PlanHash;
-		Report.CreatedUtc = Pending.RequestedUtc.ToIso8601();
 		Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(
 			TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing has run yet.")
 				+ (Pending.Summary.Effects.IsEmpty() ? FString() : TEXT(" First effect: ") + Pending.Summary.Effects[0]),
 			FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
 		Report.NextAction = TEXT("Wait for the user to approve or reject it; hyper_operation_wait with bWaitThroughApproval waits for you.");
-		Report.JournalAccessMode = TEXT("approval_queue");
 		return Report;
 	}
 
@@ -2243,6 +2292,11 @@ UHyperAIOperationWaitResult* UHyperAIStudioNativeReadToolset::hyper_operation_wa
 	Waiter.bWaitThroughApproval = bWaitThroughApproval;
 	Start(MoveTemp(Waiter), TimeoutMs);
 	return Result;
+}
+
+bool HyperAIStudio::OperationWait::IsAutoApproving(const FString& OperationId)
+{
+	return FHyperAIStudioApprovalGate::IsAutoApproving(OperationId);
 }
 
 void HyperAIStudio::OperationWait::WhenDone(const FString& OperationId, const int32 TimeoutMs, TFunction<void(const FHyperAIStudioEditOutcome&)>&& Done)

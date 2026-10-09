@@ -6,6 +6,7 @@
 #include "AssetRegistry/IAssetRegistry.h"
 #include "ContentBrowserModule.h"
 #include "FileHelpers.h"
+#include "HyperAIStudioAutoApproval.h"
 #include "HyperAIStudioNames.h"
 #include "HyperAIStudioStyle.h"
 #include "IContentBrowserSingleton.h"
@@ -13,6 +14,7 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
+#include "SHyperAIStudioAutoApprovalBanner.h"
 #include "Styling/AppStyle.h"
 #include "Styling/StyleColors.h"
 #include "UObject/SoftObjectPath.h"
@@ -66,6 +68,7 @@ namespace HyperAIStudio::ActivitySidebar
 		case EHyperAIStudioActivityKind::ApprovalRequested: return FStyleColors::AccentYellow;
 		case EHyperAIStudioActivityKind::Completed:
 		case EHyperAIStudioActivityKind::JobFinished: return FStyleColors::AccentGreen;
+		case EHyperAIStudioActivityKind::AutoApproval: return FStyleColors::AccentOrange;
 		default: return FSlateColor::UseSubduedForeground();
 		}
 	}
@@ -92,6 +95,7 @@ void SHyperAIStudioChatActivitySidebar::Construct(const FArguments& InArgs)
 	ApprovalChangedHandle = FHyperAIStudioApprovalGate::OnChanged().AddSP(this, &SHyperAIStudioChatActivitySidebar::Rebuild);
 	JobChangedHandle = FHyperAIStudioAsyncJobHost::OnChanged().AddSP(this, &SHyperAIStudioChatActivitySidebar::Rebuild);
 	SandboxChangedHandle = HyperAIStudio::Sandbox::OnChanged().AddSP(this, &SHyperAIStudioChatActivitySidebar::Rebuild);
+	AutoApprovalChangedHandle = FHyperAIStudioAutoApproval::OnChanged().AddSP(this, &SHyperAIStudioChatActivitySidebar::Rebuild);
 
 	ChildSlot
 	[
@@ -111,6 +115,36 @@ void SHyperAIStudioChatActivitySidebar::Construct(const FArguments& InArgs)
 					SNew(STextBlock)
 					.Text(LOCTEXT("Title", "Activity"))
 					.TextStyle(FHyperAIStudioStyle::Get(), "HyperAIStudio.Text.Title")
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+					.ToolTipText_Lambda([]()
+					{
+						return FHyperAIStudioAutoApproval::IsActive()
+							? LOCTEXT("AutoApproveOnTooltip", "Auto-approval is on. Open to start a new one in its place; use Stop to end it.")
+							: LOCTEXT("AutoApproveTooltip", "Let agents' requests run without asking you, for a while. It shows what it covers and asks before it turns on.");
+					})
+					.OnClicked_Lambda([this]()
+					{
+						FHyperAIStudioAutoApproval::OpenDialog(AsShared());
+						return FReply::Handled();
+					})
+					[
+						SNew(STextBlock)
+						.Text_Lambda([]()
+						{
+							return FHyperAIStudioAutoApproval::IsActive()
+								? LOCTEXT("AutoApprovalOnButton", "Auto-approval on") : LOCTEXT("AutoApproveButton", "Auto-approve...");
+						})
+						.ColorAndOpacity_Lambda([]()
+						{
+							return FHyperAIStudioAutoApproval::IsActive() ? FSlateColor(FStyleColors::AccentOrange) : FSlateColor::UseForeground();
+						})
+					]
 				]
 				+ SHorizontalBox::Slot()
 				.AutoWidth()
@@ -149,6 +183,12 @@ void SHyperAIStudioChatActivitySidebar::Construct(const FArguments& InArgs)
 			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()
+			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+			[
+				SNew(SHyperAIStudioAutoApprovalBanner)
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
 			.Padding(0.0f, 8.0f, 0.0f, 0.0f)
 			[
 				SNew(STextBlock)
@@ -178,6 +218,7 @@ SHyperAIStudioChatActivitySidebar::~SHyperAIStudioChatActivitySidebar()
 	FHyperAIStudioApprovalGate::OnChanged().Remove(ApprovalChangedHandle);
 	FHyperAIStudioAsyncJobHost::OnChanged().Remove(JobChangedHandle);
 	HyperAIStudio::Sandbox::OnChanged().Remove(SandboxChangedHandle);
+	FHyperAIStudioAutoApproval::OnChanged().Remove(AutoApprovalChangedHandle);
 }
 
 int32 SHyperAIStudioChatActivitySidebar::GetPendingApprovalCount()
@@ -360,6 +401,17 @@ TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildApprovalCard(const F
 			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()
+			.Padding(0.0f, 4.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Visibility(Approval.bAutoApproving ? EVisibility::Visible : EVisibility::Collapsed)
+				.Text(LOCTEXT("AutoApprovingNote", "Auto-approval runs this as soon as the editor is idle."))
+				.AutoWrapText(true)
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
 			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
 			[
 				SNew(SHorizontalBox)
@@ -453,17 +505,21 @@ TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildEntryRow(const FHype
 {
 	using namespace HyperAIStudio::ActivitySidebar;
 	const FString Target = Entry.Target;
+	// What the user's auto-approval approved says so, with the category that covered it.
+	const bool bAutoApproved = Entry.Kind == EHyperAIStudioActivityKind::ApprovalApproved && Entry.AutoApprovedAs.IsSet();
+	const FText KindText = bAutoApproved
+		? FText::Format(LOCTEXT("AutoApprovedKind", "Auto-approved ({0})"), FHyperAIStudioAutoApproval::GetCategoryName(*Entry.AutoApprovedAs))
+		: FText::FromString(FHyperAIStudioAgentActivityLog::LexToString(Entry.Kind));
 	TSharedRef<SHorizontalBox> Line = SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot()
 		.FillWidth(1.0f)
 		[
 			SNew(STextBlock)
-			.Text(FText::Format(LOCTEXT("EntryLine", "{0}: {1}"),
-				FText::FromString(FHyperAIStudioAgentActivityLog::LexToString(Entry.Kind)), FText::FromString(Entry.ToolName)))
+			.Text(FText::Format(LOCTEXT("EntryLine", "{0}: {1}"), KindText, FText::FromString(Entry.ToolName)))
 			.ToolTipText(FText::FromString((Entry.Detail.IsEmpty() ? Entry.StatusCode : Entry.Detail)
 				+ (Entry.Agent.IsEmpty() ? FString() : TEXT("\nBy ") + AgentText(Entry.Agent, Entry.Model))))
 			.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-			.ColorAndOpacity(StatusColor(Entry.Kind))
+			.ColorAndOpacity(bAutoApproved ? FSlateColor(FStyleColors::AccentOrange) : StatusColor(Entry.Kind))
 		]
 		+ SHorizontalBox::Slot()
 		.AutoWidth()

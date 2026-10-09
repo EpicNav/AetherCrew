@@ -39,6 +39,7 @@ textarea, input { width: 100%; padding: 8px; font: inherit; color: var(--ink); b
 textarea { min-height: 64px; resize: vertical; }
 #code { max-width: 200px; font-size: 24px; letter-spacing: .3em; text-align: center; }
 .status { min-height: 1.3em; margin-top: 6px; font-size: 13px; color: var(--muted); }
+.auto { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 18%, var(--panel)); }
 .hidden { display: none; }
 </style>
 </head>
@@ -50,6 +51,13 @@ textarea { min-height: 64px; resize: vertical; }
       <p>Enter the pairing code the editor shows under <b>Chat &rsaquo; &hellip; &rsaquo; Open On Another Device</b>.</p>
       <div class="row"><input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000"><button id="pairButton" class="primary">Pair</button></div>
       <div id="pairStatus" class="status"></div>
+    </div>
+  </section>
+  <section id="autoApproval" class="hidden">
+    <div class="card auto">
+      <div class="row"><b id="autoText" style="flex: 1">Auto-approval is on</b><button id="autoStop" class="danger">Stop</button></div>
+      <div class="meta">Agents' requests in these categories run without asking you. It turns on only in the editor.</div>
+      <div id="autoStatus" class="status"></div>
     </div>
   </section>
   <section id="waiting" class="hidden"><h2>Waiting for you</h2><div id="approvals"></div></section>
@@ -108,6 +116,7 @@ function renderApprovals(approvals) {
     const head = el("div", "row");
     head.append(el("b", "", approval.tool || "Edit"));
     if (approval.safety !== "edit" && approval.safety !== "read") head.append(el("span", "badge risky", approval.safety.replace("_", " ")));
+    if (approval.autoApproving) head.append(el("span", "badge working", "auto-approving"));
     card.append(head);
     if (approval.target) card.append(el("div", "meta", approval.target));
     const list = el("ul");
@@ -124,6 +133,21 @@ function renderApprovals(approvals) {
     box.append(card);
   }
 }
+
+// Shown while the editor's auto-approval is on; the page can only stop it.
+const categoryNames = { edits: "Edits", scripts: "Scripts", destructive: "Destructive", external_effects: "External effects" };
+function renderAutoApproval(auto) {
+  const on = !!(auto && auto.on);
+  show("autoApproval", on);
+  if (!on) return;
+  const left = auto.secondsLeft < 0 ? "until the editor closes"
+    : auto.secondsLeft >= 3600 ? Math.floor(auto.secondsLeft / 3600) + " h " + Math.floor(auto.secondsLeft % 3600 / 60) + " min left"
+    : auto.secondsLeft >= 60 ? Math.ceil(auto.secondsLeft / 60) + " min left" : Math.ceil(auto.secondsLeft) + " s left";
+  document.getElementById("autoText").textContent = "Auto-approval on: "
+    + auto.categories.map(c => categoryNames[c] || c).join(", ") + " (" + left + ")";
+}
+document.getElementById("autoStop").onclick = () =>
+  act("stop_auto_approval", {}, document.getElementById("autoStatus"), [document.getElementById("autoStop")]);
 
 function chatCard(tab) {
   if (cards[tab]) return cards[tab];
@@ -202,7 +226,7 @@ async function refresh() {
     document.getElementById("dot").classList.add("live");
     show("offline", false);
     if (response.status === 401) {
-      ["waiting", "chatSection", "empty"].forEach(id => show(id, false));
+      ["autoApproval", "waiting", "chatSection", "empty"].forEach(id => show(id, false));
       show("pair", true);
       return;
     }
@@ -210,6 +234,7 @@ async function refresh() {
     const state = await response.json();
     show("pair", false);
     document.getElementById("title").textContent = "HyperAI Studio · " + state.project;
+    renderAutoApproval(state.autoApproval);
     renderApprovals(state.approvals);
     renderChats(state.chats);
     show("waiting", state.approvals.length > 0);

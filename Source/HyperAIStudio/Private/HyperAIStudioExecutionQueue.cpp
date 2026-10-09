@@ -16,6 +16,7 @@ namespace HyperAIStudio::ExecutionQueue::Private
 		FHyperAIStudioTrustedPreparedArtifact Prepared;
 		FString OperationId;
 		FHyperAIStudioTrustedArtifactRequest Request;
+		/** Approved by the user: a click, or the auto-approval they turned on for its category. */
 		bool bUserApproved = false;
 		double QueuedSeconds = 0.0;
 	};
@@ -121,10 +122,11 @@ namespace HyperAIStudio::ExecutionQueue::Private
 			OutError = OutError.IsEmpty() ? Status.Diagnostic : OutError;
 			return false;
 		}
-		// Edit is tokenless. A risky plan's grant is issued only for a plan the user approved, now that it runs.
+		// Edit is tokenless. A risky plan's grant is issued only for a plan the user approved, now that it runs, by the
+		// host that staged it (in the editor that is always the core host).
 		FString AuthorizationToken;
 		if (Item.bUserApproved && Item.Request.Safety != EHyperAIStudioDomainSafety::Edit
-			&& !HyperAIStudio::TrustedExecution::Private::IssueCoreUiAuthorizationGrant(Receipt, AuthorizationToken, OutError))
+			&& !Host.IssueAuthorizationFromCoreUiApproval(Receipt, AuthorizationToken, OutError))
 		{
 			OutStatus = TEXT("authorization_not_issued");
 			return false;
@@ -243,6 +245,20 @@ void HyperAIStudio::TrustedExecution::Private::SetQueueHostForTests(
 	HyperAIStudio::ExecutionQueue::Private::HostOverride() = Host;
 }
 #endif
+
+bool HyperAIStudio::TrustedExecution::Private::DescribeQueuedSafety(
+	const FHyperAIStudioTrustedPreparedArtifact& Prepared,
+	EHyperAIStudioDomainSafety& OutSafety)
+{
+	const TSharedPtr<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host = HyperAIStudio::ExecutionQueue::Private::CurrentHost();
+	FHyperAIStudioTrustedArtifactRequest Request;
+	if (!IsInGameThread() || !Host.IsValid() || !Host->DescribePrepared(Prepared, Request))
+	{
+		return false;
+	}
+	OutSafety = Request.Safety;
+	return true;
+}
 
 bool HyperAIStudio::TrustedExecution::Private::SubmitUserApproved(
 	const FHyperAIStudioTrustedPreparedArtifact& Prepared,

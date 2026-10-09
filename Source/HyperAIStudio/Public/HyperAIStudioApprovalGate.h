@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Delegates/Delegate.h"
+#include "HyperAIStudioApprovalCategory.h"
 #include "HyperAIStudioDomainAdapter.h"
 #include "HyperAIStudioTrustedExecution.h"
 
@@ -22,6 +23,8 @@ struct FHyperAIStudioApprovalSummary
 	TArray<FString> Effects;
 	/** Assets the plan overwrites or creates, if any. */
 	TArray<FString> Touches;
+	/** hyper_script_run's escalated scripts. Auto-approval files them under Scripts whatever Safety says. */
+	bool bEscalatedScript = false;
 };
 
 struct FHyperAIStudioPendingApproval
@@ -29,6 +32,19 @@ struct FHyperAIStudioPendingApproval
 	FString OperationId;
 	FHyperAIStudioApprovalSummary Summary;
 	FDateTime RequestedUtc = FDateTime::MinValue();
+	/** What auto-approval files it under; unset when only a click can approve it. */
+	TOptional<EHyperAIStudioApprovalCategory> Category;
+	/** The auto-approval the user turned on covers it and approves it on the next quiet editor tick. */
+	bool bAutoApproving = false;
+};
+
+/** Who approved an operation: a click (the Activity card, the remote page, a tool form) or the user's auto-approval. */
+struct FHyperAIStudioApprovalRecord
+{
+	FString OperationId;
+	/** Set when auto-approval approved it; the category that covered it. */
+	TOptional<EHyperAIStudioApprovalCategory> AutoApprovedAs;
+	FDateTime ApprovedUtc = FDateTime::MinValue();
 };
 
 /**
@@ -36,7 +52,8 @@ struct FHyperAIStudioPendingApproval
  *
  * The plan is held prepared, not staged: a staged artifact expires in seconds, while a person may
  * take minutes. Staging and submitting happen on approval, so the reviewed plan is the one that
- * runs, and a risky variant's server grant is issued only from that click.
+ * runs, and a risky variant's server grant is issued only from that approval: the user's click, or
+ * the auto-approval the user turned on for its category in Activity.
  *
  * Game thread only.
  */
@@ -45,7 +62,11 @@ class HYPERAISTUDIO_API FHyperAIStudioApprovalGate
 public:
 	static constexpr int32 MaxPending = 16;
 
-	/** True when this safety class must be approved before it runs, per the user's settings. */
+	/**
+	 * True when this safety class must be approved before it runs, per the user's settings. Auto-approval does not
+	 * change this: covered requests still pass through the gate, so they are recorded and approved on the same path
+	 * as a click.
+	 */
 	static bool IsApprovalRequired(EHyperAIStudioDomainSafety Safety);
 
 	/**
@@ -69,10 +90,14 @@ public:
 
 	static TArray<FHyperAIStudioPendingApproval> GetPending();
 	static bool HasPending(const FString& OperationId);
+	/** True while OperationId waits and the user's auto-approval will approve it on the next quiet editor tick. */
+	static bool IsAutoApproving(const FString& OperationId);
+	/** How OperationId was approved, among the last 64 approvals of this editor session. */
+	static TOptional<FHyperAIStudioApprovalRecord> FindApproval(const FString& OperationId);
 
 	/**
 	 * Run the held plan, or queue it behind the edit that owns the project lane. On failure the request is
-	 * dropped and OutError explains why.
+	 * dropped and OutError explains why. This is the click; auto-approval runs the same code.
 	 */
 	static bool Approve(const FString& OperationId, FString& OutError);
 	static void Reject(const FString& OperationId, const FString& Reason);

@@ -358,6 +358,8 @@ FHyperAIScriptRunReport FHyperAIStudioScriptingContracts::Run(const FHyperAIScri
 	Summary.ToolName = ToolName;
 	Summary.VariantId = TEXT("script.run.v1");
 	Summary.Safety = bUndoable ? EHyperAIStudioDomainSafety::Edit : EHyperAIStudioDomainSafety::Destructive;
+	// It runs without the undo step and the guard: auto-approval offers it only as Scripts, never as Destructive.
+	Summary.bEscalatedScript = !bUndoable;
 	Summary.EffectTarget = Report.ScriptFolder / TEXT("script.py");
 	Summary.Effects.Add(bUndoable ? FString(TEXT("Run a Python script inside one undo step"))
 		: TEXT("Run a Python script that ") + FString::Join(Reasons, TEXT("; ")));
