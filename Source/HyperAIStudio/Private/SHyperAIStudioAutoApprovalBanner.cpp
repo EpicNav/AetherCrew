@@ -51,9 +51,9 @@ void SHyperAIStudioAutoApprovalBanner::Construct(const FArguments& InArgs)
 			.VAlign(VAlign_Center)
 			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
 			[
-				SNew(SButton)
+				SAssignNew(StopButton, SButton)
 				.Text(LOCTEXT("Stop", "Stop"))
-				.ToolTipText(LOCTEXT("StopTooltip", "Turn auto-approval off now. Requests wait for your approval again; work already approved keeps running."))
+				.ToolTipText(GetStopTooltip())
 				.OnClicked_Lambda([]()
 				{
 					FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::Stopped);
@@ -63,5 +63,21 @@ void SHyperAIStudioAutoApprovalBanner::Construct(const FArguments& InArgs)
 		]
 	];
 }
+
+FText SHyperAIStudioAutoApprovalBanner::GetStopTooltip()
+{
+	return LOCTEXT("StopUnstartedTooltip",
+		"Turn auto-approval off now. Requests wait for your approval again, and so does what it approved that has not started yet; work already running goes on.");
+}
+
+#if WITH_DEV_AUTOMATION_TESTS
+void FHyperAIStudioAutoApprovalTestAccess::PressStop(SHyperAIStudioAutoApprovalBanner& Banner)
+{
+	if (Banner.StopButton.IsValid())
+	{
+		Banner.StopButton->SimulateClick();
+	}
+}
+#endif
 
 #undef LOCTEXT_NAMESPACE

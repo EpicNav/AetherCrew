@@ -150,31 +150,35 @@ bool FHyperAIStudioRemotePageTest::RunTest(const FString& Parameters)
 		.Body.Contains(TEXT("\"ok\":false")));
 	TestTrue(TEXT("Each waiting edit says whether auto-approval is about to approve it"), State.Body.Contains(TEXT("\"autoApproving\":false")));
 
-	// Auto-approval: the page shows it and can stop it; nothing on it turns it on.
-	FHyperAIStudioAutoApprovalTestAccess::Reset();
-	ON_SCOPE_EXIT { FHyperAIStudioAutoApprovalTestAccess::Reset(); };
-	auto AutoApprovalOf = [](const FAnswer& Answer)
+	// Auto-approval: the page shows it and can stop it; nothing on it turns it on. The page's Stop would end the user's
+	// own auto-approval, so this part waits for an editor where it is off.
+	if (!FHyperAIStudioAutoApprovalTestAccess::SkipWhileUserActivationOn(*this))
 	{
-		TSharedPtr<FJsonObject> Root;
-		const TSharedPtr<FJsonObject>* Auto = nullptr;
-		return FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Answer.Body), Root) && Root.IsValid()
-			&& Root->TryGetObjectField(TEXT("autoApproval"), Auto) && Auto ? *Auto : TSharedPtr<FJsonObject>();
-	};
-	TSharedPtr<FJsonObject> Auto = AutoApprovalOf(Call(Port, TEXT("GET"), TEXT("/remote/api/state"), FString(), Browser));
-	TestTrue(TEXT("The page sees auto-approval off"), Auto.IsValid() && !Auto->GetBoolField(TEXT("on")));
-	for (const TCHAR* Action : {TEXT("auto_approval"), TEXT("start_auto_approval"), TEXT("enable_auto_approval"), TEXT("turn_on_auto_approval")})
-	{
-		Call(Port, TEXT("POST"), FString(TEXT("/remote/api/")) + Action, TEXT("{}"), Browser);
-		TestFalse(FString::Printf(TEXT("No page action turns it on (%s)"), Action), FHyperAIStudioAutoApproval::IsActive());
+		FHyperAIStudioAutoApprovalTestAccess::Reset();
+		ON_SCOPE_EXIT { FHyperAIStudioAutoApprovalTestAccess::Reset(); };
+		auto AutoApprovalOf = [](const FAnswer& Answer)
+		{
+			TSharedPtr<FJsonObject> Root;
+			const TSharedPtr<FJsonObject>* Auto = nullptr;
+			return FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Answer.Body), Root) && Root.IsValid()
+				&& Root->TryGetObjectField(TEXT("autoApproval"), Auto) && Auto ? *Auto : TSharedPtr<FJsonObject>();
+		};
+		TSharedPtr<FJsonObject> Auto = AutoApprovalOf(Call(Port, TEXT("GET"), TEXT("/remote/api/state"), FString(), Browser));
+		TestTrue(TEXT("The page sees auto-approval off"), Auto.IsValid() && !Auto->GetBoolField(TEXT("on")));
+		for (const TCHAR* Action : {TEXT("auto_approval"), TEXT("start_auto_approval"), TEXT("enable_auto_approval"), TEXT("turn_on_auto_approval")})
+		{
+			Call(Port, TEXT("POST"), FString(TEXT("/remote/api/")) + Action, TEXT("{}"), Browser);
+			TestFalse(FString::Printf(TEXT("No page action turns it on (%s)"), Action), FHyperAIStudioAutoApproval::IsActive());
+		}
+		TestTrue(TEXT("Auto-approval turns on in the editor"), FHyperAIStudioAutoApprovalTestAccess::TurnOn({EHyperAIStudioApprovalCategory::Edits}, {}));
+		Auto = AutoApprovalOf(Call(Port, TEXT("GET"), TEXT("/remote/api/state"), FString(), Browser));
+		TestTrue(TEXT("The page sees it on, with what it covers"), Auto.IsValid() && Auto->GetBoolField(TEXT("on"))
+			&& Auto->GetArrayField(TEXT("categories")).Num() == 1 && Auto->GetArrayField(TEXT("categories"))[0]->AsString() == TEXT("edits"));
+		TestTrue(TEXT("The page can stop it"), Call(Port, TEXT("POST"), TEXT("/remote/api/stop_auto_approval"), TEXT("{}"), Browser)
+			.Body.Contains(TEXT("\"ok\":true")));
+		TestFalse(TEXT("and it is off"), FHyperAIStudioAutoApproval::IsActive());
+		TestTrue(TEXT("stopped remotely"), FHyperAIStudioAutoApprovalTestAccess::GetLastEnd() == EHyperAIStudioAutoApprovalEnd::StoppedRemotely);
 	}
-	TestTrue(TEXT("Auto-approval turns on in the editor"), FHyperAIStudioAutoApprovalTestAccess::TurnOn({EHyperAIStudioApprovalCategory::Edits}, {}));
-	Auto = AutoApprovalOf(Call(Port, TEXT("GET"), TEXT("/remote/api/state"), FString(), Browser));
-	TestTrue(TEXT("The page sees it on, with what it covers"), Auto.IsValid() && Auto->GetBoolField(TEXT("on"))
-		&& Auto->GetArrayField(TEXT("categories")).Num() == 1 && Auto->GetArrayField(TEXT("categories"))[0]->AsString() == TEXT("edits"));
-	TestTrue(TEXT("The page can stop it"), Call(Port, TEXT("POST"), TEXT("/remote/api/stop_auto_approval"), TEXT("{}"), Browser)
-		.Body.Contains(TEXT("\"ok\":true")));
-	TestFalse(TEXT("and it is off"), FHyperAIStudioAutoApproval::IsActive());
-	TestTrue(TEXT("stopped remotely"), FHyperAIStudioAutoApprovalTestAccess::GetLastEnd() == EHyperAIStudioAutoApprovalEnd::StoppedRemotely);
 
 	FHyperAIStudioRemote::ForgetBrowsers();
 	TestEqual(TEXT("A forgotten browser must pair again"), Call(Port, TEXT("GET"), TEXT("/remote/api/state"), FString(), Browser).Code, 401);

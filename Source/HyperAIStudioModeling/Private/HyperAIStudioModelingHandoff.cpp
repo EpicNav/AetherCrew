@@ -977,6 +977,7 @@ FHyperAIModelHandoffReport FHyperAIStudioModelingContracts::Handoff(const FHyper
 		Report.Status = TEXT("awaiting_user_approval");
 		Report.Diagnostic = FString::Printf(TEXT("Putting %s in the level needs approval here. Waiting in HyperAI Chat, Activity panel; nothing ran yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true."),
 			*Target.Label);
+		FHyperAIStudioApprovalGate::DescribeHeld(OperationId, Report.Status, Report.Diagnostic);
 		return Report;
 	}
 	FHyperAIModelHandoffReport Done = Execute(Resolved, Report.OperationId);

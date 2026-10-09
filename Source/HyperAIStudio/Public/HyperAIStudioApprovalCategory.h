@@ -10,7 +10,10 @@
  */
 enum class EHyperAIStudioApprovalCategory : uint8
 {
-	/** Undoable asset and level changes, playtests, and scripts the runner proves undoable. */
+	/**
+	 * Mostly undoable asset and level changes, playtests and renders, and scripts in which the runner's best-effort
+	 * checks found nothing risky (one undo step, behind a guard that is not a sandbox).
+	 */
 	Edits,
 	/** hyper_script_run scripts the runner could not prove undoable; they run without the undo step or the guard. */
 	Scripts,

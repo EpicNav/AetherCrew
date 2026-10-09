@@ -39,6 +39,8 @@ struct FHyperAIStudioActivityEntry
 	FString Model;
 	/** Set when the user's auto-approval approved it rather than a click; the category that covered it. */
 	TOptional<EHyperAIStudioApprovalCategory> AutoApprovedAs;
+	/** A running agent job the user started approved it, not a click. */
+	bool bApprovedForJob = false;
 };
 
 /**

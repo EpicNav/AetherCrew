@@ -554,6 +554,7 @@ void SHyperAIStudioQuickActionWindow::Construct(const FArguments& InArgs)
 						.ColorAndOpacity_Lambda([this]() { return FLinearColor(1.0f, 1.0f, 1.0f, ActivitySidebarCurve.GetLerp()); })
 						[
 							SAssignNew(ActivitySidebar, SHyperAIStudioChatActivitySidebar)
+							.bShowAutoApprovalBanner(false)
 							.OnClose(this, &SHyperAIStudioQuickActionWindow::ToggleActivitySidebar)
 							.OnApprovalResolved_Lambda([this]()
 							{

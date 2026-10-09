@@ -17,4 +17,15 @@ namespace HyperAIStudio::Approval::Private
 	TOptional<EHyperAIStudioApprovalCategory> Categorize(
 		const FHyperAIStudioApprovalSummary& Summary,
 		TOptional<EHyperAIStudioDomainSafety> SealedSafety);
+
+	/**
+	 * When an auto-approval ends: plans it approved that still wait in the edit queue behind other edits are taken back
+	 * before their grant is issued, and wait for a click again as they did before it. Returns how many.
+	 */
+	int32 ReturnUnstarted(uint64 EndedActivation);
+
+#if WITH_DEV_AUTOMATION_TESTS
+	/** One pass of the sweep its ticker runs, without ticking the core ticker. */
+	void SweepForTests();
+#endif
 }

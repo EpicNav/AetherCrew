@@ -3491,6 +3491,7 @@ FHyperAIPIEPlaytestRunResult UHyperAIStudioPIEPlaytestToolset::hyper_playtest_ru
 	Result.bOk = true;
 	Result.Status = TEXT("awaiting_user_approval");
 	Result.Diagnostic = Fit.AppendTo(TEXT("Waiting for approval in HyperAI Chat, Activity panel; nothing has run yet. hyper_operation_wait with bWaitThroughApproval true waits for the approval and the playtest."));
+	FHyperAIStudioApprovalGate::DescribeHeld(Request.OperationId, Result.Status, Result.Diagnostic);
 	return Result;
 }
 

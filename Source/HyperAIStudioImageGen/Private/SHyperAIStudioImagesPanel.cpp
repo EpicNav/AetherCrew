@@ -1264,9 +1264,10 @@ FHyperAIImageGenerateReport SHyperAIStudioImagesPanel::Generate()
 		bStatusIsError = true;
 		return Submitted;
 	}
-	if (Submitted.Status == TEXT("awaiting_user_approval"))
+	if (FHyperAIStudioApprovalGate::HasPending(Request.OperationId))
 	{
-		// The click is the approval: whoever pressed Generate has read the prompt and the cost above it.
+		// The click is the approval: whoever pressed Generate has read the prompt and the cost above it. It comes first
+		// even when the user's auto-approval covers the request (which then reads as queued).
 		FString Error;
 		if (!FHyperAIStudioApprovalGate::Approve(Request.OperationId, Error))
 		{

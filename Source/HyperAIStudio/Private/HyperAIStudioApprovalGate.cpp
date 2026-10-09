@@ -40,11 +40,26 @@ namespace HyperAIStudio::Approval::Private
 		bool bScheduled = false;
 	};
 
+	/** A typed plan an auto-approval approved that went into the edit queue behind other edits. */
+	struct FAwaitingLane
+	{
+		FHyperAIStudioPendingApproval Pending;
+		uint64 Sequence = 0;
+		uint64 Activation = 0;
+	};
+
 	constexpr int32 MaxRecords = 64;
 
 	TArray<FHeldApproval>& Held()
 	{
 		static TArray<FHeldApproval> Storage;
+		return Storage;
+	}
+
+	/** Remembered until the auto-approval that approved them ends, so whatever has not started then can go back. */
+	TArray<FAwaitingLane>& AwaitingLane()
+	{
+		static TArray<FAwaitingLane> Storage;
 		return Storage;
 	}
 
@@ -88,16 +103,22 @@ namespace HyperAIStudio::Approval::Private
 		return Entry;
 	}
 
-	void RecordApproval(const FString& OperationId, const TOptional<EHyperAIStudioApprovalCategory>& AutoCategory)
+	void ForgetApproval(const FString& OperationId)
+	{
+		Records().RemoveAll([&OperationId](const FHyperAIStudioApprovalRecord& Record) { return Record.OperationId == OperationId; });
+	}
+
+	void RecordApproval(const FString& OperationId, const EHyperAIStudioApprover Approver, const TOptional<EHyperAIStudioApprovalCategory>& AutoCategory)
 	{
 		TArray<FHyperAIStudioApprovalRecord>& Items = Records();
-		Items.RemoveAll([&OperationId](const FHyperAIStudioApprovalRecord& Record) { return Record.OperationId == OperationId; });
+		ForgetApproval(OperationId);
 		if (Items.Num() >= MaxRecords)
 		{
 			Items.RemoveAt(0);
 		}
 		FHyperAIStudioApprovalRecord& Record = Items.AddDefaulted_GetRef();
 		Record.OperationId = OperationId;
+		Record.ApprovedBy = Approver;
 		Record.AutoApprovedAs = AutoCategory;
 		Record.ApprovedUtc = FDateTime::UtcNow();
 	}
@@ -165,7 +186,7 @@ namespace HyperAIStudio::Approval::Private
 	/** Holds a request; one the user's auto-approval covers is approved on the next quiet tick. */
 	void Hold(FHeldApproval&& Item)
 	{
-		FHyperAIStudioAutoApproval::EndIfExpired();
+		FHyperAIStudioAutoApproval::EndIfOver();
 		Item.Sequence = NextSequence()++;
 		Item.Pending.RequestedUtc = FDateTime::UtcNow();
 		Item.bScheduled = IsCovered(Item);
@@ -182,8 +203,15 @@ namespace HyperAIStudio::Approval::Private
 		FHyperAIStudioApprovalGate::OnChanged().Broadcast();
 	}
 
-	/** A click and an auto-approval both approve here; only the activity entry, the log and the record say which. */
-	bool ApproveHeld(const FString& OperationId, const TOptional<EHyperAIStudioApprovalCategory>& AutoCategory, FString& OutError)
+	/**
+	 * A click, an auto-approval and a running job all approve here; only the activity entry, the log and the record say
+	 * which. AutoCategory is set exactly when Approver is AutoApproval.
+	 */
+	bool ApproveHeld(
+		const FString& OperationId,
+		const EHyperAIStudioApprover Approver,
+		const TOptional<EHyperAIStudioApprovalCategory>& AutoCategory,
+		FString& OutError)
 	{
 		OutError.Reset();
 		if (!IsInGameThread())
@@ -199,10 +227,11 @@ namespace HyperAIStudio::Approval::Private
 		}
 		const FHeldApproval Item = Held()[Index];
 		Held().RemoveAt(Index);
-		RecordApproval(OperationId, AutoCategory);
-		const FString Approved = AutoCategory.IsSet()
-			? FString::Printf(TEXT("Auto-approved as %s; "), ::LexToString(*AutoCategory)) : FString(TEXT("Approved; "));
-		auto LogApproval = [&Item, &OperationId, &AutoCategory]()
+		RecordApproval(OperationId, Approver, AutoCategory);
+		const FString Approved = AutoCategory.IsSet() ? FString::Printf(TEXT("Auto-approved as %s; "), ::LexToString(*AutoCategory))
+			: Approver == EHyperAIStudioApprover::AgentJob ? FString(TEXT("Approved for a running agent job; "))
+			: FString(TEXT("Approved; "));
+		auto LogApproval = [&Item, &OperationId, &AutoCategory, Approver]()
 		{
 			if (AutoCategory.IsSet())
 			{
@@ -211,16 +240,22 @@ namespace HyperAIStudio::Approval::Private
 			}
 			else
 			{
-				UE_LOG(LogHyperAIStudioApproval, Log, TEXT("Approved %s on %s (%s)."),
-					*Item.Pending.Summary.ToolName, *Item.Pending.Summary.EffectTarget, *OperationId);
+				UE_LOG(LogHyperAIStudioApproval, Log, TEXT("Approved %s on %s (%s)%s."),
+					*Item.Pending.Summary.ToolName, *Item.Pending.Summary.EffectTarget, *OperationId,
+					Approver == EHyperAIStudioApprover::AgentJob ? TEXT(" for a running agent job") : TEXT(""));
 			}
+		};
+		auto Mark = [&AutoCategory, Approver](FHyperAIStudioActivityEntry& Entry)
+		{
+			Entry.AutoApprovedAs = AutoCategory;
+			Entry.bApprovedForJob = Approver == EHyperAIStudioApprover::AgentJob;
 		};
 		if (Item.Action)
 		{
 			FHyperAIStudioActivityEntry Entry = MakeEntry(EHyperAIStudioActivityKind::ApprovalApproved, Item.Pending.Summary, OperationId);
 			Entry.StatusCode = TEXT("approved");
 			Entry.Detail = Approved + TEXT("running.");
-			Entry.AutoApprovedAs = AutoCategory;
+			Mark(Entry);
 			FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
 			LogApproval();
 			FHyperAIStudioApprovalGate::OnChanged().Broadcast();
@@ -228,30 +263,43 @@ namespace HyperAIStudio::Approval::Private
 			return true;
 		}
 
-		auto Fail = [&Item, &OperationId](const FString& Status, const FString& Diagnostic)
+		// A plan that cannot start still says who approved it, so a failure nobody clicked for reads as such.
+		auto Fail = [&Item, &OperationId, &Approved, &Mark, Approver](const FString& Status, const FString& Diagnostic)
 		{
 			FHyperAIStudioActivityEntry Entry = MakeEntry(EHyperAIStudioActivityKind::Failed, Item.Pending.Summary, OperationId);
 			Entry.StatusCode = Status;
-			Entry.Detail = Diagnostic;
+			Entry.Detail = Approver == EHyperAIStudioApprover::User ? Diagnostic : Approved + TEXT("it could not start: ") + Diagnostic;
+			Mark(Entry);
 			FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
 			FHyperAIStudioApprovalGate::OnChanged().Broadcast();
 		};
 
 		// Staging happens when the plan reaches the lane, not when the agent asked, so the stage lifetime covers only
 		// the run. A plan the user took longer than its seal to approve is prepared again from the same inputs, and a
-		// risky plan's grant is issued then, for this approval only.
+		// risky plan's grant is issued then, for this approval only: for an auto-approval, only while it lasts.
+		TOptional<HyperAIStudio::TrustedExecution::Private::FAutoApprovedBy> AutoApproved;
+		if (AutoCategory.IsSet())
+		{
+			AutoApproved.Emplace();
+			AutoApproved->Activation = FHyperAIStudioAutoApproval::GetActivationId();
+			AutoApproved->Category = *AutoCategory;
+		}
 		FString Status;
-		if (!HyperAIStudio::TrustedExecution::Private::SubmitUserApproved(Item.Prepared, OperationId, Status, OutError))
+		if (!HyperAIStudio::TrustedExecution::Private::SubmitUserApproved(Item.Prepared, OperationId, Status, OutError, AutoApproved))
 		{
 			Fail(Status, OutError);
 			return false;
+		}
+		if (AutoApproved.IsSet() && Status == TEXT("queued"))
+		{
+			AwaitingLane().Add({Item.Pending, Item.Sequence, AutoApproved->Activation});
 		}
 
 		FHyperAIStudioActivityEntry Entry = MakeEntry(EHyperAIStudioActivityKind::ApprovalApproved, Item.Pending.Summary, OperationId);
 		Entry.StatusCode = Status;
 		Entry.Detail = Approved + (Status == TEXT("queued")
 			? TEXT("it runs when the edits ahead of it finish.") : TEXT("the edit is running."));
-		Entry.AutoApprovedAs = AutoCategory;
+		Mark(Entry);
 		FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
 		LogApproval();
 		FHyperAIStudioApprovalGate::OnChanged().Broadcast();
@@ -260,15 +308,14 @@ namespace HyperAIStudio::Approval::Private
 
 	/**
 	 * Approves, on the game thread, what auto-approval covered as it arrived, by the code a click runs. Requests it no
-	 * longer covers (it was stopped, ran out or reached a limit) wait for a click again.
+	 * longer covers (it was stopped, ran out or reached a limit) wait for a click again. True while more remain.
 	 */
-	bool Sweep(float)
+	bool SweepOnce()
 	{
-		FHyperAIStudioAutoApproval::EndIfExpired();
+		FHyperAIStudioAutoApproval::EndIfOver();
 		auto IsScheduled = [](const FHeldApproval& Item) { return Item.bScheduled; };
 		if (!Held().ContainsByPredicate(IsScheduled))
 		{
-			SweepHandle().Reset();
 			return false;
 		}
 		if (IsEditorBusy())
@@ -302,7 +349,7 @@ namespace HyperAIStudio::Approval::Private
 			const EHyperAIStudioApprovalCategory Category = *Held()[Index].Pending.Category;
 			FHyperAIStudioAutoApproval::BeginApproval(Next.Value);
 			FString Error;
-			if (ApproveHeld(Next.Value, Category, Error))
+			if (ApproveHeld(Next.Value, EHyperAIStudioApprover::AutoApproval, Category, Error))
 			{
 				FHyperAIStudioAutoApproval::NoteApproved(Category);
 			}
@@ -316,13 +363,64 @@ namespace HyperAIStudio::Approval::Private
 			FHyperAIStudioApprovalGate::OnChanged().Broadcast();
 		}
 		// What an approved action asked for in turn is approved on the next tick.
-		const bool bMore = Held().ContainsByPredicate(IsScheduled);
+		return Held().ContainsByPredicate(IsScheduled);
+	}
+
+	bool Sweep(float)
+	{
+		const bool bMore = SweepOnce();
 		if (!bMore)
 		{
 			SweepHandle().Reset();
 		}
 		return bMore;
 	}
+
+	int32 ReturnUnstarted(const uint64 EndedActivation)
+	{
+		TArray<FAwaitingLane> Awaiting = MoveTemp(AwaitingLane());
+		AwaitingLane().Reset();
+		int32 Returned = 0;
+		for (FAwaitingLane& Entry : Awaiting)
+		{
+			FHeldApproval Item;
+			if (Entry.Activation != EndedActivation || IndexOf(Entry.Pending.OperationId) != INDEX_NONE
+				|| !HyperAIStudio::TrustedExecution::Private::WithdrawAutoApproved(Entry.Pending.OperationId, Entry.Activation, Item.Prepared))
+			{
+				// It started, failed, or another activation's; either way nothing of it is still waiting on this one.
+				continue;
+			}
+			// Its place among held requests is the one it had, so no later auto-approval counts it as made after it began.
+			Item.Pending = MoveTemp(Entry.Pending);
+			Item.Pending.bAutoApproving = false;
+			Item.Sequence = Entry.Sequence;
+			ForgetApproval(Item.Pending.OperationId);
+			FHyperAIStudioActivityEntry Activity = MakeEntry(EHyperAIStudioActivityKind::ApprovalRequested, Item.Pending.Summary, Item.Pending.OperationId);
+			Activity.StatusCode = TEXT("awaiting_user_approval");
+			Activity.Detail = TEXT("Auto-approval ended before this reached the edit lane; nothing ran. It waits for your approval again.");
+			UE_LOG(LogHyperAIStudioApproval, Display, TEXT("%s (%s) waits for a click again: the auto-approval that approved it ended before it started."),
+				*Item.Pending.Summary.ToolName, *Item.Pending.OperationId);
+			Held().Add(MoveTemp(Item));
+			FHyperAIStudioAgentActivityLog::Record(MoveTemp(Activity));
+			++Returned;
+		}
+		if (Returned > 0)
+		{
+			FHyperAIStudioApprovalGate::OnChanged().Broadcast();
+		}
+		return Returned;
+	}
+
+#if WITH_DEV_AUTOMATION_TESTS
+	void SweepForTests()
+	{
+		if (!SweepOnce() && SweepHandle().IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(SweepHandle());
+			SweepHandle().Reset();
+		}
+	}
+#endif
 }
 
 bool FHyperAIStudioApprovalGate::IsApprovalRequired(const EHyperAIStudioDomainSafety Safety)
@@ -439,6 +537,22 @@ bool FHyperAIStudioApprovalGate::IsAutoApproving(const FString& OperationId)
 	return Index != INDEX_NONE && Held()[Index].bScheduled && IsCovered(Held()[Index]);
 }
 
+bool FHyperAIStudioApprovalGate::DescribeHeld(const FString& OperationId, FString& InOutStatus, FString& InOutDiagnostic)
+{
+	using namespace HyperAIStudio::Approval::Private;
+	if (!IsAutoApproving(OperationId))
+	{
+		return false;
+	}
+	const TOptional<EHyperAIStudioApprovalCategory>& Category = Held()[IndexOf(OperationId)].Pending.Category;
+	InOutStatus = TEXT("queued");
+	InOutDiagnostic = FString::Printf(
+		TEXT("Auto-approval covers this request (%s): it is approved on the next quiet editor tick; nobody needs to click. ")
+		TEXT("Call hyper_operation_wait with this operation_id for its outcome."),
+		Category.IsSet() ? ::LexToString(*Category) : TEXT("edits"));
+	return true;
+}
+
 TOptional<FHyperAIStudioApprovalRecord> FHyperAIStudioApprovalGate::FindApproval(const FString& OperationId)
 {
 	if (!IsInGameThread())
@@ -452,7 +566,12 @@ TOptional<FHyperAIStudioApprovalRecord> FHyperAIStudioApprovalGate::FindApproval
 
 bool FHyperAIStudioApprovalGate::Approve(const FString& OperationId, FString& OutError)
 {
-	return HyperAIStudio::Approval::Private::ApproveHeld(OperationId, {}, OutError);
+	return HyperAIStudio::Approval::Private::ApproveHeld(OperationId, EHyperAIStudioApprover::User, {}, OutError);
+}
+
+bool FHyperAIStudioApprovalGate::ApproveForJob(const FString& OperationId, FString& OutError)
+{
+	return HyperAIStudio::Approval::Private::ApproveHeld(OperationId, EHyperAIStudioApprover::AgentJob, {}, OutError);
 }
 
 void FHyperAIStudioApprovalGate::Reject(const FString& OperationId, const FString& Reason)
@@ -485,6 +604,7 @@ void FHyperAIStudioApprovalGate::Clear()
 		SweepHandle().Reset();
 	}
 	Held().Reset();
+	AwaitingLane().Reset();
 	OnChanged().Broadcast();
 }
 

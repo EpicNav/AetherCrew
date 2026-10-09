@@ -4,6 +4,7 @@
 
 #include "CoreGlobals.h"
 #include "Framework/Application/SlateApplication.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioStyle.h"
 #include "Misc/App.h"
@@ -15,6 +16,7 @@
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
@@ -54,6 +56,22 @@ namespace HyperAIStudio::AutoApprovalDialog
 			.AutoWrapText(true)
 			.Font(bBold ? FCoreStyle::GetDefaultFontStyle("Bold", 10) : FCoreStyle::GetDefaultFontStyle("Regular", 10));
 	}
+
+	/**
+	 * The most the scrolling part may take: 70% of the screen the editor works on, in Slate units, so the buttons
+	 * fit on a 768-pixel-high screen or a 1080p one at 150%. Unlimited where no screen is known, as in a headless test.
+	 */
+	FOptionalSize MaxBodyHeight()
+	{
+		if (!FSlateApplication::IsInitialized())
+		{
+			return FOptionalSize();
+		}
+		const FSlateRect Area = FSlateApplication::Get().GetPreferredWorkArea();
+		const float Scale = FMath::Max(FPlatformApplicationMisc::GetDPIScaleFactorAtPoint(Area.Left, Area.Top), 0.5f);
+		const float Height = Area.GetSize().Y / Scale;
+		return Height > 200.0f ? FOptionalSize(FMath::Max(240.0f, Height * 0.7f)) : FOptionalSize();
+	}
 }
 
 void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
@@ -83,6 +101,93 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 		.AutoWrapText(true)
 		.ColorAndOpacity(FStyleColors::AccentRed)
 		.Text(LOCTEXT("ScriptsWarning", "Ticking this lets agents run any code on this computer. It is as strong as ticking everything."));
+
+	// Everything between the heading and the buttons scrolls, so Cancel and Turn On stay on a short screen.
+	const TSharedRef<SVerticalBox> Body = SNew(SVerticalBox)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			Paragraph(LOCTEXT("Intro",
+				"While auto-approval is on, HyperAI approves each new request in the categories you tick as if you had clicked Approve in Activity: it runs through the same queue, with the same checks. Requests in other categories still wait for you."))
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 8.0f, 0.0f, 0.0f)
+		[
+			Paragraph(LOCTEXT("Scope",
+				"This applies to every agent and MCP client connected to this editor, not just HyperAI chats: Claude Code, Codex, Gemini, or any other program that reaches this editor's Unreal MCP server."), true)
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 8.0f, 0.0f, 0.0f)
+		[
+			Paragraph(FText::Format(LOCTEXT("EndingUnstarted",
+				"It is never saved. It ends when its time runs out, when you press Stop, when the editor closes, when the spend cap or an external service's or image model's settings change, or by itself after {0} approvals, {1} external-effect requests, or {2} failures in a row. What it approved that has not started by then waits for your approval again."),
+				FHyperAIStudioAutoApproval::MaxApprovals, FHyperAIStudioAutoApproval::MaxExternalEffects,
+				FHyperAIStudioAutoApproval::MaxConsecutiveFailures))
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 14.0f, 0.0f, 0.0f)
+		[
+			BuildCategory(EHyperAIStudioApprovalCategory::Edits, LOCTEXT("EditsMostlyLabel", "Edits (mostly undoable)"),
+				LOCTEXT("EditsChecksBody",
+					"Changes agents plan to assets and levels: Blueprints and Animation Blueprints, materials, animation, gameplay abilities, Niagara, PCG and scatter, landscape and mesh terrain, foliage, lighting, level blockout, arranging actors, sequences, World Partition, UI, modeling and placing models, retargeting, pose search, texture graphs and sound. Also playtests (they start Play In Editor and may record a video), movie renders written to disk, and Python scripts in which the runner's best-effort checks found nothing risky: they run inside one undo step behind a guard that is not a sandbox, and one may open another level when nothing is unsaved. Each change is saved to the project when it finishes; most can be taken back with Undo."),
+				EditsNote)
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 10.0f, 0.0f, 0.0f)
+		[
+			BuildCategory(EHyperAIStudioApprovalCategory::Scripts, LOCTEXT("ScriptsLabel", "Scripts that need approval (cannot be undone)"),
+				LOCTEXT("ScriptsBody",
+					"Editor Python from hyper_script_run that the runner could not prove safe: it deletes, renames or merges assets or folders, destroys actors or components, imports files from disk, opens another level while this one has unsaved changes, runs console commands or more Python, writes files outside its own folder, closes the editor, or imports modules such as os, subprocess, socket, ctypes or requests. These scripts run without an undo step and without the guard, with your account's rights: they can delete or overwrite any of your files, start programs, use the network, and read keys kept in environment variables."),
+				ScriptsNote)
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 10.0f, 0.0f, 0.0f)
+		[
+			BuildCategory(EHyperAIStudioApprovalCategory::Destructive, LOCTEXT("DestructiveLabel", "Destructive tools (cannot be undone)"),
+				LOCTEXT("DestructiveBody",
+					"Plans that delete or replace things, such as UI plans (hyper_ui_apply_plan) that delete or replace widgets, bindings or animations, and any other plan its tool marks destructive. The one-time permission the editor requires for each of these is issued without your click. Agent scripts are not part of this; they are under Scripts."),
+				SNullWidget::NullWidget)
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 10.0f, 0.0f, 0.0f)
+		[
+			BuildCategory(EHyperAIStudioApprovalCategory::ExternalEffects, LOCTEXT("ExternalLabel", "External effects (spend money, leave this computer)"),
+				FText::Format(LOCTEXT("ExternalCapBody",
+					"Requests that reach outside the editor: generating images (hyper_image_generate, with Codex, Gemini or a configured image service), generating 3D models (hyper_mesh_generate, with Tripo, Meshy or Hi3D), and submitting files to source control (hyper_source_control_submit, through Perforce, Git, Plastic or Lore, where your team receives them). Prompts and pictures are sent to those services. One image request may make up to 8 paid calls. Paid calls still stop at this session's spend cap of {0}, and auto-approval turns off if the cap or a service's or model's price changes while it is on; agent models use your agent plan."),
+					SpendCap),
+				SNullWidget::NullWidget)
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 14.0f, 0.0f, 0.0f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 12.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("TurnOffAfter", "Turn off after"))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+			]
+			+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::FifteenMinutes, LOCTEXT("FifteenMinutes", "15 minutes"))]
+			+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::OneHour, LOCTEXT("OneHour", "1 hour"))]
+			+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::FourHours, LOCTEXT("FourHours", "4 hours"))]
+			+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::UntilEditorCloses, LOCTEXT("WhenEditorCloses", "When the editor closes"))]
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 12.0f, 0.0f, 0.0f)
+		[
+			BuildPending()
+		];
 
 	ChildSlot
 	[
@@ -120,86 +225,15 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 				.AutoHeight()
 				.Padding(0.0f, 10.0f, 0.0f, 0.0f)
 				[
-					Paragraph(LOCTEXT("Intro",
-						"While auto-approval is on, HyperAI approves each new request in the categories you tick as if you had clicked Approve in Activity: it runs through the same queue, with the same checks. Requests in other categories still wait for you."))
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 8.0f, 0.0f, 0.0f)
-				[
-					Paragraph(LOCTEXT("Scope",
-						"This applies to every agent and MCP client connected to this editor, not just HyperAI chats: Claude Code, Codex, Gemini, or any other program that reaches this editor's Unreal MCP server."), true)
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 8.0f, 0.0f, 0.0f)
-				[
-					Paragraph(FText::Format(LOCTEXT("Ending",
-						"It is never saved. It ends when its time runs out, when you press Stop, when the editor closes, or by itself after {0} approvals, {1} external effects, or {2} failures in a row."),
-						FHyperAIStudioAutoApproval::MaxApprovals, FHyperAIStudioAutoApproval::MaxExternalEffects,
-						FHyperAIStudioAutoApproval::MaxConsecutiveFailures))
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 14.0f, 0.0f, 0.0f)
-				[
-					BuildCategory(EHyperAIStudioApprovalCategory::Edits, LOCTEXT("EditsLabel", "Edits (can be undone)"),
-						LOCTEXT("EditsBody",
-							"Changes agents plan to assets and levels: Blueprints and Animation Blueprints, materials, animation, gameplay abilities, Niagara, PCG and scatter, landscape and mesh terrain, foliage, lighting, level blockout, arranging actors, sequences and movie renders, World Partition, UI, modeling and placing models, retargeting, pose search, texture graphs and sound. Also playtests (they start Play In Editor and may record a video) and Python scripts the runner proves undoable. Each change is saved to the project when it finishes; most can be taken back with Undo."),
-						EditsNote)
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 10.0f, 0.0f, 0.0f)
-				[
-					BuildCategory(EHyperAIStudioApprovalCategory::Scripts, LOCTEXT("ScriptsLabel", "Scripts that need approval (cannot be undone)"),
-						LOCTEXT("ScriptsBody",
-							"Editor Python from hyper_script_run that the runner could not prove safe: it deletes, renames or merges assets or folders, destroys actors or components, imports files from disk, opens another level while this one has unsaved changes, runs console commands or more Python, writes files outside its own folder, closes the editor, or imports modules such as os, subprocess, socket, ctypes or requests. These scripts run without an undo step and without the guard, with your account's rights: they can delete or overwrite any of your files, start programs, use the network, and read keys kept in environment variables."),
-						ScriptsNote)
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 10.0f, 0.0f, 0.0f)
-				[
-					BuildCategory(EHyperAIStudioApprovalCategory::Destructive, LOCTEXT("DestructiveLabel", "Destructive tools (cannot be undone)"),
-						LOCTEXT("DestructiveBody",
-							"Plans that delete or replace things, such as UI plans (hyper_ui_apply_plan) that delete or replace widgets, bindings or animations, and any other plan its tool marks destructive. The one-time permission the editor requires for each of these is issued without your click. Agent scripts are not part of this; they are under Scripts."),
-						SNullWidget::NullWidget)
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 10.0f, 0.0f, 0.0f)
-				[
-					BuildCategory(EHyperAIStudioApprovalCategory::ExternalEffects, LOCTEXT("ExternalLabel", "External effects (spend money, leave this computer)"),
-						FText::Format(LOCTEXT("ExternalBody",
-							"Requests that reach outside the editor: generating images (hyper_image_generate, with Codex, Gemini or a configured image service), generating 3D models (hyper_mesh_generate, with Tripo, Meshy or Hi3D), and submitting files to source control (hyper_source_control_submit, through Perforce, Git, Plastic or Lore, where your team receives them). Prompts and pictures are sent to those services. Paid calls still stop at this session's spend cap of {0}; agent models use your agent plan."),
-							SpendCap),
-						SNullWidget::NullWidget)
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 14.0f, 0.0f, 0.0f)
-				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					.Padding(0.0f, 0.0f, 12.0f, 0.0f)
+					SNew(SBox)
+					.MaxDesiredHeight_Static(&MaxBodyHeight)
 					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("TurnOffAfter", "Turn off after"))
-						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+						SNew(SScrollBox)
+						+ SScrollBox::Slot()
+						[
+							Body
+						]
 					]
-					+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::FifteenMinutes, LOCTEXT("FifteenMinutes", "15 minutes"))]
-					+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::OneHour, LOCTEXT("OneHour", "1 hour"))]
-					+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::FourHours, LOCTEXT("FourHours", "4 hours"))]
-					+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::UntilEditorCloses, LOCTEXT("WhenEditorCloses", "When the editor closes"))]
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 12.0f, 0.0f, 0.0f)
-				[
-					BuildPending()
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
@@ -340,7 +374,7 @@ TSharedRef<SWidget> SHyperAIStudioAutoApprovalDialog::BuildPending() const
 		];
 }
 
-TSharedPtr<SWidget> SHyperAIStudioAutoApprovalDialog::GetCancelButton() const
+TSharedPtr<SWidget> SHyperAIStudioAutoApprovalDialog::FocusOnOpen() const
 {
 	return CancelButton;
 }
@@ -397,7 +431,7 @@ FText SHyperAIStudioAutoApprovalDialog::BuildConfirmation() const
 			Lines.Add(LOCTEXT("ConfirmExternal", "- External effects (can spend money and send data off this computer)"));
 			break;
 		default:
-			Lines.Add(LOCTEXT("ConfirmEdits", "- Edits (undoable asset and level changes)"));
+			Lines.Add(LOCTEXT("ConfirmEditsMostly", "- Edits (mostly undoable asset and level changes, and scripts the runner's checks passed)"));
 			break;
 		}
 	}
@@ -412,7 +446,9 @@ FReply SHyperAIStudioAutoApprovalDialog::OnTurnOnClicked()
 	{
 		return FReply::Handled();
 	}
-	// A second, native confirmation: an MCP client can synthesize Slate clicks, but not answer a Windows message box.
+	// A second, native confirmation. An MCP-only client can synthesize Slate input but cannot reach a Windows message
+	// box. It is no barrier to a program with input of its own at the OS level (an agent with a shell can send it
+	// keys); such agents are held by their own client's permission prompts.
 	++NativeConfirmations;
 	if (!ConfirmNatively || !ConfirmNatively(LOCTEXT("ConfirmCaption", "HyperAI Studio: turn on auto-approval?"), BuildConfirmation()))
 	{
@@ -517,6 +553,16 @@ void FHyperAIStudioAutoApprovalTestAccess::PressTurnOn(SHyperAIStudioAutoApprova
 void FHyperAIStudioAutoApprovalTestAccess::PressCancel(SHyperAIStudioAutoApprovalDialog& Dialog)
 {
 	Dialog.OnCancelClicked();
+}
+
+void FHyperAIStudioAutoApprovalTestAccess::PressKey(SHyperAIStudioAutoApprovalDialog& Dialog, const FKey& Key)
+{
+	Dialog.OnKeyDown(FGeometry(), FKeyEvent(Key, FModifierKeysState(), 0, false, 0, 0));
+}
+
+bool FHyperAIStudioAutoApprovalTestAccess::FocusesCancel(const SHyperAIStudioAutoApprovalDialog& Dialog)
+{
+	return Dialog.FocusOnOpen().IsValid() && Dialog.FocusOnOpen() == Dialog.CancelButton;
 }
 
 bool FHyperAIStudioAutoApprovalTestAccess::TurnOn(

@@ -723,6 +723,7 @@ FHyperAIImageGenerateReport FHyperAIStudioImageGenContracts::BuildPlan(const FHy
 	Report.Diagnostic = FString::Printf(
 		TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing has been sent or spent.%s ")
 		TEXT("Call hyper_operation_wait with operation_id and bWaitThroughApproval true; once approved, watch the batch with hyper_image_inspect."), *SlowWarning);
+	FHyperAIStudioApprovalGate::DescribeHeld(Request.OperationId, Report.Status, Report.Diagnostic);
 	return Report;
 }
 

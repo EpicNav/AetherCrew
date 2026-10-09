@@ -11,6 +11,7 @@
 #include "HyperAIStudioNativeReadToolset.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioWidgetShot.h"
+#include "InputCoreTypes.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/Guid.h"
@@ -103,7 +104,14 @@ namespace HyperAIStudio::AutoApprovalTests
 		return {};
 	}
 
-	/** Every test starts and ends where module startup does: off, with nothing of its own left waiting. */
+	/**
+	 * Every test starts and ends where module startup does: off, with nothing of its own left waiting. Tests may run in
+	 * the user's own editor, so each first skips while the user's own auto-approval is on, and Reset ends only a
+	 * test's activation. Gate-only tests drive the sweep through FAccess::PumpGate rather than the core ticker; those
+	 * that wait on the edit queue or hyper_operation_wait tick the core ticker, which also serves MCP and the remote
+	 * page, so it is the test scope (the test's own ids, and only under GIsAutomationTesting) that keeps a test's
+	 * activation from covering anything else.
+	 */
 	struct FScope
 	{
 		TArray<FString> Ids;
@@ -151,9 +159,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FHyperAIStudioAutoApprovalUnreachableTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::AutoApprovalTests;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
 	FScope Scope;
 	TestFalse(TEXT("A fresh editor has auto-approval off"), FHyperAIStudioAutoApproval::IsActive());
 	TestFalse(TEXT("and its status says so"), FHyperAIStudioAutoApproval::GetStatus().bActive);
+	TestTrue(TEXT("and no activation is current"), FHyperAIStudioAutoApproval::GetActivationId() == 0);
 
 	auto Names = [](const FString& Name)
 	{
@@ -230,6 +243,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FHyperAIStudioAutoApprovalDialogTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::AutoApprovalTests;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
 	FScope Scope;
 	const FString Id = Scope.Add();
 
@@ -265,6 +282,16 @@ bool FHyperAIStudioAutoApprovalDialogTest::RunTest(const FString& Parameters)
 	FAccess::PressTurnOn(*Cancelled, {Id});
 	TestFalse(TEXT("and leaves it off, even if Turn On is pressed after"), FHyperAIStudioAutoApproval::IsActive());
 
+	const TSharedRef<SHyperAIStudioAutoApprovalDialog> Escaped = FAccess::MakeDialog();
+	FAccess::SetNativeAnswer(*Escaped, true);
+	TestTrue(TEXT("The window focuses Cancel as it opens, so Enter cancels"), FAccess::FocusesCancel(*Escaped));
+	FAccess::PressKey(*Escaped, EKeys::Enter);
+	TestFalse(TEXT("Enter reaching the dialog itself presses nothing"), FAccess::WasClosed(*Escaped) || FHyperAIStudioAutoApproval::IsActive());
+	FAccess::PressKey(*Escaped, EKeys::Escape);
+	TestTrue(TEXT("Escape closes the dialog"), FAccess::WasClosed(*Escaped));
+	TestFalse(TEXT("and leaves it off"), FHyperAIStudioAutoApproval::IsActive());
+	TestEqual(TEXT("without asking the native confirmation"), FAccess::GetNativeConfirmations(*Escaped), 0);
+
 	const TSharedRef<SHyperAIStudioAutoApprovalDialog> Confirmed = FAccess::MakeDialog();
 	FAccess::SetTicked(*Confirmed, ECategory::ExternalEffects, true);
 	FAccess::SetDuration(*Confirmed, EHyperAIStudioAutoApprovalDuration::FifteenMinutes);
@@ -281,6 +308,8 @@ bool FHyperAIStudioAutoApprovalDialogTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Activity records that it turned on"), !Entries.IsEmpty()
 		&& Entries[0].Kind == EHyperAIStudioActivityKind::AutoApproval && Entries[0].ToolName == TEXT("turned on")
 		&& Entries[0].Detail.Contains(TEXT("External effects")) && Entries[0].Agent.IsEmpty());
+	TestTrue(TEXT("as a test's, never as one a person confirmed: ") + (Entries.IsEmpty() ? FString() : Entries[0].Detail),
+		!Entries.IsEmpty() && Entries[0].Detail.Contains(TEXT("automation test")) && !Entries[0].Detail.Contains(TEXT("confirmed")));
 
 	const TSharedRef<SHyperAIStudioAutoApprovalDialog> Again = FAccess::MakeDialog();
 	TestTrue(TEXT("The next dialog starts from the defaults again"), FAccess::IsTicked(*Again, ECategory::Edits)
@@ -297,6 +326,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FHyperAIStudioAutoApprovalCategoriesTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::AutoApprovalTests;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
 	for (const ECategory Chosen : AllCategories)
 	{
 		FScope Scope;
@@ -343,6 +376,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FHyperAIStudioAutoApprovalPendingTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::AutoApprovalTests;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
 	FScope Scope;
 	const FString Before = Scope.Add();
 	const FString After = Scope.Add();
@@ -377,14 +414,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FHyperAIStudioAutoApprovalExpiryTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::AutoApprovalTests;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
 	FScope Scope;
 	const FString Late = Scope.Add();
 	const FString Stopped = Scope.Add();
 	TestTrue(TEXT("It turns on for 15 minutes"),
 		FAccess::TurnOn({ECategory::Edits}, Scope.All(), EHyperAIStudioAutoApprovalDuration::FifteenMinutes));
 	FAccess::AdvanceClock(15.0 * 60.0 + 1.0);
-	// Its own one-second ticker notices.
-	FTSTicker::GetCoreTicker().Tick(1.5f);
+	// Its own one-second ticker notices, with no request to prompt it.
+	TestTrue(TEXT("Its expiry ticker is registered"), FAccess::TickExpiry());
 	TestFalse(TEXT("When its time runs out it turns off"), FHyperAIStudioAutoApproval::IsActive());
 	TestTrue(TEXT("because it expired"), FAccess::GetLastEnd() == EHyperAIStudioAutoApprovalEnd::Expired);
 	bool bLateRan = false;
@@ -394,7 +435,8 @@ bool FHyperAIStudioAutoApprovalExpiryTest::RunTest(const FString& Parameters)
 	const TArray<FHyperAIStudioActivityEntry> Entries = FHyperAIStudioAgentActivityLog::GetSnapshot();
 	TestTrue(TEXT("Activity records that it turned off and why"), Entries.ContainsByPredicate([](const FHyperAIStudioActivityEntry& Entry)
 	{
-		return Entry.Kind == EHyperAIStudioActivityKind::AutoApproval && Entry.ToolName == TEXT("turned off") && Entry.Detail == TEXT("its time ran out");
+		return Entry.Kind == EHyperAIStudioActivityKind::AutoApproval && Entry.ToolName == TEXT("turned off")
+			&& Entry.Detail.StartsWith(TEXT("its time ran out"));
 	}));
 
 	FAccess::Reset();
@@ -405,8 +447,11 @@ bool FHyperAIStudioAutoApprovalExpiryTest::RunTest(const FString& Parameters)
 	bool bStoppedRan = false;
 	TestTrue(TEXT("A covered request is held"), Hold(Stopped, MakeSummary(EHyperAIStudioDomainSafety::Edit), [&bStoppedRan]() { bStoppedRan = true; }));
 	TestTrue(TEXT("and about to be approved"), FHyperAIStudioApprovalGate::IsAutoApproving(Stopped));
-	FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::Stopped);
+	// The banner's Stop button, as a person presses it.
+	const TSharedRef<SHyperAIStudioAutoApprovalBanner> Banner = SNew(SHyperAIStudioAutoApprovalBanner);
+	FAccess::PressStop(*Banner);
 	TestFalse(TEXT("Stop turns it off at once"), FHyperAIStudioAutoApproval::IsActive());
+	TestTrue(TEXT("as stopped by the user"), FAccess::GetLastEnd() == EHyperAIStudioAutoApprovalEnd::Stopped);
 	TestTrue(TEXT("and tells the banners"), Changes > 0);
 	TestTrue(TEXT("The request it had not reached yet is no longer about to be approved"), !FHyperAIStudioApprovalGate::IsAutoApproving(Stopped));
 	FAccess::PumpGate();
@@ -422,6 +467,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FHyperAIStudioAutoApprovalGuardTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::AutoApprovalTests;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
 	{
 		FScope Scope;
 		for (int32 Index = 0; Index < 8; ++Index)
@@ -501,6 +550,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FHyperAIStudioAutoApprovalStatusTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::AutoApprovalTests;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
 	FScope Scope;
 	const FString Auto = Scope.Add();
 	const FString Waited = Scope.Add();
@@ -515,6 +568,12 @@ bool FHyperAIStudioAutoApprovalStatusTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("scheduled by auto-approval"), Status.StatusCode, FString(TEXT("auto_approval_scheduled")));
 	TestEqual(TEXT("and approved by it"), Status.ApprovedBy, FString(TEXT("auto_approval")));
 	TestFalse(TEXT("not finished"), Status.bTerminal);
+	// What a pack that replies at once (hyper_script_run, hyper_playtest_run, hyper_mesh_generate...) tells the agent.
+	FString Reply = TEXT("awaiting_user_approval");
+	FString Diagnostic = TEXT("Waiting in HyperAI Chat, Activity panel; nothing ran yet.");
+	TestTrue(TEXT("A pack's reply learns that auto-approval covers it"), FHyperAIStudioApprovalGate::DescribeHeld(Auto, Reply, Diagnostic));
+	TestEqual(TEXT("and says queued, not awaiting approval"), Reply, FString(TEXT("queued")));
+	TestEqual(TEXT("with what hyper_operation_status says"), Diagnostic, Status.Diagnostic);
 	FAccess::PumpGate();
 	Status = UHyperAIStudioNativeReadToolset::hyper_operation_status(Auto);
 	TestEqual(TEXT("After it, the edit's own outcome shows"), Status.Status, FString(TEXT("completed")));
@@ -535,6 +594,10 @@ bool FHyperAIStudioAutoApprovalStatusTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A request outside it is held"), Hold(Clicked, MakeSummary(EHyperAIStudioDomainSafety::Edit), [Clicked]() { RecordOutcome(Clicked, true); }));
 	Status = UHyperAIStudioNativeReadToolset::hyper_operation_status(Clicked);
 	TestEqual(TEXT("and reads as waiting for a person"), Status.Status, FString(TEXT("awaiting_user_approval")));
+	Reply = TEXT("awaiting_user_approval");
+	Diagnostic = TEXT("Waiting.");
+	TestFalse(TEXT("A pack's reply for it is left as it was"), FHyperAIStudioApprovalGate::DescribeHeld(Clicked, Reply, Diagnostic));
+	TestTrue(TEXT("awaiting approval"), Reply == TEXT("awaiting_user_approval") && Diagnostic == TEXT("Waiting."));
 	FString Error;
 	TestTrue(TEXT("A click approves it"), FHyperAIStudioApprovalGate::Approve(Clicked, Error));
 	Status = UHyperAIStudioNativeReadToolset::hyper_operation_status(Clicked);
@@ -553,6 +616,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FHyperAIStudioAutoApprovalBusyTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::AutoApprovalTests;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
 	if (!GEditor)
 	{
 		AddInfo(TEXT("No editor to hold a transaction open."));
@@ -590,11 +657,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FHyperAIStudioAutoApprovalTestScopeTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::AutoApprovalTests;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
 	FScope Scope;
 	const FString Own = Scope.Add();
 	const FString Other = Scope.Add();
 	// A test can run in the user's own editor (Epic's automation toolset), so its activation must never reach their requests.
 	TestTrue(TEXT("It turns on for one id"), FAccess::TurnOn({ECategory::Edits}, {Own}));
+	const TArray<FHyperAIStudioActivityEntry> Turned = FHyperAIStudioAgentActivityLog::GetSnapshot();
+	TestTrue(TEXT("Activity records it as a test's, covering only the test's own requests"), !Turned.IsEmpty()
+		&& Turned[0].ToolName == TEXT("turned on") && Turned[0].Detail.Contains(TEXT("automation test")));
 	bool bOtherRan = false;
 	bool bOwnRan = false;
 	TestTrue(TEXT("Another request is held"), Hold(Other, MakeSummary(EHyperAIStudioDomainSafety::Edit), [&bOtherRan]() { bOtherRan = true; }));
@@ -612,6 +686,114 @@ bool FHyperAIStudioAutoApprovalTestScopeTest::RunTest(const FString& Parameters)
 	Hold(Stray, MakeSummary(EHyperAIStudioDomainSafety::Edit), [&bStrayRan]() { bStrayRan = true; });
 	FAccess::PumpGate();
 	TestTrue(TEXT("and approves nothing"), !bStrayRan && FHyperAIStudioApprovalGate::HasPending(Stray));
+	FAccess::Reset();
+	TestFalse(TEXT("A test's own activation ends with the test"), FHyperAIStudioAutoApproval::IsActive());
+	const TArray<FHyperAIStudioActivityEntry> Ended = FHyperAIStudioAgentActivityLog::GetSnapshot();
+	TestTrue(TEXT("and Activity says a test ended it, not that the editor closed"), !Ended.IsEmpty()
+		&& Ended[0].ToolName == TEXT("turned off") && Ended[0].Detail.Contains(TEXT("automation test"))
+		&& !Ended[0].Detail.Contains(TEXT("editor is closing")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAutoApprovalSpendSettingsTest,
+	"HyperAIStudio.Chat.AutoApproval.SpendSettingsChangeEndsIt",
+	HyperAIStudio::AutoApprovalTests::Flags)
+
+bool FHyperAIStudioAutoApprovalSpendSettingsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::AutoApprovalTests;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
+	FScope Scope;
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const float Cap = Settings->ExternalServiceSessionSpendCap;
+	const TArray<FHyperAIStudioExternalServiceSettings> Services = Settings->ExternalServices;
+	const TArray<FHyperAIStudioImageModelSettings> Models = Settings->ImageModels;
+	ON_SCOPE_EXIT
+	{
+		Settings->ExternalServiceSessionSpendCap = Cap;
+		Settings->ExternalServices = Services;
+		Settings->ImageModels = Models;
+	};
+	const FString Paid = Scope.Add();
+	TestTrue(TEXT("External-effects auto-approval turns on"), FAccess::TurnOn({ECategory::ExternalEffects, ECategory::Edits}, Scope.All()));
+	FAccess::PumpGate();
+	TestTrue(TEXT("While nothing changes, it stays on"), FHyperAIStudioAutoApproval::IsActive());
+
+	// What Epic's settings toolset lets any MCP client do with no approval: raise the cap after the user confirmed.
+	Settings->ExternalServiceSessionSpendCap = Cap + 100.0f;
+	bool bRan = false;
+	TestTrue(TEXT("A paid request is held"), Hold(Paid, SummaryFor(ECategory::ExternalEffects), [&bRan]() { bRan = true; }));
+	FAccess::PumpGate();
+	TestFalse(TEXT("A raised cap turns it off before it approves anything"), FHyperAIStudioAutoApproval::IsActive());
+	TestTrue(TEXT("for that reason"), FAccess::GetLastEnd() == EHyperAIStudioAutoApprovalEnd::SpendSettingsChanged);
+	TestTrue(TEXT("and the paid request waits for a click"), !bRan && FHyperAIStudioApprovalGate::HasPending(Paid));
+	const TArray<FHyperAIStudioActivityEntry> Entries = FHyperAIStudioAgentActivityLog::GetSnapshot();
+	TestTrue(TEXT("Activity says why it turned off"), Entries.ContainsByPredicate([](const FHyperAIStudioActivityEntry& Entry)
+	{
+		return Entry.ToolName == TEXT("turned off") && Entry.Detail.Contains(TEXT("spend cap"));
+	}));
+
+	// A service made free, or a cheaper model, is the same thing the other way round; the one-second check notices.
+	Settings->ExternalServiceSessionSpendCap = Cap;
+	FAccess::Reset();
+	TestTrue(TEXT("It turns on again"), FAccess::TurnOn({ECategory::ExternalEffects}, Scope.All()));
+	FHyperAIStudioExternalServiceSettings& Service = Settings->ExternalServices.AddDefaulted_GetRef();
+	Service.Id = TEXT("autoapproval-test-service");
+	Service.CostPerCall = 0.0f;
+	TestTrue(TEXT("Its one-second check runs"), FAccess::TickExpiry());
+	TestFalse(TEXT("and turns it off for a changed service"), FHyperAIStudioAutoApproval::IsActive());
+	TestTrue(TEXT("for that reason too"), FAccess::GetLastEnd() == EHyperAIStudioAutoApprovalEnd::SpendSettingsChanged);
+
+	Settings->ExternalServices = Services;
+	FAccess::Reset();
+	TestTrue(TEXT("It turns on once more"), FAccess::TurnOn({ECategory::ExternalEffects}, Scope.All()));
+	Settings->ImageModels.AddDefaulted();
+	TestTrue(TEXT("Its one-second check runs again"), FAccess::TickExpiry());
+	TestFalse(TEXT("and turns it off for a changed image model"), FHyperAIStudioAutoApproval::IsActive());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAutoApprovalJobApprovalTest,
+	"HyperAIStudio.Chat.AutoApproval.JobApprovalsSaySo",
+	HyperAIStudio::AutoApprovalTests::Flags)
+
+bool FHyperAIStudioAutoApprovalJobApprovalTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::AutoApprovalTests;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
+	FScope Scope;
+	const FString Edit = Scope.Add();
+	const FString Risky = Scope.Add();
+	bool bRan = false;
+	TestTrue(TEXT("An edit is held"), Hold(Edit, MakeSummary(EHyperAIStudioDomainSafety::Edit), [Edit, &bRan]()
+	{
+		bRan = true;
+		RecordOutcome(Edit, true);
+	}));
+	const TOptional<FHyperAIStudioPendingApproval> Plain = FindPending(Edit);
+	TestTrue(TEXT("A plain edit is one a running job may approve"), Plain.IsSet() && Plain->IsPlainEdit());
+	FString Error;
+	TestTrue(TEXT("A running job approves it: ") + Error, FHyperAIStudioApprovalGate::ApproveForJob(Edit, Error) && bRan);
+	const TOptional<FHyperAIStudioApprovalRecord> Record = FHyperAIStudioApprovalGate::FindApproval(Edit);
+	TestTrue(TEXT("The gate records the job as the approver"), Record.IsSet()
+		&& Record->ApprovedBy == EHyperAIStudioApprover::AgentJob && !Record->AutoApprovedAs.IsSet());
+	const FHyperAIOperationStatus Status = UHyperAIStudioNativeReadToolset::hyper_operation_status(Edit);
+	TestEqual(TEXT("An agent reads that a job approved it, not a person"), Status.ApprovedBy, FString(TEXT("agent_job")));
+	const TOptional<FHyperAIStudioActivityEntry> Approved = FindApproval(Edit);
+	TestTrue(TEXT("Activity marks it approved for a job"), Approved.IsSet() && Approved->bApprovedForJob
+		&& !Approved->AutoApprovedAs.IsSet() && Approved->Detail.StartsWith(TEXT("Approved for a running agent job")));
+
+	TestTrue(TEXT("A destructive request is held"), Hold(Risky, MakeSummary(EHyperAIStudioDomainSafety::Destructive), []() {}));
+	const TOptional<FHyperAIStudioPendingApproval> Destructive = FindPending(Risky);
+	TestTrue(TEXT("and no running job may approve it"), Destructive.IsSet() && !Destructive->IsPlainEdit());
 	return true;
 }
 
@@ -623,6 +805,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FHyperAIStudioAutoApprovalScreensTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::AutoApprovalTests;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
 	FScope Scope;
 	const FString Waiting = Scope.Add();
 	FHyperAIStudioApprovalSummary Summary = MakeSummary(EHyperAIStudioDomainSafety::Edit);

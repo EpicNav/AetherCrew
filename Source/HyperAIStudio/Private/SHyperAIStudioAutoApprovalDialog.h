@@ -12,8 +12,9 @@ class SWindow;
 
 /**
  * The warning auto-approval turns on from, and the only way it does: what each category covers and risks, how long it
- * lasts, and what already waits. Cancel is the default; Turn On asks once more in a native box, which no agent's
- * synthetic Slate input can press.
+ * lasts, and what already waits. Cancel is the default; Turn On asks once more in a native box, which an MCP-only
+ * client's synthetic Slate input cannot reach. (A program with OS-level input, such as an agent with a shell, could
+ * answer it; its own client's permission prompts govern that.)
  */
 class SHyperAIStudioAutoApprovalDialog : public SCompoundWidget
 {
@@ -26,7 +27,8 @@ public:
 	void Construct(const FArguments& InArgs);
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
-	TSharedPtr<SWidget> GetCancelButton() const;
+	/** What its window focuses as it opens, so Enter presses it: Cancel. */
+	TSharedPtr<SWidget> FocusOnOpen() const;
 
 private:
 #if WITH_DEV_AUTOMATION_TESTS

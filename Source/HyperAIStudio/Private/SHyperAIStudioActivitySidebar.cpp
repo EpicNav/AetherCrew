@@ -21,6 +21,7 @@
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
@@ -185,7 +186,12 @@ void SHyperAIStudioChatActivitySidebar::Construct(const FArguments& InArgs)
 			.AutoHeight()
 			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
 			[
-				SNew(SHyperAIStudioAutoApprovalBanner)
+				// A chat window shows its own banner above the chat; one there is enough.
+				SNew(SBox)
+				.Visibility(InArgs._bShowAutoApprovalBanner ? EVisibility::SelfHitTestInvisible : EVisibility::Collapsed)
+				[
+					SNew(SHyperAIStudioAutoApprovalBanner)
+				]
 			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()
@@ -505,10 +511,17 @@ TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildEntryRow(const FHype
 {
 	using namespace HyperAIStudio::ActivitySidebar;
 	const FString Target = Entry.Target;
-	// What the user's auto-approval approved says so, with the category that covered it.
+	// What nobody clicked for says so: the user's auto-approval, with the category that covered it, or a running job.
+	// So does whatever such an approval led to in the queue: a wait, or a failure.
 	const bool bAutoApproved = Entry.Kind == EHyperAIStudioActivityKind::ApprovalApproved && Entry.AutoApprovedAs.IsSet();
+	const bool bAutoApprovedOutcome = !bAutoApproved && Entry.AutoApprovedAs.IsSet();
 	const FText KindText = bAutoApproved
 		? FText::Format(LOCTEXT("AutoApprovedKind", "Auto-approved ({0})"), FHyperAIStudioAutoApproval::GetCategoryName(*Entry.AutoApprovedAs))
+		: bAutoApprovedOutcome
+		? FText::Format(LOCTEXT("AutoApprovedOutcomeKind", "{0} (auto-approved, {1})"),
+			FText::FromString(FHyperAIStudioAgentActivityLog::LexToString(Entry.Kind)), FHyperAIStudioAutoApproval::GetCategoryName(*Entry.AutoApprovedAs))
+		: Entry.bApprovedForJob
+		? FText::Format(LOCTEXT("JobApprovedKind", "{0} (for a job)"), FText::FromString(FHyperAIStudioAgentActivityLog::LexToString(Entry.Kind)))
 		: FText::FromString(FHyperAIStudioAgentActivityLog::LexToString(Entry.Kind));
 	TSharedRef<SHorizontalBox> Line = SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot()

@@ -1781,7 +1781,7 @@ namespace HyperAIStudio::NativeReadTools::Private
 {
 	FHyperAIOperationStatus ReadOperationStatus(const FString& OperationId);
 
-	/** Who approved it, when it waited for approval: the user's click, or the auto-approval they turned on. */
+	/** Who approved it, when it waited for approval: the user's click, the auto-approval they turned on, or a job they started. */
 	void AnnotateApproval(FHyperAIOperationStatus& Report, const FString& OperationId)
 	{
 		if (!Report.bFound || Report.Status == TEXT("awaiting_user_approval") || !Report.ApprovedBy.IsEmpty())
@@ -1793,7 +1793,8 @@ namespace HyperAIStudio::NativeReadTools::Private
 		{
 			return;
 		}
-		Report.ApprovedBy = Record->AutoApprovedAs.IsSet() ? TEXT("auto_approval") : TEXT("user");
+		Report.ApprovedBy = Record->ApprovedBy == EHyperAIStudioApprover::AutoApproval ? TEXT("auto_approval")
+			: Record->ApprovedBy == EHyperAIStudioApprover::AgentJob ? TEXT("agent_job") : TEXT("user");
 		if (Record->AutoApprovedAs.IsSet() && !Report.Diagnostic.StartsWith(TEXT("Auto-approved")))
 		{
 			Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(
@@ -1843,16 +1844,12 @@ FHyperAIOperationStatus HyperAIStudio::NativeReadTools::Private::ReadOperationSt
 		Report.PlanHash = Pending.Summary.PlanHash;
 		Report.CreatedUtc = Pending.RequestedUtc.ToIso8601();
 		Report.JournalAccessMode = TEXT("approval_queue");
-		if (Pending.bAutoApproving)
+		if (FHyperAIStudioApprovalGate::DescribeHeld(OperationId, Report.Status, Report.Diagnostic))
 		{
 			// Nobody needs to click: waits go on through it as through the edit queue.
-			Report.Status = TEXT("queued");
 			Report.State = Report.Status;
 			Report.StatusCode = TEXT("auto_approval_scheduled");
 			Report.ApprovedBy = TEXT("auto_approval");
-			Report.Diagnostic = FString::Printf(
-				TEXT("Auto-approval covers this request (%s): it is approved on the next quiet editor tick; nobody needs to click."),
-				Pending.Category.IsSet() ? ::LexToString(*Pending.Category) : TEXT("edits"));
 			Report.NextAction = TEXT("Call hyper_operation_wait with this operation_id; it runs without waiting for a person.");
 			return Report;
 		}

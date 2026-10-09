@@ -865,6 +865,7 @@ FHyperAIMeshGenerateReport FHyperAIStudioMeshGenContracts::Generate(const FHyper
 	Report.Status = TEXT("awaiting_user_approval");
 	Report.Diagnostic = FString::Printf(TEXT("Waiting for the user's approval in HyperAI Chat, Activity; nothing was spent yet. Then it makes %s and imports it into %s, ")
 		TEXT("in one to five minutes: call hyper_operation_wait with operation_id and bWaitThroughApproval true, then hyper_mesh_status."), *What, *Report.Destination);
+	FHyperAIStudioApprovalGate::DescribeHeld(Report.OperationId, Report.Status, Report.Diagnostic);
 	return Report;
 }
 

@@ -705,9 +705,9 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
-   "key": "ConfirmEdits",
-   "source": "- Edits (undoable asset and level changes)",
-   "text": "- 编辑（可撤销的资产和关卡更改）"
+   "key": "ConfirmEditsMostly",
+   "source": "- Edits (mostly undoable asset and level changes, and scripts the runner's checks passed)",
+   "text": "- 编辑（大多可撤销的资产和关卡更改，以及通过了运行器检查的脚本）"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -777,15 +777,15 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
-   "key": "EditsBody",
-   "source": "Changes agents plan to assets and levels: Blueprints and Animation Blueprints, materials, animation, gameplay abilities, Niagara, PCG and scatter, landscape and mesh terrain, foliage, lighting, level blockout, arranging actors, sequences and movie renders, World Partition, UI, modeling and placing models, retargeting, pose search, texture graphs and sound. Also playtests (they start Play In Editor and may record a video) and Python scripts the runner proves undoable. Each change is saved to the project when it finishes; most can be taken back with Undo.",
-   "text": "智能体对资产和关卡计划的更改：蓝图与动画蓝图、材质、动画、游戏性技能、Niagara、PCG 与散布、地形与网格地形、植被、光照、关卡白模、摆放 Actor、序列与影片渲染、World Partition、UI、建模与放置模型、重定向、姿势搜索、纹理图和声音。还包括试玩（会启动“在编辑器中运行”，并可能录制视频），以及运行器能证明可撤销的 Python 脚本。每项更改完成后都会保存到项目中；大多数可以通过“撤销”恢复。"
+   "key": "EditsChecksBody",
+   "source": "Changes agents plan to assets and levels: Blueprints and Animation Blueprints, materials, animation, gameplay abilities, Niagara, PCG and scatter, landscape and mesh terrain, foliage, lighting, level blockout, arranging actors, sequences, World Partition, UI, modeling and placing models, retargeting, pose search, texture graphs and sound. Also playtests (they start Play In Editor and may record a video), movie renders written to disk, and Python scripts in which the runner's best-effort checks found nothing risky: they run inside one undo step behind a guard that is not a sandbox, and one may open another level when nothing is unsaved. Each change is saved to the project when it finishes; most can be taken back with Undo.",
+   "text": "智能体对资产和关卡计划的更改：蓝图与动画蓝图、材质、动画、游戏性技能、Niagara、PCG 与散布、地形与网格地形、植被、光照、关卡白模、摆放 Actor、序列、World Partition、UI、建模与放置模型、重定向、姿势搜索、纹理图和声音。还包括试玩（会启动“在编辑器中运行”，并可能录制视频）、写入磁盘的影片渲染，以及运行器尽力检查后未发现风险的 Python 脚本：这些脚本在一个撤销步骤内运行，受一道并非沙盒的防护约束；没有未保存的内容时，脚本可能会打开另一个关卡。每项更改完成后都会保存到项目中；大多数可以通过“撤销”恢复。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
-   "key": "EditsLabel",
-   "source": "Edits (can be undone)",
-   "text": "编辑（可撤销）"
+   "key": "EditsMostlyLabel",
+   "source": "Edits (mostly undoable)",
+   "text": "编辑（大多可撤销）"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -795,9 +795,9 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
-   "key": "Ending",
-   "source": "It is never saved. It ends when its time runs out, when you press Stop, when the editor closes, or by itself after {0} approvals, {1} external effects, or {2} failures in a row.",
-   "text": "它从不保存。时间到、你按下“停止”或编辑器关闭时它都会结束；批准 {0} 次、产生 {1} 次外部影响或连续失败 {2} 次后，它也会自行关闭。"
+   "key": "EndingUnstarted",
+   "source": "It is never saved. It ends when its time runs out, when you press Stop, when the editor closes, when the spend cap or an external service's or image model's settings change, or by itself after {0} approvals, {1} external-effect requests, or {2} failures in a row. What it approved that has not started by then waits for your approval again.",
+   "text": "它从不保存。时间到、你按下“停止”、编辑器关闭，或者花费上限、外部服务或图片模型的设置发生变化时，它都会结束；批准 {0} 次、批准 {1} 个外部影响请求或连续失败 {2} 次后，它也会自行关闭。届时它已批准但尚未开始的请求，会重新等待你的审批。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -807,9 +807,9 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
-   "key": "ExternalBody",
-   "source": "Requests that reach outside the editor: generating images (hyper_image_generate, with Codex, Gemini or a configured image service), generating 3D models (hyper_mesh_generate, with Tripo, Meshy or Hi3D), and submitting files to source control (hyper_source_control_submit, through Perforce, Git, Plastic or Lore, where your team receives them). Prompts and pictures are sent to those services. Paid calls still stop at this session's spend cap of {0}; agent models use your agent plan.",
-   "text": "会延伸到编辑器之外的请求：生成图片（hyper_image_generate，使用 Codex、Gemini 或已配置的图片服务）、生成 3D 模型（hyper_mesh_generate，使用 Tripo、Meshy 或 Hi3D），以及向源代码管理提交文件（hyper_source_control_submit，通过 Perforce、Git、Plastic 或 Lore，你的团队会收到这些文件）。提示词和图片会被发送到这些服务。付费调用仍受本次会话 {0} 的花费上限约束；智能体模型会消耗你的智能体套餐。"
+   "key": "ExternalCapBody",
+   "source": "Requests that reach outside the editor: generating images (hyper_image_generate, with Codex, Gemini or a configured image service), generating 3D models (hyper_mesh_generate, with Tripo, Meshy or Hi3D), and submitting files to source control (hyper_source_control_submit, through Perforce, Git, Plastic or Lore, where your team receives them). Prompts and pictures are sent to those services. One image request may make up to 8 paid calls. Paid calls still stop at this session's spend cap of {0}, and auto-approval turns off if the cap or a service's or model's price changes while it is on; agent models use your agent plan.",
+   "text": "会延伸到编辑器之外的请求：生成图片（hyper_image_generate，使用 Codex、Gemini 或已配置的图片服务）、生成 3D 模型（hyper_mesh_generate，使用 Tripo、Meshy 或 Hi3D），以及向源代码管理提交文件（hyper_source_control_submit，通过 Perforce、Git、Plastic 或 Lore，你的团队会收到这些文件）。提示词和图片会被发送到这些服务。一个图片请求最多可产生 8 次付费调用。付费调用仍受本次会话 {0} 的花费上限约束；开启期间如果上限或某项服务、模型的价格发生变化，自动批准会关闭。智能体模型会消耗你的智能体套餐。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -904,8 +904,8 @@
   {
    "namespace": "HyperAIStudioAutoApproval",
    "key": "OffToast",
-   "source": "Auto-approval is off. Agents' requests wait for your approval again.",
-   "text": "自动批准已关闭。智能体的请求将重新等待你的审批。"
+   "source": "Auto-approval is off. Agents' requests wait for your approval again, including any it approved that had not started.",
+   "text": "自动批准已关闭。智能体的请求将重新等待你的审批，包括它已批准但尚未开始的请求。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -969,15 +969,21 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
+   "key": "SpendSettingsToast",
+   "source": "Auto-approval turned itself off: the spend cap, an external service or an image model changed in HyperAI Studio's settings. Check them before turning it on again.",
+   "text": "自动批准已自行关闭：HyperAI Studio 设置中的花费上限、外部服务或图片模型发生了变化。重新开启前请先检查这些设置。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
    "key": "Stop",
    "source": "Stop",
    "text": "停止"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
-   "key": "StopTooltip",
-   "source": "Turn auto-approval off now. Requests wait for your approval again; work already approved keeps running.",
-   "text": "立即关闭自动批准。请求将重新等待你的审批；已批准的工作会继续运行。"
+   "key": "StopUnstartedTooltip",
+   "source": "Turn auto-approval off now. Requests wait for your approval again, and so does what it approved that has not started yet; work already running goes on.",
+   "text": "立即关闭自动批准。请求将重新等待你的审批，它已批准但尚未开始的请求也是如此；已在运行的工作会继续。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -989,7 +995,7 @@
    "namespace": "HyperAIStudioAutoApproval",
    "key": "TurnOffAfter",
    "source": "Turn off after",
-   "text": "在此之后关闭"
+   "text": "多久后关闭："
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -16125,6 +16131,12 @@
   },
   {
    "namespace": "HyperAIStudioShell",
+   "key": "AutoApprovalStop",
+   "source": "Stop",
+   "text": "停止"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
    "key": "GroupCreate",
    "source": "Create",
    "text": "创作"
@@ -16659,6 +16671,12 @@
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "AutoApprovedOutcomeKind",
+   "source": "{0} (auto-approved, {1})",
+   "text": "{0}（自动批准，{1}）"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
    "key": "AutoApprovingNote",
    "source": "Auto-approval runs this as soon as the editor is idle.",
    "text": "编辑器空闲时，自动批准会立即运行它。"
@@ -16734,6 +16752,12 @@
    "key": "HoursAgo",
    "source": "{0}h ago",
    "text": "{0} 小时前"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "JobApprovedKind",
+   "source": "{0} (for a job)",
+   "text": "{0}（由任务批准）"
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",

@@ -36,12 +36,30 @@ struct FHyperAIStudioPendingApproval
 	TOptional<EHyperAIStudioApprovalCategory> Category;
 	/** The auto-approval the user turned on covers it and approves it on the next quiet editor tick. */
 	bool bAutoApproving = false;
+
+	/** An undoable edit by its sealed variant as well as its declared safety: what a running agent job may approve. */
+	bool IsPlainEdit() const
+	{
+		return Summary.Safety == EHyperAIStudioDomainSafety::Edit && Category == EHyperAIStudioApprovalCategory::Edits;
+	}
 };
 
-/** Who approved an operation: a click (the Activity card, the remote page, a tool form) or the user's auto-approval. */
+/** Who approved a held request. */
+enum class EHyperAIStudioApprover : uint8
+{
+	/** A person's click: the Activity card, the remote page, a tool form, or a panel's own Generate button. */
+	User,
+	/** The auto-approval the user turned on for the request's category. */
+	AutoApproval,
+	/** A running agent job the user started, for an edit in one of its packs. */
+	AgentJob
+};
+
+/** Who approved an operation, and as what. */
 struct FHyperAIStudioApprovalRecord
 {
 	FString OperationId;
+	EHyperAIStudioApprover ApprovedBy = EHyperAIStudioApprover::User;
 	/** Set when auto-approval approved it; the category that covered it. */
 	TOptional<EHyperAIStudioApprovalCategory> AutoApprovedAs;
 	FDateTime ApprovedUtc = FDateTime::MinValue();
@@ -92,6 +110,12 @@ public:
 	static bool HasPending(const FString& OperationId);
 	/** True while OperationId waits and the user's auto-approval will approve it on the next quiet editor tick. */
 	static bool IsAutoApproving(const FString& OperationId);
+	/**
+	 * For a pack's reply right after Request or RequestAction. When the user's auto-approval will approve OperationId,
+	 * sets Status to queued and Diagnostic to what hyper_operation_status says of it, and returns true; otherwise leaves
+	 * both as they are (awaiting_user_approval).
+	 */
+	static bool DescribeHeld(const FString& OperationId, FString& InOutStatus, FString& InOutDiagnostic);
 	/** How OperationId was approved, among the last 64 approvals of this editor session. */
 	static TOptional<FHyperAIStudioApprovalRecord> FindApproval(const FString& OperationId);
 
@@ -100,6 +124,8 @@ public:
 	 * dropped and OutError explains why. This is the click; auto-approval runs the same code.
 	 */
 	static bool Approve(const FString& OperationId, FString& OutError);
+	/** Approve, by a running agent job the user started rather than a click; recorded and reported as such. */
+	static bool ApproveForJob(const FString& OperationId, FString& OutError);
 	static void Reject(const FString& OperationId, const FString& Reason);
 	static void Clear();
 

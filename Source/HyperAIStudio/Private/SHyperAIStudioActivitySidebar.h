@@ -20,10 +20,14 @@
 class SHyperAIStudioChatActivitySidebar : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SHyperAIStudioChatActivitySidebar) {}
+	SLATE_BEGIN_ARGS(SHyperAIStudioChatActivitySidebar)
+		: _bShowAutoApprovalBanner(true)
+	{}
 		SLATE_EVENT(FSimpleDelegate, OnClose)
 		/** Notified when an approval is granted or rejected, so the chat panel can report it. */
 		SLATE_EVENT(FSimpleDelegate, OnApprovalResolved)
+		/** False where the host already shows the auto-approval banner, as a chat window does. */
+		SLATE_ARGUMENT(bool, bShowAutoApprovalBanner)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);

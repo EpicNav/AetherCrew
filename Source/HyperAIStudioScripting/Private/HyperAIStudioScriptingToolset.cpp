@@ -386,6 +386,7 @@ FHyperAIScriptRunReport FHyperAIStudioScriptingContracts::Run(const FHyperAIScri
 	Report.Diagnostic = (bUndoable ? FString(TEXT("Agent edits need approval here."))
 		: TEXT("The script ") + FString::Join(Reasons, TEXT("; ")) + TEXT("."))
 		+ TEXT(" Waiting in HyperAI Chat, Activity panel; nothing ran yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true.");
+	FHyperAIStudioApprovalGate::DescribeHeld(OperationId, Report.Status, Report.Diagnostic);
 	return Report;
 }
 

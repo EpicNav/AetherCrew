@@ -10,6 +10,7 @@
 #include "Framework/Docking/TabManager.h"
 #include "HAL/PlatformProcess.h"
 #include "HyperAIStudioAsyncJobHost.h"
+#include "HyperAIStudioAutoApproval.h"
 #include "HyperAIStudioPromptPresets.h"
 #include "HyperAIStudioStyle.h"
 #include "HyperAIStudioWidgets.h"
@@ -20,6 +21,7 @@
 #include "Interfaces/IPluginManager.h"
 #include "Misc/ConfigCacheIni.h"
 #include "SHyperAIStudioActivitySidebar.h"
+#include "SHyperAIStudioAutoApprovalBanner.h"
 #include "SHyperAIStudioQuickActionWindow.h"
 #include "SHyperAIStudioShell.h"
 #include "Styling/AppStyle.h"
@@ -975,6 +977,53 @@ TSharedRef<SWidget> SHyperAIStudioShell::BuildStatusBar()
 					.TextStyle(&Style(), "HyperAIStudio.Text.Caption")
 					.ColorAndOpacity(FStyleColors::Warning)
 					.Text_Lambda([this]() { return FText::Format(LOCTEXT("Approvals", "{0} {0}|plural(one=item,other=items) waiting for you"), Approvals); })
+				]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(16.0f, 0.0f, 0.0f, 0.0f))
+			[
+				// Auto-approval is never on out of sight: every Studio page shows it here, with Stop.
+				SNew(SBorder)
+				.Visibility_Lambda([]() { return FHyperAIStudioAutoApproval::IsActive() ? EVisibility::Visible : EVisibility::Collapsed; })
+				.BorderImage(Style().GetBrush("HyperAIStudio.TerminalFrame"))
+				.BorderBackgroundColor_Lambda([]() { return FSlateColor(FStyleColors::AccentOrange.GetSpecifiedColor().CopyWithNewOpacity(0.3f)); })
+				.Padding(FMargin(4.0f, 0.0f))
+				.ToolTipText_Lambda([]() { return FHyperAIStudioAutoApproval::DescribeBannerTooltip(); })
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
+						SNew(SButton)
+						.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+						.ContentPadding(FMargin(4.0f, 0.0f))
+						.OnClicked_Lambda([this]()
+						{
+							OpenPage(TEXT("Activity"));
+							return FReply::Handled();
+						})
+						[
+							SNew(STextBlock)
+							.TextStyle(&Style(), "HyperAIStudio.Text.Caption")
+							.Text_Lambda([]() { return FHyperAIStudioAutoApproval::DescribeBanner(); })
+						]
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
+						SNew(SButton)
+						.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+						.ContentPadding(FMargin(4.0f, 0.0f))
+						.ToolTipText(SHyperAIStudioAutoApprovalBanner::GetStopTooltip())
+						.OnClicked_Lambda([]()
+						{
+							FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::Stopped);
+							return FReply::Handled();
+						})
+						[
+							SNew(STextBlock)
+							.TextStyle(&Style(), "HyperAIStudio.Text.Caption")
+							.ColorAndOpacity(FStyleColors::AccentOrange)
+							.Text(LOCTEXT("AutoApprovalStop", "Stop"))
+						]
+					]
 				]
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(16.0f, 0.0f, 0.0f, 0.0f))

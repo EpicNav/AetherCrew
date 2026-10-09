@@ -4,6 +4,7 @@
 
 #include "Containers/Ticker.h"
 #include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioAutoApproval.h"
 #include "HyperAIStudioSandbox.h"
 #include "HyperAIStudioSourceControl.h"
 #include "HyperAIStudioTrustedExecutionInternal.h"
@@ -18,6 +19,8 @@ namespace HyperAIStudio::ExecutionQueue::Private
 		FHyperAIStudioTrustedArtifactRequest Request;
 		/** Approved by the user: a click, or the auto-approval they turned on for its category. */
 		bool bUserApproved = false;
+		/** Set when that approval was the auto-approval's: it starts only while that activation lasts. */
+		TOptional<HyperAIStudio::TrustedExecution::Private::FAutoApprovedBy> AutoApproved;
 		double QueuedSeconds = 0.0;
 	};
 
@@ -70,6 +73,10 @@ namespace HyperAIStudio::ExecutionQueue::Private
 		Entry.OperationId = Item.OperationId;
 		Entry.StatusCode = Status;
 		Entry.Detail = Detail;
+		if (Item.AutoApproved.IsSet())
+		{
+			Entry.AutoApprovedAs = Item.AutoApproved->Category;
+		}
 		FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
 	}
 
@@ -94,6 +101,14 @@ namespace HyperAIStudio::ExecutionQueue::Private
 	/** Stages and submits on a free lane. A plan that waited past its seal is prepared again from the same inputs. */
 	bool Start(FHyperAIStudioTrustedExecutionHost& Host, const FQueuedEdit& Item, FString& OutStatus, FString& OutError)
 	{
+		// The approval an auto-approval gave lasts only as long as it does. Its end takes such plans back to wait for a
+		// click; this refuses, before anything is staged or granted, any that did not go back.
+		if (Item.AutoApproved.IsSet() && Item.AutoApproved->Activation != FHyperAIStudioAutoApproval::GetActivationId())
+		{
+			OutStatus = TEXT("auto_approval_ended");
+			OutError = TEXT("The auto-approval that approved this edit ended before its turn came; nothing ran. Submit it again to ask the user.");
+			return false;
+		}
 		// Checked as the edit starts, not when it queued: the sandbox that will hold its save must be open now.
 		if (!HyperAIStudio::Sandbox::CheckAgentEdit(OutError))
 		{
@@ -179,6 +194,7 @@ namespace HyperAIStudio::ExecutionQueue::Private
 		const FHyperAIStudioTrustedPreparedArtifact& Prepared,
 		const FString& OperationId,
 		const bool bUserApproved,
+		const TOptional<HyperAIStudio::TrustedExecution::Private::FAutoApprovedBy>& AutoApproved,
 		FString& OutStatus,
 		FString& OutError)
 	{
@@ -208,6 +224,7 @@ namespace HyperAIStudio::ExecutionQueue::Private
 		Item.Prepared = Prepared;
 		Item.OperationId = OperationId;
 		Item.bUserApproved = bUserApproved;
+		Item.AutoApproved = AutoApproved;
 		Item.QueuedSeconds = FPlatformTime::Seconds();
 		const bool bLaneBusy = Host->IsLaneBusy();
 		if (Items.IsEmpty() && !bLaneBusy)
@@ -264,9 +281,29 @@ bool HyperAIStudio::TrustedExecution::Private::SubmitUserApproved(
 	const FHyperAIStudioTrustedPreparedArtifact& Prepared,
 	const FString& OperationId,
 	FString& OutStatus,
-	FString& OutError)
+	FString& OutError,
+	const TOptional<FAutoApprovedBy>& AutoApproved)
 {
-	return HyperAIStudio::ExecutionQueue::Private::Enqueue(Prepared, OperationId, true, OutStatus, OutError);
+	return HyperAIStudio::ExecutionQueue::Private::Enqueue(Prepared, OperationId, true, AutoApproved, OutStatus, OutError);
+}
+
+bool HyperAIStudio::TrustedExecution::Private::WithdrawAutoApproved(
+	const FString& OperationId,
+	const uint64 Activation,
+	FHyperAIStudioTrustedPreparedArtifact& OutPrepared)
+{
+	using namespace HyperAIStudio::ExecutionQueue::Private;
+	const int32 Index = IsInGameThread() ? Queue().IndexOfByPredicate([&OperationId, Activation](const FQueuedEdit& Item)
+	{
+		return Item.OperationId == OperationId && Item.AutoApproved.IsSet() && Item.AutoApproved->Activation == Activation;
+	}) : INDEX_NONE;
+	if (Index == INDEX_NONE)
+	{
+		return false;
+	}
+	OutPrepared = Queue()[Index].Prepared;
+	Queue().RemoveAt(Index);
+	return true;
 }
 
 bool FHyperAIStudioExecutionQueue::Submit(
@@ -275,7 +312,7 @@ bool FHyperAIStudioExecutionQueue::Submit(
 	FString& OutStatus,
 	FString& OutError)
 {
-	return HyperAIStudio::ExecutionQueue::Private::Enqueue(Prepared, OperationId, false, OutStatus, OutError);
+	return HyperAIStudio::ExecutionQueue::Private::Enqueue(Prepared, OperationId, false, {}, OutStatus, OutError);
 }
 
 bool FHyperAIStudioExecutionQueue::Query(const FString& OperationId, int32& OutPosition, FString& OutFailure, FString& OutDiagnostic)

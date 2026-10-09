@@ -598,5 +598,6 @@ FHyperAISourceControlSubmitReport UHyperAIStudioSourceControlToolset::hyper_sour
 	Report.bOk = true;
 	Report.Status = TEXT("awaiting_user_approval");
 	Report.Diagnostic = TEXT("Waiting for the user's approval in HyperAI Chat, Activity; nothing was sent. Call hyper_operation_wait with operation_id and bWaitThroughApproval true.");
+	FHyperAIStudioApprovalGate::DescribeHeld(OperationId, Report.Status, Report.Diagnostic);
 	return Report;
 }
