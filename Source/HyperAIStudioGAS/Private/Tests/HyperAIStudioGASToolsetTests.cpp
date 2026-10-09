@@ -999,4 +999,30 @@ bool FHyperAIGASPathTakenTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIGASLongPathTest,
+	"HyperAIStudio.NativeTools.GAS.LongPathRefused",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIGASLongPathTest::RunTest(const FString& Parameters)
+{
+	// A new Blueprint's path is looked up before it is made. At 1024 characters, which the plan's size bound allows, the
+	// lookup's FName stopped the editor, even on a dry run.
+	FHyperAIGASPlanOperation Create;
+	Create.Type = TEXT("create_gameplay_effect_blueprint");
+	Create.TargetPath = TEXT("/Game/") + FString::ChrN(1018, TEXT('a'));
+	FHyperAIGASApplyPlanRequest Plan;
+	Plan.Operations = {Create};
+	Plan.bDryRun = true;
+	const FHyperAIGASApplyPlanReport Refused = UHyperAIStudioGASToolset::hyper_gas_apply_plan(Plan);
+	TestTrue(TEXT("A TargetPath at an FName's length is refused before it is looked up: ") + Refused.Diagnostic.Left(120),
+		!Refused.bOk && Refused.Status == TEXT("invalid_request") && Refused.Diagnostic.StartsWith(TEXT("Operations[0].TargetPath")));
+	Plan.Operations[0].TargetPath = TEXT("/Game/") + FString::ChrN(600, TEXT('a'));
+	TestEqual(TEXT("and so is one past the name rule"), UHyperAIStudioGASToolset::hyper_gas_apply_plan(Plan).Status, FString(TEXT("invalid_request")));
+	Plan.Operations[0].TargetPath = TEXT("/Game/__HyperAIStudioAutomation/GE_Short");
+	Plan.Operations[0].ParentClassPath = TEXT("/Script/") + FString::ChrN(1000, TEXT('b'));
+	TestEqual(TEXT("as is a parent class path past it"), UHyperAIStudioGASToolset::hyper_gas_apply_plan(Plan).Status, FString(TEXT("invalid_request")));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

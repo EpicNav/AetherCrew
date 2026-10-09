@@ -913,6 +913,9 @@ namespace HyperAIStudio::GAS::Authoring
 			Report.Diagnostic = TEXT("GAS edits run on the game thread.");
 			return Report;
 		}
+		// Tags, attributes and paths become FNames and lookups, which stop the editor past an FName's length; CheckBounds
+		// lets a path reach 1024 characters, and Check looks a new Blueprint's path up before anything else does.
+		if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 		FString Error;
 		if (!CheckBounds(Request, Error))
 		{
