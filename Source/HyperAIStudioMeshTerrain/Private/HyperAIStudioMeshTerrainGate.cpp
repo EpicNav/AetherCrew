@@ -677,6 +677,11 @@ namespace HyperAIStudio::MeshTerrain::Gate
 				OutError = FString::Printf(TEXT("\"%s\" is not Name=Value."), *Piece.Left(MaxValueCharacters));
 				return false;
 			}
+			// The setting is found by an FName of its name; the value is checked against the setting it fills.
+			if (!FHyperAIStudioNames::IsName(Name.TrimStartAndEnd(), TEXT("A setting's name"), &OutError))
+			{
+				return false;
+			}
 			OutPairs.Emplace(Name.TrimStartAndEnd(), Value.TrimStartAndEnd());
 		}
 		if (OutPairs.Num() > MaxProperties)

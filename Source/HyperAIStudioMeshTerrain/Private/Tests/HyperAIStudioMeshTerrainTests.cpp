@@ -8,6 +8,7 @@
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioMeshTerrainGate.h"
 #include "HyperAIStudioMeshTerrainToolset.h"
+#include "HyperAIStudioNames.h"
 #include "MeshPartition.h"
 #include "MeshPartitionModifierComponent.h"
 #include "Misc/AutomationTest.h"
@@ -80,6 +81,22 @@ bool FHyperAIStudioMeshTerrainContractsTest::RunTest(const FString& Parameters)
 		&& Pairs.Num() == 1 && Pairs[0].Value == TEXT("(1;2)"));
 	TestFalse(TEXT("An unclosed bracket is refused"), Gate::ParseProperties(TEXT("A=(1"), Pairs, Error));
 	TestFalse(TEXT("A setting needs Name=Value"), Gate::ParseProperties(TEXT("oops"), Pairs, Error));
+
+	// Settings as inspect gives them back run past one name's length; each name in them is held to the rule instead.
+	FString Many;
+	for (int32 Index = 0; Index < 20; ++Index)
+	{
+		Many += FString::Printf(TEXT("NoiseFrequency=(X=0.00%d,Y=0.00%d); "), Index + 1, Index + 1);
+	}
+	TestTrue(TEXT("Settings longer than a name parse"), Many.Len() > FHyperAIStudioNames::MaxLength && Gate::ParseProperties(Many, Pairs, Error) && Pairs.Num() == 20);
+	TestFalse(TEXT("A setting's name past the rule is refused"), Gate::ParseProperties(FString::ChrN(600, TEXT('a')) + TEXT("=1"), Pairs, Error));
+	TestTrue(TEXT("saying so: ") + Error.Left(80), Error.StartsWith(TEXT("A setting's name is 600 characters long")));
+	FHyperAIMeshTerrainApplyPlanRequest Plan;
+	FHyperAIMeshTerrainOp Set = HyperAIStudio::MeshTerrain::Tests::Op(TEXT("set_modifier"), TEXT("HyperAITestHills"));
+	Set.Properties = Many;
+	Plan.Ops = {Set};
+	const FHyperAIMeshTerrainApplyPlanReport Front = FHyperAIStudioMeshTerrainContracts::BuildPlan(Plan);
+	TestEqual(TEXT("and the plan takes them past its front door, to its own checks: ") + Front.Diagnostic.Left(120), Front.Status, FString(TEXT("invalid_revision")));
 
 	TArray<FVector> Points;
 	TestTrue(TEXT("Points parse"), Gate::ParsePoints(TEXT("0,0,0; 1000,-50.5,20"), Points, Error) && Points.Num() == 2

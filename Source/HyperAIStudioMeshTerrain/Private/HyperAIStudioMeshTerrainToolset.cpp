@@ -576,7 +576,8 @@ FHyperAIMeshTerrainApplyPlanReport FHyperAIStudioMeshTerrainContracts::BuildPlan
 	using namespace HyperAIStudio::MeshTerrain::Private;
 	FHyperAIMeshTerrainApplyPlanReport Report;
 	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
-	if (FHyperAIStudioNames::RefuseRequest(Request, Report, {TEXT("Points"), TEXT("Settings")})) return Report;
+	// Properties holds many settings, as long as inspect's Settings, and the gate holds each name and value to the rule.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report, {TEXT("Points"), TEXT("Properties")})) return Report;
 	Report.bDryRun = Request.bDryRun;
 	Report.OperationId = Request.OperationId.Left(FHyperAIStudioDomainLimits::MaxOperationIdChars);
 	Report.Capabilities = GetCapabilities();
