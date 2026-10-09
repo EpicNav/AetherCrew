@@ -237,9 +237,12 @@ namespace HyperAIStudio::Animation::Timeline
 				for (const FHyperAIAnimationNameMapping& Property : Spec.Properties)
 				{
 					FProperty* Found = FindFProperty<FProperty>(Class, FName(*Property.Source));
-					// The text import makes names of it and loads what it references, as the load below does.
+					// The text import makes names of it and loads what it references.
 					if (Found && !FHyperAIStudioNames::CanImportText(*Found, Property.Target, *Property.Source, &OutError)) return false;
-					if (Found && Property.Target.StartsWith(TEXT("/")) && Property.Target.Contains(TEXT(".")))
+					// Only a reference is loaded first. A name, string or text property takes any text, a path with a double
+					// slash too, and loading that would make its package and stop the editor.
+					if (Found && (Found->IsA<FObjectPropertyBase>() || Found->IsA<FInterfaceProperty>()) && Property.Target.StartsWith(TEXT("/"))
+						&& Property.Target.Contains(TEXT(".")) && FHyperAIStudioNames::IsObjectPath(Property.Target, nullptr))
 					{
 						FSoftObjectPath(Property.Target).TryLoad();
 					}
