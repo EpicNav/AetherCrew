@@ -92,12 +92,14 @@ namespace HyperAIStudio::AgentJobs
 		}
 		for (const FHyperAIStudioPendingApproval& Pending : FHyperAIStudioApprovalGate::GetPending())
 		{
-			if (Pending.Summary.Safety != EHyperAIStudioDomainSafety::Edit || !Packs.Contains(Pending.Summary.PackId))
+			// Plain edits only, by the sealed variant as well as the declared safety: a UI plan declared as an edit
+			// whose variant deletes needs its grant from the user.
+			if (!Pending.IsPlainEdit() || !Packs.Contains(Pending.Summary.PackId))
 			{
 				continue;
 			}
 			FString Error;
-			if (FHyperAIStudioApprovalGate::Approve(Pending.OperationId, Error))
+			if (FHyperAIStudioApprovalGate::ApproveForJob(Pending.OperationId, Error))
 			{
 				UE_LOG(LogHyperAIStudioJobs, Display, TEXT("Approved %s (%s) for a running job."), *Pending.OperationId, *Pending.Summary.ToolName);
 			}

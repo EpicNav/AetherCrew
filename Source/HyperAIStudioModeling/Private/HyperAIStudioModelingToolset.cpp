@@ -366,6 +366,7 @@ FHyperAIModelPlanReport FHyperAIStudioModelingContracts::ApplyPlan(const FHyperA
 		Report.Status = TEXT("awaiting_user_approval");
 		Report.Assets = MoveTemp(Preview);
 		Report.Diagnostic = TEXT("Agent edits need approval here. Waiting in HyperAI Chat, Activity panel; nothing ran yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true. Once it runs, each asset's PNG is at its Assets[].PreviewPath here, and the wait's diagnostic says which were drawn.");
+		FHyperAIStudioApprovalGate::DescribeHeld(OperationId, Report.Status, Report.Diagnostic);
 		return Report;
 	}
 	FHyperAIModelPlanReport Done = Execute(Request, Report.OperationId, &Plan, Built.Get());

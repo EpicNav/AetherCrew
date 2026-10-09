@@ -12,6 +12,7 @@
 #include "HttpServerRequest.h"
 #include "HttpServerResponse.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioAutoApproval.h"
 #include "HyperAIStudioEditorRestart.h"
 #include "HyperAIStudioNativeChat.h"
 #include "HyperAIStudioSettings.h"
@@ -279,12 +280,26 @@ namespace HyperAIStudio::Remote::Private
 			Approval->SetArrayField(TEXT("effects"), Strings(Pending.Summary.Effects));
 			Approval->SetArrayField(TEXT("touches"), Strings(Pending.Summary.Touches));
 			Approval->SetStringField(TEXT("requestedAt"), Pending.RequestedUtc.ToIso8601());
+			Approval->SetBoolField(TEXT("autoApproving"), Pending.bAutoApproving);
 			Approvals.Add(MakeShared<FJsonValueObject>(Approval));
 		}
+		// The page shows auto-approval and can stop it; nothing here turns it on.
+		const FHyperAIStudioAutoApprovalStatus Auto = FHyperAIStudioAutoApproval::GetStatus();
+		const TSharedRef<FJsonObject> AutoApproval = MakeShared<FJsonObject>();
+		AutoApproval->SetBoolField(TEXT("on"), Auto.bActive);
+		TArray<TSharedPtr<FJsonValue>> Categories;
+		for (const EHyperAIStudioApprovalCategory Category : Auto.Categories)
+		{
+			Categories.Add(MakeShared<FJsonValueString>(::LexToString(Category)));
+		}
+		AutoApproval->SetArrayField(TEXT("categories"), Categories);
+		AutoApproval->SetNumberField(TEXT("secondsLeft"), FMath::FloorToDouble(Auto.SecondsLeft));
+		AutoApproval->SetNumberField(TEXT("approved"), Auto.Approved);
 		const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
 		Root->SetStringField(TEXT("project"), FApp::GetProjectName());
 		Root->SetArrayField(TEXT("chats"), Chats);
 		Root->SetArrayField(TEXT("approvals"), Approvals);
+		Root->SetObjectField(TEXT("autoApproval"), AutoApproval);
 		return Root;
 	}
 
@@ -373,6 +388,11 @@ namespace HyperAIStudio::Remote::Private
 		{
 			SHyperAIStudioQuickActionWindow::InterruptTab(Tab(Json));
 			Done(OnComplete, true, TEXT("Asked to stop."));
+		}
+		else if (Action == TEXT("stop_auto_approval"))
+		{
+			FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::StoppedRemotely);
+			Done(OnComplete, true, TEXT("Auto-approval is off."));
 		}
 		else
 		{
@@ -469,7 +489,7 @@ bool FHyperAIStudioRemote::Start(FString& OutError)
 				: Fail(OnComplete, Refused == TEXT("not_paired") ? EHttpServerResponseCodes::Denied : EHttpServerResponseCodes::Forbidden, Refused);
 			return true;
 		})));
-	for (const TCHAR* Action : {TEXT("approve"), TEXT("reject"), TEXT("answer"), TEXT("send"), TEXT("stop")})
+	for (const TCHAR* Action : {TEXT("approve"), TEXT("reject"), TEXT("answer"), TEXT("send"), TEXT("stop"), TEXT("stop_auto_approval")})
 	{
 		const FString Name = Action;
 		Current.Routes.Add(Router->BindRoute(FHttpPath(TEXT("/remote/api/") + Name), EHttpServerRequestVerbs::VERB_POST,

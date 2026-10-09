@@ -28,16 +28,22 @@ namespace HyperAIStudio::OperationWait
 	/** Calls Done on the game thread once OperationId finishes, waits for approval, or TimeoutMs passes. */
 	HYPERAISTUDIO_API void WhenDone(const FString& OperationId, int32 TimeoutMs, TFunction<void(const FHyperAIStudioEditOutcome&)>&& Done);
 
+	/** True while OperationId waits for approval and the auto-approval the user turned on is about to approve it. */
+	HYPERAISTUDIO_API bool IsAutoApproving(const FString& OperationId);
+
 	/**
 	 * A TResult (a UToolCallAsyncResult with SetValue(TReport)) that completes with Report once the edit Report
 	 * submitted, under Report.OperationId, has finished, its status and diagnostic replaced by the outcome. A dry run,
-	 * a refusal or an edit waiting for approval completes at once with Report as it is.
+	 * a refusal or an edit waiting for a person completes at once with Report as it is; one the user's auto-approval
+	 * covers is waited for like a submitted one.
 	 */
 	template <typename TResult, typename TReport>
 	TResult* ReplyWhenDone(TReport Report)
 	{
 		TResult* Result = NewObject<TResult>();
-		if (!Report.bOk || !(Report.Status == TEXT("submitted") || Report.Status == TEXT("queued")))
+		const bool bRuns = Report.Status == TEXT("submitted") || Report.Status == TEXT("queued")
+			|| (Report.Status == TEXT("awaiting_user_approval") && IsAutoApproving(Report.OperationId));
+		if (!Report.bOk || !bRuns)
 		{
 			Result->SetValue(Report);
 			return Result;

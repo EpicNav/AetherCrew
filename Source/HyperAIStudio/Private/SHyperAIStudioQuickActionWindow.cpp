@@ -34,7 +34,9 @@
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioAutoApproval.h"
 #include "SHyperAIStudioActivitySidebar.h"
+#include "SHyperAIStudioAutoApprovalBanner.h"
 #include "SHyperAIStudioChatHistorySidebar.h"
 #include "SHyperAIStudioMemoryPanel.h"
 #include "HyperAIStudioAgents.h"
@@ -490,6 +492,13 @@ void SHyperAIStudioQuickActionWindow::Construct(const FArguments& InArgs)
 						BuildAgentActions()
 					]
 					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+					[
+						// Auto-approval is never on out of sight of a chat.
+						SNew(SHyperAIStudioAutoApprovalBanner)
+					]
+					+ SVerticalBox::Slot()
 					.FillHeight(1.0f)
 					.Padding(0.0f, 8.0f, 0.0f, 0.0f)
 					[
@@ -545,6 +554,7 @@ void SHyperAIStudioQuickActionWindow::Construct(const FArguments& InArgs)
 						.ColorAndOpacity_Lambda([this]() { return FLinearColor(1.0f, 1.0f, 1.0f, ActivitySidebarCurve.GetLerp()); })
 						[
 							SAssignNew(ActivitySidebar, SHyperAIStudioChatActivitySidebar)
+							.bShowAutoApprovalBanner(false)
 							.OnClose(this, &SHyperAIStudioQuickActionWindow::ToggleActivitySidebar)
 							.OnApprovalResolved_Lambda([this]()
 							{
@@ -871,7 +881,12 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildHeader()
 		[
 			SNew(SButton)
 			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-			.ToolTipText(LOCTEXT("ActivityToggleTooltip", "Plans waiting for your approval, work in progress, and what the agent changed."))
+			.ToolTipText_Lambda([]()
+			{
+				const FText Tooltip = LOCTEXT("ActivityToggleTooltip", "Plans waiting for your approval, work in progress, and what the agent changed.");
+				return FHyperAIStudioAutoApproval::IsActive()
+					? FText::Format(LOCTEXT("ActivityToggleAutoTooltip", "{0} Auto-approval is on."), Tooltip) : Tooltip;
+			})
 			.OnClicked_Lambda([this]()
 			{
 				ToggleActivitySidebar();
@@ -887,9 +902,9 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildHeader()
 					.Image(FAppStyle::GetBrush(TEXT("Icons.Visibility")))
 					.ColorAndOpacity_Lambda([]()
 					{
-						// Amber while something is waiting on the user.
-						return SHyperAIStudioChatActivitySidebar::GetPendingApprovalCount() > 0
-							? FSlateColor(FStyleColors::AccentYellow) : FSlateColor::UseForeground();
+						// Amber while something is waiting on the user; orange while auto-approval is on and nothing waits.
+						return SHyperAIStudioChatActivitySidebar::GetPendingApprovalCount() > 0 ? FSlateColor(FStyleColors::AccentYellow)
+							: FHyperAIStudioAutoApproval::IsActive() ? FSlateColor(FStyleColors::AccentOrange) : FSlateColor::UseForeground();
 					})
 				]
 				+ SHorizontalBox::Slot()

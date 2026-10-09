@@ -14,15 +14,20 @@
  * What the agent is asking to do, what it is doing, and what it did.
  *
  * Plans wait here until approved, jobs report progress here, and finished work stays listed with the
- * asset it touched. Reads core state only; every mutation goes through the approval gate.
+ * asset it touched. Reads core state only; every mutation goes through the approval gate. Its header is the
+ * one place auto-approval turns on from.
  */
 class SHyperAIStudioChatActivitySidebar : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SHyperAIStudioChatActivitySidebar) {}
+	SLATE_BEGIN_ARGS(SHyperAIStudioChatActivitySidebar)
+		: _bShowAutoApprovalBanner(true)
+	{}
 		SLATE_EVENT(FSimpleDelegate, OnClose)
 		/** Notified when an approval is granted or rejected, so the chat panel can report it. */
 		SLATE_EVENT(FSimpleDelegate, OnApprovalResolved)
+		/** False where the host already shows the auto-approval banner, as a chat window does. */
+		SLATE_ARGUMENT(bool, bShowAutoApprovalBanner)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -60,4 +65,5 @@ private:
 	FDelegateHandle ApprovalChangedHandle;
 	FDelegateHandle JobChangedHandle;
 	FDelegateHandle SandboxChangedHandle;
+	FDelegateHandle AutoApprovalChangedHandle;
 };

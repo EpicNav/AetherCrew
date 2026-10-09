@@ -131,7 +131,8 @@ void FHyperAIStudioAgentActivityLog::Record(FHyperAIStudioActivityEntry Entry)
 		}
 		if (Entry.Target.IsEmpty()) Entry.Target = First->Target;
 	}
-	else if (Entry.Agent.IsEmpty() && Resolver())
+	// The user turns auto-approval on and off, never the agent that happens to be working.
+	else if (Entry.Agent.IsEmpty() && Entry.Kind != EHyperAIStudioActivityKind::AutoApproval && Resolver())
 	{
 		FString Agent;
 		FString Model;
@@ -184,6 +185,7 @@ const TCHAR* FHyperAIStudioAgentActivityLog::LexToString(const EHyperAIStudioAct
 	case EHyperAIStudioActivityKind::JobFinished: return TEXT("Finished");
 	case EHyperAIStudioActivityKind::Completed: return TEXT("Completed");
 	case EHyperAIStudioActivityKind::Queued: return TEXT("Queued");
+	case EHyperAIStudioActivityKind::AutoApproval: return TEXT("Auto-approval");
 	default: return TEXT("Failed");
 	}
 }

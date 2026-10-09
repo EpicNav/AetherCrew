@@ -656,6 +656,366 @@
    "text": "HyperAI：应用动画计划"
   },
   {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ApprovalLimitToast",
+   "source": "Auto-approval turned itself off after {0} approvals. Turn it on again from Activity to go on.",
+   "text": "自动批准在批准 {0} 个请求后已自行关闭。如需继续，请在“活动”中重新开启。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "Banner",
+   "source": "Auto-approval on: {0} ({1})",
+   "text": "自动批准已开启：{0}（{1}）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "BannerTooltip",
+   "source": "Agents' requests in these categories run without asking you, from any agent or MCP client connected to this editor. {0} approved so far; it turns itself off after {1}. Requests in other categories still wait for you.",
+   "text": "这些类别中的智能体请求将不再询问你直接运行，无论来自连接到此编辑器的哪个智能体或 MCP 客户端。目前已批准 {0} 个；达到 {1} 个后会自行关闭。其他类别的请求仍会等待你处理。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "Cancel",
+   "source": "Cancel",
+   "text": "取消"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "CategorySeparator",
+   "source": ", ",
+   "text": "、"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmBody",
+   "source": "{0}, agents' requests in these categories will run without asking you:\n\n{1}\n\nThis covers every agent and MCP client connected to this editor, not only HyperAI chats.\n\nIf you did not open this yourself, press Cancel.",
+   "text": "{0}，这些类别中智能体的请求将不再询问你，直接运行：\n\n{1}\n\n这涵盖连接到此编辑器的所有智能体和 MCP 客户端，而不仅仅是 HyperAI 对话。\n\n如果这不是你自己打开的，请按“取消”。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmCaption",
+   "source": "HyperAI Studio: turn on auto-approval?",
+   "text": "HyperAI Studio：要开启自动批准吗？"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmDestructive",
+   "source": "- Destructive tools (cannot be undone)",
+   "text": "- 破坏性工具（不可撤销）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmEditsMostly",
+   "source": "- Edits (mostly undoable asset and level changes, and scripts the runner's checks passed)",
+   "text": "- 编辑（大多可撤销的资产和关卡更改，以及通过了运行器检查的脚本）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmExternal",
+   "source": "- External effects (can spend money and send data off this computer)",
+   "text": "- 外部影响（可能花钱，并把数据发送到这台电脑之外）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmFifteenMinutes",
+   "source": "For the next 15 minutes",
+   "text": "接下来 15 分钟内"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmFourHours",
+   "source": "For the next 4 hours",
+   "text": "接下来 4 小时内"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmOneHour",
+   "source": "For the next hour",
+   "text": "接下来 1 小时内"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmScripts",
+   "source": "- Scripts that need approval (can run any code on this computer)",
+   "text": "- 需要审批的脚本（可在这台电脑上运行任意代码）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmUntilClose",
+   "source": "Until the editor closes",
+   "text": "在编辑器关闭之前"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "DestructiveBody",
+   "source": "Plans that delete or replace things, such as UI plans (hyper_ui_apply_plan) that delete or replace widgets, bindings or animations, and any other plan its tool marks destructive. The one-time permission the editor requires for each of these is issued without your click. Agent scripts are not part of this; they are under Scripts.",
+   "text": "会删除或替换内容的计划，例如删除或替换控件、绑定或动画的 UI 计划（hyper_ui_apply_plan），以及其工具标记为破坏性的任何其他计划。编辑器为每个此类计划要求的一次性许可，将在你不点击的情况下签发。智能体脚本不在此列，它们属于“脚本”。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "DestructiveLabel",
+   "source": "Destructive tools (cannot be undone)",
+   "text": "破坏性工具（不可撤销）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "DestructiveShort",
+   "source": "Destructive",
+   "text": "破坏性"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "DialogTitle",
+   "source": "Turn on auto-approval?",
+   "text": "要开启自动批准吗？"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "EditsAlreadyRun",
+   "source": "Edits already run without asking: Require Approval For Agent Edits is off in Project Settings.",
+   "text": "编辑本来就不会询问你：项目设置中的 Require Approval For Agent Edits（智能体编辑需要审批）已关闭。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "EditsChecksBody",
+   "source": "Changes agents plan to assets and levels: Blueprints and Animation Blueprints, materials, animation, gameplay abilities, Niagara, PCG and scatter, landscape and mesh terrain, foliage, lighting, level blockout, arranging actors, sequences, World Partition, UI, modeling and placing models, retargeting, pose search, texture graphs and sound. Also playtests (they start Play In Editor and may record a video), movie renders written to disk, and Python scripts in which the runner's best-effort checks found nothing risky: they run inside one undo step behind a guard that is not a sandbox, and one may open another level when nothing is unsaved. Each change is saved to the project when it finishes; most can be taken back with Undo.",
+   "text": "智能体对资产和关卡计划的更改：蓝图与动画蓝图、材质、动画、游戏性技能、Niagara、PCG 与散布、地形与网格地形、植被、光照、关卡白模、摆放 Actor、序列、World Partition、UI、建模与放置模型、重定向、姿势搜索、纹理图和声音。还包括试玩（会启动“在编辑器中运行”，并可能录制视频）、写入磁盘的影片渲染，以及运行器尽力检查后未发现风险的 Python 脚本：这些脚本在一个撤销步骤内运行，受一道并非沙盒的防护约束；没有未保存的内容时，脚本可能会打开另一个关卡。每项更改完成后都会保存到项目中；大多数可以通过“撤销”恢复。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "EditsMostlyLabel",
+   "source": "Edits (mostly undoable)",
+   "text": "编辑（大多可撤销）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "EditsShort",
+   "source": "Edits",
+   "text": "编辑"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "EndingUnstarted",
+   "source": "It is never saved. It ends when its time runs out, when you press Stop, when the editor closes, when the spend cap or an external service's or image model's settings change, or by itself after {0} approvals, {1} external-effect requests, or {2} failures in a row. What it approved that has not started by then waits for your approval again.",
+   "text": "它从不保存。时间到、你按下“停止”、编辑器关闭，或者花费上限、外部服务或图片模型的设置发生变化时，它都会结束；批准 {0} 次、批准 {1} 个外部影响请求或连续失败 {2} 次后，它也会自行关闭。届时它已批准但尚未开始的请求，会重新等待你的审批。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ExpiredToast",
+   "source": "Auto-approval ended: its time ran out. Agents' requests wait for your approval again.",
+   "text": "自动批准已结束：时间已到。智能体的请求将重新等待你的审批。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ExternalCapBody",
+   "source": "Requests that reach outside the editor: generating images (hyper_image_generate, with Codex, Gemini or a configured image service), generating 3D models (hyper_mesh_generate, with Tripo, Meshy or Hi3D), and submitting files to source control (hyper_source_control_submit, through Perforce, Git, Plastic or Lore, where your team receives them). Prompts and pictures are sent to those services. One image request may make up to 8 paid calls. Paid calls still stop at this session's spend cap of {0}, and auto-approval turns off if the cap or a service's or model's price changes while it is on; agent models use your agent plan.",
+   "text": "会延伸到编辑器之外的请求：生成图片（hyper_image_generate，使用 Codex、Gemini 或已配置的图片服务）、生成 3D 模型（hyper_mesh_generate，使用 Tripo、Meshy 或 Hi3D），以及向源代码管理提交文件（hyper_source_control_submit，通过 Perforce、Git、Plastic 或 Lore，你的团队会收到这些文件）。提示词和图片会被发送到这些服务。一个图片请求最多可产生 8 次付费调用。付费调用仍受本次会话 {0} 的花费上限约束；开启期间如果上限或某项服务、模型的价格发生变化，自动批准会关闭。智能体模型会消耗你的智能体套餐。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ExternalLabel",
+   "source": "External effects (spend money, leave this computer)",
+   "text": "外部影响（会花钱，会离开这台电脑）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ExternalLimitToast",
+   "source": "Auto-approval turned itself off after {0} external effects. Turn it on again from Activity to go on.",
+   "text": "自动批准在产生 {0} 次外部影响后已自行关闭。如需继续，请在“活动”中重新开启。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ExternalShort",
+   "source": "External effects",
+   "text": "外部影响"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "FailuresToast",
+   "source": "Auto-approval turned itself off: the last {0} requests it approved failed. Check Activity before turning it on again.",
+   "text": "自动批准已自行关闭：它最近批准的 {0} 个请求都失败了。重新开启前请先查看“活动”。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "FifteenMinutes",
+   "source": "15 minutes",
+   "text": "15 分钟"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ForFifteenMinutes",
+   "source": "for 15 minutes",
+   "text": "15 分钟"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ForFourHours",
+   "source": "for 4 hours",
+   "text": "4 小时"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ForOneHour",
+   "source": "for 1 hour",
+   "text": "1 小时"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "FourHours",
+   "source": "4 hours",
+   "text": "4 小时"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "Heading",
+   "source": "Agents' requests will run without asking you.",
+   "text": "智能体的请求将不再询问你，直接运行。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "Intro",
+   "source": "While auto-approval is on, HyperAI approves each new request in the categories you tick as if you had clicked Approve in Activity: it runs through the same queue, with the same checks. Requests in other categories still wait for you.",
+   "text": "自动批准开启期间，HyperAI 会批准你勾选类别中的每个新请求，效果等同于你在“活动”中点击了“批准”：它经过同一个队列，接受同样的检查。其他类别的请求仍会等待你处理。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "LeftHours",
+   "source": "{0} h {1} min left",
+   "text": "剩余 {0} 小时 {1} 分钟"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "LeftMinutes",
+   "source": "{0} min left",
+   "text": "剩余 {0} 分钟"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "LeftSeconds",
+   "source": "{0} s left",
+   "text": "剩余 {0} 秒"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "LeftUntilClose",
+   "source": "until the editor closes",
+   "text": "直到编辑器关闭"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "OffToast",
+   "source": "Auto-approval is off. Agents' requests wait for your approval again, including any it approved that had not started.",
+   "text": "自动批准已关闭。智能体的请求将重新等待你的审批，包括它已批准但尚未开始的请求。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "OnToast",
+   "source": "Auto-approval is on {0}: {1}. Requests in these categories now run without asking you; Stop is in Activity and in each chat window.",
+   "text": "自动批准已开启（{0}）：{1}。这些类别的请求现在会直接运行，不再询问你；“停止”按钮位于“活动”面板和每个对话窗口中。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "OneHour",
+   "source": "1 hour",
+   "text": "1 小时"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "PendingIntro",
+   "source": "{0} {0}|plural(one=request is,other=requests are) waiting now. They keep waiting for your click: auto-approval covers only requests made after you turn it on.",
+   "text": "当前有 {0} 个请求正在等待。它们会继续等待你点击：自动批准只覆盖开启之后发出的请求。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "PendingLine",
+   "source": "{0} on {1}",
+   "text": "{1} 上的 {0}"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "PendingMore",
+   "source": "and {0} more",
+   "text": "以及另外 {0} 个"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "Scope",
+   "source": "This applies to every agent and MCP client connected to this editor, not just HyperAI chats: Claude Code, Codex, Gemini, or any other program that reaches this editor's Unreal MCP server.",
+   "text": "这适用于连接到此编辑器的所有智能体和 MCP 客户端，而不仅仅是 HyperAI 对话：Claude Code、Codex、Gemini，或任何能访问此编辑器 Unreal MCP 服务器的程序。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ScriptsBody",
+   "source": "Editor Python from hyper_script_run that the runner could not prove safe: it deletes, renames or merges assets or folders, destroys actors or components, imports files from disk, opens another level while this one has unsaved changes, runs console commands or more Python, writes files outside its own folder, closes the editor, or imports modules such as os, subprocess, socket, ctypes or requests. These scripts run without an undo step and without the guard, with your account's rights: they can delete or overwrite any of your files, start programs, use the network, and read keys kept in environment variables.",
+   "text": "运行器无法证明安全的 hyper_script_run 编辑器 Python 脚本：它会删除、重命名或合并资产或文件夹，销毁 Actor 或组件，从磁盘导入文件，在当前关卡有未保存更改时打开另一个关卡，运行控制台命令或更多 Python，在自身文件夹之外写文件，关闭编辑器，或导入 os、subprocess、socket、ctypes、requests 等模块。这类脚本运行时没有撤销步骤，也没有防护，并拥有你账户的全部权限：它们可以删除或覆盖你的任何文件、启动程序、访问网络，以及读取保存在环境变量中的密钥。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ScriptsLabel",
+   "source": "Scripts that need approval (cannot be undone)",
+   "text": "需要审批的脚本（不可撤销）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ScriptsShort",
+   "source": "Scripts",
+   "text": "脚本"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ScriptsWarning",
+   "source": "Ticking this lets agents run any code on this computer. It is as strong as ticking everything.",
+   "text": "勾选此项意味着智能体可以在这台电脑上运行任意代码，效果等同于勾选全部类别。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "SpendSettingsToast",
+   "source": "Auto-approval turned itself off: the spend cap, an external service or an image model changed in HyperAI Studio's settings. Check them before turning it on again.",
+   "text": "自动批准已自行关闭：HyperAI Studio 设置中的花费上限、外部服务或图片模型发生了变化。重新开启前请先检查这些设置。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "Stop",
+   "source": "Stop",
+   "text": "停止"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "StopUnstartedTooltip",
+   "source": "Turn auto-approval off now. Requests wait for your approval again, and so does what it approved that has not started yet; work already running goes on.",
+   "text": "立即关闭自动批准。请求将重新等待你的审批，它已批准但尚未开始的请求也是如此；已在运行的工作会继续。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "TickOne",
+   "source": "Tick at least one category.",
+   "text": "请至少勾选一个类别。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "TurnOffAfter",
+   "source": "Turn off after",
+   "text": "多久后关闭："
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "TurnOn",
+   "source": "Turn On Auto-Approval",
+   "text": "开启自动批准"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "UntilClose",
+   "source": "until the editor closes",
+   "text": "直到编辑器关闭"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "WhenEditorCloses",
+   "source": "When the editor closes",
+   "text": "编辑器关闭时"
+  },
+  {
    "namespace": "HyperAIStudioBlueprintStructure",
    "key": "StructurePlan",
    "source": "HyperAI: Edit Blueprint Structure",
@@ -15771,6 +16131,12 @@
   },
   {
    "namespace": "HyperAIStudioShell",
+   "key": "AutoApprovalStop",
+   "source": "Stop",
+   "text": "停止"
+  },
+  {
+   "namespace": "HyperAIStudioShell",
    "key": "GroupCreate",
    "source": "Create",
    "text": "创作"
@@ -16275,6 +16641,48 @@
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "AutoApprovalOnButton",
+   "source": "Auto-approval on",
+   "text": "自动批准已开启"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "AutoApproveButton",
+   "source": "Auto-approve...",
+   "text": "自动批准..."
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "AutoApproveOnTooltip",
+   "source": "Auto-approval is on. Open to start a new one in its place; use Stop to end it.",
+   "text": "自动批准已开启。打开可用新的设置替换它；用“停止”结束它。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "AutoApproveTooltip",
+   "source": "Let agents' requests run without asking you, for a while. It shows what it covers and asks before it turns on.",
+   "text": "让智能体的请求在一段时间内无需询问你即可运行。开启前会说明它覆盖的范围并请你确认。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "AutoApprovedKind",
+   "source": "Auto-approved ({0})",
+   "text": "已自动批准（{0}）"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "AutoApprovedOutcomeKind",
+   "source": "{0} (auto-approved, {1})",
+   "text": "{0}（自动批准，{1}）"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "AutoApprovingNote",
+   "source": "Auto-approval runs this as soon as the editor is idle.",
+   "text": "编辑器空闲时，自动批准会立即运行它。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
    "key": "CancelJob",
    "source": "Cancel",
    "text": "取消"
@@ -16344,6 +16752,12 @@
    "key": "HoursAgo",
    "source": "{0}h ago",
    "text": "{0} 小时前"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "JobApprovedKind",
+   "source": "{0} (for a job)",
+   "text": "{0}（由任务批准）"
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",
@@ -18438,6 +18852,12 @@
    "key": "ActivityToggle",
    "source": "Activity",
    "text": "活动"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ActivityToggleAutoTooltip",
+   "source": "{0} Auto-approval is on.",
+   "text": "{0} 自动批准已开启。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",

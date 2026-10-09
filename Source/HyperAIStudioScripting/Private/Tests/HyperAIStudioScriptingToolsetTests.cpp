@@ -190,6 +190,12 @@ bool FHyperAIStudioScriptingApprovalTest::RunTest(const FString& Parameters)
 	FHyperAIScriptRunReport Queued = RunScript(Code);
 	TestEqual(TEXT("a risky script waits"), Queued.Status, FString(TEXT("awaiting_user_approval")));
 	TestTrue(TEXT("in the approval queue"), FHyperAIStudioApprovalGate::HasPending(Queued.OperationId));
+	// Auto-approval files it under Scripts, which the user must tick on its own: never under Destructive.
+	const TArray<FHyperAIStudioPendingApproval> AllPending = FHyperAIStudioApprovalGate::GetPending();
+	const FHyperAIStudioPendingApproval* Held = AllPending.FindByPredicate(
+		[&Queued](const FHyperAIStudioPendingApproval& Pending) { return Pending.OperationId == Queued.OperationId; });
+	TestTrue(TEXT("held as an escalated script"), Held && Held->Summary.bEscalatedScript
+		&& Held->Category == EHyperAIStudioApprovalCategory::Scripts);
 	FHyperAIStudioApprovalGate::Reject(Queued.OperationId, TEXT("test"));
 	TestFalse(TEXT("rejecting drops it"), FHyperAIStudioApprovalGate::HasPending(Queued.OperationId));
 	TestFalse(TEXT("and nothing ran"), IFileManager::Get().FileExists(*(FPaths::ProjectDir() / Queued.ScriptFolder / TEXT("result.json"))));

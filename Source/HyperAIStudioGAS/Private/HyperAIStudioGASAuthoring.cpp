@@ -965,6 +965,7 @@ namespace HyperAIStudio::GAS::Authoring
 			Report.bOk = true;
 			Report.Status = TEXT("awaiting_user_approval");
 			Report.Diagnostic = TEXT("Agent edits need approval here. Waiting in HyperAI Chat, Activity panel; nothing ran yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true.");
+			FHyperAIStudioApprovalGate::DescribeHeld(OperationId, Report.Status, Report.Diagnostic);
 			return Report;
 		}
 		return Execute(Request, Report.OperationId);

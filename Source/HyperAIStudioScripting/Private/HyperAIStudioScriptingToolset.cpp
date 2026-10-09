@@ -358,6 +358,8 @@ FHyperAIScriptRunReport FHyperAIStudioScriptingContracts::Run(const FHyperAIScri
 	Summary.ToolName = ToolName;
 	Summary.VariantId = TEXT("script.run.v1");
 	Summary.Safety = bUndoable ? EHyperAIStudioDomainSafety::Edit : EHyperAIStudioDomainSafety::Destructive;
+	// It runs without the undo step and the guard: auto-approval offers it only as Scripts, never as Destructive.
+	Summary.bEscalatedScript = !bUndoable;
 	Summary.EffectTarget = Report.ScriptFolder / TEXT("script.py");
 	Summary.Effects.Add(bUndoable ? FString(TEXT("Run a Python script inside one undo step"))
 		: TEXT("Run a Python script that ") + FString::Join(Reasons, TEXT("; ")));
@@ -384,6 +386,7 @@ FHyperAIScriptRunReport FHyperAIStudioScriptingContracts::Run(const FHyperAIScri
 	Report.Diagnostic = (bUndoable ? FString(TEXT("Agent edits need approval here."))
 		: TEXT("The script ") + FString::Join(Reasons, TEXT("; ")) + TEXT("."))
 		+ TEXT(" Waiting in HyperAI Chat, Activity panel; nothing ran yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true.");
+	FHyperAIStudioApprovalGate::DescribeHeld(OperationId, Report.Status, Report.Diagnostic);
 	return Report;
 }
 

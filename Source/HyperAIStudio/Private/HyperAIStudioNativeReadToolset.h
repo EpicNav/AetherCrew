@@ -380,6 +380,14 @@ struct FHyperAIOperationStatus
 	/** Sandbox Mode holds what is saved: the project's files change only when the user approves. */
 	UPROPERTY()
 	bool bSandboxed = false;
+
+	/**
+	 * user (a person's click: Activity, the remote page, a tool form or a panel's Generate), auto_approval (the
+	 * auto-approval the user turned on), agent_job (a running agent job the user started, for an edit in its packs),
+	 * or empty when it never waited for approval.
+	 */
+	UPROPERTY()
+	FString ApprovedBy;
 };
 
 USTRUCT(BlueprintType)

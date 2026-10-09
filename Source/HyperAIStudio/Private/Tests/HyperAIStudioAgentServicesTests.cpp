@@ -9,6 +9,7 @@
 #include "HyperAIStudioAgentChatHistory.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioAsyncJobHost.h"
+#include "HyperAIStudioAutoApproval.h"
 #include "HyperAIStudioResultPreview.h"
 #include "HAL/FileManager.h"
 #include "Misc/App.h"
@@ -104,6 +105,21 @@ bool FHyperAIStudioApprovalGateTest::RunTest(const FString& Parameters)
 		FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::Destructive));
 	TestTrue(TEXT("External effects always need approval"),
 		FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::ExternalEffect));
+	// Auto-approval changes who approves, never what asks: covered requests still pass through the gate. A test never
+	// touches the user's own auto-approval, so this part waits for an editor where it is off.
+	if (!FHyperAIStudioAutoApprovalTestAccess::SkipWhileUserActivationOn(*this))
+	{
+		FHyperAIStudioAutoApprovalTestAccess::Reset();
+		TestTrue(TEXT("Auto-approval turns on for everything"), FHyperAIStudioAutoApprovalTestAccess::TurnOn({
+			EHyperAIStudioApprovalCategory::Edits, EHyperAIStudioApprovalCategory::Scripts,
+			EHyperAIStudioApprovalCategory::Destructive, EHyperAIStudioApprovalCategory::ExternalEffects}, {}));
+		Settings->bRequireApprovalForAgentEdits = true;
+		TestTrue(TEXT("With it on, edits still go through approval"), FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::Edit));
+		TestTrue(TEXT("and so do destructive and external-effect tools"),
+			FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::Destructive)
+			&& FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::ExternalEffect));
+		FHyperAIStudioAutoApprovalTestAccess::Reset();
+	}
 	Settings->bRequireApprovalForAgentEdits = bPrevious;
 
 	// An unprepared plan is never queued, and an unknown id is never approved.

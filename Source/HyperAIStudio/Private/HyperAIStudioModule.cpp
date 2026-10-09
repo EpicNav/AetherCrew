@@ -35,6 +35,7 @@
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioCapabilityCatalogCounts.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioAutoApproval.h"
 #include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioFoundationProbe.h"
@@ -973,6 +974,7 @@ public:
 		FHyperAIStudioCommands::Unregister();
 		// Jobs hold pack callbacks and pending approvals hold prepared plans; neither may outlive the host.
 		FHyperAIStudioAsyncJobHost::Shutdown();
+		FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::EditorClosing);
 		FHyperAIStudioExecutionQueue::Clear();
 		FHyperAIStudioApprovalGate::Clear();
 		if (FoundationProbe)
@@ -1443,7 +1445,9 @@ private:
 		HyperAIStudio::BenchmarkInstrumentation::Shutdown();
 #endif
 		HyperAIStudio::Sandbox::Shutdown();
-		// Waiting plans keep their packs' objects alive, so they go before the packs unregister.
+		// Waiting plans keep their packs' objects alive, so they go before the packs unregister. Auto-approval ends
+		// first: it lives only as long as this editor.
+		FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::EditorClosing);
 		FHyperAIStudioExecutionQueue::Clear();
 		FHyperAIStudioApprovalGate::Clear();
 		HyperAIStudio::TrustedExecution::Private::BeginEnginePreExit();
