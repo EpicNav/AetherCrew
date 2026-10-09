@@ -8,6 +8,7 @@
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "IO/IoHash.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/PackageName.h"
@@ -473,7 +474,7 @@ bool FHyperAIStudioLiveProductionContracts::IsCanonicalProjectObjectPath(
 	const FString PackageLeaf = Path.Mid(Slash + 1, Dot - Slash - 1);
 	const FString ObjectName = Path.Mid(Dot + 1);
 	return PackageLeaf == ObjectName && PackageLeaf.Len() <= MaxNameCharacters
-		&& FPackageName::IsValidObjectPath(Path);
+		&& FHyperAIStudioNames::IsObjectPath(Path, nullptr) && FPackageName::IsValidObjectPath(Path);
 }
 
 bool FHyperAIStudioLiveProductionContracts::IsCanonicalSha256(

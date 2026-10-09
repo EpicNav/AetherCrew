@@ -35,6 +35,7 @@
 #include "GeometryScript/OpenSubdivUtilityFunctions.h"
 #include "GroupTopology.h"
 #include "HAL/FileManager.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioResultPreview.h"
 #include "Hash/xxhash.h"
 #include "HyperAIStudioSourceControl.h"
@@ -691,7 +692,8 @@ namespace HyperAIStudio::Modeling::Gate
 	T* LoadQuiet(const FString& Reference)
 	{
 		const FString Trimmed = Reference.TrimStartAndEnd();
-		if (Trimmed.IsEmpty() || !Trimmed.StartsWith(TEXT("/"))) return nullptr;
+		// No lookup of a path that would stop the editor: an FName past 1023 characters, a load's package with "//".
+		if (!FHyperAIStudioNames::IsObjectPath(Trimmed, TEXT("Path"))) return nullptr;
 		if (T* Found = FindObject<T>(nullptr, *ObjectPathOf(Trimmed))) return Found;
 		if (!FPackageName::DoesPackageExist(PackageOf(Trimmed))) return nullptr;
 		return LoadObject<T>(nullptr, *ObjectPathOf(Trimmed), nullptr, LOAD_NoWarn | LOAD_Quiet);
@@ -763,9 +765,10 @@ namespace HyperAIStudio::Modeling::Gate
 			double Id = 0.0;
 			if (!Entry.Split(TEXT(":"), &Slot, &Path) || !LexTryParseString(Id, *Slot.TrimStartAndEnd()) || Id < 0.0 || Id > 15.0 || Id != FMath::RoundToDouble(Id))
 			{
-				OutError = FString::Printf(TEXT("Materials entry '%s' is not slot:path, like 0:/Game/M/MI_Stone."), *Entry.TrimStartAndEnd());
+				OutError = FString::Printf(TEXT("Materials entry '%s' is not slot:path, like 0:/Game/M/MI_Stone."), *Entry.TrimStartAndEnd().Left(FHyperAIStudioNames::MaxLength));
 				return false;
 			}
+			if (!FHyperAIStudioNames::IsObjectPath(Path.TrimStartAndEnd(), TEXT("Materials"), &OutError)) return false;
 			if (!LoadQuiet<UMaterialInterface>(Path))
 			{
 				OutError = FString::Printf(TEXT("Materials: %s is not a material or material instance."), *Path.TrimStartAndEnd());
@@ -1056,9 +1059,11 @@ namespace HyperAIStudio::Modeling::Gate
 	bool CheckWrite(const FStep& Step, TSet<FString>& Assets, FString& OutError)
 	{
 		const FString Path = PackageOf(Step.Asset);
-		if (!Path.StartsWith(TEXT("/Game/")) || !FPackageName::IsValidLongPackageName(Path))
+		FString Reason;
+		if (!Path.StartsWith(TEXT("/Game/")) || !FHyperAIStudioNames::IsPackagePath(Path, TEXT("Asset"), &Reason))
 		{
-			OutError = FString::Printf(TEXT("Asset '%s' is not a path under /Game, like /Game/HyperAI/Models/SM_Rock."), *Step.Asset);
+			OutError = Reason.IsEmpty() ? FString::Printf(TEXT("Asset '%s' is not a path under /Game, like /Game/HyperAI/Models/SM_Rock."), *Step.Asset.Left(FHyperAIStudioNames::MaxLength))
+				: Reason + TEXT(" Write under /Game, like /Game/HyperAI/Models/SM_Rock.");
 			return false;
 		}
 		if (Assets.Contains(Path.ToLower()))

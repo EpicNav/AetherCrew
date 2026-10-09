@@ -40,6 +40,7 @@
 #include "GameFramework/NavMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_Event.h"
 #include "K2Node_IfThenElse.h"
@@ -1029,6 +1030,8 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 				}
 				return true;
 			}
+			// Loaded when nothing is in memory: an FName past its length, or a package with "//", stops the editor.
+			if (!FHyperAIStudioNames::IsObjectPath(Op.Asset, TEXT("asset"), &OutError)) return false;
 			OutAsset = LoadObject<UAnimationAsset>(nullptr, *Op.Asset);
 			const bool bSequence = OutAsset && OutAsset->IsA<UAnimSequenceBase>() && !OutAsset->IsA<UAnimMontage>();
 			const UBlendSpace* BlendSpace = Cast<UBlendSpace>(OutAsset);
@@ -1098,7 +1101,7 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 				}
 				if (Op.Kind == TEXT("implement_interface"))
 				{
-					const UAnimBlueprint* Interface = Op.Asset.IsEmpty() ? nullptr : LoadObject<UAnimBlueprint>(nullptr, *Op.Asset);
+					const UAnimBlueprint* Interface = !FHyperAIStudioNames::IsObjectPath(Op.Asset, nullptr) ? nullptr : LoadObject<UAnimBlueprint>(nullptr, *Op.Asset);
 					if (!IsLayerInterface(Interface) || !Interface->GeneratedClass)
 					{
 						return Fail(FString::Printf(TEXT("%s is not a compiled Animation Layer Interface."), *Op.Asset));
@@ -1408,12 +1411,14 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 
 	USkeleton* ResolveSkeleton(const FString& Path)
 	{
-		return Path.IsEmpty() ? nullptr : LoadObject<USkeleton>(nullptr, *Path);
+		// Loaded when nothing is in memory: an FName past its length, or a package with "//", stops the editor.
+		return !FHyperAIStudioNames::IsObjectPath(Path, nullptr) ? nullptr : LoadObject<USkeleton>(nullptr, *Path);
 	}
 
 	UClass* ResolveParentClass(const FString& Path, FString& OutError)
 	{
 		if (Path.IsEmpty()) return UAnimInstance::StaticClass();
+		if (!FHyperAIStudioNames::IsObjectPath(Path, TEXT("parent_class_path"), &OutError)) return nullptr;
 		UClass* Class = LoadClass<UAnimInstance>(nullptr, *Path);
 		if (!Class) OutError = FString::Printf(TEXT("%s is not an AnimInstance class."), *Path);
 		return Class;

@@ -403,14 +403,16 @@ void SHyperAIStudioPromptPicker::Refresh()
 	const TArray<int32> Found = Search(Library, Query, bOwnList ? FString() : CategoryId, &Context, 0);
 	if (CategoryId == RecentCategory)
 	{
-		// Newest first, and only those the search keeps.
+		// Newest first, and only those the search keeps. Each preset once: the list view asserts on an item listed twice.
 		TSet<int32> Kept;
 		Kept.Append(Found);
+		TSet<int32> Added;
 		for (const FString& Id : Recent())
 		{
 			const int32 Index = Library.Presets.IndexOfByPredicate([&Id](const FHyperAIStudioPromptPreset& Each) { return Each.Id == Id; });
-			if (Index != INDEX_NONE && Kept.Contains(Index))
+			if (Index != INDEX_NONE && Kept.Contains(Index) && !Added.Contains(Index))
 			{
+				Added.Add(Index);
 				Shown.Add(All[Index]);
 			}
 		}
@@ -660,12 +662,13 @@ int32 SHyperAIStudioPromptPicker::CountIn(const FString& InCategoryId) const
 	}
 	if (InCategoryId == RecentCategory)
 	{
-		int32 Count = 0;
+		// As Refresh lists them: each preset once.
+		TSet<const FHyperAIStudioPromptPreset*> Counted;
 		for (const FString& Id : HyperAIStudio::PromptPresets::Recent())
 		{
-			Count += Library.Find(Id) ? 1 : 0;
+			if (const FHyperAIStudioPromptPreset* Preset = Library.Find(Id)) Counted.Add(Preset);
 		}
-		return Count;
+		return Counted.Num();
 	}
 	int32 Count = 0;
 	for (const FPresetPtr& Preset : All)

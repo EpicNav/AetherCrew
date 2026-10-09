@@ -11,6 +11,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSourceControl.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Guid.h"
@@ -80,6 +81,12 @@ namespace HyperAIStudio::MotionMatching::Private
 	{
 		const FString Package = PackageOf(Path);
 		FText Reason;
+		FString NameReason;
+		if (!FHyperAIStudioNames::IsObjectPath(Path.TrimStartAndEnd(), TEXT("The path"), &NameReason))
+		{
+			OutError = NameReason;
+			return false;
+		}
 		if (!FPackageName::IsValidLongPackageName(Package, /*bIncludeReadOnlyRoots=*/false, &Reason)
 			|| Package.StartsWith(TEXT("/Script/")) || Package.StartsWith(TEXT("/Engine/")) || Package.StartsWith(TEXT("/Temp/")))
 		{
@@ -107,7 +114,9 @@ namespace HyperAIStudio::MotionMatching::Private
 	template <typename T>
 	T* Load(const FString& Path)
 	{
-		return Path.TrimStartAndEnd().IsEmpty() ? nullptr : LoadObject<T>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		// The load makes an FName of each part, and the package it looked for: past 1023 characters, or with "//", either
+		// stops the editor.
+		return !FHyperAIStudioNames::IsObjectPath(Path.TrimStartAndEnd(), nullptr) ? nullptr : LoadObject<T>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
 
 	FString NameOf(const UObject* Object)
@@ -227,6 +236,8 @@ namespace HyperAIStudio::MotionMatching::Private
 				return false;
 			}
 			const FString Before = ExportValue(*Property, Container, Owner);
+			// The import makes names of the text, and loads an asset it names (making the package when nothing is there).
+			if (!FHyperAIStudioNames::CanImportText(*Property, Setting.Value, *Setting.Name, &OutError)) return false;
 			const TCHAR* Rest = Property->ImportText_InContainer(*Setting.Value, Container, Owner, PPF_None);
 			if (!Rest || !FString(Rest).TrimStartAndEnd().IsEmpty())
 			{
@@ -1010,6 +1021,8 @@ FHyperAIPoseSearchInspectReport FHyperAIStudioPoseSearchContracts::Inspect(const
 {
 	using namespace HyperAIStudio::MotionMatching::Private;
 	FHyperAIPoseSearchInspectReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	if (Request.Paths.IsEmpty() || Request.Paths.Num() > 64)
 	{
 		Report.Diagnostic = TEXT("Give 1 to 64 Paths: Pose Search schemas or databases.");
@@ -1042,6 +1055,8 @@ FHyperAIPoseSearchPlanReport FHyperAIStudioPoseSearchContracts::ApplyPlan(const 
 	FHyperAIPoseSearchPlanReport Report;
 	Report.OperationId = Request.OperationId.IsEmpty()
 		? FString::Printf(TEXT("pose-search-%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower()) : Request.OperationId;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report, {TEXT("Value")})) return Report;
 	FString Error;
 	if (!Check(Request, Error))
 	{
@@ -1076,6 +1091,18 @@ FHyperAIPoseSearchPlanReport FHyperAIStudioPoseSearchContracts::ApplyPlan(const 
 		const FString OperationId = Report.OperationId;
 		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId]()
 			{
+				// The editor may have moved on while the plan waited (an asset deleted, a path taken, the level closed),
+				// so it is checked again before anything changes.
+				FString Problem;
+				if (!Check(Request, Problem))
+				{
+					FHyperAIPoseSearchPlanReport Refused;
+					Refused.OperationId = OperationId;
+					Refused.Status = TEXT("invalid_request");
+					Refused.Diagnostic = TEXT("The editor changed while the plan waited for approval: ") + Problem;
+					Record(OperationId, Refused);
+					return;
+				}
 				Record(OperationId, Execute(Request, OperationId));
 			}, Error))
 		{

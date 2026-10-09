@@ -10,6 +10,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSourceControl.h"
 #include "ImageCore.h"
 #include "Engine/StaticMesh.h"
@@ -91,7 +92,9 @@ namespace HyperAIStudio::LandscapeTools::Private
 	T* Load(const FString& Path)
 	{
 		const FString Trimmed = Path.TrimStartAndEnd();
-		if (Trimmed.IsEmpty()) return nullptr;
+		// The load makes an FName of each part, and the package it looked for: past 1023 characters, or with a double
+		// slash, either stops the editor.
+		if (!FHyperAIStudioNames::IsObjectPath(Trimmed, TEXT("Path"))) return nullptr;
 		const FString ObjectPath = Trimmed.Contains(TEXT(".")) ? Trimmed : Trimmed + TEXT(".") + FPackageName::GetShortName(Trimmed);
 		return LoadObject<T>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
@@ -210,9 +213,31 @@ namespace HyperAIStudio::LandscapeTools::Private
 		return Info.GetBlendMethod() == ELandscapeTargetLayerBlendMethod::PremultipliedAlphaBlending;
 	}
 
-	/** An existing layer info asset for the layer name in Folder, or a new one when bMake. */
+	/** The folder an op's layer infos go in, as Check checks it and Apply uses it: trimmed, without a trailing slash. */
+	FString LayerInfoFolderOf(const FHyperAILandscapeOp& Op)
+	{
+		FString Folder = Op.LayerInfoFolder.TrimStartAndEnd();
+		while (Folder.EndsWith(TEXT("/"))) Folder.LeftChopInline(1);
+		return Folder.IsEmpty() ? FString(DefaultLayerInfoFolder) : Folder;
+	}
+
+	/** Why an op's layer infos cannot go in its folder, or empty when they can. */
+	FString LayerInfoFolderProblem(const FHyperAILandscapeOp& Op)
+	{
+		const FString Folder = LayerInfoFolderOf(Op);
+		FString Reason;
+		// The engine makes each layer info's package from the folder, and stops on a double slash in it.
+		if ((Folder != TEXT("/Game") && !Folder.StartsWith(TEXT("/Game/"))) || !FHyperAIStudioNames::IsFolderPath(Folder, TEXT("LayerInfoFolder"), &Reason))
+		{
+			return TEXT("LayerInfoFolder is a folder under /Game, like /Game/Landscape/LayerInfos.") + (Reason.IsEmpty() ? FString() : TEXT(" ") + Reason);
+		}
+		return FString();
+	}
+
+	/** An existing layer info asset for the layer name in Folder, or a new one when bMake; null when Folder cannot hold one. */
 	ULandscapeLayerInfoObject* FindOrMakeLayerInfo(const FString& Folder, const FString& Name, const bool bMake)
 	{
+		if (!FHyperAIStudioNames::IsFolderPath(Folder, nullptr) || !FHyperAIStudioNames::IsName(Name, nullptr)) return nullptr;
 		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 		TArray<FAssetData> Assets;
 		Registry.GetAssetsByPath(FName(*Folder), Assets, /*bRecursive=*/false);
@@ -565,7 +590,8 @@ namespace HyperAIStudio::LandscapeTools::Private
 		TArray<int32> RuleLayer;
 		for (const FHyperAILandscapePaintRule& Rule : Op.Rules)
 		{
-			ULandscapeLayerInfoObject* RuleInfo = Info->GetLayerInfoByName(FName(*Rule.Layer));
+			// Check matched the name trimmed to a layer the landscape has, so its FName is that layer's.
+			ULandscapeLayerInfoObject* RuleInfo = Info->GetLayerInfoByName(FName(*Rule.Layer.TrimStartAndEnd()));
 			const int32 Index = LayerInfos.IndexOfByKey(RuleInfo);
 			if (Index == INDEX_NONE) return FString::Printf(TEXT("The landscape has no paint layer %s with a layer info."), *Rule.Layer);
 			RuleLayer.Add(Index);
@@ -1051,7 +1077,7 @@ namespace HyperAIStudio::LandscapeTools::Private
 			{
 				const FString Path = PackageOf(Op.Material);
 				// Taken on disk, or by an object only in memory (an unsaved asset).
-				if (!Path.StartsWith(TEXT("/Game/")) || !FPackageName::IsValidLongPackageName(Path) || FPackageName::DoesPackageExist(Path) || Materials.Contains(Path.ToLower())
+				if (!Path.StartsWith(TEXT("/Game/")) || !FHyperAIStudioNames::IsPackagePath(Path, TEXT("Material")) || FPackageName::DoesPackageExist(Path) || Materials.Contains(Path.ToLower())
 					|| FindObject<UObject>(nullptr, *(Path + TEXT(".") + FPackageName::GetShortName(Path))))
 				{
 					return Fail(TEXT("Name the new Material as a free path under /Game, like /Game/Landscape/M_Valley."));
@@ -1107,10 +1133,8 @@ namespace HyperAIStudio::LandscapeTools::Private
 				{
 					return Fail(FString::Printf(TEXT("%s is not a material."), *Op.Material));
 				}
-				if (!Op.LayerInfoFolder.IsEmpty() && !Op.LayerInfoFolder.StartsWith(TEXT("/Game/")))
-				{
-					return Fail(TEXT("LayerInfoFolder is a folder under /Game."));
-				}
+				const FString FolderProblem = LayerInfoFolderProblem(Op);
+				if (!FolderProblem.IsEmpty()) return Fail(FolderProblem);
 				FPlanned Made;
 				for (const FString& Layer : Op.PaintLayers)
 				{
@@ -1118,7 +1142,7 @@ namespace HyperAIStudio::LandscapeTools::Private
 					Made.PaintLayers.Add(Layer.ToLower());
 				}
 				Made.EditLayers.Add(TEXT("layer"));
-				AddReusedStacking(Op.LayerInfoFolder.IsEmpty() ? FString(DefaultLayerInfoFolder) : Op.LayerInfoFolder, Op.PaintLayers, Made);
+				AddReusedStacking(LayerInfoFolderOf(Op), Op.PaintLayers, Made);
 				Plan.Add(Op.Landscape.TrimStartAndEnd().ToLower(), MoveTemp(Made));
 				continue;
 			}
@@ -1158,13 +1182,15 @@ namespace HyperAIStudio::LandscapeTools::Private
 			else if (Kind == TEXT("landscape.add_paint_layer"))
 			{
 				if (Op.PaintLayers.IsEmpty()) return Fail(TEXT("Name the PaintLayers to add."));
+				const FString FolderProblem = LayerInfoFolderProblem(Op);
+				if (!FolderProblem.IsEmpty()) return Fail(FolderProblem);
 				for (const FString& Layer : Op.PaintLayers)
 				{
 					if (!IsIdentifier(Layer)) return Fail(FString::Printf(TEXT("'%s' is not a layer name: letters, digits and _."), *Layer));
 					if (Landscape->PaintLayers.Contains(Layer.ToLower())) return Fail(FString::Printf(TEXT("The landscape has paint layer %s already."), *Layer));
 					Landscape->PaintLayers.Add(Layer.ToLower());
 				}
-				AddReusedStacking(Op.LayerInfoFolder.IsEmpty() ? FString(DefaultLayerInfoFolder) : Op.LayerInfoFolder, Op.PaintLayers, *Landscape);
+				AddReusedStacking(LayerInfoFolderOf(Op), Op.PaintLayers, *Landscape);
 			}
 			else if (Kind == TEXT("landscape.paint"))
 			{
@@ -1226,17 +1252,22 @@ namespace HyperAIStudio::LandscapeTools::Private
 	bool Apply(UWorld& World, const FHyperAILandscapeOp& Op, TArray<ALandscape*>& Touched, TArray<UObject*>& Assets, TArray<FString>& OutNotes, FString& OutError)
 	{
 		const FString Kind = KindOf(Op);
-		const FString Folder = Op.LayerInfoFolder.IsEmpty() ? FString(DefaultLayerInfoFolder) : Op.LayerInfoFolder;
-		auto MakeLayerInfos = [&Folder, &Assets](const TArray<FString>& Names)
+		// The folder Check checked.
+		const FString Folder = LayerInfoFolderOf(Op);
+		auto MakeLayerInfos = [&Folder, &Assets, &OutError](const TArray<FString>& Names, TArray<ULandscapeLayerInfoObject*>& OutInfos)
 		{
-			TArray<ULandscapeLayerInfoObject*> Infos;
 			for (const FString& Name : Names)
 			{
 				ULandscapeLayerInfoObject* Info = FindOrMakeLayerInfo(Folder, Name, /*bMake=*/true);
-				Infos.Add(Info);
+				if (!Info)
+				{
+					OutError = FString::Printf(TEXT("The layer info for %s could not be made in %s."), *Name, *Folder);
+					return false;
+				}
+				OutInfos.Add(Info);
 				Assets.AddUnique(Info);
 			}
-			return Infos;
+			return true;
 		};
 		if (Kind == TEXT("landscape.create"))
 		{
@@ -1262,7 +1293,8 @@ namespace HyperAIStudio::LandscapeTools::Private
 					}
 				}
 			}
-			const TArray<ULandscapeLayerInfoObject*> LayerInfos = MakeLayerInfos(Op.PaintLayers);
+			TArray<ULandscapeLayerInfoObject*> LayerInfos;
+			if (!MakeLayerInfos(Op.PaintLayers, LayerInfos)) return false;
 			const double Quads = Size - 1;
 			const FVector Scale(Op.Resolution, Op.Resolution, Op.HeightRange * 100.0 / 512.0);
 			ALandscape* Landscape = World.SpawnActor<ALandscape>(Op.Location - FVector(Quads * Op.Resolution * 0.5, Quads * Op.Resolution * 0.5, 0.0), FRotator::ZeroRotator);
@@ -1370,7 +1402,9 @@ namespace HyperAIStudio::LandscapeTools::Private
 		}
 		if (Kind == TEXT("landscape.add_paint_layer"))
 		{
-			for (ULandscapeLayerInfoObject* LayerInfo : MakeLayerInfos(Op.PaintLayers))
+			TArray<ULandscapeLayerInfoObject*> LayerInfos;
+			if (!MakeLayerInfos(Op.PaintLayers, LayerInfos)) return false;
+			for (ULandscapeLayerInfoObject* LayerInfo : LayerInfos)
 			{
 				Landscape->AddTargetLayer(LayerInfo->GetLayerName(), FLandscapeTargetLayerSettings(LayerInfo));
 				Info->UpdateLayerInfoMap(Landscape);
@@ -1488,6 +1522,8 @@ FHyperAILandscapeInspectReport FHyperAIStudioLandscapeContracts::Inspect(const F
 {
 	using namespace HyperAIStudio::LandscapeTools::Private;
 	FHyperAILandscapeInspectReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	UWorld* World = EditorWorld();
 	if (!World)
 	{
@@ -1520,6 +1556,8 @@ FHyperAILandscapePlanReport FHyperAIStudioLandscapeContracts::ApplyPlan(const FH
 	FHyperAILandscapePlanReport Report;
 	Report.OperationId = Request.OperationId.IsEmpty()
 		? FString::Printf(TEXT("landscape-%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower()) : Request.OperationId;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	UWorld* World = EditorWorld();
 	FString Error;
 	if (!World)
@@ -1571,6 +1609,20 @@ FHyperAILandscapePlanReport FHyperAIStudioLandscapeContracts::ApplyPlan(const FH
 		const FString OperationId = Report.OperationId;
 		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId, CheckNotes]()
 			{
+				// The editor may have moved on while the plan waited (an asset deleted, a path taken, the level closed),
+				// so it is checked again before anything changes.
+				FString Problem;
+				TArray<FString> Notes;
+				UWorld* Now = EditorWorld();
+				if (!Now || !Check(*Now, Request, Notes, Problem))
+				{
+					FHyperAILandscapePlanReport Refused;
+					Refused.OperationId = OperationId;
+					Refused.Status = TEXT("invalid_request");
+					Refused.Diagnostic = Now ? TEXT("The editor changed while the plan waited for approval: ") + Problem : FString(TEXT("No level is open in the editor; nothing was changed."));
+					Record(OperationId, Refused);
+					return;
+				}
 				Record(OperationId, Execute(Request, OperationId, CheckNotes));
 			}, Error))
 		{

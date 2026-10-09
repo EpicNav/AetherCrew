@@ -5,6 +5,7 @@
 #include "HyperAIStudioPIEPlaytestToolset.h"
 
 #include "HyperAIStudioCapabilityPackRegistry.h"
+#include "JsonObjectConverter.h"
 #include "Misc/AutomationTest.h"
 #include "UObject/FieldIterator.h"
 #include "UObject/UnrealType.h"
@@ -440,6 +441,56 @@ bool FHyperAIStudioPIEPlaytestNormalizeBoundsTest::RunTest(const FString& Parame
 	TestFalse(TEXT("StopSession must be the terminal typed step"),
 		FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Smuggled, Plan, Code, Error));
 	TestEqual(TEXT("Terminal-step ordering has an exact code"), Code, FString(TEXT("invalid_step_order")));
+
+	// A typed value's name was an FName that the JSON import made before any check ran: past 1023 characters it stopped
+	// the editor. Text now, it reaches the bound and is refused there, as an object path past an FName's length is.
+	const FString Blob = FString::ChrN(1100, TEXT('a'));
+	FHyperAIPIEPlaytestRequest Imported;
+	const FString Json = FString::Printf(TEXT("{\"steps\":[{\"stepId\":\"s1\",\"value\":{\"type\":\"Name\",\"name\":\"%s\"}}]}"), *Blob);
+	TestTrue(TEXT("A value name past an FName's length imports from JSON"), FJsonObjectConverter::JsonObjectStringToUStruct(Json, &Imported));
+	TestTrue(TEXT("as text, whole"), Imported.Steps.Num() == 1 && Imported.Steps[0].Value.Name.Len() == 1100);
+	Smuggled = ReadRequest();
+	Smuggled.Steps[0].Value.Type = EHyperAIPIEPlaytestValueType::Name;
+	Smuggled.Steps[0].Value.Name = Blob;
+	TestFalse(TEXT("and is refused by the bound"), FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Smuggled, Plan, Code, Error));
+	Smuggled = ReadRequest();
+	Smuggled.Steps[0].TargetObjectPath = TEXT("/Game/") + FString::ChrN(1010, TEXT('a'));
+	TestFalse(TEXT("A target path within the 1024 bound but past the name limit is refused"),
+		FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Smuggled, Plan, Code, Error));
+	TestEqual(TEXT("before FSoftObjectPath makes an FName of it"), Code, FString(TEXT("invalid_object_path")));
+
+	// The name is still compared as the FName it was: case aside, and empty or None, in any case, is no name.
+	Smuggled = ReadRequest();
+	Smuggled.Steps[0].Value.Name = TEXT("none");
+	const bool bNoneIsNoName = FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Smuggled, Plan, Code, Error);
+	TestTrue(TEXT("None in any case is no name, so not a field outside the value's type: ") + Error, bNoneIsNoName);
+	FHyperAIPIEPlaytestValue Actual;
+	Actual.Type = EHyperAIPIEPlaytestValueType::Name;
+	Actual.Name = TEXT("Idle");
+	FHyperAIPIEPlaytestValue Expected = Actual;
+	Expected.Name = TEXT("idle");
+	TestTrue(TEXT("A name assertion ignores case, as FNames compare"), FHyperAIStudioPIEPlaytestContracts::ScalarEquals(Actual, Expected));
+	Expected.Name = TEXT("Walk");
+	TestFalse(TEXT("but not the name itself"), FHyperAIStudioPIEPlaytestContracts::ScalarEquals(Actual, Expected));
+	Actual.Name = TEXT("None");
+	Expected.Name.Reset();
+	TestTrue(TEXT("None read back meets an empty expected name"), FHyperAIStudioPIEPlaytestContracts::ScalarEquals(Actual, Expected));
+	Expected.Name = TEXT("NONE");
+	TestTrue(TEXT("and one written in capitals"), FHyperAIStudioPIEPlaytestContracts::ScalarEquals(Actual, Expected));
+	FHyperAIPIEPlaytestRequest Assert = ReadRequest();
+	Assert.Steps[0].Kind = EHyperAIPIEPlaytestStepKind::AssertScalarEquals;
+	Assert.Steps[0].TargetObjectPath = TEXT("/Game/Maps/UEDPIE_0_Test.Test:PersistentLevel.TestActor_0");
+	Assert.Steps[0].Name = TEXT("State");
+	Assert.Steps[0].Value.Type = EHyperAIPIEPlaytestValueType::Name;
+	FHyperAIStudioPIENormalizedPlan EmptyName;
+	const bool bAssertNormalized = FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Assert, EmptyName, Code, Error);
+	if (TestTrue(TEXT("An assertion on a name normalizes: ") + Error, bAssertNormalized))
+	{
+		Assert.Steps[0].Value.Name = TEXT("NONE");
+		FHyperAIStudioPIENormalizedPlan NoneName;
+		TestTrue(TEXT("and None, in any case, hashes as no name does"), FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Assert, NoneName, Code, Error)
+			&& NoneName.PlanHash == EmptyName.PlanHash);
+	}
 
 	const FString Fingerprint = TEXT("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
 	const FString Cursor = FHyperAIStudioPIEPlaytestContracts::MakeCursor(Fingerprint, 12);

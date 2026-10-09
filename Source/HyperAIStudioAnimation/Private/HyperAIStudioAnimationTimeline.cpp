@@ -15,6 +15,7 @@
 #include "Factories/AnimMontageFactory.h"
 #include "FileHelpers.h"
 #include "HyperAIStudioAnimationBlendSpace.h"
+#include "HyperAIStudioNames.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
 #include "UObject/Package.h"
@@ -236,7 +237,12 @@ namespace HyperAIStudio::Animation::Timeline
 				for (const FHyperAIAnimationNameMapping& Property : Spec.Properties)
 				{
 					FProperty* Found = FindFProperty<FProperty>(Class, FName(*Property.Source));
-					if (Property.Target.StartsWith(TEXT("/")) && Property.Target.Contains(TEXT(".")))
+					// The text import makes names of it and loads what it references.
+					if (Found && !FHyperAIStudioNames::CanImportText(*Found, Property.Target, *Property.Source, &OutError)) return false;
+					// Only a reference is loaded first. A name, string or text property takes any text, a path with a double
+					// slash too, and loading that would make its package and stop the editor.
+					if (Found && (Found->IsA<FObjectPropertyBase>() || Found->IsA<FInterfaceProperty>()) && Property.Target.StartsWith(TEXT("/"))
+						&& Property.Target.Contains(TEXT(".")) && FHyperAIStudioNames::IsObjectPath(Property.Target, nullptr))
 					{
 						FSoftObjectPath(Property.Target).TryLoad();
 					}

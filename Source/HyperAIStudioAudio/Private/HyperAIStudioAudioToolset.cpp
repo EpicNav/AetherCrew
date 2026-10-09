@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioAudioToolset.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 
@@ -178,7 +179,8 @@ namespace HyperAIStudio::Audio::Private
 		if (Path.IsEmpty() || Path.Len() > FHyperAIStudioAudioContracts::MaxPathCharacters
 			|| !Path.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
 			|| Path.Contains(TEXT("..")) || Path.Contains(TEXT("\\"))
-			|| Path.Contains(TEXT("*")) || Path.Contains(TEXT("?")))
+			|| Path.Contains(TEXT("*")) || Path.Contains(TEXT("?"))
+			|| !FHyperAIStudioNames::IsObjectPath(Path, nullptr))
 		{
 			return false;
 		}

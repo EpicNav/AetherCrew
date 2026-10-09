@@ -12,6 +12,7 @@
 #include "Expressions/Output/TG_Expression_Output.h"
 #include "Expressions/TG_Expression.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "IO/IoHash.h"
 #include "Misc/PackageName.h"
 #include "Model/Mix/MixSettings.h"
@@ -285,7 +286,8 @@ namespace
 		if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
 		{
 			FText Reason;
-			const UObject* Asset = FPackageName::IsValidObjectPath(Text, &Reason) ? FSoftObjectPath(Text).TryLoad() : nullptr;
+			// Loaded when nothing is in memory: an FName past its length, or a package with a double slash, stops the editor.
+			const UObject* Asset = FHyperAIStudioNames::IsObjectPath(Text, nullptr) && FPackageName::IsValidObjectPath(Text, &Reason) ? FSoftObjectPath(Text).TryLoad() : nullptr;
 			if (!Asset || !ObjectProperty->PropertyClass || !Asset->IsA(ObjectProperty->PropertyClass))
 			{
 				OutError = FString::Printf(TEXT("'%s' is not an existing %s asset path."), *Text,
@@ -707,6 +709,7 @@ namespace
 
 UTextureGraph* ResolveGraph(const FString& TargetPath, const bool bLoad)
 {
+	if (!FHyperAIStudioNames::IsObjectPath(TargetPath, nullptr)) return nullptr;
 	const FSoftObjectPath Path(TargetPath);
 	UObject* Object = Path.ResolveObject();
 	if (!Object && bLoad && FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(TargetPath)))

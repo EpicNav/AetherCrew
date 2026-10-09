@@ -5,6 +5,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_Niagara.h"
+#include "HyperAIStudioNames.h"
 #include "Misc/EngineVersionComparison.h"
 #include "Misc/OutputDeviceNull.h"
 #include "NiagaraCommon.h"
@@ -802,6 +803,8 @@ namespace HyperAIStudio::Niagara::GraphGate
 		bool ImportValue(const FProperty& Property, const FString& Value, UObject* Owner, void* Destination, FString& OutError)
 		{
 			const FString Text = ExpandShorthand(Property, Value.TrimStartAndEnd());
+			// The import makes names of the text, and loads an asset it names (making the package when nothing is there).
+			if (!FHyperAIStudioNames::CanImportText(Property, Text, TEXT("value"), &OutError)) return false;
 			FOutputDeviceNull Quiet;
 			const TCHAR* End = Property.ImportText_Direct(*Text, Destination, Owner, PPF_None, &Quiet);
 			while (End && FChar::IsWhitespace(*End))

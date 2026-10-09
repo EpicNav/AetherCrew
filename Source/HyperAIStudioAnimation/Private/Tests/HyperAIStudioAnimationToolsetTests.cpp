@@ -380,7 +380,8 @@ bool FHyperAIStudioAnimationClosedSchemaTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Mutation between pages rejects the stale cursor"),
 			StalePageReport.Status, FString(TEXT("stale_cursor_revision")));
 		SelectorSequence->Notifies.Reset();
-		const FString LongName = FString::ChrN(300, TEXT('L'));
+		// The object path stays within FHyperAIStudioNames::MaxLength: one past it is refused before it is looked up.
+		const FString LongName = FString::ChrN(230, TEXT('L'));
 		UPackage* LongPackage = CreatePackage(
 			*(TEXT("/Game/HyperAIStudioTests/") + LongName));
 		UAnimSequence* LongSequence = NewObject<UAnimSequence>(
@@ -397,6 +398,15 @@ bool FHyperAIStudioAnimationClosedSchemaTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Oversized base record fails without a non-progress cursor"),
 			SmallBudgetReport.Status == TEXT("record_exceeds_output_budget")
 			&& SmallBudgetReport.NextCursor.IsEmpty());
+		FHyperAIAnimationInspectRequest PastNameLength = SmallBudget;
+		PastNameLength.AssetPaths = {TEXT("/Game/HyperAIStudioTests/") + FString::ChrN(1023 - 25, TEXT('L'))};
+		const FHyperAIAnimationInspectReport PastNameLengthReport =
+			UHyperAIStudioAnimationToolset::hyper_animation_inspect(PastNameLength);
+		TestFalse(TEXT("A path at an FName's length is refused, not loaded"), PastNameLengthReport.bOk);
+		FHyperAIAnimationInspectRequest DoubleSlash = SmallBudget;
+		DoubleSlash.AssetPaths = {TEXT("/Game/HyperAIStudioTests//Walk.Walk")};
+		TestFalse(TEXT("and so is one with a double slash, which a load would make a package of"),
+			UHyperAIStudioAnimationToolset::hyper_animation_inspect(DoubleSlash).bOk);
 		SelectorSequence->Notifies.SetNum(
 			FHyperAIStudioAnimationContracts::MaxElementsPerAsset + 128);
 		FHyperAIStudioAnimationValueSnapshot BoundedSnapshot;
@@ -985,8 +995,20 @@ bool FHyperAIStudioAnimationTimelineTest::RunTest(const FString& Parameters)
 	FHyperAIAnimationPlanOperation Marker = PlanOp(TEXT("sequence.add_sync_marker"), SequencePath, Step.ExpectedRevision);
 	Marker.Name = TEXT("Foot_L");
 	Marker.Minimum = 0.1;
-	TestEqual(TEXT("the sequence plan completes"), RunPlan({Step, Curve, Root, Rate, Marker}, TEXT("anim-sequence-") + Suffix), FString(TEXT("completed")));
+	// A name property takes a path-like text as the name it is. Loaded as a path, its double slash made a package and
+	// stopped the editor.
+	FHyperAIAnimationPlanOperation Socket = PlanOp(TEXT("sequence.add_notify"), SequencePath, Step.ExpectedRevision);
+	Socket.Notify.Kind = TEXT("notify");
+	Socket.Notify.NotifyClass = TEXT("/Script/Engine.AnimNotify_PlaySound");
+	Socket.Notify.TimeSeconds = 0.2;
+	Socket.Notify.Properties = {{TEXT("AttachName"), TEXT("/Game//X.X")}};
+	TestEqual(TEXT("the sequence plan completes"), RunPlan({Step, Curve, Root, Rate, Marker, Socket}, TEXT("anim-sequence-") + Suffix), FString(TEXT("completed")));
 	const UAnimSequence* Sequence = Cast<UAnimSequence>(SequenceCopy);
+	TestTrue(TEXT("a sound notify's socket holds the path-like text as a name, nothing loaded"), Sequence->Notifies.ContainsByPredicate([](const FAnimNotifyEvent& Event)
+	{
+		const FNameProperty* Attach = Event.Notify ? FindFProperty<FNameProperty>(Event.Notify->GetClass(), TEXT("AttachName")) : nullptr;
+		return Attach && Attach->GetPropertyValue_InContainer(Event.Notify) == FName(TEXT("/Game//X.X"));
+	}));
 	TestTrue(TEXT("root motion on, rate 1.5"), Sequence->bEnableRootMotion && FMath::IsNearlyEqual(Sequence->RateScale, 1.5f));
 	TestTrue(TEXT("the Foot_L marker"), Sequence->AuthoredSyncMarkers.ContainsByPredicate([](const FAnimSyncMarker& M) { return M.MarkerName == TEXT("Foot_L"); }));
 	const FHyperAIAnimationElementView* CurveView = FindElement(SequencePath, TEXT("curve.float"), TEXT("HyperAITestWeight"));

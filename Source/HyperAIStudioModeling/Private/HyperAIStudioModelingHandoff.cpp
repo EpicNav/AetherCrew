@@ -18,6 +18,7 @@
 #include "Framework/Notifications/NotificationManager.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioNames.h"
 #include "Interfaces/IPluginManager.h"
 #include "Kismet2/ComponentEditorUtils.h"
 #include "LevelEditor.h"
@@ -347,6 +348,13 @@ namespace HyperAIStudio::Modeling::Handoff
 				Refuse(Report, TEXT("invalid_request"), Path + NotGame);
 				return nullptr;
 			}
+			// Before the registry or a lookup makes an FName of it, which stops the editor past 1023 characters.
+			FString Reason;
+			if (!FHyperAIStudioNames::IsObjectPath(Path, TEXT("Asset"), &Reason))
+			{
+				Refuse(Report, TEXT("invalid_request"), Reason + TEXT(" Nothing was changed."));
+				return nullptr;
+			}
 			const FString ObjectPath = Path.Contains(TEXT(".")) ? Path : Path + TEXT(".") + FPackageName::GetShortName(Path);
 			IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 			const FAssetData Data = Registry.GetAssetByObjectPath(FSoftObjectPath(ObjectPath));
@@ -480,6 +488,11 @@ namespace HyperAIStudio::Modeling::Handoff
 				return Refuse(Report, TEXT("invalid_request"), AssetPath.IsEmpty() ? TEXT("Give Asset (a static mesh under /Game) or Actor (an actor in the open level).")
 					: TEXT("Give Asset (a static mesh under /Game) or Actor (an actor in the open level), not both."));
 			}
+			FString NameReason;
+			if (!FHyperAIStudioNames::IsName(ActorName, TEXT("Actor"), &NameReason))
+			{
+				return Refuse(Report, TEXT("invalid_request"), NameReason + TEXT(" Nothing was changed."));
+			}
 			const FString ToolName = Request.Tool.TrimStartAndEnd();
 			if (!ToolName.IsEmpty())
 			{
@@ -530,7 +543,7 @@ namespace HyperAIStudio::Modeling::Handoff
 					if (Actor->GetActorLabel().Equals(ActorName, ESearchCase::IgnoreCase)) Labelled.Add(Actor);
 					else if (!Named && Actor->GetName().Equals(ActorName, ESearchCase::IgnoreCase)) Named = Actor;
 				}
-				if (Labelled.IsEmpty() && !Named && ActorName.StartsWith(TEXT("/")))
+				if (Labelled.IsEmpty() && !Named && FHyperAIStudioNames::IsObjectPath(ActorName, TEXT("Actor")))
 				{
 					AActor* Found = FindObject<AActor>(nullptr, *ActorName);
 					if (IsValid(Found) && Found->GetWorld() == World) Named = Found;

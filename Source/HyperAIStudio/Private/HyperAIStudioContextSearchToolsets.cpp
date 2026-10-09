@@ -17,6 +17,7 @@
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioProjectAssetIndex.h"
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "IModelContextProtocolModule.h"
@@ -4298,7 +4299,8 @@ FHyperAIReadReport FHyperAIStudioContextSearchContracts::AnalyzeBatch(
 				return InvalidReport(TEXT("invalid_scene_scope"), QueryId + TEXT(".scope"), TEXT("Scene scope must be selected, world, or actor."));
 			}
 			if (Scope == TEXT("actor") && (RawOperation.ActorPath.IsEmpty()
-				|| RawOperation.ActorPath.Len() > MaxPathCharacters || ContainsEmbeddedNull(RawOperation.ActorPath)))
+				|| RawOperation.ActorPath.Len() > MaxPathCharacters || ContainsEmbeddedNull(RawOperation.ActorPath)
+				|| !FHyperAIStudioNames::IsObjectPath(RawOperation.ActorPath, TEXT("actor_path"))))
 			{
 				return InvalidReport(TEXT("invalid_actor_path"), QueryId + TEXT(".actor_path"), TEXT("Actor scope requires one bounded exact already-loaded actor path."));
 			}
@@ -4549,7 +4551,7 @@ FHyperAIReadReport UHyperAIStudioSceneInspectToolset::hyper_scene_inspect(
 		&& (Request.ActorPath.IsEmpty() || Request.ActorPath.Len() > MaxPathCharacters
 			|| ContainsEmbeddedNull(Request.ActorPath) || !HasWellFormedUtf16(Request.ActorPath)
 			|| !Request.ActorPath.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
-			|| !Request.ActorPath.Contains(TEXT(":"))))
+			|| !Request.ActorPath.Contains(TEXT(":")) || !FHyperAIStudioNames::IsObjectPath(Request.ActorPath, TEXT("actor_path"))))
 	{
 		return InvalidReport(
 			TEXT("invalid_actor_path"),
@@ -4724,7 +4726,8 @@ FHyperAISceneApplyPlanReport UHyperAIStudioSceneInspectToolset::hyper_scene_appl
 			if (ActorPath.IsEmpty() || ActorPath.Len() > MaxPathCharacters
 				|| ContainsEmbeddedNull(ActorPath) || !HasWellFormedUtf16(ActorPath)
 				|| !ActorPath.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
-				|| !ActorPath.Contains(TEXT(":")) || UniqueActors.Contains(ActorPath)
+				|| !ActorPath.Contains(TEXT(":")) || !FHyperAIStudioNames::IsObjectPath(ActorPath, TEXT("actor_paths"))
+				|| UniqueActors.Contains(ActorPath)
 				|| !IsCanonicalSha256(ExpectedRevision))
 			{
 				return Fail(TEXT("invalid_actor_binding"), TEXT("Actor paths must be unique exact loaded /Game subobjects with one canonical revision each."));

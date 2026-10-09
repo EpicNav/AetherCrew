@@ -7,6 +7,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Editor.h"
 #include "Engine/SkeletalMesh.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioRetargetToolset.h"
 #include "HyperAIStudioSettings.h"
 #include "Misc/AutomationTest.h"
@@ -182,6 +183,40 @@ bool FHyperAIStudioRetargetEndToEndTest::RunTest(const FString& Parameters)
 	OntoItself.SourceMesh = SourceMesh->GetPathName();
 	OntoItself.TargetMesh = SourceMesh->GetPathName();
 	TestFalse(TEXT("and so is retargeting a mesh onto itself"), Run({MakeSource, MakeTarget, MakeRetargeter, OntoItself}, /*bDryRun=*/true).bOk);
+
+	// Replace goes in for each match of Search, so a short Replace can carry a copy's package past an FName's length. In
+	// this folder the copy's path fits with one replacement and not with two.
+	const FString ClipName = Clip->GetName();
+	FString Search;
+	int32 Matches = 0;
+	for (const TCHAR Char : ClipName)
+	{
+		const FString One = FString::ChrN(1, Char);
+		const int32 Count = ClipName.Replace(*One, TEXT("..")).Len() - ClipName.Len();
+		if (Count > Matches)
+		{
+			Matches = Count;
+			Search = One;
+		}
+	}
+	FHyperAIRetargetOp Lengthened = Copy;
+	Lengthened.Suffix.Reset();
+	Lengthened.Replace = FString::ChrN(100, TEXT('x'));
+	const int32 FolderLength = FHyperAIStudioNames::MaxLength - 1 - ClipName.Len() - (Lengthened.Replace.Len() - 1);
+	Lengthened.OutputFolder = Folder + TEXT("/") + FString::ChrN(FolderLength - Folder.Len() - 1, TEXT('a'));
+	const FHyperAIRetargetPlanReport LongFolder = Run({MakeSource, MakeTarget, MakeRetargeter, Lengthened}, /*bDryRun=*/true);
+	TestTrue(TEXT("A long output folder checks while the names fit it: ") + LongFolder.Diagnostic, LongFolder.bOk);
+	if (Matches >= 2)
+	{
+		Lengthened.Search = Search;
+		const FHyperAIRetargetPlanReport Grown = Run({MakeSource, MakeTarget, MakeRetargeter, Lengthened}, /*bDryRun=*/true);
+		TestTrue(FString::Printf(TEXT("and a Replace that goes in %d times is refused before the batch names a package past the rule: %s"), Matches, *Grown.Diagnostic),
+			!Grown.bOk && Grown.Status == TEXT("invalid_request") && Grown.Diagnostic.Contains(TEXT("characters long")));
+	}
+	else
+	{
+		AddInfo(FString::Printf(TEXT("%s repeats no character, so the growth from repeated replacement is not shown."), *ClipName));
+	}
 	const FHyperAIRetargetPlanReport Checked = Run({MakeSource, MakeTarget, MakeRetargeter, Copy}, /*bDryRun=*/true);
 	TestTrue(TEXT("The whole plan checks: ") + Checked.Diagnostic, Checked.bOk && Checked.Status == TEXT("checked")
 		&& !FindObject<UObject>(nullptr, *ObjectPathOf(SourceRig)));

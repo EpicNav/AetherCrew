@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioLightingToolset.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioAgentActivity.h"
 
@@ -421,11 +422,15 @@ FString FHyperAIStudioLightingContracts::CaptureResultSchemaFingerprint()
 
 FHyperAICaptureViewReport FHyperAIStudioLightingContracts::CaptureNow(const FHyperAICaptureViewRequest& Request)
 {
+	FHyperAICaptureViewReport Refused;
+	if (FHyperAIStudioNames::RefuseRequest(Request, Refused)) return Refused;
 	return HyperAIStudio::Lighting::Capture::RunNow(Request);
 }
 
 FHyperAIImageCompareReport FHyperAIStudioLightingContracts::CompareImages(const FHyperAIImageCompareRequest& Request)
 {
+	FHyperAIImageCompareReport Refused;
+	if (FHyperAIStudioNames::RefuseRequest(Request, Refused)) return Refused;
 	return HyperAIStudio::Lighting::Match::Compare(Request);
 }
 
@@ -698,6 +703,7 @@ FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHy
 	Fit.Clamp(Request.MaxMaterials, 0, 48, TEXT("max_materials"));
 	FHyperAILightingInspectReport Report;
 	Report.Capabilities = GetCapabilities();
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	auto Reject = [&](const TCHAR* Status, const FString& Diagnostic)
 	{
 		Report.bOk = false;
@@ -822,6 +828,7 @@ FHyperAILightingCompareReport FHyperAIStudioLightingContracts::Compare(const FHy
 	namespace Gate = HyperAIStudio::Lighting::Gate;
 	FHyperAILightingCompareReport Report;
 	Report.Capabilities = GetCapabilities();
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	auto Reject = [&](const TCHAR* Status, const FString& Diagnostic)
 	{
 		Report.bOk = false;
@@ -933,6 +940,12 @@ FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const
 	if (!IsInGameThread())
 	{
 		return Reject(TEXT("game_thread_required"), TEXT("Lighting edit planning runs on the game thread."));
+	}
+	// Labels, properties and parameters become FNames and lookups, which stop the editor past an FName's length.
+	FString NameReason;
+	if (!FHyperAIStudioNames::CheckRequest(Request, &NameReason))
+	{
+		return Reject(TEXT("invalid_request"), NameReason);
 	}
 	if (Request.bDryRun && (!Request.OperationId.IsEmpty() || !Request.ExpectedPlanHash.IsEmpty()))
 	{

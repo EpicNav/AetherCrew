@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioGameplayAIToolset.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 
@@ -919,7 +920,7 @@ bool FHyperAIStudioGameplayAIContracts::IsCanonicalProjectObjectPath(const FStri
 	if (Path.IsEmpty() || Path.Len() > MaxPathCharacters
 		|| Path.Contains(TEXT("\\")) || Path.Contains(TEXT("..")) || Path.Contains(TEXT(":"))
 		|| !Path.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
-		|| !FPackageName::IsValidObjectPath(Path)) return false;
+		|| !FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path)) return false;
 	FString PackageName;
 	FString ObjectName;
 	return Path.Split(TEXT("."), &PackageName, &ObjectName, ESearchCase::CaseSensitive,
@@ -1401,6 +1402,8 @@ FHyperAIGameplayAIApplyPlanReport FHyperAIStudioGameplayAIContracts::BuildPlan(
 		Report.Diagnostic = TEXT("Gameplay AI UObject planning is allowed only on Unreal's serialized game thread.");
 		return Report;
 	}
+	// Key names and paths become FNames and lookups, which stop the editor past an FName's length.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	if (Request.Operations.IsEmpty() || Request.Operations.Num() > MaxOperations
 		|| Request.DeadlineMs < 100 || Request.DeadlineMs > 2000
 		|| Request.MaxGameThreadMs < 50 || Request.MaxGameThreadMs > 250

@@ -12,6 +12,7 @@
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSourceControl.h"
 #include "LevelSequence.h"
 #include "Misc/CoreDelegates.h"
@@ -77,6 +78,9 @@ namespace HyperAIStudio::MovieRenderTools::Private
 	{
 		const FString Trimmed = Path.TrimStartAndEnd();
 		if (Trimmed.IsEmpty() || !Trimmed.StartsWith(TEXT("/"))) return nullptr;
+		// The load makes an FName of each part, and the package it looked for: past 1023 characters, or with a double
+		// slash, either stops the editor.
+		if (!FHyperAIStudioNames::IsObjectPath(Trimmed, TEXT("Path"))) return nullptr;
 		const FString ObjectPath = Trimmed.Contains(TEXT(".")) ? Trimmed : Trimmed + TEXT(".") + FPackageName::GetShortName(Trimmed);
 		return LoadObject<T>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
@@ -91,7 +95,8 @@ namespace HyperAIStudio::MovieRenderTools::Private
 
 	bool IsNewAssetPath(const FString& Path)
 	{
-		return Path.StartsWith(TEXT("/Game/")) && FPackageName::IsValidLongPackageName(Path) && !FPackageName::DoesPackageExist(Path);
+		// Free in memory too: an unsaved asset there of another class would stop the editor when the new one is made.
+		return Path.StartsWith(TEXT("/Game/")) && FHyperAIStudioNames::IsPackagePath(Path, nullptr) && FHyperAIStudioNames::IsFreePackage(Path);
 	}
 
 	UMoviePipelineQueueSubsystem* Queues()
@@ -213,6 +218,8 @@ namespace HyperAIStudio::MovieRenderTools::Private
 			return false;
 		}
 		const FString Before = ExportValue(*Property, &Object, &Object);
+		// The import makes names of the text, and loads an asset it names (making the package when nothing is there).
+		if (!FHyperAIStudioNames::CanImportText(*Property, Value, *Name, &OutError)) return false;
 		if (bNotify) Object.PreEditChange(Property);
 		const TCHAR* Rest = Property->ImportText_InContainer(*Value, &Object, &Object, PPF_None);
 		if (FBoolProperty* Override = FindFProperty<FBoolProperty>(Object.GetClass(), *(TEXT("bOverride_") + Property->GetName())))
@@ -817,6 +824,8 @@ FHyperAIMovieRenderInspectReport FHyperAIStudioMovieRenderContracts::Inspect(con
 {
 	using namespace HyperAIStudio::MovieRenderTools::Private;
 	FHyperAIMovieRenderInspectReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	for (const FHyperAIStudioAsyncJobStatus& Job : FHyperAIStudioAsyncJobHost::GetSnapshot())
 	{
 		if (Job.ToolName == PlanToolName && Job.State == EHyperAIStudioAsyncJobState::Running)
@@ -869,6 +878,8 @@ FHyperAIMovieRenderPlanReport FHyperAIStudioMovieRenderContracts::ApplyPlan(cons
 	FHyperAIMovieRenderPlanReport Report;
 	Report.OperationId = Request.OperationId.IsEmpty()
 		? FString::Printf(TEXT("render-%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower()) : Request.OperationId;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report, {TEXT("Value")})) return Report;
 	UWorld* World = EditorWorld();
 	FString Error;
 	if (!World)
@@ -908,6 +919,19 @@ FHyperAIMovieRenderPlanReport FHyperAIStudioMovieRenderContracts::ApplyPlan(cons
 		const FString OperationId = Report.OperationId;
 		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId]()
 			{
+				// The editor may have moved on while the plan waited (an asset deleted, a path taken, the level closed),
+				// so it is checked again before anything changes.
+				FString Problem;
+				UWorld* Now = EditorWorld();
+				if (!Now || !Check(*Now, Request, Problem))
+				{
+					FHyperAIMovieRenderPlanReport Refused;
+					Refused.OperationId = OperationId;
+					Refused.Status = TEXT("invalid_request");
+					Refused.Diagnostic = Now ? TEXT("The editor changed while the plan waited for approval: ") + Problem : FString(TEXT("No level is open in the editor; nothing was changed."));
+					Record(OperationId, Refused);
+					return;
+				}
 				Record(OperationId, Execute(Request, OperationId));
 			}, Error))
 		{

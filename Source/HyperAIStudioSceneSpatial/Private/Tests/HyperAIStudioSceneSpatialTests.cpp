@@ -1403,4 +1403,96 @@ bool FHyperAIStudioSpatialDirectApplyTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSceneSpatialLongNamesTest,
+	"HyperAIStudio.SceneSpatial.Contracts.LongAndMalformedNames",
+	HyperAIStudio::SceneSpatial::Tests::Flags)
+
+bool FHyperAIStudioSceneSpatialLongNamesTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::SceneSpatial;
+	using namespace HyperAIStudio::SceneSpatial::Tests;
+	using C = FHyperAIStudioSceneSpatialContracts;
+	// Each of these once reached an FName past 1023 characters, or a load of a package with a double slash, and stopped
+	// the editor; all three tools, dry runs and read-only queries included, now refuse them first.
+	const FString Blob = FString::ChrN(1100, TEXT('a'));
+	const FString PathBlob = TEXT("/") + Blob;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld=*/false, TEXT("HyperAISpatialLongNamesWorld"));
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+	AddFloor(*World);
+	AddCube(*World, TEXT("Crate"), FVector(0.0, 0.0, 300.0))->Tags.Add(TEXT("Pick"));
+
+	for (const FString& Name : {PathBlob, Blob})
+	{
+		const TCHAR* Which = Name.StartsWith(TEXT("/")) ? TEXT("a path") : TEXT("a label");
+		FHyperAISpatialQuery Measured = Query(TEXT("measure"));
+		Measured.ActorA = Name;
+		TestFalse(FString::Printf(TEXT("measure refuses %s past an FName's length"), Which), Ask(*World, Measured).bOk);
+		FHyperAISpatialQuery Ignoring = Query(TEXT("ground"));
+		Ignoring.IgnoreActors = {Name};
+		TestFalse(FString::Printf(TEXT("IgnoreActors refuses %s past an FName's length"), Which), Ask(*World, Ignoring).bOk);
+		FHyperAISpatialQuery ByClass = Query(TEXT("nearest"));
+		ByClass.ClassFilter = Name;
+		TestFalse(FString::Printf(TEXT("ClassFilter refuses %s past an FName's length"), Which), Ask(*World, ByClass).bOk);
+	}
+	// Just under an FName's length, the lookup with _C once went past it.
+	FHyperAISpatialQuery Edge = Query(TEXT("nearest"));
+	Edge.ClassFilter = FString::ChrN(NAME_SIZE - 1, TEXT('a'));
+	TestFalse(TEXT("ClassFilter refuses a name that _C would take past an FName's length"), Ask(*World, Edge).bOk);
+	FHyperAISpatialQuery LongTag = Query(TEXT("nearest"));
+	LongTag.TagFilter = Blob;
+	const FHyperAISpatialResult Tagged = Ask(*World, LongTag);
+	TestTrue(TEXT("TagFilter past an FName's length is refused: ") + Tagged.Diagnostic.Left(120), !Tagged.bOk && Tagged.Diagnostic.Contains(TEXT("characters long")));
+	FHyperAISpatialQuery Unknown = Query(TEXT("nearest"));
+	Unknown.TagFilter = TEXT("HyperAI_NoActorHasThisTag_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FHyperAISpatialResult None = Ask(*World, Unknown);
+	TestTrue(TEXT("a tag no actor has finds nothing, not every actor"), None.bOk && None.Nearest.IsEmpty());
+	FHyperAISpatialQuery Pick = Query(TEXT("nearest"));
+	Pick.TagFilter = TEXT("Pick");
+	TestEqual(TEXT("a tag an actor has still finds it"), Ask(*World, Pick).Nearest.Num(), 1);
+
+	// The query tool refuses them as a request, before a world is picked.
+	FHyperAISpatialQueryRequest Asked;
+	Asked.Queries.Add(Query(TEXT("ground")));
+	Asked.Queries.Add(LongTag);
+	const FHyperAISpatialQueryReport Front = C::Query(Asked);
+	TestTrue(TEXT("hyper_spatial_query refuses the request: ") + Front.Diagnostic.Left(120), Front.Status == TEXT("invalid_request") && Front.Diagnostic.Contains(TEXT("Queries[1]")));
+
+	FHyperAISceneCostRequest Scoped;
+	Scoped.Scope = TEXT("actors");
+	Scoped.Actors = {PathBlob};
+	const FHyperAISceneCostReport Costed = Measure(*World, Scoped);
+	TestTrue(TEXT("the cost report refuses a scope actor past an FName's length: ") + Costed.Diagnostic.Left(120),
+		!Costed.bOk && Costed.Status == TEXT("invalid_request") && Costed.Diagnostic.Contains(TEXT("characters long")));
+
+	auto Checked = [&](const FHyperAISpatialOp& Operation)
+	{
+		TArray<Plan::FMove> Moves;
+		FHyperAISpatialPlanReport Report;
+		Report.bOk = Plan::Check(*World, PlanOf({Operation}), Moves, Report);
+		return Report;
+	};
+	auto Refused = [](const FHyperAISpatialPlanReport& Report, const TCHAR* Words)
+	{
+		return !Report.bOk && Report.Status == TEXT("invalid_request") && Report.Diagnostic.Contains(Words);
+	};
+	FHyperAISpatialOp Place = Op(TEXT("place"));
+	Place.Label = TEXT("HyperAI_LongNames_New");
+	Place.Mesh = PathBlob;
+	TestTrue(TEXT("a plan refuses a Mesh past an FName's length"), Refused(Checked(Place), TEXT("characters long")));
+	Place.Mesh = TEXT("/Game//SM_Nope");
+	TestTrue(TEXT("and a Mesh with a double slash, which the load would make a package of"), Refused(Checked(Place), TEXT("double slash")));
+	Place.Mesh = TEXT("/Engine/BasicShapes/Cube");
+	Place.Folder = Blob;
+	TestTrue(TEXT("and an Outliner Folder past an FName's length, set only once approved"), Refused(Checked(Place), TEXT("Folder is")));
+	Place.Folder = TEXT("Props/Rocks");
+	TestTrue(TEXT("a Folder of a fitting length is kept"), Checked(Place).bOk);
+	TestTrue(TEXT("and an actor past an FName's length"), Refused(Checked(Op(TEXT("drop_to_ground"), {PathBlob})), TEXT("characters long")));
+	FHyperAISpatialOp Ignored = Op(TEXT("drop_to_ground"), {TEXT("Crate")});
+	Ignored.IgnoreActors = {PathBlob};
+	TestTrue(TEXT("and an ignored actor past an FName's length"), Refused(Checked(Ignored), TEXT("characters long")));
+	return true;
+}
+
 #endif

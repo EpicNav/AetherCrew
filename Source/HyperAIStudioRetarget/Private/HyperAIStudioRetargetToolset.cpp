@@ -11,6 +11,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSourceControl.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Guid.h"
@@ -86,6 +87,12 @@ namespace HyperAIStudio::Retarget::Private
 	{
 		const FString Package = PackageOf(Path);
 		FText Reason;
+		FString NameReason;
+		if (!FHyperAIStudioNames::IsObjectPath(Path.TrimStartAndEnd(), TEXT("The path"), &NameReason))
+		{
+			OutError = NameReason;
+			return false;
+		}
 		if (!FPackageName::IsValidLongPackageName(Package, /*bIncludeReadOnlyRoots=*/false, &Reason)
 			|| Package.StartsWith(TEXT("/Script/")) || Package.StartsWith(TEXT("/Engine/")) || Package.StartsWith(TEXT("/Temp/")))
 		{
@@ -113,7 +120,51 @@ namespace HyperAIStudio::Retarget::Private
 	template <typename T>
 	T* Load(const FString& Path)
 	{
-		return Path.TrimStartAndEnd().IsEmpty() ? nullptr : LoadObject<T>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		// The load makes an FName of each part, and the package it looked for: past 1023 characters, or with "//", either
+		// stops the editor.
+		return !FHyperAIStudioNames::IsObjectPath(Path.TrimStartAndEnd(), nullptr) ? nullptr : LoadObject<T>(nullptr, *ObjectPath(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	}
+
+	/**
+	 * Whether every copy retarget.animations makes fits the name rule. The batch names a copy as the engine's duplication
+	 * rule does, Prefix + the name with every Search replaced + Suffix, in OutputFolder or the animation's own folder, and
+	 * makes FNames of that package and path: each replacement lengthens the name, so it is worked out per animation, and
+	 * for what a montage or blend space brings along when bIncludeReferenced is set.
+	 */
+	bool CopiesFitNames(const FHyperAIRetargetOp& Op, FString& OutError)
+	{
+		TArray<UAnimationAsset*> Copied;
+		for (const FString& Path : Op.Animations)
+		{
+			if (UAnimationAsset* Animation = Load<UAnimationAsset>(Path))
+			{
+				Copied.AddUnique(Animation);
+			}
+		}
+		// Found as the batch finds them; each adds what it references to the end of the list.
+		for (int32 Index = 0; Op.bIncludeReferenced && Index < Copied.Num(); ++Index)
+		{
+			Copied[Index]->HandleAnimReferenceCollection(Copied, /*bRecursive=*/true);
+		}
+		const FString Folder = Op.OutputFolder.TrimStartAndEnd();
+		for (const UAnimationAsset* Animation : Copied)
+		{
+			if (!IsValid(Animation))
+			{
+				continue;
+			}
+			// FString::Replace, as the rule calls it: every match, whatever its case.
+			const FString Name = Op.Prefix + (Op.Search.IsEmpty() ? Animation->GetName() : Animation->GetName().Replace(*Op.Search, *Op.Replace)) + Op.Suffix;
+			const FString Package = (Folder.IsEmpty() ? FPackageName::GetLongPackagePath(Animation->GetPathName()) : Folder) + TEXT("/") + Name;
+			if (Package.Len() > FHyperAIStudioNames::MaxLength)
+			{
+				OutError = FString::Printf(TEXT("The copy of %s would be %s..., %d characters long; a path is at most %d. Shorten OutputFolder, Prefix or Suffix%s."),
+					*Animation->GetName(), *Package.Left(80), Package.Len(), FHyperAIStudioNames::MaxLength,
+					Op.Search.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(", or Replace, which goes in for each '%s' in the name"), *Op.Search));
+				return false;
+			}
+		}
+		return true;
 	}
 
 	bool HasBone(const USkeletalMesh* Mesh, const FString& Bone)
@@ -708,6 +759,15 @@ namespace HyperAIStudio::Retarget::Private
 				{
 					return Fail(Why);
 				}
+				if (Op.Prefix.Len() + Op.Suffix.Len() + Op.Replace.Len() > 128)
+				{
+					return Fail(TEXT("Prefix, Suffix and Replace together are at most 128 characters."));
+				}
+				// Replace goes in once for each match, so only the names themselves say whether the packages' FNames fit.
+				if (!CopiesFitNames(Op, Why))
+				{
+					return Fail(Why);
+				}
 				continue;
 			}
 			return Fail(TEXT("Unknown op; see hyper_retarget_apply_plan's description."));
@@ -998,6 +1058,8 @@ FHyperAIRetargetInspectReport FHyperAIStudioRetargetContracts::Inspect(const FHy
 {
 	using namespace HyperAIStudio::Retarget::Private;
 	FHyperAIRetargetInspectReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	if (Request.Paths.IsEmpty() || Request.Paths.Num() > 64)
 	{
 		Report.Diagnostic = TEXT("Give 1 to 64 Paths: IK Rigs, IK Retargeters or skeletal meshes.");
@@ -1039,6 +1101,8 @@ FHyperAIRetargetPlanReport FHyperAIStudioRetargetContracts::ApplyPlan(const FHyp
 	FHyperAIRetargetPlanReport Report;
 	Report.OperationId = Request.OperationId.IsEmpty()
 		? FString::Printf(TEXT("retarget-%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower()) : Request.OperationId;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	FString Error;
 	if (!Check(Request, Error))
 	{
@@ -1074,6 +1138,18 @@ FHyperAIRetargetPlanReport FHyperAIStudioRetargetContracts::ApplyPlan(const FHyp
 		const FString OperationId = Report.OperationId;
 		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId]()
 			{
+				// The editor may have moved on while the plan waited (an asset deleted, a path taken, the level closed),
+				// so it is checked again before anything changes.
+				FString Problem;
+				if (!Check(Request, Problem))
+				{
+					FHyperAIRetargetPlanReport Refused;
+					Refused.OperationId = OperationId;
+					Refused.Status = TEXT("invalid_request");
+					Refused.Diagnostic = TEXT("The editor changed while the plan waited for approval: ") + Problem;
+					Record(OperationId, Refused);
+					return;
+				}
 				Record(OperationId, Execute(Request, OperationId));
 			}, Error))
 		{

@@ -228,6 +228,40 @@ bool FHyperAIStudioModelingParseAndRefuseTest::RunTest(const FString& Parameters
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingLongPathsTest, "HyperAIStudio.NativeTools.Modeling.LongAndMalformedPaths", HyperAIStudio::ModelingTests::Flags)
+
+bool FHyperAIStudioModelingLongPathsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelingTests;
+	// Each of these once reached an FName past 1023 characters, or a load of a package with a double slash, and stopped
+	// the editor; now each is refused before any lookup.
+	const FString Blob = TEXT("/Game/") + FString::ChrN(1100, TEXT('a'));
+	FHyperAIModelInspectRequest Folder;
+	Folder.Folder = Blob;
+	const FHyperAIModelInspectReport Listed = C::Inspect(Folder);
+	TestTrue(TEXT("inspect refuses a Folder past an FName's length: ") + Listed.Diagnostic.Left(200), !Listed.bOk && Listed.Diagnostic.Contains(TEXT("characters long")));
+	FHyperAIModelInspectRequest Asset;
+	Asset.Asset = Blob;
+	Asset.bPreview = true;
+	TestTrue(TEXT("and an Asset to preview"), !C::Inspect(Asset).bOk);
+	Asset.Asset = TEXT("/Game//SM_Nope");
+	TestTrue(TEXT("and an Asset with a double slash"), C::Inspect(Asset).Diagnostic.Contains(TEXT("double slash")));
+	FHyperAIModelValidateRequest Validate;
+	Validate.Assets = {Blob, TEXT("/Game//SM_Nope.SM_Nope"), Blob + TEXT(".") + FString::ChrN(1100, TEXT('b'))};
+	const FHyperAIModelValidateReport Checked = C::Validate(Validate);
+	TestEqual(TEXT("validate reports each as no static mesh"), Checked.Issues.FilterByPredicate([](const FHyperAIModelIssue& Issue) { return Issue.Code == TEXT("not_a_static_mesh"); }).Num(), 3);
+	TestFalse(TEXT("and fails"), Checked.bOk);
+	const FHyperAIModelOp Box = Sized(TEXT("add.box"), TEXT("Block"), TEXT("100"));
+	TestTrue(TEXT("a plan refuses a write_asset path past an FName's length, naming the field"), Refused(Run({Box, Write(TEXT("Block"), Blob)}, true), TEXT("Operations[1].Asset"),
+		TEXT("characters long")));
+	TestTrue(TEXT("and one with a double slash"), Refused(Run({Box, Write(TEXT("Block"), TEXT("/Game//SM_Block"))}, true), TEXT("Op 1"), TEXT("double slash")));
+	TestTrue(TEXT("and a material path past an FName's length"), Refused(Run({Box, Write(TEXT("Block"), TestFolder() + TEXT("/SM_Block"), *(TEXT("Materials=0:") + Blob))}, true),
+		TEXT("Op 1"), TEXT("characters long")));
+	TestTrue(TEXT("and a material path with a double slash"), Refused(Run({Box, Write(TEXT("Block"), TestFolder() + TEXT("/SM_Block"), TEXT("Materials=0:/Game//M_Nope"))}, true),
+		TEXT("Op 1"), TEXT("double slash")));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingBudgetsTest, "HyperAIStudio.NativeTools.Modeling.Budgets", HyperAIStudio::ModelingTests::Flags)
 
 bool FHyperAIStudioModelingBudgetsTest::RunTest(const FString& Parameters)

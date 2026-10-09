@@ -17,6 +17,7 @@
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioExecutionQueue.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioPIEPlaytestToolset.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityInventoryClient.h"
@@ -2299,6 +2300,14 @@ FHyperAIBlueprintDebugReport UHyperAIStudioNativeReadToolset::hyper_blueprint_de
 	{
 		Report.Status = TEXT("invalid_input");
 		Report.Diagnostic = TEXT("blueprint_asset_path and graph_name must satisfy their bounded path/name limits.");
+		return Report;
+	}
+	// FSoftObjectPath makes an FName of the package part, which stops the editor past 1023 characters.
+	FString PathReason;
+	if (!FHyperAIStudioNames::IsObjectPath(BlueprintAssetPath, TEXT("blueprint_asset_path"), &PathReason))
+	{
+		Report.Status = TEXT("invalid_asset_path");
+		Report.Diagnostic = PathReason;
 		return Report;
 	}
 

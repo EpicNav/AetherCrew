@@ -18,6 +18,7 @@
 #include "GameMapsSettings.h"
 #include "HAL/FileManager.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "IMessageLogListing.h"
 #include "ImageUtils.h"
 #include "Logging/TokenizedMessage.h"
@@ -502,6 +503,8 @@ namespace HyperAIStudio::LevelDesign::Gate
 		UClass* PawnClass = nullptr;
 		if (!PawnClassPath.IsEmpty())
 		{
+			// Loaded when nothing is in memory: an FName past its length, or a package with "//", stops the editor.
+			if (!FHyperAIStudioNames::IsObjectPath(PawnClassPath, TEXT("pawn_class_path"), &OutError)) return false;
 			PawnClass = LoadClass<APawn>(nullptr, *PawnClassPath);
 			if (!PawnClass)
 			{

@@ -10,6 +10,7 @@
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioOperationJournal.h"
 #include "HyperAIStudioPlanExecuteToolset.h"
 #include "HyperAIStudioService.h"
@@ -99,10 +100,12 @@ namespace HyperAIStudio::BlueprintWorkflow::Private
 			OutDiagnostic = TEXT("Loaded Blueprint workflows require Unreal's serialized game thread.");
 			return nullptr;
 		}
-		if (AssetPath.IsEmpty() || AssetPath.Len() > FHyperAIStudioBlueprintPatch::MaxPathCharacters)
+		FString PathReason;
+		if (AssetPath.IsEmpty() || AssetPath.Len() > FHyperAIStudioBlueprintPatch::MaxPathCharacters
+			|| !FHyperAIStudioNames::IsObjectPath(AssetPath, TEXT("asset_path"), &PathReason))
 		{
 			OutStatus = TEXT("invalid_asset_path");
-			OutDiagnostic = TEXT("asset_path must be one bounded Unreal object path.");
+			OutDiagnostic = PathReason.IsEmpty() ? TEXT("asset_path must be one bounded Unreal object path.") : PathReason;
 			return nullptr;
 		}
 		const FSoftObjectPath Reference(AssetPath);

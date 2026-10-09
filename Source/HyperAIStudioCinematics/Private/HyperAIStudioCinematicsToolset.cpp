@@ -12,6 +12,7 @@
 #include "Engine/Engine.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "IO/IoHash.h"
 #include "LevelSequence.h"
 #include "Misc/PackageName.h"
@@ -1260,7 +1261,7 @@ bool FHyperAIStudioCinematicsContracts::IsCanonicalPrimaryAssetPath(const FStrin
 	const FString PackageLeaf = Path.Mid(Slash + 1, Dot - Slash - 1);
 	const FString ObjectName = Path.Mid(Dot + 1);
 	return PackageLeaf == ObjectName && PackageLeaf.Len() <= MaxNameCharacters
-		&& FPackageName::IsValidObjectPath(Path);
+		&& FHyperAIStudioNames::IsObjectPath(Path, nullptr) && FPackageName::IsValidObjectPath(Path);
 }
 
 bool FHyperAIStudioCinematicsContracts::IsCanonicalSha256(const FString& Value)

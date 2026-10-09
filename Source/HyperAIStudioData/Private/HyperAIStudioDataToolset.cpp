@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioDataToolset.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSourceControl.h"
 
 #include "AssetRegistry/AssetData.h"
@@ -1275,7 +1276,8 @@ bool FHyperAIStudioDataContracts::IsCanonicalProjectObjectPath(const FString& Pa
 		|| Path.Contains(TEXT("\\")) || Path.Contains(TEXT("..")) || Path.Contains(TEXT(":"))
 		|| HyperAIStudio::Data::Private::HasControlCharacter(Path)) return false;
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason)) return false;
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason)) return false;
 	const FSoftObjectPath SoftPath(Path);
 	if (!SoftPath.IsValid() || !SoftPath.GetSubPathUtf8String().IsEmpty()) return false;
 	const FString PackageName = FPackageName::ObjectPathToPackageName(Path);

@@ -7,6 +7,7 @@
 #include "Engine/Texture.h"
 #include "GameFramework/Actor.h"
 #include "HyperAIStudioLightingGate.h"
+#include "HyperAIStudioNames.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -261,7 +262,7 @@ namespace HyperAIStudio::Lighting::LookDev
 			{
 				Path += TEXT(".") + FPackageName::GetShortName(Path);
 			}
-			Out.Texture = Path.StartsWith(TEXT("/")) ? Cast<UTexture>(FSoftObjectPath(Path).TryLoad()) : nullptr;
+			Out.Texture = FHyperAIStudioNames::IsObjectPath(Value, nullptr) ? Cast<UTexture>(FSoftObjectPath(Path).TryLoad()) : nullptr;
 			if (!Out.Texture)
 			{
 				OutError = FString::Printf(TEXT("takes a texture's path, or default; '%s' is not a texture"), *Value.Left(128));

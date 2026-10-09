@@ -19,6 +19,7 @@
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioExternalService.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSettings.h"
 #include "IAssetTools.h"
 #include "Interfaces/IHttpRequest.h"
@@ -716,6 +717,8 @@ FHyperAIMeshGenerateReport FHyperAIStudioMeshGenContracts::Generate(const FHyper
 {
 	using namespace HyperAIStudio::MeshGen::Private;
 	FHyperAIMeshGenerateReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	auto Refuse = [&Report](const TCHAR* Status, const FString& Diagnostic)
 	{
 		Report.bOk = false;
@@ -790,11 +793,18 @@ FHyperAIMeshGenerateReport FHyperAIStudioMeshGenContracts::Generate(const FHyper
 	}
 	FString Folder = Request.Folder.TrimStartAndEnd().IsEmpty() ? GetDefault<UHyperAIStudioSettings>()->MeshImportFolder : Request.Folder.TrimStartAndEnd();
 	Folder.RemoveFromEnd(TEXT("/"));
-	if (!Folder.StartsWith(TEXT("/Game/")) && Folder != TEXT("/Game"))
+	FString FolderReason;
+	if ((!Folder.StartsWith(TEXT("/Game/")) && Folder != TEXT("/Game")) || !FHyperAIStudioNames::IsFolderPath(Folder, TEXT("folder"), &FolderReason))
 	{
-		return Refuse(TEXT("invalid_request"), TEXT("folder is a content path under /Game, such as /Game/Generated/Models."));
+		return Refuse(TEXT("invalid_request"), TEXT("folder is a content path under /Game, such as /Game/Generated/Models.")
+			+ (FolderReason.IsEmpty() ? FString() : TEXT(" ") + FolderReason));
 	}
 	const FString Name = FreeName(Folder, AssetNameFor(Request.Name, Prompt));
+	// Imported as Folder/Name/Name: the package that makes must be one, past its paid job.
+	if (!FHyperAIStudioNames::IsPackagePath(Folder / Name / Name, TEXT("The folder and name together"), &FolderReason))
+	{
+		return Refuse(TEXT("invalid_request"), FolderReason + TEXT(" Give a shorter folder or name."));
+	}
 	Report.Destination = Folder / Name;
 	Report.Source = Image.IsEmpty() ? TEXT("words") : TEXT("picture");
 	Report.EstimatedCost = Service.CostPerCall;

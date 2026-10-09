@@ -35,6 +35,7 @@
 #include "HAL/IConsoleManager.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioLightingLookDev.h"
+#include "HyperAIStudioNames.h"
 #include "ImageCore.h"
 #include "ImageUtils.h"
 #include "LevelEditorViewport.h"
@@ -299,6 +300,8 @@ namespace HyperAIStudio::Lighting::Gate
 				if (!bTrue && !bFalse) OutError = TEXT("takes true or false");
 				return bTrue || bFalse;
 			}
+			// The import makes names of the text, and loads an asset it names (making the package when nothing is there).
+			if (!FHyperAIStudioNames::CanImportText(Property, OutImport, TEXT("The value"), &OutError)) return false;
 			void* Scratch = FMemory::Malloc(Property.GetSize(), Property.GetMinAlignment());
 			Property.InitializeValue(Scratch);
 			FStringOutputDevice Errors;
@@ -1006,7 +1009,7 @@ namespace HyperAIStudio::Lighting::Gate
 				{
 					Path += TEXT(".") + FPackageName::GetShortName(Path);
 				}
-				UObject* Loaded = Path.StartsWith(TEXT("/")) ? FSoftObjectPath(Path).TryLoad() : nullptr;
+				UObject* Loaded = FHyperAIStudioNames::IsObjectPath(Path, nullptr) ? FSoftObjectPath(Path).TryLoad() : nullptr;
 				const bool bIes = FCString::Strcmp(Spec.Key, TEXT("ies_profile")) == 0;
 				if (bIes ? Loaded && Loaded->IsA<UTextureLightProfile>() : IsLightFunction(Loaded))
 				{
@@ -1082,7 +1085,7 @@ namespace HyperAIStudio::Lighting::Gate
 				{
 					MaterialPath += TEXT(".") + FPackageName::GetShortName(MaterialPath);
 				}
-				Out.Material = MaterialPath.StartsWith(TEXT("/")) ? Cast<UMaterialInterface>(FSoftObjectPath(MaterialPath).TryLoad()) : nullptr;
+				Out.Material = FHyperAIStudioNames::IsObjectPath(MaterialPath, nullptr) ? Cast<UMaterialInterface>(FSoftObjectPath(MaterialPath).TryLoad()) : nullptr;
 				if (!Out.Material)
 				{
 					OutError = FString::Printf(TEXT("set_actor_material value '%s' is not a material or material instance; pass its path, e.g. /Game/Materials/M_Grid."), *Op.Value);
@@ -1494,7 +1497,8 @@ namespace HyperAIStudio::Lighting::Gate
 				{
 					Path += TEXT(".") + FPackageName::GetShortName(Path);
 				}
-				FSoftObjectPath(Path).TryLoad();
+				// Loaded when nothing is in memory: an FName past its length, or a package with "//", stops the editor.
+				if (FHyperAIStudioNames::IsObjectPath(Text, nullptr)) FSoftObjectPath(Path).TryLoad();
 			}
 			FString Why;
 			if (!ParseSkyValue(*OutProperty, *OutDetails.Object, Text, OutImport, Why))
@@ -1535,6 +1539,12 @@ namespace HyperAIStudio::Lighting::Gate
 			const FString PackageName = FString(MadeAssetsRoot) + TEXT("LUTs/") + Name;
 			UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *(PackageName + TEXT(".") + Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
 			const bool bNew = Texture == nullptr;
+			// Something else of that name, an asset of another class not saved yet, would stop the editor when the texture is made.
+			if (bNew && !FHyperAIStudioNames::IsFreePackage(PackageName))
+			{
+				OutError = FString::Printf(TEXT("%s is taken by an asset that is not a texture; rename or delete it, then try again"), *PackageName);
+				return nullptr;
+			}
 			if (bNew)
 			{
 				UPackage* Package = CreatePackage(*PackageName);
@@ -1598,7 +1608,7 @@ namespace HyperAIStudio::Lighting::Gate
 				{
 					Path += TEXT(".") + FPackageName::GetShortName(Path);
 				}
-				Texture = Cast<UTexture>(FSoftObjectPath(Path).TryLoad());
+				Texture = FHyperAIStudioNames::IsObjectPath(Value, nullptr) ? Cast<UTexture>(FSoftObjectPath(Path).TryLoad()) : nullptr;
 				if (!Texture)
 				{
 					OutError = FString::Printf(TEXT("color_grading_lut '%s' is not a texture; pass a LUT image inside the project, a LUT texture's path, or none"), *Value.Left(128));

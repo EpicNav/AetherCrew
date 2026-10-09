@@ -15,6 +15,7 @@
 #include "GameplayTagsManager.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSourceControl.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/CompilerResultsLog.h"
@@ -120,7 +121,8 @@ namespace HyperAIStudio::GAS::Authoring
 
 		UBlueprint* LoadBlueprint(const FString& Path)
 		{
-			return Path.TrimStartAndEnd().IsEmpty() ? nullptr
+			// Loaded when nothing is in memory: an FName past its length, or a package with "//", stops the editor.
+			return !FHyperAIStudioNames::IsObjectPath(Path.TrimStartAndEnd(), nullptr) ? nullptr
 				: LoadObject<UBlueprint>(nullptr, *ObjectPathOf(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
 		}
 
@@ -138,7 +140,7 @@ namespace HyperAIStudio::GAS::Authoring
 		UClass* ResolveClass(const FString& Path, const UClass* Base, const TMap<FString, UBlueprint*>& Planned)
 		{
 			const FString Trimmed = Path.TrimStartAndEnd();
-			if (Trimmed.IsEmpty())
+			if (Trimmed.IsEmpty() || !FHyperAIStudioNames::IsObjectPath(Trimmed, nullptr))
 			{
 				return nullptr;
 			}
@@ -166,6 +168,7 @@ namespace HyperAIStudio::GAS::Authoring
 			Out.Reset();
 			for (const FString& Name : Names)
 			{
+				if (!FHyperAIStudioNames::IsName(Name.TrimStartAndEnd(), TEXT("A tag"), &OutError)) return false;
 				const FGameplayTag Tag = UGameplayTagsManager::Get().RequestGameplayTag(FName(*Name.TrimStartAndEnd()), /*ErrorIfNotFound=*/false);
 				if (!Tag.IsValid())
 				{
@@ -180,7 +183,8 @@ namespace HyperAIStudio::GAS::Authoring
 		/** An attribute by its set's class and its name; the class is loaded when it is a Blueprint's. */
 		bool ResolveAttribute(const FString& OwnerClassPath, const FString& Name, FGameplayAttribute& Out, FString& OutError)
 		{
-			UClass* Owner = FSoftClassPath(OwnerClassPath.TrimStartAndEnd()).TryLoadClass<UAttributeSet>();
+			UClass* Owner = FHyperAIStudioNames::IsObjectPath(OwnerClassPath.TrimStartAndEnd(), nullptr) && FHyperAIStudioNames::IsName(Name.TrimStartAndEnd(), nullptr)
+				? FSoftClassPath(OwnerClassPath.TrimStartAndEnd()).TryLoadClass<UAttributeSet>() : nullptr;
 			FProperty* Property = Owner ? FindFProperty<FProperty>(Owner, FName(*Name.TrimStartAndEnd())) : nullptr;
 			if (!Owner || !Property || !FGameplayAttribute::IsSupportedProperty(Property))
 			{
@@ -611,6 +615,12 @@ namespace HyperAIStudio::GAS::Authoring
 				OutError = FString::Printf(TEXT("A Blueprint can't be made from %s."), *Op.ParentClassPath);
 				return nullptr;
 			}
+			// Asked again here, as an approval can wait: an asset of another class made there meanwhile would stop the editor.
+			if (!FHyperAIStudioNames::IsFreePackage(Package))
+			{
+				OutError = FString::Printf(TEXT("%s was taken before the Blueprint was made; nothing was made there."), *Package);
+				return nullptr;
+			}
 			UPackage* Outer = CreatePackage(*Package);
 			UBlueprint* Blueprint = FKismetEditorUtilities::CreateBlueprint(Parent, Outer, FName(*FPackageName::GetShortName(Package)), BPTYPE_Normal,
 				bEffect ? UBlueprint::StaticClass() : UGameplayAbilityBlueprint::StaticClass(), UBlueprintGeneratedClass::StaticClass(), TEXT("HyperAIStudio"));
@@ -882,7 +892,8 @@ namespace HyperAIStudio::GAS::Authoring
 	{
 		for (const FString& Path : AssetPaths)
 		{
-			if (Path.StartsWith(TEXT("/Game/")) && !FSoftObjectPath(Path).ResolveObject() && FPackageName::DoesPackageExist(PackageOf(Path)))
+			if (Path.StartsWith(TEXT("/Game/")) && FHyperAIStudioNames::IsObjectPath(Path, nullptr) && !FSoftObjectPath(Path).ResolveObject()
+				&& FPackageName::DoesPackageExist(PackageOf(Path)))
 			{
 				LoadObject<UObject>(nullptr, *ObjectPathOf(Path), nullptr, LOAD_NoWarn | LOAD_Quiet);
 			}
@@ -902,6 +913,9 @@ namespace HyperAIStudio::GAS::Authoring
 			Report.Diagnostic = TEXT("GAS edits run on the game thread.");
 			return Report;
 		}
+		// Tags, attributes and paths become FNames and lookups, which stop the editor past an FName's length; CheckBounds
+		// lets a path reach 1024 characters, and Check looks a new Blueprint's path up before anything else does.
+		if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 		FString Error;
 		if (!CheckBounds(Request, Error))
 		{

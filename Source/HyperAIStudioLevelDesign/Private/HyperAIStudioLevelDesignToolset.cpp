@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioLevelDesignToolset.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioRequestFit.h"
 
@@ -394,6 +395,8 @@ FHyperAILevelDesignInspectReport FHyperAIStudioLevelDesignContracts::Inspect(con
 {
 	using namespace HyperAIStudio::LevelDesign::Private;
 	FHyperAILevelDesignInspectReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	Report.Capabilities = GetCapabilities();
 	auto Reject = [&](const TCHAR* Status, const FString& Diagnostic)
 	{
@@ -446,6 +449,8 @@ FHyperAILevelDesignValidateReport FHyperAIStudioLevelDesignContracts::Validate(c
 {
 	using namespace HyperAIStudio::LevelDesign::Private;
 	FHyperAILevelDesignValidateReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	Report.Capabilities = GetCapabilities();
 	auto Reject = [&](const TCHAR* Status, const FString& Diagnostic)
 	{
@@ -550,6 +555,8 @@ FHyperAILevelBlockoutApplyPlanReport FHyperAIStudioLevelDesignContracts::BuildPl
 {
 	using namespace HyperAIStudio::LevelDesign::Private;
 	FHyperAILevelBlockoutApplyPlanReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	Report.bDryRun = Request.bDryRun;
 	Report.OperationId = Request.OperationId.Left(FHyperAIStudioDomainLimits::MaxOperationIdChars);
 	Report.Capabilities = GetCapabilities();

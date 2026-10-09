@@ -10,6 +10,7 @@
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "Interfaces/IPluginManager.h"
 #include "MassEntityConfigAsset.h"
 #include "MassEntityTraitBase.h"
@@ -805,7 +806,8 @@ bool FHyperAIStudioGameplaySystemsContracts::IsCanonicalTargetPath(
 	const FString PackageName = Path.Left(ObjectDelimiter);
 	const FString ObjectName = Path.Mid(ObjectDelimiter + 1);
 	FText Reason;
-	if (!FPackageName::IsValidTextForLongPackageName(PackageName, &Reason)
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidTextForLongPackageName(PackageName, &Reason)
 		|| !FName::IsValidXName(ObjectName, INVALID_OBJECTPATH_CHARACTERS, &Reason)
 		|| ObjectName.Contains(TEXT("/"))) return false;
 	if (Role == TEXT("world_condition_schema")) return Path.StartsWith(TEXT("/Script/"));

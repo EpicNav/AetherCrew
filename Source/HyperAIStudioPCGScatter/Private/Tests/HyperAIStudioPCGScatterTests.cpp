@@ -20,6 +20,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Helpers/PCGHelpers.h"
 #include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioPCGScatterToolset.h"
 #include "HyperAIStudioSettings.h"
@@ -34,8 +35,10 @@
 #include "LandscapeSplinesComponent.h"
 #include "LandscapeSubsystem.h"
 #include "LandscapeUtils.h"
+#include "Materials/Material.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Guid.h"
+#include "Misc/ScopeExit.h"
 #include "ObjectTools.h"
 #include "PCGComponent.h"
 #include "PCGEdge.h"
@@ -798,11 +801,28 @@ bool FHyperAIStudioPCGScatterEndToEndTest::RunTest(const FString& Parameters)
 		Settings->bRequireApprovalForAgentEdits = false;
 		TestTrue(TEXT("the volume is cleared"), Run({Clear}).bOk);
 		Settings->bRequireApprovalForAgentEdits = bApproval;
+		// PCG cleans up over the next frames, and a container it is cleaning ensures when read; until it is done the
+		// volume reads as busy, and another clear is refused rather than skipped by PCG and reported as done.
+		const APCGVolume* Cleaning = FindVolume(VolumeLabel);
+		if (Cleaning && Cleaning->PCGComponent && Cleaning->PCGComponent->IsCleaningUp())
+		{
+			const FString Volumes = FString::Join(C::Inspect(FHyperAIPCGScatterInspectRequest()).Volumes, TEXT(" | "));
+			TestTrue(TEXT("a volume PCG is cleaning reads as busy: ") + Volumes, Volumes.Contains(VolumeLabel + TEXT(": ")) && Volumes.Contains(TEXT("busy, count pending")));
+			const FHyperAIPCGScatterPlanReport Twice = Run({Clear}, /*bDryRun=*/true);
+			TestTrue(TEXT("and a second clear is refused: ") + Twice.Diagnostic, !Twice.bOk && Twice.Diagnostic.Contains(TEXT("cleaning up")));
+			AddInfo(TEXT("While PCG cleaned up: ") + Volumes);
+		}
+		else
+		{
+			AddInfo(TEXT("PCG finished the cleanup at once; the reads during one were not tried."));
+		}
 		State->Began = FPlatformTime::Seconds();
 		return true;
 	}));
 	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, State, VolumeLabel, Cleanup]()
 	{
+		// Read every frame of the cleanup, as an agent's inspect could be.
+		C::Inspect(FHyperAIPCGScatterInspectRequest());
 		const int32 Left = Instances(FindVolume(VolumeLabel)).Num();
 		if (Left > 0 && FPlatformTime::Seconds() - State->Began < 30.0) return false;
 		TestEqual(TEXT("and no instance is left"), Left, 0);
@@ -1780,6 +1800,136 @@ bool FHyperAIStudioPCGEcosystemRestartedTest::RunTest(const FString& Parameters)
 		Cleanup();
 		return true;
 	}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioPCGPathsTest,
+	"HyperAIStudio.NativeTools.PCG.PathsTakenOrGone",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioPCGPathsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::PCGScatterTests;
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		AddInfo(TEXT("Skipped: no editor world."));
+		return true;
+	}
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	const FString Folder = TEXT("/Game/__HyperAIStudioTests/PCGPaths_") + Suffix;
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
+	TArray<UObject*> Squatters;
+	ON_SCOPE_EXIT
+	{
+		Settings->bRequireApprovalForAgentEdits = bApproval;
+		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		TArray<FAssetData> Assets;
+		Registry.GetAssetsByPath(FName(*Folder), Assets, /*bRecursive=*/true);
+		TArray<UObject*> Objects = Squatters;
+		for (const FAssetData& Asset : Assets)
+		{
+			if (UObject* Object = Asset.GetAsset()) Objects.AddUnique(Object);
+		}
+		Objects.RemoveAll([](const UObject* Object) { return !IsValid(Object); });
+		if (!Objects.IsEmpty()) ObjectTools::ForceDeleteObjects(Objects, /*ShowConfirmation=*/false);
+	};
+	FHyperAIPCGScatterMesh Rock;
+	Rock.Mesh = Eco::RockMesh;
+	auto Scatter = [&Rock](const FString& Graph)
+	{
+		FHyperAIPCGScatterOp Out = Op(TEXT("graph.create"));
+		Out.Graph = Graph;
+		Out.Meshes = {Rock};
+		return Out;
+	};
+	FHyperAIPCGBiome Field;
+	Field.Name = TEXT("Field");
+	Field.Species = {LatticeSpecies(TEXT("Lattice"), Eco::RockMesh)};
+	auto Ecosystem = [&Field](const FString& Graph)
+	{
+		FHyperAIPCGScatterOp Out = Op(TEXT("ecosystem.create"));
+		Out.Graph = Graph;
+		Out.Biomes = {Field};
+		return Out;
+	};
+	auto Refused = [](const FHyperAIPCGScatterPlanReport& Report, const TCHAR* Words)
+	{
+		return !Report.bOk && Report.Status == TEXT("invalid_request") && Report.Diagnostic.Contains(Words);
+	};
+	// What the activity log recorded last for an operation: the snapshot lists the newest first.
+	auto LastSaid = [](const FString& OperationId)
+	{
+		for (const FHyperAIStudioActivityEntry& Entry : FHyperAIStudioAgentActivityLog::GetSnapshot())
+		{
+			if (Entry.OperationId == OperationId && !Entry.Detail.IsEmpty()) return Entry.Detail;
+		}
+		return FString();
+	};
+
+	// Names and paths past what an FName holds, or that a load would make a package of, are refused before any lookup:
+	// either would stop the editor.
+	const FString Blob = FString::ChrN(1100, TEXT('a'));
+	TestTrue(TEXT("a graph path past an FName's length is refused"), Refused(Run({Scatter(Folder + TEXT("/") + Blob)}, /*bDryRun=*/true), TEXT("characters long")));
+	FHyperAIPCGScatterOp Slashed = Op(TEXT("graph.set"));
+	Slashed.Graph = TEXT("/Game//PCG_Nope");
+	TestTrue(TEXT("and one with a double slash"), Refused(Run({Slashed}, /*bDryRun=*/true), TEXT("double slash")));
+	FHyperAIPCGScatterOp LongMesh = Scatter(Folder + TEXT("/PCG_LongMesh"));
+	LongMesh.Meshes[0].Mesh = TEXT("/Game/") + Blob;
+	TestTrue(TEXT("and a mesh path past an FName's length"), Refused(Run({LongMesh}, /*bDryRun=*/true), TEXT("characters long")));
+	FHyperAIPCGScatterOp LongTag = Ecosystem(Folder + TEXT("/PCG_LongTag"));
+	LongTag.AvoidTags = {Blob};
+	TestTrue(TEXT("and an avoided tag past an FName's length"), Refused(Run({LongTag}, /*bDryRun=*/true), TEXT("characters long")));
+	FHyperAIPCGScatterOp LongBiome = Ecosystem(Folder + TEXT("/PCG_LongBiome"));
+	LongBiome.Biomes[0].Name = FString::ChrN(300, TEXT('b'));
+	TestTrue(TEXT("and a biome name its node titles cannot hold"), Refused(Run({LongBiome}, /*bDryRun=*/true), TEXT("at most 128")));
+	FHyperAIPCGScatterOp LongVolume = Op(TEXT("volume.clear"));
+	LongVolume.Volume = Blob;
+	TestTrue(TEXT("and a volume label past an FName's length"), Refused(Run({LongVolume}, /*bDryRun=*/true), TEXT("characters long")));
+
+	// An asset made, duplicated or renamed to the path and not saved lives only in memory, where the disk check never
+	// looked: a graph made over it would replace it or, being of another class, stop the editor.
+	const FString Taken = Folder + TEXT("/PCG_Taken");
+	Squatters.Add(NewObject<UMaterial>(CreatePackage(*Taken), TEXT("PCG_Taken"), RF_Public | RF_Standalone));
+	TestTrue(TEXT("graph.create over an unsaved asset of another class is refused"), Refused(Run({Scatter(Taken)}, /*bDryRun=*/true), TEXT("is taken")));
+	TestTrue(TEXT("and so is ecosystem.create"), Refused(Run({Ecosystem(Taken)}, /*bDryRun=*/true), TEXT("is taken")));
+	TestTrue(TEXT("whatever the case of its name"), Refused(Run({Scatter(Folder + TEXT("/pcg_TAKEN"))}, /*bDryRun=*/true), TEXT("is taken")));
+
+	// A held plan is checked again when it is approved: here an asset took the path while it waited.
+	const FString Late = Folder + TEXT("/PCG_Late");
+	Settings->bRequireApprovalForAgentEdits = true;
+	const FHyperAIPCGScatterPlanReport Held = Run({Scatter(Late)});
+	TestEqual(TEXT("the new graph waits for approval"), Held.Status, FString(TEXT("awaiting_user_approval")));
+	UMaterial* LateSquatter = NewObject<UMaterial>(CreatePackage(*Late), TEXT("PCG_Late"), RF_Public | RF_Standalone);
+	Squatters.Add(LateSquatter);
+	FString Error;
+	TestTrue(TEXT("the approval runs: ") + Error, FHyperAIStudioApprovalGate::Approve(Held.OperationId, Error));
+	const FString LateSaid = LastSaid(Held.OperationId);
+	TestTrue(TEXT("and refuses the path taken meanwhile instead of making a graph over it: ") + LateSaid, LateSaid.Contains(TEXT("is taken")));
+	TestTrue(TEXT("the asset there is left alone"), FindObject<UMaterial>(nullptr, *(Late + TEXT(".PCG_Late"))) == LateSquatter);
+
+	// And a graph deleted while its edit waited.
+	const FString Gone = Folder + TEXT("/PCG_Gone");
+	Settings->bRequireApprovalForAgentEdits = false;
+	const FHyperAIPCGScatterPlanReport Built = Run({Scatter(Gone)});
+	TestTrue(TEXT("a graph to edit is made: ") + Built.Diagnostic, Built.bOk);
+	Settings->bRequireApprovalForAgentEdits = true;
+	FHyperAIPCGScatterOp Edit = Op(TEXT("graph.set"));
+	Edit.Graph = Gone;
+	Edit.Density = 0.5f;
+	const FHyperAIPCGScatterPlanReport Waiting = Run({Edit});
+	TestEqual(TEXT("its edit waits for approval"), Waiting.Status, FString(TEXT("awaiting_user_approval")));
+	if (UPCGGraph* Graph = FindObject<UPCGGraph>(nullptr, *(Gone + TEXT(".PCG_Gone"))))
+	{
+		ObjectTools::ForceDeleteObjects({Graph}, /*ShowConfirmation=*/false);
+		CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+	}
+	TestNull(TEXT("the graph is deleted"), FindObject<UPCGGraph>(nullptr, *(Gone + TEXT(".PCG_Gone"))));
+	TestTrue(TEXT("the approval runs: ") + Error, FHyperAIStudioApprovalGate::Approve(Waiting.OperationId, Error));
+	const FString GoneSaid = LastSaid(Waiting.OperationId);
+	TestTrue(TEXT("and is refused, the graph being gone, instead of editing nothing: ") + GoneSaid, GoneSaid.Contains(TEXT("is not a PCG graph")));
 	return true;
 }
 

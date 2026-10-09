@@ -12,6 +12,8 @@
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/TimelineTemplate.h"
 #include "GameFramework/Actor.h"
+#include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioBlueprintStructureToolset.h"
 #include "HyperAIStudioSettings.h"
 #include "K2Node_CallFunction.h"
@@ -24,6 +26,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Materials/Material.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Guid.h"
 #include "Misc/ScopeExit.h"
@@ -520,6 +523,59 @@ bool FHyperAIStudioBlueprintStructureTypesTest::RunTest(const FString& Parameter
 	const FHyperAIBlueprintStructureInspectReport Values = Inspect(StatePath);
 	TestTrue(TEXT("Idle, Pursue, Dead: ") + FString::Join(Values.EnumValues, TEXT(", ")), Values.EnumValues.Num() == 3
 		&& Values.EnumValues[0].StartsWith(TEXT("0 Idle")) && Values.EnumValues[1].StartsWith(TEXT("1 Pursue")) && Values.EnumValues[2].StartsWith(TEXT("2 Dead")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioBlueprintStructureApprovalTest,
+	"HyperAIStudio.BlueprintStructure.CheckedAgainOnApproval",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioBlueprintStructureApprovalTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::BlueprintStructureTests;
+	// A held plan runs only once approved, and the editor can move on meanwhile: here an asset of another class takes the
+	// new interface's path. The plan is checked again before anything changes, and refused.
+	const FString DoorPath = NewPath(TEXT("BP_LateDoor"));
+	const FString UsePath = NewPath(TEXT("BPI_Late"));
+	const FString ObjectPath = UsePath + TEXT(".") + FPackageName::GetShortName(UsePath);
+	UBlueprint* Door = NewActorBlueprint(DoorPath);
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
+	UObject* Squatter = nullptr;
+	ON_SCOPE_EXIT
+	{
+		Settings->bRequireApprovalForAgentEdits = bApproval;
+		Clean({Squatter, FindObject<UBlueprint>(nullptr, *ObjectPath), Door});
+	};
+	Settings->bRequireApprovalForAgentEdits = true;
+	FHyperAIBlueprintStructureOp Create = Op(TEXT("interface.create"));
+	Create.Interface = UsePath;
+	FHyperAIBlueprintStructurePlanRequest Plan;
+	Plan.BlueprintPath = DoorPath;
+	Plan.Operations = {Create};
+	Plan.bDryRun = false;
+	const FHyperAIBlueprintStructurePlanReport Held = FHyperAIStudioBlueprintStructureContracts::ApplyPlan(Plan);
+	if (!TestEqual(TEXT("the new interface waits for approval: ") + Held.Diagnostic, Held.Status, FString(TEXT("awaiting_user_approval")))) return false;
+	Squatter = NewObject<UMaterial>(CreatePackage(*UsePath), FName(*FPackageName::GetShortName(UsePath)), RF_Public | RF_Standalone);
+	Plan.bDryRun = true;
+	const FHyperAIBlueprintStructurePlanReport Checked = FHyperAIStudioBlueprintStructureContracts::ApplyPlan(Plan);
+	TestTrue(TEXT("a plan checked now refuses the path, unsaved as the asset there is: ") + Checked.Diagnostic,
+		!Checked.bOk && Checked.Diagnostic.Contains(TEXT("exists already")));
+	FString Error;
+	TestTrue(TEXT("the approval runs: ") + Error, FHyperAIStudioApprovalGate::Approve(Held.OperationId, Error));
+	FString Said;
+	for (const FHyperAIStudioActivityEntry& Entry : FHyperAIStudioAgentActivityLog::GetSnapshot())
+	{
+		if (Entry.OperationId == Held.OperationId && !Entry.Detail.IsEmpty())
+		{
+			Said = Entry.Detail;
+			break;
+		}
+	}
+	TestTrue(TEXT("and is checked again, refused for the path taken meanwhile: ") + Said,
+		Said.Contains(TEXT("changed while the plan waited")) && Said.Contains(TEXT("exists already")));
+	TestTrue(TEXT("the asset there is left alone"), FindObject<UMaterial>(nullptr, *ObjectPath) == Squatter);
 	return true;
 }
 

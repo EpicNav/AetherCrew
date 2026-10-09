@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioMaterialsToolset.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioAgentActivity.h"
 
@@ -1893,7 +1894,8 @@ bool FHyperAIStudioMaterialsContracts::IsCanonicalProjectObjectPath(const FStrin
 		return false;
 	for (int32 Index = 0; Index < Path.Len(); ++Index) if (Path[Index] == TEXT('\0')) return false;
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason)) return false;
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason)) return false;
 	const FString PackageName = FPackageName::ObjectPathToPackageName(Path);
 	const FString ObjectName = FPackageName::ObjectPathToObjectName(Path);
 	return !PackageName.IsEmpty() && !ObjectName.IsEmpty()
@@ -2232,7 +2234,7 @@ bool FHyperAIStudioMaterialsContracts::ValidateOperationShape(
 			|| !Operation.Edges.IsEmpty() || !Operation.Outputs.IsEmpty() || !Operation.RepairKinds.IsEmpty())
 			return Fail(TEXT("instance_shape_invalid"), TEXT("Instance operations take only parameters (and parent_path to create); expected_revision stays empty because parameters are set, not merged."));
 		if (OutOperation.Kind == EKind::CreateMaterialInstance && !IsCanonicalProjectObjectPath(Operation.ParentPath)
-			&& !(Operation.ParentPath.StartsWith(TEXT("/")) && FPackageName::IsValidObjectPath(Operation.ParentPath)))
+			&& !(FHyperAIStudioNames::IsObjectPath(Operation.ParentPath, nullptr) && FPackageName::IsValidObjectPath(Operation.ParentPath)))
 			return Fail(TEXT("invalid_parent_path"), TEXT("create_material_instance needs parent_path, an exact material or instance object path."));
 		if (OutOperation.Kind == EKind::SetInstanceParameters && Operation.Parameters.IsEmpty())
 			return Fail(TEXT("instance_shape_invalid"), TEXT("set_instance_parameters needs at least one parameter."));
@@ -3885,6 +3887,13 @@ FHyperAIMaterialApplyPlanReport FHyperAIStudioMaterialsContracts::BuildPlan(
 	if (!IsInGameThread())
 	{
 		return Reject(TEXT("game_thread_required"), TEXT("Material plans capture loaded state on the game thread."));
+	}
+	// Node, parameter, input and output names become FNames, which stop the editor past an FName's length. Values (HLSL
+	// among them) and justifications are text.
+	FString NameReason;
+	if (!FHyperAIStudioNames::CheckRequest(Request, &NameReason, {TEXT("Value"), TEXT("Justification")}))
+	{
+		return Reject(TEXT("invalid_request"), NameReason);
 	}
 	if (Request.OperationId.Len() > 256
 		|| Request.ExpectedPlanHash.Len() > 71

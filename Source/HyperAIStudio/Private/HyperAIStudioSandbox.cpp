@@ -12,6 +12,7 @@
 #include "HAL/FileManager.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioExecutionQueue.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSettings.h"
 #include "IFileSandboxCoreModule.h"
 #include "ISandboxInstance.h"
@@ -288,7 +289,9 @@ namespace HyperAIStudio::Sandbox
 					continue;
 				}
 				const FString PackageName = FPackageName::ObjectPathToPackageName(Entry.Target);
-				UPackage* Package = FPackageName::IsValidLongPackageName(PackageName) ? FindPackage(nullptr, *PackageName) : nullptr;
+				// A target is a tool's text, an agent's at times: FindPackage makes an FName of it.
+				UPackage* Package = FHyperAIStudioNames::IsObjectPath(PackageName, nullptr) && FPackageName::IsValidLongPackageName(PackageName)
+					? FindPackage(nullptr, *PackageName) : nullptr;
 				if (!Package)
 				{
 					continue;

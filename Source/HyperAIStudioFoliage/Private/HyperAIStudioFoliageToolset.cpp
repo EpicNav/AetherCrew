@@ -18,6 +18,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioSourceControl.h"
 #include "InstancedFoliage.h"
 #include "InstancedFoliageActor.h"
@@ -88,7 +89,9 @@ namespace HyperAIStudio::FoliageTools::Private
 	T* Load(const FString& Path)
 	{
 		const FString Trimmed = Path.TrimStartAndEnd();
-		if (Trimmed.IsEmpty()) return nullptr;
+		// The load makes an FName of each part, and the package it looked for: past 1023 characters, or with a double
+		// slash, either stops the editor.
+		if (!FHyperAIStudioNames::IsObjectPath(Trimmed, TEXT("Path"))) return nullptr;
 		const FString ObjectPath = Trimmed.Contains(TEXT(".")) ? Trimmed : Trimmed + TEXT(".") + FPackageName::GetShortName(Trimmed);
 		return LoadObject<T>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
@@ -191,6 +194,8 @@ namespace HyperAIStudio::FoliageTools::Private
 				return false;
 			}
 			const FString Before = ExportValue(*Property, &Type, &Type);
+			// The import makes names of the text, and loads an asset it names (making the package when nothing is there).
+			if (!FHyperAIStudioNames::CanImportText(*Property, Setting.Value, *Setting.Name, &OutError)) return false;
 			if (bNotify) Type.PreEditChange(Property);
 			const TCHAR* Rest = Property->ImportText_InContainer(*Setting.Value, &Type, &Type, PPF_None);
 			if (bNotify)
@@ -793,12 +798,13 @@ namespace HyperAIStudio::FoliageTools::Private
 			{
 				if (Op.Types.Num() != 1) return Fail(TEXT("Name the one new foliage type in Types, as /Game/Folder/FT_Name."));
 				const FString Path = PackageOf(Op.Types[0]);
-				if (!Path.StartsWith(TEXT("/Game/")) || !FPackageName::IsValidLongPackageName(Path))
+				if (!Path.StartsWith(TEXT("/Game/")) || !FHyperAIStudioNames::IsPackagePath(Path, nullptr))
 				{
 					return Fail(TEXT("A new foliage type goes under /Game, as /Game/Folder/FT_Name."));
 				}
 				FString Ignored;
-				if (Planned.Contains(Path.ToLower()) || FindType(Path, Ignored) || FPackageName::DoesPackageExist(Path))
+				// Free in memory too: an unsaved asset there of another class would stop the editor when the type is made.
+				if (Planned.Contains(Path.ToLower()) || FindType(Path, Ignored) || !FHyperAIStudioNames::IsFreePackage(Path))
 				{
 					return Fail(FString::Printf(TEXT("%s exists already; foliage_type.set changes it."), *Path));
 				}
@@ -1032,6 +1038,8 @@ FHyperAIFoliageInspectReport FHyperAIStudioFoliageContracts::Inspect(const FHype
 {
 	using namespace HyperAIStudio::FoliageTools::Private;
 	FHyperAIFoliageInspectReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	UWorld* World = EditorWorld();
 	if (!World)
 	{
@@ -1127,6 +1135,8 @@ FHyperAIFoliagePlanReport FHyperAIStudioFoliageContracts::ApplyPlan(const FHyper
 	FHyperAIFoliagePlanReport Report;
 	Report.OperationId = Request.OperationId.IsEmpty()
 		? FString::Printf(TEXT("foliage-%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower()) : Request.OperationId;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report, {TEXT("Value")})) return Report;
 	UWorld* World = EditorWorld();
 	FString Error;
 	if (!World)
@@ -1175,6 +1185,19 @@ FHyperAIFoliagePlanReport FHyperAIStudioFoliageContracts::ApplyPlan(const FHyper
 		const FString OperationId = Report.OperationId;
 		if (!FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Request, OperationId]()
 			{
+				// The editor may have moved on while the plan waited (an asset deleted, a path taken, the level closed),
+				// so it is checked again before anything changes.
+				FString Problem;
+				UWorld* Now = EditorWorld();
+				if (!Now || !Check(*Now, Request, Problem))
+				{
+					FHyperAIFoliagePlanReport Refused;
+					Refused.OperationId = OperationId;
+					Refused.Status = TEXT("invalid_request");
+					Refused.Diagnostic = Now ? TEXT("The editor changed while the plan waited for approval: ") + Problem : FString(TEXT("No level is open in the editor; nothing was changed."));
+					Record(OperationId, Refused);
+					return;
+				}
 				Record(OperationId, Execute(Request, OperationId));
 			}, Error))
 		{

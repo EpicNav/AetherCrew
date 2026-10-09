@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioAnimationToolset.h"
+#include "HyperAIStudioNames.h"
 #include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioAnimationBlendSpace.h"
 #include "HyperAIStudioAnimationTimeline.h"
@@ -1298,7 +1299,7 @@ bool FHyperAIStudioAnimationContracts::IsCanonicalProjectObjectPath(const FStrin
 	}
 	if (Path.Contains(TEXT("\\")) || Path.Contains(TEXT("..")) || Path.Contains(TEXT(":"))
 		|| !Path.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
-		|| !FPackageName::IsValidObjectPath(Path)) return false;
+		|| !FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path)) return false;
 	FString PackageName;
 	FString ObjectName;
 	return Path.Split(TEXT("."), &PackageName, &ObjectName, ESearchCase::CaseSensitive,
@@ -1432,6 +1433,12 @@ bool FHyperAIStudioAnimationContracts::ValidateOperationShape(
 	{
 		if (!IsNameToken(Property.Source) || Property.Target.Len() > MaxPathCharacters)
 			return Fail(TEXT("invalid_notify_property"), TEXT("Notify properties are a property name and a bounded Unreal text value."));
+	}
+	// Found, then loaded when nothing is in memory: an FName past its length, or a package with "//", stops the editor.
+	if (!Operation.Notify.NotifyClass.IsEmpty() && !FHyperAIStudioNames::IsObjectPath(Operation.Notify.NotifyClass, TEXT("notify.notify_class"), &OutError))
+	{
+		OutErrorCode = TEXT("invalid_notify_class");
+		return false;
 	}
 	for (const FHyperAIAnimationCurveKey& Key : Operation.Keys)
 	{

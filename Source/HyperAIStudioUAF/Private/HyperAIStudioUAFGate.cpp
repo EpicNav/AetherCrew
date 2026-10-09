@@ -12,6 +12,7 @@
 #include "Graph/RigUnit_AnimNextGraphRoot.h"
 #include "Graph/RigUnit_AnimNextTraitStack.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "Misc/PackageName.h"
 #include "Param/ParamType.h"
 #include "RigVMModel/RigVMClient.h"
@@ -113,7 +114,7 @@ namespace HyperAIStudio::UAF::Gate
 
 		const FTrait* FindTrait(const FString& Name)
 		{
-			return Name.IsEmpty() ? nullptr : FTraitRegistry::Get().Find(FName(*Name));
+			return Name.IsEmpty() || !FHyperAIStudioNames::IsName(Name, nullptr) ? nullptr : FTraitRegistry::Get().Find(FName(*Name));
 		}
 
 		FString TraitNameOfPin(const URigVMPin& Pin)

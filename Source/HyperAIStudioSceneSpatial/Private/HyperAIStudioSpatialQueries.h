@@ -38,6 +38,9 @@ namespace HyperAIStudio::SceneSpatial::Spatial
 	 */
 	AActor* FindActor(UWorld& World, const FString& LabelOrPath, FString& OutError);
 
+	/** The query's actor names and filters fit an FName, as every lookup by them makes one; OutError names the one that does not. */
+	bool CheckNames(const FHyperAISpatialQuery& Query, FString& OutError);
+
 	/** Sprites, arrows, debug drawing and other editor helpers: not what an actor looks like, and never drawn in a game. */
 	bool IsHelperPrimitive(const UPrimitiveComponent& Component);
 	/**

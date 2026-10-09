@@ -14,6 +14,7 @@
 #include "GameplayTagsManager.h"
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
 #include "UObject/SoftObjectPath.h"
@@ -961,7 +962,7 @@ bool FHyperAIStudioGASContracts::IsCanonicalProjectObjectPath(const FString& Pat
 		|| HyperAIStudio::GAS::Private::HasEmbeddedNull(Path) || Path.Contains(TEXT("\\"))
 		|| Path.Contains(TEXT("..")) || Path.Contains(TEXT(":"))
 		|| !Path.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
-		|| !FPackageName::IsValidObjectPath(Path)) return false;
+		|| !FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path)) return false;
 	FString PackageName;
 	FString ObjectName;
 	return Path.Split(TEXT("."), &PackageName, &ObjectName, ESearchCase::CaseSensitive,
@@ -1285,6 +1286,7 @@ FHyperAIGASInspectReport UHyperAIStudioGASToolset::hyper_gas_inspect(
 		Report.Diagnostic = TEXT("Loaded Unreal GAS objects may only be inspected on the serialized game thread.");
 		return Report;
 	}
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	if (Request.AssetPaths.Num() > FHyperAIStudioGASContracts::MaxAssetPaths
 		|| !IsSupportedVariantFilter(Request.Variant)
 		|| Request.PageSize < 1 || Request.PageSize > FHyperAIStudioGASContracts::MaxPageSize
@@ -1402,6 +1404,7 @@ FHyperAIGASValidateReport UHyperAIStudioGASToolset::hyper_gas_validate(
 		Report.Diagnostic = TEXT("Fresh Unreal GAS validation requires the serialized game thread.");
 		return Report;
 	}
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	if (!Request.bRequireFreshCapture)
 	{
 		Report.Status = TEXT("fresh_capture_required");
@@ -1989,6 +1992,8 @@ FHyperAIGASApplyPlanReport FHyperAIStudioGASContracts::BuildPlan(
 		Report.Diagnostic = TEXT("GAS plan capture and simulation require the serialized game thread.");
 		return Finish();
 	}
+	// Tags, attributes and class paths become FNames and lookups, which stop the editor past an FName's length.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Finish();
 	if (Request.Operations.IsEmpty() || Request.Operations.Num() > MaxOperations
 		|| Request.DeadlineMs < 100 || Request.DeadlineMs > 2000
 		|| Request.MaxGameThreadMs < 50 || Request.MaxGameThreadMs > 250
