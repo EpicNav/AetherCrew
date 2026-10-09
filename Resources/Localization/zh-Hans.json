@@ -18747,6 +18747,12 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "EditorStartingNextAction",
+   "source": "Waiting for the editor to finish starting. Unreal MCP is checked as soon as it can answer, and the agent starts then.",
+   "text": "正在等待编辑器完成启动。Unreal MCP 一旦能够响应就会立即检查，智能体随后启动。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "HandTasksToAgents",
    "source": "Hand Tasks to Project Agents",
    "text": "将任务交给项目智能体"
@@ -18882,6 +18888,12 @@
    "key": "McpCopyEndpointTooltip",
    "source": "Copy the MCP endpoint URL to the clipboard.",
    "text": "将 MCP 端点 URL 复制到剪贴板。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "McpEditorStarting",
+   "source": "MCP: waiting for the editor to start",
+   "text": "MCP：等待编辑器启动"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
@@ -19482,6 +19494,12 @@
    "key": "TerminalAppearanceTooltip",
    "source": "Font, size, colour scheme and scrollback for the embedded terminal. Changes apply the next time the agent starts.",
    "text": "内嵌终端的字体、字号、配色方案和回滚行数。更改会在智能体下次启动时生效。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "ToolsUnreachableNextAction",
+   "source": "Unreal MCP tools are unreachable: {0} The chat checks again every 15 seconds; Reconnect in the MCP menu restarts the server.",
+   "text": "无法访问 Unreal MCP 工具：{0} 聊天每 15 秒重新检查一次；MCP 菜单中的“重新连接”会重启服务器。"
   },
   {
    "namespace": "SHyperAIStudioSettingsPage",

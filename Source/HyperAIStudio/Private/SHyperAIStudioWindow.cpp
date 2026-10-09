@@ -447,6 +447,10 @@ namespace HyperAIStudio::Private
 				? LOCTEXT("ProbeDetailReady", "tools/list is reachable.")
 				: FText::FromString(Status.ProbeMessage);
 		}
+		if (Status.bEditorStarting)
+		{
+			return FText::FromString(Status.ProbeMessage);
+		}
 		if (Status.bProbeInProgress)
 		{
 			return FText::FromString(FString::Printf(TEXT("Checking %s with initialize and tools/list."), Status.Endpoint.IsEmpty() ? TEXT("the configured endpoint") : *Status.Endpoint));

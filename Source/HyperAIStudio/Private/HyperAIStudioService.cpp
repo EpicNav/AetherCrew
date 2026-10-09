@@ -5,6 +5,7 @@
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioCapabilityPreset.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
+#include "HyperAIStudioEditorStartupGate.h"
 #include "HyperAIStudioLegacyMigration.h"
 #include "HyperAIStudioManagedConfigMigration.h"
 #include "HyperAIStudioMcpSerialQueue.h"
@@ -1768,6 +1769,18 @@ namespace HyperAIStudio::Private
 			&& Request->GetStatus() == EHttpRequestStatus::NotStarted;
 	}
 
+	/**
+	 * A probe request that got no answer: the probe only reads (see FHyperAIStudioMcpSerialQueue), so the endpoint is
+	 * reported unreachable and stays open, and the next probe asks again.
+	 */
+	FString DescribeUnansweredMcpRequest(const TCHAR* Method, const FHttpRequestPtr& Request)
+	{
+		const TCHAR* Reason = Request.IsValid() ? LexToString(Request->GetFailureReason()) : TEXT("no request");
+		return IsMcpRequestProvablyNotSent(Request)
+			? FString::Printf(TEXT("Could not send %s to Unreal MCP (%s); the next probe asks again."), Method, Reason)
+			: FString::Printf(TEXT("Unreal MCP did not answer %s (%s); the next probe asks again."), Method, Reason);
+	}
+
 	class FShallowMcpProbeCompletion : public TSharedFromThis<FShallowMcpProbeCompletion>
 	{
 	public:
@@ -1791,8 +1804,7 @@ namespace HyperAIStudio::Private
 			const bool bInReachable,
 			FString InMessage,
 			const int32 InToolCount,
-			const bool bCleanupSafe,
-			const bool bAmbiguousTransport = false)
+			const bool bCleanupSafe)
 		{
 			if (CompletionCount.Increment() != 1)
 			{
@@ -1801,7 +1813,6 @@ namespace HyperAIStudio::Private
 			bReachable = bInReachable;
 			Message = MoveTemp(InMessage);
 			ToolCount = InToolCount;
-			bQuarantineRelease = bAmbiguousTransport;
 
 			if (bCleanupSafe && !SessionId.IsEmpty())
 			{
@@ -1836,9 +1847,8 @@ namespace HyperAIStudio::Private
 			}
 			if (QueueComplete)
 			{
-				QueueComplete(bQuarantineRelease
-					? FHyperAIStudioMcpSerialQueue::ECompletionDisposition::AmbiguousTransport
-					: FHyperAIStudioMcpSerialQueue::ECompletionDisposition::SafeToRelease);
+				// Read-only, so released whatever the transport did; an unknown outcome must not lock the endpoint.
+				QueueComplete(FHyperAIStudioMcpSerialQueue::ECompletionDisposition::SafeToRelease);
 			}
 			if (OnComplete)
 			{
@@ -1854,7 +1864,6 @@ namespace HyperAIStudio::Private
 		FThreadSafeCounter CompletionCount;
 		FThreadSafeCounter DeliveryCount;
 		bool bReachable = false;
-		bool bQuarantineRelease = false;
 		FString Message;
 		int32 ToolCount = 0;
 	};
@@ -3277,10 +3286,16 @@ void FHyperAIStudioService::RefreshStatusAsync(TFunction<void(const FHyperAIStud
 	}
 
 	Status.bProbeInProgress = true;
+	// Until the editor has finished starting its own server cannot answer, so the probe waits instead of timing out.
+	Status.bEditorStarting = !FHyperAIStudioEditorStartupGate::IsEditorAnswering();
+	if (Status.bEditorStarting)
+	{
+		Status.ProbeMessage = TEXT("The editor is still starting; Unreal MCP is checked as soon as it can answer.");
+	}
 	OnComplete(Status);
 
 	const FString Endpoint = Status.Endpoint;
-	ProbeToolsListAsync(Endpoint, [this, Endpoint, OnComplete](bool bReachable, const FString& Message, int32 ToolCount)
+	ProbeOwnServerToolsListAsync(Endpoint, [this, Endpoint, OnComplete](bool bReachable, const FString& Message, int32 ToolCount)
 	{
 		FHyperAIStudioStatus UpdatedStatus = GetStatusSync();
 		UpdatedStatus.bHasProbeRun = true;
@@ -6978,15 +6993,8 @@ void FHyperAIStudioService::ProbeToolsListAsync(const FString& Endpoint, TFuncti
 				{
 					if (!bInitConnected || !InitResponse.IsValid())
 					{
-						const bool bAmbiguous = !HyperAIStudio::Private::IsMcpRequestProvablyNotSent(CompletedRequest);
-						Completion->Complete(
-							false,
-							bAmbiguous
-								? TEXT("Unreal MCP initialize outcome is unknown; calls are locked until a confirmed server restart.")
-								: TEXT("Could not connect to Unreal MCP initialize endpoint; the request was not sent."),
-							0,
-							false,
-							bAmbiguous);
+						Completion->Complete(false,
+							HyperAIStudio::Private::DescribeUnansweredMcpRequest(TEXT("initialize"), CompletedRequest), 0, false);
 					return;
 				}
 
@@ -7042,15 +7050,8 @@ void FHyperAIStudioService::ProbeToolsListAsync(const FString& Endpoint, TFuncti
 						{
 							if (!bInitializedConnected || !InitializedResponse.IsValid())
 							{
-								const bool bAmbiguous = !HyperAIStudio::Private::IsMcpRequestProvablyNotSent(CompletedRequest);
-								Completion->Complete(
-									false,
-									bAmbiguous
-										? TEXT("notifications/initialized outcome is unknown; calls are locked until a confirmed server restart.")
-										: TEXT("Could not connect for notifications/initialized; the request was not sent."),
-									0,
-									false,
-									bAmbiguous);
+								Completion->Complete(false, HyperAIStudio::Private::DescribeUnansweredMcpRequest(
+									TEXT("notifications/initialized"), CompletedRequest), 0, false);
 							return;
 						}
 						const int32 InitializedCode = InitializedResponse->GetResponseCode();
@@ -7092,15 +7093,8 @@ void FHyperAIStudioService::ProbeToolsListAsync(const FString& Endpoint, TFuncti
 								{
 									if (!bListConnected || !ListResponse.IsValid())
 									{
-										const bool bAmbiguous = !HyperAIStudio::Private::IsMcpRequestProvablyNotSent(CompletedRequest);
-										Completion->Complete(
-											false,
-											bAmbiguous
-												? TEXT("tools/list outcome is unknown; calls are locked until a confirmed server restart.")
-												: TEXT("Could not connect for tools/list; the request was not sent."),
-											0,
-											false,
-											bAmbiguous);
+										Completion->Complete(false, HyperAIStudio::Private::DescribeUnansweredMcpRequest(
+											TEXT("tools/list"), CompletedRequest), 0, false);
 									return;
 								}
 								const int32 ListCode = ListResponse->GetResponseCode();
@@ -7169,4 +7163,12 @@ void FHyperAIStudioService::ProbeToolsListAsync(const FString& Endpoint, TFuncti
 				OnComplete(false, Reason, 0);
 			}
 		});
+}
+
+bool FHyperAIStudioService::ProbeOwnServerToolsListAsync(const FString& Endpoint, TFunction<void(bool bReachable, const FString& Message, int32 ToolCount)> OnComplete)
+{
+	return FHyperAIStudioEditorStartupGate::RunWhenEditorAnswers([Endpoint, OnComplete]()
+	{
+		ProbeToolsListAsync(Endpoint, OnComplete);
+	});
 }

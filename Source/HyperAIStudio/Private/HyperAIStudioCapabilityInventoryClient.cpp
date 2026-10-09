@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioCapabilityInventoryClient.h"
+#include "HyperAIStudioEditorStartupGate.h"
 #include "HyperAIStudioMcpSerialQueue.h"
 
 #include "Dom/JsonObject.h"
@@ -105,6 +106,29 @@ namespace HyperAIStudio::CapabilityInventoryClient::Private
 			&& Request->GetStatus() == EHttpRequestStatus::NotStarted;
 	}
 
+	/**
+	 * An inventory request that got no answer. Inventory sessions only read (see FHyperAIStudioMcpSerialQueue), so the
+	 * endpoint stays open and the next refresh asks again.
+	 */
+	FString DescribeUnanswered(const FString& What, const FHttpRequestPtr& Request)
+	{
+		const TCHAR* Reason = Request.IsValid() ? LexToString(Request->GetFailureReason()) : TEXT("no request");
+		return IsProvablyNotSent(Request)
+			? FString::Printf(TEXT("Capability inventory could not send %s (%s); the next refresh asks again."), *What, Reason)
+			: FString::Printf(TEXT("Capability inventory got no answer to %s (%s); the next refresh asks again."), *What, Reason);
+	}
+
+	/** This editor's own server cannot answer before the editor has finished starting; other endpoints start at once. */
+	void StartWhenServerCanAnswer(const FString& Endpoint, TFunction<void()> Start)
+	{
+		if (FHyperAIStudioEditorStartupGate::IsOwnServerEndpoint(Endpoint))
+		{
+			FHyperAIStudioEditorStartupGate::RunWhenEditorAnswers(MoveTemp(Start));
+			return;
+		}
+		Start();
+	}
+
 	FString SerializeObject(const TSharedRef<FJsonObject>& Object)
 	{
 		FString Json;
@@ -170,7 +194,7 @@ namespace HyperAIStudio::CapabilityInventoryClient::Private
 	class FInventorySession : public TSharedFromThis<FInventorySession>
 	{
 	public:
-		using FFinished = TFunction<void(FHyperAIStudioCapabilityInventoryResult&&, bool)>;
+		using FFinished = TFunction<void(FHyperAIStudioCapabilityInventoryResult&&)>;
 
 		FInventorySession(
 			FString InRequestEndpoint,
@@ -207,14 +231,18 @@ namespace HyperAIStudio::CapabilityInventoryClient::Private
 			Root->SetNumberField(TEXT("id"), 1);
 			Root->SetStringField(TEXT("method"), TEXT("initialize"));
 			Root->SetObjectField(TEXT("params"), Params);
-			Post(SerializeObject(Root), false, [Self = AsShared()](FHttpResponsePtr Response)
+			Post(TEXT("initialize"), SerializeObject(Root), false, [Self = AsShared()](FHttpResponsePtr Response)
 			{
 				Self->OnInitialize(Response);
 			});
 		}
 
 	private:
-		void Post(const FString& Payload, const bool bInitialized, TFunction<void(FHttpResponsePtr)> OnResponse)
+		void Post(
+			const FString& What,
+			const FString& Payload,
+			const bool bInitialized,
+			TFunction<void(FHttpResponsePtr)> OnResponse)
 		{
 			if (bFinished)
 			{
@@ -247,7 +275,7 @@ namespace HyperAIStudio::CapabilityInventoryClient::Private
 			Request->SetContentAsString(Payload);
 			Request->SetTimeout(RequestTimeoutSeconds);
 			Request->OnProcessRequestComplete().BindLambda(
-				[Self = AsShared(), OnResponse = MoveTemp(OnResponse)](FHttpRequestPtr CompletedRequest, FHttpResponsePtr Response, const bool bConnected) mutable
+				[Self = AsShared(), What, OnResponse = MoveTemp(OnResponse)](FHttpRequestPtr CompletedRequest, FHttpResponsePtr Response, const bool bConnected) mutable
 				{
 					if (Self->bFinished)
 					{
@@ -255,14 +283,7 @@ namespace HyperAIStudio::CapabilityInventoryClient::Private
 					}
 					if (!bConnected || !Response.IsValid())
 					{
-						const bool bAmbiguous = !IsProvablyNotSent(CompletedRequest);
-						Self->Finish(
-							false,
-							bAmbiguous
-								? TEXT("Capability inventory transport failed after the request may have been sent; Unreal MCP is locked until a confirmed server restart.")
-								: TEXT("Capability inventory could not connect; the request was not sent."),
-							false,
-							bAmbiguous);
+						Self->Finish(false, DescribeUnanswered(What, CompletedRequest), false);
 						return;
 					}
 					if (Self->SessionId.IsEmpty())
@@ -323,7 +344,8 @@ namespace HyperAIStudio::CapabilityInventoryClient::Private
 				ProtocolVersion = MoveTemp(Negotiated);
 			}
 
-			Post(TEXT("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}"), true,
+			Post(TEXT("notifications/initialized"),
+				TEXT("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}"), true,
 				[Self = AsShared()](FHttpResponsePtr InitializedResponse)
 				{
 					FString Body;
@@ -344,7 +366,7 @@ namespace HyperAIStudio::CapabilityInventoryClient::Private
 
 		void RequestToolsList()
 		{
-			Post(TEXT("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}"), true,
+			Post(TEXT("tools/list"), TEXT("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}"), true,
 				[Self = AsShared()](FHttpResponsePtr Response)
 				{
 					FString Body;
@@ -393,7 +415,7 @@ namespace HyperAIStudio::CapabilityInventoryClient::Private
 			Root->SetNumberField(TEXT("id"), RequestId);
 			Root->SetStringField(TEXT("method"), TEXT("tools/call"));
 			Root->SetObjectField(TEXT("params"), Params);
-			Post(SerializeObject(Root), true,
+			Post(Name, SerializeObject(Root), true,
 				[OnResponse = MoveTemp(OnResponse), RequestId](FHttpResponsePtr Response) mutable
 				{
 					OnResponse(Response, RequestId);
@@ -593,8 +615,7 @@ namespace HyperAIStudio::CapabilityInventoryClient::Private
 		void Finish(
 			const bool bSuccess,
 			const FString& Message,
-			const bool bCleanupSafe,
-			const bool bAmbiguousTransport = false)
+			const bool bCleanupSafe)
 		{
 			if (bFinished)
 			{
@@ -604,7 +625,6 @@ namespace HyperAIStudio::CapabilityInventoryClient::Private
 			Result.bSuccess = bSuccess;
 			Result.Message = Message.IsEmpty() ? TEXT("Capability inventory failed without detail.") : Message;
 			Result.CompletedUtc = FDateTime::UtcNow();
-			bQuarantineRelease = bAmbiguousTransport;
 			Result.RefreshGeneration = Generation;
 			Result.Snapshot.RefreshGeneration = Generation;
 			Result.Snapshot.CapturedAtUtc = Result.CompletedUtc;
@@ -641,7 +661,7 @@ namespace HyperAIStudio::CapabilityInventoryClient::Private
 				return;
 			}
 			bDelivered = true;
-			OnFinished(MoveTemp(Result), bQuarantineRelease);
+			OnFinished(MoveTemp(Result));
 		}
 
 		FString RequestEndpoint;
@@ -659,7 +679,6 @@ namespace HyperAIStudio::CapabilityInventoryClient::Private
 		int64 NextRequestId = 3;
 		bool bFinished = false;
 		bool bDelivered = false;
-		bool bQuarantineRelease = false;
 	};
 
 	void TrimEndpointStatesLocked()
@@ -1102,35 +1121,36 @@ void FHyperAIStudioCapabilityInventoryClient::RefreshAsync(
 	if (bStartSession)
 	{
 		const FString RequestEndpoint = Endpoint.TrimStartAndEnd();
-		FHyperAIStudioMcpSerialQueue::Enqueue(RequestEndpoint,
-			[RequestEndpoint, EndpointKey, Generation, CachedCoreSchema](FHyperAIStudioMcpSerialQueue::FComplete Complete)
-			{
-				TSharedRef<FInventorySession> Session = MakeShared<FInventorySession>(
-					RequestEndpoint,
-					EndpointKey,
+		StartWhenServerCanAnswer(RequestEndpoint, [RequestEndpoint, EndpointKey, Generation, CachedCoreSchema]()
+		{
+			FHyperAIStudioMcpSerialQueue::Enqueue(RequestEndpoint,
+				[RequestEndpoint, EndpointKey, Generation, CachedCoreSchema](FHyperAIStudioMcpSerialQueue::FComplete Complete)
+				{
+					TSharedRef<FInventorySession> Session = MakeShared<FInventorySession>(
+						RequestEndpoint,
+						EndpointKey,
 						Generation,
 						CachedCoreSchema,
 						TOptional<EHyperAIStudioDetailedInventoryScope>(),
-					[EndpointKey, Generation, Complete = MoveTemp(Complete)](
-						FHyperAIStudioCapabilityInventoryResult&& Result,
-						const bool bAmbiguousTransport) mutable
-					{
-						Complete(bAmbiguousTransport
-							? FHyperAIStudioMcpSerialQueue::ECompletionDisposition::AmbiguousTransport
-							: FHyperAIStudioMcpSerialQueue::ECompletionDisposition::SafeToRelease);
-						CompleteEndpoint(EndpointKey, Generation, MoveTemp(Result));
-					});
-				Session->Start();
-			},
-			[EndpointKey, Generation](const FString& Reason)
-			{
-				FHyperAIStudioCapabilityInventoryResult Rejected;
-				Rejected.Endpoint = EndpointKey;
-				Rejected.RefreshGeneration = Generation;
-				Rejected.Message = Reason;
-				Rejected.CompletedUtc = FDateTime::UtcNow();
-				CompleteEndpoint(EndpointKey, Generation, MoveTemp(Rejected));
-			});
+						[EndpointKey, Generation, Complete = MoveTemp(Complete)](
+							FHyperAIStudioCapabilityInventoryResult&& Result) mutable
+						{
+							// Inventory sessions only read, so the endpoint is released whatever the transport did.
+							Complete(FHyperAIStudioMcpSerialQueue::ECompletionDisposition::SafeToRelease);
+							CompleteEndpoint(EndpointKey, Generation, MoveTemp(Result));
+						});
+					Session->Start();
+				},
+				[EndpointKey, Generation](const FString& Reason)
+				{
+					FHyperAIStudioCapabilityInventoryResult Rejected;
+					Rejected.Endpoint = EndpointKey;
+					Rejected.RefreshGeneration = Generation;
+					Rejected.Message = Reason;
+					Rejected.CompletedUtc = FDateTime::UtcNow();
+					CompleteEndpoint(EndpointKey, Generation, MoveTemp(Rejected));
+				});
+		});
 	}
 }
 
@@ -1234,35 +1254,36 @@ void FHyperAIStudioCapabilityInventoryClient::RefreshDetailedAsync(
 	if (bStartSession)
 	{
 		const FString RequestEndpoint = Endpoint.TrimStartAndEnd();
-		FHyperAIStudioMcpSerialQueue::Enqueue(RequestEndpoint,
-			[RequestEndpoint, EndpointKey, Generation, Scope](FHyperAIStudioMcpSerialQueue::FComplete Complete)
-			{
-				TSharedRef<FInventorySession> Session = MakeShared<FInventorySession>(
-					RequestEndpoint,
-					EndpointKey,
-					Generation,
-					TOptional<FCachedSchema>(),
-					Scope,
-					[EndpointKey, Generation, Scope, Complete = MoveTemp(Complete)](
-						FHyperAIStudioCapabilityInventoryResult&& Result,
-						const bool bAmbiguousTransport) mutable
-					{
-						Complete(bAmbiguousTransport
-							? FHyperAIStudioMcpSerialQueue::ECompletionDisposition::AmbiguousTransport
-							: FHyperAIStudioMcpSerialQueue::ECompletionDisposition::SafeToRelease);
-						CompleteDetailedEndpoint(EndpointKey, Scope, Generation, MoveTemp(Result));
-					});
-				Session->Start();
-			},
-			[EndpointKey, Generation, Scope](const FString& Reason)
-			{
-				FHyperAIStudioCapabilityInventoryResult Rejected;
-				Rejected.Endpoint = EndpointKey;
-				Rejected.RefreshGeneration = Generation;
-				Rejected.Message = Reason;
-				Rejected.CompletedUtc = FDateTime::UtcNow();
-				CompleteDetailedEndpoint(EndpointKey, Scope, Generation, MoveTemp(Rejected));
-			});
+		StartWhenServerCanAnswer(RequestEndpoint, [RequestEndpoint, EndpointKey, Generation, Scope]()
+		{
+			FHyperAIStudioMcpSerialQueue::Enqueue(RequestEndpoint,
+				[RequestEndpoint, EndpointKey, Generation, Scope](FHyperAIStudioMcpSerialQueue::FComplete Complete)
+				{
+					TSharedRef<FInventorySession> Session = MakeShared<FInventorySession>(
+						RequestEndpoint,
+						EndpointKey,
+						Generation,
+						TOptional<FCachedSchema>(),
+						Scope,
+						[EndpointKey, Generation, Scope, Complete = MoveTemp(Complete)](
+							FHyperAIStudioCapabilityInventoryResult&& Result) mutable
+						{
+							// Read-only like the lightweight inventory: released whatever the transport did.
+							Complete(FHyperAIStudioMcpSerialQueue::ECompletionDisposition::SafeToRelease);
+							CompleteDetailedEndpoint(EndpointKey, Scope, Generation, MoveTemp(Result));
+						});
+					Session->Start();
+				},
+				[EndpointKey, Generation, Scope](const FString& Reason)
+				{
+					FHyperAIStudioCapabilityInventoryResult Rejected;
+					Rejected.Endpoint = EndpointKey;
+					Rejected.RefreshGeneration = Generation;
+					Rejected.Message = Reason;
+					Rejected.CompletedUtc = FDateTime::UtcNow();
+					CompleteDetailedEndpoint(EndpointKey, Scope, Generation, MoveTemp(Rejected));
+				});
+		});
 	}
 }
 

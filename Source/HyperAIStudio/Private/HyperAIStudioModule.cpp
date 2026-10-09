@@ -41,6 +41,7 @@
 #include "HyperAIStudioNativeReadToolset.h"
 #include "HyperAIStudioPIEPlaytestToolset.h"
 #include "HyperAIStudioEditorRestart.h"
+#include "HyperAIStudioEditorStartupGate.h"
 #include "HyperAIStudioRemote.h"
 #include "HyperAIStudioSourceControl.h"
 #include "HyperAIStudioBlueprintTidy.h"
@@ -572,6 +573,8 @@ public:
 		FHyperAIStudioStyle::Register();
 		// HyperAI's text in its own language setting, before any of its windows exist.
 		HyperAIStudio::Localization::Startup();
+		// Before any chat tab is restored: probes of this editor's own MCP server wait until the editor can answer.
+		FHyperAIStudioEditorStartupGate::Startup();
 		// Sandbox Mode needs the editor and the File Sandbox, both ready after engine init.
 		if (GIsRunning && GEditor)
 		{
@@ -863,6 +866,7 @@ public:
 		FHyperAIStudioRemote::Shutdown();
 		FHyperAIStudioSourceControl::Shutdown();
 		FHyperAIStudioBlueprintTidy::Shutdown();
+		FHyperAIStudioEditorStartupGate::Shutdown();
 		if (PIEPlaytestRegistration)
 		{
 			PIEPlaytestRegistration->Shutdown();
