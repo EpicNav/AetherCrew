@@ -189,6 +189,12 @@ namespace HyperAIStudio::PIEPlaytest::Private
 		return true;
 	}
 
+	/** A typed value's name as the FName it was: empty or None, in any case, is no name. */
+	FString NameToken(const FString& Name)
+	{
+		return Name.IsEmpty() || Name.Equals(TEXT("None"), ESearchCase::IgnoreCase) ? FString(TEXT("None")) : Name;
+	}
+
 	bool ValidateTypedValue(
 		const FHyperAIPIEPlaytestValue& Value,
 		FString& OutErrorCode,
@@ -220,8 +226,8 @@ namespace HyperAIStudio::PIEPlaytest::Private
 		const bool bBooleanPopulated = Value.bBoolean;
 		const bool bIntegerPopulated = Value.Integer != 0;
 		const bool bFloatPopulated = Value.Float != 0.0;
-		// As an FName, None was no name.
-		const bool bNamePopulated = !Value.Name.IsEmpty() && !Value.Name.Equals(TEXT("None"));
+		// As an FName, None in any case was no name.
+		const bool bNamePopulated = !Value.Name.IsEmpty() && !Value.Name.Equals(TEXT("None"), ESearchCase::IgnoreCase);
 		const bool bStringPopulated = !Value.String.IsEmpty();
 		const bool bVectorPopulated = Value.Vector != FVector::ZeroVector;
 		bool bHasIrrelevantUnionField = false;
@@ -282,7 +288,7 @@ namespace HyperAIStudio::PIEPlaytest::Private
 			AppendCanonicalToken(Canonical, NumberToken(Value.Float));
 			break;
 		case EHyperAIPIEPlaytestValueType::Name:
-			AppendCanonicalToken(Canonical, Value.Name.IsEmpty() ? FString(TEXT("None")) : Value.Name);
+			AppendCanonicalToken(Canonical, NameToken(Value.Name));
 			break;
 		case EHyperAIPIEPlaytestValueType::String:
 			AppendCanonicalToken(Canonical, Value.String);
@@ -1256,7 +1262,8 @@ namespace HyperAIStudio::PIEPlaytest::Private
 		case EHyperAIPIEPlaytestValueType::Boolean: return Actual.bBoolean == Expected.bBoolean;
 		case EHyperAIPIEPlaytestValueType::Integer: return Actual.Integer == Expected.Integer;
 		case EHyperAIPIEPlaytestValueType::Float: return FMath::IsNearlyEqual(Actual.Float, Expected.Float, 1.e-6);
-		case EHyperAIPIEPlaytestValueType::Name: return Actual.Name.Equals(Expected.Name.IsEmpty() ? FString(TEXT("None")) : Expected.Name);
+		// Names compare as FNames do, ignoring case.
+		case EHyperAIPIEPlaytestValueType::Name: return NameToken(Actual.Name).Equals(NameToken(Expected.Name), ESearchCase::IgnoreCase);
 		case EHyperAIPIEPlaytestValueType::String: return Actual.String == Expected.String;
 		case EHyperAIPIEPlaytestValueType::Vector: return Actual.Vector.Equals(Expected.Vector, 1.e-4);
 		default: return true;
@@ -2214,6 +2221,11 @@ namespace HyperAIStudio::PIEPlaytest::Private
 		bool bPausedByRun = false;
 		bool bAnyRuntimeEffectAttempted = false;
 	};
+}
+
+bool FHyperAIStudioPIEPlaytestContracts::ScalarEquals(const FHyperAIPIEPlaytestValue& Actual, const FHyperAIPIEPlaytestValue& Expected)
+{
+	return HyperAIStudio::PIEPlaytest::Private::EqualTypedValue(Actual, Expected);
 }
 
 namespace HyperAIStudio::PIEPlaytest::Private

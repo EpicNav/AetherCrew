@@ -1037,6 +1037,8 @@ public:
 	static FString StepKindToString(EHyperAIPIEPlaytestStepKind Kind);
 	static FString RuntimeStateToString(EHyperAIStudioPIERuntimeState State);
 	static FString ComputeEvidenceFingerprint(const TArray<FHyperAIPIEPlaytestEvidence>& Evidence);
+	/** Whether a scalar read equals an assertion's expected value, as AssertScalarEquals decides. */
+	static bool ScalarEquals(const FHyperAIPIEPlaytestValue& Actual, const FHyperAIPIEPlaytestValue& Expected);
 	static FString MakeCursor(const FString& EvidenceFingerprint, int32 Offset);
 	static bool ParseCursor(
 		const FString& Cursor,

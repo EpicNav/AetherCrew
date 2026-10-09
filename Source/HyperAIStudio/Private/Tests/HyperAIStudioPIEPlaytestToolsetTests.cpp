@@ -459,6 +459,39 @@ bool FHyperAIStudioPIEPlaytestNormalizeBoundsTest::RunTest(const FString& Parame
 		FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Smuggled, Plan, Code, Error));
 	TestEqual(TEXT("before FSoftObjectPath makes an FName of it"), Code, FString(TEXT("invalid_object_path")));
 
+	// The name is still compared as the FName it was: case aside, and empty or None, in any case, is no name.
+	Smuggled = ReadRequest();
+	Smuggled.Steps[0].Value.Name = TEXT("none");
+	const bool bNoneIsNoName = FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Smuggled, Plan, Code, Error);
+	TestTrue(TEXT("None in any case is no name, so not a field outside the value's type: ") + Error, bNoneIsNoName);
+	FHyperAIPIEPlaytestValue Actual;
+	Actual.Type = EHyperAIPIEPlaytestValueType::Name;
+	Actual.Name = TEXT("Idle");
+	FHyperAIPIEPlaytestValue Expected = Actual;
+	Expected.Name = TEXT("idle");
+	TestTrue(TEXT("A name assertion ignores case, as FNames compare"), FHyperAIStudioPIEPlaytestContracts::ScalarEquals(Actual, Expected));
+	Expected.Name = TEXT("Walk");
+	TestFalse(TEXT("but not the name itself"), FHyperAIStudioPIEPlaytestContracts::ScalarEquals(Actual, Expected));
+	Actual.Name = TEXT("None");
+	Expected.Name.Reset();
+	TestTrue(TEXT("None read back meets an empty expected name"), FHyperAIStudioPIEPlaytestContracts::ScalarEquals(Actual, Expected));
+	Expected.Name = TEXT("NONE");
+	TestTrue(TEXT("and one written in capitals"), FHyperAIStudioPIEPlaytestContracts::ScalarEquals(Actual, Expected));
+	FHyperAIPIEPlaytestRequest Assert = ReadRequest();
+	Assert.Steps[0].Kind = EHyperAIPIEPlaytestStepKind::AssertScalarEquals;
+	Assert.Steps[0].TargetObjectPath = TEXT("/Game/Maps/UEDPIE_0_Test.Test:PersistentLevel.TestActor_0");
+	Assert.Steps[0].Name = TEXT("State");
+	Assert.Steps[0].Value.Type = EHyperAIPIEPlaytestValueType::Name;
+	FHyperAIStudioPIENormalizedPlan EmptyName;
+	const bool bAssertNormalized = FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Assert, EmptyName, Code, Error);
+	if (TestTrue(TEXT("An assertion on a name normalizes: ") + Error, bAssertNormalized))
+	{
+		Assert.Steps[0].Value.Name = TEXT("NONE");
+		FHyperAIStudioPIENormalizedPlan NoneName;
+		TestTrue(TEXT("and None, in any case, hashes as no name does"), FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Assert, NoneName, Code, Error)
+			&& NoneName.PlanHash == EmptyName.PlanHash);
+	}
+
 	const FString Fingerprint = TEXT("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
 	const FString Cursor = FHyperAIStudioPIEPlaytestContracts::MakeCursor(Fingerprint, 12);
 	int32 Offset = INDEX_NONE;
