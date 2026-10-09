@@ -13,13 +13,13 @@
  * server but no answer came back, more work could act twice or on top of it, so the endpoint stays
  * locked until a confirmed server restart. Read-only work never reports it. The readiness probe and
  * the capability inventory send only initialize, notifications/initialized, tools/list and the
- * list_toolsets/describe_toolset meta-tools, which change nothing, so asking again is always safe.
- * A stale exchange cannot feed a later one either: each opens its own session with its own
- * initialize, its later requests carry that session's Mcp-Session-Id and check their JSON-RPC ids,
- * and UE's HTTP client hands each response only to the request that sent it. A late initialize
- * leaves at most an unused session on the server. Locking on them once left a restarted editor's
- * chats waiting for good: the first probe timed out before the editor ticked, and only a server
- * restart could clear the lock.
+ * list_toolsets/describe_toolset meta-tools, which change nothing, so asking again is always safe;
+ * they are the queue's only users today, so nothing locks an endpoint now. A stale exchange cannot
+ * feed a later one either: each opens its own session with its own initialize, its later requests
+ * carry that session's Mcp-Session-Id and check their JSON-RPC ids, and UE's HTTP client hands each
+ * response only to the request that sent it. A late initialize leaves at most an unused session on
+ * the server. Locking on them once left a restarted editor's chats waiting for good: the first probe
+ * timed out before the editor ticked, and only a server restart could clear the lock.
  */
 class FHyperAIStudioMcpSerialQueue
 {

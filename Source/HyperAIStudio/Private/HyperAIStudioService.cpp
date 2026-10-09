@@ -3572,7 +3572,7 @@ bool FHyperAIStudioService::StopUnrealMCP(FText& OutMessage) const
 	Module->StopServer();
 	if (Server && Server->IsServerRunning())
 	{
-		OutMessage = FText::FromString(TEXT("Unreal MCP stop was requested, but the server is still running; ambiguous calls remain locked."));
+		OutMessage = FText::FromString(TEXT("Unreal MCP stop was requested, but the server is still running; try Reconnect again or restart the editor."));
 		return false;
 	}
 	if (Server)

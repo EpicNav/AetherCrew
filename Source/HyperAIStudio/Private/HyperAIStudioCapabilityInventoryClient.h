@@ -73,8 +73,9 @@ public:
 	static void InvalidateDetailed(const FString& Endpoint);
 
 	/**
-	 * Invalidates inventory and releases a fail-closed serial lock only after the caller has
-	 * positively confirmed that the previous Unreal MCP server/session epoch ended.
+	 * Invalidates inventory and resets the endpoint's serial queue, refusing the work still waiting
+	 * in it, only after the caller has positively confirmed that the previous Unreal MCP
+	 * server/session epoch ended.
 	 */
 	static void NotifyConfirmedServerStopped(const FString& Endpoint);
 };
