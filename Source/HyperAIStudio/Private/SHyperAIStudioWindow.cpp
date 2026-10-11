@@ -12,6 +12,7 @@
 #include "HyperAIStudioCapabilityInventoryClient.h"
 #include "HyperAIStudioStyle.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
+#include "HyperAIStudioDocs.h"
 #include "HyperAIStudioLegacyMigration.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioToolInventoryViewModel.h"
@@ -896,7 +897,12 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildSetupSummaryPanel()
 					]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)
 					[
-						SNew(SButton).Text(LOCTEXT("SetupFailedOpenDocs", "Open Docs")).OnClicked(this, &SHyperAIStudioWindow::OnOpenIncludedDocsClicked)
+						// The docs' troubleshooting table, on the Studio's Docs page.
+						SNew(SButton).Text(LOCTEXT("SetupFailedOpenDocs", "Open Docs")).OnClicked_Lambda([]()
+						{
+							HyperAIStudio::Docs::Open(TEXT("setup.html#trouble"));
+							return FReply::Handled();
+						})
 					]
 					+ SHorizontalBox::Slot().AutoWidth()
 					[

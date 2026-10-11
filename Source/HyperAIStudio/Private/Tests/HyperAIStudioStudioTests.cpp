@@ -104,7 +104,7 @@ bool FHyperAIStudioStudioPagesTest::RunTest(const FString& Parameters)
 	using namespace HyperAIStudio::StudioTests;
 	// Every feature is a page of the one window.
 	for (const TCHAR* Id : {TEXT("Home"), TEXT("Chat"), TEXT("Images"), TEXT("Match"), TEXT("Playtest"), TEXT("Memory"), TEXT("Skills"),
-		TEXT("Agents"), TEXT("Tools"), TEXT("Activity"), TEXT("Settings")})
+		TEXT("Agents"), TEXT("Tools"), TEXT("Activity"), TEXT("Settings"), TEXT("Docs")})
 	{
 		const FHyperAIStudioPage* Page = FHyperAIStudioShell::FindPage(Id);
 		TestTrue(FString::Printf(TEXT("The %s page is registered, with a label, an icon and a tooltip"), Id),
@@ -131,7 +131,7 @@ bool FHyperAIStudioStudioPagesTest::RunTest(const FString& Parameters)
 	const FString Joined = FString::Join(Order, TEXT(","));
 	AddInfo(TEXT("Navigation: ") + Joined);
 	TestEqual(TEXT("The navigation lists the pages by group and order"), Joined,
-		FString(TEXT("Home,Chat,Images,Match,Playtest,Memory,Skills,Agents,Tools,Activity,Settings")));
+		FString(TEXT("Home,Chat,Images,Match,Playtest,Memory,Skills,Agents,Tools,Activity,Settings,Docs")));
 
 	TArray<FString> Actions;
 	for (const FHyperAIStudioAction& Action : FHyperAIStudioShell::GetActions())

@@ -31,6 +31,7 @@
 #include "HyperAIStudioBlueprintWorkflowToolset.h"
 #include "HyperAIStudioContextSearchToolsets.h"
 #include "HyperAIStudioDiagnosticsRegistration.h"
+#include "HyperAIStudioDocs.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioCapabilityCatalogCounts.h"
@@ -1569,6 +1570,9 @@ private:
 		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Settings"), LOCTEXT("PageSettings", "Settings"),
 			LOCTEXT("PageSettingsTip", "Setup, agents, MCP servers, image services and preferences."), TEXT("System"), 20,
 			TEXT("HyperAIStudio.Icon.Settings"), [](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioSettingsPage); }));
+		FHyperAIStudioShell::RegisterPage(MakePage(HyperAIStudio::Docs::GetPageId(), LOCTEXT("PageDocs", "Docs"),
+			LOCTEXT("PageDocsTip", "HyperAI Studio's guides and documentation, read here; links to websites open in your browser."), TEXT("System"), 30,
+			TEXT("Icons.Help"), [](const TSharedRef<SDockTab>& Tab) { return HyperAIStudio::Docs::CreatePage(Tab); }));
 
 		// What the search box can do besides opening a page.
 		auto Action = [](const FName Id, const FText& Label, const FText& Description, const FName Icon, TFunction<void()> Run)
@@ -1585,14 +1589,14 @@ private:
 			TEXT("HyperAIStudio.Icon.Chat"), [this]() { OpenNextChatTab(); });
 		Action(TEXT("StartSetup"), LOCTEXT("ActionSetup", "Set up HyperAI"), LOCTEXT("ActionSetupTip", "Unreal MCP, the agent files, and what is missing."),
 			TEXT("HyperAIStudio.Icon.Settings"), []() { FHyperAIStudioShell::Open(TEXT("Settings")); });
-		Action(TEXT("OpenDocs"), LOCTEXT("ActionDocs", "Documentation"), LOCTEXT("ActionDocsTip", "HyperAI Studio's guides, in the browser."),
-			TEXT("HyperAIStudio.Icon.Report"), []() { FPlatformProcess::LaunchURL(TEXT("https://hyperaistudio.com/docs"), nullptr, nullptr); });
+		Action(TEXT("OpenDocs"), LOCTEXT("ActionDocs", "Documentation"), LOCTEXT("ActionDocsTip", "HyperAI Studio's guides, read in the editor on the Docs page."),
+			TEXT("HyperAIStudio.Icon.Report"), []() { HyperAIStudio::Docs::Open(); });
 	}
 
 	void UnregisterStudioPages()
 	{
 		for (const FName Id : {FName(TEXT("Home")), FName(TEXT("Match")), FName(TEXT("Playtest")), FName(TEXT("Memory")), FName(TEXT("Skills")),
-			FName(TEXT("Agents")), FName(TEXT("Tools")), FName(TEXT("Activity")), FName(TEXT("Settings"))})
+			FName(TEXT("Agents")), FName(TEXT("Tools")), FName(TEXT("Activity")), FName(TEXT("Settings")), HyperAIStudio::Docs::GetPageId()})
 		{
 			FHyperAIStudioShell::UnregisterPage(Id);
 		}
@@ -2277,7 +2281,7 @@ private:
 
 	FText GetWelcomeOpenDocsTooltipText() const
 	{
-		return LOCTEXT("WelcomeOpenDocsTooltip", "Open the HyperAIStudio documentation site.");
+		return LOCTEXT("WelcomeOpenDocsTooltip", "Read the HyperAIStudio documentation in the editor, on the Studio's Docs page.");
 	}
 
 	FText GetWelcomeDontShowText() const
@@ -2652,14 +2656,13 @@ private:
 								SNew(SButton)
 								.Text(GetWelcomeOpenDocsText())
 								.ToolTipText(GetWelcomeOpenDocsTooltipText())
-								.OnClicked_Lambda([]()
+								.OnClicked_Lambda([WeakWelcomeWindow]()
 								{
-									FHyperAIStudioService Service;
-									FText Message;
-									if (!Service.OpenIncludedDocs(Message))
+									if (const TSharedPtr<SWindow> PinnedWindow = WeakWelcomeWindow.Pin())
 									{
-										FPlatformProcess::LaunchURL(*FHyperAIStudioService::GetDocumentationUrl(), nullptr, nullptr);
+										PinnedWindow->RequestDestroyWindow();
 									}
+									HyperAIStudio::Docs::Open();
 									return FReply::Handled();
 								})
 							]
@@ -2985,7 +2988,7 @@ private:
 			&& GetWelcomeStartSetupTooltipText().ToString().Contains(TEXT("Configure Unreal MCP"))
 			&& GetWelcomeOpenPanelTooltipText().ToString().Contains(TEXT("workbench"))
 			&& GetWelcomeOpenChatTooltipText().ToString().Contains(TEXT("prompt and terminal"))
-			&& GetWelcomeOpenDocsTooltipText().ToString().Contains(TEXT("documentation site"))
+			&& GetWelcomeOpenDocsTooltipText().ToString().Contains(TEXT("documentation in the editor"))
 			&& GetWelcomeDontShowTooltipText().ToString().Contains(TEXT("Tools or the status bar"));
 		const FVector2D WelcomeWindowSize = GetWelcomeWindowSize();
 		const FVector2D WelcomeContentSize = GetWelcomeContentSize();
