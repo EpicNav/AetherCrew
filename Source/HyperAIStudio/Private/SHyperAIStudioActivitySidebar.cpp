@@ -15,6 +15,7 @@
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "SHyperAIStudioAutoApprovalBanner.h"
+#include "SHyperAIStudioMcpBypassNote.h"
 #include "Styling/AppStyle.h"
 #include "Styling/StyleColors.h"
 #include "UObject/SoftObjectPath.h"
@@ -192,6 +193,13 @@ void SHyperAIStudioChatActivitySidebar::Construct(const FArguments& InArgs)
 				[
 					SNew(SHyperAIStudioAutoApprovalBanner)
 				]
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+			[
+				// Other MCP servers change this editor without coming here; it says so while any is found.
+				SNew(SHyperAIStudioMcpBypassNote)
 			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()

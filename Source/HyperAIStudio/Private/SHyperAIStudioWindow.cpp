@@ -13,12 +13,14 @@
 #include "HyperAIStudioStyle.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioLegacyMigration.h"
+#include "HyperAIStudioMcpBypassMonitor.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioToolInventoryViewModel.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "SHyperAIStudioQuickActionWindow.h"
 #include "SHyperAIStudioAgentsPanel.h"
+#include "SHyperAIStudioMcpBypassNote.h"
 #include "SHyperAIStudioToolForm.h"
 #include "SHyperAIStudioMemoryPanel.h"
 #include "SHyperAIStudioSkillsPanel.h"
@@ -996,6 +998,25 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildSetupSummaryPanel()
 					LOCTEXT("SetupConfigureAgentsRow", "Configure Agents"),
 					FOnClicked::CreateSP(this, &SHyperAIStudioWindow::OnConfigureAgentsClicked))
 			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
+			[
+				BuildSetupSummaryRow(
+					LOCTEXT("SetupOtherMcpRow", "Other MCP servers"),
+					[]()
+					{
+						const int32 Bypassing = HyperAIStudio::McpBypass::FilterBypass(FHyperAIStudioMcpBypassMonitor::GetFindings(), false).Num();
+						return Bypassing > 0
+							? FText::Format(LOCTEXT("SetupOtherMcpBypassing", "{0} bypass HyperAI"), Bypassing)
+							: LOCTEXT("SetupOtherMcpNone", "None bypass HyperAI");
+					},
+					[]()
+					{
+						return HyperAIStudio::McpBypass::FilterBypass(FHyperAIStudioMcpBypassMonitor::GetFindings(), false).IsEmpty()
+							? HyperAIStudio::Private::GoodColor() : HyperAIStudio::Private::WarningColor();
+					},
+					LOCTEXT("SetupOtherMcpShow", "Show"),
+					FOnClicked::CreateSP(this, &SHyperAIStudioWindow::OnConfigureAgentsClicked))
+			]
 		];
 }
 
@@ -1097,6 +1118,11 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildAgentsTab()
 		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
 		[
 			BuildAgentRow(TEXT("vscode"), TEXT("VS Code/Copilot"), TEXT(".vscode/mcp.json"))
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 18.0f, 0.0f, 0.0f)
+		[
+			// The other servers these agents have, and whether each changes this editor outside HyperAI's approvals.
+			SNew(SHyperAIStudioMcpBypassPanel)
 		];
 }
 

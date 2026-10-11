@@ -36,6 +36,7 @@
 #include "HyperAIStudioCapabilityCatalogCounts.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioAutoApproval.h"
+#include "HyperAIStudioMcpBypassMonitor.h"
 #include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioFoundationProbe.h"
@@ -601,6 +602,8 @@ public:
 		FHyperAIStudioSourceControl::Startup();
 		// Blueprint nodes agents add are laid out when their Blueprint compiles.
 		FHyperAIStudioBlueprintTidy::Startup();
+		// Other MCP servers that change this editor outside the approval gate: found shortly after start, and warned about.
+		FHyperAIStudioMcpBypassMonitor::Startup();
 		if (FHyperAIStudioExtensionRuntime::AreExtendedHyperToolsEnabled())
 		{
 			FString TrustedExecutionError;
@@ -867,6 +870,7 @@ public:
 		FHyperAIStudioRemote::Shutdown();
 		FHyperAIStudioSourceControl::Shutdown();
 		FHyperAIStudioBlueprintTidy::Shutdown();
+		FHyperAIStudioMcpBypassMonitor::Shutdown();
 		FHyperAIStudioEditorStartupGate::Shutdown();
 		if (PIEPlaytestRegistration)
 		{
@@ -2329,6 +2333,7 @@ private:
 		if (bSetUp)
 		{
 			FHyperAIStudioService::RefreshMemoryInstructions();
+			FHyperAIStudioService::RefreshMcpBypassInstructions();
 		}
 		if (Settings && Settings->bRefreshAgentInstructionsOnStartup && bSetUp)
 		{
@@ -5899,6 +5904,11 @@ private:
 			Status.bAgentFilesReady ? TEXT("true") : TEXT("false"),
 			Status.RegisteredToolCount,
 			Status.ProbeToolCount);
+		// Other MCP servers: what changes this editor outside the approval gate, and what else agents have.
+		const TArray<FHyperAIStudioMcpFinding> Findings = FHyperAIStudioMcpBypassMonitor::GetFindings();
+		const FString Bypass = HyperAIStudio::McpBypass::BuildLogLine(Findings);
+		UE_LOG(LogHyperAIStudio, Display, TEXT("HyperAIStudio.Status otherMcpServers=%d bypassing=%d%s%s"),
+			Findings.Num(), HyperAIStudio::McpBypass::FilterBypass(Findings, false).Num(), Bypass.IsEmpty() ? TEXT("") : TEXT(" "), *Bypass);
 	}
 
 	void RunConsoleStatusProbe(const TArray<FString>& Args)

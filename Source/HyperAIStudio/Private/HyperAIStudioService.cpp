@@ -8,6 +8,7 @@
 #include "HyperAIStudioEditorStartupGate.h"
 #include "HyperAIStudioLegacyMigration.h"
 #include "HyperAIStudioManagedConfigMigration.h"
+#include "HyperAIStudioMcpBypassMonitor.h"
 #include "HyperAIStudioMcpSerialQueue.h"
 #include "HyperAIStudioOperationJournal.h"
 #include "HyperAIStudioProjectMemory.h"
@@ -85,6 +86,8 @@ namespace HyperAIStudio::Private
 	static const TCHAR* ManagedTomlEnd = TEXT("# END HYPERAISTUDIO MANAGED MCP");
 	static const TCHAR* ManagedMemoryBegin = TEXT("<!-- BEGIN HYPERAISTUDIO PROJECT MEMORY -->");
 	static const TCHAR* ManagedMemoryEnd = TEXT("<!-- END HYPERAISTUDIO PROJECT MEMORY -->");
+	static const TCHAR* ManagedMcpBypassBegin = TEXT("<!-- BEGIN HYPERAISTUDIO OTHER MCP SERVERS -->");
+	static const TCHAR* ManagedMcpBypassEnd = TEXT("<!-- END HYPERAISTUDIO OTHER MCP SERVERS -->");
 
 	void ApplyCapabilityInventoryResult(
 		FHyperAIStudioStatus& Status,
@@ -3628,6 +3631,8 @@ bool FHyperAIStudioService::GenerateProjectFiles(FText& OutMessage) const
 	HyperAIStudio::Skills::SyncClaudeMirror(ProjectRoot);
 	HyperAIStudio::Agents::InstallTeam(ProjectRoot, /*bUpdateOnly=*/true);
 	HyperAIStudio::Agents::Sync(ProjectRoot);
+	// Beside the main block: the rule about other MCP servers, only while some change this editor outside HyperAI.
+	RefreshMcpBypassInstructions();
 
 	FHyperAIStudioStatus Status = GetStatusSync();
 	WriteStatusJson(ProjectRoot, Status);
@@ -4935,6 +4940,28 @@ bool FHyperAIStudioService::RefreshMemoryInstructions()
 	const FString Block = HyperAIStudio::Memory::BuildInstructionSection(GetProjectRoot(), Settings->AgentMemory)
 		.Replace(TEXT("\n"), LINE_TERMINATOR);
 	return UpsertManagedBlock(AgentsPath, Block, ManagedMemoryBegin, ManagedMemoryEnd);
+}
+
+bool FHyperAIStudioService::RefreshMcpBypassInstructions()
+{
+	return WriteMcpBypassInstructions(FPaths::Combine(GetProjectRoot(), TEXT("AGENTS.md")), FHyperAIStudioMcpBypassMonitor::GetFindings());
+}
+
+bool FHyperAIStudioService::WriteMcpBypassInstructions(const FString& AgentsPath, const TArray<FHyperAIStudioMcpFinding>& Findings)
+{
+	using namespace HyperAIStudio::Private;
+	FString Existing;
+	// Like the memory block: it joins the file Setup made, and never creates AGENTS.md on its own.
+	if (!FFileHelper::LoadFileToString(Existing, *AgentsPath) || !Existing.Contains(ManagedMarkdownBegin))
+	{
+		return false;
+	}
+	const FString Section = HyperAIStudio::McpBypass::BuildInstructionSection(Findings);
+	if (Section.IsEmpty())
+	{
+		return RemoveManagedBlock(AgentsPath, ManagedMcpBypassBegin, ManagedMcpBypassEnd);
+	}
+	return UpsertManagedBlock(AgentsPath, Section.Replace(TEXT("\n"), LINE_TERMINATOR), ManagedMcpBypassBegin, ManagedMcpBypassEnd);
 }
 
 bool FHyperAIStudioService::AreAgentInstructionsCurrent() const

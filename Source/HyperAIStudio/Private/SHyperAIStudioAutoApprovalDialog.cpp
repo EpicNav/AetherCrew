@@ -5,6 +5,7 @@
 #include "CoreGlobals.h"
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "HyperAIStudioMcpBypassMonitor.h"
 #include "HyperAIStudioSandbox.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioStyle.h"
@@ -80,6 +81,8 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 	using namespace HyperAIStudio::AutoApprovalDialog;
 	Window = InArgs._Window;
 	PendingAtOpen = FHyperAIStudioApprovalGate::GetPending();
+	// Silenced or not: this is where the user decides what runs without asking.
+	BypassLine = HyperAIStudio::McpBypass::BuildAutoApprovalLine(FHyperAIStudioMcpBypassMonitor::GetFindings());
 	{
 		const HyperAIStudio::Sandbox::FStatus Sandbox = HyperAIStudio::Sandbox::GetStatus();
 		bOffersSandbox = Sandbox.State != HyperAIStudio::Sandbox::EState::Off;
@@ -122,6 +125,17 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 		[
 			Paragraph(LOCTEXT("Scope",
 				"This applies to every agent and MCP client connected to this editor, not just HyperAI chats: Claude Code, Codex, Gemini, or any other program that reaches this editor's Unreal MCP server."), true)
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 8.0f, 0.0f, 0.0f)
+		[
+			SNew(STextBlock)
+			.Visibility(BypassLine.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+			.Text(BypassLine)
+			.AutoWrapText(true)
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+			.ColorAndOpacity(FStyleColors::AccentOrange)
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -752,6 +766,11 @@ FText FHyperAIStudioAutoApprovalTestAccess::GetSandboxNote(const SHyperAIStudioA
 FText FHyperAIStudioAutoApprovalTestAccess::GetConfirmation(const SHyperAIStudioAutoApprovalDialog& Dialog)
 {
 	return Dialog.BuildConfirmation();
+}
+
+FText FHyperAIStudioAutoApprovalTestAccess::GetBypassLine(const SHyperAIStudioAutoApprovalDialog& Dialog)
+{
+	return Dialog.BypassLine;
 }
 #endif
 

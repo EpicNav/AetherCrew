@@ -26,6 +26,7 @@
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioDependencyGraphToolset.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioMcpBypassMonitor.h"
 #include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioPlanExecuteToolset.h"
 #include "HyperAIStudioProjectMemory.h"
@@ -1388,6 +1389,42 @@ FString FHyperAIStudioNativeReadContracts::ClassifyJournalLoadFailure(const FStr
 		: TEXT("journal_unavailable");
 }
 
+namespace HyperAIStudio::NativeReadTools::Private
+{
+	/** The other MCP servers agents have here, from the bypass monitor's last check: names, places and removal text only. */
+	void FillOtherMcpServers(FHyperAICapabilityReport& Report)
+	{
+		constexpr int32 MaxServers = 64;
+		const TArray<FHyperAIStudioMcpFinding> Findings = FHyperAIStudioMcpBypassMonitor::GetFindings();
+		for (const FHyperAIStudioMcpFinding& Finding : Findings)
+		{
+			if (Report.OtherMcpServers.Num() >= MaxServers)
+			{
+				break;
+			}
+			FHyperAIOtherMcpServer& Server = Report.OtherMcpServers.AddDefaulted_GetRef();
+			Server.Name = Finding.DisplayName;
+			Server.Classification = HyperAIStudio::McpBypass::ClassificationId(Finding.Class);
+			Server.Why = HyperAIStudio::McpBypass::DescribeWhy(Finding).ToString();
+			Server.bWarningSilenced = Finding.bSilenced;
+			for (const FHyperAIStudioMcpServerSource& Source : Finding.Sources)
+			{
+				Server.ConfiguredIn.Add(HyperAIStudio::McpBypass::DescribeSourcePlain(Source));
+				if (Finding.ChangesEditor())
+				{
+					Server.HowToRemove.Add(HyperAIStudio::McpBypass::DescribeRemoval(Source, Finding.bWrittenByHyperAI).ToString());
+				}
+			}
+		}
+		const TArray<FString> Names = HyperAIStudio::McpBypass::GetBypassNames(Findings);
+		Report.BypassMcpServerCount = Names.Num();
+		Report.OtherMcpServersSummary = Names.IsEmpty()
+			? FString::Printf(TEXT("No other MCP server or editor plugin changes this editor outside HyperAI's approval gate (%d other servers listed)."), Findings.Num())
+			: FString::Printf(TEXT("%s can change this editor outside HyperAI: no HyperAI approval, auto-approval, undo grouping or checks. Use HyperAI's tools for edits; use those only if the user asks."),
+				*FString::Join(Names, TEXT(", ")));
+	}
+}
+
 FHyperAICapabilityReport UHyperAIStudioNativeReadToolset::hyper_capability_report(
 	const int32 PageSize,
 	const FString& Cursor)
@@ -1423,6 +1460,7 @@ FHyperAICapabilityReport UHyperAIStudioNativeReadToolset::hyper_capability_repor
 	Report.bExtendedHyperToolsEnabled =
 		FHyperAIStudioExtensionRuntime::AreExtendedHyperToolsEnabled();
 	Report.bSourceCandidateToolsEnabled = Report.bExtendedHyperToolsEnabled;
+	FillOtherMcpServers(Report);
 
 	FString PageDiagnostic;
 	if (!FHyperAIStudioNativeReadContracts::ValidatePageRequest(PageSize, Cursor, PageDiagnostic))

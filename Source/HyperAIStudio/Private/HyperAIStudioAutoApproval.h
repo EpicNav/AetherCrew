@@ -192,6 +192,8 @@ struct FHyperAIStudioAutoApprovalTestAccess
 	static FText GetSandboxNote(const SHyperAIStudioAutoApprovalDialog& Dialog);
 	/** What the native confirmation would say. */
 	static FText GetConfirmation(const SHyperAIStudioAutoApprovalDialog& Dialog);
+	/** The line on other MCP servers that bypass approvals; empty while none is found. */
+	static FText GetBypassLine(const SHyperAIStudioAutoApprovalDialog& Dialog);
 	/** One pass of the sandbox sweep the one-second ticker runs, without waiting for its two-second spacing. */
 	static void PumpSandbox();
 	/** How long a failed sandbox write waits before it is tried again while the held files stay as they were. */
