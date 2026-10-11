@@ -7,8 +7,16 @@
 #include "HAL/IConsoleManager.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioApprovalGateInternal.h"
 #include "HyperAIStudioAutoApproval.h"
 #include "HAL/PlatformFileManager.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/Application/SlateUser.h"
+#include "Layout/WidgetPath.h"
+#include "Tests/HyperAIStudioLogCapture.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/SViewport.h"
+#include "Widgets/SWindow.h"
 #include "HyperAIStudioNativeReadToolset.h"
 #include "HyperAIStudioSandbox.h"
 #include "HyperAIStudioSettings.h"
@@ -206,46 +214,7 @@ namespace HyperAIStudio::AutoApprovalTests
 		return GetString(TEXT("Status"));
 	}
 
-	/** The lines one log category writes while it lives, as they reach the log. */
-	class FLogCapture : public FOutputDevice
-	{
-	public:
-		explicit FLogCapture(const TCHAR* InCategory)
-			: Category(InCategory)
-		{
-			GLog->AddOutputDevice(this);
-		}
-
-		virtual ~FLogCapture() override
-		{
-			GLog->RemoveOutputDevice(this);
-		}
-
-		virtual void Serialize(const TCHAR* Value, ELogVerbosity::Type Verbosity, const FName& InCategory) override
-		{
-			if (InCategory == Category && Value)
-			{
-				FScopeLock Lock(&Mutex);
-				Lines.Add(Value);
-			}
-		}
-
-		virtual bool CanBeUsedOnAnyThread() const override { return true; }
-		virtual bool CanBeUsedOnMultipleThreads() const override { return true; }
-
-		/** How many lines so far contain Text. */
-		int32 Count(const TCHAR* Text)
-		{
-			GLog->Flush();
-			FScopeLock Lock(&Mutex);
-			return Lines.FilterByPredicate([Text](const FString& Line) { return Line.Contains(Text); }).Num();
-		}
-
-	private:
-		FName Category;
-		FCriticalSection Mutex;
-		TArray<FString> Lines;
-	};
+	using HyperAIStudio::Tests::FLogCapture;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -841,7 +810,158 @@ bool FHyperAIStudioAutoApprovalBusyTest::RunTest(const FString& Parameters)
 	FAccess::PumpGate();
 	TestTrue(TEXT("Once the transaction ends, it is approved"), bRan && !FHyperAIStudioApprovalGate::HasPending(Id));
 	TestEqual(TEXT("and the log says the wait is over"), Log.Count(TEXT("The editor is quiet again after")), 1);
+	TestTrue(TEXT("with what it approved"), Log.Count(TEXT("auto-approval approved 1 request(s)")) == 1);
 	TestTrue(TEXT("Nothing waits any more"), FHyperAIStudioApprovalGate::DescribeAutoApprovalWait().IsEmpty());
+
+	// Turned off while the editor is busy: what it had scheduled waits for a click, and nothing says it is about to be
+	// approved, neither while the editor stays busy nor once it is quiet.
+	const FString Stopped = Scope.Add();
+	FAccess::Reset();
+	TestTrue(TEXT("It turns on again"), FAccess::TurnOn({ECategory::Edits}, {Stopped}));
+	const int32 Busy = GEditor->BeginTransaction(FText::FromString(TEXT("Auto-approval stop test")));
+	bool bBusyOpen = true;
+	ON_SCOPE_EXIT
+	{
+		if (bBusyOpen)
+		{
+			GEditor->CancelTransaction(Busy);
+		}
+	};
+	bool bStoppedRan = false;
+	TestTrue(TEXT("A covered request is held"), Hold(Stopped, MakeSummary(EHyperAIStudioDomainSafety::Edit), [&bStoppedRan]() { bStoppedRan = true; }));
+	FAccess::PumpGate(2);
+	TestEqual(TEXT("While the editor is busy, the log says it waits to approve it"),
+		Log.Count(TEXT("waiting for a quiet editor tick to approve 1 request(s): an undo transaction is open (Auto-approval stop test)")), 1);
+	FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::Stopped);
+	FAccess::PumpGate(4);
+	TestFalse(TEXT("Stopped, it no longer schedules the request"), FHyperAIStudioApprovalGate::IsAutoApproving(Stopped));
+	TestTrue(TEXT("and Activity no longer says an approval waits, though the editor is still busy"),
+		FHyperAIStudioApprovalGate::DescribeAutoApprovalWait().IsEmpty());
+	GEditor->CancelTransaction(Busy);
+	bBusyOpen = false;
+	FAccess::PumpGate();
+	TestTrue(TEXT("Quiet again, the request still waits for a click"), !bStoppedRan && FHyperAIStudioApprovalGate::HasPending(Stopped));
+	TestEqual(TEXT("and the log never says auto-approval approves it"), Log.Count(TEXT("The editor is quiet again after")), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAutoApprovalPlayInEditorTest,
+	"HyperAIStudio.Chat.AutoApproval.PlayInEditorMouseIsNoDrag",
+	HyperAIStudio::AutoApprovalTests::Flags)
+
+/**
+ * A game holds the mouse for the whole of a Play In Editor session; that capture must not hold approvals back, while any
+ * other capture does, and so does the same viewport in Simulate In Editor or an ejected session, where it is the user's.
+ * Starts a real play session, holds the mouse with its game viewport through Slate, and asks the gate.
+ */
+bool FHyperAIStudioAutoApprovalPlayInEditorTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::AutoApprovalTests;
+	namespace Gate = HyperAIStudio::Approval::Private;
+	if (!GEditor || !FSlateApplication::IsInitialized())
+	{
+		AddInfo(TEXT("No editor or Slate here; nothing to check."));
+		return true;
+	}
+	if (GEditor->IsPlaySessionInProgress() || GEditor->PlayWorld)
+	{
+		AddWarning(TEXT("A play session is already running here; this test leaves it alone and checks nothing."));
+		return true;
+	}
+
+	// The decision itself, with no session running.
+	TestNull(TEXT("With no play session there is no game viewport to ignore"), Gate::PlayingGameViewport());
+	const TSharedRef<SButton> Button = SNew(SButton);
+	const TSharedRef<SViewport> Viewport = SNew(SViewport);
+	TestEqual(TEXT("A button's capture holds approvals back"), Gate::DescribeCaptor(*Button, nullptr), FString(TEXT("SButton")));
+	TestEqual(TEXT("and so does a viewport's while no game plays in it"), Gate::DescribeCaptor(*Viewport, nullptr), FString(TEXT("SViewport")));
+	TestTrue(TEXT("The playing game's viewport does not"), Gate::DescribeCaptor(*Viewport, &Viewport.Get()).IsEmpty());
+	TestEqual(TEXT("while another widget still does"), Gate::DescribeCaptor(*Button, &Viewport.Get()), FString(TEXT("SButton")));
+
+	FRequestPlaySessionParams Params;
+	Params.WorldType = EPlaySessionWorldType::PlayInEditor;
+	Params.SessionDestination = EPlaySessionDestinationType::InProcess;
+	GEditor->RequestPlaySession(Params);
+	const double Deadline = FPlatformTime::Seconds() + 60.0;
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, Deadline]()
+	{
+		if (!GEditor->PlayWorld && FPlatformTime::Seconds() < Deadline)
+		{
+			return false;
+		}
+		if (!TestNotNull(TEXT("Play In Editor starts"), GEditor->PlayWorld.Get()))
+		{
+			return true;
+		}
+		const TSharedPtr<SViewport> Game = FSlateApplication::Get().GetGameViewport();
+		if (!Game.IsValid())
+		{
+			AddInfo(TEXT("This editor registered no game viewport for the session; only the decision was checked."));
+			return true;
+		}
+		TestTrue(TEXT("While it plays, the gate knows the game's viewport"), Gate::PlayingGameViewport() == Game.Get());
+
+		// The game holds the mouse, as a game does for the whole session.
+		const TSharedPtr<FSlateUser> User = FSlateApplication::Get().GetCursorUser();
+		FWidgetPath GamePath;
+		if (!User.IsValid() || !FSlateApplication::Get().FindPathToWidget(Game.ToSharedRef(), GamePath) || !GamePath.IsValid())
+		{
+			AddInfo(TEXT("The game viewport is in no window Slate can reach here; only the gate's view of the session was checked."));
+			return true;
+		}
+		const bool bHeld = User->SetCursorCaptor(Game.ToSharedRef(), GamePath);
+		ON_SCOPE_EXIT { User->ReleaseAllCapture(); };
+		if (!TestTrue(TEXT("The game viewport holds the mouse"), bHeld && FSlateApplication::Get().HasAnyMouseCaptor()))
+		{
+			return true;
+		}
+		const Gate::FBusy Playing = Gate::DescribeBusy();
+		TestFalse(TEXT("The game holding the mouse holds no approval back: ") + Playing.Log, Playing.Log.Contains(TEXT("mouse is captured")));
+
+		// The same viewport in Simulate In Editor (or a session ejected to it) is the user's to drag in.
+		const bool bWasSimulating = GEditor->bIsSimulatingInEditor;
+		GEditor->bIsSimulatingInEditor = true;
+		TestNull(TEXT("Simulating, the gate ignores no viewport"), Gate::PlayingGameViewport());
+		const Gate::FBusy Simulating = Gate::DescribeBusy();
+		GEditor->bIsSimulatingInEditor = bWasSimulating;
+		TestTrue(TEXT("and the same capture holds approvals back, naming it: ") + Simulating.Log,
+			Simulating.Log.Contains(TEXT("mouse is captured by")) && Simulating.Log.Contains(Game->GetTypeAsString()));
+
+		// Any other widget holding the mouse while the game plays is a drag.
+		FWidgetPath WindowPath;
+		const TSharedRef<SWindow> Window = GamePath.GetWindow();
+		if (FSlateApplication::Get().FindPathToWidget(Window, WindowPath) && User->SetCursorCaptor(Window, WindowPath))
+		{
+			const Gate::FBusy Other = Gate::DescribeBusy();
+			TestTrue(TEXT("Another widget's capture during play holds approvals back: ") + Other.Log,
+				Other.Log.Contains(TEXT("mouse is captured by")) && Other.Log.Contains(Window->GetTypeAsString()));
+		}
+		return true;
+	}));
+	const TSharedRef<bool> bEndRequested = MakeShared<bool>(false);
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, bEndRequested]()
+	{
+		if (!*bEndRequested)
+		{
+			*bEndRequested = true;
+			if (GEditor->IsPlaySessionRequestQueued())
+			{
+				GEditor->CancelRequestPlaySession();
+			}
+			if (GEditor->PlayWorld)
+			{
+				GEditor->RequestEndPlayMap();
+			}
+			return false;
+		}
+		if (GEditor->PlayWorld || GEditor->IsPlaySessionInProgress())
+		{
+			return false;
+		}
+		TestNull(TEXT("The play session ends"), GEditor->PlayWorld.Get());
+		return true;
+	}));
 	return true;
 }
 

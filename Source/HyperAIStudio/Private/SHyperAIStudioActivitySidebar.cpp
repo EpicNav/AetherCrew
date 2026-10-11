@@ -703,13 +703,14 @@ TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildSandboxCard(const Hy
 
 	if (Status.State == Sandbox::EState::Active && !Status.Changes.IsEmpty())
 	{
-		// The auto-approval the user chose for these presses Approve All for them; this says when, or what it waits for.
+		// While auto-approval is on: when it presses Approve All for these, what that waits for, or that it does not
+		// write them because Sandbox Mode's held saves was not ticked in its dialog.
 		Card->AddSlot()
 		.AutoHeight()
 		.Padding(0.0f, 4.0f, 0.0f, 0.0f)
 		[
 			SNew(STextBlock)
-			.Visibility_Lambda([]() { return FHyperAIStudioAutoApproval::CoversSandboxSaves() ? EVisibility::Visible : EVisibility::Collapsed; })
+			.Visibility_Lambda([]() { return FHyperAIStudioAutoApproval::DescribeSandboxWait().IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
 			.Text_Lambda([]() { return FHyperAIStudioAutoApproval::DescribeSandboxWait(); })
 			.AutoWrapText(true)
 			.Font(FAppStyle::GetFontStyle("SmallFont"))

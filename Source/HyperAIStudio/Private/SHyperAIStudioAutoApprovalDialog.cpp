@@ -178,13 +178,13 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 			.Visibility(bOffersSandbox ? EVisibility::Visible : EVisibility::Collapsed)
 			[
 				BuildCategory(EHyperAIStudioApprovalCategory::SandboxSaves, LOCTEXT("SandboxLabel", "Sandbox Mode's held saves (written to the project)"),
-					LOCTEXT("SandboxBody",
-						"Sandbox Mode holds everything saved in the editor for review, your own saves included, until you press Approve All in Activity. With this ticked, auto-approval presses it for you at a quiet moment: when no asset has unsaved changes, Play In Editor is not running and no agent edit is running. A held removal deletes the project's own file, so removals are written only if Destructive tools is ticked too. Written files cannot be taken back with Undo."),
+					FText::Format(LOCTEXT("SandboxBodyUnreviewed",
+						"Sandbox Mode holds everything saved in the editor for review until you press Approve All in Activity: your own saves, and saves by tools that never asked for your approval, such as another MCP server's editor Python. With this ticked, auto-approval presses Approve All for you at a quiet moment, so those reach the project unreviewed. It waits until no asset has unsaved changes, Play In Editor is not running and no agent edit is running, and it never saves for you: an asset left unsaved, by you or by an agent's script, holds the write back until it is saved (Approve All saves what agents left unsaved first). A held removal deletes the project's own file, so removals are written only if Destructive tools is ticked too. Each write counts as one of its {0} approvals, and a failed write as one of its {1} failures in a row. Written files cannot be taken back with Undo."),
+						FHyperAIStudioAutoApproval::MaxApprovals, FHyperAIStudioAutoApproval::MaxConsecutiveFailures),
 					SNew(STextBlock)
-					.Visibility(SandboxHeldAtOpen > 0 ? EVisibility::Visible : EVisibility::Collapsed)
 					.AutoWrapText(true)
 					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-					.Text(FText::Format(LOCTEXT("SandboxHeldNow", "It holds {0} {0}|plural(one=file,other=files) now; with this ticked, they are written too."), SandboxHeldAtOpen)))
+					.Text_Lambda([this]() { return SandboxNote(); }))
 			]
 		]
 		+ SVerticalBox::Slot()
@@ -503,6 +503,22 @@ TSet<FString> SHyperAIStudioAutoApprovalDialog::GetChosenWaiting() const
 	return Chosen;
 }
 
+FText SHyperAIStudioAutoApprovalDialog::SandboxNote() const
+{
+	// Shown whatever it holds now: an empty sandbox as the dialog opens is no sign that nothing will wait in it later.
+	if (bTicked[static_cast<int32>(EHyperAIStudioApprovalCategory::SandboxSaves)])
+	{
+		return SandboxHeldAtOpen > 0
+			? FText::Format(LOCTEXT("SandboxNoteTickedHeld", "It holds {0} {0}|plural(one=file,other=files) now; they are written too, and so is what is saved from now on."), SandboxHeldAtOpen)
+			: LOCTEXT("SandboxNoteTicked", "It holds nothing now; what is saved from now on is written.");
+	}
+	return SandboxHeldAtOpen > 0
+		? FText::Format(LOCTEXT("SandboxNoteUntickedHeld",
+			"Unticked, auto-approval writes none of it: the {0} {0}|plural(one=file,other=files) it holds now, and whatever agents save from now on, keep waiting in Activity's Sandbox card until you press Approve All."), SandboxHeldAtOpen)
+		: LOCTEXT("SandboxNoteUnticked",
+			"Unticked, auto-approval writes none of it: whatever agents save from now on keeps waiting in Activity's Sandbox card until you press Approve All.");
+}
+
 bool SHyperAIStudioAutoApprovalDialog::CanTurnOn() const
 {
 	return !bClosed && !GetChosen().IsEmpty();
@@ -533,7 +549,7 @@ FText SHyperAIStudioAutoApprovalDialog::BuildConfirmation() const
 			Lines.Add(LOCTEXT("ConfirmExternal", "- External effects (can spend money and send data off this computer)"));
 			break;
 		case EHyperAIStudioApprovalCategory::SandboxSaves:
-			Lines.Add(LOCTEXT("ConfirmSandbox", "- Sandbox Mode's held saves (written to the project, your own saves included)"));
+			Lines.Add(LOCTEXT("ConfirmSandboxUnreviewed", "- Sandbox Mode's held saves (written to the project unreviewed: your own saves, and saves by tools that never asked for approval)"));
 			break;
 		default:
 			Lines.Add(LOCTEXT("ConfirmEditsMostly", "- Edits (mostly undoable asset and level changes, and scripts the runner's checks passed)"));
@@ -726,6 +742,11 @@ int32 FHyperAIStudioAutoApprovalTestAccess::GetWaitingChosen(const SHyperAIStudi
 bool FHyperAIStudioAutoApprovalTestAccess::OffersSandboxSaves(const SHyperAIStudioAutoApprovalDialog& Dialog)
 {
 	return Dialog.bOffersSandbox;
+}
+
+FText FHyperAIStudioAutoApprovalTestAccess::GetSandboxNote(const SHyperAIStudioAutoApprovalDialog& Dialog)
+{
+	return Dialog.SandboxNote();
 }
 
 FText FHyperAIStudioAutoApprovalTestAccess::GetConfirmation(const SHyperAIStudioAutoApprovalDialog& Dialog)

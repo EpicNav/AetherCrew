@@ -698,7 +698,7 @@ namespace HyperAIStudio::Sandbox
 		// neither, so the user's own unsaved work is never saved or reloaded for them.
 		if (const TArray<FString> Unsaved = UnsavedPackageNames(); !Unsaved.IsEmpty())
 		{
-			Readiness.WaitsFor = FString::Printf(TEXT("%d %s unsaved changes (%s); closing the sandbox would reload them from disk"),
+			Readiness.WaitsFor = FString::Printf(TEXT("%d %s unsaved changes (%s); closing the sandbox would reload them from disk, and auto-approval never saves for you: save them, or press Approve All, which saves what agents left unsaved first"),
 				Unsaved.Num(), Unsaved.Num() == 1 ? TEXT("asset has") : TEXT("assets have"), *NameList(Unsaved));
 		}
 		return Readiness;

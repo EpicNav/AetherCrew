@@ -126,16 +126,14 @@ namespace HyperAIStudio::Approval::Private
 		}
 	}
 
-	/** The sweep goes ahead, or has nothing left to do: a wait it logged says how it ended. */
-	void EndWait(const int32 Approving)
+	/** The sweep went ahead after Ended, the wait it was in: a wait it logged says how it ended, with what it approved. */
+	void LogWaitEnded(const FWait& Ended, const int32 Approved)
 	{
-		FWait& State = Wait();
-		if (State.Ticks > 0 && State.LastLogged >= 0.0 && Approving > 0)
+		if (Ended.Ticks > 0 && Ended.LastLogged >= 0.0 && Approved > 0)
 		{
-			UE_LOG(LogHyperAIStudioApproval, Display, TEXT("The editor is quiet again after %.1f s; auto-approval approves %d request(s) now."),
-				FPlatformTime::Seconds() - State.Since, Approving);
+			UE_LOG(LogHyperAIStudioApproval, Display, TEXT("The editor is quiet again after %.1f s; auto-approval approved %d request(s)."),
+				FPlatformTime::Seconds() - Ended.Since, Approved);
 		}
-		State = FWait();
 	}
 
 	int32 IndexOf(const FString& OperationId)
@@ -186,6 +184,23 @@ namespace HyperAIStudio::Approval::Private
 			&& FHyperAIStudioAutoApproval::Covers(*Item.Pending.Category, Item.Sequence, Item.Pending.OperationId);
 	}
 
+	const SWidget* PlayingGameViewport()
+	{
+		// Simulate In Editor, and a play session ejected to it, run in the level viewport the user navigates and drags in:
+		// the same widget is the registered game viewport then, but a capture there is the user's.
+		if (!GEditor || !GEditor->PlayWorld || GEditor->bIsSimulatingInEditor || GEditor->IsSimulateInEditorInProgress()
+			|| !FSlateApplication::IsInitialized())
+		{
+			return nullptr;
+		}
+		return FSlateApplication::Get().GetGameViewport().Get();
+	}
+
+	FString DescribeCaptor(const SWidget& Captor, const SWidget* PlayingGame)
+	{
+		return &Captor == PlayingGame ? FString() : Captor.GetTypeAsString();
+	}
+
 	FBusy DescribeBusy()
 	{
 		FBusy Busy;
@@ -199,8 +214,7 @@ namespace HyperAIStudio::Approval::Private
 		{
 			// A game that holds the mouse while Play In Editor runs is no drag, and holds it for the whole session: it
 			// does not count, or nothing would be approved until play stopped. Any other capture is named.
-			const TSharedPtr<SViewport> GameViewport = FSlateApplication::Get().GetGameViewport();
-			const SWidget* Game = GEditor && GEditor->PlayWorld ? static_cast<const SWidget*>(GameViewport.Get()) : nullptr;
+			const SWidget* Game = PlayingGameViewport();
 			FString Captor;
 			FSlateApplication::Get().ForEachUser([&Captor, Game](FSlateUser& User)
 			{
@@ -220,9 +234,9 @@ namespace HyperAIStudio::Approval::Private
 						Captor = FString::Printf(TEXT("a widget of user %d"), User.GetUserIndex());
 						break;
 					}
-					if (&Path.GetLastWidget().Get() != Game)
+					Captor = DescribeCaptor(Path.GetLastWidget().Get(), Game);
+					if (!Captor.IsEmpty())
 					{
-						Captor = Path.GetLastWidget()->GetTypeAsString();
 						break;
 					}
 				}
@@ -361,20 +375,25 @@ namespace HyperAIStudio::Approval::Private
 		const FHeldApproval Item = Held()[Index];
 		Held().RemoveAt(Index);
 		RecordApproval(OperationId, Approver, AutoCategory);
-		// A request that was waiting when auto-approval began was approved because the user chose it in its dialog.
-		const bool bChosenWaiting = AutoCategory.IsSet() && FHyperAIStudioAutoApproval::IsFromBeforeStart(Item.Sequence);
+		// A request that was waiting when auto-approval began was approved because the user chose it in its dialog, or
+		// because the auto-approval this one replaced had approved it before it started.
+		const bool bFromBefore = AutoCategory.IsSet() && FHyperAIStudioAutoApproval::IsFromBeforeStart(Item.Sequence);
+		const bool bCarried = bFromBefore && FHyperAIStudioAutoApproval::WasCarriedOver(OperationId);
+		const TCHAR* const FromBefore = !bFromBefore ? TEXT("")
+			: bCarried ? TEXT(" (the auto-approval this one replaced had approved it before it started)")
+			: TEXT(" (it was waiting when auto-approval was turned on, and was chosen in its dialog)");
 		const FString Approved = AutoCategory.IsSet()
-			? FString::Printf(TEXT("Auto-approved as %s%s; "), ::LexToString(*AutoCategory),
-				bChosenWaiting ? TEXT(" (it was waiting when auto-approval was turned on, and was chosen in its dialog)") : TEXT(""))
+			? FString::Printf(TEXT("Auto-approved as %s%s; "), ::LexToString(*AutoCategory), FromBefore)
 			: Approver == EHyperAIStudioApprover::AgentJob ? FString(TEXT("Approved for a running agent job; "))
 			: FString(TEXT("Approved; "));
-		auto LogApproval = [&Item, &OperationId, &AutoCategory, Approver, bChosenWaiting]()
+		auto LogApproval = [&Item, &OperationId, &AutoCategory, Approver, bFromBefore, bCarried]()
 		{
 			if (AutoCategory.IsSet())
 			{
 				UE_LOG(LogHyperAIStudioApproval, Display, TEXT("Auto-approved %s on %s (%s) as %s%s."),
 					*Item.Pending.Summary.ToolName, *Item.Pending.Summary.EffectTarget, *OperationId, ::LexToString(*AutoCategory),
-					bChosenWaiting ? TEXT(", which was waiting when auto-approval was turned on") : TEXT(""));
+					!bFromBefore ? TEXT("") : bCarried ? TEXT(", which the auto-approval it replaced had approved before it started")
+					: TEXT(", which was waiting when auto-approval was turned on"));
 			}
 			else
 			{
@@ -452,14 +471,26 @@ namespace HyperAIStudio::Approval::Private
 	{
 		FHyperAIStudioAutoApproval::EndIfOver();
 		auto IsScheduled = [](const FHeldApproval& Item) { return Item.bScheduled; };
+		// What it no longer covers waits for a click from here on, before anything is counted or logged as about to be
+		// approved: an auto-approval that ended while the editor was busy approves nothing when it is quiet again.
+		bool bUnscheduled = false;
 		int32 ScheduledCount = 0;
-		for (const FHeldApproval& Item : Held())
+		for (FHeldApproval& Item : Held())
 		{
+			if (Item.bScheduled && !IsCovered(Item))
+			{
+				Item.bScheduled = false;
+				bUnscheduled = true;
+			}
 			ScheduledCount += Item.bScheduled ? 1 : 0;
+		}
+		if (bUnscheduled)
+		{
+			FHyperAIStudioApprovalGate::OnChanged().Broadcast();
 		}
 		if (ScheduledCount == 0)
 		{
-			EndWait(0);
+			Wait() = FWait();
 			return false;
 		}
 		if (const FBusy Busy = DescribeBusy(); Busy.IsSet())
@@ -467,7 +498,9 @@ namespace HyperAIStudio::Approval::Private
 			NoteWait(Busy, ScheduledCount);
 			return true;
 		}
-		EndWait(ScheduledCount);
+		// Cleared before anything runs: an approved action may ask what an approval waits for.
+		const FWait Ended = Wait();
+		Wait() = FWait();
 		TArray<TPair<uint64, FString>> Scheduled;
 		for (const FHeldApproval& Item : Held())
 		{
@@ -477,10 +510,12 @@ namespace HyperAIStudio::Approval::Private
 			}
 		}
 		Scheduled.Sort([](const TPair<uint64, FString>& A, const TPair<uint64, FString>& B) { return A.Key < B.Key; });
-		bool bUnscheduled = false;
+		bUnscheduled = false;
+		int32 Approved = 0;
 		for (const TPair<uint64, FString>& Next : Scheduled)
 		{
-			// An approved action runs in place and may have changed what is held, so each one is looked up again.
+			// An approved action runs in place and may have changed what is held, so each one is looked up again; an
+			// approval may also have reached a limit, which ends the auto-approval for the rest.
 			const int32 Index = IndexOf(Next.Value);
 			if (Index == INDEX_NONE || !Held()[Index].bScheduled)
 			{
@@ -495,6 +530,7 @@ namespace HyperAIStudio::Approval::Private
 			const EHyperAIStudioApprovalCategory Category = *Held()[Index].Pending.Category;
 			FHyperAIStudioAutoApproval::BeginApproval(Next.Value);
 			FString Error;
+			++Approved;
 			if (ApproveHeld(Next.Value, EHyperAIStudioApprover::AutoApproval, Category, Error))
 			{
 				FHyperAIStudioAutoApproval::NoteApproved(Category);
@@ -504,6 +540,7 @@ namespace HyperAIStudio::Approval::Private
 				UE_LOG(LogHyperAIStudioApproval, Warning, TEXT("Auto-approved %s, but it could not start: %s"), *Next.Value, *Error);
 			}
 		}
+		LogWaitEnded(Ended, Approved);
 		if (bUnscheduled)
 		{
 			FHyperAIStudioApprovalGate::OnChanged().Broadcast();
@@ -522,7 +559,7 @@ namespace HyperAIStudio::Approval::Private
 		return bMore;
 	}
 
-	int32 ReturnUnstarted(const uint64 EndedActivation)
+	int32 ReturnUnstarted(const uint64 EndedActivation, TArray<FString>* OutReturned)
 	{
 		TArray<FAwaitingLane> Awaiting = MoveTemp(AwaitingLane());
 		AwaitingLane().Reset();
@@ -546,6 +583,10 @@ namespace HyperAIStudio::Approval::Private
 			Activity.Detail = TEXT("Auto-approval ended before this reached the edit lane; nothing ran. It waits for your approval again.");
 			UE_LOG(LogHyperAIStudioApproval, Display, TEXT("%s (%s) waits for a click again: the auto-approval that approved it ended before it started."),
 				*Item.Pending.Summary.ToolName, *Item.Pending.OperationId);
+			if (OutReturned)
+			{
+				OutReturned->Add(Item.Pending.OperationId);
+			}
 			Held().Add(MoveTemp(Item));
 			FHyperAIStudioAgentActivityLog::Record(MoveTemp(Activity));
 			++Returned;
@@ -568,8 +609,11 @@ namespace HyperAIStudio::Approval::Private
 			}
 			Item.bScheduled = true;
 			++Scheduled;
-			UE_LOG(LogHyperAIStudioApproval, Display, TEXT("Auto-approval will approve %s on %s (%s) as %s, which was waiting when it was turned on and was chosen in its dialog."),
-				*Item.Pending.Summary.ToolName, *Item.Pending.Summary.EffectTarget, *Item.Pending.OperationId, *CategoryForLog(Item.Pending.Category));
+			UE_LOG(LogHyperAIStudioApproval, Display, TEXT("Auto-approval will approve %s on %s (%s) as %s, %s."),
+				*Item.Pending.Summary.ToolName, *Item.Pending.Summary.EffectTarget, *Item.Pending.OperationId, *CategoryForLog(Item.Pending.Category),
+				FHyperAIStudioAutoApproval::WasCarriedOver(Item.Pending.OperationId)
+					? TEXT("which the auto-approval it replaced had approved before it started")
+					: TEXT("which was waiting when it was turned on and was chosen in its dialog"));
 		}
 		if (Scheduled > 0)
 		{

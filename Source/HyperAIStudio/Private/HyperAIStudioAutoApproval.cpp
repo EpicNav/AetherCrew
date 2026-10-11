@@ -39,6 +39,11 @@ namespace HyperAIStudio::AutoApproval::Private
 	constexpr double SandboxCheckSeconds = 2.0;
 	/** How often a sandbox write that keeps waiting says so again in the log; a new reason is logged at once. */
 	constexpr double SandboxWaitLogSeconds = 30.0;
+	/**
+	 * How long a failed sandbox write waits before it is tried again while the held files stay as they were: what made
+	 * it fail (a project file another program holds, a checkout) is fixed outside the sandbox, where nothing reports it.
+	 */
+	constexpr double SandboxRetrySeconds = 60.0;
 
 	struct FActivation
 	{
@@ -52,10 +57,17 @@ namespace HyperAIStudio::AutoApproval::Private
 		uint64 FirstSequence = 0;
 		/** Requests waiting as its dialog opened that the user chose there to approve as well. */
 		TSet<FString> ChosenWaiting;
+		/**
+		 * Requests the activation it replaced had approved that went back to waiting because they had not started: the
+		 * user approved them by turning that one on, and its dialog never listed them, so this one approves them again.
+		 */
+		TSet<FString> CarriedOver;
 		/** The spend settings as the user confirmed it under; it ends if they change. */
 		FString SpendSettings;
 		int32 Approved = 0;
 		int32 ExternalApproved = 0;
+		/** Writes of Sandbox Mode's held saves, each also counted in Approved. */
+		int32 SandboxWrites = 0;
 		int32 ConsecutiveFailures = 0;
 		/** Operations it approved whose outcome is not in yet, oldest first. */
 		TArray<FString> Approving;
@@ -74,6 +86,13 @@ namespace HyperAIStudio::AutoApproval::Private
 	uint64& LastActivationId()
 	{
 		static uint64 Value = 0;
+		return Value;
+	}
+
+	/** What the last Stop sent back to wait for a click: plans it approved that had not started. */
+	TArray<FString>& ReturnedByStop()
+	{
+		static TArray<FString> Value;
 		return Value;
 	}
 
@@ -311,8 +330,9 @@ namespace HyperAIStudio::AutoApproval::Private
 		{
 			return ENotCovered::Failures;
 		}
-		// What already waited as it began is covered only if the user chose it in its dialog.
-		if (Sequence < Active->FirstSequence && !Active->ChosenWaiting.Contains(OperationId))
+		// What already waited as it began is covered only if the user chose it in its dialog, or the activation it replaced
+		// had approved it.
+		if (Sequence < Active->FirstSequence && !Active->ChosenWaiting.Contains(OperationId) && !Active->CarriedOver.Contains(OperationId))
 		{
 			return ENotCovered::WaitingBefore;
 		}
@@ -335,8 +355,12 @@ namespace HyperAIStudio::AutoApproval::Private
 		double LastLogged = -1.0;
 		/** It looks again no sooner than this, on the monotonic clock. */
 		double NextCheck = 0.0;
-		/** The held files a write failed on: it is not tried again until they change. */
+		/** The held files left after a write failed: it is tried again when they change, or at RetryAt. */
 		FString FailedOn;
+		/** When a failed write is tried again with the same held files, on Now()'s clock. */
+		double RetryAt = 0.0;
+		/** The log said once, for this activation, that it does not write what the sandbox holds. */
+		bool bToldNotCovered = false;
 	};
 
 	FSandboxWait& SandboxWait()
@@ -373,13 +397,9 @@ namespace HyperAIStudio::AutoApproval::Private
 		Wait.LastLogged = -1.0;
 	}
 
-	/** Whether the current activation may write the sandbox named SandboxName; a test's only one it opened itself. */
-	bool MayWriteSandbox(const FActivation& Active, const FString& SandboxName)
+	/** Whether the current activation reaches the sandbox named SandboxName at all; a test's only one it opened itself. */
+	bool ReachesSandbox(const FActivation& Active, const FString& SandboxName)
 	{
-		if (!(Active.CategoryMask & Bit(EHyperAIStudioApprovalCategory::SandboxSaves)))
-		{
-			return false;
-		}
 #if WITH_DEV_AUTOMATION_TESTS
 		if (Active.OnlyOperations.IsSet())
 		{
@@ -389,10 +409,40 @@ namespace HyperAIStudio::AutoApproval::Private
 		return true;
 	}
 
+	/** Whether the current activation may write the sandbox named SandboxName: the user ticked its held saves. */
+	bool MayWriteSandbox(const FActivation& Active, const FString& SandboxName)
+	{
+		return (Active.CategoryMask & Bit(EHyperAIStudioApprovalCategory::SandboxSaves)) && ReachesSandbox(Active, SandboxName);
+	}
+
+	/** HyperAI's own sandbox is open: its name; unset otherwise (off, waiting to open, or someone else's). */
+	TOptional<FString> OurOpenSandbox()
+	{
+		HyperAIStudio::Sandbox::FStatus Status = HyperAIStudio::Sandbox::GetStatus(/*bWithChanges=*/false);
+		return Status.State == HyperAIStudio::Sandbox::EState::Active ? TOptional<FString>(MoveTemp(Status.SandboxName)) : TOptional<FString>();
+	}
+
+	/** The held files as "kind path" lines, as CheckApproveAll lists them. */
+	FString HeldNow()
+	{
+		TArray<FString> Files;
+		for (const HyperAIStudio::Sandbox::FChange& Change : HyperAIStudio::Sandbox::GetStatus().Changes)
+		{
+			Files.Add(Change.Kind + TEXT(" ") + Change.Path);
+		}
+		return FString::Join(Files, TEXT("\n"));
+	}
+
 	/**
 	 * When the user chose Sandbox Mode's held saves: writes what the sandbox holds to the project, as Approve All does,
 	 * at a quiet moment. It never saves or reloads the user's unsaved work: it waits until nothing is unsaved, Play In
 	 * Editor is not running and no agent edit runs. Removals delete project files, so they need Destructive too.
+	 *
+	 * Held saves are not only HyperAI's gated edits: whatever saves in the editor lands there, including edits from
+	 * tools that never ask HyperAI for approval. In the reported session (10 Oct 2026) agents changed materials with
+	 * editor Python sent through another MCP server, the Nwiro Integration Kit's execute_python on port 5353, so
+	 * nothing reached HyperAI's gate and auto-approval had nothing to approve; Sandbox Mode was the only layer that
+	 * caught those edits, and the dialog says that ticking this writes them unreviewed.
 	 */
 	void SweepSandbox()
 	{
@@ -401,9 +451,25 @@ namespace HyperAIStudio::AutoApproval::Private
 		FSandboxWait& Wait = SandboxWait();
 		{
 			const TOptional<FActivation>& Active = Current();
-			if (!Active.IsSet() || !(Active->CategoryMask & Bit(ECategory::SandboxSaves)))
+			if (!Active.IsSet())
 			{
 				Wait = FSandboxWait();
+				return;
+			}
+			if (!(Active->CategoryMask & Bit(ECategory::SandboxSaves)))
+			{
+				// Turned on without Sandbox Mode's held saves, so what the sandbox holds keeps waiting for Approve All:
+				// said once per activation, or the Sandbox card's waiting files would read as auto-approval not working.
+				if (!Wait.bToldNotCovered && Sandbox::GetHeldCount() > 0)
+				{
+					if (const TOptional<FString> Name = OurOpenSandbox(); Name.IsSet() && ReachesSandbox(*Active, *Name))
+					{
+						Wait.bToldNotCovered = true;
+						UE_LOG(LogHyperAIStudioAutoApproval, Display,
+							TEXT("Auto-approval is on but does not write the %d file(s) Sandbox Mode holds: Sandbox Mode's held saves was not ticked in its dialog. They wait for Approve All in Activity, saves by tools that never asked for approval included; turn auto-approval on again with that ticked to have them written."),
+							Sandbox::GetHeldCount());
+					}
+				}
 				return;
 			}
 			if (Active->Approved >= FHyperAIStudioAutoApproval::MaxApprovals
@@ -430,7 +496,9 @@ namespace HyperAIStudio::AutoApproval::Private
 			return;
 		}
 		const FString Held = FString::Join(Ready.Files, TEXT("\n"));
-		if (!Wait.FailedOn.IsEmpty() && Wait.FailedOn == Held)
+		// After a failed write it waits: until the held files change, or for its back-off, since what made it fail is
+		// usually fixed outside the sandbox (a project file another program holds, a checkout), where nothing reports it.
+		if (!Wait.FailedOn.IsEmpty() && Wait.FailedOn == Held && Now() < Wait.RetryAt)
 		{
 			return;
 		}
@@ -461,29 +529,40 @@ namespace HyperAIStudio::AutoApproval::Private
 		Entry.ToolName = TEXT("Sandbox Mode");
 		Entry.AutoApprovedAs = ECategory::SandboxSaves;
 		FString Error;
-		// The same call as Approve All in Activity; only the activity entry and the log say nobody clicked.
+		// The same call as Approve All in Activity; only the activity entry and the log say nobody clicked. Each write is
+		// one of its approvals, and a failed one one of its failures in a row, as the dialog says.
 		if (Sandbox::ApproveAll(Error))
 		{
 			ClearSandboxWait();
+			const int32 Write = Current().IsSet() ? ++Current()->SandboxWrites : 0;
+			const int32 Approval = Current().IsSet() ? Current()->Approved + 1 : 0;
 			Entry.Kind = EHyperAIStudioActivityKind::ApprovalApproved;
 			Entry.StatusCode = TEXT("approved");
-			Entry.Detail = FString::Printf(TEXT("Auto-approved as sandbox_saves; wrote the %d file(s) Sandbox Mode held to the project: %s."), Files, *Listed);
-			UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Auto-approved Sandbox Mode's held saves: wrote %d file(s) to the project (%s)."), Files, *Listed);
+			Entry.Detail = FString::Printf(TEXT("Auto-approved as sandbox_saves; wrote the %d file(s) Sandbox Mode held to the project: %s. It is approval %d of %d."),
+				Files, *Listed, Approval, FHyperAIStudioAutoApproval::MaxApprovals);
+			UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Auto-approved Sandbox Mode's held saves: wrote %d file(s) to the project (%s); write %d, approval %d of %d."),
+				Files, *Listed, Write, Approval, FHyperAIStudioAutoApproval::MaxApprovals);
 			FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
 			if (Current().IsSet())
 			{
 				Current()->ConsecutiveFailures = 0;
 			}
+			Wait.FailedOn.Reset();
 			FHyperAIStudioAutoApproval::NoteApproved(ECategory::SandboxSaves);
 			return;
 		}
-		Wait.FailedOn = Held;
+		// What is left held after the failure: a write that wrote some files changes the list, which is no new save.
+		Wait.FailedOn = HeldNow();
+		Wait.RetryAt = Now() + SandboxRetrySeconds;
+		const int32 Failures = Current().IsSet() ? Current()->ConsecutiveFailures + 1 : 0;
 		Entry.Kind = EHyperAIStudioActivityKind::Failed;
 		Entry.StatusCode = TEXT("sandbox_write_failed");
-		Entry.Detail = FString::Printf(TEXT("Auto-approved as sandbox_saves, but writing the %d held file(s) failed: %s"), Files, *Error);
-		UE_LOG(LogHyperAIStudioAutoApproval, Warning, TEXT("Auto-approval could not write the %d file(s) Sandbox Mode holds: %s It tries again when they change."), Files, *Error);
-		NoteSandboxWait(FString::Printf(TEXT("writing them failed (%s); it tries again when the held files change"), *Error),
-			FText::Format(LOCTEXT("SandboxWaitFailed", "writing them failed ({0}); it tries again when the held files change"), FText::FromString(Error)),
+		Entry.Detail = FString::Printf(TEXT("Auto-approved as sandbox_saves, but writing the %d held file(s) failed: %s It is tried again in %.0f s, or when the held files change; failure %d of %d in a row."),
+			Files, *Error, SandboxRetrySeconds, Failures, FHyperAIStudioAutoApproval::MaxConsecutiveFailures);
+		UE_LOG(LogHyperAIStudioAutoApproval, Warning, TEXT("Auto-approval could not write the %d file(s) Sandbox Mode holds: %s It tries again in %.0f s, or when they change (failure %d of %d in a row)."),
+			Files, *Error, SandboxRetrySeconds, Failures, FHyperAIStudioAutoApproval::MaxConsecutiveFailures);
+		NoteSandboxWait(FString::Printf(TEXT("writing them failed (%s); it tries again in a minute, or when the held files change"), *Error),
+			FText::Format(LOCTEXT("SandboxWaitFailedRetry", "writing them failed ({0}); it tries again in a minute, or when the held files change"), FText::FromString(Error)),
 			Files);
 		FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
 		if (Current().IsSet() && ++Current()->ConsecutiveFailures >= FHyperAIStudioAutoApproval::MaxConsecutiveFailures)
@@ -562,6 +641,7 @@ FHyperAIStudioAutoApprovalStatus FHyperAIStudioAutoApproval::GetStatus()
 	Status.Approved = Active->Approved;
 	Status.ExternalEffectsApproved = Active->ExternalApproved;
 	Status.ChosenWaiting = Active->ChosenWaiting.Num();
+	Status.SandboxWrites = Active->SandboxWrites;
 	return Status;
 }
 
@@ -608,16 +688,45 @@ bool FHyperAIStudioAutoApproval::IsFromBeforeStart(const uint64 Sequence)
 	return Active.IsSet() && Sequence < Active->FirstSequence;
 }
 
+bool FHyperAIStudioAutoApproval::WasCarriedOver(const FString& OperationId)
+{
+	const TOptional<HyperAIStudio::AutoApproval::Private::FActivation>& Active = HyperAIStudio::AutoApproval::Private::Current();
+	return Active.IsSet() && Active->CarriedOver.Contains(OperationId);
+}
+
 bool FHyperAIStudioAutoApproval::CoversSandboxSaves()
 {
 	using namespace HyperAIStudio::AutoApproval::Private;
 	const TOptional<FActivation>& Active = Current();
-	return Active.IsSet() && MayWriteSandbox(*Active, HyperAIStudio::Sandbox::GetStatus(/*bWithChanges=*/false).SandboxName);
+	if (!Active.IsSet())
+	{
+		return false;
+	}
+	// It writes only HyperAI's own open sandbox: not one still waiting to open, and never someone else's.
+	const TOptional<FString> Name = OurOpenSandbox();
+	return Name.IsSet() && MayWriteSandbox(*Active, *Name);
+}
+
+bool FHyperAIStudioAutoApproval::LeavesSandboxSavesWaiting()
+{
+	using namespace HyperAIStudio::AutoApproval::Private;
+	const TOptional<FActivation>& Active = Current();
+	if (!Active.IsSet() || (Active->CategoryMask & Bit(EHyperAIStudioApprovalCategory::SandboxSaves)))
+	{
+		return false;
+	}
+	const TOptional<FString> Name = OurOpenSandbox();
+	return Name.IsSet() && ReachesSandbox(*Active, *Name);
 }
 
 FText FHyperAIStudioAutoApproval::DescribeSandboxWait()
 {
 	using namespace HyperAIStudio::AutoApproval::Private;
+	if (LeavesSandboxSavesWaiting())
+	{
+		return LOCTEXT("SandboxNotCovered",
+			"Auto-approval is on but does not write these: Sandbox Mode's held saves was not ticked in its dialog. Press Approve All, or turn auto-approval on again with that ticked.");
+	}
 	if (!CoversSandboxSaves())
 	{
 		return FText::GetEmpty();
@@ -725,27 +834,43 @@ bool FHyperAIStudioAutoApproval::Activate(
 		return false;
 	}
 #endif
-	if (Current().IsSet())
-	{
-		Stop(EHyperAIStudioAutoApprovalEnd::Replaced);
-	}
-
 	FActivation Activation;
-	Activation.Id = ++LastActivationId();
 	for (const EHyperAIStudioApprovalCategory Category : Categories)
 	{
 		Activation.CategoryMask |= Bit(Category);
 	}
+#if WITH_DEV_AUTOMATION_TESTS
+	Activation.OnlyOperations = MoveTemp(TestScope);
+#endif
+	const bool bTest = IsTestScoped(Activation);
+	if (Current().IsSet())
+	{
+		// What the activation it replaces approved that had not started goes back to waiting as it stops. Its dialog
+		// listed only what was held then, so the user never chose these there; they approved them by turning the one
+		// before on, so those in this one's categories are approved again. A test's are never carried into the user's.
+		const bool bCarry = !IsTestScoped(*Current()) || bTest;
+		Stop(EHyperAIStudioAutoApprovalEnd::Replaced);
+		if (bCarry && !ReturnedByStop().IsEmpty())
+		{
+			for (const FHyperAIStudioPendingApproval& Pending : FHyperAIStudioApprovalGate::GetPending())
+			{
+				if (ReturnedByStop().Contains(Pending.OperationId) && Pending.Category.IsSet() && (Activation.CategoryMask & Bit(*Pending.Category)))
+				{
+					Activation.CarriedOver.Add(Pending.OperationId);
+				}
+			}
+		}
+		ReturnedByStop().Reset();
+	}
+
+	Activation.Id = ++LastActivationId();
 	Activation.Duration = Duration;
 	const double Seconds = DurationSeconds(Duration);
 	Activation.EndsAt = Seconds > 0.0 ? Now() + Seconds : 0.0;
 	Activation.FirstSequence = HyperAIStudio::Approval::Private::PeekNextSequence();
 	Activation.ChosenWaiting = ChosenWaiting;
 	Activation.SpendSettings = SpendSettings();
-#if WITH_DEV_AUTOMATION_TESTS
-	Activation.OnlyOperations = MoveTemp(TestScope);
-#endif
-	const bool bTest = IsTestScoped(Activation);
+	const TSet<FString> CarriedOver = Activation.CarriedOver;
 	Current() = MoveTemp(Activation);
 	SandboxWait() = FSandboxWait();
 	ExpiryHandle() = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateStatic(&TickExpiry), 1.0f);
@@ -757,10 +882,29 @@ bool FHyperAIStudioAutoApproval::Activate(
 		Names.Add(EnglishName(Category));
 	}
 	const FString Covered = FString::Join(Names, TEXT(", "));
-	// The requests already waiting that the user chose in the dialog are approved on the next quiet tick, as new ones are.
-	const int32 Chosen = HyperAIStudio::Approval::Private::ScheduleCovered();
-	const FString AlsoWaiting = Chosen > 0
+	// The requests already waiting that the user chose in the dialog, and those carried over from the activation this
+	// replaced, are approved on the next quiet tick, as new ones are.
+	const int32 Scheduled = HyperAIStudio::Approval::Private::ScheduleCovered();
+	int32 Carried = 0;
+	for (const FString& Id : CarriedOver)
+	{
+		Carried += FHyperAIStudioApprovalGate::IsAutoApproving(Id) ? 1 : 0;
+	}
+	const int32 Chosen = Scheduled - Carried;
+	FString AlsoWaiting = Chosen > 0
 		? FString::Printf(TEXT("; it also approves %d request(s) that were waiting, as chosen in its dialog"), Chosen) : FString();
+	if (Carried > 0)
+	{
+		AlsoWaiting += FString::Printf(TEXT("; it approves again %d request(s) the auto-approval it replaced had approved before they started"), Carried);
+	}
+	// Whether Sandbox Mode's Approve All, the other approval waiting in Activity, is covered too.
+	if (HyperAIStudio::Sandbox::GetStatus(/*bWithChanges=*/false).State != HyperAIStudio::Sandbox::EState::Off)
+	{
+		const int32 HeldFiles = HyperAIStudio::Sandbox::GetHeldCount();
+		AlsoWaiting += (Current()->CategoryMask & Bit(EHyperAIStudioApprovalCategory::SandboxSaves))
+			? FString::Printf(TEXT("; Sandbox Mode is on, holding %d file(s), and its held saves are covered: they are written to the project at a quiet moment"), HeldFiles)
+			: FString::Printf(TEXT("; Sandbox Mode is on, holding %d file(s), and its held saves are NOT covered (not ticked in its dialog): they wait for Approve All in Activity"), HeldFiles);
+	}
 	if (bTest)
 	{
 		// What a test turns on covers only its own requests, so it is recorded as such and tells the user nothing.
@@ -809,7 +953,8 @@ void FHyperAIStudioAutoApproval::Stop(const EHyperAIStudioAutoApprovalEnd Why)
 
 	// Held requests are left as they are: they wait for a click again. So does what it approved that is still queued
 	// behind other edits, with its grant not yet issued; work that has started goes on, as after a click.
-	const int32 Returned = HyperAIStudio::Approval::Private::ReturnUnstarted(Ended);
+	ReturnedByStop().Reset();
+	const int32 Returned = HyperAIStudio::Approval::Private::ReturnUnstarted(Ended, &ReturnedByStop());
 	FString Reason = EndReason(Why);
 	if (bTest && Why != EHyperAIStudioAutoApprovalEnd::TestFinished)
 	{
@@ -817,7 +962,9 @@ void FHyperAIStudioAutoApproval::Stop(const EHyperAIStudioAutoApprovalEnd Why)
 	}
 	if (Returned > 0)
 	{
-		Reason += FString::Printf(TEXT("; %d approved request(s) that had not started wait for a click again"), Returned);
+		Reason += Why == EHyperAIStudioAutoApprovalEnd::Replaced
+			? FString::Printf(TEXT("; %d approved request(s) that had not started went back to waiting, and the new auto-approval approves again those in its categories"), Returned)
+			: FString::Printf(TEXT("; %d approved request(s) that had not started wait for a click again"), Returned);
 	}
 	UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Auto-approval OFF: %s."), *Reason);
 	RecordAudit(TEXT("turned off"), TEXT("auto_approval_off"), Reason);
@@ -937,9 +1084,17 @@ FText FHyperAIStudioAutoApproval::DescribeBanner()
 
 FText FHyperAIStudioAutoApproval::DescribeBannerTooltip()
 {
+	const FHyperAIStudioAutoApprovalStatus Status = GetStatus();
+	if (Status.Categories.Contains(EHyperAIStudioApprovalCategory::SandboxSaves))
+	{
+		// Each write of the held saves is one of the approvals, so a session of many saves reaches the limit sooner.
+		return FText::Format(LOCTEXT("BannerTooltipSandbox",
+			"Agents' requests in these categories run without asking you, from any agent or MCP client connected to this editor. {0} approved so far, {2} of them writes of Sandbox Mode's held saves; it turns itself off after {1}. Requests in other categories still wait for you."),
+			Status.Approved, MaxApprovals, Status.SandboxWrites);
+	}
 	return FText::Format(LOCTEXT("BannerTooltip",
 		"Agents' requests in these categories run without asking you, from any agent or MCP client connected to this editor. {0} approved so far; it turns itself off after {1}. Requests in other categories still wait for you."),
-		GetStatus().Approved, MaxApprovals);
+		Status.Approved, MaxApprovals);
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -990,6 +1145,11 @@ void FHyperAIStudioAutoApprovalTestAccess::PumpSandbox()
 {
 	HyperAIStudio::AutoApproval::Private::SandboxWait().NextCheck = 0.0;
 	HyperAIStudio::AutoApproval::Private::SweepSandbox();
+}
+
+double FHyperAIStudioAutoApprovalTestAccess::GetSandboxRetrySeconds()
+{
+	return HyperAIStudio::AutoApproval::Private::SandboxRetrySeconds;
 }
 
 bool FHyperAIStudioAutoApprovalTestAccess::TickExpiry()

@@ -45,6 +45,8 @@ struct FHyperAIStudioAutoApprovalStatus
 	int32 ExternalEffectsApproved = 0;
 	/** Requests that were waiting when it began which the user chose in its dialog to approve too. */
 	int32 ChosenWaiting = 0;
+	/** Writes of Sandbox Mode's held saves; each is also one of Approved. */
+	int32 SandboxWrites = 0;
 };
 
 /**
@@ -74,16 +76,35 @@ public:
 	static bool Covers(EHyperAIStudioApprovalCategory Category, uint64 Sequence, const FString& OperationId);
 	/** Why Covers says no, as a clause in the log's English ("destructive is not one of the categories it covers"); empty when it says yes. */
 	static FString DescribeWhyNotCovered(const TOptional<EHyperAIStudioApprovalCategory>& Category, uint64 Sequence, const FString& OperationId);
-	/** True for a request held before the current auto-approval began: it covers one only if the user chose it in its dialog. */
+	/**
+	 * True for a request held before the current auto-approval began: it covers one only if the user chose it in its
+	 * dialog, or if the auto-approval it replaced had approved it before it started (WasCarriedOver).
+	 */
 	static bool IsFromBeforeStart(uint64 Sequence);
+	/**
+	 * The auto-approval the current one replaced had approved this request, which went back to waiting because it had not
+	 * started; the current one approves it again if its categories cover it.
+	 */
+	static bool WasCarriedOver(const FString& OperationId);
 	/**
 	 * Turns off an activation whose time ran out, or whose spend settings (the cap, the external services, the image
 	 * models) changed since it started; the gate calls it before each approval decision.
 	 */
 	static void EndIfOver();
-	/** The user chose Sandbox Mode's held saves in its dialog: what the sandbox holds is written at a quiet moment. */
+	/**
+	 * The user chose Sandbox Mode's held saves in its dialog and HyperAI's own sandbox is open: what it holds is written
+	 * at a quiet moment. False while the sandbox waits to open or someone else's is active, where nothing is written.
+	 */
 	static bool CoversSandboxSaves();
-	/** For Sandbox Mode's card in Activity while it covers the held saves: when they are written, or what that waits for. */
+	/**
+	 * It is on and could reach HyperAI's open sandbox, but Sandbox Mode's held saves was not ticked in its dialog, so
+	 * what the sandbox holds keeps waiting for Approve All.
+	 */
+	static bool LeavesSandboxSavesWaiting();
+	/**
+	 * For Sandbox Mode's card in Activity while it is on: when the held saves are written or what that waits for, or that
+	 * it does not write them. Empty while it says nothing about the sandbox.
+	 */
 	static FText DescribeSandboxWait();
 	/** The gate is about to approve OperationId for it; its outcome counts toward the failure guard. */
 	static void BeginApproval(const FString& OperationId);
@@ -167,10 +188,14 @@ struct FHyperAIStudioAutoApprovalTestAccess
 	static int32 GetWaitingChosen(const SHyperAIStudioAutoApprovalDialog& Dialog);
 	/** Whether the dialog offers Sandbox Mode's held saves (only while Sandbox Mode is on). */
 	static bool OffersSandboxSaves(const SHyperAIStudioAutoApprovalDialog& Dialog);
+	/** The note under that row: what happens to what Sandbox Mode holds, ticked or not. */
+	static FText GetSandboxNote(const SHyperAIStudioAutoApprovalDialog& Dialog);
 	/** What the native confirmation would say. */
 	static FText GetConfirmation(const SHyperAIStudioAutoApprovalDialog& Dialog);
 	/** One pass of the sandbox sweep the one-second ticker runs, without waiting for its two-second spacing. */
 	static void PumpSandbox();
+	/** How long a failed sandbox write waits before it is tried again while the held files stay as they were. */
+	static double GetSandboxRetrySeconds();
 	static int32 GetNativeConfirmations(const SHyperAIStudioAutoApprovalDialog& Dialog);
 	static void AdvanceClock(double Seconds);
 	/** A test's activation off, with the clock back: what module startup sees. The user's own activation is left alone. */

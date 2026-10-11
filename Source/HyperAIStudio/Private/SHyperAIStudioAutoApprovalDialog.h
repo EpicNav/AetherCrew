@@ -42,6 +42,8 @@ private:
 	/** Whether a request waiting as it opened is in a ticked category. */
 	bool IsCoveredByTicks(const FHyperAIStudioPendingApproval& Pending) const;
 	bool CanTurnOn() const;
+	/** Under Sandbox Mode's held saves: what happens to what the sandbox holds, ticked or not. */
+	FText SandboxNote() const;
 	FReply OnTurnOnClicked();
 	FReply OnCancelClicked();
 	void Close();
