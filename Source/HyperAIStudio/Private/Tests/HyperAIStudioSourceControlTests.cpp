@@ -156,6 +156,7 @@ bool FHyperAIStudioSourceControlLoreTest::RunTest(const FString& Parameters)
 	const FHyperAISourceControlStatusReport Status = UHyperAIStudioSourceControlToolset::hyper_source_control_status(StatusRequest);
 	TestTrue(TEXT("Status names the workspace and the agent's files, with what lore status says"), Status.Backend.StartsWith(TEXT("lore:"))
 		&& Status.Files.Num() == 2 && Status.LoreStatus.Contains(TEXT("On branch main")));
+	TestTrue(TEXT("and that the repository is on a server"), Status.Lore.Mode == TEXT("remote") && Status.Lore.Server == TEXT("lore://127.0.0.1:41337"));
 
 	FHyperAISourceControlSubmitRequest Submit;
 	Submit.Description = TEXT("Add the jump curves");

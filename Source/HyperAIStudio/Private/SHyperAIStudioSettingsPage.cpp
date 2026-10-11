@@ -10,6 +10,7 @@
 #include "IDetailsView.h"
 #include "Modules/ModuleManager.h"
 #include "PropertyEditorModule.h"
+#include "SHyperAIStudioLoreSetupPanel.h"
 #include "SHyperAIStudioWindow.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
@@ -31,6 +32,7 @@ namespace HyperAIStudio::SettingsPage
 	const FName Agents(TEXT("Agents"));
 	const FName Servers(TEXT("Servers"));
 	const FName Images(TEXT("Images"));
+	const FName VersionControl(TEXT("VersionControl"));
 	const FName Preferences(TEXT("Preferences"));
 	const FName Docs(TEXT("Docs"));
 
@@ -65,6 +67,7 @@ void SHyperAIStudioSettingsPage::Construct(const FArguments& InArgs)
 		{Agents, LOCTEXT("Agents", "Agents"), LOCTEXT("AgentsDescription", "The agent CLIs HyperAI works with, and their files.")},
 		{Servers, LOCTEXT("Servers", "MCP servers"), LOCTEXT("ServersDescription", "The Unreal MCP server, and extra servers agents can use.")},
 		{Images, LOCTEXT("Images", "Image services"), LOCTEXT("ImagesDescription", "Image models, and the services and keys they need.")},
+		{VersionControl, LOCTEXT("VersionControl", "Version control"), LOCTEXT("VersionControlDescription", "Epic's Lore: set up a local repository, a server, and sign-in.")},
 		{Preferences, LOCTEXT("Preferences", "Preferences"), LOCTEXT("PreferencesDescription", "Every HyperAI setting, in one place.")},
 		{Docs, LOCTEXT("Docs", "Documentation"), LOCTEXT("DocsDescription", "Guides, the agent instructions, and troubleshooting.")}};
 	const TSharedRef<SVerticalBox> List = SNew(SVerticalBox);
@@ -180,6 +183,10 @@ TSharedRef<SWidget> SHyperAIStudioSettingsPage::BuildSection(const FName Id)
 					return Category.StartsWith(TEXT("External Services")) || Category.StartsWith(TEXT("Image Generation"));
 				})
 			];
+	}
+	if (Id == VersionControl)
+	{
+		return SNew(SHyperAIStudioLoreSetupPanel);
 	}
 	if (Id == Preferences)
 	{

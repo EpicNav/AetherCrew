@@ -13,6 +13,7 @@ class SWidgetSwitcher;
  * - Agents: the agent CLIs and their files.
  * - MCP servers: the Unreal MCP server and extra servers.
  * - Image services: image models and the keys they need.
+ * - Version control: Epic's Lore, set up for the project (local now, a server later).
  * - Preferences: every setting, in a details panel.
  * - Documentation.
  */
@@ -24,7 +25,7 @@ public:
 
 	void Construct(const FArguments& InArgs);
 
-	/** Setup, Agents, Servers, Images, Preferences or Docs. */
+	/** Setup, Agents, Servers, Images, VersionControl, Preferences or Docs. */
 	void ShowSection(FName Section);
 	FName GetSection() const { return Section; }
 
