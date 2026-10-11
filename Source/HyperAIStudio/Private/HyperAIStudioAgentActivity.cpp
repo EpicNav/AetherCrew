@@ -131,8 +131,10 @@ void FHyperAIStudioAgentActivityLog::Record(FHyperAIStudioActivityEntry Entry)
 		}
 		if (Entry.Target.IsEmpty()) Entry.Target = First->Target;
 	}
-	// The user turns auto-approval on and off, never the agent that happens to be working.
-	else if (Entry.Agent.IsEmpty() && Entry.Kind != EHyperAIStudioActivityKind::AutoApproval && Resolver())
+	// The user turns auto-approval on and off, never the agent that happens to be working; and what Sandbox Mode held
+	// and auto-approval wrote is everyone's saves, the user's included.
+	else if (Entry.Agent.IsEmpty() && Entry.Kind != EHyperAIStudioActivityKind::AutoApproval
+		&& Entry.AutoApprovedAs != EHyperAIStudioApprovalCategory::SandboxSaves && Resolver())
 	{
 		FString Agent;
 		FString Model;

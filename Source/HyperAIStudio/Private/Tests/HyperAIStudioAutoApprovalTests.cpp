@@ -7,16 +7,36 @@
 #include "HAL/IConsoleManager.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioApprovalGateInternal.h"
 #include "HyperAIStudioAutoApproval.h"
+#include "HAL/PlatformFileManager.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/Application/SlateUser.h"
+#include "Layout/WidgetPath.h"
+#include "Tests/HyperAIStudioLogCapture.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/SViewport.h"
+#include "Widgets/SWindow.h"
 #include "HyperAIStudioNativeReadToolset.h"
+#include "HyperAIStudioSandbox.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioWidgetShot.h"
+#include "IFileSandboxCoreModule.h"
 #include "InputCoreTypes.h"
+#include "ISandboxInstance.h"
+#include "ISandboxManager.h"
+#include "Misc/PackageName.h"
+#include "ObjectTools.h"
+#include "Types/Manager/DeleteSandboxByDirectoryArgs.h"
+#include "Types/Manager/DeleteSandboxResult.h"
+#include "Types/Manager/LeaveSandboxResult.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/Guid.h"
+#include "Misc/OutputDeviceRedirector.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
+#include "Misc/ScopeLock.h"
 #include "SHyperAIStudioActivitySidebar.h"
 #include "SHyperAIStudioAutoApprovalBanner.h"
 #include "SHyperAIStudioAutoApprovalDialog.h"
@@ -149,6 +169,52 @@ namespace HyperAIStudio::AutoApprovalTests
 		FString Error;
 		return FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, MoveTemp(Run), Error);
 	}
+
+	/**
+	 * hyper_script_run as an MCP client reaches it: through its reflected toolset function (the scripting pack is its
+	 * own module). Returns the reply's status; empty when the pack is not loaded.
+	 */
+	FString RunScriptTool(const FString& OperationId, const FString& Code, FString& OutDiagnostic)
+	{
+		UClass* Toolset = FindObject<UClass>(nullptr, TEXT("/Script/HyperAIStudioScripting.HyperAIStudioScriptingToolset"));
+		UFunction* Function = Toolset ? Toolset->FindFunctionByName(TEXT("hyper_script_run")) : nullptr;
+		FStructProperty* RequestProperty = Function ? CastField<FStructProperty>(Function->FindPropertyByName(TEXT("Request"))) : nullptr;
+		FStructProperty* ReturnProperty = Function ? CastField<FStructProperty>(Function->GetReturnProperty()) : nullptr;
+		if (!RequestProperty || !ReturnProperty)
+		{
+			OutDiagnostic = TEXT("The scripting pack is not loaded.");
+			return FString();
+		}
+		TArray<uint8> Parameters;
+		Parameters.SetNumZeroed(Function->ParmsSize);
+		Function->InitializeStruct(Parameters.GetData());
+		ON_SCOPE_EXIT { Function->DestroyStruct(Parameters.GetData()); };
+		void* Request = RequestProperty->ContainerPtrToValuePtr<void>(Parameters.GetData());
+		auto SetString = [RequestProperty, Request](const TCHAR* Name, const FString& Value)
+		{
+			if (const FStrProperty* Field = CastField<FStrProperty>(RequestProperty->Struct->FindPropertyByName(Name)))
+			{
+				Field->SetPropertyValue_InContainer(Request, Value);
+			}
+		};
+		SetString(TEXT("Code"), Code);
+		SetString(TEXT("OperationId"), OperationId);
+		if (const FIntProperty* Timeout = CastField<FIntProperty>(RequestProperty->Struct->FindPropertyByName(TEXT("TimeoutSeconds"))))
+		{
+			Timeout->SetPropertyValue_InContainer(Request, 30);
+		}
+		Toolset->GetDefaultObject()->ProcessEvent(Function, Parameters.GetData());
+		const void* Report = ReturnProperty->ContainerPtrToValuePtr<void>(Parameters.GetData());
+		auto GetString = [ReturnProperty, Report](const TCHAR* Name)
+		{
+			const FStrProperty* Field = CastField<FStrProperty>(ReturnProperty->Struct->FindPropertyByName(Name));
+			return Field ? Field->GetPropertyValue_InContainer(Report) : FString();
+		};
+		OutDiagnostic = GetString(TEXT("Diagnostic"));
+		return GetString(TEXT("Status"));
+	}
+
+	using HyperAIStudio::Tests::FLogCapture;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -255,6 +321,8 @@ bool FHyperAIStudioAutoApprovalDialogTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Scripts are not"), FAccess::IsTicked(*Dialog, ECategory::Scripts));
 	TestFalse(TEXT("Destructive tools are not"), FAccess::IsTicked(*Dialog, ECategory::Destructive));
 	TestFalse(TEXT("External effects are not"), FAccess::IsTicked(*Dialog, ECategory::ExternalEffects));
+	TestFalse(TEXT("Sandbox Mode's held saves are not"), FAccess::IsTicked(*Dialog, ECategory::SandboxSaves));
+	TestTrue(TEXT("Requests waiting now are approved too unless the person unticks it"), FAccess::IsAlsoApprovingWaiting(*Dialog));
 	TestEqual(TEXT("It lasts an hour by default"), FAccess::GetDuration(*Dialog), EHyperAIStudioAutoApprovalDuration::OneHour);
 
 	// The real native confirmation answers no where nobody can answer it, as in this test run.
@@ -391,6 +459,12 @@ bool FHyperAIStudioAutoApprovalPendingTest::RunTest(const FString& Parameters)
 	const TSharedRef<SHyperAIStudioAutoApprovalDialog> Dialog = FAccess::MakeDialog();
 	TestTrue(TEXT("The dialog lists what already waits"), FAccess::GetPendingShown(*Dialog) >= 1
 		&& FAccess::GetPendingShown(*Dialog) == FHyperAIStudioApprovalGate::GetPending().Num());
+	TestTrue(TEXT("and offers to approve it too, ticked by default"), FAccess::IsAlsoApprovingWaiting(*Dialog));
+	// The person unticks "Also approve the requests waiting now".
+	FAccess::SetAlsoApproveWaiting(*Dialog, false);
+	TestEqual(TEXT("Unticked, it approves none of them"), FAccess::GetWaitingChosen(*Dialog), 0);
+	TestFalse(TEXT("and the native confirmation does not say it would"),
+		FAccess::GetConfirmation(*Dialog).ToString().Contains(TEXT("It also approves")));
 	FAccess::SetNativeAnswer(*Dialog, true);
 	FAccess::PressTurnOn(*Dialog, Scope.All());
 	TestTrue(TEXT("It turns on"), FHyperAIStudioAutoApproval::IsActive());
@@ -399,10 +473,88 @@ bool FHyperAIStudioAutoApprovalPendingTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("and is still held"), FHyperAIStudioApprovalGate::HasPending(Before));
 	const TOptional<FHyperAIStudioPendingApproval> Pending = FindPending(Before);
 	TestTrue(TEXT("and is not marked as about to be approved"), Pending.IsSet() && !Pending->bAutoApproving);
+	// Held before it began (sequence 0 is before any activation's first).
+	const FString WhyNot = FHyperAIStudioAutoApproval::DescribeWhyNotCovered(Pending.IsSet() ? Pending->Category : TOptional<ECategory>(), 0, Before);
+	TestTrue(TEXT("and the log can say why: ") + WhyNot, WhyNot.Contains(TEXT("already waiting")));
 
 	TestTrue(TEXT("A request made after"), Hold(After, MakeSummary(EHyperAIStudioDomainSafety::Edit), [&bAfterRan]() { bAfterRan = true; }));
 	FAccess::PumpGate();
 	TestTrue(TEXT("is approved"), bAfterRan && !FHyperAIStudioApprovalGate::HasPending(After));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAutoApprovalChosenWaitingTest,
+	"HyperAIStudio.Chat.AutoApproval.WaitingRequestsChosenInDialog",
+	HyperAIStudio::AutoApprovalTests::Flags)
+
+bool FHyperAIStudioAutoApprovalChosenWaitingTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::AutoApprovalTests;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
+	FScope Scope;
+	FLogCapture Log(TEXT("LogHyperAIStudioApproval"));
+	const FString Edit = Scope.Add();
+	const FString Risky = Scope.Add();
+	bool bEditRan = false;
+	bool bRiskyRan = false;
+	TestTrue(TEXT("An edit waits before auto-approval is on"),
+		Hold(Edit, MakeSummary(EHyperAIStudioDomainSafety::Edit), [Edit, &bEditRan]() { bEditRan = true; RecordOutcome(Edit, true); }));
+	TestTrue(TEXT("and so does a destructive request"),
+		Hold(Risky, MakeSummary(EHyperAIStudioDomainSafety::Destructive), [&bRiskyRan]() { bRiskyRan = true; }));
+	TestEqual(TEXT("While it is off, a hold is logged for a click"), Log.Count(TEXT("for a click.")), 2);
+
+	// Whatever else waits in this editor counts in the dialog too; only this test's own requests can be approved.
+	auto Waiting = [](const ECategory Category)
+	{
+		int32 Count = 0;
+		for (const FHyperAIStudioPendingApproval& Pending : FHyperAIStudioApprovalGate::GetPending())
+		{
+			Count += Pending.Category == Category ? 1 : 0;
+		}
+		return Count;
+	};
+	const TSharedRef<SHyperAIStudioAutoApprovalDialog> Dialog = FAccess::MakeDialog();
+	TestTrue(TEXT("The dialog offers to approve what waits now, ticked by default"), FAccess::IsAlsoApprovingWaiting(*Dialog));
+	TestEqual(TEXT("only the requests in the ticked categories: the edits"), FAccess::GetWaitingChosen(*Dialog), Waiting(ECategory::Edits));
+	TestTrue(TEXT("and the native confirmation says so: ") + FAccess::GetConfirmation(*Dialog).ToString(),
+		FAccess::GetConfirmation(*Dialog).ToString().Contains(TEXT("It also approves the")));
+	FAccess::SetTicked(*Dialog, ECategory::Destructive, true);
+	TestEqual(TEXT("Ticking Destructive adds the destructive ones"), FAccess::GetWaitingChosen(*Dialog),
+		Waiting(ECategory::Edits) + Waiting(ECategory::Destructive));
+	FAccess::SetTicked(*Dialog, ECategory::Destructive, false);
+	FAccess::SetNativeAnswer(*Dialog, true);
+	FAccess::PressTurnOn(*Dialog, Scope.All());
+	TestTrue(TEXT("It turns on"), FHyperAIStudioAutoApproval::IsActive());
+	TestEqual(TEXT("with the waiting edits chosen"), FHyperAIStudioAutoApproval::GetStatus().ChosenWaiting, Waiting(ECategory::Edits));
+	TestTrue(TEXT("The waiting edit is about to be approved"), FHyperAIStudioApprovalGate::IsAutoApproving(Edit));
+	TestFalse(TEXT("the destructive one is not: its category was not ticked"), FHyperAIStudioApprovalGate::IsAutoApproving(Risky));
+	TestEqual(TEXT("The log says which waiting request it will approve"), Log.Count(TEXT("which was waiting when it was turned on")), 1);
+	TestFalse(TEXT("Nothing runs until the editor ticks"), bEditRan);
+	FAccess::PumpGate();
+	TestTrue(TEXT("Then the waiting edit is approved"), bEditRan && !FHyperAIStudioApprovalGate::HasPending(Edit));
+	TestTrue(TEXT("and the destructive one still waits for a click"), !bRiskyRan && FHyperAIStudioApprovalGate::HasPending(Risky));
+	const TOptional<FHyperAIStudioActivityEntry> Approved = FindApproval(Edit);
+	TestTrue(TEXT("Activity marks it auto-approved, as chosen in the dialog: ") + (Approved.IsSet() ? Approved->Detail : FString()),
+		Approved.IsSet() && Approved->AutoApprovedAs == ECategory::Edits
+		&& Approved->Detail.StartsWith(TEXT("Auto-approved as edits")) && Approved->Detail.Contains(TEXT("was waiting when auto-approval was turned on")));
+	const TOptional<FHyperAIStudioApprovalRecord> Record = FHyperAIStudioApprovalGate::FindApproval(Edit);
+	TestTrue(TEXT("and the gate records auto-approval as its approver"), Record.IsSet()
+		&& Record->ApprovedBy == EHyperAIStudioApprover::AutoApproval && Record->AutoApprovedAs == ECategory::Edits);
+	TestTrue(TEXT("Activity's record of turning it on says it approved what waited"),
+		FHyperAIStudioAgentActivityLog::GetSnapshot().ContainsByPredicate([](const FHyperAIStudioActivityEntry& Entry)
+	{
+		return Entry.Kind == EHyperAIStudioActivityKind::AutoApproval && Entry.ToolName == TEXT("turned on")
+			&& Entry.Detail.Contains(TEXT("also approves"));
+	}));
+	TestEqual(TEXT("A destructive request held while only Edits are on is logged with why it waits"),
+		Log.Count(TEXT("does not cover it")), 0);
+	const FString Late = Scope.Add();
+	Hold(Late, MakeSummary(EHyperAIStudioDomainSafety::Destructive), []() {});
+	TestEqual(TEXT("(held now)"), Log.Count(TEXT("Destructive was not chosen in its dialog")), 1);
 	return true;
 }
 
@@ -626,6 +778,7 @@ bool FHyperAIStudioAutoApprovalBusyTest::RunTest(const FString& Parameters)
 		return true;
 	}
 	FScope Scope;
+	FLogCapture Log(TEXT("LogHyperAIStudioApproval"));
 	const FString Id = Scope.Add();
 	TestTrue(TEXT("It turns on"), FAccess::TurnOn({ECategory::Edits}, Scope.All()));
 	bool bRan = false;
@@ -639,13 +792,176 @@ bool FHyperAIStudioAutoApprovalBusyTest::RunTest(const FString& Parameters)
 		}
 	};
 	TestTrue(TEXT("A covered request is held"), Hold(Id, MakeSummary(EHyperAIStudioDomainSafety::Edit), [&bRan]() { bRan = true; }));
-	FAccess::PumpGate();
+	TestEqual(TEXT("and the log says auto-approval covers it"), Log.Count(TEXT("auto-approval covers it and approves it on the next quiet editor tick")), 1);
+	TestTrue(TEXT("Before any sweep, nothing is waiting yet"), FHyperAIStudioApprovalGate::DescribeAutoApprovalWait().IsEmpty());
+	FAccess::PumpGate(8);
 	TestFalse(TEXT("It is not approved inside the user's open transaction"), bRan);
 	TestTrue(TEXT("and stays scheduled"), FHyperAIStudioApprovalGate::IsAutoApproving(Id));
+	const FString Wait = FHyperAIStudioApprovalGate::DescribeAutoApprovalWait().ToString();
+	TestTrue(TEXT("Activity can say what it waits for: ") + Wait, Wait.Contains(TEXT("Auto-approval busy test")));
+	TestEqual(TEXT("The log says so once, not on every tick"), Log.Count(TEXT("Auto-approval is waiting for a quiet editor tick")), 1);
+	TestTrue(TEXT("naming the open transaction"), Log.Count(TEXT("an undo transaction is open (Auto-approval busy test)")) == 1);
+	FString Status = TEXT("awaiting_user_approval");
+	FString Diagnostic;
+	TestTrue(TEXT("An agent reads it as scheduled"), FHyperAIStudioApprovalGate::DescribeHeld(Id, Status, Diagnostic));
+	TestTrue(TEXT("and why it has not run yet: ") + Diagnostic, Diagnostic.Contains(TEXT("It is waiting because an undo transaction is open")));
 	GEditor->CancelTransaction(Transaction);
 	bOpen = false;
 	FAccess::PumpGate();
 	TestTrue(TEXT("Once the transaction ends, it is approved"), bRan && !FHyperAIStudioApprovalGate::HasPending(Id));
+	TestEqual(TEXT("and the log says the wait is over"), Log.Count(TEXT("The editor is quiet again after")), 1);
+	TestTrue(TEXT("with what it approved"), Log.Count(TEXT("auto-approval approved 1 request(s)")) == 1);
+	TestTrue(TEXT("Nothing waits any more"), FHyperAIStudioApprovalGate::DescribeAutoApprovalWait().IsEmpty());
+
+	// Turned off while the editor is busy: what it had scheduled waits for a click, and nothing says it is about to be
+	// approved, neither while the editor stays busy nor once it is quiet.
+	const FString Stopped = Scope.Add();
+	FAccess::Reset();
+	TestTrue(TEXT("It turns on again"), FAccess::TurnOn({ECategory::Edits}, {Stopped}));
+	const int32 Busy = GEditor->BeginTransaction(FText::FromString(TEXT("Auto-approval stop test")));
+	bool bBusyOpen = true;
+	ON_SCOPE_EXIT
+	{
+		if (bBusyOpen)
+		{
+			GEditor->CancelTransaction(Busy);
+		}
+	};
+	bool bStoppedRan = false;
+	TestTrue(TEXT("A covered request is held"), Hold(Stopped, MakeSummary(EHyperAIStudioDomainSafety::Edit), [&bStoppedRan]() { bStoppedRan = true; }));
+	FAccess::PumpGate(2);
+	TestEqual(TEXT("While the editor is busy, the log says it waits to approve it"),
+		Log.Count(TEXT("waiting for a quiet editor tick to approve 1 request(s): an undo transaction is open (Auto-approval stop test)")), 1);
+	FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::Stopped);
+	FAccess::PumpGate(4);
+	TestFalse(TEXT("Stopped, it no longer schedules the request"), FHyperAIStudioApprovalGate::IsAutoApproving(Stopped));
+	TestTrue(TEXT("and Activity no longer says an approval waits, though the editor is still busy"),
+		FHyperAIStudioApprovalGate::DescribeAutoApprovalWait().IsEmpty());
+	GEditor->CancelTransaction(Busy);
+	bBusyOpen = false;
+	FAccess::PumpGate();
+	TestTrue(TEXT("Quiet again, the request still waits for a click"), !bStoppedRan && FHyperAIStudioApprovalGate::HasPending(Stopped));
+	TestEqual(TEXT("and the log never says auto-approval approves it"), Log.Count(TEXT("The editor is quiet again after")), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAutoApprovalPlayInEditorTest,
+	"HyperAIStudio.Chat.AutoApproval.PlayInEditorMouseIsNoDrag",
+	HyperAIStudio::AutoApprovalTests::Flags)
+
+/**
+ * A game holds the mouse for the whole of a Play In Editor session; that capture must not hold approvals back, while any
+ * other capture does, and so does the same viewport in Simulate In Editor or an ejected session, where it is the user's.
+ * Starts a real play session, holds the mouse with its game viewport through Slate, and asks the gate.
+ */
+bool FHyperAIStudioAutoApprovalPlayInEditorTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::AutoApprovalTests;
+	namespace Gate = HyperAIStudio::Approval::Private;
+	if (!GEditor || !FSlateApplication::IsInitialized())
+	{
+		AddInfo(TEXT("No editor or Slate here; nothing to check."));
+		return true;
+	}
+	if (GEditor->IsPlaySessionInProgress() || GEditor->PlayWorld)
+	{
+		AddWarning(TEXT("A play session is already running here; this test leaves it alone and checks nothing."));
+		return true;
+	}
+
+	// The decision itself, with no session running.
+	TestNull(TEXT("With no play session there is no game viewport to ignore"), Gate::PlayingGameViewport());
+	const TSharedRef<SButton> Button = SNew(SButton);
+	const TSharedRef<SViewport> Viewport = SNew(SViewport);
+	TestEqual(TEXT("A button's capture holds approvals back"), Gate::DescribeCaptor(*Button, nullptr), FString(TEXT("SButton")));
+	TestEqual(TEXT("and so does a viewport's while no game plays in it"), Gate::DescribeCaptor(*Viewport, nullptr), FString(TEXT("SViewport")));
+	TestTrue(TEXT("The playing game's viewport does not"), Gate::DescribeCaptor(*Viewport, &Viewport.Get()).IsEmpty());
+	TestEqual(TEXT("while another widget still does"), Gate::DescribeCaptor(*Button, &Viewport.Get()), FString(TEXT("SButton")));
+
+	FRequestPlaySessionParams Params;
+	Params.WorldType = EPlaySessionWorldType::PlayInEditor;
+	Params.SessionDestination = EPlaySessionDestinationType::InProcess;
+	GEditor->RequestPlaySession(Params);
+	const double Deadline = FPlatformTime::Seconds() + 60.0;
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, Deadline]()
+	{
+		if (!GEditor->PlayWorld && FPlatformTime::Seconds() < Deadline)
+		{
+			return false;
+		}
+		if (!TestNotNull(TEXT("Play In Editor starts"), GEditor->PlayWorld.Get()))
+		{
+			return true;
+		}
+		const TSharedPtr<SViewport> Game = FSlateApplication::Get().GetGameViewport();
+		if (!Game.IsValid())
+		{
+			AddInfo(TEXT("This editor registered no game viewport for the session; only the decision was checked."));
+			return true;
+		}
+		TestTrue(TEXT("While it plays, the gate knows the game's viewport"), Gate::PlayingGameViewport() == Game.Get());
+
+		// The game holds the mouse, as a game does for the whole session.
+		const TSharedPtr<FSlateUser> User = FSlateApplication::Get().GetCursorUser();
+		FWidgetPath GamePath;
+		if (!User.IsValid() || !FSlateApplication::Get().FindPathToWidget(Game.ToSharedRef(), GamePath) || !GamePath.IsValid())
+		{
+			AddInfo(TEXT("The game viewport is in no window Slate can reach here; only the gate's view of the session was checked."));
+			return true;
+		}
+		const bool bHeld = User->SetCursorCaptor(Game.ToSharedRef(), GamePath);
+		ON_SCOPE_EXIT { User->ReleaseAllCapture(); };
+		if (!TestTrue(TEXT("The game viewport holds the mouse"), bHeld && FSlateApplication::Get().HasAnyMouseCaptor()))
+		{
+			return true;
+		}
+		const Gate::FBusy Playing = Gate::DescribeBusy();
+		TestFalse(TEXT("The game holding the mouse holds no approval back: ") + Playing.Log, Playing.Log.Contains(TEXT("mouse is captured")));
+
+		// The same viewport in Simulate In Editor (or a session ejected to it) is the user's to drag in.
+		const bool bWasSimulating = GEditor->bIsSimulatingInEditor;
+		GEditor->bIsSimulatingInEditor = true;
+		TestNull(TEXT("Simulating, the gate ignores no viewport"), Gate::PlayingGameViewport());
+		const Gate::FBusy Simulating = Gate::DescribeBusy();
+		GEditor->bIsSimulatingInEditor = bWasSimulating;
+		TestTrue(TEXT("and the same capture holds approvals back, naming it: ") + Simulating.Log,
+			Simulating.Log.Contains(TEXT("mouse is captured by")) && Simulating.Log.Contains(Game->GetTypeAsString()));
+
+		// Any other widget holding the mouse while the game plays is a drag.
+		FWidgetPath WindowPath;
+		const TSharedRef<SWindow> Window = GamePath.GetWindow();
+		if (FSlateApplication::Get().FindPathToWidget(Window, WindowPath) && User->SetCursorCaptor(Window, WindowPath))
+		{
+			const Gate::FBusy Other = Gate::DescribeBusy();
+			TestTrue(TEXT("Another widget's capture during play holds approvals back: ") + Other.Log,
+				Other.Log.Contains(TEXT("mouse is captured by")) && Other.Log.Contains(Window->GetTypeAsString()));
+		}
+		return true;
+	}));
+	const TSharedRef<bool> bEndRequested = MakeShared<bool>(false);
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, bEndRequested]()
+	{
+		if (!*bEndRequested)
+		{
+			*bEndRequested = true;
+			if (GEditor->IsPlaySessionRequestQueued())
+			{
+				GEditor->CancelRequestPlaySession();
+			}
+			if (GEditor->PlayWorld)
+			{
+				GEditor->RequestEndPlayMap();
+			}
+			return false;
+		}
+		if (GEditor->PlayWorld || GEditor->IsPlaySessionInProgress())
+		{
+			return false;
+		}
+		TestNull(TEXT("The play session ends"), GEditor->PlayWorld.Get());
+		return true;
+	}));
 	return true;
 }
 
@@ -798,6 +1114,196 @@ bool FHyperAIStudioAutoApprovalJobApprovalTest::RunTest(const FString& Parameter
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAutoApprovalRealTicksTest,
+	"HyperAIStudio.Chat.AutoApproval.RealTicksApproveAgentScripts",
+	HyperAIStudio::AutoApprovalTests::Flags)
+
+/**
+ * The whole way in a running editor, with no PumpGate: an agent's hyper_script_run waits, the dialog turns auto-approval
+ * on with it chosen, and the editor's own core ticker approves it and the next one; then, in a sandbox the test opens,
+ * the edit an approved script saves is written to the project by the one-second ticker. Run in an interactive editor
+ * (Epic's automation toolset reaches it over MCP), it shows whether quiet ticks come there.
+ */
+bool FHyperAIStudioAutoApprovalRealTicksTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::AutoApprovalTests;
+	namespace FSC = UE::FileSandboxCore;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
+	struct FState
+	{
+		TArray<FString> Ids;
+		bool bRequiredBefore = true;
+		TSharedPtr<FLogCapture> Log;
+		double Since = 0.0;
+		uint64 SinceFrame = 0;
+		/** The sandbox part runs only where no sandbox is active, as the Sandbox Mode test does. */
+		bool bSandboxPart = false;
+		FString SandboxName;
+		TSet<FString> Roots;
+		FString AssetName;
+	};
+	const TSharedRef<FState> State = MakeShared<FState>();
+	FAccess::Reset();
+	FHyperAIStudioAgentScoreboard::SetStoragePathForTests(
+		FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Tests/AgentScoreboard.json")));
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	State->bRequiredBefore = Settings->bRequireApprovalForAgentEdits;
+	Settings->bRequireApprovalForAgentEdits = true;
+	State->Log = MakeShared<FLogCapture>(TEXT("LogHyperAIStudioApproval"));
+	for (int32 Index = 0; Index < 3; ++Index)
+	{
+		State->Ids.Add(NewId());
+	}
+	const FString Trivial = TEXT("import unreal\n\ndef run():\n    return {\"ok\": True}\n");
+	FString Diagnostic;
+	const FString Held = RunScriptTool(State->Ids[0], Trivial, Diagnostic);
+	if (Held.IsEmpty())
+	{
+		AddInfo(TEXT("The scripting pack is not loaded here; nothing to check."));
+		Settings->bRequireApprovalForAgentEdits = State->bRequiredBefore;
+		FHyperAIStudioAgentScoreboard::SetStoragePathForTests(FString());
+		return true;
+	}
+	TestEqual(TEXT("An agent's script waits for approval: ") + Diagnostic, Held, FString(TEXT("awaiting_user_approval")));
+
+	const TSharedRef<SHyperAIStudioAutoApprovalDialog> Dialog = FAccess::MakeDialog();
+	TestTrue(TEXT("The dialog would approve the waiting script too"), FAccess::GetWaitingChosen(*Dialog) >= 1);
+	FAccess::SetNativeAnswer(*Dialog, true);
+	FAccess::PressTurnOn(*Dialog, TSet<FString>(State->Ids));
+	TestTrue(TEXT("It turns on"), FHyperAIStudioAutoApproval::IsActive());
+	State->Since = FPlatformTime::Seconds();
+	State->SinceFrame = GFrameCounter;
+
+	// The editor ticks on its own between these; nothing here runs the sweep.
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, State, Trivial]()
+	{
+		const FHyperAIOperationStatus Status = UHyperAIStudioNativeReadToolset::hyper_operation_status(State->Ids[0]);
+		if (!Status.bTerminal && FPlatformTime::Seconds() - State->Since < 30.0)
+		{
+			return false;
+		}
+		TestEqual(TEXT("The waiting script runs, approved by the editor's own ticks"), Status.Status, FString(TEXT("completed")));
+		TestEqual(TEXT("by auto-approval"), Status.ApprovedBy, FString(TEXT("auto_approval")));
+		AddInfo(FString::Printf(TEXT("The waiting script finished %.2f s and %llu frames after auto-approval turned on."),
+			FPlatformTime::Seconds() - State->Since, GFrameCounter - State->SinceFrame));
+		FString Reply;
+		const FString Queued = RunScriptTool(State->Ids[1], Trivial, Reply);
+		TestEqual(TEXT("A new script reads as queued for auto-approval: ") + Reply, Queued, FString(TEXT("queued")));
+		State->Since = FPlatformTime::Seconds();
+		State->SinceFrame = GFrameCounter;
+		return true;
+	}));
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, State]()
+	{
+		const FHyperAIOperationStatus Status = UHyperAIStudioNativeReadToolset::hyper_operation_status(State->Ids[1]);
+		if (!Status.bTerminal && FPlatformTime::Seconds() - State->Since < 30.0)
+		{
+			return false;
+		}
+		TestEqual(TEXT("The new script runs too"), Status.Status, FString(TEXT("completed")));
+		AddInfo(FString::Printf(TEXT("The new script finished %.2f s and %llu frames after it was held."),
+			FPlatformTime::Seconds() - State->Since, GFrameCounter - State->SinceFrame));
+		const int32 Waits = State->Log->Count(TEXT("Auto-approval is waiting for a quiet editor tick"));
+		AddInfo(FString::Printf(TEXT("Approvals waited for a quieter tick %d time(s) in this editor."), Waits));
+		TestEqual(TEXT("The log says it covered the new script as it was held"),
+			State->Log->Count(TEXT("auto-approval covers it and approves it on the next quiet editor tick")), 1);
+
+		// Sandbox Mode's held saves, in a sandbox of the test's own.
+		FSC::ISandboxManager* Manager = FSC::IFileSandboxCoreModule::IsAvailable() ? &FSC::IFileSandboxCoreModule::Get().GetSandboxManager() : nullptr;
+		State->bSandboxPart = Manager && !Manager->HasActiveSandbox();
+		if (!State->bSandboxPart)
+		{
+			AddInfo(TEXT("A sandbox is already active here (or the File Sandbox is not loaded); the sandbox part does not run."));
+			return true;
+		}
+		HyperAIStudio::Sandbox::SetModeForTests(true);
+		FString Error;
+		TestTrue(TEXT("Sandbox Mode opens a sandbox for the test"), HyperAIStudio::Sandbox::CheckAgentEdit(Error));
+		const FSC::ISandboxInstance* Active = Manager->GetActiveSandboxInstance();
+		State->Roots.Add(Active ? FString(Active->GetRootDirectory()) : FString());
+		State->SandboxName = HyperAIStudio::Sandbox::GetStatus().SandboxName;
+		FAccess::Reset();
+		TestTrue(TEXT("Auto-approval turns on for Edits and Sandbox Mode's held saves"), FAccess::TurnOn(
+			{ECategory::Edits, ECategory::SandboxSaves}, {State->Ids[2], TEXT("sandbox:") + State->SandboxName}));
+		State->AssetName = TEXT("M_AutoApprovalLive_") + State->Ids[2].Right(8);
+		const FString Saving = FString::Printf(TEXT("import unreal\n\ndef run():\n    tools = unreal.AssetToolsHelpers.get_asset_tools()\n")
+			TEXT("    asset = tools.create_asset(\"%s\", \"/Game/__HyperAIStudioTests/AutoApprovalLive\", unreal.Material, unreal.MaterialFactoryNew())\n")
+			TEXT("    return {\"saved\": unreal.EditorAssetLibrary.save_loaded_asset(asset, False)}\n"), *State->AssetName);
+		FString Reply;
+		const FString Queued = RunScriptTool(State->Ids[2], Saving, Reply);
+		TestEqual(TEXT("A saving script reads as queued: ") + Reply, Queued, FString(TEXT("queued")));
+		State->Since = FPlatformTime::Seconds();
+		return true;
+	}));
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, State]()
+	{
+		if (!State->bSandboxPart)
+		{
+			return true;
+		}
+		const FString File = FPaths::ConvertRelativePathToFull(FPackageName::LongPackageNameToFilename(
+			TEXT("/Game/__HyperAIStudioTests/AutoApprovalLive/") + State->AssetName, FPackageName::GetAssetPackageExtension()));
+		const bool bWritten = IPlatformFile::GetPlatformPhysical().FileExists(*File);
+		if (!bWritten && FPlatformTime::Seconds() - State->Since < 30.0)
+		{
+			return false;
+		}
+		TestTrue(TEXT("The saved material reaches the project from the sandbox, written by the one-second ticker: ")
+			+ FHyperAIStudioAutoApproval::DescribeSandboxWait().ToString(), bWritten);
+		AddInfo(FString::Printf(TEXT("The sandbox was written %.2f s after the saving script was held."), FPlatformTime::Seconds() - State->Since));
+		TestTrue(TEXT("Activity records the write as auto-approved"), FHyperAIStudioAgentActivityLog::GetSnapshot().ContainsByPredicate(
+			[](const FHyperAIStudioActivityEntry& Entry)
+		{
+			return Entry.Kind == EHyperAIStudioActivityKind::ApprovalApproved && Entry.AutoApprovedAs == EHyperAIStudioApprovalCategory::SandboxSaves;
+		}));
+		return true;
+	}));
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([State, Settings]()
+	{
+		FAccess::Reset();
+		for (const FString& Id : State->Ids)
+		{
+			FHyperAIStudioApprovalGate::Reject(Id, TEXT("test over"));
+		}
+		if (State->bSandboxPart)
+		{
+			FSC::ISandboxManager& Manager = FSC::IFileSandboxCoreModule::Get().GetSandboxManager();
+			HyperAIStudio::Sandbox::SetModeForTests(false);
+			HyperAIStudio::Sandbox::OnModeChanged();
+			if (const FSC::ISandboxInstance* Active = Manager.GetActiveSandboxInstance())
+			{
+				State->Roots.Add(Active->GetRootDirectory());
+				Manager.LeaveSandbox();
+			}
+			for (const FString& Root : State->Roots)
+			{
+				if (!Root.IsEmpty())
+				{
+					Manager.DeleteSandbox(FSC::FDeleteSandboxByDirectoryArgs(Root));
+				}
+			}
+			HyperAIStudio::Sandbox::SetModeForTests(TOptional<bool>());
+			const FString PackageName = TEXT("/Game/__HyperAIStudioTests/AutoApprovalLive/") + State->AssetName;
+			if (UObject* Made = FindObject<UObject>(nullptr, *(PackageName + TEXT(".") + State->AssetName)))
+			{
+				TArray<UObject*> Objects = {Made};
+				ObjectTools::ForceDeleteObjects(Objects, /*ShowConfirmation=*/false);
+			}
+			IPlatformFile::GetPlatformPhysical().DeleteFile(*FPaths::ConvertRelativePathToFull(
+				FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension())));
+		}
+		Settings->bRequireApprovalForAgentEdits = State->bRequiredBefore;
+		FHyperAIStudioAgentScoreboard::SetStoragePathForTests(FString());
+		State->Log.Reset();
+		return true;
+	}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHyperAIStudioAutoApprovalScreensTest,
 	"HyperAIStudio.Screens.AutoApprovalDialog",
 	HyperAIStudio::AutoApprovalTests::Flags)
@@ -825,12 +1331,28 @@ bool FHyperAIStudioAutoApprovalScreensTest::RunTest(const FString& Parameters)
 	FAccess::PumpGate();
 	const FString BannerShot = HyperAIStudio::Tests::SaveWidgetShot(SNew(SHyperAIStudioAutoApprovalBanner), FIntPoint(560, 64), TEXT("auto-approval-banner"));
 	const FString ActivityShot = HyperAIStudio::Tests::SaveWidgetShot(SNew(SHyperAIStudioChatActivitySidebar), FIntPoint(300, 560), TEXT("auto-approval-activity"));
+	// A covered request the sweep holds back while an undo step is open: its card says what it waits for.
+	FString WaitingShot;
+	if (GEditor)
+	{
+		const FString Held = Scope.Add();
+		FAccess::Reset();
+		TestTrue(TEXT("It is on for the waiting shot"), FAccess::TurnOn({ECategory::Edits}, {Held}));
+		const int32 Transaction = GEditor->BeginTransaction(FText::FromString(TEXT("Move Actors")));
+		Summary.ToolName = TEXT("hyper_landscape_apply_plan");
+		Summary.EffectTarget = TEXT("/Game/Maps/Arena.Arena");
+		Hold(Held, Summary, []() {});
+		FAccess::PumpGate();
+		WaitingShot = HyperAIStudio::Tests::SaveWidgetShot(SNew(SHyperAIStudioChatActivitySidebar), FIntPoint(300, 560), TEXT("auto-approval-activity-waiting"));
+		GEditor->CancelTransaction(Transaction);
+		FAccess::PumpGate();
+	}
 	if (DialogShot.IsEmpty() || BannerShot.IsEmpty() || ActivityShot.IsEmpty())
 	{
 		AddInfo(TEXT("This editor cannot render; no screenshots were taken."));
 		return true;
 	}
-	AddInfo(TEXT("Screenshots: ") + DialogShot + TEXT(", ") + BannerShot + TEXT(", ") + ActivityShot);
+	AddInfo(TEXT("Screenshots: ") + DialogShot + TEXT(", ") + BannerShot + TEXT(", ") + ActivityShot + TEXT(", ") + WaitingShot);
 	return true;
 }
 

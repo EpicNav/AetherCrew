@@ -5,6 +5,7 @@
 #include "CoreGlobals.h"
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "HyperAIStudioSandbox.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioStyle.h"
 #include "Misc/App.h"
@@ -79,6 +80,11 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 	using namespace HyperAIStudio::AutoApprovalDialog;
 	Window = InArgs._Window;
 	PendingAtOpen = FHyperAIStudioApprovalGate::GetPending();
+	{
+		const HyperAIStudio::Sandbox::FStatus Sandbox = HyperAIStudio::Sandbox::GetStatus();
+		bOffersSandbox = Sandbox.State != HyperAIStudio::Sandbox::EState::Off;
+		SandboxHeldAtOpen = Sandbox.Changes.Num();
+	}
 	ConfirmNatively = [this](const FText& Caption, const FText& Body)
 	{
 		return ShowNativeConfirmation(Window.Pin(), Caption, Body);
@@ -165,6 +171,24 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
+		.Padding(0.0f, 10.0f, 0.0f, 0.0f)
+		[
+			// Sandbox Mode's Approve All is an approval too, and the one that waits in Activity while Sandbox Mode is on.
+			SNew(SBox)
+			.Visibility(bOffersSandbox ? EVisibility::Visible : EVisibility::Collapsed)
+			[
+				BuildCategory(EHyperAIStudioApprovalCategory::SandboxSaves, LOCTEXT("SandboxLabel", "Sandbox Mode's held saves (written to the project)"),
+					FText::Format(LOCTEXT("SandboxBodyUnreviewed",
+						"Sandbox Mode holds everything saved in the editor for review until you press Approve All in Activity: your own saves, and saves by tools that never asked for your approval, such as another MCP server's editor Python. With this ticked, auto-approval presses Approve All for you at a quiet moment, so those reach the project unreviewed. It waits until no asset has unsaved changes, Play In Editor is not running and no agent edit is running, and it never saves for you: an asset left unsaved, by you or by an agent's script, holds the write back until it is saved (Approve All saves what agents left unsaved first). A held removal deletes the project's own file, so removals are written only if Destructive tools is ticked too. Each write counts as one of its {0} approvals, and a failed write as one of its {1} failures in a row. Written files cannot be taken back with Undo."),
+						FHyperAIStudioAutoApproval::MaxApprovals, FHyperAIStudioAutoApproval::MaxConsecutiveFailures),
+					SNew(STextBlock)
+					.AutoWrapText(true)
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					.Text_Lambda([this]() { return SandboxNote(); }))
+			]
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
 		.Padding(0.0f, 14.0f, 0.0f, 0.0f)
 		[
 			SNew(SHorizontalBox)
@@ -186,7 +210,7 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 		.AutoHeight()
 		.Padding(0.0f, 12.0f, 0.0f, 0.0f)
 		[
-			BuildPending()
+			BuildWaiting()
 		];
 
 	ChildSlot
@@ -326,7 +350,7 @@ TSharedRef<SWidget> SHyperAIStudioAutoApprovalDialog::BuildDuration(const EHyper
 		];
 }
 
-TSharedRef<SWidget> SHyperAIStudioAutoApprovalDialog::BuildPending() const
+TSharedRef<SWidget> SHyperAIStudioAutoApprovalDialog::BuildWaiting()
 {
 	using namespace HyperAIStudio::AutoApprovalDialog;
 	if (PendingAtOpen.IsEmpty())
@@ -337,19 +361,68 @@ TSharedRef<SWidget> SHyperAIStudioAutoApprovalDialog::BuildPending() const
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		[
-			Paragraph(FText::Format(LOCTEXT("PendingIntro",
-				"{0} {0}|plural(one=request is,other=requests are) waiting now. They keep waiting for your click: auto-approval covers only requests made after you turn it on."),
-				PendingAtOpen.Num()))
+			Paragraph(FText::Format(LOCTEXT("WaitingIntro", "{0} {0}|plural(one=request is,other=requests are) waiting now."), PendingAtOpen.Num()))
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 4.0f, 0.0f, 0.0f)
+		[
+			SNew(SCheckBox)
+			.IsChecked_Lambda([this]() { return bAlsoApproveWaiting ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+			.OnCheckStateChanged_Lambda([this](const ECheckBoxState State) { bAlsoApproveWaiting = State == ECheckBoxState::Checked; })
+			[
+				SNew(STextBlock)
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+				.Text_Lambda([this]()
+				{
+					int32 Covered = 0;
+					for (const FHyperAIStudioPendingApproval& Pending : PendingAtOpen)
+					{
+						Covered += IsCoveredByTicks(Pending) ? 1 : 0;
+					}
+					return Covered > 0
+						? FText::Format(LOCTEXT("AlsoApproveWaiting", "Also approve the {0} {0}|plural(one=request,other=requests) waiting now"), Covered)
+						: LOCTEXT("AlsoApproveWaitingNone", "Also approve the requests waiting now (none is in a ticked category)");
+				})
+			]
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(24.0f, 2.0f, 0.0f, 0.0f)
+		[
+			SNew(STextBlock)
+			.AutoWrapText(true)
+			.Font(FAppStyle::GetFontStyle("SmallFont"))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			.Text_Lambda([this]()
+			{
+				return !GetChosenWaiting().IsEmpty()
+					? LOCTEXT("AlsoApproveWaitingBody", "Those in the ticked categories are approved as soon as auto-approval is on, as if you had clicked Approve, and Activity marks them auto-approved. The others keep waiting for your click.")
+					: LOCTEXT("KeepWaitingBody", "They keep waiting for your click: auto-approval then covers only requests made after you turn it on.");
+			})
 		];
 	for (int32 Index = 0; Index < PendingAtOpen.Num() && Index < ShownPending; ++Index)
 	{
+		const FHyperAIStudioPendingApproval& Pending = PendingAtOpen[Index];
+		const FText Line = FText::Format(LOCTEXT("PendingLine", "{0} on {1}"),
+			FText::FromString(Pending.Summary.ToolName), AssetName(Pending.Summary.EffectTarget));
 		Box->AddSlot()
 		.AutoHeight()
 		.Padding(12.0f, 2.0f, 0.0f, 0.0f)
 		[
 			SNew(STextBlock)
-			.Text(FText::Format(LOCTEXT("PendingLine", "{0} on {1}"),
-				FText::FromString(PendingAtOpen[Index].Summary.ToolName), AssetName(PendingAtOpen[Index].Summary.EffectTarget)))
+			.Text_Lambda([this, Index, Line]()
+			{
+				const FHyperAIStudioPendingApproval& Item = PendingAtOpen[Index];
+				if (!Item.Category.IsSet())
+				{
+					return FText::Format(LOCTEXT("PendingLineClickOnly", "{0} (only a click approves it)"), Line);
+				}
+				const FText Category = FHyperAIStudioAutoApproval::GetCategoryName(*Item.Category);
+				return IsCoveredByTicks(Item) && bAlsoApproveWaiting
+					? FText::Format(LOCTEXT("PendingLineApproved", "{0} ({1}): approved too"), Line, Category)
+					: FText::Format(LOCTEXT("PendingLineWaits", "{0} ({1}): keeps waiting"), Line, Category);
+			})
 			.Font(FAppStyle::GetFontStyle("SmallFont"))
 			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 		];
@@ -393,12 +466,57 @@ TArray<EHyperAIStudioApprovalCategory> SHyperAIStudioAutoApprovalDialog::GetChos
 	TArray<EHyperAIStudioApprovalCategory> Chosen;
 	for (int32 Index = 0; Index < CategoryCount; ++Index)
 	{
-		if (bTicked[Index])
+		const EHyperAIStudioApprovalCategory Category = static_cast<EHyperAIStudioApprovalCategory>(Index);
+		// Sandbox Mode's held saves are offered, and so chosen, only while Sandbox Mode is on.
+		if (bTicked[Index] && (Category != EHyperAIStudioApprovalCategory::SandboxSaves || bOffersSandbox))
 		{
-			Chosen.Add(static_cast<EHyperAIStudioApprovalCategory>(Index));
+			Chosen.Add(Category);
 		}
 	}
 	return Chosen;
+}
+
+bool SHyperAIStudioAutoApprovalDialog::IsCoveredByTicks(const FHyperAIStudioPendingApproval& Pending) const
+{
+	if (!Pending.Category.IsSet() || *Pending.Category == EHyperAIStudioApprovalCategory::SandboxSaves)
+	{
+		return false;
+	}
+	const int32 Index = static_cast<int32>(*Pending.Category);
+	return Index >= 0 && Index < CategoryCount && bTicked[Index];
+}
+
+TSet<FString> SHyperAIStudioAutoApprovalDialog::GetChosenWaiting() const
+{
+	TSet<FString> Chosen;
+	if (!bAlsoApproveWaiting)
+	{
+		return Chosen;
+	}
+	for (const FHyperAIStudioPendingApproval& Pending : PendingAtOpen)
+	{
+		if (IsCoveredByTicks(Pending))
+		{
+			Chosen.Add(Pending.OperationId);
+		}
+	}
+	return Chosen;
+}
+
+FText SHyperAIStudioAutoApprovalDialog::SandboxNote() const
+{
+	// Shown whatever it holds now: an empty sandbox as the dialog opens is no sign that nothing will wait in it later.
+	if (bTicked[static_cast<int32>(EHyperAIStudioApprovalCategory::SandboxSaves)])
+	{
+		return SandboxHeldAtOpen > 0
+			? FText::Format(LOCTEXT("SandboxNoteTickedHeld", "It holds {0} {0}|plural(one=file,other=files) now; they are written too, and so is what is saved from now on."), SandboxHeldAtOpen)
+			: LOCTEXT("SandboxNoteTicked", "It holds nothing now; what is saved from now on is written.");
+	}
+	return SandboxHeldAtOpen > 0
+		? FText::Format(LOCTEXT("SandboxNoteUntickedHeld",
+			"Unticked, auto-approval writes none of it: the {0} {0}|plural(one=file,other=files) it holds now, and whatever agents save from now on, keep waiting in Activity's Sandbox card until you press Approve All."), SandboxHeldAtOpen)
+		: LOCTEXT("SandboxNoteUnticked",
+			"Unticked, auto-approval writes none of it: whatever agents save from now on keeps waiting in Activity's Sandbox card until you press Approve All.");
 }
 
 bool SHyperAIStudioAutoApprovalDialog::CanTurnOn() const
@@ -430,14 +548,22 @@ FText SHyperAIStudioAutoApprovalDialog::BuildConfirmation() const
 		case EHyperAIStudioApprovalCategory::ExternalEffects:
 			Lines.Add(LOCTEXT("ConfirmExternal", "- External effects (can spend money and send data off this computer)"));
 			break;
+		case EHyperAIStudioApprovalCategory::SandboxSaves:
+			Lines.Add(LOCTEXT("ConfirmSandboxUnreviewed", "- Sandbox Mode's held saves (written to the project unreviewed: your own saves, and saves by tools that never asked for approval)"));
+			break;
 		default:
 			Lines.Add(LOCTEXT("ConfirmEditsMostly", "- Edits (mostly undoable asset and level changes, and scripts the runner's checks passed)"));
 			break;
 		}
 	}
+	FText Listed = FText::Join(FText::FromString(TEXT("\n")), Lines);
+	if (const int32 Waiting = GetChosenWaiting().Num(); Waiting > 0)
+	{
+		Listed = FText::Format(LOCTEXT("ConfirmAlsoWaiting", "{0}\n\nIt also approves the {1} {1}|plural(one=request,other=requests) in these categories waiting now."), Listed, Waiting);
+	}
 	return FText::Format(LOCTEXT("ConfirmBody",
 		"{0}, agents' requests in these categories will run without asking you:\n\n{1}\n\nThis covers every agent and MCP client connected to this editor, not only HyperAI chats.\n\nIf you did not open this yourself, press Cancel."),
-		When, FText::Join(FText::FromString(TEXT("\n")), Lines));
+		When, Listed);
 }
 
 FReply SHyperAIStudioAutoApprovalDialog::OnTurnOnClicked()
@@ -461,7 +587,7 @@ FReply SHyperAIStudioAutoApprovalDialog::OnTurnOnClicked()
 	}
 #endif
 	FString Error;
-	if (FHyperAIStudioAutoApproval::Activate(GetChosen(), Duration, Error))
+	if (FHyperAIStudioAutoApproval::Activate(GetChosen(), Duration, GetChosenWaiting(), Error))
 	{
 		Close();
 	}
@@ -568,13 +694,15 @@ bool FHyperAIStudioAutoApprovalTestAccess::FocusesCancel(const SHyperAIStudioAut
 bool FHyperAIStudioAutoApprovalTestAccess::TurnOn(
 	const TArray<EHyperAIStudioApprovalCategory>& Categories,
 	const TSet<FString>& OperationIds,
-	const EHyperAIStudioAutoApprovalDuration Duration)
+	const EHyperAIStudioAutoApprovalDuration Duration,
+	const bool bAlsoApproveWaiting)
 {
 	const TSharedRef<SHyperAIStudioAutoApprovalDialog> Dialog = MakeDialog();
 	for (int32 Index = 0; Index < SHyperAIStudioAutoApprovalDialog::CategoryCount; ++Index)
 	{
 		Dialog->bTicked[Index] = Categories.Contains(static_cast<EHyperAIStudioApprovalCategory>(Index));
 	}
+	Dialog->bAlsoApproveWaiting = bAlsoApproveWaiting;
 	Dialog->Duration = Duration;
 	SetNativeAnswer(*Dialog, true);
 	PressTurnOn(*Dialog, OperationIds);
@@ -594,6 +722,36 @@ int32 FHyperAIStudioAutoApprovalTestAccess::GetPendingShown(const SHyperAIStudio
 int32 FHyperAIStudioAutoApprovalTestAccess::GetNativeConfirmations(const SHyperAIStudioAutoApprovalDialog& Dialog)
 {
 	return Dialog.NativeConfirmations;
+}
+
+bool FHyperAIStudioAutoApprovalTestAccess::IsAlsoApprovingWaiting(const SHyperAIStudioAutoApprovalDialog& Dialog)
+{
+	return Dialog.bAlsoApproveWaiting;
+}
+
+void FHyperAIStudioAutoApprovalTestAccess::SetAlsoApproveWaiting(SHyperAIStudioAutoApprovalDialog& Dialog, const bool bAlso)
+{
+	Dialog.bAlsoApproveWaiting = bAlso;
+}
+
+int32 FHyperAIStudioAutoApprovalTestAccess::GetWaitingChosen(const SHyperAIStudioAutoApprovalDialog& Dialog)
+{
+	return Dialog.GetChosenWaiting().Num();
+}
+
+bool FHyperAIStudioAutoApprovalTestAccess::OffersSandboxSaves(const SHyperAIStudioAutoApprovalDialog& Dialog)
+{
+	return Dialog.bOffersSandbox;
+}
+
+FText FHyperAIStudioAutoApprovalTestAccess::GetSandboxNote(const SHyperAIStudioAutoApprovalDialog& Dialog)
+{
+	return Dialog.SandboxNote();
+}
+
+FText FHyperAIStudioAutoApprovalTestAccess::GetConfirmation(const SHyperAIStudioAutoApprovalDialog& Dialog)
+{
+	return Dialog.BuildConfirmation();
 }
 #endif
 

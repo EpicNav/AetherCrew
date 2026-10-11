@@ -16,6 +16,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioAutoApproval.h"
 #include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioNames.h"
 #include "HyperAIStudioPIEPlaytestToolset.h"
@@ -2811,9 +2812,14 @@ FHyperAISandboxStatusReport UHyperAIStudioNativeReadToolset::hyper_sandbox_statu
 	default: Report.Status = TEXT("off"); break;
 	}
 	Report.SandboxName = Status.SandboxName;
+	// What auto-approval does with held files is said only while HyperAI's own sandbox is open: it writes nothing else.
 	Report.Diagnostic = Status.State == Sandbox::EState::Off
 		? FString(TEXT("Sandbox Mode is off: saves go straight to the project."))
-		: Status.Diagnostic + TEXT(" Only the user approves or discards held files.");
+		: Status.Diagnostic + (FHyperAIStudioAutoApproval::CoversSandboxSaves()
+			? TEXT(" Only the user approves or discards held files; the auto-approval they turned on for these writes them to the project at a quiet moment, once no asset is unsaved.")
+			: FHyperAIStudioAutoApproval::LeavesSandboxSavesWaiting()
+			? TEXT(" Only the user approves or discards held files. Their auto-approval is on but does not cover these (Sandbox Mode's held saves was not ticked), so they wait for Approve All in Activity.")
+			: TEXT(" Only the user approves or discards held files."));
 	Report.HeldCount = Status.Changes.Num();
 	for (int32 Index = 0; Index < Status.Changes.Num() && Index < 200; ++Index)
 	{

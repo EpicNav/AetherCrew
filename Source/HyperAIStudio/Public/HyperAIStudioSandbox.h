@@ -40,6 +40,20 @@ namespace HyperAIStudio::Sandbox
 		TArray<FChange> Changes;
 	};
 
+	/** Whether Approve All could write what HyperAI's sandbox holds right now; finding out saves and changes nothing. */
+	struct FReadiness
+	{
+		/** HyperAI's sandbox is active and holds files. */
+		bool bHolding = false;
+		FString SandboxName;
+		/** What it holds, as "kind path", as Activity lists it. */
+		TArray<FString> Files;
+		/** Some held files remove the project's own files when written. */
+		bool bRemovals = false;
+		/** Empty when Approve All would go ahead now; otherwise what it waits for, in the log's English. */
+		FString WaitsFor;
+	};
+
 	HYPERAISTUDIO_API void Startup();
 	HYPERAISTUDIO_API void Shutdown();
 	/** Applies the Sandbox Mode setting after it changed. */
@@ -56,6 +70,12 @@ namespace HyperAIStudio::Sandbox
 	 * Refused while other assets are unsaved: closing a sandbox reloads every unsaved asset from disk.
 	 */
 	HYPERAISTUDIO_API bool ApproveAll(FString& OutError);
+	/**
+	 * For the auto-approval the user turned on for Sandbox Mode's held saves: whether Approve All would go ahead now,
+	 * without its saving step. It waits while any asset is unsaved, rather than saving it, and while Play In Editor or an
+	 * agent edit runs.
+	 */
+	HYPERAISTUDIO_API FReadiness CheckApproveAll();
 	/** The user's decision: throws away every held file and reloads what was open from the project, unsaved assets included. */
 	HYPERAISTUDIO_API bool DiscardAll(FString& OutError);
 	HYPERAISTUDIO_API FSimpleMulticastDelegate& OnChanged();
