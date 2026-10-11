@@ -20,8 +20,13 @@ enum class EHyperAIStudioApprovalCategory : uint8
 	/** Plans whose sealed variant deletes or replaces; each needs the editor's one-time grant. */
 	Destructive,
 	/** Paid services, the network and source-control submits; each needs the editor's one-time grant. */
-	ExternalEffects
+	ExternalEffects,
+	/**
+	 * Not a request: the files Sandbox Mode holds for review (the user's own saves among them), written to the project
+	 * as Approve All writes them. No request is ever filed under it. Held removals need Destructive as well.
+	 */
+	SandboxSaves
 };
 
-/** edits, scripts, destructive, external_effects: for logs and the status agents read. */
+/** edits, scripts, destructive, external_effects, sandbox_saves: for logs and the status agents read. */
 HYPERAISTUDIO_API const TCHAR* LexToString(EHyperAIStudioApprovalCategory Category);

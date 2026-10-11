@@ -656,6 +656,48 @@
    "text": "HyperAI：应用动画计划"
   },
   {
+   "namespace": "HyperAIStudioApprovalGate",
+   "key": "BusyCapture",
+   "source": "the mouse is captured ({0}), as in a drag",
+   "text": "鼠标正被占用（{0}），就像正在拖动"
+  },
+  {
+   "namespace": "HyperAIStudioApprovalGate",
+   "key": "BusyGarbage",
+   "source": "garbage is being collected",
+   "text": "正在进行垃圾回收"
+  },
+  {
+   "namespace": "HyperAIStudioApprovalGate",
+   "key": "BusySaving",
+   "source": "a package is being saved",
+   "text": "正在保存一个包"
+  },
+  {
+   "namespace": "HyperAIStudioApprovalGate",
+   "key": "BusyTransaction",
+   "source": "an undo step is still open ({0})",
+   "text": "一个撤销步骤仍处于打开状态（{0}）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "AlsoApproveWaiting",
+   "source": "Also approve the {0} {0}|plural(one=request,other=requests) waiting now",
+   "text": "同时批准当前正在等待的 {0} 个请求"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "AlsoApproveWaitingBody",
+   "source": "Those in the ticked categories are approved as soon as auto-approval is on, as if you had clicked Approve, and Activity marks them auto-approved. The others keep waiting for your click.",
+   "text": "勾选类别中的请求会在自动批准开启后立即获得批准，效果等同于你点击了“批准”，“活动”会将它们标记为自动批准。其他请求仍会等待你点击。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "AlsoApproveWaitingNone",
+   "source": "Also approve the requests waiting now (none is in a ticked category)",
+   "text": "同时批准当前正在等待的请求（没有请求属于已勾选的类别）"
+  },
+  {
    "namespace": "HyperAIStudioAutoApproval",
    "key": "ApprovalLimitToast",
    "source": "Auto-approval turned itself off after {0} approvals. Turn it on again from Activity to go on.",
@@ -684,6 +726,12 @@
    "key": "CategorySeparator",
    "source": ", ",
    "text": "、"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmAlsoWaiting",
+   "source": "{0}\n\nIt also approves the {1} {1}|plural(one=request,other=requests) in these categories waiting now.",
+   "text": "{0}\n\n它还会批准这些类别中当前正在等待的 {1} 个请求。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -732,6 +780,12 @@
    "key": "ConfirmOneHour",
    "source": "For the next hour",
    "text": "接下来 1 小时内"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmSandbox",
+   "source": "- Sandbox Mode's held saves (written to the project, your own saves included)",
+   "text": "- 沙盒模式保留的保存（会写入项目，包括你自己的保存）"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -879,6 +933,12 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
+   "key": "KeepWaitingBody",
+   "source": "They keep waiting for your click: auto-approval then covers only requests made after you turn it on.",
+   "text": "它们会继续等待你点击：此后自动批准只覆盖开启之后发出的请求。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
    "key": "LeftHours",
    "source": "{0} h {1} min left",
    "text": "剩余 {0} 小时 {1} 分钟"
@@ -921,21 +981,81 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
-   "key": "PendingIntro",
-   "source": "{0} {0}|plural(one=request is,other=requests are) waiting now. They keep waiting for your click: auto-approval covers only requests made after you turn it on.",
-   "text": "当前有 {0} 个请求正在等待。它们会继续等待你点击：自动批准只覆盖开启之后发出的请求。"
-  },
-  {
-   "namespace": "HyperAIStudioAutoApproval",
    "key": "PendingLine",
    "source": "{0} on {1}",
    "text": "{1} 上的 {0}"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
+   "key": "PendingLineApproved",
+   "source": "{0} ({1}): approved too",
+   "text": "{0}（{1}）：一并批准"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "PendingLineClickOnly",
+   "source": "{0} (only a click approves it)",
+   "text": "{0}（只能通过点击批准）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "PendingLineWaits",
+   "source": "{0} ({1}): keeps waiting",
+   "text": "{0}（{1}）：继续等待"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
    "key": "PendingMore",
    "source": "and {0} more",
    "text": "以及另外 {0} 个"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "SandboxBody",
+   "source": "Sandbox Mode holds everything saved in the editor for review, your own saves included, until you press Approve All in Activity. With this ticked, auto-approval presses it for you at a quiet moment: when no asset has unsaved changes, Play In Editor is not running and no agent edit is running. A held removal deletes the project's own file, so removals are written only if Destructive tools is ticked too. Written files cannot be taken back with Undo.",
+   "text": "沙盒模式会保留编辑器中保存的所有内容以供审阅（包括你自己的保存），直到你在“活动”中按下“全部批准”。勾选此项后，自动批准会在空闲时替你按下它：前提是没有资产有未保存的更改、“在编辑器中运行”未在运行，且没有智能体编辑正在运行。保留的删除会删除项目自身的文件，因此只有同时勾选“破坏性工具”时才会写入删除。写入的文件无法通过“撤销”恢复。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "SandboxHeldNow",
+   "source": "It holds {0} {0}|plural(one=file,other=files) now; with this ticked, they are written too.",
+   "text": "它当前保留了 {0} 个文件；勾选此项后，这些文件也会被写入。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "SandboxLabel",
+   "source": "Sandbox Mode's held saves (written to the project)",
+   "text": "沙盒模式保留的保存（写入项目）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "SandboxShort",
+   "source": "Sandbox saves",
+   "text": "沙盒保存"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "SandboxWaitFailed",
+   "source": "writing them failed ({0}); it tries again when the held files change",
+   "text": "写入失败（{0}）；保留的文件发生变化后会再次尝试"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "SandboxWaitRemovals",
+   "source": "it holds removals, which delete the project's own files, and Destructive tools was not ticked; press Approve All to write them",
+   "text": "其中包含删除，会删除项目自身的文件，而“破坏性工具”未勾选；请按“全部批准”来写入"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "SandboxWriteSoon",
+   "source": "Auto-approval writes these to the project at the next quiet moment.",
+   "text": "自动批准会在下一个空闲时刻将这些文件写入项目。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "SandboxWriteWaiting",
+   "source": "Auto-approval writes these to the project at the next quiet moment; it is waiting because {0}.",
+   "text": "自动批准会在下一个空闲时刻将这些文件写入项目；它正在等待，因为{0}。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -1008,6 +1128,12 @@
    "key": "UntilClose",
    "source": "until the editor closes",
    "text": "直到编辑器关闭"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "WaitingIntro",
+   "source": "{0} {0}|plural(one=request is,other=requests are) waiting now.",
+   "text": "当前有 {0} 个请求正在等待。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -16683,6 +16809,12 @@
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "AutoApprovingWaitNote",
+   "source": "Auto-approval runs this at the next quiet moment; it is waiting because {0}.",
+   "text": "自动批准会在下一个空闲时刻运行它；它正在等待，因为{0}。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
    "key": "CancelJob",
    "source": "Cancel",
    "text": "取消"
@@ -16794,6 +16926,12 @@
    "key": "MoreSandboxFiles",
    "source": "and {0} more",
    "text": "还有 {0} 个"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "NotAutoApprovedNote",
+   "source": "Auto-approval is on but leaves this for your click: {0}.",
+   "text": "自动批准已开启，但此请求仍需你点击：{0}。"
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",

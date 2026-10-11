@@ -411,7 +411,37 @@ TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildApprovalCard(const F
 			[
 				SNew(STextBlock)
 				.Visibility(Approval.bAutoApproving ? EVisibility::Visible : EVisibility::Collapsed)
-				.Text(LOCTEXT("AutoApprovingNote", "Auto-approval runs this as soon as the editor is idle."))
+				// Read live: what holds it back (an open undo step, a mouse capture) changes without the list rebuilding.
+				.Text_Lambda([]()
+				{
+					const FText Wait = FHyperAIStudioApprovalGate::DescribeAutoApprovalWait();
+					return Wait.IsEmpty()
+						? LOCTEXT("AutoApprovingNote", "Auto-approval runs this as soon as the editor is idle.")
+						: FText::Format(LOCTEXT("AutoApprovingWaitNote", "Auto-approval runs this at the next quiet moment; it is waiting because {0}."), Wait);
+				})
+				.AutoWrapText(true)
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+				.ColorAndOpacity_Lambda([]()
+				{
+					return FHyperAIStudioApprovalGate::DescribeAutoApprovalWait().IsEmpty()
+						? FSlateColor::UseSubduedForeground() : FSlateColor(FStyleColors::AccentOrange);
+				})
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 4.0f, 0.0f, 0.0f)
+			[
+				// While auto-approval is on, a request it leaves for a click says why, so "it approves nothing" can be read.
+				SNew(STextBlock)
+				.Visibility_Lambda([OperationId]()
+				{
+					return FHyperAIStudioApprovalGate::DescribeWhyNotAutoApproved(OperationId).IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
+				})
+				.Text_Lambda([OperationId]()
+				{
+					return FText::Format(LOCTEXT("NotAutoApprovedNote", "Auto-approval is on but leaves this for your click: {0}."),
+						FText::FromString(FHyperAIStudioApprovalGate::DescribeWhyNotAutoApproved(OperationId)));
+				})
 				.AutoWrapText(true)
 				.Font(FAppStyle::GetFontStyle("SmallFont"))
 				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
@@ -673,6 +703,18 @@ TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildSandboxCard(const Hy
 
 	if (Status.State == Sandbox::EState::Active && !Status.Changes.IsEmpty())
 	{
+		// The auto-approval the user chose for these presses Approve All for them; this says when, or what it waits for.
+		Card->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 4.0f, 0.0f, 0.0f)
+		[
+			SNew(STextBlock)
+			.Visibility_Lambda([]() { return FHyperAIStudioAutoApproval::CoversSandboxSaves() ? EVisibility::Visible : EVisibility::Collapsed; })
+			.Text_Lambda([]() { return FHyperAIStudioAutoApproval::DescribeSandboxWait(); })
+			.AutoWrapText(true)
+			.Font(FAppStyle::GetFontStyle("SmallFont"))
+			.ColorAndOpacity(FStyleColors::AccentOrange)
+		];
 		TArray<FString> Files;
 		for (const Sandbox::FChange& Change : Status.Changes)
 		{

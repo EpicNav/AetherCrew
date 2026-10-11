@@ -10,6 +10,7 @@
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioApprovalGateInternal.h"
+#include "HyperAIStudioSandbox.h"
 #include "HyperAIStudioSettings.h"
 #include "SHyperAIStudioAutoApprovalDialog.h"
 #include "Styling/AppStyle.h"
@@ -32,7 +33,12 @@ namespace HyperAIStudio::AutoApproval::Private
 		EHyperAIStudioApprovalCategory::Edits,
 		EHyperAIStudioApprovalCategory::Scripts,
 		EHyperAIStudioApprovalCategory::Destructive,
-		EHyperAIStudioApprovalCategory::ExternalEffects};
+		EHyperAIStudioApprovalCategory::ExternalEffects,
+		EHyperAIStudioApprovalCategory::SandboxSaves};
+	/** How often it looks at what Sandbox Mode holds; checking for unsaved assets walks every package. */
+	constexpr double SandboxCheckSeconds = 2.0;
+	/** How often a sandbox write that keeps waiting says so again in the log; a new reason is logged at once. */
+	constexpr double SandboxWaitLogSeconds = 30.0;
 
 	struct FActivation
 	{
@@ -42,8 +48,10 @@ namespace HyperAIStudio::AutoApproval::Private
 		EHyperAIStudioAutoApprovalDuration Duration = EHyperAIStudioAutoApprovalDuration::OneHour;
 		/** When it ends, on the monotonic clock; 0 while it lasts until the editor closes. */
 		double EndsAt = 0.0;
-		/** Requests held before it started keep waiting for a click. */
+		/** Requests held before it started keep waiting for a click, except those the user chose in its dialog. */
 		uint64 FirstSequence = 0;
+		/** Requests waiting as its dialog opened that the user chose there to approve as well. */
+		TSet<FString> ChosenWaiting;
 		/** The spend settings as the user confirmed it under; it ends if they change. */
 		FString SpendSettings;
 		int32 Approved = 0;
@@ -116,6 +124,7 @@ namespace HyperAIStudio::AutoApproval::Private
 		case EHyperAIStudioApprovalCategory::Scripts: return TEXT("Scripts");
 		case EHyperAIStudioApprovalCategory::Destructive: return TEXT("Destructive");
 		case EHyperAIStudioApprovalCategory::ExternalEffects: return TEXT("External effects");
+		case EHyperAIStudioApprovalCategory::SandboxSaves: return TEXT("Sandbox saves");
 		default: return TEXT("Edits");
 		}
 	}
@@ -255,6 +264,234 @@ namespace HyperAIStudio::AutoApproval::Private
 		FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
 	}
 
+	/** Why the current activation does not cover a request; None when it does. */
+	enum class ENotCovered : uint8
+	{
+		None,
+		Off,
+		NoCategory,
+		NotChosen,
+		Expired,
+		ApprovalLimit,
+		ExternalLimit,
+		Failures,
+		WaitingBefore,
+		TestScope
+	};
+
+	ENotCovered Check(const TOptional<EHyperAIStudioApprovalCategory>& Category, const uint64 Sequence, const FString& OperationId)
+	{
+		const TOptional<FActivation>& Active = Current();
+		if (!Active.IsSet())
+		{
+			return ENotCovered::Off;
+		}
+		// Sandbox Mode's held saves are no request: a request never reaches it by that category.
+		if (!Category.IsSet() || *Category == EHyperAIStudioApprovalCategory::SandboxSaves)
+		{
+			return ENotCovered::NoCategory;
+		}
+		if (!(Active->CategoryMask & Bit(*Category)))
+		{
+			return ENotCovered::NotChosen;
+		}
+		if (Active->EndsAt > 0.0 && Now() >= Active->EndsAt)
+		{
+			return ENotCovered::Expired;
+		}
+		if (Active->Approved >= FHyperAIStudioAutoApproval::MaxApprovals)
+		{
+			return ENotCovered::ApprovalLimit;
+		}
+		if (*Category == EHyperAIStudioApprovalCategory::ExternalEffects && Active->ExternalApproved >= FHyperAIStudioAutoApproval::MaxExternalEffects)
+		{
+			return ENotCovered::ExternalLimit;
+		}
+		if (Active->ConsecutiveFailures >= FHyperAIStudioAutoApproval::MaxConsecutiveFailures)
+		{
+			return ENotCovered::Failures;
+		}
+		// What already waited as it began is covered only if the user chose it in its dialog.
+		if (Sequence < Active->FirstSequence && !Active->ChosenWaiting.Contains(OperationId))
+		{
+			return ENotCovered::WaitingBefore;
+		}
+#if WITH_DEV_AUTOMATION_TESTS
+		if (Active->OnlyOperations.IsSet() && (!GIsAutomationTesting || !Active->OnlyOperations->Contains(OperationId)))
+		{
+			return ENotCovered::TestScope;
+		}
+#endif
+		return ENotCovered::None;
+	}
+
+	/** Where writing Sandbox Mode's held saves stands, for the log and Activity's sandbox card. */
+	struct FSandboxWait
+	{
+		/** What the write waits for, as a clause in the log's English; empty while nothing holds it back. */
+		FString Log;
+		FText Text;
+		double Since = 0.0;
+		double LastLogged = -1.0;
+		/** It looks again no sooner than this, on the monotonic clock. */
+		double NextCheck = 0.0;
+		/** The held files a write failed on: it is not tried again until they change. */
+		FString FailedOn;
+	};
+
+	FSandboxWait& SandboxWait()
+	{
+		static FSandboxWait Value;
+		return Value;
+	}
+
+	/** Logged when the reason changes and then at most every SandboxWaitLogSeconds. */
+	void NoteSandboxWait(const FString& Log, const FText& Text, const int32 Files)
+	{
+		FSandboxWait& Wait = SandboxWait();
+		const double Time = FPlatformTime::Seconds();
+		if (Wait.Log.IsEmpty())
+		{
+			Wait.Since = Time;
+		}
+		const bool bNewReason = Wait.Log != Log;
+		Wait.Log = Log;
+		Wait.Text = Text;
+		if (bNewReason || Time - Wait.LastLogged >= SandboxWaitLogSeconds)
+		{
+			Wait.LastLogged = Time;
+			UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Auto-approval is waiting to write the %d file(s) Sandbox Mode holds: %s (waiting %.0f s)."),
+				Files, *Log, Time - Wait.Since);
+		}
+	}
+
+	void ClearSandboxWait()
+	{
+		FSandboxWait& Wait = SandboxWait();
+		Wait.Log.Reset();
+		Wait.Text = FText::GetEmpty();
+		Wait.LastLogged = -1.0;
+	}
+
+	/** Whether the current activation may write the sandbox named SandboxName; a test's only one it opened itself. */
+	bool MayWriteSandbox(const FActivation& Active, const FString& SandboxName)
+	{
+		if (!(Active.CategoryMask & Bit(EHyperAIStudioApprovalCategory::SandboxSaves)))
+		{
+			return false;
+		}
+#if WITH_DEV_AUTOMATION_TESTS
+		if (Active.OnlyOperations.IsSet())
+		{
+			return GIsAutomationTesting && Active.OnlyOperations->Contains(TEXT("sandbox:") + SandboxName);
+		}
+#endif
+		return true;
+	}
+
+	/**
+	 * When the user chose Sandbox Mode's held saves: writes what the sandbox holds to the project, as Approve All does,
+	 * at a quiet moment. It never saves or reloads the user's unsaved work: it waits until nothing is unsaved, Play In
+	 * Editor is not running and no agent edit runs. Removals delete project files, so they need Destructive too.
+	 */
+	void SweepSandbox()
+	{
+		namespace Sandbox = HyperAIStudio::Sandbox;
+		using ECategory = EHyperAIStudioApprovalCategory;
+		FSandboxWait& Wait = SandboxWait();
+		{
+			const TOptional<FActivation>& Active = Current();
+			if (!Active.IsSet() || !(Active->CategoryMask & Bit(ECategory::SandboxSaves)))
+			{
+				Wait = FSandboxWait();
+				return;
+			}
+			if (Active->Approved >= FHyperAIStudioAutoApproval::MaxApprovals
+				|| Active->ConsecutiveFailures >= FHyperAIStudioAutoApproval::MaxConsecutiveFailures)
+			{
+				return;
+			}
+		}
+		const double Time = FPlatformTime::Seconds();
+		if (Time < Wait.NextCheck)
+		{
+			return;
+		}
+		Wait.NextCheck = Time + SandboxCheckSeconds;
+		const Sandbox::FReadiness Ready = Sandbox::CheckApproveAll();
+		if (!Ready.bHolding)
+		{
+			ClearSandboxWait();
+			Wait.FailedOn.Reset();
+			return;
+		}
+		if (!MayWriteSandbox(*Current(), Ready.SandboxName))
+		{
+			return;
+		}
+		const FString Held = FString::Join(Ready.Files, TEXT("\n"));
+		if (!Wait.FailedOn.IsEmpty() && Wait.FailedOn == Held)
+		{
+			return;
+		}
+		Wait.FailedOn.Reset();
+		const int32 Files = Ready.Files.Num();
+		if (Ready.bRemovals && !(Current()->CategoryMask & Bit(ECategory::Destructive)))
+		{
+			NoteSandboxWait(TEXT("it holds removals, which delete the project's own files, and Destructive tools was not chosen; Approve All in Activity writes them"),
+				LOCTEXT("SandboxWaitRemovals", "it holds removals, which delete the project's own files, and Destructive tools was not ticked; press Approve All to write them"),
+				Files);
+			return;
+		}
+		if (const HyperAIStudio::Approval::Private::FBusy Busy = HyperAIStudio::Approval::Private::DescribeBusy(); Busy.IsSet())
+		{
+			NoteSandboxWait(Busy.Log, Busy.Text, Files);
+			return;
+		}
+		if (!Ready.WaitsFor.IsEmpty())
+		{
+			NoteSandboxWait(Ready.WaitsFor, FText::FromString(Ready.WaitsFor), Files);
+			return;
+		}
+
+		const FString Listed = FString::Join(TArrayView<const FString>(Ready.Files).Left(10), TEXT(", "))
+			+ (Files > 10 ? FString::Printf(TEXT(" and %d more"), Files - 10) : FString());
+		FHyperAIStudioActivityEntry Entry;
+		Entry.PackId = TEXT("sandbox");
+		Entry.ToolName = TEXT("Sandbox Mode");
+		Entry.AutoApprovedAs = ECategory::SandboxSaves;
+		FString Error;
+		// The same call as Approve All in Activity; only the activity entry and the log say nobody clicked.
+		if (Sandbox::ApproveAll(Error))
+		{
+			ClearSandboxWait();
+			Entry.Kind = EHyperAIStudioActivityKind::ApprovalApproved;
+			Entry.StatusCode = TEXT("approved");
+			Entry.Detail = FString::Printf(TEXT("Auto-approved as sandbox_saves; wrote the %d file(s) Sandbox Mode held to the project: %s."), Files, *Listed);
+			UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Auto-approved Sandbox Mode's held saves: wrote %d file(s) to the project (%s)."), Files, *Listed);
+			FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
+			if (Current().IsSet())
+			{
+				Current()->ConsecutiveFailures = 0;
+			}
+			FHyperAIStudioAutoApproval::NoteApproved(ECategory::SandboxSaves);
+			return;
+		}
+		Wait.FailedOn = Held;
+		Entry.Kind = EHyperAIStudioActivityKind::Failed;
+		Entry.StatusCode = TEXT("sandbox_write_failed");
+		Entry.Detail = FString::Printf(TEXT("Auto-approved as sandbox_saves, but writing the %d held file(s) failed: %s"), Files, *Error);
+		UE_LOG(LogHyperAIStudioAutoApproval, Warning, TEXT("Auto-approval could not write the %d file(s) Sandbox Mode holds: %s It tries again when they change."), Files, *Error);
+		NoteSandboxWait(FString::Printf(TEXT("writing them failed (%s); it tries again when the held files change"), *Error),
+			FText::Format(LOCTEXT("SandboxWaitFailed", "writing them failed ({0}); it tries again when the held files change"), FText::FromString(Error)),
+			Files);
+		FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
+		if (Current().IsSet() && ++Current()->ConsecutiveFailures >= FHyperAIStudioAutoApproval::MaxConsecutiveFailures)
+		{
+			FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::RepeatedFailures);
+		}
+	}
+
 	bool TickExpiry(float)
 	{
 		FHyperAIStudioAutoApproval::EndIfOver();
@@ -263,7 +500,8 @@ namespace HyperAIStudio::AutoApproval::Private
 			ExpiryHandle().Reset();
 			return false;
 		}
-		return true;
+		SweepSandbox();
+		return Current().IsSet();
 	}
 
 	/** Counts the outcomes of what it approved: a run of failures turns it off. */
@@ -323,35 +561,71 @@ FHyperAIStudioAutoApprovalStatus FHyperAIStudioAutoApproval::GetStatus()
 	Status.SecondsLeft = Active->EndsAt > 0.0 ? FMath::Max(0.0, Active->EndsAt - Now()) : -1.0;
 	Status.Approved = Active->Approved;
 	Status.ExternalEffectsApproved = Active->ExternalApproved;
+	Status.ChosenWaiting = Active->ChosenWaiting.Num();
 	return Status;
 }
 
 bool FHyperAIStudioAutoApproval::Covers(const EHyperAIStudioApprovalCategory Category, const uint64 Sequence, const FString& OperationId)
 {
 	using namespace HyperAIStudio::AutoApproval::Private;
+	return Check(Category, Sequence, OperationId) == ENotCovered::None;
+}
+
+FString FHyperAIStudioAutoApproval::DescribeWhyNotCovered(
+	const TOptional<EHyperAIStudioApprovalCategory>& Category,
+	const uint64 Sequence,
+	const FString& OperationId)
+{
+	using namespace HyperAIStudio::AutoApproval::Private;
+	switch (Check(Category, Sequence, OperationId))
+	{
+	case ENotCovered::None: return FString();
+	case ENotCovered::Off: return TEXT("auto-approval is off");
+	case ENotCovered::NoCategory:
+		return TEXT("it fits no category (a read, or a plan whose declared and sealed safety are different risky kinds), so only a click approves it");
+	case ENotCovered::NotChosen:
+	{
+		TArray<FString> Names;
+		for (const EHyperAIStudioApprovalCategory Chosen : CategoriesOf(Current()->CategoryMask))
+		{
+			Names.Add(EnglishName(Chosen));
+		}
+		return FString::Printf(TEXT("%s was not chosen in its dialog (it covers %s)"), EnglishName(*Category), *FString::Join(Names, TEXT(", ")));
+	}
+	case ENotCovered::Expired: return TEXT("its time ran out");
+	case ENotCovered::ApprovalLimit: return FString::Printf(TEXT("it reached its limit of %d approvals"), MaxApprovals);
+	case ENotCovered::ExternalLimit: return FString::Printf(TEXT("it reached its limit of %d external effects"), MaxExternalEffects);
+	case ENotCovered::Failures: return FString::Printf(TEXT("%d requests it approved failed in a row"), MaxConsecutiveFailures);
+	case ENotCovered::WaitingBefore:
+		return TEXT("it was already waiting when auto-approval was turned on, and was not chosen in its dialog to be approved too");
+	default: return TEXT("an automation test's auto-approval covers only that test's own requests");
+	}
+}
+
+bool FHyperAIStudioAutoApproval::IsFromBeforeStart(const uint64 Sequence)
+{
+	const TOptional<HyperAIStudio::AutoApproval::Private::FActivation>& Active = HyperAIStudio::AutoApproval::Private::Current();
+	return Active.IsSet() && Sequence < Active->FirstSequence;
+}
+
+bool FHyperAIStudioAutoApproval::CoversSandboxSaves()
+{
+	using namespace HyperAIStudio::AutoApproval::Private;
 	const TOptional<FActivation>& Active = Current();
-	if (!Active.IsSet() || !(Active->CategoryMask & Bit(Category)))
+	return Active.IsSet() && MayWriteSandbox(*Active, HyperAIStudio::Sandbox::GetStatus(/*bWithChanges=*/false).SandboxName);
+}
+
+FText FHyperAIStudioAutoApproval::DescribeSandboxWait()
+{
+	using namespace HyperAIStudio::AutoApproval::Private;
+	if (!CoversSandboxSaves())
 	{
-		return false;
+		return FText::GetEmpty();
 	}
-	if ((Active->EndsAt > 0.0 && Now() >= Active->EndsAt)
-		|| Active->Approved >= MaxApprovals
-		|| (Category == EHyperAIStudioApprovalCategory::ExternalEffects && Active->ExternalApproved >= MaxExternalEffects)
-		|| Active->ConsecutiveFailures >= MaxConsecutiveFailures)
-	{
-		return false;
-	}
-	if (Sequence < Active->FirstSequence)
-	{
-		return false;
-	}
-#if WITH_DEV_AUTOMATION_TESTS
-	if (Active->OnlyOperations.IsSet() && (!GIsAutomationTesting || !Active->OnlyOperations->Contains(OperationId)))
-	{
-		return false;
-	}
-#endif
-	return true;
+	const FSandboxWait& Wait = SandboxWait();
+	return Wait.Text.IsEmpty()
+		? LOCTEXT("SandboxWriteSoon", "Auto-approval writes these to the project at the next quiet moment.")
+		: FText::Format(LOCTEXT("SandboxWriteWaiting", "Auto-approval writes these to the project at the next quiet moment; it is waiting because {0}."), Wait.Text);
 }
 
 void FHyperAIStudioAutoApproval::EndIfOver()
@@ -419,6 +693,7 @@ void FHyperAIStudioAutoApproval::NoteApproved(const EHyperAIStudioApprovalCatego
 bool FHyperAIStudioAutoApproval::Activate(
 	const TArray<EHyperAIStudioApprovalCategory>& Categories,
 	const EHyperAIStudioAutoApprovalDuration Duration,
+	const TSet<FString>& ChosenWaiting,
 	FString& OutError)
 {
 	using namespace HyperAIStudio::AutoApproval::Private;
@@ -465,12 +740,14 @@ bool FHyperAIStudioAutoApproval::Activate(
 	const double Seconds = DurationSeconds(Duration);
 	Activation.EndsAt = Seconds > 0.0 ? Now() + Seconds : 0.0;
 	Activation.FirstSequence = HyperAIStudio::Approval::Private::PeekNextSequence();
+	Activation.ChosenWaiting = ChosenWaiting;
 	Activation.SpendSettings = SpendSettings();
 #if WITH_DEV_AUTOMATION_TESTS
 	Activation.OnlyOperations = MoveTemp(TestScope);
 #endif
 	const bool bTest = IsTestScoped(Activation);
 	Current() = MoveTemp(Activation);
+	SandboxWait() = FSandboxWait();
 	ExpiryHandle() = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateStatic(&TickExpiry), 1.0f);
 	ActivityHandle() = FHyperAIStudioAgentActivityLog::OnChanged().AddStatic(&OnActivity);
 
@@ -480,21 +757,25 @@ bool FHyperAIStudioAutoApproval::Activate(
 		Names.Add(EnglishName(Category));
 	}
 	const FString Covered = FString::Join(Names, TEXT(", "));
+	// The requests already waiting that the user chose in the dialog are approved on the next quiet tick, as new ones are.
+	const int32 Chosen = HyperAIStudio::Approval::Private::ScheduleCovered();
+	const FString AlsoWaiting = Chosen > 0
+		? FString::Printf(TEXT("; it also approves %d request(s) that were waiting, as chosen in its dialog"), Chosen) : FString();
 	if (bTest)
 	{
 		// What a test turns on covers only its own requests, so it is recorded as such and tells the user nothing.
-		UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Auto-approval on for an automation test's own requests: %s (%s)."),
-			*Covered, DurationName(Duration));
+		UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Auto-approval on for an automation test's own requests: %s (%s)%s."),
+			*Covered, DurationName(Duration), *AlsoWaiting);
 		RecordAudit(TEXT("turned on"), TEXT("auto_approval_on"),
-			FString::Printf(TEXT("%s %s (automation test; it covers only the test's own requests)"), *Covered, DurationName(Duration)));
+			FString::Printf(TEXT("%s %s (automation test; it covers only the test's own requests%s)"), *Covered, DurationName(Duration), *AlsoWaiting));
 	}
 	else
 	{
 		UE_LOG(LogHyperAIStudioAutoApproval, Warning,
-			TEXT("Auto-approval ON for %s (%s), confirmed in its dialog. It covers every agent and MCP client connected to this editor."),
-			*Covered, DurationName(Duration));
+			TEXT("Auto-approval ON for %s (%s), confirmed in its dialog%s. It covers every agent and MCP client connected to this editor."),
+			*Covered, DurationName(Duration), *AlsoWaiting);
 		RecordAudit(TEXT("turned on"), TEXT("auto_approval_on"),
-			FString::Printf(TEXT("%s %s (confirmed in its dialog)"), *Covered, DurationName(Duration)));
+			FString::Printf(TEXT("%s %s (confirmed in its dialog%s)"), *Covered, DurationName(Duration), *AlsoWaiting));
 		Notify(FText::Format(LOCTEXT("OnToast",
 			"Auto-approval is on {0}: {1}. Requests in these categories now run without asking you; Stop is in Activity and in each chat window."),
 			DurationPhrase(Duration), DescribeCategories(Categories)), /*bWarning=*/true);
@@ -521,6 +802,7 @@ void FHyperAIStudioAutoApproval::Stop(const EHyperAIStudioAutoApprovalEnd Why)
 	const uint64 Ended = Current()->Id;
 	const bool bTest = IsTestScoped(*Current());
 	Current().Reset();
+	SandboxWait() = FSandboxWait();
 #if WITH_DEV_AUTOMATION_TESTS
 	LastEnd() = Why;
 #endif
@@ -614,6 +896,7 @@ FText FHyperAIStudioAutoApproval::GetCategoryName(const EHyperAIStudioApprovalCa
 	case EHyperAIStudioApprovalCategory::Scripts: return LOCTEXT("ScriptsShort", "Scripts");
 	case EHyperAIStudioApprovalCategory::Destructive: return LOCTEXT("DestructiveShort", "Destructive");
 	case EHyperAIStudioApprovalCategory::ExternalEffects: return LOCTEXT("ExternalShort", "External effects");
+	case EHyperAIStudioApprovalCategory::SandboxSaves: return LOCTEXT("SandboxShort", "Sandbox saves");
 	default: return LOCTEXT("EditsShort", "Edits");
 	}
 }
@@ -701,6 +984,12 @@ void FHyperAIStudioAutoApprovalTestAccess::PumpGate(const int32 Ticks)
 		TickExpiry();
 		HyperAIStudio::Approval::Private::SweepForTests();
 	}
+}
+
+void FHyperAIStudioAutoApprovalTestAccess::PumpSandbox()
+{
+	HyperAIStudio::AutoApproval::Private::SandboxWait().NextCheck = 0.0;
+	HyperAIStudio::AutoApproval::Private::SweepSandbox();
 }
 
 bool FHyperAIStudioAutoApprovalTestAccess::TickExpiry()

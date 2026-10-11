@@ -135,7 +135,7 @@ function renderApprovals(approvals) {
 }
 
 // Shown while the editor's auto-approval is on; the page can only stop it.
-const categoryNames = { edits: "Edits", scripts: "Scripts", destructive: "Destructive", external_effects: "External effects" };
+const categoryNames = { edits: "Edits", scripts: "Scripts", destructive: "Destructive", external_effects: "External effects", sandbox_saves: "Sandbox saves" };
 function renderAutoApproval(auto) {
   const on = !!(auto && auto.on);
   show("autoApproval", on);

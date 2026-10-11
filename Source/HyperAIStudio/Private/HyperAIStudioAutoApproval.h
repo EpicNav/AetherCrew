@@ -43,6 +43,8 @@ struct FHyperAIStudioAutoApprovalStatus
 	double SecondsLeft = -1.0;
 	int32 Approved = 0;
 	int32 ExternalEffectsApproved = 0;
+	/** Requests that were waiting when it began which the user chose in its dialog to approve too. */
+	int32 ChosenWaiting = 0;
 };
 
 /**
@@ -70,11 +72,19 @@ public:
 	 * covers nothing, and EndIfOver turns it off.
 	 */
 	static bool Covers(EHyperAIStudioApprovalCategory Category, uint64 Sequence, const FString& OperationId);
+	/** Why Covers says no, as a clause in the log's English ("destructive is not one of the categories it covers"); empty when it says yes. */
+	static FString DescribeWhyNotCovered(const TOptional<EHyperAIStudioApprovalCategory>& Category, uint64 Sequence, const FString& OperationId);
+	/** True for a request held before the current auto-approval began: it covers one only if the user chose it in its dialog. */
+	static bool IsFromBeforeStart(uint64 Sequence);
 	/**
 	 * Turns off an activation whose time ran out, or whose spend settings (the cap, the external services, the image
 	 * models) changed since it started; the gate calls it before each approval decision.
 	 */
 	static void EndIfOver();
+	/** The user chose Sandbox Mode's held saves in its dialog: what the sandbox holds is written at a quiet moment. */
+	static bool CoversSandboxSaves();
+	/** For Sandbox Mode's card in Activity while it covers the held saves: when they are written, or what that waits for. */
+	static FText DescribeSandboxWait();
 	/** The gate is about to approve OperationId for it; its outcome counts toward the failure guard. */
 	static void BeginApproval(const FString& OperationId);
 	static void NoteApproved(EHyperAIStudioApprovalCategory Category);
@@ -83,7 +93,7 @@ public:
 	/** Opens the warning dialog, modal to Parent's window. It turns on only if the person confirms there. */
 	static void OpenDialog(const TSharedPtr<const SWidget>& Parent);
 
-	/** Edits, Scripts, Destructive, External effects. */
+	/** Edits, Scripts, Destructive, External effects, Sandbox saves. */
 	static FText GetCategoryName(EHyperAIStudioApprovalCategory Category);
 	static FText DescribeCategories(const TArray<EHyperAIStudioApprovalCategory>& Categories);
 	static FText DescribeTimeLeft();
@@ -95,10 +105,11 @@ private:
 	friend class SHyperAIStudioAutoApprovalDialog;
 	/**
 	 * The dialog's confirm path, after the native confirmation. Replaces a running activation, except that a test's
-	 * activation never replaces the user's own.
+	 * activation never replaces the user's own. ChosenWaiting names requests that were waiting as the dialog opened
+	 * and that the user chose there to approve as well; it covers no other request held before it began.
 	 */
 	static bool Activate(const TArray<EHyperAIStudioApprovalCategory>& Categories,
-		EHyperAIStudioAutoApprovalDuration Duration, FString& OutError);
+		EHyperAIStudioAutoApprovalDuration Duration, const TSet<FString>& ChosenWaiting, FString& OutError);
 #if WITH_DEV_AUTOMATION_TESTS
 	friend struct FHyperAIStudioAutoApprovalTestAccess;
 	/**
@@ -141,11 +152,25 @@ struct FHyperAIStudioAutoApprovalTestAccess
 	static bool FocusesCancel(const SHyperAIStudioAutoApprovalDialog& Dialog);
 	/** Clicks the banner's Stop button, as a person would. */
 	static void PressStop(SHyperAIStudioAutoApprovalBanner& Banner);
-	/** A fresh dialog with these categories and this duration, confirmed: the whole way a person turns it on. */
+	/**
+	 * A fresh dialog with these categories and this duration, confirmed: the whole way a person turns it on. Unlike the
+	 * dialog's default, it leaves "Also approve the requests waiting now" unticked unless asked, so a test's requests
+	 * held before it keep waiting.
+	 */
 	static bool TurnOn(const TArray<EHyperAIStudioApprovalCategory>& Categories, const TSet<FString>& OperationIds,
-		EHyperAIStudioAutoApprovalDuration Duration = EHyperAIStudioAutoApprovalDuration::OneHour);
+		EHyperAIStudioAutoApprovalDuration Duration = EHyperAIStudioAutoApprovalDuration::OneHour, bool bAlsoApproveWaiting = false);
 	static bool WasClosed(const SHyperAIStudioAutoApprovalDialog& Dialog);
 	static int32 GetPendingShown(const SHyperAIStudioAutoApprovalDialog& Dialog);
+	/** "Also approve the requests waiting now": its tick, and how many waiting requests it would approve with the categories ticked. */
+	static bool IsAlsoApprovingWaiting(const SHyperAIStudioAutoApprovalDialog& Dialog);
+	static void SetAlsoApproveWaiting(SHyperAIStudioAutoApprovalDialog& Dialog, bool bAlso);
+	static int32 GetWaitingChosen(const SHyperAIStudioAutoApprovalDialog& Dialog);
+	/** Whether the dialog offers Sandbox Mode's held saves (only while Sandbox Mode is on). */
+	static bool OffersSandboxSaves(const SHyperAIStudioAutoApprovalDialog& Dialog);
+	/** What the native confirmation would say. */
+	static FText GetConfirmation(const SHyperAIStudioAutoApprovalDialog& Dialog);
+	/** One pass of the sandbox sweep the one-second ticker runs, without waiting for its two-second spacing. */
+	static void PumpSandbox();
 	static int32 GetNativeConfirmations(const SHyperAIStudioAutoApprovalDialog& Dialog);
 	static void AdvanceClock(double Seconds);
 	/** A test's activation off, with the clock back: what module startup sees. The user's own activation is left alone. */

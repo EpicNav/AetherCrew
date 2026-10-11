@@ -5,8 +5,13 @@
 #include "Curves/CurveFloat.h"
 #include "Data/SandboxMetaData.h"
 #include "FileHelpers.h"
+#include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
+#include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioAutoApproval.h"
 #include "HyperAIStudioSandbox.h"
+#include "HyperAIStudioWidgetShot.h"
+#include "SHyperAIStudioAutoApprovalDialog.h"
 #include "IFileSandboxCoreModule.h"
 #include "ISandboxInstance.h"
 #include "ISandboxManager.h"
@@ -259,6 +264,156 @@ bool FHyperAIStudioSandboxModeTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("It is not HyperAI's"), IsHoldingEdits());
 	TestFalse(TEXT("Approve is refused on a foreign sandbox"), ApproveAll(Error));
 	TestTrue(TEXT("The foreign sandbox is still active"), Manager().HasActiveSandbox());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioSandboxAutoApprovalTest,
+	"HyperAIStudio.Sandbox.AutoApprovalWritesHeldSaves",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioSandboxAutoApprovalTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::Sandbox;
+	using namespace HyperAIStudio::Sandbox::Tests;
+	using FAccess = FHyperAIStudioAutoApprovalTestAccess;
+	using ECategory = EHyperAIStudioApprovalCategory;
+	if (!FSC::IFileSandboxCoreModule::IsAvailable())
+	{
+		AddError(TEXT("The File Sandbox plugin is not loaded; HyperAIStudio.uplugin enables it."));
+		return false;
+	}
+	if (Manager().HasActiveSandbox())
+	{
+		AddWarning(TEXT("A sandbox is already active in this editor; this test leaves it alone and does not run."));
+		return true;
+	}
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
+	if (const TArray<FString> Unsaved = UnsavedPackages(); !Unsaved.IsEmpty())
+	{
+		AddWarning(TEXT("Assets are unsaved in this editor, so a sandbox write would wait for them; this test does not run: ") + FString::Join(Unsaved, TEXT(", ")));
+		return true;
+	}
+
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8);
+	const FProbe Added = MakeProbe(TEXT("SandboxAutoAdded_") + Suffix);
+	const FProbe Removed = MakeProbe(TEXT("SandboxAutoRemoved_") + Suffix);
+	TSet<FString> Roots;
+	FAccess::Reset();
+	ON_SCOPE_EXIT
+	{
+		FAccess::Reset();
+		SetModeForTests(false);
+		OnModeChanged();
+		if (Manager().HasActiveSandbox())
+		{
+			Roots.Add(ActiveRoot());
+			Manager().LeaveSandbox();
+		}
+		for (const FString& Root : Roots)
+		{
+			Manager().DeleteSandbox(FSC::FDeleteSandboxByDirectoryArgs(Root));
+		}
+		SetModeForTests(TOptional<bool>());
+		TArray<UObject*> Made;
+		for (const FProbe* Probe : {&Added, &Removed})
+		{
+			if (UObject* Object = FindObject<UObject>(nullptr, *Probe->ObjectPath))
+			{
+				Made.Add(Object);
+			}
+		}
+		if (!Made.IsEmpty())
+		{
+			ObjectTools::ForceDeleteObjects(Made, /*ShowConfirmation=*/false);
+		}
+		for (const FProbe* Probe : {&Added, &Removed})
+		{
+			IPlatformFile::GetPlatformPhysical().DeleteFile(*Probe->File);
+		}
+	};
+
+	// One asset is in the project before the sandbox opens; the sandbox will hold its removal.
+	SetModeForTests(false);
+	TestTrue(TEXT("An asset is saved to the project first"), SaveCurve(Removed, 2));
+	TestTrue(TEXT("The project holds it"), ProjectFileSize(Removed) > 0);
+	SetModeForTests(true);
+	FString Error;
+	TestTrue(TEXT("Sandbox Mode opens its sandbox"), CheckAgentEdit(Error));
+	Roots.Add(ActiveRoot());
+	const FString Name = GetStatus().SandboxName;
+
+	// Turned on without naming this sandbox, a test's auto-approval may write nothing at all.
+	TestTrue(TEXT("Sandbox Mode's held saves are offered in the dialog"), FAccess::OffersSandboxSaves(*FAccess::MakeDialog()));
+	TestTrue(TEXT("A new asset is saved, into the sandbox"), SaveCurve(Added, 3));
+	FCoreDelegates::OnEndFrame.Broadcast();
+	TestTrue(TEXT("It is held"), Holds(GetStatus(), Added, TEXT("added")));
+	{
+		// For review: the dialog while Sandbox Mode holds a file, with its row ticked.
+		const TSharedRef<SHyperAIStudioAutoApprovalDialog> Dialog = FAccess::MakeDialog();
+		FAccess::SetTicked(*Dialog, ECategory::SandboxSaves, true);
+		const FString Shot = HyperAIStudio::Tests::SaveWidgetShot(Dialog, FIntPoint(660, 1240), TEXT("auto-approval-dialog-sandbox"));
+		if (!Shot.IsEmpty())
+		{
+			AddInfo(TEXT("Screenshot: ") + Shot);
+		}
+		TestTrue(TEXT("Its native confirmation names Sandbox Mode's held saves"),
+			FAccess::GetConfirmation(*Dialog).ToString().Contains(TEXT("Sandbox Mode's held saves")));
+	}
+	TestTrue(TEXT("A test's auto-approval that does not name this sandbox turns on"), FAccess::TurnOn({ECategory::Edits, ECategory::SandboxSaves}, {}));
+	TestFalse(TEXT("and does not cover it"), FHyperAIStudioAutoApproval::CoversSandboxSaves());
+	FAccess::PumpSandbox();
+	TestTrue(TEXT("Nothing is written"), ProjectFileSize(Added) < 0 && Holds(GetStatus(), Added, TEXT("added")));
+	FAccess::Reset();
+
+	// A held removal deletes the project's file, so it needs Destructive as well.
+	TestTrue(TEXT("The project file is removed in the sandbox"), IFileManager::Get().Delete(*Removed.File, false, true, true));
+	FCoreDelegates::OnEndFrame.Broadcast();
+	const FStatus WithRemoval = GetStatus();
+	TestTrue(TEXT("The removal is held"), Holds(WithRemoval, Removed, TEXT("removed")));
+	TestTrue(TEXT("while the project keeps its file"), ProjectFileSize(Removed) > 0);
+	TestTrue(TEXT("Auto-approval for Edits and Sandbox Mode's held saves turns on"),
+		FAccess::TurnOn({ECategory::Edits, ECategory::SandboxSaves}, {TEXT("sandbox:") + Name}));
+	TestTrue(TEXT("It covers this sandbox"), FHyperAIStudioAutoApproval::CoversSandboxSaves());
+	FAccess::PumpSandbox();
+	TestTrue(TEXT("Without Destructive nothing is written"), ProjectFileSize(Added) < 0 && ProjectFileSize(Removed) > 0);
+	const FString RemovalWait = FHyperAIStudioAutoApproval::DescribeSandboxWait().ToString();
+	TestTrue(TEXT("and Activity says why: ") + RemovalWait, RemovalWait.Contains(TEXT("removals")));
+
+	// With Destructive too, it still never closes the sandbox over unsaved work.
+	FAccess::Reset();
+	TestTrue(TEXT("With Destructive too, it turns on"),
+		FAccess::TurnOn({ECategory::Edits, ECategory::Destructive, ECategory::SandboxSaves}, {TEXT("sandbox:") + Name}));
+	if (UCurveFloat* Curve = FindObject<UCurveFloat>(nullptr, *Added.ObjectPath))
+	{
+		Curve->FloatCurve.AddKey(9.0f, 1.0f);
+		Curve->MarkPackageDirty();
+	}
+	FAccess::PumpSandbox();
+	TestTrue(TEXT("While an asset is unsaved nothing is written"), ProjectFileSize(Added) < 0 && ProjectFileSize(Removed) > 0);
+	const FString UnsavedWait = FHyperAIStudioAutoApproval::DescribeSandboxWait().ToString();
+	TestTrue(TEXT("and Activity names it: ") + UnsavedWait, UnsavedWait.Contains(TEXT("unsaved")) && UnsavedWait.Contains(Added.PackageName));
+	TestEqual(TEXT("the unsaved edit is still in memory"), KeysInMemory(Added), 4);
+
+	// Saved, the sandbox is written at the next quiet look, as Approve All writes it.
+	TestTrue(TEXT("The edit is saved, into the sandbox"), SaveCurve(Added, 4));
+	FCoreDelegates::OnEndFrame.Broadcast();
+	FAccess::PumpSandbox();
+	TestTrue(TEXT("The project has the new asset now"), ProjectFileSize(Added) > 0);
+	TestTrue(TEXT("and the removal is written"), ProjectFileSize(Removed) < 0);
+	TestEqual(TEXT("Nothing is held any more"), GetStatus().Changes.Num(), 0);
+	TestEqual(TEXT("It counts as one approval"), FHyperAIStudioAutoApproval::GetStatus().Approved, 1);
+	TestTrue(TEXT("A fresh sandbox holds what is saved next"), IsHoldingEdits());
+	Roots.Add(ActiveRoot());
+	const TArray<FHyperAIStudioActivityEntry> Entries = FHyperAIStudioAgentActivityLog::GetSnapshot();
+	TestTrue(TEXT("Activity marks the write auto-approved, naming the files"), Entries.ContainsByPredicate([&Added](const FHyperAIStudioActivityEntry& Entry)
+	{
+		return Entry.Kind == EHyperAIStudioActivityKind::ApprovalApproved && Entry.AutoApprovedAs == EHyperAIStudioApprovalCategory::SandboxSaves
+			&& Entry.ToolName == TEXT("Sandbox Mode") && Entry.Detail.Contains(FPaths::GetBaseFilename(Added.File));
+	}));
 	return true;
 }
 

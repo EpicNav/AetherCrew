@@ -5,13 +5,19 @@
 #include "Containers/Ticker.h"
 #include "Editor.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Framework/Application/SlateUser.h"
+#include "HAL/PlatformTime.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGateInternal.h"
 #include "HyperAIStudioAutoApproval.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioTrustedExecutionInternal.h"
+#include "Layout/WidgetPath.h"
 #include "UObject/GarbageCollection.h"
 #include "UObject/UObjectGlobals.h"
+#include "Widgets/SViewport.h"
+
+#define LOCTEXT_NAMESPACE "HyperAIStudioApprovalGate"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioApproval, Log, All);
 
@@ -22,6 +28,7 @@ const TCHAR* LexToString(const EHyperAIStudioApprovalCategory Category)
 	case EHyperAIStudioApprovalCategory::Scripts: return TEXT("scripts");
 	case EHyperAIStudioApprovalCategory::Destructive: return TEXT("destructive");
 	case EHyperAIStudioApprovalCategory::ExternalEffects: return TEXT("external_effects");
+	case EHyperAIStudioApprovalCategory::SandboxSaves: return TEXT("sandbox_saves");
 	default: return TEXT("edits");
 	}
 }
@@ -81,6 +88,56 @@ namespace HyperAIStudio::Approval::Private
 		return Handle;
 	}
 
+	/** How often a sweep that keeps waiting says so again in the log; a new reason is logged at once. */
+	constexpr double WaitLogSeconds = 15.0;
+
+	/** The wait for a quiet tick the sweep is in, so the log and Activity can say what holds approvals back. */
+	struct FWait
+	{
+		FBusy Busy;
+		double Since = 0.0;
+		double LastLogged = -1.0;
+		int32 Ticks = 0;
+	};
+
+	FWait& Wait()
+	{
+		static FWait Value;
+		return Value;
+	}
+
+	/** A scheduled approval waits another tick; logged when the reason changes and then at most every WaitLogSeconds. */
+	void NoteWait(const FBusy& Busy, const int32 Scheduled)
+	{
+		FWait& State = Wait();
+		const double Now = FPlatformTime::Seconds();
+		if (State.Ticks == 0)
+		{
+			State.Since = Now;
+		}
+		++State.Ticks;
+		const bool bNewReason = State.Busy.Log != Busy.Log;
+		State.Busy = Busy;
+		if (bNewReason || Now - State.LastLogged >= WaitLogSeconds)
+		{
+			State.LastLogged = Now;
+			UE_LOG(LogHyperAIStudioApproval, Display, TEXT("Auto-approval is waiting for a quiet editor tick to approve %d request(s): %s (waiting %.1f s, %d tick(s))."),
+				Scheduled, *Busy.Log, Now - State.Since, State.Ticks);
+		}
+	}
+
+	/** The sweep goes ahead, or has nothing left to do: a wait it logged says how it ended. */
+	void EndWait(const int32 Approving)
+	{
+		FWait& State = Wait();
+		if (State.Ticks > 0 && State.LastLogged >= 0.0 && Approving > 0)
+		{
+			UE_LOG(LogHyperAIStudioApproval, Display, TEXT("The editor is quiet again after %.1f s; auto-approval approves %d request(s) now."),
+				FPlatformTime::Seconds() - State.Since, Approving);
+		}
+		State = FWait();
+	}
+
 	int32 IndexOf(const FString& OperationId)
 	{
 		return Held().IndexOfByPredicate([&OperationId](const FHeldApproval& Item)
@@ -129,16 +186,68 @@ namespace HyperAIStudio::Approval::Private
 			&& FHyperAIStudioAutoApproval::Covers(*Item.Pending.Category, Item.Sequence, Item.Pending.OperationId);
 	}
 
-	/**
-	 * A click never lands mid-drag or mid-save, but a ticker can: an approved edit would nest its transaction in the
-	 * user's open one, and a failed edit that undoes its transaction could undo the user's work. Such ticks wait.
-	 */
-	bool IsEditorBusy()
+	FBusy DescribeBusy()
 	{
-		return (GEditor && GEditor->IsTransactionActive())
-			|| (FSlateApplication::IsInitialized() && FSlateApplication::Get().HasAnyMouseCaptor())
-			|| UE::IsSavingPackage()
-			|| IsGarbageCollecting();
+		FBusy Busy;
+		if (GEditor && GEditor->IsTransactionActive())
+		{
+			const FText Name = GEditor->GetTransactionName();
+			Busy.Log = FString::Printf(TEXT("an undo transaction is open (%s)"), Name.IsEmpty() ? TEXT("unnamed") : *Name.ToString());
+			Busy.Text = FText::Format(LOCTEXT("BusyTransaction", "an undo step is still open ({0})"), Name);
+		}
+		else if (FSlateApplication::IsInitialized() && FSlateApplication::Get().HasAnyMouseCaptor())
+		{
+			// A game that holds the mouse while Play In Editor runs is no drag, and holds it for the whole session: it
+			// does not count, or nothing would be approved until play stopped. Any other capture is named.
+			const TSharedPtr<SViewport> GameViewport = FSlateApplication::Get().GetGameViewport();
+			const SWidget* Game = GEditor && GEditor->PlayWorld ? static_cast<const SWidget*>(GameViewport.Get()) : nullptr;
+			FString Captor;
+			FSlateApplication::Get().ForEachUser([&Captor, Game](FSlateUser& User)
+			{
+				if (!Captor.IsEmpty() || !User.HasAnyCapture())
+				{
+					return;
+				}
+				const TArray<FWidgetPath> Paths = User.GetCaptorPaths();
+				if (Paths.IsEmpty())
+				{
+					Captor = FString::Printf(TEXT("a widget of user %d"), User.GetUserIndex());
+				}
+				for (const FWidgetPath& Path : Paths)
+				{
+					if (!Path.IsValid())
+					{
+						Captor = FString::Printf(TEXT("a widget of user %d"), User.GetUserIndex());
+						break;
+					}
+					if (&Path.GetLastWidget().Get() != Game)
+					{
+						Captor = Path.GetLastWidget()->GetTypeAsString();
+						break;
+					}
+				}
+			}, /*bIncludeVirtualUsers=*/true);
+			if (!Captor.IsEmpty())
+			{
+				Busy.Log = FString::Printf(TEXT("the mouse is captured by %s, as in a drag"), *Captor);
+				Busy.Text = FText::Format(LOCTEXT("BusyCapture", "the mouse is captured ({0}), as in a drag"), FText::FromString(Captor));
+			}
+		}
+		if (Busy.IsSet())
+		{
+			return Busy;
+		}
+		if (UE::IsSavingPackage())
+		{
+			Busy.Log = TEXT("a package is being saved");
+			Busy.Text = LOCTEXT("BusySaving", "a package is being saved");
+		}
+		else if (IsGarbageCollecting())
+		{
+			Busy.Log = TEXT("garbage is being collected");
+			Busy.Text = LOCTEXT("BusyGarbage", "garbage is being collected");
+		}
+		return Busy;
 	}
 
 	uint64 PeekNextSequence()
@@ -183,6 +292,12 @@ namespace HyperAIStudio::Approval::Private
 		}
 	}
 
+	/** The category as the log names it. */
+	FString CategoryForLog(const TOptional<EHyperAIStudioApprovalCategory>& Category)
+	{
+		return Category.IsSet() ? FString(::LexToString(*Category)) : FString(TEXT("no category (only a click approves it)"));
+	}
+
 	/** Holds a request; one the user's auto-approval covers is approved on the next quiet tick. */
 	void Hold(FHeldApproval&& Item)
 	{
@@ -191,6 +306,24 @@ namespace HyperAIStudio::Approval::Private
 		Item.Pending.RequestedUtc = FDateTime::UtcNow();
 		Item.bScheduled = IsCovered(Item);
 		const bool bScheduled = Item.bScheduled;
+		// What the user expects auto-approval to do with each request can be read back from the log.
+		const FHyperAIStudioApprovalSummary& Summary = Item.Pending.Summary;
+		if (bScheduled)
+		{
+			UE_LOG(LogHyperAIStudioApproval, Display, TEXT("Holding %s on %s (%s) as %s: auto-approval covers it and approves it on the next quiet editor tick."),
+				*Summary.ToolName, *Summary.EffectTarget, *Item.Pending.OperationId, *CategoryForLog(Item.Pending.Category));
+		}
+		else if (FHyperAIStudioAutoApproval::IsActive())
+		{
+			UE_LOG(LogHyperAIStudioApproval, Display, TEXT("Holding %s on %s (%s) as %s for a click: auto-approval is on but does not cover it: %s."),
+				*Summary.ToolName, *Summary.EffectTarget, *Item.Pending.OperationId, *CategoryForLog(Item.Pending.Category),
+				*FHyperAIStudioAutoApproval::DescribeWhyNotCovered(Item.Pending.Category, Item.Sequence, Item.Pending.OperationId));
+		}
+		else
+		{
+			UE_LOG(LogHyperAIStudioApproval, Log, TEXT("Holding %s on %s (%s) as %s for a click."),
+				*Summary.ToolName, *Summary.EffectTarget, *Item.Pending.OperationId, *CategoryForLog(Item.Pending.Category));
+		}
 		FHyperAIStudioActivityEntry Entry = MakeEntry(EHyperAIStudioActivityKind::ApprovalRequested, Item.Pending.Summary, Item.Pending.OperationId);
 		Entry.StatusCode = TEXT("awaiting_user_approval");
 		Entry.Detail = Item.Pending.Summary.Effects.Num() > 0 ? Item.Pending.Summary.Effects[0] : FString();
@@ -228,15 +361,20 @@ namespace HyperAIStudio::Approval::Private
 		const FHeldApproval Item = Held()[Index];
 		Held().RemoveAt(Index);
 		RecordApproval(OperationId, Approver, AutoCategory);
-		const FString Approved = AutoCategory.IsSet() ? FString::Printf(TEXT("Auto-approved as %s; "), ::LexToString(*AutoCategory))
+		// A request that was waiting when auto-approval began was approved because the user chose it in its dialog.
+		const bool bChosenWaiting = AutoCategory.IsSet() && FHyperAIStudioAutoApproval::IsFromBeforeStart(Item.Sequence);
+		const FString Approved = AutoCategory.IsSet()
+			? FString::Printf(TEXT("Auto-approved as %s%s; "), ::LexToString(*AutoCategory),
+				bChosenWaiting ? TEXT(" (it was waiting when auto-approval was turned on, and was chosen in its dialog)") : TEXT(""))
 			: Approver == EHyperAIStudioApprover::AgentJob ? FString(TEXT("Approved for a running agent job; "))
 			: FString(TEXT("Approved; "));
-		auto LogApproval = [&Item, &OperationId, &AutoCategory, Approver]()
+		auto LogApproval = [&Item, &OperationId, &AutoCategory, Approver, bChosenWaiting]()
 		{
 			if (AutoCategory.IsSet())
 			{
-				UE_LOG(LogHyperAIStudioApproval, Display, TEXT("Auto-approved %s on %s (%s) as %s."),
-					*Item.Pending.Summary.ToolName, *Item.Pending.Summary.EffectTarget, *OperationId, ::LexToString(*AutoCategory));
+				UE_LOG(LogHyperAIStudioApproval, Display, TEXT("Auto-approved %s on %s (%s) as %s%s."),
+					*Item.Pending.Summary.ToolName, *Item.Pending.Summary.EffectTarget, *OperationId, ::LexToString(*AutoCategory),
+					bChosenWaiting ? TEXT(", which was waiting when auto-approval was turned on") : TEXT(""));
 			}
 			else
 			{
@@ -314,14 +452,22 @@ namespace HyperAIStudio::Approval::Private
 	{
 		FHyperAIStudioAutoApproval::EndIfOver();
 		auto IsScheduled = [](const FHeldApproval& Item) { return Item.bScheduled; };
-		if (!Held().ContainsByPredicate(IsScheduled))
+		int32 ScheduledCount = 0;
+		for (const FHeldApproval& Item : Held())
 		{
+			ScheduledCount += Item.bScheduled ? 1 : 0;
+		}
+		if (ScheduledCount == 0)
+		{
+			EndWait(0);
 			return false;
 		}
-		if (IsEditorBusy())
+		if (const FBusy Busy = DescribeBusy(); Busy.IsSet())
 		{
+			NoteWait(Busy, ScheduledCount);
 			return true;
 		}
+		EndWait(ScheduledCount);
 		TArray<TPair<uint64, FString>> Scheduled;
 		for (const FHeldApproval& Item : Held())
 		{
@@ -409,6 +555,28 @@ namespace HyperAIStudio::Approval::Private
 			FHyperAIStudioApprovalGate::OnChanged().Broadcast();
 		}
 		return Returned;
+	}
+
+	int32 ScheduleCovered()
+	{
+		int32 Scheduled = 0;
+		for (FHeldApproval& Item : Held())
+		{
+			if (Item.bScheduled || !IsCovered(Item))
+			{
+				continue;
+			}
+			Item.bScheduled = true;
+			++Scheduled;
+			UE_LOG(LogHyperAIStudioApproval, Display, TEXT("Auto-approval will approve %s on %s (%s) as %s, which was waiting when it was turned on and was chosen in its dialog."),
+				*Item.Pending.Summary.ToolName, *Item.Pending.Summary.EffectTarget, *Item.Pending.OperationId, *CategoryForLog(Item.Pending.Category));
+		}
+		if (Scheduled > 0)
+		{
+			ScheduleSweep();
+			FHyperAIStudioApprovalGate::OnChanged().Broadcast();
+		}
+		return Scheduled;
 	}
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -545,12 +713,31 @@ bool FHyperAIStudioApprovalGate::DescribeHeld(const FString& OperationId, FStrin
 		return false;
 	}
 	const TOptional<EHyperAIStudioApprovalCategory>& Category = Held()[IndexOf(OperationId)].Pending.Category;
+	const FBusy& Busy = Wait().Busy;
 	InOutStatus = TEXT("queued");
 	InOutDiagnostic = FString::Printf(
-		TEXT("Auto-approval covers this request (%s): it is approved on the next quiet editor tick; nobody needs to click. ")
+		TEXT("Auto-approval covers this request (%s): it is approved on the next quiet editor tick; nobody needs to click.%s ")
 		TEXT("Call hyper_operation_wait with this operation_id for its outcome."),
-		Category.IsSet() ? ::LexToString(*Category) : TEXT("edits"));
+		Category.IsSet() ? ::LexToString(*Category) : TEXT("edits"),
+		Busy.IsSet() ? *FString::Printf(TEXT(" It is waiting because %s."), *Busy.Log) : TEXT(""));
 	return true;
+}
+
+FText FHyperAIStudioApprovalGate::DescribeAutoApprovalWait()
+{
+	return IsInGameThread() ? HyperAIStudio::Approval::Private::Wait().Busy.Text : FText::GetEmpty();
+}
+
+FString FHyperAIStudioApprovalGate::DescribeWhyNotAutoApproved(const FString& OperationId)
+{
+	using namespace HyperAIStudio::Approval::Private;
+	const int32 Index = IsInGameThread() && FHyperAIStudioAutoApproval::IsActive() ? IndexOf(OperationId) : INDEX_NONE;
+	if (Index == INDEX_NONE)
+	{
+		return FString();
+	}
+	const FHeldApproval& Item = Held()[Index];
+	return FHyperAIStudioAutoApproval::DescribeWhyNotCovered(Item.Pending.Category, Item.Sequence, Item.Pending.OperationId);
 }
 
 TOptional<FHyperAIStudioApprovalRecord> FHyperAIStudioApprovalGate::FindApproval(const FString& OperationId)
@@ -605,6 +792,7 @@ void FHyperAIStudioApprovalGate::Clear()
 	}
 	Held().Reset();
 	AwaitingLane().Reset();
+	Wait() = FWait();
 	OnChanged().Broadcast();
 }
 
@@ -613,3 +801,5 @@ FSimpleMulticastDelegate& FHyperAIStudioApprovalGate::OnChanged()
 	static FSimpleMulticastDelegate Delegate;
 	return Delegate;
 }
+
+#undef LOCTEXT_NAMESPACE

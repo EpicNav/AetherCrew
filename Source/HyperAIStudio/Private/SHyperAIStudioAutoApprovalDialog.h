@@ -34,9 +34,13 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend struct FHyperAIStudioAutoApprovalTestAccess;
 #endif
-	static constexpr int32 CategoryCount = 4;
+	static constexpr int32 CategoryCount = 5;
 
 	TArray<EHyperAIStudioApprovalCategory> GetChosen() const;
+	/** The requests waiting as it opened that Turn On approves too: those in a ticked category, while that box is ticked. */
+	TSet<FString> GetChosenWaiting() const;
+	/** Whether a request waiting as it opened is in a ticked category. */
+	bool IsCoveredByTicks(const FHyperAIStudioPendingApproval& Pending) const;
 	bool CanTurnOn() const;
 	FReply OnTurnOnClicked();
 	FReply OnCancelClicked();
@@ -45,13 +49,20 @@ private:
 	TSharedRef<SWidget> BuildCategory(EHyperAIStudioApprovalCategory Category, const FText& Label, const FText& Body,
 		const TSharedRef<SWidget>& Note);
 	TSharedRef<SWidget> BuildDuration(EHyperAIStudioAutoApprovalDuration Choice, const FText& Label);
-	TSharedRef<SWidget> BuildPending() const;
+	/** What waits now, each with its category, and whether Turn On approves those in the ticked categories too. */
+	TSharedRef<SWidget> BuildWaiting();
 	/** MessageBoxW, Cancel by default; false wherever nobody can answer it. */
 	static bool ShowNativeConfirmation(const TSharedPtr<SWindow>& Owner, const FText& Caption, const FText& Body);
 
 	TWeakPtr<SWindow> Window;
 	/** Every activation starts from these: Edits only. */
-	bool bTicked[CategoryCount] = {true, false, false, false};
+	bool bTicked[CategoryCount] = {true, false, false, false, false};
+	/** "Also approve the requests waiting now", ticked by default: turning it on with requests waiting approves them. */
+	bool bAlsoApproveWaiting = true;
+	/** Sandbox Mode was on as it opened, so its held saves are offered. */
+	bool bOffersSandbox = false;
+	/** How many files Sandbox Mode held as it opened. */
+	int32 SandboxHeldAtOpen = 0;
 	EHyperAIStudioAutoApprovalDuration Duration = EHyperAIStudioAutoApprovalDuration::OneHour;
 	TArray<FHyperAIStudioPendingApproval> PendingAtOpen;
 	TSharedPtr<SButton> CancelButton;

@@ -116,6 +116,17 @@ public:
 	 * both as they are (awaiting_user_approval).
 	 */
 	static bool DescribeHeld(const FString& OperationId, FString& InOutStatus, FString& InOutDiagnostic);
+	/**
+	 * Why approvals the user's auto-approval scheduled are waiting for a quieter tick (an open undo step, a mouse
+	 * capture, a save), for Activity; empty while they are not waiting.
+	 */
+	static FText DescribeAutoApprovalWait();
+	/**
+	 * While auto-approval is on, why it does not cover OperationId (its category was not chosen, it waited before it
+	 * began and was not chosen then, a limit), in the log's English; empty when it covers it, when auto-approval is
+	 * off, or when nothing waits under that id.
+	 */
+	static FString DescribeWhyNotAutoApproved(const FString& OperationId);
 	/** How OperationId was approved, among the last 64 approvals of this editor session. */
 	static TOptional<FHyperAIStudioApprovalRecord> FindApproval(const FString& OperationId);
 

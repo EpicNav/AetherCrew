@@ -662,6 +662,48 @@ namespace HyperAIStudio::Sandbox
 		return true;
 	}
 
+	FReadiness CheckApproveAll()
+	{
+		FReadiness Readiness;
+		FSC::ISandboxInstance* Ours = OurInstance();
+		// The count follows the File Sandbox's own change events, so an empty sandbox costs no directory walk.
+		if (!Ours || State().HeldCount == 0)
+		{
+			return Readiness;
+		}
+		const TArray<FChange> Changes = ChangesOf(*Ours);
+		if (Changes.IsEmpty())
+		{
+			return Readiness;
+		}
+		Readiness.bHolding = true;
+		Readiness.SandboxName = Ours->GetInitialMetaData().Name;
+		for (const FChange& Change : Changes)
+		{
+			Readiness.Files.Add(Change.Kind + TEXT(" ") + Change.Path);
+			Readiness.bRemovals |= Change.Kind == TEXT("removed");
+		}
+		// What Approve All itself refuses over, as what the wait is for.
+		if (IsPlaying())
+		{
+			Readiness.WaitsFor = TEXT("Play In Editor is running on the sandboxed files");
+			return Readiness;
+		}
+		if (FHyperAIStudioExecutionQueue::Num() > 0 || FHyperAIStudioExecutionQueue::IsRunning())
+		{
+			Readiness.WaitsFor = TEXT("agent edits are running or waiting to run");
+			return Readiness;
+		}
+		// Approve All saves what agents left unsaved and refuses over the rest; waiting for nothing to be unsaved does
+		// neither, so the user's own unsaved work is never saved or reloaded for them.
+		if (const TArray<FString> Unsaved = UnsavedPackageNames(); !Unsaved.IsEmpty())
+		{
+			Readiness.WaitsFor = FString::Printf(TEXT("%d %s unsaved changes (%s); closing the sandbox would reload them from disk"),
+				Unsaved.Num(), Unsaved.Num() == 1 ? TEXT("asset has") : TEXT("assets have"), *NameList(Unsaved));
+		}
+		return Readiness;
+	}
+
 	bool DiscardAll(FString& OutError)
 	{
 		OutError.Reset();
