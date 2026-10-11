@@ -27,10 +27,11 @@ function Save-Result([hashtable]$Result) {
   [IO.File]::WriteAllText($ResultPath, ($Result | ConvertTo-Json -Depth 5), $Utf8)
 }
 
-# After a crash, an editor someone opened already (by hand, or the crash reporter's Send and Restart) keeps the project,
-# and takes the chats back itself. ponytail: matched by the project's file name, so two projects sharing one count as one.
+# An editor someone opened already (by hand, or after a crash the crash reporter's Send and Restart) keeps the project,
+# and takes the chats back itself. For a restart this is checked only once the editor that asked for it is gone.
+# ponytail: matched by the project's file name, so two projects sharing one count as one.
 function Test-EditorProcess {
-  $Name = if ($Crashed -and $Plan.projectFile) { [IO.Path]::GetFileName($Plan.projectFile) } else { '' }
+  $Name = if ($Plan.projectFile) { [IO.Path]::GetFileName($Plan.projectFile) } else { '' }
   if (-not $Name) { return $false }
   $Open = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'UnrealEditor%'" -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -notlike 'UnrealEditor-Cmd*' -and "$($_.CommandLine)".IndexOf($Name, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
@@ -98,17 +99,28 @@ if ($Crashed) {
   Say "HyperAI Studio is restarting the editor for $($Plan.project)." 'Cyan'
 }
 
-# 1. Wait for the editor to close. A cancelled close never comes: give up, rather than build after a later close.
-# After a crash there is nothing to wait for.
+# 1. Wait for the editor to close, however long its questions take (save your work, close anyway). A close that is
+# turned down calls the restart off: the editor stops this window and withdraws the plan, so a later close builds and
+# reopens nothing. closeTimeoutSeconds above 0 also gives up after that long. After a crash there is nothing to wait for.
 $Editor = if ($Plan.editorProcessId) { Get-Process -Id $Plan.editorProcessId -ErrorAction SilentlyContinue }
 if ($Editor) {
-  Say 'Waiting for the editor to close...'
-  if (-not $Editor.WaitForExit([int]$Plan.closeTimeoutSeconds * 1000)) {
-    Say 'The editor did not close, so nothing was built or opened again.' 'Yellow'
-    Save-Result @{ state = 'cancelled' }
-    Start-Sleep -Seconds $Linger
-    exit 1
+  Say 'Waiting for the editor to close. If it asks first (save your work, close anyway), it waits for your answer.'
+  $Limit = [int]$Plan.closeTimeoutSeconds
+  $Waited = [Diagnostics.Stopwatch]::StartNew()
+  while (-not $Editor.WaitForExit(500)) {
+    if (-not (Test-Path -LiteralPath $Request)) {
+      Say 'The restart was called off in the editor, which stays open, so nothing was built or opened again.' 'Yellow'
+      Start-Sleep -Seconds $Linger
+      exit 1
+    }
+    if ($Limit -gt 0 -and $Waited.Elapsed.TotalSeconds -ge $Limit) {
+      Say 'The editor did not close, so nothing was built or opened again.' 'Yellow'
+      Save-Result @{ state = 'cancelled' }
+      Start-Sleep -Seconds $Linger
+      exit 1
+    }
   }
+  Say 'The editor closed.'
 }
 
 # 2. Build, showing and logging the output, and keep the compiler, linker and UBT errors for the agent.

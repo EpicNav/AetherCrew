@@ -3,17 +3,23 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Containers/Ticker.h"
+#include "Framework/Docking/TabManager.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioEditorRestart.h"
 #include "HyperAIStudioNativeChat.h"
+#include "HyperAIStudioSettings.h"
+#include "HyperAIStudioShell.h"
 #include "HyperAIStudioWidgetShot.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
+#include "Widgets/Docking/SDockTab.h"
 #include "SHyperAIStudioNativeChatView.h"
 #include "SHyperAIStudioQuickActionWindow.h"
 #include "Serialization/JsonReader.h"
@@ -216,6 +222,22 @@ bool FHyperAIStudioEditorRestartDryRunTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("and open the same project with one restart token"), Relaunch.Contains(FPaths::GetCleanFilename(FPaths::GetProjectFilePath()))
 		&& Relaunch.Contains(TEXT("-HyperAIResume=")) && Relaunch.Find(TEXT("-HyperAIResume=")) == Relaunch.Find(TEXT("-HyperAIResume="), ESearchCase::IgnoreCase, ESearchDir::FromEnd));
 
+	// A live test's answer to the close's question (-HyperAITestRestartAnswer) stays with the editor it was given to:
+	// the editor opened again would otherwise press Don't Save on a question of its own.
+	const FString Original = FCommandLine::Get();
+	for (const TCHAR* Armed : {TEXT(" -HyperAIResume=old -HyperAITestRestartAnswer=\"Don't Save@3\" -HyperAIStaysHere"), TEXT(" \"-HyperAITestRestartAnswer=Don't Save@3\" -HyperAIResume=old -HyperAIStaysHere")})
+	{
+		FCommandLine::Set(*(Original + Armed));
+		const FString Reopens = FHyperAIStudioEditorRestart::Restart(Options).RelaunchCommand;
+		FCommandLine::Set(*Original);
+		AddInfo(TEXT("Armed, reopens with: ") + Reopens);
+		TestTrue(FString::Printf(TEXT("An editor started with%s opens again without the test's answer, with one new token"), Armed),
+			!Reopens.Contains(TEXT("HyperAITestRestartAnswer")) && !Reopens.Contains(TEXT("Save@3")) && !Reopens.Contains(TEXT("=old"))
+			&& Reopens.Contains(TEXT("-HyperAIResume=")) && Reopens.Find(TEXT("-HyperAIResume=")) == Reopens.Find(TEXT("-HyperAIResume="), ESearchCase::IgnoreCase, ESearchDir::FromEnd)
+			&& Reopens.Contains(TEXT("-HyperAIStaysHere")));
+	}
+	TestEqual(TEXT("and the command line is as it was"), FString(FCommandLine::Get()), Original);
+
 	Options.bDryRun = false;
 	const FHyperAIEditorRestartReport Refused = FHyperAIStudioEditorRestart::Restart(Options);
 	TestTrue(TEXT("For real it refuses to restart under automation tests"), !Refused.bOk && Refused.Status == TEXT("refused")
@@ -362,6 +384,372 @@ bool FHyperAIStudioEditorRestartCrashResumeWithoutTokenTest::RunTest(const FStri
 	const TOptional<FHyperAIStudioRestartChat> Chat = FHyperAIStudioEditorRestart::TakeChat(1);
 	TestTrue(TEXT("The chat that was working is told the editor crashed and was opened again"), Chat.IsSet() && Chat->SessionId == TEXT("s-7")
 		&& Chat->Message.StartsWith(TEXT("The Unreal Editor crashed and was opened again")) && Chat->Message.Contains(TEXT("PlayLevel.cpp")));
+	IFileManager::Get().DeleteDirectory(*Folder, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioEditorRestartJudgeCloseTest,
+	"HyperAIStudio.EditorRestart.JudgeClose",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioEditorRestartJudgeCloseTest::RunTest(const FString& Parameters)
+{
+	using ECloseState = FHyperAIStudioEditorRestart::ECloseState;
+	constexpr double Later = FHyperAIStudioEditorRestart::CloseRetrySeconds;
+	auto Judge = [](const bool bShutDown, const bool bQueued, const bool bAsked, const int32 Tries,
+		const double SinceRefused = FHyperAIStudioEditorRestart::CloseRetrySeconds, const bool bBusy = false)
+	{
+		return FHyperAIStudioEditorRestart::JudgeClose(bShutDown, bQueued, bAsked, Tries, SinceRefused, bBusy);
+	};
+	TestTrue(TEXT("Until the editor runs its close, the restart waits"), Judge(false, true, false, 1) == ECloseState::Waiting);
+	TestTrue(TEXT("and while the editor puts the close back for later (saving, loading), it waits on"), Judge(false, true, true, 1) == ECloseState::Waiting);
+	// 11 Oct 2026: the save prompt was answered after 2 min 17 s. The close went ahead in that frame, and the editor ended
+	// a frame later; a 10 s limit judged it cancelled in between and stopped the helper, so nothing reopened the editor.
+	TestTrue(TEXT("A close that went ahead after questions answered at any pace is the editor closing"), Judge(true, false, true, 1, 600.0) == ECloseState::Closing);
+	TestTrue(TEXT("and so is one that asked nothing"), Judge(true, false, false, 1) == ECloseState::Closing);
+	TestTrue(TEXT("A No or Cancel to a question before closing calls the restart off"), Judge(false, false, true, 1, 0.0) == ECloseState::CalledOff);
+	// An import makes the editor refuse with a toast and no question. Asked again the next frame, it refused three times in
+	// a few frames and the restart was off; it is asked again only some seconds later, and once the import is done.
+	TestTrue(TEXT("An editor that stayed open without asking anything is not asked again at once"), Judge(false, false, false, 1, 0.0) == ECloseState::Waiting
+		&& Judge(false, false, false, 1, Later - 0.5) == ECloseState::Waiting);
+	TestTrue(TEXT("nor while something keeps it busy, however long that takes"), Judge(false, false, false, 1, 600.0, true) == ECloseState::Waiting);
+	TestTrue(TEXT("It is asked again once it had time and is not busy"), Judge(false, false, false, 1, Later) == ECloseState::TryAgain
+		&& Judge(false, false, false, 2, Later + 1.0) == ECloseState::TryAgain);
+	TestTrue(TEXT("until it stayed open a third time, when the restart is called off, busy or not"), Judge(false, false, false, 3, 0.0) == ECloseState::CalledOff
+		&& Judge(false, false, false, 3, 0.0, true) == ECloseState::CalledOff);
+	TestFalse(TEXT("Nothing in the editor is restarting meanwhile"), FHyperAIStudioEditorRestart::IsRestarting());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioEditorRestartNotReopenedTest,
+	"HyperAIStudio.EditorRestart.ResumeWhenNotReopened",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioEditorRestartNotReopenedTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::EditorRestartTests;
+	const FString Folder = NewFolder();
+	const FString ThisProject = FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath()).ReplaceCharWithEscapedChar();
+	// The plan as the editor leaves it when its close went ahead for a restart (closedAt), with no result: the helper was
+	// stopped before it built or opened anything, and the project is then opened by hand, without the token.
+	const FString TwoChats = TEXT(R"JSON([{"tab": 1, "agent": "Claude Code", "sessionId": "s-5", "working": true}, {"tab": 2, "agent": "Codex", "sessionId": "t-6", "working": false}])JSON");
+	auto WritePlan = [&Folder, &TwoChats](const FString& Token, const FString& ProjectFile, const FString& ClosedAt, const FString& Chats = FString())
+	{
+		FFileHelper::SaveStringToFile(FString::Printf(TEXT(R"JSON({"token": "%s", "reason": "restart", "requestedAt": "%s", "projectFile": "%s", %s
+			"note": "Baked the dust drape into C++; next, try a lance throw.",
+			"build": {"enabled": true, "target": "HyperAIDevEditor", "logRelative": "Saved/HyperAIStudio/Restart/build.log"},
+			"chats": %s})JSON"),
+			*Token, *FDateTime::UtcNow().ToIso8601(), *ProjectFile, *ClosedAt, Chats.IsEmpty() ? *TwoChats : *Chats), *(Folder / TEXT("request.json")),
+			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	};
+	auto ClosedAgo = [](const double Minutes)
+	{
+		return FString::Printf(TEXT(R"("closedAt": "%s",)"), *(FDateTime::UtcNow() - FTimespan::FromMinutes(Minutes)).ToIso8601());
+	};
+
+	WritePlan(TEXT("r1"), ThisProject, FString());
+	TestFalse(TEXT("A restart whose editor never closed for it gives nothing to an editor opened by hand"), FHyperAIStudioEditorRestart::LoadResume(Folder, FString(), 6.0 * 3600.0));
+	TestTrue(TEXT("and leaves its plan for the helper's editor"), FPaths::FileExists(Folder / TEXT("request.json")));
+	WritePlan(TEXT("r2"), TEXT("E:\\\\Other\\\\Other.uproject"), ClosedAgo(3.0));
+	TestFalse(TEXT("Another project's restart is left alone"), FHyperAIStudioEditorRestart::LoadResume(Folder, FString(), 6.0 * 3600.0));
+
+	// The reported case: the editor closed for the restart and nothing opened it again; opened by hand 3 minutes later.
+	WritePlan(TEXT("r3"), ThisProject, ClosedAgo(3.0));
+	FFileHelper::SaveStringToFile(TEXT(R"JSON({"token": "someone-else", "state": "relaunched", "build": {"enabled": true, "exitCode": 0, "seconds": 9}})JSON"),
+		*(Folder / TEXT("result.json")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	TestTrue(TEXT("An editor opened by hand soon after takes the chats back by itself"), FHyperAIStudioEditorRestart::LoadResume(Folder, FString(), 6.0 * 3600.0));
+	TestFalse(TEXT("and uses the plan up, so it resumes once"), FPaths::FileExists(Folder / TEXT("request.json")) || FPaths::FileExists(Folder / TEXT("result.json")));
+	const TOptional<FHyperAIStudioRestartChat> Working = FHyperAIStudioEditorRestart::TakeChat(1);
+	if (!TestTrue(TEXT("Tab 1 has its chat"), Working.IsSet()))
+	{
+		return false;
+	}
+	AddInfo(TEXT("Told: ") + Working->Message.Replace(TEXT("\n"), TEXT(" / ")));
+	TestTrue(TEXT("The chat that asked is told the editor closed but was opened again by hand, and to continue"), Working->SessionId == TEXT("s-5")
+		&& Working->Message.StartsWith(TEXT("The Unreal Editor closed for the restart you asked for")) && Working->Message.Contains(TEXT("opened again by hand"))
+		&& Working->Message.Contains(TEXT("Your note: Baked the dust drape")) && Working->Message.EndsWith(TEXT("Continue where you left off.")));
+	TestTrue(TEXT("Another restart's result is not taken for this one's: the build is said to have no result"), Working->Message.Contains(TEXT("- Build: no result."))
+		&& !Working->Message.Contains(TEXT("built in 9 s")));
+	const TOptional<FHyperAIStudioRestartChat> Idle = FHyperAIStudioEditorRestart::TakeChat(2);
+	TestTrue(TEXT("A chat that was idle resumes and is told nothing"), Idle.IsSet() && Idle->SessionId == TEXT("t-6") && Idle->Message.IsEmpty());
+	FString Continue;
+	TestTrue(TEXT("A terminal chat's details wait in continue.md"), FFileHelper::LoadFileToString(Continue, *(Folder / TEXT("continue.md"))) && Continue == Working->Message);
+
+	// Opened by hand two hours after the close: not resumed unasked, but offered.
+	WritePlan(TEXT("r4"), ThisProject, ClosedAgo(120.0));
+	TestFalse(TEXT("A restart that closed the editor long ago is not resumed by itself"), FHyperAIStudioEditorRestart::LoadResume(Folder, FString(), 6.0 * 3600.0));
+	TestTrue(TEXT("but offered, its plan kept until then"), FHyperAIStudioEditorRestart::HasResumeOffer() && FPaths::FileExists(Folder / TEXT("request.json")));
+	FHyperAIStudioEditorRestart::DeclineResumeOffer();
+	TestTrue(TEXT("Dismissed, it is not offered again"), !FHyperAIStudioEditorRestart::HasResumeOffer() && !FPaths::FileExists(Folder / TEXT("request.json")));
+	TestFalse(TEXT("and no tab gets a chat"), FHyperAIStudioEditorRestart::TakeChat(1).IsSet());
+
+	WritePlan(TEXT("r5"), ThisProject, ClosedAgo(120.0));
+	FHyperAIStudioEditorRestart::LoadResume(Folder, FString(), 6.0 * 3600.0);
+	// Meanwhile a newer restart replaced the plan: accepting the old offer must not take it.
+	WritePlan(TEXT("r6"), ThisProject, FString());
+	TestFalse(TEXT("An offer whose plan was replaced resumes nothing"), FHyperAIStudioEditorRestart::AcceptResumeOffer());
+	TestTrue(TEXT("and leaves the newer plan alone"), !FHyperAIStudioEditorRestart::HasResumeOffer() && FPaths::FileExists(Folder / TEXT("request.json")));
+	TestFalse(TEXT("so no tab gets a chat"), FHyperAIStudioEditorRestart::TakeChat(1).IsSet());
+
+	WritePlan(TEXT("r7"), ThisProject, ClosedAgo(8.0 * 60.0));
+	TestFalse(TEXT("A restart that closed the editor more than six hours ago is neither resumed"), FHyperAIStudioEditorRestart::LoadResume(Folder, FString(), 6.0 * 3600.0));
+	TestFalse(TEXT("nor offered"), FHyperAIStudioEditorRestart::HasResumeOffer());
+
+	// A restart with no chat running (asked for from outside the editor, or from the console with no agent tab open):
+	// "Resume the 0 chats" was offered, and its button did nothing.
+	WritePlan(TEXT("r8"), ThisProject, ClosedAgo(45.0), TEXT("[]"));
+	TestFalse(TEXT("A restart that ran no chats resumes nothing when the editor is opened by hand later"), FHyperAIStudioEditorRestart::LoadResume(Folder, FString(), 6.0 * 3600.0));
+	TestFalse(TEXT("and offers nothing"), FHyperAIStudioEditorRestart::HasResumeOffer());
+	TestFalse(TEXT("Its plan is used up, so no later editor offers it either"), FPaths::FileExists(Folder / TEXT("request.json")));
+	WritePlan(TEXT("r9"), ThisProject, ClosedAgo(3.0), TEXT(R"JSON([{"tab": 1, "agent": "", "sessionId": "", "working": false}])JSON"));
+	TestFalse(TEXT("nor does one opened soon after, even with a tab that ran no agent in its plan"), FHyperAIStudioEditorRestart::LoadResume(Folder, FString(), 6.0 * 3600.0)
+		|| FHyperAIStudioEditorRestart::HasResumeOffer() || FHyperAIStudioEditorRestart::TakeChat(1).IsSet());
+	TestFalse(TEXT("and that plan is used up too"), FPaths::FileExists(Folder / TEXT("request.json")));
+	IFileManager::Get().DeleteDirectory(*Folder, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioEditorRestartPlaceChatsTest,
+	"HyperAIStudio.EditorRestart.PlaceChats",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioEditorRestartPlaceChatsTest::RunTest(const FString& Parameters)
+{
+	// Chat tabs 1-4 as a late resume finds them: closed (-), open and idle (I), or open and in use (U).
+	auto Tabs = [](const TCHAR* States)
+	{
+		TArray<FHyperAIStudioRestartTab> Out;
+		for (int32 Index = 0; States[Index]; ++Index)
+		{
+			FHyperAIStudioRestartTab& Tab = Out.AddDefaulted_GetRef();
+			Tab.TabIndex = Index + 1;
+			Tab.bOpen = States[Index] != TEXT('-');
+			Tab.bInUse = States[Index] == TEXT('U');
+		}
+		return Out;
+	};
+	auto Place = [&Tabs](const TArray<int32>& ChatTabs, const TCHAR* States)
+	{
+		return FString::JoinBy(FHyperAIStudioEditorRestart::PlaceChats(ChatTabs, Tabs(States)), TEXT(","), [](const int32 Tab) { return FString::FromInt(Tab); });
+	};
+	TestEqual(TEXT("Tabs that came back with fresh, idle chats take their own restart chats"), Place({1, 2}, TEXT("II--")), FString(TEXT("1,2")));
+	TestEqual(TEXT("and so do closed ones, which open on them"), Place({1, 2}, TEXT("----")), FString(TEXT("1,2")));
+	TestEqual(TEXT("A tab in use keeps its chat: the restart's goes to the lowest closed tab"), Place({1, 2}, TEXT("UI--")), FString(TEXT("3,2")));
+	TestEqual(TEXT("never to a tab another restart chat is for"), Place({3, 1}, TEXT("UI--")), FString(TEXT("3,4")));
+	TestEqual(TEXT("With no tab closed, an open idle tab no restart chat is for takes it"), Place({1}, TEXT("UUIU")), FString(TEXT("3")));
+	TestEqual(TEXT("With none left the chat is not resumed, and no chat in use is stopped"), Place({1, 2}, TEXT("UUIU")), FString(TEXT("3,0")));
+	TestEqual(TEXT("Nothing open: every chat to its own tab"), Place({4, 2, 1}, TEXT("----")), FString(TEXT("4,2,1")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioEditorRestartAcceptOfferTest,
+	"HyperAIStudio.EditorRestart.AcceptOfferInTabs",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioEditorRestartAcceptOfferTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::EditorRestartTests;
+	int32 Code = -1;
+	FString Out;
+	FString Err;
+	FPlatformProcess::ExecProcess(TEXT("python"), TEXT("--version"), &Code, &Out, &Err);
+	if (Code != 0)
+	{
+		AddWarning(TEXT("python is not on PATH, so the scripted Claude Code stand-in cannot run."));
+		return true;
+	}
+	// Chats in HyperAI's own view, run by a Claude Code stand-in that answers every message.
+	const FString Folder = NewFolder();
+	const FString Script = Folder / TEXT("fake_claude.py");
+	FFileHelper::SaveStringToFile(FakeResumedClaude, *Script, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	FHyperAIStudioNativeChat::SetCommandForTests(FString::Printf(TEXT("python -u \"%s\""), *Script));
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bWasNative = Settings->bUseNativeChatView;
+	Settings->bUseNativeChatView = true;
+	// Claude Code as if it were set up here, which a test run's project need not be.
+	SHyperAIStudioQuickActionWindow::SetAgentsForTests(TArray<FString>({TEXT("Claude Code")}));
+	ON_SCOPE_EXIT
+	{
+		SHyperAIStudioQuickActionWindow::SetAgentsForTests({});
+		for (int32 Index = 1; Index <= SHyperAIStudioQuickActionWindow::MaxChatTabs; ++Index)
+		{
+			if (const TSharedPtr<FHyperAIStudioNativeChat> Chat = SHyperAIStudioQuickActionWindow::GetTabChat(Index))
+			{
+				Chat->Stop();
+			}
+		}
+		if (const TSharedPtr<SDockTab> Studio = FGlobalTabmanager::Get()->FindExistingLiveTab(FTabId(FHyperAIStudioShell::GetTabName())))
+		{
+			Studio->RequestCloseTab();
+		}
+		Settings->bUseNativeChatView = bWasNative;
+		FHyperAIStudioNativeChat::SetCommandForTests(FString());
+		IFileManager::Get().DeleteDirectory(*Folder, false, true);
+	};
+	auto Pump = [](const double Seconds, TFunctionRef<bool()> Done)
+	{
+		const double End = FPlatformTime::Seconds() + Seconds;
+		while (!Done() && FPlatformTime::Seconds() < End)
+		{
+			FTSTicker::GetCoreTicker().Tick(0.05f);
+			FPlatformProcess::Sleep(0.02f);
+		}
+		return Done();
+	};
+	auto Said = [](const TSharedPtr<FHyperAIStudioNativeChat>& Chat, const FString& Text)
+	{
+		return Chat.IsValid() && Chat->GetItems().ContainsByPredicate([&Text](const TSharedPtr<FHyperAIStudioChatItem>& Item)
+		{
+			return Item.IsValid() && Item->Kind == FHyperAIStudioChatItem::EKind::User && Item->Text.StartsWith(Text);
+		});
+	};
+	auto Answered = [](const TSharedPtr<FHyperAIStudioNativeChat>& Chat)
+	{
+		return Chat.IsValid() && Chat->IsReady() && !Chat->IsBusy() && Chat->GetItems().ContainsByPredicate([](const TSharedPtr<FHyperAIStudioChatItem>& Item)
+		{
+			return Item.IsValid() && Item->Kind == FHyperAIStudioChatItem::EKind::Agent;
+		});
+	};
+
+	// The editor was opened by hand long after a restart: Chat 3 came back running a fresh chat nobody wrote in, and
+	// Chat 4 is in use, its own conversation going.
+	for (const int32 Index : {3, 4})
+	{
+		if (!FHyperAIStudioShell::Open(SHyperAIStudioQuickActionWindow::GetPageId(Index)).IsValid())
+		{
+			AddWarning(TEXT("The Studio's chat tabs do not open in this editor, so the tabs cannot be checked."));
+			return true;
+		}
+		if (!TestTrue(FString::Printf(TEXT("Chat %d starts Claude Code"), Index), SHyperAIStudioQuickActionWindow::StartTabForTests(Index, TEXT("Claude Code"))))
+		{
+			return false;
+		}
+	}
+	const TSharedPtr<FHyperAIStudioNativeChat> Fresh = SHyperAIStudioQuickActionWindow::GetTabChat(3);
+	const TSharedPtr<FHyperAIStudioNativeChat> Busy = SHyperAIStudioQuickActionWindow::GetTabChat(4);
+	if (!TestTrue(TEXT("Both tabs run Claude Code in the chat view"), Fresh.IsValid() && Busy.IsValid()))
+	{
+		return false;
+	}
+	Busy->Send(TEXT("Make the lance glow when it is thrown."));
+	Pump(20.0, [&]() { return Answered(Busy); });
+
+	// The restart those tabs ran, offered on opening: Chat 3 asked for it, Chat 4's chat was idle.
+	FFileHelper::SaveStringToFile(FString::Printf(TEXT(R"JSON({"token": "late", "reason": "restart", "requestedAt": "%s", "projectFile": "%s", "closedAt": "%s",
+		"note": "Baked the dust drape into C++; next, try a lance throw.", "build": {"enabled": true, "target": "HyperAIDevEditor"},
+		"chats": [{"tab": 3, "agent": "Claude Code", "sessionId": "s-5", "working": true}, {"tab": 4, "agent": "Claude Code", "sessionId": "s-7", "working": false}]})JSON"),
+		*FDateTime::UtcNow().ToIso8601(), *FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath()).ReplaceCharWithEscapedChar(),
+		*(FDateTime::UtcNow() - FTimespan::FromMinutes(90.0)).ToIso8601()), *(Folder / TEXT("request.json")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	FHyperAIStudioEditorRestart::LoadResume(Folder, FString(), 6.0 * 3600.0);
+	if (!TestTrue(TEXT("The restart is offered"), FHyperAIStudioEditorRestart::HasResumeOffer()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Resume Chats resumes them"), FHyperAIStudioEditorRestart::AcceptResumeOffer());
+
+	FString Agent;
+	FString Session;
+	FString Continue;
+	TestTrue(TEXT("Chat 3, whose chat nobody wrote in, picks up the restart's conversation and what it is told"),
+		SHyperAIStudioQuickActionWindow::GetTabResumeForTests(3, Agent, Session, Continue) && Agent == TEXT("Claude Code") && Session == TEXT("s-5")
+		&& Continue.StartsWith(TEXT("The Unreal Editor closed for the restart you asked for")) && Continue.Contains(TEXT("Your note: Baked the dust drape")));
+	const FString Told = Continue;
+	TestFalse(TEXT("its fresh chat stopped"), Fresh->IsRunning());
+	TestTrue(TEXT("Chat 4, in use, keeps its own conversation running"), SHyperAIStudioQuickActionWindow::GetTabChat(4) == Busy && Busy->IsRunning()
+		&& Said(Busy, TEXT("Make the lance glow")) && SHyperAIStudioQuickActionWindow::GetTabResumeForTests(4, Agent, Session, Continue) && Session.IsEmpty());
+	int32 Moved = 0;
+	for (int32 Index = 1; Index <= SHyperAIStudioQuickActionWindow::MaxChatTabs && Moved == 0; ++Index)
+	{
+		Moved = Index != 4 && SHyperAIStudioQuickActionWindow::GetTabResumeForTests(Index, Agent, Session, Continue) && Session == TEXT("s-7") ? Index : 0;
+	}
+	AddInfo(FString::Printf(TEXT("Chat 4's restart chat opened in chat %d."), Moved));
+	TestTrue(TEXT("and its restart chat opens in a free tab, told nothing, as it was idle"), Moved != 0 && Moved != 3
+		&& SHyperAIStudioQuickActionWindow::GetTabResumeForTests(Moved, Agent, Session, Continue) && Continue.IsEmpty());
+
+	// Chat 3's agent launches as the tab's startup launches it: the restart's message is the first thing it is told.
+	TestTrue(TEXT("Chat 3's agent starts"), SHyperAIStudioQuickActionWindow::StartTabForTests(3, FString()));
+	const TSharedPtr<FHyperAIStudioNativeChat> Resumed = SHyperAIStudioQuickActionWindow::GetTabChat(3);
+	Pump(20.0, [&]() { return Answered(Resumed); });
+	TestTrue(TEXT("and is told the editor restarted, in the chat that asked for it, and answers"), Resumed.IsValid() && Resumed != Fresh && !Told.IsEmpty()
+		&& Said(Resumed, Told) && Answered(Resumed));
+	TestFalse(TEXT("The offer is used up"), FHyperAIStudioEditorRestart::HasResumeOffer() || FPaths::FileExists(Folder / TEXT("request.json")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioEditorRestartHelperWaitsTest,
+	"HyperAIStudio.EditorRestart.HelperWaitsForTheClose",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioEditorRestartHelperWaitsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::EditorRestartTests;
+	const FString Script = PluginScript(TEXT("HyperAIStudioRestart.ps1"));
+	if (!TestTrue(TEXT("The helper ships in the plugin"), FPaths::FileExists(Script)))
+	{
+		return false;
+	}
+	const FString Folder = NewFolder();
+	const FString BuildScript = Folder / TEXT("build.cmd");
+	const FString Built = Folder / TEXT("built.txt");
+	const FString Marker = Folder / TEXT("relaunched.txt");
+	FFileHelper::SaveStringToFile(FString::Printf(TEXT("@echo off\r\necho built> \"%s\"\r\nexit /b 0\r\n"), *Native(Built)), *BuildScript);
+	// A stand-in editor that closes after Seconds, and the plan the editor writes for it: no limit on the wait (0).
+	auto Start = [&](const int32 Seconds, uint32& OutEditorId)
+	{
+		FProcHandle Editor = FPlatformProcess::CreateProc(TEXT("powershell.exe"), *FString::Printf(TEXT("-NoProfile -Command Start-Sleep -Seconds %d"), Seconds),
+			false, true, true, &OutEditorId, 0, nullptr, nullptr);
+		FFileHelper::SaveStringToFile(FString::Printf(TEXT(R"JSON({"token": "tok", "project": "Stand-in", "editorProcessId": %u, "closeTimeoutSeconds": 0, "lingerSeconds": 0,
+			"build": {"enabled": true, "target": "HyperAIDevEditor", "script": "%s", "log": "%s"},
+			"relaunch": {"executable": "cmd.exe", "arguments": "/c echo relaunched -HyperAIResume=tok> \"%s\"", "workingDirectory": "%s"}})JSON"),
+			OutEditorId, *Native(BuildScript).ReplaceCharWithEscapedChar(), *Native(Folder / TEXT("build.log")).ReplaceCharWithEscapedChar(),
+			*Native(Marker).ReplaceCharWithEscapedChar(), *Native(Folder).ReplaceCharWithEscapedChar()), *(Folder / TEXT("request.json")),
+			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+		return Editor;
+	};
+	const FString Params = FString::Printf(TEXT("-NoProfile -ExecutionPolicy Bypass -File \"%s\" -Request \"%s\""), *Native(Script), *Native(Folder / TEXT("request.json")));
+
+	// The editor's questions before closing take their time: the helper waits them out, then builds and reopens.
+	uint32 EditorId = 0;
+	FProcHandle Editor = Start(4, EditorId);
+	int32 Code = -1;
+	FString Out;
+	FString Err;
+	const double Began = FPlatformTime::Seconds();
+	FPlatformProcess::ExecProcess(TEXT("powershell.exe"), *Params, &Code, &Out, &Err);
+	AddInfo(FString::Printf(TEXT("The helper waited %.1f s for an editor that closed after 4 s."), FPlatformTime::Seconds() - Began));
+	TestFalse(TEXT("With no limit, the helper waited for the editor to close"), FPlatformProcess::IsProcRunning(Editor));
+	FPlatformProcess::CloseProc(Editor);
+	FString Relaunched;
+	for (int32 Try = 0; Try < 50 && !FFileHelper::LoadFileToString(Relaunched, *Marker); ++Try)
+	{
+		FPlatformProcess::Sleep(0.1f);
+	}
+	TestTrue(TEXT("then built and opened the project again"), FPaths::FileExists(Built) && Relaunched.Contains(TEXT("-HyperAIResume=tok")));
+
+	// Called off in the editor, which stays open: the plan is withdrawn and the helper stops without building or reopening.
+	IFileManager::Get().Delete(*Built);
+	IFileManager::Get().Delete(*Marker);
+	IFileManager::Get().Delete(*(Folder / TEXT("result.json")));
+	Editor = Start(60, EditorId);
+	FProcHandle Helper = FPlatformProcess::CreateProc(TEXT("powershell.exe"), *Params, false, true, true, nullptr, 0, nullptr, nullptr);
+	FPlatformProcess::Sleep(3.0f);
+	TestTrue(TEXT("While the editor is open and the plan stands, the helper waits"), FPlatformProcess::IsProcRunning(Helper));
+	IFileManager::Get().Delete(*(Folder / TEXT("request.json")));
+	for (int32 Try = 0; Try < 100 && FPlatformProcess::IsProcRunning(Helper); ++Try)
+	{
+		FPlatformProcess::Sleep(0.1f);
+	}
+	TestFalse(TEXT("Once the plan is withdrawn, the helper stops"), FPlatformProcess::IsProcRunning(Helper));
+	TestTrue(TEXT("with nothing built or opened, and the editor left running"), !FPaths::FileExists(Built) && !FPaths::FileExists(Marker) && FPlatformProcess::IsProcRunning(Editor));
+	FPlatformProcess::TerminateProc(Helper, true);
+	FPlatformProcess::CloseProc(Helper);
+	FPlatformProcess::TerminateProc(Editor, true);
+	FPlatformProcess::CloseProc(Editor);
 	IFileManager::Get().DeleteDirectory(*Folder, false, true);
 	return true;
 }
