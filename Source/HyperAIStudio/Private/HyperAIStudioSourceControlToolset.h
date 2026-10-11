@@ -14,7 +14,7 @@ struct FHyperAISourceControlFile
 
 	/** Relative to the project. */
 	UPROPERTY() FString Path;
-	/** checked_out, added, locked, modified, current, checked_out_by_other, not_current, or unknown. */
+	/** checked_out, added, locked, changed (a local Lore repository), modified, current, checked_out_by_other, not_current, or unknown. */
 	UPROPERTY() FString State;
 	/** Who else holds it, when someone does. */
 	UPROPERTY() FString Who;
@@ -30,6 +30,31 @@ struct FHyperAISourceControlStatusRequest
 };
 
 USTRUCT(BlueprintType)
+struct FHyperAISourceControlLoreStatus
+{
+	GENERATED_BODY()
+
+	/** Whether the lore command was found, where, and its version. */
+	UPROPERTY() bool bCliFound = false;
+	UPROPERTY() FString CliPath;
+	UPROPERTY() FString CliVersion;
+	/**
+	 * local (history on this computer only, no server, no locks), remote (on Server: locks, push), unknown (.lore/config.toml
+	 * unreadable: treated as remote), or none (no Lore workspace).
+	 */
+	UPROPERTY() FString Mode;
+	UPROPERTY() FString Workspace;
+	/** The workspace's server, when remote. */
+	UPROPERTY() FString Server;
+	/** The Lore Server setting: where a repository set up here would be made; empty for local. */
+	UPROPERTY() FString ConfiguredServer;
+	/** Who the lore command is signed in as (names only, never tokens); read when remote. */
+	UPROPERTY() TArray<FString> SignedInAs;
+	/** What the user can do next, such as setting up in Settings > Version control, or running lore login in a terminal. */
+	UPROPERTY() FString Next;
+};
+
+USTRUCT(BlueprintType)
 struct FHyperAISourceControlStatusReport
 {
 	GENERATED_BODY()
@@ -42,6 +67,8 @@ struct FHyperAISourceControlStatusReport
 	UPROPERTY() TArray<FHyperAISourceControlFile> Files;
 	/** For Lore: what lore status says, trimmed. */
 	UPROPERTY() FString LoreStatus;
+	/** Lore on this machine and for this project: the command, local or remote mode, the server and sign-in. */
+	UPROPERTY() FHyperAISourceControlLoreStatus Lore;
 };
 
 USTRUCT(BlueprintType)
@@ -65,7 +92,7 @@ struct FHyperAISourceControlSubmitReport
 	GENERATED_BODY()
 
 	UPROPERTY() bool bOk = false;
-	/** checked (a dry run), awaiting_user_approval, or why it was refused. */
+	/** checked (a dry run), awaiting_user_approval, or why it was refused (submit_running: an earlier submit has not finished). */
 	UPROPERTY() FString Status;
 	UPROPERTY() FString Diagnostic;
 	UPROPERTY() FString OperationId;
@@ -84,15 +111,15 @@ public:
 
 	/**
 	 * The project's source control (Unreal's provider, or the Lore CLI in a Lore workspace) and the files agents checked
-	 * out, locked or added this session, each with its state. Agent edits check assets out on their own; an asset a
-	 * teammate holds refuses the edit, naming them.
+	 * out, locked or added this session, each with its state. Lore: the command's version, local or remote mode, server and
+	 * sign-in. Read only; setup and lore login are the user's, in Settings > Version control.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|SourceControl")
 	static FHyperAISourceControlStatusReport hyper_source_control_status(const FHyperAISourceControlStatusRequest& Request);
 
 	/**
-	 * Submits (checks in, or with Lore stages, commits and pushes) the files agents changed, with a description. It
-	 * reaches the team, so it always waits for the user's approval; dry-run first (the default) to list the files.
+	 * Submits (checks in, or with Lore stages, commits and pushes; a local Lore repository only commits) the files agents
+	 * changed, with a description. It always waits for the user's approval; dry-run first (the default) to list the files.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|SourceControl")
 	static FHyperAISourceControlSubmitReport hyper_source_control_submit(const FHyperAISourceControlSubmitRequest& Request);

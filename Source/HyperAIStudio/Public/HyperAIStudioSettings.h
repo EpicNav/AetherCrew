@@ -557,12 +557,28 @@ public:
 	bool bSendCrashReportForMe = true;
 
 	/**
-	 * Before an agent changes an asset, check it out through the project's source control (or, in a Lore workspace with
-	 * no Unreal provider, lock it with the lore command). An asset a teammate has checked out or locked, or one behind
-	 * the latest revision, turns the edit away. Files an agent adds are marked for add once saved.
+	 * Before an agent changes an asset, check it out through the project's source control (or, in a Lore workspace on a
+	 * server with no Unreal provider, lock it with the lore command). An asset a teammate has checked out or locked, or one
+	 * behind the latest revision, turns the edit away. Files an agent adds are marked for add once saved.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Source Control", meta = (DisplayName = "Check Out Before Agent Edits"))
 	bool bCheckOutBeforeAgentEdits = true;
+
+	/**
+	 * The Lore server a new repository for this project is made on: lore://host:41337 for a self-hosted loreserver, or
+	 * Epic's hosted service once it opens. Empty keeps the repository on this computer only (Lore's local mode). Lore
+	 * fixes the server when the repository is made; Settings > Version control sets it up and checks the server.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Source Control", meta = (DisplayName = "Lore Server"))
+	FString LoreServerUrl;
+
+	/** Who Lore records on commits made in a repository HyperAI sets up here, such as your email. Optional. */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Source Control", meta = (DisplayName = "Lore Identity"))
+	FString LoreIdentity;
+
+	// The lore command's own path, for when it is elsewhere, is set on Settings > Version control only and kept outside
+	// this object (FHyperAIStudioLore::GetCommandOverride): which program HyperAI runs is no setting an agent's settings
+	// tools may write.
 
 	/**
 	 * Lay out the Blueprint nodes agents add when the Blueprint compiles after an edit: flow left to right, branches

@@ -38,5 +38,7 @@
  "project-search-memory-scm.inventory-placed-class.ph.properties.label": "要读取的属性",
  "project-search-memory-scm.inventory-placed-class.ph.properties.hint": "以逗号分隔的确切变量名",
  "project-search-memory-scm.inventory-placed-class.ph.expected_count.label": "预期数量",
- "project-search-memory-scm.inventory-placed-class.ph.min_spacing.label": "最小间距（厘米）"
+ "project-search-memory-scm.inventory-placed-class.ph.min_spacing.label": "最小间距（厘米）",
+ "project-search-memory-scm.check-lore-setup.title": "检查本项目的 Lore 版本控制",
+ "project-search-memory-scm.check-lore-setup.summary": "lore 命令是否已安装、项目的 Lore 仓库在本机还是在服务器上、当前登录身份，以及下一步该做什么。"
 }

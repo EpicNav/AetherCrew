@@ -192,6 +192,9 @@ namespace HyperAIStudio::Private
 			AddExecutableSearchDirectory(Directories, FPaths::Combine(UserProfile, TEXT(".volta"), TEXT("bin")));
 			AddExecutableSearchDirectory(Directories, FPaths::Combine(UserProfile, TEXT(".bun"), TEXT("bin")));
 			AddExecutableSearchDirectory(Directories, FPaths::Combine(UserProfile, TEXT(".proto"), TEXT("shims")));
+			// Lore's installer (lore, loreserver) and Scoop's shims, for an editor started before they reached PATH.
+			AddExecutableSearchDirectory(Directories, FPaths::Combine(UserProfile, TEXT("bin")));
+			AddExecutableSearchDirectory(Directories, FPaths::Combine(UserProfile, TEXT("scoop"), TEXT("shims")));
 		}
 		if (!ProgramData.IsEmpty())
 		{

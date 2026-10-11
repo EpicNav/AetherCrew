@@ -14097,6 +14097,18 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "project-search-memory-scm.check-lore-setup.summary",
+   "source": "Whether the lore command is installed, if the project's Lore repository is local or on a server, who is signed in, and what to do next.",
+   "text": "lore 命令是否已安装、项目的 Lore 仓库在本机还是在服务器上、当前登录身份，以及下一步该做什么。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "project-search-memory-scm.check-lore-setup.title",
+   "source": "Check this project's Lore version control",
+   "text": "检查本项目的 Lore 版本控制"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "project-search-memory-scm.correct-stale-memory.ph.correction.hint",
    "source": "The corrected fact, or remove it",
    "text": "更正后的事实，或填 remove it 表示删除"
@@ -18182,6 +18194,756 @@
    "text": "{0} x {1}，{2} 张"
   },
   {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "AgentsLocal",
+   "source": "Agent edits are marked dirty in Lore once saved; hyper_source_control_submit commits them here after you approve.",
+   "text": "智能体的改动保存后会在 Lore 中标记为已修改；经你批准后，hyper_source_control_submit 会在本机提交它们。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "AgentsNone",
+   "source": "Until it is set up, agent edits are saved as they are, with no version control.",
+   "text": "在设置好之前，智能体的改动会直接保存，不受版本控制。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "AgentsRemote",
+   "source": "Agent edits lock each file on the server first (a teammate's lock turns the edit away); hyper_source_control_submit commits and pushes after you approve.",
+   "text": "智能体编辑前会先在服务器上锁定每个文件（队友持有锁时编辑会被拒绝）；经你批准后，hyper_source_control_submit 会提交并推送。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "Cancelled",
+   "source": "Nothing was changed.",
+   "text": "没有做任何更改。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CheckNeedsCli",
+   "source": "The lore command is needed to check a server.",
+   "text": "检查服务器需要 lore 命令。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CheckServer",
+   "source": "Check server",
+   "text": "检查服务器"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CheckServerTip",
+   "source": "Asks the server for its repositories (lore repository list). Changes nothing.",
+   "text": "向服务器查询其仓库列表（lore repository list）。不做任何更改。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "Checking",
+   "source": "Asking the server...",
+   "text": "正在询问服务器……"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CliFound",
+   "source": "lore {0} at {1}.",
+   "text": "lore {0}，位于 {1}。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CliMissing",
+   "source": "The lore command was not found. {0} Install it with Epic's installer (PowerShell: irm https://raw.githubusercontent.com/EpicGames/lore/main/scripts/install.ps1 | iex), then press Refresh.",
+   "text": "未找到 lore 命令。{0} 请用 Epic 的安装程序安装（PowerShell：irm https://raw.githubusercontent.com/EpicGames/lore/main/scripts/install.ps1 | iex），然后点击“刷新”。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CliNote",
+   "source": "Lore is pre-1.0 and changes quickly. HyperAI uses only its command line, and never signs in or reads its tokens.",
+   "text": "Lore 尚未到 1.0，变化很快。HyperAI 只使用它的命令行，从不登录，也从不读取它的令牌。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CliOdd",
+   "source": "Found {0}, but lore --version did not report a version (exit code {1}): {2}",
+   "text": "找到了 {0}，但 lore --version 没有报告版本（退出码 {1}）：{2}"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CliTitle",
+   "source": "The lore command",
+   "text": "lore 命令"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CommandCleared",
+   "source": "HyperAI looks for lore on PATH and in %USERPROFILE%\\bin.",
+   "text": "HyperAI 会在 PATH 和 %USERPROFILE%\\bin 中查找 lore。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CommandHint",
+   "source": "Empty: found on PATH or in %USERPROFILE%\\bin. Otherwise the full path of lore.exe.",
+   "text": "留空：在 PATH 或 %USERPROFILE%\\bin 中查找。否则填写 lore.exe 的完整路径。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CommandLabel",
+   "source": "Lore command",
+   "text": "Lore 命令"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CommandUsed",
+   "source": "HyperAI runs {0} for Lore.",
+   "text": "HyperAI 会运行 {0} 作为 Lore。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "Confirm",
+   "source": "Set up Lore in {0}?\n\n{1}\nThis adds a .lore folder (and .loreignore) to the project folder; your project files are not changed. To undo it, delete the .lore folder.\n\nRun these steps now?",
+   "text": "在 {0} 中设置 Lore？\n\n{1}\n这会在项目文件夹中添加一个 .lore 文件夹（以及 .loreignore）；你的项目文件不会被更改。要撤销，删除 .lore 文件夹即可。\n\n现在运行这些步骤吗？"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ConfirmServer",
+   "source": "Set up Lore in {0} on the server {2}?\n\n{1}\nThis creates the repository {3} on the server, uploads to it every project file the ignore rules leave in, and adds a .lore folder (and .loreignore) to the project folder. To undo it, run lore repository delete {3}, which removes the repository and its files from the server, and delete the .lore folder.\n\nRun these steps now?",
+   "text": "在服务器 {2} 上为 {0} 设置 Lore？\n\n{1}\n这会在服务器上创建仓库 {3}，把忽略规则未排除的所有项目文件上传到其中，并在项目文件夹中添加一个 .lore 文件夹（以及 .loreignore）。要撤销，请运行 lore repository delete {3}（它会从服务器上删除该仓库及其文件），并删除 .lore 文件夹。\n\n现在运行这些步骤吗？"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ConfirmServerNoCommit",
+   "source": "Set up Lore in {0} on the server {2}?\n\n{1}\nThis creates the repository {3} on the server (no files are uploaded yet) and adds a .lore folder (and .loreignore) to the project folder. To undo it, run lore repository delete {3} and delete the .lore folder.\n\nRun these steps now?",
+   "text": "在服务器 {2} 上为 {0} 设置 Lore？\n\n{1}\n这会在服务器上创建仓库 {3}（暂不上传任何文件），并在项目文件夹中添加一个 .lore 文件夹（以及 .loreignore）。要撤销，请运行 lore repository delete {3}，并删除 .lore 文件夹。\n\n现在运行这些步骤吗？"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ConfirmTitle",
+   "source": "Set up Lore",
+   "text": "设置 Lore"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CopyGitIgnore",
+   "source": "Also keep out what the project's .gitignore ignores (Lore does not read .gitignore)",
+   "text": "同时排除项目 .gitignore 所忽略的内容（Lore 不读取 .gitignore）"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CopyGitIgnoreTip",
+   "source": "Copies the rules of .gitignore that .loreignore lacks, under a heading of their own after the Unreal ones. Off: files only .gitignore keeps out, such as per-user settings, are committed.",
+   "text": "把 .loreignore 缺少的 .gitignore 规则复制进来，放在 Unreal 规则之后的单独标题下。关闭时：只有 .gitignore 排除的文件（例如个人设置）会被提交。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CopyLogin",
+   "source": "Copy",
+   "text": "复制"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CopyLoginTip",
+   "source": "Copy the command, to paste in a terminal.",
+   "text": "复制该命令，以便粘贴到终端中。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "DetailCheckServer",
+   "source": "Reads the server's list of repositories. Changes nothing. Undo: nothing to undo.",
+   "text": "读取服务器的仓库列表。不做任何更改。撤销：无需撤销。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "DetailCommit",
+   "source": "Records the first revision. Works without a network. Undo: the revision stays in the history; deleting .lore starts over.",
+   "text": "记录第一个修订版本。无需网络。撤销：该修订会留在历史中；删除 .lore 即可重新开始。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "DetailCreateLocal",
+   "source": "Adds a .lore folder to {0}, where Lore keeps the history on this computer. No server is used; your files are not changed. Undo: delete the .lore folder; the repository and its history go, your files stay.",
+   "text": "在 {0} 中添加一个 .lore 文件夹，Lore 会把历史保存在这台电脑上。不使用服务器；你的文件不会被更改。撤销：删除 .lore 文件夹；仓库及其历史会被删除，你的文件保留。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "DetailCreateRemote",
+   "source": "Registers the repository on the server and adds a .lore folder to {0}. Your files are not changed. Undo: delete the .lore folder, and run lore repository delete {1} to remove it from the server.",
+   "text": "在服务器上注册该仓库，并在 {0} 中添加一个 .lore 文件夹。你的文件不会被更改。撤销：删除 .lore 文件夹，并运行 lore repository delete {1} 将其从服务器上移除。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "DetailIgnoreAppend",
+   "source": "Appends lines, so Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, IDE files, *.sln and HyperAI's per-machine .hyperai/runtime folder stay out of the repository. Undo: remove the lines under the HyperAI Studio headings.",
+   "text": "追加若干行，使 Binaries、Intermediate、Saved、DerivedDataCache、插件构建、IDE 文件、*.sln 以及 HyperAI 的本机 .hyperai/runtime 文件夹不进入仓库。撤销：删除 HyperAI Studio 标题下的那些行。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "DetailIgnoreGitCopied",
+   "source": "{0} Lore does not read .gitignore, so the project's .gitignore rules that .loreignore lacks ({1}) are copied in too.",
+   "text": "{0} Lore 不读取 .gitignore，因此项目 .gitignore 中 .loreignore 缺少的规则（{1} 条）也会被复制进来。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "DetailIgnoreGitSkipped",
+   "source": "{0} Lore does not read .gitignore: whatever only the project's .gitignore keeps out will be committed.",
+   "text": "{0} Lore 不读取 .gitignore：只由项目 .gitignore 排除的内容将会被提交。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "DetailIgnoreWrite",
+   "source": "Writes the file, so Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, IDE files, *.sln and HyperAI's per-machine .hyperai/runtime folder stay out of the repository. Undo: delete .loreignore.",
+   "text": "写入该文件，使 Binaries、Intermediate、Saved、DerivedDataCache、插件构建、IDE 文件、*.sln 以及 HyperAI 的本机 .hyperai/runtime 文件夹不进入仓库。撤销：删除 .loreignore。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "DetailPush",
+   "source": "Uploads the project's files to the server, where the team can clone them. Undo: lore repository delete {0} removes it from the server.",
+   "text": "把项目文件上传到服务器，团队可以从那里克隆。撤销：lore repository delete {0} 会将其从服务器上移除。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "DetailStage",
+   "source": "Walks the folder and stages what .loreignore leaves in; a large project takes a while. Undo: lore unstage .",
+   "text": "遍历文件夹，暂存 .loreignore 未排除的内容；大型项目需要一些时间。撤销：lore unstage ."
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "FactFolder",
+   "source": "Project folder",
+   "text": "项目文件夹"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "FactIdentity",
+   "source": "Commits recorded as",
+   "text": "提交记录的身份"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "FactMode",
+   "source": "Repository",
+   "text": "仓库"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "FactWorkspace",
+   "source": "Lore workspace",
+   "text": "Lore 工作区"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "FirstCommit",
+   "source": "Commit the project as the first revision",
+   "text": "将项目提交为第一个修订版本"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "FirstCommitTip",
+   "source": "Stages every file the ignore rules leave in and commits it (and pushes it, on a server).",
+   "text": "暂存忽略规则未排除的所有文件并提交（使用服务器时还会推送）。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "IdentityHint",
+   "source": "Optional: your name or email",
+   "text": "可选：你的名字或邮箱"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "IdentityLabel",
+   "source": "Commits recorded as",
+   "text": "提交记录的身份"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "IgnoreNotWritten",
+   "source": "Could not write {0}.",
+   "text": "无法写入 {0}。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "IgnoreWritten",
+   "source": "{0} has the ignore rules.",
+   "text": "{0} 已包含忽略规则。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "InstallGuide",
+   "source": "Install guide",
+   "text": "安装指南"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "InstallGuideTip",
+   "source": "Open Epic's guide to installing the lore command.",
+   "text": "打开 Epic 的 lore 命令安装指南。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "JoinLater",
+   "source": "To work on a project a teammate already put on a server: lore clone <server>/<name> <folder>, then open its .uproject.",
+   "text": "要参与队友已放到服务器上的项目：运行 lore clone <server>/<name> <folder>，然后打开其中的 .uproject。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "LoreIdentityHint",
+   "source": "Optional: recorded on commits in a repository set up here",
+   "text": "可选：记录在此处设置的仓库的提交中"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "LoreIdentityLabel",
+   "source": "Lore Identity",
+   "text": "Lore 身份"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "LoreOrg",
+   "source": "lore.org",
+   "text": "lore.org"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "LoreOrgTip",
+   "source": "Open lore.org, Epic's page for Lore.",
+   "text": "打开 lore.org，Epic 的 Lore 页面。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "LoreServerHint",
+   "source": "Empty: local only. lore://127.0.0.1:41337 for a loreserver on this computer.",
+   "text": "留空：仅本机。本机上的 loreserver 用 lore://127.0.0.1:41337。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "LoreServerLabel",
+   "source": "Lore Server",
+   "text": "Lore 服务器"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "MessageHint",
+   "source": "Add the Unreal project",
+   "text": "添加 Unreal 项目"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "MessageLabel",
+   "source": "Commit message",
+   "text": "提交说明"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ModeLocal",
+   "source": "Local: the history stays in this computer's .lore folder; no server, no locks.",
+   "text": "本地：历史保存在这台电脑的 .lore 文件夹中；没有服务器，没有锁。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ModeNone",
+   "source": "Not set up: this project is in no Lore workspace.",
+   "text": "未设置：此项目不在任何 Lore 工作区中。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ModeRemote",
+   "source": "Server: pushes to {0}, and agents lock files there before editing them.",
+   "text": "服务器：推送到 {0}，智能体编辑文件前会先在那里锁定。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ModeUnknown",
+   "source": "Unknown: .lore/config.toml could not be read, so HyperAI treats it as a server repository: agents lock files before editing them, and a submit pushes.",
+   "text": "未知：无法读取 .lore/config.toml，因此 HyperAI 将其视为服务器仓库：智能体编辑文件前会先加锁，提交时会推送。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "MoveLater",
+   "source": "This repository is local. Lore 0.10 sets the server when a repository is made, so moving to a server later means a new repository there (set it up from a copy of the project, or ask the server's owner to import it); this local history stays here.",
+   "text": "此仓库是本地仓库。Lore 0.10 在创建仓库时确定服务器，因此以后迁移到服务器意味着在那里新建一个仓库（从项目副本进行设置，或请服务器管理员导入）；这里的本地历史会保留在本机。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "NameHint",
+   "source": "Letters, digits, '-', '_', '.' and '/'",
+   "text": "字母、数字、'-'、'_'、'.' 和 '/'"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "NameLabel",
+   "source": "Repository name",
+   "text": "仓库名称"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "NeedCli",
+   "source": "Install the lore command first (Install guide, above), then press Refresh.",
+   "text": "请先安装 lore 命令（见上方“安装指南”），然后点击“刷新”。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "NoIdentity",
+   "source": "Not set",
+   "text": "未设置"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "NoServer",
+   "source": "Enter the server's address, such as lore://127.0.0.1:41337, or keep the repository on this computer.",
+   "text": "请输入服务器地址，例如 lore://127.0.0.1:41337，或者把仓库保留在这台电脑上。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "NoServerToCheck",
+   "source": "No server is set: enter one in Lore Server and press Save.",
+   "text": "未设置服务器：请在“Lore 服务器”中填写并点击“保存”。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "NoWorkspace",
+   "source": "None",
+   "text": "无"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "NotChecked",
+   "source": "Not checked yet.",
+   "text": "尚未检查。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "NothingPlanned",
+   "source": "Nothing to do.",
+   "text": "无需执行任何操作。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "OnlineIntro",
+   "source": "For when a server is available: a loreserver you host (lore://host:41337), or Epic's hosted Lore once it opens. These settings are kept per user and project, never in the project's files.",
+   "text": "适用于有服务器可用时：你自己托管的 loreserver（lore://host:41337），或 Epic 托管的 Lore（开放后）。这些设置按用户和项目保存，从不写入项目文件。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "OnlineTitle",
+   "source": "Server and sign-in",
+   "text": "服务器与登录"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemAlreadyWorkspace",
+   "source": "{0} is a Lore workspace already.",
+   "text": "{0} 已经是 Lore 工作区。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemBadIdentity",
+   "source": "The identity is a name or email: no quotes or control characters, and not starting with '-'.",
+   "text": "身份是名字或电子邮件：不能包含引号或控制字符，也不能以“-”开头。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemBadName",
+   "source": "\"{0}\" is not a repository name Lore accepts: letters, digits, '/', '-', '_' and '.', up to 100.",
+   "text": "“{0}”不是 Lore 接受的仓库名：只能包含字母、数字、“/”、“-”、“_”和“.”，最多 100 个字符。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemCliCommandMissing",
+   "source": "The lore command set below names a file that does not exist.",
+   "text": "下方设置的 lore 命令指向的文件不存在。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemCliCommandNotLore",
+   "source": "The lore command set below is not a file named lore.exe, so HyperAI does not run it.",
+   "text": "下方设置的 lore 命令不是名为 lore.exe 的文件，因此 HyperAI 不会运行它。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemCliNotFound",
+   "source": "The lore command is not on PATH, nor in %USERPROFILE%\\bin where Lore's installer puts it.",
+   "text": "lore 命令不在 PATH 中，也不在 Lore 安装程序放置它的 %USERPROFILE%\\bin 中。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemInsideWorkspace",
+   "source": "{0} is inside the Lore workspace {1} already; set up the workspace's own folder, or none.",
+   "text": "{0} 已位于 Lore 工作区 {1} 之内；请设置该工作区本身的文件夹，或者不设置。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemNotAFolder",
+   "source": "{0} is not a folder.",
+   "text": "{0} 不是文件夹。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemServerBadHost",
+   "source": "A server address names its host, and carries no user name or password.",
+   "text": "服务器地址需要写明主机，且不能包含用户名或密码。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemServerBadScheme",
+   "source": "The server address does not start with a URL scheme, such as lore://.",
+   "text": "服务器地址没有以 URL 协议（例如 lore://）开头。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemServerNoScheme",
+   "source": "A Lore server is an address such as lore://127.0.0.1:41337 (scheme, host, and port when it is not the default).",
+   "text": "Lore 服务器地址的格式类似 lore://127.0.0.1:41337（协议、主机，以及非默认时的端口）。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemServerSpaces",
+   "source": "A server address has no spaces or quotes.",
+   "text": "服务器地址不能包含空格或引号。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProjectTitle",
+   "source": "This project",
+   "text": "本项目"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProviderFirst",
+   "source": "Unreal's {0} provider is set up, so agent edits check out through it rather than through Lore.",
+   "text": "已设置 Unreal 的 {0} 提供程序，因此智能体的编辑通过它签出，而不是通过 Lore。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "Refresh",
+   "source": "Refresh",
+   "text": "刷新"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "RefreshTip",
+   "source": "Look for the lore command, the workspace and sign-ins again.",
+   "text": "重新查找 lore 命令、工作区和登录信息。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "SaveServer",
+   "source": "Save",
+   "text": "保存"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "SaveServerTip",
+   "source": "Keep the server and identity for this project (Preferences has them too).",
+   "text": "为此项目保存服务器和身份（“偏好设置”中也有这些设置）。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "Saved",
+   "source": "Saved.",
+   "text": "已保存。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ServerAnswered",
+   "source": "The server answered. {0}",
+   "text": "服务器已响应。{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ServerEmpty",
+   "source": "{0}: no repositories yet.",
+   "text": "{0}：还没有仓库。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ServerFailed",
+   "source": "No answer: {0}",
+   "text": "无响应：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ServerHint",
+   "source": "lore://127.0.0.1:41337",
+   "text": "lore://127.0.0.1:41337"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ServerLabel",
+   "source": "Server",
+   "text": "服务器"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "SetUp",
+   "source": "Set up...",
+   "text": "设置……"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "SetUpTip",
+   "source": "Shows the steps once more and runs them after you confirm.",
+   "text": "再次列出这些步骤，并在你确认后运行。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "SetupDone",
+   "source": "Done: {0} is now a Lore workspace. {1} Agent edits go through Lore from now on; hyper_source_control_status shows it.",
+   "text": "完成：{0} 现在是一个 Lore 工作区。{1} 从现在起，智能体的编辑通过 Lore 进行；hyper_source_control_status 会显示这一点。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "SetupFailedNoRepo",
+   "source": "A step failed (its output is above) and no repository was made. Fix what it says and set up again; a .loreignore written so far can stay.",
+   "text": "有一步失败了（输出见上方），没有创建仓库。按提示修正后重新设置；已写入的 .loreignore 可以保留。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "SetupFailedRepo",
+   "source": "A step failed (its output is above) after the repository was made. Finish by hand with the commands shown, or delete the .lore folder to start over.",
+   "text": "仓库创建后有一步失败了（输出见上方）。可以用上面显示的命令手动完成，或删除 .lore 文件夹重新开始。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "SetupIntro",
+   "source": "Makes this folder a Lore workspace. A local repository needs no server and suits working alone; a server repository can be shared, pushed and locked. Lore sets the server when the repository is made.",
+   "text": "把此文件夹变成 Lore 工作区。本地仓库不需要服务器，适合独自工作；服务器仓库可以共享、推送和加锁。Lore 在创建仓库时确定服务器。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "SetupTitle",
+   "source": "Set up Lore for this project",
+   "text": "为此项目设置 Lore"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "SignInHow",
+   "source": "A server with sign-in turned on (Epic's hosted Lore signs in with an Epic account) needs you to sign in once, yourself, in a terminal: run the command below. It opens the sign-in page in your browser. HyperAI only shows the command; it never signs in, and never reads or keeps tokens.",
+   "text": "启用了登录的服务器（Epic 托管的 Lore 使用 Epic 账户登录）需要你亲自在终端中登录一次：运行下面的命令，它会在浏览器中打开登录页面。HyperAI 只显示该命令；它从不登录，也从不读取或保存令牌。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "SignInLabel",
+   "source": "Sign-in",
+   "text": "登录"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "SignInLocal",
+   "source": "A local repository needs no sign-in.",
+   "text": "本地仓库无需登录。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "SignedIn",
+   "source": "The lore command is signed in as: {0}",
+   "text": "lore 命令当前登录为：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "StepCheckServer",
+   "source": "Check that the Lore server {0} answers",
+   "text": "检查 Lore 服务器 {0} 是否响应"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "StepCommit",
+   "source": "Commit them as \"{0}\"",
+   "text": "以“{0}”提交它们"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "StepCreateLocal",
+   "source": "Create the local repository {0} in this folder",
+   "text": "在此文件夹中创建本地仓库 {0}"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "StepCreateRemote",
+   "source": "Create the repository {0} on {1}, with this folder as its workspace",
+   "text": "在 {1} 上创建仓库 {0}，并以此文件夹作为其工作区"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "StepIgnoreAppend",
+   "source": "Add Unreal's build output and caches to .loreignore",
+   "text": "把 Unreal 的构建输出和缓存加入 .loreignore"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "StepIgnoreWrite",
+   "source": "Write .loreignore for Unreal's build output and caches",
+   "text": "为 Unreal 的构建输出和缓存写入 .loreignore"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "StepLine",
+   "source": "{0}. {1}",
+   "text": "{0}. {1}"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "StepPush",
+   "source": "Push the first revision to {0}",
+   "text": "把第一个修订版本推送到 {0}"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "StepStage",
+   "source": "Stage every project file that is not ignored",
+   "text": "暂存所有未被忽略的项目文件"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "StepsLabel",
+   "source": "What setup will do",
+   "text": "设置将执行的操作"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "Subtitle",
+   "source": "Epic's Lore (lore.org) for this project: a local repository now, a server when you have one. Nothing here runs until you confirm it.",
+   "text": "为此项目使用 Epic 的 Lore（lore.org）：现在用本地仓库，有服务器时再用服务器。你确认之前这里不会运行任何操作。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "Title",
+   "source": "Version control",
+   "text": "版本控制"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "UseCommand",
+   "source": "Use",
+   "text": "使用"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "UseCommandTip",
+   "source": "Keep this path for this project. Only a file named lore.exe is accepted, and only here: agents' settings tools cannot choose which program HyperAI runs.",
+   "text": "为此项目保存这个路径。只接受名为 lore.exe 的文件，并且只能在这里设置：智能体的设置工具无法选择 HyperAI 运行哪个程序。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "UseServer",
+   "source": "Make it on a Lore server instead of this computer only",
+   "text": "在 Lore 服务器上创建，而不是只在这台电脑上"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "UseServerTip",
+   "source": "On: lore repository create <server>/<name>. Off: lore repository create --offline <name>, kept in this folder's .lore.",
+   "text": "开启：lore repository create <server>/<name>。关闭：lore repository create --offline <name>，保存在此文件夹的 .lore 中。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "WriteIgnore",
+   "source": "Keep Unreal's build output and caches out (.loreignore)",
+   "text": "排除 Unreal 的构建输出和缓存（.loreignore）"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "WriteIgnoreTip",
+   "source": "Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, .vs, *.sln and other IDE files, and HyperAI's per-machine .hyperai/runtime folder. An existing .loreignore keeps its lines; missing ones are added.",
+   "text": "Binaries、Intermediate、Saved、DerivedDataCache、插件构建、.vs、*.sln 和其他 IDE 文件，以及 HyperAI 的本机 .hyperai/runtime 文件夹。已有的 .loreignore 会保留原有行；缺少的行会被添加。"
+  },
+  {
    "namespace": "SHyperAIStudioMemoryPanel",
    "key": "AddFact",
    "source": "Add Fact",
@@ -20310,6 +21072,18 @@
    "key": "Title",
    "source": "Settings",
    "text": "设置"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "VersionControl",
+   "source": "Version control",
+   "text": "版本控制"
+  },
+  {
+   "namespace": "SHyperAIStudioSettingsPage",
+   "key": "VersionControlDescription",
+   "source": "Epic's Lore: set up a local repository, a server, and sign-in.",
+   "text": "Epic 的 Lore：设置本地仓库、服务器和登录。"
   },
   {
    "namespace": "SHyperAIStudioSkillsPanel",
