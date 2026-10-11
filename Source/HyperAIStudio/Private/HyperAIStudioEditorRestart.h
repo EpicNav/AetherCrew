@@ -82,6 +82,15 @@ struct FHyperAIStudioRestartChat
 	FString Message;
 };
 
+/** A chat tab as a restart resumed late sees it: open or not, and whether the chat in it is in use. */
+struct FHyperAIStudioRestartTab
+{
+	int32 TabIndex = 1;
+	bool bOpen = false;
+	/** Its turn runs, it waits on an approval or a message, or something was said in it: it is never stopped. */
+	bool bInUse = false;
+};
+
 /**
  * Restart and resume. The editor saves, writes the plan under Saved/HyperAIStudio/Restart, hands the build and the
  * relaunch to a helper script that outlives it, and closes. The editor the helper opens (with -HyperAIResume=<token>)
@@ -110,25 +119,48 @@ public:
 	/** Where a restart's close stands, judged each frame once the editor was asked to close. */
 	enum class ECloseState : uint8
 	{
-		/** The close has not run yet, or the editor put it back for later (it was saving or loading). */
+		/**
+		 * The close has not run yet, the editor put it back for later (it was saving or loading), or it stayed open
+		 * without asking anything and is given time, and the end of an import, before it is asked again.
+		 */
 		Waiting,
 		/** The editor shuts down: the helper builds and opens it again once it is gone. */
 		Closing,
-		/** The close ran and the editor stayed open without asking anything: ask it again. */
+		/** The close ran, the editor stayed open without asking anything, and it is no longer busy: ask it again. */
 		TryAgain,
 		/** The editor stayed open: a question before closing was answered No or Cancel, or it kept refusing. */
 		CalledOff,
 	};
+	/** The least time between an editor staying open without asking anything and the close asked for again. */
+	static constexpr double CloseRetrySeconds = 5.0;
 	/**
 	 * Judged from what happened, never from how long it took: the editor's questions (save your work, close anyway)
 	 * wait for as long as the person answering takes, and a close that goes ahead only ends the editor a frame later.
+	 * An editor that stayed open without asking (SecondsSinceRefused ago) is asked again once CloseRetrySeconds passed
+	 * and it is not busy (an import running, say), up to three times in all.
 	 */
-	static ECloseState JudgeClose(bool bShutDown, bool bCloseQueued, bool bAsked, int32 Tries);
+	static ECloseState JudgeClose(bool bShutDown, bool bCloseQueued, bool bAsked, int32 Tries, double SecondsSinceRefused, bool bBusy);
 
 	/** An editor opened by hand long after a restart that closed it and never opened it again: its chats wait to be resumed. */
 	static bool HasResumeOffer();
-	/** Resumes the offered restart's chats: open tabs pick them up at once and the others open. False when there was none. */
+	/**
+	 * Resumes the offered restart's chats: an open tab whose chat is not in use picks its chat up at once, a tab in use
+	 * keeps its chat and the restart's opens in a free tab, and the others open. False when there was none.
+	 */
 	static bool AcceptResumeOffer();
+	/**
+	 * Where each of a late resume's chats goes (ChatTabs, the tab each was in), given the chat tabs 1..n (Tabs): its own
+	 * tab when that is closed or not in use; otherwise the lowest closed tab no other chat goes to, else the lowest open
+	 * one not in use and not taken; 0 when no tab is left, and it is not resumed.
+	 */
+	static TArray<int32> PlaceChats(const TArray<int32>& ChatTabs, const TArray<FHyperAIStudioRestartTab>& Tabs);
+	/** The tabs the chats still waiting after a restart are for, in the order they are shown. */
+	static TArray<int32> GetWaitingChatTabs();
+	/**
+	 * Sends the waiting chats to Tabs (one per chat, as GetWaitingChatTabs orders them); a chat sent to 0 is not
+	 * resumed and is returned.
+	 */
+	static TArray<FHyperAIStudioRestartChat> PlaceWaitingChats(const TArray<int32>& Tabs);
 	/** Drops the offered restart: its chats stay as they are. */
 	static void DeclineResumeOffer();
 

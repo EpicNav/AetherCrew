@@ -52,12 +52,24 @@ public:
 	/** Every tab running an agent, as an editor restart reopens it. */
 	static TArray<FHyperAIStudioRestartChat> GetRestartChats();
 	/**
-	 * Open tabs pick up a restart's chats now, ending what they run: a restart resumed late, from its notification,
-	 * after the tabs started chats of their own. Tabs not open take theirs as they open.
+	 * Open tabs pick up a restart's chats now: a restart resumed late, from its notification, after the tabs started
+	 * chats of their own. A tab whose chat is idle ends it and takes its restart chat; a tab in use keeps its chat, and
+	 * the restart's goes to a free tab. Tabs not open take theirs as they open.
 	 */
 	static void TakeRestartChats();
 	/** True when every terminal widget open in the editor is one of HyperAI's chat tabs, which a restart reopens. */
 	static bool OwnsEveryTerminal();
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Tests: the agents tabs offer, as if only they were set up here; unset goes back to those that are. */
+	static void SetAgentsForTests(const TOptional<TArray<FString>>& Agents);
+	/** Tests: what a tab's next launch resumes (agent, conversation) and tells its chat first. False when the tab is not open. */
+	static bool GetTabResumeForTests(int32 TabIndex, FString& OutAgent, FString& OutSessionId, FString& OutContinue);
+	/**
+	 * Tests: launches a tab's agent now (Agent, when given, picked first), as its startup does once Unreal MCP answers,
+	 * which a test run cannot wait for. False when the tab is not open, already started, or cannot run Agent.
+	 */
+	static bool StartTabForTests(int32 TabIndex, const FString& Agent);
+#endif
 	/**
 	 * Sends Text to a chat tab as the user, opening the tab if needed (HyperAIStudio.ChatSend). Images go with it in
 	 * HyperAI's chat view; a terminal gets a long or multi-line message as one line pointing at a file that holds it.
@@ -125,6 +137,11 @@ private:
 	static TSharedPtr<SHyperAIStudioQuickActionWindow> FindTab(int32 TabIndex);
 	/** The agent, model, subagent and conversation a restart left for this tab, and what its chat is told first. */
 	void AdoptRestartChat(const FHyperAIStudioRestartChat& Chat);
+	/**
+	 * A chat a restart resumed late must not replace: a turn running, an approval, a message or job waiting, or, in the
+	 * chat view, anything said. An idle terminal chat is not, since what was said in it cannot be read.
+	 */
+	bool IsInUse() const;
 	/** The model this tab launches AgentName with: the tab's own choice, else the agent's saved one. */
 	FString GetModelForAgent(const FString& AgentName) const;
 	FText GetTabTitle() const;

@@ -1072,8 +1072,8 @@
   {
    "namespace": "HyperAIStudioEditorRestart",
    "key": "ResumeRestartChatsTooltip",
-   "source": "Reopen the chat tabs on their conversations, and tell the chat that asked for the restart to continue.",
-   "text": "在各自的会话上重新打开聊天标签页，并让请求重启的聊天继续。"
+   "source": "Reopen the restart's chats on their conversations, and tell the chat that asked for the restart to continue. An open tab whose chat is idle switches to its restart chat (the chat it had stays in Chats); a tab that is working, or whose chat view has messages, keeps its chat, and the restart's opens in a free tab.",
+   "text": "在各自的会话上重新打开此次重启的聊天，并让请求重启的聊天继续。聊天空闲的已打开标签页会切换到它的重启聊天（原来的聊天仍保留在“对话”中）；正在工作、或聊天视图中已有消息的标签页会保留自己的聊天，重启的聊天会在一个空闲的标签页中打开。"
   },
   {
    "namespace": "HyperAIStudioFoliage",
@@ -16114,14 +16114,20 @@
   {
    "namespace": "HyperAIStudioSandbox",
    "key": "DiscardSandbox",
-   "source": "Discard",
-   "text": "丢弃"
+   "source": "Discard Sandbox Changes",
+   "text": "丢弃沙盒更改"
+  },
+  {
+   "namespace": "HyperAIStudioSandbox",
+   "key": "DiscardSandboxConfirm",
+   "source": "Discard the {0} {0}|plural(one=change,other=changes) Sandbox Mode held from an earlier session? The project keeps its own files. This cannot be undone.\n\nThis is about held file changes, not chats.",
+   "text": "要丢弃沙盒模式从上一个会话保留的 {0} 项更改吗？项目会保留它自己的文件。此操作无法撤销。\n\n这里指的是保留的文件更改，而不是聊天。"
   },
   {
    "namespace": "HyperAIStudioSandbox",
    "key": "DiscardSandboxTooltip",
-   "source": "Throw those held changes away; the project keeps its files as they are.",
-   "text": "丢弃这些保留的更改；项目文件保持原样。"
+   "source": "Throw those held changes away, after you confirm; the project keeps its files as they are.",
+   "text": "确认后丢弃这些保留的更改；项目文件保持原样。"
   },
   {
    "namespace": "HyperAIStudioSandbox",
@@ -19770,6 +19776,12 @@
    "key": "RemoteWaitsForTurn",
    "source": "Remote Control switches when the agent finishes its current turn.",
    "text": "智能体完成当前回合后会切换远程控制。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "RestartChatNoTab",
+   "source": "Chat {0} is in use and every chat tab is taken, so the restart's {1} chat was not resumed. Close a tab, then reopen it from Chats.",
+   "text": "对话 {0} 正在使用中，且所有对话标签页都已占用，因此重启前的 {1} 对话没有恢复。请关闭一个标签页，然后从“对话”中重新打开它。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",

@@ -35,6 +35,8 @@ public class HyperAIStudio : ModuleRules
 			"HTTPServer",
 			"HyperAIStudioBot",
 			"InputCore",
+			// An import running keeps the editor open; a restart waits for it before it asks to close again.
+			"InterchangeEngine",
 			"Json",
 			"JsonUtilities",
 			"LevelEditor",

@@ -18,6 +18,7 @@
 #include "ISandboxInstance.h"
 #include "ISandboxManager.h"
 #include "ISandboxRepository.h"
+#include "Misc/MessageDialog.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Templates/ValueOrError.h"
@@ -426,40 +427,64 @@ namespace HyperAIStudio::Sandbox
 				Changes));
 			Info.bFireAndForget = false;
 			Info.ExpireDuration = 0.0f;
+			// The first choice is the only one: the buttons go at once (a notice stays up a while as it fades), and a press
+			// that still lands does nothing. On 11 Oct a Discard pressed after Resume Sandbox threw the resumed changes away.
+			auto Decided = []()
+			{
+				if (!State().bAwaitingDecision)
+				{
+					return true;
+				}
+				if (const TSharedPtr<SNotificationItem> Notice = State().LeftoverNotice.Pin())
+				{
+					Notice->SetCompletionState(SNotificationItem::CS_Success);
+					Notice->ExpireAndFadeout();
+				}
+				return false;
+			};
 			// Named for the sandbox: after a restart it sits beside chats that resume, and a bare Resume read as theirs.
 			Info.ButtonDetails.Add(FNotificationButtonInfo(LOCTEXT("ResumeSandbox", "Resume Sandbox"),
 				LOCTEXT("ResumeSandboxTooltip", "Open that sandbox again; its changes show in HyperAI's Activity panel."),
-				FSimpleDelegate::CreateLambda([Newest]()
+				FSimpleDelegate::CreateLambda([Newest, Decided]()
 			{
+				if (Decided())
+				{
+					return;
+				}
 				State().bAwaitingDecision = false;
 				if (FSC::ISandboxManager* Loader = Manager(); Loader && !Loader->HasActiveSandbox())
 				{
 					if (Loader->LoadSandbox(FSC::FLoadSandboxByDirectoryArgs(Newest)).HasValue())
 					{
 						State().OpenedUtc = FDateTime::UtcNow();
+						UE_LOG(LogHyperAIStudioSandbox, Log, TEXT("Sandbox Mode resumed %s, as chosen."), *Newest);
 					}
-				}
-				if (const TSharedPtr<SNotificationItem> Notice = State().LeftoverNotice.Pin())
-				{
-					Notice->ExpireAndFadeout();
 				}
 				Broadcast();
 			}), SNotificationItem::CS_None));
-			Info.ButtonDetails.Add(FNotificationButtonInfo(LOCTEXT("DiscardSandbox", "Discard"),
-				LOCTEXT("DiscardSandboxTooltip", "Throw those held changes away; the project keeps its files as they are."),
-				FSimpleDelegate::CreateLambda([Roots]()
+			Info.ButtonDetails.Add(FNotificationButtonInfo(LOCTEXT("DiscardSandbox", "Discard Sandbox Changes"),
+				LOCTEXT("DiscardSandboxTooltip", "Throw those held changes away, after you confirm; the project keeps its files as they are."),
+				FSimpleDelegate::CreateLambda([Roots, Changes, Decided]()
 			{
+				if (!State().bAwaitingDecision)
+				{
+					return;
+				}
+				const FText Question = FText::Format(LOCTEXT("DiscardSandboxConfirm",
+					"Discard the {0} {0}|plural(one=change,other=changes) Sandbox Mode held from an earlier session? The project keeps its own files. This cannot be undone.\n\nThis is about held file changes, not chats."),
+					Changes);
+				if (FMessageDialog::Open(EAppMsgType::YesNo, EAppReturnType::No, Question) != EAppReturnType::Yes || Decided())
+				{
+					return;
+				}
 				State().bAwaitingDecision = false;
 				if (FSC::ISandboxManager* Deleter = Manager())
 				{
 					for (const FString& Root : Roots)
 					{
 						Deleter->DeleteSandbox(FSC::FDeleteSandboxByDirectoryArgs(Root));
+						UE_LOG(LogHyperAIStudioSandbox, Log, TEXT("Sandbox Mode discarded %s, as chosen."), *Root);
 					}
-				}
-				if (const TSharedPtr<SNotificationItem> Notice = State().LeftoverNotice.Pin())
-				{
-					Notice->ExpireAndFadeout();
 				}
 				OpenNextTick();
 				Broadcast();
@@ -610,7 +635,7 @@ namespace HyperAIStudio::Sandbox
 		}
 		Status.State = EState::Waiting;
 		Status.Diagnostic = IsPlaying() ? TEXT("Play In Editor is running; the sandbox opens when it stops.")
-			: State().bAwaitingDecision ? TEXT("A sandbox from an earlier session waits for Resume or Discard.")
+			: State().bAwaitingDecision ? TEXT("A sandbox from an earlier session waits for Resume Sandbox or Discard Sandbox Changes in its notification.")
 			: TEXT("The sandbox opens at the next agent edit.");
 		return Status;
 	}

@@ -288,6 +288,15 @@ namespace HyperAIStudio::QuickAction
 		return Route;
 	}
 
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Tests: the agents every tab offers instead of those set up here, which a test run need not have. */
+	TOptional<TArray<FString>>& AgentsForTests()
+	{
+		static TOptional<TArray<FString>> Agents;
+		return Agents;
+	}
+#endif
+
 	/**
 	 * MCP tool calls carry no caller identity, so credit goes to the only tab running an agent, or to the only one
 	 * working when several run. ponytail: a guess from screen state; per-tab MCP endpoints would make it exact.
@@ -2008,6 +2017,16 @@ void SHyperAIStudioQuickActionWindow::RefreshAgentOptions()
 	}
 	// Looks for Ollama and LM Studio models in the background, so the Model menu has them when it opens.
 	FHyperAIStudioLocalModels::Get();
+#if WITH_DEV_AUTOMATION_TESTS
+	if (const TOptional<TArray<FString>>& TestAgents = HyperAIStudio::QuickAction::AgentsForTests(); TestAgents.IsSet())
+	{
+		AgentOptions.Reset();
+		for (const FString& AgentName : TestAgents.GetValue())
+		{
+			AddAgent(AgentName);
+		}
+	}
+#endif
 
 	if (AgentOptions.Num() == 0)
 	{
@@ -3280,8 +3299,43 @@ void SHyperAIStudioQuickActionWindow::AdoptRestartChat(const FHyperAIStudioResta
 	LastMessage = LOCTEXT("ChatRestored", "The editor restarted; this tab picks its chat up again.");
 }
 
+bool SHyperAIStudioQuickActionWindow::IsInUse() const
+{
+	if (!PendingPrompt.IsEmpty() || Handoff.IsSet())
+	{
+		return true;
+	}
+	if (const TSharedPtr<FHyperAIStudioNativeChat> Native = NativeView.IsValid() ? NativeView->GetChat() : nullptr)
+	{
+		return Native->IsBusy() || Native->HasOpenApproval() || Native->NumQueued() > 0 || Native->GetItems().ContainsByPredicate(
+			[](const TSharedPtr<FHyperAIStudioChatItem>& Item) { return Item.IsValid() && Item->Kind == FHyperAIStudioChatItem::EKind::User; });
+	}
+	// What was said in a terminal cannot be read; a turn running, or a question or plan waiting, shows on its screen.
+	return IsTurnActive();
+}
+
 void SHyperAIStudioQuickActionWindow::TakeRestartChats()
 {
+	// A tab in use keeps its chat: the restart's goes to a free tab instead, or, with none left, is not resumed.
+	TArray<FHyperAIStudioRestartTab> Tabs;
+	for (int32 Index = 1; Index <= MaxChatTabs; ++Index)
+	{
+		const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = FindTab(Index);
+		FHyperAIStudioRestartTab& Tab = Tabs.AddDefaulted_GetRef();
+		Tab.TabIndex = Index;
+		Tab.bOpen = Window.IsValid() || FHyperAIStudioShell::FindPageTab(GetPageId(Index)).IsValid();
+		Tab.bInUse = Window.IsValid() ? Window->IsInUse() : Tab.bOpen;
+	}
+	const TArray<FHyperAIStudioRestartChat> Dropped = FHyperAIStudioEditorRestart::PlaceWaitingChats(
+		FHyperAIStudioEditorRestart::PlaceChats(FHyperAIStudioEditorRestart::GetWaitingChatTabs(), Tabs));
+	for (const FHyperAIStudioRestartChat& Chat : Dropped)
+	{
+		UE_LOG(LogHyperAIStudioChat, Warning, TEXT("Chat %d is in use and no chat tab is free, so the restart's %s chat %s is not resumed; it can be reopened from Chats."),
+			Chat.TabIndex, *Chat.Agent, *Chat.SessionId);
+		HyperAIStudio::QuickAction::Toast(FText::Format(LOCTEXT("RestartChatNoTab",
+			"Chat {0} is in use and every chat tab is taken, so the restart's {1} chat was not resumed. Close a tab, then reopen it from Chats."),
+			FText::AsNumber(Chat.TabIndex), FText::FromString(Chat.Agent)));
+	}
 	for (const TWeakPtr<SHyperAIStudioQuickActionWindow>& Weak : HyperAIStudio::QuickAction::LiveWindows())
 	{
 		const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = Weak.Pin();
@@ -3322,6 +3376,50 @@ bool SHyperAIStudioQuickActionWindow::OwnsEveryTerminal()
 	}
 	return true;
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+void SHyperAIStudioQuickActionWindow::SetAgentsForTests(const TOptional<TArray<FString>>& Agents)
+{
+	HyperAIStudio::QuickAction::AgentsForTests() = Agents;
+}
+
+bool SHyperAIStudioQuickActionWindow::GetTabResumeForTests(const int32 TabIndex, FString& OutAgent, FString& OutSessionId, FString& OutContinue)
+{
+	const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = FindTab(TabIndex);
+	if (!Window.IsValid())
+	{
+		return false;
+	}
+	OutAgent = Window->ResumeAgentName;
+	OutSessionId = Window->ResumeSessionId;
+	OutContinue = Window->ContinueMessage;
+	return true;
+}
+
+bool SHyperAIStudioQuickActionWindow::StartTabForTests(const int32 TabIndex, const FString& Agent)
+{
+	const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = FindTab(TabIndex);
+	if (!Window.IsValid())
+	{
+		return false;
+	}
+	if (!Agent.IsEmpty() && !Window->GetSelectedAgentName().Equals(Agent, ESearchCase::IgnoreCase))
+	{
+		Window->SelectAgentByName(Agent);
+	}
+	// What RunDeferredTerminalStartup does once the tab's status is ready.
+	const FString AgentName = Window->GetSelectedAgentName();
+	if (Window->bTerminalStartupSent || AgentName.IsEmpty() || (!Agent.IsEmpty() && !AgentName.Equals(Agent, ESearchCase::IgnoreCase)))
+	{
+		return false;
+	}
+	Window->bTerminalStartupSent = true;
+	Window->ActiveTerminalAgentName = AgentName;
+	Window->ActiveTerminalModel = Window->GetModelForAgent(AgentName);
+	Window->LaunchChat(AgentName);
+	return true;
+}
+#endif
 
 TSharedPtr<SHyperAIStudioQuickActionWindow> SHyperAIStudioQuickActionWindow::FindTab(const int32 TabIndex)
 {
