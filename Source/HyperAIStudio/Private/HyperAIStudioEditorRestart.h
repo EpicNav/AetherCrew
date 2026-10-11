@@ -107,6 +107,31 @@ public:
 	/** The chat a restart left for this tab, handed over once. */
 	static TOptional<FHyperAIStudioRestartChat> TakeChat(int32 TabIndex);
 
+	/** Where a restart's close stands, judged each frame once the editor was asked to close. */
+	enum class ECloseState : uint8
+	{
+		/** The close has not run yet, or the editor put it back for later (it was saving or loading). */
+		Waiting,
+		/** The editor shuts down: the helper builds and opens it again once it is gone. */
+		Closing,
+		/** The close ran and the editor stayed open without asking anything: ask it again. */
+		TryAgain,
+		/** The editor stayed open: a question before closing was answered No or Cancel, or it kept refusing. */
+		CalledOff,
+	};
+	/**
+	 * Judged from what happened, never from how long it took: the editor's questions (save your work, close anyway)
+	 * wait for as long as the person answering takes, and a close that goes ahead only ends the editor a frame later.
+	 */
+	static ECloseState JudgeClose(bool bShutDown, bool bCloseQueued, bool bAsked, int32 Tries);
+
+	/** An editor opened by hand long after a restart that closed it and never opened it again: its chats wait to be resumed. */
+	static bool HasResumeOffer();
+	/** Resumes the offered restart's chats: open tabs pick them up at once and the others open. False when there was none. */
+	static bool AcceptResumeOffer();
+	/** Drops the offered restart: its chats stay as they are. */
+	static void DeclineResumeOffer();
+
 	/** Module lifetime: the restart tool, the console command, and resuming after a restart. */
 	static void Startup();
 	static void Shutdown();
@@ -115,7 +140,12 @@ public:
 	static FString DescribeRestart(const TSharedPtr<FJsonObject>& Plan, const TSharedPtr<FJsonObject>& Result);
 	/** The same, for a terminal chat: one line a command line carries safely, pointing at continue.md. */
 	static FString ContinuePrompt();
-	/** Takes a restart's chats from Folder when both of its files carry Token and it is fresh; the files are used up. */
+	/**
+	 * Takes a restart's chats from Folder when both of its files carry Token and it is fresh; the files are used up.
+	 * Without the token (the editor opened by hand, or by the crash reporter) it takes a fresh crash's chats, and a
+	 * restart's whose editor really closed but never opened again: by itself when that was recent, and otherwise, up
+	 * to MaxAgeSeconds, as an offer (HasResumeOffer) the person accepts or declines.
+	 */
 	static bool LoadResume(const FString& Folder, const FString& Token, double MaxAgeSeconds);
 	static FString GetFolder();
 };

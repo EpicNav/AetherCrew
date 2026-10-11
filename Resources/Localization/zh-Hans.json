@@ -1028,6 +1028,54 @@
    "text": "HyperAI：编辑 Decibel 会话"
   },
   {
+   "namespace": "HyperAIStudioEditorRestart",
+   "key": "DismissRestartChats",
+   "source": "Dismiss",
+   "text": "忽略"
+  },
+  {
+   "namespace": "HyperAIStudioEditorRestart",
+   "key": "DismissRestartChatsTooltip",
+   "source": "Leave the chat tabs as they are. This restart is not offered again.",
+   "text": "保持聊天标签页原样。此次重启不会再提示恢复。"
+  },
+  {
+   "namespace": "HyperAIStudioEditorRestart",
+   "key": "RestartCalledOff",
+   "source": "The editor restart was called off: {0}",
+   "text": "编辑器重启已取消：{0}"
+  },
+  {
+   "namespace": "HyperAIStudioEditorRestart",
+   "key": "RestartKeptOpen",
+   "source": "the editor asked before closing and the answer kept it open, so nothing was built or opened again.",
+   "text": "编辑器在关闭前询问了你，而你的回答让它保持打开，因此没有构建，也没有重新打开。"
+  },
+  {
+   "namespace": "HyperAIStudioEditorRestart",
+   "key": "RestartNeverClosed",
+   "source": "the editor stayed open after {0} requests to close, without asking anything. Close it yourself, or restart again.",
+   "text": "编辑器在 {0} 次关闭请求后仍保持打开，且没有询问任何内容。请自行关闭它，或再次重启。"
+  },
+  {
+   "namespace": "HyperAIStudioEditorRestart",
+   "key": "RestartResumeOffer",
+   "source": "The editor closed for a HyperAI restart and did not open again by itself. Resume the {0} {0}|plural(one=chat,other=chats) it was running, where {0}|plural(one=it,other=they) left off?",
+   "text": "编辑器因 HyperAI 重启而关闭，但没有自行重新打开。要从中断处恢复它当时运行的 {0} 个聊天吗？"
+  },
+  {
+   "namespace": "HyperAIStudioEditorRestart",
+   "key": "ResumeRestartChats",
+   "source": "Resume Chats",
+   "text": "恢复聊天"
+  },
+  {
+   "namespace": "HyperAIStudioEditorRestart",
+   "key": "ResumeRestartChatsTooltip",
+   "source": "Reopen the chat tabs on their conversations, and tell the chat that asked for the restart to continue.",
+   "text": "在各自的会话上重新打开聊天标签页，并让请求重启的聊天继续。"
+  },
+  {
    "namespace": "HyperAIStudioFoliage",
    "key": "FoliagePlan",
    "source": "HyperAI: Edit Foliage",
@@ -16078,8 +16126,8 @@
   {
    "namespace": "HyperAIStudioSandbox",
    "key": "LeftoverSandbox",
-   "source": "HyperAI's Sandbox Mode is still holding {0} {0}|plural(one=change,other=changes) from an earlier session. Resume to keep reviewing them, or discard them.",
-   "text": "HyperAI 的沙盒模式仍保留着上一个会话的 {0} 项更改。恢复以继续审阅，或将其丢弃。"
+   "source": "HyperAI's Sandbox Mode is still holding {0} {0}|plural(one=change,other=changes) from an earlier session. Resume Sandbox to keep reviewing them, or discard them. Your chats are not affected.",
+   "text": "HyperAI 的沙盒模式仍保留着上一个会话的 {0} 项更改。点击“恢复沙盒”以继续审阅，或将其丢弃。你的聊天不受影响。"
   },
   {
    "namespace": "HyperAIStudioSandbox",
@@ -16096,8 +16144,8 @@
   {
    "namespace": "HyperAIStudioSandbox",
    "key": "ResumeSandbox",
-   "source": "Resume",
-   "text": "恢复"
+   "source": "Resume Sandbox",
+   "text": "恢复沙盒"
   },
   {
    "namespace": "HyperAIStudioSandbox",

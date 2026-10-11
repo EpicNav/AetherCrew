@@ -52,6 +52,13 @@ public:
 	/** Every tab running an agent, as an editor restart reopens it. */
 	static TArray<FHyperAIStudioRestartChat> GetRestartChats();
 	/**
+	 * Open tabs pick up a restart's chats now, ending what they run: a restart resumed late, from its notification,
+	 * after the tabs started chats of their own. Tabs not open take theirs as they open.
+	 */
+	static void TakeRestartChats();
+	/** True when every terminal widget open in the editor is one of HyperAI's chat tabs, which a restart reopens. */
+	static bool OwnsEveryTerminal();
+	/**
 	 * Sends Text to a chat tab as the user, opening the tab if needed (HyperAIStudio.ChatSend). Images go with it in
 	 * HyperAI's chat view; a terminal gets a long or multi-line message as one line pointing at a file that holds it.
 	 */
@@ -116,6 +123,8 @@ private:
 	bool TickHandoff(float DeltaTime);
 	TArray<FString> GetUsableAgentNames() const;
 	static TSharedPtr<SHyperAIStudioQuickActionWindow> FindTab(int32 TabIndex);
+	/** The agent, model, subagent and conversation a restart left for this tab, and what its chat is told first. */
+	void AdoptRestartChat(const FHyperAIStudioRestartChat& Chat);
 	/** The model this tab launches AgentName with: the tab's own choice, else the agent's saved one. */
 	FString GetModelForAgent(const FString& AgentName) const;
 	FText GetTabTitle() const;

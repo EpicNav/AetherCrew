@@ -422,11 +422,12 @@ namespace HyperAIStudio::Sandbox
 				Roots.Add(Leftover.Root);
 			}
 			FNotificationInfo Info(FText::Format(LOCTEXT("LeftoverSandbox",
-				"HyperAI's Sandbox Mode is still holding {0} {0}|plural(one=change,other=changes) from an earlier session. Resume to keep reviewing them, or discard them."),
+				"HyperAI's Sandbox Mode is still holding {0} {0}|plural(one=change,other=changes) from an earlier session. Resume Sandbox to keep reviewing them, or discard them. Your chats are not affected."),
 				Changes));
 			Info.bFireAndForget = false;
 			Info.ExpireDuration = 0.0f;
-			Info.ButtonDetails.Add(FNotificationButtonInfo(LOCTEXT("ResumeSandbox", "Resume"),
+			// Named for the sandbox: after a restart it sits beside chats that resume, and a bare Resume read as theirs.
+			Info.ButtonDetails.Add(FNotificationButtonInfo(LOCTEXT("ResumeSandbox", "Resume Sandbox"),
 				LOCTEXT("ResumeSandboxTooltip", "Open that sandbox again; its changes show in HyperAI's Activity panel."),
 				FSimpleDelegate::CreateLambda([Newest]()
 			{

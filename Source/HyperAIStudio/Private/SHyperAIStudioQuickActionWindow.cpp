@@ -374,26 +374,7 @@ void SHyperAIStudioQuickActionWindow::Construct(const FArguments& InArgs)
 	}
 	if (TOptional<FHyperAIStudioRestartChat> Restored = FHyperAIStudioEditorRestart::TakeChat(TabIndex); Restored.IsSet())
 	{
-		// This tab ran a chat when the editor restarted: the same agent, model and subagent pick the conversation up.
-		for (const TSharedPtr<FString>& Agent : AgentOptions)
-		{
-			if (Agent.IsValid() && Agent->Equals(Restored->Agent, ESearchCase::IgnoreCase))
-			{
-				SelectedAgent = Agent;
-			}
-		}
-		if (!Restored->Model.IsEmpty())
-		{
-			TabModel = Restored->Model;
-			TabModelAgent = Restored->Agent;
-		}
-		TabSubagent = Restored->Subagent;
-		ResumeAgentName = Restored->Agent;
-		ResumeSessionId = Restored->SessionId;
-		ResumeTitle = Restored->Title;
-		ResumeBackgroundId = Restored->BackgroundId;
-		ContinueMessage = Restored->Message;
-		LastMessage = LOCTEXT("ChatRestored", "The editor restarted; this tab picks its chat up again.");
+		AdoptRestartChat(Restored.GetValue());
 	}
 	ResetTranscript();
 	SAssignNew(TerminalScrollBar, SScrollBar)
@@ -3269,6 +3250,77 @@ TArray<FHyperAIStudioRestartChat> SHyperAIStudioQuickActionWindow::GetRestartCha
 		Chat.bWorking = Native.IsValid() ? Native->IsBusy() || Native->HasOpenApproval() : Window->IsTurnActive();
 	}
 	return Chats;
+}
+
+void SHyperAIStudioQuickActionWindow::AdoptRestartChat(const FHyperAIStudioRestartChat& Chat)
+{
+	// This tab ran a chat when the editor restarted: the same agent, model and subagent pick the conversation up.
+	for (const TSharedPtr<FString>& Agent : AgentOptions)
+	{
+		if (Agent.IsValid() && Agent->Equals(Chat.Agent, ESearchCase::IgnoreCase))
+		{
+			SelectedAgent = Agent;
+		}
+	}
+	if (AgentComboBox.IsValid() && SelectedAgent.IsValid())
+	{
+		AgentComboBox->SetSelectedItem(SelectedAgent);
+	}
+	if (!Chat.Model.IsEmpty())
+	{
+		TabModel = Chat.Model;
+		TabModelAgent = Chat.Agent;
+	}
+	TabSubagent = Chat.Subagent;
+	ResumeAgentName = Chat.Agent;
+	ResumeSessionId = Chat.SessionId;
+	ResumeTitle = Chat.Title;
+	ResumeBackgroundId = Chat.BackgroundId;
+	ContinueMessage = Chat.Message;
+	LastMessage = LOCTEXT("ChatRestored", "The editor restarted; this tab picks its chat up again.");
+}
+
+void SHyperAIStudioQuickActionWindow::TakeRestartChats()
+{
+	for (const TWeakPtr<SHyperAIStudioQuickActionWindow>& Weak : HyperAIStudio::QuickAction::LiveWindows())
+	{
+		const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = Weak.Pin();
+		TOptional<FHyperAIStudioRestartChat> Chat = Window.IsValid() ? FHyperAIStudioEditorRestart::TakeChat(Window->TabIndex) : TOptional<FHyperAIStudioRestartChat>();
+		if (!Chat.IsSet())
+		{
+			continue;
+		}
+		Window->RefreshAgentOptions();
+		Window->AdoptRestartChat(Chat.GetValue());
+		Window->AddTranscriptLine(Window->LastMessage.ToString());
+		// What the tab started on its own ends, and its agent launches again on the restart's conversation. Only a launch
+		// sends the continue message, so a running chat view is stopped rather than restarted in place.
+		Window->bAutoRouted = false;
+		Window->StopNativeChat();
+		Window->QueueTerminalStartup(/*bForce=*/true, /*bResetTerminal=*/true);
+		// A tab behind others may still hold the status it had as the editor started; a fresh probe starts it once MCP answers.
+		Window->RefreshStatus(/*bSilent=*/false);
+	}
+}
+
+bool SHyperAIStudioQuickActionWindow::OwnsEveryTerminal()
+{
+	TSet<const STerminal*> Ours;
+	for (const TWeakPtr<SHyperAIStudioQuickActionWindow>& Weak : HyperAIStudio::QuickAction::LiveWindows())
+	{
+		if (const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = Weak.Pin(); Window.IsValid() && Window->TerminalWidget.IsValid())
+		{
+			Ours.Add(Window->TerminalWidget.Get());
+		}
+	}
+	for (const TSharedRef<STerminal>& Terminal : STerminal::GetAllInstances())
+	{
+		if (!Ours.Contains(&Terminal.Get()))
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 TSharedPtr<SHyperAIStudioQuickActionWindow> SHyperAIStudioQuickActionWindow::FindTab(const int32 TabIndex)

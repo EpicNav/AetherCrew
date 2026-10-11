@@ -5,6 +5,8 @@
 #include "Containers/Ticker.h"
 #include "Editor.h"
 #include "FileHelpers.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/Notifications/NotificationManager.h"
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformProcess.h"
@@ -28,8 +30,15 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "TerminalSettings.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
 #include "UObject/Package.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Notifications/SNotificationList.h"
+#include "Widgets/SWindow.h"
+#include "Widgets/Text/STextBlock.h"
+
+#define LOCTEXT_NAMESPACE "HyperAIStudioEditorRestart"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioRestart, Log, All);
 
@@ -39,17 +48,26 @@ namespace HyperAIStudio::EditorRestart::Private
 	constexpr const TCHAR* CohortId = TEXT("cohort.source.hyperaistudioeditorrestarttoolset.v1");
 	constexpr const TCHAR* ToolName = TEXT("hyper_editor_restart");
 	constexpr const TCHAR* QualifiedToolset = TEXT("HyperAIStudio.HyperAIStudioEditorRestartToolset");
-	/** How long the helper waits for the editor to close before it gives up. */
-	constexpr int32 CloseTimeoutSeconds = 120;
+	/**
+	 * How long the helper waits for the editor to close; 0 is for as long as the editor runs. The editor's questions
+	 * before closing wait on a person, and a close the person turns down withdraws the plan and stops the helper.
+	 */
+	constexpr int32 CloseTimeoutSeconds = 0;
 	/** A restart older than this is not resumed: a full rebuild can take hours, a forgotten plan should not come back. */
 	constexpr double MaxResumeAgeSeconds = 6.0 * 60.0 * 60.0;
 	/** An editor opened without the token takes a crash's chats only this soon after it: Send and Restart, or a quick reopen by hand. */
 	constexpr double MaxCrashAgeWithoutTokenSeconds = 10.0 * 60.0;
+	/**
+	 * An editor opened by hand takes the chats of a restart that closed the editor and never opened it again by itself
+	 * this soon after the close; later, up to MaxResumeAgeSeconds, it offers them.
+	 */
+	constexpr double MaxRestartAgeWithoutTokenSeconds = 30.0 * 60.0;
 	/** The editor waits this long before it closes, so the tool's answer reaches the agent first. */
 	constexpr float CloseDelaySeconds = 2.0f;
-	/** A close still not under way this long after it was asked for was cancelled. */
-	constexpr double CancelAfterSeconds = 10.0;
+	/** Times the close is asked for again when the editor stayed open without asking anything (it was busy). */
+	constexpr int32 MaxCloseTries = 3;
 	constexpr int32 MaxNoteCharacters = 4000;
+	constexpr const TCHAR* CloseCommand = TEXT("CLOSE_SLATE_MAINFRAME");
 
 	/** How often the crash watch looks for changed chats. */
 	constexpr float WatchSeconds = 5.0f;
@@ -58,11 +76,28 @@ namespace HyperAIStudio::EditorRestart::Private
 	{
 		bool bRestarting = false;
 		FProcHandle Helper;
+		/** The restart's plan, which an editor opened by hand reads too once the close went ahead. */
+		FString PlanPath;
+		/** The close: asked for (Tries), with a question on screen while it ran (bCloseAsked), gone ahead (bShutDown). */
+		int32 CloseTries = 0;
+		bool bCloseAsked = false;
+		bool bShutDown = false;
+		FTSTicker::FDelegateHandle CloseWatch;
+		FDelegateHandle ModalTick;
+		FDelegateHandle ShutdownSaved;
+		/** The Terminal plugin's close question, held off while a restart closes the editor; its value to put back. */
+		TOptional<bool> TerminalQuestion;
+		/** A restart an editor opened by hand offers to resume: its plan and result, and the notification asking. */
+		TSharedPtr<FJsonObject> OfferPlan;
+		TSharedPtr<FJsonObject> OfferResult;
+		FString OfferFolder;
+		TWeakPtr<SNotificationItem> OfferNotice;
 		/** After a restart: the chats still waiting for their tab. */
 		TArray<FHyperAIStudioRestartChat> Chats;
 		/** After a restart: every restored chat's tab, the one told to continue last. */
 		TArray<int32> Pages;
 		TUniquePtr<FAutoConsoleCommand> Command;
+		TUniquePtr<FAutoConsoleCommand> ResumeCommand;
 		FDelegateHandle PostEngineInit;
 		FDelegateHandle MainFrameReady;
 		FDelegateHandle PreExit;
@@ -273,50 +308,11 @@ namespace HyperAIStudio::EditorRestart::Private
 		return FString::Printf(TEXT("Chat %d, %s: %s%s"), Chat.TabIndex, *Chat.Agent, *How, Chat.bWorking ? TEXT(", and is told to continue") : TEXT(""));
 	}
 
-	void EndRestart()
+	/** Seconds since an ISO 8601 time; -1 when there is none. */
+	double SecondsSince(const FString& Iso8601)
 	{
-		FState& Current = State();
-		if (Current.Helper.IsValid())
-		{
-			FPlatformProcess::CloseProc(Current.Helper);
-		}
-		Current.Helper = FProcHandle();
-		Current.bRestarting = false;
-	}
-
-	/** The editor did not close: stop the helper, so a later close is not followed by a build and a relaunch. */
-	void CancelRestart()
-	{
-		if (State().Helper.IsValid() && FPlatformProcess::IsProcRunning(State().Helper))
-		{
-			FPlatformProcess::TerminateProc(State().Helper, /*KillTree=*/true);
-		}
-		EndRestart();
-		UE_LOG(LogHyperAIStudioRestart, Warning, TEXT("The editor did not close (the close was cancelled), so the restart stopped."));
-	}
-
-	/** The way File > Restart closes the editor: it asks the editor's own questions, and a No keeps it open. */
-	void CloseEditor()
-	{
-		if (!State().bRestarting || !GEngine)
-		{
-			return;
-		}
-		GEngine->DeferredCommands.Add(TEXT("CLOSE_SLATE_MAINFRAME"));
-		const double Asked = FPlatformTime::Seconds();
-		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Asked](float)
-		{
-			if (!State().bRestarting || IsEngineExitRequested())
-			{
-				return false;
-			}
-			if (FPlatformTime::Seconds() - Asked < CancelAfterSeconds)
-			{
-				return true;
-			}
-			CancelRestart();
-			return false;
-		}), 0.5f);
+		FDateTime At;
+		return !Iso8601.IsEmpty() && FDateTime::ParseIso8601(*Iso8601, At) ? (FDateTime::UtcNow() - At).GetTotalSeconds() : -1.0;
 	}
 
 	/**
@@ -420,6 +416,382 @@ namespace HyperAIStudio::EditorRestart::Private
 		FPlatformProcess::CloseProc(Process);
 		Current.WatchTicker = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateStatic(&RefreshWatch), WatchSeconds);
 		UE_LOG(LogHyperAIStudioRestart, Display, TEXT("Watching for crashes: if this editor crashes, it opens again with its chats."));
+	}
+
+	/**
+	 * The Terminal plugin asks before the editor closes while a terminal shows output, and the agent that asked for the
+	 * restart is still writing its answer in its tab. HyperAI's chat terminals come back on their own conversations, so
+	 * while every terminal open is one of them, the restart's close does not ask about them. A terminal of your own
+	 * keeps the question. Only the setting in this editor's memory changes, and a called-off restart puts it back.
+	 */
+	void HoldTerminalQuestion()
+	{
+		UTerminalSettings* Settings = GetMutableDefault<UTerminalSettings>();
+		if (State().TerminalQuestion.IsSet() || !Settings || !Settings->bPreventCloseDuringActivity || !SHyperAIStudioQuickActionWindow::OwnsEveryTerminal())
+		{
+			return;
+		}
+		State().TerminalQuestion = Settings->bPreventCloseDuringActivity;
+		Settings->bPreventCloseDuringActivity = false;
+		UE_LOG(LogHyperAIStudioRestart, Display, TEXT("Every terminal open is a HyperAI chat that reopens after the restart, so the editor does not ask about them as it closes."));
+	}
+
+	void RestoreTerminalQuestion()
+	{
+		if (State().TerminalQuestion.IsSet())
+		{
+			GetMutableDefault<UTerminalSettings>()->bPreventCloseDuringActivity = State().TerminalQuestion.GetValue();
+		}
+		State().TerminalQuestion.Reset();
+	}
+
+	void StopWatchingClose()
+	{
+		FState& Current = State();
+		if (Current.CloseWatch.IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(Current.CloseWatch);
+			Current.CloseWatch.Reset();
+		}
+		if (Current.ModalTick.IsValid() && FSlateApplication::IsInitialized())
+		{
+			FSlateApplication::Get().GetOnModalLoopTickEvent().Remove(Current.ModalTick);
+		}
+		Current.ModalTick.Reset();
+	}
+
+	void EndRestart()
+	{
+		FState& Current = State();
+		StopWatchingClose();
+		if (Current.Helper.IsValid())
+		{
+			FPlatformProcess::CloseProc(Current.Helper);
+		}
+		Current.Helper = FProcHandle();
+		Current.bRestarting = false;
+		Current.CloseTries = 0;
+		Current.bCloseAsked = false;
+		Current.bShutDown = false;
+	}
+
+	/**
+	 * The editor stays open, so the restart is off: the helper stops and the plan goes, so neither a later close nor an
+	 * editor opened later builds, reopens or resumes anything. Said in the log and in a notification.
+	 */
+	void CancelRestart(const FText& Why)
+	{
+		FState& Current = State();
+		if (Current.Helper.IsValid() && FPlatformProcess::IsProcRunning(Current.Helper))
+		{
+			FPlatformProcess::TerminateProc(Current.Helper, /*KillTree=*/true);
+		}
+		// The helper also stops by itself once the plan is gone.
+		if (!Current.PlanPath.IsEmpty())
+		{
+			IFileManager::Get().Delete(*Current.PlanPath, false, true, true);
+		}
+		RestoreTerminalQuestion();
+		EndRestart();
+		UE_LOG(LogHyperAIStudioRestart, Warning, TEXT("The restart was called off, and the editor stays open: %s"), *Why.ToString());
+		if (FSlateApplication::IsInitialized())
+		{
+			FNotificationInfo Info(FText::Format(LOCTEXT("RestartCalledOff", "The editor restart was called off: {0}"), Why));
+			Info.ExpireDuration = 10.0f;
+			Info.bUseSuccessFailIcons = true;
+			if (const TSharedPtr<SNotificationItem> Notice = FSlateNotificationManager::Get().AddNotification(Info))
+			{
+				Notice->SetCompletionState(SNotificationItem::CS_Fail);
+			}
+		}
+	}
+
+	/**
+	 * The editor shuts down for the restart (FMainFrameHandler::ShutDownEditor, after every question was answered). The
+	 * plan says so, for an editor opened by hand should the helper never open one.
+	 */
+	void OnShutDown()
+	{
+		FState& Current = State();
+		if (!Current.bRestarting || Current.bShutDown)
+		{
+			return;
+		}
+		Current.bShutDown = true;
+		if (const TSharedPtr<FJsonObject> Plan = ReadJson(Current.PlanPath))
+		{
+			Plan->SetStringField(TEXT("closedAt"), FDateTime::UtcNow().ToIso8601());
+			WriteJson(Current.PlanPath, Plan.ToSharedRef());
+		}
+		// The helper opens it again now; a crash on the way out must not have the watchdog open a second one.
+		EndCrashWatch();
+		UE_LOG(LogHyperAIStudioRestart, Display, TEXT("The editor closes for the restart; the helper builds and opens it again once it is gone."));
+	}
+
+	void OnPreExit()
+	{
+		// Closed some other way than the main frame's close (QUIT_EDITOR, say): the restart still goes ahead.
+		OnShutDown();
+		EndCrashWatch();
+	}
+
+#if WITH_DEV_AUTOMATION_TESTS && !UE_BUILD_SHIPPING
+	/**
+	 * For live tests of a restart, which span a real close and relaunch: HYPERAI_TEST_RESTART_ANSWER=<button>@<seconds>
+	 * presses the button labelled <button> on a question the restart's close puts on screen, once it has been up that
+	 * long, as a person would. It is read as the close is asked for, so it reaches the editor the helper opens too.
+	 */
+	struct FTestAnswer
+	{
+		FString Label;
+		double Seconds = 0.0;
+		double Since = -1.0;
+	};
+
+	FTestAnswer& TestAnswer()
+	{
+		static FTestAnswer Answer;
+		return Answer;
+	}
+
+	bool ShowsText(const TSharedRef<SWidget>& Widget, const FString& Label)
+	{
+		if (Widget->GetType() == FName(TEXT("STextBlock")) && StaticCastSharedRef<STextBlock>(Widget)->GetText().ToString() == Label)
+		{
+			return true;
+		}
+		FChildren* Children = Widget->GetChildren();
+		for (int32 Index = 0; Children && Index < Children->Num(); ++Index)
+		{
+			if (ShowsText(Children->GetChildAt(Index), Label))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	TSharedPtr<SButton> FindButton(const TSharedRef<SWidget>& Widget, const FString& Label)
+	{
+		const FName Type = Widget->GetType();
+		if ((Type == FName(TEXT("SButton")) || Type == FName(TEXT("SPrimaryButton"))) && ShowsText(Widget, Label))
+		{
+			return StaticCastSharedRef<SButton>(Widget);
+		}
+		FChildren* Children = Widget->GetChildren();
+		for (int32 Index = 0; Children && Index < Children->Num(); ++Index)
+		{
+			if (TSharedPtr<SButton> Found = FindButton(Children->GetChildAt(Index), Label))
+			{
+				return Found;
+			}
+		}
+		return nullptr;
+	}
+
+	void ReadTestAnswer()
+	{
+		const FString Value = FPlatformMisc::GetEnvironmentVariable(TEXT("HYPERAI_TEST_RESTART_ANSWER"));
+		FString Label;
+		FString Seconds;
+		TestAnswer() = FTestAnswer();
+		if (Value.Split(TEXT("@"), &Label, &Seconds, ESearchCase::IgnoreCase, ESearchDir::FromEnd) && !Label.IsEmpty())
+		{
+			TestAnswer().Label = Label;
+			TestAnswer().Seconds = FCString::Atod(*Seconds);
+		}
+	}
+
+	void AnswerForTests()
+	{
+		FTestAnswer& Answer = TestAnswer();
+		const TSharedPtr<SWindow> Modal = Answer.Label.IsEmpty() ? nullptr : FSlateApplication::Get().GetActiveModalWindow();
+		if (!Modal.IsValid())
+		{
+			return;
+		}
+		const double Now = FPlatformTime::Seconds();
+		if (Answer.Since < 0.0)
+		{
+			Answer.Since = Now;
+			UE_LOG(LogHyperAIStudioRestart, Display, TEXT("Test: '%s' asks before closing; it is answered %s in %.0f s."), *Modal->GetTitle().ToString(), *Answer.Label, Answer.Seconds);
+		}
+		if (Now - Answer.Since < Answer.Seconds)
+		{
+			return;
+		}
+		if (const TSharedPtr<SButton> Button = FindButton(Modal.ToSharedRef(), Answer.Label))
+		{
+			UE_LOG(LogHyperAIStudioRestart, Display, TEXT("Test: answered '%s' with %s after %.0f s."), *Modal->GetTitle().ToString(), *Answer.Label, Now - Answer.Since);
+			Answer.Since = -1.0;
+			Button->SimulateClick();
+		}
+	}
+#endif
+
+	void AskToClose();
+
+	/** Each frame once the close was asked for, until the editor shuts down or the restart is off. */
+	bool WatchClose(float)
+	{
+		using ECloseState = FHyperAIStudioEditorRestart::ECloseState;
+		FState& Current = State();
+		if (!Current.bRestarting)
+		{
+			Current.CloseWatch.Reset();
+			return false;
+		}
+		const bool bQueued = GEngine && GEngine->DeferredCommands.Contains(CloseCommand);
+		switch (FHyperAIStudioEditorRestart::JudgeClose(Current.bShutDown || IsEngineExitRequested(), bQueued, Current.bCloseAsked, Current.CloseTries))
+		{
+		case ECloseState::Waiting:
+			return true;
+		case ECloseState::Closing:
+			OnShutDown();
+			Current.CloseWatch.Reset();
+			StopWatchingClose();
+			return false;
+		case ECloseState::TryAgain:
+			UE_LOG(LogHyperAIStudioRestart, Display, TEXT("The editor stayed open without asking anything (it was busy), so the restart asks it to close again."));
+			AskToClose();
+			return true;
+		case ECloseState::CalledOff:
+		default:
+			Current.CloseWatch.Reset();
+			CancelRestart(Current.bCloseAsked
+				? LOCTEXT("RestartKeptOpen", "the editor asked before closing and the answer kept it open, so nothing was built or opened again.")
+				: FText::Format(LOCTEXT("RestartNeverClosed", "the editor stayed open after {0} requests to close, without asking anything. Close it yourself, or restart again."),
+					FText::AsNumber(MaxCloseTries)));
+			return false;
+		}
+	}
+
+	/**
+	 * The way File > Restart closes the editor, so it asks its own questions (save your work, close anyway), which wait
+	 * for an answer however long it takes. What comes of it is judged by WatchClose from what happened, never by time.
+	 */
+	void AskToClose()
+	{
+		FState& Current = State();
+		if (!Current.bRestarting || !GEngine)
+		{
+			return;
+		}
+		++Current.CloseTries;
+		Current.bCloseAsked = false;
+		HoldTerminalQuestion();
+		if (!Current.ModalTick.IsValid() && FSlateApplication::IsInitialized())
+		{
+#if WITH_DEV_AUTOMATION_TESTS && !UE_BUILD_SHIPPING
+			ReadTestAnswer();
+#endif
+			// A modal loop runs only while a question is on screen: the save prompt, close anyway, are you sure.
+			Current.ModalTick = FSlateApplication::Get().GetOnModalLoopTickEvent().AddLambda([](float)
+			{
+				State().bCloseAsked = true;
+#if WITH_DEV_AUTOMATION_TESTS && !UE_BUILD_SHIPPING
+				AnswerForTests();
+#endif
+			});
+		}
+		GEngine->DeferredCommands.AddUnique(CloseCommand);
+		if (!Current.CloseWatch.IsValid())
+		{
+			Current.CloseWatch = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateStatic(&WatchClose), 0.0f);
+		}
+	}
+
+	/** A restart's chats in State for their tabs, the working ones told what happened; continue.md for a terminal chat. */
+	bool AdoptChats(const FString& Folder, const TSharedPtr<FJsonObject>& Plan, const TSharedPtr<FJsonObject>& Result)
+	{
+		const FString Message = FHyperAIStudioEditorRestart::DescribeRestart(Plan, Result);
+		TArray<FHyperAIStudioRestartChat>& Chats = State().Chats;
+		Chats.Reset();
+		State().Pages.Reset();
+		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+		if (Plan.IsValid() && Plan->TryGetArrayField(TEXT("chats"), Values) && Values)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *Values)
+			{
+				FHyperAIStudioRestartChat Chat = ChatFromJson(Value.IsValid() ? Value->AsObject() : nullptr);
+				Chat.Message = Chat.bWorking ? Message : FString();
+				if (!Chat.Agent.IsEmpty())
+				{
+					Chats.Add(MoveTemp(Chat));
+				}
+			}
+		}
+		Chats.StableSort([](const FHyperAIStudioRestartChat& A, const FHyperAIStudioRestartChat& B) { return !A.bWorking && B.bWorking; });
+		for (const FHyperAIStudioRestartChat& Chat : Chats)
+		{
+			State().Pages.AddUnique(Chat.TabIndex);
+		}
+		// A terminal chat gets one line that points here.
+		if (Chats.ContainsByPredicate([](const FHyperAIStudioRestartChat& Chat) { return Chat.bWorking; }))
+		{
+			FFileHelper::SaveStringToFile(Message, *(Folder / TEXT("continue.md")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+		}
+		UE_LOG(LogHyperAIStudioRestart, Display, TEXT("Opened by a restart: %d chat(s) resume."), Chats.Num());
+		return !Chats.IsEmpty();
+	}
+
+	int32 CountChats(const TSharedPtr<FJsonObject>& Plan)
+	{
+		int32 Count = 0;
+		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+		if (Plan.IsValid() && Plan->TryGetArrayField(TEXT("chats"), Values) && Values)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *Values)
+			{
+				Count += ChatFromJson(Value.IsValid() ? Value->AsObject() : nullptr).Agent.IsEmpty() ? 0 : 1;
+			}
+		}
+		return Count;
+	}
+
+	void EndOffer()
+	{
+		FState& Current = State();
+		Current.OfferPlan.Reset();
+		Current.OfferResult.Reset();
+		Current.OfferFolder.Reset();
+		if (const TSharedPtr<SNotificationItem> Notice = Current.OfferNotice.Pin())
+		{
+			Notice->ExpireAndFadeout();
+		}
+		Current.OfferNotice.Reset();
+	}
+
+	/** The offered restart's files, if they are still that restart's: another editor may have taken them, or a newer restart replaced them. */
+	bool OfferStillThere()
+	{
+		const FState& Current = State();
+		return Current.OfferPlan.IsValid()
+			&& StringField(ReadJson(Current.OfferFolder / TEXT("request.json")), TEXT("token")) == StringField(Current.OfferPlan, TEXT("token"));
+	}
+
+	/** Once the main frame is up: asks whether to resume a restart that closed the editor long ago and never opened it again. */
+	void OfferResume()
+	{
+		FState& Current = State();
+		if (!Current.OfferPlan.IsValid() || !FSlateApplication::IsInitialized())
+		{
+			return;
+		}
+		const int32 Count = CountChats(Current.OfferPlan);
+		FNotificationInfo Info(FText::Format(LOCTEXT("RestartResumeOffer",
+			"The editor closed for a HyperAI restart and did not open again by itself. Resume the {0} {0}|plural(one=chat,other=chats) it was running, where {0}|plural(one=it,other=they) left off?"),
+			Count));
+		Info.bFireAndForget = false;
+		Info.ExpireDuration = 0.0f;
+		Info.ButtonDetails.Add(FNotificationButtonInfo(LOCTEXT("ResumeRestartChats", "Resume Chats"),
+			LOCTEXT("ResumeRestartChatsTooltip", "Reopen the chat tabs on their conversations, and tell the chat that asked for the restart to continue."),
+			FSimpleDelegate::CreateLambda([]() { FHyperAIStudioEditorRestart::AcceptResumeOffer(); }), SNotificationItem::CS_None));
+		Info.ButtonDetails.Add(FNotificationButtonInfo(LOCTEXT("DismissRestartChats", "Dismiss"),
+			LOCTEXT("DismissRestartChatsTooltip", "Leave the chat tabs as they are. This restart is not offered again."),
+			FSimpleDelegate::CreateLambda([]() { FHyperAIStudioEditorRestart::DeclineResumeOffer(); }), SNotificationItem::CS_None));
+		Current.OfferNotice = FSlateNotificationManager::Get().AddNotification(Info);
+		UE_LOG(LogHyperAIStudioRestart, Display, TEXT("Offering to resume %d chat(s) from a restart that closed the editor and never opened it again."), Count);
 	}
 
 	void RegisterToolset()
@@ -615,9 +987,10 @@ FHyperAIEditorRestartReport FHyperAIStudioEditorRestart::Restart(const FOptions&
 	}
 	State().bRestarting = true;
 	State().Helper = Helper;
+	State().PlanPath = PlanPath;
 	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([](float)
 	{
-		CloseEditor();
+		AskToClose();
 		return false;
 	}), CloseDelaySeconds);
 
@@ -649,8 +1022,12 @@ FString FHyperAIStudioEditorRestart::DescribeRestart(const TSharedPtr<FJsonObjec
 	using namespace HyperAIStudio::EditorRestart::Private;
 	// A crash's plan comes from the watchdog, with the crash report's error and where it happened.
 	const TSharedPtr<FJsonObject> Crash = StringField(Plan, TEXT("reason")) == TEXT("crash") ? ObjectField(Plan, TEXT("crash")) : nullptr;
+	// The editor closed for the restart, and no helper reported opening it again: someone opened it by hand.
+	const bool bByHand = !Crash.IsValid() && !StringField(Plan, TEXT("closedAt")).IsEmpty() && StringField(Result, TEXT("state")) != TEXT("relaunched");
 	TArray<FString> Lines = {Crash.IsValid()
 		? FString(TEXT("The Unreal Editor crashed and was opened again; this chat resumed."))
+		: bByHand
+		? FString(TEXT("The Unreal Editor closed for the restart you asked for with hyper_editor_restart, but did not open again by itself. It was opened again by hand, and this chat resumed."))
 		: FString(TEXT("The Unreal Editor restarted, as you asked with hyper_editor_restart, and this chat resumed.")), FString()};
 	if (Crash.IsValid())
 	{
@@ -678,7 +1055,17 @@ FString FHyperAIStudioEditorRestart::DescribeRestart(const TSharedPtr<FJsonObjec
 		Build->TryGetNumberField(TEXT("exitCode"), ExitCode);
 		Build->TryGetNumberField(TEXT("seconds"), Seconds);
 	}
-	if (!bBuilt)
+	bool bBuildPlanned = false;
+	if (PlanBuild.IsValid())
+	{
+		PlanBuild->TryGetBoolField(TEXT("enabled"), bBuildPlanned);
+	}
+	if (!Build.IsValid() && bBuildPlanned && !Crash.IsValid())
+	{
+		Lines.Add(FString::Printf(TEXT("- Build: no result. The restart's helper stopped before it reported a build of %s, so the editor may be running the binaries from before your changes; if they are missing, restart again with bBuild."),
+			*Target));
+	}
+	else if (!bBuilt)
 	{
 		if (!Crash.IsValid())
 		{
@@ -735,57 +1122,118 @@ bool FHyperAIStudioEditorRestart::LoadResume(const FString& Folder, const FStrin
 	const FString PlanPath = Folder / TEXT("request.json");
 	const FString ResultPath = Folder / TEXT("result.json");
 	const TSharedPtr<FJsonObject> Plan = ReadJson(PlanPath);
-	const TSharedPtr<FJsonObject> Result = ReadJson(ResultPath);
-	FDateTime Requested;
-	const double Age = FDateTime::ParseIso8601(*StringField(Plan, TEXT("requestedAt")), Requested) ? (FDateTime::UtcNow() - Requested).GetTotalSeconds() : -1.0;
-	// Opened without the token (the crash reporter's Send and Restart, or by hand): only a fresh crash plan for this very
-	// project resumes here. Anything else stays for the editor its helper opens.
+	TSharedPtr<FJsonObject> Result = ReadJson(ResultPath);
+	double Age = SecondsSince(StringField(Plan, TEXT("requestedAt")));
+	// Opened without the token (the crash reporter's Send and Restart, or by hand): only a plan for this very project, and
+	// then a fresh crash's, or a restart's whose editor really closed for it and that nothing opened again. Anything else
+	// stays for the editor its helper opens.
 	const bool bNoToken = Token.IsEmpty();
-	if (bNoToken && !(StringField(Plan, TEXT("reason")) == TEXT("crash") && Age >= 0.0 && Age <= MaxCrashAgeWithoutTokenSeconds
-		&& FPaths::IsSamePath(StringField(Plan, TEXT("projectFile")), FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath()))))
+	if (bNoToken)
 	{
-		return false;
+		const bool bThisProject = FPaths::IsSamePath(StringField(Plan, TEXT("projectFile")), FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath()));
+		const bool bCrash = StringField(Plan, TEXT("reason")) == TEXT("crash");
+		// A restart counts from its close: the editor's questions before closing may have waited a long time.
+		const double Closed = bCrash ? -1.0 : SecondsSince(StringField(Plan, TEXT("closedAt")));
+		if (!bThisProject || (bCrash ? !(Age >= 0.0 && Age <= MaxCrashAgeWithoutTokenSeconds) : Closed < 0.0))
+		{
+			return false;
+		}
+		if (!bCrash)
+		{
+			if (Closed > MaxRestartAgeWithoutTokenSeconds)
+			{
+				// Too long ago to tell an agent to continue unasked: offered instead, and the files stay until then.
+				if (Closed <= MaxAgeSeconds)
+				{
+					State().OfferPlan = Plan;
+					State().OfferResult = StringField(Result, TEXT("token")) == StringField(Plan, TEXT("token")) ? Result : nullptr;
+					State().OfferFolder = Folder;
+				}
+				return false;
+			}
+			UE_LOG(LogHyperAIStudioRestart, Display, TEXT("The editor closed for a restart %d min ago and nothing opened it again, so this editor takes its chats."),
+				FMath::RoundToInt(Closed / 60.0));
+			Age = Closed;
+		}
+		// A result is this restart's only when it carries the same token; the helper may never have written one.
+		if (StringField(Result, TEXT("token")) != StringField(Plan, TEXT("token")))
+		{
+			Result.Reset();
+		}
 	}
 	const FString Expected = bNoToken ? StringField(Plan, TEXT("token")) : Token;
 	// A restart resumes once: whatever the files hold, they are used up now.
 	IFileManager::Get().Delete(*PlanPath, false, true, true);
 	IFileManager::Get().Delete(*ResultPath, false, true, true);
-	// Without the token there may be no result yet: the helper writes one only for an editor it opened itself.
 	if (Expected.IsEmpty() || StringField(Plan, TEXT("token")) != Expected || (!bNoToken && StringField(Result, TEXT("token")) != Expected)
 		|| Age < 0.0 || Age > MaxAgeSeconds)
 	{
 		UE_LOG(LogHyperAIStudioRestart, Display, TEXT("This editor was opened by a restart whose plan is missing, stale or another restart's; chats start fresh."));
 		return false;
 	}
-	const FString Message = DescribeRestart(Plan, Result);
-	TArray<FHyperAIStudioRestartChat>& Chats = State().Chats;
-	Chats.Reset();
-	State().Pages.Reset();
-	const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
-	if (Plan->TryGetArrayField(TEXT("chats"), Values) && Values)
+	return AdoptChats(Folder, Plan, Result);
+}
+
+FHyperAIStudioEditorRestart::ECloseState FHyperAIStudioEditorRestart::JudgeClose(const bool bShutDown, const bool bCloseQueued, const bool bAsked, const int32 Tries)
+{
+	if (bShutDown)
 	{
-		for (const TSharedPtr<FJsonValue>& Value : *Values)
-		{
-			FHyperAIStudioRestartChat Chat = ChatFromJson(Value.IsValid() ? Value->AsObject() : nullptr);
-			Chat.Message = Chat.bWorking ? Message : FString();
-			if (!Chat.Agent.IsEmpty())
-			{
-				Chats.Add(MoveTemp(Chat));
-			}
-		}
+		return ECloseState::Closing;
 	}
-	Chats.StableSort([](const FHyperAIStudioRestartChat& A, const FHyperAIStudioRestartChat& B) { return !A.bWorking && B.bWorking; });
-	for (const FHyperAIStudioRestartChat& Chat : Chats)
+	if (bCloseQueued)
 	{
-		State().Pages.AddUnique(Chat.TabIndex);
+		return ECloseState::Waiting;
 	}
-	// A terminal chat gets one line that points here.
-	if (Chats.ContainsByPredicate([](const FHyperAIStudioRestartChat& Chat) { return Chat.bWorking; }))
+	if (bAsked)
 	{
-		FFileHelper::SaveStringToFile(Message, *(Folder / TEXT("continue.md")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+		return ECloseState::CalledOff;
 	}
-	UE_LOG(LogHyperAIStudioRestart, Display, TEXT("Opened by a restart: %d chat(s) resume."), Chats.Num());
-	return !Chats.IsEmpty();
+	return Tries < HyperAIStudio::EditorRestart::Private::MaxCloseTries ? ECloseState::TryAgain : ECloseState::CalledOff;
+}
+
+bool FHyperAIStudioEditorRestart::HasResumeOffer()
+{
+	return HyperAIStudio::EditorRestart::Private::State().OfferPlan.IsValid();
+}
+
+bool FHyperAIStudioEditorRestart::AcceptResumeOffer()
+{
+	using namespace HyperAIStudio::EditorRestart::Private;
+	FState& Current = State();
+	const TSharedPtr<FJsonObject> Plan = Current.OfferPlan;
+	const TSharedPtr<FJsonObject> Result = Current.OfferResult;
+	const FString Folder = Current.OfferFolder;
+	const bool bThere = OfferStillThere();
+	EndOffer();
+	if (!Plan.IsValid() || !bThere)
+	{
+		UE_LOG(LogHyperAIStudioRestart, Display, TEXT("The restart offered for resuming is gone (another editor took it, or a newer restart replaced it)."));
+		return false;
+	}
+	IFileManager::Get().Delete(*(Folder / TEXT("request.json")), false, true, true);
+	IFileManager::Get().Delete(*(Folder / TEXT("result.json")), false, true, true);
+	if (!AdoptChats(Folder, Plan, Result))
+	{
+		return false;
+	}
+	// The tabs are up and running fresh chats by now: the open ones pick their restart chat up at once, then every
+	// restored chat's tab shows, the one told to continue in front.
+	SHyperAIStudioQuickActionWindow::TakeRestartChats();
+	ShowChats();
+	return true;
+}
+
+void FHyperAIStudioEditorRestart::DeclineResumeOffer()
+{
+	using namespace HyperAIStudio::EditorRestart::Private;
+	const FString Folder = State().OfferFolder;
+	if (OfferStillThere())
+	{
+		IFileManager::Get().Delete(*(Folder / TEXT("request.json")), false, true, true);
+		IFileManager::Get().Delete(*(Folder / TEXT("result.json")), false, true, true);
+		UE_LOG(LogHyperAIStudioRestart, Display, TEXT("The restart's chats were not resumed, as chosen; it is not offered again."));
+	}
+	EndOffer();
 }
 
 void FHyperAIStudioEditorRestart::Startup()
@@ -800,14 +1248,23 @@ void FHyperAIStudioEditorRestart::Startup()
 	Current.Command = MakeUnique<FAutoConsoleCommand>(TEXT("HyperAIStudio.Restart"),
 		TEXT("Restart the editor and resume its chats: HyperAIStudio.Restart [NoBuild] [NoSave] [DryRun] [Tab=<n>] [note]. Tab tells that chat to continue."),
 		FConsoleCommandWithArgsDelegate::CreateStatic(&RunCommand));
+	Current.ResumeCommand = MakeUnique<FAutoConsoleCommand>(TEXT("HyperAIStudio.ResumeChats"),
+		TEXT("Resume the chats of a restart that closed the editor and never opened it again, as its notification's Resume Chats does."),
+		FConsoleCommandDelegate::CreateLambda([]()
+		{
+			UE_LOG(LogHyperAIStudioRestart, Display, TEXT("%s"), FHyperAIStudioEditorRestart::AcceptResumeOffer()
+				? TEXT("The restart's chats resume.") : TEXT("No restart waits to be resumed."));
+		}));
 
-	Current.PreExit = FCoreDelegates::OnEnginePreExit.AddStatic(&EndCrashWatch);
+	Current.PreExit = FCoreDelegates::OnEnginePreExit.AddStatic(&OnPreExit);
+	// The one place the main frame's close goes ahead, once every question before it was answered.
+	Current.ShutdownSaved = FEditorDelegates::OnShutdownPostPackagesSaved.AddStatic(&OnShutDown);
 
 	FString Token;
 	FParse::Value(FCommandLine::Get(), TEXT("HyperAIResume="), Token);
 	const bool bResume = IsInteractiveEditor() && LoadResume(GetFolder(), Token, MaxResumeAgeSeconds);
 	// Once the main frame is up: the crash watch, and after a restart, every restored chat tab a moment later. Tabs the
-	// Studio layout brings back take their chats as they open.
+	// Studio layout brings back take their chats as they open. A restart too old to resume by itself is offered.
 	auto WhenUp = [bResume]()
 	{
 		StartCrashWatch();
@@ -819,6 +1276,7 @@ void FHyperAIStudioEditorRestart::Startup()
 				return false;
 			}), 1.5f);
 		}
+		OfferResume();
 	};
 	IMainFrameModule* MainFrame = FModuleManager::LoadModulePtr<IMainFrameModule>(TEXT("MainFrame"));
 	if (MainFrame && MainFrame->IsWindowInitialized())
@@ -836,10 +1294,16 @@ void FHyperAIStudioEditorRestart::Shutdown()
 	using namespace HyperAIStudio::EditorRestart::Private;
 	FState& Current = State();
 	EndCrashWatch();
+	StopWatchingClose();
 	if (Current.PreExit.IsValid())
 	{
 		FCoreDelegates::OnEnginePreExit.Remove(Current.PreExit);
 		Current.PreExit.Reset();
+	}
+	if (Current.ShutdownSaved.IsValid())
+	{
+		FEditorDelegates::OnShutdownPostPackagesSaved.Remove(Current.ShutdownSaved);
+		Current.ShutdownSaved.Reset();
 	}
 	if (Current.PostEngineInit.IsValid())
 	{
@@ -864,6 +1328,7 @@ void FHyperAIStudioEditorRestart::Shutdown()
 	}
 	Current.bOwnsToolset = false;
 	Current.Command.Reset();
+	Current.ResumeCommand.Reset();
 	// The helper runs on by design: it is what reopens the editor.
 	if (Current.Helper.IsValid())
 	{
@@ -871,3 +1336,5 @@ void FHyperAIStudioEditorRestart::Shutdown()
 		Current.Helper = FProcHandle();
 	}
 }
+
+#undef LOCTEXT_NAMESPACE
