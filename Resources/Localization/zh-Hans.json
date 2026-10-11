@@ -10,8 +10,8 @@
   {
    "namespace": "FHyperAIStudioModule",
    "key": "ActionDocsTip",
-   "source": "HyperAI Studio's guides, in the browser.",
-   "text": "在浏览器中打开 HyperAI Studio 指南。"
+   "source": "HyperAI Studio's guides, read in the editor on the Docs page.",
+   "text": "在编辑器的“文档”页面中阅读 HyperAI Studio 指南。"
   },
   {
    "namespace": "FHyperAIStudioModule",
@@ -267,6 +267,18 @@
   },
   {
    "namespace": "FHyperAIStudioModule",
+   "key": "PageDocs",
+   "source": "Docs",
+   "text": "文档"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
+   "key": "PageDocsTip",
+   "source": "HyperAI Studio's guides and documentation, read here; links to websites open in your browser.",
+   "text": "在这里阅读 HyperAI Studio 的指南和文档；指向网站的链接会在你的浏览器中打开。"
+  },
+  {
+   "namespace": "FHyperAIStudioModule",
    "key": "PageHome",
    "source": "Home",
    "text": "主页"
@@ -466,8 +478,8 @@
   {
    "namespace": "FHyperAIStudioModule",
    "key": "WelcomeOpenDocsTooltip",
-   "source": "Open the HyperAIStudio documentation site.",
-   "text": "打开 HyperAIStudio 文档网站。"
+   "source": "Read the HyperAIStudio documentation in the editor, on the Studio's Docs page.",
+   "text": "在编辑器中阅读 HyperAIStudio 文档，位于 Studio 的“文档”页面。"
   },
   {
    "namespace": "FHyperAIStudioModule",
@@ -1182,6 +1194,126 @@
    "key": "SoundPlan",
    "source": "HyperAI: Edit Decibel Session",
    "text": "HyperAI：编辑 Decibel 会话"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "BackTip",
+   "source": "Back to the page before.",
+   "text": "返回上一页。"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "ForwardTip",
+   "source": "Forward again.",
+   "text": "前进到下一页。"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "HomeTip",
+   "source": "The docs' first page: everything HyperAI adds.",
+   "text": "文档首页：HyperAI 带来的全部功能。"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "MissingBody",
+   "source": "The plugin's Docs folder is missing. The same guides are on the website.",
+   "text": "插件的 Docs 文件夹缺失。网站上有相同的指南。"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "MissingTitle",
+   "source": "The docs are not in this copy of HyperAI",
+   "text": "此份 HyperAI 中没有文档"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "NoBrowserBody",
+   "source": "This editor has no web browser to show them here: Unreal's WebBrowser module could not load Chromium (CEF), or the browser is turned off. Open in browser shows the same pages, from the plugin's Docs folder.",
+   "text": "此编辑器没有可在这里显示文档的网页浏览器：Unreal 的 WebBrowser 模块无法加载 Chromium (CEF)，或浏览器已被关闭。“在浏览器中打开”会显示插件 Docs 文件夹中的相同页面。"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "NoBrowserTitle",
+   "source": "The docs open in your browser",
+   "text": "文档会在你的浏览器中打开"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "NotOpened",
+   "source": "That link leads outside HyperAI's docs, so it was not opened.",
+   "text": "该链接指向 HyperAI 文档之外，因此未打开。"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "OpenInBrowser",
+   "source": "Open in browser",
+   "text": "在浏览器中打开"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "OpenInBrowserTip",
+   "source": "Open this page in your system browser, to print it or read it beside the editor.",
+   "text": "在系统浏览器中打开此页面，以便打印，或在编辑器旁边阅读。"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "OpenPageFailed",
+   "source": "Could not open this page in your browser.",
+   "text": "无法在你的浏览器中打开此页面。"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "OpenSiteFailed",
+   "source": "Could not open {0}: {1}",
+   "text": "无法打开 {0}：{1}"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "OpenWebsite",
+   "source": "Open the website",
+   "text": "打开网站"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "OpenedPage",
+   "source": "Opened this page in your browser.",
+   "text": "已在你的浏览器中打开此页面。"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "OpenedSite",
+   "source": "Opened {0} in your browser.",
+   "text": "已在你的浏览器中打开 {0}。"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "PickPage",
+   "source": "Pages",
+   "text": "页面"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "PickerTip",
+   "source": "Go to a page of the docs.",
+   "text": "前往文档中的某一页。"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "PolicyTip",
+   "source": "This page shows only HyperAI's own documentation, from the plugin's Docs folder. Links to websites open in your system browser; anything else is not opened.",
+   "text": "此页面只显示 HyperAI 自己的文档，来自插件的 Docs 文件夹。指向网站的链接会在你的系统浏览器中打开；其他任何内容都不会打开。"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "ReloadTip",
+   "source": "Load the page again from the plugin's Docs folder.",
+   "text": "从插件的 Docs 文件夹重新加载此页面。"
+  },
+  {
+   "namespace": "HyperAIStudioDocs",
+   "key": "WebLinksHint",
+   "source": "Web links open in your browser",
+   "text": "网页链接会在你的浏览器中打开"
   },
   {
    "namespace": "HyperAIStudioEditorRestart",

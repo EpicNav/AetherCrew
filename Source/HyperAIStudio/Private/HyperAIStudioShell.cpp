@@ -11,6 +11,7 @@
 #include "HAL/PlatformProcess.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioAutoApproval.h"
+#include "HyperAIStudioDocs.h"
 #include "HyperAIStudioPromptPresets.h"
 #include "HyperAIStudioStyle.h"
 #include "HyperAIStudioWidgets.h"
@@ -607,7 +608,7 @@ TSharedRef<SWidget> SHyperAIStudioShell::BuildHeader()
 				IconButton(Icon("Icons.Help"), LOCTEXT("HelpTooltip", "HyperAI Studio documentation."),
 					FOnClicked::CreateLambda([]()
 					{
-						FPlatformProcess::LaunchURL(TEXT("https://hyperaistudio.com/docs"), nullptr, nullptr);
+						HyperAIStudio::Docs::Open();
 						return FReply::Handled();
 					}))
 			]

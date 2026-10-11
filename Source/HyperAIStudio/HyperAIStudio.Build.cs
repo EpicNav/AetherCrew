@@ -56,7 +56,9 @@ public class HyperAIStudio : ModuleRules
 			"ToolWidgets",
 			// The off-screen widget renderer the UI screenshot tests draw with.
 			"UMG",
-			"UnrealEd"
+			"UnrealEd",
+			// The Docs page shows HyperAI's own documentation in the editor's web browser (CEF).
+			"WebBrowser"
 		});
 
 		if (Target.Platform == UnrealTargetPlatform.Win64)
