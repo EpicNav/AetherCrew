@@ -270,6 +270,9 @@ bool FHyperAIStudioLoreSetupPlanTest::RunTest(const FString& Parameters)
 	Options.bFirstCommit = false;
 	TestTrue(TEXT("Only the repository, when asked for nothing else"), FHyperAIStudioLore::PlanSetup(Options, Steps, Error) && Kinds(Steps) == TArray<EKind>{EKind::Create});
 	Options.bWriteIgnore = true;
+	// Lore stages a .git or .plastic folder like any other unless told not to, at any depth (a plugin's own repository).
+	TestTrue(TEXT("Other version control's folders stay out at any depth"), FHyperAIStudioLore::UnrealIgnoreText().Contains(TEXT("\n.git/\n"))
+		&& FHyperAIStudioLore::UnrealIgnoreText().Contains(TEXT("\n.plastic/\n")));
 	FFileHelper::SaveStringToFile(FHyperAIStudioLore::UnrealIgnoreText(), *(Folder / TEXT(".loreignore")));
 	TestTrue(TEXT("An ignore file that has every pattern is left alone"), FHyperAIStudioLore::PlanSetup(Options, Steps, Error) && !Find(Steps, EKind::WriteIgnore));
 
