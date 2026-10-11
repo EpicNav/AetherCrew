@@ -2875,7 +2875,8 @@ private:
 			{TEXT("chat.html"), TEXT("A studio team of six.")},
 			{TEXT("match.html"), TEXT("Match it: the agent does the work.")},
 			{TEXT("memory.html"), TEXT("Held notes and keys.")},
-			{TEXT("tools.html"), TEXT("The 35 packs.")},
+			// The pack count changes as packs are added (build_catalog.py checks the number), so only the heading's end.
+			{TEXT("tools.html"), TEXT(" packs.</h2>")},
 			{TEXT("reference.html"), TEXT("Console commands.")}};
 		TArray<FString> Missing;
 		for (const TPair<const TCHAR*, const TCHAR*>& Page : Pages)
