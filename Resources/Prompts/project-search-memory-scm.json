@@ -147,6 +147,9 @@
    "packs": [
     "source_control"
    ],
+   "skills": [
+    "lore-version-control"
+   ],
    "tools": [
     "hyper_source_control_status",
     "hyper_diagnose",
@@ -176,6 +179,30 @@
     }
    ],
    "prompt": "Submit the agents' work with the description \"{{description}}\". Files: {{files}}.\n1. hyper_source_control_status with bRefresh true: the provider (unreal, lore or none) and each file agents changed, with its state. If the provider is none, say so and stop. FAIL any file checked_out_by_other or not_current, naming who holds it.\n2. hyper_diagnose with check dirty_loaded_packages: unsaved changes are not submitted. List them and ask whether to save first.\n3. hyper_sandbox_status: if Sandbox Mode holds files, they are not in the project yet. Tell me to approve them in Activity first, and stop.\n4. hyper_source_control_submit with bDryRun true, the description and the files (an empty list for all agent files): show me the exact list.\n5. Only after I say yes: hyper_source_control_submit with bDryRun false and a fresh operationId, then hyper_operation_wait with bWaitThroughApproval true.\n6. Report a PASS/FAIL table: provider found, no conflicts, nothing unsaved, nothing sandboxed, dry run listed N files, submitted. Never submit a file outside the approved list."
+  },
+  {
+   "id": "project-search-memory-scm.check-lore-setup",
+   "title": "Check this project's Lore version control",
+   "summary": "Whether the lore command is installed, if the project's Lore repository is local or on a server, who is signed in, and what to do next.",
+   "packs": [
+    "source_control"
+   ],
+   "skills": [
+    "lore-version-control"
+   ],
+   "tools": [
+    "hyper_source_control_status"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "lore",
+    "version-control",
+    "source-control",
+    "setup",
+    "status"
+   ],
+   "placeholders": [],
+   "prompt": "Tell me where {{project}} stands with Epic's Lore version control, and what I should do next. Read only.\n1. hyper_source_control_status with bRefresh false. From its Lore field report: whether the lore command is installed (bCliFound, CliVersion, CliPath), the Mode (local, remote or none), the Workspace, the Server, the ConfiguredServer setting, and SignedInAs.\n2. Explain the mode in one line each: local keeps history in the project's .lore folder with no server, no locks and no push; remote locks files on the server and pushes on submit; none means the project is not in a Lore workspace.\n3. If the command is missing, give me Epic's install command for PowerShell and the guide link from Next. If there is no workspace, tell me to open HyperAI Studio > Settings > Version control, which lists every setup step and asks before running it. If the server needs a sign-in, show me the lore login command from Next to run myself in a terminal.\n4. Report a PASS/FAIL table: lore installed, workspace found, mode, server answers (remote only, from the status), signed in (remote only). Then the files agents changed this session with their states.\nDo not run any lore command, set anything up, sign in, or submit."
   },
   {
    "id": "project-search-memory-scm.snapshot-selected-actors",
