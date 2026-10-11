@@ -2,6 +2,7 @@
 
 #include "HyperAIStudioSourceControl.h"
 
+#include "Async/Async.h"
 #include "Containers/Ticker.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
@@ -47,11 +48,35 @@ namespace HyperAIStudio::SourceControl::Private
 		FDelegateHandle Saved;
 		FDelegateHandle PostEngineInit;
 		bool bOwnsToolset = false;
+		/** A Lore submit's commands are running on a worker thread. */
+		bool bSubmitting = false;
 		FString LoreExecutable;
 		FString LorePrefix;
 		FString LoreRoot;
 		FString LoreRemoteUrl;
 	};
+
+	/** The lore command and the workspace a call runs in: found on the game thread, usable on any. */
+	struct FLoreTarget
+	{
+		FString Executable;
+		FString Prefix;
+		FString Root;
+		/** The workspace's server; empty for a local repository, and when its config could not be read. */
+		FString RemoteUrl;
+		EHyperAIStudioLoreMode Mode = EHyperAIStudioLoreMode::None;
+		/** Only a repository whose config says it has no server: a workspace HyperAI cannot read takes locks and pushes. */
+		bool IsLocal() const { return Mode == EHyperAIStudioLoreMode::Local; }
+	};
+
+	/** Timeouts: agent edits wait on a lock and a dirty mark on the game thread, so those stay short. */
+	constexpr double LockSeconds = 20.0;
+	constexpr double DirtySeconds = 30.0;
+	constexpr double StatusSeconds = 30.0;
+	constexpr double SignInSeconds = 10.0;
+	/** A submit runs on a worker thread; staging and committing a large change take a while, a push at most this. */
+	constexpr double StageSeconds = 1800.0;
+	constexpr double PushSeconds = 600.0;
 
 	FState& State()
 	{
@@ -84,62 +109,59 @@ namespace HyperAIStudio::SourceControl::Private
 	}
 
 	/**
-	 * A Lore workspace around the project, and the lore command, when no Unreal provider is set up. OutRemoteUrl is the
-	 * workspace's server: empty for a local repository, which has no locks to take and nowhere to push.
+	 * A Lore workspace around the project, and the lore command, when no Unreal provider is set up. Out.Root and Out.Mode
+	 * are filled even when the command is missing. Game thread.
 	 */
-	bool FindLore(FString& OutExecutable, FString& OutPrefix, FString& OutRoot, FString* OutRemoteUrl = nullptr)
+	bool FindLore(FLoreTarget& Out)
 	{
 		const FState& Current = State();
 		if (!Current.LoreExecutable.IsEmpty())
 		{
-			OutExecutable = Current.LoreExecutable;
-			OutPrefix = Current.LorePrefix;
-			OutRoot = Current.LoreRoot;
-			if (OutRemoteUrl)
-			{
-				*OutRemoteUrl = Current.LoreRemoteUrl;
-			}
+			Out.Executable = Current.LoreExecutable;
+			Out.Prefix = Current.LorePrefix;
+			Out.Root = Current.LoreRoot;
+			Out.RemoteUrl = Current.LoreRemoteUrl;
+			Out.Mode = Current.LoreRemoteUrl.IsEmpty() ? EHyperAIStudioLoreMode::Local : EHyperAIStudioLoreMode::Remote;
 			return true;
 		}
 		// ponytail: looked up on each use; a workspace appears seldom enough that caching buys nothing.
 		const FHyperAIStudioLoreWorkspace Workspace = FHyperAIStudioLore::FindWorkspace(FPaths::ProjectDir());
-		OutRoot = Workspace.Root;
-		OutPrefix.Reset();
-		if (OutRemoteUrl)
-		{
-			*OutRemoteUrl = Workspace.RemoteUrl;
-		}
-		return !OutRoot.IsEmpty() && FHyperAIStudioLore::FindExecutable(OutExecutable);
+		Out.Root = Workspace.Root;
+		Out.RemoteUrl = Workspace.RemoteUrl.TrimStartAndEnd();
+		Out.Mode = Workspace.Mode;
+		Out.Prefix.Reset();
+		return !Out.Root.IsEmpty() && FHyperAIStudioLore::FindExecutable(Out.Executable);
 	}
 
-	/** A Lore workspace whose repository is on this computer only (made with --offline). */
+	/** A Lore workspace whose config says its repository is on this computer only (made with --offline). */
 	bool IsLocalLore()
 	{
-		FString Executable;
-		FString Prefix;
-		FString Root;
-		FString RemoteUrl;
-		return FindLore(Executable, Prefix, Root, &RemoteUrl) && RemoteUrl.TrimStartAndEnd().IsEmpty();
+		FLoreTarget Lore;
+		return FindLore(Lore) && Lore.IsLocal();
 	}
 
-	/** One lore command, never asking anything, stopped after TimeoutSeconds; OutText is what it said. */
-	bool RunLore(const FString& Arguments, FString& OutText, const double TimeoutSeconds = 120.0)
+	/** One lore command in Lore's workspace, never asking anything, stopped after TimeoutSeconds; OutText is what it said. Any thread. */
+	bool RunLore(const FLoreTarget& Lore, const FString& Arguments, FString& OutText, const double TimeoutSeconds)
 	{
-		FString Executable;
-		FString Prefix;
-		FString Root;
-		if (!FindLore(Executable, Prefix, Root))
+		const FString Params = FString::Printf(TEXT("%s%s--repository %s --no-pager --non-interactive %s"), *Lore.Prefix, Lore.Prefix.IsEmpty() ? TEXT("") : TEXT(" "),
+			*FHyperAIStudioLore::JoinArguments({Lore.Root}), *Arguments);
+		int32 Code = -1;
+		FHyperAIStudioLore::RunProcess(Lore.Executable, Params, Lore.Root, TimeoutSeconds, OutText, &Code);
+		OutText = OutText.Right(MaxOutputCharacters);
+		UE_LOG(LogHyperAIStudioSourceControl, Log, TEXT("lore %s -> %d"), *Arguments.Left(300), Code);
+		return Code == 0;
+	}
+
+	/** RunLore in the project's workspace. Game thread. */
+	bool RunLore(const FString& Arguments, FString& OutText, const double TimeoutSeconds)
+	{
+		FLoreTarget Lore;
+		if (!FindLore(Lore))
 		{
 			OutText = TEXT("No Lore workspace or lore command was found.");
 			return false;
 		}
-		const FString Params = FString::Printf(TEXT("%s%s--repository %s --no-pager --non-interactive %s"), *Prefix, Prefix.IsEmpty() ? TEXT("") : TEXT(" "),
-			*FHyperAIStudioLore::JoinArguments({Root}), *Arguments);
-		int32 Code = -1;
-		FHyperAIStudioLore::RunProcess(Executable, Params, Root, TimeoutSeconds, OutText, &Code);
-		OutText = OutText.Right(MaxOutputCharacters);
-		UE_LOG(LogHyperAIStudioSourceControl, Log, TEXT("lore %s -> %d"), *Arguments.Left(300), Code);
-		return Code == 0;
+		return RunLore(Lore, Arguments, OutText, TimeoutSeconds);
 	}
 
 	FString Quoted(const TArray<FString>& Files)
@@ -225,7 +247,7 @@ namespace HyperAIStudio::SourceControl::Private
 		else
 		{
 			FString Text;
-			RunLore(TEXT("dirty ") + Quoted(Files), Text);
+			RunLore(TEXT("dirty ") + Quoted(Files), Text, DirtySeconds);
 		}
 		return false;
 	}
@@ -259,17 +281,45 @@ namespace HyperAIStudio::SourceControl::Private
 		FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
 	}
 
-	/** Checks the files in with Description, or in Lore stages, commits and pushes them, then lets their locks go. */
+	/** Stages, commits and (on a server) pushes the files, then lets their locks go; the detail for the activity entry. Any thread. */
+	bool CommitInLore(const FLoreTarget& Lore, const TArray<FString>& Files, const FString& Description, FString& OutDetail)
+	{
+		const FString List = Quoted(Files);
+		const bool bLocal = Lore.IsLocal();
+		FString Step;
+		bool bOk = RunLore(Lore, TEXT("stage ") + List, Step, StageSeconds);
+		FString Text = Step;
+		// A message that starts with '-' follows "--", so lore never reads it as an option.
+		bOk = bOk && RunLore(Lore, FString::Printf(TEXT("commit %s%s"), Description.StartsWith(TEXT("-")) ? TEXT("-- ") : TEXT(""),
+			*FHyperAIStudioLore::JoinArguments({Description.Replace(TEXT("\""), TEXT("'"))})), Step, StageSeconds);
+		Text += TEXT("\n") + Step;
+		// A local repository has no server: its commit is the whole submit. One on a server that does not answer has
+		// committed here all the same, and pushes later.
+		const bool bPushed = bOk && !bLocal && RunLore(Lore, TEXT("push"), Step, PushSeconds);
+		if (bOk && !bLocal)
+		{
+			Text += TEXT("\n") + Step;
+			RunLore(Lore, TEXT("lock release ") + List, Step, LockSeconds);
+		}
+		OutDetail = FString::Printf(TEXT("%s %d file(s) in %s%s. %s"), bOk ? TEXT("Committed") : TEXT("Could not commit"), Files.Num(),
+			bLocal ? TEXT("the local Lore repository") : TEXT("Lore"),
+			bOk && !bLocal && !bPushed ? TEXT(", but the push did not go through (it stays committed here)") : TEXT(""), *Text.TrimStartAndEnd());
+		return bOk;
+	}
+
+	/**
+	 * Checks the files in with Description. Lore's commands run on a worker thread, so a large commit or a slow server
+	 * never stops the editor; the outcome is recorded when they finish, which is what hyper_operation_wait waits for.
+	 */
 	void Submit(const FString& OperationId, const TArray<FString>& Files, const FString& Description)
 	{
-		FString Text;
 		if (ISourceControlProvider* Provider = UnrealProvider())
 		{
 			const TSharedRef<FCheckIn> CheckIn = ISourceControlOperation::Create<FCheckIn>();
 			CheckIn->SetDescription(FText::FromString(Description));
 			const FSourceControlChangelistPtr List = State().Changelist;
 			const bool bOk = (List.IsValid() ? Provider->Execute(CheckIn, List, Files) : Provider->Execute(CheckIn, Files)) == ECommandResult::Succeeded;
-			Text = bOk ? CheckIn->GetSuccessMessage().ToString() : Errors(CheckIn);
+			const FString Text = bOk ? CheckIn->GetSuccessMessage().ToString() : Errors(CheckIn);
 			if (bOk)
 			{
 				State().Changelist.Reset();
@@ -281,82 +331,103 @@ namespace HyperAIStudio::SourceControl::Private
 			RecordOutcome(OperationId, bOk, FString::Printf(TEXT("%s %d file(s): %s"), bOk ? TEXT("Submitted") : TEXT("Could not submit"), Files.Num(), *Text));
 			return;
 		}
-		const FString List = Quoted(Files);
-		const bool bLocal = IsLocalLore();
-		FString Step;
-		bool bOk = RunLore(TEXT("stage ") + List, Step, 1800.0);
-		Text = Step;
-		// A message that starts with '-' follows "--", so lore never reads it as an option.
-		bOk = bOk && RunLore(FString::Printf(TEXT("commit %s%s"), Description.StartsWith(TEXT("-")) ? TEXT("-- ") : TEXT(""),
-			*FHyperAIStudioLore::JoinArguments({Description.Replace(TEXT("\""), TEXT("'"))})), Step, 1800.0);
-		Text += TEXT("\n") + Step;
-		// A local repository has no server: its commit is the whole submit. One on a server that does not answer has
-		// committed here all the same, and pushes later.
-		const bool bPushed = bOk && !bLocal && RunLore(TEXT("push"), Step, 1800.0);
-		if (!bLocal)
+		FLoreTarget Lore;
+		if (!FindLore(Lore))
 		{
-			Text += TEXT("\n") + Step;
+			RecordOutcome(OperationId, false, TEXT("Could not commit: no Lore workspace or lore command was found."));
+			return;
 		}
-		if (bOk)
+		if (State().bSubmitting)
 		{
-			if (!bLocal)
-			{
-				RunLore(TEXT("lock release ") + List, Step, 60.0);
-			}
-			for (const FString& File : Files)
-			{
-				State().AgentFiles.Remove(File);
-			}
+			RecordOutcome(OperationId, false, TEXT("Could not commit: another submit is still running. Submit again once it has finished."));
+			return;
 		}
-		RecordOutcome(OperationId, bOk, FString::Printf(TEXT("%s %d file(s) in %s%s. %s"), bOk ? TEXT("Committed") : TEXT("Could not commit"), Files.Num(),
-			bLocal ? TEXT("the local Lore repository") : TEXT("Lore"),
-			bOk && !bLocal && !bPushed ? TEXT(", but the push did not go through (it stays committed here)") : TEXT(""), *Text.TrimStartAndEnd()));
+		State().bSubmitting = true;
+		Async(EAsyncExecution::Thread, [OperationId, Files, Description, Lore]()
+		{
+			FString Detail;
+			const bool bOk = CommitInLore(Lore, Files, Description, Detail);
+			AsyncTask(ENamedThreads::GameThread, [OperationId, Files, bOk, Detail]()
+			{
+				FState& Current = State();
+				Current.bSubmitting = false;
+				if (bOk)
+				{
+					for (const FString& File : Files)
+					{
+						Current.AgentFiles.Remove(File);
+					}
+				}
+				RecordOutcome(OperationId, bOk, Detail);
+			});
+		});
 	}
 
-	/** Lore for the status report: the command, the project's workspace and its mode, the server, and who is signed in. */
+	const TCHAR* ModeName(const EHyperAIStudioLoreMode Mode)
+	{
+		switch (Mode)
+		{
+		case EHyperAIStudioLoreMode::Local: return TEXT("local");
+		case EHyperAIStudioLoreMode::Remote: return TEXT("remote");
+		case EHyperAIStudioLoreMode::Unknown: return TEXT("unknown");
+		default: return TEXT("none");
+		}
+	}
+
+	/**
+	 * Lore for the status report: the command, the project's workspace and its mode, the server, and who is signed in.
+	 * Nothing is started for a project Unreal's provider looks after, the command's version is read once per install, and
+	 * sign-ins are read only for a server repository, with the same command (and, in tests, the same stand-in) agent edits use.
+	 */
 	void DescribeLore(FHyperAISourceControlLoreStatus& Out)
 	{
 		const FString SetupPlace = TEXT("HyperAI Studio > Settings > Version control");
 		Out.ConfiguredServer = GetDefault<UHyperAIStudioSettings>()->LoreServerUrl.TrimStartAndEnd();
+		FLoreTarget Lore;
+		const bool bLore = FindLore(Lore);
+		Out.Workspace = Lore.Root;
+		Out.Server = Lore.RemoteUrl;
+		Out.Mode = Lore.Root.IsEmpty() ? TEXT("none") : ModeName(Lore.Mode);
+		if (Lore.Root.IsEmpty() && UnrealProvider())
+		{
+			// Unreal's provider is the project's source control; Lore is not needed, and nothing is run to ask about it.
+			Out.bCliFound = FHyperAIStudioLore::FindExecutable(Out.CliPath);
+			return;
+		}
 		const FHyperAIStudioLoreCli Cli = FHyperAIStudioLore::DetectCli();
 		Out.bCliFound = Cli.bFound;
 		Out.CliPath = Cli.Path;
 		Out.CliVersion = Cli.Version;
-		FString Executable;
-		FString Prefix;
-		FString Root;
-		FString RemoteUrl;
-		FindLore(Executable, Prefix, Root, &RemoteUrl);
-		Out.Workspace = Root;
-		Out.Server = RemoteUrl.TrimStartAndEnd();
-		Out.Mode = Root.IsEmpty() ? TEXT("none") : Out.Server.IsEmpty() ? TEXT("local") : TEXT("remote");
-		if (Root.IsEmpty() && UnrealProvider())
-		{
-			// Unreal's provider is the project's source control; Lore is not needed.
-		}
-		else if (!Cli.bFound)
+		if (!Cli.bFound && !bLore)
 		{
 			Out.Next = FString::Printf(TEXT("The lore command is not installed: the user installs it (%s), then sets Lore up in %s."), FHyperAIStudioLore::InstallGuideUrl, *SetupPlace);
 		}
-		else if (Root.IsEmpty())
+		else if (Lore.Root.IsEmpty())
 		{
 			Out.Next = FString::Printf(TEXT("The project is not in a Lore workspace: the user can set one up in %s (a local repository needs no server)."), *SetupPlace);
 		}
-		else if (Out.Mode == TEXT("local") && !Out.ConfiguredServer.IsEmpty())
+		else if (Lore.Mode == EHyperAIStudioLoreMode::Local && !Out.ConfiguredServer.IsEmpty())
 		{
 			Out.Next = FString::Printf(TEXT("The Lore Server setting names %s, but this repository is local: Lore fixes the server when a repository is made."), *Out.ConfiguredServer);
 		}
-		else if (Out.Mode == TEXT("remote"))
+		else if (Lore.Mode == EHyperAIStudioLoreMode::Unknown)
+		{
+			Out.Next = TEXT("The workspace's .lore/config.toml could not be read, so it is treated as a server repository: agent edits take locks and a submit pushes.");
+		}
+		if (bLore && !Lore.IsLocal())
 		{
 			FString Text;
-			FHyperAIStudioLore::ListSignIns(Cli.Path, Out.SignedInAs, Text);
-			if (Out.SignedInAs.IsEmpty())
+			if (RunLore(Lore, TEXT("auth list"), Text, SignInSeconds))
+			{
+				Out.SignedInAs = FHyperAIStudioLore::ParseSignIns(Text);
+			}
+			if (Out.SignedInAs.IsEmpty() && Lore.Mode == EHyperAIStudioLoreMode::Remote)
 			{
 				Out.Next = FString::Printf(TEXT("No Lore sign-in is stored. If %s asks for one, the user runs %s in a terminal; agents never sign in."),
 					*Out.Server, *FHyperAIStudioLore::LoginCommand(Out.Server));
 			}
 		}
-		if (UnrealProvider() && !Root.IsEmpty())
+		if (UnrealProvider() && !Lore.Root.IsEmpty())
 		{
 			Out.Next += FString::Printf(TEXT("%sAgent edits go through Unreal's %s provider, not the lore command."), Out.Next.IsEmpty() ? TEXT("") : TEXT(" "),
 				*UnrealProvider()->GetName().ToString());
@@ -410,11 +481,9 @@ bool FHyperAIStudioSourceControl::MakeEditable(const TArray<FString>& PackageNam
 {
 	using namespace HyperAIStudio::SourceControl::Private;
 	ISourceControlProvider* Provider = UnrealProvider();
-	FString Executable;
-	FString Prefix;
-	FString Root;
+	FLoreTarget Lore;
 	// A project without source control records nothing, so its saves never reach for a provider.
-	if (!GetDefault<UHyperAIStudioSettings>()->bCheckOutBeforeAgentEdits || (!Provider && !FindLore(Executable, Prefix, Root)))
+	if (!GetDefault<UHyperAIStudioSettings>()->bCheckOutBeforeAgentEdits || (!Provider && !FindLore(Lore)))
 	{
 		return true;
 	}
@@ -466,10 +535,11 @@ bool FHyperAIStudioSourceControl::MakeEditable(const TArray<FString>& PackageNam
 	}
 	// Lore's locks are advisory: taking one tells the team, and one a teammate holds turns the edit away. A local
 	// repository has no server to keep locks (lore refuses them: "Unable to acquire lock while offline") and no team to
-	// tell, so its files are only recorded, and marked dirty once saved.
+	// tell, so its files are only recorded, and marked dirty once saved. The edit waits for the lock on the game thread,
+	// so a server that does not answer is given up on quickly.
 	TArray<FString> Existing = Files.FilterByPredicate([](const FString& File) { return FPaths::FileExists(File); });
 	FString Text;
-	if (!Existing.IsEmpty() && !IsLocalLore() && !RunLore(TEXT("lock acquire ") + Quoted(Existing), Text, 60.0))
+	if (!Existing.IsEmpty() && !Lore.IsLocal() && !RunLore(Lore, TEXT("lock acquire ") + Quoted(Existing), Text, LockSeconds))
 	{
 		OutError = FString::Printf(TEXT("Lore could not lock %s for this edit: %s"), *ProjectRelative(Existing[0]), *Text.Left(600));
 		if (Text.Contains(TEXT("Disconnected")) || Text.Contains(TEXT("Stopped after")))
@@ -516,29 +586,18 @@ FString FHyperAIStudioSourceControl::DescribeBackend()
 	{
 		return TEXT("unreal: ") + Provider->GetName().ToString();
 	}
-	FString Executable;
-	FString Prefix;
-	FString Root;
-	return FindLore(Executable, Prefix, Root) ? TEXT("lore: ") + Root : FString(TEXT("none"));
-}
-
-FString FHyperAIStudioSourceControl::DescribeLoreMode()
-{
-	using namespace HyperAIStudio::SourceControl::Private;
-	FString Executable;
-	FString Prefix;
-	FString Root;
-	FString RemoteUrl;
-	if (UnrealProvider() || !FindLore(Executable, Prefix, Root, &RemoteUrl))
-	{
-		return FString();
-	}
-	return RemoteUrl.TrimStartAndEnd().IsEmpty() ? FString(TEXT("local")) : FString(TEXT("remote"));
+	FLoreTarget Lore;
+	return FindLore(Lore) ? TEXT("lore: ") + Lore.Root : FString(TEXT("none"));
 }
 
 TArray<FString> FHyperAIStudioSourceControl::GetAgentFiles()
 {
 	return HyperAIStudio::SourceControl::Private::State().AgentFiles.Array();
+}
+
+bool FHyperAIStudioSourceControl::IsSubmitting()
+{
+	return HyperAIStudio::SourceControl::Private::State().bSubmitting;
 }
 
 void FHyperAIStudioSourceControl::Startup()
@@ -611,7 +670,7 @@ FHyperAISourceControlStatusReport UHyperAIStudioSourceControlToolset::hyper_sour
 		}
 		if (Report.Backend.StartsWith(TEXT("lore")))
 		{
-			RunLore(TEXT("status"), Report.LoreStatus, 60.0);
+			RunLore(TEXT("status"), Report.LoreStatus, StatusSeconds);
 		}
 	}
 	DescribeLore(Report.Lore);
@@ -622,6 +681,10 @@ FHyperAISourceControlStatusReport UHyperAIStudioSourceControlToolset::hyper_sour
 	if (Report.Lore.Mode == TEXT("local"))
 	{
 		Report.Diagnostic += TEXT(" The Lore repository is local: a submit commits here, with no push and no locks.");
+	}
+	if (FHyperAIStudioSourceControl::IsSubmitting())
+	{
+		Report.Diagnostic += TEXT(" A submit is still running; hyper_operation_wait follows it.");
 	}
 	if (!Report.Lore.Next.IsEmpty())
 	{
@@ -644,6 +707,10 @@ FHyperAISourceControlSubmitReport UHyperAIStudioSourceControlToolset::hyper_sour
 	if (Report.Backend == TEXT("none"))
 	{
 		return Refuse(TEXT("no_source_control"), TEXT("The project has no source control set up in Unreal and is not in a Lore workspace."));
+	}
+	if (FHyperAIStudioSourceControl::IsSubmitting())
+	{
+		return Refuse(TEXT("submit_running"), TEXT("A submit is still running in Lore; wait for it with hyper_operation_wait, then submit what is left."));
 	}
 	const FString Description = Request.Description.TrimStartAndEnd();
 	if (Description.IsEmpty() || Description.Len() > 2000)

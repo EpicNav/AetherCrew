@@ -3,10 +3,12 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Async/TaskGraphInterfaces.h"
 #include "Containers/Ticker.h"
 #include "Curves/CurveFloat.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioSourceControl.h"
 #include "HyperAIStudioSourceControlToolset.h"
@@ -36,6 +38,9 @@ if command[:2] == ["lock", "acquire"] and any("Locked" in path for path in comma
     sys.exit(1)
 if command[:1] == ["status"]:
     print("On branch main, 2 files dirty")
+if command[:2] == ["auth", "list"]:
+    print("fake-signin@example.com  lore://127.0.0.1:41337")
+    sys.exit(0)
 print("ok")
 )PY");
 
@@ -157,6 +162,9 @@ bool FHyperAIStudioSourceControlLoreTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Status names the workspace and the agent's files, with what lore status says"), Status.Backend.StartsWith(TEXT("lore:"))
 		&& Status.Files.Num() == 2 && Status.LoreStatus.Contains(TEXT("On branch main")));
 	TestTrue(TEXT("and that the repository is on a server"), Status.Lore.Mode == TEXT("remote") && Status.Lore.Server == TEXT("lore://127.0.0.1:41337"));
+	// Sign-ins are read with the same lore command agent edits use, here the stand-in, never this machine's own sign-in store.
+	TestTrue(TEXT("Who is signed in comes from the stand-in"), Calls().Contains(TEXT("\"auth\", \"list\"")) && Status.Lore.SignedInAs.Num() == 1
+		&& Status.Lore.SignedInAs[0].StartsWith(TEXT("fake-signin@example.com")));
 
 	FHyperAISourceControlSubmitRequest Submit;
 	Submit.Description = TEXT("Add the jump curves");
@@ -167,6 +175,15 @@ bool FHyperAIStudioSourceControlLoreTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("For real it waits for the user"), Asked.Status, FString(TEXT("awaiting_user_approval")));
 	TestFalse(TEXT("and nothing is committed before that"), Calls().Contains(TEXT("\"commit\"")));
 	TestTrue(TEXT("Approved, it goes: ") + Error, FHyperAIStudioApprovalGate::Approve(Asked.OperationId, Error));
+	// Stage, commit, push and the lock release run on a worker thread; the editor goes on, and the outcome lands later.
+	TestTrue(TEXT("in the background"), FHyperAIStudioSourceControl::IsSubmitting());
+	const double End = FPlatformTime::Seconds() + 60.0;
+	while (FHyperAIStudioSourceControl::IsSubmitting() && FPlatformTime::Seconds() < End)
+	{
+		FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+		FPlatformProcess::Sleep(0.02f);
+	}
+	TestFalse(TEXT("and finishes"), FHyperAIStudioSourceControl::IsSubmitting());
 	const FString Log = Calls();
 	TestTrue(TEXT("staged, committed with the description, pushed, and the locks let go"), Log.Contains(TEXT("\"stage\"")) && Log.Contains(TEXT("\"commit\", \"Add the jump curves\""))
 		&& Log.Contains(TEXT("\"push\"")) && Log.Contains(TEXT("\"lock\", \"release\"")));

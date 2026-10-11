@@ -4,6 +4,41 @@
 
 #include "CoreMinimal.h"
 
+/**
+ * Why the lore command, a setup or a server address cannot be used. The core reports it beside its English text (for
+ * tools and logs), and the Version control page words it in the user's language.
+ */
+enum class EHyperAIStudioLoreProblem : uint8
+{
+	None,
+	/** The lore command is neither on PATH nor in the folders Lore's installers use. */
+	CliNotFound,
+	/** The lore command set on Settings > Version control is not there. */
+	CliCommandMissing,
+	/** The lore command set there is not a file named lore.exe (lore elsewhere), so it is never run. */
+	CliCommandNotLore,
+	/** It ran, but did not report a Lore version. */
+	CliNoVersion,
+	/** A setup's folder does not exist. */
+	NotAFolder,
+	/** The folder is a Lore workspace already. */
+	AlreadyWorkspace,
+	/** The folder is inside another Lore workspace. */
+	InsideWorkspace,
+	/** The repository name is not one Lore accepts. */
+	BadName,
+	/** The identity has quotes or control characters, or reads as an option. */
+	BadIdentity,
+	/** A server address without scheme://host. */
+	ServerNoScheme,
+	/** A server address whose scheme is not one. */
+	ServerBadScheme,
+	/** A server address with spaces or quotes. */
+	ServerSpacesOrQuotes,
+	/** A server address with no host, or with a user name or password. */
+	ServerBadHost
+};
+
 /** The lore command on this machine. */
 struct FHyperAIStudioLoreCli
 {
@@ -13,8 +48,12 @@ struct FHyperAIStudioLoreCli
 	/** Its release, such as 0.10.1, and the full build it reports. */
 	FString Version;
 	FString Build;
-	/** Why it could not be used, when it was found but did not answer. */
+	/** Why it could not be used, in English for tools and logs; Problem says the same for the page to word. */
 	FString Error;
+	EHyperAIStudioLoreProblem Problem = EHyperAIStudioLoreProblem::None;
+	/** What lore --version printed, and its exit code, when that was no version. */
+	FString Output;
+	int32 ExitCode = 0;
 };
 
 /** Where a Lore repository keeps its history: on this computer only, or on a server it pushes to. */
@@ -22,7 +61,12 @@ enum class EHyperAIStudioLoreMode : uint8
 {
 	None,
 	Local,
-	Remote
+	Remote,
+	/**
+	 * A workspace whose .lore/config.toml could not be read or has no top-level remote_url. HyperAI treats it as a server
+	 * repository, so agents still take locks and a submit still pushes: never skip a teammate's lock on a guess.
+	 */
+	Unknown
 };
 
 /** A Lore workspace: the folder holding .lore, and what its .lore/config.toml says. */
@@ -48,8 +92,10 @@ struct FHyperAIStudioLoreSetupOptions
 	FString ServerUrl;
 	/** Recorded on commits; optional. */
 	FString Identity;
-	/** Add Unreal's build output and caches to .loreignore. */
+	/** Add Unreal's build output and caches, and HyperAI's per-machine .hyperai/runtime folder, to .loreignore. */
 	bool bWriteIgnore = true;
+	/** With bWriteIgnore, also copy in the rules of the project's .gitignore, which Lore does not read. */
+	bool bCopyGitIgnore = true;
 	/** Stage everything not ignored and commit it. */
 	bool bFirstCommit = true;
 	FString CommitMessage;
@@ -103,35 +149,63 @@ public:
 	/** The port a loreserver answers on, and its HTTP health check's. */
 	static constexpr int32 DefaultServerPort = 41337;
 
-	/** The lore command: the Lore Command setting, else PATH and the folders Lore's installers use. Game thread. */
-	static bool FindExecutable(FString& OutPath);
-	/** FindExecutable, and `lore --version` (a second at most). Game thread. */
+	/**
+	 * The lore command: the one set on Settings > Version control, else PATH and the folders Lore's installers use. A
+	 * command set there is used only when it is a file named lore.exe (lore elsewhere). Game thread.
+	 */
+	static bool FindExecutable(FString& OutPath, EHyperAIStudioLoreProblem* OutProblem = nullptr);
+	/**
+	 * The lore command's path set on Settings > Version control, or empty to search PATH. It is kept in the editor's
+	 * per-project user config, outside HyperAI's settings object, so the settings tools agents can call never reach it:
+	 * only the user names a program HyperAI runs.
+	 */
+	static FString GetCommandOverride();
+	/** Sets it, or clears it with an empty Path; refuses (with OutProblem) a file that is missing or not named lore.exe. */
+	static bool SetCommandOverride(const FString& Path, EHyperAIStudioLoreProblem& OutProblem);
+	/** Whether Path's file name is the lore command's: lore.exe on Windows, lore elsewhere. */
+	static bool IsLoreFileName(const FString& Path);
+	/**
+	 * FindExecutable, and `lore --version` (a second at most). A command that reported its version is remembered until
+	 * its file changes, so asking again starts nothing. Game thread.
+	 */
 	static FHyperAIStudioLoreCli DetectCli();
 	/** Reads `lore --version`'s output: "lore 0.10.1+1476-lore_v0.10.1__urc_main" is 0.10.1, built 1476-lore_v0.10.1__urc_main. */
 	static bool ParseVersion(const FString& Output, FString& OutVersion, FString& OutBuild);
 
 	/** The workspace Folder is in: the nearest folder at or above it holding .lore. */
 	static FHyperAIStudioLoreWorkspace FindWorkspace(const FString& Folder);
-	/** remote_url and identity from a .lore/config.toml. */
-	static void ReadWorkspaceConfig(const FString& ConfigToml, FString& OutRemoteUrl, FString& OutIdentity);
+	/** remote_url and identity from a .lore/config.toml; true when it has a top-level remote_url (empty for a local repository). */
+	static bool ReadWorkspaceConfig(const FString& ConfigToml, FString& OutRemoteUrl, FString& OutIdentity);
 
 	/** A repository name Lore accepts, made from a project's name: other characters become '-'. */
 	static FString RepositoryName(const FString& ProjectName);
 	static bool IsValidRepositoryName(const FString& Name);
 	/** A server address the lore command can use: scheme://host[:port], no spaces or quotes. */
-	static bool IsValidServerUrl(const FString& Url, FString& OutError);
+	static bool IsValidServerUrl(const FString& Url, FString& OutError, EHyperAIStudioLoreProblem* OutProblem = nullptr);
 	/** The repository's address on a server: the server, then /name. */
 	static FString RepositoryUrl(const FString& ServerUrl, const FString& Name);
 	/** The command a user runs in a terminal to sign in to a server; HyperAI only shows it. */
 	static FString LoginCommand(const FString& ServerUrl);
 
-	/** The .loreignore patterns for an Unreal project: build output, caches, IDE files. Gitignore syntax. */
+	/**
+	 * The .loreignore patterns for an Unreal project: build output, caches, IDE files, and HyperAI's per-machine
+	 * .hyperai/runtime folder (chat jobs, journals, status), which HyperAI keeps out of Git with a .gitignore rule that
+	 * Lore never reads. Gitignore syntax.
+	 */
 	static FString UnrealIgnoreText();
-	/** Existing .loreignore text with the Unreal patterns it lacks appended; nothing it has is removed or reordered. */
-	static FString MergeIgnore(const FString& Existing, bool& bOutChanged);
+	/** The rules in a .gitignore's text: its lines that are neither blank nor comments, in order. */
+	static TArray<FString> IgnoreRules(const FString& IgnoreText);
+	/**
+	 * Existing .loreignore text with the Unreal patterns it lacks appended, then (under a heading of their own) the rules of
+	 * GitIgnore, a .gitignore's text, that it lacks: Lore reads only .loreignore. Nothing it has is removed or reordered.
+	 */
+	static FString MergeIgnore(const FString& Existing, bool& bOutChanged, const FString& GitIgnore = FString());
+	/** How many of GitIgnore's rules MergeIgnore would add to Existing. */
+	static int32 CountMissingGitRules(const FString& Existing, const FString& GitIgnore);
 
-	/** The steps a setup takes, in order, or false with OutError when the folder cannot be set up as asked. */
-	static bool PlanSetup(const FHyperAIStudioLoreSetupOptions& Options, TArray<FHyperAIStudioLoreSetupStep>& OutSteps, FString& OutError);
+	/** The steps a setup takes, in order, or false with OutError (and OutProblem) when the folder cannot be set up as asked. */
+	static bool PlanSetup(const FHyperAIStudioLoreSetupOptions& Options, TArray<FHyperAIStudioLoreSetupStep>& OutSteps, FString& OutError,
+		EHyperAIStudioLoreProblem* OutProblem = nullptr);
 	/** Runs one planned step. Any thread; a step the lore command runs waits for it, up to a long timeout. */
 	static bool RunStep(const FString& Executable, const FHyperAIStudioLoreSetupOptions& Options, const FHyperAIStudioLoreSetupStep& Step, FString& OutText);
 

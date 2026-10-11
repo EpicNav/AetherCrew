@@ -39,10 +39,10 @@ public:
 	static bool SaveAsset(UObject& Asset, FString& OutError);
 	/** unreal (with the provider's name), lore (with the workspace), or none. */
 	static FString DescribeBackend();
-	/** For a Lore workspace: local (history on this computer, no server) or remote (the server it pushes to); else empty. */
-	static FString DescribeLoreMode();
 	/** Files agents made editable or added this session, as absolute paths. */
 	static TArray<FString> GetAgentFiles();
+	/** Whether an approved Lore submit is still running (its commands run on a worker thread). */
+	static bool IsSubmitting();
 	/** What an agent's edit of a file with State needs: nothing, a check-out, or a refusal with OutError. */
 	enum class EDecision : uint8 { Edit, CheckOut, Refuse };
 	static EDecision Decide(const FHyperAIStudioSourceControlFileState& State, const FString& DisplayName, FString& OutError);

@@ -576,9 +576,9 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Source Control", meta = (DisplayName = "Lore Identity"))
 	FString LoreIdentity;
 
-	/** The lore command's full path, when it is neither on PATH nor in %USERPROFILE%\bin, where Lore's installer puts it. */
-	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Source Control", meta = (DisplayName = "Lore Command"))
-	FString LoreCommand;
+	// The lore command's own path, for when it is elsewhere, is set on Settings > Version control only and kept outside
+	// this object (FHyperAIStudioLore::GetCommandOverride): which program HyperAI runs is no setting an agent's settings
+	// tools may write.
 
 	/**
 	 * Lay out the Blueprint nodes agents add when the Blueprint compiles after an edit: flow left to right, branches

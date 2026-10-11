@@ -29,9 +29,14 @@ public:
 	void Refresh();
 	/** The setup's options as the page holds them. */
 	FHyperAIStudioLoreSetupOptions GetOptions() const;
-	/** The steps the setup would take now, or none with the reason in GetPlanError. */
+	/** The steps the setup would take now, or none with the reason in GetPlanError (English) and GetPlanErrorText (as shown). */
 	const TArray<FHyperAIStudioLoreSetupStep>& GetPlan() const { return Plan; }
 	const FString& GetPlanError() const { return PlanError; }
+	const FText& GetPlanErrorText() const { return PlanErrorText; }
+	/** The question Set up asks before running the plan: the steps, what they change and how to undo them. */
+	FText GetConfirmQuestion() const;
+	/** The lore command as the page shows it. */
+	const FHyperAIStudioLoreCli& GetCli() const { return Cli; }
 	bool IsRunning() const { return bRunning; }
 	/** What the last setup said when it finished. */
 	const FText& GetResult() const { return Result; }
@@ -44,7 +49,7 @@ public:
 
 private:
 	enum class EStepState : uint8 { Waiting, Running, Done, Failed, Skipped };
-	enum class ECheck : uint8 { Unknown, Checking, Answered, Failed };
+	enum class ECheck : uint8 { Unknown, Checking, Answered, Failed, Invalid };
 
 	TSharedRef<SWidget> BuildCliCard();
 	TSharedRef<SWidget> BuildProjectCard();
@@ -56,6 +61,8 @@ private:
 	/** Runs the plan's steps one by one on a worker thread, stopping at the first that fails. */
 	void RunPlan();
 	FReply OnCheckServer();
+	/** Keeps the lore command's path typed on the page (a file named lore.exe), or clears it. */
+	FReply OnUseCommand();
 	void OnStepFinished(int32 Index, bool bOk, const FString& Text);
 	void OnSetupFinished(bool bOk);
 
@@ -69,11 +76,16 @@ private:
 	FString ServerUrl;
 	FString Identity;
 	bool bWriteIgnore = true;
+	bool bCopyGitIgnore = true;
 	bool bFirstCommit = true;
 	FString CommitMessage;
+	/** The lore command's path as typed, and what keeping it said. */
+	FString CommandPath;
+	FText CommandText;
 
 	TArray<FHyperAIStudioLoreSetupStep> Plan;
 	FString PlanError;
+	FText PlanErrorText;
 	TArray<EStepState> StepStates;
 	TArray<FString> StepOutputs;
 	bool bRunning = false;

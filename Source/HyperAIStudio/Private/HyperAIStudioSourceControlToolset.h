@@ -38,7 +38,10 @@ struct FHyperAISourceControlLoreStatus
 	UPROPERTY() bool bCliFound = false;
 	UPROPERTY() FString CliPath;
 	UPROPERTY() FString CliVersion;
-	/** local (history on this computer only, no server, no locks), remote (on Server: locks, push), or none (no Lore workspace). */
+	/**
+	 * local (history on this computer only, no server, no locks), remote (on Server: locks, push), unknown (.lore/config.toml
+	 * unreadable: treated as remote), or none (no Lore workspace).
+	 */
 	UPROPERTY() FString Mode;
 	UPROPERTY() FString Workspace;
 	/** The workspace's server, when remote. */
@@ -89,7 +92,7 @@ struct FHyperAISourceControlSubmitReport
 	GENERATED_BODY()
 
 	UPROPERTY() bool bOk = false;
-	/** checked (a dry run), awaiting_user_approval, or why it was refused. */
+	/** checked (a dry run), awaiting_user_approval, or why it was refused (submit_running: an earlier submit has not finished). */
 	UPROPERTY() FString Status;
 	UPROPERTY() FString Diagnostic;
 	UPROPERTY() FString OperationId;

@@ -18040,8 +18040,8 @@
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
    "key": "CliOdd",
-   "source": "Found {0}, but it did not report a version: {1}",
-   "text": "找到了 {0}，但它没有报告版本：{1}"
+   "source": "Found {0}, but lore --version did not report a version (exit code {1}): {2}",
+   "text": "找到了 {0}，但 lore --version 没有报告版本（退出码 {1}）：{2}"
   },
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
@@ -18051,15 +18051,63 @@
   },
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CommandCleared",
+   "source": "HyperAI looks for lore on PATH and in %USERPROFILE%\\bin.",
+   "text": "HyperAI 会在 PATH 和 %USERPROFILE%\\bin 中查找 lore。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CommandHint",
+   "source": "Empty: found on PATH or in %USERPROFILE%\\bin. Otherwise the full path of lore.exe.",
+   "text": "留空：在 PATH 或 %USERPROFILE%\\bin 中查找。否则填写 lore.exe 的完整路径。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CommandLabel",
+   "source": "Lore command",
+   "text": "Lore 命令"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CommandUsed",
+   "source": "HyperAI runs {0} for Lore.",
+   "text": "HyperAI 会运行 {0} 作为 Lore。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
    "key": "Confirm",
    "source": "Set up Lore in {0}?\n\n{1}\nThis adds a .lore folder (and .loreignore) to the project folder; your project files are not changed. To undo it, delete the .lore folder.\n\nRun these steps now?",
    "text": "在 {0} 中设置 Lore？\n\n{1}\n这会在项目文件夹中添加一个 .lore 文件夹（以及 .loreignore）；你的项目文件不会被更改。要撤销，删除 .lore 文件夹即可。\n\n现在运行这些步骤吗？"
   },
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ConfirmServer",
+   "source": "Set up Lore in {0} on the server {2}?\n\n{1}\nThis creates the repository {3} on the server, uploads to it every project file the ignore rules leave in, and adds a .lore folder (and .loreignore) to the project folder. To undo it, run lore repository delete {3}, which removes the repository and its files from the server, and delete the .lore folder.\n\nRun these steps now?",
+   "text": "在服务器 {2} 上为 {0} 设置 Lore？\n\n{1}\n这会在服务器上创建仓库 {3}，把忽略规则未排除的所有项目文件上传到其中，并在项目文件夹中添加一个 .lore 文件夹（以及 .loreignore）。要撤销，请运行 lore repository delete {3}（它会从服务器上删除该仓库及其文件），并删除 .lore 文件夹。\n\n现在运行这些步骤吗？"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ConfirmServerNoCommit",
+   "source": "Set up Lore in {0} on the server {2}?\n\n{1}\nThis creates the repository {3} on the server (no files are uploaded yet) and adds a .lore folder (and .loreignore) to the project folder. To undo it, run lore repository delete {3} and delete the .lore folder.\n\nRun these steps now?",
+   "text": "在服务器 {2} 上为 {0} 设置 Lore？\n\n{1}\n这会在服务器上创建仓库 {3}（暂不上传任何文件），并在项目文件夹中添加一个 .lore 文件夹（以及 .loreignore）。要撤销，请运行 lore repository delete {3}，并删除 .lore 文件夹。\n\n现在运行这些步骤吗？"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
    "key": "ConfirmTitle",
    "source": "Set up Lore",
    "text": "设置 Lore"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CopyGitIgnore",
+   "source": "Also keep out what the project's .gitignore ignores (Lore does not read .gitignore)",
+   "text": "同时排除项目 .gitignore 所忽略的内容（Lore 不读取 .gitignore）"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "CopyGitIgnoreTip",
+   "source": "Copies the rules of .gitignore that .loreignore lacks, under a heading of their own after the Unreal ones. Off: files only .gitignore keeps out, such as per-user settings, are committed.",
+   "text": "把 .loreignore 缺少的 .gitignore 规则复制进来，放在 Unreal 规则之后的单独标题下。关闭时：只有 .gitignore 排除的文件（例如个人设置）会被提交。"
   },
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
@@ -18100,14 +18148,26 @@
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
    "key": "DetailIgnoreAppend",
-   "source": "Appends lines, so Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, IDE files and *.sln stay out of the repository. Undo: remove the lines under the HyperAI Studio heading.",
-   "text": "追加若干行，使 Binaries、Intermediate、Saved、DerivedDataCache、插件构建、IDE 文件和 *.sln 不进入仓库。撤销：删除 HyperAI Studio 标题下的这些行。"
+   "source": "Appends lines, so Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, IDE files, *.sln and HyperAI's per-machine .hyperai/runtime folder stay out of the repository. Undo: remove the lines under the HyperAI Studio headings.",
+   "text": "追加若干行，使 Binaries、Intermediate、Saved、DerivedDataCache、插件构建、IDE 文件、*.sln 以及 HyperAI 的本机 .hyperai/runtime 文件夹不进入仓库。撤销：删除 HyperAI Studio 标题下的那些行。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "DetailIgnoreGitCopied",
+   "source": "{0} Lore does not read .gitignore, so the project's .gitignore rules that .loreignore lacks ({1}) are copied in too.",
+   "text": "{0} Lore 不读取 .gitignore，因此项目 .gitignore 中 .loreignore 缺少的规则（{1} 条）也会被复制进来。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "DetailIgnoreGitSkipped",
+   "source": "{0} Lore does not read .gitignore: whatever only the project's .gitignore keeps out will be committed.",
+   "text": "{0} Lore 不读取 .gitignore：只由项目 .gitignore 排除的内容将会被提交。"
   },
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
    "key": "DetailIgnoreWrite",
-   "source": "Writes the file, so Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, IDE files and *.sln stay out of the repository. Undo: delete .loreignore.",
-   "text": "写入该文件，使 Binaries、Intermediate、Saved、DerivedDataCache、插件构建、IDE 文件和 *.sln 不进入仓库。撤销：删除 .loreignore。"
+   "source": "Writes the file, so Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, IDE files, *.sln and HyperAI's per-machine .hyperai/runtime folder stay out of the repository. Undo: delete .loreignore.",
+   "text": "写入该文件，使 Binaries、Intermediate、Saved、DerivedDataCache、插件构建、IDE 文件、*.sln 以及 HyperAI 的本机 .hyperai/runtime 文件夹不进入仓库。撤销：删除 .loreignore。"
   },
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
@@ -18168,6 +18228,18 @@
    "key": "IdentityLabel",
    "source": "Commits recorded as",
    "text": "提交记录的身份"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "IgnoreNotWritten",
+   "source": "Could not write {0}.",
+   "text": "无法写入 {0}。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "IgnoreWritten",
+   "source": "{0} has the ignore rules.",
+   "text": "{0} 已包含忽略规则。"
   },
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
@@ -18255,6 +18327,12 @@
   },
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ModeUnknown",
+   "source": "Unknown: .lore/config.toml could not be read, so HyperAI treats it as a server repository: agents lock files before editing them, and a submit pushes.",
+   "text": "未知：无法读取 .lore/config.toml，因此 HyperAI 将其视为服务器仓库：智能体编辑文件前会先加锁，提交时会推送。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
    "key": "MoveLater",
    "source": "This repository is local. Lore 0.10 sets the server when a repository is made, so moving to a server later means a new repository there (set it up from a copy of the project, or ask the server's owner to import it); this local history stays here.",
    "text": "此仓库是本地仓库。Lore 0.10 在创建仓库时确定服务器，因此以后迁移到服务器意味着在那里新建一个仓库（从项目副本进行设置，或请服务器管理员导入）；这里的本地历史会保留在本机。"
@@ -18327,6 +18405,78 @@
   },
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemAlreadyWorkspace",
+   "source": "{0} is a Lore workspace already.",
+   "text": "{0} 已经是 Lore 工作区。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemBadIdentity",
+   "source": "The identity is a name or email: no quotes or control characters, and not starting with '-'.",
+   "text": "身份是名字或电子邮件：不能包含引号或控制字符，也不能以“-”开头。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemBadName",
+   "source": "\"{0}\" is not a repository name Lore accepts: letters, digits, '/', '-', '_' and '.', up to 100.",
+   "text": "“{0}”不是 Lore 接受的仓库名：只能包含字母、数字、“/”、“-”、“_”和“.”，最多 100 个字符。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemCliCommandMissing",
+   "source": "The lore command set below names a file that does not exist.",
+   "text": "下方设置的 lore 命令指向的文件不存在。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemCliCommandNotLore",
+   "source": "The lore command set below is not a file named lore.exe, so HyperAI does not run it.",
+   "text": "下方设置的 lore 命令不是名为 lore.exe 的文件，因此 HyperAI 不会运行它。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemCliNotFound",
+   "source": "The lore command is not on PATH, nor in %USERPROFILE%\\bin where Lore's installer puts it.",
+   "text": "lore 命令不在 PATH 中，也不在 Lore 安装程序放置它的 %USERPROFILE%\\bin 中。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemInsideWorkspace",
+   "source": "{0} is inside the Lore workspace {1} already; set up the workspace's own folder, or none.",
+   "text": "{0} 已位于 Lore 工作区 {1} 之内；请设置该工作区本身的文件夹，或者不设置。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemNotAFolder",
+   "source": "{0} is not a folder.",
+   "text": "{0} 不是文件夹。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemServerBadHost",
+   "source": "A server address names its host, and carries no user name or password.",
+   "text": "服务器地址需要写明主机，且不能包含用户名或密码。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemServerBadScheme",
+   "source": "The server address does not start with a URL scheme, such as lore://.",
+   "text": "服务器地址没有以 URL 协议（例如 lore://）开头。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemServerNoScheme",
+   "source": "A Lore server is an address such as lore://127.0.0.1:41337 (scheme, host, and port when it is not the default).",
+   "text": "Lore 服务器地址的格式类似 lore://127.0.0.1:41337（协议、主机，以及非默认时的端口）。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ProblemServerSpaces",
+   "source": "A server address has no spaces or quotes.",
+   "text": "服务器地址不能包含空格或引号。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
    "key": "ProjectTitle",
    "source": "This project",
    "text": "本项目"
@@ -18372,6 +18522,12 @@
    "key": "ServerAnswered",
    "source": "The server answered. {0}",
    "text": "服务器已响应。{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "ServerEmpty",
+   "source": "{0}: no repositories yet.",
+   "text": "{0}：还没有仓库。"
   },
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
@@ -18531,6 +18687,18 @@
   },
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "UseCommand",
+   "source": "Use",
+   "text": "使用"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
+   "key": "UseCommandTip",
+   "source": "Keep this path for this project. Only a file named lore.exe is accepted, and only here: agents' settings tools cannot choose which program HyperAI runs.",
+   "text": "为此项目保存这个路径。只接受名为 lore.exe 的文件，并且只能在这里设置：智能体的设置工具无法选择 HyperAI 运行哪个程序。"
+  },
+  {
+   "namespace": "SHyperAIStudioLoreSetupPanel",
    "key": "UseServer",
    "source": "Make it on a Lore server instead of this computer only",
    "text": "在 Lore 服务器上创建，而不是只在这台电脑上"
@@ -18550,8 +18718,8 @@
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
    "key": "WriteIgnoreTip",
-   "source": "Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, .vs, *.sln and other IDE files. An existing .loreignore keeps its lines; missing ones are added.",
-   "text": "Binaries、Intermediate、Saved、DerivedDataCache、插件构建、.vs、*.sln 及其他 IDE 文件。已有的 .loreignore 会保留原有行，只补上缺少的规则。"
+   "source": "Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, .vs, *.sln and other IDE files, and HyperAI's per-machine .hyperai/runtime folder. An existing .loreignore keeps its lines; missing ones are added.",
+   "text": "Binaries、Intermediate、Saved、DerivedDataCache、插件构建、.vs、*.sln 和其他 IDE 文件，以及 HyperAI 的本机 .hyperai/runtime 文件夹。已有的 .loreignore 会保留原有行；缺少的行会被添加。"
   },
   {
    "namespace": "SHyperAIStudioMemoryPanel",

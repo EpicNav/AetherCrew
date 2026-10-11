@@ -8,6 +8,7 @@
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioWidgets.h"
 #include "Misc/App.h"
+#include "Misc/FileHelper.h"
 #include "Misc/MessageDialog.h"
 #include "Misc/Paths.h"
 #include "ISourceControlModule.h"
@@ -101,8 +102,44 @@ namespace HyperAIStudio::LoreSetupPanel
 		{
 		case EHyperAIStudioLoreMode::Local: return LOCTEXT("ModeLocal", "Local: the history stays in this computer's .lore folder; no server, no locks.");
 		case EHyperAIStudioLoreMode::Remote: return FText::Format(LOCTEXT("ModeRemote", "Server: pushes to {0}, and agents lock files there before editing them."), FText::FromString(Workspace.RemoteUrl));
+		case EHyperAIStudioLoreMode::Unknown: return LOCTEXT("ModeUnknown", "Unknown: .lore/config.toml could not be read, so HyperAI treats it as a server repository: agents lock files before editing them, and a submit pushes.");
 		default: return LOCTEXT("ModeNone", "Not set up: this project is in no Lore workspace.");
 		}
+	}
+
+	/** Why the lore command, a setup or a server address cannot be used, in the user's language; English when unknown. */
+	FText ProblemText(const EHyperAIStudioLoreProblem Problem, const FHyperAIStudioLoreSetupOptions& Options, const FString& English)
+	{
+		const FText Folder = FText::FromString(FPaths::ConvertRelativePathToFull(Options.Folder));
+		switch (Problem)
+		{
+		case EHyperAIStudioLoreProblem::CliNotFound: return LOCTEXT("ProblemCliNotFound", "The lore command is not on PATH, nor in %USERPROFILE%\\bin where Lore's installer puts it.");
+		case EHyperAIStudioLoreProblem::CliCommandMissing: return LOCTEXT("ProblemCliCommandMissing", "The lore command set below names a file that does not exist.");
+		case EHyperAIStudioLoreProblem::CliCommandNotLore: return LOCTEXT("ProblemCliCommandNotLore", "The lore command set below is not a file named lore.exe, so HyperAI does not run it.");
+		case EHyperAIStudioLoreProblem::NotAFolder: return FText::Format(LOCTEXT("ProblemNotAFolder", "{0} is not a folder."), Folder);
+		case EHyperAIStudioLoreProblem::AlreadyWorkspace: return FText::Format(LOCTEXT("ProblemAlreadyWorkspace", "{0} is a Lore workspace already."), Folder);
+		case EHyperAIStudioLoreProblem::InsideWorkspace: return FText::Format(LOCTEXT("ProblemInsideWorkspace", "{0} is inside the Lore workspace {1} already; set up the workspace's own folder, or none."),
+			Folder, FText::FromString(FHyperAIStudioLore::FindWorkspace(Options.Folder).Root));
+		case EHyperAIStudioLoreProblem::BadName: return FText::Format(LOCTEXT("ProblemBadName", "\"{0}\" is not a repository name Lore accepts: letters, digits, '/', '-', '_' and '.', up to 100."),
+			FText::FromString(Options.Name));
+		case EHyperAIStudioLoreProblem::BadIdentity: return LOCTEXT("ProblemBadIdentity", "The identity is a name or email: no quotes or control characters, and not starting with '-'.");
+		case EHyperAIStudioLoreProblem::ServerNoScheme: return LOCTEXT("ProblemServerNoScheme", "A Lore server is an address such as lore://127.0.0.1:41337 (scheme, host, and port when it is not the default).");
+		case EHyperAIStudioLoreProblem::ServerBadScheme: return LOCTEXT("ProblemServerBadScheme", "The server address does not start with a URL scheme, such as lore://.");
+		case EHyperAIStudioLoreProblem::ServerSpacesOrQuotes: return LOCTEXT("ProblemServerSpaces", "A server address has no spaces or quotes.");
+		case EHyperAIStudioLoreProblem::ServerBadHost: return LOCTEXT("ProblemServerBadHost", "A server address names its host, and carries no user name or password.");
+		default: return FText::FromString(English);
+		}
+	}
+
+	/** The project's .gitignore, when there is one and the setup copies it. */
+	FString GitIgnoreFor(const FHyperAIStudioLoreSetupOptions& Options)
+	{
+		FString Text;
+		if (Options.bCopyGitIgnore)
+		{
+			FFileHelper::LoadFileToString(Text, *(FPaths::ConvertRelativePathToFull(Options.Folder) / TEXT(".gitignore")));
+		}
+		return Text;
 	}
 
 	FText StepTitle(const FHyperAIStudioLoreSetupStep& Step, const FHyperAIStudioLoreSetupOptions& Options, const bool bIgnoreExists)
@@ -133,9 +170,23 @@ namespace HyperAIStudio::LoreSetupPanel
 		case EHyperAIStudioLoreStepKind::CheckServer:
 			return LOCTEXT("DetailCheckServer", "Reads the server's list of repositories. Changes nothing. Undo: nothing to undo.");
 		case EHyperAIStudioLoreStepKind::WriteIgnore:
-			return bIgnoreExists
-				? LOCTEXT("DetailIgnoreAppend", "Appends lines, so Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, IDE files and *.sln stay out of the repository. Undo: remove the lines under the HyperAI Studio heading.")
-				: LOCTEXT("DetailIgnoreWrite", "Writes the file, so Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, IDE files and *.sln stay out of the repository. Undo: delete .loreignore.");
+		{
+			const FText Base = bIgnoreExists
+				? LOCTEXT("DetailIgnoreAppend", "Appends lines, so Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, IDE files, *.sln and HyperAI's per-machine .hyperai/runtime folder stay out of the repository. Undo: remove the lines under the HyperAI Studio headings.")
+				: LOCTEXT("DetailIgnoreWrite", "Writes the file, so Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, IDE files, *.sln and HyperAI's per-machine .hyperai/runtime folder stay out of the repository. Undo: delete .loreignore.");
+			const FString Root = FPaths::ConvertRelativePathToFull(Options.Folder);
+			FString Current;
+			FFileHelper::LoadFileToString(Current, *(Root / TEXT(".loreignore")));
+			const int32 GitRules = FHyperAIStudioLore::CountMissingGitRules(Current, GitIgnoreFor(Options));
+			if (GitRules > 0)
+			{
+				return FText::Format(LOCTEXT("DetailIgnoreGitCopied", "{0} Lore does not read .gitignore, so the project's .gitignore rules that .loreignore lacks ({1}) are copied in too."),
+					Base, FText::AsNumber(GitRules));
+			}
+			return !Options.bCopyGitIgnore && FPaths::FileExists(Root / TEXT(".gitignore"))
+				? FText::Format(LOCTEXT("DetailIgnoreGitSkipped", "{0} Lore does not read .gitignore: whatever only the project's .gitignore keeps out will be committed."), Base)
+				: Base;
+		}
 		case EHyperAIStudioLoreStepKind::Create:
 			return Options.ServerUrl.TrimStartAndEnd().IsEmpty()
 				? FText::Format(LOCTEXT("DetailCreateLocal", "Adds a .lore folder to {0}, where Lore keeps the history on this computer. No server is used; your files are not changed. Undo: delete the .lore folder; the repository and its history go, your files stay."), Folder)
@@ -163,6 +214,7 @@ void SHyperAIStudioLoreSetupPanel::Construct(const FArguments& InArgs)
 	bUseServer = !ServerUrl.IsEmpty();
 	Identity = Settings->LoreIdentity.TrimStartAndEnd();
 	CommitMessage = TEXT("Add the Unreal project");
+	CommandPath = FHyperAIStudioLore::GetCommandOverride();
 	Refresh();
 
 	ChildSlot
@@ -197,7 +249,7 @@ void SHyperAIStudioLoreSetupPanel::Refresh()
 		Result = FText::GetEmpty();
 	}
 	SignIns.Reset();
-	if (Cli.bFound && Workspace.Mode == EHyperAIStudioLoreMode::Remote)
+	if (Cli.bFound && (Workspace.Mode == EHyperAIStudioLoreMode::Remote || Workspace.Mode == EHyperAIStudioLoreMode::Unknown))
 	{
 		FString Text;
 		FHyperAIStudioLore::ListSignIns(Cli.Path, SignIns, Text);
@@ -213,6 +265,7 @@ FHyperAIStudioLoreSetupOptions SHyperAIStudioLoreSetupPanel::GetOptions() const
 	Options.ServerUrl = bUseServer ? ServerUrl.TrimStartAndEnd() : FString();
 	Options.Identity = Identity.TrimStartAndEnd();
 	Options.bWriteIgnore = bWriteIgnore;
+	Options.bCopyGitIgnore = bCopyGitIgnore;
 	Options.bFirstCommit = bFirstCommit;
 	Options.CommitMessage = CommitMessage;
 	return Options;
@@ -225,14 +278,19 @@ void SHyperAIStudioLoreSetupPanel::Replan()
 		return;
 	}
 	PlanError.Reset();
-	if (!FHyperAIStudioLore::PlanSetup(GetOptions(), Plan, PlanError))
+	PlanErrorText = FText::GetEmpty();
+	const FHyperAIStudioLoreSetupOptions Options = GetOptions();
+	EHyperAIStudioLoreProblem Problem = EHyperAIStudioLoreProblem::None;
+	if (!FHyperAIStudioLore::PlanSetup(Options, Plan, PlanError, &Problem))
 	{
 		Plan.Reset();
+		PlanErrorText = HyperAIStudio::LoreSetupPanel::ProblemText(Problem, Options, PlanError);
 	}
 	if (bUseServer && ServerUrl.TrimStartAndEnd().IsEmpty())
 	{
 		Plan.Reset();
-		PlanError = LOCTEXT("NoServer", "Enter the server's address, such as lore://127.0.0.1:41337, or keep the repository on this computer.").ToString();
+		PlanErrorText = LOCTEXT("NoServer", "Enter the server's address, such as lore://127.0.0.1:41337, or keep the repository on this computer.");
+		PlanError = PlanErrorText.ToString();
 	}
 	StepStates.Init(EStepState::Waiting, Plan.Num());
 	StepOutputs.Init(FString(), Plan.Num());
@@ -259,12 +317,40 @@ TSharedRef<SWidget> SHyperAIStudioLoreSetupPanel::BuildCliCard()
 					if (!Cli.bFound)
 					{
 						return FText::Format(LOCTEXT("CliMissing", "The lore command was not found. {0} Install it with Epic's installer (PowerShell: irm https://raw.githubusercontent.com/EpicGames/lore/main/scripts/install.ps1 | iex), then press Refresh."),
-							FText::FromString(Cli.Error));
+							ProblemText(Cli.Problem, GetOptions(), Cli.Error));
 					}
 					return Cli.Version.IsEmpty()
-						? FText::Format(LOCTEXT("CliOdd", "Found {0}, but it did not report a version: {1}"), FText::FromString(Cli.Path), FText::FromString(Cli.Error))
+						? FText::Format(LOCTEXT("CliOdd", "Found {0}, but lore --version did not report a version (exit code {1}): {2}"), FText::FromString(Cli.Path),
+							FText::AsNumber(Cli.ExitCode), FText::FromString(Cli.Output))
 						: FText::Format(LOCTEXT("CliFound", "lore {0} at {1}."), FText::FromString(Cli.Version), FText::FromString(Cli.Path));
 				}))
+			]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 10.0f, 0.0f, 0.0f))
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.0f, 0.0f, 10.0f, 0.0f))
+			[
+				SNew(SBox).WidthOverride(150.0f)[ SNew(STextBlock).TextStyle(&Style(), "HyperAIStudio.Text.Subdued").Text(LOCTEXT("CommandLabel", "Lore command")) ]
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f)
+			[
+				SNew(SEditableTextBox)
+				.Text_Lambda([this]() { return FText::FromString(CommandPath); })
+				.HintText(LOCTEXT("CommandHint", "Empty: found on PATH or in %USERPROFILE%\\bin. Otherwise the full path of lore.exe."))
+				.OnTextChanged_Lambda([this](const FText& Text) { CommandPath = Text.ToString(); })
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(6.0f, 0.0f, 0.0f, 0.0f))
+			[
+				Button(LOCTEXT("UseCommand", "Use"), FOnClicked::CreateSP(this, &SHyperAIStudioLoreSetupPanel::OnUseCommand), nullptr, false,
+					LOCTEXT("UseCommandTip", "Keep this path for this project. Only a file named lore.exe is accepted, and only here: agents' settings tools cannot choose which program HyperAI runs."))
+			]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 4.0f, 0.0f, 0.0f))
+		[
+			SNew(SBox).Visibility_Lambda([this]() { return CommandText.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+			[
+				Body(TAttribute<FText>::CreateLambda([this]() { return CommandText; }), TEXT("HyperAIStudio.Text.Caption"))
 			]
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 8.0f, 0.0f, 0.0f))
@@ -331,7 +417,8 @@ TSharedRef<SWidget> SHyperAIStudioLoreSetupPanel::BuildProjectCard()
 				switch (Workspace.Mode)
 				{
 				case EHyperAIStudioLoreMode::Local: return LOCTEXT("AgentsLocal", "Agent edits are marked dirty in Lore once saved; hyper_source_control_submit commits them here after you approve.");
-				case EHyperAIStudioLoreMode::Remote: return LOCTEXT("AgentsRemote", "Agent edits lock each file on the server first (a teammate's lock turns the edit away); hyper_source_control_submit commits and pushes after you approve.");
+				case EHyperAIStudioLoreMode::Remote:
+				case EHyperAIStudioLoreMode::Unknown: return LOCTEXT("AgentsRemote", "Agent edits lock each file on the server first (a teammate's lock turns the edit away); hyper_source_control_submit commits and pushes after you approve.");
 				default: return LOCTEXT("AgentsNone", "Until it is set up, agent edits are saved as they are, with no version control.");
 				}
 			}), TEXT("HyperAIStudio.Text.Caption"))
@@ -378,7 +465,16 @@ TSharedRef<SWidget> SHyperAIStudioLoreSetupPanel::BuildSetupCard()
 				+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 6.0f, 0.0f, 0.0f))
 				[
 					Check(LOCTEXT("WriteIgnore", "Keep Unreal's build output and caches out (.loreignore)"), bWriteIgnore,
-						LOCTEXT("WriteIgnoreTip", "Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, .vs, *.sln and other IDE files. An existing .loreignore keeps its lines; missing ones are added."), Changed, Editable)
+						LOCTEXT("WriteIgnoreTip", "Binaries, Intermediate, Saved, DerivedDataCache, plugin builds, .vs, *.sln and other IDE files, and HyperAI's per-machine .hyperai/runtime folder. An existing .loreignore keeps its lines; missing ones are added."), Changed, Editable)
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(20.0f, 6.0f, 0.0f, 0.0f))
+				[
+					SNew(SBox).Visibility_Lambda([this]() { return FPaths::FileExists(Folder / TEXT(".gitignore")) ? EVisibility::Visible : EVisibility::Collapsed; })
+					[
+						Check(LOCTEXT("CopyGitIgnore", "Also keep out what the project's .gitignore ignores (Lore does not read .gitignore)"), bCopyGitIgnore,
+							LOCTEXT("CopyGitIgnoreTip", "Copies the rules of .gitignore that .loreignore lacks, under a heading of their own after the Unreal ones. Off: files only .gitignore keeps out, such as per-user settings, are committed."),
+							Changed, TAttribute<bool>::CreateLambda([this]() { return !bRunning && Workspace.Root.IsEmpty() && bWriteIgnore; }))
+					]
 				]
 				+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 6.0f, 0.0f, 0.0f))
 				[
@@ -471,11 +567,12 @@ TSharedRef<SWidget> SHyperAIStudioLoreSetupPanel::BuildOnlineCard()
 				Button(LOCTEXT("SaveServer", "Save"), FOnClicked::CreateLambda([this, Server, Who]()
 				{
 					FString Error;
+					EHyperAIStudioLoreProblem Problem = EHyperAIStudioLoreProblem::None;
 					const FString Url = Server->TrimStartAndEnd();
-					if (!Url.IsEmpty() && !FHyperAIStudioLore::IsValidServerUrl(Url, Error))
+					if (!Url.IsEmpty() && !FHyperAIStudioLore::IsValidServerUrl(Url, Error, &Problem))
 					{
-						ServerCheck = ECheck::Failed;
-						ServerCheckText = Error;
+						ServerCheck = ECheck::Invalid;
+						ServerCheckText = ProblemText(Problem, GetOptions(), Error).ToString();
 						return FReply::Handled();
 					}
 					UHyperAIStudioSettings* Mutable = GetMutableDefault<UHyperAIStudioSettings>();
@@ -504,7 +601,8 @@ TSharedRef<SWidget> SHyperAIStudioLoreSetupPanel::BuildOnlineCard()
 			[
 				Dot(TAttribute<FSlateColor>::CreateLambda([this]()
 				{
-					return StatusColor(ServerCheck == ECheck::Answered ? EStatus::Good : ServerCheck == ECheck::Failed ? EStatus::Error : ServerCheck == ECheck::Checking ? EStatus::Busy : EStatus::Neutral);
+					return StatusColor(ServerCheck == ECheck::Answered ? EStatus::Good : ServerCheck == ECheck::Failed || ServerCheck == ECheck::Invalid ? EStatus::Error
+						: ServerCheck == ECheck::Checking ? EStatus::Busy : EStatus::Neutral);
 				}))
 			]
 			+ SHorizontalBox::Slot().FillWidth(1.0f)
@@ -586,7 +684,7 @@ void SHyperAIStudioLoreSetupPanel::RebuildSteps()
 	{
 		StepList->AddSlot().AutoHeight()
 		[
-			Body(FText::FromString(PlanError.IsEmpty() ? LOCTEXT("NothingPlanned", "Nothing to do.").ToString() : PlanError))
+			Body(PlanErrorText.IsEmpty() ? LOCTEXT("NothingPlanned", "Nothing to do.") : PlanErrorText)
 		];
 		return;
 	}
@@ -648,9 +746,20 @@ FReply SHyperAIStudioLoreSetupPanel::OnSetUp()
 	}
 	if (Plan.IsEmpty())
 	{
-		Result = FText::FromString(PlanError);
+		Result = PlanErrorText;
 		return FReply::Handled();
 	}
+	if (FMessageDialog::Open(EAppMsgType::YesNo, EAppReturnType::No, GetConfirmQuestion(), LOCTEXT("ConfirmTitle", "Set up Lore")) != EAppReturnType::Yes)
+	{
+		Result = LOCTEXT("Cancelled", "Nothing was changed.");
+		return FReply::Handled();
+	}
+	RunPlan();
+	return FReply::Handled();
+}
+
+FText SHyperAIStudioLoreSetupPanel::GetConfirmQuestion() const
+{
 	const FHyperAIStudioLoreSetupOptions Options = GetOptions();
 	const bool bIgnoreExists = FPaths::FileExists(Folder / TEXT(".loreignore"));
 	FString List;
@@ -658,14 +767,34 @@ FReply SHyperAIStudioLoreSetupPanel::OnSetUp()
 	{
 		List += FString::Printf(TEXT("%d. %s\n    %s\n"), Index + 1, *HyperAIStudio::LoreSetupPanel::StepTitle(Plan[Index], Options, bIgnoreExists).ToString(), *Plan[Index].Command);
 	}
-	const FText Question = FText::Format(LOCTEXT("Confirm", "Set up Lore in {0}?\n\n{1}\nThis adds a .lore folder (and .loreignore) to the project folder; your project files are not changed. To undo it, delete the .lore folder.\n\nRun these steps now?"),
-		FText::FromString(Folder), FText::FromString(List));
-	if (FMessageDialog::Open(EAppMsgType::YesNo, EAppReturnType::No, Question, LOCTEXT("ConfirmTitle", "Set up Lore")) != EAppReturnType::Yes)
+	const FString Server = Options.ServerUrl.TrimStartAndEnd();
+	if (Server.IsEmpty())
 	{
-		Result = LOCTEXT("Cancelled", "Nothing was changed.");
+		return FText::Format(LOCTEXT("Confirm", "Set up Lore in {0}?\n\n{1}\nThis adds a .lore folder (and .loreignore) to the project folder; your project files are not changed. To undo it, delete the .lore folder.\n\nRun these steps now?"),
+			FText::FromString(Folder), FText::FromString(List));
+	}
+	// On a server, deleting .lore undoes neither the repository there nor the files a first commit uploads to it.
+	const FText Repository = FText::FromString(FHyperAIStudioLore::RepositoryUrl(Server, Options.Name));
+	return Options.bFirstCommit
+		? FText::Format(LOCTEXT("ConfirmServer", "Set up Lore in {0} on the server {2}?\n\n{1}\nThis creates the repository {3} on the server, uploads to it every project file the ignore rules leave in, and adds a .lore folder (and .loreignore) to the project folder. To undo it, run lore repository delete {3}, which removes the repository and its files from the server, and delete the .lore folder.\n\nRun these steps now?"),
+			FText::FromString(Folder), FText::FromString(List), FText::FromString(Server), Repository)
+		: FText::Format(LOCTEXT("ConfirmServerNoCommit", "Set up Lore in {0} on the server {2}?\n\n{1}\nThis creates the repository {3} on the server (no files are uploaded yet) and adds a .lore folder (and .loreignore) to the project folder. To undo it, run lore repository delete {3} and delete the .lore folder.\n\nRun these steps now?"),
+			FText::FromString(Folder), FText::FromString(List), FText::FromString(Server), Repository);
+}
+
+FReply SHyperAIStudioLoreSetupPanel::OnUseCommand()
+{
+	EHyperAIStudioLoreProblem Problem = EHyperAIStudioLoreProblem::None;
+	if (!FHyperAIStudioLore::SetCommandOverride(CommandPath, Problem))
+	{
+		CommandText = HyperAIStudio::LoreSetupPanel::ProblemText(Problem, GetOptions(), FString());
 		return FReply::Handled();
 	}
-	RunPlan();
+	CommandPath = FHyperAIStudioLore::GetCommandOverride();
+	CommandText = CommandPath.IsEmpty()
+		? LOCTEXT("CommandCleared", "HyperAI looks for lore on PATH and in %USERPROFILE%\\bin.")
+		: FText::Format(LOCTEXT("CommandUsed", "HyperAI runs {0} for Lore."), FText::FromString(CommandPath));
+	Refresh();
 	return FReply::Handled();
 }
 
@@ -733,6 +862,13 @@ void SHyperAIStudioLoreSetupPanel::OnStepFinished(const int32 Index, const bool 
 	{
 		StepStates[Index] = bOk ? EStepState::Done : EStepState::Failed;
 		StepOutputs[Index] = Text;
+		// The ignore step is HyperAI's own, so its report is in the user's language; the lore command's own output is shown as it is.
+		if (Plan.IsValidIndex(Index) && Plan[Index].Kind == EHyperAIStudioLoreStepKind::WriteIgnore)
+		{
+			const FText File = FText::FromString(Folder / TEXT(".loreignore"));
+			StepOutputs[Index] = (bOk ? FText::Format(LOCTEXT("IgnoreWritten", "{0} has the ignore rules."), File)
+				: FText::Format(LOCTEXT("IgnoreNotWritten", "Could not write {0}."), File)).ToString();
+		}
 	}
 }
 
@@ -762,6 +898,14 @@ FReply SHyperAIStudioLoreSetupPanel::OnCheckServer()
 		ServerCheckText = LOCTEXT("NoServerToCheck", "No server is set: enter one in Lore Server and press Save.").ToString();
 		return FReply::Handled();
 	}
+	FString Error;
+	EHyperAIStudioLoreProblem Problem = EHyperAIStudioLoreProblem::None;
+	if (!FHyperAIStudioLore::IsValidServerUrl(Url, Error, &Problem))
+	{
+		ServerCheck = ECheck::Invalid;
+		ServerCheckText = HyperAIStudio::LoreSetupPanel::ProblemText(Problem, GetOptions(), Error).ToString();
+		return FReply::Handled();
+	}
 	if (!Cli.bFound || ServerCheck == ECheck::Checking)
 	{
 		ServerCheck = Cli.bFound ? ServerCheck : ECheck::Failed;
@@ -780,7 +924,9 @@ FReply SHyperAIStudioLoreSetupPanel::OnCheckServer()
 			if (const TSharedPtr<SHyperAIStudioLoreSetupPanel> Panel = Weak.Pin())
 			{
 				Panel->ServerCheck = bOk ? ECheck::Answered : ECheck::Failed;
-				Panel->ServerCheckText = bOk ? FString::Printf(TEXT("%s: %s"), *Url, Text.IsEmpty() ? TEXT("no repositories yet.") : *Text) : Text;
+				Panel->ServerCheckText = !bOk ? Text : Text.IsEmpty()
+					? FText::Format(LOCTEXT("ServerEmpty", "{0}: no repositories yet."), FText::FromString(Url)).ToString()
+					: FString::Printf(TEXT("%s: %s"), *Url, *Text);
 			}
 		});
 	});

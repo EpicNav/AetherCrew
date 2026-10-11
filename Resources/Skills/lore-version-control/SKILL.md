@@ -17,7 +17,11 @@ drives it through the `lore` command. Both tools below are on toolset
   no push. Agent edits are marked dirty once saved; a submit commits here.
 - `Mode` `remote`: the repository is on `Server`. Agent edits lock each asset there first; a teammate's lock turns the
   edit away, naming them. A submit stages, commits, pushes and releases the locks.
+- `Mode` `unknown`: the workspace's `.lore/config.toml` could not be read. HyperAI treats it as `remote` (locks, push),
+  so a teammate's lock is never skipped on a guess.
 - `Mode` `none`: the project is in no Lore workspace. `bCliFound` false means the `lore` command is not installed.
+- Status never contacts the server. Whether it answers is checked by the user, with *Check server* on
+  Settings > Version control.
 - `SignedInAs` lists who the `lore` command is signed in as (names only). `Next` says what the user can do next.
 
 If an Unreal source control provider (Perforce, Git, Plastic) is set up, agent edits go through it, not Lore.
@@ -26,11 +30,17 @@ If an Unreal source control provider (Perforce, Git, Plastic) is set up, agent e
 
 1. `hyper_source_control_submit` with `{"description": "...", "files": [], "bDryRun": true}`: show the user the list.
 2. Only after the user says yes: the same with `"bDryRun": false` and a fresh `operationId`, then
-   `hyper_operation_wait` with `bWaitThroughApproval` true. The user approves it in HyperAI Chat or Activity.
+   `hyper_operation_wait` with `bWaitThroughApproval` true. The user approves it in HyperAI Chat or Activity. The lore
+   commands then run in the background; the wait returns when they finish. `submit_running` means an earlier submit
+   has not finished: wait for it, then submit what is left.
 3. Submit only files agents changed this session; the user's own work is theirs to submit.
 
 ## Setting Lore up, and signing in, are the user's
 
+- Lore reads `.loreignore` only, never `.gitignore`. Setup writes Unreal's build output, caches and
+  `.hyperai/runtime/` into `.loreignore`, and can copy the project's `.gitignore` rules in too.
+- Which `lore` program runs is the user's choice, on Settings > Version control (only a file named `lore.exe`); no
+  setting an agent can change names it.
 - Setup changes the project folder (it adds `.lore` and `.loreignore`), so the user runs it in
   **HyperAI Studio > Settings > Version control**, which lists every step and asks before it runs. Never run
   `lore repository create`, `lore clone`, `lore repository delete` or `lore reset` yourself; point the user there.
