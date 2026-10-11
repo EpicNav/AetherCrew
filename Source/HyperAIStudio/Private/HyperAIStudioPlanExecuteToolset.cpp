@@ -32,6 +32,8 @@
 
 #if PLATFORM_WINDOWS
 #include "Windows/WindowsHWrapper.h"
+// windows.h maps LoadImage to LoadImageW, which breaks FImageUtils::LoadImage in later unity-bundle files.
+#undef LoadImage
 #endif
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(HyperAIStudioPlanExecuteToolset)
