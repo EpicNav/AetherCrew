@@ -90,6 +90,38 @@ struct FHyperAIEpicToolsetSummary
 	FString InventoryState;
 };
 
+/**
+ * One MCP server agents have besides HyperAI's Unreal MCP, or an editor plugin or setting that acts like one. Names,
+ * addresses and file paths only: never a value from a config's env, headers or arguments.
+ */
+USTRUCT(BlueprintType)
+struct FHyperAIOtherMcpServer
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString Name;
+
+	/** changes_editor_outside_hyperai (no HyperAI approval, auto-approval, undo grouping or checks) or other_tools. */
+	UPROPERTY()
+	FString Classification;
+
+	UPROPERTY()
+	FString Why;
+
+	/** Each place it is configured or hosted: client, scope, file, entry and address, or the plugin or setting. */
+	UPROPERTY()
+	TArray<FString> ConfiguredIn;
+
+	/** How to remove each place by hand, in the same order; empty for other tools. HyperAI never edits these files. */
+	UPROPERTY()
+	TArray<FString> HowToRemove;
+
+	/** The user chose not to be warned about it in this project. */
+	UPROPERTY()
+	bool bWarningSilenced = false;
+};
+
 /** Installed capability and health report. Scope and admission come from the complete generated catalog. */
 USTRUCT(BlueprintType)
 struct FHyperAICapabilityReport
@@ -279,6 +311,18 @@ struct FHyperAICapabilityReport
 
 	UPROPERTY()
 	TArray<FHyperAIEpicToolsetSummary> CachedEpicToolsets;
+
+	/** How many other MCP servers, plugins or settings change this editor outside HyperAI's approval gate. */
+	UPROPERTY()
+	int32 BypassMcpServerCount = 0;
+
+	/** Every other MCP server agents have here, and this editor's plugins and settings that act like one. */
+	UPROPERTY()
+	TArray<FHyperAIOtherMcpServer> OtherMcpServers;
+
+	/** One sentence on the above: which bypass HyperAI, if any. */
+	UPROPERTY()
+	FString OtherMcpServersSummary;
 };
 
 /** Reconciled state for one client-known HyperAI mutation operation. */
@@ -864,7 +908,10 @@ class HYPERAISTUDIO_API UHyperAIStudioNativeReadToolset final : public UToolsetD
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** Return installed HyperAI tools, current health, and a page of the existing cached Epic inventory. No I/O refresh is started. */
+	/**
+	 * Return installed HyperAI tools, current health, a page of the existing cached Epic inventory, and the other MCP
+	 * servers agents have here (those that change this editor outside HyperAI's approvals first). No I/O refresh is started.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Capabilities")
 	static FHyperAICapabilityReport hyper_capability_report(
 		int32 PageSize = 32,

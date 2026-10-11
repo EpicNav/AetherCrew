@@ -69,6 +69,8 @@ public class HyperAIStudio : ModuleRules
 			PublicDelayLoadDLLs.AddRange(new[] { "mfplat.dll", "mfreadwrite.dll" });
 			// A deleted chat's log goes to the Recycle Bin through the shell.
 			PublicSystemLibraries.Add("shell32.lib");
+			// The ports this editor listens on (GetExtendedTcpTable), to tell an MCP server inside it from one outside.
+			PublicSystemLibraries.Add("iphlpapi.lib");
 		}
 	}
 }

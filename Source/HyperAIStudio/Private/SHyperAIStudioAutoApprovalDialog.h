@@ -67,6 +67,8 @@ private:
 	int32 SandboxHeldAtOpen = 0;
 	EHyperAIStudioAutoApprovalDuration Duration = EHyperAIStudioAutoApprovalDuration::OneHour;
 	TArray<FHyperAIStudioPendingApproval> PendingAtOpen;
+	/** Other MCP servers agents can use that bypass approvals entirely, as it opened; empty when there are none. */
+	FText BypassLine;
 	TSharedPtr<SButton> CancelButton;
 	/** The second confirmation; only the tests' access replaces it. */
 	TFunction<bool(const FText& Caption, const FText& Body)> ConfirmNatively;

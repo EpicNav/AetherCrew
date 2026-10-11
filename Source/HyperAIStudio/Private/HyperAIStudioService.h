@@ -8,6 +8,7 @@
 
 class UEdGraph;
 class UEdGraphNode;
+struct FHyperAIStudioMcpFinding;
 
 enum class EHyperAIStudioSetupOutcome : uint8
 {
@@ -159,6 +160,14 @@ public:
 	 * once Setup has created AGENTS.md. Never touches the other managed files, so it needs no project lock.
 	 */
 	static bool RefreshMemoryInstructions();
+	/**
+	 * Writes the Other MCP Servers block into AGENTS.md, with its own markers, while servers that change this editor
+	 * outside HyperAI are found (FHyperAIStudioMcpBypassMonitor), and removes it when none are. Like the memory block,
+	 * only once Setup has created AGENTS.md, and never touching the other managed files.
+	 */
+	static bool RefreshMcpBypassInstructions();
+	/** The same, for this AGENTS.md and these findings: the block, or none when no finding changes this editor. */
+	static bool WriteMcpBypassInstructions(const FString& AgentsPath, const TArray<FHyperAIStudioMcpFinding>& Findings);
 	/** The managed AGENTS.md block Setup would write with the current settings. */
 	static FString BuildAgentsInstructionText();
 	bool CreateQuickConnectPromptPackage(const FString& AgentName, FHyperAIStudioPromptPackage& OutPackage, FText& OutMessage) const;

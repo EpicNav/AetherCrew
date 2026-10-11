@@ -1712,6 +1712,438 @@
    "text": "HyperAI 材质编辑"
   },
   {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "ActivityNote",
+   "source": "Not covered here: agents can also change this editor through {0}, with no HyperAI approval, auto-approval, undo grouping or checks.",
+   "text": "此处不涵盖：智能体还可以通过 {0} 更改此编辑器，且没有 HyperAI 审批、自动批准、撤销分组或检查。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "AutoApprovalMany",
+   "source": "Agents can also use {0}, which bypass approvals entirely; auto-approval does not cover them.",
+   "text": "智能体还可以使用 {0}，它们会完全绕过审批；自动批准不涵盖它们。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "AutoApprovalOne",
+   "source": "Agents can also use {0}, which bypasses approvals entirely; auto-approval does not cover it.",
+   "text": "智能体还可以使用 {0}，它会完全绕过审批；自动批准不涵盖它。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "ChipBypass",
+   "source": "Bypasses HyperAI",
+   "text": "绕过 HyperAI"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "ChipOther",
+   "source": "Other tools",
+   "text": "其他工具"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "ChipSilenced",
+   "source": "Not warned about",
+   "text": "不再警告"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "Consequence",
+   "source": "Agents using it can edit assets and run Python in this editor with no HyperAI approval, no auto-approval, no undo grouping and no HyperAI checks.",
+   "text": "使用它的智能体可以在此编辑器中编辑资产并运行 Python，没有 HyperAI 审批、没有自动批准、没有撤销分组，也没有 HyperAI 检查。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "DetailsBypassHeading",
+   "source": "Can change this editor outside HyperAI",
+   "text": "可在 HyperAI 之外更改此编辑器"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "DetailsClose",
+   "source": "Close",
+   "text": "关闭"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "DetailsFooter",
+   "source": "HyperAI only reads these files and never changes them: remove an entry yourself if you do not want agents to have it. Names, addresses and file paths are shown; values from env, headers and arguments are never read out.",
+   "text": "HyperAI 只读取这些文件，从不修改它们：如果不希望智能体使用某个条目，请自行删除。这里只显示名称、地址和文件路径；env、headers 和参数中的值从不读出。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "DetailsNoBypass",
+   "source": "No MCP server or editor plugin found here changes this editor outside HyperAI.",
+   "text": "在此未发现任何会在 HyperAI 之外更改此编辑器的 MCP 服务器或编辑器插件。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "DetailsOtherBody",
+   "source": "These do not reach this editor; they are listed so you know what else agents have.",
+   "text": "这些不会触及此编辑器；列出它们是为了让你了解智能体还拥有哪些工具。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "DetailsOtherHeading",
+   "source": "Other tools",
+   "text": "其他工具"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "DetailsProblemsHeading",
+   "source": "Not read",
+   "text": "未读取"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "DetailsSilenced",
+   "source": "You chose not to be warned about it in this project.",
+   "text": "你已选择在此项目中不再就此发出警告。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "DetailsTitle",
+   "source": "Other MCP servers",
+   "text": "其他 MCP 服务器"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "DismissWarning",
+   "source": "Dismiss",
+   "text": "忽略"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "DismissWarningTooltip",
+   "source": "Close this warning. It comes back when another such server, or another place for one, appears.",
+   "text": "关闭此警告。当出现另一个此类服务器，或它的新配置位置时，警告会再次出现。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "DontWarnAgain",
+   "source": "Don't warn about {0} again",
+   "text": "不再就 {0} 发出警告"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "DontWarnAgainTooltip",
+   "source": "Stop this warning in this project, for you. Agents can still use it; Settings > Agents still lists it, and can warn again.",
+   "text": "仅对你，在此项目中停止此警告。智能体仍可使用它；“设置 > 智能体”仍会列出它，并可恢复警告。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "JoinAnd",
+   "source": "{0} and {1}",
+   "text": "{0} 和 {1}"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "JoinComma",
+   "source": ", ",
+   "text": "、"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "NoteDetails",
+   "source": "Details",
+   "text": "详情"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "NoteDetailsTooltip",
+   "source": "Which servers, where they are configured, and how to remove them.",
+   "text": "哪些服务器、它们配置在哪里，以及如何移除。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "Notification",
+   "source": "Agents can change this editor without HyperAI's approval through {0}. There they can edit assets and run Python with no HyperAI approval, no auto-approval, no undo grouping and no HyperAI checks.",
+   "text": "智能体可以通过 {0} 在没有 HyperAI 审批的情况下更改此编辑器。通过它们，智能体可以编辑资产并运行 Python，没有 HyperAI 审批、没有自动批准、没有撤销分组，也没有 HyperAI 检查。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "NotificationItem",
+   "source": "{0} ({1})",
+   "text": "{0}（{1}）"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "NotificationSeparator",
+   "source": "; ",
+   "text": "；"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "PanelBody",
+   "source": "MCP servers these agents have besides HyperAI's Unreal MCP, and this editor's plugins and settings that act like one. Those that change this editor do it with no HyperAI approval, no auto-approval, no undo grouping and no HyperAI checks. HyperAI only reads their files; remove an entry yourself as shown.",
+   "text": "除 HyperAI 的 Unreal MCP 之外，这些智能体拥有的 MCP 服务器，以及此编辑器中作用类似的插件和设置。会更改此编辑器的那些，更改时没有 HyperAI 审批、没有自动批准、没有撤销分组，也没有 HyperAI 检查。HyperAI 只读取它们的文件；请按所示自行删除条目。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "PanelCheckAgain",
+   "source": "Check Again",
+   "text": "重新检查"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "PanelCheckAgainTooltip",
+   "source": "Read the agents' config files and this editor's plugins again.",
+   "text": "重新读取智能体的配置文件和此编辑器的插件。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "PanelDetails",
+   "source": "Details",
+   "text": "详情"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "PanelDetailsTooltip",
+   "source": "Everything below as one report, in its own window.",
+   "text": "将下方所有内容作为一份报告，在单独的窗口中显示。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "PanelDontWarn",
+   "source": "Don't Warn Again",
+   "text": "不再警告"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "PanelDontWarnTooltip",
+   "source": "Stop warning about it in this project, for you. Agents can still use it, and it stays listed here.",
+   "text": "仅对你，在此项目中不再就此发出警告。智能体仍可使用它，它也仍会列在这里。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "PanelNone",
+   "source": "No other MCP servers found in the agents' configs, and no editor plugin or setting that acts like one.",
+   "text": "在智能体的配置中未发现其他 MCP 服务器，也没有作用类似的编辑器插件或设置。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "PanelPlace",
+   "source": "- {0}",
+   "text": "- {0}"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "PanelTitle",
+   "source": "Other MCP servers",
+   "text": "其他 MCP 服务器"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "PlacePlugin",
+   "source": "the {0} plugin",
+   "text": "{0} 插件"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "PlaceSetting",
+   "source": "Project Settings",
+   "text": "项目设置"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "RemoveClaudeLocal",
+   "source": "In {File}, find this project under \"projects\" and delete \"{Entry}\" under its \"mcpServers\"; or run in the project folder: claude mcp remove {Entry} -s local",
+   "text": "在 {File} 中，于 \"projects\" 下找到此项目，删除其 \"mcpServers\" 下的 \"{Entry}\"；或在项目文件夹中运行：claude mcp remove {Entry} -s local"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "RemoveClaudeProject",
+   "source": "Delete the \"{Entry}\" entry under \"mcpServers\" in {File} (HyperAI keeps entries it did not write, so it does not add it back); or run: claude mcp remove {Entry} -s project",
+   "text": "删除 {File} 中 \"mcpServers\" 下的 \"{Entry}\" 条目（HyperAI 会保留并非由它写入的条目，因此不会把它加回来）；或运行：claude mcp remove {Entry} -s project"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "RemoveClaudeUser",
+   "source": "Delete the \"{Entry}\" entry under the top-level \"mcpServers\" in {File}; or run: claude mcp remove {Entry} -s user",
+   "text": "删除 {File} 中顶层 \"mcpServers\" 下的 \"{Entry}\" 条目；或运行：claude mcp remove {Entry} -s user"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "RemoveCodexProject",
+   "source": "Delete the [mcp_servers.{Entry}] table, and any [mcp_servers.{Entry}.*] tables under it, in {File}; or set enabled = false in it.",
+   "text": "删除 {File} 中的 [mcp_servers.{Entry}] 表及其下的所有 [mcp_servers.{Entry}.*] 表；或在其中设置 enabled = false。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "RemoveCodexUser",
+   "source": "Delete the [mcp_servers.{Entry}] table, and any [mcp_servers.{Entry}.*] tables under it, in {File}; or set enabled = false in it; or run: codex mcp remove {Entry}",
+   "text": "删除 {File} 中的 [mcp_servers.{Entry}] 表及其下的所有 [mcp_servers.{Entry}.*] 表；或在其中设置 enabled = false；或运行：codex mcp remove {Entry}"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "RemoveJson",
+   "source": "Delete the \"{Entry}\" entry under \"{Container}\" in {File}.",
+   "text": "删除 {File} 中 \"{Container}\" 下的 \"{Entry}\" 条目。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "RemovePlugin",
+   "source": "Disable the {Entry} plugin in Edit > Plugins and restart the editor (it is in {File}).",
+   "text": "在“编辑 > 插件”中禁用 {Entry} 插件并重启编辑器（它位于 {File}）。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "RemovePythonSetting",
+   "source": "Untick Edit > Project Settings > Plugins > Python > Enable Remote Execution?",
+   "text": "取消勾选“编辑 > 项目设置 > 插件 > Python > Enable Remote Execution?（启用远程执行）”。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "RemoveWrittenByHyperAI",
+   "source": "{0} HyperAI writes this entry from Settings > MCP servers: turn it off or delete it there and press Regenerate Files, or it comes back.",
+   "text": "{0} 此条目由 HyperAI 根据“设置 > MCP 服务器”写入：请在那里将其关闭或删除，然后按“重新生成文件”，否则它会再次出现。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "ScopeLocal",
+   "source": "local",
+   "text": "本地"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "ScopeProject",
+   "source": "project",
+   "text": "项目"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "ScopeUser",
+   "source": "user",
+   "text": "用户"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "ShowDetails",
+   "source": "Show details",
+   "text": "显示详情"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "ShowDetailsTooltip",
+   "source": "List every MCP server agents have here, where each is configured, and how to remove it.",
+   "text": "列出此处智能体拥有的每个 MCP 服务器、各自的配置位置以及移除方法。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "SourceConfig",
+   "source": "{Client} ({Scope}): {File}, entry \"{Entry}\"",
+   "text": "{Client}（{Scope}）：{File}，条目 \"{Entry}\""
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "SourceConfigAddress",
+   "source": "{Client} ({Scope}): {File}, entry \"{Entry}\", {Address}",
+   "text": "{Client}（{Scope}）：{File}，条目 \"{Entry}\"，{Address}"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "SourcePlugin",
+   "source": "This editor: the {0} plugin ({1})",
+   "text": "此编辑器：{0} 插件（{1}）"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "SourcePluginPort",
+   "source": "This editor: the {0} plugin ({1}), listening on {2}",
+   "text": "此编辑器：{0} 插件（{1}），监听 {2}"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "SourcePythonSetting",
+   "source": "This editor: Project Settings > Plugins > Python > Enable Remote Execution?",
+   "text": "此编辑器：项目设置 > 插件 > Python > Enable Remote Execution?（启用远程执行）"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "ToRemove",
+   "source": "To remove: {0}",
+   "text": "移除方法：{0}"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "WarnAgain",
+   "source": "Warn Again",
+   "text": "恢复警告"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "WarnAgainTooltip",
+   "source": "Warn about it again at editor start and in Activity.",
+   "text": "在编辑器启动时和“活动”中再次就此发出警告。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "WhyEditorPort",
+   "source": "Its address, port {0}, is served by this editor itself.",
+   "text": "它的地址（端口 {0}）由此编辑器自身提供服务。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "WhyMcpPlugin",
+   "source": "An enabled plugin that names itself an MCP server, running inside this editor.",
+   "text": "一个已启用、自称 MCP 服务器的插件，运行在此编辑器内部。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "WhyNotUnreal",
+   "source": "Not an Unreal server: its tools do not reach this editor, as far as HyperAI can tell.",
+   "text": "不是 Unreal 服务器：据 HyperAI 判断，它的工具不会触及此编辑器。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "WhyNwiro",
+   "source": "The Nwiro Integration Kit runs this MCP server inside this editor; its tools include execute_python, which runs any editor Python.",
+   "text": "Nwiro Integration Kit 在此编辑器内部运行这个 MCP 服务器；它的工具包括 execute_python，可运行任意编辑器 Python。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "WhyNwiroNotHere",
+   "source": "A Nwiro Integration Kit server, but that plugin is not enabled in this editor, so it cannot reach it.",
+   "text": "这是 Nwiro Integration Kit 的服务器，但此编辑器未启用该插件，因此它无法触及此编辑器。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "WhyPythonRemote",
+   "source": "Python Remote Execution is on: any program on this computer, or on your network's multicast group, can run Python in this editor.",
+   "text": "Python 远程执行已开启：此计算机上或你网络多播组中的任何程序都可以在此编辑器中运行 Python。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "WhyRider",
+   "source": "JetBrains Rider's MCP server. Its Unreal tools (ue_execute_python, spawn_actor, ue_play) reach this editor through the RiderLink plugin.",
+   "text": "JetBrains Rider 的 MCP 服务器。它的 Unreal 工具（ue_execute_python、spawn_actor、ue_play）通过 RiderLink 插件触及此编辑器。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "WhyRiderLinkOnly",
+   "source": "Rider's link to this editor. Agents reach it only through Rider's MCP server, which no agent config here lists.",
+   "text": "Rider 与此编辑器的连接。智能体只能通过 Rider 的 MCP 服务器触及它，而此处没有任何智能体配置列出该服务器。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "WhyRiderNoLink",
+   "source": "JetBrains Rider's MCP server. RiderLink is not enabled in this editor, so its Unreal tools cannot reach it.",
+   "text": "JetBrains Rider 的 MCP 服务器。此编辑器未启用 RiderLink，因此它的 Unreal 工具无法触及此编辑器。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "WhyUnrealName",
+   "source": "An Unreal server on this computer, so it can drive this editor directly.",
+   "text": "这是此计算机上的 Unreal 服务器，因此可以直接驱动此编辑器。"
+  },
+  {
+   "namespace": "HyperAIStudioMcpBypass",
+   "key": "WhyUnrealRemote",
+   "source": "An Unreal server, but its address is on another computer, so it does not reach this editor.",
+   "text": "这是 Unreal 服务器，但地址在另一台计算机上，因此不会触及此编辑器。"
+  },
+  {
    "namespace": "HyperAIStudioMeshTerrain",
    "key": "MeshTerrainEdit",
    "source": "HyperAI: Mesh Terrain edit",
@@ -22566,6 +22998,30 @@
    "key": "SetupOpenChatTooltip",
    "source": "Open the separate daily handoff panel.",
    "text": "打开独立的日常交接面板。"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupOtherMcpBypassing",
+   "source": "{0} bypass HyperAI",
+   "text": "{0} 个绕过 HyperAI"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupOtherMcpNone",
+   "source": "None bypass HyperAI",
+   "text": "没有绕过 HyperAI 的"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupOtherMcpRow",
+   "source": "Other MCP servers",
+   "text": "其他 MCP 服务器"
+  },
+  {
+   "namespace": "SHyperAIStudioWindow",
+   "key": "SetupOtherMcpShow",
+   "source": "Show",
+   "text": "显示"
   },
   {
    "namespace": "SHyperAIStudioWindow",
