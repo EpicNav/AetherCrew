@@ -2049,11 +2049,12 @@ FHyperAIOperationStatus HyperAIStudio::NativeReadTools::Private::ReadOperationSt
 			return Report;
 		}
 		// Scripts, 3D models and submits run outside the typed executor, so their activity entries are their only status
-		// record. A 3D model is a background job, whose start and end the job host records.
+		// record. A 3D model or generated audio is a background job, whose start and end the job host records.
 		const bool bScript = Entry.PackId == TEXT("scripting");
 		const bool bSubmit = Entry.PackId == TEXT("source_control");
+		const bool bAudio = Entry.PackId == TEXT("audio_generation");
 		const bool bRunning = Entry.Kind == EHyperAIStudioActivityKind::ApprovalApproved || Entry.Kind == EHyperAIStudioActivityKind::JobStarted;
-		if ((bScript || bSubmit || Entry.PackId == TEXT("mesh_generation")) && (bRunning || Entry.Kind == EHyperAIStudioActivityKind::Completed
+		if ((bScript || bSubmit || bAudio || Entry.PackId == TEXT("mesh_generation")) && (bRunning || Entry.Kind == EHyperAIStudioActivityKind::Completed
 			|| Entry.Kind == EHyperAIStudioActivityKind::Failed || Entry.Kind == EHyperAIStudioActivityKind::JobFinished))
 		{
 			Report.bOk = true;
@@ -2066,6 +2067,7 @@ FHyperAIOperationStatus HyperAIStudio::NativeReadTools::Private::ReadOperationSt
 			Report.NextAction = !Report.bTerminal ? TEXT("Still running; call hyper_operation_wait to wait for it.")
 				: bScript ? TEXT("The script's result, output and traceback are in Saved/HyperAIStudio/Scripts/<operation_id>/result.json.")
 				: bSubmit ? TEXT("hyper_source_control_status lists what is still unsubmitted.")
+				: bAudio ? TEXT("hyper_audio_generate_status has each take's file, SoundWave, length and price, and the wrapper.")
 				: TEXT("hyper_mesh_status has the model's file and the asset it was imported as.");
 			Report.JournalAccessMode = TEXT("activity_log");
 			return Report;

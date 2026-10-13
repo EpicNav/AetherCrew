@@ -46,7 +46,7 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("animation_rigging"), TEXT("animation animations anim montage montages sequence sequences blend space blendspace notify notifies root motion retarget retargeting retargeter ik rig rigging skeleton pose matching mocap")},
 			{TEXT("worldbuilding_navigation"), TEXT("landscape landscapes terrain heightmap sculpt sculpting paint painting layer layers road roads spline splines navmesh navigation pathfinding foliage grass hills world partition streaming hlod")},
 			{TEXT("networking_game_framework"), TEXT("multiplayer network networking replication replicate replicated server client clients rpc online game mode gamemode state controller pawn framework session")},
-			{TEXT("audio_metasound"), TEXT("audio metasound metasounds cue attenuation mixer submix music ambient ambience volume")},
+			{TEXT("audio_metasound"), TEXT("audio metasound metasounds cue attenuation mixer submix music ambient ambience volume concurrency occlusion falloff procedural")},
 			{TEXT("materials_dynamic_material"), TEXT("material materials shader shaders texture textures instance instances roughness metallic specular normal emissive parameter parameters master tint color colour translucent opacity dynamic designer mossy stone wood metal")},
 			{TEXT("niagara_vfx"), TEXT("vfx niagara particle particles effect effects emitter emitters explosion explosions smoke fire flame flames spark sparks magic spell spells trail trails impact impacts muzzle flash weather rain snow dust swarm")},
 			{TEXT("texture_graph"), TEXT("texture graph procedural tileable seamless pattern noise generate")},
@@ -71,6 +71,7 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("uaf_graph"), TEXT("uaf animation framework animnext graph")},
 			{TEXT("image_generation"), TEXT("image images picture pictures generate draw concept art reference illustration")},
 			{TEXT("mesh_generation"), TEXT("3d model models generate generated textured photo picture realistic tripo meshy hi3d paid")},
+			{TEXT("audio_generation"), TEXT("elevenlabs stable stability generate generated paid sfx clip clips takes variations")},
 			// No "props" or "placeholder": "place" reads as "placeholder", and props to place are level design's. PolyEdit and
 			// PolyGroups are Modeling Mode's tools a hand-off points people at; "sculpt" stays the landscape's.
 			{TEXT("mesh_modeling"), TEXT("model models modeling modelling modeled mesh meshes kitbash lowpoly poly primitive primitives rock boulder boulders archway pillar pillars column columns crystal crystals mushroom mushrooms tower towers watchtower ruins ruined rubble monolith trunk stump crate crates bevel extrude inset boolean revolve lathe polyedit polygroup polygroups")},
@@ -107,7 +108,8 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("destruction"), TEXT("unreal-destruction")},
 			{TEXT("physics_chaos"), TEXT("unreal-destruction")},
 			{TEXT("sound_design"), TEXT("sound-design")},
-			{TEXT("audio_metasound"), TEXT("sound-design")},
+			{TEXT("audio_metasound"), TEXT("game-audio")},
+			{TEXT("audio_generation"), TEXT("game-audio")},
 		};
 
 		/**

@@ -1779,6 +1779,38 @@
       0,
       0
      ]
+    },
+    {
+     "name": "hyper_sound_cue_plan",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_sound_mix_plan",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_sound_asset_inspect",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_metasound_recipe",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ]
   },
@@ -3653,6 +3685,32 @@
     {
      "name": "hyper_mesh_status",
      "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "audio_generation",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [],
+   "tools": [
+    {
+     "name": "hyper_audio_generate",
+     "cohort": "cohort.source.hyperaistudioaudiogentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_audio_generate_status",
+     "cohort": "cohort.source.hyperaistudioaudiogentoolset.v1",
      "admission": "SourceCandidate",
      "safety": [
       "Read"
