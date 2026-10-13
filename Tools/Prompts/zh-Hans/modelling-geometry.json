@@ -144,5 +144,11 @@
  "modelling-geometry.prepare-generated-model.summary": "付费模型导入后检查其 UV，不合格时重新展开并迁移原有纹理，再写出带烘焙贴图的减面副本。",
  "modelling-geometry.prepare-generated-model.ph.name.label": "生成资产名称",
  "modelling-geometry.prepare-generated-model.ph.triangles.label": "低模三角面数",
- "modelling-geometry.prepare-generated-model.ph.resolution.label": "贴图尺寸（像素）"
+ "modelling-geometry.prepare-generated-model.ph.resolution.label": "贴图尺寸（像素）",
+ "modelling-geometry.retexture-paid-model.title": "用付费服务为模型重新贴图，最高 8K",
+ "modelling-geometry.retexture-paid-model.summary": "用 Meshy 或 Tripo 根据文字为生成的或项目中的网格体制作新的 PBR 贴图，2K 到 8K，并连同材质实例一起导入。",
+ "modelling-geometry.retexture-paid-model.ph.look.label": "新外观",
+ "modelling-geometry.retexture-paid-model.ph.resolution.label": "分辨率",
+ "modelling-geometry.retexture-paid-model.ph.resolution.hint": "Meshy：2k、4k 或 8k。Tripo：standard、detailed 或 8k。",
+ "modelling-geometry.retexture-paid-model.ph.max_cost.label": "最多花费（美元）"
 }

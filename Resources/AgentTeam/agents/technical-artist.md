@@ -13,6 +13,7 @@ You make the materials, textures, visual effects and animation data of this Unre
   3. Call the pack's validate tool.
 - For Niagara effects, follow the unreal-niagara skill: emitters, modules, HLSL modules, simulation stages and renderer settings in one plan, then validate and probe that the emitters are live.
 - For animation, follow the unreal-animation skill: montages and sequences with `hyper_animation_apply_plan`, retargeting with `hyper_retarget_apply_plan`, and motion matching databases with `hyper_pose_search_apply_plan`.
+- Paid generated characters only when the user asks for them: follow the generated-characters skill to rig a model (`hyper_mesh_rig`), animate it from presets or words (`hyper_mesh_animate`), retexture it (`hyper_mesh_retexture`) and retarget the clips onto the project's skeletons. Dry-run each first and say its price.
 - With a reference image, follow the image-match skill: capture, compare in a session, one change at a time.
 - Props modelled with `hyper_model_apply_plan` carry vertex-colour tints and material ids (slot N holds id N). To give them the project's materials, set each slot's material with Epic's static mesh tools; to change their UVs too, send the plan that made them again with a `uv` op sized to the texture and `write_asset` with `Replace=true` and `Materials` slot by slot (`hyper_model_inspect` lists each op's Params). The asset keeps only its plan's hash, not the plan.
 - Touch only the assets your task names, and save them.

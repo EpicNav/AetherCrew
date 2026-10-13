@@ -37,14 +37,14 @@ bool FHyperAIStudioServiceDefaultsTest::RunTest(const FString& Parameters)
 	const TArray<FHyperAIStudioExternalServiceSettings> Restore = Settings->ExternalServices;
 	ON_SCOPE_EXIT { Settings->ExternalServices = Restore; };
 
-	// Built in: Google's Gemini API for the Nano Banana models, Tripo, Meshy and Hi3D for 3D models, and ElevenLabs and
-	// Stability for audio. Keys come from the environment.
+	// Built in: Google's Gemini API for the Nano Banana models, Tripo, Meshy and Hi3D for 3D models, Viggle for animation
+	// from words, and ElevenLabs and Stability for audio. Keys come from the environment.
 	Settings->ExternalServices.Reset();
 	const TArray<FHyperAIStudioExternalServiceSettings> Unconfigured = FHyperAIStudioExternalServices::GetServices();
-	TestTrue(TEXT("an unconfigured project has the Gemini API, the 3D services and the audio services"), Unconfigured.Num() == 7
+	TestTrue(TEXT("an unconfigured project has the Gemini API, the 3D services and the audio services"), Unconfigured.Num() == 8
 		&& Unconfigured[0].Id == TEXT("google_gemini") && Unconfigured[1].Id == TEXT("tripo") && Unconfigured[2].Id == TEXT("meshy")
-		&& Unconfigured[3].Id == TEXT("hi3d") && Unconfigured[4].Id == TEXT("elevenlabs") && Unconfigured[5].Id == TEXT("elevenlabs_music")
-		&& Unconfigured[6].Id == TEXT("stability"));
+		&& Unconfigured[3].Id == TEXT("hi3d") && Unconfigured[4].Id == TEXT("viggle") && Unconfigured[5].Id == TEXT("elevenlabs")
+		&& Unconfigured[6].Id == TEXT("elevenlabs_music") && Unconfigured[7].Id == TEXT("stability"));
 	FHyperAIStudioExternalServiceSettings ElevenLabs;
 	TestTrue(TEXT("ElevenLabs takes its key in xi-api-key, with no prefix"), FHyperAIStudioExternalServices::Find(TEXT("elevenlabs"), ElevenLabs)
 		&& ElevenLabs.ApiKeyHeader == TEXT("xi-api-key") && ElevenLabs.ApiKeyPrefix.IsEmpty() && ElevenLabs.ApiKeyVariable == TEXT("ELEVENLABS_API_KEY"));
@@ -55,7 +55,7 @@ bool FHyperAIStudioServiceDefaultsTest::RunTest(const FString& Parameters)
 	FHyperAIStudioExternalServiceSettings Proxy = Gemini;
 	Proxy.BaseUrl = TEXT("http://127.0.0.1:8123");
 	Settings->ExternalServices = {Proxy};
-	TestTrue(TEXT("and a project's own entry with its id replaces it"), FHyperAIStudioExternalServices::GetServices().Num() == 7
+	TestTrue(TEXT("and a project's own entry with its id replaces it"), FHyperAIStudioExternalServices::GetServices().Num() == 8
 		&& FHyperAIStudioExternalServices::Find(TEXT("google_gemini"), Gemini) && Gemini.BaseUrl == Proxy.BaseUrl);
 
 	Settings->ExternalServices = {Paid(TEXT("local_model"), 0.0f)};

@@ -179,7 +179,7 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 		[
 			BuildCategory(EHyperAIStudioApprovalCategory::ExternalEffects, LOCTEXT("ExternalLabel", "External effects (spend money, leave this computer)"),
 				FText::Format(LOCTEXT("ExternalCapBody",
-					"Requests that reach outside the editor: generating images (hyper_image_generate, with Codex, Gemini or a configured image service), generating 3D models (hyper_mesh_generate, with Tripo, Meshy or Hi3D), and submitting files to source control (hyper_source_control_submit, through Perforce, Git, Plastic or Lore, where your team receives them). Prompts and pictures are sent to those services. One image request may make up to 8 paid calls. Paid calls still stop at this session's spend cap of {0}, and auto-approval turns off if the cap or a service's or model's price changes while it is on; agent models use your agent plan."),
+					"Requests that reach outside the editor: generating images (hyper_image_generate, with Codex, Gemini or a configured image service), generating, rigging, animating and retexturing 3D models (hyper_mesh_generate, hyper_mesh_rig, hyper_mesh_animate and hyper_mesh_retexture, with Tripo, Meshy, Hi3D or Viggle), and submitting files to source control (hyper_source_control_submit, through Perforce, Git, Plastic or Lore, where your team receives them). Prompts, pictures and meshes are sent to those services. One image request may make up to 8 paid calls. Paid calls still stop at this session's spend cap of {0}, and auto-approval turns off if the cap or a service's, model's or 3D task's price changes while it is on; agent models use your agent plan."),
 					SpendCap),
 				SNullWidget::NullWidget)
 		]
