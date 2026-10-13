@@ -606,6 +606,7 @@ bool FHyperAIStudioProfilingLiveTest::RunTest(const FString& Parameters)
 		double SpawnedAt = 0.0;
 		TStrongObjectPtr<UHyperAIPerfLiveResult> Sampled;
 		FString SystemPath;
+		bool bSkip = false;
 	};
 	const TSharedRef<FState> State = MakeShared<FState>();
 	const double Deadline = FPlatformTime::Seconds() + 120.0;
@@ -643,13 +644,20 @@ bool FHyperAIStudioProfilingLiveTest::RunTest(const FString& Parameters)
 		State->SystemPath = System->GetPathName();
 		UNiagaraComponent* Component = UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, System, FVector(0.0, 0.0, 200.0), FRotator::ZeroRotator,
 			FVector::OneVector, /*bAutoDestroy=*/false, /*bAutoActivate=*/true, ENCPoolMethod::None, /*bPreCullCheck=*/false);
+		if (!Component && GUsingNullRHI)
+		{
+			// Niagara does not simulate without an RHI; the readout of no effects was checked above.
+			AddInfo(TEXT("Niagara spawns nothing under a null RHI; the sampled Niagara read is left to an editor that renders."));
+			State->bSkip = true;
+			return true;
+		}
 		TestNotNull(TEXT("It spawns in the play world"), Component);
 		State->SpawnedAt = FPlatformTime::Seconds();
 		return true;
 	}));
 	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, State, Deadline]()
 	{
-		if (!GEditor->PlayWorld) return true;
+		if (!GEditor->PlayWorld || State->bSkip) return true;
 		// Let it simulate a little first.
 		if (FPlatformTime::Seconds() - State->SpawnedAt < 0.5) return false;
 		FHyperAIPerfLiveRequest Request;
