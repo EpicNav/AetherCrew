@@ -14,7 +14,9 @@
 #include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioNames.h"
 #include "HyperAIStudioSettings.h"
+#include "HyperAIStudioSourceControl.h"
 #include "IFileSandboxCoreModule.h"
+#include "Interface/IPersistFeedback.h"
 #include "ISandboxInstance.h"
 #include "ISandboxManager.h"
 #include "ISandboxRepository.h"
@@ -32,6 +34,7 @@
 #include "Types/Manager/NewSandboxArgs.h"
 #include "Types/Manager/NewSandboxError.h"
 #include "Types/Manager/SandboxCreationResult.h"
+#include "Types/Sandbox/PersistArgs.h"
 #include "Types/Sandbox/RevertResult.h"
 #include "Types/SandboxFileChange.h"
 #include "Types/SandboxMetaInfo.h"
@@ -65,6 +68,8 @@ namespace HyperAIStudio::Sandbox
 			/** A sandbox from an earlier session waits for the user to resume or discard it. */
 			bool bAwaitingDecision = false;
 			int32 HeldCount = 0;
+			/** What source control did for each file at the last approve. */
+			TArray<FFileOutcome> LastOutcomes;
 			FDelegateHandle PostStartup;
 			FDelegateHandle PreShutdown;
 			FDelegateHandle PostShutdown;
@@ -346,6 +351,66 @@ namespace HyperAIStudio::Sandbox
 				List += FString::Printf(TEXT(" and %d more"), Names.Num() - Shown);
 			}
 			return List;
+		}
+
+		/** Which files a persist wrote, from the File Sandbox's own per-file report. */
+		class FWrittenFiles final : public FSC::IPersistFeedback
+		{
+		public:
+			TSet<FString> Written;
+			virtual void StartFile(const TCHAR*) override {}
+			virtual void HandleSuccess(const TCHAR* InFilename) override { Written.Add(FPaths::ConvertRelativePathToFull(InFilename)); }
+			virtual void HandleError_CheckoutNotAllowed(const TCHAR*) override {}
+			virtual void HandleError_Checkout(const TCHAR*) override {}
+			virtual void HandleError_Revert(const TCHAR*) override {}
+			virtual void HandleError_MarkForAdd(const TCHAR*) override {}
+			virtual void HandleError_DeleteSCC(const TCHAR*) override {}
+			virtual void HandleError_MakeWritable(const TCHAR*) override {}
+			virtual void HandleError_MoveFile(const TCHAR*, const TCHAR*) override {}
+			virtual void HandleError_DeleteFile(const TCHAR*) override {}
+		};
+
+		/**
+		 * Writes Changes into the project through source control (check out or lock first, add after) and records what
+		 * happened per file. True when every one was written; OutError names those that stayed held.
+		 */
+		bool WriteThroughSourceControl(FSC::ISandboxInstance& Ours, const TArray<FChange>& Changes, FString& OutError)
+		{
+			const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+			TArray<FHyperAIStudioSourceControl::FHeldFile> Held;
+			for (const FChange& Change : Changes)
+			{
+				Held.Add({FPaths::ConvertRelativePathToFull(ProjectDir / Change.Path), Change.Kind});
+			}
+			const TArray<FHyperAIStudioSourceControl::FHeldFileResult> Results = FHyperAIStudioSourceControl::WriteHeldFiles(Held,
+				[&Ours](const TArray<FString>& Files)
+			{
+				FWrittenFiles Feedback;
+				FSC::FPersistArgs Args;
+				Args.Files = Files;
+				Args.Feedback = &Feedback;
+				Ours.PersistSandbox(Args);
+				return Feedback.Written;
+			});
+			TArray<FFileOutcome>& Outcomes = State().LastOutcomes;
+			Outcomes.Reset();
+			TArray<FString> Left;
+			for (const FHyperAIStudioSourceControl::FHeldFileResult& Result : Results)
+			{
+				FString Relative = Result.Path;
+				FPaths::MakePathRelativeTo(Relative, *ProjectDir);
+				Outcomes.Add({Relative, Result.Kind, Result.Outcome, Result.Who, Result.Detail, Result.bWritten});
+				if (!Result.bWritten)
+				{
+					Left.Add(Result.Who.IsEmpty() ? Relative : FString::Printf(TEXT("%s (held by %s)"), *Relative, *Result.Who));
+				}
+			}
+			if (!Left.IsEmpty())
+			{
+				OutError = FString::Printf(TEXT("%d %s stayed in the sandbox, the rest were written: %s. The sandbox card says why for each."),
+					Left.Num(), Left.Num() == 1 ? TEXT("file") : TEXT("files"), *NameList(Left));
+			}
+			return Left.IsEmpty();
 		}
 
 		bool CanDecide(FSC::ISandboxInstance*& OutOurs, FString& OutError)
@@ -670,9 +735,10 @@ namespace HyperAIStudio::Sandbox
 			OutError = TEXT("Save or revert these unsaved assets first; closing the sandbox would reload them from disk: ") + NameList(Unsaved);
 			return false;
 		}
-		if (!Ours->PersistAll())
+		// Each file is checked out (or locked) before it is written; one a teammate holds stays held and the sandbox with it.
+		if (!WriteThroughSourceControl(*Ours, ChangesOf(*Ours), OutError))
 		{
-			OutError = TEXT("Some files could not be written to the project, for example because they are read-only or checked out elsewhere. Everything stays in the sandbox; the Output Log names the files.");
+			Broadcast();
 			return false;
 		}
 		if (!LeaveAndRemove(OutError))
@@ -686,6 +752,39 @@ namespace HyperAIStudio::Sandbox
 		}
 		Broadcast();
 		return true;
+	}
+
+	bool ApproveFiles(const TArray<FString>& Paths, FString& OutError)
+	{
+		OutError.Reset();
+		FSC::ISandboxInstance* Ours = nullptr;
+		if (!CanDecide(Ours, OutError))
+		{
+			return false;
+		}
+		// Agent edits still in memory go into the sandbox first, so what is written is what the agent made.
+		SaveAgentEdits();
+		TArray<FChange> Chosen;
+		for (const FChange& Change : ChangesOf(*Ours))
+		{
+			if (Paths.Contains(Change.Path))
+			{
+				Chosen.Add(Change);
+			}
+		}
+		if (Chosen.IsEmpty())
+		{
+			OutError = TEXT("None of those files is held in the sandbox any more.");
+			return false;
+		}
+		const bool bAll = WriteThroughSourceControl(*Ours, Chosen, OutError);
+		Broadcast();
+		return bAll;
+	}
+
+	const TArray<FFileOutcome>& GetLastOutcomes()
+	{
+		return State().LastOutcomes;
 	}
 
 	FReadiness CheckApproveAll()

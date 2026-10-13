@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Templates/Function.h"
 
 class UObject;
 
@@ -47,6 +48,44 @@ public:
 	enum class EDecision : uint8 { Edit, CheckOut, Refuse };
 	static EDecision Decide(const FHyperAIStudioSourceControlFileState& State, const FString& DisplayName, FString& OutError);
 
+	/** One file Sandbox Mode holds, about to be written into the project. */
+	struct FHeldFile
+	{
+		/** Absolute path of the project file. */
+		FString Path;
+		/** added, edited or removed. */
+		FString Kind;
+	};
+
+	/** What source control did for one held file as it was approved. */
+	struct FHeldFileResult
+	{
+		FString Path;
+		FString Kind;
+		/**
+		 * checked_out, marked_for_add, marked_for_delete (Unreal's provider); locked, marked_dirty (Lore); written (no
+		 * source control); blocked (a teammate holds it, or it is behind the latest revision: it stays held); failed.
+		 */
+		FString Outcome;
+		/** Who holds it, for a blocked file. */
+		FString Who;
+		FString Detail;
+		bool bWritten = false;
+	};
+
+	/**
+	 * Writes held sandbox files into the project the team's way. First each target is made editable: checked out through
+	 * Unreal's provider (Perforce, SVN lock, Plastic, Git LFS lock), whichever is configured, or locked with Lore in a
+	 * workspace on a server. A file a teammate holds, or one behind the latest revision, is left out and stays held, with
+	 * the holder named; the others go ahead. Write gets the files cleared to go and returns those it wrote. Then new files
+	 * are marked for add and removed ones for delete; in Lore every written file is marked dirty (a local repository has
+	 * no locks). Game thread.
+	 */
+	static TArray<FHeldFileResult> WriteHeldFiles(const TArray<FHeldFile>& Files, TFunctionRef<TSet<FString>(const TArray<FString>&)> Write);
+
+	/** The provider agent edits go through: the configured one, also while a File Sandbox stands in for it; null for none. */
+	static class ISourceControlProvider* GetProvider();
+
 	static void Startup();
 	static void Shutdown();
 #if WITH_DEV_AUTOMATION_TESTS
@@ -55,5 +94,7 @@ public:
 	 * local repository); empty strings restore detection. Either way the agents' files start over.
 	 */
 	static void SetLoreForTests(const FString& Executable, const FString& Prefix, const FString& Root, const FString& RemoteUrl = TEXT("lore://127.0.0.1:41337"));
+	/** Stands Provider in for Unreal's (a mock in tests); null restores the editor's own. Either way the agents' files start over. */
+	static void SetProviderForTests(class ISourceControlProvider* Provider);
 #endif
 };

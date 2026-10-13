@@ -22,8 +22,12 @@
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "SHyperAIStudioMentionPicker.h"
 #include "SHyperAIStudioPromptPicker.h"
+#include "HAL/PlatformApplicationMisc.h"
+#include "HyperAIStudioStyle.h"
 #include "Styling/AppStyle.h"
+#include "Widgets/Input/SMenuAnchor.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/StyleColors.h"
 #include "Widgets/Input/SButton.h"
@@ -288,20 +292,49 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
+		.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+		[
+			SAssignNew(MentionBox, SWrapBox)
+			.UseAllottedSize(true)
+			.InnerSlotPadding(FVector2D(4.0f, 4.0f))
+			.Visibility_Lambda([this]() { return Mentions.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
 		.Padding(0.0f, 8.0f, 0.0f, 0.0f)
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot()
 			.FillWidth(1.0f)
 			[
+				SAssignNew(MentionAnchor, SMenuAnchor)
+				.Placement(MenuPlacement_AboveAnchor)
+				.MenuContent
+				(
+					SAssignNew(MentionPicker, SHyperAIStudioMentionPicker)
+					.OnChosen_Lambda([this](const FHyperAIStudioMention& Mention) { ChooseMention(Mention); })
+				)
+				[
 				SNew(SBox)
 				.MaxDesiredHeight(160.0f)
 				[
 					SAssignNew(Composer, SMultiLineEditableTextBox)
 					.AutoWrapText(true)
-					.HintText(FText::Format(LOCTEXT("ComposerHint", "Message {0}. Enter sends; Shift+Enter starts a new line."), FText::FromString(Chat->GetAgentName())))
+					.HintText(FText::Format(LOCTEXT("ComposerHintMentions", "Message {0}. Enter sends; Shift+Enter starts a new line; @ names an asset, actor, file, skill or operation."), FText::FromString(Chat->GetAgentName())))
 					.OnTextChanged_Lambda([this](const FText& Text)
 					{
+						// The picker follows the @ query the cursor is in, once the cursor has moved (next tick). A chip whose
+						// token was typed or cut away goes with it.
+						bMentionRefreshPending = true;
+						if (!Mentions.IsEmpty())
+						{
+							const TArray<FHyperAIStudioMention> Kept = HyperAIStudio::Mentions::StillReferenced(Text.ToString(), Mentions);
+							if (Kept.Num() != Mentions.Num())
+							{
+								Mentions = Kept;
+								RebuildMentions();
+							}
+						}
 						// A composer typed empty starts over: the preset no longer describes what is in it, and what it turned on
 						// and said goes with it.
 						if (Text.IsEmpty())
@@ -320,7 +353,41 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 					})
 					.OnKeyDownHandler_Lambda([this](const FGeometry&, const FKeyEvent& KeyEvent)
 					{
-						if (KeyEvent.GetKey() == EKeys::Enter && !KeyEvent.IsShiftDown() && !KeyEvent.IsControlDown() && !KeyEvent.IsAltDown())
+						const FKey Key = KeyEvent.GetKey();
+						const bool bPlain = !KeyEvent.IsShiftDown() && !KeyEvent.IsControlDown() && !KeyEvent.IsAltDown();
+						// The @ picker is open: typing stays here, and these keys drive it.
+						if (MentionAnchor.IsValid() && MentionAnchor->IsOpen() && MentionPicker.IsValid())
+						{
+							if (Key == EKeys::Up || Key == EKeys::Down)
+							{
+								MentionPicker->MoveSelection(Key == EKeys::Up ? -1 : 1);
+								return FReply::Handled();
+							}
+							if ((Key == EKeys::Enter || Key == EKeys::Tab) && bPlain && MentionPicker->Num() > 0)
+							{
+								MentionPicker->ChooseSelected();
+								return FReply::Handled();
+							}
+							if (Key == EKeys::Escape)
+							{
+								CloseMentionPicker();
+								return FReply::Handled();
+							}
+						}
+						// Pasted asset or actor paths (a Content Browser copy, say) become chips; anything else pastes as text.
+						if ((Key == EKeys::V && KeyEvent.IsControlDown() && !KeyEvent.IsAltDown()) || (Key == EKeys::Insert && KeyEvent.IsShiftDown()))
+						{
+							FString Clipboard;
+							FPlatformApplicationMisc::ClipboardPaste(Clipboard);
+							const TArray<FHyperAIStudioMention> Pasted = HyperAIStudio::Mentions::FromPastedText(Clipboard);
+							if (!Pasted.IsEmpty())
+							{
+								AddMentions(Pasted);
+								return FReply::Handled();
+							}
+							return FReply::Unhandled();
+						}
+						if (Key == EKeys::Enter && bPlain)
 						{
 							Submit();
 							return FReply::Handled();
@@ -333,6 +400,7 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 						}
 						return FReply::Unhandled();
 					})
+				]
 				]
 			]
 			+ SHorizontalBox::Slot()
@@ -606,6 +674,9 @@ void SHyperAIStudioNativeChatView::Submit()
 			return;
 		}
 	}
+	// The chips' exact references go with the message; taken before the composer empties, which drops the chips.
+	const FString WithMentions = HyperAIStudio::Mentions::Serialize(Text, Mentions);
+	CloseMentionPicker();
 	FHyperAIStudioMessageHints Hints = GetPendingHints();
 	if (!bTeam && Hints.Agent == TEXT("team"))
 	{
@@ -623,8 +694,10 @@ void SHyperAIStudioNativeChatView::Submit()
 	bBlanksNoted = false;
 	bTeamFromPreset = false;
 	Composer->SetText(FText::GetEmpty());
+	Mentions.Reset();
+	RebuildMentions();
 	bFollow = true;
-	FString Message = Text;
+	FString Message = WithMentions;
 	if (bTeam)
 	{
 		// A chat that started before the team was added does not know its skill yet, so it gets the skill's file.
@@ -635,7 +708,7 @@ void SHyperAIStudioNativeChatView::Submit()
 			HyperAIStudio::Agents::InstallTeam(Root, /*bUpdateOnly=*/false);
 			Notice = TEXT("Added HyperAI's team to this project, in .hyperai/agents, with its skill and workflow.");
 		}
-		Message = HyperAIStudio::Agents::TeamRequest(bAdded ? FString() : Chat->GetAgentName(), Text);
+		Message = HyperAIStudio::Agents::TeamRequest(bAdded ? FString() : Chat->GetAgentName(), WithMentions);
 	}
 	// A request to the team is the team's to share out; anything else may first go to the agent its task fits.
 	else if (OnRoute.IsBound() && OnRoute.Execute(Message, Attached, Hints))
@@ -663,6 +736,200 @@ bool SHyperAIStudioNativeChatView::Attach(const FString& Path)
 	RebuildAttachments();
 	FocusComposer();
 	return true;
+}
+
+FString SHyperAIStudioNativeChatView::GetComposerTextAndCursor(int32& OutCursor) const
+{
+	OutCursor = 0;
+	if (!Composer.IsValid())
+	{
+		return FString();
+	}
+	const FString Text = Composer->GetText().ToString().Replace(TEXT("\r\n"), TEXT("\n"));
+	const FTextLocation Location = Composer->GetCursorLocation();
+	TArray<FString> Lines;
+	Text.ParseIntoArray(Lines, TEXT("\n"), /*InCullEmpty=*/false);
+	int32 Offset = 0;
+	for (int32 Line = 0; Line < Lines.Num() && Line < Location.GetLineIndex(); ++Line)
+	{
+		Offset += Lines[Line].Len() + 1;
+	}
+	OutCursor = FMath::Clamp(Offset + Location.GetOffset(), 0, Text.Len());
+	return Text;
+}
+
+void SHyperAIStudioNativeChatView::SetComposerText(const FString& Text, const int32 Cursor)
+{
+	if (!Composer.IsValid())
+	{
+		return;
+	}
+	Composer->SetText(FText::FromString(Text));
+	int32 Line = 0;
+	int32 LineStart = 0;
+	for (int32 Index = 0; Index < Cursor && Index < Text.Len(); ++Index)
+	{
+		if (Text[Index] == TEXT('\n'))
+		{
+			++Line;
+			LineStart = Index + 1;
+		}
+	}
+	Composer->GoTo(FTextLocation(Line, FMath::Max(0, Cursor - LineStart)));
+}
+
+void SHyperAIStudioNativeChatView::RefreshMentionPicker()
+{
+	if (!MentionAnchor.IsValid() || !MentionPicker.IsValid())
+	{
+		return;
+	}
+	int32 Cursor = 0;
+	const FString Text = GetComposerTextAndCursor(Cursor);
+	int32 Start = INDEX_NONE;
+	FString Query;
+	if (!HyperAIStudio::Mentions::FindActiveQuery(Text, Cursor, Start, Query))
+	{
+		CloseMentionPicker();
+		return;
+	}
+	MentionPicker->SetItems(HyperAIStudio::Mentions::Gather(Query));
+	if (!MentionAnchor->IsOpen())
+	{
+		// The composer keeps the keyboard: typing goes on narrowing the list.
+		MentionAnchor->SetIsOpen(true, /*bFocusMenu=*/false);
+	}
+}
+
+void SHyperAIStudioNativeChatView::CloseMentionPicker()
+{
+	if (MentionAnchor.IsValid() && MentionAnchor->IsOpen())
+	{
+		MentionAnchor->SetIsOpen(false);
+	}
+}
+
+void SHyperAIStudioNativeChatView::ChooseMention(const FHyperAIStudioMention& Mention)
+{
+	int32 Cursor = 0;
+	const FString Text = GetComposerTextAndCursor(Cursor);
+	int32 Start = INDEX_NONE;
+	FString Query;
+	if (!HyperAIStudio::Mentions::FindActiveQuery(Text, Cursor, Start, Query))
+	{
+		Start = Cursor;
+	}
+	// Into the list first: setting the text prunes chips whose token is missing.
+	Mentions.AddUnique(Mention);
+	int32 NewCursor = 0;
+	SetComposerText(HyperAIStudio::Mentions::ReplaceQuery(Text, Start, Cursor, Mention, NewCursor), NewCursor);
+	bMentionRefreshPending = false;
+	CloseMentionPicker();
+	RebuildMentions();
+	FocusComposer();
+}
+
+void SHyperAIStudioNativeChatView::AddMentions(const TArray<FHyperAIStudioMention>& InMentions)
+{
+	int32 Cursor = 0;
+	const FString Text = GetComposerTextAndCursor(Cursor);
+	FString Inserted;
+	for (const FHyperAIStudioMention& Mention : InMentions)
+	{
+		if (Mention.Reference.IsEmpty() || Mention.Label.IsEmpty())
+		{
+			continue;
+		}
+		const bool bNew = !Mentions.Contains(Mention);
+		if (bNew)
+		{
+			Mentions.Add(Mention);
+		}
+		// A chip already there gets its token again only when it was typed away.
+		if (bNew || !Text.Contains(HyperAIStudio::Mentions::Token(Mention)))
+		{
+			Inserted += HyperAIStudio::Mentions::Token(Mention) + TEXT(" ");
+		}
+	}
+	if (!Inserted.IsEmpty())
+	{
+		const bool bNeedsSpace = Cursor > 0 && !FChar::IsWhitespace(Text[Cursor - 1]);
+		const FString Before = Text.Left(Cursor) + (bNeedsSpace ? TEXT(" ") : TEXT(""));
+		SetComposerText(Before + Inserted + Text.Mid(Cursor), Before.Len() + Inserted.Len());
+	}
+	RebuildMentions();
+	FocusComposer();
+}
+
+FString SHyperAIStudioNativeChatView::GetMessageWithMentions() const
+{
+	return HyperAIStudio::Mentions::Serialize(GetComposerText().TrimStartAndEnd(), Mentions);
+}
+
+void SHyperAIStudioNativeChatView::RebuildMentions()
+{
+	if (!MentionBox.IsValid())
+	{
+		return;
+	}
+	MentionBox->ClearChildren();
+	for (const FHyperAIStudioMention& Mention : Mentions)
+	{
+		const FString Token = HyperAIStudio::Mentions::Token(Mention);
+		MentionBox->AddSlot()
+		[
+			SNew(SBorder)
+			.BorderImage(FHyperAIStudioStyle::Get().GetBrush("HyperAIStudio.Badge"))
+			.Padding(FMargin(6.0f, 2.0f))
+			.ToolTipText(FText::Format(LOCTEXT("MentionChipTooltip", "{0}: {1}\nThe agent gets this exact reference with the message."),
+				FText::FromString(HyperAIStudio::Mentions::KindName(Mention.Kind)), FText::FromString(Mention.Reference)))
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Token))
+					.ColorAndOpacity(FStyleColors::AccentBlue)
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Mention.Detail))
+					.Font(FAppStyle::GetFontStyle("SmallFont"))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+					.ContentPadding(FMargin(2.0f, 0.0f))
+					.ToolTipText(LOCTEXT("RemoveMention", "Remove this reference and its @ from the message."))
+					.OnClicked_Lambda([this, Mention, Token]()
+					{
+						Mentions.Remove(Mention);
+						int32 Cursor = 0;
+						FString Text = GetComposerTextAndCursor(Cursor);
+						Text.ReplaceInline(*(Token + TEXT(" ")), TEXT(""), ESearchCase::CaseSensitive);
+						Text.ReplaceInline(*Token, TEXT(""), ESearchCase::CaseSensitive);
+						SetComposerText(Text, FMath::Min(Cursor, Text.Len()));
+						RebuildMentions();
+						return FReply::Handled();
+					})
+					[
+						SNew(STextBlock).Text(LOCTEXT("RemoveMentionGlyph", "x"))
+					]
+				]
+			]
+		];
+	}
 }
 
 void SHyperAIStudioNativeChatView::RebuildAttachments()
@@ -886,6 +1153,11 @@ void SHyperAIStudioNativeChatView::Tick(const FGeometry& AllottedGeometry, const
 	if (bFollow && Scroll.IsValid() && Scroll->GetScrollOffset() < Scroll->GetScrollOffsetOfEnd())
 	{
 		Scroll->ScrollToEnd();
+	}
+	if (bMentionRefreshPending)
+	{
+		bMentionRefreshPending = false;
+		RefreshMentionPicker();
 	}
 }
 

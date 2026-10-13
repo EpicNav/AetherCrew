@@ -34,7 +34,7 @@
      "hint": "A word or two that names it in code and assets"
     }
    ],
-   "prompt": "Find where {{feature}} lives in {{project}}: code, assets and past notes. Read only.\n1. hyper_memory_recall with query \"{{feature}}\": notes, past tasks and recent agent changes that mention it.\n2. hyper_project_index_status: if Status is uninitialized or failed, or bDirty is true, call it with bRequestRefresh true and poll until bRefreshInProgress is false. partial is normal: assets are not indexed yet.\n3. hyper_project_search with query {{feature}}, kinds [cpp_symbol] and pageSize 64; page with cursor. List classes, functions and properties with their file and line.\n4. Assets: the project search does not index assets yet, so use Epic's AssetTools find_assets with name {{feature}}, an empty folder_path and recursive true, then get_asset_class for each hit.\n5. Report two tables, C++ (symbol, kind, file:line) and assets (path, class), then the five places to read first and why.\n6. PASS/FAIL rows: index ready or partial with C++ symbols, code found, assets found, memory checked. Say how many results each search returned and whether any was truncated. Change nothing."
+   "prompt": "Find where {{feature}} lives in {{project}}: code, assets and past notes. Read only.\n1. hyper_memory_recall with query \"{{feature}}\": notes, past tasks and recent agent changes that mention it.\n2. hyper_project_index_status: if Status is uninitialized or failed, or bDirty is true, call it with bRequestRefresh true and poll until bRefreshInProgress is false. partial is normal while assets are still being indexed.\n3. hyper_project_search with query {{feature}}, kinds [cpp_symbol] and pageSize 64; page with cursor. List classes, functions and properties with their file and line.\n4. Assets: hyper_project_search with query {{feature}}, kinds [asset] and mode hybrid: assets named for it first, then those that match by meaning, each with its class.\n5. Report two tables, C++ (symbol, kind, file:line) and assets (path, class), then the five places to read first and why.\n6. PASS/FAIL rows: index ready or partial with C++ symbols, code found, assets found, memory checked. Say how many results each search returned and whether any was truncated. Change nothing."
   },
   {
    "id": "project-search-memory-scm.recall-before-task",
@@ -344,6 +344,83 @@
     }
    ],
    "prompt": "Show me what agents changed in {{project}} this session and what they hold. Read only.\n1. hyper_source_control_status with bRefresh false: the provider, and each file agents checked out, locked or added, with its state and anyone else holding it.\n2. hyper_memory_recall with an empty query, limit 20 and target all: the newest notes and what agents changed lately (asset, time, summary).\n3. If {{operation_id}} is not none, hyper_operation_status with it: its state, what it changed and whether it waits for approval.\n4. Report a table of files: path, state, holder, PASS (held by us and current) or FAIL (checked out by someone else, or not current). Then a table of recent agent changes: asset, when, what.\n5. Point out anything risky: assets locked by a teammate, files added but never saved, an operation awaiting approval. Submit, revert or save nothing."
+  },
+  {
+   "id": "project-search-memory-scm.find-assets-by-description",
+   "title": "Find assets by describing them",
+   "summary": "Search the project's assets by meaning, such as a stone wall material with moss, and list the best matches with how each matched.",
+   "packs": [
+    "context_scene_project_search"
+   ],
+   "tools": [
+    "hyper_project_index_status",
+    "hyper_project_search"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "search",
+    "assets",
+    "semantic",
+    "meaning",
+    "find"
+   ],
+   "placeholders": [
+    {
+     "name": "description",
+     "label": "Description",
+     "default": "the stone wall material with moss",
+     "hint": "What the asset is or looks like, in a few words"
+    }
+   ],
+   "prompt": "Find the assets in {{project}} that fit \"{{description}}\". Read only.\n1. hyper_project_index_status: if AssetIndexStatus is uninitialized, call it with bRequestRefresh true and poll until bRefreshInProgress is false. Note bPausedForPlayInEditor: while Play In Editor runs, new assets wait to be indexed.\n2. hyper_project_search with query \"{{description}}\", kinds [asset], mode semantic and pageSize 32. Records come best first, each with match (name, meaning, spelling or words) and score.\n3. hyper_project_search again with mode literal and the one or two most telling words, to catch assets named for it that the ranking put lower.\n4. Report a table of the ten best: asset (object path), class, match, score. Say which matched only by meaning, so I can check them, and whether any search came back incomplete.\nChange nothing."
+  },
+  {
+   "id": "project-search-memory-scm.check-search-index",
+   "title": "Check the project search index",
+   "summary": "How much of the project the search index holds, its size in memory, whether it is paused for Play In Editor, what it stores and where.",
+   "packs": [
+    "context_scene_project_search"
+   ],
+   "tools": [
+    "hyper_project_index_status",
+    "hyper_project_search"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "search",
+    "index",
+    "status",
+    "privacy",
+    "semantic"
+   ],
+   "placeholders": [],
+   "prompt": "Tell me what {{project}}'s search index holds and where it keeps it. Read only.\n1. hyper_project_index_status with bRequestRefresh false. Report Status, AssetIndexStatus, AssetRecordCount, AssetFolderCount, AssetPendingFolderCount, CppSymbolCount, SearchEngine, ConceptCount, IndexFeatureCount, IndexBytes in MB, and bPausedForPlayInEditor.\n2. Quote Storage, and say plainly whether anything is written to disk or sent off this computer.\n3. Quote EpicSemanticSearch: whether Epic's SemanticSearch plugin is enabled here and where its endpoint is.\n4. One hyper_project_search with query \"wall\", kinds [asset] and mode hybrid, to show the index answers; give the count.\n5. A PASS/WARN/FAIL table: index ready, assets indexed, not paused, local only. If the asset count is close to 32768, WARN that the index is near its bound.\nChange nothing."
+  },
+  {
+   "id": "project-search-memory-scm.review-sandbox-before-approve",
+   "title": "Check Sandbox Mode's held files before you approve",
+   "summary": "List the files Sandbox Mode holds and what source control will do with each on approve: check out, lock, mark for add, or hold back a file a teammate has.",
+   "packs": [
+    "shared_foundation",
+    "source_control"
+   ],
+   "skills": [
+    "lore-version-control"
+   ],
+   "tools": [
+    "hyper_sandbox_status",
+    "hyper_source_control_status"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "sandbox",
+    "source-control",
+    "perforce",
+    "lore",
+    "review"
+   ],
+   "placeholders": [],
+   "prompt": "Check what approving Sandbox Mode's held files in {{project}} will do. Read only.\n1. hyper_sandbox_status: the sandbox's state and every held file with its kind (added, edited, removed).\n2. hyper_source_control_status with bRefresh true: the backend (unreal with the provider's name, lore, or none) and, for Lore, whether the repository is local or on a server.\n3. For each held file, say what Approve will do: with Unreal's provider, check out an edited file, mark an added one for add and a removed one for delete; with Lore on a server, lock it, then mark it dirty; with local Lore, mark it dirty; with none, write it. A file a teammate has checked out or locked, or one behind the latest revision, stays held and the Sandbox card names who has it.\n4. Report a table: file, kind, what approve does, any risk. Then tell me to press Approve All, or Approve on one file's row, in Activity's Sandbox card: agents cannot approve.\nDo not save, approve, discard, check out or submit anything."
   }
  ]
 }

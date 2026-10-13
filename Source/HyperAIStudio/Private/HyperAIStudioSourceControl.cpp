@@ -10,8 +10,14 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "Features/IModularFeatures.h"
 #include "HyperAIStudioLore.h"
+#include "HyperAIStudioSandbox.h"
 #include "HyperAIStudioSettings.h"
+#include "Misc/CommandLine.h"
+#include "Misc/ConfigCacheIni.h"
+#include "Misc/Parse.h"
+#include "SourceControlHelpers.h"
 #include "HyperAIStudioSourceControlToolset.h"
 #include "ISourceControlModule.h"
 #include "ISourceControlProvider.h"
@@ -54,6 +60,8 @@ namespace HyperAIStudio::SourceControl::Private
 		FString LorePrefix;
 		FString LoreRoot;
 		FString LoreRemoteUrl;
+		/** Tests: a mock provider standing in for Unreal's. */
+		ISourceControlProvider* ProviderForTests = nullptr;
 	};
 
 	/** The lore command and the workspace a call runs in: found on the game thread, usable on any. */
@@ -101,11 +109,76 @@ namespace HyperAIStudio::SourceControl::Private
 		return FPaths::ConvertRelativePathToFull(File);
 	}
 
-	/** Unreal's provider when one is set up; its plugin covers Perforce, Plastic, Git and Lore's own Unreal plugin. */
+	/**
+	 * Unreal's provider when one is set up; its plugins cover Perforce, Subversion, Plastic, Git and Lore's own Unreal
+	 * plugin. While a File Sandbox is open the global provider is Epic's proxy ("File Sandbox"), which answers check-outs
+	 * and adds without doing them until the sandbox is persisted; the provider configured for the project is the real one.
+	 */
 	ISourceControlProvider* UnrealProvider()
 	{
+		if (State().ProviderForTests)
+		{
+			return State().ProviderForTests;
+		}
 		ISourceControlModule& Module = ISourceControlModule::Get();
-		return Module.IsEnabled() && Module.GetProvider().GetName() != FName(TEXT("None")) ? &Module.GetProvider() : nullptr;
+		if (!Module.IsEnabled())
+		{
+			return nullptr;
+		}
+		ISourceControlProvider& Active = Module.GetProvider();
+		static const FName None(TEXT("None"));
+		static const FName SandboxProxy(TEXT("File Sandbox"));
+		if (Active.GetName() == None)
+		{
+			return nullptr;
+		}
+		if (Active.GetName() != SandboxProxy)
+		{
+			return &Active;
+		}
+		FString Configured;
+		GConfig->GetString(TEXT("SourceControl.SourceControlSettings"), TEXT("Provider"), Configured, SourceControlHelpers::GetSettingsIni());
+		FParse::Value(FCommandLine::Get(), TEXT("SCCProvider="), Configured);
+		if (Configured.IsEmpty() || FName(*Configured) == None)
+		{
+			return nullptr;
+		}
+		for (ISourceControlProvider* Provider : IModularFeatures::Get().GetModularFeatureImplementations<ISourceControlProvider>(TEXT("SourceControl")))
+		{
+			if (Provider && Provider != &Active && Provider->GetName() == FName(*Configured))
+			{
+				return Provider;
+			}
+		}
+		return nullptr;
+	}
+
+	/** HyperAI's sandbox holds what is saved: check-outs, locks and adds wait for the user's approval. */
+	bool IsDeferredToSandbox()
+	{
+		return HyperAIStudio::Sandbox::IsHoldingEdits();
+	}
+
+	/** Who a lore refusal names: "... is locked by bob@studio". */
+	FString LockHolder(const FString& Text)
+	{
+		for (const TCHAR* Marker : {TEXT("locked by "), TEXT("held by "), TEXT("owned by ")})
+		{
+			const int32 At = Text.Find(Marker, ESearchCase::IgnoreCase);
+			if (At != INDEX_NONE)
+			{
+				FString Rest = Text.Mid(At + FCString::Strlen(Marker));
+				int32 End = 0;
+				while (End < Rest.Len() && !FChar::IsWhitespace(Rest[End]) && Rest[End] != TEXT(',') && Rest[End] != TEXT(')'))
+				{
+					++End;
+				}
+				Rest.LeftInline(End);
+				Rest.RemoveFromEnd(TEXT("."));
+				return Rest;
+			}
+		}
+		return FString();
 	}
 
 	/**
@@ -255,7 +328,8 @@ namespace HyperAIStudio::SourceControl::Private
 	void OnPackageSaved(const FString& PackageFilename, UPackage* Package, FObjectPostSaveContext)
 	{
 		FState& Current = State();
-		if (!Package || !Current.AgentPackages.Contains(Package->GetName()))
+		// A save into HyperAI's sandbox is not in the project yet; approving it adds and marks what it writes.
+		if (!Package || !Current.AgentPackages.Contains(Package->GetName()) || IsDeferredToSandbox())
 		{
 			return;
 		}
@@ -477,6 +551,274 @@ FHyperAIStudioSourceControl::EDecision FHyperAIStudioSourceControl::Decide(const
 	return FileState.bCanCheckOut ? EDecision::CheckOut : EDecision::Edit;
 }
 
+ISourceControlProvider* FHyperAIStudioSourceControl::GetProvider()
+{
+	return HyperAIStudio::SourceControl::Private::UnrealProvider();
+}
+
+TArray<FHyperAIStudioSourceControl::FHeldFileResult> FHyperAIStudioSourceControl::WriteHeldFiles(const TArray<FHeldFile>& Files,
+	TFunctionRef<TSet<FString>(const TArray<FString>&)> Write)
+{
+	using namespace HyperAIStudio::SourceControl::Private;
+	TArray<FHeldFileResult> Results;
+	for (const FHeldFile& File : Files)
+	{
+		FHeldFileResult& Result = Results.AddDefaulted_GetRef();
+		Result.Path = FPaths::ConvertRelativePathToFull(File.Path);
+		Result.Kind = File.Kind;
+	}
+	const bool bManaged = GetDefault<UHyperAIStudioSettings>()->bCheckOutBeforeAgentEdits;
+	ISourceControlProvider* Provider = bManaged ? UnrealProvider() : nullptr;
+	FLoreTarget Lore;
+	const bool bLore = bManaged && !Provider && FindLore(Lore);
+	FState& Current = State();
+	TArray<FString> Clear;
+
+	if (Provider)
+	{
+		if (!Provider->IsAvailable())
+		{
+			for (FHeldFileResult& Result : Results)
+			{
+				Result.Outcome = TEXT("failed");
+				Result.Detail = FString::Printf(TEXT("%s is set up but not connected, so nothing was checked out or written. Connect it in the editor's Revision Control menu."),
+					*Provider->GetName().ToString());
+			}
+			return Results;
+		}
+		TArray<FString> All;
+		for (const FHeldFileResult& Result : Results)
+		{
+			All.Add(Result.Path);
+		}
+		Provider->Execute(ISourceControlOperation::Create<FUpdateStatus>(), All);
+		TArray<int32> ToCheckOut;
+		for (int32 Index = 0; Index < Results.Num(); ++Index)
+		{
+			FHeldFileResult& Result = Results[Index];
+			const FHyperAIStudioSourceControlFileState FileState = ReadState(Provider->GetState(Result.Path, EStateCacheUsage::Use));
+			FString Error;
+			// A new file has nothing to check out, but one a teammate has already added there is theirs.
+			const EDecision Decision = Result.Kind == TEXT("added") && !FileState.bCheckedOutOther ? EDecision::Edit
+				: Decide(FileState, ProjectRelative(Result.Path), Error);
+			if (Decision == EDecision::Refuse)
+			{
+				Result.Outcome = TEXT("blocked");
+				Result.Who = FileState.Who;
+				Result.Detail = Error;
+			}
+			else if (Decision == EDecision::CheckOut && Result.Kind == TEXT("edited"))
+			{
+				ToCheckOut.Add(Index);
+			}
+			else
+			{
+				const FSourceControlStatePtr Held = Provider->GetState(Result.Path, EStateCacheUsage::Use);
+				if (Result.Kind == TEXT("edited") && Held.IsValid() && Held->IsCheckedOut())
+				{
+					// Checked out already, by this workspace.
+					Result.Outcome = TEXT("checked_out");
+				}
+				Clear.Add(Result.Path);
+			}
+		}
+		if (!ToCheckOut.IsEmpty())
+		{
+			TArray<FString> Batch;
+			for (const int32 Index : ToCheckOut)
+			{
+				Batch.Add(Results[Index].Path);
+			}
+			const FSourceControlChangelistPtr List = Changelist(*Provider);
+			const FSourceControlOperationRef Operation = ISourceControlOperation::Create<FCheckOut>();
+			const bool bAll = (List.IsValid() ? Provider->Execute(Operation, List, Batch) : Provider->Execute(Operation, Batch)) == ECommandResult::Succeeded;
+			for (const int32 Index : ToCheckOut)
+			{
+				FHeldFileResult& Result = Results[Index];
+				bool bOk = bAll;
+				FString Why;
+				if (!bAll)
+				{
+					// One refusal fails the batch: each file again, so only the one a teammate took is held back.
+					const FSourceControlOperationRef Single = ISourceControlOperation::Create<FCheckOut>();
+					bOk = (List.IsValid() ? Provider->Execute(Single, List, TArray<FString>{Result.Path}) : Provider->Execute(Single, TArray<FString>{Result.Path})) == ECommandResult::Succeeded;
+					Why = bOk ? FString() : Errors(Single);
+				}
+				if (bOk)
+				{
+					Result.Outcome = TEXT("checked_out");
+					Current.AgentFiles.Add(Result.Path);
+					Clear.Add(Result.Path);
+				}
+				else
+				{
+					const FHyperAIStudioSourceControlFileState After = ReadState(Provider->GetState(Result.Path, EStateCacheUsage::Use));
+					Result.Outcome = TEXT("blocked");
+					Result.Who = After.Who.IsEmpty() ? LockHolder(Why) : After.Who;
+					Result.Detail = FString::Printf(TEXT("%s could not check out %s%s: %s"), *Provider->GetName().ToString(), *ProjectRelative(Result.Path),
+						Result.Who.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (held by %s)"), *Result.Who), *Why);
+				}
+			}
+		}
+	}
+	else if (bLore)
+	{
+		for (FHeldFileResult& Result : Results)
+		{
+			// Locks only on a server, and only for files that are there to lock; a local repository has neither.
+			if (!Lore.IsLocal() && Result.Kind != TEXT("added") && FPaths::FileExists(Result.Path))
+			{
+				FString Text;
+				if (!RunLore(Lore, TEXT("lock acquire ") + Quoted({Result.Path}), Text, LockSeconds))
+				{
+					Result.Outcome = TEXT("blocked");
+					Result.Who = LockHolder(Text);
+					Result.Detail = FString::Printf(TEXT("Lore could not lock %s: %s"), *ProjectRelative(Result.Path), *Text.TrimStartAndEnd().Left(600));
+					continue;
+				}
+				Result.Outcome = TEXT("locked");
+				Current.AgentFiles.Add(Result.Path);
+			}
+			Clear.Add(Result.Path);
+		}
+	}
+	else
+	{
+		for (const FHeldFileResult& Result : Results)
+		{
+			Clear.Add(Result.Path);
+		}
+	}
+
+	const TSet<FString> Written = Clear.IsEmpty() ? TSet<FString>() : Write(Clear);
+	TArray<FString> Added;
+	TArray<FString> Removed;
+	TArray<FString> Dirty;
+	for (FHeldFileResult& Result : Results)
+	{
+		if (!Clear.Contains(Result.Path))
+		{
+			continue;
+		}
+		Result.bWritten = Written.Contains(Result.Path);
+		if (!Result.bWritten)
+		{
+			Result.Outcome = TEXT("failed");
+			Result.Detail = TEXT("The File Sandbox could not write it into the project, so it stays held; the Output Log says why.");
+			continue;
+		}
+		if (Result.Outcome.IsEmpty())
+		{
+			Result.Outcome = TEXT("written");
+		}
+		(Result.Kind == TEXT("added") ? Added : Result.Kind == TEXT("removed") ? Removed : Dirty).Add(Result.Path);
+	}
+
+	if (Provider)
+	{
+		// The File Sandbox adds and deletes through the real provider as it writes; a provider that still does not know
+		// a written file (or a stand-in) is told here.
+		TArray<FString> Touched = Added;
+		Touched.Append(Removed);
+		if (!Touched.IsEmpty())
+		{
+			Provider->Execute(ISourceControlOperation::Create<FUpdateStatus>(), Touched);
+		}
+		TArray<FString> Add;
+		for (const FString& File : Added)
+		{
+			const FSourceControlStatePtr FileState = Provider->GetState(File, EStateCacheUsage::Use);
+			if (FileState.IsValid() && !FileState->IsSourceControlled() && FileState->CanAdd())
+			{
+				Add.Add(File);
+			}
+		}
+		FString AddError;
+		if (!Add.IsEmpty())
+		{
+			const FSourceControlOperationRef MarkForAdd = ISourceControlOperation::Create<FMarkForAdd>();
+			const FSourceControlChangelistPtr List = Changelist(*Provider);
+			if ((List.IsValid() ? Provider->Execute(MarkForAdd, List, Add) : Provider->Execute(MarkForAdd, Add)) != ECommandResult::Succeeded)
+			{
+				AddError = Errors(MarkForAdd);
+			}
+		}
+		TArray<FString> Delete;
+		for (const FString& File : Removed)
+		{
+			const FSourceControlStatePtr FileState = Provider->GetState(File, EStateCacheUsage::Use);
+			if (FileState.IsValid() && FileState->IsSourceControlled() && !FileState->IsDeleted() && !FileState->IsAdded())
+			{
+				Delete.Add(File);
+			}
+		}
+		FString DeleteError;
+		if (!Delete.IsEmpty())
+		{
+			const FSourceControlOperationRef MarkForDelete = ISourceControlOperation::Create<FDelete>();
+			if (Provider->Execute(MarkForDelete, Delete) != ECommandResult::Succeeded)
+			{
+				DeleteError = Errors(MarkForDelete);
+			}
+		}
+		for (FHeldFileResult& Result : Results)
+		{
+			if (!Result.bWritten)
+			{
+				continue;
+			}
+			if (Result.Kind == TEXT("added"))
+			{
+				const FSourceControlStatePtr FileState = Provider->GetState(Result.Path, EStateCacheUsage::Use);
+				const bool bAdded = FileState.IsValid() && FileState->IsAdded();
+				Result.Outcome = bAdded ? TEXT("marked_for_add") : TEXT("written");
+				Result.Detail = bAdded ? FString() : FString::Printf(TEXT("Written, but not marked for add%s"), AddError.IsEmpty() ? TEXT(".") : *(TEXT(": ") + AddError));
+				Current.AgentFiles.Add(Result.Path);
+			}
+			else if (Result.Kind == TEXT("removed"))
+			{
+				const FSourceControlStatePtr FileState = Provider->GetState(Result.Path, EStateCacheUsage::Use);
+				const bool bDeleted = FileState.IsValid() && FileState->IsDeleted();
+				Result.Outcome = bDeleted ? TEXT("marked_for_delete") : TEXT("written");
+				Result.Detail = bDeleted || DeleteError.IsEmpty() ? FString() : TEXT("Removed, but not marked for delete: ") + DeleteError;
+			}
+		}
+	}
+	else if (bLore)
+	{
+		TArray<FString> All = Dirty;
+		All.Append(Added);
+		All.Append(Removed);
+		if (!All.IsEmpty())
+		{
+			FString Text;
+			const bool bDirty = RunLore(Lore, TEXT("dirty ") + Quoted(All), Text, DirtySeconds);
+			for (FHeldFileResult& Result : Results)
+			{
+				if (!Result.bWritten)
+				{
+					continue;
+				}
+				Current.AgentFiles.Add(Result.Path);
+				if (Result.Outcome != TEXT("locked"))
+				{
+					Result.Outcome = bDirty ? TEXT("marked_dirty") : TEXT("written");
+				}
+				if (!bDirty)
+				{
+					Result.Detail = TEXT("Written, but lore dirty did not take it: ") + Text.TrimStartAndEnd().Left(300);
+				}
+			}
+		}
+	}
+	for (const FHeldFileResult& Result : Results)
+	{
+		UE_LOG(LogHyperAIStudioSourceControl, Log, TEXT("Sandbox approve: %s %s -> %s%s"), *Result.Kind, *ProjectRelative(Result.Path), *Result.Outcome,
+			Result.Who.IsEmpty() ? TEXT("") : *(TEXT(" (") + Result.Who + TEXT(")")));
+	}
+	return Results;
+}
+
 bool FHyperAIStudioSourceControl::MakeEditable(const TArray<FString>& PackageNames, FString& OutError)
 {
 	using namespace HyperAIStudio::SourceControl::Private;
@@ -520,6 +862,12 @@ bool FHyperAIStudioSourceControl::MakeEditable(const TArray<FString>& PackageNam
 			default: break;
 			}
 		}
+		// Sandbox Mode: a teammate's file still turns the edit away now, but the check-out waits for the user's approval,
+		// which checks out what it writes (WriteHeldFiles).
+		if (IsDeferredToSandbox())
+		{
+			return true;
+		}
 		if (!CheckOut.IsEmpty())
 		{
 			const FSourceControlOperationRef Operation = ISourceControlOperation::Create<FCheckOut>();
@@ -538,6 +886,11 @@ bool FHyperAIStudioSourceControl::MakeEditable(const TArray<FString>& PackageNam
 	// tell, so its files are only recorded, and marked dirty once saved. The edit waits for the lock on the game thread,
 	// so a server that does not answer is given up on quickly.
 	TArray<FString> Existing = Files.FilterByPredicate([](const FString& File) { return FPaths::FileExists(File); });
+	// Sandbox Mode: the lock is taken when the user approves the held files (WriteHeldFiles).
+	if (IsDeferredToSandbox())
+	{
+		return true;
+	}
 	FString Text;
 	if (!Existing.IsEmpty() && !Lore.IsLocal() && !RunLore(Lore, TEXT("lock acquire ") + Quoted(Existing), Text, LockSeconds))
 	{
@@ -634,6 +987,15 @@ void FHyperAIStudioSourceControl::SetLoreForTests(const FString& Executable, con
 	State().LorePrefix = Prefix;
 	State().LoreRoot = Root;
 	State().LoreRemoteUrl = RemoteUrl;
+	State().AgentFiles.Reset();
+	State().AgentPackages.Reset();
+}
+
+void FHyperAIStudioSourceControl::SetProviderForTests(ISourceControlProvider* Provider)
+{
+	using namespace HyperAIStudio::SourceControl::Private;
+	State().ProviderForTests = Provider;
+	State().Changelist.Reset();
 	State().AgentFiles.Reset();
 	State().AgentPackages.Reset();
 }

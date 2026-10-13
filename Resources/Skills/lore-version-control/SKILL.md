@@ -55,3 +55,11 @@ If an Unreal source control provider (Perforce, Git, Plastic) is set up, agent e
 - "locked by <name>": someone else holds the asset. Ask them to submit it, or work on another asset.
 - "The Lore server did not answer": the server in `Lore.Server` is down or unreachable. Tell the user; do not retry
   in a loop, and do not turn off Check Out Before Agent Edits for them.
+
+## While Sandbox Mode holds edits
+
+Saves land in HyperAI's sandbox, not the project, so nothing is locked or checked out as an agent edits; a teammate's
+lock still turns the edit away. When the user presses Approve All (or Approve on one file) in Activity's Sandbox card,
+each file is locked (server) or checked out through Unreal's provider before it is written, new files are marked for
+add (or dirty, in Lore), and a file a teammate holds stays held, naming them. `hyper_sandbox_status` lists what is
+held; agents never approve it.

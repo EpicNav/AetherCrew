@@ -622,6 +622,14 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Sandbox", meta = (DisplayName = "Sandbox Mode"))
 	bool bSandboxMode = false;
 
+	/**
+	 * Project search and the chat's @ picker also find assets by meaning ("the stone wall material with moss" finds
+	 * MI_Cobble_Overgrown), from a vocabulary and an index that stay on this computer: nothing is downloaded or sent. Off:
+	 * ranked by the words in names, tags, classes and folders only.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Project Search", meta = (DisplayName = "Search By Meaning"))
+	bool bSearchByMeaning = true;
+
 	/** Chats open in HyperAI's own chat view instead of the terminal. A Claude Code chat with Remote Control stays in the terminal. */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Chat", meta = (DisplayName = "Native Chat View"))
 	bool bUseNativeChatView = true;

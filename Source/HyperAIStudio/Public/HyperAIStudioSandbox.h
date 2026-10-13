@@ -32,6 +32,20 @@ namespace HyperAIStudio::Sandbox
 		FString Kind;
 	};
 
+	/** What source control did for one held file as it was last approved (FHyperAIStudioSourceControl::WriteHeldFiles). */
+	struct FFileOutcome
+	{
+		/** Project-relative, as FChange::Path. */
+		FString Path;
+		FString Kind;
+		/** checked_out, marked_for_add, marked_for_delete, locked, marked_dirty, written, blocked or failed. */
+		FString Outcome;
+		/** Who holds a blocked file. */
+		FString Who;
+		FString Detail;
+		bool bWritten = false;
+	};
+
 	struct FStatus
 	{
 		EState State = EState::Off;
@@ -70,6 +84,15 @@ namespace HyperAIStudio::Sandbox
 	 * Refused while other assets are unsaved: closing a sandbox reloads every unsaved asset from disk.
 	 */
 	HYPERAISTUDIO_API bool ApproveAll(FString& OutError);
+	/**
+	 * The user's decision for some held files (project-relative, as FChange::Path): each is checked out (or locked, in
+	 * Lore on a server) and written to the project; new files are marked for add. A file a teammate holds stays held,
+	 * naming them, and the rest go ahead. The sandbox stays open with whatever is left. Approve All writes every held file
+	 * this way, and closes the sandbox only once all of them went. False with OutError when any stayed held.
+	 */
+	HYPERAISTUDIO_API bool ApproveFiles(const TArray<FString>& Paths, FString& OutError);
+	/** What source control did for each file at the last approve, for the sandbox card. */
+	HYPERAISTUDIO_API const TArray<FFileOutcome>& GetLastOutcomes();
 	/**
 	 * For the auto-approval the user turned on for Sandbox Mode's held saves: whether Approve All would go ahead now,
 	 * without its saving step. It waits while any asset is unsaved, rather than saving it, and while Play In Editor or an

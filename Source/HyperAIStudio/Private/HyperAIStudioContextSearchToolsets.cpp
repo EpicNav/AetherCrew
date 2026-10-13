@@ -19,6 +19,8 @@
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioNames.h"
 #include "HyperAIStudioProjectAssetIndex.h"
+#include "HyperAIStudioSemanticSearch.h"
+#include "HyperAIStudioSettings.h"
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "IModelContextProtocolModule.h"
 #include "Internationalization/Text.h"
@@ -723,7 +725,7 @@ namespace HyperAIStudio::ContextSearch::Private
 		static const TSet<FString> Values = {
 			TEXT("name"), TEXT("asset_name"), TEXT("asset_class_path"), TEXT("package_name"),
 			TEXT("object_path"), TEXT("parent_class_path"), TEXT("symbol_kind"), TEXT("relative_path"), TEXT("line"),
-			TEXT("status"), TEXT("generation"), TEXT("asset_count"), TEXT("cpp_file_count"),
+			TEXT("match"), TEXT("score"), TEXT("status"), TEXT("generation"), TEXT("asset_count"), TEXT("cpp_file_count"),
 			TEXT("cpp_symbol_count"), TEXT("total_record_count")
 		};
 		return Values;
@@ -733,7 +735,8 @@ namespace HyperAIStudio::ContextSearch::Private
 	{
 		static const TArray<FString> Values = {
 			TEXT("name"), TEXT("asset_name"), TEXT("asset_class_path"), TEXT("package_name"),
-			TEXT("object_path"), TEXT("parent_class_path"), TEXT("symbol_kind"), TEXT("relative_path"), TEXT("line")
+			TEXT("object_path"), TEXT("parent_class_path"), TEXT("symbol_kind"), TEXT("relative_path"), TEXT("line"),
+			TEXT("match"), TEXT("score")
 		};
 		return Values;
 	}
@@ -1325,7 +1328,8 @@ bool FHyperAIStudioContextSearchContracts::ProjectPage(
 	const int32 PageSize,
 	const FString& Cursor,
 	const int32 MaxOutputBytesValue,
-	FHyperAIReadReport& OutReport)
+	FHyperAIReadReport& OutReport,
+	const bool bKeepOrder)
 {
 	using namespace HyperAIStudio::ContextSearch::Private;
 	OutReport = FHyperAIReadReport();
@@ -1349,7 +1353,8 @@ bool FHyperAIStudioContextSearchContracts::ProjectPage(
 
 	const TArray<FHyperAIContextSearchValueRecord>* Records = &Snapshot.Records;
 	TArray<FHyperAIContextSearchValueRecord> CanonicalRecords;
-	if (!RecordsAreCanonical(Snapshot.Records))
+	// A ranked search keeps its order, best first; its records come with their fields sorted and no duplicates.
+	if (!bKeepOrder && !RecordsAreCanonical(Snapshot.Records))
 	{
 		CanonicalRecords = Snapshot.Records;
 		SortAndDeduplicateRecords(CanonicalRecords);
@@ -3251,6 +3256,32 @@ namespace HyperAIStudio::ContextSearch::Private
 		return Snapshot;
 	}
 
+	/**
+	 * Epic's SemanticSearch plugin, read from its plugin state and saved settings without loading it: its embeddings and
+	 * captions come from an OpenAI-compatible HTTP API, so HyperAI says where that is and never sends it anything.
+	 */
+	FString DescribeEpicSemanticSearch()
+	{
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SemanticSearch"));
+		if (!Plugin.IsValid())
+		{
+			return TEXT("not_installed");
+		}
+		if (!Plugin->IsEnabled())
+		{
+			return TEXT("not_enabled: Epic's SemanticSearch (Experimental) is off here. HyperAI does not use it: its only embedding provider is an OpenAI-compatible HTTP API.");
+		}
+		FString Url = TEXT("https://api.openai.com/v1");
+		if (GConfig)
+		{
+			GConfig->GetString(TEXT("/Script/SemanticSearch.SemanticSearchSettings"), TEXT("EmbeddingBaseUrl"), Url, GEditorPerProjectIni);
+		}
+		const FString Lower = Url.ToLower();
+		const bool bLocal = Lower.Contains(TEXT("://localhost")) || Lower.Contains(TEXT("://127.0.0.1")) || Lower.Contains(TEXT("://[::1]"));
+		return FString::Printf(TEXT("%s: Epic's SemanticSearch is enabled and embeds through %s. HyperAI's project search does not call it."),
+			bLocal ? TEXT("enabled_local_endpoint") : TEXT("enabled_remote_endpoint"), *Url);
+	}
+
 	bool IsAssetSnapshotAttached(const FHyperAIProjectAssetIndexSnapshot& Assets)
 	{
 		return Assets.Status != TEXT("not_attached");
@@ -3368,6 +3399,11 @@ FHyperAIReadReport FHyperAIStudioContextSearchContracts::SearchProjectIndex(
 	if (!NormalizeProjection(Request.Fields, ProjectProjectionAllowlist(), ProjectProjectionDefaults(), Projection, ErrorCode, Error))
 	{
 		return InvalidReport(ErrorCode, TEXT("fields"), Error);
+	}
+	const FString Mode = Request.Mode.TrimStartAndEnd().ToLower().IsEmpty() ? FString(TEXT("auto")) : Request.Mode.TrimStartAndEnd().ToLower();
+	if (Mode != TEXT("auto") && Mode != TEXT("literal") && Mode != TEXT("semantic") && Mode != TEXT("hybrid"))
+	{
+		return InvalidReport(TEXT("invalid_mode"), TEXT("mode"), TEXT("Mode is literal, semantic, hybrid or auto (empty)."));
 	}
 
 	TSet<FString> KindSet(Kinds);
@@ -3518,19 +3554,67 @@ FHyperAIReadReport FHyperAIStudioContextSearchContracts::SearchProjectIndex(
 			TEXT("query"),
 			FString::Printf(TEXT("The query matched more than %d records; add a term to narrow it."), MaxProjectSearchMatches));
 	}
-	Filtered.Records.Reserve(Filtered.Records.Num() + AssetMatches.Num());
+	// By meaning: assets ranked on this machine by stems, the built-in concept vocabulary and spelling. They follow the
+	// literal matches (hybrid), or stand alone, best first (semantic); auto ranks a description or a query nothing named.
+	TArray<FHyperAIContextSearchValueRecord> Ranked;
+	if (bAssetPartCounts && Mode != TEXT("literal") && !bWorkBoundReached)
+	{
+		const bool bMeaning = GetDefault<UHyperAIStudioSettings>()->bSearchByMeaning;
+		const HyperAIStudio::SemanticSearch::FQuery Analyzed = HyperAIStudio::SemanticSearch::AnalyzeQuery(Query, bMeaning);
+		const bool bRank = Mode == TEXT("semantic") || Mode == TEXT("hybrid")
+			|| (Mode == TEXT("auto") && (AssetMatches.IsEmpty() || Analyzed.Words.Num() >= 3));
+		if (bRank && !Analyzed.IsEmpty())
+		{
+			if (Mode == TEXT("semantic"))
+			{
+				// Literal matches come back through the ranking, with the name bonus, in score order.
+				AssetMatches.Reset();
+			}
+			HyperAIStudio::SemanticSearch::FRankLimits Limits;
+			Limits.MaxResults = FMath::Clamp(MaxProjectSearchMatches - Filtered.Records.Num() - AssetMatches.Num(), 0, 200);
+			bool bRankTruncated = false;
+			const TArray<HyperAIStudio::SemanticSearch::FRanked> Results =
+				HyperAIStudio::SemanticSearch::Rank(Assets, Analyzed, Limits, bRankTruncated);
+			const TSet<const FHyperAIProjectAssetRow*> Literal(AssetMatches);
+			for (const HyperAIStudio::SemanticSearch::FRanked& Result : Results)
+			{
+				if (Literal.Contains(Result.Row))
+				{
+					continue;
+				}
+				FHyperAIContextSearchValueRecord Record = MakeAssetRecord(*Result.Row);
+				AddField(Record, TEXT("match"), TEXT("string"), Result.Match);
+				AddField(Record, TEXT("score"), TEXT("number"), FString::Printf(TEXT("%.3f"), Result.Score));
+				SortFields(Record);
+				Ranked.Add(MoveTemp(Record));
+			}
+			if (bRankTruncated)
+			{
+				Filtered.bIncomplete = true;
+				AddDiagnosticOnce(Filtered.Diagnostics, TEXT("project_search_rank_budget_reached"), TEXT("warning"), TEXT("query"),
+					TEXT("Ranking by meaning reached its time budget; some folders were not scored."));
+			}
+		}
+	}
+	Filtered.Records.Reserve(Filtered.Records.Num() + AssetMatches.Num() + Ranked.Num());
 	for (const FHyperAIProjectAssetRow* Row : AssetMatches)
 	{
 		Filtered.Records.Add(MakeAssetRecord(*Row));
 	}
 	SortAndDeduplicateRecords(Filtered.Records);
+	const bool bRanked = !Ranked.IsEmpty();
+	Filtered.Records.Append(MoveTemp(Ranked));
 	TArray<FString> FingerprintTokens = {
 		TEXT("project_search.v1"), Query.ToLower(), FString::Join(Kinds, TEXT(",")),
 		FString::Join(Projection, TEXT(",")), LexToString(Request.PageSize), LexToString(Request.MaxOutputBytes)
 	};
+	if (Mode != TEXT("literal"))
+	{
+		FingerprintTokens.Add(TEXT("mode=") + Mode);
+	}
 	const FString RequestFingerprint = HashTokens(FingerprintTokens);
 	FHyperAIReadReport Report;
-	ProjectPage(Filtered, Projection, RequestFingerprint, Request.PageSize, Request.Cursor, Request.MaxOutputBytes, Report);
+	ProjectPage(Filtered, Projection, RequestFingerprint, Request.PageSize, Request.Cursor, Request.MaxOutputBytes, Report, bRanked);
 	return Report;
 }
 
@@ -3562,6 +3646,15 @@ FHyperAIProjectIndexStatus FHyperAIStudioProjectIndexStore::GetStatus() const
 	Status.AssetFolderCount = Assets->FolderCount;
 	Status.AssetPendingFolderCount = Assets->PendingFolderCount;
 	Status.bAssetRegistryScanning = Assets->bRegistryScanning;
+	Status.SearchEngine = GetDefault<UHyperAIStudioSettings>()->bSearchByMeaning ? TEXT("local_concepts.v1") : TEXT("words_only");
+	Status.ConceptCount = HyperAIStudio::SemanticSearch::ConceptCount();
+	Status.IndexFeatureCount = Assets->PostingCount;
+	Status.IndexBytes = Assets->ApproxBytes;
+	Status.bPausedForPlayInEditor = Assets->bPaused;
+	Status.Storage = TEXT("Editor memory only, rebuilt from the Asset Registry's cache each session: per asset its name, class, folder, ")
+		TEXT("parent class and up to 12 short tag values, plus the words, concepts and trigrams found in them. Nothing is written to disk, ")
+		TEXT("no model is downloaded, and no query or asset data leaves this computer.");
+	Status.EpicSemanticSearch = DescribeEpicSemanticSearch();
 	Status.CppFileCount = Snapshot.CppFileCount;
 	Status.CppSymbolCount = Snapshot.CppSymbolCount;
 	Status.TotalRecordCount = Snapshot.Value.Records.Num() + Assets->AssetCount;
