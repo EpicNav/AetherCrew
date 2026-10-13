@@ -542,6 +542,63 @@ namespace HyperAIStudio::Niagara::GraphGate
 			return true;
 		}
 
+		/** The System's scratch pad module script of this object name, as inspect's scratch_pad_modules lists it. */
+		UNiagaraScript* FindScratchModule(const UNiagaraSystem& System, const FString& Name)
+		{
+			for (UNiagaraScript* Script : System.ScratchPadScripts)
+			{
+				if (Script && Script->GetName() == Name)
+				{
+					return Script;
+				}
+			}
+			return nullptr;
+		}
+
+		UNiagaraNodeCustomHlsl* FindHlslNode(const UNiagaraScript& Script)
+		{
+			const UNiagaraScriptSource* Source = Cast<UNiagaraScriptSource>(Script.GetLatestSource());
+			const UNiagaraGraph* Graph = Source ? Source->NodeGraph.Get() : nullptr;
+			if (!Graph)
+			{
+				return nullptr;
+			}
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (UNiagaraNodeCustomHlsl* Code = Cast<UNiagaraNodeCustomHlsl>(Node))
+				{
+					return Code;
+				}
+			}
+			return nullptr;
+		}
+
+		/**
+		 * Replaces the body of a scratch pad module's Custom HLSL node, the Details panel's way: the property through
+		 * reflection between Modify and PostEditChangeProperty, which marks the module's graph for recompile, so the
+		 * System's compile picks the new code up wherever the module sits in a stack.
+		 */
+		bool SetHlslModule(UNiagaraSystem& System, const FHyperAINiagaraEditOp& Op, FString& OutStatus, FString& OutError)
+		{
+			FStrProperty* HlslProperty = FindFProperty<FStrProperty>(UNiagaraNodeCustomHlsl::StaticClass(), TEXT("CustomHlsl"));
+			UNiagaraScript* Script = FindScratchModule(System, Op.Name);
+			UNiagaraNodeCustomHlsl* Code = Script ? FindHlslNode(*Script) : nullptr;
+			if (!HlslProperty || !Code)
+			{
+				OutError = !HlslProperty ? FString(TEXT("This engine build changed the Custom HLSL node; HLSL modules cannot be edited here."))
+					: FString::Printf(TEXT("%s is not a scratch pad module with a Custom HLSL node."), *Op.Name);
+				return false;
+			}
+			Script->Modify();
+			Code->Modify();
+			Code->PreEditChange(HlslProperty);
+			HlslProperty->SetPropertyValue_InContainer(Code, Op.Hlsl);
+			FPropertyChangedEvent HlslChanged(HlslProperty, EPropertyChangeType::ValueSet);
+			Code->PostEditChangeProperty(HlslChanged);
+			OutStatus = TEXT("set_hlsl_module:") + Op.Name;
+			return true;
+		}
+
 		bool AddStageModule(UNiagaraSystem& System, const FHyperAINiagaraEditOp& Op, FString& OutStatus, FString& OutError)
 		{
 			FStack Stack;
@@ -912,7 +969,7 @@ namespace HyperAIStudio::Niagara::GraphGate
 
 	bool IsGraphOp(const FHyperAINiagaraEditOp& Op)
 	{
-		return Op.Kind == TEXT("add_simulation_stage") || Op.Kind == TEXT("add_hlsl_module")
+		return Op.Kind == TEXT("add_simulation_stage") || Op.Kind == TEXT("add_hlsl_module") || Op.Kind == TEXT("set_hlsl_module")
 			|| Op.Kind == TEXT("set_emitter_property") || Op.Kind == TEXT("set_renderer_property")
 			|| ((Op.Kind == TEXT("add_module") || Op.Kind == TEXT("set_module_enabled")) && !Op.StageName.IsEmpty());
 	}
@@ -921,9 +978,24 @@ namespace HyperAIStudio::Niagara::GraphGate
 	{
 		OutStatus.Reset();
 		OutDiagnostic.Reset();
-		if (!Op.Hlsl.IsEmpty() && Op.Kind != TEXT("add_hlsl_module"))
+		if (!Op.Hlsl.IsEmpty() && Op.Kind != TEXT("add_hlsl_module") && Op.Kind != TEXT("set_hlsl_module"))
 		{
-			return Fail(OutStatus, OutDiagnostic, TEXT("invalid_op_address"), TEXT("Only add_hlsl_module takes hlsl."));
+			return Fail(OutStatus, OutDiagnostic, TEXT("invalid_op_address"), TEXT("Only add_hlsl_module and set_hlsl_module take hlsl."));
+		}
+		if (Op.Kind == TEXT("set_hlsl_module"))
+		{
+			FString HlslError;
+			if (!Op.EmitterName.IsEmpty() || !Op.ScriptName.IsEmpty() || !Op.StageName.IsEmpty() || !Op.ModuleName.IsEmpty()
+				|| !Op.AssetPath.IsEmpty() || !IsIdentifier(Op.Name))
+			{
+				return Fail(OutStatus, OutDiagnostic, TEXT("invalid_op_address"),
+					TEXT("set_hlsl_module needs name, the scratch pad module's name as inspect lists it in scratch_pad_modules, and hlsl; no emitter, script, stage or module address."));
+			}
+			if (!CheckHlsl(Op.Hlsl, HlslError))
+			{
+				return Fail(OutStatus, OutDiagnostic, TEXT("invalid_hlsl"), HlslError);
+			}
+			return true;
 		}
 		if (Op.Kind == TEXT("add_simulation_stage"))
 		{
@@ -1026,6 +1098,8 @@ namespace HyperAIStudio::Niagara::GraphGate
 				Describe(*Data, Emitters.Add(Handle.GetName()));
 			}
 		}
+		// Scratch pad modules the System has, and those earlier add_hlsl_module ops make (named as asked when free).
+		TSet<FString> ScratchModules(ReadScratchPadModules(System));
 		for (int32 Index = 0; Index < Ops.Num(); ++Index)
 		{
 			const FHyperAINiagaraEditOp& Op = Ops[Index];
@@ -1033,6 +1107,19 @@ namespace HyperAIStudio::Niagara::GraphGate
 			{
 				return Fail(OutStatus, OutDiagnostic, Status, FString::Printf(TEXT("Op %d: %s"), Index, *Why));
 			};
+			if (Op.Kind == TEXT("add_hlsl_module"))
+			{
+				ScratchModules.Add(Op.Name);
+			}
+			if (Op.Kind == TEXT("set_hlsl_module"))
+			{
+				if (!ScratchModules.Contains(Op.Name))
+				{
+					return Reject(TEXT("scratch_module_not_found"), FString::Printf(TEXT("No scratch pad module named %s. Scratch pad modules: %s."), *Op.Name,
+						ScratchModules.IsEmpty() ? TEXT("none") : *FString::Join(ScratchModules.Array(), TEXT(", "))));
+				}
+				continue;
+			}
 			if (Op.Kind == TEXT("add_emitter"))
 			{
 				if (Emitters.Contains(FName(*Op.Name)))
@@ -1137,6 +1224,7 @@ namespace HyperAIStudio::Niagara::GraphGate
 		bool bApplied = false;
 		if (Op.Kind == TEXT("add_simulation_stage")) bApplied = AddSimulationStage(System, Op, OutStatus, OutError);
 		else if (Op.Kind == TEXT("add_hlsl_module")) bApplied = AddHlslModule(System, Op, OutStatus, OutError);
+		else if (Op.Kind == TEXT("set_hlsl_module")) bApplied = SetHlslModule(System, Op, OutStatus, OutError);
 		else if (Op.Kind == TEXT("add_module")) bApplied = AddStageModule(System, Op, OutStatus, OutError);
 		else if (Op.Kind == TEXT("set_module_enabled")) bApplied = SetStageModuleEnabled(System, Op, OutStatus, OutError);
 		else if (Op.Kind == TEXT("set_emitter_property")) bApplied = SetEmitterProperty(System, Op, OutStatus, OutError);

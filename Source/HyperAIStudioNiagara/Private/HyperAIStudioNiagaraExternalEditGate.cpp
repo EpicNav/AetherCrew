@@ -428,7 +428,7 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 			// A stage address on an op that cannot use one would otherwise edit a different stack.
 			return Fail(TEXT("invalid_op_address"), Op.Kind == TEXT("set_input_value")
 				? TEXT("Inputs of simulation-stage modules cannot be set yet; write the values into an add_hlsl_module in that stage.")
-				: TEXT("stage_name goes only with add_module, set_module_enabled and add_hlsl_module; hlsl only with add_hlsl_module."));
+				: TEXT("stage_name goes only with add_module, set_module_enabled and add_hlsl_module; hlsl only with add_hlsl_module and set_hlsl_module."));
 		}
 
 		const bool bHasScript = !Op.ScriptName.IsEmpty();
@@ -508,7 +508,7 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 			}
 			return true;
 		}
-		return Fail(TEXT("unsupported_op_kind"), TEXT("kind must be set_module_enabled, add_module, add_renderer, add_emitter, set_input_value, apply_stack_issue_fix, add_simulation_stage, add_hlsl_module, set_emitter_property or set_renderer_property."));
+		return Fail(TEXT("unsupported_op_kind"), TEXT("kind must be set_module_enabled, add_module, add_renderer, add_emitter, set_input_value, apply_stack_issue_fix, add_simulation_stage, add_hlsl_module, set_hlsl_module, set_emitter_property or set_renderer_property."));
 	}
 
 	bool ApplyOps(

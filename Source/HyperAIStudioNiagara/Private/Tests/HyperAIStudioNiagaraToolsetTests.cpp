@@ -16,6 +16,11 @@
 #include "HyperAIStudioNiagaraAssetsGate.h"
 #include "HyperAIStudioNiagaraExternalEditGate.h"
 #include "HyperAIStudioNiagaraGraphGate.h"
+#include "HyperAIStudioNiagaraLive.h"
+#include "NiagaraComponent.h"
+#include "NiagaraGraph.h"
+#include "NiagaraScriptSource.h"
+#include "PreviewScene.h"
 #include "NiagaraNodeCustomHlsl.h"
 #include "NiagaraScript.h"
 #include "NiagaraSimulationStageBase.h"
@@ -110,15 +115,16 @@ bool FHyperAIStudioNiagaraManifestTest::RunTest(const FString& Parameters)
 	(void)Parameters;
 	const TArray<FHyperAIStudioNiagaraManifestEntry>& Manifest =
 		FHyperAIStudioNiagaraContracts::GetManifest();
-	// The generated catalog pins these three names; a fourth tool would fail admission until it is regenerated.
-	TestEqual(TEXT("exactly three Niagara callables"), Manifest.Num(), 3);
+	// The generated catalog pins these four names; another tool would fail admission until it is regenerated.
+	TestEqual(TEXT("exactly four Niagara callables"), Manifest.Num(), 4);
 	TestEqual(TEXT("exact optional-module toolset identity"),
 		FHyperAIStudioNiagaraContracts::GetQualifiedToolsetName(),
 		FString(TEXT("HyperAIStudioNiagara.HyperAIStudioNiagaraToolset")));
 	const TSet<FString> Expected = {
 		TEXT("hyper_niagara_inspect"),
 		TEXT("hyper_niagara_apply_plan"),
-		TEXT("hyper_niagara_validate")};
+		TEXT("hyper_niagara_validate"),
+		TEXT("hyper_niagara_live")};
 	TSet<FString> Actual;
 	for (const FHyperAIStudioNiagaraManifestEntry& Entry : Manifest)
 	{
@@ -164,7 +170,7 @@ bool FHyperAIStudioNiagaraDescriptorTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("exact live probe"),
 		FString(FHyperAIStudioNiagaraContracts::LiveProbeId),
 		FString(TEXT("probe.niagara_editor")));
-	TestEqual(TEXT("exact three variants"), Descriptor.Variants.Num(), 3);
+	if (!TestEqual(TEXT("exact four variants"), Descriptor.Variants.Num(), 4)) return false;
 	TestTrue(TEXT("contract fingerprint canonical"),
 		FHyperAIStudioNiagaraContracts::IsCanonicalSha256(Descriptor.ContractFingerprint));
 	TestTrue(TEXT("adapter fingerprint canonical"),
@@ -186,15 +192,17 @@ bool FHyperAIStudioNiagaraDescriptorTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("result type stays in the disjoint result namespace"),
 			Variant.ResultTypeId.StartsWith(TEXT("hyperai.result.")));
 	}
-	TestEqual(TEXT("unique variants"), Variants.Num(), 3);
-	TestEqual(TEXT("unique request DTOs"), RequestTypes.Num(), 3);
-	TestEqual(TEXT("unique result DTOs"), ResultTypes.Num(), 3);
+	TestEqual(TEXT("unique variants"), Variants.Num(), 4);
+	TestEqual(TEXT("unique request DTOs"), RequestTypes.Num(), 4);
+	TestEqual(TEXT("unique result DTOs"), ResultTypes.Num(), 4);
 	// Safety classes are pinned by the generated catalog; changing one fails admission closed.
 	TestEqual(TEXT("inspect read safety"), Descriptor.Variants[0].Safety, EHyperAIStudioDomainSafety::Read);
 	TestEqual(TEXT("apply_plan edit safety"), Descriptor.Variants[1].Safety, EHyperAIStudioDomainSafety::Edit);
 	TestEqual(TEXT("apply_plan runs batched edit ops"), Descriptor.Variants[1].VariantId,
 		FString(TEXT("external_edit_ops.v1")));
 	TestEqual(TEXT("validate read safety"), Descriptor.Variants[2].Safety, EHyperAIStudioDomainSafety::Read);
+	TestEqual(TEXT("live read safety"), Descriptor.Variants[3].Safety, EHyperAIStudioDomainSafety::Read);
+	TestEqual(TEXT("live reads hyper_niagara_live"), Descriptor.Variants[3].ToolName, FString(TEXT("hyper_niagara_live")));
 	return true;
 }
 
@@ -1250,6 +1258,229 @@ bool FHyperAIStudioNiagaraHlslRuntimeTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("the CPU System compiles the HLSL without errors: ") + DescribeIssues(Diagnostics), Diagnostics.bCompileHasErrors);
 	const int32 After = LiveParticles();
 	TestTrue(FString::Printf(TEXT("the HLSL module ran: %d live particles before, %d after"), Before, After), After >= 0 && After * 4 < Before);
+	return true;
+}
+
+namespace HyperAIStudio::Niagara::Tests
+{
+	/** The body of the scratch pad module's Custom HLSL node, read the way set_hlsl_module writes it. */
+	FString ScratchHlsl(const UNiagaraSystem& System, const FString& Module)
+	{
+		const FStrProperty* Property = FindFProperty<FStrProperty>(UNiagaraNodeCustomHlsl::StaticClass(), TEXT("CustomHlsl"));
+		for (const UNiagaraScript* Script : System.ScratchPadScripts)
+		{
+			const UNiagaraScriptSource* Source = Script && Script->GetName() == Module ? Cast<UNiagaraScriptSource>(Script->GetLatestSource()) : nullptr;
+			const UNiagaraGraph* Graph = Source ? Source->NodeGraph.Get() : nullptr;
+			for (const UEdGraphNode* Node : Graph ? Graph->Nodes : TArray<TObjectPtr<UEdGraphNode>>())
+			{
+				if (const UNiagaraNodeCustomHlsl* Code = Cast<UNiagaraNodeCustomHlsl>(Node))
+				{
+					return Property ? Property->GetPropertyValue_InContainer(Code) : FString();
+				}
+			}
+		}
+		return FString();
+	}
+
+	FHyperAINiagaraLiveEmitter LiveEmitter(const TCHAR* Name, const TCHAR* State, const int64 Particles, const int64 TotalSpawned)
+	{
+		FHyperAINiagaraLiveEmitter Out;
+		Out.Name = Name;
+		Out.State = State;
+		Out.Particles = Particles;
+		Out.TotalSpawned = TotalSpawned;
+		return Out;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNiagaraScratchPadEditTest,
+	"HyperAIStudio.Niagara.Mutation.ScratchPadHlslEdit",
+	HyperAIStudio::Niagara::Tests::Flags)
+
+bool FHyperAIStudioNiagaraScratchPadEditTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Niagara::Tests;
+	namespace Gate = HyperAIStudio::Niagara::ExternalEditGate;
+	namespace GraphGate = HyperAIStudio::Niagara::GraphGate;
+	UNiagaraSystem* System = MakeFountainSystem(TEXT("NS_HyperAIScratch_"));
+	if (!System)
+	{
+		AddInfo(TEXT("Skipped: Niagara's Fountain template is not available."));
+		return true;
+	}
+	ON_SCOPE_EXIT { ObjectTools::ForceDeleteObjects({System}, /*ShowConfirmation=*/false); };
+	const FString Emitter = System->GetEmitterHandles()[0].GetName().ToString();
+	FHyperAINiagaraEditOp Add = MakeOp(TEXT("add_hlsl_module"));
+	Add.EmitterName = Emitter;
+	Add.ScriptName = TEXT("ParticleUpdateScript");
+	Add.Name = TEXT("Drift");
+	Add.Hlsl = TEXT("Particles.Velocity += float3(0.0, 0.0, 10.0) * Engine.DeltaTime;");
+	FHyperAINiagaraEditOp Set = MakeOp(TEXT("set_hlsl_module"));
+	Set.Name = TEXT("Drift");
+	Set.Hlsl = TEXT("// Sideways now.\nParticles.Velocity += float3(25.0, 0.0, 0.0) * Engine.DeltaTime;");
+
+	FString Status;
+	FString Diagnostic;
+	TestTrue(TEXT("set_hlsl_module passes its shape check: ") + Diagnostic, Gate::ValidateOp(Set, true, Status, Diagnostic));
+	FHyperAINiagaraEditOp Addressed = Set;
+	Addressed.EmitterName = Emitter;
+	TestFalse(TEXT("with an emitter address it is refused"), Gate::ValidateOp(Addressed, true, Status, Diagnostic));
+	TestEqual(TEXT("as invalid_op_address"), Status, FString(TEXT("invalid_op_address")));
+	FHyperAINiagaraEditOp Empty = Set;
+	Empty.Hlsl.Reset();
+	TestFalse(TEXT("without hlsl it is refused"), Gate::ValidateOp(Empty, true, Status, Diagnostic));
+	FHyperAINiagaraEditOp Ghost = Set;
+	Ghost.Name = TEXT("Nope");
+	TestFalse(TEXT("a module the System does not have is caught in the dry run"), GraphGate::ValidatePlanAgainstSystem(*System, {Ghost}, Status, Diagnostic));
+	TestEqual(TEXT("as scratch_module_not_found"), Status, FString(TEXT("scratch_module_not_found")));
+	TestTrue(TEXT("an edit of a module an earlier op adds is valid: ") + Diagnostic, GraphGate::ValidatePlanAgainstSystem(*System, {Add, Set}, Status, Diagnostic));
+
+	int32 Applied = 0;
+	TArray<FString> PerOp;
+	FString Error;
+	if (!TestTrue(TEXT("the module is added: ") + Error, Gate::ApplyOps(*System, {Add}, Applied, PerOp, Error)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("with its first body"), ScratchHlsl(*System, TEXT("Drift")), Add.Hlsl);
+	TestTrue(TEXT("the edit applies on its own plan: ") + Error, Gate::ApplyOps(*System, {Set}, Applied, PerOp, Error) && Applied == 1);
+	TestEqual(TEXT("and replaces the body"), ScratchHlsl(*System, TEXT("Drift")), Set.Hlsl);
+	TestTrue(TEXT("still one scratch pad"), GraphGate::ReadScratchPadModules(*System).Num() == 1);
+	System->RequestCompile(/*bForce=*/false);
+	System->WaitForCompilationComplete(/*bIncludingGPUShaders=*/true, /*bShowProgress=*/false);
+	HyperAIStudio::Niagara::ExternalEditGate::FDiagnostics Diagnostics;
+	FString DiagnosticsError;
+	Gate::ReadDiagnostics(*System, 64, Diagnostics, DiagnosticsError);
+	TestFalse(TEXT("the System compiles the new body: ") + DescribeIssues(Diagnostics), Diagnostics.bCompileHasErrors);
+	if (!GEditor)
+	{
+		return true;
+	}
+	TestTrue(TEXT("one undo step"), GEditor->UndoTransaction());
+	TestEqual(TEXT("undo restores the first body"), ScratchHlsl(*System, TEXT("Drift")), Add.Hlsl);
+	TestTrue(TEXT("one redo step"), GEditor->RedoTransaction());
+	TestEqual(TEXT("redo brings the edit back"), ScratchHlsl(*System, TEXT("Drift")), Set.Hlsl);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNiagaraLiveSampleTest,
+	"HyperAIStudio.Niagara.Live.SampleAndIssues",
+	HyperAIStudio::Niagara::Tests::Flags)
+
+bool FHyperAIStudioNiagaraLiveSampleTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Niagara::Tests;
+	namespace Live = HyperAIStudio::Niagara::Live;
+	TestEqual(TEXT("an invalid box prints as empty"), Live::BoundsText(FBox(ForceInit)), FString(TEXT("empty")));
+	TestEqual(TEXT("a box prints its corners"), Live::BoundsText(FBox(FVector(-1, -2, -3), FVector(4, 5, 6))), FString(TEXT("min (-1,-2,-3) max (4,5,6)")));
+
+	FHyperAINiagaraLiveReport Before;
+	FHyperAINiagaraLiveSystem& Fire = Before.Systems.AddDefaulted_GetRef();
+	Fire.System = TEXT("/Game/FX/NS_Fire.NS_Fire");
+	Fire.Component = TEXT("Torch.Fire");
+	Fire.ComponentPath = TEXT("/Game/Map.Map:PersistentLevel.Torch.Fire");
+	Fire.Emitters = {LiveEmitter(TEXT("Flames"), TEXT("active"), 40, 100), LiveEmitter(TEXT("Sparks"), TEXT("active"), 0, 50),
+		LiveEmitter(TEXT("Smoke"), TEXT("active"), 10, 500)};
+	FHyperAINiagaraLiveReport After = Before;
+	After.Systems[0].Emitters[0].TotalSpawned = 160;
+	// Smoke restarted between the reads: its counter went back.
+	After.Systems[0].Emitters[2].TotalSpawned = 30;
+	FHyperAINiagaraLiveSystem& Late = After.Systems.AddDefaulted_GetRef();
+	Late.System = TEXT("/Game/FX/NS_Hit.NS_Hit");
+	Late.Component = TEXT("Hit");
+	Late.ComponentPath = TEXT("/Game/Map.Map:PersistentLevel.Hit");
+	Late.Particles = 5;
+	Late.Emitters = {LiveEmitter(TEXT("Burst"), TEXT("active"), 5, 5)};
+	Live::ApplySample(Before, 0.5, After);
+	const TArray<FHyperAINiagaraLiveEmitter>& Emitters = After.Systems[0].Emitters;
+	TestTrue(TEXT("Flames spawned 60 in the sample"), Emitters[0].SpawnedInSample == 60 && Emitters[0].Spawning == TEXT("yes"));
+	TestTrue(TEXT("Sparks spawned nothing"), Emitters[1].SpawnedInSample == 0 && Emitters[1].Spawning == TEXT("no"));
+	TestTrue(TEXT("a restarted emitter counts what it spawned since"), Emitters[2].SpawnedInSample == 30 && Emitters[2].Spawning == TEXT("yes"));
+	TestTrue(TEXT("a system that appeared in the sample counts all of it"), After.Systems[1].Emitters[0].SpawnedInSample == 5);
+	TestTrue(TEXT("the sample length is kept"), FMath::IsNearlyEqual(After.SampledSeconds, 0.5));
+
+	Live::Finish(1, After);
+	if (!TestEqual(TEXT("top_n 1 keeps one system"), After.Systems.Num(), 1)) return false;
+	TestEqual(TEXT("the one with issues first"), After.Systems[0].System, FString(TEXT("/Game/FX/NS_Fire.NS_Fire")));
+	TestTrue(TEXT("and a note says one more was left out"), After.Notes.ContainsByPredicate([](const FString& Note) { return Note.Contains(TEXT("1 more")); }));
+	TestEqual(TEXT("Sparks, active with nothing alive or spawning, is an issue"), After.Systems[0].Emitters[1].Issues.Num(), 1);
+	TestEqual(TEXT("Flames is not"), After.Systems[0].Emitters[0].Issues.Num(), 0);
+	TestTrue(TEXT("the flat list names system, component and emitter"), After.Errors.Num() == 1
+		&& After.Errors[0].StartsWith(TEXT("NS_Fire (Torch.Fire) / Sparks:")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNiagaraLiveWorldTest,
+	"HyperAIStudio.Niagara.Live.ReadsAPlayingSystem",
+	HyperAIStudio::Niagara::Tests::Flags)
+
+bool FHyperAIStudioNiagaraLiveWorldTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace HyperAIStudio::Niagara::Tests;
+	namespace Live = HyperAIStudio::Niagara::Live;
+	if (!GEditor || !GEditor->PlayWorld)
+	{
+		const UHyperAINiagaraLiveResult* Refused = UHyperAIStudioNiagaraToolset::hyper_niagara_live(FHyperAINiagaraLiveRequest());
+		TestTrue(TEXT("without Play In Editor the tool answers no_pie_world at once"), Refused && Refused->Value.Status == TEXT("no_pie_world"));
+		FHyperAINiagaraLiveRequest Once;
+		TestEqual(TEXT("and so does the adapter's single read"), Live::ReadOnce(Once).Status, FString(TEXT("no_pie_world")));
+	}
+	UNiagaraSystem* System = MakeFountainSystem(TEXT("NS_HyperAILive_"));
+	if (!System)
+	{
+		AddInfo(TEXT("Skipped: Niagara's Fountain template is not available."));
+		return true;
+	}
+	ON_SCOPE_EXIT { ObjectTools::ForceDeleteObjects({System}, /*ShowConfirmation=*/false); };
+	// A world of its own with the Fountain playing in it, stepped by hand the way the runtime probe steps it.
+	FPreviewScene Scene{FPreviewScene::ConstructionValues()};
+	UNiagaraComponent* Component = NewObject<UNiagaraComponent>(GetTransientPackage(), NAME_None, RF_Transient);
+	Component->SetAutoActivate(false);
+	Component->SetAsset(System);
+	Component->SetForceSolo(true);
+	Scene.AddComponent(Component, FTransform::Identity);
+	Component->Activate(/*bReset=*/true);
+	Component->AdvanceSimulation(30, 1.f / 30.f);
+	UWorld& World = *Scene.GetWorld();
+
+	FHyperAINiagaraLiveReport First;
+	Live::Read(World, FString(), /*bIncludeInactive=*/false, First);
+	if (!TestEqual(TEXT("the playing Fountain is read"), First.Systems.Num(), 1)) return false;
+	const FHyperAINiagaraLiveSystem& Read = First.Systems[0];
+	TestEqual(TEXT("by its asset"), Read.System, System->GetPathName());
+	TestEqual(TEXT("as active"), Read.State, FString(TEXT("active")));
+	if (!TestEqual(TEXT("with its one emitter"), Read.Emitters.Num(), 1)) return false;
+	TestEqual(TEXT("on the CPU"), Read.Emitters[0].SimTarget, FString(TEXT("cpu")));
+	TestTrue(FString::Printf(TEXT("with particles alive (%lld) and spawned (%lld)"), Read.Emitters[0].Particles, Read.Emitters[0].TotalSpawned),
+		Read.Emitters[0].Particles > 0 && Read.Emitters[0].TotalSpawned >= Read.Emitters[0].Particles);
+	TestTrue(TEXT("and bounds around them"), Read.Emitters[0].Bounds != TEXT("empty") || !Read.Emitters[0].bDynamicBounds);
+	TestEqual(TEXT("counted in the totals"), First.Particles, Read.Emitters[0].Particles);
+	TestEqual(TEXT("one component playing"), First.ActiveComponents, 1);
+
+	FHyperAINiagaraLiveReport Filtered;
+	Live::Read(World, TEXT("NoSuchSystem"), false, Filtered);
+	TestEqual(TEXT("a filter that matches nothing reads nothing"), Filtered.Systems.Num(), 0);
+
+	Component->AdvanceSimulation(15, 1.f / 30.f);
+	FHyperAINiagaraLiveReport Second;
+	Live::Read(World, FString(), false, Second);
+	Live::ApplySample(First, 0.5, Second);
+	Live::Finish(20, Second);
+	TestTrue(TEXT("between the reads the Fountain kept spawning"), Second.Systems.Num() == 1 && Second.Systems[0].Emitters.Num() == 1
+		&& Second.Systems[0].Emitters[0].Spawning == TEXT("yes"));
+	TestEqual(TEXT("and has nothing wrong: ") + FString::Join(Second.Errors, TEXT(" | ")), Second.Errors.Num(), 0);
+
+	Component->Deactivate();
+	Component->DeactivateImmediate();
+	FHyperAINiagaraLiveReport Stopped;
+	Live::Read(World, FString(), /*bIncludeInactive=*/true, Stopped);
+	TestTrue(TEXT("a stopped component is listed only when asked"), Stopped.Systems.Num() == 1 && Stopped.ActiveComponents == 0);
 	return true;
 }
 

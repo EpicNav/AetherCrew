@@ -347,7 +347,8 @@ struct FHyperAINiagaraEditOp
 	/**
 	 * System edits: set_module_enabled | add_module | add_renderer | add_emitter | set_input_value | apply_stack_issue_fix.
 	 * Stages, code and properties: add_simulation_stage (emitter_name, name, value = iterations 1-64) |
-	 * add_hlsl_module (script_name, stage_name for a stage, name, hlsl) | set_emitter_property (emitter_name, name
+	 * add_hlsl_module (script_name, stage_name for a stage, name, hlsl) | set_hlsl_module (name = a scratch pad module
+	 * from inspect's scratch_pad_modules, hlsl = its new body) | set_emitter_property (emitter_name, name
 	 * sim_target|local_space|determinism|random_seed|fixed_bounds|enabled, value) | set_renderer_property
 	 * (emitter_name, renderer_index, name = the renderer's C++ property, value). add_module and set_module_enabled
 	 * also take a stage_name.
@@ -375,7 +376,7 @@ struct FHyperAINiagaraEditOp
 	UPROPERTY() FString Value;
 	/** set_renderer_property: the renderer's index in its emitter, from inspect. */
 	UPROPERTY() int32 RendererIndex = INDEX_NONE;
-	/** add_hlsl_module: the module body. Read and write attributes by name (Particles.Velocity, Engine.DeltaTime, User.X); up to 16384 characters. */
+	/** add_hlsl_module, set_hlsl_module: the module body. Read and write attributes by name (Particles.Velocity, Engine.DeltaTime, User.X); up to 16384 characters. */
 	UPROPERTY() FString Hlsl;
 	/** set_module_enabled */
 	UPROPERTY() bool bEnabled = true;
@@ -461,7 +462,105 @@ public:
 	FHyperAINiagaraApplyPlanReport Value;
 };
 
-/** Exactly three functions form the Niagara atomic cohort. */
+USTRUCT(BlueprintType)
+struct FHyperAINiagaraLiveRequest
+{
+	GENERATED_BODY()
+
+	/** Only systems whose asset path, actor or component name contains this; empty reads them all. */
+	UPROPERTY() FString Filter;
+	/** Seconds watched (0 to 5, 0.5 by default) to tell which emitters are spawning; 0 reads once and leaves spawning unknown. */
+	UPROPERTY() float SampleSeconds = 0.5f;
+	/** Systems listed, busiest first: 20 by default, 1 to 100. */
+	UPROPERTY() int32 TopN = 20;
+	/** Also list components that are not playing (finished, never activated, or culled). */
+	UPROPERTY() bool bIncludeInactive = false;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAINiagaraLiveEmitter
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString Name;
+	/** cpu, gpu or stateless (the lightweight emitter). */
+	UPROPERTY() FString SimTarget;
+	/** active, inactive, inactive_clear, complete or disabled. */
+	UPROPERTY() FString State;
+	/** Alive now. GPU counts come from the last readback, a frame or more old. */
+	UPROPERTY() int64 Particles = 0;
+	/** Spawned since it started. */
+	UPROPERTY() int64 TotalSpawned = 0;
+	/** Spawned during the sample; -1 when there was none. */
+	UPROPERTY() int64 SpawnedInSample = -1;
+	/** yes, no, or unknown (no sample). */
+	UPROPERTY() FString Spawning = TEXT("unknown");
+	/** The emitter's own bounds, local space: "min (x,y,z) max (x,y,z)", or "empty". */
+	UPROPERTY() FString Bounds;
+	UPROPERTY() bool bDynamicBounds = true;
+	/** What is wrong with it: a compile error, disabled, no particles while active, waiting for shaders. */
+	UPROPERTY() TArray<FString> Issues;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAINiagaraLiveSystem
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString System;
+	/** Actor.Component, as the Outliner names them. */
+	UPROPERTY() FString Component;
+	UPROPERTY() FString ComponentPath;
+	/** active, inactive, complete, disabled or not_playing. */
+	UPROPERTY() FString State;
+	UPROPERTY() float AgeSeconds = 0.f;
+	UPROPERTY() int64 Particles = 0;
+	/** The component's world bounds: centre and size (cm). */
+	UPROPERTY() FVector BoundsCenter = FVector::ZeroVector;
+	UPROPERTY() FVector BoundsSize = FVector::ZeroVector;
+	/** The system uses fixed bounds (no per-frame bounds from its particles). */
+	UPROPERTY() bool bFixedBounds = false;
+	UPROPERTY() TArray<FHyperAINiagaraLiveEmitter> Emitters;
+	UPROPERTY() TArray<FString> Issues;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAINiagaraLiveReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY() bool bOk = false;
+	/** completed, no_pie_world, invalid_request. */
+	UPROPERTY() FString Status;
+	UPROPERTY() FString Diagnostic;
+	UPROPERTY() FString Level;
+	UPROPERTY() double SampledSeconds = 0.0;
+	UPROPERTY() int32 Components = 0;
+	UPROPERTY() int32 ActiveComponents = 0;
+	UPROPERTY() int64 Particles = 0;
+	UPROPERTY() TArray<FHyperAINiagaraLiveSystem> Systems;
+	/** Every issue found, "System (Component) / Emitter: what", for a quick read. */
+	UPROPERTY() TArray<FString> Errors;
+	UPROPERTY() TArray<FString> Notes;
+};
+
+/** Completes when the sample window, if any, is over. */
+UCLASS()
+class UHyperAINiagaraLiveResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAINiagaraLiveReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAINiagaraLiveReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAINiagaraLiveReport Value;
+};
+
+/** The Niagara cohort: inspect, plan and validate the asset, and read what plays live. */
 UCLASS()
 class HYPERAISTUDIONIAGARA_API UHyperAIStudioNiagaraToolset final : public UToolsetDefinition
 {
@@ -484,6 +583,15 @@ public:
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Niagara")
 	static FHyperAINiagaraValidateReport hyper_niagara_validate(
 		const FHyperAINiagaraValidateRequest& Request);
+
+	/**
+	 * Read-only look at the Niagara systems playing in Play In Editor, per system and per emitter: particle counts,
+	 * bounds, whether each emitter is spawning (watched over SampleSeconds), its sim target and state, and what is
+	 * wrong (compile errors, disabled or culled emitters, active emitters with no particles, empty bounds). Cost per
+	 * system is hyper_profile_live's; this says what each effect is doing.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Niagara")
+	static UHyperAINiagaraLiveResult* hyper_niagara_live(const FHyperAINiagaraLiveRequest& Request);
 };
 
 struct FHyperAIStudioNiagaraValueSnapshot
@@ -543,6 +651,24 @@ class FHyperAIStudioNiagaraValidateResultPayload final : public IHyperAIStudioDo
 {
 public:
 	FHyperAINiagaraValidateReport Report;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+class FHyperAIStudioNiagaraLivePayload final : public IHyperAIStudioDomainRequestPayload
+{
+public:
+	FHyperAINiagaraLiveRequest Request;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+class FHyperAIStudioNiagaraLiveResultPayload final : public IHyperAIStudioDomainResultPayload
+{
+public:
+	FHyperAINiagaraLiveReport Report;
 	virtual FString GetTypeId() const override;
 	virtual FString GetSchemaFingerprint() const override;
 	virtual int32 GetBoundedByteSize() const override;
@@ -623,6 +749,9 @@ public:
 		TEXT("hyperai.result.niagara.edit_ops.v1");
 	static constexpr const TCHAR* ValidateResultTypeId =
 		TEXT("hyperai.result.niagara.validate.v1");
+	static constexpr const TCHAR* LiveVariantId = TEXT("pie_live_read.v1");
+	static constexpr const TCHAR* LivePayloadTypeId = TEXT("hyperai.payload.niagara.live.v1");
+	static constexpr const TCHAR* LiveResultTypeId = TEXT("hyperai.result.niagara.live.v1");
 	static constexpr int32 MaxOpsPerPlan = 16;
 	static constexpr int32 MaxPathCharacters = 512;
 	static constexpr int32 MaxNameCharacters = 128;
@@ -660,6 +789,8 @@ public:
 	static FString InspectResultSchemaFingerprint();
 	static FString MutationResultSchemaFingerprint();
 	static FString ValidateResultSchemaFingerprint();
+	static FString LivePayloadSchemaFingerprint();
+	static FString LiveResultSchemaFingerprint();
 	static const FHyperAIStudioDomainAdapterDescriptor& GetAdapterDescriptor();
 	static bool CaptureExact(
 		const FString& TargetPath,
