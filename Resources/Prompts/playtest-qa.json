@@ -762,6 +762,190 @@
     }
    ],
    "prompt": "Find how {{level}} reads its player's aim. Change nothing in the level.\n1. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown StopOwnedSession: a Survey step with target {{target}}, then AimAt target {{target}} aim Auto seconds 0.5. Follow it with hyper_operation_wait (timeoutMs 120000, bWaitThroughApproval true) and hyper_playtest_status (pageSize 64).\n2. Run the same two steps three more times, once each with aim Cursor, Stick and Look. A run that fails aim_off_target shows the game does not aim that way.\n3. Report a table with one row per aim: passed or its code, and the game's own aim readings with how far off they were. Quote Auto's reason, and say whether Auto chose the aim that passes.\n4. If the game has no GetAimWorldLocation, GetAimDirection or GetAimDirectionFlat, every aim passes without a reading: say so, and suggest checking an attack's hit instead."
+  },
+  {
+   "id": "playtest-qa.survey-level-coverage",
+   "title": "Survey the level: reachable ground, stuck spots and falls",
+   "summary": "One SurveyLevel step maps what a player can reach, films it, and finds where it gets stuck or falls out.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_verify_run"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "survey",
+    "coverage",
+    "reachability",
+    "stuck",
+    "falls",
+    "overview",
+    "video"
+   ],
+   "placeholders": [
+    {
+     "name": "cells",
+     "label": "Grid cells a side",
+     "default": "24",
+     "hint": "4 to 48; more is finer and slower"
+    },
+    {
+     "name": "walk_seconds",
+     "label": "Seconds of walking",
+     "default": "12",
+     "hint": "Short walks that look for stuck spots and falls"
+    }
+   ],
+   "prompt": "Survey {{level}} for what a player can reach. Change nothing in the level.\n1. hyper_verify_run (deadlineSeconds 60) with one case named level-survey, timeoutSeconds 55: Wait seconds 0.5, then SurveyLevel with value \"{{cells}}\", seconds {{walk_seconds}}, timeoutSeconds 50 and text level-survey.\n2. Read the step's detail and open coverage.json and overview.png in the folder its file names.\n3. Report a table with PASS/FAIL rows: reachable share of the ground at least 80% (with the counts), no fall out of the world, no stuck spot, method (navmesh or ground). List every stuck spot and fall with its location in cm.\n4. Show the overview on its own line as ![overview](path) and link survey.mp4. Say what the red (unreachable) areas look like on the overview and whether a player is meant to reach them. Fix nothing."
+  },
+  {
+   "id": "playtest-qa.gas-ability-check",
+   "title": "Check an ability through GAS while playing",
+   "summary": "Press an ability and prove it ran, cost what it should, and applied its effect and tags.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest",
+    "unreal-gas"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "gas",
+    "ability",
+    "attribute",
+    "effect",
+    "tag",
+    "playtest"
+   ],
+   "placeholders": [
+    {
+     "name": "input_action",
+     "label": "Input action",
+     "default": "IA_Ability1",
+     "hint": "The action that triggers the ability"
+    },
+    {
+     "name": "ability",
+     "label": "Ability class",
+     "default": "GA_Fireball",
+     "hint": "Such as GA_Fireball"
+    },
+    {
+     "name": "cost_attribute",
+     "label": "Cost attribute",
+     "default": "Mana",
+     "hint": "The attribute it spends"
+    },
+    {
+     "name": "effect",
+     "label": "Effect on the target",
+     "default": "GE_Burning",
+     "hint": "Such as GE_Burning"
+    },
+    {
+     "name": "target",
+     "label": "Target",
+     "default": "BP_Enemy",
+     "hint": "An actor label, tag or class"
+    }
+   ],
+   "prompt": "Prove {{ability}} works in {{level}} by playing it. Change nothing in the level.\n1. hyper_playtest_run (mode StartInProcess, bRecordVideo true) with Bot steps: AssertAbility target Player property {{ability}} (granted); AssertAttribute target Player property {{cost_attribute}} compare > value 0; Press inputAction {{input_action}} with target {{target}} and aim Auto; WaitUntil AssertAbility property {{ability}} value active (timeoutSeconds 2); WaitUntil AssertEffect target {{target}} property {{effect}} (timeoutSeconds 5); AssertAttribute target Player property {{cost_attribute}} compare < with the value read before; Capture.\n2. hyper_operation_wait with bWaitThroughApproval true, then hyper_playtest_status for the evidence.\n3. Report a PASS/FAIL table, one row per check with its evidence line (granted abilities, attribute values, effect stacks). Show the capture and link the video. A no_ability_system result means GAS is not on that actor: say where it is instead."
+  },
+  {
+   "id": "playtest-qa.eight-player-session",
+   "title": "Play an 8-player session with late joiners",
+   "summary": "A listen server, its clients and late joiners, each with a bot, checking what replicated to every one.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest",
+    "unreal-networking"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "multiplayer",
+    "replication",
+    "late join",
+    "listen server",
+    "eight players"
+   ],
+   "placeholders": [
+    {
+     "name": "players",
+     "label": "Players at the start",
+     "default": "6",
+     "hint": "2 to 6; late joiners make up the rest of 8"
+    },
+    {
+     "name": "target",
+     "label": "Replicated actor",
+     "default": "BP_Door",
+     "hint": "An actor every player should see"
+    },
+    {
+     "name": "property",
+     "label": "Its replicated property",
+     "default": "bOpen",
+     "hint": "Such as bOpen"
+    }
+   ],
+   "prompt": "Check {{target}}.{{property}} replicates to every player in {{level}}, with 8 players. Change nothing in the level.\n1. hyper_playtest_run with mode StartInProcess, netMode ListenServer, numPlayers {{players}}, bRecordVideo true and wholeTimeoutMs 240000. Steps: a Bot MoveTo {{target}} radius 150 as the host (pieInstance 0); then for each client 1 to {{players}} minus 1 a Bot WaitUntil AssertProperty target {{target}} property {{property}} compare == value true with that pieInstance; then JoinPlayer steps until there are 8 players, each followed by the same WaitUntil on the new instance.\n2. If it is refused with not_enough_memory, rerun with the player count it names and say so.\n3. hyper_operation_wait with bWaitThroughApproval true, then hyper_playtest_status (pageSize 64).\n4. Report a table, one row per player (host, clients, late joiners): PASS or FAIL with its evidence line. Link the video."
+  },
+  {
+   "id": "playtest-qa.phone-playtest",
+   "title": "Playtest on phones over the local network",
+   "summary": "Stream Play In Editor to phones with Pixel Streaming 2, show the QR code, and record the bot playing.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_phone_playtest_start",
+    "hyper_operation_wait",
+    "hyper_phone_playtest_status",
+    "hyper_playtest_run",
+    "hyper_phone_playtest_stop"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "phone",
+    "mobile",
+    "pixel streaming",
+    "qr code",
+    "stream",
+    "touch"
+   ],
+   "placeholders": [
+    {
+     "name": "viewers",
+     "label": "Viewers",
+     "default": "4",
+     "hint": "1 to 8 phones at once"
+    }
+   ],
+   "prompt": "Set up a phone playtest of {{level}} for up to {{viewers}} phones on this network.\n1. hyper_phone_playtest_start with bDryRun true and maxViewers {{viewers}}. If it is refused, report why (plugin not enabled, player page missing, a public address) and stop.\n2. Tell the user the URL, the ports and the exposure line, then call it again with bDryRun false; hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_phone_playtest_status: show the QR code on its own line as ![scan to play](qrCodePng) and the URL in a code block.\n4. When the user says the phones are connected, run hyper_playtest_run (bRecordVideo true) with a Survey step and a Play Explore step of 30 seconds, so the phones watch the bot play; then report the viewer count from hyper_phone_playtest_status and link the video.\n5. Leave it running for the user; say hyper_phone_playtest_stop ends it."
   }
  ]
 }

@@ -1,6 +1,6 @@
 ---
 name: unreal-playtest
-description: Play the game in Unreal and check that it works, with HyperAI's playtest bot. It plays like a person through the game's own controls, moving round obstacles, jumping, collecting, aiming the way the game reads aim (its cursor, right stick or view) and attacking, dodging, exploring, and fighting other players in PvP. It also presses input actions, clicks UI, waits for things to happen, and captures screenshots, then reports evidence per step with a map of each play. hyper_verify_run plays many such cases at once in under a minute. Use it to verify gameplay, such as a pickup adding score, a door opening, an enemy dying when shot, or a HUD updating.
+description: Play the game in Unreal and check that it works, with HyperAI's playtest bot. It plays like a person through the game's own controls, moving round obstacles, jumping, collecting, aiming the way the game reads aim (its cursor, right stick or view) and attacking, dodging, exploring, and fighting other players in PvP, with up to 8 networked players. It also presses input actions, clicks UI, waits for things to happen, checks actors, gameplay attributes, tags, abilities, effects and widgets, surveys a whole level for what a player can reach, and captures screenshots and video, then reports evidence per step. hyper_verify_run plays many such cases at once in under a minute, and hyper_phone_playtest_start streams play to phones on the local network. Use it to verify gameplay, such as a pickup adding score, a door opening, an enemy dying when shot, or a HUD updating.
 ---
 # Playtest with the HyperAI bot
 
@@ -42,7 +42,10 @@ Set `"bRecordVideo": true` (and `videoFps`, 10 unless set, 5 to 30) to record th
 
 ### Multiplayer: host, clients and late joiners
 
-- **Start a networked session.** Set `netMode` to `ListenServer` or `Client`, with `numPlayers` 2 to 4. Every player plays in this editor process, in a window of its own, and the run starts once all of them are in.
+- **Start a networked session.** Set `netMode` to `ListenServer` or `Client`, with `numPlayers` 2 to 8. Every player plays in this editor process, in a window of its own, and the run starts once all of them are in.
+  - Players and `JoinPlayer` steps together are 8 at most.
+  - Past 4 players, each needs about 0.5 GB of free memory, and 1.5 GB stay free for the editor; a dedicated server counts as one more player. A machine short of it is refused before anything starts, with `not_enough_memory` and how many players it can play. Ask for that many.
+  - Each player keeps a bot of its own: steps with that player's `pieInstance` drive it.
   - With `ListenServer`, PIE instance 0 hosts and plays, and 1 and up are its clients.
   - With `Client`, a dedicated server is instance 0, and the players come after it.
 - **Pick a player per step.** A step's `pieInstance` (-1 for the run's own world) picks the player it acts as. A check on a client, such as `AssertProperty` or `UiAssert` at `pieInstance: 1`, proves what replicated to it.
@@ -59,6 +62,70 @@ Set `"bRecordVideo": true` (and `videoFps`, 10 unless set, 5 to 30) to record th
     {"stepId": "joiner-sees-it", "kind": "Bot", "pieInstance": 2, "timeoutMs": 5000,
      "bot": {"action": "AssertProperty", "target": "BP_Door", "property": "bOpen", "compare": "==", "value": "true"}}]}}
 ```
+
+## Check actors, GAS and widgets
+
+These are Assert actions, so `WaitUntil` waits for any of them, and they work in both tools (UiAssert only in `hyper_playtest_run`).
+
+| action | fields | passes when |
+|---|---|---|
+| AssertCount | target (a class, tag, label or name), compare, value | That many actors match, counting all of them. |
+| AssertDistance | target, other or location, compare, value (cm) | The distance compares as asked, such as `<` 300. |
+| AssertAttribute | target, property (`Health`, or `HealthSet.Health`; `Health.Base` for the base value), compare, value | The gameplay attribute compares as asked. A miss lists the attributes there are. |
+| AssertTag | target, property (the tag), value `present` (unless set) or `absent` | The target's gameplay tags have it, or not. A parent tag matches its children. |
+| AssertAbility | target, property (the ability's class, `GA_Dash`), value `granted` (unless set), `active`, `inactive` or `absent` | The ability is in that state. Reports every granted ability with its level. |
+| AssertEffect | target, property (the effect's class, `GE_Burning`), compare, value (stacks, `>= 1` unless set) | The active effect's stack count compares as asked. Inhibited effects are counted apart. |
+| UiAssert | widget, property, compare, value | See below. |
+
+- **GAS stays optional.** The bot finds the ability system the way the engine does (the AbilitySystemInterface, then a component), on the actor or, for a player, its player state, and reads it by reflection. A game without GAS fails these with `no_ability_system`, not an error.
+- **Tags** come from the ability system and from an actor that has gameplay tags of its own.
+- **On a client** (`pieInstance` 1 and up), these read what replicated, so they prove replication too.
+
+`UiAssert` finds `widget` by name or by class, after an optional user widget: `WBP_HUD.ScoreText`, `WBP_HUD.ProgressBar`, or `WBP_Pause` alone. `property` says what to check:
+
+| property | passes when |
+|---|---|
+| Visible (unless set) | The widget, every widget it sits in, and its user widget are visible and on the screen. With value, its text compares too. |
+| Text | Its text (a text block, rich text or text box) compares with value: `==`, `contains`... |
+| Enabled / Disabled | It is enabled, or disabled. |
+| Focused | It or a widget inside it has focus. |
+| Hidden | It is not on the screen. |
+| Percent | A progress bar's fill, 0 to 1, compares with value. |
+
+```json
+{"stepId": "burning", "kind": "Bot", "timeoutMs": 5000, "bot": {"action": "WaitUntil", "until": "AssertEffect", "target": "BP_Enemy", "property": "GE_Burning", "compare": ">=", "value": "2", "timeoutSeconds": 3}},
+{"stepId": "mana", "kind": "Bot", "timeoutMs": 5000, "bot": {"action": "AssertAttribute", "target": "Player", "property": "Mana", "compare": "<", "value": "100"}},
+{"stepId": "bar", "kind": "Bot", "timeoutMs": 5000, "bot": {"action": "UiAssert", "widget": "WBP_HUD.HealthBar", "property": "Percent", "compare": "<", "value": "1"}}
+```
+
+## Survey a level
+
+`SurveyLevel` walks and films the whole level the player is in, in one step. Run it as a `hyper_verify_run` case (`timeoutSeconds` 50) or a `hyper_playtest_run` Bot step (`timeoutMs` 30000).
+
+- **The grid:** `value` cells a side (24 unless set, 4 to 48) over the level, or over `range` cm round the player. Each cell is reachable, unreachable (ground the player cannot get to), or has no ground at all. With a navmesh it asks the navmesh for a path to each cell; without one it follows the ground from cell to cell, over rises a player can climb and round walls.
+- **Frames:** up to 16 views at eye height over the reachable ground, then frames of the walks.
+- **Walks:** short walks (`seconds` of walking, 12 unless set) from spread-out reachable spots, every other one toward an edge with nothing below. A walk that makes no progress for a second is a stuck spot; a fall with nothing below, past KillZ, or a pawn the game destroyed is a fall out of the world.
+- **What it writes,** into a folder named after `text`: `overview.png` (the level from above: reachable green, unreachable red, no ground dark, walked blue, the start white, stuck spots yellow, falls magenta), `coverage.json` (counts, the reachable share, a character map of the grid, stuck spots and falls with locations), the frames, and `survey.mp4` made from them. The step's `file` is the folder.
+- **It always passes** when it ran; read the counts, stuck spots and falls, and open the overview. The player is put back where it started.
+
+```json
+{"name": "level-survey", "timeoutSeconds": 50, "steps": [
+  {"action": "Wait", "seconds": 0.5},
+  {"action": "SurveyLevel", "value": "24", "seconds": 12, "timeoutSeconds": 45, "text": "survey"}]}
+```
+
+## Playtest on phones
+
+`hyper_phone_playtest_start` streams the game with Epic's Pixel Streaming 2 to phones and browsers on this PC's network, and returns a URL and `qrCodePng`, a QR code to scan. Studio's Playtest page shows both, with Start and Stop.
+
+- **Needs** the Pixel Streaming 2 plugin enabled in the project (then restart the editor) and its player page on disk. HyperAI never downloads it; a refusal says so.
+- **It always asks the user** (an external effect): it starts a server in this editor, listening for phones. Run it with `bDryRun: true` first to show the user the URL, ports and plan, then for real, then `hyper_operation_wait` with `bWaitThroughApproval: true`, then `hyper_phone_playtest_status`.
+- **Local network only.** The engine's server listens on every network interface, so HyperAI refuses on a PC with a public internet address, and takes websockets only from pages served on its LAN address or this PC. Say so to the user, with `exposure`. A router forwarding the ports would expose it; nothing else does.
+- **target `PlayInEditor`** (default) streams every PIE session started while it runs: the user presses Play, or you run `hyper_playtest_run` with the bot and `bRecordVideo`, so a bot or a person plays while it records. Phones see the first player's view (a client's, in a listen-server session).
+- **target `Standalone`** launches the saved level as its own game process (`map`, `resX`, `resY`, `bOffscreen`).
+- **Viewers:** `maxViewers` 1 to 8 (8 unless set). With `bAllViewersControl` (default) every viewer's touches, keys and mouse reach the game's first player; false gives control to the first viewer only. A browser gamepad becomes a player of its own when the game adds local players.
+- **Ports:** `httpPort` 8080 (the page) and `streamerPort` 8888, both 1024 to 65535 and free. Windows may ask to let UnrealEditor accept connections: private networks only.
+- `hyper_phone_playtest_stop` ends it, closing a Standalone game.
 
 ## Verify many things at once
 
@@ -192,10 +259,12 @@ More to know:
 | Sample | target, property (optional), seconds | Always passes. Reports first, last, min and max. Without a property, speed and distance moved. |
 | Capture | text | A PNG was written. Without a screen, as in verification copies, it renders the player's camera. Its path is in the evidence: open it and look. |
 | RecordStart / RecordStop | text, seconds (interval, 0.5) | A frame was saved every interval into a folder, until RecordStop. |
-| UiClick / UiType / UiAssert | widget (`WBP_HUD.ScoreText`), text, compare, value | A button clicked through Slate, text typed, or a widget visible with matching text. |
+| UiClick / UiType / UiAssert | widget (`WBP_HUD.ScoreText`), text, property, compare, value | A button clicked through Slate, text typed, or a widget checked as Check actors, GAS and widgets says. |
 | Damage | target (geometry collections) or location, radius (cm reached), value (strain; twice the highest damage threshold unless set), seconds (keep it on) | A strain field hit Chaos geometry collections there. |
 | Fire | target or location, value (cm/s, 3000), range (drop from this high instead) | A 40 cm, 200 kg test ball was fired from the player's view, or dropped. |
 | AssertBroken | target (empty: every geometry collection), compare, value | That many pieces broke off. The detail counts the clusters broken and names what fell how far. |
+| AssertCount, AssertDistance, AssertAttribute, AssertTag, AssertAbility, AssertEffect | see Check actors, GAS and widgets | |
+| SurveyLevel | value (cells a side), range, seconds, text | Always passes when it ran; see Survey a level. |
 
 **Targets** are an actor's label, name, tag or class name (`BP_Coin`), or one of Player, PlayerController, PlayerState, GameState or GameMode. An empty target means Player. For a step with playerIndex, those names mean that player's. `Player0` to `Player7` name each player's pawn.
 
@@ -217,7 +286,8 @@ More to know:
 - **An attack's direction:** Press the attack with `aim` and the enemy as target. The evidence says how it aimed and where the game's own aim pointed. For a top-down or isometric game, also try `aim: Look`: if that one fails `aim_off_target` and Cursor passes, the game aims by its cursor.
 - **Combat:** Play Defeat on the enemies' tag or class. Its evidence says whether shots landed and did damage. `no_damage` means hits did nothing, which is a bug in the damage path. Then check what a defeat should do, such as score or loot.
 - **Can it be finished:** Play Reach to the goal, or Play Collect on every pickup. A `stuck` result says where the level blocks a player.
-- **Level coverage:** Play Explore for 30 to 60 seconds, then look at the map. Its stuck spots and falls are where players get trapped or fall out.
+- **Level coverage:** SurveyLevel for the whole level's reachable ground, stuck spots and falls, with an overview and a video. Play Explore for 30 to 60 seconds shows how a wandering player moves through it.
+- **An ability:** Press its input, then WaitUntil AssertAbility `active`, AssertEffect on the effect it applies, and AssertAttribute on what it costs.
 - **Before building anything:** Survey tells you the class names, where the player starts, and whether a target is reachable.
 - **Destruction:** Wait 0.5 s, Damage the geometry collection (or Fire at it), WaitUntil AssertBroken with compare `>=`, then Wait and AssertBroken again to read what fell. `hyper_destruction_apply_plan` hands back such a case as `VerifyCase`; the `unreal-destruction` skill has more.
 

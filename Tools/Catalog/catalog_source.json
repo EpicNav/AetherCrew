@@ -1078,6 +1078,31 @@
       0,
       1
      ]
+    },
+    {
+     "name": "hyper_phone_playtest_start",
+     "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read",
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_phone_playtest_status",
+     "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_phone_playtest_stop",
+     "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ],
    "cohortOrder": [
