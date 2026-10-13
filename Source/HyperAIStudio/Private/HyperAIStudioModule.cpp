@@ -1231,6 +1231,13 @@ private:
 				{TEXT("GeometryScripting")}
 			},
 			{
+				TEXT("HyperAIStudioDestruction"),
+				TEXT("destruction"),
+				TEXT("cohort.source.hyperaistudiodestructiontoolset.v1"),
+				{TEXT("hyper_destruction_inspect"), TEXT("hyper_destruction_apply_plan")},
+				{TEXT("GeometryCollectionPlugin"), TEXT("Fracture")}
+			},
+			{
 				TEXT("HyperAIStudioUAF"),
 				TEXT("uaf_graph"),
 				TEXT("cohort.source.hyperaistudiouaftoolset.v1"),

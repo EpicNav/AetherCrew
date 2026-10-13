@@ -643,6 +643,19 @@
 				"CoreUObject",
 				"Engine"
 			]
+		},
+		{
+			"Name": "HyperAIStudioDestruction",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
 		}
 	],
 	"Plugins": [
@@ -820,6 +833,18 @@
 		},
 		{
 			"Name": "Decibel",
+			"Enabled": false
+		},
+		{
+			"Name": "GeometryCollectionPlugin",
+			"Enabled": false
+		},
+		{
+			"Name": "Fracture",
+			"Enabled": false
+		},
+		{
+			"Name": "PlanarCut",
 			"Enabled": false
 		}
 	]

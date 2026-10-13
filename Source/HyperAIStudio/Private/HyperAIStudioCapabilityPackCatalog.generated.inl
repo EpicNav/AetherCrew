@@ -4,12 +4,12 @@
 static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatalog& OutCatalog)
 {
 	OutCatalog.Schema = TEXT("hyperai.capability-pack-catalog.v2");
-	OutCatalog.GeneratedFingerprint = TEXT("sha256:110fcdba32304cd3070a3610977ae04491eeae26bc167b7eaf3677ca47bce5c3");
+	OutCatalog.GeneratedFingerprint = TEXT("sha256:b3e132287f628925a55651d6620c39350393bbeeb45c3cd9c0f363f4dc41c8e6");
 	OutCatalog.ApprovedPlanFingerprint = TEXT("sha256:0111a6ad1e4b2f81b6da0439a22d83ffbfd8f7ccb20f958d8494eaeee84c6d1a");
 	OutCatalog.AdmissionMatrixFingerprint = TEXT("sha256:404ea0204015fb9558cf2b5fcc092d77fb7e6dc323f0adde7032252e025c23c9");
 	OutCatalog.SourceLedgerFingerprint = TEXT("sha256:2954241d83a1a24feaf00a28c6884cae62c6b138923cd8d2deae23b7dc9c4e2e");
 	OutCatalog.SourceArtifactFingerprint = TEXT("sha256:52806e6f474cb0216a8cecb2531649612ef1b87f7381a560d023fd8389fd6f4b");
-	OutCatalog.SourceArtifactCount = 174;
+	OutCatalog.SourceArtifactCount = 176;
 
 	{
 		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
@@ -138,6 +138,11 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 	}
 	{
 		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
+		Item.Id = TEXT("plugin.Fracture");
+		Item.Kind = EHyperAIStudioCapabilityPrerequisiteKind::Plugin;
+	}
+	{
+		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
 		Item.Id = TEXT("plugin.GameFeatures");
 		Item.Kind = EHyperAIStudioCapabilityPrerequisiteKind::Plugin;
 	}
@@ -159,6 +164,11 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 	{
 		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
 		Item.Id = TEXT("plugin.GameplayInteractions");
+		Item.Kind = EHyperAIStudioCapabilityPrerequisiteKind::Plugin;
+	}
+	{
+		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
+		Item.Id = TEXT("plugin.GeometryCollectionPlugin");
 		Item.Kind = EHyperAIStudioCapabilityPrerequisiteKind::Plugin;
 	}
 	{
@@ -1119,6 +1129,25 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 			Group.Mode = EHyperAIStudioCapabilityRequirementMode::AllOf;
 			Group.bBlocking = true;
 			Group.PrerequisiteIds.Add(TEXT("probe.physics_asset"));
+		}
+	}
+	{
+		FHyperAIStudioCapabilityPackDefinition& Pack = OutCatalog.Packs.AddDefaulted_GetRef();
+		Pack.Id = TEXT("destruction");
+		Pack.Tier = EHyperAIStudioCapabilityPackTier::Optional;
+		Pack.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Pack.bContainsExternalEffects = false;
+		Pack.DependsOnPackIds.Add(TEXT("shared_foundation"));
+		Pack.AtomicCohortIds.Add(TEXT("cohort.source.hyperaistudiodestructiontoolset.v1"));
+		Pack.ToolNames.Add(TEXT("hyper_destruction_inspect"));
+		Pack.ToolNames.Add(TEXT("hyper_destruction_apply_plan"));
+		{
+			FHyperAIStudioCapabilityRequirementGroup& Group = Pack.Requirements.AddDefaulted_GetRef();
+			Group.Id = TEXT("destruction_plugin");
+			Group.Mode = EHyperAIStudioCapabilityRequirementMode::AllOf;
+			Group.bBlocking = true;
+			Group.PrerequisiteIds.Add(TEXT("plugin.GeometryCollectionPlugin"));
+			Group.PrerequisiteIds.Add(TEXT("plugin.Fracture"));
 		}
 	}
 	{
@@ -3537,6 +3566,40 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 		Tool.ProductEvidenceRows = 0;
 		Tool.SupplementalEvidenceRows = 0;
 		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Read);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_destruction_inspect");
+		Tool.PackId = TEXT("destruction");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudiodestructiontoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:0ed5430ed8da22ac7828065cb3d9767e224ef6c70b48fd66968fd8a502332bfe");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Read);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_destruction_apply_plan");
+		Tool.PackId = TEXT("destruction");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudiodestructiontoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:ac65c6809adc4116a15538b772bba3d4f48935a4dbcc12bb5a6a31cf10d9d2ff");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Edit);
 	}
 	{
 		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();

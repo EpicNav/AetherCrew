@@ -159,6 +159,9 @@ The duel passes when Player0 wins. It fails `defeated` when Player1 wins, and th
 | Capture | text | A PNG was written. Without a screen, as in verification copies, it renders the player's camera. Its path is in the evidence: open it and look. |
 | RecordStart / RecordStop | text, seconds (interval, 0.5) | A frame was saved every interval into a folder, until RecordStop. |
 | UiClick / UiType / UiAssert | widget (`WBP_HUD.ScoreText`), text, compare, value | A button clicked through Slate, text typed, or a widget visible with matching text. |
+| Damage | target (geometry collections) or location, radius (cm reached), value (strain; twice the highest damage threshold unless set), seconds (keep it on) | A strain field hit Chaos geometry collections there. |
+| Fire | target or location, value (cm/s, 3000), range (drop from this high instead) | A 40 cm, 200 kg test ball was fired from the player's view, or dropped. |
+| AssertBroken | target (empty: every geometry collection), compare, value | That many pieces broke off. The detail counts the clusters broken and names what fell how far. |
 
 **Targets** are an actor's label, name, tag or class name (`BP_Coin`), or one of Player, PlayerController, PlayerState, GameState or GameMode. An empty target means Player. For a step with playerIndex, those names mean that player's. `Player0` to `Player7` name each player's pawn.
 
@@ -181,6 +184,7 @@ The duel passes when Player0 wins. It fails `defeated` when Player1 wins, and th
 - **Can it be finished:** Play Reach to the goal, or Play Collect on every pickup. A `stuck` result says where the level blocks a player.
 - **Level coverage:** Play Explore for 30 to 60 seconds, then look at the map. Its stuck spots and falls are where players get trapped or fall out.
 - **Before building anything:** Survey tells you the class names, where the player starts, and whether a target is reachable.
+- **Destruction:** Wait 0.5 s, Damage the geometry collection (or Fire at it), WaitUntil AssertBroken with compare `>=`, then Wait and AssertBroken again to read what fell. `hyper_destruction_apply_plan` hands back such a case as `VerifyCase`; the `unreal-destruction` skill has more.
 
 ## Rules
 

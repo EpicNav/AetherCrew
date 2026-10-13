@@ -119,6 +119,9 @@ bool FHyperAIStudioTaskRouterPacksTest::RunTest(const FString& Parameters)
 		{TEXT("Open the rock mesh in modeling mode so I can sculpt it myself"), TEXT("mesh_modeling")},
 		{TEXT("Let me hand edit the crate with PolyEdit"), TEXT("mesh_modeling")},
 		{TEXT("Sculpt hills into the landscape"), TEXT("worldbuilding_navigation")},
+		// Breaking things is the destruction pack's, not the physics asset pack's.
+		{TEXT("Fracture the stone wall so it shatters"), TEXT("destruction")},
+		{TEXT("Make the bridge destructible"), TEXT("destruction")},
 		{TEXT("What time is it?"), TEXT("none")},
 		{TEXT("Thanks!"), TEXT("none")},
 	};
