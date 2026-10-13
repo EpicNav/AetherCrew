@@ -73,6 +73,8 @@ public class HyperAIStudio : ModuleRules
 			PublicSystemLibraries.Add("iphlpapi.lib");
 			// Auto-approval kept on after a restart: its record is sealed with DPAPI (CryptProtectData) for this user.
 			PublicSystemLibraries.Add("crypt32.lib");
+			// Keys the user gives agents and providers live in Windows Credential Manager (CredWrite, CredRead).
+			PublicSystemLibraries.Add("advapi32.lib");
 		}
 	}
 }

@@ -2,6 +2,7 @@
 
 #include "HyperAIStudioService.h"
 #include "HyperAIStudioCapabilityInventoryClient.h"
+#include "HyperAIStudioCredentials.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioCapabilityPreset.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
@@ -2645,7 +2646,57 @@ FString FHyperAIStudioService::GetCodexTerminalLaunchCommand()
 	{
 		LaunchCommand += TEXT(" -c service_tier=fast");
 	}
-	return LaunchCommand;
+	return LaunchCommand + GetCodexRootArguments();
+}
+
+FString FHyperAIStudioService::GetCodexRootArguments()
+{
+	// A -c value that is not valid TOML is taken as a string, so an address goes unquoted; anything cmd.exe would read
+	// as an operator is refused instead.
+	auto IsPlainAddress = [](const FString& Value)
+	{
+		if (!(Value.StartsWith(TEXT("http://")) || Value.StartsWith(TEXT("https://"))))
+		{
+			return false;
+		}
+		for (const TCHAR C : Value)
+		{
+			if (C <= TEXT(' ') || FCString::Strchr(TEXT("\"'&|<>^%!(),`"), C))
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+	const FString Endpoint = Settings
+		? GetEndpoint(Settings->UnrealMCPPort, Settings->UnrealMCPUrlPath)
+		: GetEndpoint(UE::ModelContextProtocol::DefaultServerPort, FString(UE::ModelContextProtocol::DefaultServerUrlPath));
+	FString Arguments;
+	if (IsPlainAddress(Endpoint))
+	{
+		Arguments += FString::Printf(TEXT(" -c mcp_servers.unreal-mcp.url=%s -c mcp_servers.unreal-mcp.startup_timeout_sec=30 -c mcp_servers.unreal-mcp.tool_timeout_sec=300"), *Endpoint);
+	}
+	if (!HyperAIStudio::Credentials::ReadSlot(TEXT("agent/codex/OPENAI_API_KEY")).TrimStartAndEnd().IsEmpty())
+	{
+		FString BaseUrl = HyperAIStudio::Credentials::ReadSlot(TEXT("agent/codex/OPENAI_BASE_URL")).TrimStartAndEnd();
+		BaseUrl = IsPlainAddress(BaseUrl) ? BaseUrl : FString(TEXT("https://api.openai.com/v1"));
+		Arguments += FString::Printf(TEXT(" -c model_provider=hyperai -c model_providers.hyperai.name=HyperAI -c model_providers.hyperai.base_url=%s")
+			TEXT(" -c model_providers.hyperai.env_key=OPENAI_API_KEY"), *BaseUrl);
+	}
+	return Arguments;
+}
+
+FString FHyperAIStudioService::GetClaudeLaunchSettingsFile()
+{
+	const FString File = FPaths::Combine(GetProjectRoot(), TEXT(".hyperai"), TEXT("runtime"), TEXT("claude-launch-settings.json"));
+	const FString Wanted = TEXT("{\"enabledMcpjsonServers\": [\"unreal-mcp\"]}\n");
+	FString Existing;
+	if (FFileHelper::LoadFileToString(Existing, *File) && Existing == Wanted)
+	{
+		return File;
+	}
+	return FFileHelper::SaveStringToFile(Wanted, *File, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM) ? File : FString();
 }
 
 FString FHyperAIStudioService::GetAgentTerminalLaunchCommand(const FString& AgentName)

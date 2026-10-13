@@ -92,9 +92,12 @@ namespace HyperAIStudio::ChatHistory
 	 * to the editor, so background sessions outlive it.
 	 */
 	TArray<FHyperAIStudioLiveChat> ListLiveClaudeChats(const FString& ClaudeCommand, const FString& ProjectRoot);
-	/** Starts `claude --bg <Arguments>` in ProjectRoot and returns its short id. EnvPrefix is cmd `set` commands ending in "&& ". */
+	/**
+	 * Starts `claude --bg <Arguments>` in ProjectRoot and returns its short id. EnvPrefix is cmd `set` commands ending in
+	 * "&& ". KeyTargets (Credentials::TargetsFor) are the stored keys it starts with.
+	 */
 	FString StartClaudeBackgroundChat(const FString& ClaudeCommand, const FString& ProjectRoot, const FString& EnvPrefix,
-		const FString& Arguments, FString& OutError);
+		const FString& Arguments, FString& OutError, const TArray<TPair<FString, FString>>& KeyTargets = {});
 	/** `claude stop <ShortId>`: the session ends and its conversation stays resumable. */
 	bool StopClaudeBackgroundChat(const FString& ClaudeCommand, const FString& ShortId);
 }

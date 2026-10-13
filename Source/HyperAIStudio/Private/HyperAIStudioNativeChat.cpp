@@ -3,6 +3,7 @@
 #include "HyperAIStudioNativeChat.h"
 
 #include "Async/Async.h"
+#include "HyperAIStudioCredentials.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformTime.h"
 #include "CoreGlobals.h"
@@ -228,9 +229,14 @@ bool FHyperAIStudioNativeChat::Start(FString& OutError)
 	}
 #endif
 	Command = Command.IsEmpty() ? CommandLine() : Command;
-	// Through cmd so npm's .cmd shims start too; /s keeps the quoted executable path intact.
-	Process = FPlatformProcess::CreateProc(TEXT("cmd.exe"), *FString::Printf(TEXT("/d /s /c \"%s\""), *Command),
-		/*bLaunchDetached=*/false, /*bLaunchHidden=*/true, /*bLaunchReallyHidden=*/true, nullptr, 0, *ProjectRoot, StdOutWrite, StdInRead);
+	// Through cmd so npm's .cmd shims start too; /s keeps the quoted executable path intact. The keys the user stored
+	// for this agent go into its environment alone, not the editor's.
+	const TMap<FString, FString> Keys = HyperAIStudio::Credentials::EnvironmentFor(AgentName);
+	Process = Keys.IsEmpty()
+		? FPlatformProcess::CreateProc(TEXT("cmd.exe"), *FString::Printf(TEXT("/d /s /c \"%s\""), *Command),
+			/*bLaunchDetached=*/false, /*bLaunchHidden=*/true, /*bLaunchReallyHidden=*/true, nullptr, 0, *ProjectRoot, StdOutWrite, StdInRead)
+		: HyperAIStudio::Credentials::CreateProcWithEnvironment(TEXT("cmd.exe"), FString::Printf(TEXT("/d /s /c \"%s\""), *Command), ProjectRoot,
+			Keys, StdOutWrite, StdInRead);
 	if (!Process.IsValid())
 	{
 		OutError = FString::Printf(TEXT("Could not start %s."), *Command);
@@ -297,6 +303,7 @@ void FHyperAIStudioNativeChat::Stop()
 		return;
 	}
 	bStopped = true;
+	HyperAIStudio::ChatModes::ClearActive(this);
 	if (Ticker.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(Ticker);
@@ -356,8 +363,32 @@ void FHyperAIStudioNativeChat::Send(const FString& Text, const TArray<FString>& 
 	}
 	AddItem(FHyperAIStudioChatItem::EKind::User, FString(), FString(), Trimmed)->Images = Sendable;
 	TurnStarted();
+	// The mode's packs, tools and skills go with every message, after what the message names itself.
+	FHyperAIStudioMessageHints WithMode = Hints;
+	for (const FString& Pack : Mode.Packs) { WithMode.Packs.AddUnique(Pack); }
+	for (const FString& Tool : Mode.Tools) { WithMode.Tools.AddUnique(Tool); }
+	for (const FString& Skill : Mode.Skills) { WithMode.Skills.AddUnique(Skill); }
+	// Its instructions go once, with the first message after the chat enters it.
+	FString ModeBlock;
+	const FString ModeKey = Mode.Id.IsEmpty() ? FString() : HyperAIStudio::ChatModes::ToJson(Mode);
+	if (!bHeadless && ModeKey != SentModeKey && !Trimmed.StartsWith(TEXT("/")))
+	{
+		SentModeKey = ModeKey;
+		ModeBlock = Mode.Id.IsEmpty() ? FString() : HyperAIStudio::ChatModes::InstructionsBlock(Mode);
+	}
 	// The agent also gets what project memory knows about the message; the transcript keeps what was typed.
-	SendNow(Trimmed + MemoryFor(Trimmed, Hints), Sendable);
+	SendNow(Trimmed + ModeBlock + MemoryFor(Trimmed, WithMode), Sendable);
+}
+
+void FHyperAIStudioNativeChat::SetMode(const FHyperAIStudioChatMode& InMode, const FString& Label)
+{
+	Mode = InMode;
+	if (bStopped || bHeadless)
+	{
+		return;
+	}
+	HyperAIStudio::ChatModes::SetActive(this, &Mode, Label);
+	Changed();
 }
 
 FString FHyperAIStudioNativeChat::MemoryFor(const FString& Text, const FHyperAIStudioMessageHints& Hints)
@@ -835,7 +866,8 @@ namespace HyperAIStudio::NativeChat::Private
 			{
 				Command += TEXT(" -c service_tier=fast");
 			}
-			return Command + TEXT(" app-server");
+			// Unreal MCP and a stored OpenAI key, as the terminal's Codex gets them.
+			return Command + FHyperAIStudioService::GetCodexRootArguments() + TEXT(" app-server");
 		}
 
 		virtual bool WritesJsonRpcVersion() const override { return false; }

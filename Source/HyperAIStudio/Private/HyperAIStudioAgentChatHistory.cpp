@@ -3,6 +3,7 @@
 #include "HyperAIStudioAgentChatHistory.h"
 
 #include "Algo/AllOf.h"
+#include "HyperAIStudioCredentials.h"
 #include "Dom/JsonObject.h"
 #include "GenericPlatform/GenericPlatformFile.h"
 #include "HAL/FileManager.h"
@@ -596,10 +597,10 @@ TArray<FHyperAIStudioLiveChat> ListLiveClaudeChats(const FString& ClaudeCommand,
 }
 
 FString StartClaudeBackgroundChat(const FString& ClaudeCommand, const FString& ProjectRoot, const FString& EnvPrefix,
-	const FString& Arguments, FString& OutError)
+	const FString& Arguments, FString& OutError, const TArray<TPair<FString, FString>>& KeyTargets)
 {
 	FString Output;
-	RunHidden(EnvPrefix + ClaudeCommand + TEXT(" --bg ") + Arguments, ProjectRoot, Output);
+	RunHidden(HyperAIStudio::Credentials::WrapCommandWithTargets(KeyTargets, EnvPrefix + ClaudeCommand + TEXT(" --bg ") + Arguments), ProjectRoot, Output);
 	const FString ShortId = ParseBackgroundedId(Output);
 	if (ShortId.IsEmpty())
 	{

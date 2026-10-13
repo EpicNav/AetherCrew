@@ -303,6 +303,10 @@ private:
 	/** Replaces the terminal with a native chat for the selected agent, resuming ResumeId when set. */
 	bool StartNativeChat(const FString& ResumeId);
 	void StopNativeChat();
+	/** A mode picked in the chat view: kept for this tab's next chats, and its preferred agent and model taken while the chat is new. */
+	void OnModeChosen(const FHyperAIStudioChatMode& Mode);
+	/** The mode this tab's chats run in (HyperAIStudio::ChatModes). */
+	FString TabModeId;
 	/**
 	 * A new chat's first message, before it is sent: the task route it fits starts its agent here, the chat starting
 	 * again on that agent with the message when it is another. A preset's message takes its category's route (Hints).

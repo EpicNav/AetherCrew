@@ -267,6 +267,92 @@ bool ParseSkill(const FString& SkillText, FString& OutName, FString& OutDescript
 	return false;
 }
 
+bool ValidateSkill(const FString& SkillText, const FString& FolderName, FString& OutName, FString& OutDescription, FString& OutError)
+{
+	OutError.Reset();
+	TArray<FString> Lines;
+	SkillText.Replace(TEXT("\r"), TEXT("")).ParseIntoArray(Lines, TEXT("\n"), /*InCullEmpty=*/false);
+	if (Lines.IsEmpty() || Lines[0].TrimEnd() != TEXT("---"))
+	{
+		OutError = TEXT("SKILL.md must start with a frontmatter block: a line of ---, then name: and description:, then another ---.");
+		return false;
+	}
+	bool bClosed = false;
+	for (int32 Line = 1; Line < Lines.Num() && !bClosed; ++Line)
+	{
+		bClosed = Lines[Line].TrimEnd() == TEXT("---");
+	}
+	if (!bClosed)
+	{
+		OutError = TEXT("SKILL.md's frontmatter is not closed with a line of ---.");
+		return false;
+	}
+	bool bMenuOnly = false;
+	ParseSkill(SkillText, OutName, OutDescription, bMenuOnly);
+	if (OutName.IsEmpty())
+	{
+		OutError = TEXT("The frontmatter has no name: field (or it is not closed with ---).");
+		return false;
+	}
+	if (!IsValidName(OutName))
+	{
+		OutError = FString::Printf(TEXT("name '%s' is not valid: use lowercase letters, digits and hyphens, at most 64, not starting or ending with a hyphen."), *OutName);
+		return false;
+	}
+	if (OutName.Contains(TEXT("anthropic")) || OutName.Contains(TEXT("claude")))
+	{
+		OutError = FString::Printf(TEXT("name '%s' uses a reserved word (anthropic or claude), which Claude Code refuses."), *OutName);
+		return false;
+	}
+	if (!FolderName.IsEmpty() && FolderName != OutName)
+	{
+		OutError = FString::Printf(TEXT("name '%s' does not match its folder '%s'; agents find a skill by its folder's name."), *OutName, *FolderName);
+		return false;
+	}
+	if (OutDescription.IsEmpty())
+	{
+		OutError = TEXT("The frontmatter has no description: field. Agents pick a skill by its description: say what it does and when to use it.");
+		return false;
+	}
+	if (OutDescription.Len() > 1024)
+	{
+		OutError = FString::Printf(TEXT("The description is %d characters; the limit is 1024."), OutDescription.Len());
+		return false;
+	}
+	const FRegexPattern Tag(TEXT("<[A-Za-z/][^>]*>"));
+	if (FRegexMatcher(Tag, OutName).FindNext() || FRegexMatcher(Tag, OutDescription).FindNext())
+	{
+		OutError = TEXT("The name or description holds an XML tag, which skills may not.");
+		return false;
+	}
+	return true;
+}
+
+bool Create(const FString& ProjectRoot, const FString& Name, const FString& Description, FString& OutError)
+{
+	const FString Folder = FPaths::Combine(CanonicalDirectory(ProjectRoot), Name);
+	const FString Text = FString::Printf(TEXT("---\nname: %s\ndescription: %s\n---\n\n# %s\n\nWhat to do, step by step, with the HyperAI tools to call and how to check the result.\n"),
+		*Name, *Description.Replace(TEXT("\n"), TEXT(" ")).TrimStartAndEnd(), *Name);
+	FString CheckedName;
+	FString CheckedDescription;
+	if (!ValidateSkill(Text, Name, CheckedName, CheckedDescription, OutError))
+	{
+		return false;
+	}
+	if (FPaths::DirectoryExists(Folder) || FPaths::DirectoryExists(FPaths::Combine(ClaudeDirectory(ProjectRoot), Name)))
+	{
+		OutError = FString::Printf(TEXT("The project already has a skill named '%s'."), *Name);
+		return false;
+	}
+	if (!FFileHelper::SaveStringToFile(Text, *FPaths::Combine(Folder, TEXT("SKILL.md")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	{
+		OutError = TEXT("Could not write the skill's SKILL.md.");
+		return false;
+	}
+	SyncClaudeMirror(ProjectRoot);
+	return true;
+}
+
 FString FolderHash(const FString& Folder)
 {
 	FSHA1 Sha;
@@ -286,16 +372,44 @@ FString FolderHash(const FString& Folder)
 	return BytesToHex(Digest, FSHA1::DigestSize);
 }
 
-TArray<FHyperAIStudioSkill> ListProjectSkills(const FString& ProjectRoot)
+TArray<FHyperAIStudioSkill> ListProjectSkills(const FString& ProjectRoot, const bool bIncludeInvalid)
 {
 	TArray<FHyperAIStudioSkill> Skills;
 	TSet<FString> Canonical;
+	// A folder agents cannot use is shown with why, so it can be fixed rather than silently missing.
+	auto AddInvalid = [&Skills, bIncludeInvalid](const FString& Folder, const FString& Scope)
+	{
+		FString Text;
+		FString Name;
+		FString Description;
+		FString Error;
+		if (!bIncludeInvalid || !FFileHelper::LoadFileToString(Text, *FPaths::Combine(Folder, TEXT("SKILL.md")))
+			|| ValidateSkill(Text, FPaths::GetCleanFilename(Folder), Name, Description, Error))
+		{
+			return;
+		}
+		FHyperAIStudioSkill& Skill = Skills.AddDefaulted_GetRef();
+		Skill.Name = FPaths::GetCleanFilename(Folder);
+		Skill.Description = Description;
+		Skill.Folder = FPaths::ConvertRelativePathToFull(Folder);
+		Skill.Scope = Scope;
+		Skill.Problem = Error;
+	};
 	for (const FString& Folder : SkillFolders(CanonicalDirectory(ProjectRoot)))
 	{
 		FHyperAIStudioSkill Skill;
 		if (!ReadSkill(Folder, TEXT("project"), Skill))
 		{
+			AddInvalid(Folder, TEXT("project"));
 			continue;
+		}
+		if (bIncludeInvalid)
+		{
+			FString Text;
+			FString Name;
+			FString Description;
+			FFileHelper::LoadFileToString(Text, *FPaths::Combine(Folder, TEXT("SKILL.md")));
+			ValidateSkill(Text, FPaths::GetCleanFilename(Folder), Name, Description, Skill.Problem);
 		}
 		const FString Hash = FolderHash(Folder);
 		Skill.bBuiltIn = ReadMarker(Folder, BuiltInMarker) == Hash;
@@ -320,10 +434,17 @@ TArray<FHyperAIStudioSkill> ListProjectSkills(const FString& ProjectRoot)
 	for (const FString& Folder : SkillFolders(ClaudeDirectory(ProjectRoot)))
 	{
 		FHyperAIStudioSkill Skill;
-		if (!Canonical.Contains(FPaths::GetCleanFilename(Folder)) && !FPaths::FileExists(FPaths::Combine(Folder, MirrorMarker))
-			&& ReadSkill(Folder, TEXT("claude"), Skill))
+		if (Canonical.Contains(FPaths::GetCleanFilename(Folder)) || FPaths::FileExists(FPaths::Combine(Folder, MirrorMarker)))
+		{
+			continue;
+		}
+		if (ReadSkill(Folder, TEXT("claude"), Skill))
 		{
 			Skills.Add(MoveTemp(Skill));
+		}
+		else
+		{
+			AddInvalid(Folder, TEXT("claude"));
 		}
 	}
 	return Skills;
@@ -644,15 +765,17 @@ FString Import(const FString& ProjectRoot, const FString& Source, FString& OutEr
 			return FString();
 		}
 	}
-	FHyperAIStudioSkill Skill;
+	// Checked as Claude Code reads it; the copy takes the name its frontmatter gives, whatever the folder or zip was called.
 	FString Name;
-	if (!ReadSkill(Folder, TEXT("project"), Skill))
+	FString Description;
+	FString SkillText;
+	if (Folder.IsEmpty() || !FFileHelper::LoadFileToString(SkillText, *FPaths::Combine(Folder, TEXT("SKILL.md"))))
 	{
-		OutError = TEXT("That folder has no valid SKILL.md (frontmatter with name and description).");
+		OutError = TEXT("That folder has no SKILL.md.");
 	}
-	else if (Name = Skill.Name; !IsValidName(Name))
+	else if (!ValidateSkill(SkillText, FString(), Name, Description, OutError))
 	{
-		OutError = FString::Printf(TEXT("'%s' is not a valid skill name: lowercase letters, digits and hyphens."), *Name);
+		OutError = FString::Printf(TEXT("%s is not a valid skill: %s"), *FPaths::GetCleanFilename(Folder), *OutError);
 		Name.Reset();
 	}
 	else if (FPaths::DirectoryExists(FPaths::Combine(CanonicalDirectory(ProjectRoot), Name)))

@@ -19,6 +19,8 @@ struct FHyperAIStudioSkill
 	bool bBuiltIn = false;
 	/** Project skills only: synced, stale, missing, edited (its Claude copy was changed there) or taken (a Claude-only skill has the name). */
 	FString MirrorState;
+	/** Why its SKILL.md is not a valid skill, so agents cannot use it; empty for a valid one. */
+	FString Problem;
 };
 
 /**
@@ -38,10 +40,19 @@ namespace HyperAIStudio::Skills
 
 	bool IsValidName(const FString& Name);
 	bool ParseSkill(const FString& SkillText, FString& OutName, FString& OutDescription, bool& bOutMenuOnly);
+	/**
+	 * Checks a SKILL.md the way Claude Code and Codex read it: frontmatter between --- lines with a name (lowercase
+	 * letters, digits and hyphens, up to 64, not naming Anthropic or Claude, and the folder's name when FolderName is
+	 * given) and a description (up to 1024 characters), neither holding XML tags. OutError says what is wrong.
+	 */
+	bool ValidateSkill(const FString& SkillText, const FString& FolderName, FString& OutName, FString& OutDescription, FString& OutError);
+	/** A new project skill in .agents/skills from Name and Description, with a body to fill in; synced to Claude Code. */
+	bool Create(const FString& ProjectRoot, const FString& Name, const FString& Description, FString& OutError);
 	/** Hash of a skill folder's files and relative paths, leaving out HyperAIStudio's marker files. */
 	FString FolderHash(const FString& Folder);
 
-	TArray<FHyperAIStudioSkill> ListProjectSkills(const FString& ProjectRoot);
+	/** bIncludeInvalid adds folders whose SKILL.md is not valid, with Problem set, for the Skills page to show. */
+	TArray<FHyperAIStudioSkill> ListProjectSkills(const FString& ProjectRoot, bool bIncludeInvalid = false);
 	TArray<FHyperAIStudioSkill> ListPersonalSkills();
 	/** What the chat's Skills menu offers Claude Code or Codex; nothing for other agents. */
 	TArray<FHyperAIStudioSkill> ListForAgent(const FString& ProjectRoot, const FString& AgentName);

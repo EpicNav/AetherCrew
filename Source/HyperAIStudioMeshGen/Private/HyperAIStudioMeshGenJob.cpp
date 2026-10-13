@@ -9,6 +9,7 @@
 #include "HttpModule.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioCredentials.h"
 #include "HyperAIStudioExternalService.h"
 #include "Interfaces/IHttpResponse.h"
 #include "Misc/FileHelper.h"
@@ -30,7 +31,8 @@ namespace HyperAIStudio::MeshGen::Private
 
 	FString Key(const FHyperAIStudioExternalServiceSettings& Service)
 	{
-		return Service.ApiKeyVariable.IsEmpty() ? FString() : FPlatformMisc::GetEnvironmentVariable(*Service.ApiKeyVariable).TrimStartAndEnd();
+		// The key stored in Settings > Agents first, then the environment variable.
+		return HyperAIStudio::Credentials::ReadKey(Service.ApiKeyVariable);
 	}
 
 	FString ProjectRelative(const FString& Path)

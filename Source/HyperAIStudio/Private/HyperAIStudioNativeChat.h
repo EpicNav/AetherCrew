@@ -6,6 +6,7 @@
 #include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
 #include "HAL/PlatformProcess.h"
+#include "HyperAIStudioChatModes.h"
 
 /** One line of a native chat's transcript. */
 struct FHyperAIStudioChatItem
@@ -115,6 +116,12 @@ public:
 	void Answer(const FString& ItemId, int32 Choice);
 	/** A line in the transcript from HyperAI itself, such as which agent a task was routed to. */
 	void AddNotice(const FString& Text);
+	/**
+	 * The chat's mode: its instructions go with the next message, its packs, tools and skills with every one, and a
+	 * read-only mode makes HyperAI refuse edit plans while this chat runs. Label names the chat in refusals.
+	 */
+	void SetMode(const FHyperAIStudioChatMode& InMode, const FString& Label);
+	const FHyperAIStudioChatMode& GetMode() const { return Mode; }
 	/**
 	 * What goes with a message beside what was typed: the project notes and past tasks it matches, the project agent its
 	 * task is for (unless the chat runs as one, StartedAs), the skills made for its kind of work and the HyperAI tools
@@ -247,4 +254,7 @@ private:
 	bool bStopped = false;
 	/** The notes and past tasks this chat was given, and the tasks it finished: none is sent to it again. */
 	TSet<FString> GivenMemory;
+	FHyperAIStudioChatMode Mode;
+	/** The mode whose instructions the agent was last sent, so a change is announced once. */
+	FString SentModeKey;
 };
