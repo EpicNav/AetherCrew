@@ -8,6 +8,8 @@
 #include "HAL/PlatformProcess.h"
 #include "HyperAIStudioChatModes.h"
 
+class FHyperAIStudioHostStreamReader;
+
 /** One line of a native chat's transcript. */
 struct FHyperAIStudioChatItem
 {
@@ -108,7 +110,19 @@ public:
 	 */
 	void SetHeadless(const FString& Instructions);
 	bool Start(FString& OutError);
+	/**
+	 * Instead of Start: takes up a chat whose agent HyperAI's background host runs (FHyperAIStudioAgentHost), one an
+	 * editor that closed or crashed left there. Everything the agent said since it started is replayed into the
+	 * transcript, its turn and open approvals included, and the chat goes on live from there.
+	 */
+	bool Attach(const FString& HostSessionId, FString& OutError);
+	/** Lets go of a hosted chat without stopping its agent, as the editor closes; another editor attaches to it later. */
+	void Detach();
 	void Stop();
+	/** The background host's session this chat runs in; empty when its agent runs inside the editor. */
+	const FString& GetHostSession() const { return HostSession; }
+	/** For the host's note of the chat: the tab it is in, and its title and subagent, for an editor that takes it up later. */
+	void SetHostNote(int32 TabIndex, const FString& Title, const FString& Subagent);
 	/** Sends now, or once the running turn ends. Images are files the agent sees with the text; Hints go with it either way. */
 	void Send(const FString& Text, const TArray<FString>& Images = {}, const FHyperAIStudioMessageHints& Hints = {});
 	void Interrupt();
@@ -173,6 +187,22 @@ protected:
 	/** A resumed chat brings back what was said before, for an agent that does not send it back itself. */
 	virtual void LoadHistory() {}
 	/**
+	 * Replaying a hosted chat: what handles the answer to a request the editor sent before (Method), so a turn that
+	 * ends with that answer ends in the replay too. Null for requests whose answer only matters live.
+	 */
+	using FOnResult = TFunction<void(const TSharedPtr<FJsonObject>& Result, const FString& Error)>;
+	virtual FOnResult ReplayCallback(const FString& /*Method*/) { return nullptr; }
+	/** Replaying a hosted chat: the user's message just shown starts a new turn, as SendNow does live. */
+	virtual void ReplayUserMessage() {}
+	/** The id of a request the agent sent (a JSON-RPC request; Claude Code's control_request), or empty. */
+	virtual FString AgentRequestKey(const TSharedRef<FJsonObject>& Line) const;
+	/** The id of the agent's request this line of the editor's answers, or empty. */
+	virtual FString EditorAnswerKey(const TSharedRef<FJsonObject>& Line) const;
+	/** The id of a request the agent withdrew with this line, or empty. */
+	virtual FString AgentWithdrawKey(const TSharedRef<FJsonObject>& /*Line*/) const { return FString(); }
+	/** A request id as text, a number or a string alike. */
+	static FString KeyOf(const TSharedPtr<FJsonValue>& Id);
+	/**
 	 * Shows an earlier part of the chat above everything on screen: Replay adds its items as the live chat would, and
 	 * they move to the top. bMoreBefore says the conversation goes back further than what is shown.
 	 */
@@ -180,7 +210,6 @@ protected:
 
 	/** One message to the agent, as a line. */
 	void Write(const TSharedRef<FJsonObject>& Message);
-	using FOnResult = TFunction<void(const TSharedPtr<FJsonObject>& Result, const FString& Error)>;
 	void Request(const FString& Method, const TSharedRef<FJsonObject>& Params, FOnResult OnResult = nullptr);
 	void Notify(const FString& Method, const TSharedRef<FJsonObject>& Params);
 	/** Answers a request the agent sent; Claude Code answers with control responses instead. */
@@ -215,6 +244,8 @@ protected:
 	FString HeadlessInstructions;
 	/** Set while ShowEarlier replays: nothing is announced, and pictures are not written to disk again. */
 	bool bReplaying = false;
+	/** Set while a hosted chat's stream replays: nothing reaches the agent, no request is sent, and pictures are kept. */
+	bool bStreamReplay = false;
 
 private:
 	struct FQueuedMessage
@@ -228,13 +259,32 @@ private:
 	TSharedRef<FHyperAIStudioChatItem> NewItem(FHyperAIStudioChatItem::EKind Kind, const FString& Id, const FString& Title,
 		const FString& Text, const FString& Status);
 	bool Pump(float DeltaTime);
+	/** A hosted chat's pump: the lines its host wrote since the last tick. */
+	bool PumpHost();
 	void Dispatch(const FString& Line);
 	void ClosePipes();
+	/** Starts the agent in the background host; false (and nothing started) when the host cannot run. */
+	bool StartHosted(const FString& Command, FString& OutError);
+	/** Everything a hosted chat's stream holds, run through the chat as it happened, with nothing sent to the agent. */
+	void ReplayStream(const TArray<FString>& Lines);
+	/** The host says the agent ended (exited, stopped or lost): Body is its event. */
+	void HostEnded(const FString& Body);
+	/** A note kept in a hosted chat's stream for an editor that replays it later. */
+	void Note(const TSharedRef<FJsonObject>& Fields);
+	/** Lets go of the chat's ticker and turn, the agent left alone. */
+	void EndLocally();
 	/** ContextFor Text and its Hints, with what this chat has not had yet, to send with it; a notice says what went. */
 	FString MemoryFor(const FString& Text, const FHyperAIStudioMessageHints& Hints);
 	/** Records the turn that just ended in the project's task history. */
 	void RecordTurn();
 
+	/** The background host's session, and its stream as read so far; empty when the agent runs inside the editor. */
+	FString HostSession;
+	TUniquePtr<FHyperAIStudioHostStreamReader> HostStream;
+	/** When the host was asked to start the agent; its first word is waited for a while, the host restarted if gone. */
+	double HostAskedAt = 0.0;
+	double HostCheckedAt = 0.0;
+	bool bHostHeard = false;
 	FProcHandle Process;
 	void* StdOutRead = nullptr;
 	void* StdOutWrite = nullptr;

@@ -634,6 +634,24 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Chat", meta = (DisplayName = "Native Chat View"))
 	bool bUseNativeChatView = true;
 
+	/**
+	 * Chats in the native view run their agent in HyperAI's background host, a small process apart from the editor, so
+	 * a turn keeps going when the editor restarts, crashes or closes (only a chat that is working is kept when you close
+	 * the editor yourself; an idle one stops). The editor that opens next reattaches each chat and shows what it missed.
+	 * Stop them from a chat's menu with Stop Background Agents. Off: an agent runs inside the editor and stops with it.
+	 * Applies to chats started from now on.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Chat", meta = (DisplayName = "Keep Agents Working When The Editor Closes"))
+	bool bKeepAgentsWorkingWhenEditorCloses = true;
+
+	/**
+	 * With no editor open, a background agent that has done nothing for this many minutes (waiting on an approval
+	 * nobody can answer, say) is stopped; its conversation is kept and can be resumed from Chats. 0 never stops one.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Chat", meta = (DisplayName = "Stop Background Agents Idle For (Minutes)", ClampMin = "0",
+		EditCondition = "bKeepAgentsWorkingWhenEditorCloses"))
+	int32 BackgroundAgentIdleMinutes = 30;
+
 	/** Actor classes a playtest may spawn into the PIE world. Nothing else can be spawned. */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Playtests", meta = (AllowAbstract = "false", MetaClass = "/Script/Engine.Actor"))
 	TArray<FSoftClassPath> PlaytestSpawnableClasses;

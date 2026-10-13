@@ -43,6 +43,7 @@
 #include "SHyperAIStudioMemoryPanel.h"
 #include "HyperAIStudioAgents.h"
 #include "HyperAIStudioLocalModels.h"
+#include "HyperAIStudioAgentHost.h"
 #include "HyperAIStudioNativeChat.h"
 #include "SHyperAIStudioNativeChatView.h"
 #include "SHyperAIStudioPromptPicker.h"
@@ -965,6 +966,22 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildSettingsMenu()
 		LOCTEXT("RefreshTooltip", "Re-check Unreal MCP readiness and installed agents."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Refresh"),
 		FUIAction(FExecuteAction::CreateSPLambda(this, [this]() { OnRefreshClicked(); })));
+	{
+		// Every agent HyperAI's background host runs for this project, this editor's chats and any left from before.
+		const int32 Running = FHyperAIStudioAgentHost::CountRunning();
+		Menu.AddMenuEntry(
+			FText::Format(LOCTEXT("StopBackgroundAgents", "Stop Background Agents ({0})"), FText::AsNumber(Running)),
+			LOCTEXT("StopBackgroundAgentsTooltip", "Stop every agent HyperAI's background host runs for this project, including chats left running when an editor closed or crashed. Their conversations are kept and can be resumed from Chats. The host exits once none runs."),
+			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.X"),
+			FUIAction(
+				FExecuteAction::CreateLambda([]()
+				{
+					const int32 Stopped = FHyperAIStudioAgentHost::StopAll(TEXT("stopped from the chat menu"));
+					HyperAIStudio::QuickAction::Toast(FText::Format(LOCTEXT("StoppedBackgroundAgents", "{0} background {0}|plural(one=agent,other=agents) stopped."),
+						FText::AsNumber(Stopped)));
+				}),
+				FCanExecuteAction::CreateLambda([Running]() { return Running > 0; })));
+	}
 	Menu.AddSeparator();
 	Menu.AddMenuEntry(
 		LOCTEXT("ChatOpenSetup", "Open Setup"),
@@ -2484,6 +2501,7 @@ void SHyperAIStudioQuickActionWindow::QueueTerminalStartup(bool bForce, bool bRe
 		}
 		const bool bResuming = ResumeAgentName.Equals(AgentName, ESearchCase::IgnoreCase);
 		const FString Resume = bResuming ? ResumeSessionId : FString();
+		const FString HostSession = bResuming ? ResumeHostSession : FString();
 		if (FHyperAIStudioNativeChat::IsSupported(AgentName)
 			&& !HyperAIStudio::QuickAction::NeedsTerminal(AgentName, Resume, bResuming ? ResumeBackgroundId : FString()))
 		{
@@ -2491,8 +2509,9 @@ void SHyperAIStudioQuickActionWindow::QueueTerminalStartup(bool bForce, bool bRe
 			ResumeSessionId.Reset();
 			ResumeTitle.Reset();
 			ResumeBackgroundId.Reset();
+			ResumeHostSession.Reset();
 			StopNativeChat();
-			StartNativeChat(Resume);
+			StartNativeChat(Resume, HostSession);
 			return;
 		}
 		// A terminal-only agent, or a Claude Code chat with Remote Control, takes the tab back to the terminal.
@@ -2604,11 +2623,13 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 	const bool bResuming = !ResumeAgentName.IsEmpty() && ResumeAgentName.Equals(AgentName, ESearchCase::IgnoreCase);
 	FString SessionId = bResuming ? ResumeSessionId : FString();
 	const FString AttachId = bResuming ? ResumeBackgroundId : FString();
+	const FString HostSession = bResuming ? ResumeHostSession : FString();
 	ActiveChatTitle = bResuming ? ResumeTitle : FString();
 	ResumeAgentName.Reset();
 	ResumeSessionId.Reset();
 	ResumeTitle.Reset();
 	ResumeBackgroundId.Reset();
+	ResumeHostSession.Reset();
 	ActiveBackgroundId.Reset();
 	bRemoteRelaunchPending = false;
 	bBackgroundStarting = false;
@@ -2630,7 +2651,7 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 
 	// A native chat that cannot start falls back to the terminal.
 	if (GetDefault<UHyperAIStudioSettings>()->bUseNativeChatView && FHyperAIStudioNativeChat::IsSupported(AgentName)
-		&& !HyperAIStudio::QuickAction::NeedsTerminal(AgentName, SessionId, AttachId) && StartNativeChat(SessionId))
+		&& !HyperAIStudio::QuickAction::NeedsTerminal(AgentName, SessionId, AttachId) && StartNativeChat(SessionId, HostSession))
 	{
 		if (!Notice.IsEmpty() && NativeView.IsValid() && NativeView->GetChat().IsValid())
 		{
@@ -2868,15 +2889,32 @@ void SHyperAIStudioQuickActionWindow::SetAutoMode(const bool bAuto)
 	RelaunchActiveChat();
 }
 
-bool SHyperAIStudioQuickActionWindow::StartNativeChat(const FString& ResumeId)
+bool SHyperAIStudioQuickActionWindow::StartNativeChat(const FString& ResumeId, const FString& HostSession)
 {
 	const FString Agent = GetSelectedAgentName();
 	const FString ChatModel = GetModelForAgent(Agent);
 	// A new chat in a subagent tab starts as that subagent, as it does in the terminal.
-	const TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(Agent, FHyperAIStudioService::GetProjectRoot(), ChatModel, ResumeId,
+	TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(Agent, FHyperAIStudioService::GetProjectRoot(), ChatModel, ResumeId,
 		HyperAIStudio::Skills::IsValidName(TabSubagent) ? TabSubagent : FString());
 	FString Error;
-	if (!Chat.IsValid() || !Chat->Start(Error))
+	// Its agent kept running in the background host: the chat takes it up where it is, with what it missed replayed.
+	// A session that is gone resumes the conversation by its id instead.
+	if (Chat.IsValid() && !HostSession.IsEmpty())
+	{
+		if (Chat->Attach(HostSession, Error))
+		{
+			Error.Reset();
+		}
+		else
+		{
+			UE_LOG(LogHyperAIStudioChat, Display, TEXT("Chat %d: %s; it resumes its conversation instead."), TabIndex, *Error);
+			Error.Reset();
+			Chat = FHyperAIStudioNativeChat::Create(Agent, FHyperAIStudioService::GetProjectRoot(), ChatModel, ResumeId,
+				HyperAIStudio::Skills::IsValidName(TabSubagent) ? TabSubagent : FString());
+		}
+	}
+	const bool bAttached = Chat.IsValid() && !Chat->GetHostSession().IsEmpty();
+	if (!Chat.IsValid() || (!bAttached && !Chat->Start(Error)))
 	{
 		LastMessage = FText::FromString(Error.IsEmpty() ? FString::Printf(TEXT("%s has no native view."), *Agent) : Error);
 		AddTranscriptLine(LastMessage.ToString());
@@ -2890,6 +2928,7 @@ bool SHyperAIStudioQuickActionWindow::StartNativeChat(const FString& ResumeId)
 	bChatResumed = !ResumeId.IsEmpty();
 	// Claude Code's id is known from the start; the others' arrive with their handshake.
 	ActiveChatSessionId = Chat->GetSessionId().IsEmpty() ? ResumeId : Chat->GetSessionId();
+	Chat->SetHostNote(TabIndex, ActiveChatTitle, TabSubagent);
 	if (TerminalHost.IsValid())
 	{
 		TerminalHost->SetContent(SAssignNew(NativeView, SHyperAIStudioNativeChatView)
@@ -3351,6 +3390,11 @@ TArray<FHyperAIStudioRestartChat> SHyperAIStudioQuickActionWindow::GetRestartCha
 		Chat.Subagent = Window->TabSubagent;
 		Chat.Title = Window->ActiveChatTitle;
 		Chat.BackgroundId = Window->ActiveBackgroundId;
+		Chat.HostSession = Native.IsValid() ? Native->GetHostSession() : FString();
+		if (Native.IsValid())
+		{
+			Native->SetHostNote(Window->TabIndex, Window->ActiveChatTitle, Window->TabSubagent);
+		}
 		// A native chat knows; a terminal one is read off its screen, which a hidden tab stops refreshing.
 		Chat.bWorking = Native.IsValid() ? Native->IsBusy() || Native->HasOpenApproval() : Window->IsTurnActive();
 	}
@@ -3381,6 +3425,7 @@ void SHyperAIStudioQuickActionWindow::AdoptRestartChat(const FHyperAIStudioResta
 	ResumeSessionId = Chat.SessionId;
 	ResumeTitle = Chat.Title;
 	ResumeBackgroundId = Chat.BackgroundId;
+	ResumeHostSession = Chat.HostSession;
 	ContinueMessage = Chat.Message;
 	LastMessage = LOCTEXT("ChatRestored", "The editor restarted; this tab picks its chat up again.");
 }
@@ -3738,6 +3783,7 @@ bool SHyperAIStudioQuickActionWindow::CanCloseEditor()
 	}
 	int32 Stopping = 0;
 	TArray<FString> Background;
+	TArray<TSharedPtr<FHyperAIStudioNativeChat>> Hosted;
 	for (const TWeakPtr<SHyperAIStudioQuickActionWindow>& Weak : HyperAIStudio::QuickAction::LiveWindows())
 	{
 		const TSharedPtr<SHyperAIStudioQuickActionWindow> Window = Weak.Pin();
@@ -3745,7 +3791,12 @@ bool SHyperAIStudioQuickActionWindow::CanCloseEditor()
 		{
 			continue;
 		}
-		if (Window->ActiveBackgroundId.IsEmpty())
+		const TSharedPtr<FHyperAIStudioNativeChat> Native = Window->NativeView.IsValid() ? Window->NativeView->GetChat() : nullptr;
+		if (Native.IsValid() && !Native->GetHostSession().IsEmpty())
+		{
+			Hosted.Add(Native);
+		}
+		else if (Window->ActiveBackgroundId.IsEmpty())
 		{
 			++Stopping;
 		}
@@ -3754,7 +3805,7 @@ bool SHyperAIStudioQuickActionWindow::CanCloseEditor()
 			Background.Add(Window->ActiveBackgroundId);
 		}
 	}
-	if (Stopping == 0 && Background.IsEmpty())
+	if (Stopping == 0 && Background.IsEmpty() && Hosted.IsEmpty())
 	{
 		return true;
 	}
@@ -3768,9 +3819,14 @@ bool SHyperAIStudioQuickActionWindow::CanCloseEditor()
 	{
 		Lines.Add(FText::Format(LOCTEXT("CloseKeepsRemoteChats", "{0} remote {0}|plural(one=chat is,other=chats are) working in the background and will keep going after the editor closes. Reopen them from Chats."), Background.Num()));
 	}
+	if (!Hosted.IsEmpty())
+	{
+		Lines.Add(FText::Format(LOCTEXT("CloseKeepsHostedChats", "{0} {0}|plural(one=chat is,other=chats are) working in HyperAI's background host and will keep going after the editor closes; {0}|plural(one=it reattaches,other=they reattach) when you open the project again."), Hosted.Num()));
+	}
+	const bool bKeepsAny = !Background.IsEmpty() || !Hosted.IsEmpty();
 	TArray<SCustomDialog::FButton> Buttons;
 	Buttons.Add(SCustomDialog::FButton(Stopping > 0 ? LOCTEXT("CloseAnyway", "Close Anyway") : LOCTEXT("CloseKeepRunning", "Keep Running")));
-	if (!Background.IsEmpty())
+	if (bKeepsAny)
 	{
 		Buttons.Add(SCustomDialog::FButton(LOCTEXT("CloseStopRemote", "Stop Them and Close")));
 	}
@@ -3789,12 +3845,16 @@ bool SHyperAIStudioQuickActionWindow::CanCloseEditor()
 	{
 		return true;
 	}
-	if (!Background.IsEmpty() && Choice == 1)
+	if (bKeepsAny && Choice == 1)
 	{
 		const FString Claude = FHyperAIStudioService::GetAgentTerminalLaunchCommand(TEXT("Claude Code"));
 		for (const FString& ShortId : Background)
 		{
 			HyperAIStudio::ChatHistory::StopClaudeBackgroundChat(Claude, ShortId);
+		}
+		for (const TSharedPtr<FHyperAIStudioNativeChat>& Chat : Hosted)
+		{
+			Chat->Stop();
 		}
 		return true;
 	}

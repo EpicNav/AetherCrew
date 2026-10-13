@@ -43,6 +43,7 @@
 #include "HyperAIStudioFoundationProbe.h"
 #include "HyperAIStudioNativeReadToolset.h"
 #include "HyperAIStudioPIEPlaytestToolset.h"
+#include "HyperAIStudioAgentHost.h"
 #include "HyperAIStudioEditorRestart.h"
 #include "HyperAIStudioEditorStartupGate.h"
 #include "HyperAIStudioRemote.h"
@@ -595,6 +596,8 @@ public:
 			CanCloseEditorHandle = MainFrame->RegisterCanCloseEditor(
 				IMainFrameModule::FMainFrameCanCloseEditor::CreateStatic(&SHyperAIStudioQuickActionWindow::CanCloseEditor));
 		}
+		// The background host that keeps agents working when the editor closes: its closing hooks and Stop command.
+		FHyperAIStudioAgentHost::Startup();
 		// Restart and resume: the tool and console command, and, in an editor a restart opened, its chats.
 		FHyperAIStudioEditorRestart::Startup();
 		// The remote page, when it is set to run from the start.
@@ -870,6 +873,7 @@ public:
 			CanCloseEditorHandle.Reset();
 		}
 		FHyperAIStudioEditorRestart::Shutdown();
+		FHyperAIStudioAgentHost::Shutdown();
 		FHyperAIStudioRemote::Shutdown();
 		FHyperAIStudioSourceControl::Shutdown();
 		FHyperAIStudioBlueprintTidy::Shutdown();
