@@ -131,5 +131,18 @@
  "modelling-geometry.concept-image-to-model.title": "把概念图变成带贴图的 3D 模型",
  "modelling-geometry.concept-image-to-model.summary": "先用图像模型画出道具概念图，再让 Tripo、Meshy 或 Hi3D 依据该图生成模型，每一步都需你批准。",
  "modelling-geometry.concept-image-to-model.ph.subject.label": "要制作的内容",
- "modelling-geometry.concept-image-to-model.ph.name.label": "资产名称"
+ "modelling-geometry.concept-image-to-model.ph.name.label": "资产名称",
+ "modelling-geometry.uv-check-and-unwrap.title": "检查网格 UV，不合格时重新展开",
+ "modelling-geometry.uv-check-and-unwrap.summary": "测量所选网格的 UV 通道，预览 xatlas 展开，仅在确有改善时应用，然后再次检查。",
+ "modelling-geometry.uv-check-and-unwrap.ph.texture_size.label": "纹理尺寸（像素）",
+ "modelling-geometry.bake-high-to-low.title": "把高模的法线和 AO 烘焙到低模",
+ "modelling-geometry.bake-high-to-low.summary": "检查低模 UV，重叠时先展开，再把高模的法线、AO 和 ORM 贴图烘焙进新的材质实例。",
+ "modelling-geometry.bake-high-to-low.ph.high.label": "高模网格",
+ "modelling-geometry.bake-high-to-low.ph.low.label": "低模网格",
+ "modelling-geometry.bake-high-to-low.ph.resolution.label": "贴图尺寸（像素）",
+ "modelling-geometry.prepare-generated-model.title": "整理生成的模型：UV、低模和烘焙贴图",
+ "modelling-geometry.prepare-generated-model.summary": "付费模型导入后检查其 UV，不合格时重新展开并迁移原有纹理，再写出带烘焙贴图的减面副本。",
+ "modelling-geometry.prepare-generated-model.ph.name.label": "生成资产名称",
+ "modelling-geometry.prepare-generated-model.ph.triangles.label": "低模三角面数",
+ "modelling-geometry.prepare-generated-model.ph.resolution.label": "贴图尺寸（像素）"
 }

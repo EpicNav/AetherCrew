@@ -32,7 +32,7 @@ FString FHyperAIStudioModelingContracts::GetQualifiedToolsetName()
 
 TArray<FString> FHyperAIStudioModelingContracts::GetToolNames()
 {
-	return {InspectToolName, PlanToolName, ValidateToolName, HandoffToolName};
+	return {InspectToolName, PlanToolName, ValidateToolName, HandoffToolName, UVCheckToolName, UVApplyToolName, BakeToolName, PrepareToolName};
 }
 
 bool FHyperAIStudioModelingContracts::IsRegistrationAllowed(const bool bAllowSourceCandidateForDev)

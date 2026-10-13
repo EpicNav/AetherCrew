@@ -35,13 +35,19 @@ public class HyperAIStudioModeling : ModuleRules
 			"JsonUtilities",
 			// The level editor's tab and viewport, brought in front of HyperAI Studio for a hand-off.
 			"LevelEditor",
+			// FMeshDescriptionToDynamicMesh and back: a static mesh's LODs read and written with only their UVs changed.
+			"MeshConversion",
 			// Static mesh source data, read back to check what was written.
 			"MeshDescription",
+			// FOverlappingCorners and the lightmap UV version, for the lightmap layout the build will make.
+			"MeshUtilitiesCommon",
 			// UE::AssetUtils::CreateStaticMeshAsset, which writes a new asset without opening a transaction of its own.
 			"ModelingComponentsEditorOnly",
 			// ECollisionTraceFlag for complex-as-simple collision.
 			"PhysicsCore",
 			"Projects",
+			// FlushRenderingCommands before a material bake draws its source.
+			"RenderCore",
 			// Tabs, and the notification a hand-off shows the person.
 			"Slate",
 			"SlateCore",

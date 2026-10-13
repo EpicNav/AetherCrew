@@ -1494,6 +1494,143 @@
     }
    ],
    "prompt": "Concept a prop, {{subject}}, as a picture, then turn that picture into a textured model at `{{content_folder}}/Generated/{{name}}`. Both steps spend money or my plan: each waits for my approval and costs credits.\n1. hyper_image_inspect: pick a ready model (codex_image_gen if you cannot draw, else nano_banana_2), and note its cost and the session spend cap. If the image_generation or mesh_generation tools are missing, say which and stop.\n2. hyper_image_generate with bDryRun true, Prompt \"{{subject}}, single object, three-quarter view, plain light grey background, even studio light, no text\", Count 2 and BatchName `{{name}}_concept`. Read ComposedPrompt and EstimatedCost, then send it with bDryRun false, ExpectedPlanHash and a fresh OperationId, and call hyper_operation_wait with bWaitThroughApproval true; then hyper_image_inspect the BatchId until its State is complete. Open both images and pick the one with the clearest silhouette.\n3. hyper_mesh_generate with bDryRun true, ImagePath set to that PNG, Name {{name}} and Folder `{{content_folder}}/Generated`; report the provider and EstimatedCost. Then send it with bDryRun false and a fresh OperationId, and use hyper_operation_wait (bWaitThroughApproval true, TimeoutMs 120000) or hyper_mesh_status until it completes.\n4. hyper_geometry_validate the imported mesh with Policy `static_mesh_build_ready`.\n5. Report a PASS/FAIL table: concept images written, model job completed, the total cost of both steps, mesh imported with its materials, validation 0 errors. Show the chosen concept on its own line."
+  },
+  {
+   "id": "modelling-geometry.uv-check-and-unwrap",
+   "title": "Check a mesh's UVs and unwrap them if bad",
+   "summary": "Measure the selected mesh's UV channel, preview an xatlas unwrap, apply it only if it improves, and check it again.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_uv_check",
+    "hyper_model_uv_apply",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "uv",
+    "unwrap",
+    "xatlas",
+    "overlap",
+    "texel density",
+    "static mesh",
+    "audit"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "StaticMesh"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "texture_size",
+     "label": "Texture size (px)",
+     "default": "2048"
+    }
+   ],
+   "prompt": "Check the UVs of {{selected_asset}} and fix them only if they are bad. Change nothing else.\n1. hyper_model_uv_check with Asset {{selected_asset}}, Channel 0 and TextureSize {{texture_size}}. If the tool is missing, say the mesh_modeling pack is off and stop. Report the Verdict, the Problems, the island count, OverlapPercent and the texel density, and open LayoutPath with your image reader. If the Verdict is good, or usable with no overlap problem, stop here and report.\n2. hyper_model_uv_apply with Asset {{selected_asset}}, Method xatlas, Resolution {{texture_size}} and bDryRun true. Read LODs[0] Before and After and bImproved, and open its LayoutPath. If bImproved is false, stop and say why.\n3. Send it again with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_uv_check again on {{selected_asset}}.\n5. Report a PASS/FAIL table: overlap under 0.5%, 0 flipped triangles, nothing outside 0-1, Verdict good or usable, the write read back (bVerified), the same material slots as before."
+  },
+  {
+   "id": "modelling-geometry.bake-high-to-low",
+   "title": "Bake normal and AO from a high-poly onto a low-poly",
+   "summary": "Check the low-poly's UVs, unwrap them if they overlap, then bake normal, AO and ORM maps from the high-poly into a new material instance.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_uv_check",
+    "hyper_model_uv_apply",
+    "hyper_model_bake",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "bake",
+    "normal map",
+    "ambient occlusion",
+    "orm",
+    "high poly",
+    "low poly",
+    "material instance",
+    "textures"
+   ],
+   "placeholders": [
+    {
+     "name": "high",
+     "label": "High-poly mesh",
+     "default": "/Game/Models/SM_Statue_High"
+    },
+    {
+     "name": "low",
+     "label": "Low-poly mesh",
+     "default": "/Game/Models/SM_Statue"
+    },
+    {
+     "name": "resolution",
+     "label": "Map size (px)",
+     "default": "2048"
+    }
+   ],
+   "prompt": "Bake the detail of `{{high}}` onto `{{low}}` as {{resolution}} px maps and put them on the low-poly. Change only `{{low}}`'s UVs, its material slots and the new textures and material.\n1. hyper_model_uv_check with Asset `{{low}}`, Channel 0 and TextureSize {{resolution}}. If the tool is missing, say the mesh_modeling pack is off and stop. If the Verdict is bad or missing, or OverlapPercent is above 0.5, run hyper_model_uv_apply on `{{low}}` with Method xatlas and Resolution {{resolution}}: first with bDryRun true (stop unless bImproved), then with bDryRun false and a fresh OperationId.\n2. hyper_model_bake with Target `{{low}}`, Source `{{high}}`, Maps normal and ao, Resolution {{resolution}}, Samples 4, Padding 8, Material `new`, AssignSlots `all`, bDryRun true and bPreviewDryRun true. Report the Textures it names with their compression and sRGB, and open the 128 px PreviewPath. Stop if any texture path is refused.\n3. Send it with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true. Open the PreviewPath.\n4. Report a PASS/FAIL table: the low-poly's channel 0 does not overlap, each map written at {{resolution}} px with the right compression (normal TC_Normalmap, AO and ORM TC_Masks, all linear), the AO map's Min below 0.9 and Max near 1 (it holds occlusion), the material instance made and on every slot."
+  },
+  {
+   "id": "modelling-geometry.prepare-generated-model",
+   "title": "Ready a generated model: UVs, low-poly and baked maps",
+   "summary": "After a paid model imports, check its UVs, unwrap them if bad with its textures carried over, and write a decimated copy with baked maps.",
+   "packs": [
+    "mesh_modeling",
+    "mesh_generation"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_mesh_status",
+    "hyper_model_uv_check",
+    "hyper_model_prepare",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "generated",
+    "ai",
+    "tripo",
+    "meshy",
+    "uv",
+    "decimate",
+    "low poly",
+    "bake",
+    "normal map",
+    "game ready"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Generated asset name",
+     "default": "SM_Telescope"
+    },
+    {
+     "name": "triangles",
+     "label": "Low-poly triangles",
+     "default": "8000"
+    },
+    {
+     "name": "resolution",
+     "label": "Map size (px)",
+     "default": "2048"
+    }
+   ],
+   "prompt": "Make the generated model {{name}} game-ready: clean UVs, and a lighter copy with its detail baked in. Spend no credits: this works on the model already imported.\n1. hyper_mesh_status: find the completed job that made {{name}} and its AssetPath (the static mesh). If there is none, say so and stop. If the mesh_modeling tools are missing, say the pack is off and stop.\n2. hyper_model_uv_check with that Asset, Channel 0 and TextureSize {{resolution}}: report the Verdict, Problems and Metrics, and open LayoutPath.\n3. hyper_model_prepare with Asset that path, LowPoly the same path with `_Low` added, TargetTriangles {{triangles}}, Resolution {{resolution}}, Samples 4, Padding 8 and bDryRun true. Read its Steps: whether it unwraps, which textures it carries, the low-poly's triangles and its UVs.\n4. Send it with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true. Open LayoutPath, MapsPreviewPath and PreviewPath.\n5. hyper_model_validate with both meshes and Policy `production`.\n6. Report a PASS/FAIL table: the original's UVs no longer bad, its base colour still showing (a carried texture, or none needed), the low-poly within 10% of {{triangles}} triangles with good or usable UVs, normal, AO and base colour maps written, a material instance on its slots, and 0 validation errors on each mesh. List every asset made."
   }
  ]
 }

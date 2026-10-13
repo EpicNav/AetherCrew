@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HyperAIStudioModelingSurfaceTypes.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
 #include "HyperAIStudioModelingToolset.generated.h"
@@ -280,7 +281,9 @@ struct FHyperAIModelHandoffReport
  * 3D modelling with Geometry Script: named meshes built in memory from primitives, sweeps and revolves, booleans,
  * cuts, selection modelling, warps, remeshing, UVs, material ids and vertex colours, with recipe macros for props,
  * then written as static meshes with collision. Modeling Mode's interactive tools are left to people:
- * hyper_model_handoff hands a mesh over and reads the edit back.
+ * hyper_model_handoff hands a mesh over and reads the edit back. Any static mesh in the project, generated and imported
+ * ones too, can have its UVs checked and laid out again and its textures baked (hyper_model_uv_check, uv_apply, bake,
+ * prepare).
  */
 UCLASS()
 class HYPERAISTUDIOMODELING_API UHyperAIStudioModelingToolset final : public UToolsetDefinition
@@ -321,6 +324,39 @@ public:
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Modeling")
 	static FHyperAIModelHandoffReport hyper_model_handoff(const FHyperAIModelHandoffRequest& Request);
+
+	/**
+	 * Checks one UV channel of any static mesh's LOD, read-only: missing channel, overlap (percent and which islands),
+	 * flipped and degenerate triangles, UVs outside 0-1, islands and seam length, texel density spread, and the lightmap
+	 * channel's shared texels and padding. A verdict (good, usable, bad, missing) and a layout PNG with problems coloured.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Modeling")
+	static FHyperAIModelUVCheckReport hyper_model_uv_check(const FHyperAIModelUVCheckRequest& Request);
+
+	/**
+	 * AutoUV for a project static mesh in one undo step: xatlas, patch (PatchBuilder), box/planar/cylinder projection,
+	 * repack with padding for a texture size, or lightmap UVs into a chosen channel. Writes the chosen LODs keeping
+	 * materials and sections, reads the result back and reports the UV check before and after. Dry run builds in memory.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Modeling")
+	static FHyperAIModelUVApplyReport hyper_model_uv_apply(const FHyperAIModelUVApplyRequest& Request);
+
+	/**
+	 * Bakes maps with Geometry Script from a source mesh (high-poly, or the mesh itself) into a target's UV channel:
+	 * normal, ao, bent_normal, curvature, position, height, object_normal, vertex_color, texture, multi_texture, or the
+	 * whole material by render capture. Writes
+	 * Texture2D assets set up per map (normal compression, linear data), an ORM pack, and optionally a material instance.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Modeling")
+	static FHyperAIModelBakeReport hyper_model_bake(const FHyperAIModelBakeRequest& Request);
+
+	/**
+	 * Prepares a generated or imported model in one step: checks its UVs, unwraps them when bad (carrying its base colour
+	 * and normal textures to the new layout), and optionally writes a decimated copy with normal, ao and colour baked
+	 * from the original, plus lightmap UVs. Run it after hyper_mesh_generate imports a model.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Modeling")
+	static FHyperAIModelPrepareReport hyper_model_prepare(const FHyperAIModelPrepareRequest& Request);
 };
 
 class FHyperAIStudioModelingContracts final
@@ -332,6 +368,18 @@ public:
 	static constexpr const TCHAR* PlanToolName = TEXT("hyper_model_apply_plan");
 	static constexpr const TCHAR* ValidateToolName = TEXT("hyper_model_validate");
 	static constexpr const TCHAR* HandoffToolName = TEXT("hyper_model_handoff");
+	static constexpr const TCHAR* UVCheckToolName = TEXT("hyper_model_uv_check");
+	static constexpr const TCHAR* UVApplyToolName = TEXT("hyper_model_uv_apply");
+	static constexpr const TCHAR* BakeToolName = TEXT("hyper_model_bake");
+	static constexpr const TCHAR* PrepareToolName = TEXT("hyper_model_prepare");
+
+	/** Triangles one LOD may have for the UV check to read it, for xatlas and patch to unwrap it (and prepare to decimate it), and for the other layouts. */
+	static constexpr int32 MaxCheckTriangles = 2000000;
+	static constexpr int32 MaxUnwrapTriangles = 400000;
+	static constexpr int32 MaxLayoutTriangles = 1000000;
+	/** Largest bake, pixels per side, and the most triangles a bake's target may have. */
+	static constexpr int32 MaxBakeResolution = 4096;
+	static constexpr int32 MaxBakeTargetTriangles = 500000;
 
 	/** Ops a request may send, and ops after recipes expand. */
 	static constexpr int32 MaxOperations = 64;
@@ -391,6 +439,10 @@ public:
 	static FHyperAIModelPlanReport ApplyPlan(const FHyperAIModelPlanRequest& Request);
 	static FHyperAIModelValidateReport Validate(const FHyperAIModelValidateRequest& Request);
 	static FHyperAIModelHandoffReport Handoff(const FHyperAIModelHandoffRequest& Request);
+	static FHyperAIModelUVCheckReport CheckUVs(const FHyperAIModelUVCheckRequest& Request);
+	static FHyperAIModelUVApplyReport ApplyUVs(const FHyperAIModelUVApplyRequest& Request);
+	static FHyperAIModelBakeReport BakeMaps(const FHyperAIModelBakeRequest& Request);
+	static FHyperAIModelPrepareReport PrepareModel(const FHyperAIModelPrepareRequest& Request);
 #if WITH_DEV_AUTOMATION_TESTS
 	/** Test runs are unattended, which a hand-off refuses: this lets them through, and can name a mode id that does not exist. */
 	static void SetHandoffTestHooks(bool bAllowUnattended, FName ModeId = NAME_None);

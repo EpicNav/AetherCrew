@@ -8,7 +8,7 @@
 /** Sizes of the generated capability catalog. Code and tests use these instead of literal counts. */
 namespace HyperAIStudio::CapabilityCatalog
 {
-	constexpr int32 GeneratedToolCount = 171;
+	constexpr int32 GeneratedToolCount = 175;
 	constexpr int32 GeneratedPackCount = 40;
-	constexpr int32 GeneratedSourceArtifactCount = 171;
+	constexpr int32 GeneratedSourceArtifactCount = 175;
 }
