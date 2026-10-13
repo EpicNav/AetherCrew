@@ -126,6 +126,11 @@ bool FHyperAIStudioTaskRouterPacksTest::RunTest(const FString& Parameters)
 		// Breaking things is the destruction pack's, not the physics asset pack's.
 		{TEXT("Fracture the stone wall so it shatters"), TEXT("destruction")},
 		{TEXT("Make the bridge destructible"), TEXT("destruction")},
+		// Queries, warping, choosers and registries are the packs that now make them.
+		{TEXT("Find a flanking spot for the guards with an environment query"), TEXT("gameplay_ai")},
+		{TEXT("Add a motion warping window to the vault montage"), TEXT("animation_rigging")},
+		{TEXT("Set up a chooser table that picks the locomotion animations"), TEXT("animation_rigging")},
+		{TEXT("Make a data registry over the weapon tables"), TEXT("data_config_localization")},
 		{TEXT("What time is it?"), TEXT("none")},
 		{TEXT("Thanks!"), TEXT("none")},
 	};

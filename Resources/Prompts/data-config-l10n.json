@@ -372,6 +372,86 @@
     }
    ],
    "prompt": "Audit {{project}}'s gameplay tags under `{{parent_tag}}`; remove or rename nothing.\n1. hyper_memory_recall \"gameplay tag naming\" for the project's tag rules.\n2. Epic's GameplayTagsToolset: ListTags with parentTag {{parent_tag}}; for each tag, GetTagInfo (where it is defined) and FindReferencersByTag.\n3. Flag tags with 0 referencers; near-duplicates (the same words in another case, plural and singular, typos one letter apart); tags that break the naming rule; and leaf tags placed directly under the root.\n4. hyper_project_search (kinds cpp_symbol) for each unreferenced tag, since C++ (UE_DEFINE_GAMEPLAY_TAG, RequestGameplayTag) may use a tag without an asset reference.\n5. Report a table: tag | source | referencers | C++ hits | PASS/WARN/FAIL | suggestion. RemoveTag and RenameTag change the whole project: list the ones you suggest, and run each only if I approve it by name."
+  },
+  {
+   "id": "data-config-l10n.data-registry-over-tables",
+   "title": "Make a Data Registry over the selected data tables",
+   "summary": "Build a Data Registry whose items come from the selected data tables (and a folder of more), check every id resolves, and say how to register it.",
+   "packs": [
+    "data_config_localization"
+   ],
+   "skills": [
+    "unreal-data-registry"
+   ],
+   "tools": [
+    "hyper_data_registry_inspect",
+    "hyper_data_registry_apply_plan",
+    "hyper_data_registry_lookup",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "create",
+    "source.add"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "data registry",
+    "data table",
+    "items",
+    "ids"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "DataTable"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "type",
+     "label": "Registry type",
+     "default": "Items",
+     "hint": "The name every id starts with (Items:Sword)."
+    },
+    {
+     "name": "folder",
+     "label": "Folder of more tables",
+     "default": "",
+     "hint": "A folder whose matching tables join too (a meta source); empty for none."
+    }
+   ],
+   "prompt": "Make a Data Registry over {{selected_assets}}. Follow the unreal-data-registry skill; if hyper_data_registry_apply_plan is not available, say the Data Registry plugin is off and stop.\n1. Read the tables' row struct (Epic's DataTable tools or hyper_data_inspect); every table must share it.\n2. hyper_data_registry_apply_plan with bDryRun true, Asset `{{content_folder}}/Data/DR_{{type}}`, Operations: create with RegistryType {{type}} and ItemStruct the row struct; one source.add data_table per selected table; if `{{folder}}` is not empty, a source.add data_table_meta with Paths [{{folder}}]. Read Sources and Warnings, then run it with bDryRun false and a fresh OperationId (hyper_operation_wait with bWaitThroughApproval true if it waits).\n3. hyper_data_registry_inspect the registry: ItemCount, and whether it is in a scanned directory.\n4. hyper_data_registry_lookup three item names from the tables.\nReport the registry, its sources in order, item count, the three lookups, and if it is not scanned, the Project Settings > Game > Data Registry > Directories To Scan entry to add. Leave it unsaved."
+  },
+  {
+   "id": "data-config-l10n.audit-data-registry",
+   "title": "Check a Data Registry's sources and ids",
+   "summary": "Read the selected Data Registry's sources, the tables they resolve to, hidden ids, and whether the game loads it. Changes nothing.",
+   "packs": [
+    "data_config_localization"
+   ],
+   "skills": [
+    "unreal-data-registry"
+   ],
+   "tools": [
+    "hyper_data_registry_inspect",
+    "hyper_data_registry_lookup"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "data registry",
+    "audit",
+    "ids",
+    "sources"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "DataRegistry"
+    ],
+    "min": 1
+   },
+   "prompt": "Review the Data Registry {{selected_asset}}. Change nothing.\n1. If hyper_data_registry_inspect is not available, the Data Registry plugin is off: say so and stop. hyper_data_registry_inspect with Asset {{selected_asset}}.\n2. hyper_data_registry_lookup with the first ten item names, Format json.\nReport a table with one row per source: kind, tables, items, PASS or the problem (a table whose rows do not match the item struct, a meta source that finds nothing). List ids that one source hides in another (Shadowed), and whether the registry is in Directories To Scan."
   }
  ]
 }

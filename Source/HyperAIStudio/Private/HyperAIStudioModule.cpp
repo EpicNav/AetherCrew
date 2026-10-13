@@ -1023,6 +1023,13 @@ private:
 				{}
 			},
 			{
+				TEXT("HyperAIStudioEQS"),
+				TEXT("gameplay_ai"),
+				TEXT("cohort.source.hyperaistudioeqstoolset.v1"),
+				{TEXT("hyper_eqs_inspect"), TEXT("hyper_eqs_apply_plan"), TEXT("hyper_eqs_run")},
+				{}
+			},
+			{
 				TEXT("HyperAIStudioGAS"),
 				TEXT("gas"),
 				TEXT("cohort.source.hyperaistudiogastoolset.v1"),
@@ -1201,6 +1208,20 @@ private:
 				{TEXT("PoseSearch")}
 			},
 			{
+				TEXT("HyperAIStudioMotionWarping"),
+				TEXT("animation_rigging"),
+				TEXT("cohort.source.hyperaistudiomotionwarpingtoolset.v1"),
+				{TEXT("hyper_motion_warping_inspect"), TEXT("hyper_motion_warping_apply_plan")},
+				{TEXT("MotionWarping")}
+			},
+			{
+				TEXT("HyperAIStudioChooser"),
+				TEXT("animation_rigging"),
+				TEXT("cohort.source.hyperaistudiochoosertoolset.v1"),
+				{TEXT("hyper_chooser_inspect"), TEXT("hyper_chooser_apply_plan"), TEXT("hyper_chooser_evaluate")},
+				{TEXT("Chooser")}
+			},
+			{
 				TEXT("HyperAIStudioLandscape"),
 				TEXT("worldbuilding_navigation"),
 				TEXT("cohort.source.hyperaistudiolandscapetoolset.v1"),
@@ -1288,6 +1309,13 @@ private:
 				{TEXT("hyper_data_inspect"), TEXT("hyper_data_apply_plan"),
 					TEXT("hyper_data_validate")},
 				{}
+			},
+			{
+				TEXT("HyperAIStudioDataRegistry"),
+				TEXT("data_config_localization"),
+				TEXT("cohort.source.hyperaistudiodataregistrytoolset.v1"),
+				{TEXT("hyper_data_registry_inspect"), TEXT("hyper_data_registry_apply_plan"), TEXT("hyper_data_registry_lookup")},
+				{TEXT("DataRegistry")}
 			},
 			{
 				TEXT("HyperAIStudioPhysics"),

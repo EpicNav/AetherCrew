@@ -63,14 +63,33 @@ start while staggered or already attacking:
  {"type": "set_ability_property", "targetPath": "/Game/GAS/GA_HeavyAttack.GA_HeavyAttack", "property": "net_execution_policy", "value": "local_predicted"}]
 ```
 
-## Wiring it
+## Abilities through Blueprint
 
-The ability's graph is Blueprint logic: write it with the unreal-blueprint skill on its `EventGraph`. `ActivateAbility`
-commits the cost (`CommitAbility`), plays the attack montage and waits for it (`PlayMontageAndWait`, an ability task
-`find_node_types` lists), applies the hit to what it strikes (`MakeOutgoingGameplayEffectSpec` of `GE_HeavyHit`, then
-`AssignTagSetByCallerMagnitude` with `Data.Damage`, then `ApplyGameplayEffectSpecToTarget`), and ends with
-`EndAbility`. The character grants it on its Ability System Component (`GiveAbility`) and triggers it by tag
-(`TryActivateAbilitiesByTag` with `Ability.Attack.Heavy`) from input.
+HyperAI's plan makes the ability's class and its defaults; what it does when it runs is Blueprint logic in the
+ability's own `EventGraph`, written with the unreal-blueprint skill (`find_node_types` lists every node named here).
+
+- **The ability's graph.** `Event ActivateAbility` (or `Event ActivateAbilityFromEvent` when a gameplay event starts
+  it, with the event's `EventData`) runs when it starts. Call `CommitAbility` first: it pays the cost effect and starts
+  the cooldown, and returns false when it cannot (then `EndAbility` and stop). Do the work with ability tasks, latent
+  nodes that end with the ability: `PlayMontageAndWait` (its On Completed, On Blend Out, On Interrupted and On
+  Cancelled pins), `WaitGameplayEvent` (an anim notify's event tag, such as the hit frame), `WaitDelay`,
+  `WaitInputRelease` (charge attacks), `WaitTargetData`. Apply what it does with `MakeOutgoingGameplayEffectSpec`,
+  `AssignTagSetByCallerMagnitude` and `ApplyGameplayEffectSpecToTarget` (or `ApplyGameplayEffectToOwner` for buffs);
+  `GetAvatarActorFromActorInfo` is the character, `GetAbilitySystemComponentFromActorInfo` its component. Every path
+  ends in `EndAbility`, or the ability stays active and blocks the next one. `Event OnEndAbility` cleans up.
+- **Granting.** On the character (or its Player State, wherever the Ability System Component lives), call `Give
+  Ability` with the ability class, on the server (`BlueprintAuthorityOnly`), usually from `BeginPlay` or when the
+  ability is unlocked; `Give Ability And Activate Once` for one-shot abilities.
+- **Triggering from Blueprint.** From input (an Enhanced Input action event), call `TryActivateAbilitiesByTag` with
+  the ability's asset tag (`Ability.Attack.Heavy`) or `TryActivateAbilityByClass`; both return false when tags,
+  cost or cooldown refuse it. To start an ability from an event instead (a hit reaction, a parry window), give the
+  ability an Ability Trigger (in its class defaults: trigger tag `Event.Hit`, source Gameplay Event) and send the event
+  with `SendGameplayEventToActor` (Ability System Blueprint Library) and a payload; the ability runs `ActivateAbilityFromEvent`.
+- **Cancelling.** Abilities whose `cancel_abilities_with` tags match are cancelled when this one starts; from
+  Blueprint, `CancelAbilities` on the component with tags, or `CancelAbility` inside the ability.
+
+Compile the ability and the character after the graph changes; Epic's `AbilitySystemInspectorToolset` then shows the
+ability granted and active in Play In Editor.
 
 ## Checking
 

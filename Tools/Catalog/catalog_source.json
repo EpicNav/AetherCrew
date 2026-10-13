@@ -1240,6 +1240,30 @@
       0,
       0
      ]
+    },
+    {
+     "name": "hyper_eqs_inspect",
+     "cohort": "cohort.source.hyperaistudioeqstoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_eqs_apply_plan",
+     "cohort": "cohort.source.hyperaistudioeqstoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_eqs_run",
+     "cohort": "cohort.source.hyperaistudioeqstoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
     }
    ]
   },
@@ -1421,6 +1445,46 @@
      "admission": "SourceCandidate",
      "safety": [
       "Edit"
+     ]
+    },
+    {
+     "name": "hyper_motion_warping_inspect",
+     "cohort": "cohort.source.hyperaistudiomotionwarpingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_motion_warping_apply_plan",
+     "cohort": "cohort.source.hyperaistudiomotionwarpingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_chooser_inspect",
+     "cohort": "cohort.source.hyperaistudiochoosertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_chooser_apply_plan",
+     "cohort": "cohort.source.hyperaistudiochoosertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_chooser_evaluate",
+     "cohort": "cohort.source.hyperaistudiochoosertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
      ]
     }
    ]
@@ -2763,6 +2827,30 @@
       0,
       0,
       0
+     ]
+    },
+    {
+     "name": "hyper_data_registry_inspect",
+     "cohort": "cohort.source.hyperaistudiodataregistrytoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_data_registry_apply_plan",
+     "cohort": "cohort.source.hyperaistudiodataregistrytoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_data_registry_lookup",
+     "cohort": "cohort.source.hyperaistudiodataregistrytoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
      ]
     }
    ]

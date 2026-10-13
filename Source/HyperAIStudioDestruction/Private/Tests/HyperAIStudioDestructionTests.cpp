@@ -353,7 +353,7 @@ bool FHyperAIStudioDestructionApplyUndoTest::RunTest(const FString& Parameters)
 		if (IsValid(Wall)) World->EditorDestroyActor(Wall, false);
 	};
 	const FString Asset = TestAsset(TEXT("GC_Wall"));
-	const int32 UndoBefore = GEditor->Trans->GetQueueLength();
+	const int32 UndoBefore = (GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount());
 	FHyperAIDestructionOp Inside = Op(TEXT("material.internal"));
 	Inside.Material = InsideMaterial;
 	const FHyperAIDestructionPlanReport Done = Run(Asset, {
@@ -366,7 +366,7 @@ bool FHyperAIStudioDestructionApplyUndoTest::RunTest(const FString& Parameters)
 		Op(TEXT("anchor"), TEXT("Ground=true; Height=10")),
 		Inside,
 		Op(TEXT("rendering"), TEXT("Nanite=false"))}, false);
-	const int32 Steps = GEditor->Trans->GetQueueLength() - UndoBefore;
+	const int32 Steps = (GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount()) - UndoBefore;
 	ON_SCOPE_EXIT
 	{
 		// Whatever failed below: the plan taken back.
@@ -456,7 +456,7 @@ bool FHyperAIStudioDestructionBreaksInVerifyTest::RunTest(const FString& Paramet
 		// Placed in the air ahead of the player, kinematic until the damage breaks it.
 		const FVector At = Start->GetActorLocation() + FRotator(0.0, Start->GetActorRotation().Yaw, 0.0).Vector() * 800.0 + FVector(0.0, 0.0, 300.0);
 		const FString Asset = TestAsset(TEXT("GC_Verify"));
-		const int32 UndoBefore = GEditor->Trans ? GEditor->Trans->GetQueueLength() : 0;
+		const int32 UndoBefore = GEditor->Trans ? (GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount()) : 0;
 		const FHyperAIDestructionPlanReport Done = Run(Asset, {Make({Cube}, TEXT("at"), *Gate::VectorText(At)), Op(TEXT("fracture.uniform"), TEXT("Sites=12; Seed=9")),
 			Op(TEXT("damage"), TEXT("Thresholds=500")), Op(TEXT("state"), TEXT("State=kinematic"))}, false);
 		ON_SCOPE_EXIT

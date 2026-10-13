@@ -36,5 +36,13 @@
  "data-config-l10n.import-csv-data-table.ph.table_name.label": "数据表名称",
  "data-config-l10n.audit-gameplay-tags.title": "审查未使用和拼写有误的 Gameplay 标签",
  "data-config-l10n.audit-gameplay-tags.summary": "列出项目的 Gameplay 标签及其引用者，标出未使用的标签、近似重复和命名问题，并给出待批准的删除建议。",
- "data-config-l10n.audit-gameplay-tags.ph.parent_tag.label": "要审查的标签分支"
+ "data-config-l10n.audit-gameplay-tags.ph.parent_tag.label": "要审查的标签分支",
+ "data-config-l10n.data-registry-over-tables.title": "基于所选数据表制作数据注册表",
+ "data-config-l10n.data-registry-over-tables.summary": "构建一个数据注册表，其条目来自所选数据表（以及一个文件夹中的更多表），检查每个 ID 都能解析，并说明如何注册它。",
+ "data-config-l10n.data-registry-over-tables.ph.type.label": "注册表类型",
+ "data-config-l10n.data-registry-over-tables.ph.type.hint": "每个 ID 的开头名称（Items:Sword）。",
+ "data-config-l10n.data-registry-over-tables.ph.folder.label": "更多表所在文件夹",
+ "data-config-l10n.data-registry-over-tables.ph.folder.hint": "其中匹配的表也会加入的文件夹（元数据源）；留空表示没有。",
+ "data-config-l10n.audit-data-registry.title": "检查数据注册表的数据源和 ID",
+ "data-config-l10n.audit-data-registry.summary": "读取所选数据注册表的数据源、它们解析到的表、被其他数据源遮蔽的条目，以及游戏是否会加载它。不做任何更改。"
 }
