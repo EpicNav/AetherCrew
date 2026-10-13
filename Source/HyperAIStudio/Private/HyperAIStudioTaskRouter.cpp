@@ -102,6 +102,7 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("ui_slate_mvvm"), TEXT("unreal-umg")},
 			{TEXT("cinematics"), TEXT("unreal-cinematics")},
 			{TEXT("pie_runtime"), TEXT("unreal-playtest")},
+			{TEXT("automation_profiling_build"), TEXT("performance")},
 			{TEXT("sound_design"), TEXT("sound-design")},
 			{TEXT("audio_metasound"), TEXT("sound-design")},
 		};
