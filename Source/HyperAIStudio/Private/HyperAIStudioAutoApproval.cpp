@@ -107,10 +107,10 @@ namespace HyperAIStudio::AutoApproval::Private
 	}
 
 	/**
-	 * What paid calls are checked against: the session spend cap, the external services (with their prices) and the
-	 * image models (with theirs). Any MCP client can write HyperAI's settings (Epic's settings toolset asks nobody), so an
-	 * activation keeps them as the user confirmed it and ends when they change, rather than approving paid calls under a
-	 * cap or a price an agent set afterwards.
+	 * What paid calls are checked against: the session spend cap, the external services (with their prices), the image
+	 * models (with theirs) and the 3D task prices. Any MCP client can write HyperAI's settings (Epic's settings toolset
+	 * asks nobody), so an activation keeps them as the user confirmed it and ends when they change, rather than approving
+	 * paid calls under a cap or a price an agent set afterwards.
 	 */
 	FString SpendSettings()
 	{
@@ -123,7 +123,8 @@ namespace HyperAIStudio::AutoApproval::Private
 		const FName Names[] = {
 			GET_MEMBER_NAME_CHECKED(UHyperAIStudioSettings, ExternalServiceSessionSpendCap),
 			GET_MEMBER_NAME_CHECKED(UHyperAIStudioSettings, ExternalServices),
-			GET_MEMBER_NAME_CHECKED(UHyperAIStudioSettings, ImageModels)};
+			GET_MEMBER_NAME_CHECKED(UHyperAIStudioSettings, ImageModels),
+			GET_MEMBER_NAME_CHECKED(UHyperAIStudioSettings, MeshTaskPrices)};
 		for (const FName Name : Names)
 		{
 			if (const FProperty* Property = UHyperAIStudioSettings::StaticClass()->FindPropertyByName(Name))

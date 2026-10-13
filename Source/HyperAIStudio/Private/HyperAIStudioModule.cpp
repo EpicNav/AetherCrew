@@ -1150,7 +1150,8 @@ private:
 				TEXT("HyperAIStudioMeshGen"),
 				TEXT("mesh_generation"),
 				TEXT("cohort.source.hyperaistudiomeshgentoolset.v1"),
-				{TEXT("hyper_mesh_generate"), TEXT("hyper_mesh_status")},
+				{TEXT("hyper_mesh_generate"), TEXT("hyper_mesh_status"), TEXT("hyper_mesh_rig"), TEXT("hyper_mesh_animate"),
+					TEXT("hyper_mesh_retexture"), TEXT("hyper_mesh_actions"), TEXT("hyper_mesh_cancel")},
 				{TEXT("Interchange")}
 			},
 			{

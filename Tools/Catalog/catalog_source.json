@@ -3588,6 +3588,46 @@
      "safety": [
       "Read"
      ]
+    },
+    {
+     "name": "hyper_mesh_rig",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_mesh_animate",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_mesh_retexture",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_mesh_actions",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_mesh_cancel",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ]
   },

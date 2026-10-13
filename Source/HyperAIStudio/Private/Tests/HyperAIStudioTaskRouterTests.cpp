@@ -109,6 +109,10 @@ bool FHyperAIStudioTaskRouterPacksTest::RunTest(const FString& Parameters)
 		{TEXT("Model a crystal cluster prop"), TEXT("mesh_modeling")},
 		{TEXT("Make a low poly rock mesh"), TEXT("mesh_modeling")},
 		{TEXT("Generate a textured 3D model of a car"), TEXT("mesh_generation")},
+		// Rigging, animating and texturing a generated model are the generator's; retargeting the project's own is not.
+		{TEXT("Auto-rig the generated knight with Meshy"), TEXT("mesh_generation")},
+		{TEXT("Retexture the generated statue as weathered bronze"), TEXT("mesh_generation")},
+		{TEXT("Retarget the run animation from Manny to Quinn"), TEXT("animation_rigging")},
 		{TEXT("Import the FBX of the sword"), TEXT("geometry_interchange")},
 		{TEXT("Model a crate prop"), TEXT("mesh_modeling")},
 		// Props that are there already are placed with the level design pack's spatial tools, not modelled again.

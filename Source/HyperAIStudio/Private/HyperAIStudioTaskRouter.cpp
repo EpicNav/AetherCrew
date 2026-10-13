@@ -69,7 +69,9 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("automation_profiling_build"), TEXT("test tests testing automation profile profiling performance fps frame stat stats build cook package packaging compile fail rate framerate low slow lag laggy hitch hitches stutter stuttering")},
 			{TEXT("uaf_graph"), TEXT("uaf animation framework animnext graph")},
 			{TEXT("image_generation"), TEXT("image images picture pictures generate draw concept art reference illustration")},
-			{TEXT("mesh_generation"), TEXT("3d model models generate generated textured photo picture realistic tripo meshy hi3d paid")},
+			// Rigging and animating as the generator's own words ("rigged", "autorig"), so "rig" and "animation" stay the
+			// animation pack's.
+			{TEXT("mesh_generation"), TEXT("3d model models generate generated textured photo picture realistic tripo meshy hi3d viggle paid rigged autorig retexture retextured")},
 			// No "props" or "placeholder": "place" reads as "placeholder", and props to place are level design's. PolyEdit and
 			// PolyGroups are Modeling Mode's tools a hand-off points people at; "sculpt" stays the landscape's.
 			{TEXT("mesh_modeling"), TEXT("model models modeling modelling modeled mesh meshes kitbash lowpoly poly primitive primitives rock boulder boulders archway pillar pillars column columns crystal crystals mushroom mushrooms tower towers watchtower ruins ruined rubble monolith trunk stump crate crates bevel extrude inset boolean revolve lathe polyedit polygroup polygroups")},
@@ -98,6 +100,7 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("pcg"), TEXT("unreal-level-design")},
 			{TEXT("mesh_terrain"), TEXT("unreal-level-design")},
 			{TEXT("mesh_modeling"), TEXT("unreal-modeling")},
+			{TEXT("mesh_generation"), TEXT("generated-characters")},
 			{TEXT("animation_rigging"), TEXT("unreal-animation")},
 			{TEXT("ui_slate_mvvm"), TEXT("unreal-umg")},
 			{TEXT("cinematics"), TEXT("unreal-cinematics")},

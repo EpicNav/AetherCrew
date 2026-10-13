@@ -186,6 +186,31 @@ struct FHyperAIStudioImagePromptTemplateSettings
 	FString Template;
 };
 
+/**
+ * What one task costs that is not a whole model: rigging a model, one preset animation, a clip made from words, a new
+ * texture. Providers price these in credits; this is the credits at the provider's price, in USD.
+ */
+USTRUCT(BlueprintType)
+struct FHyperAIStudioMeshTaskPrice
+{
+	GENERATED_BODY()
+
+	/** The service's id: tripo, meshy or viggle. */
+	UPROPERTY(Config, EditAnywhere, Category = "3D Generation")
+	FString Provider;
+
+	/**
+	 * rig; animate (one preset action); motion (a clip made from words) or motion_swift (Meshy's quicker one);
+	 * motion_apply (Meshy: a clip put on a rig); texture, texture_hd (Tripo's detailed) or texture_8k.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "3D Generation")
+	FString Task;
+
+	/** In USD, against this session's spend cap. */
+	UPROPERTY(Config, EditAnywhere, Category = "3D Generation", meta = (ClampMin = "0.0"))
+	float Cost = 0.0f;
+};
+
 /** The Nano Banana model Gemini CLI's nanobanana extension draws with. */
 UENUM()
 enum class EHyperAIStudioNanoBananaModel : uint8
@@ -700,14 +725,31 @@ public:
 	static FHyperAIStudioExternalServiceSettings GetGeminiService();
 
 	/**
-	 * Tripo, Meshy and Hi3D, for 3D models, with the price of a textured model. They are there without settings; an
-	 * entry with the same id (tripo, meshy, hi3d) replaces one, to go through a proxy or follow a price change.
+	 * Tripo, Meshy and Hi3D, for 3D models, with the price of a textured model, and Viggle, for animation made from
+	 * words. They are there without settings; an entry with the same id (tripo, meshy, hi3d, viggle) replaces one, to go
+	 * through a proxy or follow a price change. Rigging, animating and texturing are priced in MeshTaskPrices.
 	 */
 	static TArray<FHyperAIStudioExternalServiceSettings> GetMeshServices();
 
 	/** Where generated 3D models are imported. */
 	UPROPERTY(Config, EditAnywhere, Category = "3D Generation")
 	FString MeshImportFolder = TEXT("/Game/Generated/Models");
+
+	/**
+	 * What rigging, animating and texturing a model cost, task by task, in USD. They are built in at list price; an
+	 * entry with the same provider and task replaces one, to follow a price change.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "3D Generation")
+	TArray<FHyperAIStudioMeshTaskPrice> MeshTaskPrices;
+
+	/**
+	 * The built-in task prices, at list price (October 2026): Tripo and Viggle credits at $0.01, Meshy's at about $0.02
+	 * (Meshy publishes no price per credit).
+	 */
+	static TArray<FHyperAIStudioMeshTaskPrice> GetMeshTaskPrices();
+
+	/** What one Task with Provider costs: the project's entry, else the built-in one; negative when neither has it. */
+	static float FindMeshTaskPrice(const FString& Provider, const FString& Task);
 
 	/**
 	 * Nano Banana 2, Nano Banana Pro, Nano Banana 2 Lite and the original Nano Banana, through the Gemini API, with

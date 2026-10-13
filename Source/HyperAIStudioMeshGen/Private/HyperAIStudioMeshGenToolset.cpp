@@ -3,311 +3,36 @@
 #include "HyperAIStudioMeshGenToolset.h"
 
 #include "AssetImportTask.h"
-#include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
 #include "Containers/Ticker.h"
-#include "Dom/JsonObject.h"
 #include "Engine/StaticMesh.h"
-#include "HAL/FileManager.h"
-#include "HAL/PlatformMisc.h"
 #include "GenericPlatform/GenericPlatformHttp.h"
+#include "HAL/FileManager.h"
 #include "HAL/PlatformTime.h"
-#include "HttpModule.h"
-#include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
-#include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioExternalService.h"
+#include "HyperAIStudioMeshGenJob.h"
 #include "HyperAIStudioNames.h"
 #include "HyperAIStudioSettings.h"
 #include "IAssetTools.h"
-#include "Interfaces/IHttpRequest.h"
-#include "Interfaces/IHttpResponse.h"
 #include "Misc/Base64.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
-#include "Policies/CondensedJsonPrintPolicy.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioMeshGen, Log, All);
 
 namespace HyperAIStudio::MeshGen::Private
 {
-	using C = FHyperAIStudioMeshGenContracts;
-
-	/** Generation takes one to five minutes; the job host bounds every job at ten. */
-	constexpr int32 JobDeadlineMs = 10 * 60 * 1000;
-	constexpr int32 MaxModelBytes = 200 * 1024 * 1024;
 	const TCHAR* const ProviderOrder[] = {TEXT("tripo"), TEXT("meshy"), TEXT("hi3d")};
-
-	double& PollSeconds()
-	{
-		static double Seconds = 3.0;
-		return Seconds;
-	}
 
 	FString DefaultModel(const FString& Provider)
 	{
 		return Provider == TEXT("tripo") ? FString(TEXT("v3.1-20260211")) : Provider == TEXT("meshy") ? FString(TEXT("latest")) : FString(TEXT("hi3dv3.0"));
-	}
-
-	/** Read at the moment of the call, never kept in a setting, and never reported. */
-	FString Key(const FHyperAIStudioExternalServiceSettings& Service)
-	{
-		return Service.ApiKeyVariable.IsEmpty() ? FString() : FPlatformMisc::GetEnvironmentVariable(*Service.ApiKeyVariable).TrimStartAndEnd();
-	}
-
-	FString ProjectRelative(const FString& Path)
-	{
-		FString Relative = Path;
-		FPaths::MakePathRelativeTo(Relative, *FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()));
-		return Relative;
-	}
-
-	FString ModelsRoot()
-	{
-		return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Models"));
-	}
-
-	enum class EPhase : uint8
-	{
-		Prepare,
-		Submit,
-		Generate,
-		Download,
-		Import,
-		Done,
-		Failed
-	};
-
-	struct FJob
-	{
-		/** What hyper_mesh_status reports. */
-		FHyperAIMeshJob Info;
-		FHyperAIStudioExternalServiceSettings Service;
-		/** Absolute, when the model is made from a picture. */
-		FString ImageFile;
-		FString AssetFolder;
-		FString AssetName;
-		EPhase Phase = EPhase::Prepare;
-		bool bWaiting = false;
-		double NextPollAt = 0.0;
-		/** Hi3D's access token, or the file token Tripo gave the uploaded picture. */
-		FString Token;
-		/** Meshy makes a textured model from words in two tasks: the mesh, then its texture. */
-		bool bRefined = false;
-		FString ModelUrl;
-		TSharedPtr<IHttpRequest> Request;
-	};
-
-	TArray<TSharedRef<FJob>>& Jobs()
-	{
-		static TArray<TSharedRef<FJob>> Items;
-		return Items;
-	}
-
-	TSharedPtr<FJob> FindJob(const FString& OperationId)
-	{
-		const TSharedRef<FJob>* Found = Jobs().FindByPredicate([&OperationId](const TSharedRef<FJob>& Job) { return Job->Info.OperationId == OperationId; });
-		return Found ? TSharedPtr<FJob>(*Found) : nullptr;
-	}
-
-	/**
-	 * Name, or Name_2 and on: a model gets a folder of its own under Folder, so a name is free when no asset is in that
-	 * folder and no other job waiting to import has it.
-	 */
-	FString FreeName(const FString& Folder, const FString& Name, const FJob* Self = nullptr)
-	{
-		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
-		auto Taken = [&](const FString& Candidate)
-		{
-			return Registry.HasAssets(FName(*(Folder / Candidate)), /*bRecursive=*/true)
-				|| Jobs().ContainsByPredicate([&](const TSharedRef<FJob>& Job)
-				{
-					return &Job.Get() != Self && Job->Phase != EPhase::Failed && Job->AssetFolder == Folder && Job->AssetName == Candidate;
-				});
-		};
-		FString Candidate = Name;
-		for (int32 Suffix = 2; Taken(Candidate) && Suffix < 1000; ++Suffix)
-		{
-			Candidate = FString::Printf(TEXT("%s_%d"), *Name, Suffix);
-		}
-		return Candidate;
-	}
-
-	TSharedPtr<FJsonObject> ParseJson(const TArray<uint8>& Body)
-	{
-		const FUTF8ToTCHAR Text(reinterpret_cast<const ANSICHAR*>(Body.GetData()), Body.Num());
-		TSharedPtr<FJsonObject> Json;
-		FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(FString(Text.Length(), Text.Get())), Json);
-		return Json;
-	}
-
-	FString JsonText(const TSharedRef<FJsonObject>& Json)
-	{
-		FString Text;
-		FJsonSerializer::Serialize(Json, TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Text));
-		return Text;
-	}
-
-	TArray<uint8> Utf8(const FString& Text)
-	{
-		const FTCHARToUTF8 Converted(*Text);
-		return TArray<uint8>(reinterpret_cast<const uint8*>(Converted.Get()), Converted.Length());
-	}
-
-	/** A dotted path into a reply, such as data.output.model_url. */
-	FString Field(const TSharedPtr<FJsonObject>& Json, const FString& Path)
-	{
-		TArray<FString> Parts;
-		Path.ParseIntoArray(Parts, TEXT("."));
-		TSharedPtr<FJsonObject> Object = Json;
-		for (int32 Index = 0; Object.IsValid() && Index < Parts.Num(); ++Index)
-		{
-			if (Index == Parts.Num() - 1)
-			{
-				FString Value;
-				double Number = 0.0;
-				if (Object->TryGetStringField(Parts[Index], Value))
-				{
-					return Value;
-				}
-				return Object->TryGetNumberField(Parts[Index], Number) ? FString::Printf(TEXT("%g"), Number) : FString();
-			}
-			const TSharedPtr<FJsonObject>* Next = nullptr;
-			Object = Object->TryGetObjectField(Parts[Index], Next) && Next ? *Next : nullptr;
-		}
-		return FString();
-	}
-
-	/** A multipart form, for the providers that take a picture as a file. */
-	struct FForm
-	{
-		FString Boundary = TEXT("----HyperAIStudio") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
-		TArray<uint8> Body;
-
-		void Text(const FString& Name, const FString& Value)
-		{
-			Body.Append(Utf8(FString::Printf(TEXT("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n"), *Boundary, *Name, *Value)));
-		}
-		void File(const FString& Name, const FString& Path, const TArray<uint8>& Bytes)
-		{
-			const FString Extension = FPaths::GetExtension(Path).ToLower();
-			const FString Mime = Extension == TEXT("png") ? TEXT("image/png") : Extension == TEXT("webp") ? TEXT("image/webp") : TEXT("image/jpeg");
-			Body.Append(Utf8(FString::Printf(TEXT("--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\nContent-Type: %s\r\n\r\n"),
-				*Boundary, *Name, *FPaths::GetCleanFilename(Path), *Mime)));
-			Body.Append(Bytes);
-			Body.Append(Utf8(TEXT("\r\n")));
-		}
-		TArray<uint8> Finish()
-		{
-			Body.Append(Utf8(FString::Printf(TEXT("--%s--\r\n"), *Boundary)));
-			return MoveTemp(Body);
-		}
-		FString ContentType() const
-		{
-			return TEXT("multipart/form-data; boundary=") + Boundary;
-		}
-	};
-
-	/** The job's record beside its model, which also keeps the provider's credit line for Hi3D. */
-	void WriteRecord(const FJob& Job)
-	{
-		const TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
-		Json->SetStringField(TEXT("operationId"), Job.Info.OperationId);
-		Json->SetStringField(TEXT("provider"), Job.Info.Provider);
-		Json->SetStringField(TEXT("model"), Job.Info.Model);
-		Json->SetStringField(TEXT("state"), Job.Info.State);
-		Json->SetStringField(TEXT("prompt"), Job.Info.Prompt);
-		Json->SetStringField(TEXT("imagePath"), Job.Info.ImagePath);
-		Json->SetStringField(TEXT("taskId"), Job.Info.TaskId);
-		Json->SetStringField(TEXT("assetPath"), Job.Info.AssetPath);
-		Json->SetStringField(TEXT("diagnostic"), Job.Info.Diagnostic);
-		if (Job.Info.Provider == TEXT("hi3d"))
-		{
-			Json->SetStringField(TEXT("attribution"), TEXT("Created with Hitem3D"));
-		}
-		const FString Folder = ModelsRoot() / Job.Info.OperationId;
-		IFileManager::Get().MakeDirectory(*Folder, /*Tree=*/true);
-		FFileHelper::SaveStringToFile(JsonText(Json), *(Folder / TEXT("job.json")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
-	}
-
-	void Fail(FJob& Job, const FString& Why)
-	{
-		Job.Phase = EPhase::Failed;
-		Job.Info.State = TEXT("failed");
-		Job.Info.Diagnostic = Why.Left(1024);
-		WriteRecord(Job);
-		UE_LOG(LogHyperAIStudioMeshGen, Warning, TEXT("3D job %s (%s) failed: %s"), *Job.Info.OperationId, *Job.Info.Provider, *Job.Info.Diagnostic);
-	}
-
-	using FOnReply = TFunction<void(FJob& Job, int32 Code, const TArray<uint8>& Body)>;
-
-	/** One request for the job; OnReply runs on the game thread, and not at all once the job has failed or stopped. */
-	void Send(const TSharedRef<FJob>& Job, const TCHAR* Verb, const FString& Url, const TMap<FString, FString>& Headers,
-		TArray<uint8> Body, FOnReply OnReply, const float TimeoutSeconds = 120.f)
-	{
-		const TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
-		Request->SetURL(Url);
-		Request->SetVerb(Verb);
-		Request->SetTimeout(TimeoutSeconds);
-		for (const TPair<FString, FString>& Header : Headers)
-		{
-			Request->SetHeader(Header.Key, Header.Value);
-		}
-		if (!Body.IsEmpty())
-		{
-			Request->SetContent(MoveTemp(Body));
-		}
-		Job->bWaiting = true;
-		Job->Request = Request;
-		Request->OnProcessRequestComplete().BindLambda([Job, OnReply = MoveTemp(OnReply)](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnected)
-		{
-			Job->bWaiting = false;
-			Job->Request.Reset();
-			if (Job->Phase == EPhase::Failed || Job->Phase == EPhase::Done)
-			{
-				return;
-			}
-			if (!bConnected || !Response.IsValid())
-			{
-				Fail(*Job, FString::Printf(TEXT("%s did not answer."), *Job->Service.Label));
-				return;
-			}
-			OnReply(*Job, Response->GetResponseCode(), Response->GetContent());
-		});
-		Request->ProcessRequest();
-	}
-
-	/** The key in the service's own header (Authorization: Bearer for Tripo and Meshy). */
-	TMap<FString, FString> KeyHeaders(const FJob& Job)
-	{
-		return {{Job.Service.ApiKeyHeader.IsEmpty() ? FString(TEXT("Authorization")) : Job.Service.ApiKeyHeader, Job.Service.ApiKeyPrefix + Key(Job.Service)}};
-	}
-
-	TMap<FString, FString> JsonHeaders(const FJob& Job)
-	{
-		TMap<FString, FString> Headers = KeyHeaders(Job);
-		Headers.Add(TEXT("Content-Type"), TEXT("application/json"));
-		return Headers;
-	}
-
-	/** What a provider said went wrong, in its own words where it gave any. */
-	FString ProviderError(const FJob& Job, const int32 Code, const TArray<uint8>& Body)
-	{
-		const TSharedPtr<FJsonObject> Json = ParseJson(Body);
-		FString Message = Field(Json, TEXT("message"));
-		Message = Message.IsEmpty() ? Field(Json, TEXT("msg")) : Message;
-		Message = Message.IsEmpty() ? Field(Json, TEXT("task_error.message")) : Message;
-		const FString Credits = Code == 402 || Field(Json, TEXT("code")) == TEXT("30010000") || Field(Json, TEXT("code")) == TEXT("2010")
-			? FString(TEXT(" The account is out of credits.")) : FString();
-		return FString::Printf(TEXT("%s answered %d%s%s%s"), *Job.Service.Label, Code, Message.IsEmpty() ? TEXT("") : TEXT(": "), *Message.Left(300), *Credits);
 	}
 
 	TArray<uint8> ImageBytes(const FJob& Job)
@@ -558,22 +283,8 @@ namespace HyperAIStudio::MeshGen::Private
 		}));
 	}
 
-	EHyperAIStudioAsyncJobPoll Poll(const TSharedRef<FJob>& Job, FString& OutProgress, FString& OutDiagnostic)
+	void StepGenerate(const TSharedRef<FJob>& Job)
 	{
-		OutProgress = FString::Printf(TEXT("%s %d%%"), *Job->Info.State, Job->Info.Progress);
-		OutDiagnostic = Job->Info.Diagnostic;
-		if (Job->Phase == EPhase::Failed)
-		{
-			return EHyperAIStudioAsyncJobPoll::Failed;
-		}
-		if (Job->Phase == EPhase::Done)
-		{
-			return EHyperAIStudioAsyncJobPoll::Completed;
-		}
-		if (Job->bWaiting || FPlatformTime::Seconds() < Job->NextPollAt)
-		{
-			return EHyperAIStudioAsyncJobPoll::Running;
-		}
 		switch (Job->Phase)
 		{
 		case EPhase::Prepare: Prepare(Job); break;
@@ -583,111 +294,6 @@ namespace HyperAIStudio::MeshGen::Private
 		case EPhase::Import: Import(Job); break;
 		default: break;
 		}
-		return EHyperAIStudioAsyncJobPoll::Running;
-	}
-
-	void RecordFailure(const FJob& Job)
-	{
-		FHyperAIStudioActivityEntry Entry;
-		Entry.Kind = EHyperAIStudioActivityKind::Failed;
-		Entry.PackId = C::PackId;
-		Entry.ToolName = C::GenerateToolName;
-		Entry.Target = Job.AssetFolder / Job.AssetName;
-		Entry.OperationId = Job.Info.OperationId;
-		Entry.StatusCode = TEXT("failed");
-		Entry.Detail = Job.Info.Diagnostic;
-		FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
-	}
-
-	/** Approved: book the spend, then run the job in the background, where the Activity panel shows it. */
-	void Begin(const TSharedRef<FJob>& Job)
-	{
-		double Cost = 0.0;
-		FString Error;
-		if (!FHyperAIStudioExternalServices::Reserve(Job->Service.Id, 1, Cost, Error))
-		{
-			Fail(*Job, Error);
-			RecordFailure(*Job);
-			return;
-		}
-		Job->Info.State = TEXT("submitting");
-		FHyperAIStudioAsyncJobRequest Request;
-		Request.PackId = C::PackId;
-		Request.ToolName = C::GenerateToolName;
-		Request.Target = Job->AssetFolder / Job->AssetName;
-		Request.OperationId = Job->Info.OperationId;
-		Request.DeadlineMs = JobDeadlineMs;
-		Request.PollIntervalMs = 200;
-		Request.OnCancel = [Job]()
-		{
-			if (Job->Request.IsValid())
-			{
-				Job->Request->CancelRequest();
-			}
-			if (Job->Phase != EPhase::Done)
-			{
-				Fail(*Job, TEXT("Stopped before it finished."));
-			}
-		};
-		FString JobId;
-		if (!FHyperAIStudioAsyncJobHost::Start(Request, [Job](FString& OutProgress, FString& OutDiagnostic) { return Poll(Job, OutProgress, OutDiagnostic); }, JobId, Error))
-		{
-			Fail(*Job, Error);
-			RecordFailure(*Job);
-		}
-	}
-
-	/** SM_ and the prompt's first words, or the name given, as an asset name: letters, digits and underscores. */
-	FString AssetNameFor(const FString& Name, const FString& Prompt)
-	{
-		FString Out;
-		if (!Name.TrimStartAndEnd().IsEmpty())
-		{
-			for (const TCHAR Char : Name.TrimStartAndEnd())
-			{
-				Out.AppendChar(FChar::IsAlnum(Char) || Char == TEXT('_') ? Char : TEXT('_'));
-			}
-		}
-		else
-		{
-			TArray<FString> Words;
-			Prompt.ParseIntoArrayWS(Words);
-			Out = TEXT("SM_");
-			for (int32 Index = 0, Kept = 0; Index < Words.Num() && Kept < 4; ++Index)
-			{
-				FString Word;
-				for (const TCHAR Char : Words[Index])
-				{
-					if (FChar::IsAlnum(Char))
-					{
-						Word.AppendChar(Char);
-					}
-				}
-				if (Word.Len() > 2 || (Kept > 0 && !Word.IsEmpty()))
-				{
-					Out += Word.Left(1).ToUpper() + Word.Mid(1).ToLower();
-					++Kept;
-				}
-			}
-			Out = Out == TEXT("SM_") ? FString(TEXT("SM_Generated")) : Out;
-		}
-		if (Out.IsEmpty() || !FChar::IsAlpha(Out[0]))
-		{
-			Out = TEXT("SM_") + Out;
-		}
-		return Out.Left(64);
-	}
-
-	FHyperAIMeshJob Snapshot(const FJob& Job)
-	{
-		FHyperAIMeshJob Info = Job.Info;
-		// A plan the user turned down never runs; the gate forgets it, so this is where that shows.
-		if (Info.State == TEXT("awaiting_user_approval") && !FHyperAIStudioApprovalGate::HasPending(Info.OperationId))
-		{
-			Info.State = TEXT("rejected");
-			Info.Diagnostic = TEXT("The user rejected it; nothing was spent.");
-		}
-		return Info;
 	}
 }
 
@@ -698,7 +304,7 @@ FString FHyperAIStudioMeshGenContracts::GetQualifiedToolsetName()
 
 TArray<FString> FHyperAIStudioMeshGenContracts::GetToolNames()
 {
-	return {GenerateToolName, StatusToolName};
+	return {GenerateToolName, StatusToolName, RigToolName, AnimateToolName, RetextureToolName, ActionsToolName, CancelToolName};
 }
 
 bool FHyperAIStudioMeshGenContracts::IsRegistrationAllowed(const bool bAllowSourceCandidateForDev)
@@ -835,6 +441,7 @@ FHyperAIMeshGenerateReport FHyperAIStudioMeshGenContracts::Generate(const FHyper
 	}
 
 	const TSharedRef<FJob> Job = MakeShared<FJob>();
+	Job->Info.Kind = TEXT("generate");
 	Job->Service = Service;
 	Job->ImageFile = Image;
 	Job->AssetFolder = Folder;
@@ -894,6 +501,31 @@ FHyperAIMeshGenerateReport UHyperAIStudioMeshGenToolset::hyper_mesh_generate(con
 FHyperAIMeshStatusReport UHyperAIStudioMeshGenToolset::hyper_mesh_status(const FHyperAIMeshStatusRequest& Request)
 {
 	return FHyperAIStudioMeshGenContracts::Status(Request.OperationId);
+}
+
+FHyperAIMeshTaskReport UHyperAIStudioMeshGenToolset::hyper_mesh_rig(const FHyperAIMeshRigRequest& Request)
+{
+	return FHyperAIStudioMeshGenContracts::Rig(Request);
+}
+
+FHyperAIMeshTaskReport UHyperAIStudioMeshGenToolset::hyper_mesh_animate(const FHyperAIMeshAnimateRequest& Request)
+{
+	return FHyperAIStudioMeshGenContracts::Animate(Request);
+}
+
+FHyperAIMeshTaskReport UHyperAIStudioMeshGenToolset::hyper_mesh_retexture(const FHyperAIMeshRetextureRequest& Request)
+{
+	return FHyperAIStudioMeshGenContracts::Retexture(Request);
+}
+
+FHyperAIMeshActionsReport UHyperAIStudioMeshGenToolset::hyper_mesh_actions(const FHyperAIMeshActionsRequest& Request)
+{
+	return FHyperAIStudioMeshGenContracts::Actions(Request);
+}
+
+FHyperAIMeshCancelReport UHyperAIStudioMeshGenToolset::hyper_mesh_cancel(const FHyperAIMeshCancelRequest& Request)
+{
+	return FHyperAIStudioMeshGenContracts::Cancel(Request.OperationId);
 }
 
 void FHyperAIStudioMeshGenRegistration::Startup()

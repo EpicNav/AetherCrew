@@ -880,8 +880,8 @@
   {
    "namespace": "HyperAIStudioAutoApproval",
    "key": "ExternalCapBody",
-   "source": "Requests that reach outside the editor: generating images (hyper_image_generate, with Codex, Gemini or a configured image service), generating 3D models (hyper_mesh_generate, with Tripo, Meshy or Hi3D), and submitting files to source control (hyper_source_control_submit, through Perforce, Git, Plastic or Lore, where your team receives them). Prompts and pictures are sent to those services. One image request may make up to 8 paid calls. Paid calls still stop at this session's spend cap of {0}, and auto-approval turns off if the cap or a service's or model's price changes while it is on; agent models use your agent plan.",
-   "text": "会延伸到编辑器之外的请求：生成图片（hyper_image_generate，使用 Codex、Gemini 或已配置的图片服务）、生成 3D 模型（hyper_mesh_generate，使用 Tripo、Meshy 或 Hi3D），以及向源代码管理提交文件（hyper_source_control_submit，通过 Perforce、Git、Plastic 或 Lore，你的团队会收到这些文件）。提示词和图片会被发送到这些服务。一个图片请求最多可产生 8 次付费调用。付费调用仍受本次会话 {0} 的花费上限约束；开启期间如果上限或某项服务、模型的价格发生变化，自动批准会关闭。智能体模型会消耗你的智能体套餐。"
+   "source": "Requests that reach outside the editor: generating images (hyper_image_generate, with Codex, Gemini or a configured image service), generating, rigging, animating and retexturing 3D models (hyper_mesh_generate, hyper_mesh_rig, hyper_mesh_animate and hyper_mesh_retexture, with Tripo, Meshy, Hi3D or Viggle), and submitting files to source control (hyper_source_control_submit, through Perforce, Git, Plastic or Lore, where your team receives them). Prompts, pictures and meshes are sent to those services. One image request may make up to 8 paid calls. Paid calls still stop at this session's spend cap of {0}, and auto-approval turns off if the cap or a service's, model's or 3D task's price changes while it is on; agent models use your agent plan.",
+   "text": "会延伸到编辑器之外的请求：生成图片（hyper_image_generate，使用 Codex、Gemini 或已配置的图片服务）、生成、绑定骨骼、制作动画和重新贴图 3D 模型（hyper_mesh_generate、hyper_mesh_rig、hyper_mesh_animate 和 hyper_mesh_retexture，使用 Tripo、Meshy、Hi3D 或 Viggle），以及向源代码管理提交文件（hyper_source_control_submit，通过 Perforce、Git、Plastic 或 Lore，你的团队会收到这些文件）。提示词、图片和网格体会被发送到这些服务。一个图片请求最多可产生 8 次付费调用。付费调用仍受本次会话 {0} 的花费上限约束；开启期间如果上限或某项服务、模型或 3D 任务的价格发生变化，自动批准会关闭。智能体模型会消耗你的智能体套餐。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -3393,6 +3393,54 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "animation.generated-character-mannequin.ph.actions.hint",
+   "source": "Names or ids from the provider's library; hyper_mesh_actions searches it.",
+   "text": "服务商动画库中的名称或 ID；可用 hyper_mesh_actions 搜索。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.generated-character-mannequin.ph.actions.label",
+   "source": "Preset animations",
+   "text": "预设动画"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.generated-character-mannequin.ph.mannequin.label",
+   "source": "Your Mannequin",
+   "text": "你的 Mannequin"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.generated-character-mannequin.ph.max_cost.label",
+   "source": "Most to spend (USD)",
+   "text": "最多花费（美元）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.generated-character-mannequin.ph.name.label",
+   "source": "Skeletal mesh name",
+   "text": "骨骼网格体名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.generated-character-mannequin.ph.subject.label",
+   "source": "Character to make",
+   "text": "要生成的角色"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.generated-character-mannequin.summary",
+   "source": "A paid pipeline: a model from a prompt, rigged by Meshy or Tripo, given preset clips, then IK Rigs, a retargeter and the clips on your Mannequin.",
+   "text": "付费流程：根据提示词生成模型，由 Meshy 或 Tripo 绑定骨骼并加上预设动画，再为你的 Mannequin 创建 IK Rig、重定向器并重定向动画。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.generated-character-mannequin.title",
+   "source": "Generate, rig and animate a character for your Mannequin",
+   "text": "生成角色、绑定骨骼并为你的 Mannequin 制作动画"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "animation.locomotion-blend-space-1d.ph.blend_space_name.label",
    "source": "Blend space name",
    "text": "混合空间名称"
@@ -3444,6 +3492,42 @@
    "key": "animation.locomotion-blend-space-1d.title",
    "source": "Make a 1D idle-walk-run blend space at true speeds",
    "text": "按真实速度制作一维待机-行走-奔跑混合空间"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.mannequin-from-text.ph.mannequin.label",
+   "source": "Your Mannequin",
+   "text": "你的 Mannequin"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.mannequin-from-text.ph.max_cost.label",
+   "source": "Most to spend (USD)",
+   "text": "最多花费（美元）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.mannequin-from-text.ph.motion.label",
+   "source": "What the character does",
+   "text": "角色要做的动作"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.mannequin-from-text.ph.seconds.label",
+   "source": "Length in seconds",
+   "text": "时长（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.mannequin-from-text.summary",
+   "source": "Make a clip from words with Viggle or Meshy and land it on your project's Mannequin skeleton, priced and approved first.",
+   "text": "用 Viggle 或 Meshy 根据文字生成动画片段，导入到项目 Mannequin 的骨架上，先报价并经你批准。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.mannequin-from-text.title",
+   "source": "Animate the Mannequin from a sentence",
+   "text": "用一句话为 Mannequin 制作动画"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -3522,6 +3606,30 @@
    "key": "animation.npc-idle-composite.title",
    "source": "Chain idle breaks into a long NPC idle composite",
    "text": "把待机小动作串成 NPC 长待机合成动画"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.price-character-pipeline.ph.actions.label",
+   "source": "Preset animations",
+   "text": "预设动画"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.price-character-pipeline.ph.mannequin.label",
+   "source": "Your Mannequin",
+   "text": "你的 Mannequin"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.price-character-pipeline.summary",
+   "source": "Dry-run the rig, preset clips and the retarget onto your Mannequin with Meshy and Tripo side by side, spending nothing.",
+   "text": "试运行骨骼绑定、预设动画和到 Mannequin 的重定向，对比 Meshy 与 Tripo，不花任何费用。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.price-character-pipeline.title",
+   "source": "Price rigging and animating a generated character",
+   "text": "为生成角色的骨骼绑定和动画报价"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -12240,6 +12348,42 @@
    "key": "modelling-geometry.reimport-preflight.title",
    "source": "Preflight a mesh reimport from an updated source file",
    "text": "预检用更新后的源文件重新导入网格"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.retexture-paid-model.ph.look.label",
+   "source": "New look",
+   "text": "新外观"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.retexture-paid-model.ph.max_cost.label",
+   "source": "Most to spend (USD)",
+   "text": "最多花费（美元）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.retexture-paid-model.ph.resolution.hint",
+   "source": "Meshy: 2k, 4k or 8k. Tripo: standard, detailed or 8k.",
+   "text": "Meshy：2k、4k 或 8k。Tripo：standard、detailed 或 8k。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.retexture-paid-model.ph.resolution.label",
+   "source": "Resolution",
+   "text": "分辨率"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.retexture-paid-model.summary",
+   "source": "Give a generated or project mesh a new PBR texture from words with Meshy or Tripo, at 2K to 8K, imported with its material instance.",
+   "text": "用 Meshy 或 Tripo 根据文字为生成的或项目中的网格体制作新的 PBR 贴图，2K 到 8K，并连同材质实例一起导入。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.retexture-paid-model.title",
+   "source": "Retexture a model up to 8K with a paid service",
+   "text": "用付费服务为模型重新贴图，最高 8K"
   },
   {
    "namespace": "HyperAIStudioPrompts",
