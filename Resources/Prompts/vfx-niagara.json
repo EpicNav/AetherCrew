@@ -1134,6 +1134,96 @@
     }
    ],
    "prompt": "Give the effect {{selected_asset}} a `User.{{param}}` float (default 1) that scales particle size and brightness, so gameplay can turn it up or down. Change only this System; each plan compiles and saves it. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_inspect with bIncludeTopology true. If userParameters lacks {{param}}, add it with Epic's AddUserVariables (float, default 1), save, and inspect again for the revision.\n2. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): for each sprite emitter, add_hlsl_module `Scale{{param}}_<Emitter>` in its ParticleSpawnScript (once per particle, so nothing compounds) that multiplies Particles.SpriteSize and the rgb of Particles.Color by User.{{param}}. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_niagara_validate with policy authoring, then runtime_ready; repair a failing module in one plan with set_module_enabled false and a corrected add_hlsl_module under a new name. If a Color module in Particle Update rewrites the colour every frame, say so.\n4. Prove it: place the System in {{level}} (unsaved); with Epic's SetVariable on its component set {{param}} to 0.25 and hyper_capture_view one frame with source transform 400 cm away, then set 2.0 and capture again from the same transform.\nReply with a PASS/FAIL table: the user parameter present with default 1; one module per sprite emitter, last in its spawn stack; 0 errors and 0 warnings; the 2.0 frame brighter than the 0.25 frame (luminanceP95). Show both frames on their own lines."
+  },
+  {
+   "id": "vfx-niagara.inspect-effects-in-play",
+   "title": "See what every effect does in play",
+   "summary": "Read each Niagara system and emitter while the game plays: particles, spawning, bounds, CPU or GPU, and why an effect shows nothing.",
+   "packs": [
+    "niagara_vfx",
+    "automation_profiling_build"
+   ],
+   "skills": [
+    "unreal-niagara",
+    "performance"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_live",
+    "hyper_profile_live"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "live",
+    "play",
+    "pie",
+    "debug",
+    "spawning",
+    "particles",
+    "bounds",
+    "invisible effect"
+   ],
+   "placeholders": [
+    {
+     "name": "filter",
+     "label": "System, actor or component (blank for all)",
+     "default": ""
+    },
+    {
+     "name": "seconds",
+     "label": "Seconds to watch spawning",
+     "default": "1",
+     "hint": "0 to 5."
+    }
+   ],
+   "prompt": "Tell me what the Niagara effects in {{level}} are doing while it plays. Change nothing.\n1. Play In Editor must be running; if hyper_niagara_live answers no_pie_world, ask me to press Play and stop.\n2. hyper_niagara_live with filter \"{{filter}}\" and sampleSeconds {{seconds}}. A table per system: component, state, particles, and per emitter its simTarget, particles, spawnedInSample, spawning and bounds.\n3. Every line of errors, with the likely cause and the fix (a hyper_niagara_apply_plan op where there is one).\n4. hyper_profile_live with sampleSeconds 2 for what the busiest systems cost (game thread, render thread, GPU).\nEnd with the three effects to look at first, and why."
+  },
+  {
+   "id": "vfx-niagara.tune-hlsl-module",
+   "title": "Tune a custom HLSL module in place",
+   "summary": "Rewrite a scratch pad HLSL module's body as one undo step, recompile, and prove the emitter still spawns.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate"
+   ],
+   "ops": [
+    "set_hlsl_module"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "hlsl",
+    "scratch pad",
+    "custom module",
+    "tune",
+    "code"
+   ],
+   "placeholders": [
+    {
+     "name": "system",
+     "label": "Niagara System",
+     "default": "NS_Vortex"
+    },
+    {
+     "name": "module",
+     "label": "Scratch pad module",
+     "default": "Vortex"
+    },
+    {
+     "name": "change",
+     "label": "What to change",
+     "default": "make the swirl twice as strong and add a little upward drift"
+    }
+   ],
+   "prompt": "In `{{content_folder}}/VFX/{{system}}`, change the HLSL module `{{module}}` to {{change}}.\n1. hyper_niagara_inspect with bIncludeTopology true; keep revision. If `{{module}}` is not in scratchPadModules, list what is and stop.\n2. Write the new body (attributes by full name, no return) and send one hyper_niagara_apply_plan: expectedRevision, bDryRun false, a fresh operationId and one set_hlsl_module op with name {{module}} and hlsl. Follow a reply still running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n3. hyper_niagara_validate with policy authoring (no compile errors), then runtime_probe: the module's emitter must be live.\nReport the old and new body side by side, the validate results, and that one undo puts the old body back."
   }
  ]
 }

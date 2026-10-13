@@ -45,6 +45,7 @@ and not compiling (`compile_not_terminal` means wait and plan again). Just after
 | `set_emitter_property` | `emitterName`, `name`, `value` (below) |
 | `add_simulation_stage` | `emitterName`, `name`, `value` = iterations per frame, 1-64 (default 1) |
 | `add_hlsl_module` | `scriptName` (or `stageName`), `emitterName`, `name`, `hlsl` |
+| `set_hlsl_module` | `name` (a scratch pad module from inspect's `scratchPadModules`, or one an earlier op adds), `hlsl` (its new body) |
 | `apply_stack_issue_fix` | `issueId`, `fixId` from validate |
 | `create_effect_type`, `set_effect_type`, `set_effect_type_setting` | scalability budgets; see the tool guide |
 
@@ -88,6 +89,9 @@ Particles.Velocity += float3(-P.y, P.x, 0.0) * 2.0 * Engine.DeltaTime;
   `add_hlsl_module` with a new name and the corrected code. Validate again; remove the broken one with Epic's
   `RemoveModule` once the compile is clean.
 
+**Editing one.** `set_hlsl_module` replaces a scratch pad module's body in place, wherever it sits in a stack, as one
+undo step; the System recompiles with the plan. Use it to tune or repair code rather than adding a module beside it.
+
 ## Simulation stages (GPU)
 
 A simulation stage is an extra stack that runs after Particle Update, as many times per frame as its iterations, over
@@ -105,6 +109,23 @@ In UE 5.8 they run only on GPU emitters, so a plan for a CPU emitter switches it
 `add_module` and `set_module_enabled` also take a `stageName`. Inputs of modules inside a stage cannot be set yet: write
 the values into an HLSL module there. Stages that iterate a data interface (grids, render targets) come from Epic's
 emitter templates.
+
+## CPU or GPU
+
+`set_emitter_property` `sim_target` `cpu` or `gpu` switches an emitter. GPU takes many more particles and runs
+simulation stages and texture sampling, but cannot measure its own bounds (give it `fixed_bounds`) and its counts read
+back a frame late. Stay on CPU for small counts, events, collisions that spawn other emitters and effects that must be
+deterministic on every platform.
+
+## Live in play
+
+`hyper_niagara_live` reads what plays in Play In Editor, read-only, per system and per emitter: particles alive, spawned
+during a short watch (`sampleSeconds`, 0.5 by default) and so whether it is `spawning`, its `simTarget`, state and
+bounds, and `issues`: compile errors, emitters disabled or culled, an active emitter with nothing alive or spawning,
+particles alive with empty bounds (it can be culled), shaders still caching. `filter` narrows it to a system, actor or
+component; `errors` lists every issue in one line each. It says what an effect is doing; what it costs per frame is
+`hyper_profile_live` (sampled game-thread, render-thread and GPU time per system). Use both when an effect looks wrong
+or slow in game.
 
 ## A worked plan
 

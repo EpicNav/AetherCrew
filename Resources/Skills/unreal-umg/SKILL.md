@@ -22,7 +22,8 @@ Widget Blueprint as the earlier ops leave it, applied as one undo step, compiled
    `bDryRun: true` checks a plan without changing anything.
 4. **Validate** with `hyper_ui_validate` (`targetPaths`): the layout, accessibility, animations and bindings. Aim for no
    errors and no warnings.
-5. **Wire it** in the event graph with the unreal-blueprint skill: play the intro, focus the first button, and handle
+5. **Look at it** full size with `hyper_ui_render_review` (below), and fix what it finds.
+6. **Wire it** in the event graph with the unreal-blueprint skill: play the intro, focus the first button, and handle
    clicks (below).
 
 Close the Widget Blueprint's editor tab before a plan, so it changes in one place.
@@ -118,6 +119,37 @@ first with Epic's `BindToEventProperty` (`widgetBlueprint`, `eventName: "OnClick
 Focusing the first button on Construct is what makes a menu usable with a gamepad. Look up any other node with
 `find_node_types` (`Game|OpenLevel(byName)`, `Widget|RemovefromParent`, `UserInterface|Animation|PlayAnimationReverse`).
 
+## The polish loop: render, compare, fix, render again
+
+`hyper_ui_render_review` draws the Widget Blueprint off screen at real screen sizes and reviews what it drew. It is
+read-only: the PNGs go to `Saved/HyperAIStudio/UIReview`, nothing in the project changes.
+
+```json
+{"targetPath": "/Game/UI/WBP_MainMenu.WBP_MainMenu", "resolutions": ["1920x1080", "1280x720", "2560x1440"],
+ "referenceImagePath": "Saved/References/MainMenu_mockup.png", "sessionId": "main-menu", "note": "first pass"}
+```
+
+- **Sizes and scale.** Each size is drawn at the project's DPI curve for it, as the game would (`dpiScale` overrides).
+  1280x720 shrinks the UI the most: it is where text gets too small and layouts run out of room. `bFromPlay: true`
+  draws the instance on screen in Play In Editor, with its live text and state.
+- **Open the PNGs** (`renders[].imagePath`) and look: the checks catch measurable faults, not taste.
+- **Issues**, errors first, each with the widget's path, the size it was seen at and its rect in pixels:
+  `text_clipped` (the text wants more room than its slot gives: let the slot size to content, wrap it, or shorten it),
+  `text_too_small` (glyphs under `minTextPixels`, 14 by default), `low_contrast` (text against what is drawn behind it,
+  under 4.5:1, or 3:1 for large text; set `backdrop` near the game's view behind the UI), `offscreen`,
+  `outside_safe_zone` (the outer 5% a TV may crop; `safeZone` 1 checks only the edge), `clipped_by_parent` (a panel
+  that clips cuts it off), `overlapping_interactive` (two buttons a tap can confuse), `not_focusable`,
+  `broken_navigation` (an explicit rule to a widget that is not there) and `no_initial_focus` (no Desired Focus Widget,
+  so a gamepad starts nowhere).
+- **Against a mock-up.** With `referenceImagePath` (an image inside the project), the first render is scored against it
+  with the image-match compare (aligned): `reference.score` 0-100 against `targetScore` (80), `heatMapPath` (where they
+  differ, brightest where most; open it), `sideBySidePath`, the worst `worstRegions` and `suggestions`. Keep one
+  `sessionId` for the whole loop, with a `note` per pass, so the history shows which change helped.
+
+The loop: render and review; fix the worst issue or region with one `hyper_ui_apply_plan`; render again in the same
+session; stop when there are no errors, the warnings are ones you accept, and the score reaches the target or stops
+rising for three passes.
+
 ## Quality
 
 - Layout scales from 1280 x 720 to 3840 x 2160: anchor to the edge or centre an element belongs to, and keep important
@@ -125,4 +157,5 @@ Focusing the first button on Construct is what makes a menu usable with a gamepa
 - Body text 18 point or more, 14 at the least; one font family; spacing in multiples of 4.
 - Every button, slider and checkbox reachable by gamepad and keyboard in layout order, with `accessible_text`.
 - Screens animate in over 0.15 to 0.4 seconds.
-- `hyper_ui_validate` reports no errors or warnings.
+- `hyper_ui_validate` reports no errors or warnings, and `hyper_ui_render_review` no errors at 1280x720, 1920x1080
+  and 2560x1440.

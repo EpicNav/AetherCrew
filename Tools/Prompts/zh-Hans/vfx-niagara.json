@@ -98,5 +98,15 @@
  "vfx-niagara.healing-aura-loop.ph.color.label": "色调（线性 RGBA 0-1）",
  "vfx-niagara.intensity-user-parameter.title": "用用户参数驱动特效强度",
  "vfx-niagara.intensity-user-parameter.summary": "公开一个 User 浮点参数，通过 HLSL 缩放粒子大小和亮度，供蓝图设置，并证明两个取值的画面不同。",
- "vfx-niagara.intensity-user-parameter.ph.param.label": "用户参数名称"
+ "vfx-niagara.intensity-user-parameter.ph.param.label": "用户参数名称",
+ "vfx-niagara.inspect-effects-in-play.title": "查看每个特效在游戏中的表现",
+ "vfx-niagara.inspect-effects-in-play.summary": "在游戏运行时读取每个 Niagara 系统和发射器：粒子、是否生成、包围盒、CPU 或 GPU，以及特效不显示的原因。",
+ "vfx-niagara.inspect-effects-in-play.ph.filter.label": "系统、Actor 或组件（留空为全部）",
+ "vfx-niagara.inspect-effects-in-play.ph.seconds.label": "观察生成的秒数",
+ "vfx-niagara.inspect-effects-in-play.ph.seconds.hint": "0 到 5。",
+ "vfx-niagara.tune-hlsl-module.title": "就地调整自定义 HLSL 模块",
+ "vfx-niagara.tune-hlsl-module.summary": "以一个撤销步骤重写暂存区 HLSL 模块的代码，重新编译，并证明发射器仍在生成粒子。",
+ "vfx-niagara.tune-hlsl-module.ph.system.label": "Niagara 系统",
+ "vfx-niagara.tune-hlsl-module.ph.module.label": "暂存区模块",
+ "vfx-niagara.tune-hlsl-module.ph.change.label": "要修改的内容"
 }

@@ -1218,6 +1218,173 @@
     }
    ],
    "prompt": "Plan a change to the Material Designer material {{selected_asset}}: set the colour value `{{colour_value}}` to {{colour}}, set the value `{{scalar_value}}` to {{scalar}}, and {{layer_action}} the layer `{{layer}}`. If the DynamicMaterial plugin is off, say so and stop.\n1. hyper_dynamic_material_inspect (TargetFamily dynamic_material_instance): find the exact ComponentPath of each value and of the layer, their current values and ranges, and the Revision.\n2. hyper_dynamic_material_apply_plan with bDryRun true and Operations, each with that ExpectedRevision: value.set_color (VectorValue r,g,b,a) and value.set_scalar (ScalarValue inside its range) on those ComponentPaths, and layer.set_enabled (bBoolValue) for the layer. Read PlanHash, Effects and Issues.\n3. This pack only seals Material Designer plans as evidence: Status bounded_compile_or_runtime_cas_backend_required means nothing ran, and a bDryRun false call would not run either, so send none and do not write the asset any other way. If inspect's bMutationRevisionComplete is false, the plan cannot seal: list MutationRevisionBlockers.\n4. hyper_dynamic_material_validate on the material either way.\nReport a table: each change with its ComponentPath, current -> planned value, PASS/FAIL for in range, and whether the plan sealed (PlanHash) or why not. Then the exact steps to make each change by hand in the Material Designer panel."
+  },
+  {
+   "id": "materials-textures.recipe-layered-pbr",
+   "title": "Make a layered PBR master material",
+   "summary": "Build a PBR master from a recipe: base colour, normal with a detail normal, ORM and tiling as parameters, compiled and previewed, then an instance.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "skills": [
+    "unreal-materials"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_recipe",
+    "hyper_operation_wait",
+    "hyper_material_apply_plan"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "pbr",
+    "master material",
+    "orm",
+    "detail normal",
+    "recipe",
+    "instance"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Material name",
+     "default": "M_Surface_Master"
+    },
+    {
+     "name": "textures",
+     "label": "Base colour, normal and ORM textures (blank for flat ones)",
+     "default": ""
+    },
+    {
+     "name": "tiling",
+     "label": "Tiling",
+     "default": "2"
+    }
+   ],
+   "prompt": "Make the master material `{{content_folder}}/Materials/{{name}}` for {{project}}.\n1. hyper_material_recipe with recipe layered_pbr, path {{content_folder}}/Materials/{{name}}, settings tiling {{tiling}} and, if given, base_color_texture, normal_texture and orm_texture from: {{textures}}. Dry-run first (bDryRun true) and show the parameters.\n2. The same request with bDryRun false and a fresh operationId; if it waits for approval, hyper_operation_wait with bWaitThroughApproval true. It must end completed with no compile errors.\n3. One hyper_material_apply_plan create_material_instance `MI_{{name}}_Default` from it.\nReport the parameters by group, the instruction and sampler counts, and the preview path on its own line."
+  },
+  {
+   "id": "materials-textures.recipe-water",
+   "title": "Make a Single Layer Water material",
+   "summary": "Build lake or sea water from a recipe: depth absorption, scattering, panning normals and refraction, compiled and previewed.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "skills": [
+    "unreal-materials"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_recipe",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "water",
+    "single layer water",
+    "lake",
+    "sea",
+    "refraction",
+    "panner",
+    "recipe"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Material name",
+     "default": "M_Lake"
+    },
+    {
+     "name": "look",
+     "label": "Water look",
+     "default": "clear mountain lake, green-blue in the deep"
+    }
+   ],
+   "prompt": "Make the water material `{{content_folder}}/Materials/{{name}}`: {{look}}.\n1. hyper_material_recipe with an empty recipe to read the water settings; choose shallow_color, scattering_color and absorption (per metre, red absorbed first) for the look, and normal_tiling, pan_speed and normal_strength for the waves.\n2. hyper_material_recipe with recipe water, path {{content_folder}}/Materials/{{name}} and those settings, dry run first, then bDryRun false with a fresh operationId; if it waits for approval, hyper_operation_wait with bWaitThroughApproval true.\nReport the settings you chose and why, the compile result, and the preview path on its own line. Note that Single Layer Water needs the deferred renderer."
+  },
+  {
+   "id": "materials-textures.recipe-landscape-layers",
+   "title": "Make a height-blended landscape material",
+   "summary": "Build a landscape material whose paint layers blend by height, named as the landscape pack paints them, then put it on the landscape.",
+   "packs": [
+    "materials_dynamic_material",
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-materials"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_recipe",
+    "hyper_operation_wait",
+    "hyper_landscape_apply_plan"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "landscape",
+    "terrain",
+    "layers",
+    "height blend",
+    "paint layers",
+    "recipe"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Material name",
+     "default": "M_Landscape"
+    },
+    {
+     "name": "layers",
+     "label": "Paint layers",
+     "default": "Grass,Rock,Snow",
+     "hint": "1 to 8 names, comma separated."
+    }
+   ],
+   "prompt": "Make the landscape material `{{content_folder}}/Materials/{{name}}` with the paint layers {{layers}}, and use it in {{level}}.\n1. hyper_material_recipe with recipe landscape_layers, path {{content_folder}}/Materials/{{name}} and setting layers {{layers}}; dry run, then bDryRun false with a fresh operationId (hyper_operation_wait with bWaitThroughApproval true if it waits). It must compile clean.\n2. hyper_landscape_apply_plan: landscape.set_material with it on the level's landscape, and landscape.add_paint_layer for each of {{layers}} with exactly those names. If there is no landscape, say so and stop after step 1.\nReport each layer with its tint and height parameters, and the preview path on its own line."
+  },
+  {
+   "id": "materials-textures.recipe-hlsl-function",
+   "title": "Write HLSL as a material function",
+   "summary": "Make a material function from Custom HLSL with typed inputs, compiled in the dry run, and a material that calls it with parameters.",
+   "packs": [
+    "materials_dynamic_material"
+   ],
+   "skills": [
+    "unreal-materials"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_recipe",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "hlsl",
+    "custom node",
+    "material function",
+    "code",
+    "recipe"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Function name",
+     "default": "MF_Rim"
+    },
+    {
+     "name": "what",
+     "label": "What it computes",
+     "default": "a rim light from the camera vector and a normal, coloured and scaled"
+    },
+    {
+     "name": "inputs",
+     "label": "Inputs as Name:type",
+     "default": "Color:vector3, Power:scalar, Strength:scalar",
+     "hint": "Types: scalar, vector2, vector3, vector4."
+    }
+   ],
+   "prompt": "Write `{{content_folder}}/Materials/{{name}}`, a material function that computes {{what}}, and a material that uses it.\n1. Write the HLSL body (ending in a return of float3) over the inputs {{inputs}}.\n2. hyper_material_recipe with recipe material_function, path {{content_folder}}/Materials/{{name}}, settings inputs \"{{inputs}}\" and caller_output emissive, the code, and callerPath {{content_folder}}/Materials/M_{{name}}_Preview; dry run first. On compile_errors, read the errors, fix the code and dry-run again.\n3. The same with bDryRun false and a fresh operationId; hyper_operation_wait with bWaitThroughApproval true if it waits.\nReport the code, the compile result and the caller's preview path on its own line."
   }
  ]
 }

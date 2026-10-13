@@ -69,5 +69,19 @@
  "ui-umg.wire-menu-buttons.ph.owner_bp.label": "显示菜单的蓝图",
  "ui-umg.replace-placeholder-text.title": "查找并替换界面中的占位文字",
  "ui-umg.replace-placeholder-text.summary": "扫描文件夹内控件蓝图中遗留的“Text Block”、乱数假文和 TODO 字样，修复能推断的部分并列出其余项。",
- "ui-umg.replace-placeholder-text.ph.patterns.label": "占位文字模式"
+ "ui-umg.replace-placeholder-text.ph.patterns.label": "占位文字模式",
+ "ui-umg.polish-against-mockup.title": "对照设计稿打磨界面",
+ "ui-umg.polish-against-mockup.summary": "以完整分辨率渲染控件蓝图，用热力图与设计稿比对评分，修正差异最大的地方并重新渲染，直到匹配。",
+ "ui-umg.polish-against-mockup.ph.widget.label": "控件蓝图",
+ "ui-umg.polish-against-mockup.ph.mockup.label": "项目中的设计稿图片",
+ "ui-umg.polish-against-mockup.ph.mockup.hint": "项目文件夹内的 PNG 或 JPG。",
+ "ui-umg.polish-against-mockup.ph.target.label": "目标分数（0-100）",
+ "ui-umg.review-three-resolutions.title": "在 720p、1080p 和 1440p 下审查界面",
+ "ui-umg.review-three-resolutions.summary": "按项目 UI 缩放以三种屏幕尺寸渲染控件蓝图，列出被裁切或过小的文字、对比度、安全区、重叠和焦点问题。",
+ "ui-umg.review-three-resolutions.ph.widget.label": "控件蓝图",
+ "ui-umg.review-three-resolutions.ph.backdrop.label": "界面背后的颜色（r,g,b 0-1）",
+ "ui-umg.review-three-resolutions.ph.backdrop.hint": "接近此界面背后的游戏画面，用于对比度检查。",
+ "ui-umg.review-hud-in-play.title": "在游戏运行时审查 HUD",
+ "ui-umg.review-hud-in-play.summary": "在 PIE 中渲染屏幕上的 HUD 实例及其实时数值，检查文字、对比度、安全区和焦点。",
+ "ui-umg.review-hud-in-play.ph.hud.label": "HUD 控件蓝图"
 }
