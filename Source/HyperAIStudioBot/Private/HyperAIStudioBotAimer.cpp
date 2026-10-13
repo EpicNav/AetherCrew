@@ -502,10 +502,14 @@ FVector FHyperAIBotAimer::TargetPoint() const
 
 bool FHyperAIBotAimer::IsCurrent() const
 {
+	// A cursor yields only to a newer cursor, and a stick or view only to a newer stick or view: a cursor at rest keeps
+	// holding the window's cursor while the view or the stick aims, as a hand stays on the mouse, so the real mouse
+	// passing over the window never moves the game's aim.
+	const bool bCursor = Mode == EHyperAIBotAim::Cursor;
 	const TArray<FHyperAIBotAimer*>& List = HyperAIStudio::Bot::AimDetail::Aimers();
 	for (int32 Index = List.Num() - 1; Index >= 0; --Index)
 	{
-		if (List[Index]->World == World && List[Index]->PlayerIndex == PlayerIndex)
+		if (List[Index]->World == World && List[Index]->PlayerIndex == PlayerIndex && (List[Index]->Mode == EHyperAIBotAim::Cursor) == bCursor)
 		{
 			return List[Index] == this;
 		}

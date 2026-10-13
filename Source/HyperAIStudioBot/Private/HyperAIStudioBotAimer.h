@@ -17,7 +17,8 @@ class UWorld;
 /**
  * Holds one player's aim on an actor or a point, for as long as it lives, through what the game reads: its window's
  * cursor, its right stick or its view. It acts at the start of every frame of its world, before anything in the game
- * ticks, so the game's aim code reads this frame's aim. The newest aimer of a player is the one that acts. Letting go
+ * ticks, so the game's aim code reads this frame's aim. The newest cursor aimer of a player holds its cursor, and its
+ * newest stick or view aimer turns those; a cursor at rest holds while the view or the stick aims. Letting go
  * puts back what it changed.
  *
  * The cursor never moves the real one. FSceneViewport keeps the cursor position a game reads (GetMousePosition,

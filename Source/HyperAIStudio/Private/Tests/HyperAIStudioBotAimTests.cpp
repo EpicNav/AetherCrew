@@ -571,6 +571,9 @@ namespace HyperAIStudio::BotAimTests
 					return false;
 				}
 				Test.TestEqual(TEXT("A press aimed with the view says the game aims elsewhere: ") + Result.Detail, Result.Code, FString(TEXT("aim_off_target")));
+				// The cursor at rest held the window's cursor all through, whatever the real mouse did over the window.
+				Test.TestTrue(FString::Printf(TEXT("the window's cursor stayed at rest at (%.0f, %.0f), now (%.0f, %.0f)"), HeldCursor.X, HeldCursor.Y, Aim->Cursor.X, Aim->Cursor.Y),
+					Aim->Cursor.Equals(HeldCursor, 0.5));
 				Test.TestTrue(TEXT("and its slash still went to the decoy"), Aim->Slashes == Slashes + 1 && Between(Aim->LastSlash, Decoy->GetActorLocation() - Iso->GetActorLocation()) < 10.0);
 				Slashes = Aim->Slashes;
 				Phase = 9;
