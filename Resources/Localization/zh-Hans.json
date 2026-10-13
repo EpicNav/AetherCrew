@@ -15573,6 +15573,18 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "project-search-memory-scm.check-search-index.summary",
+   "source": "How much of the project the search index holds, its size in memory, whether it is paused for Play In Editor, what it stores and where.",
+   "text": "搜索索引收录了项目的多少内容、在内存中占多大、是否因“在编辑器中运行”而暂停，以及它存储了什么、存放在哪里。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "project-search-memory-scm.check-search-index.title",
+   "source": "Check the project search index",
+   "text": "检查项目搜索索引"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "project-search-memory-scm.correct-stale-memory.ph.correction.hint",
    "source": "The corrected fact, or remove it",
    "text": "更正后的事实，或填 remove it 表示删除"
@@ -15600,6 +15612,30 @@
    "key": "project-search-memory-scm.correct-stale-memory.title",
    "source": "Correct or remove a wrong project memory note",
    "text": "更正或删除错误的项目记忆条目"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "project-search-memory-scm.find-assets-by-description.ph.description.hint",
+   "source": "What the asset is or looks like, in a few words",
+   "text": "用几个词说明资产是什么或看起来像什么"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "project-search-memory-scm.find-assets-by-description.ph.description.label",
+   "source": "Description",
+   "text": "描述"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "project-search-memory-scm.find-assets-by-description.summary",
+   "source": "Search the project's assets by meaning, such as a stone wall material with moss, and list the best matches with how each matched.",
+   "text": "按含义搜索项目中的资产（例如“长着苔藓的石墙材质”），列出最匹配的结果以及各自的匹配方式。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "project-search-memory-scm.find-assets-by-description.title",
+   "source": "Find assets by describing them",
+   "text": "通过描述查找资产"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -15720,6 +15756,18 @@
    "key": "project-search-memory-scm.review-and-submit-changes.title",
    "source": "Review and submit what agents changed",
    "text": "审阅并提交智能体的改动"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "project-search-memory-scm.review-sandbox-before-approve.summary",
+   "source": "List the files Sandbox Mode holds and what source control will do with each on approve: check out, lock, mark for add, or hold back a file a teammate has.",
+   "text": "列出沙盒模式暂存的文件，以及批准时源代码管理会如何处理每个文件：签出、加锁、标记为添加，或保留队友正在使用的文件。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "project-search-memory-scm.review-sandbox-before-approve.title",
+   "source": "Check Sandbox Mode's held files before you approve",
+   "text": "批准前检查沙盒模式暂存的文件"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -18315,9 +18363,21 @@
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",
-   "key": "ApproveAllTooltip",
-   "source": "Write every held file to the project, saving what agents left unsaved first. A new sandbox holds what is saved next.",
-   "text": "将所有保留的文件写入项目，并先保存智能体未保存的内容。之后保存的内容由新的沙盒保留。"
+   "key": "ApproveAllCheckoutTooltip",
+   "source": "Write every held file to the project, saving what agents left unsaved first. Each file is checked out through your source control (or locked in Lore) before it is written, and new files are marked for add; a file a teammate holds stays held, naming them. A new sandbox holds what is saved next.",
+   "text": "把每个暂存的文件写入项目，并先保存智能体未保存的内容。每个文件在写入前都会通过你的源代码管理签出（或在 Lore 中加锁），新文件会被标记为添加；队友正在使用的文件会继续暂存，并注明是谁。之后保存的内容由新的沙盒暂存。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ApproveFile",
+   "source": "Approve",
+   "text": "批准"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ApproveFileTooltip",
+   "source": "Write this file to the project now: checked out (or locked in Lore) first, marked for add if new. The rest stay held.",
+   "text": "立即把此文件写入项目：先签出（或在 Lore 中加锁），新文件标记为添加。其余文件继续暂存。"
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",
@@ -18483,6 +18543,18 @@
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "LastApproveFile",
+   "source": "{0} {1}: {2}",
+   "text": "{0} {1}：{2}"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "LastApproveHeading",
+   "source": "Written at the last approve",
+   "text": "上次批准时写入的文件"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
    "key": "MinutesAgo",
    "source": "{0}m ago",
    "text": "{0} 分钟前"
@@ -18552,6 +18624,60 @@
    "key": "SandboxHeld",
    "source": "{0}: {1} {1}|plural(one=file,other=files) held for review",
    "text": "{0}：{1} 个文件待审阅"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ScmAdded",
+   "source": "marked for add",
+   "text": "已标记为添加"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ScmBlocked",
+   "source": "stays held: not editable",
+   "text": "继续暂存：无法编辑"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ScmBlockedBy",
+   "source": "stays held: {0} has it",
+   "text": "继续暂存：{0} 正在使用"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ScmCheckedOut",
+   "source": "checked out",
+   "text": "已签出"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ScmDeleted",
+   "source": "marked for delete",
+   "text": "已标记为删除"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ScmDirty",
+   "source": "marked dirty in Lore",
+   "text": "已在 Lore 中标记为已修改"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ScmFailed",
+   "source": "stays held: not written",
+   "text": "继续暂存：未写入"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ScmLocked",
+   "source": "locked in Lore",
+   "text": "已在 Lore 中加锁"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "ScmWritten",
+   "source": "written",
+   "text": "已写入"
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",
@@ -20726,6 +20852,48 @@
    "text": "类型"
   },
   {
+   "namespace": "SHyperAIStudioMentionPicker",
+   "key": "KindActor",
+   "source": "Actor",
+   "text": "Actor"
+  },
+  {
+   "namespace": "SHyperAIStudioMentionPicker",
+   "key": "KindAsset",
+   "source": "Asset",
+   "text": "资产"
+  },
+  {
+   "namespace": "SHyperAIStudioMentionPicker",
+   "key": "KindFile",
+   "source": "File",
+   "text": "文件"
+  },
+  {
+   "namespace": "SHyperAIStudioMentionPicker",
+   "key": "KindOperation",
+   "source": "Operation",
+   "text": "操作"
+  },
+  {
+   "namespace": "SHyperAIStudioMentionPicker",
+   "key": "KindSkill",
+   "source": "Skill",
+   "text": "技能"
+  },
+  {
+   "namespace": "SHyperAIStudioMentionPicker",
+   "key": "NothingFound",
+   "source": "Nothing matches. Keep typing, or press Esc.",
+   "text": "没有匹配项。继续输入，或按 Esc。"
+  },
+  {
+   "namespace": "SHyperAIStudioMentionPicker",
+   "key": "PickerFooter",
+   "source": "Up and Down move, Enter or Tab inserts, Esc closes. {0}",
+   "text": "上下方向键移动，Enter 或 Tab 插入，Esc 关闭。{0}"
+  },
+  {
    "namespace": "SHyperAIStudioNativeChatView",
    "key": "Answered",
    "source": "Answered: {0}",
@@ -20763,9 +20931,9 @@
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
-   "key": "ComposerHint",
-   "source": "Message {0}. Enter sends; Shift+Enter starts a new line.",
-   "text": "给 {0} 发消息。Enter 发送；Shift+Enter 换行。"
+   "key": "ComposerHintMentions",
+   "source": "Message {0}. Enter sends; Shift+Enter starts a new line; @ names an asset, actor, file, skill or operation.",
+   "text": "给 {0} 发消息。Enter 发送；Shift+Enter 换行；@ 可引用资产、Actor、文件、技能或操作。"
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
@@ -20796,6 +20964,12 @@
    "key": "KindTool",
    "source": "Tool",
    "text": "工具"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "MentionChipTooltip",
+   "source": "{0}: {1}\nThe agent gets this exact reference with the message.",
+   "text": "{0}：{1}\n智能体会随消息收到这个精确引用。"
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
@@ -20850,6 +21024,18 @@
    "key": "RemoveAttachment",
    "source": "Remove",
    "text": "移除"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "RemoveMention",
+   "source": "Remove this reference and its @ from the message.",
+   "text": "从消息中移除此引用及其 @。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "RemoveMentionGlyph",
+   "source": "x",
+   "text": "x"
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
@@ -21846,6 +22032,12 @@
    "key": "McpUnreachable",
    "source": "MCP: no tool list",
    "text": "MCP：无工具列表"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "MentionsDropped",
+   "source": "Added {0} {0}|plural(one=reference,other=references) to the message.",
+   "text": "已向消息添加 {0} 个引用。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",

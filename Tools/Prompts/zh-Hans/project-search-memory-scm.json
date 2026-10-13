@@ -40,5 +40,13 @@
  "project-search-memory-scm.inventory-placed-class.ph.expected_count.label": "预期数量",
  "project-search-memory-scm.inventory-placed-class.ph.min_spacing.label": "最小间距（厘米）",
  "project-search-memory-scm.check-lore-setup.title": "检查本项目的 Lore 版本控制",
- "project-search-memory-scm.check-lore-setup.summary": "lore 命令是否已安装、项目的 Lore 仓库在本机还是在服务器上、当前登录身份，以及下一步该做什么。"
+ "project-search-memory-scm.check-lore-setup.summary": "lore 命令是否已安装、项目的 Lore 仓库在本机还是在服务器上、当前登录身份，以及下一步该做什么。",
+ "project-search-memory-scm.find-assets-by-description.title": "通过描述查找资产",
+ "project-search-memory-scm.find-assets-by-description.summary": "按含义搜索项目中的资产（例如“长着苔藓的石墙材质”），列出最匹配的结果以及各自的匹配方式。",
+ "project-search-memory-scm.find-assets-by-description.ph.description.label": "描述",
+ "project-search-memory-scm.find-assets-by-description.ph.description.hint": "用几个词说明资产是什么或看起来像什么",
+ "project-search-memory-scm.check-search-index.title": "检查项目搜索索引",
+ "project-search-memory-scm.check-search-index.summary": "搜索索引收录了项目的多少内容、在内存中占多大、是否因“在编辑器中运行”而暂停，以及它存储了什么、存放在哪里。",
+ "project-search-memory-scm.review-sandbox-before-approve.title": "批准前检查沙盒模式暂存的文件",
+ "project-search-memory-scm.review-sandbox-before-approve.summary": "列出沙盒模式暂存的文件，以及批准时源代码管理会如何处理每个文件：签出、加锁、标记为添加，或保留队友正在使用的文件。"
 }

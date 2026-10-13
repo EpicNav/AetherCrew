@@ -677,30 +677,122 @@ TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildSandboxCard(const Hy
 			.ColorAndOpacity(Status.State == Sandbox::EState::Foreign ? FSlateColor(FStyleColors::AccentYellow) : FSlateColor::UseSubduedForeground())
 		];
 
+	// What source control did at the last approve, per file: a held file shows why it stayed (who holds it).
+	const TArray<Sandbox::FFileOutcome>& Outcomes = Sandbox::GetLastOutcomes();
+	const auto OutcomeText = [](const Sandbox::FFileOutcome& Outcome)
+	{
+		if (Outcome.Outcome == TEXT("checked_out")) return LOCTEXT("ScmCheckedOut", "checked out");
+		if (Outcome.Outcome == TEXT("marked_for_add")) return LOCTEXT("ScmAdded", "marked for add");
+		if (Outcome.Outcome == TEXT("marked_for_delete")) return LOCTEXT("ScmDeleted", "marked for delete");
+		if (Outcome.Outcome == TEXT("locked")) return LOCTEXT("ScmLocked", "locked in Lore");
+		if (Outcome.Outcome == TEXT("marked_dirty")) return LOCTEXT("ScmDirty", "marked dirty in Lore");
+		if (Outcome.Outcome == TEXT("written")) return LOCTEXT("ScmWritten", "written");
+		if (Outcome.Outcome == TEXT("blocked"))
+		{
+			return Outcome.Who.IsEmpty() ? LOCTEXT("ScmBlocked", "stays held: not editable")
+				: FText::Format(LOCTEXT("ScmBlockedBy", "stays held: {0} has it"), FText::FromString(Outcome.Who));
+		}
+		return LOCTEXT("ScmFailed", "stays held: not written");
+	};
 	for (int32 Index = 0; Index < Status.Changes.Num() && Index < ShownFiles; ++Index)
 	{
 		const Sandbox::FChange& Change = Status.Changes[Index];
 		const FString ObjectPath = ObjectPathOfFile(Change.Path);
+		const Sandbox::FFileOutcome* Outcome = Outcomes.FindByPredicate([&Change](const Sandbox::FFileOutcome& Each) { return Each.Path == Change.Path; });
+		const FString ChangePath = Change.Path;
 		Card->AddSlot()
 		.AutoHeight()
 		[
-			SNew(SButton)
-			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-			.HAlign(HAlign_Left)
-			.ContentPadding(FMargin(0.0f, 1.0f))
-			.IsEnabled(!ObjectPath.IsEmpty())
-			.ToolTipText(FText::FromString(Change.Path))
-			.OnClicked_Lambda([ObjectPath]()
-			{
-				ShowTargetInContentBrowser(ObjectPath);
-				return FReply::Handled();
-			})
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			[
+				SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+				.HAlign(HAlign_Left)
+				.ContentPadding(FMargin(0.0f, 1.0f))
+				.IsEnabled(!ObjectPath.IsEmpty())
+				.ToolTipText(FText::FromString(Change.Path))
+				.OnClicked_Lambda([ObjectPath]()
+				{
+					ShowTargetInContentBrowser(ObjectPath);
+					return FReply::Handled();
+				})
+				[
+					SNew(STextBlock)
+					.Text(FText::Format(LOCTEXT("SandboxFile", "{0} {1}"), FText::FromString(Change.Kind), FText::FromString(FPaths::GetCleanFilename(Change.Path))))
+					.Font(FAppStyle::GetFontStyle("SmallFont"))
+					.ColorAndOpacity(Change.Kind == TEXT("removed") ? FStyleColors::AccentRed : FStyleColors::AccentBlue)
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(4.0f, 0.0f, 0.0f, 0.0f)
 			[
 				SNew(STextBlock)
-				.Text(FText::Format(LOCTEXT("SandboxFile", "{0} {1}"), FText::FromString(Change.Kind), FText::FromString(FPaths::GetCleanFilename(Change.Path))))
+				.Visibility(Outcome ? EVisibility::Visible : EVisibility::Collapsed)
+				.Text(Outcome ? OutcomeText(*Outcome) : FText::GetEmpty())
+				.ToolTipText(Outcome ? FText::FromString(Outcome->Detail) : FText::GetEmpty())
 				.Font(FAppStyle::GetFontStyle("SmallFont"))
-				.ColorAndOpacity(Change.Kind == TEXT("removed") ? FStyleColors::AccentRed : FStyleColors::AccentBlue)
+				.ColorAndOpacity(FStyleColors::AccentOrange)
 			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Visibility(Status.State == Sandbox::EState::Active ? EVisibility::Visible : EVisibility::Collapsed)
+				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+				.ContentPadding(FMargin(4.0f, 0.0f))
+				.ToolTipText(LOCTEXT("ApproveFileTooltip", "Write this file to the project now: checked out (or locked in Lore) first, marked for add if new. The rest stay held."))
+				.OnClicked_Lambda([ChangePath]()
+				{
+					FString Error;
+					if (!HyperAIStudio::Sandbox::ApproveFiles({ChangePath}, Error))
+					{
+						FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Error));
+					}
+					return FReply::Handled();
+				})
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("ApproveFile", "Approve"))
+					.Font(FAppStyle::GetFontStyle("SmallFont"))
+				]
+			]
+		];
+	}
+	// Files the last approve wrote: how source control took each one.
+	int32 WrittenShown = 0;
+	for (const Sandbox::FFileOutcome& Outcome : Outcomes)
+	{
+		if (!Outcome.bWritten || WrittenShown >= ShownFiles)
+		{
+			continue;
+		}
+		if (WrittenShown++ == 0)
+		{
+			Card->AddSlot()
+			.AutoHeight()
+			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("LastApproveHeading", "Written at the last approve"))
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			];
+		}
+		Card->AddSlot()
+		.AutoHeight()
+		[
+			SNew(STextBlock)
+			.Text(FText::Format(LOCTEXT("LastApproveFile", "{0} {1}: {2}"), FText::FromString(Outcome.Kind),
+				FText::FromString(FPaths::GetCleanFilename(Outcome.Path)), OutcomeText(Outcome)))
+			.ToolTipText(FText::FromString(Outcome.Detail.IsEmpty() ? Outcome.Path : Outcome.Detail))
+			.Font(FAppStyle::GetFontStyle("SmallFont"))
+			.ColorAndOpacity(FStyleColors::AccentGreen)
 		];
 	}
 	if (Status.Changes.Num() > ShownFiles)
@@ -752,7 +844,7 @@ TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildSandboxCard(const Hy
 			[
 				SNew(SButton)
 				.Text(LOCTEXT("ApproveAll", "Approve All"))
-				.ToolTipText(LOCTEXT("ApproveAllTooltip", "Write every held file to the project, saving what agents left unsaved first. A new sandbox holds what is saved next."))
+				.ToolTipText(LOCTEXT("ApproveAllCheckoutTooltip", "Write every held file to the project, saving what agents left unsaved first. Each file is checked out through your source control (or locked in Lore) before it is written, and new files are marked for add; a file a teammate holds stays held, naming them. A new sandbox holds what is saved next."))
 				.OnClicked_Lambda([Report]()
 				{
 					// Closing the sandbox reloads unsaved assets from disk, so unsaved work is offered for saving first, as a map load does.
