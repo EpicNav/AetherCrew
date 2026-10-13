@@ -608,9 +608,10 @@ FHyperAIStudioGameplayAIFacade::GetVariantDescriptors()
 		{TEXT("state_tree"), {TEXT("StateTree")},
 			{TEXT("StateTreeModule"), TEXT("StateTreeEditorModule")}, false, false, false, {},
 			{TEXT("typed_adapter_not_implemented")}},
-		{TEXT("eqs"), {TEXT("EnvironmentQueryEditor")},
-			{TEXT("AIModule"), TEXT("EnvironmentQueryEditor")}, false, false, false, {},
-			{TEXT("typed_adapter_not_implemented")}},
+		// Environment Queries have their own cohort: hyper_eqs_inspect, hyper_eqs_apply_plan and hyper_eqs_run.
+		{TEXT("eqs"), {},
+			{TEXT("AIModule")}, false, false, false, {},
+			{TEXT("served_by_hyper_eqs_tools")}},
 		{TEXT("smart_object"), {TEXT("SmartObjects"), TEXT("GameplayAbilities")},
 			{TEXT("SmartObjectsModule"), TEXT("SmartObjectsEditorModule"), TEXT("GameplayAbilities")},
 			false, false, false, {}, {TEXT("typed_adapter_not_implemented")}},

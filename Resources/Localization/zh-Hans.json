@@ -1370,6 +1370,18 @@
    "text": "HyperAI：编辑蓝图结构"
   },
   {
+   "namespace": "HyperAIStudioChooser",
+   "key": "ChooserPlan",
+   "source": "HyperAI: Chooser Plan",
+   "text": "HyperAI：选择器计划"
+  },
+  {
+   "namespace": "HyperAIStudioDataRegistry",
+   "key": "DataRegistryPlan",
+   "source": "HyperAI: Data Registry Plan",
+   "text": "HyperAI：数据注册表计划"
+  },
+  {
    "namespace": "HyperAIStudioDecibel",
    "key": "SoundPlan",
    "source": "HyperAI: Edit Decibel Session",
@@ -1500,6 +1512,12 @@
    "key": "WebLinksHint",
    "source": "Web links open in your browser",
    "text": "网页链接会在你的浏览器中打开"
+  },
+  {
+   "namespace": "HyperAIStudioEQS",
+   "key": "EQSPlan",
+   "source": "HyperAI: EQS Plan",
+   "text": "HyperAI：EQS 计划"
   },
   {
    "namespace": "HyperAIStudioEditorRestart",
@@ -2384,6 +2402,12 @@
    "text": "HyperAI：UV 布局"
   },
   {
+   "namespace": "HyperAIStudioMotionWarping",
+   "key": "MotionWarpingPlan",
+   "source": "HyperAI: Motion Warping Plan",
+   "text": "HyperAI：运动扭曲计划"
+  },
+  {
    "namespace": "HyperAIStudioNiagaraExternalEditGate",
    "key": "ApplyOpsTransaction",
    "source": "HyperAI Niagara Edit",
@@ -2832,6 +2856,126 @@
    "key": "ai-behavior.debug-idle-enemy.title",
    "source": "Find out why an enemy stands still in play",
    "text": "找出敌人在游戏中原地不动的原因"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-audit-query.ph.querier.hint",
+   "source": "The label of an actor to run the query from; empty uses the selected actor.",
+   "text": "用于运行查询的 Actor 标签；留空则使用所选 Actor。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-audit-query.ph.querier.label",
+   "source": "Querier",
+   "text": "查询者"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-audit-query.summary",
+   "source": "Read the selected Environment Query, flag tests that cannot score its items, navmesh needs and fallbacks that never run, and run it once. Changes nothing.",
+   "text": "读取所选环境查询，标出无法为其项目评分的测试、导航网格需求和永远不会运行的后备选项，并运行一次。不做任何更改。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-audit-query.title",
+   "source": "Check an EQS query's options and tests",
+   "text": "检查 EQS 查询的选项和测试"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-find-cover.ph.key.hint",
+   "source": "A Vector key of the tree's Blackboard that gets the spot.",
+   "text": "行为树黑板中接收该位置的 Vector 键。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-find-cover.ph.key.label",
+   "source": "Blackboard key",
+   "text": "黑板键"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-find-cover.ph.querier.hint",
+   "source": "The label of an actor in the level to run the query from; empty uses the selected actor.",
+   "text": "关卡中用于运行查询的 Actor 标签；留空则使用所选 Actor。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-find-cover.ph.querier.label",
+   "source": "Test querier",
+   "text": "测试查询者"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-find-cover.ph.radius.hint",
+   "source": "How far from the AI to look for cover.",
+   "text": "在 AI 周围多远范围内寻找掩体。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-find-cover.ph.radius.label",
+   "source": "Search radius (cm)",
+   "text": "搜索半径（厘米）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-find-cover.ph.target.hint",
+   "source": "A context class that returns the player or the threat.",
+   "text": "返回玩家或威胁的上下文类。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-find-cover.ph.target.label",
+   "source": "Hide from",
+   "text": "躲避对象"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-find-cover.summary",
+   "source": "Build an Environment Query for spots near the AI hidden from a target, wire it into the selected Behavior Tree, and run it to show the best spots.",
+   "text": "构建一个环境查询，寻找 AI 附近、避开目标视线的位置，接入所选行为树，并运行它显示最佳位置。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-find-cover.title",
+   "source": "Make an EQS query that finds cover from the player",
+   "text": "制作一个寻找躲避玩家掩体的 EQS 查询"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-nearest-target.ph.class.hint",
+   "source": "The class of the actors to choose from.",
+   "text": "可供选择的 Actor 的类。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-nearest-target.ph.class.label",
+   "source": "Target class",
+   "text": "目标类"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-nearest-target.ph.range.hint",
+   "source": "Only actors this close count.",
+   "text": "只计算这么近的 Actor。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-nearest-target.ph.range.label",
+   "source": "Range (cm)",
+   "text": "范围（厘米）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-nearest-target.summary",
+   "source": "Build a query that returns the nearest actor of a class within range of the AI, run it from an actor in the level, and report the ranking.",
+   "text": "构建一个查询，返回 AI 范围内最近的某类 Actor，从关卡中的 Actor 运行它，并报告排名。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-nearest-target.title",
+   "source": "Pick the nearest target with an EQS query",
+   "text": "用 EQS 查询选出最近的目标"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -3525,6 +3669,30 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "animation.audit-chooser.summary",
+   "source": "Evaluate the selected chooser table across its ranges and report rows that never win, gaps that fall to the fallback, and unbound columns.",
+   "text": "读取所选选择器表，在其列范围内求值，报告永远不会胜出的行、落到后备结果的空档以及未绑定的列。不做任何更改。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.audit-chooser.title",
+   "source": "Check which rows of a chooser table can ever win",
+   "text": "检查选择器表中哪些行可能胜出"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.audit-motion-warping.summary",
+   "source": "List the selected montage's warp windows, their targets and settings, root motion and overlaps, and the warp target names game code must set. Changes nothing.",
+   "text": "列出所选蒙太奇的扭曲窗口、目标和设置、根运动和重叠，以及游戏代码必须设置的扭曲目标名称。不做任何更改。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.audit-motion-warping.title",
+   "source": "Check a montage's Motion Warping windows",
+   "text": "检查蒙太奇的运动扭曲窗口"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "animation.fix-retarget-chains-ik.ph.pelvis_bone.label",
    "source": "Target pelvis bone",
    "text": "目标骨盆骨骼"
@@ -3702,6 +3870,54 @@
    "key": "animation.locomotion-blend-space-1d.title",
    "source": "Make a 1D idle-walk-run blend space at true speeds",
    "text": "按真实速度制作一维待机-行走-奔跑混合空间"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.locomotion-chooser.ph.context.hint",
+   "source": "The class whose properties the columns read (an Anim Instance or a component).",
+   "text": "列所读取属性的类（动画实例或组件）。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.locomotion-chooser.ph.context.label",
+   "source": "Context class",
+   "text": "上下文类"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.locomotion-chooser.ph.speed.hint",
+   "source": "The float property speed columns bind to.",
+   "text": "速度列绑定的浮点属性。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.locomotion-chooser.ph.speed.label",
+   "source": "Speed property",
+   "text": "速度属性"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.locomotion-chooser.ph.walk.hint",
+   "source": "Speeds above this pick the run.",
+   "text": "超过此速度时选择奔跑。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.locomotion-chooser.ph.walk.label",
+   "source": "Walk up to (cm/s)",
+   "text": "行走上限（厘米/秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.locomotion-chooser.summary",
+   "source": "Build a chooser table that picks idle, walk or run from speed and stance, then evaluate it at a few speeds to prove each row wins where it should.",
+   "text": "构建一个按速度和姿态挑选待机、行走或奔跑的选择器表，然后在几个速度下求值，证明每一行都在应当胜出时胜出。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.locomotion-chooser.title",
+   "source": "Pick locomotion animations with a chooser table",
+   "text": "用选择器表挑选移动动画"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -4164,6 +4380,66 @@
    "key": "animation.tune-motion-matching.title",
    "source": "Tune a motion matching database for steadier picks",
    "text": "调优运动匹配数据库，让选帧更稳定"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.vault-motion-warping.ph.character.hint",
+   "source": "The character that plays the montage.",
+   "text": "播放该蒙太奇的角色。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.vault-motion-warping.ph.character.label",
+   "source": "Character Blueprint",
+   "text": "角色蓝图"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.vault-motion-warping.ph.end.hint",
+   "source": "When the body is over the top.",
+   "text": "身体越过顶部的时刻。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.vault-motion-warping.ph.end.label",
+   "source": "Window end (s)",
+   "text": "窗口结束（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.vault-motion-warping.ph.start.hint",
+   "source": "When the hands reach for the ledge.",
+   "text": "双手伸向边缘的时刻。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.vault-motion-warping.ph.start.label",
+   "source": "Window start (s)",
+   "text": "窗口开始（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.vault-motion-warping.ph.target.hint",
+   "source": "The name game code sets the target under.",
+   "text": "游戏代码设置目标时使用的名称。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.vault-motion-warping.ph.target.label",
+   "source": "Warp target name",
+   "text": "扭曲目标名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.vault-motion-warping.summary",
+   "source": "Add a Motion Warping window to the selected vault montage, give the character the Motion Warping component, and say how to set the warp target in Blueprint.",
+   "text": "为所选翻越蒙太奇添加运动扭曲窗口，为角色添加运动扭曲组件，并说明如何在蓝图中设置扭曲目标。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "animation.vault-motion-warping.title",
+   "source": "Warp a vault montage onto any wall height",
+   "text": "让翻越蒙太奇通过运动扭曲适配任意墙高"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -6429,6 +6705,18 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "data-config-l10n.audit-data-registry.summary",
+   "source": "Read the selected Data Registry's sources, the tables they resolve to, hidden ids, and whether the game loads it. Changes nothing.",
+   "text": "读取所选数据注册表的数据源、它们解析到的表、被其他数据源遮蔽的条目，以及游戏是否会加载它。不做任何更改。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "data-config-l10n.audit-data-registry.title",
+   "source": "Check a Data Registry's sources and ids",
+   "text": "检查数据注册表的数据源和 ID"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "data-config-l10n.audit-data-table.ph.rules.label",
    "source": "Rules to check",
    "text": "要检查的规则"
@@ -6462,6 +6750,42 @@
    "key": "data-config-l10n.audit-gameplay-tags.title",
    "source": "Audit gameplay tags for unused and misspelled entries",
    "text": "审查未使用和拼写有误的 Gameplay 标签"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "data-config-l10n.data-registry-over-tables.ph.folder.hint",
+   "source": "A folder whose matching tables join too (a meta source); empty for none.",
+   "text": "其中匹配的表也会加入的文件夹（元数据源）；留空表示没有。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "data-config-l10n.data-registry-over-tables.ph.folder.label",
+   "source": "Folder of more tables",
+   "text": "更多表所在文件夹"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "data-config-l10n.data-registry-over-tables.ph.type.hint",
+   "source": "The name every id starts with (Items:Sword).",
+   "text": "每个 ID 的开头名称（Items:Sword）。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "data-config-l10n.data-registry-over-tables.ph.type.label",
+   "source": "Registry type",
+   "text": "注册表类型"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "data-config-l10n.data-registry-over-tables.summary",
+   "source": "Build a Data Registry whose items come from the selected data tables (and a folder of more), check every id resolves, and say how to register it.",
+   "text": "构建一个数据注册表，其条目来自所选数据表（以及一个文件夹中的更多表），检查每个 ID 都能解析，并说明如何注册它。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "data-config-l10n.data-registry-over-tables.title",
+   "source": "Make a Data Registry over the selected data tables",
+   "text": "基于所选数据表制作数据注册表"
   },
   {
    "namespace": "HyperAIStudioPrompts",

@@ -1034,6 +1034,189 @@
     }
    ],
    "prompt": "Find out what rigging {{selected_asset}} and giving it the animations {{actions}} would cost, without spending anything: dry runs only. If the mesh_generation tools are missing, say so and stop.\n1. hyper_mesh_status to see this session's jobs; if one made {{selected_asset}}, use its operation id as SourceOperationId, else MeshPath {{selected_asset}} (it is sent as a GLB).\n2. For each provider with a key (Providers lists them), hyper_mesh_rig with bDryRun true, RetargetTo {{mannequin}}; read Tasks, EstimatedCost, Destination and RetargetPlan.\n3. hyper_mesh_actions for each of {{actions}} with that provider; note the ids. Then hyper_mesh_animate with bDryRun true, Provider that provider, RigTaskId `dry-run`, RigMesh {{mannequin}} and those Actions, for the clips' price.\n4. Never send bDryRun false.\n5. Report a table with one row per provider: rig price, clips price, total, the actions found (or missing), and what Meshy and Tripo need from the model (Meshy: a textured humanoid facing +Z under 300,000 faces). Remind me that running it needs my approval."
+  },
+  {
+   "id": "animation.vault-motion-warping",
+   "title": "Warp a vault montage onto any wall height",
+   "summary": "Add a Motion Warping window to the selected vault montage, give the character the Motion Warping component, and say how to set the warp target in Blueprint.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-motion-warping"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_motion_warping_inspect",
+    "hyper_motion_warping_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "window.add",
+    "component.add"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "motion warping",
+    "vault",
+    "montage",
+    "root motion",
+    "traversal"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimMontage"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "character",
+     "label": "Character Blueprint",
+     "default": "/Game/Characters/BP_Hero",
+     "hint": "The character that plays the montage."
+    },
+    {
+     "name": "target",
+     "label": "Warp target name",
+     "default": "VaultTarget",
+     "hint": "The name game code sets the target under."
+    },
+    {
+     "name": "start",
+     "label": "Window start (s)",
+     "default": "0.15",
+     "hint": "When the hands reach for the ledge."
+    },
+    {
+     "name": "end",
+     "label": "Window end (s)",
+     "default": "0.6",
+     "hint": "When the body is over the top."
+    }
+   ],
+   "prompt": "Make {{selected_asset}} land on any wall with Motion Warping. Follow the unreal-motion-warping skill; if hyper_motion_warping_apply_plan is not available, say the Motion Warping plugin is off and stop.\n1. hyper_motion_warping_inspect with Asset {{selected_asset}}: its length, windows and whether root motion is on. If root motion is off, say so and stop (warping bends root motion).\n2. hyper_motion_warping_apply_plan with bDryRun true, Asset {{selected_asset}}, Operations: window.add with WarpTargetName {{target}}, StartSeconds {{start}}, EndSeconds {{end}}, Modifier skew_warp, Params `bIgnoreZAxis=false; RotationType=Facing`. Read Windows and Warnings, then run it with bDryRun false and a fresh OperationId (hyper_operation_wait with bWaitThroughApproval true if it waits).\n3. hyper_motion_warping_inspect with Asset {{character}}; if it has no Motion Warping component, hyper_motion_warping_apply_plan with Asset {{character}} and component.add.\nReport the window and the component, then the Blueprint to add before Play Montage: a trace finds the ledge, then AddOrUpdateWarpTargetFromLocationAndRotation on the Motion Warping component with WarpTargetName {{target}}. Leave everything unsaved."
+  },
+  {
+   "id": "animation.audit-motion-warping",
+   "title": "Check a montage's Motion Warping windows",
+   "summary": "List the selected montage's warp windows, their targets and settings, root motion and overlaps, and the warp target names game code must set. Changes nothing.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-motion-warping"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_motion_warping_inspect"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "motion warping",
+    "audit",
+    "montage",
+    "warp target"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimMontage"
+    ],
+    "min": 1
+   },
+   "prompt": "Review the Motion Warping on {{selected_asset}}. Change nothing.\n1. If hyper_motion_warping_inspect is not available, the Motion Warping plugin is off: say so and stop. hyper_motion_warping_inspect with Asset {{selected_asset}}.\nReport a table with one row per window: start and end, warp target, modifier and its settings, and PASS or the problem (outside the montage, overlapping another window on the same target, root motion off, an experimental modifier). End with the list of WarpTargets game code must set with AddOrUpdateWarpTarget before the montage reaches each window."
+  },
+  {
+   "id": "animation.locomotion-chooser",
+   "title": "Pick locomotion animations with a chooser table",
+   "summary": "Build a chooser table that picks idle, walk or run from speed and stance, then evaluate it at a few speeds to prove each row wins where it should.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-chooser"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_chooser_inspect",
+    "hyper_chooser_apply_plan",
+    "hyper_chooser_evaluate",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "create",
+    "column.add",
+    "row.add",
+    "fallback.set"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "chooser",
+    "locomotion",
+    "animation selection",
+    "chooser table"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimSequence"
+    ],
+    "min": 2
+   },
+   "placeholders": [
+    {
+     "name": "context",
+     "label": "Context class",
+     "default": "/Script/Engine.CharacterMovementComponent",
+     "hint": "The class whose properties the columns read (an Anim Instance or a component)."
+    },
+    {
+     "name": "speed",
+     "label": "Speed property",
+     "default": "MaxWalkSpeed",
+     "hint": "The float property speed columns bind to."
+    },
+    {
+     "name": "walk",
+     "label": "Walk up to (cm/s)",
+     "default": "300",
+     "hint": "Speeds above this pick the run."
+    }
+   ],
+   "prompt": "Make a chooser table that picks among {{selected_assets}} by speed. Follow the unreal-chooser skill; if hyper_chooser_apply_plan is not available, say the Chooser plugin is off and stop.\n1. hyper_chooser_inspect with no Asset for the column kinds and their settings.\n2. hyper_chooser_apply_plan with bDryRun true, Asset `{{content_folder}}/Animation/CHT_Locomotion` and Operations: create with result type object (AnimationAsset) and a context parameter of {{context}}; column.add float_range bound to {{speed}}; one row.add per selected animation, idle with cell `..5`, walk `5..{{walk}}`, run `{{walk}}..`; fallback.set the idle. Read the reply, then run it with bDryRun false and a fresh OperationId (hyper_operation_wait with bWaitThroughApproval true if it waits).\n3. hyper_chooser_evaluate with {{speed}} at 0, half of {{walk}} and twice {{walk}}.\nReport the table (columns, rows and cells) and a PASS/FAIL table of the three evaluations: the row that won and the one expected. Leave it unsaved."
+  },
+  {
+   "id": "animation.audit-chooser",
+   "title": "Check which rows of a chooser table can ever win",
+   "summary": "Evaluate the selected chooser table across its ranges and report rows that never win, gaps that fall to the fallback, and unbound columns.",
+   "packs": [
+    "animation_rigging"
+   ],
+   "skills": [
+    "unreal-chooser"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_chooser_inspect",
+    "hyper_chooser_evaluate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "chooser",
+    "audit",
+    "rows",
+    "fallback"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "ChooserTable"
+    ],
+    "min": 1
+   },
+   "prompt": "Review the chooser table {{selected_asset}}. Change nothing.\n1. If hyper_chooser_inspect is not available, the Chooser plugin is off: say so and stop. hyper_chooser_inspect with Asset {{selected_asset}}: parameters, columns with bindings, rows with cells, fallback.\n2. For each row, hyper_chooser_evaluate with values inside its cells; also values between rows' ranges.\nReport a table with one row per chooser row: the values tried, the row that won, PASS or the problem (another row wins first, a disabled row, an unbound column). List the values that fall to the fallback."
   }
  ]
 }

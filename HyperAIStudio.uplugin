@@ -682,6 +682,58 @@
 				"CoreUObject",
 				"Engine"
 			]
+		},
+		{
+			"Name": "HyperAIStudioEQS",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioMotionWarping",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioDataRegistry",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioChooser",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
 		}
 	],
 	"Plugins": [
@@ -871,6 +923,18 @@
 		},
 		{
 			"Name": "PlanarCut",
+			"Enabled": false
+		},
+		{
+			"Name": "MotionWarping",
+			"Enabled": false
+		},
+		{
+			"Name": "DataRegistry",
+			"Enabled": false
+		},
+		{
+			"Name": "Chooser",
 			"Enabled": false
 		}
 	]

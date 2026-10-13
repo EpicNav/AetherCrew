@@ -652,6 +652,161 @@
    "skills": [
     "unreal-ai"
    ]
+  },
+  {
+   "id": "ai-behavior.eqs-find-cover",
+   "title": "Make an EQS query that finds cover from the player",
+   "summary": "Build an Environment Query for spots near the AI hidden from a target, wire it into the selected Behavior Tree, and run it to show the best spots.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "skills": [
+    "unreal-eqs"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_eqs_inspect",
+    "hyper_eqs_apply_plan",
+    "hyper_eqs_run",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "create",
+    "option.add",
+    "test.add",
+    "bt.add_composite",
+    "bt.run_eqs_task"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "eqs",
+    "environment query",
+    "cover",
+    "behavior tree",
+    "ai"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "BehaviorTree"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "target",
+     "label": "Hide from",
+     "default": "/Game/AI/EQC_Player.EQC_Player_C",
+     "hint": "A context class that returns the player or the threat."
+    },
+    {
+     "name": "radius",
+     "label": "Search radius (cm)",
+     "default": "1200",
+     "hint": "How far from the AI to look for cover."
+    },
+    {
+     "name": "key",
+     "label": "Blackboard key",
+     "default": "CoverLocation",
+     "hint": "A Vector key of the tree's Blackboard that gets the spot."
+    },
+    {
+     "name": "querier",
+     "label": "Test querier",
+     "default": "",
+     "hint": "The label of an actor in the level to run the query from; empty uses the selected actor."
+    }
+   ],
+   "prompt": "Give the AI using {{selected_asset}} a cover query. Follow the unreal-eqs skill; if hyper_eqs_apply_plan is not available, the EQS tools are off: say so and stop.\n1. hyper_eqs_inspect with BehaviorTree {{selected_asset}}: note its composites and that {{key}} is a Vector key. hyper_eqs_inspect with no Asset if you need a kind's settings.\n2. hyper_eqs_apply_plan with bDryRun true, Asset `{{content_folder}}/AI/EQS_FindCover` and Operations: create; option.add donut `InnerRadius=300; OuterRadius={{radius}}; NumberOfRings=4`; test.add trace `Purpose=Filter; Bool=true; Context={{target}}`; test.add distance `Purpose=Score; Scoring=InverseLinear; Context=querier`; bt.add_composite sequence under root `NodeName=Take Cover` with BehaviorTree {{selected_asset}}; bt.run_eqs_task under Take Cover with BlackboardKey {{key}}. Read Options and Warnings; if the level has no navmesh, add `ProjectionData.TraceMode=GeometryByChannel` to the donut.\n3. The same plan with bDryRun false and a fresh OperationId; if awaiting_user_approval, hyper_operation_wait with bWaitThroughApproval true.\n4. hyper_eqs_run with Asset `{{content_folder}}/AI/EQS_FindCover`, Querier `{{querier}}`, RunMode all and MaxItems 5.\nReport the query's options and tests, the tree node added, and a table of the five best spots with their scores. Say what to add next (a Move To {{key}} after the task). Leave everything unsaved."
+  },
+  {
+   "id": "ai-behavior.eqs-nearest-target",
+   "title": "Pick the nearest target with an EQS query",
+   "summary": "Build a query that returns the nearest actor of a class within range of the AI, run it from an actor in the level, and report the ranking.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "skills": [
+    "unreal-eqs"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_eqs_apply_plan",
+    "hyper_eqs_run",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "create",
+    "option.add",
+    "test.add"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "eqs",
+    "environment query",
+    "target",
+    "nearest",
+    "ai"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "class",
+     "label": "Target class",
+     "default": "/Script/Engine.Pawn",
+     "hint": "The class of the actors to choose from."
+    },
+    {
+     "name": "range",
+     "label": "Range (cm)",
+     "default": "2500",
+     "hint": "Only actors this close count."
+    }
+   ],
+   "prompt": "Make an Environment Query that picks the nearest {{class}} within {{range}} cm. Follow the unreal-eqs skill; if hyper_eqs_apply_plan is not available, say the EQS tools are off and stop.\n1. hyper_eqs_apply_plan with Asset `{{content_folder}}/AI/EQS_NearestTarget` and Operations: create; option.add actors_of_class `SearchedActorClass={{class}}; GenerateOnlyActorsInRadius=true; SearchRadius=param:Range`; test.add distance `Purpose=Score; Scoring=InverseLinear; Context=querier`. Use a fresh OperationId; if awaiting_user_approval, hyper_operation_wait with bWaitThroughApproval true.\n2. hyper_eqs_run with Querier {{selected_actor}}, Params `Range={{range}}`, RunMode all and MaxItems 10.\nReport the ranking (actor, distance score) and the winner. If nothing passed, read Warnings and say why. Leave it unsaved."
+  },
+  {
+   "id": "ai-behavior.eqs-audit-query",
+   "title": "Check an EQS query's options and tests",
+   "summary": "Read the selected Environment Query, flag tests that cannot score its items, navmesh needs and fallbacks that never run, and run it once. Changes nothing.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "skills": [
+    "unreal-eqs"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_eqs_inspect",
+    "hyper_eqs_run"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "eqs",
+    "environment query",
+    "audit",
+    "review"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "EnvQuery"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "querier",
+     "label": "Querier",
+     "default": "",
+     "hint": "The label of an actor to run the query from; empty uses the selected actor."
+    }
+   ],
+   "prompt": "Review the Environment Query {{selected_asset}}. Change nothing.\n1. If hyper_eqs_inspect is not available, the EQS tools are off: say so and stop. hyper_eqs_inspect with Asset {{selected_asset}}: per option its generator, items and settings, per test its purpose, description and settings, the QueryParams and Warnings.\n2. hyper_eqs_run with Querier `{{querier}}`, RunMode all and MaxItems 10, giving a sensible value for each QueryParam.\nReport a table with one row per option and test: what it does, PASS or a problem (a test that cannot test the items, a filter that drops everything, a navmesh the level lacks, an option with no tests that hides the options after it), and the fix. End with the run: which option won, how many items passed, the best three."
   }
  ]
 }
