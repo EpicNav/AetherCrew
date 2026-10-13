@@ -1870,7 +1870,8 @@ const TArray<FHyperAIStudioMaterialManifestEntry>& FHyperAIStudioMaterialsContra
 	static const TArray<FHyperAIStudioMaterialManifestEntry> Manifest = {
 		{TEXT("hyper_material_inspect"), GetQualifiedToolsetName()},
 		{TEXT("hyper_material_apply_plan"), GetQualifiedToolsetName()},
-		{TEXT("hyper_material_validate"), GetQualifiedToolsetName()}};
+		{TEXT("hyper_material_validate"), GetQualifiedToolsetName()},
+		{TEXT("hyper_material_recipe"), GetQualifiedToolsetName()}};
 	return Manifest;
 }
 
@@ -2048,6 +2049,20 @@ FString FHyperAIStudioMaterialsContracts::ValidateResultSchemaFingerprint()
 	return Fingerprint;
 }
 
+FString FHyperAIStudioMaterialsContracts::RecipePayloadSchemaFingerprint()
+{
+	static const FString Fingerprint = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("material.recipe.payload.v1|recipe|path|settings|code|caller_path|dry_run|operation_id"));
+	return Fingerprint;
+}
+
+FString FHyperAIStudioMaterialsContracts::RecipeResultSchemaFingerprint()
+{
+	static const FString Fingerprint = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("material.recipe.result.v1|status|path|caller|recipes|graph|parameters|stats|preview|substrate|saved|notes"));
+	return Fingerprint;
+}
+
 FString FHyperAIStudioMaterialsContracts::GetAuthoringModeName()
 {
 	switch (GetDefault<UHyperAIStudioSettings>()->MaterialAuthoringMode)
@@ -2081,6 +2096,8 @@ const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioMaterialsContracts::G
 			EHyperAIStudioDomainSafety::Edit});
 		Value.Variants.Add({ValidateToolName, ValidateVariantId, ValidatePayloadTypeId, ValidatePayloadSchemaFingerprint(),
 			ValidateResultTypeId, ValidateResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
+		Value.Variants.Add({RecipeToolName, RecipeCheckVariantId, RecipePayloadTypeId, RecipePayloadSchemaFingerprint(),
+			RecipeResultTypeId, RecipeResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
 		Value.ContractFingerprint = FHyperAIStudioDomainAdapterRegistry::ComputeContractFingerprint(Value);
 		Value.AdapterFingerprint = FHyperAIStudioDomainAdapterRegistry::ComputeAdapterFingerprint(Value);
 		return Value;
@@ -4556,6 +4573,11 @@ FHyperAIMaterialValidateReport UHyperAIStudioMaterialsToolset::hyper_material_va
 	return Report;
 }
 
+FHyperAIMaterialRecipeReport UHyperAIStudioMaterialsToolset::hyper_material_recipe(const FHyperAIMaterialRecipeRequest& Request)
+{
+	return FHyperAIStudioMaterialsContracts::Recipe(Request);
+}
+
 FString FHyperAIStudioMaterialTypedPayload::GetTypeId() const
 {
 	return FHyperAIStudioMaterialsContracts::PayloadTypeId;
@@ -4701,6 +4723,41 @@ int32 FHyperAIStudioMaterialValidateResultPayload::GetBoundedByteSize() const
 	return HyperAIStudio::Materials::Private::ClampBytes(Size);
 }
 
+FString FHyperAIStudioMaterialRecipePayload::GetTypeId() const
+{
+	return FHyperAIStudioMaterialsContracts::RecipePayloadTypeId;
+}
+
+FString FHyperAIStudioMaterialRecipePayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioMaterialsContracts::RecipePayloadSchemaFingerprint();
+}
+
+int32 FHyperAIStudioMaterialRecipePayload::GetBoundedByteSize() const
+{
+	int64 Size = 256 + 4ll * (Request.Recipe.Len() + Request.Path.Len() + Request.Code.Len() + Request.CallerPath.Len());
+	for (const FHyperAIMaterialNodeProperty& Setting : Request.Settings) Size += 32 + 4ll * (Setting.Key.Len() + Setting.Value.Len());
+	return HyperAIStudio::Materials::Private::ClampBytes(Size);
+}
+
+FString FHyperAIStudioMaterialRecipeResultPayload::GetTypeId() const
+{
+	return FHyperAIStudioMaterialsContracts::RecipeResultTypeId;
+}
+
+FString FHyperAIStudioMaterialRecipeResultPayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioMaterialsContracts::RecipeResultSchemaFingerprint();
+}
+
+int32 FHyperAIStudioMaterialRecipeResultPayload::GetBoundedByteSize() const
+{
+	int64 Size = 1024 + 4ll * (Report.Diagnostic.Len() + Report.PreviewImagePath.Len());
+	for (const FString& Line : Report.Graph) Size += 16 + 4ll * Line.Len();
+	for (const FString& Error : Report.Stats.CompileErrors) Size += 16 + 4ll * Error.Len();
+	return HyperAIStudio::Materials::Private::ClampBytes(Size);
+}
+
 FHyperAIStudioMaterialsDomainAdapter::FHyperAIStudioMaterialsDomainAdapter()
 	: Descriptor(FHyperAIStudioMaterialsContracts::GetAdapterDescriptor())
 {
@@ -4761,6 +4818,17 @@ FHyperAIStudioDomainAdapterResult FHyperAIStudioMaterialsDomainAdapter::Execute(
 		const TSharedRef<FHyperAIStudioMaterialValidateResultPayload, ESPMode::ThreadSafe> Output =
 			MakeShared<FHyperAIStudioMaterialValidateResultPayload, ESPMode::ThreadSafe>();
 		Output->Report = Contracts::Validate(static_cast<const FHyperAIStudioMaterialValidatePayload&>(Payload).Request);
+		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
+	}
+	if (Matches(Contracts::RecipeToolName, Contracts::RecipeCheckVariantId, EHyperAIStudioDomainSafety::Read,
+		Contracts::RecipePayloadTypeId, Contracts::RecipePayloadSchemaFingerprint()))
+	{
+		// A Read dispatch checks the recipe and never makes anything: the edit is the tool's own, behind its approval.
+		FHyperAIMaterialRecipeRequest Check = static_cast<const FHyperAIStudioMaterialRecipePayload&>(Payload).Request;
+		Check.bDryRun = true;
+		const TSharedRef<FHyperAIStudioMaterialRecipeResultPayload, ESPMode::ThreadSafe> Output =
+			MakeShared<FHyperAIStudioMaterialRecipeResultPayload, ESPMode::ThreadSafe>();
+		Output->Report = Contracts::Recipe(Check);
 		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
 	}
 	if (Matches(Contracts::MutationToolName, Contracts::MutationVariantId, EHyperAIStudioDomainSafety::Edit,
