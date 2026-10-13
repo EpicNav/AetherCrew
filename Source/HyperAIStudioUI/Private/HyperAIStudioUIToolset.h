@@ -534,7 +534,117 @@ public:
 	FHyperAIUIApplyPlanReport Value;
 };
 
-/** Exact atomic pack: no Epic callable is re-exposed under a second name. */
+USTRUCT(BlueprintType)
+struct FHyperAIUIRenderReviewRequest
+{
+	GENERATED_BODY()
+
+	/** The Widget Blueprint, an object path such as /Game/UI/WBP_MainMenu.WBP_MainMenu. */
+	UPROPERTY() FString TargetPath;
+	/** Render the instance playing in Play In Editor (its live state) rather than a fresh design-time one. */
+	UPROPERTY() bool bFromPlay = false;
+	/** Screen sizes as "WxH": 1920x1080 by default; add 2560x1440 and 1280x720 to check scaling and small screens. At most 4. */
+	UPROPERTY() TArray<FString> Resolutions;
+	/** UI scale; 0 (the default) uses the project's DPI curve for each resolution, as the game would. */
+	UPROPERTY() float DpiScale = 0.f;
+	/** Share of each screen axis inside the title-safe area: 0.9 by default (TVs can crop the outer 5% each side); 1 checks only the screen edge. */
+	UPROPERTY() float SafeZone = 0.9f;
+	/** Text whose glyphs come out smaller than this many pixels tall is too small: 14 by default. */
+	UPROPERTY() float MinTextPixels = 14.f;
+	/** Least contrast between text and what is drawn behind it (WCAG ratio): 4.5 by default; large text needs 3. */
+	UPROPERTY() float MinContrast = 4.5f;
+	/** What fills the screen behind the widget, sRGB: a dark grey by default. Set it near the game's view behind this UI. */
+	UPROPERTY() FLinearColor Backdrop = FLinearColor(0.12f, 0.12f, 0.12f, 1.f);
+	/** A mock-up or concept image inside the project to compare the first render against (hyper_image_compare, aligned). */
+	UPROPERTY() FString ReferenceImagePath;
+	/** Score (0-100) the render must reach against the reference: 80 by default. */
+	UPROPERTY() float TargetScore = 80.f;
+	/** Keeps a polish loop's compares together, as hyper_image_compare's session_id: letters, digits, - and _. */
+	UPROPERTY() FString SessionId;
+	/** What changed since the last render, kept in the compare session's history. */
+	UPROPERTY() FString Note;
+	/** Issues listed: 64 by default, 1 to 256. */
+	UPROPERTY() int32 MaxIssues = 64;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIUIReviewIssue
+{
+	GENERATED_BODY()
+
+	/**
+	 * text_clipped, text_too_small, low_contrast, offscreen, outside_safe_zone, clipped_by_parent, overlapping_interactive,
+	 * not_focusable, broken_navigation or no_initial_focus.
+	 */
+	UPROPERTY() FString Code;
+	/** error or warning. */
+	UPROPERTY() FString Severity;
+	/** The widget's path in the tree, such as Root/Menu/PlayButton. */
+	UPROPERTY() FString Widget;
+	/** The render it was seen in, "1920x1080"; empty for issues of the tree itself (focus, navigation). */
+	UPROPERTY() FString Resolution;
+	/** Where it is in that render, pixels: "x,y wxh". */
+	UPROPERTY() FString Rect;
+	UPROPERTY() FString Message;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIUIRender
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString Resolution;
+	UPROPERTY() float DpiScale = 1.f;
+	/** The PNG, full size. Open it to look at it. */
+	UPROPERTY() FString ImagePath;
+	/** Widgets drawn and measured. */
+	UPROPERTY() int32 Widgets = 0;
+	UPROPERTY() int32 Issues = 0;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIUIReferenceMatch
+{
+	GENERATED_BODY()
+
+	UPROPERTY() bool bCompared = false;
+	/** 0-100, hyper_image_compare's aligned score of the first render against the reference. */
+	UPROPERTY() float Score = 0.f;
+	UPROPERTY() float TargetScore = 0.f;
+	UPROPERTY() bool bMatched = false;
+	/** Where they differ, brightest where most: open it. */
+	UPROPERTY() FString HeatMapPath;
+	UPROPERTY() FString SideBySidePath;
+	/** The cells that differ most, worst first: "top left: darker by 0.8 EV, less detail". */
+	UPROPERTY() TArray<FString> WorstRegions;
+	UPROPERTY() TArray<FString> Suggestions;
+	UPROPERTY() FString SessionId;
+	/** Why there is no compare, when there is none. */
+	UPROPERTY() FString Diagnostic;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIUIRenderReviewReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY() bool bOk = false;
+	/** reviewed, invalid_request, not_found, not_compiled, cannot_render or no_pie_world. */
+	UPROPERTY() FString Status;
+	UPROPERTY() FString Diagnostic;
+	/** design_time (a fresh instance) or play (the instance in Play In Editor). */
+	UPROPERTY() FString Source;
+	UPROPERTY() TArray<FHyperAIUIRender> Renders;
+	/** Errors first. */
+	UPROPERTY() TArray<FHyperAIUIReviewIssue> Issues;
+	UPROPERTY() int32 ErrorCount = 0;
+	UPROPERTY() int32 WarningCount = 0;
+	UPROPERTY() bool bTruncated = false;
+	UPROPERTY() FHyperAIUIReferenceMatch Reference;
+	UPROPERTY() TArray<FString> Notes;
+};
+
+/** The UI cohort: inspect, plan and validate Widget Blueprints, and render them full size to review them. */
 UCLASS()
 class HYPERAISTUDIOUI_API UHyperAIStudioUIToolset final : public UToolsetDefinition
 {
@@ -559,6 +669,17 @@ public:
 	/** Layout, accessibility, animation, binding and MVVM checks of loaded Widget Blueprints. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|UI")
 	static FHyperAIUIValidateReport hyper_ui_validate(const FHyperAIUIValidateRequest& Request);
+
+	/**
+	 * Render a Widget Blueprint off screen at full size (1920x1080 by default; also 2560x1440, 1280x720, at the project's
+	 * DPI scale or a chosen one), or its instance playing in Play In Editor, write each as a PNG, and review the layout:
+	 * clipped text (desired against allotted size), text too small or too low in contrast against what is drawn behind
+	 * it, widgets off screen or outside the safe zone or cut off by a clipping parent, overlapping buttons, and buttons
+	 * that cannot take focus or navigate. With reference_image_path, also scores the render against a mock-up and
+	 * writes a heat map. Read-only: nothing in the project changes.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|UI")
+	static FHyperAIUIRenderReviewReport hyper_ui_render_review(const FHyperAIUIRenderReviewRequest& Request);
 };
 
 enum class EHyperAIStudioUIPlanSafety : uint8

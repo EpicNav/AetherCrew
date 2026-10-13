@@ -516,14 +516,15 @@ const TArray<FHyperAIStudioUIManifestEntry>& FHyperAIStudioUIContracts::GetManif
 	static const TArray<FHyperAIStudioUIManifestEntry> Manifest = {
 		{TEXT("hyper_ui_inspect"), GetQualifiedToolsetName()},
 		{TEXT("hyper_ui_apply_plan"), GetQualifiedToolsetName()},
-		{TEXT("hyper_ui_validate"), GetQualifiedToolsetName()}};
+		{TEXT("hyper_ui_validate"), GetQualifiedToolsetName()},
+		{TEXT("hyper_ui_render_review"), GetQualifiedToolsetName()}};
 	return Manifest;
 }
 
 bool FHyperAIStudioUIContracts::IsRegistrationAllowed(const bool bAllowSourceCandidateForDev)
 {
 	const TArray<FHyperAIStudioUIManifestEntry>& Manifest = GetManifest();
-	if (Manifest.Num() != 3 || FHyperAIStudioUIEpicDelegationMatrix::Get().Num() != 46) return false;
+	if (Manifest.Num() != 4 || FHyperAIStudioUIEpicDelegationMatrix::Get().Num() != 46) return false;
 	TArray<FString> Names;
 	TSet<FString> Unique;
 	for (const FHyperAIStudioUIManifestEntry& Entry : Manifest)

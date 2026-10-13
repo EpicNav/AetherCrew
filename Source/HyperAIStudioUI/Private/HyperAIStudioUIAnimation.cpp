@@ -44,6 +44,9 @@ namespace HyperAIStudio::UI::Animation
 		constexpr const TCHAR* ValidatePayloadTypeId = TEXT("hyperai.payload.ui.validate.v1");
 		constexpr const TCHAR* InspectResultTypeId = TEXT("hyperai.result.ui.inspect.v1");
 		constexpr const TCHAR* ValidateResultTypeId = TEXT("hyperai.result.ui.validate.v1");
+		constexpr const TCHAR* ReviewVariantId = TEXT("ui.render_review.v1");
+		constexpr const TCHAR* ReviewPayloadTypeId = TEXT("hyperai.payload.ui.render-review.v1");
+		constexpr const TCHAR* ReviewResultTypeId = TEXT("hyperai.result.ui.render-review.v1");
 		constexpr int32 MaxKeys = 64;
 		constexpr double MaxLengthSeconds = 600.0;
 		const FName OpacityProperty(TEXT("RenderOpacity"));
@@ -87,6 +90,18 @@ namespace HyperAIStudio::UI::Animation
 		const FString& ValidateResultSchema()
 		{
 			static const FString Value = Seal(TEXT("ui.validate.result.v1|fingerprints|counts|issues|bounded"));
+			return Value;
+		}
+
+		const FString& ReviewPayloadSchema()
+		{
+			static const FString Value = Seal(TEXT("ui.render_review.payload.v1|target|from_play|resolutions|dpi|safe_zone|min_text|min_contrast|backdrop|reference|target_score|session|note|max_issues"));
+			return Value;
+		}
+
+		const FString& ReviewResultSchema()
+		{
+			static const FString Value = Seal(TEXT("ui.render_review.result.v1|source|renders|issues|counts|reference|notes"));
 			return Value;
 		}
 
@@ -926,6 +941,23 @@ int32 FHyperAIStudioUIInspectResultPayload::GetBoundedByteSize() const
 		+ 4096ll * Report.Records.Num() + 512ll * Report.Issues.Num());
 }
 
+FString FHyperAIStudioUIRenderReviewPayload::GetTypeId() const { return HyperAIStudio::UI::Animation::ReviewPayloadTypeId; }
+FString FHyperAIStudioUIRenderReviewPayload::GetSchemaFingerprint() const { return HyperAIStudio::UI::Animation::ReviewPayloadSchema(); }
+int32 FHyperAIStudioUIRenderReviewPayload::GetBoundedByteSize() const
+{
+	int64 Size = 256 + 2ll * (Request.TargetPath.Len() + Request.ReferenceImagePath.Len() + Request.SessionId.Len() + Request.Note.Len());
+	for (const FString& Resolution : Request.Resolutions) Size += 16 + 2ll * Resolution.Len();
+	return HyperAIStudio::UI::Animation::ClampBytes(Size);
+}
+
+FString FHyperAIStudioUIRenderReviewResultPayload::GetTypeId() const { return HyperAIStudio::UI::Animation::ReviewResultTypeId; }
+FString FHyperAIStudioUIRenderReviewResultPayload::GetSchemaFingerprint() const { return HyperAIStudio::UI::Animation::ReviewResultSchema(); }
+int32 FHyperAIStudioUIRenderReviewResultPayload::GetBoundedByteSize() const
+{
+	return HyperAIStudio::UI::Animation::ClampBytes(1024 + 6ll * (Report.Status.Len() + Report.Diagnostic.Len()) + 512ll * Report.Issues.Num()
+		+ 512ll * Report.Renders.Num());
+}
+
 FString FHyperAIStudioUIValidateResultPayload::GetTypeId() const { return HyperAIStudio::UI::Animation::ValidateResultTypeId; }
 FString FHyperAIStudioUIValidateResultPayload::GetSchemaFingerprint() const { return HyperAIStudio::UI::Animation::ValidateResultSchema(); }
 int32 FHyperAIStudioUIValidateResultPayload::GetBoundedByteSize() const
@@ -949,6 +981,9 @@ const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioUIAnimationAdapter::D
 			ResultTypeId, ResultSchema(), EHyperAIStudioDomainSafety::Edit});
 		Value.Variants.Add({TEXT("hyper_ui_validate"), ValidateVariantId, ValidatePayloadTypeId, ValidatePayloadSchema(),
 			ValidateResultTypeId, ValidateResultSchema(), EHyperAIStudioDomainSafety::Read});
+		// Read: its PNGs go under Saved/HyperAIStudio/UIReview; nothing in the project changes.
+		Value.Variants.Add({TEXT("hyper_ui_render_review"), ReviewVariantId, ReviewPayloadTypeId, ReviewPayloadSchema(),
+			ReviewResultTypeId, ReviewResultSchema(), EHyperAIStudioDomainSafety::Read});
 		Value.ContractFingerprint = FHyperAIStudioDomainAdapterRegistry::ComputeContractFingerprint(Value);
 		Value.AdapterFingerprint = FHyperAIStudioDomainAdapterRegistry::ComputeAdapterFingerprint(Value);
 		return Value;
@@ -987,6 +1022,12 @@ FHyperAIStudioDomainAdapterResult FHyperAIStudioUIAnimationAdapter::Execute(
 	{
 		const TSharedRef<FHyperAIStudioUIValidateResultPayload, ESPMode::ThreadSafe> Output = MakeShared<FHyperAIStudioUIValidateResultPayload, ESPMode::ThreadSafe>();
 		Output->Report = UHyperAIStudioUIToolset::hyper_ui_validate(static_cast<const FHyperAIStudioUIValidatePayload&>(Payload).Request);
+		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
+	}
+	if (Matches(TEXT("hyper_ui_render_review"), ReviewVariantId, EHyperAIStudioDomainSafety::Read, ReviewPayloadTypeId, ReviewPayloadSchema()))
+	{
+		const TSharedRef<FHyperAIStudioUIRenderReviewResultPayload, ESPMode::ThreadSafe> Output = MakeShared<FHyperAIStudioUIRenderReviewResultPayload, ESPMode::ThreadSafe>();
+		Output->Report = UHyperAIStudioUIToolset::hyper_ui_render_review(static_cast<const FHyperAIStudioUIRenderReviewPayload&>(Payload).Request);
 		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
 	}
 	if (Matches(TEXT("hyper_ui_apply_plan"), VariantId, EHyperAIStudioDomainSafety::Edit, PayloadTypeId, PayloadSchema()))

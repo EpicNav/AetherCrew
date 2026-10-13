@@ -88,6 +88,24 @@ public:
 	virtual int32 GetBoundedByteSize() const override;
 };
 
+class FHyperAIStudioUIRenderReviewPayload final : public IHyperAIStudioDomainRequestPayload
+{
+public:
+	FHyperAIUIRenderReviewRequest Request;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+class FHyperAIStudioUIRenderReviewResultPayload final : public IHyperAIStudioDomainResultPayload
+{
+public:
+	FHyperAIUIRenderReviewReport Report;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
 class FHyperAIStudioUIAnimationAdapter final : public IHyperAIStudioDomainAdapter
 {
 public:
