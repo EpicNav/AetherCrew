@@ -692,6 +692,24 @@
    "text": "一个撤销步骤仍处于打开状态（{0}）"
   },
   {
+   "namespace": "HyperAIStudioAudioAuthoring",
+   "key": "MetaSoundRecipe",
+   "source": "HyperAI: MetaSound Recipe",
+   "text": "HyperAI：MetaSound 配方"
+  },
+  {
+   "namespace": "HyperAIStudioAudioAuthoring",
+   "key": "SoundCuePlan",
+   "source": "HyperAI: Sound Cue Plan",
+   "text": "HyperAI：应用 Sound Cue 计划"
+  },
+  {
+   "namespace": "HyperAIStudioAudioAuthoring",
+   "key": "SoundMixPlan",
+   "source": "HyperAI: Sound Mix Plan",
+   "text": "HyperAI：应用声音混音计划"
+  },
+  {
    "namespace": "HyperAIStudioAutoApproval",
    "key": "AlsoApproveWaiting",
    "source": "Also approve the {0} {0}|plural(one=request,other=requests) waiting now",
@@ -3933,6 +3951,30 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "audio.engine-hum-recipe.ph.cylinders.label",
+   "source": "Cylinders",
+   "text": "气缸数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.engine-hum-recipe.ph.idle_rpm.label",
+   "source": "Idle RPM",
+   "text": "怠速转速"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.engine-hum-recipe.summary",
+   "source": "Experimental: a procedural engine hum MetaSound Source with RPM, Cylinders, Load and Volume inputs, ready for a vehicle Blueprint to drive.",
+   "text": "实验性：一个带 RPM、Cylinders、Load 和 Volume 输入的程序化引擎轰鸣 MetaSound Source，可由载具蓝图驱动。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.engine-hum-recipe.title",
+   "source": "Build an engine hum MetaSound driven by RPM",
+   "text": "构建由转速驱动的引擎轰鸣 MetaSound"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "audio.footstep-attenuation-plan-check.ph.falloff.label",
    "source": "Falloff distance (cm)",
    "text": "衰减距离（厘米）"
@@ -3960,6 +4002,72 @@
    "key": "audio.footstep-attenuation-plan-check.title",
    "source": "Check a footstep attenuation and concurrency plan",
    "text": "检查脚步声衰减与并发方案"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.footstep-cue-surfaces.ph.surfaces.label",
+   "source": "Surfaces",
+   "text": "地面类型"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.footstep-cue-surfaces.ph.waves_folder.hint",
+   "source": "Holds the takes, named by surface (Stone, Grass).",
+   "text": "存放各地面的样本，按地面命名（Stone、Grass）。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.footstep-cue-surfaces.ph.waves_folder.label",
+   "source": "Footstep SoundWaves folder",
+   "text": "脚步声 SoundWave 文件夹"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.footstep-cue-surfaces.summary",
+   "source": "A Sound Cue with a surface switch, no-repeat random takes, pitch and volume variation, attenuation and a voice limit, laid out and validated.",
+   "text": "一个带地面切换、不重复随机样本、音高与音量变化、衰减和发声数上限的 Sound Cue，自动布局并通过验证。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.footstep-cue-surfaces.title",
+   "source": "Build a footstep cue that switches by surface",
+   "text": "构建按地面切换的脚步声 Sound Cue"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.generate-sfx-takes.ph.max_cost.label",
+   "source": "Most it may cost (USD)",
+   "text": "最高花费（美元）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.generate-sfx-takes.ph.seconds.label",
+   "source": "Length (s)",
+   "text": "时长（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.generate-sfx-takes.ph.sound.label",
+   "source": "The sound",
+   "text": "声音描述"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.generate-sfx-takes.ph.takes.label",
+   "source": "Takes",
+   "text": "样本数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.generate-sfx-takes.summary",
+   "source": "Paid: price several ElevenLabs takes of a sound effect, make them after approval, import them and play them through a no-repeat random MetaSound.",
+   "text": "付费：先为 ElevenLabs 音效的多个样本报价，批准后生成、导入，并由不重复随机的 MetaSound 播放。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.generate-sfx-takes.title",
+   "source": "Generate sound effect takes and a random player",
+   "text": "生成音效样本和随机播放器"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -4050,6 +4158,54 @@
    "key": "audio.menu-music-loop.title",
    "source": "Compose a looping menu music track",
    "text": "创作可循环的菜单背景音乐"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.mix-classes-duck-reverb.ph.decay.label",
+   "source": "Reverb decay (s)",
+   "text": "混响衰减（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.mix-classes-duck-reverb.ph.duck.label",
+   "source": "Music volume under dialogue",
+   "text": "对白时的音乐音量"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.mix-classes-duck-reverb.summary",
+   "source": "A Master, SFX, Music, Voice and UI class tree, a mix that ducks music under dialogue, and a world submix with reverb, EQ and a compressor.",
+   "text": "Master、SFX、Music、Voice、UI 声音类树，一个在对白时压低音乐的混音，以及带混响、均衡和压缩器的世界子混音。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.mix-classes-duck-reverb.title",
+   "source": "Set up sound classes, a dialogue duck and a reverb bus",
+   "text": "设置声音类、对白压低和混响总线"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.price-generated-audio.ph.seconds.label",
+   "source": "Length (s)",
+   "text": "时长（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.price-generated-audio.ph.sound.label",
+   "source": "The sound or music",
+   "text": "音效或音乐描述"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.price-generated-audio.summary",
+   "source": "Dry-run ElevenLabs and Stable Audio for the same request and compare each take's length and price, without spending anything.",
+   "text": "对同一请求试运行 ElevenLabs 和 Stable Audio，比较每个样本的时长和价格，不产生任何花费。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.price-generated-audio.title",
+   "source": "Price a generated sound or music clip, spending nothing",
+   "text": "为生成的音效或音乐报价，不花一分钱"
   },
   {
    "namespace": "HyperAIStudioPrompts",

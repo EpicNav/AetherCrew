@@ -71,6 +71,30 @@ TArray<FHyperAIStudioExternalServiceSettings> UHyperAIStudioSettings::GetMeshSer
 		Make(TEXT("hi3d"), TEXT("Hi3D (Hitem3D)"), TEXT("https://api.hitem3d.ai"), TEXT("HITEM3D_API_KEY"), 1.30f)};
 }
 
+TArray<FHyperAIStudioExternalServiceSettings> UHyperAIStudioSettings::GetAudioServices()
+{
+	auto Make = [](const TCHAR* Id, const TCHAR* Label, const TCHAR* BaseUrl, const TCHAR* KeyVariable, const TCHAR* KeyHeader, const TCHAR* KeyPrefix,
+		const float Cost)
+	{
+		FHyperAIStudioExternalServiceSettings Service;
+		Service.Id = Id;
+		Service.Label = Label;
+		Service.BaseUrl = BaseUrl;
+		Service.ApiKeyVariable = KeyVariable;
+		Service.ApiKeyHeader = KeyHeader;
+		Service.ApiKeyPrefix = KeyPrefix;
+		Service.CostPerCall = Cost;
+		Service.TimeoutSeconds = 180;
+		return Service;
+	};
+	// List prices (October 2026): ElevenLabs' API bills sound effects at $0.12 and music at $0.15 a minute of audio, so
+	// their price is a minute's; Stability bills 8 credits at $0.01 for a Stable Audio 2.5 or 3 generation.
+	return {
+		Make(TEXT("elevenlabs"), TEXT("ElevenLabs Sound Effects"), TEXT("https://api.elevenlabs.io"), TEXT("ELEVENLABS_API_KEY"), TEXT("xi-api-key"), TEXT(""), 0.12f),
+		Make(TEXT("elevenlabs_music"), TEXT("ElevenLabs Music"), TEXT("https://api.elevenlabs.io"), TEXT("ELEVENLABS_API_KEY"), TEXT("xi-api-key"), TEXT(""), 0.15f),
+		Make(TEXT("stability"), TEXT("Stability AI (Stable Audio)"), TEXT("https://api.stability.ai"), TEXT("STABILITY_API_KEY"), TEXT("Authorization"), TEXT("Bearer "), 0.08f)};
+}
+
 TArray<FHyperAIStudioImageModelSettings> UHyperAIStudioSettings::GetNanoBananaModels()
 {
 	// generateContent, which Google keeps supported beside its newer Interactions API. The picture is a part of the

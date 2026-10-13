@@ -496,6 +496,227 @@
     }
    ],
    "prompt": "Re-render the Decibel sessions in {{content_folder}} whose names start with `{{prefix}}` so they sit at one peak of {{peak}} dBFS, each with a MetaSound. Change only their rendered SoundWaves and MetaSounds, never the sessions. Follow the sound-design skill's Measuring section; if the sound_design pack (Decibel) is unavailable, say so and stop.\n1. hyper_sound_inspect with bSessions for the sessions, then each SessionPath for its length and loop settings.\n2. hyper_sound_render each once with no normalizing (fresh operationId) to measure PeakDb and RmsDb as it stands.\n3. Render each again with NormalizePeakDb {{peak}} and bMetaSound true; for a looping session add bLoop with LoopCrossfadeSeconds 4 (a bed) or LoopTailSeconds 3 (music).\n4. A peak does not match loudness: if a sound's RmsDb is more than 6 dB from the set's median, name it and suggest the change (a limiter drive, a quieter layer) instead of editing its session.\n5. hyper_audio_inspect the SoundWaves (projection metrics) and hyper_audio_validate the MetaSounds.\nReply with a PASS/FAIL table, one row per sound: PeakDb before and after, RmsDb, within 6 dB of the median, not clipped, no Issues, MetaSound valid."
+  },
+  {
+   "id": "audio.footstep-cue-surfaces",
+   "title": "Build a footstep cue that switches by surface",
+   "summary": "A Sound Cue with a surface switch, no-repeat random takes, pitch and volume variation, attenuation and a voice limit, laid out and validated.",
+   "packs": [
+    "audio_metasound"
+   ],
+   "skills": [
+    "game-audio"
+   ],
+   "tools": [
+    "hyper_sound_asset_inspect",
+    "hyper_sound_mix_plan",
+    "hyper_sound_cue_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "switch",
+    "random",
+    "modulator",
+    "attenuation",
+    "wave_player"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "footsteps",
+    "cue",
+    "surface",
+    "variation",
+    "random",
+    "attenuation",
+    "concurrency"
+   ],
+   "placeholders": [
+    {
+     "name": "waves_folder",
+     "label": "Footstep SoundWaves folder",
+     "default": "/Game/Audio/Footsteps",
+     "hint": "Holds the takes, named by surface (Stone, Grass)."
+    },
+    {
+     "name": "surfaces",
+     "label": "Surfaces",
+     "default": "Stone, Grass"
+    }
+   ],
+   "prompt": "Build `{{content_folder}}/SC_Footsteps`, a footstep Sound Cue that switches by surface. Follow the game-audio skill; if the audio_metasound tools are missing, say so and stop.\n1. hyper_sound_asset_inspect with Folder `{{waves_folder}}`: list the SoundWaves for each of {{surfaces}} (2 to 8 per surface). Stop if a surface has none.\n2. One hyper_sound_mix_plan (fresh OperationId): an attenuation `{{content_folder}}/ATT_Footsteps` (FalloffDistance 2500, DistanceAlgorithm NaturalSound, bAttenuateWithLPF true) and a concurrency `{{content_folder}}/CON_Footsteps` (MaxCount 4, ResolutionRule StopOldest). Dry-run it, then send it with bDryRun false; if it is awaiting_user_approval, hyper_operation_wait with bWaitThroughApproval true.\n3. One hyper_sound_cue_plan: root an attenuation node on ATT_Footsteps, then a modulator (PitchMin 0.95, PitchMax 1.05, VolumeMin 0.85, VolumeMax 1), then a switch on Parameter `Surface` whose inputs are unset (the first surface again) and one random node per surface (bNoRepeat true) over that surface's wave players. Concurrency [CON_Footsteps]. Dry-run, read Nodes for the layout, then apply.\n4. hyper_sound_asset_inspect the cue.\n5. Reply with a PASS/FAIL table: every take in the graph, no error Issues, the switch has one input per surface plus unset, each random node no-repeat, attenuation and concurrency set, the cue saved. Say which Surface value plays which takes."
+  },
+  {
+   "id": "audio.mix-classes-duck-reverb",
+   "title": "Set up sound classes, a dialogue duck and a reverb bus",
+   "summary": "A Master, SFX, Music, Voice and UI class tree, a mix that ducks music under dialogue, and a world submix with reverb, EQ and a compressor.",
+   "packs": [
+    "audio_metasound"
+   ],
+   "skills": [
+    "game-audio"
+   ],
+   "tools": [
+    "hyper_sound_asset_inspect",
+    "hyper_sound_mix_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "sound_class",
+    "sound_mix",
+    "submix",
+    "reverb",
+    "compressor"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "mix",
+    "sound class",
+    "ducking",
+    "submix",
+    "reverb",
+    "dialogue",
+    "music"
+   ],
+   "placeholders": [
+    {
+     "name": "duck",
+     "label": "Music volume under dialogue",
+     "default": "0.4"
+    },
+    {
+     "name": "decay",
+     "label": "Reverb decay (s)",
+     "default": "1.8"
+    }
+   ],
+   "prompt": "Set up the project's mix under `{{content_folder}}/Mix` in one plan. Follow the game-audio skill; if the audio_metasound tools are missing, say so and stop.\n1. hyper_sound_asset_inspect with Folder `{{content_folder}}/Mix`: stop if SCL_Master already exists and report what is there.\n2. One hyper_sound_mix_plan, assets in this order: sound_class SCL_Master; SCL_SFX, SCL_Music (bIsMusic true), SCL_Voice and SCL_UI (bIsUISound true), each with Parent SCL_Master; sound_mix MIX_DialogueDuck with an adjuster on SCL_Music (Volume {{duck}}, bApplyToChildren true), FadeInTime 0.25, FadeOutTime 0.5, Duration -1; submix SMX_Master; submix SMX_World with Parent SMX_Master and Effects reverb (DecayTime {{decay}}, WetLevel 0.3), eq (a band at 250 Hz, -2 dB) and compressor (ThresholdDb -14, Ratio 3). Dry-run it and read Changes, then send it with bDryRun false and a fresh OperationId; hyper_operation_wait if it waits for approval.\n3. hyper_sound_asset_inspect SCL_Master, MIX_DialogueDuck and SMX_World.\n4. Reply with a PASS/FAIL table: SCL_Master lists 4 children, the duck adjusts SCL_Music to {{duck}} with its fades, SMX_World's parent is SMX_Master with reverb, EQ and compressor in that order, everything saved."
+  },
+  {
+   "id": "audio.generate-sfx-takes",
+   "title": "Generate sound effect takes and a random player",
+   "summary": "Paid: price several ElevenLabs takes of a sound effect, make them after approval, import them and play them through a no-repeat random MetaSound.",
+   "packs": [
+    "audio_generation",
+    "audio_metasound"
+   ],
+   "skills": [
+    "game-audio"
+   ],
+   "tools": [
+    "hyper_audio_generate",
+    "hyper_operation_wait",
+    "hyper_audio_generate_status",
+    "hyper_sound_asset_inspect"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "generate",
+    "elevenlabs",
+    "sfx",
+    "variations",
+    "metasound",
+    "paid"
+   ],
+   "placeholders": [
+    {
+     "name": "sound",
+     "label": "The sound",
+     "default": "heavy oak door slams shut in a stone hall"
+    },
+    {
+     "name": "takes",
+     "label": "Takes",
+     "default": "4"
+    },
+    {
+     "name": "seconds",
+     "label": "Length (s)",
+     "default": "2"
+    },
+    {
+     "name": "max_cost",
+     "label": "Most it may cost (USD)",
+     "default": "0.10"
+    }
+   ],
+   "prompt": "Make {{takes}} takes of \"{{sound}}\" with ElevenLabs and a MetaSound that plays one at random. This spends real money: it runs only after my approval and never above {{max_cost}} USD. If the audio_generation tools are missing, say the pack is off and stop.\n1. hyper_audio_generate with bDryRun true, Provider elevenlabs, Prompt \"{{sound}}\", DurationSeconds {{seconds}}, Variations {{takes}}, Folder `{{content_folder}}/Generated` and Wrap metasound_random. Report each take's Name, Seconds and Cost, EstimatedCost and WrapperPath. If EstimatedCost is above {{max_cost}} or the status is missing_key, stop and say why.\n2. Send it again with bDryRun false and a fresh OperationId. Call hyper_operation_wait with that OperationId, bWaitThroughApproval true and TimeoutMs 120000, then hyper_audio_generate_status until the State is completed, failed or rejected.\n3. hyper_sound_asset_inspect the wrapper and each take.\n4. Reply with a PASS/FAIL table: the job completed, {{takes}} SoundWaves imported with their lengths, the wrapper is a MetaSound Source with a Sounds input, the actual Cost at or under {{max_cost}} USD. List the asset paths and ask me to listen."
+  },
+  {
+   "id": "audio.price-generated-audio",
+   "title": "Price a generated sound or music clip, spending nothing",
+   "summary": "Dry-run ElevenLabs and Stable Audio for the same request and compare each take's length and price, without spending anything.",
+   "packs": [
+    "audio_generation"
+   ],
+   "skills": [
+    "game-audio"
+   ],
+   "tools": [
+    "hyper_audio_generate_status",
+    "hyper_audio_generate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "generate",
+    "price",
+    "cost",
+    "elevenlabs",
+    "stable audio",
+    "music",
+    "dry run"
+   ],
+   "placeholders": [
+    {
+     "name": "sound",
+     "label": "The sound or music",
+     "default": "gentle rain on leaves, steady, no thunder"
+    },
+    {
+     "name": "seconds",
+     "label": "Length (s)",
+     "default": "20"
+    }
+   ],
+   "prompt": "Find out what \"{{sound}}\" ({{seconds}} s) would cost from each audio provider, without spending anything. Every call here is a dry run.\n1. hyper_audio_generate_status with no OperationId: stop if this session already made it. If the audio_generation tools are missing, say the pack is off and stop.\n2. hyper_audio_generate with bDryRun true, Prompt \"{{sound}}\", DurationSeconds {{seconds}} and Variations 1, once for each Provider: elevenlabs (only if {{seconds}} is 30 or less), elevenlabs_music, and stability. Read Providers to see which keys are set.\n3. Do not call hyper_audio_generate with bDryRun false.\n4. Reply with a table, one row per dry run: provider, model, Status (PASS when it is checked), take length, EstimatedCost in USD and DocsUrl. Say which is cheapest and remind me that a real take needs my approval."
+  },
+  {
+   "id": "audio.engine-hum-recipe",
+   "title": "Build an engine hum MetaSound driven by RPM",
+   "summary": "Experimental: a procedural engine hum MetaSound Source with RPM, Cylinders, Load and Volume inputs, ready for a vehicle Blueprint to drive.",
+   "packs": [
+    "audio_metasound"
+   ],
+   "skills": [
+    "game-audio"
+   ],
+   "tools": [
+    "hyper_metasound_recipe",
+    "hyper_operation_wait",
+    "hyper_sound_asset_inspect"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "metasound",
+    "procedural",
+    "engine",
+    "vehicle",
+    "rpm",
+    "recipe",
+    "experimental"
+   ],
+   "placeholders": [
+    {
+     "name": "cylinders",
+     "label": "Cylinders",
+     "default": "6"
+    },
+    {
+     "name": "idle_rpm",
+     "label": "Idle RPM",
+     "default": "900"
+    }
+   ],
+   "prompt": "Build `{{content_folder}}/MS_EngineHum` from the experimental engine_hum recipe. Follow the game-audio skill; if the audio_metasound tools are missing, say so and stop.\n1. hyper_metasound_recipe with an empty Recipe: read engine_hum's inputs and their ranges.\n2. hyper_metasound_recipe with Recipe engine_hum, Path `{{content_folder}}/MS_EngineHum`, Inputs Cylinders {{cylinders}} and RPM {{idle_rpm}}, bDryRun true; then again with bDryRun false and a fresh OperationId, and hyper_operation_wait if it waits for approval.\n3. hyper_sound_asset_inspect the new asset.\n4. Reply with a PASS/FAIL table: a MetaSound Source made, inputs RPM, Cylinders, Load and Volume exposed, defaults as asked. Then explain in two lines how a vehicle Blueprint drives it (an Audio Component's Set Float Parameter for RPM and Load each tick), and that the recipe is experimental and needs tuning by ear."
   }
  ]
 }

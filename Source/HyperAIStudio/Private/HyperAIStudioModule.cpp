@@ -1061,6 +1061,14 @@ private:
 				{TEXT("Metasound")}
 			},
 			{
+				TEXT("HyperAIStudioAudioAuthoring"),
+				TEXT("audio_metasound"),
+				TEXT("cohort.source.hyperaistudioaudioauthoringtoolset.v1"),
+				{TEXT("hyper_sound_cue_plan"), TEXT("hyper_sound_mix_plan"),
+					TEXT("hyper_sound_asset_inspect"), TEXT("hyper_metasound_recipe")},
+				{TEXT("Metasound")}
+			},
+			{
 				TEXT("HyperAIStudioMaterials"),
 				TEXT("materials_dynamic_material"),
 				TEXT("cohort.source.hyperaistudiomaterialstoolset.v1"),
@@ -1152,6 +1160,13 @@ private:
 				TEXT("cohort.source.hyperaistudiomeshgentoolset.v1"),
 				{TEXT("hyper_mesh_generate"), TEXT("hyper_mesh_status")},
 				{TEXT("Interchange")}
+			},
+			{
+				TEXT("HyperAIStudioAudioGen"),
+				TEXT("audio_generation"),
+				TEXT("cohort.source.hyperaistudioaudiogentoolset.v1"),
+				{TEXT("hyper_audio_generate"), TEXT("hyper_audio_generate_status")},
+				{TEXT("Metasound")}
 			},
 			{
 				TEXT("HyperAIStudioDecibel"),

@@ -4,12 +4,12 @@
 static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatalog& OutCatalog)
 {
 	OutCatalog.Schema = TEXT("hyperai.capability-pack-catalog.v2");
-	OutCatalog.GeneratedFingerprint = TEXT("sha256:899b8faa0dc40d76eea2a3be77008edc064ce12accde8ec3ec692f5b90e0dfa8");
+	OutCatalog.GeneratedFingerprint = TEXT("sha256:b77176ed2a17d823bfe64f8be1b16c67e71b6b7649d7b1d00a874eae3499ebc4");
 	OutCatalog.ApprovedPlanFingerprint = TEXT("sha256:0111a6ad1e4b2f81b6da0439a22d83ffbfd8f7ccb20f958d8494eaeee84c6d1a");
 	OutCatalog.AdmissionMatrixFingerprint = TEXT("sha256:404ea0204015fb9558cf2b5fcc092d77fb7e6dc323f0adde7032252e025c23c9");
 	OutCatalog.SourceLedgerFingerprint = TEXT("sha256:2954241d83a1a24feaf00a28c6884cae62c6b138923cd8d2deae23b7dc9c4e2e");
 	OutCatalog.SourceArtifactFingerprint = TEXT("sha256:52806e6f474cb0216a8cecb2531649612ef1b87f7381a560d023fd8389fd6f4b");
-	OutCatalog.SourceArtifactCount = 171;
+	OutCatalog.SourceArtifactCount = 177;
 
 	{
 		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
@@ -805,9 +805,14 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 		Pack.bContainsExternalEffects = true;
 		Pack.DependsOnPackIds.Add(TEXT("shared_foundation"));
 		Pack.AtomicCohortIds.Add(TEXT("cohort.source.hyperaistudioaudiotoolset.v1"));
+		Pack.AtomicCohortIds.Add(TEXT("cohort.source.hyperaistudioaudioauthoringtoolset.v1"));
 		Pack.ToolNames.Add(TEXT("hyper_audio_inspect"));
 		Pack.ToolNames.Add(TEXT("hyper_audio_apply_plan"));
 		Pack.ToolNames.Add(TEXT("hyper_audio_validate"));
+		Pack.ToolNames.Add(TEXT("hyper_sound_cue_plan"));
+		Pack.ToolNames.Add(TEXT("hyper_sound_mix_plan"));
+		Pack.ToolNames.Add(TEXT("hyper_sound_asset_inspect"));
+		Pack.ToolNames.Add(TEXT("hyper_metasound_recipe"));
 		{
 			FHyperAIStudioCapabilityRequirementGroup& Group = Pack.Requirements.AddDefaulted_GetRef();
 			Group.Id = TEXT("audio_plugin");
@@ -1354,6 +1359,17 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 		Pack.AtomicCohortIds.Add(TEXT("cohort.source.hyperaistudiomeshgentoolset.v1"));
 		Pack.ToolNames.Add(TEXT("hyper_mesh_generate"));
 		Pack.ToolNames.Add(TEXT("hyper_mesh_status"));
+	}
+	{
+		FHyperAIStudioCapabilityPackDefinition& Pack = OutCatalog.Packs.AddDefaulted_GetRef();
+		Pack.Id = TEXT("audio_generation");
+		Pack.Tier = EHyperAIStudioCapabilityPackTier::Optional;
+		Pack.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Pack.bContainsExternalEffects = true;
+		Pack.DependsOnPackIds.Add(TEXT("shared_foundation"));
+		Pack.AtomicCohortIds.Add(TEXT("cohort.source.hyperaistudioaudiogentoolset.v1"));
+		Pack.ToolNames.Add(TEXT("hyper_audio_generate"));
+		Pack.ToolNames.Add(TEXT("hyper_audio_generate_status"));
 	}
 	{
 		FHyperAIStudioCapabilityPackDefinition& Pack = OutCatalog.Packs.AddDefaulted_GetRef();
@@ -2677,6 +2693,74 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 		Tool.ProductEvidenceRows = 0;
 		Tool.SupplementalEvidenceRows = 0;
 		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Read);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_sound_cue_plan");
+		Tool.PackId = TEXT("audio_metasound");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudioaudioauthoringtoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:70478b0a8e030368000be7dca8c4ad9020201abec595733305448ce90bbea02b");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Edit);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_sound_mix_plan");
+		Tool.PackId = TEXT("audio_metasound");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudioaudioauthoringtoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:e9bcb6d81e1f9e66a5e50e41f51dd08b037a5444510090f73282070930ce494b");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Edit);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_sound_asset_inspect");
+		Tool.PackId = TEXT("audio_metasound");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudioaudioauthoringtoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:5376d791ae120f066157c08a4e51d30ae5f8f722d428c7e87a9d31093f33362c");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Read);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_metasound_recipe");
+		Tool.PackId = TEXT("audio_metasound");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudioaudioauthoringtoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:17105edf05779631f33bb1a298af02de09b6d98e7523a318530fdc11a3e21f02");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Edit);
 	}
 	{
 		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
@@ -4138,6 +4222,40 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 		Tool.bMayCauseExternalEffects = false;
 		Tool.SourceArtifactCount = 1;
 		Tool.SourceArtifactFingerprint = TEXT("sha256:9052a4a0eae039877b376211b8515fc48f45eca22be6273e5427a5380d33d247");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Read);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_audio_generate");
+		Tool.PackId = TEXT("audio_generation");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudioaudiogentoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = true;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:61c0b539a151d1f2af0b8f5e65abb06fec24271eec02c81d46834af7fe8d62dc");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::ExternalEffect);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_audio_generate_status");
+		Tool.PackId = TEXT("audio_generation");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudioaudiogentoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:7bdc3d964a22268a141e1da57e8d2274db64f086f9e2b156d9b8e04a40a732f1");
 		Tool.SourceLedgerRowCount = 0;
 		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
 		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;

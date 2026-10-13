@@ -710,6 +710,17 @@ public:
 	FString MeshImportFolder = TEXT("/Game/Generated/Models");
 
 	/**
+	 * ElevenLabs sound effects and music, and Stability AI's Stable Audio, for generated audio. ElevenLabs' price is a
+	 * minute of audio, Stability's one generation. They are there without settings; an entry with the same id
+	 * (elevenlabs, elevenlabs_music, stability) replaces one, to go through a proxy or follow a price change.
+	 */
+	static TArray<FHyperAIStudioExternalServiceSettings> GetAudioServices();
+
+	/** Where generated sound effects and music are imported. */
+	UPROPERTY(Config, EditAnywhere, Category = "Audio Generation")
+	FString AudioImportFolder = TEXT("/Game/Generated/Audio");
+
+	/**
 	 * Nano Banana 2, Nano Banana Pro, Nano Banana 2 Lite and the original Nano Banana, through the Gemini API, with
 	 * Google's prices per image.
 	 */
