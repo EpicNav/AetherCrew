@@ -1242,7 +1242,8 @@ private:
 				TEXT("HyperAIStudioModeling"),
 				TEXT("mesh_modeling"),
 				TEXT("cohort.source.hyperaistudiomodelingtoolset.v1"),
-				{TEXT("hyper_model_inspect"), TEXT("hyper_model_apply_plan"), TEXT("hyper_model_validate"), TEXT("hyper_model_handoff")},
+				{TEXT("hyper_model_inspect"), TEXT("hyper_model_apply_plan"), TEXT("hyper_model_validate"), TEXT("hyper_model_handoff"),
+					TEXT("hyper_model_uv_check"), TEXT("hyper_model_uv_apply"), TEXT("hyper_model_bake"), TEXT("hyper_model_prepare")},
 				{TEXT("GeometryScripting")}
 			},
 			{

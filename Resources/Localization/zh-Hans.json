@@ -2175,6 +2175,12 @@
   },
   {
    "namespace": "HyperAIStudioModeling",
+   "key": "BakeMaps",
+   "source": "HyperAI: Bake Maps",
+   "text": "HyperAI：烘焙贴图"
+  },
+  {
+   "namespace": "HyperAIStudioModeling",
    "key": "HandoffToast",
    "source": "HyperAI: {0} is selected in Modeling Mode. {1}Edit it, click Accept, then save {2}.",
    "text": "HyperAI：已在建模模式中选中 {0}。{1}编辑后点击“接受”，然后保存 {2}。"
@@ -2196,6 +2202,18 @@
    "key": "ModelPlan",
    "source": "HyperAI: Model Plan",
    "text": "HyperAI：模型计划"
+  },
+  {
+   "namespace": "HyperAIStudioModeling",
+   "key": "PrepareModel",
+   "source": "HyperAI: Prepare Model",
+   "text": "HyperAI：整理模型"
+  },
+  {
+   "namespace": "HyperAIStudioModeling",
+   "key": "UVLayout",
+   "source": "HyperAI: UV Layout",
+   "text": "HyperAI：UV 布局"
   },
   {
    "namespace": "HyperAIStudioNiagaraExternalEditGate",
@@ -12027,6 +12045,36 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.bake-high-to-low.ph.high.label",
+   "source": "High-poly mesh",
+   "text": "高模网格"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.bake-high-to-low.ph.low.label",
+   "source": "Low-poly mesh",
+   "text": "低模网格"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.bake-high-to-low.ph.resolution.label",
+   "source": "Map size (px)",
+   "text": "贴图尺寸（像素）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.bake-high-to-low.summary",
+   "source": "Check the low-poly's UVs, unwrap them if they overlap, then bake normal, AO and ORM maps from the high-poly into a new material instance.",
+   "text": "检查低模 UV，重叠时先展开，再把高模的法线、AO 和 ORM 贴图烘焙进新的材质实例。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.bake-high-to-low.title",
+   "source": "Bake normal and AO from a high-poly onto a low-poly",
+   "text": "把高模的法线和 AO 烘焙到低模"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "modelling-geometry.check-imported-mesh.summary",
    "source": "Read an imported static mesh's LOD build settings, material slots and source file, and validate it for build and reimport.",
    "text": "读取导入静态网格的 LOD 构建设置、材质槽和源文件，并按构建与重新导入两种标准验证。"
@@ -12489,6 +12537,36 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.prepare-generated-model.ph.name.label",
+   "source": "Generated asset name",
+   "text": "生成资产名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.prepare-generated-model.ph.resolution.label",
+   "source": "Map size (px)",
+   "text": "贴图尺寸（像素）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.prepare-generated-model.ph.triangles.label",
+   "source": "Low-poly triangles",
+   "text": "低模三角面数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.prepare-generated-model.summary",
+   "source": "After a paid model imports, check its UVs, unwrap them if bad with its textures carried over, and write a decimated copy with baked maps.",
+   "text": "付费模型导入后检查其 UV，不合格时重新展开并迁移原有纹理，再写出带烘焙贴图的减面副本。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.prepare-generated-model.title",
+   "source": "Ready a generated model: UVs, low-poly and baked maps",
+   "text": "整理生成的模型：UV、低模和烘焙贴图"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "modelling-geometry.price-paid-model.ph.name.label",
    "source": "Asset name",
    "text": "资产名称"
@@ -12750,6 +12828,24 @@
    "key": "modelling-geometry.twisted-spire.title",
    "source": "Model a twisted wizard spire with a pointed cap",
    "text": "制作一座带尖顶的扭曲法师尖塔"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.uv-check-and-unwrap.ph.texture_size.label",
+   "source": "Texture size (px)",
+   "text": "纹理尺寸（像素）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.uv-check-and-unwrap.summary",
+   "source": "Measure the selected mesh's UV channel, preview an xatlas unwrap, apply it only if it improves, and check it again.",
+   "text": "测量所选网格的 UV 通道，预览 xatlas 展开，仅在确有改善时应用，然后再次检查。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "modelling-geometry.uv-check-and-unwrap.title",
+   "source": "Check a mesh's UVs and unwrap them if bad",
+   "text": "检查网格 UV，不合格时重新展开"
   },
   {
    "namespace": "HyperAIStudioPrompts",

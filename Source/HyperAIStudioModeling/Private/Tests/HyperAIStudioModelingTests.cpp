@@ -160,8 +160,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelingContractsTest, "HyperAISt
 bool FHyperAIStudioModelingContractsTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::ModelingTests;
-	TestEqual(TEXT("four tools"), C::GetToolNames(), TArray<FString>({TEXT("hyper_model_inspect"), TEXT("hyper_model_apply_plan"), TEXT("hyper_model_validate"),
-		TEXT("hyper_model_handoff")}));
+	TestEqual(TEXT("eight tools"), C::GetToolNames(), TArray<FString>({TEXT("hyper_model_inspect"), TEXT("hyper_model_apply_plan"), TEXT("hyper_model_validate"),
+		TEXT("hyper_model_handoff"), TEXT("hyper_model_uv_check"), TEXT("hyper_model_uv_apply"), TEXT("hyper_model_bake"), TEXT("hyper_model_prepare")}));
 	FHyperAIStudioExtensionCohortAdmission Admission;
 	TestTrue(TEXT("the mesh_modeling pack's cohort is in the generated catalog, exactly: ")
 		+ FHyperAIStudioExtensionRuntime::DescribeExactGeneratedCohortMismatch(C::PackId, C::AtomicCohortId, C::GetToolNames()),

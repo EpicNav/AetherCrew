@@ -1,6 +1,6 @@
 ---
 name: unreal-modeling
-description: Model 3D props in Unreal with HyperAI's Geometry Script tools, free and offline - rocks, boulders, standing stones, pillars, arches, ruined walls, towers, crystal clusters, mushrooms, tree trunks, trees, bushes, grass tufts from recipes, or any shape from primitives, revolves, sweeps, booleans, plane cuts, mirrors, extrude, inset, offset, bevel, Catmull-Clark subdivision, noise, bend/twist/flare and ripple warps, remeshing and UVs - written as static meshes with collision and vertex-colour tints. Use for placeholder and stylised props, kitbash parts and set dressing, and to hand a mesh to a person in Modeling Mode to edit by hand, then read the change back; not for paid textured models (hyper_mesh_generate) or terrain.
+description: Model 3D props in Unreal with HyperAI's Geometry Script tools, free and offline - rocks, boulders, standing stones, pillars, arches, ruined walls, towers, crystal clusters, mushrooms, tree trunks, trees, bushes, grass tufts from recipes, or any shape from primitives, revolves, sweeps, booleans, plane cuts, mirrors, extrude, inset, offset, bevel, Catmull-Clark subdivision, noise, bend/twist/flare and ripple warps, remeshing and UVs - written as static meshes with collision and vertex-colour tints. Use for placeholder and stylised props, kitbash parts and set dressing, and to hand a mesh to a person in Modeling Mode to edit by hand, then read the change back. Also checks, unwraps (xatlas, PatchBuilder, projections, lightmap UVs) and bakes textures (normal, AO, curvature, colour carried across) for any static mesh, generated and imported ones too; not for making paid textured models (hyper_mesh_generate) or terrain.
 ---
 
 # Modeling props with Geometry Script
@@ -11,6 +11,10 @@ description: Model 3D props in Unreal with HyperAI's Geometry Script tools, free
 | build meshes from ops and recipes, then write them as static meshes | `hyper_model_apply_plan` |
 | check written meshes as props: triangles, size, pivot, open edges, UVs, slots, collision | `hyper_model_validate` |
 | hand a mesh to a person in Modeling Mode, selected and framed; read the edit back | `hyper_model_handoff` |
+| check any static mesh's UV channel: overlap, flips, islands, texel density, lightmap texels; a layout PNG | `hyper_model_uv_check` |
+| lay a channel out again (xatlas, patch, projections, repack, lightmap UVs), checked before and after | `hyper_model_uv_apply` |
+| bake normal, AO, curvature, position, colour and other maps into textures and a material instance | `hyper_model_bake` |
+| ready a generated or imported model: unwrap bad UVs, carry its textures, bake onto a decimated copy | `hyper_model_prepare` |
 
 Toolset `HyperAIStudioModeling.HyperAIStudioModelingToolset`. The pack needs the Geometry Script plugin.
 
@@ -272,6 +276,77 @@ instead (place it, scatter it, or hand it over again). The hand-off refuses duri
 off, in an unattended editor, for an asset outside `/Game` or not a static mesh, and while a tool is open in
 Modeling Mode or any other editor mode, since opening Modeling Mode would cancel it (the person Accepts or Cancels
 it first).
+
+## UVs and textures for any static mesh
+
+These four work on any static mesh in the project (under `/Game` or a project plugin), not just ones a plan wrote:
+imported, generated, hand-made. Engine content can be checked but not changed, and cooked or read-only assets are
+refused.
+
+**Check first, read-only.** `hyper_model_uv_check` with `Asset`, `LOD` (`-1` is the hi-res Nanite source; a LOD
+reduced from another is read from the built mesh), `Channel` and `TextureSize`. `Verdict` is `good`, `usable`
+(warnings only), `bad` or `missing`, and `Problems` says why, errors first: `overlap` (percent of the UV area covered
+twice, and which islands, `3+7` or `5 itself` for a fold), `flipped`, `degenerate`, `no_uv_area`, then warnings
+`outside_unit`, `texel_density` (spread over 4x), `fragmented`, `low_coverage`. `Metrics` has the numbers (islands,
+seam length, density at TextureSize in texels per meter). `Lightmap` checks the asset's lightmap channel at its
+lightmap resolution (or `LightmapResolution`): shared texels, islands closer than `LightmapPadding`, UVs outside
+0-1, and whether the build makes it. Open `LayoutPath`: islands in muted colours with light outlines, overlaps red,
+flipped triangles magenta, degenerate ones yellow, the 0-1 square framed. Overlap is fine for tiling or mirrored
+textures, and wrong for bakes and lightmaps.
+
+**Lay it out again.** `hyper_model_uv_apply` with `Method`:
+
+- `xatlas` (the default) or `patch` (PatchBuilder) unwrap from scratch, then pack into 0-1 with `Padding` texels
+  between islands at `Resolution` (4 at 1024 by default).
+- `box`, `planar`, `cylinder` project, then pack (`bRepack: true`, for baking), or keep `TileSize` cm per tile for
+  tiling materials (`bRepack: false`, which leaves UVs outside 0-1 on purpose).
+- `repack` keeps the channel's islands and packs them again with the padding.
+- `lightmap` has the mesh build its lightmap UVs with Unreal's own packer from `SourceChannel` into `Channel` (1 by
+  default) at `Resolution` (64), and sets the asset's lightmap index and resolution.
+
+`Channel` one past the last adds a channel. `LODs` defaults to `[0]`: each LOD unwrapped gets its own layout, so a
+texture made for LOD 0 will not fit another; let other LODs be reduced from LOD 0 instead. Every other channel,
+material slot, section, normal and colour stays as it was. `bDryRun: true` builds it in memory: `LODs[]` gives the
+check before and after, `bImproved`, and `LayoutPath` the new layout. A layout that would come out worse than it went
+in is refused. Written, it is one undo step; the asset is read back (`bVerified`) and saved.
+
+**Bake.** `hyper_model_bake` lays maps out in the target's `TargetChannel` (it wants islands that do not overlap:
+unwrap first, `TargetUVs` says how it is). `Source` is the detailed mesh (its hi-res source when it has one); empty
+bakes the target from itself (AO, curvature, position, vertex colour, its own texture). `Maps`:
+
+| map | texture | what for |
+|---|---|---|
+| `normal` | T_x_N, TC_Normalmap | tangent-space detail of Source on the target; carries Source's own normal map too |
+| `ao` | T_x_AO, TC_Masks, and T_x_ORM | ambient occlusion (`OcclusionRays`, `OcclusionDistance`) |
+| `bent_normal`, `object_normal` | BN (normal map), ON (exact, linear) | |
+| `curvature`, `height`, `position` | CV, H (grayscale), P (exact, linear) | height maps `ProjectionDistance` cm either side |
+| `vertex_color` | VC, sRGB | vertex colours into a texture |
+| `texture` | BC, sRGB | a texture carried from Source's UVs (`SourceTexture`, or its slot 0 base colour) |
+| `multi_texture` | BC, sRGB | each slot's base colour texture, one texture |
+| `material` | BC, N and ORM | Source drawn in its own preview world with render captures: base colour, normal, roughness and metal; needs an editor that renders, and not with texture or normal |
+
+`Resolution` (power of two, 16-4096), `Samples` (1, 4, 16, 64), `Padding` (dilation, pixels). Data maps are linear,
+colour maps sRGB. With `ao`, `bPackORM` writes ORM (red occlusion, green `Roughness`, blue `Metallic`). `Material:
+"new"` makes `MI_x_Baked`, an instance of `/Game/HyperAI/Modeling/M_HyperAIBakedSurface` (BaseColor, Normal, ORM
+texture parameters, BaseColorTint, Roughness, Metallic); a path updates that material instance. `AssignSlots: "all"`
+(or `"0,2"`) puts it on the target. Textures already there are refused unless `bReplace: true`. `bDryRun` names the
+textures; with `bPreviewDryRun` it also bakes at 128 px and draws them. The written maps are drawn side by side at
+`PreviewPath`, and each texture's `Min`/`Mean`/`Max` brightness says whether it holds anything.
+
+**Generated models.** After `hyper_mesh_generate` imports a model (Tripo, Meshy, Hi3D: dense, often with overlapping
+or fragmented UVs and one base colour texture), call `hyper_model_prepare` with its static mesh:
+
+```json
+{"Asset": "/Game/Generated/SM_Dragon", "LowPoly": "/Game/Generated/SM_Dragon_Low", "TargetTriangles": 8000, "Resolution": 2048, "bDryRun": true}
+```
+
+It checks channel 0; when the verdict is bad or missing (`UnwrapUVs: auto`; `always` or `never`), it unwraps LOD 0
+with xatlas and carries the model's base colour and normal textures onto the new layout (`T_Dragon_BC`, `T_Dragon_N`
+in `MI_Dragon_Baked`, on every slot). With `LowPoly` it writes a decimated copy, unwrapped, with normal, AO (and ORM)
+and base colour baked from the original (`Maps` changes which), its own material instance and the original's simple
+collision. `bLightmapUVs` adds lightmap UVs in channel 1. Read the dry run's `Steps`, then send it with `bDryRun:
+false`; open `LayoutPath`, `MapsPreviewPath` and `PreviewPath`. Undo takes back the asset's own change; new textures,
+materials and the low-poly stay until deleted.
 
 ## Using the results
 

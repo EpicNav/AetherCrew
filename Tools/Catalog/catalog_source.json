@@ -3766,6 +3766,38 @@
      "safety": [
       "Edit"
      ]
+    },
+    {
+     "name": "hyper_model_uv_check",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_model_uv_apply",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_model_bake",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_model_prepare",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ]
   },
