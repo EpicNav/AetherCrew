@@ -8,6 +8,11 @@
 
 class SWidget;
 
+namespace HyperAIStudio::AutoApproval::KeepOn
+{
+	enum class ERefusal : uint8;
+}
+
 enum class EHyperAIStudioAutoApprovalDuration : uint8
 {
 	FifteenMinutes,
@@ -47,15 +52,40 @@ struct FHyperAIStudioAutoApprovalStatus
 	int32 ChosenWaiting = 0;
 	/** Writes of Sandbox Mode's held saves; each is also one of Approved. */
 	int32 SandboxWrites = 0;
+	/** "Stay on after the editor restarts" was ticked: a protected record under Saved/ follows it. */
+	bool bStaysOnAfterRestart = false;
+	/** It came back on by itself as this editor started, from before a restart. */
+	bool bRestored = false;
+};
+
+/**
+ * What the auto-approval dialog opens with: the choices the user last turned it on with, kept in the editor's per-user
+ * project settings. UI preferences only: nothing reads them but the dialog, and they never turn anything on.
+ */
+struct FHyperAIStudioAutoApprovalChoices
+{
+	TArray<EHyperAIStudioApprovalCategory> Categories = {EHyperAIStudioApprovalCategory::Edits};
+	EHyperAIStudioAutoApprovalDuration Duration = EHyperAIStudioAutoApprovalDuration::OneHour;
+	bool bAlsoApproveWaiting = true;
+	bool bStayOnAfterRestart = false;
+
+	bool operator==(const FHyperAIStudioAutoApprovalChoices& Other) const
+	{
+		return Categories == Other.Categories && Duration == Other.Duration && bAlsoApproveWaiting == Other.bAlsoApproveWaiting
+			&& bStayOnAfterRestart == Other.bStayOnAfterRestart;
+	}
 };
 
 /**
  * For a while the user chose, requests in the categories they chose are approved as their click would approve them.
  *
  * Only SHyperAIStudioAutoApprovalDialog turns it on, after its warning and a native confirmation: nothing reflected,
- * configured, exported or registered as a console command can. It lives in this process's memory only, so it is off at
- * every editor start and never saved. Anything may turn it off; what it approved that has not started by then waits
- * for a click again. Game thread only.
+ * configured, exported or registered as a console command can. It lives in this process's memory, so it is off at every
+ * editor start, unless the user ticked "Stay on after the editor restarts": then a record sealed with Windows DPAPI for
+ * this user and project (HyperAIStudioAutoApprovalKeepOn.h) follows it under Saved/, and the next editor brings it back
+ * once, if the record is valid, unexpired, younger than 24 hours, under the same spend settings and, for "until the
+ * editor closes", the editor opened again within 30 minutes. Anything may turn it off; what it approved that has not
+ * started by then waits for a click again. Game thread only.
  */
 class FHyperAIStudioAutoApproval
 {
@@ -65,9 +95,20 @@ public:
 	static constexpr int32 MaxExternalEffects = 10;
 	static constexpr int32 MaxConsecutiveFailures = 3;
 
+	/**
+	 * Module lifetime. Startup waits for the editor's main window, so the notification can be seen, and then brings back
+	 * an auto-approval kept on from before a restart; until then it is off, so nothing is auto-approved before it.
+	 */
+	static void Startup();
+	static void Shutdown();
+
 	static bool IsActive();
 	/** Names the current activation, so work it approved runs only while it lasts; 0 while off. */
 	static uint64 GetActivationId();
+	/** The current activation came back on by itself after the editor restarted. */
+	static bool IsRestored();
+	/** That activation (an id from GetActivationId) came back on after a restart: what it approved is marked so. */
+	static bool WasRestored(uint64 ActivationId);
 	static FHyperAIStudioAutoApprovalStatus GetStatus();
 	/**
 	 * Would a request of this category, held at Sequence, be approved now? Reads only: an activation whose time ran out
@@ -121,16 +162,31 @@ public:
 	/** "Auto-approval on: Edits (52 min left)", for the banners. */
 	static FText DescribeBanner();
 	static FText DescribeBannerTooltip();
+	/**
+	 * "Auto-approval is back on from before the restart: Edits, until 14:35.", and when requests were already waiting,
+	 * that it approves only new ones. ExpiresUtc is unset for "until the editor closes".
+	 */
+	static FText DescribeRestored(const TArray<EHyperAIStudioApprovalCategory>& Categories, const TOptional<FDateTime>& ExpiresUtc, int32 Waiting);
+
+	/** The choices the dialog opens with: the last ones the user turned it on with, or the defaults. */
+	static FHyperAIStudioAutoApprovalChoices LoadChoices();
+	/** Section [HyperAIStudio.AutoApprovalDialog] of IniFile; the defaults for anything missing or not understood. */
+	static FHyperAIStudioAutoApprovalChoices ReadChoices(const FString& IniFile);
+	static void WriteChoices(const FString& IniFile, const FHyperAIStudioAutoApprovalChoices& Choices);
+	static const TCHAR* GetChoicesSection();
 
 private:
 	friend class SHyperAIStudioAutoApprovalDialog;
 	/**
 	 * The dialog's confirm path, after the native confirmation. Replaces a running activation, except that a test's
 	 * activation never replaces the user's own. ChosenWaiting names requests that were waiting as the dialog opened
-	 * and that the user chose there to approve as well; it covers no other request held before it began.
+	 * and that the user chose there to approve as well; it covers no other request held before it began. With
+	 * bStayOnAfterRestart a protected record follows it under Saved/; without, any earlier record is deleted.
 	 */
 	static bool Activate(const TArray<EHyperAIStudioApprovalCategory>& Categories,
-		EHyperAIStudioAutoApprovalDuration Duration, const TSet<FString>& ChosenWaiting, FString& OutError);
+		EHyperAIStudioAutoApprovalDuration Duration, const TSet<FString>& ChosenWaiting, bool bStayOnAfterRestart, FString& OutError);
+	/** The dialog's Turn On, once it turned on: what the next dialog opens with. */
+	static void SaveChoices(const FHyperAIStudioAutoApprovalChoices& Choices);
 #if WITH_DEV_AUTOMATION_TESTS
 	friend struct FHyperAIStudioAutoApprovalTestAccess;
 	/**
@@ -176,10 +232,42 @@ struct FHyperAIStudioAutoApprovalTestAccess
 	/**
 	 * A fresh dialog with these categories and this duration, confirmed: the whole way a person turns it on. Unlike the
 	 * dialog's default, it leaves "Also approve the requests waiting now" unticked unless asked, so a test's requests
-	 * held before it keep waiting.
+	 * held before it keep waiting. "Stay on after the editor restarts" is ticked only when asked, and a test's record
+	 * is written only where SetRecordPath points.
 	 */
 	static bool TurnOn(const TArray<EHyperAIStudioApprovalCategory>& Categories, const TSet<FString>& OperationIds,
-		EHyperAIStudioAutoApprovalDuration Duration = EHyperAIStudioAutoApprovalDuration::OneHour, bool bAlsoApproveWaiting = false);
+		EHyperAIStudioAutoApprovalDuration Duration = EHyperAIStudioAutoApprovalDuration::OneHour, bool bAlsoApproveWaiting = false,
+		bool bStayOnAfterRestart = false);
+	static bool IsStayingOn(const SHyperAIStudioAutoApprovalDialog& Dialog);
+	static void SetStayOn(SHyperAIStudioAutoApprovalDialog& Dialog, bool bStayOn);
+	/** The tooltip of "Stay on after the editor restarts". */
+	static FText GetStayOnTooltip(const SHyperAIStudioAutoApprovalDialog& Dialog);
+	/**
+	 * Where a test's kept-on activation writes its record and a test restore reads it; empty (the default) and a test's
+	 * activation writes nothing. The user's own always use the real path, which tests never touch.
+	 */
+	static void SetRecordPath(const FString& Path);
+	/**
+	 * A dialog under test opens with the defaults and remembers nothing, so it never reads or writes the user's choices.
+	 * With this on it remembers its Turn On's choices in memory, as the user's settings would, until Reset.
+	 */
+	static void RememberChoices(bool bRemember);
+	/** What the editor does as it closes: a kept-on activation stamps its record's close time and stays on disk. */
+	static void CloseEditor();
+	/**
+	 * What startup does with the record at Path, as of the clock now (AdvanceClock moves it): it comes back as a test's
+	 * activation covering only OperationIds, or is refused, deleted and logged. Returns the refusal (None when it came back).
+	 */
+	static HyperAIStudio::AutoApproval::KeepOn::ERefusal Restore(const FString& Path, const TSet<FString>& OperationIds);
+	/** The notification the last restore or refusal showed (a test's is kept here, not shown); unset when there was none. */
+	static TOptional<FText> GetLastNotice();
+	/** The labels of its buttons; pressing one runs it as a click would. */
+	static TArray<FText> GetLastNoticeButtons();
+	static bool PressLastNoticeButton(int32 Index);
+	/** The clock a record is read against: now in UTC, moved by AdvanceClock. */
+	static FDateTime GetUtcNow();
+	/** The spend settings' fingerprint as a record holds it. */
+	static FString GetSpendFingerprint();
 	static bool WasClosed(const SHyperAIStudioAutoApprovalDialog& Dialog);
 	static int32 GetPendingShown(const SHyperAIStudioAutoApprovalDialog& Dialog);
 	/** "Also approve the requests waiting now": its tick, and how many waiting requests it would approve with the categories ticked. */

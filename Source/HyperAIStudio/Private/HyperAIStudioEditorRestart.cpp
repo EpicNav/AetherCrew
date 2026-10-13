@@ -62,7 +62,7 @@ namespace HyperAIStudio::EditorRestart::Private
 	 * An editor opened by hand takes the chats of a restart that closed the editor and never opened it again by itself
 	 * this soon after the close; later, up to MaxResumeAgeSeconds, it offers them.
 	 */
-	constexpr double MaxRestartAgeWithoutTokenSeconds = 30.0 * 60.0;
+	constexpr double MaxRestartAgeWithoutTokenSeconds = FHyperAIStudioEditorRestart::AutoResumeWindowSeconds;
 	/** The editor waits this long before it closes, so the tool's answer reaches the agent first. */
 	constexpr float CloseDelaySeconds = 2.0f;
 	/**

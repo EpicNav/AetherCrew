@@ -747,6 +747,18 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
+   "key": "BannerTooltipKeptOn",
+   "source": "{0}\n\nIt stays on if the editor restarts (\"Stay on after the editor restarts\" was ticked).",
+   "text": "{0}\n\n编辑器重启后它仍会保持开启（已勾选“编辑器重启后保持开启”）。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "BannerTooltipRestored",
+   "source": "{0}\n\nIt came back on by itself when the editor restarted, as you chose with \"Stay on after the editor restarts\"; the counts carried over.",
+   "text": "{0}\n\n按你勾选的“编辑器重启后保持开启”，它在编辑器重启后自动恢复开启；之前的计数也一并延续。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
    "key": "BannerTooltipSandbox",
    "source": "Agents' requests in these categories run without asking you, from any agent or MCP client connected to this editor. {0} approved so far, {2} of them writes of Sandbox Mode's held saves; it turns itself off after {1}. Requests in other categories still wait for you.",
    "text": "这些类别中的智能体请求将不再询问你直接运行，无论来自连接到此编辑器的哪个智能体或 MCP 客户端。目前已批准 {0} 个，其中 {2} 个是写入沙盒模式保留的保存；达到 {1} 个后会自行关闭。其他类别的请求仍会等待你处理。"
@@ -831,6 +843,24 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmStayOn",
+   "source": "{0}\n\n{1}",
+   "text": "{0}\n\n{1}"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmStayOnTimed",
+   "source": "It stays on after the editor restarts: if the editor opens again before its time runs out, it comes back on by itself for new requests until then.",
+   "text": "编辑器重启后它仍会保持开启：如果编辑器在时间到之前再次打开，它会自动恢复开启，在剩余时间内只覆盖新的请求。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmStayOnUntilClose",
+   "source": "It stays on after the editor restarts: if the editor opens again within 30 minutes of closing, it comes back on by itself for new requests, up to 24 hours from now.",
+   "text": "编辑器重启后它仍会保持开启：如果编辑器在关闭后 30 分钟内再次打开，它会自动恢复开启，只覆盖新的请求，最长持续到从现在起 24 小时。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
    "key": "ConfirmUntilClose",
    "source": "Until the editor closes",
    "text": "在编辑器关闭之前"
@@ -885,9 +915,9 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
-   "key": "EndingUnstarted",
-   "source": "It is never saved. It ends when its time runs out, when you press Stop, when the editor closes, when the spend cap or an external service's or image model's settings change, or by itself after {0} approvals, {1} external-effect requests, or {2} failures in a row. What it approved that has not started by then waits for your approval again.",
-   "text": "它从不保存。时间到、你按下“停止”、编辑器关闭，或者花费上限、外部服务或图片模型的设置发生变化时，它都会结束；批准 {0} 次、批准 {1} 个外部影响请求或连续失败 {2} 次后，它也会自行关闭。届时它已批准但尚未开始的请求，会重新等待你的审批。"
+   "key": "EndingStayOn",
+   "source": "It ends when its time runs out, when you press Stop, when the editor closes (unless you tick Stay on after the editor restarts below), when the spend cap or an external service's or image model's settings change, or by itself after {0} approvals, {1} external-effect requests, or {2} failures in a row. What it approved that has not started by then waits for your approval again.",
+   "text": "时间到、你按下“停止”、编辑器关闭（除非你勾选了下方的“编辑器重启后保持开启”），或者花费上限、外部服务或图片模型的设置发生变化时，它都会结束；批准 {0} 次、批准 {1} 个外部影响请求或连续失败 {2} 次后，它也会自行关闭。届时它已批准但尚未开始的请求，会重新等待你的审批。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -969,6 +999,48 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
+   "key": "KeepOnClosedTooLong",
+   "source": "it lasted until the editor closed, and the editor stayed closed 30 minutes or more",
+   "text": "它设为持续到编辑器关闭，而编辑器关闭了 30 分钟或更久"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "KeepOnExpired",
+   "source": "its time ran out while the editor was closed",
+   "text": "编辑器关闭期间它的时间已经用完"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "KeepOnFuture",
+   "source": "its saved times are later than now; the clock may have been set back",
+   "text": "保存的时间晚于当前时间；系统时钟可能被调回过"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "KeepOnInvalid",
+   "source": "its saved record was not valid for you and this project (it was changed, or written by something else)",
+   "text": "保存的记录对你和此项目无效（它被改动过，或由其他程序写入）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "KeepOnLimitReached",
+   "source": "it had already reached one of its limits",
+   "text": "它已经达到了某项上限"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "KeepOnSpendChanged",
+   "source": "the spend cap, an external service or an image model changed since it was turned on",
+   "text": "开启之后，花费上限、外部服务或图片模型发生了变化"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "KeepOnTooOld",
+   "source": "it was turned on 24 hours ago or more",
+   "text": "它是在 24 小时或更早之前开启的"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
    "key": "KeepWaitingBody",
    "source": "They keep waiting for your click: auto-approval then covers only requests made after you turn it on.",
    "text": "它们会继续等待你点击：此后自动批准只覆盖开启之后发出的请求。"
@@ -1011,6 +1083,12 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
+   "key": "OnToastKeptOn",
+   "source": "Auto-approval is on {0}: {1}. Requests in these categories now run without asking you, and it stays on if the editor restarts; Stop is in Activity and in each chat window.",
+   "text": "自动批准已开启（{0}）：{1}。这些类别的请求现在会直接运行，不再询问你，编辑器重启后它仍会保持开启；“停止”按钮位于“活动”面板和每个对话窗口中。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
    "key": "OneHour",
    "source": "1 hour",
    "text": "1 小时"
@@ -1044,6 +1122,60 @@
    "key": "PendingMore",
    "source": "and {0} more",
    "text": "以及另外 {0} 个"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "RestoreEndedToast",
+   "source": "Auto-approval did not come back on after the restart: {0}. It is off; turn it on again from Activity if you want it.",
+   "text": "重启后自动批准没有恢复开启：{0}。它现在是关闭的；如仍需要，请在“活动”中重新开启。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "RestoreRefusedToast",
+   "source": "A saved auto-approval was refused and deleted: {0}. Auto-approval is off.",
+   "text": "一条保存的自动批准记录被拒绝并已删除：{0}。自动批准已关闭。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "RestoreShow",
+   "source": "Show",
+   "text": "查看"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "RestoreShowTooltip",
+   "source": "Open Activity, where auto-approval's banner, what it approved and Stop are.",
+   "text": "打开“活动”，那里有自动批准的横幅、它批准过的内容和“停止”按钮。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "RestoreStop",
+   "source": "Stop",
+   "text": "停止"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "RestoreStopTooltip",
+   "source": "Turn auto-approval off now. Requests wait for your approval again.",
+   "text": "立即关闭自动批准。请求将重新等待你的审批。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "RestoredToast",
+   "source": "Auto-approval is back on from before the restart: {0}, until {1}.",
+   "text": "自动批准已从重启前恢复开启：{0}，直到{1}。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "RestoredUntilClose",
+   "source": "the editor closes",
+   "text": "编辑器关闭"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "RestoredWaiting",
+   "source": "{0} It approves only new requests: the {1} {1}|plural(one=request,other=requests) waiting from before {1}|plural(one=keeps,other=keep) waiting for you.",
+   "text": "{0} 它只批准新的请求：重启前就在等待的 {1} 个请求会继续等待你处理。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -1152,6 +1284,36 @@
    "key": "SpendSettingsToast",
    "source": "Auto-approval turned itself off: the spend cap, an external service or an image model changed in HyperAI Studio's settings. Check them before turning it on again.",
    "text": "自动批准已自行关闭：HyperAI Studio 设置中的花费上限、外部服务或图片模型发生了变化。重新开启前请先检查这些设置。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "StayOnLabel",
+   "source": "Stay on after the editor restarts",
+   "text": "编辑器重启后保持开启"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "StayOnNoteTimed",
+   "source": "If the editor restarts before its time runs out, it comes back on by itself for what is left of it (time closed counts), for new requests only.",
+   "text": "如果编辑器在时间到之前重启，它会在剩余时间内自动恢复开启（关闭期间的时间也计算在内），只覆盖新的请求。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "StayOnNoteUnticked",
+   "source": "Unticked, it ends when the editor closes.",
+   "text": "不勾选时，它会在编辑器关闭时结束。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "StayOnNoteUntilClose",
+   "source": "If the editor opens again within 30 minutes of closing, it comes back on by itself, for new requests only, never more than 24 hours after you turn it on.",
+   "text": "如果编辑器在关闭后 30 分钟内再次打开，它会自动恢复开启，只覆盖新的请求，且最多持续到你开启后 24 小时。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "StayOnTooltip",
+   "source": "Unticked (the default), auto-approval ends when the editor closes, whatever time is left.\n\nTicked, while it is on HyperAI keeps a record of it in this project's Saved folder, encrypted by Windows for your account. When the editor opens again it comes back on by itself, with the same categories, the time left (time the editor was closed counts) and its counts toward the limits, and a notification with Stop says so. It does not come back if its time ran out, if you turned it on 24 hours ago or more, if the spend cap, an external service or an image model changed, or, with When the editor closes, if the editor stayed closed 30 minutes or more. Only requests made after it comes back are approved; requests already waiting keep waiting for you. Stop, its limits, a settings change and turning it off delete the record.",
+   "text": "不勾选（默认）时，无论还剩多少时间，自动批准都会在编辑器关闭时结束。\n\n勾选后，在它开启期间，HyperAI 会在此项目的 Saved 文件夹中保存一条它的记录，由 Windows 针对你的账户加密。编辑器再次打开时，它会自动恢复开启，类别相同，时间为剩余时间（编辑器关闭期间的时间也计算在内），并延续它在各项上限中的计数，同时会有一条带“停止”按钮的通知告诉你。如果它的时间已用完、你是在 24 小时或更早之前开启它的、花费上限、外部服务或图片模型发生了变化，或者在选择“编辑器关闭时”的情况下编辑器关闭了 30 分钟或更久，它都不会恢复。恢复后只批准之后发出的请求；已在等待的请求会继续等待你处理。按“停止”、达到上限、设置变化以及关闭它都会删除这条记录。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -18126,6 +18288,18 @@
    "key": "AutoApproveTooltip",
    "source": "Let agents' requests run without asking you, for a while. It shows what it covers and asks before it turns on.",
    "text": "让智能体的请求在一段时间内无需询问你即可运行。开启前会说明它覆盖的范围并请你确认。"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "AutoApprovedKeptOnKind",
+   "source": "Auto-approved (kept on after restart, {0})",
+   "text": "已自动批准（重启后保持开启，{0}）"
+  },
+  {
+   "namespace": "SHyperAIStudioChatActivitySidebar",
+   "key": "AutoApprovedKeptOnOutcomeKind",
+   "source": "{0} (auto-approved, kept on after restart, {1})",
+   "text": "{0}（自动批准，重启后保持开启，{1}）"
   },
   {
    "namespace": "SHyperAIStudioChatActivitySidebar",

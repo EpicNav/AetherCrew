@@ -110,6 +110,12 @@ public:
 		int32 NoteTab = 0;
 	};
 
+	/**
+	 * An editor opened again this soon after a restart closed it takes the restart's chats by itself; later it offers
+	 * them. Auto-approval kept on "until the editor closes" comes back within the same window.
+	 */
+	static constexpr double AutoResumeWindowSeconds = 30.0 * 60.0;
+
 	static FHyperAIEditorRestartReport Restart(const FOptions& Options);
 	/** True from the moment a restart starts closing the editor: the close asks nothing more. */
 	static bool IsRestarting();

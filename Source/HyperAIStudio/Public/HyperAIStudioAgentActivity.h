@@ -39,6 +39,8 @@ struct FHyperAIStudioActivityEntry
 	FString Model;
 	/** Set when the user's auto-approval approved it rather than a click; the category that covered it. */
 	TOptional<EHyperAIStudioApprovalCategory> AutoApprovedAs;
+	/** That auto-approval came back on by itself after the editor restarted ("Stay on after the editor restarts"). */
+	bool bKeptOnAfterRestart = false;
 	/** A running agent job the user started approved it, not a click. */
 	bool bApprovedForJob = false;
 };

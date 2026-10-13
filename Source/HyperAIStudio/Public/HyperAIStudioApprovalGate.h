@@ -62,6 +62,8 @@ struct FHyperAIStudioApprovalRecord
 	EHyperAIStudioApprover ApprovedBy = EHyperAIStudioApprover::User;
 	/** Set when auto-approval approved it; the category that covered it. */
 	TOptional<EHyperAIStudioApprovalCategory> AutoApprovedAs;
+	/** The auto-approval that approved it had come back on by itself after the editor restarted. */
+	bool bKeptOnAfterRestart = false;
 	FDateTime ApprovedUtc = FDateTime::MinValue();
 };
 

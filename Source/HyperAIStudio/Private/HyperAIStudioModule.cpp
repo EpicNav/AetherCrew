@@ -605,6 +605,8 @@ public:
 		FHyperAIStudioBlueprintTidy::Startup();
 		// Other MCP servers that change this editor outside the approval gate: found shortly after start, and warned about.
 		FHyperAIStudioMcpBypassMonitor::Startup();
+		// Auto-approval the user kept on from before a restart comes back once the main window is up, or not at all.
+		FHyperAIStudioAutoApproval::Startup();
 		if (FHyperAIStudioExtensionRuntime::AreExtendedHyperToolsEnabled())
 		{
 			FString TrustedExecutionError;
@@ -872,6 +874,7 @@ public:
 		FHyperAIStudioSourceControl::Shutdown();
 		FHyperAIStudioBlueprintTidy::Shutdown();
 		FHyperAIStudioMcpBypassMonitor::Shutdown();
+		FHyperAIStudioAutoApproval::Shutdown();
 		FHyperAIStudioEditorStartupGate::Shutdown();
 		if (PIEPlaytestRegistration)
 		{

@@ -175,6 +175,7 @@ namespace HyperAIStudio::Approval::Private
 		Record.OperationId = OperationId;
 		Record.ApprovedBy = Approver;
 		Record.AutoApprovedAs = AutoCategory;
+		Record.bKeptOnAfterRestart = AutoCategory.IsSet() && FHyperAIStudioAutoApproval::IsRestored();
 		Record.ApprovedUtc = FDateTime::UtcNow();
 	}
 
@@ -382,16 +383,19 @@ namespace HyperAIStudio::Approval::Private
 		const TCHAR* const FromBefore = !bFromBefore ? TEXT("")
 			: bCarried ? TEXT(" (the auto-approval this one replaced had approved it before it started)")
 			: TEXT(" (it was waiting when auto-approval was turned on, and was chosen in its dialog)");
+		// An auto-approval that came back on by itself after a restart says so wherever its approvals show.
+		const bool bKeptOn = AutoCategory.IsSet() && FHyperAIStudioAutoApproval::IsRestored();
 		const FString Approved = AutoCategory.IsSet()
-			? FString::Printf(TEXT("Auto-approved as %s%s; "), ::LexToString(*AutoCategory), FromBefore)
+			? FString::Printf(TEXT("Auto-approved as %s%s%s; "), ::LexToString(*AutoCategory), bKeptOn ? TEXT(" (kept on after restart)") : TEXT(""), FromBefore)
 			: Approver == EHyperAIStudioApprover::AgentJob ? FString(TEXT("Approved for a running agent job; "))
 			: FString(TEXT("Approved; "));
-		auto LogApproval = [&Item, &OperationId, &AutoCategory, Approver, bFromBefore, bCarried]()
+		auto LogApproval = [&Item, &OperationId, &AutoCategory, Approver, bFromBefore, bCarried, bKeptOn]()
 		{
 			if (AutoCategory.IsSet())
 			{
-				UE_LOG(LogHyperAIStudioApproval, Display, TEXT("Auto-approved %s on %s (%s) as %s%s."),
+				UE_LOG(LogHyperAIStudioApproval, Display, TEXT("Auto-approved %s on %s (%s) as %s%s%s."),
 					*Item.Pending.Summary.ToolName, *Item.Pending.Summary.EffectTarget, *OperationId, ::LexToString(*AutoCategory),
+					bKeptOn ? TEXT(" by auto-approval kept on after the editor restarted") : TEXT(""),
 					!bFromBefore ? TEXT("") : bCarried ? TEXT(", which the auto-approval it replaced had approved before it started")
 					: TEXT(", which was waiting when auto-approval was turned on"));
 			}
@@ -402,9 +406,10 @@ namespace HyperAIStudio::Approval::Private
 					Approver == EHyperAIStudioApprover::AgentJob ? TEXT(" for a running agent job") : TEXT(""));
 			}
 		};
-		auto Mark = [&AutoCategory, Approver](FHyperAIStudioActivityEntry& Entry)
+		auto Mark = [&AutoCategory, Approver, bKeptOn](FHyperAIStudioActivityEntry& Entry)
 		{
 			Entry.AutoApprovedAs = AutoCategory;
+			Entry.bKeptOnAfterRestart = bKeptOn;
 			Entry.bApprovedForJob = Approver == EHyperAIStudioApprover::AgentJob;
 		};
 		if (Item.Action)

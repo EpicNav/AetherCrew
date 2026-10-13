@@ -491,7 +491,8 @@ public:
 	 * edits run as soon as the agent submits them. Destructive and external-effect tools always need approval,
 	 * because their server grant is issued only by your approval: a click, or auto-approval you turned on for them.
 	 * To let requests run unattended for a while instead, use Auto-approve at the top of Activity: it warns you
-	 * first, lasts at most until the editor closes, and is never saved.
+	 * first and lasts at most until the editor closes, unless you tick its Stay on after the editor restarts, which
+	 * brings it back once after a restart (never more than 24 hours after you turned it on).
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow")
 	bool bRequireApprovalForAgentEdits = true;

@@ -278,9 +278,12 @@ bool FHyperAIStudioAutoApprovalUnreachableTest::RunTest(const FString& Parameter
 	}
 	TestTrue(TEXT("No reflected class, function, struct or enum names it: ") + FString::Join(Reflected, TEXT(", ")), Reflected.IsEmpty());
 
-	// Even while on, nothing of it reaches a config file, so a restart starts with it off.
+	// Even while on, nothing of it reaches a config file, so a restart starts with it off. The one section that names it
+	// holds the dialog's last choices, in the user's per-project settings, and only those four preferences: a restart
+	// brings it back only from a record sealed with DPAPI (HyperAIStudio.Chat.AutoApproval.Restart.*), never from config.
 	TestTrue(TEXT("It turns on through the dialog"), FAccess::TurnOn({ECategory::Edits}, {Scope.Add()}));
 	TArray<FString> Configured;
+	const TSet<FString> ChoiceKeys = {TEXT("Categories"), TEXT("Duration"), TEXT("AlsoApproveWaiting"), TEXT("StayOnAfterRestart")};
 	for (const FString* Ini : {&GEditorPerProjectIni, &GEditorSettingsIni, &GEditorIni, &GEngineIni, &GGameIni})
 	{
 		TArray<FString> Sections;
@@ -289,13 +292,26 @@ bool FHyperAIStudioAutoApprovalUnreachableTest::RunTest(const FString& Parameter
 		{
 			TArray<FString> Lines;
 			GConfig->GetSection(*Section, Lines, *Ini);
+			if (Ini == &GEditorPerProjectIni && Section == FHyperAIStudioAutoApproval::GetChoicesSection())
+			{
+				for (const FString& Line : Lines)
+				{
+					FString Key;
+					FString Value;
+					if (!Line.Split(TEXT("="), &Key, &Value) || !ChoiceKeys.Contains(Key.TrimStartAndEnd()))
+					{
+						Configured.Add(Section + TEXT(": ") + Line);
+					}
+				}
+				continue;
+			}
 			if (Names(Section) || Lines.ContainsByPredicate([&Names](const FString& Line) { return Names(Line); }))
 			{
 				Configured.Add(Section);
 			}
 		}
 	}
-	TestTrue(TEXT("No config section or key holds it: ") + FString::Join(Configured, TEXT(", ")), Configured.IsEmpty());
+	TestTrue(TEXT("No config section or key holds it, only the dialog's choices: ") + FString::Join(Configured, TEXT(", ")), Configured.IsEmpty());
 	FAccess::Reset();
 	TestFalse(TEXT("What module startup sees is off"), FHyperAIStudioAutoApproval::IsActive());
 	return true;
@@ -380,7 +396,8 @@ bool FHyperAIStudioAutoApprovalDialogTest::RunTest(const FString& Parameters)
 		!Entries.IsEmpty() && Entries[0].Detail.Contains(TEXT("automation test")) && !Entries[0].Detail.Contains(TEXT("confirmed")));
 
 	const TSharedRef<SHyperAIStudioAutoApprovalDialog> Again = FAccess::MakeDialog();
-	TestTrue(TEXT("The next dialog starts from the defaults again"), FAccess::IsTicked(*Again, ECategory::Edits)
+	// A person's next dialog opens with their last choices (Restart.DialogDefaultsAndRemembers); a test's never reads them.
+	TestTrue(TEXT("Under a test the next dialog starts from the defaults again"), FAccess::IsTicked(*Again, ECategory::Edits)
 		&& !FAccess::IsTicked(*Again, ECategory::ExternalEffects)
 		&& FAccess::GetDuration(*Again) == EHyperAIStudioAutoApprovalDuration::OneHour);
 	return true;
