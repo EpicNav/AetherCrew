@@ -610,6 +610,12 @@ namespace HyperAIStudio::Verify
 						*Name, StepIndex + 1, *FHyperAIBotExecutor::ActionName(Step.Action));
 					return false;
 				}
+				if (Step.Aim == EHyperAIBotAim::Cursor)
+				{
+					OutError = FString::Printf(TEXT("%s, step %d: aim Cursor needs the game's window and its cursor, which verification cases do not have. Aim it with hyper_playtest_run, or use Auto, Stick or Look."),
+						*Name, StepIndex + 1);
+					return false;
+				}
 				// The bot makes FNames of its target, property and widget names, and loads an input action given by its path.
 				if (!FHyperAIBotExecutor::Validate(Step, StepError)
 					|| !FHyperAIStudioNames::IsName(Step.Target, TEXT("target"), &StepError) || !FHyperAIStudioNames::IsName(Step.Property, TEXT("property"), &StepError)

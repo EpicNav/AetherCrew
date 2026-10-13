@@ -1,6 +1,6 @@
 ---
 name: unreal-playtest
-description: Play the game in Unreal and check that it works, with HyperAI's playtest bot. It plays like a person through the game's own controls, moving round obstacles, jumping, collecting, aiming and attacking, dodging, exploring, and fighting other players in PvP. It also presses input actions, clicks UI, waits for things to happen, and captures screenshots, then reports evidence per step with a map of each play. hyper_verify_run plays many such cases at once in under a minute. Use it to verify gameplay, such as a pickup adding score, a door opening, an enemy dying when shot, or a HUD updating.
+description: Play the game in Unreal and check that it works, with HyperAI's playtest bot. It plays like a person through the game's own controls, moving round obstacles, jumping, collecting, aiming the way the game reads aim (its cursor, right stick or view) and attacking, dodging, exploring, and fighting other players in PvP. It also presses input actions, clicks UI, waits for things to happen, and captures screenshots, then reports evidence per step with a map of each play. hyper_verify_run plays many such cases at once in under a minute. Use it to verify gameplay, such as a pickup adding score, a door opening, an enemy dying when shot, or a HUD updating.
 ---
 # Playtest with the HyperAI bot
 
@@ -89,13 +89,13 @@ Set `"bRecordVideo": true` (and `videoFps`, 10 unless set, 5 to 30) to record th
 `Play` plays toward a goal the way a person would:
 - **Controls:** it reads the game's controls and moves with the game's move input, relative to the camera, looking where it goes.
 - **Moving:** it steers round what blocks the way, jumps what it can, and backs off to try another way when stuck.
-- **Fighting:** it reacts, turns and aims like a person, with an aim that settles, and attacks when the crosshair is on the target. It strafes, hops and dodges meanwhile.
+- **Fighting:** it reacts, turns and aims like a person, with an aim that settles, and attacks when the crosshair is on the target. It strafes, hops and dodges meanwhile. In a game that aims by its cursor or its right stick it aims those too, and attacks once the game's own aim is on the target (see Aim the way the game aims).
 
 | goal | fields | passes when |
 |---|---|---|
 | Reach | target or location, radius (100 cm), timeoutSeconds | The player got within radius. Fails `stuck`, saying where. |
 | Collect | target: a tag or class naming all of them, timeoutSeconds | Every one was picked up. Presses the interact action when walking onto one is not enough. Fails `not_collected` with the ones that stayed. |
-| Defeat | target, skill, range, healthProperty, inputAction, timeoutSeconds | Every target's health reached 0 or it is gone. See the failures below. |
+| Defeat | target, skill, range, healthProperty, inputAction, aim (Auto unless set), timeoutSeconds | Every target's health reached 0 or it is gone. See the failures below. |
 | Survive | target (the threats), seconds, range (2500 cm) | The player is still alive after seconds. It keeps its distance from threats and weaves. Fails `died`. |
 | Explore | seconds | The player did not die or fall out of the world. Reports the squares it visited, where it got stuck and where it fell. |
 | Follow | target, radius (set it: 300 to 500 cm), seconds | The player kept within radius of the target 80% of the time after the first 2 s. It sprints to catch up. Fails `fell_behind`. |
@@ -136,6 +136,39 @@ A duel, with the second player 15 m ahead of the start:
 
 The duel passes when Player0 wins. It fails `defeated` when Player1 wins, and the report tells both sides.
 
+## Aim the way the game aims
+
+A game reads its player's aim from one of three places. Aim through the one it reads, or attacks go somewhere else.
+
+| the game | aim | what the bot does |
+|---|---|---|
+| Top-down, isometric, twin-stick on the mouse, click to attack | `Cursor` | Puts the game window's own cursor on the target's screen point, and moves it a few pixels round it each frame with the matching mouse motion, so checks such as "the cursor moved lately" keep passing. The user's real cursor never moves. |
+| A gamepad game, or a player on a gamepad | `Stick` | Pushes the right stick toward the target, relative to the camera. |
+| First-person, third-person over the shoulder | `Look` | Turns the view (the control rotation) to the target, as LookAt does. |
+| Not sure | `Auto`, the default | Picks one from what the game shows, and says which and why in the evidence. |
+
+Two ways to aim:
+- **`AimAt`:** aims at `target` or `location` for `seconds` (0.5 unless set), then checks.
+- **`aim` on Press, Hold or Interact:** the attack is aimed before it fires and for as long as it is held. Press and Hold aim at `target` or `location`.
+
+```json
+{"stepId": "slash", "kind": "Bot", "timeoutMs": 5000, "bot": {"action": "Press", "inputAction": "IA_Attack", "target": "BP_Enemy", "aim": "Auto"}},
+{"stepId": "channel", "kind": "Bot", "timeoutMs": 8000, "bot": {"action": "Hold", "inputAction": "IA_Beam", "target": "BP_Enemy", "aim": "Cursor", "seconds": 2, "lead": 0.2}}
+```
+
+How it checks:
+- **The game's own aim:** when the pawn or one of its components has GetAimWorldLocation, GetAimDirection or GetAimDirectionFlat, the bot reads them after aiming. A direction passes within `tolerance` degrees (10 unless set). A cursor's aim point passes within `radius` cm (100).
+- **The evidence:** how it aimed and why, the cursor's point in the window (such as `(812, 455) of 1280x720`), and each reading of the game's aim.
+- **A failure:** `aim_off_target` means the game aims somewhere else than the bot aimed. Try another aim. `aim_not_applied` means the aim never took hold, such as a target always behind the camera; the evidence says why. `viewport_unavailable` means a cursor aim ran where there is no window.
+
+More to know:
+- **`lead`** aims ahead of a moving target by that many seconds of its travel, 0 to 2.
+- **A cursor rests.** It stays where the last aimed step left it until the run ends, as a hand rests on a mouse. A resting cursor stops counting as moving after a moment, as a still mouse does, so aim the attack itself rather than AimAt and then an unaimed Press.
+- **The video** draws each aim when `bRecordVideo` is on: a ring on the point, and a line from the player.
+- **Where the cursor works:** only in `hyper_playtest_run`, which has a window. Verification copies have none, so there Auto aims by the view and a pinned `Cursor` is refused.
+- **Players:** in a networked session each client has its own window and cursor, so each client's steps aim by its own. A second local player shares the first one's window and cursor, so it aims by stick or look.
+- **CommonInput:** the bot's stick does not switch CommonInput to Gamepad, because CommonUI then hides and moves the real cursor. A game that picks its aim by CommonInput's device keeps reading the mouse, so aim it by cursor. Auto picks the stick only when CommonInput already reports a gamepad.
+
 ## Bot actions
 
 | action | fields | passes when |
@@ -145,10 +178,11 @@ The duel passes when Player0 wins. It fails `defeated` when Player1 wins, and th
 | Survey | target (optional) | Always passes. Reports the player and the camera, an actor census, the controls with their keys, the player's health, and the other pawns near it. With a target, also its distance and whether the navmesh reaches it. |
 | MoveTo | target or location, radius (100 cm), timeoutSeconds (10) | The player is within radius. Follows the navmesh when there is one. Fails `stuck` after 3 s without progress. |
 | LookAt | target or location | The view faces it. |
+| AimAt | target or location, aim, lead, tolerance, seconds (0.5) | Aimed the way the game reads aim, and the game's own aim points there. Fails `aim_off_target`. |
 | Jump | timeoutSeconds | The character left the ground and landed. Characters only. |
-| Press | inputAction (`IA_Jump`, or an asset path), value | One press was injected through Enhanced Input, so the game's own bindings run. |
-| Hold | inputAction, seconds, value | The action was held for that long. `value: "0,1"` is forward for a 2D move action. |
-| Interact | target, inputAction (optional) | The player faced the target and pressed its interact action. Without one, the action named like Interact or Use. |
+| Press | inputAction (`IA_Jump`, or an asset path), value; aim with target or location | One press was injected through Enhanced Input, so the game's own bindings run. With aim, it fires once the aim is on the target. |
+| Hold | inputAction, seconds, value; aim with target or location | The action was held for that long. `value: "0,1"` is forward for a 2D move action. With aim, it stays aimed all through. |
+| Interact | target, inputAction (optional), aim (optional) | The player faced the target and pressed its interact action. Without one, the action named like Interact or Use. With aim, it aims at the target the game's way instead. |
 | Wait | seconds | That much time passed. |
 | WaitUntil | until (one of the Assert actions), its fields, timeoutSeconds | The assertion became true. |
 | AssertProperty | target, property, compare (`==` `!=` `<` `<=` `>` `>=` `contains`), value | The comparison holds. Numbers compare as numbers. |
@@ -177,6 +211,7 @@ The duel passes when Player0 wins. It fails `defeated` when Player1 wins, and th
   2. WaitUntil AssertProperty on `HealthComponent.Health`, with compare `<` and the value.
   3. Then check what death should do.
 - **Movement feel:** Hold `IA_Move` with value `0,1` for 2 seconds, then Sample for 1 second, and read the speeds.
+- **An attack's direction:** Press the attack with `aim` and the enemy as target. The evidence says how it aimed and where the game's own aim pointed. For a top-down or isometric game, also try `aim: Look`: if that one fails `aim_off_target` and Cursor passes, the game aims by its cursor.
 - **Combat:** Play Defeat on the enemies' tag or class. Its evidence says whether shots landed and did damage. `no_damage` means hits did nothing, which is a bug in the damage path. Then check what a defeat should do, such as score or loot.
 - **Can it be finished:** Play Reach to the goal, or Play Collect on every pickup. A `stuck` result says where the level blocks a player.
 - **Level coverage:** Play Explore for 30 to 60 seconds, then look at the map. Its stuck spots and falls are where players get trapped or fall out.

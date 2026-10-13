@@ -685,9 +685,11 @@ public:
 	 * Play the game in the editor and check it. mode StartInProcess starts Play In Editor and stops it after;
 	 * AttachOnly uses the session already running. Up to 32 steps run in order and the call returns at once:
 	 * follow it with hyper_operation_wait, then read the evidence with hyper_playtest_status. Steps of kind Bot
-	 * play as the player through the game's own input and movement: MoveTo, LookAt, Jump, Press, Hold, Interact,
+	 * play as the player through the game's own input and movement: MoveTo, LookAt, AimAt, Jump, Press, Hold, Interact,
 	 * Wait, WaitUntil, Survey, Sample, Capture (a PNG you can open), RecordStart and RecordStop, AssertProperty,
-	 * AssertNear, AssertOnScreen, AssertExists, AssertGone, UiClick, UiType and UiAssert. Play plays toward a goal
+	 * AssertNear, AssertOnScreen, AssertExists, AssertGone, UiClick, UiType and UiAssert. AimAt, and Press, Hold and
+	 * Interact with aim, aim the way the game reads aim (its cursor, right stick or view; auto picks) and check the
+	 * game's own aim after. Play plays toward a goal
 	 * the way a person would (Reach, Collect, Defeat, Survive or Explore: moving, jumping, aiming and attacking
 	 * through the game's controls) and writes a map of it; AddPlayer adds a local player, for PvP. The first failing
 	 * step ends the run with its reason. Changes stay in the PIE world. bRecordVideo records the run as an MP4 with
@@ -709,9 +711,9 @@ public:
 	/**
 	 * Verify many things at once: each case plays in its own copy of the open level, all at the same time, and one
 	 * call returns every case's result within DeadlineSeconds (60 at most). A case is bot steps as in
-	 * hyper_playtest_run (Play, AddPlayer, MoveTo, LookAt, Jump, Press, Hold, Interact, Wait, WaitUntil, Survey,
-	 * Sample, Capture, RecordStart, RecordStop and the Assert steps), but no UI or AssertOnScreen steps, since the
-	 * copies have no screen; Capture renders the player's camera. Steps report any picture they wrote in file.
+	 * hyper_playtest_run (Play, AddPlayer, MoveTo, LookAt, AimAt, Jump, Press, Hold, Interact, Wait, WaitUntil, Survey,
+	 * Sample, Capture, RecordStart, RecordStop and the Assert steps), but no UI, AssertOnScreen or cursor aim steps,
+	 * since the copies have no screen; Capture renders the player's camera. Steps report any picture they wrote in file.
 	 * Unsaved edits are included, and nothing in the level changes. At most the limit hyper_verify_calibrate reports;
 	 * a case still running at the deadline reports timed_out.
 	 */

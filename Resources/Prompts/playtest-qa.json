@@ -688,6 +688,80 @@
     }
    ],
    "prompt": "Click through {{menu_widget}} in {{level}} and prove {{open_button}} opens its screen and Back returns. Change nothing.\n1. hyper_ui_inspect on {{menu_widget}} and on the Widget Blueprint of {{screen_widget}} with bIncludeTree true: confirm every widget name used below exists. If the ui_slate_mvvm pack is unavailable, say so and continue.\n2. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown StopOwnedSession. Bot steps with stepIds and timeoutMs: Wait seconds 1; UiAssert widget {{menu_widget}}.{{open_button}}; Capture text menu; UiClick widget {{menu_widget}}.{{open_button}}; Wait seconds 0.5; UiAssert widget {{screen_widget}}; Capture text screen; UiClick widget {{back_button}}; Wait seconds 0.5; UiAssert widget {{menu_widget}}.{{open_button}}; Capture text back.\n3. hyper_operation_wait (timeoutMs 120000, bWaitThroughApproval true), then hyper_playtest_status with pageSize 64.\n4. Report a PASS/FAIL table: menu shown, button clicked, screen shown, back returns, each with its evidence line. Show the three captures on their own lines as ![menu](path), ![screen](path) and ![back](path). A widget_not_found code names a widget that was not on screen: report which."
+  },
+  {
+   "id": "playtest-qa.aimed-attack-direction",
+   "title": "Check attacks go where the player aims",
+   "summary": "Aim an attack at an enemy the way the game reads aim (cursor, stick or view), and prove the game's own aim and the hit went that way.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "aim",
+    "combat",
+    "top-down",
+    "isometric",
+    "mouse"
+   ],
+   "placeholders": [
+    {
+     "name": "enemy",
+     "label": "Enemy",
+     "default": "BP_Enemy",
+     "hint": "Label, name, tag or class of the enemy to attack"
+    },
+    {
+     "name": "attack",
+     "label": "Attack input action",
+     "default": "IA_Attack",
+     "hint": "The input action that attacks, such as IA_Attack or IA_PrimaryAbility"
+    }
+   ],
+   "prompt": "Check that an attack in {{level}} goes where the player aims. Change nothing in the level.\n1. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown StopOwnedSession, bRecordVideo true. Bot steps, each with a stepId and timeoutMs: Survey target {{enemy}}; MoveTo target {{enemy}} radius 500 timeoutSeconds 15; AimAt target {{enemy}} aim Auto seconds 0.5; Press inputAction {{attack}} target {{enemy}} aim Auto; Wait seconds 1; Capture text after-attack.\n2. hyper_operation_wait with timeoutMs 120000 and bWaitThroughApproval true, then hyper_playtest_status with pageSize 64.\n3. From the AimAt and Press evidence, report how the bot aimed (cursor, stick or look) and why, the cursor's point in the window, and each reading of the game's own aim (GetAimWorldLocation, GetAimDirection, GetAimDirectionFlat) with how far off it was.\n4. Report a PASS/FAIL table: the game's aim on {{enemy}}, the attack pressed while aimed, and any health or hit change the Survey and capture show. Give the video path; the video draws each aim as a ring and a line.\n5. If a step fails aim_off_target, the game aims some other way: run the same steps again with aim Cursor, then Stick, then Look, and say which one passes. If none passes, the game's aim code ignores its input: name the step and its evidence."
+  },
+  {
+   "id": "playtest-qa.find-aim-mode",
+   "title": "Find how the game reads the player's aim",
+   "summary": "Aim at a target by cursor, stick and view in turn, and report which one the game's own aim follows, before writing combat tests.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "aim",
+    "cursor",
+    "gamepad",
+    "survey",
+    "input"
+   ],
+   "placeholders": [
+    {
+     "name": "target",
+     "label": "Something to aim at",
+     "default": "BP_Enemy",
+     "hint": "Label, name, tag or class of an actor in view of the player"
+    }
+   ],
+   "prompt": "Find how {{level}} reads its player's aim. Change nothing in the level.\n1. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown StopOwnedSession: a Survey step with target {{target}}, then AimAt target {{target}} aim Auto seconds 0.5. Follow it with hyper_operation_wait (timeoutMs 120000, bWaitThroughApproval true) and hyper_playtest_status (pageSize 64).\n2. Run the same two steps three more times, once each with aim Cursor, Stick and Look. A run that fails aim_off_target shows the game does not aim that way.\n3. Report a table with one row per aim: passed or its code, and the game's own aim readings with how far off they were. Quote Auto's reason, and say whether Auto chose the aim that passes.\n4. If the game has no GetAimWorldLocation, GetAimDirection or GetAimDirectionFlat, every aim passes without a reading: say so, and suggest checking an attack's hit instead."
   }
  ]
 }
