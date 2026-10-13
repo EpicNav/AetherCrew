@@ -4,7 +4,10 @@
 
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Blueprint/BlueprintSupport.h"
+#include "Editor.h"
+#include "HyperAIStudioSemanticSearch.h"
 #include "Interfaces/IPluginManager.h"
+#include "Misc/Crc.h"
 #include "Misc/DateTime.h"
 #include "Misc/PackageName.h"
 #include "Misc/PackagePath.h"
@@ -111,9 +114,15 @@ namespace HyperAIStudio::ProjectAssetIndex::Private
 
 TSharedRef<FHyperAIStudioProjectAssetIndex, ESPMode::ThreadSafe> FHyperAIStudioProjectAssetIndex::MakeForRegistry()
 {
+	FLimits Limits;
+	// Play In Editor gets the frame to itself; folders changed meanwhile stay queued and are read once it stops.
+	Limits.ShouldPause = []()
+	{
+		return GEditor && (GEditor->PlayWorld != nullptr || GEditor->IsPlaySessionInProgress());
+	};
 	return MakeShared<FHyperAIStudioProjectAssetIndex, ESPMode::ThreadSafe>(
 		MakeUnique<HyperAIStudio::ProjectAssetIndex::Private::FRegistryAssetSource>(),
-		FLimits());
+		Limits);
 }
 
 FHyperAIStudioProjectAssetIndex::FHyperAIStudioProjectAssetIndex(
@@ -193,6 +202,17 @@ bool FHyperAIStudioProjectAssetIndex::Tick(float DeltaSeconds)
 	if (bShuttingDown)
 	{
 		return false;
+	}
+	const bool bShouldPause = Limits.ShouldPause && Limits.ShouldPause();
+	if (bShouldPause != bPaused)
+	{
+		bPaused = bShouldPause;
+		bDirtySincePublish = true;
+		Publish();
+	}
+	if (bPaused)
+	{
+		return true;
 	}
 	// Once a walk is done and nothing is queued, a step is a few flag reads.
 	Step(Limits.MaxStepSeconds, Limits.MaxFoldersPerStep, false);
@@ -436,6 +456,7 @@ void FHyperAIStudioProjectAssetIndex::VisitFolder(const FName Folder, const bool
 	{
 		FString Key;
 		FHyperAIProjectAssetRow Row;
+		HyperAIStudio::SemanticSearch::FDoc Doc;
 	};
 	TArray<FKeyedRow> KeyedRows;
 	KeyedRows.Reserve(Assets.Num());
@@ -471,6 +492,28 @@ void FHyperAIStudioProjectAssetIndex::VisitFolder(const FName Folder, const bool
 			Keyed.Row.SearchTextLower += TEXT(" ") + Keyed.Row.ParentClassPath.ToString();
 		}
 		Keyed.Row.SearchTextLower.ToLowerInline();
+
+		// The meaning index reads what the registry already holds: name, class, folder, parent and short tag values.
+		HyperAIStudio::SemanticSearch::FDocInput Input;
+		Input.AssetName = Asset.AssetName.ToString();
+		Input.ClassPath = Keyed.Row.ClassPath.ToString();
+		Input.PackagePath = FolderString;
+		Input.ParentClass = Keyed.Row.ParentClassPath.IsNone() ? FString() : Keyed.Row.ParentClassPath.ToString();
+		for (const auto TagAndValue : Asset.TagsAndValues)
+		{
+			if (Input.Tags.Num() >= HyperAIStudio::SemanticSearch::MaxTagsPerAsset)
+			{
+				break;
+			}
+			const FString Value = TagAndValue.Value.AsString();
+			if (TagAndValue.Key != FBlueprintTags::ParentClassPath && HyperAIStudio::SemanticSearch::IsUsefulTagValue(Value))
+			{
+				Input.Tags.Add(Value);
+			}
+		}
+		Keyed.Doc = HyperAIStudio::SemanticSearch::BuildDoc(Input);
+		Keyed.Row.DocLength = Keyed.Doc.Length;
+		Keyed.Row.GramCount = static_cast<uint16>(FMath::Min(Keyed.Doc.GramCount, 65535));
 	}
 	KeyedRows.Sort([](const FKeyedRow& Left, const FKeyedRow& Right)
 	{
@@ -523,13 +566,30 @@ void FHyperAIStudioProjectAssetIndex::VisitFolder(const FName Folder, const bool
 	Tokens.Reserve(KeyedRows.Num() * 3 + 3);
 	Tokens.Add(TEXT("project_asset_folder.v1"));
 	Tokens.Add(FolderString);
+	int64 Bytes = sizeof(FHyperAIProjectAssetFolder);
 	for (FKeyedRow& Keyed : KeyedRows)
 	{
 		Tokens.Add(Keyed.Key);
 		Tokens.Add(Keyed.Row.ClassPath.ToString());
 		Tokens.Add(Keyed.Row.ParentClassPath.IsNone() ? FString() : Keyed.Row.ParentClassPath.ToString());
+		// Tags feed the meaning index, so a changed tag re-reads the folder's postings.
+		Tokens.Add(LexToString(FCrc::MemCrc32(Keyed.Doc.Features.GetData(),
+			Keyed.Doc.Features.Num() * sizeof(HyperAIStudio::SemanticSearch::FFeatureWeight))));
+		const int32 RowIndex = Chunk->Rows.Num();
+		for (const HyperAIStudio::SemanticSearch::FFeatureWeight& Feature : Keyed.Doc.Features)
+		{
+			Chunk->Postings.FindOrAdd(Feature.Feature).Add({RowIndex, Feature.Weight});
+		}
+		Chunk->PostingCount += Keyed.Doc.Features.Num();
+		Chunk->TotalDocLength += Keyed.Row.DocLength;
+		Bytes += sizeof(FHyperAIProjectAssetRow) + Keyed.Row.SearchTextLower.GetAllocatedSize();
 		Chunk->Rows.Add(MoveTemp(Keyed.Row));
 	}
+	Chunk->Postings.Compact();
+	Bytes += Chunk->Postings.GetAllocatedSize()
+		+ static_cast<int64>(Chunk->PostingCount) * sizeof(FHyperAIProjectAssetPosting)
+		+ static_cast<int64>(Chunk->Postings.Num()) * sizeof(TArray<FHyperAIProjectAssetPosting>);
+	Chunk->ApproxBytes = Bytes;
 	Tokens.Add(bTruncated ? TEXT("truncated") : TEXT("complete"));
 	Chunk->Fingerprint = FHyperAIStudioContextSearchContracts::HashTokens(Tokens);
 	if (bExisted && OldFingerprint == Chunk->Fingerprint)
@@ -616,6 +676,7 @@ void FHyperAIStudioProjectAssetIndex::Publish()
 	Snapshot->bTruncated = IsTruncated();
 	Snapshot->bRegistryScanning = bLastKnownScanning;
 	Snapshot->bHasCompletedWalk = bHasCompletedWalk;
+	Snapshot->bPaused = bPaused;
 	Snapshot->CompletedUtc = CompletedUtc;
 
 	TArray<TPair<FString, TSharedRef<const FHyperAIProjectAssetFolder, ESPMode::ThreadSafe>>> Sorted;
@@ -642,6 +703,8 @@ void FHyperAIStudioProjectAssetIndex::Publish()
 	{
 		Tokens.Add(Pair.Key);
 		Tokens.Add(Pair.Value->Fingerprint);
+		Snapshot->ApproxBytes += Pair.Value->ApproxBytes;
+		Snapshot->PostingCount += Pair.Value->PostingCount;
 		Snapshot->Folders.Add(Pair.Value);
 	}
 	Tokens.Add(Snapshot->bTruncated ? TEXT("truncated") : TEXT("complete"));

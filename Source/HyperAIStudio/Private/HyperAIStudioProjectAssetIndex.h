@@ -20,6 +20,17 @@ struct FHyperAIProjectAssetRow
 	FName ParentClassPath;
 	/** Asset name, class path, package name and parent class, lowercased. */
 	FString SearchTextLower;
+	/** Sum of the asset's word weights in the meaning index, for BM25's length normalisation. */
+	float DocLength = 0.0f;
+	/** Distinct trigrams of its name's words, for spelling matches. */
+	uint16 GramCount = 0;
+};
+
+/** One asset under one feature of the meaning index: the row in its folder and the feature's weight there. */
+struct FHyperAIProjectAssetPosting
+{
+	int32 Row = 0;
+	float Weight = 0.0f;
 };
 
 /** One folder's assets, read in one non-recursive registry call. Immutable once published. */
@@ -31,6 +42,15 @@ struct FHyperAIProjectAssetFolder
 	FString Fingerprint;
 	/** The project-wide asset bound cut this folder short. */
 	bool bTruncated = false;
+	/**
+	 * The folder's part of the meaning index (HyperAIStudioSemanticSearch): feature id to the rows that have it. Built
+	 * when the folder is read, so an edit re-indexes only its own folder.
+	 */
+	TMap<uint32, TArray<FHyperAIProjectAssetPosting>> Postings;
+	float TotalDocLength = 0.0f;
+	int32 PostingCount = 0;
+	/** Rough memory this folder holds: rows, their text and postings. */
+	int64 ApproxBytes = 0;
 };
 
 /** Immutable published asset index. Folders a refresh did not re-read are shared with the previous snapshot. */
@@ -47,6 +67,11 @@ struct FHyperAIProjectAssetIndexSnapshot
 	bool bRegistryScanning = false;
 	/** A walk of every content root has finished at least once, so the folders cover the whole project. */
 	bool bHasCompletedWalk = false;
+	/** Background reading waits while Play In Editor runs; a search still reads what it needs. */
+	bool bPaused = false;
+	/** Rough memory the index holds, in editor memory only. */
+	int64 ApproxBytes = 0;
+	int32 PostingCount = 0;
 	/** Sorted by path. */
 	TArray<TSharedRef<const FHyperAIProjectAssetFolder, ESPMode::ThreadSafe>> Folders;
 	TArray<FHyperAIReadDiagnostic> Diagnostics;
@@ -90,6 +115,8 @@ public:
 		double PublishIntervalSeconds = 0.5;
 		/** Tests drive Step themselves. */
 		bool bTickOnCoreTicker = true;
+		/** The background ticker reads nothing while this says so (Play In Editor runs, in the editor); unset never pauses. */
+		TFunction<bool()> ShouldPause;
 	};
 
 	/** The production index over the live Asset Registry. */
@@ -105,6 +132,8 @@ public:
 	void RequestFullRewalk();
 	/** Game thread. Reads queued and walked folders within the budget, then publishes when due or forced. */
 	void Step(double BudgetSeconds, int32 MaxFolders, bool bForcePublish = false);
+	/** Game thread. What the background ticker does each frame: a step, unless ShouldPause says to wait. */
+	void TickForTests(float DeltaSeconds) { Tick(DeltaSeconds); }
 	/** A first search can stop waiting: a walk has finished, or the registry is scanning or unavailable. */
 	bool IsSettled() const;
 	TSharedRef<const FHyperAIProjectAssetIndexSnapshot, ESPMode::ThreadSafe> GetPublished() const;
@@ -142,6 +171,7 @@ private:
 	bool bDirtySincePublish = false;
 	bool bLastKnownScanning = false;
 	bool bLastKnownAvailable = true;
+	bool bPaused = false;
 	TArray<FName> Roots;
 	TArray<FName> WalkQueue;
 	int32 WalkHead = 0;

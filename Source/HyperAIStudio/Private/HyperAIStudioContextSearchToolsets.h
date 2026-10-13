@@ -426,6 +426,15 @@ struct FHyperAIProjectSearchRequest
 	/** Starts a bounded asynchronous refresh when no usable immutable index exists, and waits for it (2.5 s at most); the wait also reads the project's assets folder by folder. */
 	UPROPERTY()
 	bool bStartIndexIfUnavailable = true;
+
+	/**
+	 * literal: every query term in the name, class or folder, as before. semantic: assets ranked by meaning (stems, a
+	 * built-in concept vocabulary and spelling), best first. hybrid: literal matches first, then the ranked ones. auto
+	 * (empty): hybrid for a query of three or more words, or when nothing matches literally; literal otherwise. Ranked
+	 * records carry match (name, meaning, spelling or words) and score. Local only: nothing leaves the machine.
+	 */
+	UPROPERTY()
+	FString Mode;
 };
 
 USTRUCT(BlueprintType)
@@ -566,6 +575,34 @@ struct FHyperAIProjectIndexStatus
 	UPROPERTY()
 	TArray<FString> DirtyPackages;
 
+	/** How assets are ranked: local_concepts.v1 (by meaning, on this machine), or words_only when Search By Meaning is off. */
+	UPROPERTY()
+	FString SearchEngine;
+
+	/** Concept groups in the built-in vocabulary. */
+	UPROPERTY()
+	int32 ConceptCount = 0;
+
+	/** Features stored for all assets (words, concepts, trigrams). */
+	UPROPERTY()
+	int32 IndexFeatureCount = 0;
+
+	/** Rough size of the asset index in editor memory. */
+	UPROPERTY()
+	int64 IndexBytes = 0;
+
+	/** Background indexing waits while Play In Editor runs. */
+	UPROPERTY()
+	bool bPausedForPlayInEditor = false;
+
+	/** What the index stores and where. */
+	UPROPERTY()
+	FString Storage;
+
+	/** Whether Epic's SemanticSearch plugin is enabled here, and where its embeddings would be computed. */
+	UPROPERTY()
+	FString EpicSemanticSearch;
+
 	UPROPERTY()
 	TArray<FHyperAIReadDiagnostic> Diagnostics;
 };
@@ -626,7 +663,7 @@ class HYPERAISTUDIO_API UHyperAIStudioProjectSearchToolset final : public UTools
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** Search project assets (name, class, folder) and C++ symbols in the latest immutable on-disk index; every query term must match. Bounded pages with cursors; arbitrary file contents are never returned. */
+	/** Search project assets (name, class, folder, tags) and C++ symbols in the latest immutable on-disk index, by name or by meaning (Mode: literal, semantic, hybrid, auto; local only, nothing leaves the machine). Bounded pages with cursors; arbitrary file contents are never returned. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Project")
 	static FHyperAIReadReport hyper_project_search(const FHyperAIProjectSearchRequest& Request);
 };
@@ -783,7 +820,8 @@ public:
 		int32 PageSize,
 		const FString& Cursor,
 		int32 MaxOutputBytes,
-		FHyperAIReadReport& OutReport);
+		FHyperAIReadReport& OutReport,
+		bool bKeepOrder = false);
 
 	static bool IsProjectContainedSourcePath(
 		const FString& ProjectRoot,
