@@ -349,6 +349,226 @@
     }
    ],
    "prompt": "Make {{enemy_bp}} fall as a ragdoll when its {{health_var}} reaches 0.\n1. If hyper_physics_validate is not available, the Physics pack is off: say so and stop. Find its mesh component's Skeletal Mesh and that mesh's Physics Asset (Epic's SkeletalMeshTools get_physics_asset); load it, hyper_physics_inspect it and hyper_physics_validate it (policy structural). Stop and report if validate is not valid or it has no bodies; unsaved Physics Asset edits show as dirty_loaded_state_not_cas_complete, so ask me to save them first.\n2. With the unreal-blueprint skill, where {{health_var}} first reaches 0: capsule collision to NoCollision, the mesh's collision profile to Ragdoll, SetSimulatePhysics true on the mesh, stop movement, and a bool `bIsRagdoll` set true. Leave the rest of the Blueprint alone.\n3. hyper_blueprint_compile_validate it (revision from hyper_blueprint_snapshot; preview, then compile with its planHash and an operationId; hyper_operation_wait): 0 errors.\n4. hyper_verify_run (deadlineSeconds 60), case `ragdolls`: Play Defeat on {{enemy_bp}} (healthProperty {{health_var}}, timeoutSeconds 40), then AssertProperty on {{enemy_bp}}: bIsRagdoll == true, and Mesh.IsAnySimulatingPhysics == true (use its mesh component's name if not Mesh). If Defeat fails no_attack_action, say the game has no attack the bot can use and skip step 5.\n5. hyper_playtest_run with the same steps as Bot steps, bRecordVideo true and a Capture after the death; hyper_operation_wait, then hyper_playtest_status.\nReport a PASS/FAIL table: Physics Asset valid, compile clean, Defeat result, both asserts with their evidence lines. Show the capture on its own line and link the video."
+  },
+  {
+   "id": "physics-chaos.breakable-wall",
+   "title": "Make the selected wall break into chunks",
+   "summary": "Fracture the selected wall into a geometry collection that breaks in chunks, keeps its base, and is proved to break in play.",
+   "packs": [
+    "destruction"
+   ],
+   "skills": [
+    "unreal-destruction"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_destruction_inspect",
+    "hyper_destruction_apply_plan",
+    "hyper_operation_wait",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "make",
+    "fracture.uniform",
+    "cluster",
+    "cleanup",
+    "damage",
+    "anchor",
+    "material.internal"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "destruction",
+    "fracture",
+    "chaos",
+    "geometry collection",
+    "wall",
+    "breakable"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "StaticMeshActor"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "pieces",
+     "label": "Pieces",
+     "default": "60",
+     "hint": "Voronoi sites; 20 to 80 reads well."
+    },
+    {
+     "name": "chunks",
+     "label": "Chunks",
+     "default": "8",
+     "hint": "Clusters the wall breaks into first."
+    },
+    {
+     "name": "inside",
+     "label": "Inside material",
+     "default": "/Engine/EngineMaterials/WorldGridMaterial",
+     "hint": "The material for the faces the fracture cuts."
+    }
+   ],
+   "prompt": "Make {{selected_actor}} a breakable wall. Follow the unreal-destruction skill; if hyper_destruction_apply_plan is not available, say the destruction pack is off (it needs the Geometry Collection and Fracture plugins) and stop.\n1. hyper_destruction_inspect with no Asset, to read the op kinds and their Params.\n2. hyper_destruction_apply_plan with bDryRun true, Asset `{{content_folder}}/Destruction/GC_<the wall's label>` and Operations: make with Sources [{{selected_actor}}] and Place replace; fracture.uniform `Sites={{pieces}}; Seed=1`; cluster `Clusters={{chunks}}`; cleanup `MinSize=5`; damage `Thresholds=250000, 20000; Collision=true`; anchor `Ground=true; Height=10`; material.internal with Material `{{inside}}`. Open its PreviewPath and look at the exploded pieces; read Levels and Warnings, and change the numbers if a warning asks.\n3. The same plan with bDryRun false and a fresh OperationId. If the Status is awaiting_user_approval, hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_verify_run with the reply's VerifyCase as the request.\n5. Report a PASS/FAIL table: a geometry collection actor stands where the wall stood; 2 or 3 levels with about {{chunks}} chunks at level 1; some pieces anchored; no piece under 5 cm; the verification case passed, quoting its AssertBroken detail (pieces broken off, what fell). Leave the level unsaved."
+  },
+  {
+   "id": "physics-chaos.shatter-window",
+   "title": "Shatter a window from an impact point",
+   "summary": "Radial fracture of the selected pane about an impact point, light glass pieces with small-piece collision, proved with a test ball.",
+   "packs": [
+    "destruction"
+   ],
+   "skills": [
+    "unreal-destruction"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_destruction_apply_plan",
+    "hyper_operation_wait",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "make",
+    "fracture.radial",
+    "damage",
+    "collision",
+    "mass",
+    "anchor"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "destruction",
+    "glass",
+    "window",
+    "radial",
+    "impact",
+    "shatter"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "StaticMeshActor"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "rings",
+     "label": "Rings",
+     "default": "5"
+    },
+    {
+     "name": "steps",
+     "label": "Cells per ring",
+     "default": "10"
+    },
+    {
+     "name": "impact",
+     "label": "Impact offset",
+     "default": "0,0,20",
+     "hint": "\"x,y,z\" cm from the middle of the pane."
+    }
+   ],
+   "prompt": "Make the pane {{selected_actor}} shatter like glass. Follow the unreal-destruction skill; if hyper_destruction_apply_plan is not available, say the destruction pack is off and stop.\n1. hyper_destruction_apply_plan with bDryRun true, Asset `{{content_folder}}/Destruction/GC_<the pane's label>` and Operations: make with Sources [{{selected_actor}}] and Place replace; fracture.radial with Location `{{impact}}` and Params `Rings={{rings}}; AngularSteps={{steps}}; Variability=3; Normal=<the pane's facing, the axis of its thinnest side>`; damage `Thresholds=400; Collision=true`; collision `Implicit=convex; Sizes=8:sphere`; mass `Density=2500`; anchor `Ground=true; Height=5` (the frame holds the bottom edge). Open PreviewPath and check the cracks radiate from the impact.\n2. The same plan with bDryRun false and a fresh OperationId; if awaiting_user_approval, hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_verify_run with one case: Wait 0.5 s; Fire with target the new actor; WaitUntil AssertBroken, compare >=, value a quarter of the pieces, timeoutSeconds 5; Wait 1 s; AssertBroken again to read what fell.\n4. Report a PASS/FAIL table: rings x cells pieces or close to it; the bottom edge anchored; the test ball broke at least a quarter of the pieces off, quoting the AssertBroken detail."
+  },
+  {
+   "id": "physics-chaos.brick-wall",
+   "title": "Cut a wall into bricks that tumble",
+   "summary": "Brick fracture of the selected wall in a chosen bond, anchored at the base, then knocked down by a dropped test ball.",
+   "packs": [
+    "destruction"
+   ],
+   "skills": [
+    "unreal-destruction"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_destruction_apply_plan",
+    "hyper_operation_wait",
+    "hyper_verify_run",
+    "hyper_destruction_inspect"
+   ],
+   "ops": [
+    "make",
+    "fracture.brick",
+    "damage",
+    "anchor",
+    "collision"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "destruction",
+    "brick",
+    "masonry",
+    "wall",
+    "collapse"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "StaticMeshActor"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "bond",
+     "label": "Bond",
+     "default": "english",
+     "hint": "stretcher, stack, english, header or flemish."
+    },
+    {
+     "name": "brick",
+     "label": "Brick L x H x D",
+     "default": "40 x 20 x 20",
+     "hint": "cm."
+    }
+   ],
+   "prompt": "Turn the wall {{selected_actor}} into bricks that tumble when hit. Follow the unreal-destruction skill; if hyper_destruction_apply_plan is not available, say the destruction pack is off and stop.\n1. hyper_destruction_apply_plan with bDryRun true, Asset `{{content_folder}}/Destruction/GC_<the wall's label>_Bricks` and Operations: make with Sources [{{selected_actor}}] and Place replace; fracture.brick with `Bond={{bond}}` and Length, Height and Depth from {{brick}} cm; damage `Thresholds=30000; Collision=true`; anchor `Ground=true; Height=5`; collision `Implicit=box`. If it is refused for too many bricks, make them larger and say by how much.\n2. The same plan with bDryRun false and a fresh OperationId; if awaiting_user_approval, hyper_operation_wait with bWaitThroughApproval true. hyper_destruction_inspect with the Actor to read the levels and anchors back.\n3. hyper_verify_run with one case: Wait 0.5 s; Fire with target the new actor and range 400 (a ball dropped on its top); WaitUntil AssertBroken, compare >=, value 5, timeoutSeconds 6; Wait 1.5 s; AssertBroken again.\n4. Report a PASS/FAIL table: bricks within 10% of the asked size; the bottom course anchored; the drop knocked at least 5 bricks off, quoting what fell."
+  },
+  {
+   "id": "physics-chaos.audit-destructible",
+   "title": "Check that a destructible actually breaks",
+   "summary": "Read the selected geometry collection's levels, thresholds, collision and anchors, then break it in a copy of the level and report what fell.",
+   "packs": [
+    "destruction"
+   ],
+   "skills": [
+    "unreal-destruction",
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_destruction_inspect",
+    "hyper_verify_run"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "destruction",
+    "audit",
+    "geometry collection",
+    "verify",
+    "break"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "GeometryCollectionActor"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "share",
+     "label": "Share that must break",
+     "default": "50",
+     "hint": "Percent of its pieces."
+    }
+   ],
+   "prompt": "Check that {{selected_actor}} breaks. Change nothing. If hyper_destruction_inspect is not available, say the destruction pack is off and stop.\n1. hyper_destruction_inspect with Actor {{selected_actor}} and MaxPieces 20: note its levels (pieces, clusters, thresholds), collision per size, mass, anchors, initial state and Warnings.\n2. hyper_verify_run with one case: Wait 0.5 s; Damage with target {{selected_actor}}; WaitUntil AssertBroken, compare >=, value {{share}}% of its leaves, timeoutSeconds 5; Wait 1.5 s; AssertBroken again.\n3. Report a PASS/FAIL table: fractured (more than one level); a threshold for every level that holds clusters; no piece under 5 cm; anchored or static if it stands in the level; the case passed. Quote the AssertBroken detail, and for each FAIL say which hyper_destruction_apply_plan op would fix it."
   }
  ]
 }

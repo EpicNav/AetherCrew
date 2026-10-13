@@ -70,7 +70,8 @@ REQUIRED_PLUGINS = (
     "ConversationToolset", "DataRegistryToolset", "GameFeaturesToolset", "GameplayTagsToolset",
     "GASToolsets", "LiveCodingToolset", "NiagaraToolsets", "PCGToolset", "PhysicsToolsets",
     "PluginToolset", "SlateInspectorToolset", "StateTreeToolset", "UMGToolSet",
-    "WorldConditionsToolset",
+    "WorldConditionsToolset", "GeometryCollectionPlugin", "Fracture", "ChaosEditor", "Dataflow",
+    "FieldSystemPlugin", "DataflowAgent",
 )
 
 HYPERAI_SETTINGS = {

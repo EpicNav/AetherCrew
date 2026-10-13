@@ -1196,6 +1196,12 @@
    "text": "HyperAI：编辑 Decibel 会话"
   },
   {
+   "namespace": "HyperAIStudioDestruction",
+   "key": "DestructionPlan",
+   "source": "HyperAI: Destruction Plan",
+   "text": "HyperAI：破坏计划"
+  },
+  {
    "namespace": "HyperAIStudioDocs",
    "key": "BackTip",
    "source": "Back to the page before.",
@@ -13869,6 +13875,30 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.audit-destructible.ph.share.hint",
+   "source": "Percent of its pieces.",
+   "text": "占碎片的百分比。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.audit-destructible.ph.share.label",
+   "source": "Share that must break",
+   "text": "必须破碎的比例"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.audit-destructible.summary",
+   "source": "Read the selected geometry collection's levels, thresholds, collision and anchors, then break it in a copy of the level and report what fell.",
+   "text": "读取所选几何体集合的层级、阈值、碰撞和锚点，然后在关卡副本中打碎它并报告掉落了什么。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.audit-destructible.title",
+   "source": "Check that a destructible actually breaks",
+   "text": "检查可破坏物是否真的会破碎"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "physics-chaos.audit-physics-asset.ph.max_shapes.hint",
    "source": "Bodies with more shapes than this are listed for a designer to simplify.",
    "text": "形状数超过此值的刚体会被列出，供设计师简化。"
@@ -13890,6 +13920,90 @@
    "key": "physics-chaos.audit-physics-asset.title",
    "source": "Audit a physics asset's bodies and constraints",
    "text": "审计物理资产的刚体和约束"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.breakable-wall.ph.chunks.hint",
+   "source": "Clusters the wall breaks into first.",
+   "text": "墙体先碎成的簇数。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.breakable-wall.ph.chunks.label",
+   "source": "Chunks",
+   "text": "大块数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.breakable-wall.ph.inside.hint",
+   "source": "The material for the faces the fracture cuts.",
+   "text": "破碎切出的内部面所用的材质。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.breakable-wall.ph.inside.label",
+   "source": "Inside material",
+   "text": "内部材质"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.breakable-wall.ph.pieces.hint",
+   "source": "Voronoi sites; 20 to 80 reads well.",
+   "text": "Voronoi 点数；20 到 80 效果较好。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.breakable-wall.ph.pieces.label",
+   "source": "Pieces",
+   "text": "碎片数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.breakable-wall.summary",
+   "source": "Fracture the selected wall into a geometry collection that breaks in chunks, keeps its base, and is proved to break in play.",
+   "text": "把所选墙体破碎为几何体集合：先碎成大块，保留墙基，并在游戏中证明它会破碎。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.breakable-wall.title",
+   "source": "Make the selected wall break into chunks",
+   "text": "让所选墙体碎成大块"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.brick-wall.ph.bond.hint",
+   "source": "stretcher, stack, english, header or flemish.",
+   "text": "stretcher、stack、english、header 或 flemish。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.brick-wall.ph.bond.label",
+   "source": "Bond",
+   "text": "砌法"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.brick-wall.ph.brick.hint",
+   "source": "cm.",
+   "text": "厘米。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.brick-wall.ph.brick.label",
+   "source": "Brick L x H x D",
+   "text": "砖块 长 x 高 x 深"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.brick-wall.summary",
+   "source": "Brick fracture of the selected wall in a chosen bond, anchored at the base, then knocked down by a dropped test ball.",
+   "text": "按所选砌法把所选墙体破碎为砖块，底部锚定，再用落下的测试球把它砸塌。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.brick-wall.title",
+   "source": "Cut a wall into bricks that tumble",
+   "text": "把墙切成会倒塌的砖块"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -14034,6 +14148,42 @@
    "key": "physics-chaos.share-physics-asset.title",
    "source": "Share one physics asset across mesh variants",
    "text": "让多个网格变体共用一个物理资产"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.shatter-window.ph.impact.hint",
+   "source": "\"x,y,z\" cm from the middle of the pane.",
+   "text": "相对窗格中心的 \"x,y,z\"，单位厘米。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.shatter-window.ph.impact.label",
+   "source": "Impact offset",
+   "text": "撞击点偏移"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.shatter-window.ph.rings.label",
+   "source": "Rings",
+   "text": "环数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.shatter-window.ph.steps.label",
+   "source": "Cells per ring",
+   "text": "每环单元数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.shatter-window.summary",
+   "source": "Radial fracture of the selected pane about an impact point, light glass pieces with small-piece collision, proved with a test ball.",
+   "text": "以撞击点为中心对所选窗格做放射状破碎，设置轻质玻璃碎片和小碎片碰撞，并用测试球验证。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "physics-chaos.shatter-window.title",
+   "source": "Shatter a window from an impact point",
+   "text": "从撞击点震碎窗户"
   },
   {
    "namespace": "HyperAIStudioPrompts",
