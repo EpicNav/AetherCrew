@@ -24,7 +24,10 @@
     "breakpoints",
     "review"
    ],
-   "prompt": "Audit the AI assets under {{content_folder}} in {{project}}. Change nothing.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. hyper_memory_recall `behavior tree blackboard` for the project's AI conventions.\n2. List the Behavior Trees, Blackboards and AI controller Blueprints there with Epic's AssetTools find_assets and load each with load_asset: hyper_gameplay_ai_inspect reads loaded assets only.\n3. hyper_gameplay_ai_inspect their object paths (variant all, bIncludeDetails true), following nextCursor to the end. Per tree note node count, nodes with an error, breakpoints and its runtime and editor-root blackboard; per Blackboard its keys, types and parent; per controller its senses, max ages, dominant sense and compile status.\n4. hyper_gameplay_ai_validate the same paths with bRequirePackagesClean true.\nReport a table with one row per asset: PASS when validate gives it 0 errors and it has no breakpoint, else FAIL with each issue code (behavior_tree_blackboard_link_mismatch, behavior_node_error, duplicate_or_missing_blackboard_key, dominant_sense_not_configured, package_dirty...) and the fix you recommend. End with totals: assets, errors, warnings, breakpoints."
+   "prompt": "Audit the AI assets under {{content_folder}} in {{project}}. Change nothing.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. hyper_memory_recall `behavior tree blackboard` for the project's AI conventions.\n2. List the Behavior Trees, Blackboards and AI controller Blueprints there with Epic's AssetTools find_assets and load each with load_asset: hyper_gameplay_ai_inspect reads loaded assets only.\n3. hyper_gameplay_ai_inspect their object paths (variant all, bIncludeDetails true), following nextCursor to the end. Per tree note node count, nodes with an error, breakpoints and its runtime and editor-root blackboard; per Blackboard its keys, types and parent; per controller its senses, max ages, dominant sense and compile status.\n4. hyper_gameplay_ai_validate the same paths with bRequirePackagesClean true.\nReport a table with one row per asset: PASS when validate gives it 0 errors and it has no breakpoint, else FAIL with each issue code (behavior_tree_blackboard_link_mismatch, behavior_node_error, duplicate_or_missing_blackboard_key, dominant_sense_not_configured, package_dirty...) and the fix you recommend. End with totals: assets, errors, warnings, breakpoints.",
+   "skills": [
+    "unreal-ai"
+   ]
   },
   {
    "id": "ai-behavior.outline-behavior-tree",
@@ -52,7 +55,10 @@
     ],
     "min": 1
    },
-   "prompt": "Explain the Behavior Tree {{selected_asset}} so a designer can follow it without opening the editor. Change nothing.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Load the tree and its Blackboard with Epic's AssetTools load_asset.\n2. Read its structure with Epic's BehaviorTreeTools: list_nodes and get_node_depths (same order), get_root_decorators, get_blackboard, and get_subtree for every RunBehavior task.\n3. hyper_gameplay_ai_inspect the tree and its Blackboard (bIncludeDetails true) for node kinds, node errors, breakpoints and keys.\n4. hyper_gameplay_ai_validate both.\nWrite: a short paragraph on what the AI does and when it switches behaviour; an indented outline using the depths, one line per node as `kind: name`, with its decorators and services beneath it and the key each reads (ObjectTools get_properties on its key selectors, such as BlackboardKey); a key table (name, type, instance synced); and a PASS/FAIL table: every task, composite, decorator and service has a runtime instance (no runtime_node_missing), the runtime blackboard matches the editor root's, validate 0 errors, 0 breakpoints. Say plainly what the tools could not tell you."
+   "prompt": "Explain the Behavior Tree {{selected_asset}} so a designer can follow it without opening the editor. Change nothing.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Load the tree and its Blackboard with Epic's AssetTools load_asset.\n2. Read its structure with Epic's BehaviorTreeTools: list_nodes and get_node_depths (same order), get_root_decorators, get_blackboard, and get_subtree for every RunBehavior task.\n3. hyper_gameplay_ai_inspect the tree and its Blackboard (bIncludeDetails true) for node kinds, node errors, breakpoints and keys.\n4. hyper_gameplay_ai_validate both.\nWrite: a short paragraph on what the AI does and when it switches behaviour; an indented outline using the depths, one line per node as `kind: name`, with its decorators and services beneath it and the key each reads (ObjectTools get_properties on its key selectors, such as BlackboardKey); a key table (name, type, instance synced); and a PASS/FAIL table: every task, composite, decorator and service has a runtime instance (no runtime_node_missing), the runtime blackboard matches the editor root's, validate 0 errors, 0 breakpoints. Say plainly what the tools could not tell you.",
+   "skills": [
+    "unreal-ai"
+   ]
   },
   {
    "id": "ai-behavior.check-ai-feature-readiness",
@@ -81,7 +87,10 @@
      "default": "stealth enemies that patrol, hear noises and search for the player"
     }
    ],
-   "prompt": "Tell me which AI features {{project}} is ready for, for this goal: {{goal}}. Change nothing and enable nothing.\n1. hyper_capability_report: is the gameplay_ai pack live? If it is not, say what it needs and stop.\n2. hyper_gameplay_ai_inspect with no asset paths, variant all, bIncludePrerequisites true and pageSize 1.\n3. Build a table with one row per variant it reports (behavior_tree, blackboard, ai_controller_perception, state_tree, eqs, smart_object, gameplay_behavior, gameplay_behavior_smart_object, gameplay_interaction): state, plugins installed and enabled, modules loaded, inspect and apply implemented, supported and unsupported cases.\n4. For the goal, say which Unreal systems fit (Behavior Trees, State Trees, EQS, Smart Objects, AI Perception), which plugins to enable in Edit > Plugins, and which parts HyperAI can inspect and validate versus build by hand.\nEnd with a PASS/FAIL table: pack live, behavior_tree inspect ready, blackboard inspect ready, ai_controller_perception inspect ready, and one row per plugin the goal needs (PASS when enabled)."
+   "prompt": "Tell me which AI features {{project}} is ready for, for this goal: {{goal}}. Change nothing and enable nothing.\n1. hyper_capability_report: is the gameplay_ai pack live? If it is not, say what it needs and stop.\n2. hyper_gameplay_ai_inspect with no asset paths, variant all, bIncludePrerequisites true and pageSize 1.\n3. Build a table with one row per variant it reports (behavior_tree, blackboard, ai_controller_perception, state_tree, eqs, smart_object, gameplay_behavior, gameplay_behavior_smart_object, gameplay_interaction): state, plugins installed and enabled, modules loaded, inspect and apply implemented, supported and unsupported cases.\n4. For the goal, say which Unreal systems fit (Behavior Trees, State Trees, EQS, Smart Objects, AI Perception), which plugins to enable in Edit > Plugins, and which parts HyperAI can inspect and validate versus build by hand.\nEnd with a PASS/FAIL table: pack live, behavior_tree inspect ready, blackboard inspect ready, ai_controller_perception inspect ready, and one row per plugin the goal needs (PASS when enabled).",
+   "skills": [
+    "unreal-ai"
+   ]
   },
   {
    "id": "ai-behavior.add-stealth-guard-keys",
@@ -123,7 +132,10 @@
      "hint": "Name and type pairs; types are bool, int, float, name, string, vector or rotator."
     }
    ],
-   "prompt": "Give the Blackboard {{selected_asset}} the keys a stealth guard needs: {{keys}}. Change only this asset.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Load it with Epic's AssetTools load_asset, then hyper_gameplay_ai_inspect it: note its record's revision, parent and keys. Skip a key that already exists with the same type; stop and ask if one exists with another type or is inherited.\n2. hyper_gameplay_ai_apply_plan with bDryRun true and one add_blackboard_key op per key (type, targetPath, expectedRevision = the revision from step 1, name, keyType). It must reply valid_dry_run with effects.keysAdded equal to the keys planned.\n3. Run it for real: bDryRun false, a fresh operationId, expectedPlanHash = the dry run's planHash. The pack only stages edits today: a reply of staged_backend_required means nothing changed, so add the same keys with Epic's ObjectTools set_properties on the Blackboard's Keys array (each KeyType as a class path such as /Script/AIModule.BlackboardKeyType_Vector), keeping every existing entry. Save only if I asked.\n4. hyper_gameplay_ai_inspect the Blackboard again and hyper_gameplay_ai_validate it.\nReport a PASS/FAIL table: one row per key (present, type as asked), no duplicate names, the earlier keys untouched, validate 0 errors."
+   "prompt": "Give the Blackboard {{selected_asset}} the keys a stealth guard needs: {{keys}}. Change only this asset.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Load it with Epic's AssetTools load_asset, then hyper_gameplay_ai_inspect it: note its record's revision, parent and keys. Skip a key that already exists with the same type; stop and ask if one exists with another type or is inherited.\n2. hyper_gameplay_ai_apply_plan with bDryRun true and one add_blackboard_key op per key (type, targetPath, expectedRevision = the revision from step 1, name, keyType). It must reply valid_dry_run with effects.keysAdded equal to the keys planned.\n3. Run it for real: bDryRun false, a fresh operationId, expectedPlanHash = the dry run's planHash. The pack only stages edits today: a reply of staged_backend_required means nothing changed, so add the same keys with Epic's ObjectTools set_properties on the Blackboard's Keys array (each KeyType as a class path such as /Script/AIModule.BlackboardKeyType_Vector), keeping every existing entry. Save only if I asked.\n4. hyper_gameplay_ai_inspect the Blackboard again and hyper_gameplay_ai_validate it.\nReport a PASS/FAIL table: one row per key (present, type as asked), no duplicate names, the earlier keys untouched, validate 0 errors.",
+   "skills": [
+    "unreal-ai"
+   ]
   },
   {
    "id": "ai-behavior.rename-blackboard-key",
@@ -169,7 +181,10 @@
      "default": "TargetActor"
     }
    ],
-   "prompt": "Rename the key `{{old_name}}` to `{{new_name}}` on the Blackboard {{selected_asset}} and repoint the tree nodes that read it.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Find the Behavior Trees and AI controllers that use this Blackboard (Epic's AssetTools get_referencers, or hyper_project_search) and load them and the Blackboard with load_asset.\n2. hyper_gameplay_ai_inspect them all: `{{old_name}}` must be a local key, not inherited, and `{{new_name}}` unused. In each tree, Epic's BehaviorTreeTools list_nodes, then ObjectTools get_properties on each node's key selectors (such as BlackboardKey): note every node that names `{{old_name}}`.\n3. hyper_gameplay_ai_apply_plan with bDryRun true and one rename_blackboard_key op (name {{old_name}}, newName {{new_name}}, the Blackboard's expectedRevision): it must reply valid_dry_run with effects.keysRenamed 1. Run it with bDryRun false, a fresh operationId and the dry run's planHash. The pack only stages edits today: a reply of staged_backend_required means nothing changed, so change that entry's EntryName with Epic's ObjectTools set_properties on the Keys array and nothing else.\n4. On each noted node, set the selector's SelectedKeyName to `{{new_name}}` with set_properties and read it back.\n5. hyper_gameplay_ai_inspect and hyper_gameplay_ai_validate the Blackboard and every tree.\nReport a PASS/FAIL table: old key gone, new key present with the same type, validate 0 errors, and one row per noted node with its selector after (PASS at `{{new_name}}`; a node that refused the edit is FAIL, for me to re-pick in the Behavior Tree editor). Save only if I asked."
+   "prompt": "Rename the key `{{old_name}}` to `{{new_name}}` on the Blackboard {{selected_asset}} and repoint the tree nodes that read it.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Find the Behavior Trees and AI controllers that use this Blackboard (Epic's AssetTools get_referencers, or hyper_project_search) and load them and the Blackboard with load_asset.\n2. hyper_gameplay_ai_inspect them all: `{{old_name}}` must be a local key, not inherited, and `{{new_name}}` unused. In each tree, Epic's BehaviorTreeTools list_nodes, then ObjectTools get_properties on each node's key selectors (such as BlackboardKey): note every node that names `{{old_name}}`.\n3. hyper_gameplay_ai_apply_plan with bDryRun true and one rename_blackboard_key op (name {{old_name}}, newName {{new_name}}, the Blackboard's expectedRevision): it must reply valid_dry_run with effects.keysRenamed 1. Run it with bDryRun false, a fresh operationId and the dry run's planHash. The pack only stages edits today: a reply of staged_backend_required means nothing changed, so change that entry's EntryName with Epic's ObjectTools set_properties on the Keys array and nothing else.\n4. On each noted node, set the selector's SelectedKeyName to `{{new_name}}` with set_properties and read it back.\n5. hyper_gameplay_ai_inspect and hyper_gameplay_ai_validate the Blackboard and every tree.\nReport a PASS/FAIL table: old key gone, new key present with the same type, validate 0 errors, and one row per noted node with its selector after (PASS at `{{new_name}}`; a node that refused the edit is FAIL, for me to re-pick in the Behavior Tree editor). Save only if I asked.",
+   "skills": [
+    "unreal-ai"
+   ]
   },
   {
    "id": "ai-behavior.shared-parent-blackboard",
@@ -179,6 +194,7 @@
     "gameplay_ai"
    ],
    "skills": [
+    "unreal-ai",
     "hyperai-memory"
    ],
    "agent": "programmer",
@@ -248,7 +264,10 @@
      "hint": "Or one Blackboard object path for every tree."
     }
    ],
-   "prompt": "Relink the Behavior Trees under {{content_folder}} whose blackboard is wrong or missing, to {{blackboard}}.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Load the trees and their Blackboards with Epic's AssetTools find_assets and load_asset.\n2. hyper_gameplay_ai_validate them: collect every behavior_tree_blackboard_link_mismatch, invalid_blackboard_reference and invalid_graph_blackboard_reference. hyper_gameplay_ai_inspect each affected tree for its revision, runtime blackboard and editor-root blackboard.\n3. hyper_gameplay_ai_apply_plan with bDryRun true: one set_behavior_tree_blackboard op per affected tree (targetPath, expectedRevision, referencePath = the chosen Blackboard). It must reply valid_dry_run; a tree with other errors (behavior_node_error, runtime_node_missing) fails it with postcondition_invalid, so leave that tree out and report its errors. Then send it with bDryRun false, a fresh operationId and the planHash. The pack only stages edits today: a reply of staged_backend_required means nothing changed. The link is set on each tree's Root node, which no tool edits yet: give me the list (tree, Blackboard to set) and wait until I say it is done.\n4. hyper_gameplay_ai_validate the trees again.\nReport a PASS/FAIL table, one row per tree: the problem found, the Blackboard planned, the dry run result, and validate after (PASS at 0 errors). Change no tree that validated clean."
+   "prompt": "Relink the Behavior Trees under {{content_folder}} whose blackboard is wrong or missing, to {{blackboard}}.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Load the trees and their Blackboards with Epic's AssetTools find_assets and load_asset.\n2. hyper_gameplay_ai_validate them: collect every behavior_tree_blackboard_link_mismatch, invalid_blackboard_reference and invalid_graph_blackboard_reference. hyper_gameplay_ai_inspect each affected tree for its revision, runtime blackboard and editor-root blackboard.\n3. hyper_gameplay_ai_apply_plan with bDryRun true: one set_behavior_tree_blackboard op per affected tree (targetPath, expectedRevision, referencePath = the chosen Blackboard). It must reply valid_dry_run; a tree with other errors (behavior_node_error, runtime_node_missing) fails it with postcondition_invalid, so leave that tree out and report its errors. Then send it with bDryRun false, a fresh operationId and the planHash. The pack only stages edits today: a reply of staged_backend_required means nothing changed. The link is set on each tree's Root node, which no tool edits yet: give me the list (tree, Blackboard to set) and wait until I say it is done.\n4. hyper_gameplay_ai_validate the trees again.\nReport a PASS/FAIL table, one row per tree: the problem found, the Blackboard planned, the dry run result, and validate after (PASS at 0 errors). Change no tree that validated clean.",
+   "skills": [
+    "unreal-ai"
+   ]
   },
   {
    "id": "ai-behavior.audit-ai-perception",
@@ -284,7 +303,10 @@
      "hint": "Upper bound for each sense's max age, in seconds."
     }
    ],
-   "prompt": "Check the AI Perception setup of the AI controller Blueprints under {{content_folder}}. Change nothing.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Find them with Epic's AssetTools find_assets and load each with load_asset.\n2. hyper_gameplay_ai_inspect them with variant ai_controller_perception and bIncludeDetails true: per controller, its senses (sense name, config class, max age, starts enabled), dominant sense, default blackboard and compile status.\n3. hyper_gameplay_ai_validate the same paths with that variant: note perception_max_age_invalid, dominant_sense_not_configured, duplicate_perception_sense and ai_controller_compile_error or warning.\n4. This pack reads perception but does not change it, so for each problem give the exact setting to change in the controller's AIPerception component.\nReport a PASS/FAIL table, one row per controller: has each of {{required_senses}}; every sense starts enabled; every max age above 0 and at most {{max_age}} s (0 means it never forgets: WARN); a dominant sense set; compiles clean; validate 0 errors. Then the fixes, most urgent first."
+   "prompt": "Check the AI Perception setup of the AI controller Blueprints under {{content_folder}}. Change nothing.\n1. If hyper_gameplay_ai_inspect is not available, the Gameplay AI pack is off: say so and stop. Find them with Epic's AssetTools find_assets and load each with load_asset.\n2. hyper_gameplay_ai_inspect them with variant ai_controller_perception and bIncludeDetails true: per controller, its senses (sense name, config class, max age, starts enabled), dominant sense, default blackboard and compile status.\n3. hyper_gameplay_ai_validate the same paths with that variant: note perception_max_age_invalid, dominant_sense_not_configured, duplicate_perception_sense and ai_controller_compile_error or warning.\n4. This pack reads perception but does not change it, so for each problem give the exact setting to change in the controller's AIPerception component.\nReport a PASS/FAIL table, one row per controller: has each of {{required_senses}}; every sense starts enabled; every max age above 0 and at most {{max_age}} s (0 means it never forgets: WARN); a dominant sense set; compiles clean; validate 0 errors. Then the fixes, most urgent first.",
+   "skills": [
+    "unreal-ai"
+   ]
   },
   {
    "id": "ai-behavior.patrol-chase-guard",
@@ -362,6 +384,7 @@
     "blueprint"
    ],
    "skills": [
+    "unreal-ai",
     "unreal-blueprint"
    ],
    "agent": "programmer",
@@ -421,6 +444,7 @@
     "blueprint"
    ],
    "skills": [
+    "unreal-ai",
     "unreal-blueprint"
    ],
    "agent": "programmer",
@@ -568,6 +592,7 @@
     "worldbuilding_navigation"
    ],
    "skills": [
+    "unreal-ai",
     "unreal-playtest"
    ],
    "agent": "programmer",
@@ -623,7 +648,10 @@
     ],
     "min": 1
    },
-   "prompt": "Review the State Tree {{selected_asset}} for logic holes. Change nothing.\n1. hyper_gameplay_ai_inspect with no asset paths, variant state_tree and bIncludePrerequisites true. It replies variant_adapter_unavailable, since HyperAI cannot edit State Trees yet, with the state_tree prerequisite row: if its plugins are not enabled, say so and stop. This review reads the tree through Epic's tools.\n2. Load the asset with Epic's AssetTools load_asset. With Epic's StateTreeTools: get_root_states, then get_children down every branch; per state get_tasks, get_enter_conditions and get_transitions; get_evaluators and get_global_tasks; get_node_description for each task and condition.\n3. Build the state graph: a state is entered when it is a root, its parent selects it, or a transition targets it.\nWrite an indented outline (state, tasks, enter conditions, transitions with trigger and target), then a PASS/FAIL table: every leaf state has at least 1 task; every state can be entered; every leaf state has a transition out or ends the tree on purpose; no transition targets a missing state; counts of states, tasks and transitions. For each FAIL, say the state and the smallest change that fixes it."
+   "prompt": "Review the State Tree {{selected_asset}} for logic holes. Change nothing.\n1. hyper_gameplay_ai_inspect with no asset paths, variant state_tree and bIncludePrerequisites true. It replies variant_adapter_unavailable, since HyperAI cannot edit State Trees yet, with the state_tree prerequisite row: if its plugins are not enabled, say so and stop. This review reads the tree through Epic's tools.\n2. Load the asset with Epic's AssetTools load_asset. With Epic's StateTreeTools: get_root_states, then get_children down every branch; per state get_tasks, get_enter_conditions and get_transitions; get_evaluators and get_global_tasks; get_node_description for each task and condition.\n3. Build the state graph: a state is entered when it is a root, its parent selects it, or a transition targets it.\nWrite an indented outline (state, tasks, enter conditions, transitions with trigger and target), then a PASS/FAIL table: every leaf state has at least 1 task; every state can be entered; every leaf state has a transition out or ends the tree on purpose; no transition targets a missing state; counts of states, tasks and transitions. For each FAIL, say the state and the smallest change that fixes it.",
+   "skills": [
+    "unreal-ai"
+   ]
   }
  ]
 }

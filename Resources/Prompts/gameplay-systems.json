@@ -10,6 +10,7 @@
     "enhanced_input"
    ],
    "skills": [
+    "unreal-input",
     "unreal-playtest"
    ],
    "agent": "qa-tester",
@@ -48,6 +49,7 @@
     "enhanced_input"
    ],
    "skills": [
+    "unreal-input",
     "unreal-playtest"
    ],
    "agent": "programmer",
@@ -95,6 +97,7 @@
     "enhanced_input"
    ],
    "skills": [
+    "unreal-input",
     "unreal-playtest"
    ],
    "agent": "programmer",
@@ -136,6 +139,7 @@
     "blueprint"
    ],
    "skills": [
+    "unreal-input",
     "unreal-playtest"
    ],
    "agent": "programmer",
@@ -182,7 +186,9 @@
     "enhanced_input",
     "scripting"
    ],
-   "skills": [],
+   "skills": [
+    "unreal-input"
+   ],
    "agent": "programmer",
    "tools": [
     "hyper_input_apply_plan",
@@ -217,6 +223,7 @@
     "scripting"
    ],
    "skills": [
+    "unreal-input",
     "unreal-playtest"
    ],
    "agent": "programmer",
@@ -263,7 +270,9 @@
     "enhanced_input",
     "scripting"
    ],
-   "skills": [],
+   "skills": [
+    "unreal-input"
+   ],
    "agent": "programmer",
    "tools": [
     "hyper_input_inspect",
@@ -308,7 +317,9 @@
     "enhanced_input",
     "scripting"
    ],
-   "skills": [],
+   "skills": [
+    "unreal-input"
+   ],
    "agent": "programmer",
    "tools": [
     "hyper_input_inspect",
@@ -366,6 +377,7 @@
     "enhanced_input"
    ],
    "skills": [
+    "unreal-input",
     "unreal-playtest"
    ],
    "agent": "qa-tester",
@@ -461,7 +473,9 @@
    "packs": [
     "enhanced_input"
    ],
-   "skills": [],
+   "skills": [
+    "unreal-input"
+   ],
    "agent": "qa-tester",
    "tools": [
     "hyper_input_inspect",
@@ -496,7 +510,9 @@
     "enhanced_input",
     "scripting"
    ],
-   "skills": [],
+   "skills": [
+    "unreal-input"
+   ],
    "agent": "programmer",
    "tools": [
     "hyper_input_inspect",
@@ -549,6 +565,7 @@
     "scripting"
    ],
    "skills": [
+    "unreal-input",
     "unreal-playtest"
    ],
    "agent": "programmer",
@@ -600,7 +617,6 @@
    "packs": [
     "character"
    ],
-   "skills": [],
    "agent": "qa-tester",
    "tools": [
     "hyper_character_inspect",
@@ -632,7 +648,6 @@
     "character",
     "lighting_lookdev"
    ],
-   "skills": [],
    "tools": [
     "hyper_character_inspect",
     "hyper_character_apply_plan",
@@ -694,7 +709,6 @@
     "character",
     "lighting_lookdev"
    ],
-   "skills": [],
    "tools": [
     "hyper_character_inspect",
     "hyper_character_apply_plan",
@@ -762,7 +776,6 @@
     "character",
     "lighting_lookdev"
    ],
-   "skills": [],
    "tools": [
     "hyper_character_inspect",
     "hyper_character_apply_plan",
@@ -816,7 +829,6 @@
    "packs": [
     "gameplay_systems"
    ],
-   "skills": [],
    "agent": "qa-tester",
    "tools": [
     "hyper_gameplay_systems_inspect",
