@@ -15675,6 +15675,54 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.eight-player-session.ph.players.hint",
+   "source": "2 to 6; late joiners make up the rest of 8",
+   "text": "2 到 6；其余由中途加入的玩家补足到 8 人"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.eight-player-session.ph.players.label",
+   "source": "Players at the start",
+   "text": "开始时的玩家数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.eight-player-session.ph.property.hint",
+   "source": "Such as bOpen",
+   "text": "例如 bOpen"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.eight-player-session.ph.property.label",
+   "source": "Its replicated property",
+   "text": "它的复制属性"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.eight-player-session.ph.target.hint",
+   "source": "An actor every player should see",
+   "text": "每个玩家都应看到的 Actor"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.eight-player-session.ph.target.label",
+   "source": "Replicated actor",
+   "text": "被复制的 Actor"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.eight-player-session.summary",
+   "source": "A listen server, its clients and late joiners, each with a bot, checking what replicated to every one.",
+   "text": "一个监听服务器、它的客户端和中途加入的玩家，各有一个机器人，检查复制到每个玩家的内容。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.eight-player-session.title",
+   "source": "Play an 8-player session with late joiners",
+   "text": "进行一场 8 人对局，包含中途加入的玩家"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "playtest-qa.find-aim-mode.ph.target.hint",
    "source": "Label, name, tag or class of an actor in view of the player",
    "text": "玩家视野内某个 Actor 的标签、名称、Tag 或类"
@@ -15726,6 +15774,78 @@
    "key": "playtest-qa.find-stuck-spots.title",
    "source": "Find where players get stuck or fall out",
    "text": "找出玩家会卡住或掉出世界的位置"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.gas-ability-check.ph.ability.hint",
+   "source": "Such as GA_Fireball",
+   "text": "例如 GA_Fireball"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.gas-ability-check.ph.ability.label",
+   "source": "Ability class",
+   "text": "技能类"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.gas-ability-check.ph.cost_attribute.hint",
+   "source": "The attribute it spends",
+   "text": "它消耗的属性"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.gas-ability-check.ph.cost_attribute.label",
+   "source": "Cost attribute",
+   "text": "消耗属性"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.gas-ability-check.ph.effect.hint",
+   "source": "Such as GE_Burning",
+   "text": "例如 GE_Burning"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.gas-ability-check.ph.effect.label",
+   "source": "Effect on the target",
+   "text": "目标上的效果"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.gas-ability-check.ph.input_action.hint",
+   "source": "The action that triggers the ability",
+   "text": "触发该技能的输入操作"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.gas-ability-check.ph.input_action.label",
+   "source": "Input action",
+   "text": "输入操作"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.gas-ability-check.ph.target.hint",
+   "source": "An actor label, tag or class",
+   "text": "Actor 的标签、名称、Tag 或类"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.gas-ability-check.ph.target.label",
+   "source": "Target",
+   "text": "目标"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.gas-ability-check.summary",
+   "source": "Press an ability and prove it ran, cost what it should, and applied its effect and tags.",
+   "text": "按下技能，证明它确实运行、消耗正确，并施加了相应的效果和标签。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.gas-ability-check.title",
+   "source": "Check an ability through GAS while playing",
+   "text": "在游戏中通过 GAS 检查一个技能"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -15858,6 +15978,30 @@
    "key": "playtest-qa.movement-feel.title",
    "source": "Measure walk speed, stopping and jump against targets",
    "text": "按目标测量行走速度、停步和跳跃"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.phone-playtest.ph.viewers.hint",
+   "source": "1 to 8 phones at once",
+   "text": "同时 1 到 8 部手机"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.phone-playtest.ph.viewers.label",
+   "source": "Viewers",
+   "text": "观看人数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.phone-playtest.summary",
+   "source": "Stream Play In Editor to phones with Pixel Streaming 2, show the QR code, and record the bot playing.",
+   "text": "用 Pixel Streaming 2 把编辑器内运行串流到手机，显示二维码，并录下机器人的游玩过程。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.phone-playtest.title",
+   "source": "Playtest on phones over the local network",
+   "text": "通过局域网在手机上试玩"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -16008,6 +16152,42 @@
    "key": "playtest-qa.survey-before-testing.title",
    "source": "Survey the level before writing playtests",
    "text": "编写试玩测试前先勘察关卡"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.survey-level-coverage.ph.cells.hint",
+   "source": "4 to 48; more is finer and slower",
+   "text": "4 到 48；越多越精细，也越慢"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.survey-level-coverage.ph.cells.label",
+   "source": "Grid cells a side",
+   "text": "每边网格数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.survey-level-coverage.ph.walk_seconds.hint",
+   "source": "Short walks that look for stuck spots and falls",
+   "text": "寻找卡住点和坠落点的短距离行走"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.survey-level-coverage.ph.walk_seconds.label",
+   "source": "Seconds of walking",
+   "text": "行走秒数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.survey-level-coverage.summary",
+   "source": "One SurveyLevel step maps what a player can reach, films it, and finds where it gets stuck or falls out.",
+   "text": "一个 SurveyLevel 步骤即可绘出玩家能到达的区域，录制画面，并找出玩家卡住或掉出世界的地方。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.survey-level-coverage.title",
+   "source": "Survey the level: reachable ground, stuck spots and falls",
+   "text": "勘察关卡：可到达的地面、卡住点和坠落点"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -22383,9 +22563,69 @@
   },
   {
    "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "MapTooltip",
+   "source": "Survey the whole level: what the player can reach, where it gets stuck or falls out, frames, a video and an overview image.",
+   "text": "勘察整个关卡：玩家能到达哪里、在哪里卡住或掉出世界，并生成画面帧、视频和俯视总览图。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
    "key": "NotARequest",
    "source": "Shown as JSON: {0}",
    "text": "以 JSON 显示：{0}"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "PhoneIntro",
+   "source": "Streams Play In Editor with Pixel Streaming 2 to phones on this PC's Wi-Fi, up to 8 at once: start it, scan the code, then press Play. It asks you first, and runs only on your local network.",
+   "text": "用 Pixel Streaming 2 把编辑器内运行串流到与这台电脑同一 Wi-Fi 的手机上，最多同时 8 部：先启动，扫描二维码，再按“运行”。启动前会先征求你的同意，并且只在你的局域网内运行。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "PhoneNotReady",
+   "source": "starting",
+   "text": "启动中"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "PhoneReady",
+   "source": "ready",
+   "text": "就绪"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "PhoneStart",
+   "source": "Start phone playtest",
+   "text": "开始手机试玩"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "PhoneStartTooltip",
+   "source": "Start a Pixel Streaming server in this editor on ports 8080 and 8888, for phones on this network, as hyper_phone_playtest_start does. You approve it first.",
+   "text": "在此编辑器中启动 Pixel Streaming 服务器（端口 8080 和 8888），供本网络中的手机使用，与 hyper_phone_playtest_start 相同。你需要先批准。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "PhoneStop",
+   "source": "Stop",
+   "text": "停止"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "PhoneStreaming",
+   "source": "{0} Server {1}. Only this network can reach it: ports {2} and {3}.",
+   "text": "{0} 服务器{1}。只有本网络能访问它：端口 {2} 和 {3}。"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "PhoneTitle",
+   "source": "Playtest on phones",
+   "text": "在手机上试玩"
+  },
+  {
+   "namespace": "SHyperAIStudioPlaytestPanel",
+   "key": "PhoneUrlTooltip",
+   "source": "Open this on a phone on the same Wi-Fi network, or scan the code.",
+   "text": "在同一 Wi-Fi 网络中的手机上打开此地址，或扫描二维码。"
   },
   {
    "namespace": "SHyperAIStudioPlaytestPanel",

@@ -25,7 +25,11 @@ public class HyperAIStudioBot : ModuleRules
 			"EnhancedInput",
 			"FieldSystemEngine",
 			"GeometryCollectionEngine",
+			// AssertTag reads gameplay tags; the rest of GAS is read by reflection, so games without it need nothing more.
+			"GameplayTags",
 			"InputCore",
+			// SurveyLevel writes coverage.json.
+			"Json",
 			"NavigationSystem",
 			"Slate",
 			"SlateCore",

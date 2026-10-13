@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Blueprint/UserWidget.h"
 #include "Components/ActorComponent.h"
 
 #include "HyperAIStudioBotFixtures.generated.h"
@@ -191,4 +192,11 @@ private:
 	FVector2D LastCursor = FVector2D::ZeroVector;
 	bool bHasLastCursor = false;
 	double LastMoveTime = -100.0;
+};
+
+/** A HUD for the UI assertion tests: a user widget whose tree the test builds itself. */
+UCLASS(NotBlueprintable, NotPlaceable, Transient, HideDropdown)
+class UHyperAIStudioTestHud : public UUserWidget
+{
+	GENERATED_BODY()
 };

@@ -735,6 +735,20 @@
 				"Engine"
 			]
 		}
+,
+		{
+			"Name": "HyperAIStudioPixelStreaming",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		}
 	],
 	"Plugins": [
 		{
@@ -831,6 +845,10 @@
 		},
 		{
 			"Name": "GameplayAbilities",
+			"Enabled": false
+		},
+		{
+			"Name": "PixelStreaming2",
 			"Enabled": false
 		},
 		{

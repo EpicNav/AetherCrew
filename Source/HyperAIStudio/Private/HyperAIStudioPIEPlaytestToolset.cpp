@@ -9,6 +9,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
+#include "HAL/PlatformMemory.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "HAL/PlatformTime.h"
@@ -23,8 +24,11 @@
 #include "HyperAIStudioVerify.h"
 #include "UObject/StrongObjectPtr.h"
 #include "InputAction.h"
+#include "Interfaces/IPluginManager.h"
 #include "InputKeyEventArgs.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioLevelSurvey.h"
+#include "HyperAIStudioPhonePlaytest.h"
 #include "HyperAIStudioLogTailToolset.h"
 #include "HyperAIStudioNativeReadToolset.h"
 #include "HyperAIStudioOperationJournal.h"
@@ -687,7 +691,10 @@ const TArray<FHyperAIStudioPIEPlaytestManifestEntry>& FHyperAIStudioPIEPlaytestC
 		{ TEXT("hyper_playtest_run"), GetQualifiedToolsetName() },
 		{ TEXT("hyper_playtest_status"), GetQualifiedToolsetName() },
 		{ TEXT("hyper_verify_run"), GetQualifiedToolsetName() },
-		{ TEXT("hyper_verify_calibrate"), GetQualifiedToolsetName() }
+		{ TEXT("hyper_verify_calibrate"), GetQualifiedToolsetName() },
+		{ TEXT("hyper_phone_playtest_start"), GetQualifiedToolsetName() },
+		{ TEXT("hyper_phone_playtest_status"), GetQualifiedToolsetName() },
+		{ TEXT("hyper_phone_playtest_stop"), GetQualifiedToolsetName() }
 	};
 	return Manifest;
 }
@@ -837,6 +844,14 @@ bool FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(
 		OutError = TEXT("JoinPlayer adds a client to a networked session: set net_mode to ListenServer or Client.");
 		return false;
 	}
+	const int32 LateJoiners = Request.Steps.FilterByPredicate([](const FHyperAIPIEPlaytestStep& Step) { return Step.Kind == EHyperAIPIEPlaytestStepKind::JoinPlayer; }).Num();
+	if (Request.NumPlayers + LateJoiners > MaxPlayers)
+	{
+		OutErrorCode = TEXT("invalid_players");
+		OutError = FString::Printf(TEXT("num_players %d and %d JoinPlayer step(s) make %d players; a session takes %d at most."),
+			Request.NumPlayers, LateJoiners, Request.NumPlayers + LateJoiners, MaxPlayers);
+		return false;
+	}
 	if (Request.Steps.Num() > MaxSteps)
 	{
 		OutErrorCode = TEXT("step_limit_exceeded");
@@ -903,6 +918,17 @@ bool FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(
 		return false;
 	}
 	return true;
+}
+
+int32 FHyperAIStudioPIEPlaytestContracts::PlayersThatFit(const int64 AvailableBytes, const bool bDedicatedServer)
+{
+	const int64 Spare = AvailableBytes - ReservedMemoryBytes - (bDedicatedServer ? PlayerMemoryBytes : 0);
+	return Spare <= 0 ? 0 : static_cast<int32>(FMath::Min<int64>(Spare / PlayerMemoryBytes, MaxPlayers));
+}
+
+int32 FHyperAIStudioPIEPlaytestContracts::WorldReadyTimeoutMs(const int32 Worlds)
+{
+	return FMath::Clamp(30000 + 7500 * (Worlds - 1), 30000, 90000);
 }
 
 bool FHyperAIStudioPIEPlaytestContracts::IsEffectStep(const EHyperAIPIEPlaytestStepKind Kind)
@@ -1342,6 +1368,25 @@ namespace HyperAIStudio::PIEPlaytest::Private
 			{
 				return DriverFailure(EHyperAIStudioPIEDriverOutcome::FailedBeforeEffect,
 					TEXT("session_already_active"), TEXT("StartInProcess refuses to replace or attach to an existing/queued play session."));
+			}
+			// Every player is a world, a window and a renderer in this process: refuse rather than run the machine out of memory.
+			const int32 Worlds = ExpectedPieWorlds(Plan.Request)
+				+ Plan.Request.Steps.FilterByPredicate([](const FHyperAIPIEPlaytestStep& Step) { return Step.Kind == EHyperAIPIEPlaytestStepKind::JoinPlayer; }).Num();
+			const bool bDedicated = Plan.Request.NetMode == EHyperAIPIEPlaytestNetMode::Client;
+			const int32 Players = Worlds - (bDedicated ? 1 : 0);
+			if (Players > FHyperAIStudioPIEPlaytestContracts::UncheckedPlayers)
+			{
+				const int64 Available = static_cast<int64>(FPlatformMemory::GetStats().AvailablePhysical);
+				const int32 Fit = FHyperAIStudioPIEPlaytestContracts::PlayersThatFit(Available, bDedicated);
+				if (Players > Fit)
+				{
+					return DriverFailure(EHyperAIStudioPIEDriverOutcome::FailedBeforeEffect, TEXT("not_enough_memory"),
+						FString::Printf(TEXT("%d players need about %.1f GB of free memory (%.1f GB each%s, and %.1f GB kept for the editor); this machine has %.1f GB free, enough for %d. Ask for %d players or fewer, or close other programs."),
+							Players, (Players * FHyperAIStudioPIEPlaytestContracts::PlayerMemoryBytes + (bDedicated ? FHyperAIStudioPIEPlaytestContracts::PlayerMemoryBytes : 0)
+								+ FHyperAIStudioPIEPlaytestContracts::ReservedMemoryBytes) / 1073741824.0,
+							FHyperAIStudioPIEPlaytestContracts::PlayerMemoryBytes / 1073741824.0, bDedicated ? TEXT(", the dedicated server as one more") : TEXT(""),
+							FHyperAIStudioPIEPlaytestContracts::ReservedMemoryBytes / 1073741824.0, Available / 1073741824.0, Fit, FMath::Max(Fit, FHyperAIStudioPIEPlaytestContracts::UncheckedPlayers)));
+				}
 			}
 			ULevelEditorPlaySettings* Settings = DuplicateObject<ULevelEditorPlaySettings>(
 				GetDefault<ULevelEditorPlaySettings>(), GetTransientPackage());
@@ -2179,8 +2224,9 @@ namespace HyperAIStudio::PIEPlaytest::Private
 		}
 
 		/** A bot result as a driver result: running is pending, and a failed step's reason is the run's reason. */
-		static FHyperAIStudioPIEDriverResult BotResult(const FHyperAIPIEPlaytestStep& Step, const FHyperAIBotResult& Result)
+		static FHyperAIStudioPIEDriverResult BotResult(const FHyperAIPIEPlaytestStep& Step, const FHyperAIBotResult& InResult)
 		{
+			const FHyperAIBotResult Result = HyperAIStudio::LevelSurvey::WithVideo(Step.Bot.Action, InResult);
 			if (!Result.IsDone())
 			{
 				FHyperAIStudioPIEDriverResult Pending;
@@ -2593,7 +2639,7 @@ void FHyperAIStudioPIEPlaytestRuntime::Tick()
 				Current.Status = TEXT("starting_session");
 				WorldDeadlineMs = FMath::Min(
 					WholeDeadlineMs,
-					NowMs + HyperAIStudio::PIEPlaytest::Private::WorldReadyTimeoutMs);
+					NowMs + FHyperAIStudioPIEPlaytestContracts::WorldReadyTimeoutMs(HyperAIStudio::PIEPlaytest::Private::ExpectedPieWorlds(Current.Plan.Request)));
 				return;
 			}
 			HandleDriverResult(Result, true);
@@ -2603,7 +2649,7 @@ void FHyperAIStudioPIEPlaytestRuntime::Tick()
 		Current.Status = TEXT("waiting_for_world");
 		WorldDeadlineMs = FMath::Min(
 			WholeDeadlineMs,
-			NowMs + HyperAIStudio::PIEPlaytest::Private::WorldReadyTimeoutMs);
+			NowMs + FHyperAIStudioPIEPlaytestContracts::WorldReadyTimeoutMs(HyperAIStudio::PIEPlaytest::Private::ExpectedPieWorlds(Current.Plan.Request)));
 		return;
 
 	case EHyperAIStudioPIERuntimeState::StartingSession:
@@ -3638,6 +3684,21 @@ UHyperAIVerifyCalibrationResult* UHyperAIStudioPIEPlaytestToolset::hyper_verify_
 	return Result;
 }
 
+FHyperAIPhonePlaytestReport UHyperAIStudioPIEPlaytestToolset::hyper_phone_playtest_start(const FHyperAIPhonePlaytestRequest& Request)
+{
+	return HyperAIStudio::PhonePlaytest::Start(Request);
+}
+
+FHyperAIPhonePlaytestReport UHyperAIStudioPIEPlaytestToolset::hyper_phone_playtest_status()
+{
+	return HyperAIStudio::PhonePlaytest::Status();
+}
+
+FHyperAIPhonePlaytestReport UHyperAIStudioPIEPlaytestToolset::hyper_phone_playtest_stop()
+{
+	return HyperAIStudio::PhonePlaytest::Stop();
+}
+
 void FHyperAIStudioPIEPlaytestRegistration::Startup()
 {
 	if (bStarted)
@@ -3660,6 +3721,8 @@ void FHyperAIStudioPIEPlaytestRegistration::Shutdown()
 		FCoreDelegates::GetOnPostEngineInit().Remove(PostEngineInitHandle);
 		PostEngineInitHandle.Reset();
 	}
+	// A phone playtest's game process and server end with the editor.
+	HyperAIStudio::PhonePlaytest::Stop();
 	FHyperAIStudioPIEPlaytestService::Shutdown();
 	if (bOwnsRegistration && IsInGameThread() && UObjectInitialized()
 		&& UToolsetRegistry::IsAvailable())
@@ -3717,5 +3780,11 @@ void FHyperAIStudioPIEPlaytestRegistration::RegisterAfterEngineInit()
 		FHyperAIStudioPIEPlaytestContracts::GetQualifiedToolsetName()))
 	{
 		FHyperAIStudioPIEPlaytestService::Startup();
+	}
+	// With Pixel Streaming 2 enabled, HyperAI's module turns off the plugin's own PIE streaming at once: left on, every PIE
+	// session would start the plugin's server, which first downloads from GitHub.
+	if (IPluginManager::Get().FindEnabledPlugin(TEXT("PixelStreaming2")).IsValid() && !FModuleManager::Get().IsModuleLoaded(TEXT("HyperAIStudioPixelStreaming")))
+	{
+		FModuleManager::Get().LoadModule(TEXT("HyperAIStudioPixelStreaming"));
 	}
 }

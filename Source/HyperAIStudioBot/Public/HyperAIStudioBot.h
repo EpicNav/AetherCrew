@@ -12,6 +12,7 @@
 class AActor;
 class FHyperAIBotAimer;
 class FHyperAIBotBrain;
+class FHyperAIBotSurveyor;
 class UGeometryCollectionComponent;
 class UInputAction;
 class USceneCaptureComponent2D;
@@ -91,7 +92,29 @@ enum class EHyperAIBotAction : uint8
 	 * Aim at Target or Location the way the game reads aim (Aim picks how, Auto unless set) for Seconds, 0.5 unless
 	 * set, then check the game's own aim points there.
 	 */
-	AimAt
+	AimAt,
+	/** How many actors match Target (a class, tag, label or name; every match, not the first) compared with Value. */
+	AssertCount,
+	/** The distance in cm from Target to Other, or to Location, compared with Value. */
+	AssertDistance,
+	/**
+	 * A gameplay attribute on Target's ability system (the actor's, or its player state's) compared with Value: Property
+	 * names it, as Health or HealthSet.Health. Reads its current value; Property Health.Base reads the base value.
+	 */
+	AssertAttribute,
+	/** Target's gameplay tags (its ability system's, or the actor's own): Property is the tag; Value present (unless set) or absent. A parent tag matches its children. */
+	AssertTag,
+	/** An ability on Target's ability system: Property is its class, as GA_Dash; Value granted (unless set), active, inactive or absent. */
+	AssertAbility,
+	/** An active gameplay effect on Target's ability system: Property is its class, as GE_Burning; its stack count compared with Value, >= 1 unless set. */
+	AssertEffect,
+	/**
+	 * Survey the level the player is in: a grid over it (Value cells a side, 24 unless set, inside Range cm of the player
+	 * when set) sorted into reachable, unreachable and no ground, frames from viewpoints over the reachable part, short
+	 * walks to find where the player gets stuck or falls out of the world (Seconds of walking, 12 unless set), and an
+	 * overview image with all of it drawn on. Writes coverage.json, overview.png and frames into a folder named after Text.
+	 */
+	SurveyLevel
 };
 
 /** How the bot aims: the way the game under test reads its player's aim. */
@@ -158,7 +181,11 @@ struct HYPERAISTUDIOBOT_API FHyperAIBotStep
 	UPROPERTY()
 	FVector Location = FVector::ZeroVector;
 
-	/** A property path on Target, such as Score or HealthComponent.Health. Location, Rotation, Velocity and Speed work on any actor. */
+	/**
+	 * A property path on Target, such as Score or HealthComponent.Health. Location, Rotation, Velocity and Speed work on
+	 * any actor. AssertAttribute, AssertTag, AssertAbility and AssertEffect: the attribute, tag, ability or effect.
+	 * UiAssert: what to check, Visible unless set: Text, Enabled, Disabled, Focused, Hidden or Percent (a progress bar's, 0 to 1).
+	 */
 	UPROPERTY()
 	FString Property;
 
@@ -174,7 +201,7 @@ struct HYPERAISTUDIOBOT_API FHyperAIBotStep
 	UPROPERTY()
 	FString InputAction;
 
-	/** A UI widget's name, optionally after its user widget: WBP_HUD.ScoreText. */
+	/** A UI widget's name or class, optionally after its user widget: WBP_HUD.ScoreText, WBP_HUD.ProgressBar. */
 	UPROPERTY()
 	FString Widget;
 
@@ -351,6 +378,9 @@ private:
 
 	/** A Play step's player. */
 	TUniquePtr<FHyperAIBotBrain> Brain;
+
+	/** A SurveyLevel step's survey. */
+	TUniquePtr<FHyperAIBotSurveyor> Surveyor;
 
 	/** A Damage step's strain field, applied again each frame for its Seconds. */
 	TArray<TWeakObjectPtr<UGeometryCollectionComponent>> Damaged;

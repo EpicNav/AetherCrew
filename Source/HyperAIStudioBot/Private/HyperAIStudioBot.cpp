@@ -10,6 +10,7 @@
 #include "Components/EditableText.h"
 #include "Components/EditableTextBox.h"
 #include "Components/MultiLineEditableTextBox.h"
+#include "Components/ProgressBar.h"
 #include "Components/RichTextBlock.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/TextBlock.h"
@@ -42,6 +43,8 @@
 #include "HAL/FileManager.h"
 #include "HyperAIStudioBotAimer.h"
 #include "HyperAIStudioBotBrain.h"
+#include "HyperAIStudioBotGameplay.h"
+#include "HyperAIStudioBotSurveyor.h"
 #include "HyperAIStudioBotShared.h"
 #include "ImageUtils.h"
 #include "InputAction.h"
@@ -70,6 +73,8 @@ namespace HyperAIStudio::Bot::Private
 	constexpr double AimSettleSeconds = 0.5;
 	/** AimAt aims this long unless the step says. */
 	constexpr double AimSeconds = 0.5;
+	/** AssertCount counts every match up to this. */
+	constexpr int32 MaxCountedActors = 100000;
 
 	FString Vec(const FVector& Value)
 	{
@@ -193,7 +198,7 @@ namespace HyperAIStudio::Bot::Private
 		return ByLabel ? ByLabel : ByTag ? ByTag : ByClass;
 	}
 
-	TArray<AActor*> FindAll(UWorld& World, const FString& Name, const int32 PlayerIndex)
+	TArray<AActor*> FindAll(UWorld& World, const FString& Name, const int32 PlayerIndex, const int32 Max)
 	{
 		TArray<AActor*> Found;
 		int32 Index = 0;
@@ -206,7 +211,7 @@ namespace HyperAIStudio::Bot::Private
 			return Found;
 		}
 		const FName Tag(*Name);
-		for (TActorIterator<AActor> It(&World); It && Found.Num() < 64; ++It)
+		for (TActorIterator<AActor> It(&World); It && Found.Num() < Max; ++It)
 		{
 			AActor* Actor = *It;
 			if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
@@ -550,6 +555,8 @@ namespace HyperAIStudio::Bot::Private
 		return Name.IsEmpty() ? FString(Fallback) : Name;
 	}
 
+	bool IsShown(const UWidget& Widget);
+
 	UWidget* FindWidget(UWorld& World, const FString& Name)
 	{
 		FString Outer;
@@ -579,8 +586,125 @@ namespace HyperAIStudio::Bot::Private
 			{
 				return User;
 			}
+			// Or a widget of that class inside it, such as WBP_HUD.ProgressBar: the first one shown, else the first.
+			UWidget* OfClass = nullptr;
+			User->WidgetTree->ForEachWidget([&OfClass, &Inner](UWidget* Child)
+			{
+				FString ChildClass = Child ? Child->GetClass()->GetName() : FString();
+				ChildClass.RemoveFromEnd(TEXT("_C"));
+				if (Child && (ChildClass.Equals(Inner, ESearchCase::IgnoreCase) || ChildClass.Equals(TEXT("U") + Inner, ESearchCase::IgnoreCase))
+					&& (!OfClass || (!IsShown(*OfClass) && IsShown(*Child))))
+				{
+					OfClass = Child;
+				}
+			});
+			if (OfClass)
+			{
+				return OfClass;
+			}
 		}
 		return nullptr;
+	}
+
+	bool IsShown(const UWidget& Widget)
+	{
+		// Visible itself and in every parent, up through the user widgets it sits in, to one on the screen.
+		const UWidget* At = &Widget;
+		while (At)
+		{
+			if (!At->IsVisible())
+			{
+				return false;
+			}
+			const UWidget* Parent = At->GetParent();
+			if (!Parent)
+			{
+				// The root of a user widget's tree: carry on from the user widget that holds it.
+				const UUserWidget* Holder = At->GetTypedOuter<UUserWidget>();
+				if (const UUserWidget* User = Cast<UUserWidget>(At); User && User->IsInViewport())
+				{
+					return Widget.GetCachedWidget().IsValid();
+				}
+				if (Holder && Holder != At)
+				{
+					Parent = Holder;
+				}
+			}
+			At = Parent;
+		}
+		return Widget.GetCachedWidget().IsValid();
+	}
+
+	bool ReadWidgetText(const UWidget& Widget, FString& OutText);
+
+	/** UiAssert's check of a widget it found: shown (unless Property says Hidden), then what Property names compared with Value. */
+	FResult CheckWidget(const UWidget& Widget, const FHyperAIBotStep& Step)
+	{
+		const FString Check = Step.Property.IsEmpty() ? FString(TEXT("Visible")) : Step.Property.TrimStartAndEnd();
+		const FString Name = Step.Widget;
+		const bool bShown = IsShown(Widget);
+		if (Check.Equals(TEXT("Hidden"), ESearchCase::IgnoreCase))
+		{
+			return bShown ? FResult::Failed(TEXT("assertion_failed"), FString::Printf(TEXT("%s is on screen"), *Name))
+				: FResult::Passed(FString::Printf(TEXT("%s is not on screen"), *Name));
+		}
+		if (!bShown)
+		{
+			return FResult::Failed(TEXT("not_visible"), FString::Printf(TEXT("%s (a %s) exists but is not on screen: it, or a widget it sits in, is hidden or not added to the viewport."),
+				*Name, *Widget.GetClass()->GetName()));
+		}
+		FReading Shown;
+		Shown.bOk = true;
+		FString What;
+		if (Check.Equals(TEXT("Visible"), ESearchCase::IgnoreCase) || Check.Equals(TEXT("Text"), ESearchCase::IgnoreCase))
+		{
+			if (Check.Equals(TEXT("Visible"), ESearchCase::IgnoreCase) && Step.Value.IsEmpty())
+			{
+				return FResult::Passed(FString::Printf(TEXT("%s is visible"), *Name));
+			}
+			if (!ReadWidgetText(Widget, Shown.Text))
+			{
+				return FResult::Failed(TEXT("no_text"), FString::Printf(TEXT("%s is a %s and shows no text to compare."), *Name, *Widget.GetClass()->GetName()));
+			}
+			Shown.bNumeric = LexTryParseString(Shown.Number, *Shown.Text.TrimStartAndEnd());
+			What = TEXT("shows");
+		}
+		else if (Check.Equals(TEXT("Enabled"), ESearchCase::IgnoreCase) || Check.Equals(TEXT("Disabled"), ESearchCase::IgnoreCase))
+		{
+			const bool bWantEnabled = Check.Equals(TEXT("Enabled"), ESearchCase::IgnoreCase);
+			return Widget.GetIsEnabled() == bWantEnabled
+				? FResult::Passed(FString::Printf(TEXT("%s is %s"), *Name, Widget.GetIsEnabled() ? TEXT("enabled") : TEXT("disabled")))
+				: FResult::Failed(TEXT("assertion_failed"), FString::Printf(TEXT("%s is %s, expected %s"), *Name, Widget.GetIsEnabled() ? TEXT("enabled") : TEXT("disabled"), *Check.ToLower()));
+		}
+		else if (Check.Equals(TEXT("Focused"), ESearchCase::IgnoreCase))
+		{
+			const bool bFocused = Widget.HasAnyUserFocus() || Widget.HasKeyboardFocus() || Widget.HasFocusedDescendants();
+			return bFocused ? FResult::Passed(FString::Printf(TEXT("%s has focus"), *Name))
+				: FResult::Failed(TEXT("assertion_failed"), FString::Printf(TEXT("%s does not have focus"), *Name));
+		}
+		else if (Check.Equals(TEXT("Percent"), ESearchCase::IgnoreCase) || Check.Equals(TEXT("Progress"), ESearchCase::IgnoreCase))
+		{
+			const UProgressBar* Bar = Cast<UProgressBar>(&Widget);
+			if (!Bar)
+			{
+				return FResult::Failed(TEXT("not_a_progress_bar"), FString::Printf(TEXT("%s is a %s, not a progress bar."), *Name, *Widget.GetClass()->GetName()));
+			}
+			Shown.bNumeric = true;
+			Shown.Number = Bar->GetPercent();
+			Shown.Text = FString::Printf(TEXT("%g"), Shown.Number);
+			What = TEXT("is filled to");
+			if (Step.Value.IsEmpty())
+			{
+				return FResult::Passed(FString::Printf(TEXT("%s %s %s"), *Name, *What, *Shown.Text));
+			}
+		}
+		else
+		{
+			return FResult::Failed(TEXT("invalid_step"), TEXT("UiAssert's property is Visible, Text, Enabled, Disabled, Focused, Hidden or Percent."));
+		}
+		return Holds(Shown, Step.Compare, Step.Value)
+			? FResult::Passed(FString::Printf(TEXT("%s %s \"%s\""), *Name, *What, *Shown.Text))
+			: FResult::Failed(TEXT("assertion_failed"), FString::Printf(TEXT("%s %s \"%s\", expected %s %s"), *Name, *What, *Shown.Text, *Step.Compare, *Step.Value));
 	}
 
 	bool ReadWidgetText(const UWidget& Widget, FString& OutText)
@@ -597,7 +721,10 @@ namespace HyperAIStudio::Bot::Private
 	{
 		return Action == EHyperAIBotAction::AssertProperty || Action == EHyperAIBotAction::AssertNear
 			|| Action == EHyperAIBotAction::AssertOnScreen || Action == EHyperAIBotAction::AssertExists
-			|| Action == EHyperAIBotAction::AssertGone || Action == EHyperAIBotAction::AssertBroken;
+			|| Action == EHyperAIBotAction::AssertGone || Action == EHyperAIBotAction::AssertBroken
+			|| Action == EHyperAIBotAction::AssertCount || Action == EHyperAIBotAction::AssertDistance
+			|| Action == EHyperAIBotAction::AssertAttribute || Action == EHyperAIBotAction::AssertTag
+			|| Action == EHyperAIBotAction::AssertAbility || Action == EHyperAIBotAction::AssertEffect;
 	}
 
 	TArray<FString> Words(const FString& Name)
@@ -1001,6 +1128,88 @@ namespace HyperAIStudio::Bot::Private
 		if (Count.NotSimulating > 0) Text += FString::Printf(TEXT("; %d not simulating (no physics state yet)"), Count.NotSimulating);
 		return Text;
 	}
+
+	// --- Gameplay Ability System ------------------------------------------------------------------------------------
+
+	/** AssertAttribute, AssertTag, AssertAbility and AssertEffect on Actor, read through its ability system without linking GAS. */
+	FResult EvaluateGameplay(const EHyperAIBotAction Assertion, AActor& Actor, const FHyperAIBotStep& Step)
+	{
+		namespace Gameplay = HyperAIStudio::Bot::Gameplay;
+		const FString Who = Describe(&Actor);
+		if (Assertion == EHyperAIBotAction::AssertTag)
+		{
+			FGameplayTagContainer Tags;
+			if (!Gameplay::ReadTags(Actor, Tags))
+			{
+				return FResult::Failed(TEXT("no_tags"), FString::Printf(TEXT("%s has no ability system and no gameplay tags of its own."), *Who));
+			}
+			const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*Step.Property.TrimStartAndEnd()), /*ErrorIfNotFound=*/false);
+			const bool bWantAbsent = Step.Value.Equals(TEXT("absent"), ESearchCase::IgnoreCase);
+			const bool bHas = Tag.IsValid() && Tags.HasTag(Tag);
+			const FString Owned = Tags.IsEmpty() ? FString(TEXT("no tags")) : Tags.ToStringSimple();
+			if (!Tag.IsValid() && !bWantAbsent)
+			{
+				return FResult::Failed(TEXT("unknown_tag"), FString::Printf(TEXT("%s is not a registered gameplay tag; %s has %s"), *Step.Property, *Who, *Owned));
+			}
+			return bHas != bWantAbsent
+				? FResult::Passed(FString::Printf(TEXT("%s %s %s; it has %s"), *Who, bHas ? TEXT("has") : TEXT("does not have"), *Step.Property, *Owned))
+				: FResult::Failed(TEXT("assertion_failed"), FString::Printf(TEXT("%s %s %s; it has %s"), *Who, bHas ? TEXT("has") : TEXT("does not have"), *Step.Property, *Owned));
+		}
+		UActorComponent* AbilitySystem = Gameplay::FindAbilitySystem(Actor);
+		if (!AbilitySystem)
+		{
+			return FResult::Failed(TEXT("no_ability_system"), FString::Printf(TEXT("%s has no ability system component, on itself or its player state."), *Who));
+		}
+		if (Assertion == EHyperAIBotAction::AssertAttribute)
+		{
+			const FReading Reading = Gameplay::ReadAttribute(*AbilitySystem, Step.Property);
+			if (!Reading.bOk)
+			{
+				return FResult::Failed(TEXT("attribute_not_found"), Reading.Error);
+			}
+			return Holds(Reading, Step.Compare, Step.Value)
+				? FResult::Passed(FString::Printf(TEXT("%s's %s is %s"), *Who, *Step.Property, *Reading.Text))
+				: FResult::Failed(TEXT("assertion_failed"), FString::Printf(TEXT("%s's %s is %s, expected %s %s"), *Who, *Step.Property, *Reading.Text, *Step.Compare, *Step.Value));
+		}
+		if (Assertion == EHyperAIBotAction::AssertAbility)
+		{
+			const TArray<Gameplay::FAbility> Abilities = Gameplay::ReadAbilities(*AbilitySystem);
+			const Gameplay::FAbility* Found = Abilities.FindByPredicate([&Step](const Gameplay::FAbility& Ability) { return Gameplay::NameMatches(Ability.Name, Step.Property); });
+			TArray<FString> Granted;
+			for (const Gameplay::FAbility& Ability : Abilities)
+			{
+				Granted.Add(Ability.ActiveCount > 0 ? Ability.Name + TEXT(" (active)") : Ability.Name);
+			}
+			const FString Has = Granted.IsEmpty() ? FString(TEXT("no abilities")) : FString::Join(Granted, TEXT(", "));
+			const FString Want = Step.Value.IsEmpty() ? FString(TEXT("granted")) : Step.Value.ToLower();
+			const FString State = !Found ? TEXT("absent") : Found->ActiveCount > 0 ? TEXT("active") : TEXT("inactive");
+			const bool bOk = Want == TEXT("granted") ? Found != nullptr : Want == State;
+			const FString Detail = FString::Printf(TEXT("%s on %s is %s%s; granted: %s"), *Step.Property, *Who, *State,
+				Found ? *FString::Printf(TEXT(" (level %d)"), Found->Level) : TEXT(""), *Has);
+			return bOk ? FResult::Passed(Detail) : FResult::Failed(TEXT("assertion_failed"), Detail + FString::Printf(TEXT("; expected %s"), *Want));
+		}
+		// AssertEffect: the matching active effects' stacks, inhibited ones aside.
+		const TArray<Gameplay::FEffect> Effects = Gameplay::ReadEffects(*AbilitySystem);
+		int32 Stacks = 0;
+		int32 Inhibited = 0;
+		TArray<FString> Active;
+		for (const Gameplay::FEffect& Effect : Effects)
+		{
+			Active.Add(FString::Printf(TEXT("%s x%d%s"), *Effect.Name, Effect.Stacks, Effect.bInhibited ? TEXT(" (inhibited)") : TEXT("")));
+			if (Gameplay::NameMatches(Effect.Name, Step.Property))
+			{
+				(Effect.bInhibited ? Inhibited : Stacks) += Effect.Stacks;
+			}
+		}
+		const FString Want = Step.Value.IsEmpty() ? FString(TEXT("1")) : Step.Value;
+		const FString Compare = Step.Value.IsEmpty() ? FString(TEXT(">=")) : Step.Compare;
+		const FString Detail = FString::Printf(TEXT("%s on %s: %d stack(s)%s; active effects: %s"), *Step.Property, *Who, Stacks,
+			Inhibited > 0 ? *FString::Printf(TEXT(", %d more inhibited"), Inhibited) : TEXT(""),
+			Active.IsEmpty() ? TEXT("none") : *FString::Join(Active, TEXT(", ")));
+		return Holds(Numeric(Stacks, FString::FromInt(Stacks)), Compare, Want)
+			? FResult::Passed(Detail)
+			: FResult::Failed(TEXT("assertion_failed"), Detail + FString::Printf(TEXT("; expected %s %s"), *Compare, *Want));
+	}
 }
 
 FHyperAIBotResult FHyperAIBotResult::Passed(const FString& Detail, const FString& File)
@@ -1126,7 +1335,8 @@ bool FHyperAIBotExecutor::Validate(const FHyperAIBotStep& Step, FString& OutErro
 		}
 		return bHas;
 	};
-	if (Step.Action == EHyperAIBotAction::WaitUntil && !Require(IsAssertion(Step.Until), TEXT("until set to AssertProperty, AssertNear, AssertOnScreen, AssertExists, AssertGone or AssertBroken")))
+	if (Step.Action == EHyperAIBotAction::WaitUntil && !Require(IsAssertion(Step.Until) || Step.Until == EHyperAIBotAction::UiAssert,
+		TEXT("until set to an Assert action (AssertProperty, AssertNear, AssertOnScreen, AssertExists, AssertGone, AssertBroken, AssertCount, AssertDistance, AssertAttribute, AssertTag, AssertAbility or AssertEffect) or UiAssert")))
 	{
 		return false;
 	}
@@ -1198,6 +1408,83 @@ bool FHyperAIBotExecutor::Validate(const FHyperAIBotStep& Step, FString& OutErro
 	if (Checked == EHyperAIBotAction::AssertProperty && !Require(!Step.Property.IsEmpty(), TEXT("property")))
 	{
 		return false;
+	}
+	auto IsNumber = [](const FString& Text)
+	{
+		double Number = 0.0;
+		return LexTryParseString(Number, *Text.TrimStartAndEnd()) && FMath::IsFinite(Number);
+	};
+	const bool bCompareNumber = Step.Compare != TEXT("contains");
+	switch (Checked)
+	{
+	case EHyperAIBotAction::AssertCount:
+		if (!Require(!Step.Target.IsEmpty(), TEXT("target, the class, tag, label or name to count"))) return false;
+		if (!IsNumber(Step.Value) || !bCompareNumber)
+		{
+			OutError = TEXT("AssertCount compares a count: value a number, compare ==, !=, <, <=, > or >=.");
+			return false;
+		}
+		break;
+	case EHyperAIBotAction::AssertDistance:
+		if (!IsNumber(Step.Value) || !bCompareNumber)
+		{
+			OutError = TEXT("AssertDistance compares a distance in cm: value a number, compare ==, !=, <, <=, > or >=.");
+			return false;
+		}
+		if (!Require(!Step.Other.IsEmpty() || !Step.Location.IsZero(), TEXT("other or location to measure to"))) return false;
+		break;
+	case EHyperAIBotAction::AssertAttribute:
+		if (!Require(!Step.Property.IsEmpty(), TEXT("property, the attribute (Health, or HealthSet.Health)")) || !Require(!Step.Value.IsEmpty(), TEXT("value"))) return false;
+		break;
+	case EHyperAIBotAction::AssertTag:
+		if (!Require(!Step.Property.IsEmpty(), TEXT("property, the gameplay tag"))) return false;
+		if (!Step.Value.IsEmpty() && !Step.Value.Equals(TEXT("present"), ESearchCase::IgnoreCase) && !Step.Value.Equals(TEXT("absent"), ESearchCase::IgnoreCase))
+		{
+			OutError = TEXT("AssertTag's value is present or absent.");
+			return false;
+		}
+		break;
+	case EHyperAIBotAction::AssertAbility:
+	{
+		if (!Require(!Step.Property.IsEmpty(), TEXT("property, the ability's class"))) return false;
+		static const TSet<FString> States = {TEXT(""), TEXT("granted"), TEXT("active"), TEXT("inactive"), TEXT("absent")};
+		if (!States.Contains(Step.Value.ToLower()))
+		{
+			OutError = TEXT("AssertAbility's value is granted, active, inactive or absent.");
+			return false;
+		}
+		break;
+	}
+	case EHyperAIBotAction::AssertEffect:
+		if (!Require(!Step.Property.IsEmpty(), TEXT("property, the effect's class"))) return false;
+		if ((!Step.Value.IsEmpty() && !IsNumber(Step.Value)) || !bCompareNumber)
+		{
+			OutError = TEXT("AssertEffect compares the stack count: value a number (>= 1 unless set), compare ==, !=, <, <=, > or >=.");
+			return false;
+		}
+		break;
+	case EHyperAIBotAction::UiAssert:
+	{
+		static const TSet<FString> Checks = {TEXT(""), TEXT("visible"), TEXT("text"), TEXT("enabled"), TEXT("disabled"), TEXT("focused"), TEXT("hidden"), TEXT("percent"), TEXT("progress")};
+		if (!Checks.Contains(Step.Property.ToLower()))
+		{
+			OutError = TEXT("UiAssert's property is Visible, Text, Enabled, Disabled, Focused, Hidden or Percent.");
+			return false;
+		}
+		if (!Require(!Step.Widget.IsEmpty(), TEXT("widget"))) return false;
+		break;
+	}
+	default:
+		break;
+	}
+	if (Step.Action == EHyperAIBotAction::SurveyLevel)
+	{
+		int32 Cells = 0;
+		if (!Step.Value.IsEmpty() && (!LexTryParseString(Cells, *Step.Value.TrimStartAndEnd()) || Cells < HyperAIStudio::Bot::Survey::MinCells || Cells > HyperAIStudio::Bot::Survey::MaxCells))
+		{
+			OutError = FString::Printf(TEXT("SurveyLevel's value is the grid's cells a side, %d to %d."), HyperAIStudio::Bot::Survey::MinCells, HyperAIStudio::Bot::Survey::MaxCells);
+			return false;
+		}
 	}
 	if ((Checked == EHyperAIBotAction::AssertExists || Checked == EHyperAIBotAction::AssertGone || Checked == EHyperAIBotAction::AssertOnScreen)
 		&& !Require(!Step.Target.IsEmpty(), TEXT("target")))
@@ -1601,27 +1888,7 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 			Result = FResult::Passed(FString::Printf(TEXT("typed \"%s\" into %s"), *Step.Text, *Step.Widget));
 			break;
 		}
-		if (!Widget->IsVisible() || !Widget->GetCachedWidget().IsValid())
-		{
-			Result = FResult::Failed(TEXT("not_visible"), FString::Printf(TEXT("%s exists but is not on screen."), *Step.Widget));
-			break;
-		}
-		if (Step.Value.IsEmpty())
-		{
-			Result = FResult::Passed(FString::Printf(TEXT("%s is visible"), *Step.Widget));
-			break;
-		}
-		FReading Shown;
-		if (!ReadWidgetText(*Widget, Shown.Text))
-		{
-			Result = FResult::Failed(TEXT("no_text"), FString::Printf(TEXT("%s shows no text to compare."), *Step.Widget));
-			break;
-		}
-		Shown.bOk = true;
-		Shown.bNumeric = LexTryParseString(Shown.Number, *Shown.Text.TrimStartAndEnd());
-		Result = Holds(Shown, Step.Compare, Step.Value)
-			? FResult::Passed(FString::Printf(TEXT("%s shows \"%s\""), *Step.Widget, *Shown.Text))
-			: FResult::Failed(TEXT("assertion_failed"), FString::Printf(TEXT("%s shows \"%s\", expected %s %s"), *Step.Widget, *Shown.Text, *Step.Compare, *Step.Value));
+		Result = CheckWidget(*Widget, Step);
 		break;
 	}
 	case EHyperAIBotAction::Play:
@@ -1719,7 +1986,17 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 		break;
 	}
 	case EHyperAIBotAction::AssertBroken:
+	case EHyperAIBotAction::AssertCount:
+	case EHyperAIBotAction::AssertDistance:
+	case EHyperAIBotAction::AssertAttribute:
+	case EHyperAIBotAction::AssertTag:
+	case EHyperAIBotAction::AssertAbility:
+	case EHyperAIBotAction::AssertEffect:
 		Result = Evaluate(Step.Action);
+		break;
+	case EHyperAIBotAction::SurveyLevel:
+		Surveyor = MakeUnique<FHyperAIBotSurveyor>(*W, Step, FPaths::Combine(OutputDirectory, SafeName(Step.Text, TEXT("survey"))));
+		Result = Surveyor->Begin();
 		break;
 	case EHyperAIBotAction::AimAt:
 	{
@@ -1740,6 +2017,7 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 	{
 		bRunning = false;
 		Brain.Reset();
+		Surveyor.Reset();
 		Aimer.Reset();
 	}
 	return WithBackground(Result);
@@ -1952,6 +2230,9 @@ FHyperAIBotResult FHyperAIBotExecutor::Tick()
 	case EHyperAIBotAction::Play:
 		Result = Brain ? Brain->Tick() : FResult::Failed(TEXT("no_step"), TEXT("The player's brain has ended."));
 		break;
+	case EHyperAIBotAction::SurveyLevel:
+		Result = Surveyor ? Surveyor->Tick() : FResult::Failed(TEXT("no_step"), TEXT("The survey has ended."));
+		break;
 	case EHyperAIBotAction::Damage:
 		ApplyStrain(Damaged, DamageAt, Step.Radius, DamageStrain);
 		if (Elapsed >= FMath::Max(Step.Seconds, 0.1f))
@@ -1968,6 +2249,7 @@ FHyperAIBotResult FHyperAIBotExecutor::Tick()
 	{
 		bRunning = false;
 		Brain.Reset();
+		Surveyor.Reset();
 		Aimer.Reset();
 	}
 	return WithBackground(Result);
@@ -2110,6 +2392,27 @@ FHyperAIBotResult FHyperAIBotExecutor::Evaluate(const EHyperAIBotAction Assertio
 			? FResult::Passed(Detail)
 			: FResult::Failed(TEXT("assertion_failed"), FString::Printf(TEXT("%s; expected %s %s broken off"), *Detail, *Step.Compare, *Step.Value));
 	}
+	if (Assertion == EHyperAIBotAction::AssertCount)
+	{
+		const TArray<AActor*> Found = FindAll(*W, Step.Target, Step.PlayerIndex, MaxCountedActors);
+		FReading Reading = Numeric(Found.Num(), FString::FromInt(Found.Num()));
+		TArray<FString> Some;
+		for (int32 Index = 0; Index < Found.Num() && Index < 6; ++Index)
+		{
+			Some.Add(Describe(Found[Index]));
+		}
+		const FString Detail = FString::Printf(TEXT("%d actor(s) match %s%s%s"), Found.Num(), *Step.Target, Some.IsEmpty() ? TEXT("") : TEXT(": "),
+			*FString::Join(Some, TEXT(", "))) + (Found.Num() > Some.Num() ? TEXT(", ...") : TEXT(""));
+		return Holds(Reading, Step.Compare, Step.Value)
+			? FResult::Passed(Detail)
+			: FResult::Failed(TEXT("assertion_failed"), FString::Printf(TEXT("%s; expected %s %s"), *Detail, *Step.Compare, *Step.Value));
+	}
+	if (Assertion == EHyperAIBotAction::UiAssert)
+	{
+		const UWidget* Widget = FindWidget(*W, Step.Widget);
+		return Widget ? CheckWidget(*Widget, Step)
+			: FResult::Failed(TEXT("widget_not_found"), FString::Printf(TEXT("No UI widget is named %s, or of that class."), *Step.Widget));
+	}
 	const FString TargetName = Step.Target.IsEmpty() ? FString(TEXT("Player")) : Step.Target;
 	UObject* Target = FindTarget(*W, Step.Target, Step.PlayerIndex);
 	switch (Assertion)
@@ -2142,10 +2445,29 @@ FHyperAIBotResult FHyperAIBotExecutor::Evaluate(const EHyperAIBotAction Assertio
 			: FResult::Failed(TEXT("assertion_failed"), FString::Printf(TEXT("%s.%s is %s, expected %s %s"),
 				*Describe(Target), *Step.Property, *Reading.Text, *Step.Compare, *Step.Value));
 	}
-	const AActor* Actor = Cast<AActor>(Target);
+	AActor* Actor = Cast<AActor>(Target);
 	if (!Actor)
 	{
 		return FResult::Failed(TEXT("not_an_actor"), FString::Printf(TEXT("%s has no place in the world."), *Describe(Target)));
+	}
+	if (Assertion == EHyperAIBotAction::AssertDistance)
+	{
+		const AActor* Other = Step.Other.IsEmpty() ? nullptr : Cast<AActor>(FindTarget(*W, Step.Other, Step.PlayerIndex));
+		if (!Step.Other.IsEmpty() && !Other)
+		{
+			return FResult::Failed(TEXT("not_found"), FString::Printf(TEXT("No actor matches %s."), *Step.Other));
+		}
+		const FVector To = Other ? Other->GetActorLocation() : Step.Location;
+		const double Distance = FVector::Dist(Actor->GetActorLocation(), To);
+		const FString Detail = FString::Printf(TEXT("%s is %.0f cm from %s"), *Describe(Actor), Distance, Other ? *Describe(Other) : *Vec(To));
+		return Holds(Numeric(Distance, FString::Printf(TEXT("%.1f"), Distance)), Step.Compare, Step.Value)
+			? FResult::Passed(Detail)
+			: FResult::Failed(TEXT("assertion_failed"), FString::Printf(TEXT("%s, expected %s %s"), *Detail, *Step.Compare, *Step.Value));
+	}
+	if (Assertion == EHyperAIBotAction::AssertAttribute || Assertion == EHyperAIBotAction::AssertTag
+		|| Assertion == EHyperAIBotAction::AssertAbility || Assertion == EHyperAIBotAction::AssertEffect)
+	{
+		return EvaluateGameplay(Assertion, *Actor, Step);
 	}
 	if (Assertion == EHyperAIBotAction::AssertNear)
 	{
@@ -2254,6 +2576,11 @@ void FHyperAIBotExecutor::Stop()
 	{
 		Brain->Stop();
 		Brain.Reset();
+	}
+	if (Surveyor)
+	{
+		Surveyor->Stop();
+		Surveyor.Reset();
 	}
 	// Aims let go, and the game's window gets its own cursor back.
 	Aimer.Reset();

@@ -15,6 +15,8 @@ public class HyperAIStudioGAS : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"HyperAIStudio",
+			// The bot's GAS assertions are tested here, where GAS is linked.
+			"HyperAIStudioBot",
 			"ToolsetRegistry",
 			"GameplayAbilities",
 			"GameplayTags",
