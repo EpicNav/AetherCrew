@@ -23067,6 +23067,12 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "CloseKeepsHostedChats",
+   "source": "{0} {0}|plural(one=chat is,other=chats are) working in HyperAI's background host and will keep going after the editor closes; {0}|plural(one=it reattaches,other=they reattach) when you open the project again.",
+   "text": "{0} 个对话正在 HyperAI 的后台主机中工作，编辑器关闭后仍会继续；再次打开项目时它们会重新接上。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "CloseKeepsRemoteChats",
    "source": "{0} remote {0}|plural(one=chat is,other=chats are) working in the background and will keep going after the editor closes. Reopen them from Chats.",
    "text": "{0} 个远程对话正在后台工作，编辑器关闭后仍会继续。可以从“对话”中重新打开它们。"
@@ -23865,6 +23871,18 @@
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "StopBackgroundAgents",
+   "source": "Stop Background Agents ({0})",
+   "text": "停止后台智能体（{0}）"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "StopBackgroundAgentsTooltip",
+   "source": "Stop every agent HyperAI's background host runs for this project, including chats left running when an editor closed or crashed. Their conversations are kept and can be resumed from Chats. The host exits once none runs.",
+   "text": "停止 HyperAI 后台主机为此项目运行的所有智能体，包括编辑器关闭或崩溃时留下仍在运行的对话。它们的会话会保留，可以从“对话”中恢复。没有智能体运行后，主机会退出。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "StopHandoff",
    "source": "Stop Handoff to {0}",
    "text": "停止向 {0} 交接"
@@ -23874,6 +23892,12 @@
    "key": "StopHandoffTooltip",
    "source": "Stop watching {0}. Prompts already sent stay sent.",
    "text": "停止关注 {0}。已发送的提示词不会撤回。"
+  },
+  {
+   "namespace": "SHyperAIStudioQuickActionWindow",
+   "key": "StoppedBackgroundAgents",
+   "source": "{0} background {0}|plural(one=agent,other=agents) stopped.",
+   "text": "已停止 {0} 个后台智能体。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",

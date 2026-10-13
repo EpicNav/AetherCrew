@@ -61,6 +61,11 @@ already underway, automation tests running, a lighting build running, or a never
 (save it, or turn `bSaveDirty` off so the user is asked). From outside the editor, wait with
 `.hyperai/scripts/Wait-HyperAIStudioMCP.ps1 -TimeoutSeconds 1800`.
 
+In HyperAI's chat view your process runs in its background host, so it can outlive the editor: after a crash, or
+while the editor is closed, your turn goes on but every Unreal MCP call fails (connection refused, or a timeout).
+Do not retry them in a loop. Carry on with what needs no editor (code, files, git), or wait with the script above;
+when the editor is back your chat reattaches and you are told so, with the crash summary if it crashed.
+
 ## C++ basics that cause most failures
 
 - **Modules.** Each module has `<Module>.Build.cs`. Using another module's types needs it in

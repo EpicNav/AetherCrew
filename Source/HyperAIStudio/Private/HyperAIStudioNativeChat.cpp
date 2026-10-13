@@ -3,11 +3,13 @@
 #include "HyperAIStudioNativeChat.h"
 
 #include "Async/Async.h"
+#include "HyperAIStudioAgentHost.h"
 #include "HyperAIStudioCredentials.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformTime.h"
 #include "CoreGlobals.h"
 #include "HyperAIStudioAgentChatHistory.h"
+#include "HyperAIStudioEditorRestart.h"
 #include "HyperAIStudioProjectMemory.h"
 #include "HyperAIStudioSkills.h"
 #include "HyperAIStudioService.h"
@@ -177,6 +179,14 @@ FHyperAIStudioNativeChat::FHyperAIStudioNativeChat(const FString& InAgentName, c
 
 FHyperAIStudioNativeChat::~FHyperAIStudioNativeChat()
 {
+	// The editor closes: a hosted chat that is working (or every one, for a restart, which reattaches them) keeps its
+	// agent running in the background host. One closed with its tab, or idle as you close the editor, stops.
+	if (!HostSession.IsEmpty() && !bStopped && FHyperAIStudioAgentHost::IsEditorExiting()
+		&& (FHyperAIStudioEditorRestart::IsRestarting() || bBusy || HasOpenApproval() || !Queued.IsEmpty()))
+	{
+		Detach();
+		return;
+	}
 	Stop();
 }
 
@@ -214,12 +224,6 @@ FString FHyperAIStudioNativeChat::SaveImageData(const FString& Base64, const FSt
 
 bool FHyperAIStudioNativeChat::Start(FString& OutError)
 {
-	if (!FPlatformProcess::CreatePipe(StdOutRead, StdOutWrite) || !FPlatformProcess::CreatePipe(StdInRead, StdInWrite, /*bWritePipeLocal=*/true))
-	{
-		OutError = TEXT("Could not create the pipes to talk to the agent.");
-		ClosePipes();
-		return false;
-	}
 	FString Command = HyperAIStudio::NativeChat::Private::CommandForTests();
 #if WITH_DEV_AUTOMATION_TESTS
 	if (Command.IsEmpty())
@@ -229,6 +233,31 @@ bool FHyperAIStudioNativeChat::Start(FString& OutError)
 	}
 #endif
 	Command = Command.IsEmpty() ? CommandLine() : Command;
+	// In the background host when it can run, so the turn outlives the editor; otherwise inside the editor, as before.
+	if (!bHeadless && FHyperAIStudioAgentHost::ShouldHost())
+	{
+		FString HostError;
+		if (StartHosted(Command, HostError))
+		{
+			UE_LOG(LogHyperAIStudioNativeChat, Log, TEXT("Started %s for %s in the background host (session %s)"), *Command, *AgentName, *HostSession);
+			Ticker = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateSP(this, &FHyperAIStudioNativeChat::Pump), 0.03f);
+			AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(),
+				ResumeSessionId.IsEmpty() ? FString::Printf(TEXT("Starting %s..."), *AgentName) : FString::Printf(TEXT("Resuming this %s chat..."), *AgentName));
+			Handshake();
+			if (!ResumeSessionId.IsEmpty())
+			{
+				LoadHistory();
+			}
+			return true;
+		}
+		UE_LOG(LogHyperAIStudioNativeChat, Warning, TEXT("%s runs inside the editor, since the background host could not: %s"), *AgentName, *HostError);
+	}
+	if (!FPlatformProcess::CreatePipe(StdOutRead, StdOutWrite) || !FPlatformProcess::CreatePipe(StdInRead, StdInWrite, /*bWritePipeLocal=*/true))
+	{
+		OutError = TEXT("Could not create the pipes to talk to the agent.");
+		ClosePipes();
+		return false;
+	}
 	// Through cmd so npm's .cmd shims start too; /s keeps the quoted executable path intact. The keys the user stored
 	// for this agent go into its environment alone, not the editor's.
 	const TMap<FString, FString> Keys = HyperAIStudio::Credentials::EnvironmentFor(AgentName);
@@ -259,9 +288,11 @@ void FHyperAIStudioNativeChat::ShowEarlier(TFunctionRef<void()> Replay, bool bMo
 {
 	using namespace HyperAIStudio::NativeChat::Private;
 	const int32 Before = Items.Num();
+	// Also inside a hosted chat's replay, which goes on replaying afterwards.
+	const bool bWasReplaying = bReplaying;
 	bReplaying = true;
 	Replay();
-	bReplaying = false;
+	bReplaying = bWasReplaying;
 	TArray<TSharedPtr<FHyperAIStudioChatItem>> Earlier(Items.GetData() + Before, Items.Num() - Before);
 	Items.SetNum(Before);
 	if (!Earlier.IsEmpty())
@@ -309,6 +340,11 @@ void FHyperAIStudioNativeChat::Stop()
 		FTSTicker::GetCoreTicker().RemoveTicker(Ticker);
 		Ticker.Reset();
 	}
+	if (!HostSession.IsEmpty())
+	{
+		FHyperAIStudioAgentHost::StopSession(HostSession, TEXT("the chat was closed"), /*bForget=*/true);
+		HostStream.Reset();
+	}
 	if (Process.IsValid())
 	{
 		if (FPlatformProcess::IsProcRunning(Process))
@@ -339,6 +375,10 @@ void FHyperAIStudioNativeChat::ClosePipes()
 
 bool FHyperAIStudioNativeChat::IsRunning() const
 {
+	if (!HostSession.IsEmpty())
+	{
+		return !bStopped;
+	}
 	return !bStopped && Process.IsValid() && FPlatformProcess::IsProcRunning(const_cast<FProcHandle&>(Process));
 }
 
@@ -362,6 +402,18 @@ void FHyperAIStudioNativeChat::Send(const FString& Text, const TArray<FString>& 
 		return;
 	}
 	AddItem(FHyperAIStudioChatItem::EKind::User, FString(), FString(), Trimmed)->Images = Sendable;
+	if (!HostSession.IsEmpty())
+	{
+		TArray<TSharedPtr<FJsonValue>> ImageValues;
+		for (const FString& Image : Sendable)
+		{
+			ImageValues.Add(MakeShared<FJsonValueString>(Image));
+		}
+		const TSharedRef<FJsonObject> Fields = MakeShared<FJsonObject>();
+		Fields->SetStringField(TEXT("user"), Trimmed);
+		Fields->SetArrayField(TEXT("images"), ImageValues);
+		Note(Fields);
+	}
 	TurnStarted();
 	// The mode's packs, tools and skills go with every message, after what the message names itself.
 	FHyperAIStudioMessageHints WithMode = Hints;
@@ -511,7 +563,7 @@ void FHyperAIStudioNativeChat::AddNotice(const FString& Text)
 
 void FHyperAIStudioNativeChat::RecordTurn()
 {
-	if (bHeadless || GIsAutomationTesting)
+	if (bHeadless || GIsAutomationTesting || bStreamReplay)
 	{
 		return;
 	}
@@ -578,6 +630,19 @@ void FHyperAIStudioNativeChat::Ready(const FString& InSessionId)
 {
 	SessionId = InSessionId;
 	bReady = true;
+	if (!HostSession.IsEmpty() && !bStreamReplay)
+	{
+		// For a replay: the handshake that made the chat ready is not replayed, its outcome is.
+		const TSharedRef<FJsonObject> Fields = MakeShared<FJsonObject>();
+		Fields->SetStringField(TEXT("ready"), SessionId);
+		Note(Fields);
+		FHyperAIStudioHostSessionMeta Meta;
+		if (FHyperAIStudioAgentHost::ReadMeta(HostSession, Meta) && Meta.SessionId != SessionId)
+		{
+			Meta.SessionId = SessionId;
+			FHyperAIStudioAgentHost::WriteMeta(Meta);
+		}
+	}
 	AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(), FString::Printf(TEXT("%s is ready."), *AgentName));
 	if (!Queued.IsEmpty())
 	{
@@ -688,6 +753,11 @@ void FHyperAIStudioNativeChat::Changed()
 
 void FHyperAIStudioNativeChat::Request(const FString& Method, const TSharedRef<FJsonObject>& Params, FOnResult OnResult)
 {
+	// A replay sends nothing: the requests the editor sent then come from the stream, ids and all.
+	if (bStreamReplay)
+	{
+		return;
+	}
 	const int64 Id = NextId++;
 	const TSharedRef<FJsonObject> Message = MakeShared<FJsonObject>();
 	if (WritesJsonRpcVersion())
@@ -745,13 +815,21 @@ void FHyperAIStudioNativeChat::RespondError(const TSharedPtr<FJsonValue>& Id, co
 
 void FHyperAIStudioNativeChat::Write(const TSharedRef<FJsonObject>& Message)
 {
-	if (!StdInWrite)
+	if (bStreamReplay || (!StdInWrite && HostSession.IsEmpty()))
 	{
 		return;
 	}
 	FString Line;
 	const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer = TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Line);
 	FJsonSerializer::Serialize(Message, Writer);
+	if (!HostSession.IsEmpty())
+	{
+		if (!FHyperAIStudioAgentHost::Append(HostSession, TEXT('a'), Line))
+		{
+			UE_LOG(LogHyperAIStudioNativeChat, Warning, TEXT("%s: could not write to the agent in the background host."), *AgentName);
+		}
+		return;
+	}
 	Line += TEXT("\n");
 	const FTCHARToUTF8 Utf8(*Line);
 	int32 Written = 0;
@@ -765,6 +843,10 @@ bool FHyperAIStudioNativeChat::Pump(float)
 {
 	// A callback below can stop this chat, and the view holding it can let it go.
 	const TSharedRef<FHyperAIStudioNativeChat> Keep = AsShared();
+	if (!HostSession.IsEmpty())
+	{
+		return PumpHost();
+	}
 	TArray<uint8> Bytes;
 	while (StdOutRead && FPlatformProcess::ReadPipeToArray(StdOutRead, Bytes) && Bytes.Num() > 0)
 	{
@@ -845,6 +927,391 @@ void FHyperAIStudioNativeChat::Dispatch(const FString& Line)
 	HandleMessage(Method, Params.IsValid() ? Params : MakeShared<FJsonObject>(), Id);
 }
 
+// ---------------------------------------------------------------------------------------------------------------- background host
+
+bool FHyperAIStudioNativeChat::StartHosted(const FString& Command, FString& OutError)
+{
+	if (!FHyperAIStudioAgentHost::EnsureRunning(OutError))
+	{
+		return false;
+	}
+	const FString Id = FHyperAIStudioAgentHost::NewSessionId();
+	FHyperAIStudioHostSessionMeta Meta;
+	Meta.Id = Id;
+	Meta.Agent = AgentName;
+	Meta.Model = Model;
+	Meta.SessionId = SessionId;
+	Meta.ResumeSessionId = ResumeSessionId;
+	Meta.Subagent = StartedAs;
+	Meta.ProjectFile = FPaths::IsProjectFilePathSet() ? FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath()) : FString();
+	Meta.EditorProcessId = FPlatformProcess::GetCurrentProcessId();
+	if (!FHyperAIStudioAgentHost::WriteMeta(Meta))
+	{
+		OutError = TEXT("The chat's note for the background host could not be written.");
+		return false;
+	}
+	// While the editor is away its Unreal MCP calls fail at once (nothing listens), and an editor that hangs is given
+	// up on rather than waited for forever, so the agent can go on with work that needs no editor: code, files, git.
+	// Codex has its own limits in its MCP settings; Claude Code reads these.
+	TMap<FString, FString> Environment;
+	if (FPlatformMisc::GetEnvironmentVariable(TEXT("MCP_TIMEOUT")).IsEmpty())
+	{
+		Environment.Add(TEXT("MCP_TIMEOUT"), TEXT("30000"));
+	}
+	if (FPlatformMisc::GetEnvironmentVariable(TEXT("MCP_TOOL_TIMEOUT")).IsEmpty())
+	{
+		Environment.Add(TEXT("MCP_TOOL_TIMEOUT"), TEXT("900000"));
+	}
+	if (!FHyperAIStudioAgentHost::StartSession(Id, Command, ProjectRoot, HyperAIStudio::Credentials::TargetsFor(AgentName), Environment, OutError))
+	{
+		return false;
+	}
+	HostSession = Id;
+	HostStream = MakeUnique<FHyperAIStudioHostStreamReader>(FHyperAIStudioAgentHost::StreamPath(Id));
+	HostAskedAt = HostCheckedAt = FPlatformTime::Seconds();
+	bHostHeard = false;
+	return true;
+}
+
+bool FHyperAIStudioNativeChat::PumpHost()
+{
+	TArray<FString> Lines;
+	if (HostStream.IsValid())
+	{
+		HostStream->Read(Lines);
+	}
+	for (const FString& Raw : Lines)
+	{
+		FHyperAIStudioHostLine Line;
+		if (bStopped || !FHyperAIStudioAgentHost::ParseLine(Raw, Line))
+		{
+			continue;
+		}
+		bHostHeard = true;
+		if (Line.Kind == TEXT('o'))
+		{
+			Dispatch(Line.Body);
+		}
+		else if (Line.Kind == TEXT('e'))
+		{
+			UE_LOG(LogHyperAIStudioNativeChat, Verbose, TEXT("%s: %s"), *AgentName, *Line.Body);
+			LastLogLine = Line.Body;
+		}
+		else if (Line.Kind == TEXT('x'))
+		{
+			HostEnded(Line.Body);
+		}
+		// i and u lines are this editor's own.
+	}
+	if (bStopped)
+	{
+		return false;
+	}
+	// Not a word yet: the host may have been ending as the request came, or died. One started again takes the request
+	// up, as it is still waiting in its folder; after half a minute the chat gives up.
+	const double Now = FPlatformTime::Seconds();
+	if (!bHostHeard && Now - HostCheckedAt > 3.0)
+	{
+		HostCheckedAt = Now;
+		FString Error;
+		if (!FHyperAIStudioAgentHost::IsHostRunning() && !FHyperAIStudioAgentHost::EnsureRunning(Error, 2.0))
+		{
+			UE_LOG(LogHyperAIStudioNativeChat, Warning, TEXT("%s: %s"), *AgentName, *Error);
+		}
+		if (Now - HostAskedAt > 30.0)
+		{
+			AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(), FString::Printf(
+				TEXT("%s did not start: HyperAI's background host did not take it up. Turn off Keep Agents Working When The Editor Closes in Settings to run it inside the editor."), *AgentName));
+			FHyperAIStudioAgentHost::StopSession(HostSession, TEXT("it did not start in time"), /*bForget=*/true);
+			EndLocally();
+			Changed();
+			return false;
+		}
+	}
+	return true;
+}
+
+void FHyperAIStudioNativeChat::HostEnded(const FString& Body)
+{
+	using namespace HyperAIStudio::NativeChat::Private;
+	TSharedPtr<FJsonObject> Event;
+	FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Body), Event);
+	const FString Kind = StringField(Event, TEXT("event"));
+	if (Kind == TEXT("started"))
+	{
+		return;
+	}
+	double Code = 0.0;
+	if (Event.IsValid())
+	{
+		Event->TryGetNumberField(TEXT("code"), Code);
+	}
+	const FString Reason = StringField(Event, TEXT("reason"));
+	const FString Text = Kind == TEXT("exited")
+		? FString::Printf(TEXT("%s stopped (exit code %d)%s. Start a new chat, or switch this tab to the terminal to see why."), *AgentName, static_cast<int32>(Code),
+			LastLogLine.IsEmpty() ? TEXT("") : *(TEXT(": ") + LastLogLine.Left(300)))
+		: Kind == TEXT("stopped")
+		? FString::Printf(TEXT("%s was stopped in the background host: %s. Its conversation is kept; resume it from Chats."), *AgentName, *Reason)
+		: FString::Printf(TEXT("%s ended with the background host that ran it (%s). Its conversation is kept; resume it from Chats."), *AgentName, *Reason);
+	AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(), Text);
+	// Seen here, so no editor takes this chat up again; the host drops its files.
+	FHyperAIStudioHostSessionMeta Meta;
+	if (FHyperAIStudioAgentHost::ReadMeta(HostSession, Meta))
+	{
+		Meta.bClosed = true;
+		FHyperAIStudioAgentHost::WriteMeta(Meta);
+	}
+	EndLocally();
+	Changed();
+}
+
+void FHyperAIStudioNativeChat::Note(const TSharedRef<FJsonObject>& Fields)
+{
+	FString Line;
+	FJsonSerializer::Serialize(Fields, TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Line));
+	FHyperAIStudioAgentHost::Append(HostSession, TEXT('u'), Line);
+}
+
+void FHyperAIStudioNativeChat::EndLocally()
+{
+	bStopped = true;
+	HyperAIStudio::ChatModes::ClearActive(this);
+	if (Ticker.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(Ticker);
+		Ticker.Reset();
+	}
+	HostStream.Reset();
+	Waiting.Reset();
+	OpenApprovals.Reset();
+	bBusy = false;
+	bReady = false;
+}
+
+void FHyperAIStudioNativeChat::Detach()
+{
+	if (HostSession.IsEmpty() || bStopped)
+	{
+		return;
+	}
+	FHyperAIStudioHostSessionMeta Meta;
+	if (FHyperAIStudioAgentHost::ReadMeta(HostSession, Meta))
+	{
+		Meta.EditorProcessId = 0;
+		Meta.bBusyAtDetach = bBusy || HasOpenApproval() || !Queued.IsEmpty();
+		Meta.DetachedAt = FDateTime::UtcNow().ToIso8601();
+		FHyperAIStudioAgentHost::WriteMeta(Meta);
+	}
+	UE_LOG(LogHyperAIStudioNativeChat, Display, TEXT("%s keeps running in the background host (session %s)%s."), *AgentName, *HostSession,
+		bBusy ? TEXT(", in the middle of its turn") : TEXT(""));
+	EndLocally();
+}
+
+void FHyperAIStudioNativeChat::SetHostNote(const int32 TabIndex, const FString& Title, const FString& Subagent)
+{
+	FHyperAIStudioHostSessionMeta Meta;
+	if (HostSession.IsEmpty() || bStopped || !FHyperAIStudioAgentHost::ReadMeta(HostSession, Meta)
+		|| (Meta.TabIndex == TabIndex && Meta.Title == Title && Meta.Subagent == Subagent))
+	{
+		return;
+	}
+	Meta.TabIndex = TabIndex;
+	Meta.Title = Title;
+	Meta.Subagent = Subagent;
+	FHyperAIStudioAgentHost::WriteMeta(Meta);
+}
+
+bool FHyperAIStudioNativeChat::Attach(const FString& HostSessionId, FString& OutError)
+{
+	FHyperAIStudioHostSessionMeta Meta;
+	FHyperAIStudioHostSessionState HostState;
+	if (!FHyperAIStudioAgentHost::ReadMeta(HostSessionId, Meta) || !FHyperAIStudioAgentHost::ReadState(HostSessionId, HostState))
+	{
+		OutError = TEXT("That chat's background session is gone.");
+		return false;
+	}
+	HostSession = HostSessionId;
+	if (!Meta.SessionId.IsEmpty())
+	{
+		SessionId = Meta.SessionId;
+	}
+	StartedAs = Meta.Subagent;
+	Meta.EditorProcessId = FPlatformProcess::GetCurrentProcessId();
+	Meta.DetachedAt.Reset();
+	Meta.bBusyAtDetach = false;
+	FHyperAIStudioAgentHost::WriteMeta(Meta);
+	// The host learns an editor is back; one that is gone is started again and says what became of the agent.
+	FString Error;
+	if (HostState.IsRunning() && !FHyperAIStudioAgentHost::EnsureRunning(Error, 3.0))
+	{
+		UE_LOG(LogHyperAIStudioNativeChat, Warning, TEXT("%s: %s"), *AgentName, *Error);
+	}
+	HostStream = MakeUnique<FHyperAIStudioHostStreamReader>(FHyperAIStudioAgentHost::StreamPath(HostSession));
+	TArray<FString> Lines;
+	HostStream->Read(Lines);
+	bHostHeard = true;
+	if (!Meta.ResumeSessionId.IsEmpty() && AgentName == TEXT("Claude Code"))
+	{
+		AddNotice(TEXT("Earlier messages of this conversation, from before it last started, are in Chats."));
+	}
+	ReplayStream(Lines);
+	if (!bStopped)
+	{
+		Ticker = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateSP(this, &FHyperAIStudioNativeChat::Pump), 0.03f);
+	}
+	UE_LOG(LogHyperAIStudioNativeChat, Display, TEXT("%s reattached to its background session %s (%d line(s) replayed)%s."), *AgentName, *HostSession, Lines.Num(),
+		bBusy ? TEXT(", its turn still running") : TEXT(""));
+	return true;
+}
+
+void FHyperAIStudioNativeChat::ReplayStream(const TArray<FString>& Lines)
+{
+	using namespace HyperAIStudio::NativeChat::Private;
+	// What the editor did then (its writes, its requests) is in the stream already, so nothing is sent again: requests
+	// are skipped and writes dropped while it replays. A request of the agent's that no answer follows is handled live
+	// afterwards, unless it is an approval, which stays open to be answered.
+	TMap<FString, FString> Unanswered;
+	TArray<FString> Order;
+	FString EndEvent;
+	bReplaying = true;
+	bStreamReplay = true;
+	for (const FString& Raw : Lines)
+	{
+		FHyperAIStudioHostLine Line;
+		if (!FHyperAIStudioAgentHost::ParseLine(Raw, Line))
+		{
+			continue;
+		}
+		TSharedPtr<FJsonObject> Json;
+		const bool bJson = Line.Body.StartsWith(TEXT("{")) && FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Line.Body), Json) && Json.IsValid();
+		if (Line.Kind == TEXT('o'))
+		{
+			if (bJson)
+			{
+				const FString Asked = AgentRequestKey(Json.ToSharedRef());
+				if (!Asked.IsEmpty())
+				{
+					Unanswered.Add(Asked, Line.Body);
+					Order.Add(Asked);
+				}
+				Unanswered.Remove(AgentWithdrawKey(Json.ToSharedRef()));
+			}
+			Dispatch(Line.Body);
+		}
+		else if (Line.Kind == TEXT('e'))
+		{
+			LastLogLine = Line.Body;
+		}
+		else if (Line.Kind == TEXT('i') && bJson)
+		{
+			const FString Answered = EditorAnswerKey(Json.ToSharedRef());
+			if (!Answered.IsEmpty())
+			{
+				Unanswered.Remove(Answered);
+				TArray<FString> Closed;
+				for (const TPair<FString, TSharedPtr<FJsonValue>>& Open : OpenApprovals)
+				{
+					if (KeyOf(Open.Value) == Answered)
+					{
+						Closed.Add(Open.Key);
+					}
+				}
+				for (const FString& ItemId : Closed)
+				{
+					CloseApproval(ItemId, TEXT("Answered"));
+				}
+			}
+			FString Method;
+			const TSharedPtr<FJsonValue> Id = Json->TryGetField(TEXT("id"));
+			if (Json->TryGetStringField(TEXT("method"), Method) && Id.IsValid() && Id->Type == EJson::Number)
+			{
+				// The editor's own request: later ones get ids after it, and an answer that ends a turn still ends it.
+				const int64 Number = static_cast<int64>(Id->AsNumber());
+				NextId = FMath::Max(NextId, Number + 1);
+				if (FOnResult Callback = ReplayCallback(Method))
+				{
+					Waiting.Add(Number, MoveTemp(Callback));
+				}
+			}
+		}
+		else if (Line.Kind == TEXT('u') && bJson)
+		{
+			FString Text;
+			FString Ready;
+			if (Json->TryGetStringField(TEXT("user"), Text))
+			{
+				TArray<FString> Images;
+				Json->TryGetStringArrayField(TEXT("images"), Images);
+				AddItem(FHyperAIStudioChatItem::EKind::User, FString(), FString(), Text)->Images = Images;
+				ReplayUserMessage();
+				TurnStarted();
+			}
+			else if (Json->TryGetStringField(TEXT("ready"), Ready) && !bReady)
+			{
+				SessionId = Ready;
+				bReady = true;
+			}
+		}
+		else if (Line.Kind == TEXT('x') && bJson && StringField(Json, TEXT("event")) != TEXT("started"))
+		{
+			EndEvent = Line.Body;
+		}
+	}
+	bStreamReplay = false;
+	bReplaying = false;
+	if (Items.Num() > MaxItems)
+	{
+		Items.RemoveAt(0, Items.Num() - MaxItems);
+	}
+	AddNotice(EndEvent.IsEmpty()
+		? FString::Printf(TEXT("This chat reattached: %s kept running in HyperAI's background host, and what it did while the editor was away is above."), *AgentName)
+		: FString::Printf(TEXT("This chat reattached: %s ran in HyperAI's background host while the editor was away, and ended there."), *AgentName));
+	if (!EndEvent.IsEmpty())
+	{
+		HostEnded(EndEvent);
+		return;
+	}
+	for (const FString& Key : Order)
+	{
+		const FString* Request = Unanswered.Find(Key);
+		bool bOpen = false;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Open : OpenApprovals)
+		{
+			bOpen = bOpen || KeyOf(Open.Value) == Key;
+		}
+		if (Request && !bOpen)
+		{
+			const FString Waited = *Request;
+			Unanswered.Remove(Key);
+			Dispatch(Waited);
+		}
+	}
+	Changed();
+}
+
+FString FHyperAIStudioNativeChat::KeyOf(const TSharedPtr<FJsonValue>& Id)
+{
+	if (!Id.IsValid())
+	{
+		return FString();
+	}
+	if (Id->Type == EJson::String)
+	{
+		return Id->AsString();
+	}
+	return Id->Type == EJson::Number ? FString::Printf(TEXT("%lld"), static_cast<int64>(Id->AsNumber())) : HyperAIStudio::NativeChat::Private::Compact(Id);
+}
+
+FString FHyperAIStudioNativeChat::AgentRequestKey(const TSharedRef<FJsonObject>& Line) const
+{
+	return Line->HasTypedField<EJson::String>(TEXT("method")) ? KeyOf(Line->TryGetField(TEXT("id"))) : FString();
+}
+
+FString FHyperAIStudioNativeChat::EditorAnswerKey(const TSharedRef<FJsonObject>& Line) const
+{
+	return !Line->HasField(TEXT("method")) && (Line->HasField(TEXT("result")) || Line->HasField(TEXT("error"))) ? KeyOf(Line->TryGetField(TEXT("id"))) : FString();
+}
+
 // ---------------------------------------------------------------------------------------------------------------- Codex
 
 namespace HyperAIStudio::NativeChat::Private
@@ -920,7 +1387,13 @@ namespace HyperAIStudio::NativeChat::Private
 			{
 				Params->SetStringField(TEXT("threadId"), ResumeSessionId);
 			}
-			Request(bResume ? TEXT("thread/resume") : TEXT("thread/start"), Params, [this, bResume](const TSharedPtr<FJsonObject>& Result, const FString& Error)
+			Request(bResume ? TEXT("thread/resume") : TEXT("thread/start"), Params, ThreadResult(bResume));
+		}
+
+		/** What a started or resumed thread brings: its earlier turns, and the chat ready on its id. */
+		FOnResult ThreadResult(const bool bResume)
+		{
+			return [this, bResume](const TSharedPtr<FJsonObject>& Result, const FString& Error)
 			{
 				if (!Error.IsEmpty())
 				{
@@ -950,7 +1423,27 @@ namespace HyperAIStudio::NativeChat::Private
 					}, /*bMoreBefore=*/false);
 				}
 				Ready(StringField(Thread, TEXT("id")));
-			});
+			};
+		}
+
+		FOnResult TurnStartResult()
+		{
+			return [this](const TSharedPtr<FJsonObject>& Result, const FString& Error)
+			{
+				if (!Error.IsEmpty())
+				{
+					AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(), TEXT("Codex did not take the message: ") + Error);
+					TurnFinished();
+					return;
+				}
+				TurnId = StringField(ObjectField(Result, TEXT("turn")), TEXT("id"));
+			};
+		}
+
+		virtual FOnResult ReplayCallback(const FString& Method) override
+		{
+			return Method == TEXT("thread/start") || Method == TEXT("thread/resume") ? ThreadResult(Method == TEXT("thread/resume"))
+				: Method == TEXT("turn/start") ? TurnStartResult() : FOnResult();
 		}
 
 		/** One item of a resumed thread: what the user sent, or anything else as it showed live. */
@@ -997,16 +1490,7 @@ namespace HyperAIStudio::NativeChat::Private
 				Input.Add(Obj(Object({{TEXT("type"), Str(TEXT("localImage"))}, {TEXT("path"), Str(Image)}})));
 			}
 			const TSharedRef<FJsonObject> Params = Object({{TEXT("threadId"), Str(SessionId)}, {TEXT("input"), Arr(Input)}});
-			Request(TEXT("turn/start"), Params, [this](const TSharedPtr<FJsonObject>& Result, const FString& Error)
-			{
-				if (!Error.IsEmpty())
-				{
-					AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(), TEXT("Codex did not take the message: ") + Error);
-					TurnFinished();
-					return;
-				}
-				TurnId = StringField(ObjectField(Result, TEXT("turn")), TEXT("id"));
-			});
+			Request(TEXT("turn/start"), Params, TurnStartResult());
 		}
 
 		virtual void InterruptNow() override
@@ -1147,7 +1631,7 @@ namespace HyperAIStudio::NativeChat::Private
 				}
 				FString Saved = StringField(Item, TEXT("savedPath"));
 				const FString Data = StringField(Item, TEXT("result"));
-				if (Saved.IsEmpty() && bCompleted && !Data.IsEmpty() && !bReplaying)
+				if (Saved.IsEmpty() && bCompleted && !Data.IsEmpty() && (!bReplaying || bStreamReplay))
 				{
 					Saved = SaveImageData(Data, TEXT("codex-") + Id);
 				}
@@ -1635,6 +2119,13 @@ namespace HyperAIStudio::NativeChat::Private
 			});
 		}
 
+		/** A replayed message starts a new reply, as a sent one does. */
+		virtual void ReplayUserMessage() override
+		{
+			CurrentAgent.Reset();
+			CurrentThought.Reset();
+		}
+
 		virtual void SendNow(const FString& Text, const TArray<FString>& Images) override
 		{
 			CurrentAgent.Reset();
@@ -1658,8 +2149,13 @@ namespace HyperAIStudio::NativeChat::Private
 					? FString(TEXT("An attached picture could not be read, so it was left out."))
 					: FString::Printf(TEXT("%s did not say it takes pictures, so only the text went."), *AgentName));
 			}
-			Request(TEXT("session/prompt"), Object({{TEXT("sessionId"), Str(SessionId)}, {TEXT("prompt"), Arr(Blocks)}}),
-				[this](const TSharedPtr<FJsonObject>& Result, const FString& Error)
+			Request(TEXT("session/prompt"), Object({{TEXT("sessionId"), Str(SessionId)}, {TEXT("prompt"), Arr(Blocks)}}), PromptResult());
+		}
+
+		/** A prompt's answer is the end of its turn. */
+		FOnResult PromptResult()
+		{
+			return [this](const TSharedPtr<FJsonObject>& Result, const FString& Error)
 			{
 				const FString StopReason = StringField(Result, TEXT("stopReason"));
 				if (!Error.IsEmpty())
@@ -1675,7 +2171,12 @@ namespace HyperAIStudio::NativeChat::Private
 					AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(), FString::Printf(TEXT("%s ended the turn early: %s"), *AgentName, *StopReason));
 				}
 				TurnFinished();
-			});
+			};
+		}
+
+		virtual FOnResult ReplayCallback(const FString& Method) override
+		{
+			return Method == TEXT("session/prompt") ? PromptResult() : FOnResult();
 		}
 
 		virtual void InterruptNow() override
@@ -1923,6 +2424,11 @@ namespace HyperAIStudio::NativeChat::Private
 			Control(TEXT("hyperai-initialize"), Object({{TEXT("subtype"), Str(TEXT("initialize"))}, {TEXT("hooks"), MakeShared<FJsonValueNull>()}}));
 		}
 
+		virtual void ReplayUserMessage() override
+		{
+			bReplied = false;
+		}
+
 		virtual void SendNow(const FString& Text, const TArray<FString>& Images) override
 		{
 			bReplied = false;
@@ -1967,6 +2473,21 @@ namespace HyperAIStudio::NativeChat::Private
 		{
 			Write(Object({{TEXT("type"), Str(TEXT("control_response"))}, {TEXT("response"), Obj(Object({
 				{TEXT("subtype"), Str(TEXT("error"))}, {TEXT("request_id"), Id}, {TEXT("error"), Str(Message)}}))}}));
+		}
+
+		virtual FString AgentRequestKey(const TSharedRef<FJsonObject>& Line) const override
+		{
+			return StringField(Line, TEXT("type")) == TEXT("control_request") ? StringField(Line, TEXT("request_id")) : FString();
+		}
+
+		virtual FString EditorAnswerKey(const TSharedRef<FJsonObject>& Line) const override
+		{
+			return StringField(Line, TEXT("type")) == TEXT("control_response") ? StringField(ObjectField(Line, TEXT("response")), TEXT("request_id")) : FString();
+		}
+
+		virtual FString AgentWithdrawKey(const TSharedRef<FJsonObject>& Line) const override
+		{
+			return StringField(Line, TEXT("type")) == TEXT("control_cancel_request") ? StringField(Line, TEXT("request_id")) : FString();
 		}
 
 		virtual TSharedRef<FJsonObject> AnswerPayload(const FHyperAIStudioChatItem& Item, const int32 Choice) override
@@ -2528,7 +3049,7 @@ namespace HyperAIStudio::NativeChat::Private
 						{
 							Text += (Text.IsEmpty() ? FString() : FString(TEXT("\n"))) + StringField(Piece, TEXT("text"));
 						}
-						else if (StringField(Piece, TEXT("type")) == TEXT("image") && !bReplaying)
+						else if (StringField(Piece, TEXT("type")) == TEXT("image") && (!bReplaying || bStreamReplay))
 						{
 							const FString PictureId = FString::Printf(TEXT("%s#image%d"), *Id, Pictures++);
 							const FString File = FindItem(PictureId).IsValid() ? FString()

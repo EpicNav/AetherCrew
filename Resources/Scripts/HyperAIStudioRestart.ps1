@@ -28,20 +28,23 @@ function Save-Result([hashtable]$Result) {
 }
 
 # An editor someone opened already (by hand, or after a crash the crash reporter's Send and Restart) keeps the project,
-# and takes the chats back itself. For a restart this is checked only once the editor that asked for it is gone.
-# ponytail: matched by the project's file name, so two projects sharing one count as one.
+# and takes the chats back itself: this helper never opens a second one. It counts when this user runs it on this very
+# .uproject (HyperAIStudioRecovery.ps1). For a restart this is checked only once the editor that asked for it is gone.
+# Checked again right before the launch; an editor opened by hand in the moment after that is the one the relaunched
+# editor finds as it starts, and it closes itself for it.
+. (Join-Path $PSScriptRoot 'HyperAIStudioRecovery.ps1')
+$script:OpenEditor = 0
 function Test-EditorProcess {
-  $Name = if ($Plan.projectFile) { [IO.Path]::GetFileName($Plan.projectFile) } else { '' }
-  if (-not $Name) { return $false }
-  $Open = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'UnrealEditor%'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -notlike 'UnrealEditor-Cmd*' -and "$($_.CommandLine)".IndexOf($Name, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
+  $Open = @(Get-ProjectEditors -ProjectFile "$($Plan.projectFile)" -ExcludeId ([int]$Plan.editorProcessId))
+  $script:OpenEditor = if ($Open.Count -gt 0) { [int]$Open[0].processId } else { 0 }
   return $Open.Count -gt 0
 }
 
 function Test-EditorOpen {
   if (-not (Test-EditorProcess)) { return $false }
-  Say 'The editor is open again already, and its chats come back there.' 'Green'
-  Save-Result @{ state = 'already_open' }
+  Say "The editor is open again already (process $script:OpenEditor), and its chats come back there." 'Green'
+  # That editor takes the plan's chats when it sees this result name it.
+  Save-Result @{ state = 'already_open'; editorProcessId = $script:OpenEditor }
   Start-Sleep -Seconds $Linger
   return $true
 }

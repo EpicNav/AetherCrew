@@ -247,6 +247,8 @@ private:
 	FString ResumeTitle;
 	/** Set when that chat already runs in the background: the startup attaches instead of starting a copy. */
 	FString ResumeBackgroundId;
+	/** Set when that chat's agent runs in HyperAI's background host: the native view reattaches to it. */
+	FString ResumeHostSession;
 	/** Title of the chat in this tab when it came from Chats; it names the remote session. */
 	FString ActiveChatTitle;
 	/** Short id of the background session this tab's terminal is attached to; empty when the chat runs in the tab. */
@@ -301,7 +303,7 @@ private:
 	/** Switches this tab between the terminal and the native view, resuming the conversation when its id is known. */
 	void SetNativeView(bool bNative);
 	/** Replaces the terminal with a native chat for the selected agent, resuming ResumeId when set. */
-	bool StartNativeChat(const FString& ResumeId);
+	bool StartNativeChat(const FString& ResumeId, const FString& HostSession = FString());
 	void StopNativeChat();
 	/** A mode picked in the chat view: kept for this tab's next chats, and its preferred agent and model taken while the chat is new. */
 	void OnModeChosen(const FHyperAIStudioChatMode& Mode);
