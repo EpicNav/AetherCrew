@@ -553,8 +553,14 @@ TSharedRef<SWidget> SHyperAIStudioChatActivitySidebar::BuildEntryRow(const FHype
 	// So does whatever such an approval led to in the queue: a wait, or a failure.
 	const bool bAutoApproved = Entry.Kind == EHyperAIStudioActivityKind::ApprovalApproved && Entry.AutoApprovedAs.IsSet();
 	const bool bAutoApprovedOutcome = !bAutoApproved && Entry.AutoApprovedAs.IsSet();
-	const FText KindText = bAutoApproved
+	// An auto-approval that came back on by itself after a restart is told apart from one turned on in this editor.
+	const FText KindText = bAutoApproved && Entry.bKeptOnAfterRestart
+		? FText::Format(LOCTEXT("AutoApprovedKeptOnKind", "Auto-approved (kept on after restart, {0})"), FHyperAIStudioAutoApproval::GetCategoryName(*Entry.AutoApprovedAs))
+		: bAutoApproved
 		? FText::Format(LOCTEXT("AutoApprovedKind", "Auto-approved ({0})"), FHyperAIStudioAutoApproval::GetCategoryName(*Entry.AutoApprovedAs))
+		: bAutoApprovedOutcome && Entry.bKeptOnAfterRestart
+		? FText::Format(LOCTEXT("AutoApprovedKeptOnOutcomeKind", "{0} (auto-approved, kept on after restart, {1})"),
+			FText::FromString(FHyperAIStudioAgentActivityLog::LexToString(Entry.Kind)), FHyperAIStudioAutoApproval::GetCategoryName(*Entry.AutoApprovedAs))
 		: bAutoApprovedOutcome
 		? FText::Format(LOCTEXT("AutoApprovedOutcomeKind", "{0} (auto-approved, {1})"),
 			FText::FromString(FHyperAIStudioAgentActivityLog::LexToString(Entry.Kind)), FHyperAIStudioAutoApproval::GetCategoryName(*Entry.AutoApprovedAs))

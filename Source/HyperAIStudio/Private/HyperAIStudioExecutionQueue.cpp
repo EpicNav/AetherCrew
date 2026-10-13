@@ -76,6 +76,7 @@ namespace HyperAIStudio::ExecutionQueue::Private
 		if (Item.AutoApproved.IsSet())
 		{
 			Entry.AutoApprovedAs = Item.AutoApproved->Category;
+			Entry.bKeptOnAfterRestart = FHyperAIStudioAutoApproval::WasRestored(Item.AutoApproved->Activation);
 		}
 		FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
 	}

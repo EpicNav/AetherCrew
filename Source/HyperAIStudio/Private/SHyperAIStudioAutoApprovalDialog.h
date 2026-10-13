@@ -44,6 +44,11 @@ private:
 	bool CanTurnOn() const;
 	/** Under Sandbox Mode's held saves: what happens to what the sandbox holds, ticked or not. */
 	FText SandboxNote() const;
+	/** "Stay on after the editor restarts": what it does, exactly. */
+	static FText GetStayOnTooltip();
+	/** Under that box: what it means for the duration chosen, ticked or not. */
+	FText StayOnNote() const;
+	TSharedRef<SWidget> BuildStayOn();
 	FReply OnTurnOnClicked();
 	FReply OnCancelClicked();
 	void Close();
@@ -57,10 +62,12 @@ private:
 	static bool ShowNativeConfirmation(const TSharedPtr<SWindow>& Owner, const FText& Caption, const FText& Body);
 
 	TWeakPtr<SWindow> Window;
-	/** Every activation starts from these: Edits only. */
+	/** The categories ticked; it opens with the user's last choices (FHyperAIStudioAutoApproval::LoadChoices), else Edits only. */
 	bool bTicked[CategoryCount] = {true, false, false, false, false};
 	/** "Also approve the requests waiting now", ticked by default: turning it on with requests waiting approves them. */
 	bool bAlsoApproveWaiting = true;
+	/** "Stay on after the editor restarts", unticked by default: a protected record lets the next editor bring it back. */
+	bool bStayOnAfterRestart = false;
 	/** Sandbox Mode was on as it opened, so its held saves are offered. */
 	bool bOffersSandbox = false;
 	/** How many files Sandbox Mode held as it opened. */

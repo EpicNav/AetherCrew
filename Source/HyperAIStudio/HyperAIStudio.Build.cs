@@ -71,6 +71,8 @@ public class HyperAIStudio : ModuleRules
 			PublicSystemLibraries.Add("shell32.lib");
 			// The ports this editor listens on (GetExtendedTcpTable), to tell an MCP server inside it from one outside.
 			PublicSystemLibraries.Add("iphlpapi.lib");
+			// Auto-approval kept on after a restart: its record is sealed with DPAPI (CryptProtectData) for this user.
+			PublicSystemLibraries.Add("crypt32.lib");
 		}
 	}
 }

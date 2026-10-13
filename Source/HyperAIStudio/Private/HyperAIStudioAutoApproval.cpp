@@ -10,8 +10,14 @@
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioApprovalGateInternal.h"
+#include "HyperAIStudioAutoApprovalKeepOn.h"
 #include "HyperAIStudioSandbox.h"
 #include "HyperAIStudioSettings.h"
+#include "HyperAIStudioShell.h"
+#include "Interfaces/IMainFrameModule.h"
+#include "Misc/App.h"
+#include "Misc/ConfigCacheIni.h"
+#include "Modules/ModuleManager.h"
 #include "SHyperAIStudioAutoApprovalDialog.h"
 #include "Styling/AppStyle.h"
 #include "UObject/UnrealType.h"
@@ -71,6 +77,16 @@ namespace HyperAIStudio::AutoApproval::Private
 		int32 ConsecutiveFailures = 0;
 		/** Operations it approved whose outcome is not in yet, oldest first. */
 		TArray<FString> Approving;
+		/** "Stay on after the editor restarts" was ticked: its record under Saved/ is kept current until it ends. */
+		bool bKeepOn = false;
+		/** It came back on by itself as this editor started. */
+		bool bRestored = false;
+		/** When the user turned it on, in UTC; a restored one keeps the first time, for the 24-hour cap. */
+		FDateTime TurnedOnUtc;
+		/** When a timed one ends, in UTC, for the record: time the editor spends closed counts. */
+		TOptional<FDateTime> ExpiresUtc;
+		/** When its record was last written, on the monotonic clock, for the "until the editor closes" heartbeat. */
+		double LastWritten = 0.0;
 #if WITH_DEV_AUTOMATION_TESTS
 		/** A test's activation covers only the requests that test made, and only while a test runs. */
 		TOptional<TSet<FString>> OnlyOperations;
@@ -183,6 +199,64 @@ namespace HyperAIStudio::AutoApproval::Private
 #endif
 	}
 
+	/** Wall-clock time, which a record is written and read in: a restart's downtime counts. Tests move it with Now(). */
+	FDateTime UtcNow()
+	{
+#if WITH_DEV_AUTOMATION_TESTS
+		return FDateTime::UtcNow() + FTimespan::FromSeconds(ClockOffset());
+#else
+		return FDateTime::UtcNow();
+#endif
+	}
+
+	/** The activation that came back on after a restart in this editor; 0 when none did. */
+	uint64& RestoredActivationId()
+	{
+		static uint64 Value = 0;
+		return Value;
+	}
+
+	FTSTicker::FDelegateHandle& StartupHandle()
+	{
+		static FTSTicker::FDelegateHandle Handle;
+		return Handle;
+	}
+
+	TWeakPtr<SNotificationItem>& RestoreNotice()
+	{
+		static TWeakPtr<SNotificationItem> Notice;
+		return Notice;
+	}
+
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Where a test's kept-on activation keeps its record; empty, and a test's writes nothing. */
+	FString& TestRecordPath()
+	{
+		static FString Value;
+		return Value;
+	}
+
+	/** A dialog under test remembers its choices here, and only while a test asked it to. */
+	struct FTestChoices
+	{
+		bool bRemember = false;
+		TOptional<FHyperAIStudioAutoApprovalChoices> Saved;
+	};
+
+	FTestChoices& TestChoices()
+	{
+		static FTestChoices Value;
+		return Value;
+	}
+
+	/** What the last restore or refusal would have shown; a test's is kept here instead of shown. */
+	TOptional<FNotificationInfo>& LastNotice()
+	{
+		static TOptional<FNotificationInfo> Value;
+		return Value;
+	}
+#endif
+
 	uint8 Bit(const EHyperAIStudioApprovalCategory Category)
 	{
 		return static_cast<uint8>(1u << static_cast<uint8>(Category));
@@ -281,6 +355,84 @@ namespace HyperAIStudio::AutoApproval::Private
 		Entry.StatusCode = StatusCode;
 		Entry.Detail = Detail;
 		FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
+	}
+
+	/** Where an activation's record lives: the user's under Saved/; a test's only where the test pointed it, else nowhere. */
+	FString RecordPathFor(const FActivation& Activation)
+	{
+#if WITH_DEV_AUTOMATION_TESTS
+		if (IsTestScoped(Activation))
+		{
+			return TestRecordPath();
+		}
+#endif
+		return KeepOn::DefaultPath();
+	}
+
+	/** This editor, now, as a record is checked against. */
+	KeepOn::FContext RecordContext()
+	{
+		KeepOn::FContext Context;
+		Context.NowUtc = UtcNow();
+		Context.ProjectPath = KeepOn::CurrentProject();
+		Context.WindowsUser = KeepOn::CurrentUser();
+		Context.SpendFingerprint = KeepOn::Fingerprint(SpendSettings());
+		return Context;
+	}
+
+	/**
+	 * Keeps a kept-on activation's record current: as it turns on, as its counts change and as the editor closes
+	 * (bClosing stamps the close time). A record that cannot be written is deleted, never left with older counts.
+	 */
+	void WriteRecord(FActivation& Activation, const bool bClosing = false)
+	{
+		const FString Path = RecordPathFor(Activation);
+		if (!Activation.bKeepOn || Path.IsEmpty())
+		{
+			return;
+		}
+		KeepOn::FRecord Record;
+		Record.CategoryMask = Activation.CategoryMask;
+		Record.Duration = Activation.Duration;
+		Record.TurnedOnUtc = Activation.TurnedOnUtc;
+		Record.ExpiresUtc = Activation.ExpiresUtc;
+		Record.Approved = Activation.Approved;
+		Record.ExternalApproved = Activation.ExternalApproved;
+		Record.ConsecutiveFailures = Activation.ConsecutiveFailures;
+		Record.SandboxWrites = Activation.SandboxWrites;
+		// The settings it was confirmed under, not today's: a change it has not noticed yet must still end it.
+		Record.SpendFingerprint = KeepOn::Fingerprint(Activation.SpendSettings);
+		Record.ProjectPath = KeepOn::CurrentProject();
+		Record.WindowsUser = KeepOn::CurrentUser();
+		Record.WrittenUtc = UtcNow();
+		if (bClosing)
+		{
+			Record.ClosedUtc = Record.WrittenUtc;
+		}
+		Activation.LastWritten = FPlatformTime::Seconds();
+		FString Error;
+		if (!KeepOn::Write(Path, Record, Error))
+		{
+			UE_LOG(LogHyperAIStudioAutoApproval, Warning, TEXT("Auto-approval could not keep its record for after a restart, so it will not come back after one: %s"), *Error);
+		}
+	}
+
+	void WriteCurrentRecord()
+	{
+		if (Current().IsSet())
+		{
+			WriteRecord(*Current());
+		}
+	}
+
+	/** Auto-approval turning on or off without a record to keep: none is left from before. */
+	void DeleteRecord(const FActivation& Activation)
+	{
+		const FString Path = RecordPathFor(Activation);
+		if (KeepOn::Delete(Path))
+		{
+			UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Deleted the record of auto-approval kept on after a restart: %s"), *Path);
+		}
 	}
 
 	/** Why the current activation does not cover a request; None when it does. */
@@ -528,6 +680,7 @@ namespace HyperAIStudio::AutoApproval::Private
 		Entry.PackId = TEXT("sandbox");
 		Entry.ToolName = TEXT("Sandbox Mode");
 		Entry.AutoApprovedAs = ECategory::SandboxSaves;
+		Entry.bKeptOnAfterRestart = Current()->bRestored;
 		FString Error;
 		// The same call as Approve All in Activity; only the activity entry and the log say nobody clicked. Each write is
 		// one of its approvals, and a failed one one of its failures in a row, as the dialog says.
@@ -569,6 +722,10 @@ namespace HyperAIStudio::AutoApproval::Private
 		{
 			FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::RepeatedFailures);
 		}
+		else
+		{
+			WriteCurrentRecord();
+		}
 	}
 
 	bool TickExpiry(float)
@@ -578,6 +735,13 @@ namespace HyperAIStudio::AutoApproval::Private
 		{
 			ExpiryHandle().Reset();
 			return false;
+		}
+		// "Until the editor closes" kept on: a crash records no close time, so the record is written again now and then
+		// and its last write stands for the close.
+		if (Current()->bKeepOn && Current()->Duration == EHyperAIStudioAutoApprovalDuration::UntilEditorCloses
+			&& FPlatformTime::Seconds() - Current()->LastWritten >= KeepOn::HeartbeatSeconds)
+		{
+			WriteCurrentRecord();
 		}
 		SweepSandbox();
 		return Current().IsSet();
@@ -601,7 +765,12 @@ namespace HyperAIStudio::AutoApproval::Private
 		if (Newest.Kind == EHyperAIStudioActivityKind::Completed || Newest.Kind == EHyperAIStudioActivityKind::JobFinished)
 		{
 			Active->Approving.Remove(Newest.OperationId);
+			const bool bWasFailing = Active->ConsecutiveFailures > 0;
 			Active->ConsecutiveFailures = 0;
+			if (bWasFailing)
+			{
+				WriteRecord(*Active);
+			}
 		}
 		else if (Newest.Kind == EHyperAIStudioActivityKind::Failed)
 		{
@@ -610,7 +779,198 @@ namespace HyperAIStudio::AutoApproval::Private
 			{
 				FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::RepeatedFailures);
 			}
+			else
+			{
+				WriteRecord(*Active);
+			}
 		}
+	}
+
+	/** Shows a notification, or for a test's activation keeps it for the test to read; the user never sees a test's. */
+	TSharedPtr<SNotificationItem> ShowNotice(FNotificationInfo Info, const bool bTest)
+	{
+#if WITH_DEV_AUTOMATION_TESTS
+		LastNotice() = Info;
+#endif
+		if (bTest || !FSlateApplication::IsInitialized())
+		{
+			return nullptr;
+		}
+		const TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info);
+		if (Item.IsValid())
+		{
+			Item->SetCompletionState(SNotificationItem::CS_None);
+		}
+		return Item;
+	}
+
+	void CloseRestoreNotice()
+	{
+		const TSharedPtr<SNotificationItem> Item = RestoreNotice().Pin();
+		if (Item.IsValid() && FSlateApplication::IsInitialized())
+		{
+			Item->ExpireAndFadeout();
+		}
+		RestoreNotice().Reset();
+	}
+
+	/**
+	 * Brings back the auto-approval kept on in the record at Path, once, as this editor starts: only if the record is
+	 * valid for this user and project, unexpired (time the editor was closed counts), younger than 24 hours, under the
+	 * same spend settings and, for "until the editor closes", the editor opened again within 30 minutes of closing.
+	 * Anything else is refused, and the record deleted and logged. It covers only requests made from now on: what
+	 * waits already keeps waiting, as "Also approve the requests waiting now" is never repeated. TestScope makes it a
+	 * test's activation, covering only those ids.
+	 */
+	KeepOn::ERefusal RestoreFrom(const FString& Path, const TOptional<TSet<FString>>& TestScope)
+	{
+		using KeepOn::ERefusal;
+		const bool bTest = TestScope.IsSet();
+		if (Current().IsSet())
+		{
+			// What the user turned on since this editor started owns the record now.
+			if (!IsTestScoped(*Current()) || !bTest)
+			{
+				return ERefusal::NoRecord;
+			}
+			FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::TestFinished);
+		}
+		const KeepOn::FContext Context = RecordContext();
+		KeepOn::FRecord Record;
+		const ERefusal Refusal = KeepOn::Read(Path, Context, Record);
+		if (Refusal == ERefusal::NoRecord)
+		{
+			return Refusal;
+		}
+		const TCHAR* const TestNote = bTest ? TEXT(" (automation test)") : TEXT("");
+		if (Refusal != ERefusal::None)
+		{
+			KeepOn::Delete(Path);
+			const FString Why = KeepOn::DescribeRefusal(Refusal, Record, Context);
+			const bool bSuspicious = KeepOn::IsSuspicious(Refusal);
+			if (bSuspicious)
+			{
+				UE_LOG(LogHyperAIStudioAutoApproval, Warning, TEXT("A record of auto-approval kept on after a restart was refused and deleted%s: %s (%s). Auto-approval stays off."),
+					TestNote, *Why, *Path);
+			}
+			else
+			{
+				UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Auto-approval kept on from before the restart did not come back%s: %s. Its record was deleted; auto-approval is off."),
+					TestNote, *Why);
+			}
+			RecordAudit(TEXT("not restored"), TEXT("auto_approval_not_restored"), Why + TestNote);
+			FNotificationInfo Info(FText::Format(bSuspicious
+				? LOCTEXT("RestoreRefusedToast", "A saved auto-approval was refused and deleted: {0}. Auto-approval is off.")
+				: LOCTEXT("RestoreEndedToast", "Auto-approval did not come back on after the restart: {0}. It is off; turn it on again from Activity if you want it."),
+				KeepOn::DescribeRefusalText(Refusal)));
+			Info.ExpireDuration = 12.0f;
+			Info.bFireAndForget = true;
+			Info.WidthOverride = 480.0f;
+			if (bSuspicious)
+			{
+				Info.Image = FAppStyle::GetBrush(TEXT("Icons.WarningWithColor"));
+			}
+			ShowNotice(MoveTemp(Info), bTest);
+			return Refusal;
+		}
+
+		FActivation Activation;
+		Activation.Id = ++LastActivationId();
+		Activation.CategoryMask = Record.CategoryMask;
+		Activation.Duration = Record.Duration;
+		Activation.TurnedOnUtc = Record.TurnedOnUtc;
+		Activation.ExpiresUtc = Record.ExpiresUtc;
+		Activation.EndsAt = Record.ExpiresUtc.IsSet() ? Now() + FMath::Max(0.0, (*Record.ExpiresUtc - Context.NowUtc).GetTotalSeconds()) : 0.0;
+		// Only requests made from here on: whatever waits already was never chosen in a dialog in this editor.
+		Activation.FirstSequence = HyperAIStudio::Approval::Private::PeekNextSequence();
+		Activation.SpendSettings = SpendSettings();
+		Activation.Approved = Record.Approved;
+		Activation.ExternalApproved = Record.ExternalApproved;
+		Activation.ConsecutiveFailures = Record.ConsecutiveFailures;
+		Activation.SandboxWrites = Record.SandboxWrites;
+		Activation.bKeepOn = true;
+		Activation.bRestored = true;
+#if WITH_DEV_AUTOMATION_TESTS
+		Activation.OnlyOperations = TestScope;
+#endif
+		RestoredActivationId() = Activation.Id;
+		Current() = MoveTemp(Activation);
+		SandboxWait() = FSandboxWait();
+		ExpiryHandle() = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateStatic(&TickExpiry), 1.0f);
+		ActivityHandle() = FHyperAIStudioAgentActivityLog::OnChanged().AddStatic(&OnActivity);
+		// Open again: the record loses its close time, and keeps being written as before.
+		WriteRecord(*Current());
+
+		const TArray<EHyperAIStudioApprovalCategory> Categories = CategoriesOf(Record.CategoryMask);
+		TArray<FString> Names;
+		for (const EHyperAIStudioApprovalCategory Category : Categories)
+		{
+			Names.Add(EnglishName(Category));
+		}
+		const int32 Waiting = FHyperAIStudioApprovalGate::GetPending().Num();
+		const FString Until = Record.ExpiresUtc.IsSet()
+			? FString::Printf(TEXT("until %s UTC"), *Record.ExpiresUtc->ToString(TEXT("%Y-%m-%d %H:%M")))
+			: FString(TEXT("until the editor closes"));
+		const FString Detail = FString::Printf(
+			TEXT("%s %s, kept on from before the restart (turned on %s UTC; %d of %d approvals, %d of %d external effects and %d of %d failures in a row used). It approves only requests made from now on%s"),
+			*FString::Join(Names, TEXT(", ")), *Until, *Record.TurnedOnUtc.ToString(TEXT("%Y-%m-%d %H:%M")),
+			Record.Approved, FHyperAIStudioAutoApproval::MaxApprovals, Record.ExternalApproved, FHyperAIStudioAutoApproval::MaxExternalEffects,
+			Record.ConsecutiveFailures, FHyperAIStudioAutoApproval::MaxConsecutiveFailures,
+			Waiting > 0 ? *FString::Printf(TEXT("; the %d request(s) waiting from before keep waiting for a click"), Waiting) : TEXT(""));
+		if (bTest)
+		{
+			UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Auto-approval is back on from before the restart, for an automation test's own requests: %s."), *Detail);
+		}
+		else
+		{
+			UE_LOG(LogHyperAIStudioAutoApproval, Warning,
+				TEXT("Auto-approval is back on from before the restart: %s. It covers every agent and MCP client connected to this editor."), *Detail);
+		}
+		RecordAudit(TEXT("turned on"), TEXT("auto_approval_restored"), Detail + TestNote);
+
+		FNotificationInfo Info(FHyperAIStudioAutoApproval::DescribeRestored(Categories, Record.ExpiresUtc, Waiting));
+		Info.bFireAndForget = true;
+		Info.ExpireDuration = 30.0f;
+		Info.WidthOverride = 480.0f;
+		Info.Image = FAppStyle::GetBrush(TEXT("Icons.WarningWithColor"));
+		Info.ButtonDetails.Add(FNotificationButtonInfo(LOCTEXT("RestoreStop", "Stop"),
+			LOCTEXT("RestoreStopTooltip", "Turn auto-approval off now. Requests wait for your approval again."),
+			FSimpleDelegate::CreateLambda([]()
+			{
+				FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::Stopped);
+				CloseRestoreNotice();
+			}), SNotificationItem::CS_None));
+		Info.ButtonDetails.Add(FNotificationButtonInfo(LOCTEXT("RestoreShow", "Show"),
+			LOCTEXT("RestoreShowTooltip", "Open Activity, where auto-approval's banner, what it approved and Stop are."),
+			FSimpleDelegate::CreateLambda([]()
+			{
+				FHyperAIStudioShell::Open(TEXT("Activity"));
+				CloseRestoreNotice();
+			}), SNotificationItem::CS_None));
+		RestoreNotice() = ShowNotice(MoveTemp(Info), bTest);
+
+		FHyperAIStudioAutoApproval::OnChanged().Broadcast();
+		FHyperAIStudioApprovalGate::OnChanged().Broadcast();
+		return ERefusal::None;
+	}
+
+	/** Once the editor's main window is up (notifications can be seen), before anything could be auto-approved. */
+	bool TickStartup(float)
+	{
+		const bool bInteractive = GIsEditor && !IsRunningCommandlet() && !FApp::IsUnattended() && !GIsAutomationTesting && !GIsBuildMachine;
+		if (!bInteractive)
+		{
+			StartupHandle().Reset();
+			return false;
+		}
+		const IMainFrameModule* MainFrame = FModuleManager::GetModulePtr<IMainFrameModule>(TEXT("MainFrame"));
+		if (!FSlateApplication::IsInitialized() || !MainFrame || !MainFrame->IsWindowInitialized() || GFrameCounter == 0)
+		{
+			return true;
+		}
+		StartupHandle().Reset();
+		RestoreFrom(KeepOn::DefaultPath(), {});
+		return false;
 	}
 }
 
@@ -623,6 +983,38 @@ uint64 FHyperAIStudioAutoApproval::GetActivationId()
 {
 	const TOptional<HyperAIStudio::AutoApproval::Private::FActivation>& Active = HyperAIStudio::AutoApproval::Private::Current();
 	return Active.IsSet() ? Active->Id : 0;
+}
+
+bool FHyperAIStudioAutoApproval::IsRestored()
+{
+	const TOptional<HyperAIStudio::AutoApproval::Private::FActivation>& Active = HyperAIStudio::AutoApproval::Private::Current();
+	return Active.IsSet() && Active->bRestored;
+}
+
+bool FHyperAIStudioAutoApproval::WasRestored(const uint64 ActivationId)
+{
+	return ActivationId != 0 && ActivationId == HyperAIStudio::AutoApproval::Private::RestoredActivationId();
+}
+
+void FHyperAIStudioAutoApproval::Startup()
+{
+	using namespace HyperAIStudio::AutoApproval::Private;
+	if (IsRunningCommandlet() || StartupHandle().IsValid())
+	{
+		return;
+	}
+	StartupHandle() = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateStatic(&TickStartup), 0.25f);
+}
+
+void FHyperAIStudioAutoApproval::Shutdown()
+{
+	using namespace HyperAIStudio::AutoApproval::Private;
+	if (StartupHandle().IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(StartupHandle());
+		StartupHandle().Reset();
+	}
+	RestoreNotice().Reset();
 }
 
 FHyperAIStudioAutoApprovalStatus FHyperAIStudioAutoApproval::GetStatus()
@@ -642,6 +1034,8 @@ FHyperAIStudioAutoApprovalStatus FHyperAIStudioAutoApproval::GetStatus()
 	Status.ExternalEffectsApproved = Active->ExternalApproved;
 	Status.ChosenWaiting = Active->ChosenWaiting.Num();
 	Status.SandboxWrites = Active->SandboxWrites;
+	Status.bStaysOnAfterRestart = Active->bKeepOn;
+	Status.bRestored = Active->bRestored;
 	return Status;
 }
 
@@ -677,7 +1071,9 @@ FString FHyperAIStudioAutoApproval::DescribeWhyNotCovered(
 	case ENotCovered::ExternalLimit: return FString::Printf(TEXT("it reached its limit of %d external effects"), MaxExternalEffects);
 	case ENotCovered::Failures: return FString::Printf(TEXT("%d requests it approved failed in a row"), MaxConsecutiveFailures);
 	case ENotCovered::WaitingBefore:
-		return TEXT("it was already waiting when auto-approval was turned on, and was not chosen in its dialog to be approved too");
+		return Current().IsSet() && Current()->bRestored
+			? TEXT("it was already waiting when auto-approval came back on after the editor restarted, and that covers only new requests")
+			: TEXT("it was already waiting when auto-approval was turned on, and was not chosen in its dialog to be approved too");
 	default: return TEXT("an automation test's auto-approval covers only that test's own requests");
 	}
 }
@@ -795,6 +1191,8 @@ void FHyperAIStudioAutoApproval::NoteApproved(const EHyperAIStudioApprovalCatego
 	}
 	else
 	{
+		// Kept on: the record follows the counts, so the limits trip at the same totals after a restart.
+		WriteRecord(*Active);
 		OnChanged().Broadcast();
 	}
 }
@@ -803,6 +1201,7 @@ bool FHyperAIStudioAutoApproval::Activate(
 	const TArray<EHyperAIStudioApprovalCategory>& Categories,
 	const EHyperAIStudioAutoApprovalDuration Duration,
 	const TSet<FString>& ChosenWaiting,
+	const bool bStayOnAfterRestart,
 	FString& OutError)
 {
 	using namespace HyperAIStudio::AutoApproval::Private;
@@ -870,11 +1269,27 @@ bool FHyperAIStudioAutoApproval::Activate(
 	Activation.FirstSequence = HyperAIStudio::Approval::Private::PeekNextSequence();
 	Activation.ChosenWaiting = ChosenWaiting;
 	Activation.SpendSettings = SpendSettings();
+	Activation.TurnedOnUtc = UtcNow();
+	if (Seconds > 0.0)
+	{
+		Activation.ExpiresUtc = Activation.TurnedOnUtc + FTimespan::FromSeconds(Seconds);
+	}
+	Activation.bKeepOn = bStayOnAfterRestart;
 	const TSet<FString> CarriedOver = Activation.CarriedOver;
 	Current() = MoveTemp(Activation);
 	SandboxWait() = FSandboxWait();
 	ExpiryHandle() = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateStatic(&TickExpiry), 1.0f);
 	ActivityHandle() = FHyperAIStudioAgentActivityLog::OnChanged().AddStatic(&OnActivity);
+	// Kept on, its record follows it from now; otherwise no record is left from an earlier one.
+	if (bStayOnAfterRestart)
+	{
+		WriteRecord(*Current());
+	}
+	else
+	{
+		DeleteRecord(*Current());
+	}
+	const TCHAR* const KeptOn = bStayOnAfterRestart ? TEXT("; it stays on after the editor restarts") : TEXT("");
 
 	TArray<FString> Names;
 	for (const EHyperAIStudioApprovalCategory Category : Categories)
@@ -908,20 +1323,23 @@ bool FHyperAIStudioAutoApproval::Activate(
 	if (bTest)
 	{
 		// What a test turns on covers only its own requests, so it is recorded as such and tells the user nothing.
-		UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Auto-approval on for an automation test's own requests: %s (%s)%s."),
-			*Covered, DurationName(Duration), *AlsoWaiting);
+		UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Auto-approval on for an automation test's own requests: %s (%s)%s%s."),
+			*Covered, DurationName(Duration), *AlsoWaiting, KeptOn);
 		RecordAudit(TEXT("turned on"), TEXT("auto_approval_on"),
-			FString::Printf(TEXT("%s %s (automation test; it covers only the test's own requests%s)"), *Covered, DurationName(Duration), *AlsoWaiting));
+			FString::Printf(TEXT("%s %s (automation test; it covers only the test's own requests%s%s)"), *Covered, DurationName(Duration), *AlsoWaiting, KeptOn));
 	}
 	else
 	{
 		UE_LOG(LogHyperAIStudioAutoApproval, Warning,
-			TEXT("Auto-approval ON for %s (%s), confirmed in its dialog%s. It covers every agent and MCP client connected to this editor."),
-			*Covered, DurationName(Duration), *AlsoWaiting);
+			TEXT("Auto-approval ON for %s (%s), confirmed in its dialog%s%s. It covers every agent and MCP client connected to this editor."),
+			*Covered, DurationName(Duration), *AlsoWaiting, KeptOn);
 		RecordAudit(TEXT("turned on"), TEXT("auto_approval_on"),
-			FString::Printf(TEXT("%s %s (confirmed in its dialog%s)"), *Covered, DurationName(Duration), *AlsoWaiting));
-		Notify(FText::Format(LOCTEXT("OnToast",
-			"Auto-approval is on {0}: {1}. Requests in these categories now run without asking you; Stop is in Activity and in each chat window."),
+			FString::Printf(TEXT("%s %s (confirmed in its dialog%s%s)"), *Covered, DurationName(Duration), *AlsoWaiting, KeptOn));
+		Notify(FText::Format(bStayOnAfterRestart
+			? LOCTEXT("OnToastKeptOn",
+				"Auto-approval is on {0}: {1}. Requests in these categories now run without asking you, and it stays on if the editor restarts; Stop is in Activity and in each chat window.")
+			: LOCTEXT("OnToast",
+				"Auto-approval is on {0}: {1}. Requests in these categories now run without asking you; Stop is in Activity and in each chat window."),
 			DurationPhrase(Duration), DescribeCategories(Categories)), /*bWarning=*/true);
 	}
 	OnChanged().Broadcast();
@@ -945,7 +1363,19 @@ void FHyperAIStudioAutoApproval::Stop(const EHyperAIStudioAutoApprovalEnd Why)
 	ActivityHandle().Reset();
 	const uint64 Ended = Current()->Id;
 	const bool bTest = IsTestScoped(*Current());
+	// Kept on and the editor closing: its record stays, with the close time, for the next editor. Any other end deletes
+	// it (Stop, expiry, a limit, a spend-setting change, a new activation), and so does the end of one not kept on.
+	const bool bKeptForRestart = Why == EHyperAIStudioAutoApprovalEnd::EditorClosing && Current()->bKeepOn && !RecordPathFor(*Current()).IsEmpty();
+	if (bKeptForRestart)
+	{
+		WriteRecord(*Current(), /*bClosing=*/true);
+	}
+	else
+	{
+		DeleteRecord(*Current());
+	}
 	Current().Reset();
+	CloseRestoreNotice();
 	SandboxWait() = FSandboxWait();
 #if WITH_DEV_AUTOMATION_TESTS
 	LastEnd() = Why;
@@ -959,6 +1389,10 @@ void FHyperAIStudioAutoApproval::Stop(const EHyperAIStudioAutoApprovalEnd Why)
 	if (bTest && Why != EHyperAIStudioAutoApprovalEnd::TestFinished)
 	{
 		Reason += TEXT(" (automation test)");
+	}
+	if (bKeptForRestart)
+	{
+		Reason += TEXT("; it was kept on after restarts, so its record stays for the next editor");
 	}
 	if (Returned > 0)
 	{
@@ -1085,16 +1519,148 @@ FText FHyperAIStudioAutoApproval::DescribeBanner()
 FText FHyperAIStudioAutoApproval::DescribeBannerTooltip()
 {
 	const FHyperAIStudioAutoApprovalStatus Status = GetStatus();
+	FText Tooltip;
 	if (Status.Categories.Contains(EHyperAIStudioApprovalCategory::SandboxSaves))
 	{
 		// Each write of the held saves is one of the approvals, so a session of many saves reaches the limit sooner.
-		return FText::Format(LOCTEXT("BannerTooltipSandbox",
+		Tooltip = FText::Format(LOCTEXT("BannerTooltipSandbox",
 			"Agents' requests in these categories run without asking you, from any agent or MCP client connected to this editor. {0} approved so far, {2} of them writes of Sandbox Mode's held saves; it turns itself off after {1}. Requests in other categories still wait for you."),
 			Status.Approved, MaxApprovals, Status.SandboxWrites);
 	}
-	return FText::Format(LOCTEXT("BannerTooltip",
-		"Agents' requests in these categories run without asking you, from any agent or MCP client connected to this editor. {0} approved so far; it turns itself off after {1}. Requests in other categories still wait for you."),
-		Status.Approved, MaxApprovals);
+	else
+	{
+		Tooltip = FText::Format(LOCTEXT("BannerTooltip",
+			"Agents' requests in these categories run without asking you, from any agent or MCP client connected to this editor. {0} approved so far; it turns itself off after {1}. Requests in other categories still wait for you."),
+			Status.Approved, MaxApprovals);
+	}
+	if (Status.bRestored)
+	{
+		return FText::Format(LOCTEXT("BannerTooltipRestored", "{0}\n\nIt came back on by itself when the editor restarted, as you chose with \"Stay on after the editor restarts\"; the counts carried over."), Tooltip);
+	}
+	if (Status.bStaysOnAfterRestart)
+	{
+		return FText::Format(LOCTEXT("BannerTooltipKeptOn", "{0}\n\nIt stays on if the editor restarts (\"Stay on after the editor restarts\" was ticked)."), Tooltip);
+	}
+	return Tooltip;
+}
+
+FText FHyperAIStudioAutoApproval::DescribeRestored(const TArray<EHyperAIStudioApprovalCategory>& Categories, const TOptional<FDateTime>& ExpiresUtc, const int32 Waiting)
+{
+	// AsTime shows a UTC time in the user's own time zone.
+	const FText Until = ExpiresUtc.IsSet() ? FText::AsTime(*ExpiresUtc, EDateTimeStyle::Short) : LOCTEXT("RestoredUntilClose", "the editor closes");
+	const FText Text = FText::Format(LOCTEXT("RestoredToast", "Auto-approval is back on from before the restart: {0}, until {1}."), DescribeCategories(Categories), Until);
+	if (Waiting <= 0)
+	{
+		return Text;
+	}
+	return FText::Format(LOCTEXT("RestoredWaiting",
+		"{0} It approves only new requests: the {1} {1}|plural(one=request,other=requests) waiting from before {1}|plural(one=keeps,other=keep) waiting for you."),
+		Text, Waiting);
+}
+
+const TCHAR* FHyperAIStudioAutoApproval::GetChoicesSection()
+{
+	return TEXT("HyperAIStudio.AutoApprovalDialog");
+}
+
+FHyperAIStudioAutoApprovalChoices FHyperAIStudioAutoApproval::ReadChoices(const FString& IniFile)
+{
+	using namespace HyperAIStudio::AutoApproval::Private;
+	FHyperAIStudioAutoApprovalChoices Choices;
+	if (!GConfig || IniFile.IsEmpty())
+	{
+		return Choices;
+	}
+	const TCHAR* Section = GetChoicesSection();
+	FString Text;
+	if (GConfig->GetString(Section, TEXT("Categories"), Text, IniFile))
+	{
+		TArray<FString> Names;
+		Text.ParseIntoArray(Names, TEXT(","));
+		uint8 Mask = 0;
+		bool bAllKnown = !Names.IsEmpty();
+		for (FString& Name : Names)
+		{
+			Name.TrimStartAndEndInline();
+			bool bKnown = false;
+			for (const EHyperAIStudioApprovalCategory Category : AllCategories)
+			{
+				if (Name == LexToString(Category))
+				{
+					Mask |= Bit(Category);
+					bKnown = true;
+				}
+			}
+			bAllKnown &= bKnown;
+		}
+		// Anything not understood keeps the default rather than a guess.
+		if (bAllKnown && Mask != 0)
+		{
+			Choices.Categories = CategoriesOf(Mask);
+		}
+	}
+	if (GConfig->GetString(Section, TEXT("Duration"), Text, IniFile))
+	{
+		HyperAIStudio::AutoApproval::KeepOn::ParseDuration(Text.TrimStartAndEnd(), Choices.Duration);
+	}
+	bool bValue = false;
+	if (GConfig->GetBool(Section, TEXT("AlsoApproveWaiting"), bValue, IniFile))
+	{
+		Choices.bAlsoApproveWaiting = bValue;
+	}
+	if (GConfig->GetBool(Section, TEXT("StayOnAfterRestart"), bValue, IniFile))
+	{
+		Choices.bStayOnAfterRestart = bValue;
+	}
+	return Choices;
+}
+
+void FHyperAIStudioAutoApproval::WriteChoices(const FString& IniFile, const FHyperAIStudioAutoApprovalChoices& Choices)
+{
+	if (!GConfig || IniFile.IsEmpty())
+	{
+		return;
+	}
+	TArray<FString> Names;
+	for (const EHyperAIStudioApprovalCategory Category : Choices.Categories)
+	{
+		Names.Add(LexToString(Category));
+	}
+	const TCHAR* Section = GetChoicesSection();
+	GConfig->SetString(Section, TEXT("Categories"), *FString::Join(Names, TEXT(",")), IniFile);
+	GConfig->SetString(Section, TEXT("Duration"), HyperAIStudio::AutoApproval::KeepOn::DurationKey(Choices.Duration), IniFile);
+	GConfig->SetBool(Section, TEXT("AlsoApproveWaiting"), Choices.bAlsoApproveWaiting, IniFile);
+	GConfig->SetBool(Section, TEXT("StayOnAfterRestart"), Choices.bStayOnAfterRestart, IniFile);
+	GConfig->Flush(/*bRemoveFromCache=*/false, IniFile);
+}
+
+FHyperAIStudioAutoApprovalChoices FHyperAIStudioAutoApproval::LoadChoices()
+{
+#if WITH_DEV_AUTOMATION_TESTS
+	// A dialog under test never reads the user's choices: it starts from the defaults unless a test asked it to remember.
+	if (GIsAutomationTesting)
+	{
+		const HyperAIStudio::AutoApproval::Private::FTestChoices& Test = HyperAIStudio::AutoApproval::Private::TestChoices();
+		return Test.bRemember && Test.Saved.IsSet() ? *Test.Saved : FHyperAIStudioAutoApprovalChoices();
+	}
+#endif
+	return ReadChoices(GEditorPerProjectIni);
+}
+
+void FHyperAIStudioAutoApproval::SaveChoices(const FHyperAIStudioAutoApprovalChoices& Choices)
+{
+#if WITH_DEV_AUTOMATION_TESTS
+	if (GIsAutomationTesting)
+	{
+		HyperAIStudio::AutoApproval::Private::FTestChoices& Test = HyperAIStudio::AutoApproval::Private::TestChoices();
+		if (Test.bRemember)
+		{
+			Test.Saved = Choices;
+		}
+		return;
+	}
+#endif
+	WriteChoices(GEditorPerProjectIni, Choices);
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -1130,6 +1696,73 @@ void FHyperAIStudioAutoApprovalTestAccess::Reset()
 	FHyperAIStudioAutoApproval::TestScopeForNextActivation().Reset();
 	ClockOffset() = 0.0;
 	LastEnd().Reset();
+	TestRecordPath().Reset();
+	TestChoices() = FTestChoices();
+	LastNotice().Reset();
+}
+
+void FHyperAIStudioAutoApprovalTestAccess::SetRecordPath(const FString& Path)
+{
+	HyperAIStudio::AutoApproval::Private::TestRecordPath() = Path;
+}
+
+void FHyperAIStudioAutoApprovalTestAccess::RememberChoices(const bool bRemember)
+{
+	HyperAIStudio::AutoApproval::Private::TestChoices().bRemember = bRemember;
+}
+
+void FHyperAIStudioAutoApprovalTestAccess::CloseEditor()
+{
+	using namespace HyperAIStudio::AutoApproval::Private;
+	// Only a test's own activation: the user's own is never ended by a test.
+	if (Current().IsSet() && IsTestScoped(*Current()))
+	{
+		FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::EditorClosing);
+	}
+}
+
+HyperAIStudio::AutoApproval::KeepOn::ERefusal FHyperAIStudioAutoApprovalTestAccess::Restore(const FString& Path, const TSet<FString>& OperationIds)
+{
+	return HyperAIStudio::AutoApproval::Private::RestoreFrom(Path, OperationIds);
+}
+
+TOptional<FText> FHyperAIStudioAutoApprovalTestAccess::GetLastNotice()
+{
+	const TOptional<FNotificationInfo>& Notice = HyperAIStudio::AutoApproval::Private::LastNotice();
+	return Notice.IsSet() ? TOptional<FText>(Notice->Text.Get()) : TOptional<FText>();
+}
+
+TArray<FText> FHyperAIStudioAutoApprovalTestAccess::GetLastNoticeButtons()
+{
+	TArray<FText> Labels;
+	if (const TOptional<FNotificationInfo>& Notice = HyperAIStudio::AutoApproval::Private::LastNotice(); Notice.IsSet())
+	{
+		for (const FNotificationButtonInfo& Button : Notice->ButtonDetails)
+		{
+			Labels.Add(Button.Text.Get());
+		}
+	}
+	return Labels;
+}
+
+bool FHyperAIStudioAutoApprovalTestAccess::PressLastNoticeButton(const int32 Index)
+{
+	const TOptional<FNotificationInfo> Notice = HyperAIStudio::AutoApproval::Private::LastNotice();
+	if (!Notice.IsSet() || !Notice->ButtonDetails.IsValidIndex(Index))
+	{
+		return false;
+	}
+	return Notice->ButtonDetails[Index].Callback.ExecuteIfBound();
+}
+
+FDateTime FHyperAIStudioAutoApprovalTestAccess::GetUtcNow()
+{
+	return HyperAIStudio::AutoApproval::Private::UtcNow();
+}
+
+FString FHyperAIStudioAutoApprovalTestAccess::GetSpendFingerprint()
+{
+	return HyperAIStudio::AutoApproval::KeepOn::Fingerprint(HyperAIStudio::AutoApproval::Private::SpendSettings());
 }
 
 void FHyperAIStudioAutoApprovalTestAccess::PumpGate(const int32 Ticks)

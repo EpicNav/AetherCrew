@@ -1837,8 +1837,8 @@ namespace HyperAIStudio::NativeReadTools::Private
 		if (Record->AutoApprovedAs.IsSet() && !Report.Diagnostic.StartsWith(TEXT("Auto-approved")))
 		{
 			Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(
-				FString::Printf(TEXT("Auto-approved (%s) by the auto-approval the user turned on; nobody clicked. "),
-					::LexToString(*Record->AutoApprovedAs)) + Report.Diagnostic,
+				FString::Printf(TEXT("Auto-approved (%s) by the auto-approval the user turned on%s; nobody clicked. "),
+					::LexToString(*Record->AutoApprovedAs), Record->bKeptOnAfterRestart ? TEXT(", kept on after the editor restarted") : TEXT("")) + Report.Diagnostic,
 				FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
 		}
 	}

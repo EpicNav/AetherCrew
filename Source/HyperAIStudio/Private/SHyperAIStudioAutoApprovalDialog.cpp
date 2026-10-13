@@ -92,6 +92,17 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 	{
 		return ShowNativeConfirmation(Window.Pin(), Caption, Body);
 	};
+	// The choices the user last turned it on with: preferences only, which turn nothing on by themselves.
+	{
+		const FHyperAIStudioAutoApprovalChoices Choices = FHyperAIStudioAutoApproval::LoadChoices();
+		for (int32 Index = 0; Index < CategoryCount; ++Index)
+		{
+			bTicked[Index] = Choices.Categories.Contains(static_cast<EHyperAIStudioApprovalCategory>(Index));
+		}
+		Duration = Choices.Duration;
+		bAlsoApproveWaiting = Choices.bAlsoApproveWaiting;
+		bStayOnAfterRestart = Choices.bStayOnAfterRestart;
+	}
 
 	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
 	const bool bEditsAlreadyRun = Settings && !Settings->bRequireApprovalForAgentEdits;
@@ -141,8 +152,8 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 		.AutoHeight()
 		.Padding(0.0f, 8.0f, 0.0f, 0.0f)
 		[
-			Paragraph(FText::Format(LOCTEXT("EndingUnstarted",
-				"It is never saved. It ends when its time runs out, when you press Stop, when the editor closes, when the spend cap or an external service's or image model's settings change, or by itself after {0} approvals, {1} external-effect requests, or {2} failures in a row. What it approved that has not started by then waits for your approval again."),
+			Paragraph(FText::Format(LOCTEXT("EndingStayOn",
+				"It ends when its time runs out, when you press Stop, when the editor closes (unless you tick Stay on after the editor restarts below), when the spend cap or an external service's or image model's settings change, or by itself after {0} approvals, {1} external-effect requests, or {2} failures in a row. What it approved that has not started by then waits for your approval again."),
 				FHyperAIStudioAutoApproval::MaxApprovals, FHyperAIStudioAutoApproval::MaxExternalEffects,
 				FHyperAIStudioAutoApproval::MaxConsecutiveFailures))
 		]
@@ -219,6 +230,12 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 			+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::OneHour, LOCTEXT("OneHour", "1 hour"))]
 			+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::FourHours, LOCTEXT("FourHours", "4 hours"))]
 			+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::UntilEditorCloses, LOCTEXT("WhenEditorCloses", "When the editor closes"))]
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 10.0f, 0.0f, 0.0f)
+		[
+			BuildStayOn()
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -361,6 +378,52 @@ TSharedRef<SWidget> SHyperAIStudioAutoApprovalDialog::BuildDuration(const EHyper
 				SNew(STextBlock)
 				.Text(Label)
 			]
+		];
+}
+
+FText SHyperAIStudioAutoApprovalDialog::GetStayOnTooltip()
+{
+	return LOCTEXT("StayOnTooltip",
+		"Unticked (the default), auto-approval ends when the editor closes, whatever time is left.\n\nTicked, while it is on HyperAI keeps a record of it in this project's Saved folder, encrypted by Windows for your account. When the editor opens again it comes back on by itself, with the same categories, the time left (time the editor was closed counts) and its counts toward the limits, and a notification with Stop says so. It does not come back if its time ran out, if you turned it on 24 hours ago or more, if the spend cap, an external service or an image model changed, or, with When the editor closes, if the editor stayed closed 30 minutes or more. Only requests made after it comes back are approved; requests already waiting keep waiting for you. Stop, its limits, a settings change and turning it off delete the record.");
+}
+
+FText SHyperAIStudioAutoApprovalDialog::StayOnNote() const
+{
+	if (!bStayOnAfterRestart)
+	{
+		return LOCTEXT("StayOnNoteUnticked", "Unticked, it ends when the editor closes.");
+	}
+	return Duration == EHyperAIStudioAutoApprovalDuration::UntilEditorCloses
+		? LOCTEXT("StayOnNoteUntilClose", "If the editor opens again within 30 minutes of closing, it comes back on by itself, for new requests only, never more than 24 hours after you turn it on.")
+		: LOCTEXT("StayOnNoteTimed", "If the editor restarts before its time runs out, it comes back on by itself for what is left of it (time closed counts), for new requests only.");
+}
+
+TSharedRef<SWidget> SHyperAIStudioAutoApprovalDialog::BuildStayOn()
+{
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SNew(SCheckBox)
+			.IsChecked_Lambda([this]() { return bStayOnAfterRestart ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+			.OnCheckStateChanged_Lambda([this](const ECheckBoxState State) { bStayOnAfterRestart = State == ECheckBoxState::Checked; })
+			.ToolTipText(GetStayOnTooltip())
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("StayOnLabel", "Stay on after the editor restarts"))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+			]
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(24.0f, 2.0f, 0.0f, 0.0f)
+		[
+			SNew(STextBlock)
+			.AutoWrapText(true)
+			.Font(FAppStyle::GetFontStyle("SmallFont"))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			.ToolTipText(GetStayOnTooltip())
+			.Text_Lambda([this]() { return StayOnNote(); })
 		];
 }
 
@@ -575,6 +638,14 @@ FText SHyperAIStudioAutoApprovalDialog::BuildConfirmation() const
 	{
 		Listed = FText::Format(LOCTEXT("ConfirmAlsoWaiting", "{0}\n\nIt also approves the {1} {1}|plural(one=request,other=requests) in these categories waiting now."), Listed, Waiting);
 	}
+	if (bStayOnAfterRestart)
+	{
+		Listed = FText::Format(LOCTEXT("ConfirmStayOn", "{0}\n\n{1}"), Listed, Duration == EHyperAIStudioAutoApprovalDuration::UntilEditorCloses
+			? LOCTEXT("ConfirmStayOnUntilClose",
+				"It stays on after the editor restarts: if the editor opens again within 30 minutes of closing, it comes back on by itself for new requests, up to 24 hours from now.")
+			: LOCTEXT("ConfirmStayOnTimed",
+				"It stays on after the editor restarts: if the editor opens again before its time runs out, it comes back on by itself for new requests until then."));
+	}
 	return FText::Format(LOCTEXT("ConfirmBody",
 		"{0}, agents' requests in these categories will run without asking you:\n\n{1}\n\nThis covers every agent and MCP client connected to this editor, not only HyperAI chats.\n\nIf you did not open this yourself, press Cancel."),
 		When, Listed);
@@ -601,8 +672,15 @@ FReply SHyperAIStudioAutoApprovalDialog::OnTurnOnClicked()
 	}
 #endif
 	FString Error;
-	if (FHyperAIStudioAutoApproval::Activate(GetChosen(), Duration, GetChosenWaiting(), Error))
+	if (FHyperAIStudioAutoApproval::Activate(GetChosen(), Duration, GetChosenWaiting(), bStayOnAfterRestart, Error))
 	{
+		// What it turned on with is what the next dialog opens with.
+		FHyperAIStudioAutoApprovalChoices Choices;
+		Choices.Categories = GetChosen();
+		Choices.Duration = Duration;
+		Choices.bAlsoApproveWaiting = bAlsoApproveWaiting;
+		Choices.bStayOnAfterRestart = bStayOnAfterRestart;
+		FHyperAIStudioAutoApproval::SaveChoices(Choices);
 		Close();
 	}
 	return FReply::Handled();
@@ -709,7 +787,8 @@ bool FHyperAIStudioAutoApprovalTestAccess::TurnOn(
 	const TArray<EHyperAIStudioApprovalCategory>& Categories,
 	const TSet<FString>& OperationIds,
 	const EHyperAIStudioAutoApprovalDuration Duration,
-	const bool bAlsoApproveWaiting)
+	const bool bAlsoApproveWaiting,
+	const bool bStayOnAfterRestart)
 {
 	const TSharedRef<SHyperAIStudioAutoApprovalDialog> Dialog = MakeDialog();
 	for (int32 Index = 0; Index < SHyperAIStudioAutoApprovalDialog::CategoryCount; ++Index)
@@ -718,9 +797,25 @@ bool FHyperAIStudioAutoApprovalTestAccess::TurnOn(
 	}
 	Dialog->bAlsoApproveWaiting = bAlsoApproveWaiting;
 	Dialog->Duration = Duration;
+	Dialog->bStayOnAfterRestart = bStayOnAfterRestart;
 	SetNativeAnswer(*Dialog, true);
 	PressTurnOn(*Dialog, OperationIds);
 	return FHyperAIStudioAutoApproval::IsActive();
+}
+
+bool FHyperAIStudioAutoApprovalTestAccess::IsStayingOn(const SHyperAIStudioAutoApprovalDialog& Dialog)
+{
+	return Dialog.bStayOnAfterRestart;
+}
+
+void FHyperAIStudioAutoApprovalTestAccess::SetStayOn(SHyperAIStudioAutoApprovalDialog& Dialog, const bool bStayOn)
+{
+	Dialog.bStayOnAfterRestart = bStayOn;
+}
+
+FText FHyperAIStudioAutoApprovalTestAccess::GetStayOnTooltip(const SHyperAIStudioAutoApprovalDialog& Dialog)
+{
+	return Dialog.GetStayOnTooltip();
 }
 
 bool FHyperAIStudioAutoApprovalTestAccess::WasClosed(const SHyperAIStudioAutoApprovalDialog& Dialog)
