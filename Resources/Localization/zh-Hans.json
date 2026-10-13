@@ -20390,6 +20390,150 @@
    "text": "{0} x {1}，{2} 张"
   },
   {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "Cancel",
+   "source": "Cancel",
+   "text": "取消"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "Change",
+   "source": "Change...",
+   "text": "更改..."
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "EditTitle",
+   "source": "{0}: {1}",
+   "text": "{0}：{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "EditWhere",
+   "source": "Kept in Windows Credential Manager as {0}, and given to the agent as {1}.",
+   "text": "以 {0} 保存在 Windows 凭据管理器中，并以 {1} 提供给智能体。"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "FromEnvironment",
+   "source": "{0} is set in your environment",
+   "text": "{0} 已在你的环境变量中设置"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "KeyHint",
+   "source": "Paste the key",
+   "text": "粘贴密钥"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "NotSet",
+   "source": "Not set",
+   "text": "未设置"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "NotUrl",
+   "source": "An address starts with http:// or https://.",
+   "text": "地址须以 http:// 或 https:// 开头。"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "ProvidersGroup",
+   "source": "Providers for HyperAI's tools",
+   "text": "HyperAI 工具使用的服务商"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "Remove",
+   "source": "Remove",
+   "text": "移除"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "RemoveConfirm",
+   "source": "Remove the stored {0} for {1}?",
+   "text": "移除为 {1} 保存的 {0}？"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "RemoveTip",
+   "source": "Delete the stored value from Windows Credential Manager.",
+   "text": "从 Windows 凭据管理器中删除保存的值。"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "RowTip",
+   "source": "{0}\nPassed as {1}.",
+   "text": "{0}\n以 {1} 传递。"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "RowTipUnverified",
+   "source": "{0}\nThe agent's documentation does not name this variable; it may not read it.",
+   "text": "{0}\n该智能体的文档未提到此变量，它可能不会读取。"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "Save",
+   "source": "Save",
+   "text": "保存"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "Set",
+   "source": "Set...",
+   "text": "设置..."
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "SetKeyTip",
+   "source": "Store a key in Windows Credential Manager.",
+   "text": "将密钥保存到 Windows 凭据管理器。"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "SetUrlTip",
+   "source": "Store an address for this agent.",
+   "text": "为此智能体保存一个地址。"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "Subtitle",
+   "source": "Give an agent your own API key or an OpenAI-compatible address, and give HyperAI's image, audio and 3D tools their providers' keys. Keys are kept in Windows Credential Manager for your user (targets named HyperAIStudio/...), never in the project, an ini file, a log or Activity, and go only into the environment of the agent HyperAI starts. A key set here wins over the same environment variable. Agents read a new key when their chat next starts.",
+   "text": "为智能体提供你自己的 API 密钥或 OpenAI 兼容地址，并为 HyperAI 的图像、音频和 3D 工具提供各服务商的密钥。密钥保存在当前用户的 Windows 凭据管理器中（目标名为 HyperAIStudio/...），绝不写入项目、ini 文件、日志或活动记录，只会进入 HyperAI 启动的智能体进程的环境变量。在此设置的密钥优先于同名环境变量。智能体在下次开始对话时读取新密钥。"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "Test",
+   "source": "Test",
+   "text": "测试"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "TestTip",
+   "source": "Make one free authenticated call (a model list or an account read) to see whether the key works. Nothing is generated or billed.",
+   "text": "发起一次免费的认证调用（列出模型或读取账户）以检查密钥是否可用。不会生成内容，也不会计费。"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "Testing",
+   "source": "Testing...",
+   "text": "正在测试..."
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "Title",
+   "source": "Your own keys",
+   "text": "你自己的密钥"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "UrlHint",
+   "source": "https://...",
+   "text": "https://..."
+  },
+  {
    "namespace": "SHyperAIStudioLoreSetupPanel",
    "key": "AgentsLocal",
    "source": "Agent edits are marked dirty in Lore once saved; hyper_source_control_submit commits them here after you approve.",
@@ -21488,6 +21632,330 @@
    "text": "上下方向键移动，Enter 或 Tab 插入，Esc 关闭。{0}"
   },
   {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "AgentHint",
+   "source": "Empty keeps the chat's agent; or Claude Code, Codex, Gemini...",
+   "text": "留空则沿用对话的智能体；或填 Claude Code、Codex、Gemini..."
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "AgentLabel",
+   "source": "Preferred agent",
+   "text": "首选智能体"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "ApprovalAsk",
+   "source": "asks for edits",
+   "text": "编辑需确认"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "ApprovalLabel",
+   "source": "HyperAI's tools in this mode",
+   "text": "此模式下 HyperAI 的工具"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "ApprovalNormal",
+   "source": "normal approvals",
+   "text": "常规审批"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "ApprovalReadOnly",
+   "source": "read only",
+   "text": "只读"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "BuiltInSuffix",
+   "source": ", built in",
+   "text": "，内置"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "Cancel",
+   "source": "Cancel",
+   "text": "取消"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "ChangedSuffix",
+   "source": ", built in, changed here",
+   "text": "，内置，已在此项目中修改"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "Delete",
+   "source": "Delete",
+   "text": "删除"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "DeleteConfirm",
+   "source": "Delete the mode {0} from this project?",
+   "text": "从此项目中删除模式 {0}？"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "DescriptionHint",
+   "source": "One line the mode menu shows",
+   "text": "模式菜单中显示的一行说明"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "DescriptionLabel",
+   "source": "Description",
+   "text": "说明"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "Edit",
+   "source": "Edit",
+   "text": "编辑"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "EditBuiltInTip",
+   "source": "Change this built-in mode for this project; Delete goes back to how it shipped.",
+   "text": "为此项目修改这个内置模式；“删除”可恢复为出厂状态。"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "EditTip",
+   "source": "Change this mode.",
+   "text": "修改此模式。"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "EditTitle",
+   "source": "Edit Chat Mode",
+   "text": "编辑对话模式"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "Export",
+   "source": "Export...",
+   "text": "导出..."
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "ExportTip",
+   "source": "Save this mode as a .json file to share.",
+   "text": "将此模式另存为 .json 文件以便分享。"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "ExportTitle",
+   "source": "Export chat mode",
+   "text": "导出对话模式"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "Import",
+   "source": "Import...",
+   "text": "导入..."
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "ImportTip",
+   "source": "Copy a mode's .json file into this project after checking it.",
+   "text": "检查后将模式的 .json 文件复制到此项目。"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "InstructionsHint",
+   "source": "What the agent is told when the chat enters this mode.",
+   "text": "对话进入此模式时告诉智能体的内容。"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "InstructionsLabel",
+   "source": "Instructions",
+   "text": "指令"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "ModelHint",
+   "source": "Empty keeps the chat's model",
+   "text": "留空则沿用对话的模型"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "ModelLabel",
+   "source": "Preferred model",
+   "text": "首选模型"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "NameHint",
+   "source": "Such as Level blockout",
+   "text": "例如：关卡白盒"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "NameLabel",
+   "source": "Name",
+   "text": "名称"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "New",
+   "source": "New Mode...",
+   "text": "新建模式..."
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "NewTip",
+   "source": "Make a mode for this project.",
+   "text": "为此项目创建一个模式。"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "NewTitle",
+   "source": "New Chat Mode",
+   "text": "新建对话模式"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "OpenFolder",
+   "source": "Open Folder",
+   "text": "打开文件夹"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "OpenFolderTip",
+   "source": "Show .hyperai/modes.",
+   "text": "显示 .hyperai/modes。"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "PacksHint",
+   "source": "Catalog packs, such as level_design, lighting_lookdev",
+   "text": "目录中的功能包，例如 level_design、lighting_lookdev"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "PacksLabel",
+   "source": "Packs",
+   "text": "功能包"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "PickMode",
+   "source": "Chat mode",
+   "text": "对话模式"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "RadioAsk",
+   "source": "Ask for edits",
+   "text": "编辑需确认"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "RadioAskTip",
+   "source": "Every edit plan waits for your click, even with approvals or auto-approval off.",
+   "text": "每个编辑计划都等待你点击确认，即使审批或自动审批已关闭。"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "RadioNormal",
+   "source": "Normal",
+   "text": "常规"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "RadioNormalTip",
+   "source": "Your approval settings and auto-approval apply as usual.",
+   "text": "照常使用你的审批设置和自动审批。"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "RadioReadOnly",
+   "source": "Read only",
+   "text": "只读"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "RadioReadOnlyTip",
+   "source": "HyperAI refuses every edit plan while a chat is in this mode.",
+   "text": "只要有对话处于此模式，HyperAI 就拒绝所有编辑计划。"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "Restore",
+   "source": "Restore",
+   "text": "恢复"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "RestoreConfirm",
+   "source": "Put {0} back as it shipped, dropping this project's changes to it?",
+   "text": "将 {0} 恢复为出厂状态，并丢弃此项目对它的修改？"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "RowTitle",
+   "source": "{0}  ({1}{2})",
+   "text": "{0}（{1}{2}）"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "Save",
+   "source": "Save",
+   "text": "保存"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "SharedNote",
+   "source": "Saved in .hyperai/modes as JSON, so Git shares it with your team. Never put a key here: keys go in Settings > Agents.",
+   "text": "以 JSON 保存在 .hyperai/modes 中，可通过 Git 与团队共享。切勿在此放入密钥：密钥请设置在“设置 > 智能体”中。"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "SkillsHint",
+   "source": "Skills, such as unreal-level-design",
+   "text": "技能，例如 unreal-level-design"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "SkillsLabel",
+   "source": "Skills",
+   "text": "技能"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "Subtitle",
+   "source": "A mode is a preset for a chat: what the agent is told, the packs, tools and skills its messages go with, and how far HyperAI's tools may go. Pick one in the chat's composer. A read-only mode is enforced: HyperAI refuses edit plans while any chat is in it.",
+   "text": "模式是对话的预设：告诉智能体什么、消息附带哪些功能包、工具和技能，以及 HyperAI 的工具能做到哪一步。在对话输入框中选择。只读模式会被强制执行：只要有对话处于只读模式，HyperAI 就拒绝编辑计划。"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "Title",
+   "source": "Chat modes",
+   "text": "对话模式"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "ToolsHint",
+   "source": "HyperAI tools to name first, such as hyper_lighting_inspect",
+   "text": "优先列出的 HyperAI 工具，例如 hyper_lighting_inspect"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "ToolsLabel",
+   "source": "Tools",
+   "text": "工具"
+  },
+  {
+   "namespace": "SHyperAIStudioModesPanel",
+   "key": "WindowTitle",
+   "source": "HyperAI Chat Modes",
+   "text": "HyperAI 对话模式"
+  },
+  {
    "namespace": "SHyperAIStudioNativeChatView",
    "key": "Answered",
    "source": "Answered: {0}",
@@ -21561,9 +22029,69 @@
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ManageModes",
+   "source": "Manage Modes...",
+   "text": "管理模式..."
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ManageModesTooltip",
+   "source": "Make, edit, import and export chat modes. The project's are in .hyperai/modes.",
+   "text": "创建、编辑、导入和导出对话模式。项目自己的模式在 .hyperai/modes 中。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
    "key": "MentionChipTooltip",
    "source": "{0}: {1}\nThe agent gets this exact reference with the message.",
    "text": "{0}：{1}\n智能体会随消息收到这个精确引用。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ModeAskEntry",
+   "source": "{0} (asks for edits)",
+   "text": "{0}（编辑需确认）"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ModeBuild",
+   "source": "Build",
+   "text": "构建"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ModeBuildName",
+   "source": "Build",
+   "text": "构建"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ModeNotice",
+   "source": "{0} mode. The agent is told with your next message.",
+   "text": "{0} 模式。智能体会随你的下一条消息得知。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ModeReadOnlyEntry",
+   "source": "{0} (read only)",
+   "text": "{0}（只读）"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ModeReadOnlyNotice",
+   "source": "{0} mode: read only. HyperAI refuses edit plans while this chat is in it.",
+   "text": "{0} 模式：只读。只要此对话处于该模式，HyperAI 就拒绝编辑计划。"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ModeTooltip",
+   "source": "The chat's mode: {0}. {1}",
+   "text": "对话的模式：{0}。{1}"
+  },
+  {
+   "namespace": "SHyperAIStudioNativeChatView",
+   "key": "ModesSection",
+   "source": "Chat mode",
+   "text": "对话模式"
   },
   {
    "namespace": "SHyperAIStudioNativeChatView",
@@ -23206,8 +23734,8 @@
   {
    "namespace": "SHyperAIStudioSettingsPage",
    "key": "ImagesBody",
-   "source": "The models the Images page and agents draw with. Keys are read from environment variables and never stored.",
-   "text": "图像页面和智能体用来绘图的模型。密钥从环境变量读取，从不保存。"
+   "source": "The models the Images page and agents draw with. Keys are set in Settings > Agents (kept in Windows Credential Manager) or read from environment variables; never stored in the project.",
+   "text": "“图像”页面和智能体用来绘图的模型。密钥在“设置 > 智能体”中设置（保存在 Windows 凭据管理器中），或从环境变量读取；绝不保存在项目中。"
   },
   {
    "namespace": "SHyperAIStudioSettingsPage",
@@ -23254,8 +23782,8 @@
   {
    "namespace": "SHyperAIStudioSettingsPage",
    "key": "NanoKeyMissing",
-   "source": "Set {0} in your environment to a Gemini API key, then restart the editor. The key is read from there and never saved.",
-   "text": "请在环境变量 {0} 中设置 Gemini API 密钥，然后重启编辑器。密钥只从那里读取，从不保存。"
+   "source": "Add a Gemini API key under Providers in Settings > Agents, or set {0} in your environment and restart the editor. It is never saved in the project.",
+   "text": "在“设置 > 智能体”的“服务商”下添加 Gemini API 密钥，或在环境变量中设置 {0} 后重启编辑器。它绝不会保存在项目中。"
   },
   {
    "namespace": "SHyperAIStudioSettingsPage",
@@ -23373,9 +23901,33 @@
   },
   {
    "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "Cancel",
+   "source": "Cancel",
+   "text": "取消"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
    "key": "Changed",
    "source": "{0} {0}|plural(one=skill,other=skills) changed.",
    "text": "已更改 {0} 个技能。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ChatModes",
+   "source": "Chat Modes...",
+   "text": "对话模式..."
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "ChatModesTooltip",
+   "source": "The modes a chat can run in: Plan, Build, Review, Art pass, QA and the project's own.",
+   "text": "对话可使用的模式：计划、构建、审查、美术润色、QA 以及项目自己的模式。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "Create",
+   "source": "Create",
+   "text": "创建"
   },
   {
    "namespace": "SHyperAIStudioSkillsPanel",
@@ -23388,6 +23940,18 @@
    "key": "DeleteConfirm",
    "source": "Delete the skill {0} from this project, for both agents?",
    "text": "要从此项目中删除技能 {0}（对两个智能体都生效）吗？"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "EditSkill",
+   "source": "Edit",
+   "text": "编辑"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "EditSkillTooltip",
+   "source": "Open SKILL.md in your editor. A project skill's change reaches Claude Code's copy at the next Sync.",
+   "text": "在你的编辑器中打开 SKILL.md。项目技能的修改会在下次同步时同步到 Claude Code 的副本。"
   },
   {
    "namespace": "SHyperAIStudioSkillsPanel",
@@ -23457,6 +24021,12 @@
   },
   {
    "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "Invalid",
+   "source": "not valid",
+   "text": "无效"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
    "key": "MenuOnly",
    "source": "Menu only",
    "text": "仅菜单"
@@ -23490,6 +24060,48 @@
    "key": "MirrorTakenTooltip",
    "source": "A Claude Code skill of this name exists that HyperAIStudio did not write; Claude Code uses that one.",
    "text": "已存在一个同名的 Claude Code 技能，但不是由 HyperAIStudio 写入的；Claude Code 会使用那一个。"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "NewDescriptionHint",
+   "source": "What it does and when to use it; agents pick it by this",
+   "text": "它做什么、何时使用；智能体据此选择"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "NewDescriptionLabel",
+   "source": "Description",
+   "text": "说明"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "NewNameHint",
+   "source": "lowercase-with-hyphens, such as door-setup",
+   "text": "小写字母加连字符，例如 door-setup"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "NewNameLabel",
+   "source": "Name",
+   "text": "名称"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "NewSkill",
+   "source": "New Skill...",
+   "text": "新建技能..."
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "NewSkillTitle",
+   "source": "New Skill",
+   "text": "新建技能"
+  },
+  {
+   "namespace": "SHyperAIStudioSkillsPanel",
+   "key": "NewSkillTooltip",
+   "source": "Make a project skill in .agents/skills, for Claude Code and Codex, and open its SKILL.md to write.",
+   "text": "在 .agents/skills 中为 Claude Code 和 Codex 创建一个项目技能，并打开其 SKILL.md 进行编写。"
   },
   {
    "namespace": "SHyperAIStudioSkillsPanel",
@@ -24978,630 +25590,6 @@
    "key": "ViewPrerequisitesTooltip",
    "source": "Open the detailed prerequisite checklist.",
    "text": "打开详细的前置组件清单。"
-  },
-  {
-   "namespace": "SHyperAIStudioChatActivitySidebar",
-   "key": "ApproveAllTooltip",
-   "source": "Write every held file to the project, saving what agents left unsaved first. A new sandbox holds what is saved next.",
-   "text": "将所有保留的文件写入项目，并先保存智能体未保存的内容。之后保存的内容由新的沙盒保留。"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "Cancel",
-   "source": "Cancel",
-   "text": "取消"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "Change",
-   "source": "Change...",
-   "text": "更改..."
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "EditTitle",
-   "source": "{0}: {1}",
-   "text": "{0}：{1}"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "EditWhere",
-   "source": "Kept in Windows Credential Manager as {0}, and given to the agent as {1}.",
-   "text": "以 {0} 保存在 Windows 凭据管理器中，并以 {1} 提供给智能体。"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "FromEnvironment",
-   "source": "{0} is set in your environment",
-   "text": "{0} 已在你的环境变量中设置"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "KeyHint",
-   "source": "Paste the key",
-   "text": "粘贴密钥"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "NotSet",
-   "source": "Not set",
-   "text": "未设置"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "NotUrl",
-   "source": "An address starts with http:// or https://.",
-   "text": "地址须以 http:// 或 https:// 开头。"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "ProvidersGroup",
-   "source": "Providers for HyperAI's tools",
-   "text": "HyperAI 工具使用的服务商"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "Remove",
-   "source": "Remove",
-   "text": "移除"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "RemoveConfirm",
-   "source": "Remove the stored {0} for {1}?",
-   "text": "移除为 {1} 保存的 {0}？"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "RemoveTip",
-   "source": "Delete the stored value from Windows Credential Manager.",
-   "text": "从 Windows 凭据管理器中删除保存的值。"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "RowTip",
-   "source": "{0}\nPassed as {1}.",
-   "text": "{0}\n以 {1} 传递。"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "RowTipUnverified",
-   "source": "{0}\nThe agent's documentation does not name this variable; it may not read it.",
-   "text": "{0}\n该智能体的文档未提到此变量，它可能不会读取。"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "Save",
-   "source": "Save",
-   "text": "保存"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "Set",
-   "source": "Set...",
-   "text": "设置..."
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "SetKeyTip",
-   "source": "Store a key in Windows Credential Manager.",
-   "text": "将密钥保存到 Windows 凭据管理器。"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "SetUrlTip",
-   "source": "Store an address for this agent.",
-   "text": "为此智能体保存一个地址。"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "Subtitle",
-   "source": "Give an agent your own API key or an OpenAI-compatible address, and give HyperAI's image, audio and 3D tools their providers' keys. Keys are kept in Windows Credential Manager for your user (targets named HyperAIStudio/...), never in the project, an ini file, a log or Activity, and go only into the environment of the agent HyperAI starts. A key set here wins over the same environment variable. Agents read a new key when their chat next starts.",
-   "text": "为智能体提供你自己的 API 密钥或 OpenAI 兼容地址，并为 HyperAI 的图像、音频和 3D 工具提供各服务商的密钥。密钥保存在当前用户的 Windows 凭据管理器中（目标名为 HyperAIStudio/...），绝不写入项目、ini 文件、日志或活动记录，只会进入 HyperAI 启动的智能体进程的环境变量。在此设置的密钥优先于同名环境变量。智能体在下次开始对话时读取新密钥。"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "Test",
-   "source": "Test",
-   "text": "测试"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "TestTip",
-   "source": "Make one free authenticated call (a model list or an account read) to see whether the key works. Nothing is generated or billed.",
-   "text": "发起一次免费的认证调用（列出模型或读取账户）以检查密钥是否可用。不会生成内容，也不会计费。"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "Testing",
-   "source": "Testing...",
-   "text": "正在测试..."
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "Title",
-   "source": "Your own keys",
-   "text": "你自己的密钥"
-  },
-  {
-   "namespace": "SHyperAIStudioKeysPanel",
-   "key": "UrlHint",
-   "source": "https://...",
-   "text": "https://..."
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "AgentHint",
-   "source": "Empty keeps the chat's agent; or Claude Code, Codex, Gemini...",
-   "text": "留空则沿用对话的智能体；或填 Claude Code、Codex、Gemini..."
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "AgentLabel",
-   "source": "Preferred agent",
-   "text": "首选智能体"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "ApprovalAsk",
-   "source": "asks for edits",
-   "text": "编辑需确认"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "ApprovalLabel",
-   "source": "HyperAI's tools in this mode",
-   "text": "此模式下 HyperAI 的工具"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "ApprovalNormal",
-   "source": "normal approvals",
-   "text": "常规审批"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "ApprovalReadOnly",
-   "source": "read only",
-   "text": "只读"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "BuiltInSuffix",
-   "source": ", built in",
-   "text": "，内置"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "Cancel",
-   "source": "Cancel",
-   "text": "取消"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "ChangedSuffix",
-   "source": ", built in, changed here",
-   "text": "，内置，已在此项目中修改"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "Delete",
-   "source": "Delete",
-   "text": "删除"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "DeleteConfirm",
-   "source": "Delete the mode {0} from this project?",
-   "text": "从此项目中删除模式 {0}？"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "DescriptionHint",
-   "source": "One line the mode menu shows",
-   "text": "模式菜单中显示的一行说明"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "DescriptionLabel",
-   "source": "Description",
-   "text": "说明"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "Edit",
-   "source": "Edit",
-   "text": "编辑"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "EditBuiltInTip",
-   "source": "Change this built-in mode for this project; Delete goes back to how it shipped.",
-   "text": "为此项目修改这个内置模式；“删除”可恢复为出厂状态。"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "EditTip",
-   "source": "Change this mode.",
-   "text": "修改此模式。"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "EditTitle",
-   "source": "Edit Chat Mode",
-   "text": "编辑对话模式"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "Export",
-   "source": "Export...",
-   "text": "导出..."
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "ExportTip",
-   "source": "Save this mode as a .json file to share.",
-   "text": "将此模式另存为 .json 文件以便分享。"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "ExportTitle",
-   "source": "Export chat mode",
-   "text": "导出对话模式"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "Import",
-   "source": "Import...",
-   "text": "导入..."
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "ImportTip",
-   "source": "Copy a mode's .json file into this project after checking it.",
-   "text": "检查后将模式的 .json 文件复制到此项目。"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "InstructionsHint",
-   "source": "What the agent is told when the chat enters this mode.",
-   "text": "对话进入此模式时告诉智能体的内容。"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "InstructionsLabel",
-   "source": "Instructions",
-   "text": "指令"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "ModelHint",
-   "source": "Empty keeps the chat's model",
-   "text": "留空则沿用对话的模型"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "ModelLabel",
-   "source": "Preferred model",
-   "text": "首选模型"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "NameHint",
-   "source": "Such as Level blockout",
-   "text": "例如：关卡白盒"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "NameLabel",
-   "source": "Name",
-   "text": "名称"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "New",
-   "source": "New Mode...",
-   "text": "新建模式..."
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "NewTip",
-   "source": "Make a mode for this project.",
-   "text": "为此项目创建一个模式。"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "NewTitle",
-   "source": "New Chat Mode",
-   "text": "新建对话模式"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "OpenFolder",
-   "source": "Open Folder",
-   "text": "打开文件夹"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "OpenFolderTip",
-   "source": "Show .hyperai/modes.",
-   "text": "显示 .hyperai/modes。"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "PacksHint",
-   "source": "Catalog packs, such as level_design, lighting_lookdev",
-   "text": "目录中的功能包，例如 level_design、lighting_lookdev"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "PacksLabel",
-   "source": "Packs",
-   "text": "功能包"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "PickMode",
-   "source": "Chat mode",
-   "text": "对话模式"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "RadioAsk",
-   "source": "Ask for edits",
-   "text": "编辑需确认"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "RadioAskTip",
-   "source": "Every edit plan waits for your click, even with approvals or auto-approval off.",
-   "text": "每个编辑计划都等待你点击确认，即使审批或自动审批已关闭。"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "RadioNormal",
-   "source": "Normal",
-   "text": "常规"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "RadioNormalTip",
-   "source": "Your approval settings and auto-approval apply as usual.",
-   "text": "照常使用你的审批设置和自动审批。"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "RadioReadOnly",
-   "source": "Read only",
-   "text": "只读"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "RadioReadOnlyTip",
-   "source": "HyperAI refuses every edit plan while a chat is in this mode.",
-   "text": "只要有对话处于此模式，HyperAI 就拒绝所有编辑计划。"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "Restore",
-   "source": "Restore",
-   "text": "恢复"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "RestoreConfirm",
-   "source": "Put {0} back as it shipped, dropping this project's changes to it?",
-   "text": "将 {0} 恢复为出厂状态，并丢弃此项目对它的修改？"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "RowTitle",
-   "source": "{0}  ({1}{2})",
-   "text": "{0}（{1}{2}）"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "Save",
-   "source": "Save",
-   "text": "保存"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "SharedNote",
-   "source": "Saved in .hyperai/modes as JSON, so Git shares it with your team. Never put a key here: keys go in Settings > Agents.",
-   "text": "以 JSON 保存在 .hyperai/modes 中，可通过 Git 与团队共享。切勿在此放入密钥：密钥请设置在“设置 > 智能体”中。"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "SkillsHint",
-   "source": "Skills, such as unreal-level-design",
-   "text": "技能，例如 unreal-level-design"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "SkillsLabel",
-   "source": "Skills",
-   "text": "技能"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "Subtitle",
-   "source": "A mode is a preset for a chat: what the agent is told, the packs, tools and skills its messages go with, and how far HyperAI's tools may go. Pick one in the chat's composer. A read-only mode is enforced: HyperAI refuses edit plans while any chat is in it.",
-   "text": "模式是对话的预设：告诉智能体什么、消息附带哪些功能包、工具和技能，以及 HyperAI 的工具能做到哪一步。在对话输入框中选择。只读模式会被强制执行：只要有对话处于只读模式，HyperAI 就拒绝编辑计划。"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "Title",
-   "source": "Chat modes",
-   "text": "对话模式"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "ToolsHint",
-   "source": "HyperAI tools to name first, such as hyper_lighting_inspect",
-   "text": "优先列出的 HyperAI 工具，例如 hyper_lighting_inspect"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "ToolsLabel",
-   "source": "Tools",
-   "text": "工具"
-  },
-  {
-   "namespace": "SHyperAIStudioModesPanel",
-   "key": "WindowTitle",
-   "source": "HyperAI Chat Modes",
-   "text": "HyperAI 对话模式"
-  },
-  {
-   "namespace": "SHyperAIStudioNativeChatView",
-   "key": "ComposerHint",
-   "source": "Message {0}. Enter sends; Shift+Enter starts a new line.",
-   "text": "给 {0} 发消息。Enter 发送；Shift+Enter 换行。"
-  },
-  {
-   "namespace": "SHyperAIStudioNativeChatView",
-   "key": "ManageModes",
-   "source": "Manage Modes...",
-   "text": "管理模式..."
-  },
-  {
-   "namespace": "SHyperAIStudioNativeChatView",
-   "key": "ManageModesTooltip",
-   "source": "Make, edit, import and export chat modes. The project's are in .hyperai/modes.",
-   "text": "创建、编辑、导入和导出对话模式。项目自己的模式在 .hyperai/modes 中。"
-  },
-  {
-   "namespace": "SHyperAIStudioNativeChatView",
-   "key": "ModeAskEntry",
-   "source": "{0} (asks for edits)",
-   "text": "{0}（编辑需确认）"
-  },
-  {
-   "namespace": "SHyperAIStudioNativeChatView",
-   "key": "ModeBuild",
-   "source": "Build",
-   "text": "构建"
-  },
-  {
-   "namespace": "SHyperAIStudioNativeChatView",
-   "key": "ModeBuildName",
-   "source": "Build",
-   "text": "构建"
-  },
-  {
-   "namespace": "SHyperAIStudioNativeChatView",
-   "key": "ModeNotice",
-   "source": "{0} mode. The agent is told with your next message.",
-   "text": "{0} 模式。智能体会随你的下一条消息得知。"
-  },
-  {
-   "namespace": "SHyperAIStudioNativeChatView",
-   "key": "ModeReadOnlyEntry",
-   "source": "{0} (read only)",
-   "text": "{0}（只读）"
-  },
-  {
-   "namespace": "SHyperAIStudioNativeChatView",
-   "key": "ModeReadOnlyNotice",
-   "source": "{0} mode: read only. HyperAI refuses edit plans while this chat is in it.",
-   "text": "{0} 模式：只读。只要此对话处于该模式，HyperAI 就拒绝编辑计划。"
-  },
-  {
-   "namespace": "SHyperAIStudioNativeChatView",
-   "key": "ModeTooltip",
-   "source": "The chat's mode: {0}. {1}",
-   "text": "对话的模式：{0}。{1}"
-  },
-  {
-   "namespace": "SHyperAIStudioNativeChatView",
-   "key": "ModesSection",
-   "source": "Chat mode",
-   "text": "对话模式"
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "Cancel",
-   "source": "Cancel",
-   "text": "取消"
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "ChatModes",
-   "source": "Chat Modes...",
-   "text": "对话模式..."
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "ChatModesTooltip",
-   "source": "The modes a chat can run in: Plan, Build, Review, Art pass, QA and the project's own.",
-   "text": "对话可使用的模式：计划、构建、审查、美术润色、QA 以及项目自己的模式。"
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "Create",
-   "source": "Create",
-   "text": "创建"
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "EditSkill",
-   "source": "Edit",
-   "text": "编辑"
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "EditSkillTooltip",
-   "source": "Open SKILL.md in your editor. A project skill's change reaches Claude Code's copy at the next Sync.",
-   "text": "在你的编辑器中打开 SKILL.md。项目技能的修改会在下次同步时同步到 Claude Code 的副本。"
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "Invalid",
-   "source": "not valid",
-   "text": "无效"
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "NewDescriptionHint",
-   "source": "What it does and when to use it; agents pick it by this",
-   "text": "它做什么、何时使用；智能体据此选择"
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "NewDescriptionLabel",
-   "source": "Description",
-   "text": "说明"
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "NewNameHint",
-   "source": "lowercase-with-hyphens, such as door-setup",
-   "text": "小写字母加连字符，例如 door-setup"
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "NewNameLabel",
-   "source": "Name",
-   "text": "名称"
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "NewSkill",
-   "source": "New Skill...",
-   "text": "新建技能..."
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "NewSkillTitle",
-   "source": "New Skill",
-   "text": "新建技能"
-  },
-  {
-   "namespace": "SHyperAIStudioSkillsPanel",
-   "key": "NewSkillTooltip",
-   "source": "Make a project skill in .agents/skills, for Claude Code and Codex, and open its SKILL.md to write.",
-   "text": "在 .agents/skills 中为 Claude Code 和 Codex 创建一个项目技能，并打开其 SKILL.md 进行编写。"
   }
  ]
 }
