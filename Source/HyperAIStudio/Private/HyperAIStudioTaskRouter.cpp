@@ -44,7 +44,8 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("gameplay_ai"), TEXT("ai enemy enemies npc npcs behavior behaviour tree trees blackboard state perception patrol chase attack guard guards wander see sight")},
 			{TEXT("gas"), TEXT("gas ability abilities attribute attributes effect effects cooldown cooldowns cost buff buffs debuff debuffs damage heal healing health mana stamina tag tags cue cues dodge dash")},
 			{TEXT("animation_rigging"), TEXT("animation animations anim montage montages sequence sequences blend space blendspace notify notifies root motion retarget retargeting retargeter ik rig rigging skeleton pose matching mocap")},
-			{TEXT("worldbuilding_navigation"), TEXT("landscape landscapes terrain heightmap sculpt sculpting paint painting layer layers road roads spline splines navmesh navigation pathfinding foliage grass hills world partition streaming hlod")},
+			// "trees" is foliage too, so "Plant trees along the road" stays here and not with behavior trees.
+			{TEXT("worldbuilding_navigation"), TEXT("landscape landscapes terrain heightmap sculpt sculpting paint painting layer layers road roads spline splines navmesh navigation pathfinding foliage grass trees hills world partition streaming hlod")},
 			{TEXT("networking_game_framework"), TEXT("multiplayer network networking replication replicate replicated server client clients rpc online game mode gamemode state controller pawn framework session")},
 			{TEXT("audio_metasound"), TEXT("audio metasound metasounds cue attenuation mixer submix music ambient ambience volume concurrency occlusion falloff procedural")},
 			{TEXT("materials_dynamic_material"), TEXT("material materials shader shaders texture textures instance instances roughness metallic specular normal emissive parameter parameters master tint color colour translucent opacity dynamic designer mossy stone wood metal")},
