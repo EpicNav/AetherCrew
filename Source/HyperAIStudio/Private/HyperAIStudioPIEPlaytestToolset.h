@@ -245,7 +245,11 @@ struct FHyperAIPIEPlaytestRequest
 	UPROPERTY()
 	EHyperAIPIEPlaytestNetMode NetMode = EHyperAIPIEPlaytestNetMode::Standalone;
 
-	/** StartInProcess only: players, 1-4. The run starts once every one of them is in. */
+	/**
+	 * StartInProcess only: players, 1-8, each a window of this editor (ListenServer: the host and its clients; Client: a
+	 * dedicated server and its clients). The run starts once every one of them is in. Past 4 players, a machine without
+	 * the memory for them all is refused, with how many it can play.
+	 */
 	UPROPERTY()
 	int32 NumPlayers = 1;
 
@@ -672,6 +676,137 @@ public:
 	FHyperAIVerifyCalibrationReport Value;
 };
 
+/** What a phone playtest streams. */
+UENUM(BlueprintType)
+enum class EHyperAIPhonePlaytestTarget : uint8
+{
+	/** Play In Editor sessions started while it runs (by Play, or hyper_playtest_run with its bot and video), unsaved edits and all. */
+	PlayInEditor,
+	/** A separate game process of the saved level, in a window of its own. */
+	Standalone
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIPhonePlaytestRequest
+{
+	GENERATED_BODY()
+
+	/** Empty makes one. */
+	UPROPERTY()
+	FString OperationId;
+
+	/** Check and describe the plan; nothing starts and nothing is asked. */
+	UPROPERTY()
+	bool bDryRun = false;
+
+	UPROPERTY()
+	EHyperAIPhonePlaytestTarget Target = EHyperAIPhonePlaytestTarget::PlayInEditor;
+
+	/** The player page and the viewers' connections, 1024-65535. */
+	UPROPERTY()
+	int32 HttpPort = 8080;
+
+	/** The game's stream into the server, 1024-65535. */
+	UPROPERTY()
+	int32 StreamerPort = 8888;
+
+	/** Viewers at once, 1-8; more are turned away in Play In Editor. */
+	UPROPERTY()
+	int32 MaxViewers = 8;
+
+	/** Every viewer's touches, keys and mouse reach the game; false gives control to the first viewer only. */
+	UPROPERTY()
+	bool bAllViewersControl = true;
+
+	/** The LAN address phones use; empty picks this PC's private address. */
+	UPROPERTY()
+	FString Address;
+
+	/** Standalone only: the level, a package path such as /Game/Maps/Arena; empty is the open level, as saved. */
+	UPROPERTY()
+	FString Map;
+
+	/** Standalone only: the game window's size. */
+	UPROPERTY()
+	int32 ResX = 1280;
+
+	UPROPERTY()
+	int32 ResY = 720;
+
+	/** Standalone only: render with no window on this PC; phones still see it. */
+	UPROPERTY()
+	bool bOffscreen = false;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIPhonePlaytestReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	bool bOk = false;
+
+	/** checked, awaiting_user_approval, streaming, starting, stopped, idle, refused or failed */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	UPROPERTY()
+	FString OperationId;
+
+	UPROPERTY()
+	FString Target;
+
+	/** What a phone on the same network opens. */
+	UPROPERTY()
+	FString Url;
+
+	/** A PNG of the URL's QR code, to show and scan. */
+	UPROPERTY()
+	FString QrCodePng;
+
+	UPROPERTY()
+	FString Address;
+
+	UPROPERTY()
+	int32 HttpPort = 0;
+
+	UPROPERTY()
+	int32 StreamerPort = 0;
+
+	/** Where the server listens and whom it takes, in words. */
+	UPROPERTY()
+	FString Exposure;
+
+	/** This PC's private (LAN) IPv4 addresses. */
+	UPROPERTY()
+	TArray<FString> LanAddresses;
+
+	UPROPERTY()
+	bool bServerReady = false;
+
+	UPROPERTY()
+	bool bGameRunning = false;
+
+	UPROPERTY()
+	int32 Viewers = 0;
+
+	UPROPERTY()
+	int32 MaxViewers = 0;
+
+	/** Standalone: the game process's command line and log. */
+	UPROPERTY()
+	FString GameCommandLine;
+
+	UPROPERTY()
+	FString GameLog;
+
+	UPROPERTY()
+	TArray<FString> Notes;
+};
+
 /** One atomic SourceCandidate cohort on the single Epic MCP endpoint: playtests and verification. */
 UCLASS()
 class HYPERAISTUDIO_API UHyperAIStudioPIEPlaytestToolset final : public UToolsetDefinition
@@ -692,10 +827,13 @@ public:
 	 * and Press, Hold and Interact with aim, aim the way the game reads aim (its cursor, right stick or view; auto
 	 * picks) and check the game's own aim after. Play plays toward a goal
 	 * the way a person would (Reach, Collect, Defeat, Survive or Explore: moving, jumping, aiming and attacking
-	 * through the game's controls) and writes a map of it; AddPlayer adds a local player, for PvP. The first failing
+	 * through the game's controls) and writes a map of it; AddPlayer adds a local player, for PvP. SurveyLevel walks and
+	 * films the level: what the player can reach, where it gets stuck or falls out, an overview image and an MP4.
+	 * AssertCount, AssertDistance, AssertAttribute, AssertTag, AssertAbility and AssertEffect check actors and their
+	 * Gameplay Ability System; UiAssert checks a widget's text, visibility, enabled, focus or progress. The first failing
 	 * step ends the run with its reason. Changes stay in the PIE world. bRecordVideo records the run as an MP4 with
 	 * each step and its result drawn over the game, plus timeline.json: proof to watch. For multiplayer, net_mode
-	 * ListenServer or Client with num_players 2-4 plays every player in this editor; a step's pie_instance picks the
+	 * ListenServer or Client with num_players 2-8 plays every player in this editor; a step's pie_instance picks the
 	 * player it acts as (ListenServer: 0 hosts), so a check on a client proves what replicated, and JoinPlayer adds
 	 * a late joiner.
 	 */
@@ -728,6 +866,25 @@ public:
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
 	static UHyperAIVerifyCalibrationResult* hyper_verify_calibrate(bool bMeasure = false);
+
+	/**
+	 * Playtest on phones: streams the game with Pixel Streaming 2 to phones and browsers on this PC's local network,
+	 * up to 8 viewers, and returns the URL and a QR code PNG to scan (Studio's Playtest panel shows both). Target
+	 * PlayInEditor streams every PIE session started while it runs, so hyper_playtest_run's bot and video work with it;
+	 * Standalone launches the saved level as its own game process. Needs the Pixel Streaming 2 plugin enabled. Starts a
+	 * server in this editor that phones connect to on HttpPort, so it always asks the user first, showing the address and
+	 * ports; bDryRun describes it without asking. Refused on a PC with a public internet address.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
+	static FHyperAIPhonePlaytestReport hyper_phone_playtest_start(const FHyperAIPhonePlaytestRequest& Request);
+
+	/** The phone playtest now: the URL and QR code, whether the server and game run, and how many viewers watch. */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
+	static FHyperAIPhonePlaytestReport hyper_phone_playtest_status();
+
+	/** Ends the phone playtest: stops streaming and the server, and closes a Standalone game. */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
+	static FHyperAIPhonePlaytestReport hyper_phone_playtest_stop();
 };
 
 struct FHyperAIStudioPIEPlaytestManifestEntry
@@ -1019,7 +1176,13 @@ public:
 	static constexpr int32 MaxScreenshotWidth = 1920;
 	static constexpr int32 MaxScreenshotHeight = 1080;
 	static constexpr int32 MaxScreenshotPixels = MaxScreenshotWidth * MaxScreenshotHeight;
-	static constexpr int32 MaxPlayers = 4;
+	static constexpr int32 MaxPlayers = 8;
+	/** Up to this many players a session starts without a memory check, as it always has. */
+	static constexpr int32 UncheckedPlayers = 4;
+	/** Memory a player's world, window and renderer take on top of the editor, as estimated before starting. */
+	static constexpr int64 PlayerMemoryBytes = 512ll * 1024 * 1024;
+	/** Memory kept free for the editor and the rest of the machine. */
+	static constexpr int64 ReservedMemoryBytes = 1536ll * 1024 * 1024;
 	static constexpr int32 MinVideoFps = 5;
 	static constexpr int32 MaxVideoFps = 30;
 
@@ -1041,6 +1204,13 @@ public:
 	static FString StepKindToString(EHyperAIPIEPlaytestStepKind Kind);
 	static FString RuntimeStateToString(EHyperAIStudioPIERuntimeState State);
 	static FString ComputeEvidenceFingerprint(const TArray<FHyperAIPIEPlaytestEvidence>& Evidence);
+	/**
+	 * How many players fit in AvailableBytes of free physical memory, at PlayerMemoryBytes each (a dedicated server
+	 * counts as one more) after ReservedMemoryBytes: 0 to MaxPlayers.
+	 */
+	static int32 PlayersThatFit(int64 AvailableBytes, bool bDedicatedServer);
+	/** How long a started session may take until every one of its worlds is in: 30 s, and 7.5 s more for each world past the first, 90 s at most. */
+	static int32 WorldReadyTimeoutMs(int32 Worlds);
 	/** Whether a scalar read equals an assertion's expected value, as AssertScalarEquals decides. */
 	static bool ScalarEquals(const FHyperAIPIEPlaytestValue& Actual, const FHyperAIPIEPlaytestValue& Expected);
 	static FString MakeCursor(const FString& EvidenceFingerprint, int32 Offset);

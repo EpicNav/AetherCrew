@@ -9,6 +9,11 @@
 #include "GameFramework/PlayerStart.h"
 #include "HyperAIStudioMarkdown.h"
 #include "HyperAIStudioPIEPlaytestToolset.h"
+#include "HyperAIStudioPhonePlaytest.h"
+#include "HyperAIStudioQrCode.h"
+#include "Rendering/DrawElements.h"
+#include "Widgets/Input/SEditableText.h"
+#include "Widgets/SLeafWidget.h"
 #include "HyperAIStudioWidgets.h"
 #include "IDetailsView.h"
 #include "IStructureDetailsView.h"
@@ -36,6 +41,77 @@
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SHyperAIStudioPlaytestPanel"
+
+/** A QR code of Text, drawn module by module in black on white with its quiet zone; empty text draws nothing. */
+class SHyperAIStudioQrCodeWidget : public SLeafWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SHyperAIStudioQrCodeWidget) : _ModulePixels(4.0f) {}
+		SLATE_ATTRIBUTE(FString, Text)
+		SLATE_ARGUMENT(float, ModulePixels)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs)
+	{
+		Text = InArgs._Text;
+		ModulePixels = InArgs._ModulePixels;
+	}
+
+	virtual FVector2D ComputeDesiredSize(float) const override
+	{
+		Refresh();
+		return Code.Size > 0 ? FVector2D((Code.Size + 8) * ModulePixels) : FVector2D::ZeroVector;
+	}
+
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& Geometry, const FSlateRect& Culling, FSlateWindowElementList& OutDrawElements,
+		int32 LayerId, const FWidgetStyle& Style, bool bParentEnabled) const override
+	{
+		Refresh();
+		if (Code.Size <= 0)
+		{
+			return LayerId;
+		}
+		const FSlateBrush* White = FAppStyle::GetBrush("WhiteBrush");
+		const float Side = (Code.Size + 8) * ModulePixels;
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId, Geometry.ToPaintGeometry(FVector2D(Side), FSlateLayoutTransform()), White, ESlateDrawEffect::None, FLinearColor::White);
+		for (int32 Y = 0; Y < Code.Size; ++Y)
+		{
+			for (int32 X = 0; X < Code.Size; ++X)
+			{
+				if (Code.IsDark(X, Y))
+				{
+					FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 1,
+						Geometry.ToPaintGeometry(FVector2D(ModulePixels), FSlateLayoutTransform(FVector2D((X + 4) * ModulePixels, (Y + 4) * ModulePixels))),
+						White, ESlateDrawEffect::None, FLinearColor::Black);
+				}
+			}
+		}
+		return LayerId + 1;
+	}
+
+private:
+	/** Encodes the text again when it has changed. */
+	void Refresh() const
+	{
+		const FString Now = Text.Get();
+		if (Now == Encoded)
+		{
+			return;
+		}
+		Encoded = Now;
+		Code = FHyperAIStudioQrCode();
+		FString Error;
+		if (!Now.IsEmpty())
+		{
+			FHyperAIStudioQrCode::Encode(Now, Code, Error);
+		}
+	}
+
+	TAttribute<FString> Text;
+	float ModulePixels = 4.0f;
+	mutable FString Encoded;
+	mutable FHyperAIStudioQrCode Code;
+};
 
 namespace HyperAIStudio::PlaytestPanel
 {
@@ -87,6 +163,10 @@ namespace HyperAIStudio::PlaytestPanel
 		if (Kind == TEXT("Explore"))
 		{
 			return TEXT(R"({"name": "explore", "timeoutSeconds": 25, "steps": [{"action": "Play", "goal": "Explore", "seconds": 20}, {"action": "Capture", "text": "explored"}]})");
+		}
+		if (Kind == TEXT("Map"))
+		{
+			return TEXT(R"({"name": "level-survey", "timeoutSeconds": 50, "steps": [{"action": "Wait", "seconds": 0.5}, {"action": "SurveyLevel", "seconds": 12, "timeoutSeconds": 45, "text": "level-survey"}]})");
 		}
 		if (Kind == TEXT("Duel"))
 		{
@@ -177,7 +257,8 @@ void SHyperAIStudioPlaytestPanel::Construct(const FArguments& InArgs)
 		{TEXT("Defeat"), LOCTEXT("DefeatTooltip", "Find, aim at and attack every actor of a kind until each is defeated.")},
 		{TEXT("Survive"), LOCTEXT("SurviveTooltip", "Stay alive for a while, keeping away from threats and dodging them.")},
 		{TEXT("Explore"), LOCTEXT("ExploreTooltip", "Wander toward places not yet visited; reports coverage, stuck spots and falls.")},
-		{TEXT("Duel"), LOCTEXT("DuelTooltip", "A second player joins, and the two players fight each other.")}};
+		{TEXT("Duel"), LOCTEXT("DuelTooltip", "A second player joins, and the two players fight each other.")},
+		{TEXT("Map"), LOCTEXT("MapTooltip", "Survey the whole level: what the player can reach, where it gets stuck or falls out, frames, a video and an overview image.")}};
 	for (const FKind& Kind : Kinds)
 	{
 		const FString Name = Kind.Name;
@@ -339,6 +420,10 @@ void SHyperAIStudioPlaytestPanel::Construct(const FArguments& InArgs)
 					]
 				]
 			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 0.0f)
+			[
+				PhoneSection()
+			]
 		]
 	];
 	SetCases(TEXT("{\"deadlineSeconds\": 60, \"cases\": []}"));
@@ -427,6 +512,85 @@ void SHyperAIStudioPlaytestPanel::FormToJson()
 void SHyperAIStudioPlaytestPanel::FormToJsonOnChange(const FPropertyChangedEvent& Event)
 {
 	FormToJson();
+}
+
+TSharedRef<SWidget> SHyperAIStudioPlaytestPanel::PhoneSection()
+{
+	auto PhoneReport = []() { return HyperAIStudio::PhonePlaytest::Status(); };
+	return SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("Brushes.Recessed"))
+		.Padding(8.0f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f)
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+				[
+					SNew(STextBlock).Text(LOCTEXT("PhoneTitle", "Playtest on phones"))
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
+				[
+					SNew(STextBlock)
+					.AutoWrapText(true)
+					.Text(LOCTEXT("PhoneIntro", "Streams Play In Editor with Pixel Streaming 2 to phones on this PC's Wi-Fi, up to 8 at once: start it, scan the code, then press Play. It asks you first, and runs only on your local network."))
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("PhoneStart", "Start phone playtest"))
+						.ToolTipText(LOCTEXT("PhoneStartTooltip", "Start a Pixel Streaming server in this editor on ports 8080 and 8888, for phones on this network, as hyper_phone_playtest_start does. You approve it first."))
+						.IsEnabled_Lambda([PhoneReport]() { const FString State = PhoneReport().Status; return State == TEXT("idle") || State == TEXT("failed") || State == TEXT("stopped"); })
+						.OnClicked_Lambda([this]()
+						{
+							const FHyperAIPhonePlaytestReport Started = HyperAIStudio::PhonePlaytest::Start(FHyperAIPhonePlaytestRequest());
+							PhoneStatus = FText::FromString(Started.Diagnostic);
+							return FReply::Handled();
+						})
+					]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(6.0f, 0.0f, 0.0f, 0.0f)
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("PhoneStop", "Stop"))
+						.IsEnabled_Lambda([PhoneReport]() { const FString State = PhoneReport().Status; return State == TEXT("streaming") || State == TEXT("awaiting_user_approval"); })
+						.OnClicked_Lambda([this]()
+						{
+							PhoneStatus = FText::FromString(HyperAIStudio::PhonePlaytest::Stop().Diagnostic);
+							return FReply::Handled();
+						})
+					]
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+				[
+					SNew(SEditableText)
+					.IsReadOnly(true)
+					.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
+					.Text_Lambda([PhoneReport]() { return FText::FromString(PhoneReport().Url); })
+					.ToolTipText(LOCTEXT("PhoneUrlTooltip", "Open this on a phone on the same Wi-Fi network, or scan the code."))
+				]
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(STextBlock)
+					.AutoWrapText(true)
+					.Text_Lambda([this, PhoneReport]()
+					{
+						const FHyperAIPhonePlaytestReport Now = PhoneReport();
+						const FString Line = Now.Status == TEXT("idle") ? PhoneStatus.ToString() : Now.Diagnostic;
+						return Now.Status == TEXT("streaming")
+							? FText::Format(LOCTEXT("PhoneStreaming", "{0} Server {1}. Only this network can reach it: ports {2} and {3}."), FText::FromString(Line),
+								Now.bServerReady ? LOCTEXT("PhoneReady", "ready") : LOCTEXT("PhoneNotReady", "starting"), Now.HttpPort, Now.StreamerPort)
+							: FText::FromString(Line);
+					})
+				]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(12.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SHyperAIStudioQrCodeWidget).Text_Lambda([PhoneReport]() { return PhoneReport().Url; })
+			]
+		];
 }
 
 void SHyperAIStudioPlaytestPanel::AddTemplate(const FString& Kind)

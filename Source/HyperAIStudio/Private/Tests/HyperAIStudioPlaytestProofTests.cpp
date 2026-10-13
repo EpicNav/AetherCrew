@@ -62,8 +62,8 @@ bool FHyperAIStudioPlaytestPlayersBoundsTest::RunTest(const FString& Parameters)
 		TestEqual(FString(What) + TEXT(" with its reason"), Code, FString(ExpectedCode));
 	};
 	Other = Request;
-	Other.NumPlayers = 5;
-	Refused(Other, TEXT("invalid_players"), TEXT("five players are refused"));
+	Other.NumPlayers = 9;
+	Refused(Other, TEXT("invalid_players"), TEXT("nine players are refused"));
 	Other = Request;
 	Other.Mode = EHyperAIPIEPlaytestMode::AttachOnly;
 	Other.Teardown = EHyperAIPIEPlaytestTeardown::LeaveSessionRunning;

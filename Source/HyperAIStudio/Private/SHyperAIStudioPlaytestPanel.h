@@ -28,7 +28,7 @@ public:
 	/** The request the panel holds, as hyper_verify_run takes it: a deadline and cases. */
 	FString GetCases() const;
 	void SetCases(const FString& Json);
-	/** Adds a case of one kind: Survey, Reach, Collect, Defeat, Survive, Explore or Duel. */
+	/** Adds a case of one kind: Survey, Reach, Collect, Defeat, Survive, Explore, Duel or Map. */
 	void AddTemplate(const FString& Kind);
 	/** The cases as a form, or as the JSON hyper_verify_run takes; false, saying why, when the JSON is not a request. */
 	bool ShowJson(bool bInJson);
@@ -51,6 +51,8 @@ public:
 
 private:
 	void Rebuild();
+	/** The phone playtest: start and stop, the URL, its QR code and how it is going. */
+	TSharedRef<SWidget> PhoneSection();
 	/** Reads the JSON into the form; false, with why, when it is not a request. */
 	bool JsonToForm(FText& OutWhy);
 	/** Writes the form back as JSON, leaving out what is at its default. */
@@ -64,6 +66,7 @@ private:
 	bool bJson = false;
 	TSharedPtr<SVerticalBox> Results;
 	FText Status;
+	FText PhoneStatus;
 	bool bRunning = false;
 	TOptional<HyperAIStudio::Verify::FBatchOutcome> Outcome;
 	FString Report;

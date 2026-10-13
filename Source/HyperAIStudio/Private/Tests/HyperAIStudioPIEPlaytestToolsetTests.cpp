@@ -319,11 +319,14 @@ bool FHyperAIStudioPIEPlaytestManifestAdmissionTest::RunTest(const FString& Para
 	using namespace HyperAIStudio::PIEPlaytest::Tests;
 	const TArray<FHyperAIStudioPIEPlaytestManifestEntry>& Manifest =
 		FHyperAIStudioPIEPlaytestContracts::GetManifest();
-	TestEqual(TEXT("Exactly four PIE runtime callables exist"), Manifest.Num(), 4);
+	TestEqual(TEXT("Exactly seven PIE runtime callables exist"), Manifest.Num(), 7);
 	TestEqual(TEXT("Run callable wire name is exact"), Manifest[0].Name, FString(TEXT("hyper_playtest_run")));
 	TestEqual(TEXT("Status callable wire name is exact"), Manifest[1].Name, FString(TEXT("hyper_playtest_status")));
 	TestEqual(TEXT("Verify callable wire name is exact"), Manifest[2].Name, FString(TEXT("hyper_verify_run")));
 	TestEqual(TEXT("Calibrate callable wire name is exact"), Manifest[3].Name, FString(TEXT("hyper_verify_calibrate")));
+	TestEqual(TEXT("Phone start callable wire name is exact"), Manifest[4].Name, FString(TEXT("hyper_phone_playtest_start")));
+	TestEqual(TEXT("Phone status callable wire name is exact"), Manifest[5].Name, FString(TEXT("hyper_phone_playtest_status")));
+	TestEqual(TEXT("Phone stop callable wire name is exact"), Manifest[6].Name, FString(TEXT("hyper_phone_playtest_stop")));
 	for (const FHyperAIStudioPIEPlaytestManifestEntry& Entry : Manifest)
 	{
 		TestEqual(TEXT("Every callable shares one toolset"), Entry.Toolset, Manifest[0].Toolset);
@@ -343,11 +346,12 @@ bool FHyperAIStudioPIEPlaytestManifestAdmissionTest::RunTest(const FString& Para
 				Callability.HasValue() && Callability.GetValue());
 		}
 	}
-	TestEqual(TEXT("No hidden fifth AICallable exists"), ReflectedCallables.Num(), 4);
+	TestEqual(TEXT("No hidden eighth AICallable exists"), ReflectedCallables.Num(), 7);
 	TestTrue(TEXT("Run is reflected"), ReflectedCallables.Contains(TEXT("hyper_playtest_run")));
 	TestTrue(TEXT("Status is reflected"), ReflectedCallables.Contains(TEXT("hyper_playtest_status")));
 	TestTrue(TEXT("Verify is reflected"), ReflectedCallables.Contains(TEXT("hyper_verify_run")));
 	TestTrue(TEXT("Calibrate is reflected"), ReflectedCallables.Contains(TEXT("hyper_verify_calibrate")));
+	TestTrue(TEXT("Phone start is reflected"), ReflectedCallables.Contains(TEXT("hyper_phone_playtest_start")));
 
 	FString Error;
 	FHyperAIStudioCapabilityCatalog Catalog = CandidateCatalog();

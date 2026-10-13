@@ -34,8 +34,8 @@ namespace HyperAIStudio::Bot::Private
 	 * GameState and GameMode the game's. Otherwise an actor: an exact name wins, then a label, a tag, a class.
 	 */
 	UObject* FindTarget(UWorld& World, const FString& Name, int32 PlayerIndex);
-	/** Every live actor the name matches by name, label, tag or class, up to 64; a player name gives that player's pawn. */
-	TArray<AActor*> FindAll(UWorld& World, const FString& Name, int32 PlayerIndex);
+	/** Every live actor the name matches by name, label, tag or class, up to Max (64 unless set); a player name gives that player's pawn. */
+	TArray<AActor*> FindAll(UWorld& World, const FString& Name, int32 PlayerIndex, int32 Max = 64);
 
 	struct FReading
 	{
@@ -53,6 +53,9 @@ namespace HyperAIStudio::Bot::Private
 	FReading ReadProperty(UObject* Root, const FString& Path);
 	/** Where a player would read the actor's health: a number of its own named like Health or HP, one on a component, or a GetHealth. Empty when it has none. */
 	FString FindHealth(AActor& Actor);
+
+	/** Reading compared with Expected by Compare (==, !=, <, <=, >, >= or contains): numbers as numbers, other text ignoring case. */
+	bool Holds(const FReading& Reading, const FString& Compare, const FString& Expected);
 
 	UEnhancedInputLocalPlayerSubsystem* InputFor(UWorld& World, int32 PlayerIndex, FString& OutCode, FString& OutError);
 	/** Applies the mapping contexts the game added now, rather than at Enhanced Input's next tick. */

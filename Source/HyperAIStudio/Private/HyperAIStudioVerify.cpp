@@ -2,6 +2,7 @@
 
 #include "HyperAIStudioVerify.h"
 
+#include "HyperAIStudioLevelSurvey.h"
 #include "AI/NavigationSystemBase.h"
 #include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
@@ -202,6 +203,7 @@ namespace HyperAIStudio::Verify
 		{
 			while (Case.bRunning && Result.IsDone())
 			{
+				Result = HyperAIStudio::LevelSurvey::WithVideo(Case.Spec.Steps[Case.NextStep].Action, Result);
 				const bool bPassed = Result.State == FHyperAIBotResult::EState::Passed;
 				FStepOutcome& Step = Case.Outcome.Steps.AddDefaulted_GetRef();
 				Step.Action = FHyperAIBotExecutor::ActionName(Case.Spec.Steps[Case.NextStep].Action);
