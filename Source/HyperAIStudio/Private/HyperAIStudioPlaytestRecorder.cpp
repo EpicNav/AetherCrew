@@ -8,8 +8,10 @@
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformTime.h"
+#include "HyperAIStudioBotAim.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Rendering/DrawElements.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Styling/CoreStyle.h"
@@ -17,6 +19,8 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SLeafWidget.h"
+#include "Widgets/SOverlay.h"
 #include "Widgets/SViewport.h"
 #include "Widgets/Text/STextBlock.h"
 
@@ -33,6 +37,75 @@ namespace
 	{
 		return World ? World->GetGameViewport() : nullptr;
 	}
+
+	/**
+	 * The bot's aims over the game: a ring and a cross on the point each player aims at, and a line to it from the
+	 * player, coloured by how it aims (cursor amber, stick blue, view green). A game that hides its cursor shows where
+	 * the bot put it.
+	 */
+	class SHyperAIStudioAimLayer final : public SLeafWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SHyperAIStudioAimLayer) {}
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments&, UWorld& InWorld)
+		{
+			World = &InWorld;
+			// Aims move every frame.
+			ForceVolatile(true);
+		}
+
+		virtual FVector2D ComputeDesiredSize(float) const override
+		{
+			return FVector2D::ZeroVector;
+		}
+
+		virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& Geometry, const FSlateRect& Culling, FSlateWindowElementList& Out,
+			const int32 LayerId, const FWidgetStyle& Style, const bool bParentEnabled) const override
+		{
+			const UWorld* W = World.Get();
+			if (!W)
+			{
+				return LayerId;
+			}
+			const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", 11);
+			for (const HyperAIStudio::Bot::Aim::FView& View : HyperAIStudio::Bot::Aim::Active(*W))
+			{
+				if (!View.bPointOnScreen || View.ViewportSize.X < 1 || View.ViewportSize.Y < 1)
+				{
+					continue;
+				}
+				const FVector2f Scale = FVector2f(Geometry.GetLocalSize()) / FVector2f(View.ViewportSize);
+				const FVector2f At = FVector2f(View.Point) * Scale;
+				const FLinearColor Color = View.Mode == EHyperAIBotAim::Cursor ? FLinearColor(1.f, 0.7f, 0.1f)
+					: View.Mode == EHyperAIBotAim::Stick ? FLinearColor(0.3f, 0.7f, 1.f) : FLinearColor(0.35f, 1.f, 0.45f);
+				if (View.bFromOnScreen)
+				{
+					FSlateDrawElement::MakeLines(Out, LayerId, Geometry.ToPaintGeometry(), TArray<FVector2f>{FVector2f(View.From) * Scale, At},
+						ESlateDrawEffect::None, Color.CopyWithNewOpacity(0.75f), true, 2.f);
+				}
+				TArray<FVector2f> Ring;
+				for (int32 Index = 0; Index <= 16; ++Index)
+				{
+					const float Angle = static_cast<float>(Index * UE_TWO_PI / 16.0);
+					Ring.Add(At + FVector2f(FMath::Cos(Angle), FMath::Sin(Angle)) * 11.f);
+				}
+				FSlateDrawElement::MakeLines(Out, LayerId, Geometry.ToPaintGeometry(), Ring, ESlateDrawEffect::None, Color, true, 2.f);
+				for (const FVector2f& Arm : {FVector2f(1.f, 0.f), FVector2f(-1.f, 0.f), FVector2f(0.f, 1.f), FVector2f(0.f, -1.f)})
+				{
+					FSlateDrawElement::MakeLines(Out, LayerId, Geometry.ToPaintGeometry(), TArray<FVector2f>{At + Arm * 5.f, At + Arm * 17.f},
+						ESlateDrawEffect::None, Color, true, 2.f);
+				}
+				FSlateDrawElement::MakeText(Out, LayerId + 1, Geometry.ToPaintGeometry(FVector2f(220.f, 20.f), FSlateLayoutTransform(At + FVector2f(16.f, -26.f))),
+					FString::Printf(TEXT("P%d aim: %s"), View.PlayerIndex, *HyperAIStudio::Bot::Aim::ModeName(View.Mode)), Font, ESlateDrawEffect::None, Color);
+			}
+			return LayerId + 1;
+		}
+
+	private:
+		TWeakObjectPtr<UWorld> World;
+	};
 }
 
 FHyperAIStudioPlaytestRecorder::~FHyperAIStudioPlaytestRecorder()
@@ -75,11 +148,16 @@ bool FHyperAIStudioPlaytestRecorder::Start(UWorld& InWorld, const FString& InFol
 	StartedSeconds = FPlatformTime::Seconds();
 
 	const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", 14);
-	Overlay = SNew(SBox)
+	Overlay = SNew(SOverlay)
+		.Visibility(EVisibility::HitTestInvisible)
+		+ SOverlay::Slot()
+		[
+			SNew(SHyperAIStudioAimLayer, InWorld)
+		]
+		+ SOverlay::Slot()
 		.HAlign(HAlign_Left)
 		.VAlign(VAlign_Top)
 		.Padding(FMargin(16.f))
-		.Visibility(EVisibility::HitTestInvisible)
 		[
 			SNew(SBorder)
 			.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))

@@ -14,6 +14,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "InputAction.h"
+#include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "UObject/Package.h"
 #include "UObject/StrongObjectPtr.h"
@@ -313,6 +314,194 @@ void UHyperAIStudioTestTurret::TickComponent(const float DeltaTime, const ELevel
 		Shot.Velocity = (Target->GetActorLocation() - Muzzle).GetSafeNormal() * Speed;
 		++Fired;
 	}
+}
+
+namespace HyperAIStudio::BotFixtures
+{
+	const UInputAction* TestAction(TStrongObjectPtr<UInputAction>& Action, const TCHAR* Name, const EInputActionValueType Type)
+	{
+		if (!Action.IsValid())
+		{
+			Action.Reset(NewObject<UInputAction>(GetTransientPackage(), Name));
+			Action->ValueType = Type;
+		}
+		return Action.Get();
+	}
+
+	UInputMappingContext* CursorAimContext()
+	{
+		static TStrongObjectPtr<UInputMappingContext> Context;
+		if (!Context.IsValid())
+		{
+			Context.Reset(NewObject<UInputMappingContext>(GetTransientPackage(), TEXT("IMC_HyperAITestCursorAim")));
+			Context->MapKey(UHyperAIStudioTestCursorAim::SlashAction(), EKeys::LeftMouseButton);
+			Context->MapKey(UHyperAIStudioTestCursorAim::StickAction(), EKeys::Gamepad_Right2D);
+			Context->MapKey(UHyperAIStudioTestCursorAim::LookAction(), EKeys::Mouse2D);
+		}
+		return Context.Get();
+	}
+}
+
+UHyperAIStudioTestCursorAim::UHyperAIStudioTestCursorAim()
+{
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.bStartWithTickEnabled = true;
+	PrimaryComponentTick.TickGroup = TG_PrePhysics;
+}
+
+const UInputAction* UHyperAIStudioTestCursorAim::SlashAction()
+{
+	static TStrongObjectPtr<UInputAction> Action;
+	return HyperAIStudio::BotFixtures::TestAction(Action, TEXT("IA_TestSlash"), EInputActionValueType::Boolean);
+}
+
+const UInputAction* UHyperAIStudioTestCursorAim::StickAction()
+{
+	static TStrongObjectPtr<UInputAction> Action;
+	return HyperAIStudio::BotFixtures::TestAction(Action, TEXT("IA_TestAimStick"), EInputActionValueType::Axis2D);
+}
+
+const UInputAction* UHyperAIStudioTestCursorAim::LookAction()
+{
+	static TStrongObjectPtr<UInputAction> Action;
+	return HyperAIStudio::BotFixtures::TestAction(Action, TEXT("IA_TestLookMouse"), EInputActionValueType::Axis2D);
+}
+
+FVector UHyperAIStudioTestCursorAim::GetAimDirectionFlat() const
+{
+	const FVector Flat(AimDirection.X, AimDirection.Y, 0.0);
+	return Flat.IsNearlyZero() ? FVector::ForwardVector : Flat.GetSafeNormal();
+}
+
+bool UHyperAIStudioTestCursorAim::IsMouseAimActive() const
+{
+	const UWorld* World = GetWorld();
+	return World && World->GetTimeSeconds() - LastMoveTime <= RecencySeconds;
+}
+
+void UHyperAIStudioTestCursorAim::Bind()
+{
+	const APawn* Pawn = Cast<APawn>(GetOwner());
+	APlayerController* Controller = Pawn ? Cast<APlayerController>(Pawn->GetController()) : nullptr;
+	ULocalPlayer* Player = Controller ? Controller->GetLocalPlayer() : nullptr;
+	UEnhancedInputLocalPlayerSubsystem* Input = Player ? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(Player) : nullptr;
+	if (!Input)
+	{
+		return;
+	}
+	Bindings = NewObject<UEnhancedInputComponent>(Controller);
+	Bindings->RegisterComponent();
+	Bindings->BindAction(SlashAction(), ETriggerEvent::Started, this, &UHyperAIStudioTestCursorAim::Slash);
+	Bindings->BindAction(StickAction(), ETriggerEvent::Triggered, this, &UHyperAIStudioTestCursorAim::AimStick);
+	Bindings->BindAction(StickAction(), ETriggerEvent::Completed, this, &UHyperAIStudioTestCursorAim::AimStick);
+	Bindings->BindAction(LookAction(), ETriggerEvent::Triggered, this, &UHyperAIStudioTestCursorAim::Look);
+	Controller->PushInputComponent(Bindings);
+	FModifyContextOptions Options;
+	Options.bForceImmediately = true;
+	Input->AddMappingContext(HyperAIStudio::BotFixtures::CursorAimContext(), 2, Options);
+}
+
+void UHyperAIStudioTestCursorAim::TickComponent(const float DeltaTime, const ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	if (!Bindings)
+	{
+		Bind();
+	}
+	const APawn* Pawn = Cast<APawn>(GetOwner());
+	const APlayerController* Controller = Pawn ? Cast<APlayerController>(Pawn->GetController()) : nullptr;
+	const UWorld* World = GetWorld();
+	if (!Controller || !World)
+	{
+		return;
+	}
+	if (Stick.Size() > StickDeadZone)
+	{
+		// Gamepad aim: the stick through the camera's yaw, up being where the camera faces.
+		FVector Camera;
+		FRotator View;
+		Controller->GetPlayerViewPoint(Camera, View);
+		const FRotator Yaw(0.0, View.Yaw, 0.0);
+		const FVector Along = (Yaw.Vector() * Stick.Y + FRotationMatrix(Yaw).GetScaledAxis(EAxis::Y) * Stick.X).GetSafeNormal();
+		Commit(Pawn->GetActorLocation() + Along * 1000.0);
+		return;
+	}
+	// Mouse aim: the cursor counts as aiming only while it moves.
+	float X = 0.f;
+	float Y = 0.f;
+	if (Controller->GetMousePosition(X, Y))
+	{
+		Cursor = FVector2D(X, Y);
+		if (!bHasLastCursor)
+		{
+			LastCursor = Cursor;
+			bHasLastCursor = true;
+		}
+		else if (FVector2D::Distance(Cursor, LastCursor) > MovePixels)
+		{
+			LastCursor = Cursor;
+			LastMoveTime = World->GetTimeSeconds();
+		}
+	}
+	FVector Origin;
+	FVector Direction;
+	if (!Controller->DeprojectMousePositionToWorld(Origin, Direction) || FMath::Abs(Direction.Z) < UE_KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+	// The floor is the plane under the player's feet.
+	float Radius = 0.f;
+	float HalfHeight = 0.f;
+	Pawn->GetSimpleCollisionCylinder(Radius, HalfHeight);
+	const double Along = (Pawn->GetActorLocation().Z - HalfHeight - Origin.Z) / Direction.Z;
+	if (Along > 0.0)
+	{
+		Commit(Origin + Direction * Along);
+	}
+}
+
+void UHyperAIStudioTestCursorAim::Commit(const FVector& Point)
+{
+	const APawn* Pawn = Cast<APawn>(GetOwner());
+	const FVector Feet = Pawn ? Pawn->GetActorLocation() : FVector::ZeroVector;
+	AimWorldLocation = Point;
+	const FVector Level(Point.X - Feet.X, Point.Y - Feet.Y, 0.0);
+	// A cursor on the player gives no heading; the last one stays.
+	if (Level.Size() >= DeadRadius)
+	{
+		AimDirection = FVector(Level.X, Level.Y, Point.Z - Feet.Z).GetSafeNormal();
+	}
+}
+
+void UHyperAIStudioTestCursorAim::Slash()
+{
+	++Slashes;
+	LastSlash = GetAimDirectionFlat();
+	bLastSlashActive = IsMouseAimActive();
+}
+
+void UHyperAIStudioTestCursorAim::AimStick(const FInputActionValue& Value)
+{
+	Stick = Value.Get<FVector2D>();
+}
+
+void UHyperAIStudioTestCursorAim::Look(const FInputActionValue& Value)
+{
+	++LookSamples;
+	LookSum += Value.Get<FVector2D>();
+}
+
+void UHyperAIStudioTestCursorAim::EndPlay(const EEndPlayReason::Type Reason)
+{
+	if (Bindings)
+	{
+		if (APlayerController* Controller = Cast<APlayerController>(Bindings->GetOwner()))
+		{
+			Controller->PopInputComponent(Bindings);
+		}
+		Bindings = nullptr;
+	}
+	Super::EndPlay(Reason);
 }
 
 UHyperAIStudioTestPickup::UHyperAIStudioTestPickup()

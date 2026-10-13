@@ -9,6 +9,8 @@
 
 #include "HyperAIStudioBot.generated.h"
 
+class AActor;
+class FHyperAIBotAimer;
 class FHyperAIBotBrain;
 class UGeometryCollectionComponent;
 class UInputAction;
@@ -30,11 +32,11 @@ enum class EHyperAIBotAction : uint8
 	LookAt,
 	/** Jump and land. Characters only. */
 	Jump,
-	/** One press of InputAction through Enhanced Input, so the game's own bindings run. */
+	/** One press of InputAction through Enhanced Input, so the game's own bindings run. With Aim, aimed at Target or Location first. */
 	Press,
-	/** Hold InputAction for Seconds. */
+	/** Hold InputAction for Seconds. With Aim, aimed at Target or Location for all of it. */
 	Hold,
-	/** Face Target, then press InputAction, or the game's action named like Interact or Use. */
+	/** Face Target, then press InputAction, or the game's action named like Interact or Use. With Aim, aims at it the game's way instead. */
 	Interact,
 	/** Save the game view as a PNG named after Text. Without a screen, as in verification copies, it renders the player's camera. */
 	Capture,
@@ -84,7 +86,31 @@ enum class EHyperAIBotAction : uint8
 	 * The pieces broken off Target's geometry collections (every one in the level when empty), compared with Value; the
 	 * detail counts the clusters broken and says which pieces fell how far.
 	 */
-	AssertBroken
+	AssertBroken,
+	/**
+	 * Aim at Target or Location the way the game reads aim (Aim picks how, Auto unless set) for Seconds, 0.5 unless
+	 * set, then check the game's own aim points there.
+	 */
+	AimAt
+};
+
+/** How the bot aims: the way the game under test reads its player's aim. */
+UENUM(BlueprintType)
+enum class EHyperAIBotAim : uint8
+{
+	/** Press and Hold do not aim, and Interact turns the view to its target. AimAt and Play take it as Auto. */
+	Off,
+	/** Cursor, Stick or Look, from what the game shows of itself; the result says which, and why. */
+	Auto,
+	/**
+	 * For games that aim where the mouse cursor is: the game window's own cursor position is put on the target's
+	 * screen point, with the mouse movement a hand would make, while the real cursor stays where the user has it.
+	 */
+	Cursor,
+	/** For gamepad aim: the right stick pushed toward the target, relative to the camera. */
+	Stick,
+	/** For games that aim where the view looks: the control rotation turned to the target, as LookAt does. */
+	Look
 };
 
 /** What a Play step plays for. */
@@ -195,6 +221,21 @@ struct HYPERAISTUDIOBOT_API FHyperAIBotStep
 	/** Play, MoveTo and Hold: keep running while the next steps run, such as the other player of a duel. Later results say how it went. */
 	UPROPERTY()
 	bool bBackground = false;
+
+	/**
+	 * AimAt, Press, Hold, Interact and Play Defeat: how to aim. Press and Hold aim at Target or Location while they
+	 * fire and for as long as they hold; Off leaves them unaimed.
+	 */
+	UPROPERTY()
+	EHyperAIBotAim Aim = EHyperAIBotAim::Off;
+
+	/** Aimed steps: seconds of a moving target's travel to aim ahead of it, 0 to 2. */
+	UPROPERTY()
+	float Lead = 0.f;
+
+	/** Aimed steps: how far off, in degrees, the game's aim direction may point and still pass; 10 unless set. A world aim point must be within Radius. */
+	UPROPERTY()
+	float Tolerance = 0.f;
 };
 
 /** How a step went, in words an agent or a person can act on. */
@@ -262,6 +303,13 @@ private:
 	FString Label() const;
 	void StopHold();
 	void StopRecording();
+	/** An aimed step: starts its aim at Target, or at Point without one. */
+	FHyperAIBotResult StartAim(const AActor* Target, const FVector& Point);
+	/** An aimed step, a frame at a time: aim, press once the game's aim is on the target, hold, then check. */
+	FHyperAIBotResult TickAimed();
+	/** Ends an aimed step with the game's aim checked; a cursor then rests where it is until the bot stops. */
+	FHyperAIBotResult FinishAimed(const FString& What);
+	double AimToleranceDegrees() const;
 
 	TWeakObjectPtr<UWorld> World;
 	FString OutputDirectory;
@@ -308,6 +356,16 @@ private:
 	TArray<TWeakObjectPtr<UGeometryCollectionComponent>> Damaged;
 	FVector DamageAt = FVector::ZeroVector;
 	float DamageStrain = 0.f;
+
+	/** The running aimed step's aim. */
+	TUniquePtr<FHyperAIBotAimer> Aimer;
+	/** The cursor where the last aimed step left it, held still until the bot stops, as a hand resting on the mouse. */
+	TUniquePtr<FHyperAIBotAimer> RestingCursor;
+	/** An aimed step's input action, what it aims at, and when it pressed. */
+	TWeakObjectPtr<const UInputAction> AimedAction;
+	FString AimedName;
+	double PressedAt = 0.0;
+	int32 FramesSincePress = 0;
 	/** Steps running alongside, each with its own executor. */
 	TArray<TUniquePtr<FHyperAIBotExecutor>> Background;
 	/** What background steps did since a result last reported it. */

@@ -1356,6 +1356,9 @@ namespace HyperAIStudio::PIEPlaytest::Private
 			Settings->SetRunUnderOneProcess(true);
 			Settings->SetPlayNumberOfClients(Plan.Request.NumPlayers);
 			Settings->bLaunchSeparateServer = false;
+			// The bot plays through injected input and its own in-window cursor, so the game never takes the user's
+			// real mouse when play starts (as Movie Render Queue's captures start PIE too).
+			Settings->GameGetsMouseControl = false;
 			OwnedSettings.Reset(Settings);
 			return FHyperAIStudioPIEDriverResult();
 		}

@@ -40,6 +40,7 @@
 #include "GameFramework/PlayerState.h"
 #include "GenericPlatform/GenericPlatformInputDeviceMapper.h"
 #include "HAL/FileManager.h"
+#include "HyperAIStudioBotAimer.h"
 #include "HyperAIStudioBotBrain.h"
 #include "HyperAIStudioBotShared.h"
 #include "ImageUtils.h"
@@ -65,6 +66,10 @@ namespace HyperAIStudio::Bot::Private
 	constexpr int32 MaxRecordFrames = 240;
 	constexpr double StuckSeconds = 3.0;
 	constexpr double WaypointReachedCm = 75.0;
+	/** An aimed press waits this long at most for the game's aim to come onto the target, as a person settles before firing. */
+	constexpr double AimSettleSeconds = 0.5;
+	/** AimAt aims this long unless the step says. */
+	constexpr double AimSeconds = 0.5;
 
 	FString Vec(const FVector& Value)
 	{
@@ -1063,6 +1068,30 @@ bool FHyperAIBotExecutor::Validate(const FHyperAIBotStep& Step, FString& OutErro
 		OutError = TEXT("bot.goal is Reach, Collect, Defeat, Survive, Explore, Follow or Flee.");
 		return false;
 	}
+	if (!StaticEnum<EHyperAIBotAim>()->IsValidEnumValue(static_cast<int64>(Step.Aim)))
+	{
+		OutError = TEXT("bot.aim is Off, Auto, Cursor, Stick or Look.");
+		return false;
+	}
+	const bool bAims = Step.Action == EHyperAIBotAction::AimAt || Step.Action == EHyperAIBotAction::Press || Step.Action == EHyperAIBotAction::Hold
+		|| Step.Action == EHyperAIBotAction::Interact || Step.Action == EHyperAIBotAction::Play;
+	if (Step.Aim != EHyperAIBotAim::Off && !bAims)
+	{
+		OutError = TEXT("bot.aim works for AimAt, Press, Hold, Interact and Play.");
+		return false;
+	}
+	if (!FMath::IsFinite(Step.Lead) || Step.Lead < 0.f || Step.Lead > 2.f || !FMath::IsFinite(Step.Tolerance) || Step.Tolerance < 0.f || Step.Tolerance > 90.f)
+	{
+		OutError = TEXT("bot.lead must be 0 to 2 seconds, and bot.tolerance 0 to 90 degrees.");
+		return false;
+	}
+	const bool bAimed = Step.Action == EHyperAIBotAction::AimAt
+		|| ((Step.Action == EHyperAIBotAction::Press || Step.Action == EHyperAIBotAction::Hold) && Step.Aim != EHyperAIBotAim::Off);
+	if (bAimed && Step.Target.IsEmpty() && Step.Location.IsZero())
+	{
+		OutError = FString::Printf(TEXT("%s needs a target or a location to aim at."), *ActionName(Step.Action));
+		return false;
+	}
 	if (Step.PlayerIndex < 0 || Step.PlayerIndex > 7 || !FMath::IsFinite(Step.Skill) || Step.Skill < 0.f || Step.Skill > 1.f
 		|| !FMath::IsFinite(Step.Range) || Step.Range < 0.f || Step.Range > 100000.f)
 	{
@@ -1289,6 +1318,7 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 		}
 		const UInputAction* Action = nullptr;
 		FString Facing;
+		const AActor* AimActor = nullptr;
 		if (Step.Action == EHyperAIBotAction::Interact)
 		{
 			const AActor* Target = Cast<AActor>(FindTarget(*W, Step.Target, Step.PlayerIndex));
@@ -1297,7 +1327,11 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 				Result = FResult::Failed(TEXT("not_found"), FString::Printf(TEXT("No actor matches %s."), *Step.Target));
 				break;
 			}
-			Face(*W, Step.PlayerIndex, Target->GetActorLocation());
+			AimActor = Target;
+			if (Step.Aim == EHyperAIBotAim::Off)
+			{
+				Face(*W, Step.PlayerIndex, Target->GetActorLocation());
+			}
 			const APawn* Pawn = PlayerPawn(*W, Step.PlayerIndex);
 			Facing = FString::Printf(TEXT(" facing %s at %.0f cm"), *Describe(Target),
 				Pawn ? FVector::Dist(Pawn->GetActorLocation(), Target->GetActorLocation()) : 0.0);
@@ -1320,8 +1354,21 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 				Result = FResult::Failed(TEXT("input_action_not_found"), FString::Printf(TEXT("No input action matches %s."), *Step.InputAction));
 				break;
 			}
+			AimActor = Step.Aim == EHyperAIBotAim::Off || Step.Target.IsEmpty() ? nullptr : Cast<AActor>(FindTarget(*W, Step.Target, Step.PlayerIndex));
+			if (Step.Aim != EHyperAIBotAim::Off && !Step.Target.IsEmpty() && !AimActor)
+			{
+				Result = FResult::Failed(TEXT("not_found"), FString::Printf(TEXT("No actor matches %s."), *Step.Target));
+				break;
+			}
 		}
 		ApplyMappings(*Input);
+		if (Step.Aim != EHyperAIBotAim::Off)
+		{
+			// Aimed: the aim goes on first, and the press follows once the game's own aim is on the target.
+			AimedAction = Action;
+			Result = StartAim(AimActor, Step.Location);
+			break;
+		}
 		if (Step.Action == EHyperAIBotAction::Hold)
 		{
 			// Held by injecting again every frame, as Enhanced Input's continuous injection would, but from the bot's
@@ -1674,6 +1721,17 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 	case EHyperAIBotAction::AssertBroken:
 		Result = Evaluate(Step.Action);
 		break;
+	case EHyperAIBotAction::AimAt:
+	{
+		const AActor* Target = Step.Target.IsEmpty() ? nullptr : Cast<AActor>(FindTarget(*W, Step.Target, Step.PlayerIndex));
+		if (!Step.Target.IsEmpty() && !Target)
+		{
+			Result = FResult::Failed(TEXT("not_found"), FString::Printf(TEXT("No actor matches %s."), *Step.Target));
+			break;
+		}
+		Result = StartAim(Target, Step.Location);
+		break;
+	}
 	default:
 		Result = FResult::Failed(TEXT("unsupported_action"), TEXT("The bot has no route for this action."));
 		break;
@@ -1682,8 +1740,113 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 	{
 		bRunning = false;
 		Brain.Reset();
+		Aimer.Reset();
 	}
 	return WithBackground(Result);
+}
+
+double FHyperAIBotExecutor::AimToleranceDegrees() const
+{
+	return Step.Tolerance > 0.f ? Step.Tolerance : 10.0;
+}
+
+FHyperAIBotResult FHyperAIBotExecutor::StartAim(const AActor* Target, const FVector& Point)
+{
+	using namespace HyperAIStudio::Bot::Private;
+	UWorld* W = World.Get();
+	if (!W)
+	{
+		return FResult::Failed(TEXT("world_unavailable"), TEXT("The game world has ended."));
+	}
+	AimedName = Target ? Describe(Target) : Vec(Point);
+	PressedAt = 0.0;
+	FramesSincePress = 0;
+	Aimer = MakeUnique<FHyperAIBotAimer>(*W, Step.PlayerIndex);
+	FString Code;
+	FString Why;
+	if (!Aimer->Start(Step.Aim == EHyperAIBotAim::Off ? EHyperAIBotAim::Auto : Step.Aim, Code, Why))
+	{
+		Aimer.Reset();
+		return FResult::Failed(Code, Why);
+	}
+	Aimer->SetTarget(Target, Point, Step.Lead);
+	return FResult();
+}
+
+FHyperAIBotResult FHyperAIBotExecutor::TickAimed()
+{
+	using namespace HyperAIStudio::Bot::Private;
+	UWorld* W = World.Get();
+	const double Now = W ? W->GetRealTimeSeconds() : StartedAt;
+	if (Step.Action == EHyperAIBotAction::AimAt)
+	{
+		const double Seconds = Step.Seconds > 0.f ? Step.Seconds : AimSeconds;
+		// At least two frames of aim, so the game has read it; an aim that cannot be applied ends a second later.
+		return Now - StartedAt < Seconds || (Aimer->Frames() < 2 && Now - StartedAt < Seconds + 1.0)
+			? FResult() : FinishAimed(FString::Printf(TEXT("aimed at %s for %.1f s"), *AimedName, Now - StartedAt));
+	}
+	FString Code;
+	FString Error;
+	UEnhancedInputLocalPlayerSubsystem* Input = W ? InputFor(*W, Step.PlayerIndex, Code, Error) : nullptr;
+	const UInputAction* Action = AimedAction.Get();
+	if (!Input || !Action)
+	{
+		return FResult::Failed(Input ? TEXT("input_action_lost") : Code, Input ? TEXT("The input action was unloaded mid-step.") : Error);
+	}
+	if (PressedAt <= 0.0)
+	{
+		// A person fires once the aim is on the target, or after settling a moment.
+		if (!Aimer->OnTarget(AimToleranceDegrees(), Step.Radius) && Now - StartedAt < AimSettleSeconds)
+		{
+			return FResult();
+		}
+		Input->InjectInputForAction(Action, InputValue(*Action, Step.Value), {}, {});
+		PressedAt = Now;
+		FramesSincePress = 0;
+		return FResult();
+	}
+	++FramesSincePress;
+	if (Step.Action == EHyperAIBotAction::Hold)
+	{
+		if (Now - PressedAt < Step.Seconds)
+		{
+			Input->InjectInputForAction(Action, InputValue(*Action, Step.Value), {}, {});
+			return FResult();
+		}
+		return FinishAimed(FString::Printf(TEXT("held %s for %.1f s at %s"), *Action->GetName(), Now - PressedAt, *AimedName));
+	}
+	// The injected press is read on the player's next input tick; the aim stays on a frame after it.
+	return FramesSincePress < 2 ? FResult()
+		: FinishAimed(FString::Printf(TEXT("pressed %s at %s, %.2f s after the aim began"), *Action->GetName(), *AimedName, PressedAt - StartedAt));
+}
+
+FHyperAIBotResult FHyperAIBotExecutor::FinishAimed(const FString& What)
+{
+	using namespace HyperAIStudio::Bot::Private;
+	FString Read;
+	bool bRead = false;
+	const bool bOn = Aimer->Check(AimToleranceDegrees(), Step.Radius, Read, bRead);
+	const FString Report = Aimer->Report();
+	const EHyperAIBotAim Mode = Aimer->GetMode();
+	const bool bApplied = Aimer->Frames() > 0;
+	if (Mode == EHyperAIBotAim::Cursor)
+	{
+		// The cursor stays where the step left it, as a hand rests on a mouse, until the bot stops.
+		Aimer->Rest();
+		RestingCursor = MoveTemp(Aimer);
+	}
+	Aimer.Reset();
+	const FString Detail = FString::Printf(TEXT("%s; %s; %s"), *What, *Report, *Read);
+	if (!bApplied)
+	{
+		return FResult::Failed(TEXT("aim_not_applied"), Detail + TEXT(". The aim never took hold; the report says what was in the way."));
+	}
+	if (bOn)
+	{
+		return FResult::Passed(Detail);
+	}
+	return FResult::Failed(TEXT("aim_off_target"), Detail + FString::Printf(TEXT(". The game aims elsewhere than the bot aimed by %s: try another aim (Cursor, Stick or Look)."),
+		*HyperAIStudio::Bot::Aim::ModeName(Mode)));
 }
 
 FHyperAIBotResult FHyperAIBotExecutor::Tick()
@@ -1702,8 +1865,11 @@ FHyperAIBotResult FHyperAIBotExecutor::Tick()
 	}
 	const double Elapsed = W->GetRealTimeSeconds() - StartedAt;
 	FResult Result;
-	switch (Step.Action)
+	switch (Aimer.IsValid() ? EHyperAIBotAction::AimAt : Step.Action)
 	{
+	case EHyperAIBotAction::AimAt:
+		Result = Aimer.IsValid() ? TickAimed() : FResult::Failed(TEXT("aim_lost"), TEXT("The step's aim ended early."));
+		break;
 	case EHyperAIBotAction::Wait:
 		if (Elapsed >= Step.Seconds)
 		{
@@ -1802,6 +1968,7 @@ FHyperAIBotResult FHyperAIBotExecutor::Tick()
 	{
 		bRunning = false;
 		Brain.Reset();
+		Aimer.Reset();
 	}
 	return WithBackground(Result);
 }
@@ -2088,6 +2255,9 @@ void FHyperAIBotExecutor::Stop()
 		Brain->Stop();
 		Brain.Reset();
 	}
+	// Aims let go, and the game's window gets its own cursor back.
+	Aimer.Reset();
+	RestingCursor.Reset();
 	for (const TUniquePtr<FHyperAIBotExecutor>& Child : Background)
 	{
 		Child->Stop();

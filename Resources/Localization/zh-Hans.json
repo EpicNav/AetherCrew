@@ -15009,6 +15009,42 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.aimed-attack-direction.ph.attack.hint",
+   "source": "The input action that attacks, such as IA_Attack or IA_PrimaryAbility",
+   "text": "用于攻击的输入动作，例如 IA_Attack 或 IA_PrimaryAbility"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.aimed-attack-direction.ph.attack.label",
+   "source": "Attack input action",
+   "text": "攻击输入动作"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.aimed-attack-direction.ph.enemy.hint",
+   "source": "Label, name, tag or class of the enemy to attack",
+   "text": "要攻击的敌人的标签、名称、Tag 或类"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.aimed-attack-direction.ph.enemy.label",
+   "source": "Enemy",
+   "text": "敌人"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.aimed-attack-direction.summary",
+   "source": "Aim an attack at an enemy the way the game reads aim (cursor, stick or view), and prove the game's own aim and the hit went that way.",
+   "text": "按游戏读取瞄准的方式（鼠标光标、右摇杆或视角）瞄准敌人发起攻击，并证明游戏自身的瞄准和命中都朝向那里。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.aimed-attack-direction.title",
+   "source": "Check attacks go where the player aims",
+   "text": "检查攻击是否朝玩家瞄准的方向发出"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "playtest-qa.blueprint-fix-regression.ph.bug.label",
    "source": "The bug that was fixed",
    "text": "已修复的缺陷"
@@ -15186,6 +15222,30 @@
    "key": "playtest-qa.door-replicates-to-clients.title",
    "source": "Test a door replicates to clients and late joiners",
    "text": "测试门的状态同步到客户端和中途加入者"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.find-aim-mode.ph.target.hint",
+   "source": "Label, name, tag or class of an actor in view of the player",
+   "text": "玩家视野内某个 Actor 的标签、名称、Tag 或类"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.find-aim-mode.ph.target.label",
+   "source": "Something to aim at",
+   "text": "瞄准对象"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.find-aim-mode.summary",
+   "source": "Aim at a target by cursor, stick and view in turn, and report which one the game's own aim follows, before writing combat tests.",
+   "text": "依次用鼠标光标、摇杆和视角瞄准一个目标，报告游戏自身的瞄准跟随哪一种，然后再编写战斗测试。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.find-aim-mode.title",
+   "source": "Find how the game reads the player's aim",
+   "text": "找出游戏如何读取玩家的瞄准"
   },
   {
    "namespace": "HyperAIStudioPrompts",

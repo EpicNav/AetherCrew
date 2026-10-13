@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "HyperAIStudioBot.h"
+#include "HyperAIStudioBotAimer.h"
 #include "HyperAIStudioBotShared.h"
 #include "InputActionValue.h"
 #include "Math/RandomStream.h"
@@ -18,7 +19,8 @@ class APlayerController;
  * moves with the game's own move input relative to the camera, looking where it goes. It steers round what blocks the
  * way, jumps what it can, and backs off and tries another way when stuck. It fights with a person's reaction time,
  * turn speed and an aim error that settles, pressing the attack when the crosshair is on the target, strafing, hopping
- * and dodging meanwhile. It keeps count of what happened and writes a map of it.
+ * and dodging meanwhile. In a game that aims by the cursor or the right stick, it aims those too, and fires once the
+ * game's own aim is on the target. It keeps count of what happened and writes a map of it.
  */
 class FHyperAIBotBrain
 {
@@ -139,6 +141,8 @@ private:
 	FVector MoveCheckFrom = FVector::ZeroVector;
 
 	TWeakObjectPtr<const AActor> Aiming;
+	/** Defeat: aims the way the game reads aim. Look turns the view as it always did; Cursor and Stick also put the cursor or the stick on the target. */
+	TUniquePtr<FHyperAIBotAimer> Aimer;
 	double SeenAt = -1.0;
 	double Reaction = 0.3;
 	double AimError = 0.0;

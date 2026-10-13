@@ -148,6 +148,18 @@ FHyperAIBotResult FHyperAIBotBrain::Begin()
 			{
 				return FResult::Failed(Code, Error);
 			}
+			// It aims the way the game reads aim. The view always turns, as a person's head does; a game that aims by
+			// its cursor or its right stick gets those on the target too.
+			Aimer = MakeUnique<FHyperAIBotAimer>(*W, Step.PlayerIndex);
+			if (!Aimer->Start(Step.Aim == EHyperAIBotAim::Off ? EHyperAIBotAim::Auto : Step.Aim, Code, Error))
+			{
+				return FResult::Failed(Code, Error);
+			}
+			if (Aimer->GetMode() == EHyperAIBotAim::Look)
+			{
+				Notes.Add(FString::Printf(TEXT("aimed with the view (%s)"), *Aimer->GetWhy()));
+				Aimer.Reset();
+			}
 		}
 		break;
 	case EHyperAIBotGoal::Reach:
@@ -1144,8 +1156,15 @@ void FHyperAIBotBrain::Aim(APlayerController& Controller, const AActor& Target, 
 	const FVector Line = Center - Camera;
 	const FVector Off = FVector::VectorPlaneProject(ErrorAxis, Line.GetSafeNormal()).GetSafeNormal();
 	// A skilled player leads a moving target a little.
-	const FVector Point = Center + Off * Line.Size() * FMath::Tan(FMath::DegreesToRadians(AimError + Shake)) + Target.GetVelocity() * Mix(0.0, 0.12, Skill);
+	const FVector Miss = Off * Line.Size() * FMath::Tan(FMath::DegreesToRadians(AimError + Shake));
+	const FVector Point = Center + Miss + Target.GetVelocity() * Mix(0.0, 0.12, Skill);
 	Turn(Controller, (Point - Camera).Rotation(), Dt);
+	if (Aimer)
+	{
+		// The cursor or the stick goes where the hand puts it: on the target, off by the same settling error.
+		Aimer->SetTarget(&Target, FVector::ZeroVector, static_cast<float>(Mix(0.0, 0.12, Skill)));
+		Aimer->SetOffset(Miss);
+	}
 }
 
 bool FHyperAIBotBrain::Sees(const APawn& Me, const APlayerController& Controller, const AActor& Target) const
@@ -1176,12 +1195,21 @@ bool FHyperAIBotBrain::CrosshairOn(const APlayerController& Controller, const AA
 	FVector Camera;
 	FRotator View;
 	Controller.GetPlayerViewPoint(Camera, View);
-	// Shots go where the control rotation points; the camera can trail it by a frame.
-	const FVector Direction = Controller.GetControlRotation().Vector();
-	const FVector ToTarget = AimPoint(Target) - Camera;
 	float Radius = 50.f;
 	float HalfHeight = 50.f;
 	Target.GetSimpleCollisionCylinder(Radius, HalfHeight);
+	if (Aimer)
+	{
+		// Shots go where the game's own aim is, which the cursor or the stick set: on once that is on the target.
+		const APawn* Me = Controller.GetPawn();
+		const double Away = FMath::Max(FVector::Dist(Me ? Me->GetActorLocation() : Camera, Target.GetActorLocation()), 1.0);
+		const double Wide = FMath::RadiansToDegrees(FMath::Atan2(FMath::Max(static_cast<double>(Radius), 20.0), Away));
+		bOutNear = Aimer->OnTarget(Wide * 3.0, FMath::Max(static_cast<double>(Radius), 40.0) * 3.0);
+		return Aimer->OnTarget(FMath::Max(Wide * 1.5, 2.0), FMath::Max(static_cast<double>(Radius), 40.0));
+	}
+	// Shots go where the control rotation points; the camera can trail it by a frame.
+	const FVector Direction = Controller.GetControlRotation().Vector();
+	const FVector ToTarget = AimPoint(Target) - Camera;
 	const double Angle = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(Direction, ToTarget.GetSafeNormal()), -1.0, 1.0)));
 	const double Size = FMath::RadiansToDegrees(FMath::Atan2(FMath::Max(static_cast<double>(Radius), 20.0), FMath::Max(ToTarget.Size(), 1.0)));
 	bOutNear = Angle <= Size * 1.8;
@@ -1398,6 +1426,10 @@ FString FHyperAIBotBrain::Stats() const
 		Used.AddUnique(Attack->GetName());
 	}
 	Parts.Add(Used.IsEmpty() ? FString(TEXT("the game maps no input it knows, so it moved the pawn directly")) : TEXT("input ") + FString::Join(Used, TEXT(", ")));
+	if (Aimer)
+	{
+		Parts.Add(Aimer->Report());
+	}
 	Parts.Append(Notes);
 	return FString::Join(Parts, TEXT("; "));
 }
@@ -1637,6 +1669,11 @@ FString FHyperAIBotBrain::WriteMap() const
 
 void FHyperAIBotBrain::Stop()
 {
+	// The aim lets go, and its report stays for the result.
+	if (Aimer)
+	{
+		Aimer->Stop();
+	}
 	// Input is injected a frame at a time, so letting go is not injecting; only a direct jump needs ending.
 	if (bDirectJump)
 	{
