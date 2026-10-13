@@ -10,6 +10,7 @@
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGateInternal.h"
 #include "HyperAIStudioAutoApproval.h"
+#include "HyperAIStudioChatModes.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioTrustedExecutionInternal.h"
 #include "Layout/WidgetPath.h"
@@ -181,7 +182,8 @@ namespace HyperAIStudio::Approval::Private
 
 	bool IsCovered(const FHeldApproval& Item)
 	{
-		return Item.Pending.Category.IsSet()
+		// A chat in a mode that asks for every edit, or a read-only one, leaves each plan to a click.
+		return Item.Pending.Category.IsSet() && !HyperAIStudio::ChatModes::IsAskActive() && HyperAIStudio::ChatModes::ReadOnlyHolder().IsEmpty()
 			&& FHyperAIStudioAutoApproval::Covers(*Item.Pending.Category, Item.Sequence, Item.Pending.OperationId);
 	}
 
@@ -652,6 +654,11 @@ bool FHyperAIStudioApprovalGate::IsApprovalRequired(const EHyperAIStudioDomainSa
 	{
 		return true;
 	}
+	// A chat mode that asks for edits, or refuses them, routes every edit through the gate, which then does so.
+	if (HyperAIStudio::ChatModes::IsAskActive() || !HyperAIStudio::ChatModes::ReadOnlyHolder().IsEmpty())
+	{
+		return true;
+	}
 	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
 	return !Settings || Settings->bRequireApprovalForAgentEdits;
 }
@@ -672,6 +679,12 @@ bool FHyperAIStudioApprovalGate::Request(
 	if (!Prepared.IsValid() || OperationId.IsEmpty() || Summary.EffectTarget.IsEmpty())
 	{
 		OutError = TEXT("An approval request needs a prepared plan, an operation id and an effect target.");
+		return false;
+	}
+	// A read-only chat mode is enforced here, where every edit plan arrives, not just asked of the agent.
+	if (const FString Refusal = HyperAIStudio::ChatModes::ReadOnlyRefusal(); !Refusal.IsEmpty() && IndexOf(OperationId) == INDEX_NONE)
+	{
+		OutError = Refusal;
 		return false;
 	}
 	if (IndexOf(OperationId) != INDEX_NONE)
@@ -710,6 +723,11 @@ bool FHyperAIStudioApprovalGate::RequestAction(
 	if (!IsInGameThread() || !Run || OperationId.IsEmpty() || Summary.EffectTarget.IsEmpty())
 	{
 		OutError = TEXT("An approval request needs the game thread, an action, an operation id and an effect target.");
+		return false;
+	}
+	if (const FString Refusal = HyperAIStudio::ChatModes::ReadOnlyRefusal(); !Refusal.IsEmpty() && IndexOf(OperationId) == INDEX_NONE)
+	{
+		OutError = Refusal;
 		return false;
 	}
 	if (IndexOf(OperationId) != INDEX_NONE)

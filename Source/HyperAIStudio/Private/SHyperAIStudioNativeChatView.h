@@ -22,6 +22,9 @@ class SHyperAIStudioPromptPicker;
 DECLARE_DELEGATE_RetVal_ThreeParams(bool, FOnHyperAIStudioRouteMessage, const FString& /*Message*/, const TArray<FString>& /*Images*/,
 	const FHyperAIStudioMessageHints& /*Hints*/);
 
+/** A mode picked in the composer, after the chat has taken it. */
+DECLARE_DELEGATE_OneParam(FOnHyperAIStudioModeChosen, const FHyperAIStudioChatMode& /*Mode*/);
+
 /** The chat tab's native view of a Codex, Gemini or Claude Code chat: transcript, plan, approvals and a composer. */
 class SHyperAIStudioNativeChatView : public SCompoundWidget
 {
@@ -29,6 +32,9 @@ public:
 	SLATE_BEGIN_ARGS(SHyperAIStudioNativeChatView) {}
 		SLATE_ARGUMENT(TSharedPtr<FHyperAIStudioNativeChat>, Chat)
 		SLATE_EVENT(FOnHyperAIStudioRouteMessage, OnRoute)
+		SLATE_EVENT(FOnHyperAIStudioModeChosen, OnModeChosen)
+		/** Names the chat in a read-only mode's refusals, such as "HyperAI Chat 2". */
+		SLATE_ARGUMENT(FString, ChatLabel)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -45,6 +51,8 @@ public:
 	 * forgets the preset, with the Team it turned on and its line under the composer.
 	 */
 	void InsertPreset(const FHyperAIStudioPromptPreset& Preset, const FString& Text, const TArray<FString>& Blanks = {});
+	/** Puts the chat in a mode, as picking it in the composer does. */
+	void ChooseMode(const FHyperAIStudioChatMode& Mode);
 	/** Opens the prompt picker by the composer, as Prompts and Ctrl+Space do. */
 	void OpenPrompts();
 	void FocusComposer();
@@ -100,6 +108,7 @@ private:
 	void RebuildMentions();
 	void RebuildAttachments();
 	TSharedRef<SWidget> BuildPromptPicker();
+	TSharedRef<SWidget> BuildModeMenu();
 	/** A picture scaled to fit MaxSize; Path is read as it paints, and the file reloads when it changes. */
 	TSharedRef<SWidget> Picture(TFunction<FString()> Path, const FVector2D& MaxSize);
 	TSharedRef<SWidget> ImageActions(const FItemPtr& Item);
@@ -110,6 +119,8 @@ private:
 
 	TSharedPtr<FHyperAIStudioNativeChat> Chat;
 	FOnHyperAIStudioRouteMessage OnRoute;
+	FOnHyperAIStudioModeChosen OnModeChosen;
+	FString ChatLabel;
 	TArray<FItemPtr> Rows;
 	TSharedPtr<class SScrollBox> Scroll;
 	TSharedPtr<class SVerticalBox> Transcript;

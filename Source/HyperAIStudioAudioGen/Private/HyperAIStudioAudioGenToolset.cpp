@@ -13,6 +13,7 @@
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioAsyncJobHost.h"
+#include "HyperAIStudioCredentials.h"
 #include "HyperAIStudioAudioWrappers.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
@@ -55,7 +56,8 @@ namespace HyperAIStudio::AudioGen::Private
 	/** Read at the moment of the call, never kept in a setting, and never reported. */
 	FString Key(const FHyperAIStudioExternalServiceSettings& Service)
 	{
-		return Service.ApiKeyVariable.IsEmpty() ? FString() : FPlatformMisc::GetEnvironmentVariable(*Service.ApiKeyVariable).TrimStartAndEnd();
+		// The key stored in Settings > Agents first, then the environment variable.
+		return HyperAIStudio::Credentials::ReadKey(Service.ApiKeyVariable);
 	}
 
 	FString DefaultModel(const FString& Provider)

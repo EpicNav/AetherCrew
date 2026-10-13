@@ -214,6 +214,18 @@ public:
 	static bool ProbeOwnServerToolsListAsync(const FString& Endpoint, TFunction<void(bool bReachable, const FString& Message, int32 ToolCount)> OnComplete);
 	static bool FindExecutableOnPath(const FString& ExecutableName, FString& OutPath);
 	static FString GetCodexTerminalLaunchCommand();
+	/**
+	 * Codex's root options HyperAI adds to every launch, terminal or app-server: Unreal MCP by -c, because Codex reads
+	 * a project's .codex/config.toml only once the project is trusted; and, when an OpenAI key is stored in Settings >
+	 * Agents, a provider that takes it from OPENAI_API_KEY (and the stored base URL), since Codex's own provider does
+	 * not read that variable. Starts with a space when not empty.
+	 */
+	static FString GetCodexRootArguments();
+	/**
+	 * Claude Code's --settings file that approves the project's own unreal-mcp server in .mcp.json, which an
+	 * interactive session would otherwise ask about first. Written when missing; empty when it cannot be.
+	 */
+	static FString GetClaudeLaunchSettingsFile();
 	static FString GetAgentTerminalLaunchCommand(const FString& AgentName);
 
 private:

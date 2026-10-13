@@ -15,6 +15,7 @@
 #include "Dialog/SCustomDialog.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "HyperAIStudioChatHistoryPrefs.h"
+#include "HyperAIStudioCredentials.h"
 #include "HyperAIStudioEditorRestart.h"
 #include "HyperAIStudioMentions.h"
 #include "HyperAIStudioRemote.h"
@@ -2550,6 +2551,13 @@ FString SHyperAIStudioQuickActionWindow::GetTerminalLaunchCommandForAgent(const 
 		{
 			LaunchCommand += TEXT(" ") + AutoMode;
 		}
+		// An interactive Claude Code session asks before it uses a server from .mcp.json; HyperAI's own is approved for it.
+		const FString ClaudeSettings = !LaunchCommand.IsEmpty() && HyperAIStudio::QuickAction::IsClaudeAgent(Route->Name)
+			? FHyperAIStudioService::GetClaudeLaunchSettingsFile() : FString();
+		if (!ClaudeSettings.IsEmpty())
+		{
+			LaunchCommand += FString::Printf(TEXT(" --settings \"%s\""), *ClaudeSettings);
+		}
 		if (!LaunchCommand.IsEmpty() && !ChatArguments.IsEmpty())
 		{
 			LaunchCommand += TEXT(" ") + ChatArguments;
@@ -2574,11 +2582,12 @@ FString SHyperAIStudioQuickActionWindow::GetTerminalLaunchCommandForAgent(const 
 			}
 			LaunchCommand = ModelPrefix + LaunchCommand + TEXT(" ") + ModelArgument;
 		}
-		return LaunchCommand;
+		// The keys the user stored for this agent go into its environment, never onto the line the terminal shows.
+		return HyperAIStudio::Credentials::WrapTerminalCommand(Route->Name, LaunchCommand);
 	}
 
 	// An agent hosted through the Agent Client Protocol: its own terminal interface, where it can sign in.
-	return FHyperAIStudioNativeChat::GetAcpTerminalCommand(AgentName);
+	return HyperAIStudio::Credentials::WrapTerminalCommand(AgentName, FHyperAIStudioNativeChat::GetAcpTerminalCommand(AgentName));
 }
 
 void SHyperAIStudioQuickActionWindow::RunBootstrap(const FString& AgentName, const FString& LaunchCommand)
@@ -2732,11 +2741,12 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 	LastMessage = LOCTEXT("StartingBackgroundChat", "Starting this remote chat in the background...");
 	AddTranscriptLine(LastMessage.ToString());
 	const TWeakPtr<SHyperAIStudioQuickActionWindow> WeakThis = SharedThis(this);
+	const TArray<TPair<FString, FString>> KeyTargets = HyperAIStudio::Credentials::TargetsFor(AgentName);
 	Async(EAsyncExecution::ThreadPool, [WeakThis, Generation, AgentName, Claude, ProjectRoot, ModelPrefix, BackgroundArguments,
-		SessionId, ForegroundArguments]()
+		SessionId, ForegroundArguments, KeyTargets]()
 	{
 		FString Error;
-		const FString ShortId = StartClaudeBackgroundChat(Claude, ProjectRoot, ModelPrefix, BackgroundArguments, Error);
+		const FString ShortId = StartClaudeBackgroundChat(Claude, ProjectRoot, ModelPrefix, BackgroundArguments, Error, KeyTargets);
 		// --bg picks a new chat's id itself, and starts a copy when the old process is still closing: follow the real id.
 		FString StartedSessionId = SessionId;
 		if (!ShortId.IsEmpty())
@@ -2884,7 +2894,17 @@ bool SHyperAIStudioQuickActionWindow::StartNativeChat(const FString& ResumeId)
 	{
 		TerminalHost->SetContent(SAssignNew(NativeView, SHyperAIStudioNativeChatView)
 			.Chat(Chat)
-			.OnRoute(this, &SHyperAIStudioQuickActionWindow::RouteFirstMessage));
+			.ChatLabel(GetTabDescription())
+			.OnRoute(this, &SHyperAIStudioQuickActionWindow::RouteFirstMessage)
+			.OnModeChosen(this, &SHyperAIStudioQuickActionWindow::OnModeChosen));
+		// The tab's mode carries over to each chat it starts; a mode the project no longer has falls back to Build.
+		FHyperAIStudioChatMode Mode;
+		const FString Root = FHyperAIStudioService::GetProjectRoot();
+		if (HyperAIStudio::ChatModes::Find(Root, TabModeId.IsEmpty() ? HyperAIStudio::ChatModes::DefaultId() : TabModeId, Mode)
+			|| HyperAIStudio::ChatModes::Find(Root, HyperAIStudio::ChatModes::DefaultId(), Mode))
+		{
+			Chat->SetMode(Mode, GetTabDescription());
+		}
 		NativeView->FocusComposer();
 		// A preset picked from search while the agent was starting.
 		if (PendingPresetInsert.IsSet())
@@ -2896,6 +2916,32 @@ bool SHyperAIStudioQuickActionWindow::StartNativeChat(const FString& ResumeId)
 	LastMessage = FText::Format(LOCTEXT("NativeStarted", "{0} is running in the native view."), FText::FromString(Agent));
 	AddTranscriptLine(LastMessage.ToString());
 	return true;
+}
+
+void SHyperAIStudioQuickActionWindow::OnModeChosen(const FHyperAIStudioChatMode& Mode)
+{
+	TabModeId = Mode.Id;
+	const TSharedPtr<FHyperAIStudioNativeChat> Chat = NativeView.IsValid() ? NativeView->GetChat() : nullptr;
+	const bool bNew = Chat.IsValid() && !Chat->IsBusy() && Chat->NumQueued() == 0
+		&& !Chat->GetItems().ContainsByPredicate([](const TSharedPtr<FHyperAIStudioChatItem>& Item)
+		{
+			return Item.IsValid() && Item->Kind == FHyperAIStudioChatItem::EKind::User;
+		});
+	const bool bOtherAgent = !Mode.Agent.IsEmpty() && !Mode.Agent.Equals(GetSelectedAgentName(), ESearchCase::IgnoreCase);
+	if (bOtherAgent && !bNew)
+	{
+		AddTranscriptLine(FString::Printf(TEXT("%s mode prefers %s; pick it in the agent menu to switch this chat."), *Mode.Name, *Mode.Agent));
+		return;
+	}
+	if (bOtherAgent && GetUsableAgentNames().ContainsByPredicate([&Mode](const FString& Name) { return Name.Equals(Mode.Agent, ESearchCase::IgnoreCase); }))
+	{
+		bAgentChosenHere = true;
+		SelectAgentByName(Mode.Agent);
+	}
+	if (!Mode.Model.IsEmpty() && (bNew || bOtherAgent))
+	{
+		SelectModel(Mode.Model);
+	}
 }
 
 void SHyperAIStudioQuickActionWindow::StopNativeChat()

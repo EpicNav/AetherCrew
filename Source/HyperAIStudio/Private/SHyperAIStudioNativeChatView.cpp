@@ -9,6 +9,9 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "HyperAIStudioAgents.h"
+#include "HyperAIStudioChatModes.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "SHyperAIStudioModesPanel.h"
 #include "HyperAIStudioMarkdown.h"
 #include "HyperAIStudioPreviewPanel.h"
 #include "HyperAIStudioService.h"
@@ -203,6 +206,8 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 {
 	Chat = InArgs._Chat;
 	OnRoute = InArgs._OnRoute;
+	OnModeChosen = InArgs._OnModeChosen;
+	ChatLabel = InArgs._ChatLabel;
 	check(Chat.IsValid());
 	ChildSlot
 	[
@@ -407,6 +412,34 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 			.AutoWidth()
 			.VAlign(VAlign_Bottom)
 			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SComboButton)
+				.ToolTipText_Lambda([this]()
+				{
+					const FHyperAIStudioChatMode& Mode = Chat->GetMode();
+					return FText::Format(LOCTEXT("ModeTooltip", "The chat's mode: {0}. {1}"), Mode.Name.IsEmpty() ? LOCTEXT("ModeBuildName", "Build") : FText::FromString(Mode.Name),
+						FText::FromString(Mode.Description));
+				})
+				.MenuPlacement(MenuPlacement_AboveAnchor)
+				.OnGetMenuContent(this, &SHyperAIStudioNativeChatView::BuildModeMenu)
+				.ButtonContent()
+				[
+					SNew(STextBlock)
+					.Text_Lambda([this]()
+					{
+						const FHyperAIStudioChatMode& Mode = Chat->GetMode();
+						return Mode.Name.IsEmpty() ? LOCTEXT("ModeBuild", "Build") : FText::FromString(Mode.Name);
+					})
+					.ColorAndOpacity_Lambda([this]()
+					{
+						return Chat->GetMode().IsReadOnly() ? FSlateColor(FStyleColors::AccentYellow) : FSlateColor::UseForeground();
+					})
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Bottom)
+			.Padding(4.0f, 0.0f, 0.0f, 0.0f)
 			[
 				SNew(SCheckBox)
 				.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
@@ -618,6 +651,41 @@ TSharedRef<SWidget> SHyperAIStudioNativeChatView::BuildPromptPicker()
 		[
 			Built
 		];
+}
+
+TSharedRef<SWidget> SHyperAIStudioNativeChatView::BuildModeMenu()
+{
+	FMenuBuilder Menu(/*bInShouldCloseWindowAfterMenuSelection=*/true, nullptr);
+	Menu.BeginSection(NAME_None, LOCTEXT("ModesSection", "Chat mode"));
+	for (const FHyperAIStudioChatMode& Mode : HyperAIStudio::ChatModes::List(FHyperAIStudioService::GetProjectRoot()))
+	{
+		const FText Label = Mode.IsReadOnly() ? FText::Format(LOCTEXT("ModeReadOnlyEntry", "{0} (read only)"), FText::FromString(Mode.Name))
+			: Mode.Approval == EHyperAIStudioModeApproval::Ask ? FText::Format(LOCTEXT("ModeAskEntry", "{0} (asks for edits)"), FText::FromString(Mode.Name))
+			: FText::FromString(Mode.Name);
+		Menu.AddMenuEntry(Label, FText::FromString(Mode.Description), FSlateIcon(), FUIAction(
+			FExecuteAction::CreateLambda([this, Mode]() { ChooseMode(Mode); }),
+			FCanExecuteAction(),
+			FIsActionChecked::CreateLambda([this, Id = Mode.Id]() { return Chat->GetMode().Id == Id; })),
+			NAME_None, EUserInterfaceActionType::RadioButton);
+	}
+	Menu.EndSection();
+	Menu.AddMenuSeparator();
+	Menu.AddMenuEntry(LOCTEXT("ManageModes", "Manage Modes..."), LOCTEXT("ManageModesTooltip", "Make, edit, import and export chat modes. The project's are in .hyperai/modes."),
+		FSlateIcon(), FUIAction(FExecuteAction::CreateLambda([]() { SHyperAIStudioModesPanel::OpenWindow(); })));
+	return Menu.MakeWidget();
+}
+
+void SHyperAIStudioNativeChatView::ChooseMode(const FHyperAIStudioChatMode& Mode)
+{
+	const bool bChanged = Chat->GetMode().Id != Mode.Id;
+	Chat->SetMode(Mode, ChatLabel.IsEmpty() ? Chat->GetAgentName() + TEXT(" chat") : ChatLabel);
+	if (bChanged)
+	{
+		Notice = Mode.IsReadOnly()
+			? FText::Format(LOCTEXT("ModeReadOnlyNotice", "{0} mode: read only. HyperAI refuses edit plans while this chat is in it."), FText::FromString(Mode.Name)).ToString()
+			: FText::Format(LOCTEXT("ModeNotice", "{0} mode. The agent is told with your next message."), FText::FromString(Mode.Name)).ToString();
+	}
+	OnModeChosen.ExecuteIfBound(Mode);
 }
 
 void SHyperAIStudioNativeChatView::FocusComposer()

@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "SHyperAIStudioWindow.h"
+#include "SHyperAIStudioKeysPanel.h"
 
 #include "HAL/IConsoleManager.h"
 #include "HAL/FileManager.h"
@@ -1129,6 +1130,11 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildAgentsTab()
 		[
 			// The other servers these agents have, and whether each changes this editor outside HyperAI's approvals.
 			SNew(SHyperAIStudioMcpBypassPanel)
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 18.0f, 0.0f, 0.0f)
+		[
+			// The user's own API keys and addresses, per agent and provider, in Windows Credential Manager.
+			SNew(SHyperAIStudioKeysPanel)
 		];
 }
 

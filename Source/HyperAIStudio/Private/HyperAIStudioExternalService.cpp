@@ -3,6 +3,7 @@
 #include "HyperAIStudioExternalService.h"
 
 #include "HttpModule.h"
+#include "HyperAIStudioCredentials.h"
 #include "HyperAIStudioSettings.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
@@ -53,9 +54,8 @@ namespace HyperAIStudio::Services::Private
 	/** Reads the key without ever returning it to a caller or putting it in a log line. */
 	FString ReadKey(const FHyperAIStudioExternalServiceSettings& Service)
 	{
-		return Service.ApiKeyVariable.IsEmpty()
-			? FString()
-			: FPlatformMisc::GetEnvironmentVariable(*Service.ApiKeyVariable);
+		// The key stored in Settings > Agents first, then the environment variable.
+		return HyperAIStudio::Credentials::ReadKey(Service.ApiKeyVariable);
 	}
 
 	void SetHealth(const FString& Id, const EHyperAIStudioServiceHealth Health, const FString& Diagnostic, const int32 RoundTripMs)
@@ -85,7 +85,7 @@ namespace HyperAIStudio::Services::Private
 		if (!FHyperAIStudioExternalServices::HasApiKey(Service))
 		{
 			SetHealth(Service.Id, EHyperAIStudioServiceHealth::KeyMissing,
-				FString::Printf(TEXT("Set %s in the environment; keys are never kept in project config."), *Service.ApiKeyVariable), 0);
+				FString::Printf(TEXT("Add a key for %s in Settings > Agents, or set %s in the environment; keys are never kept in project config."), *Service.Label, *Service.ApiKeyVariable), 0);
 			return;
 		}
 		State().InFlightChecks.Add(Service.Id);
@@ -289,7 +289,7 @@ bool FHyperAIStudioExternalServices::PostJson(
 	}
 	if (!HasApiKey(Service))
 	{
-		OutError = FString::Printf(TEXT("%s needs a key in the environment variable %s."), *Service.Id, *Service.ApiKeyVariable);
+		OutError = FString::Printf(TEXT("%s needs a key: add one in Settings > Agents, or set the environment variable %s."), *Service.Id, *Service.ApiKeyVariable);
 		return false;
 	}
 	if (JsonBody.Len() <= 0 || JsonBody.Len() > MaxRequestBodyBytes)

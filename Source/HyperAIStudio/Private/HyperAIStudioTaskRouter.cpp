@@ -92,6 +92,14 @@ namespace HyperAIStudio::TaskRouter
 
 		/** The bundled skill made for each pack's kind of work. */
 		const TPair<const TCHAR*, const TCHAR*> PackSkillList[] = {
+			// A pack's own skill comes before a general one it shares, so a message is pointed at it first.
+			{TEXT("gameplay_ai"), TEXT("unreal-ai")},
+			{TEXT("enhanced_input"), TEXT("unreal-input")},
+			{TEXT("networking_game_framework"), TEXT("unreal-networking")},
+			{TEXT("data_config_localization"), TEXT("unreal-data")},
+			{TEXT("lighting_lookdev"), TEXT("unreal-lighting")},
+			{TEXT("pcg"), TEXT("unreal-pcg")},
+			{TEXT("editor_lifecycle"), TEXT("unreal-cpp-build")},
 			{TEXT("blueprint"), TEXT("unreal-blueprint")},
 			{TEXT("blueprint_structure"), TEXT("unreal-blueprint")},
 			{TEXT("gameplay_systems"), TEXT("unreal-blueprint")},
@@ -102,6 +110,7 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("lighting_lookdev"), TEXT("image-match")},
 			{TEXT("level_design"), TEXT("unreal-level-design")},
 			{TEXT("worldbuilding_navigation"), TEXT("unreal-level-design")},
+			{TEXT("worldbuilding_navigation"), TEXT("unreal-world-partition")},
 			{TEXT("pcg"), TEXT("unreal-level-design")},
 			{TEXT("mesh_terrain"), TEXT("unreal-level-design")},
 			{TEXT("mesh_modeling"), TEXT("unreal-modeling")},

@@ -170,7 +170,7 @@ TSharedRef<SWidget> SHyperAIStudioSettingsPage::BuildSection(const FName Id)
 			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 0.0f, 12.0f, 14.0f))
 			[
 				PageHeader(LOCTEXT("ImagesTitle", "Image services"),
-					LOCTEXT("ImagesBody", "The models the Images page and agents draw with. Keys are read from environment variables and never stored."))
+					LOCTEXT("ImagesBody", "The models the Images page and agents draw with. Keys are set in Settings > Agents (kept in Windows Credential Manager) or read from environment variables; never stored in the project."))
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 0.0f, 12.0f, 14.0f))
 			[
@@ -216,7 +216,7 @@ TSharedRef<SWidget> SHyperAIStudioSettingsPage::BuildNanoBanana() const
 	using namespace HyperAIStudio::UI;
 	FHyperAIStudioExternalServiceSettings Gemini = UHyperAIStudioSettings::GetGeminiService();
 	FHyperAIStudioExternalServices::Find(Gemini.Id, Gemini);
-	// The environment is read when the editor starts, so this cannot change until it restarts.
+	// A key stored in Settings > Agents counts at once; the environment is read when the editor starts.
 	const bool bHasKey = FHyperAIStudioExternalServices::HasApiKey(Gemini);
 	FString Table = FString::Printf(TEXT("| %s | %s | %s | %s |\n|---|---|---|---|\n"),
 		*LOCTEXT("NanoModel", "Model").ToString(), *LOCTEXT("NanoId", "ID for agents").ToString(),
@@ -247,7 +247,7 @@ TSharedRef<SWidget> SHyperAIStudioSettingsPage::BuildNanoBanana() const
 				.TextStyle(&Style(), "HyperAIStudio.Text.Body")
 				.Text(bHasKey
 					? FText::Format(LOCTEXT("NanoKeySet", "{0} is set, so the Nano Banana models are ready in the Images page and for agents."), FText::FromString(Gemini.ApiKeyVariable))
-					: FText::Format(LOCTEXT("NanoKeyMissing", "Set {0} in your environment to a Gemini API key, then restart the editor. The key is read from there and never saved."), FText::FromString(Gemini.ApiKeyVariable)))
+					: FText::Format(LOCTEXT("NanoKeyMissing", "Add a Gemini API key under Providers in Settings > Agents, or set {0} in your environment and restart the editor. It is never saved in the project."), FText::FromString(Gemini.ApiKeyVariable)))
 			]
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 10.0f, 0.0f, 0.0f))

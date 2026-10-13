@@ -11,6 +11,7 @@
     "automation_profiling_build"
    ],
    "skills": [
+    "unreal-cpp-build",
     "unreal-playtest"
    ],
    "agent": "programmer",
@@ -53,6 +54,7 @@
     "automation_profiling_build"
    ],
    "skills": [
+    "unreal-cpp-build",
     "unreal-playtest"
    ],
    "agent": "programmer",
@@ -112,6 +114,7 @@
     "automation_profiling_build"
    ],
    "skills": [
+    "unreal-cpp-build",
     "hyperai-memory"
    ],
    "agent": "programmer",
@@ -182,7 +185,10 @@
      "hint": "A RunTestsByFilter expression that also covers the tests next to it"
     }
    ],
-   "prompt": "Automation test `{{test_name}}` fails. Find the cause and make it pass without weakening the test.\n1. hyper_memory_recall \"{{test_name}}\". Epic's AutomationTestToolset DiscoverTests, then hyper_test_inspect with [{{test_name}}] (present and runnable) and hyper_test_validate on its Snapshot (valid). hyper_test_run with bDryRun true, a fresh OperationId, that name and Snapshot as ExpectedSnapshot: quote its status (it seals the run; it starts no test).\n2. RunTests [{{test_name}}], then GetTestResults: quote every failing assertion with its file:line.\n3. hyper_project_search (kinds cpp_symbol) for the test and the code it calls; read both. Say whether the code or the test is wrong, with the evidence. Fix the code; change the test only if it contradicts documented behaviour, and ask me first.\n4. hyper_editor_restart with bDryRun true (the packages it would save, the build command), then with bBuild true and a Note holding steps 5-6; your turn ends there.\n5. When the chat resumes: hyper_log_tail with maxVerbosity error. If the build failed, fix only what the log names and restart once more. Then DiscoverTests (bForceRediscover true), RunTestsByFilter {{neighbour_filter}}, GetTestStatus until finished, and GetTestResults.\n6. Report a table: test | before | after | duration | first error, each PASS/FAIL, then every file changed (file:line)."
+   "prompt": "Automation test `{{test_name}}` fails. Find the cause and make it pass without weakening the test.\n1. hyper_memory_recall \"{{test_name}}\". Epic's AutomationTestToolset DiscoverTests, then hyper_test_inspect with [{{test_name}}] (present and runnable) and hyper_test_validate on its Snapshot (valid). hyper_test_run with bDryRun true, a fresh OperationId, that name and Snapshot as ExpectedSnapshot: quote its status (it seals the run; it starts no test).\n2. RunTests [{{test_name}}], then GetTestResults: quote every failing assertion with its file:line.\n3. hyper_project_search (kinds cpp_symbol) for the test and the code it calls; read both. Say whether the code or the test is wrong, with the evidence. Fix the code; change the test only if it contradicts documented behaviour, and ask me first.\n4. hyper_editor_restart with bDryRun true (the packages it would save, the build command), then with bBuild true and a Note holding steps 5-6; your turn ends there.\n5. When the chat resumes: hyper_log_tail with maxVerbosity error. If the build failed, fix only what the log names and restart once more. Then DiscoverTests (bForceRediscover true), RunTestsByFilter {{neighbour_filter}}, GetTestStatus until finished, and GetTestResults.\n6. Report a table: test | before | after | duration | first error, each PASS/FAIL, then every file changed (file:line).",
+   "skills": [
+    "unreal-cpp-build"
+   ]
   },
   {
    "id": "cpp-build.write-automation-test",
@@ -229,7 +235,10 @@
      "default": "base 10, armour 0 gives 10; base 10, armour 50 gives 5; a negative base gives 0"
     }
    ],
-   "prompt": "Cover `{{function}}` in module `{{module}}` with an automation test named `{{test_name}}`.\n1. hyper_project_search (kinds cpp_symbol) for {{function}}; read it and any tests already in the module (Private/Tests). Epic's AutomationTestToolset DiscoverTests, then hyper_test_inspect with [{{test_name}}]: it must not be present yet.\n2. Write Private/Tests/<Subject>Test.cpp: IMPLEMENT_SIMPLE_AUTOMATION_TEST inside WITH_DEV_AUTOMATION_TESTS, editor context and product filter flags, one TestEqual or TestTrue per case with a message naming it: {{cases}}.\n3. hyper_editor_restart with bDryRun true: report the packages it would save and the build command. Then hyper_editor_restart with bBuild true and a Note holding the remaining steps; your turn ends there.\n4. After the chat resumes with a clean build: Epic's AutomationTestToolset DiscoverTests (bForceRediscover true); hyper_test_inspect with [{{test_name}}] (present, runnable) and hyper_test_validate on its Snapshot; then RunTests [{{test_name}}] and GetTestResults.\n5. If a case fails, decide from the function's code whether the test or the function is wrong; fix only the test unless I approve a code change.\n6. Report a PASS/FAIL table per case from the result messages, plus the test file and the build result."
+   "prompt": "Cover `{{function}}` in module `{{module}}` with an automation test named `{{test_name}}`.\n1. hyper_project_search (kinds cpp_symbol) for {{function}}; read it and any tests already in the module (Private/Tests). Epic's AutomationTestToolset DiscoverTests, then hyper_test_inspect with [{{test_name}}]: it must not be present yet.\n2. Write Private/Tests/<Subject>Test.cpp: IMPLEMENT_SIMPLE_AUTOMATION_TEST inside WITH_DEV_AUTOMATION_TESTS, editor context and product filter flags, one TestEqual or TestTrue per case with a message naming it: {{cases}}.\n3. hyper_editor_restart with bDryRun true: report the packages it would save and the build command. Then hyper_editor_restart with bBuild true and a Note holding the remaining steps; your turn ends there.\n4. After the chat resumes with a clean build: Epic's AutomationTestToolset DiscoverTests (bForceRediscover true); hyper_test_inspect with [{{test_name}}] (present, runnable) and hyper_test_validate on its Snapshot; then RunTests [{{test_name}}] and GetTestResults.\n5. If a case fails, decide from the function's code whether the test or the function is wrong; fix only the test unless I approve a code change.\n6. Report a PASS/FAIL table per case from the result messages, plus the test file and the build result.",
+   "skills": [
+    "unreal-cpp-build"
+   ]
   },
   {
    "id": "cpp-build.insights-trace-playtest",
@@ -240,6 +249,7 @@
     "scripting"
    ],
    "skills": [
+    "unreal-cpp-build",
     "unreal-playtest"
    ],
    "tools": [
@@ -407,7 +417,10 @@
     "audit",
     "sandbox"
    ],
-   "prompt": "Before rebuilding {{project}}, check that nothing will be lost or broken. Do not restart yet.\n1. hyper_run_audit with action start, a new auditId and kinds dirty_loaded_packages, loaded_blueprint_health, plugin_readiness (HyperAI's required plugins) and current_map_state; then action status with that auditId until it is complete.\n2. hyper_diagnose with checks dirty_loaded_packages and loaded_blueprint_health for detail. hyper_sandbox_status: if Sandbox Mode holds files, list them, since saves land in the sandbox.\n3. hyper_log_tail with maxVerbosity error: recent errors a restart would hide. hyper_build_diagnose: the engine version, platform and build configuration the rebuild targets.\n4. hyper_editor_restart with bDryRun true and bBuild true: the packages it would save, the build command, the build log path and the chats that reopen.\n5. Report a table: check | PASS/WARN/FAIL | detail (dirty packages, Blueprints with errors, plugins not ready, sandboxed files, recent errors, build configuration). End by asking whether to restart now, and only call hyper_editor_restart for real if I say yes."
+   "prompt": "Before rebuilding {{project}}, check that nothing will be lost or broken. Do not restart yet.\n1. hyper_run_audit with action start, a new auditId and kinds dirty_loaded_packages, loaded_blueprint_health, plugin_readiness (HyperAI's required plugins) and current_map_state; then action status with that auditId until it is complete.\n2. hyper_diagnose with checks dirty_loaded_packages and loaded_blueprint_health for detail. hyper_sandbox_status: if Sandbox Mode holds files, list them, since saves land in the sandbox.\n3. hyper_log_tail with maxVerbosity error: recent errors a restart would hide. hyper_build_diagnose: the engine version, platform and build configuration the rebuild targets.\n4. hyper_editor_restart with bDryRun true and bBuild true: the packages it would save, the build command, the build log path and the chats that reopen.\n5. Report a table: check | PASS/WARN/FAIL | detail (dirty packages, Blueprints with errors, plugins not ready, sandboxed files, recent errors, build configuration). End by asking whether to restart now, and only call hyper_editor_restart for real if I say yes.",
+   "skills": [
+    "unreal-cpp-build"
+   ]
   },
   {
    "id": "cpp-build.add-module-dependency",
@@ -450,7 +463,10 @@
      "hint": "Leave empty for engine modules that are not in a plugin"
     }
    ],
-   "prompt": "Make module `{{module}}` depend on `{{dep_module}}`.\n1. Read Source/{{module}}/{{module}}.Build.cs; if {{dep_module}} is already listed, say so and stop.\n2. If the plugin `{{plugin}}` is named: Epic's PluginToolset IsEnabled for the before state, and SetPluginEnabled true when it is off (it edits the .uproject and takes effect on restart).\n3. Add \"{{dep_module}}\" to PublicDependencyModuleNames (PrivateDependencyModuleNames if only .cpp files will use it); change nothing else.\n4. hyper_editor_restart with bDryRun true: report the packages it would save and the build command. Then hyper_editor_restart with bBuild true and a Note holding the remaining steps; your turn ends there.\n5. When the chat resumes: hyper_build_diagnose; hyper_log_tail with maxVerbosity error: no module failed to load; PluginToolset IsEnabled again for the after state. If the build failed, fix only what the log names and restart once more.\n6. Report a PASS/FAIL table: the Build.cs line added, plugin state before and after, build result, errors."
+   "prompt": "Make module `{{module}}` depend on `{{dep_module}}`.\n1. Read Source/{{module}}/{{module}}.Build.cs; if {{dep_module}} is already listed, say so and stop.\n2. If the plugin `{{plugin}}` is named: Epic's PluginToolset IsEnabled for the before state, and SetPluginEnabled true when it is off (it edits the .uproject and takes effect on restart).\n3. Add \"{{dep_module}}\" to PublicDependencyModuleNames (PrivateDependencyModuleNames if only .cpp files will use it); change nothing else.\n4. hyper_editor_restart with bDryRun true: report the packages it would save and the build command. Then hyper_editor_restart with bBuild true and a Note holding the remaining steps; your turn ends there.\n5. When the chat resumes: hyper_build_diagnose; hyper_log_tail with maxVerbosity error: no module failed to load; PluginToolset IsEnabled again for the after state. If the build failed, fix only what the log names and restart once more.\n6. Report a PASS/FAIL table: the Build.cs line added, plugin state before and after, build result, errors.",
+   "skills": [
+    "unreal-cpp-build"
+   ]
   },
   {
    "id": "cpp-build.expose-function-to-blueprint",
@@ -531,7 +547,10 @@
      "default": "5"
     }
    ],
-   "prompt": "Triage this editor session's log; change nothing.\n1. hyper_log_tail with maxVerbosity warning and pageSize 128, following its cursor until no new entries; then Epic's LogsToolset GetLogEntries with pattern \"Error\" for older entries the ring no longer holds.\n2. Group the entries by category and message pattern (collapse numbers, paths and object names) and count each group.\n3. For groups that name an asset, hyper_diagnose with checks asset_context and those assetPaths (up to 64), and hyper_asset_dependency_graph with direction referencers and maxDepth 1 to see what loads it.\n4. hyper_build_diagnose for the engine version and build configuration.\n5. Report a table: group | category | count | example | asset | likely cause | FAIL/WARN/INFO. Then the top {{top_n}} fixes in order, and the groups that are engine noise safe to ignore."
+   "prompt": "Triage this editor session's log; change nothing.\n1. hyper_log_tail with maxVerbosity warning and pageSize 128, following its cursor until no new entries; then Epic's LogsToolset GetLogEntries with pattern \"Error\" for older entries the ring no longer holds.\n2. Group the entries by category and message pattern (collapse numbers, paths and object names) and count each group.\n3. For groups that name an asset, hyper_diagnose with checks asset_context and those assetPaths (up to 64), and hyper_asset_dependency_graph with direction referencers and maxDepth 1 to see what loads it.\n4. hyper_build_diagnose for the engine version and build configuration.\n5. Report a table: group | category | count | example | asset | likely cause | FAIL/WARN/INFO. Then the top {{top_n}} fixes in order, and the groups that are engine noise safe to ignore.",
+   "skills": [
+    "unreal-cpp-build"
+   ]
   },
   {
    "id": "cpp-build.move-tick-logic-to-cpp",
@@ -600,6 +619,7 @@
     "blueprint"
    ],
    "skills": [
+    "unreal-cpp-build",
     "unreal-blueprint"
    ],
    "agent": "programmer",

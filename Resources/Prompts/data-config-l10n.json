@@ -36,7 +36,10 @@
      "default": "every number above 0; no empty text or name; no missing asset reference"
     }
    ],
-   "prompt": "Audit these DataTables without changing them: {{selected_assets}}.\n1. hyper_data_inspect with those object paths as targetPaths (load any table that reports asset_not_loaded with Epic's AssetTools load_asset, then inspect again): each table's row struct and row names.\n2. hyper_data_validate with the full, unpaged Snapshot: it must be valid and complete; report any issue codes.\n3. Epic's DataTableTools get_schema and get_rows for every row. Check: {{rules}}; row names follow one pattern; no two rows are identical apart from their name.\n4. Report a table per DataTable: row | column | value | rule | PASS/WARN/FAIL, then totals per table. Suggest fixes, but make none and save nothing."
+   "prompt": "Audit these DataTables without changing them: {{selected_assets}}.\n1. hyper_data_inspect with those object paths as targetPaths (load any table that reports asset_not_loaded with Epic's AssetTools load_asset, then inspect again): each table's row struct and row names.\n2. hyper_data_validate with the full, unpaged Snapshot: it must be valid and complete; report any issue codes.\n3. Epic's DataTableTools get_schema and get_rows for every row. Check: {{rules}}; row names follow one pattern; no two rows are identical apart from their name.\n4. Report a table per DataTable: row | column | value | rule | PASS/WARN/FAIL, then totals per table. Suggest fixes, but make none and save nothing.",
+   "skills": [
+    "unreal-data"
+   ]
   },
   {
    "id": "data-config-l10n.item-table-from-struct",
@@ -47,6 +50,7 @@
     "blueprint_structure"
    ],
    "skills": [
+    "unreal-data",
     "unreal-blueprint"
    ],
    "tools": [
@@ -131,7 +135,10 @@
      "default": "BaseDamage"
     }
    ],
-   "prompt": "In {{selected_asset}}, rename field `{{old_field}}` to `{{new_field}}`; change nothing else.\n1. hyper_data_inspect with targetPaths [{{selected_asset}}] (load it first with Epic's AssetTools load_asset if it reports asset_not_loaded): the field's StableId (its GUID), its ElementFingerprint and the snapshot's PersistedFingerprint. If `{{new_field}}` already exists, stop.\n2. hyper_asset_dependency_graph with direction referencers and maxDepth 1: the Blueprints and DataTables that use the struct.\n3. hyper_data_apply_plan with bDryRun true, TargetPath the struct, ExpectedPersistedFingerprint, and one op `user_struct.rename_field` (SubjectId the GUID, ExpectedElementFingerprint, Name {{new_field}}). Then the same request with bDryRun false, a fresh OperationId and ExpectedPlanHash set to its PlanHash. If it is refused (Strict Safety), quote the reason and stop.\n4. hyper_data_inspect again and hyper_data_validate on the full Snapshot: the field reads `{{new_field}}` with the same GUID and type. hyper_diagnose with checks loaded_blueprint_health for the referencers (load them with Epic's AssetTools load_asset first).\n5. Report a PASS/FAIL table: renamed, same GUID and type, snapshot valid, each referencer healthy. The plan saves the struct; say so."
+   "prompt": "In {{selected_asset}}, rename field `{{old_field}}` to `{{new_field}}`; change nothing else.\n1. hyper_data_inspect with targetPaths [{{selected_asset}}] (load it first with Epic's AssetTools load_asset if it reports asset_not_loaded): the field's StableId (its GUID), its ElementFingerprint and the snapshot's PersistedFingerprint. If `{{new_field}}` already exists, stop.\n2. hyper_asset_dependency_graph with direction referencers and maxDepth 1: the Blueprints and DataTables that use the struct.\n3. hyper_data_apply_plan with bDryRun true, TargetPath the struct, ExpectedPersistedFingerprint, and one op `user_struct.rename_field` (SubjectId the GUID, ExpectedElementFingerprint, Name {{new_field}}). Then the same request with bDryRun false, a fresh OperationId and ExpectedPlanHash set to its PlanHash. If it is refused (Strict Safety), quote the reason and stop.\n4. hyper_data_inspect again and hyper_data_validate on the full Snapshot: the field reads `{{new_field}}` with the same GUID and type. hyper_diagnose with checks loaded_blueprint_health for the referencers (load them with Epic's AssetTools load_asset first).\n5. Report a PASS/FAIL table: renamed, same GUID and type, snapshot valid, each referencer healthy. The plan saves the struct; say so.",
+   "skills": [
+    "unreal-data"
+   ]
   },
   {
    "id": "data-config-l10n.rebalance-curve-table",
@@ -177,7 +184,10 @@
      "default": "1-30"
     }
    ],
-   "prompt": "In {{selected_asset}}, rewrite row `{{row}}` so the key at level L has value {{formula}}, for levels {{levels}}.\n1. hyper_data_inspect on it (load it first with Epic's AssetTools load_asset if it reports asset_not_loaded): every row's key count, time range, default value and ElementFingerprint. Epic's CurveTableTools get_keys for {{row}}: put the old keys in your reply as the undo record.\n2. Compute the new keys; each must be higher than the one before. Show the first 5 and the last 5 before writing.\n3. Epic's CurveTableTools set_keys for {{row}} only (time = level, value = result); touch no other row.\n4. hyper_data_inspect again and hyper_data_validate on the full Snapshot: {{row}}'s key count and time range match {{levels}}; every other row's ElementFingerprint is unchanged. get_keys for {{row}} again: every key equals the computed value.\n5. Report a table: level | old | new | PASS/FAIL (rises, matches the formula), then the totals. Leave the asset unsaved unless I ask."
+   "prompt": "In {{selected_asset}}, rewrite row `{{row}}` so the key at level L has value {{formula}}, for levels {{levels}}.\n1. hyper_data_inspect on it (load it first with Epic's AssetTools load_asset if it reports asset_not_loaded): every row's key count, time range, default value and ElementFingerprint. Epic's CurveTableTools get_keys for {{row}}: put the old keys in your reply as the undo record.\n2. Compute the new keys; each must be higher than the one before. Show the first 5 and the last 5 before writing.\n3. Epic's CurveTableTools set_keys for {{row}} only (time = level, value = result); touch no other row.\n4. hyper_data_inspect again and hyper_data_validate on the full Snapshot: {{row}}'s key count and time range match {{levels}}; every other row's ElementFingerprint is unchanged. get_keys for {{row}} again: every key equals the computed value.\n5. Report a table: level | old | new | PASS/FAIL (rises, matches the formula), then the totals. Leave the asset unsaved unless I ask.",
+   "skills": [
+    "unreal-data"
+   ]
   },
   {
    "id": "data-config-l10n.string-table-ui-text",
@@ -212,7 +222,10 @@
      "default": "Menu.Play = Play; Menu.Settings = Settings; Menu.Quit = Quit to Desktop"
     }
    ],
-   "prompt": "Create `{{content_folder}}/Localization/{{table_name}}` with these entries: {{entries}}.\n1. hyper_memory_recall \"localization keys\" for the project's key naming rule. hyper_project_search (kinds asset, query \"ST_\") for existing String Tables: if one already covers this screen, say so and add to it instead.\n2. Epic's StringTableTools create, then set_entry per entry: keys exactly as given, source strings as written, no trailing spaces.\n3. list_keys, and get_entry for each key; get_table_id and get_namespace.\n4. hyper_data_inspect on the table (load it with AssetTools load_asset if it reports asset_not_loaded): its string_table record shows the same TableId and namespace. hyper_data_validate on the full Snapshot (marked incomplete by design: entries are read with StringTableTools).\n5. Report a table: key | source string | PASS/FAIL; then the TableId to use with LOCTABLE(\"<TableId>\", \"<Key>\") in C++ or as a text property's String Table reference in the editor. Leave it unsaved unless I ask."
+   "prompt": "Create `{{content_folder}}/Localization/{{table_name}}` with these entries: {{entries}}.\n1. hyper_memory_recall \"localization keys\" for the project's key naming rule. hyper_project_search (kinds asset, query \"ST_\") for existing String Tables: if one already covers this screen, say so and add to it instead.\n2. Epic's StringTableTools create, then set_entry per entry: keys exactly as given, source strings as written, no trailing spaces.\n3. list_keys, and get_entry for each key; get_table_id and get_namespace.\n4. hyper_data_inspect on the table (load it with AssetTools load_asset if it reports asset_not_loaded): its string_table record shows the same TableId and namespace. hyper_data_validate on the full Snapshot (marked incomplete by design: entries are read with StringTableTools).\n5. Report a table: key | source string | PASS/FAIL; then the TableId to use with LOCTABLE(\"<TableId>\", \"<Key>\") in C++ or as a text property's String Table reference in the editor. Leave it unsaved unless I ask.",
+   "skills": [
+    "unreal-data"
+   ]
   },
   {
    "id": "data-config-l10n.default-maps-and-mode",
@@ -251,7 +264,10 @@
      "default": "/Game/Blueprints/BP_MenuGameMode.BP_MenuGameMode_C"
     }
    ],
-   "prompt": "Set {{project}}'s Maps & Modes: editor startup map {{startup_map}}, game default map {{game_map}}, global default game mode {{game_mode}}.\n1. hyper_project_search (kinds asset): each map and the game mode exist; stop on any that is missing.\n2. Epic's ConfigSettingsToolset: ListCategories for container Project, ListSections to find Maps & Modes, GetSectionSchema for its property names, then GetSectionPropertyValues for EditorStartupMap, GameDefaultMap and GlobalDefaultGameMode: the before values.\n3. SetSectionProperties with only those three properties (it saves the section to the project's config).\n4. GetSectionPropertyValues again: each equals what I asked for.\n5. Read {{level}}'s World Settings DefaultGameMode with Epic's ObjectTools get_properties. If it has no override, hyper_verify_run, one case: AssertExists the game mode's class name (such as BP_MenuGameMode); otherwise say the level's override wins in play.\n6. hyper_memory_remember the decision as type decision, titled with the fact itself (such as \"The game starts in L_MainMenu with BP_MenuGameMode\").\n7. Report a table: setting | before | after | PASS/FAIL, then the play check, and name the config file that changed."
+   "prompt": "Set {{project}}'s Maps & Modes: editor startup map {{startup_map}}, game default map {{game_map}}, global default game mode {{game_mode}}.\n1. hyper_project_search (kinds asset): each map and the game mode exist; stop on any that is missing.\n2. Epic's ConfigSettingsToolset: ListCategories for container Project, ListSections to find Maps & Modes, GetSectionSchema for its property names, then GetSectionPropertyValues for EditorStartupMap, GameDefaultMap and GlobalDefaultGameMode: the before values.\n3. SetSectionProperties with only those three properties (it saves the section to the project's config).\n4. GetSectionPropertyValues again: each equals what I asked for.\n5. Read {{level}}'s World Settings DefaultGameMode with Epic's ObjectTools get_properties. If it has no override, hyper_verify_run, one case: AssertExists the game mode's class name (such as BP_MenuGameMode); otherwise say the level's override wins in play.\n6. hyper_memory_remember the decision as type decision, titled with the fact itself (such as \"The game starts in L_MainMenu with BP_MenuGameMode\").\n7. Report a table: setting | before | after | PASS/FAIL, then the play check, and name the config file that changed.",
+   "skills": [
+    "unreal-data"
+   ]
   },
   {
    "id": "data-config-l10n.extend-gameplay-enum",
@@ -263,6 +279,7 @@
     "blueprint"
    ],
    "skills": [
+    "unreal-data",
     "unreal-blueprint"
    ],
    "tools": [
@@ -342,7 +359,10 @@
      "default": "DT_EnemyStats"
     }
    ],
-   "prompt": "Import `{{csv_path}}` as `{{content_folder}}/Data/{{table_name}}` with row struct `{{row_struct}}`.\n1. Read the CSV's header and count its data rows (read only). Get the struct's fields: Epic's DataTableTools search_row_structs, or hyper_data_inspect on {{row_struct}} if it is a user-defined struct. Every CSV column after the first must match a field by name; list unmatched columns and stop if any field the game reads is missing.\n2. hyper_data_inspect on {{content_folder}}/Data/{{table_name}}: it must report does_not_exist; otherwise stop and ask.\n3. Epic's DataTableTools import_file into {{content_folder}}/Data with that schema.\n4. hyper_data_inspect on the new table (load it with AssetTools load_asset if it reports asset_not_loaded) and hyper_data_validate on the full Snapshot: the row count equals the CSV's, and the row names match its first column.\n5. get_rows for the first, middle and last rows: the values equal the CSV cells.\n6. Report a PASS/FAIL table: columns matched, rows imported against the CSV, the 3 sample rows. Leave it unsaved unless I ask."
+   "prompt": "Import `{{csv_path}}` as `{{content_folder}}/Data/{{table_name}}` with row struct `{{row_struct}}`.\n1. Read the CSV's header and count its data rows (read only). Get the struct's fields: Epic's DataTableTools search_row_structs, or hyper_data_inspect on {{row_struct}} if it is a user-defined struct. Every CSV column after the first must match a field by name; list unmatched columns and stop if any field the game reads is missing.\n2. hyper_data_inspect on {{content_folder}}/Data/{{table_name}}: it must report does_not_exist; otherwise stop and ask.\n3. Epic's DataTableTools import_file into {{content_folder}}/Data with that schema.\n4. hyper_data_inspect on the new table (load it with AssetTools load_asset if it reports asset_not_loaded) and hyper_data_validate on the full Snapshot: the row count equals the CSV's, and the row names match its first column.\n5. get_rows for the first, middle and last rows: the values equal the CSV cells.\n6. Report a PASS/FAIL table: columns matched, rows imported against the CSV, the 3 sample rows. Leave it unsaved unless I ask.",
+   "skills": [
+    "unreal-data"
+   ]
   },
   {
    "id": "data-config-l10n.audit-gameplay-tags",
@@ -371,7 +391,10 @@
      "default": "Ability"
     }
    ],
-   "prompt": "Audit {{project}}'s gameplay tags under `{{parent_tag}}`; remove or rename nothing.\n1. hyper_memory_recall \"gameplay tag naming\" for the project's tag rules.\n2. Epic's GameplayTagsToolset: ListTags with parentTag {{parent_tag}}; for each tag, GetTagInfo (where it is defined) and FindReferencersByTag.\n3. Flag tags with 0 referencers; near-duplicates (the same words in another case, plural and singular, typos one letter apart); tags that break the naming rule; and leaf tags placed directly under the root.\n4. hyper_project_search (kinds cpp_symbol) for each unreferenced tag, since C++ (UE_DEFINE_GAMEPLAY_TAG, RequestGameplayTag) may use a tag without an asset reference.\n5. Report a table: tag | source | referencers | C++ hits | PASS/WARN/FAIL | suggestion. RemoveTag and RenameTag change the whole project: list the ones you suggest, and run each only if I approve it by name."
+   "prompt": "Audit {{project}}'s gameplay tags under `{{parent_tag}}`; remove or rename nothing.\n1. hyper_memory_recall \"gameplay tag naming\" for the project's tag rules.\n2. Epic's GameplayTagsToolset: ListTags with parentTag {{parent_tag}}; for each tag, GetTagInfo (where it is defined) and FindReferencersByTag.\n3. Flag tags with 0 referencers; near-duplicates (the same words in another case, plural and singular, typos one letter apart); tags that break the naming rule; and leaf tags placed directly under the root.\n4. hyper_project_search (kinds cpp_symbol) for each unreferenced tag, since C++ (UE_DEFINE_GAMEPLAY_TAG, RequestGameplayTag) may use a tag without an asset reference.\n5. Report a table: tag | source | referencers | C++ hits | PASS/WARN/FAIL | suggestion. RemoveTag and RenameTag change the whole project: list the ones you suggest, and run each only if I approve it by name.",
+   "skills": [
+    "unreal-data"
+   ]
   }
  ]
 }

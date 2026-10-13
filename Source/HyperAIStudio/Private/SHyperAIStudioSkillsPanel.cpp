@@ -10,6 +10,7 @@
 #include "HyperAIStudioService.h"
 #include "IDesktopPlatform.h"
 #include "Misc/MessageDialog.h"
+#include "Misc/Paths.h"
 #include "Styling/AppStyle.h"
 #include "Styling/StyleColors.h"
 #include "Widgets/Input/SButton.h"
@@ -20,6 +21,9 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
+#include "Dialog/SCustomDialog.h"
+#include "SHyperAIStudioModesPanel.h"
+#include "Widgets/Input/SEditableTextBox.h"
 
 #define LOCTEXT_NAMESPACE "SHyperAIStudioSkillsPanel"
 
@@ -105,6 +109,41 @@ void SHyperAIStudioSkillsPanel::Construct(const FArguments& InArgs)
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
 			[
+				Button(LOCTEXT("NewSkill", "New Skill..."), LOCTEXT("NewSkillTooltip", "Make a project skill in .agents/skills, for Claude Code and Codex, and open its SKILL.md to write."), [this]()
+				{
+					const TSharedRef<SEditableTextBox> NameBox = SNew(SEditableTextBox).HintText(LOCTEXT("NewNameHint", "lowercase-with-hyphens, such as door-setup"));
+					const TSharedRef<SEditableTextBox> DescriptionBox = SNew(SEditableTextBox).HintText(LOCTEXT("NewDescriptionHint", "What it does and when to use it; agents pick it by this"));
+					const TSharedRef<SCustomDialog> Dialog = SNew(SCustomDialog)
+						.Title(LOCTEXT("NewSkillTitle", "New Skill"))
+						.Content()
+						[
+							SNew(SBox).WidthOverride(520.0f)
+							[
+								SNew(SVerticalBox)
+								+ SVerticalBox::Slot().AutoHeight()[ SNew(STextBlock).Text(LOCTEXT("NewNameLabel", "Name")) ]
+								+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 8.0f)[ NameBox ]
+								+ SVerticalBox::Slot().AutoHeight()[ SNew(STextBlock).Text(LOCTEXT("NewDescriptionLabel", "Description")) ]
+								+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)[ DescriptionBox ]
+							]
+						]
+						.Buttons({SCustomDialog::FButton(LOCTEXT("Create", "Create")), SCustomDialog::FButton(LOCTEXT("Cancel", "Cancel"))});
+					if (Dialog->ShowModal() != 0)
+					{
+						return;
+					}
+					const FString Name = NameBox->GetText().ToString().TrimStartAndEnd();
+					FString Error;
+					if (!HyperAIStudio::Skills::Create(FHyperAIStudioService::GetProjectRoot(), Name, DescriptionBox->GetText().ToString(), Error))
+					{
+						FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Error));
+						return;
+					}
+					Reload();
+					FPlatformProcess::LaunchFileInDefaultExternalApplication(*FPaths::Combine(HyperAIStudio::Skills::CanonicalDirectory(FHyperAIStudioService::GetProjectRoot()), Name, TEXT("SKILL.md")));
+				})
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
 				Button(LOCTEXT("ImportFolder", "Import Folder..."), LOCTEXT("ImportFolderTooltip", "Copy a skill folder (with a SKILL.md) into this project."), [this]()
 				{
 					FString Folder;
@@ -126,6 +165,13 @@ void SHyperAIStudioSkillsPanel::Construct(const FArguments& InArgs)
 					{
 						ImportFrom(Files[0]);
 					}
+				})
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
+				Button(LOCTEXT("ChatModes", "Chat Modes..."), LOCTEXT("ChatModesTooltip", "The modes a chat can run in: Plan, Build, Review, Art pass, QA and the project's own."), []()
+				{
+					SHyperAIStudioModesPanel::OpenWindow();
 				})
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
@@ -159,7 +205,7 @@ void SHyperAIStudioSkillsPanel::Construct(const FArguments& InArgs)
 void SHyperAIStudioSkillsPanel::Reload()
 {
 	Skills.Reset();
-	for (FHyperAIStudioSkill& Skill : HyperAIStudio::Skills::ListProjectSkills(FHyperAIStudioService::GetProjectRoot()))
+	for (FHyperAIStudioSkill& Skill : HyperAIStudio::Skills::ListProjectSkills(FHyperAIStudioService::GetProjectRoot(), /*bIncludeInvalid=*/true))
 	{
 		Skills.Add(MakeShared<FHyperAIStudioSkill>(MoveTemp(Skill)));
 	}
@@ -241,6 +287,13 @@ TSharedRef<ITableRow> SHyperAIStudioSkillsPanel::GenerateRow(FSkillPtr Skill, co
 			Badge(LOCTEXT("BuiltIn", "built in"), FSlateColor(FStyleColors::AccentBlue), LOCTEXT("BuiltInTooltip", "Installed by HyperAIStudio and updated with the plugin until you edit it."))
 		];
 	}
+	if (!Copy.Problem.IsEmpty())
+	{
+		Line->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(6.0f, 0.0f, 0.0f, 0.0f)
+		[
+			Badge(LOCTEXT("Invalid", "not valid"), FSlateColor(FStyleColors::Error), FText::FromString(Copy.Problem))
+		];
+	}
 	if (Copy.MirrorState == TEXT("edited") || Copy.MirrorState == TEXT("taken"))
 	{
 		Line->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(6.0f, 0.0f, 0.0f, 0.0f)
@@ -319,6 +372,17 @@ TSharedRef<ITableRow> SHyperAIStudioSkillsPanel::GenerateRow(FSkillPtr Skill, co
 	Line->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f, 0.0f, 0.0f, 0.0f)
 	[
 		SNew(SButton)
+		.Text(LOCTEXT("EditSkill", "Edit"))
+		.ToolTipText(LOCTEXT("EditSkillTooltip", "Open SKILL.md in your editor. A project skill's change reaches Claude Code's copy at the next Sync."))
+		.OnClicked_Lambda([Folder = Copy.Folder]()
+		{
+			FPlatformProcess::LaunchFileInDefaultExternalApplication(*FPaths::Combine(Folder, TEXT("SKILL.md")));
+			return FReply::Handled();
+		})
+	];
+	Line->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f, 0.0f, 0.0f, 0.0f)
+	[
+		SNew(SButton)
 		.Text(LOCTEXT("OpenFolder", "Open"))
 		.ToolTipText(LOCTEXT("OpenFolderTooltip", "Show the skill's folder."))
 		.OnClicked_Lambda([Folder = Copy.Folder]()
@@ -360,7 +424,7 @@ TSharedRef<ITableRow> SHyperAIStudioSkillsPanel::GenerateRow(FSkillPtr Skill, co
 			.Padding(0.0f, 3.0f, 0.0f, 0.0f)
 			[
 				SNew(STextBlock)
-				.Text(FText::FromString(Copy.Description))
+				.Text(FText::FromString(Copy.Problem.IsEmpty() ? Copy.Description : Copy.Problem))
 				.AutoWrapText(true)
 				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 			]

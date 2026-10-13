@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioChatModes.h"
 
 #include "HyperAIStudioSettings.h"
 
@@ -91,6 +92,12 @@ EHyperAIStudioNativeExecutionMode FHyperAIStudioExtensionRuntime::GetNativeExecu
 bool FHyperAIStudioExtensionRuntime::UsesStrictNativeSafety(
 	const EHyperAIStudioDomainSafety Safety)
 {
+	// A read-only chat mode closes the fast paths too: an edit then needs a grant, which only the approval gate issues and
+	// which it refuses while that mode is on.
+	if (Safety != EHyperAIStudioDomainSafety::Read && !HyperAIStudio::ChatModes::ReadOnlyHolder().IsEmpty())
+	{
+		return true;
+	}
 	return UsesStrictNativeSafety(GetNativeExecutionMode(), Safety);
 }
 
