@@ -1494,6 +1494,59 @@
     }
    ],
    "prompt": "Concept a prop, {{subject}}, as a picture, then turn that picture into a textured model at `{{content_folder}}/Generated/{{name}}`. Both steps spend money or my plan: each waits for my approval and costs credits.\n1. hyper_image_inspect: pick a ready model (codex_image_gen if you cannot draw, else nano_banana_2), and note its cost and the session spend cap. If the image_generation or mesh_generation tools are missing, say which and stop.\n2. hyper_image_generate with bDryRun true, Prompt \"{{subject}}, single object, three-quarter view, plain light grey background, even studio light, no text\", Count 2 and BatchName `{{name}}_concept`. Read ComposedPrompt and EstimatedCost, then send it with bDryRun false, ExpectedPlanHash and a fresh OperationId, and call hyper_operation_wait with bWaitThroughApproval true; then hyper_image_inspect the BatchId until its State is complete. Open both images and pick the one with the clearest silhouette.\n3. hyper_mesh_generate with bDryRun true, ImagePath set to that PNG, Name {{name}} and Folder `{{content_folder}}/Generated`; report the provider and EstimatedCost. Then send it with bDryRun false and a fresh OperationId, and use hyper_operation_wait (bWaitThroughApproval true, TimeoutMs 120000) or hyper_mesh_status until it completes.\n4. hyper_geometry_validate the imported mesh with Policy `static_mesh_build_ready`.\n5. Report a PASS/FAIL table: concept images written, model job completed, the total cost of both steps, mesh imported with its materials, validation 0 errors. Show the chosen concept on its own line."
+  },
+  {
+   "id": "modelling-geometry.retexture-paid-model",
+   "title": "Retexture a model up to 8K with a paid service",
+   "summary": "Give a generated or project mesh a new PBR texture from words with Meshy or Tripo, at 2K to 8K, imported with its material instance.",
+   "packs": [
+    "mesh_generation"
+   ],
+   "skills": [
+    "generated-characters"
+   ],
+   "tools": [
+    "hyper_mesh_status",
+    "hyper_mesh_retexture",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "paid",
+    "ai",
+    "texture",
+    "retexture",
+    "pbr",
+    "8k",
+    "meshy",
+    "tripo"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "StaticMesh"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "look",
+     "label": "New look",
+     "default": "weathered bronze with green patina and worn edges"
+    },
+    {
+     "name": "resolution",
+     "label": "Resolution",
+     "default": "4k",
+     "hint": "Meshy: 2k, 4k or 8k. Tripo: standard, detailed or 8k."
+    },
+    {
+     "name": "max_cost",
+     "label": "Most to spend (USD)",
+     "default": "0.50"
+    }
+   ],
+   "prompt": "Give {{selected_asset}} a new look: \"{{look}}\", at {{resolution}}, with PBR maps, as a new model beside it. It is paid and waits for my approval; never above {{max_cost}} USD. If the mesh_generation tools are missing, say so and stop.\n1. hyper_mesh_status: if a job of this session made {{selected_asset}}, pass its operation id as SourceOperationId (the provider then works from its own model); otherwise MeshPath {{selected_asset}}, sent as a GLB, with bKeepUVs true (Meshy keeps your UVs).\n2. hyper_mesh_retexture with bDryRun true, Prompt \"{{look}}\", Resolution {{resolution}}, bPBR true and Folder `{{content_folder}}/Generated`. Read Provider, Tasks and EstimatedCost; stop if it passes {{max_cost}} USD or the resolution is refused.\n3. Send it with bDryRun false and a fresh OperationId, then hyper_operation_wait (bWaitThroughApproval true, TimeoutMs 120000) until it ends.\n4. hyper_mesh_status: AssetPath, Materials and Textures.\n5. Report a PASS/FAIL table: job completed, Cost at or under {{max_cost}} USD, the mesh, its material instances and textures imported (counts). If bKeepUVs was used, say which material instance to put on {{selected_asset}}."
   }
  ]
 }

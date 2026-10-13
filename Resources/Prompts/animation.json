@@ -863,6 +863,177 @@
     }
    ],
    "prompt": "Tidy the montage {{selected_asset}}: rename its sections in time order to {{section_names}}, remove sections beyond that list, and remove every notify on track `{{stale_track}}`. If the animation_rigging pack is off, say so and stop.\n1. hyper_memory_recall the project's montage naming. hyper_animation_inspect the montage: sections with times and links, notifies with StableIds and tracks, Revision. hyper_asset_dependency_graph (referencers) lists who uses it, for the report.\n2. One hyper_animation_apply_plan on the montage (ExpectedRevision from the inspect): montage.rename_section for each kept section, montage.remove_section for the extras, montage.link_sections only where a kept section linked to a removed one (renames carry links with them), and montage.remove_notify by StableId for each `{{stale_track}}` notify. It deletes, so dry-run it first (bDryRun true), then apply with bDryRun false and a fresh OperationId; hyper_operation_wait if it is not completed yet.\n3. hyper_animation_validate the montage and hyper_animation_inspect it again.\n4. Report a PASS/FAIL table: section names and order, a section at 0, links as before except those into removed sections, notifies removed versus found, 0 errors; then list the referencing assets as INFO, since code or Blueprints may still name old sections. Change nothing else."
+  },
+  {
+   "id": "animation.generated-character-mannequin",
+   "title": "Generate, rig and animate a character for your Mannequin",
+   "summary": "A paid pipeline: a model from a prompt, rigged by Meshy or Tripo, given preset clips, then IK Rigs, a retargeter and the clips on your Mannequin.",
+   "packs": [
+    "mesh_generation",
+    "animation_rigging"
+   ],
+   "skills": [
+    "generated-characters",
+    "unreal-animation"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_mesh_status",
+    "hyper_mesh_generate",
+    "hyper_mesh_rig",
+    "hyper_mesh_actions",
+    "hyper_mesh_animate",
+    "hyper_operation_wait",
+    "hyper_retarget_inspect"
+   ],
+   "ops": [
+    "ik_rig.create",
+    "retargeter.create",
+    "retarget.animations"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "paid",
+    "ai",
+    "character",
+    "rig",
+    "auto-rig",
+    "animation",
+    "retarget",
+    "mannequin",
+    "meshy",
+    "tripo"
+   ],
+   "placeholders": [
+    {
+     "name": "subject",
+     "label": "Character to make",
+     "default": "a knight in battered plate armour"
+    },
+    {
+     "name": "name",
+     "label": "Skeletal mesh name",
+     "default": "SK_Knight"
+    },
+    {
+     "name": "actions",
+     "label": "Preset animations",
+     "default": "idle, walk, run",
+     "hint": "Names or ids from the provider's library; hyper_mesh_actions searches it."
+    },
+    {
+     "name": "mannequin",
+     "label": "Your Mannequin",
+     "default": "/Game/Characters/Mannequins/Meshes/SKM_Manny"
+    },
+    {
+     "name": "max_cost",
+     "label": "Most to spend (USD)",
+     "default": "3.00"
+    }
+   ],
+   "prompt": "Make {{subject}} a playable-ready character: a generated model, rigged, with the preset animations {{actions}}, retargeted onto {{mannequin}}. Every step is a paid service that waits for my approval; never spend more than {{max_cost}} USD in all. If the mesh_generation or animation_rigging tools are missing, say which pack is off and stop.\n1. hyper_mesh_status: reuse a finished job of this session that already made {{name}}. Otherwise hyper_mesh_generate with bDryRun true, Prompt \"{{subject}}, full-body humanoid character, standing in an A-pose, arms away from the body, facing forward, game-ready, PBR textures\", Name `SM_{{name}}` and Folder `{{content_folder}}/Characters`. Use Tripo or Meshy (they rig their own models).\n2. hyper_mesh_rig with bDryRun true, SourceOperationId the model's job, Name {{name}}, Folder `{{content_folder}}/Characters` and RetargetTo {{mannequin}}. Then hyper_mesh_actions with the rig's provider and Search for each of {{actions}}; pick one id each. Dry-run hyper_mesh_animate with those Actions, Provider (the rig's), RigTaskId `dry-run` and RigMesh {{mannequin}} for its price (the real run uses RigOperationId), and RetargetTo {{mannequin}}.\n3. Add up EstimatedCost of all three; stop if the total passes {{max_cost}} USD. Tell me the total, then send each for real in order (bDryRun false, a fresh OperationId), each after the one before completes: hyper_operation_wait with bWaitThroughApproval true and TimeoutMs 120000, repeated until it ends, then hyper_mesh_status for its assets.\n4. Each rig and animation job hands a retarget plan on as RetargetOperationId: hyper_operation_wait on it (bWaitThroughApproval true), then hyper_retarget_inspect the IK Rigs and the retargeter it made. If a chain is unmapped, say which.\n5. Report a PASS/FAIL table: model, rig (skeletal mesh, skeleton, physics asset), each clip on the rig's skeleton, each clip retargeted onto {{mannequin}}, total Cost at or under {{max_cost}} USD. List every asset path."
+  },
+  {
+   "id": "animation.mannequin-from-text",
+   "title": "Animate the Mannequin from a sentence",
+   "summary": "Make a clip from words with Viggle or Meshy and land it on your project's Mannequin skeleton, priced and approved first.",
+   "packs": [
+    "mesh_generation",
+    "animation_rigging"
+   ],
+   "skills": [
+    "generated-characters"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_mesh_status",
+    "hyper_mesh_animate",
+    "hyper_operation_wait",
+    "hyper_animation_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "paid",
+    "ai",
+    "text to animation",
+    "motion",
+    "mannequin",
+    "viggle",
+    "meshy",
+    "mocap"
+   ],
+   "placeholders": [
+    {
+     "name": "motion",
+     "label": "What the character does",
+     "default": "vaults over a low wall, lands and keeps running"
+    },
+    {
+     "name": "seconds",
+     "label": "Length in seconds",
+     "default": "4"
+    },
+    {
+     "name": "mannequin",
+     "label": "Your Mannequin",
+     "default": "/Game/Characters/Mannequins/Meshes/SKM_Manny"
+    },
+    {
+     "name": "max_cost",
+     "label": "Most to spend (USD)",
+     "default": "1.00"
+    }
+   ],
+   "prompt": "Animate {{mannequin}} from words: \"{{motion}}\", {{seconds}} seconds long, as an AnimSequence on its own skeleton. It is paid and waits for my approval; never above {{max_cost}} USD. If the mesh_generation tools are missing, say so and stop.\n1. hyper_mesh_animate with bDryRun true, TargetMesh {{mannequin}}, Prompt \"{{motion}}\", DurationSeconds {{seconds}}, Name `A_Mannequin_<two words of the motion>` and Folder `{{content_folder}}/Animations/Generated`. Leave Provider empty: Viggle puts its clip straight onto a UE5 Mannequin skeleton; Meshy rigs a copy first and retargets back. Read Providers, Tasks and EstimatedCost; if both keys are set, dry-run once more with the other Provider (viggle or meshy) and pick the cheaper one that works for this skeleton.\n2. Stop if the cost passes {{max_cost}} USD. Otherwise send it with bDryRun false and a fresh OperationId, then hyper_operation_wait (bWaitThroughApproval true, TimeoutMs 120000) until it ends. With Meshy, also wait on its RetargetOperationId.\n3. hyper_mesh_status: the Animations and their skeleton; hyper_animation_validate each clip that is on {{mannequin}}'s skeleton.\n4. Report a PASS/FAIL table: provider and Cost, clip imported, on the Mannequin's skeleton, length near {{seconds}} s, 0 validate errors. Say if the diagnostic warns that a clip moves no bone."
+  },
+  {
+   "id": "animation.price-character-pipeline",
+   "title": "Price rigging and animating a generated character",
+   "summary": "Dry-run the rig, preset clips and the retarget onto your Mannequin with Meshy and Tripo side by side, spending nothing.",
+   "packs": [
+    "mesh_generation"
+   ],
+   "skills": [
+    "generated-characters"
+   ],
+   "tools": [
+    "hyper_mesh_status",
+    "hyper_mesh_rig",
+    "hyper_mesh_actions",
+    "hyper_mesh_animate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "paid",
+    "price",
+    "cost",
+    "dry run",
+    "rig",
+    "animation",
+    "meshy",
+    "tripo"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "StaticMesh"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "actions",
+     "label": "Preset animations",
+     "default": "idle, walk, attack"
+    },
+    {
+     "name": "mannequin",
+     "label": "Your Mannequin",
+     "default": "/Game/Characters/Mannequins/Meshes/SKM_Manny"
+    }
+   ],
+   "prompt": "Find out what rigging {{selected_asset}} and giving it the animations {{actions}} would cost, without spending anything: dry runs only. If the mesh_generation tools are missing, say so and stop.\n1. hyper_mesh_status to see this session's jobs; if one made {{selected_asset}}, use its operation id as SourceOperationId, else MeshPath {{selected_asset}} (it is sent as a GLB).\n2. For each provider with a key (Providers lists them), hyper_mesh_rig with bDryRun true, RetargetTo {{mannequin}}; read Tasks, EstimatedCost, Destination and RetargetPlan.\n3. hyper_mesh_actions for each of {{actions}} with that provider; note the ids. Then hyper_mesh_animate with bDryRun true, Provider that provider, RigTaskId `dry-run`, RigMesh {{mannequin}} and those Actions, for the clips' price.\n4. Never send bDryRun false.\n5. Report a table with one row per provider: rig price, clips price, total, the actions found (or missing), and what Meshy and Tripo need from the model (Meshy: a textured humanoid facing +Z under 300,000 faces). Remind me that running it needs my approval."
   }
  ]
 }

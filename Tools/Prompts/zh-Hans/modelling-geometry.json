@@ -131,5 +131,11 @@
  "modelling-geometry.concept-image-to-model.title": "把概念图变成带贴图的 3D 模型",
  "modelling-geometry.concept-image-to-model.summary": "先用图像模型画出道具概念图，再让 Tripo、Meshy 或 Hi3D 依据该图生成模型，每一步都需你批准。",
  "modelling-geometry.concept-image-to-model.ph.subject.label": "要制作的内容",
- "modelling-geometry.concept-image-to-model.ph.name.label": "资产名称"
+ "modelling-geometry.concept-image-to-model.ph.name.label": "资产名称",
+ "modelling-geometry.retexture-paid-model.title": "用付费服务为模型重新贴图，最高 8K",
+ "modelling-geometry.retexture-paid-model.summary": "用 Meshy 或 Tripo 根据文字为生成的或项目中的网格体制作新的 PBR 贴图，2K 到 8K，并连同材质实例一起导入。",
+ "modelling-geometry.retexture-paid-model.ph.look.label": "新外观",
+ "modelling-geometry.retexture-paid-model.ph.resolution.label": "分辨率",
+ "modelling-geometry.retexture-paid-model.ph.resolution.hint": "Meshy：2k、4k 或 8k。Tripo：standard、detailed 或 8k。",
+ "modelling-geometry.retexture-paid-model.ph.max_cost.label": "最多花费（美元）"
 }
