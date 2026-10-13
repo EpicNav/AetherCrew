@@ -3,12 +3,15 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HyperAIStudioMentions.h"
 #include "HyperAIStudioNativeChat.h"
 #include "HyperAIStudioPreviewImage.h"
 #include "HyperAIStudioPromptPresets.h"
 #include "Widgets/SCompoundWidget.h"
 
 class SComboButton;
+class SMenuAnchor;
+class SHyperAIStudioMentionPicker;
 class SMultiLineEditableTextBox;
 class SHyperAIStudioPromptPicker;
 
@@ -54,6 +57,15 @@ public:
 	FHyperAIStudioMessageHints GetPendingHints() const;
 	/** Adds a picture to the next message; false when it is not an image file this chat can send. */
 	bool Attach(const FString& Path);
+	/**
+	 * Adds @-mention chips (assets, actors, files, skills, operations), each one's "@Label" token typed in at the cursor.
+	 * The message goes with an exact reference for every chip whose token is still in it. Drops, pastes and the @ picker
+	 * all come here.
+	 */
+	void AddMentions(const TArray<FHyperAIStudioMention>& InMentions);
+	const TArray<FHyperAIStudioMention>& GetMentions() const { return Mentions; }
+	/** What Submit would send now: the composer's text and the references of its chips. */
+	FString GetMessageWithMentions() const;
 	const TArray<FString>& GetAttached() const { return Attached; }
 
 	virtual FReply OnDragOver(const FGeometry& Geometry, const FDragDropEvent& Event) override;
@@ -78,6 +90,14 @@ private:
 
 	void Refresh();
 	void Submit();
+	/** The composer's text with one character per line end, and the cursor as an index into it. */
+	FString GetComposerTextAndCursor(int32& OutCursor) const;
+	void SetComposerText(const FString& Text, int32 Cursor);
+	/** Opens, updates or closes the @ picker for the query the cursor is in. */
+	void RefreshMentionPicker();
+	void CloseMentionPicker();
+	void ChooseMention(const FHyperAIStudioMention& Mention);
+	void RebuildMentions();
 	void RebuildAttachments();
 	TSharedRef<SWidget> BuildPromptPicker();
 	/** A picture scaled to fit MaxSize; Path is read as it paints, and the file reloads when it changes. */
@@ -98,6 +118,13 @@ private:
 	TSharedPtr<class SVerticalBox> PlanBox;
 	TSharedPtr<class SWrapBox> AttachmentBox;
 	TArray<FString> Attached;
+	/** @-mention chips in the composer, in the order they were added. */
+	TArray<FHyperAIStudioMention> Mentions;
+	TSharedPtr<class SWrapBox> MentionBox;
+	TSharedPtr<SMenuAnchor> MentionAnchor;
+	TSharedPtr<SHyperAIStudioMentionPicker> MentionPicker;
+	/** Typing changed the composer: the picker is updated on the next tick, once the cursor has moved. */
+	bool bMentionRefreshPending = false;
 	/** What the last Save to project or capture said, shown under the composer. */
 	FString Notice;
 	/** Messages go to HyperAI's team, not to this agent alone. */

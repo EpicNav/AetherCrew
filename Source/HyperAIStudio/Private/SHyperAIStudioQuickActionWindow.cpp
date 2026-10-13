@@ -16,6 +16,7 @@
 #include "Framework/Notifications/NotificationManager.h"
 #include "HyperAIStudioChatHistoryPrefs.h"
 #include "HyperAIStudioEditorRestart.h"
+#include "HyperAIStudioMentions.h"
 #include "HyperAIStudioRemote.h"
 #include "HyperAIStudioShell.h"
 #include "HAL/IConsoleManager.h"
@@ -1106,6 +1107,7 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildContextMenu()
 	TArray<FAssetData> SelectedAssets;
 	FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser")).Get().GetSelectedAssets(SelectedAssets);
 	TArray<FString> ActorPaths;
+	TArray<FHyperAIStudioMention> ActorMentions;
 	if (GEditor)
 	{
 		for (FSelectionIterator It(*GEditor->GetSelectedActors()); It; ++It)
@@ -1113,6 +1115,7 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildContextMenu()
 			if (const AActor* Actor = Cast<AActor>(*It))
 			{
 				ActorPaths.Add(Actor->GetPathName());
+				ActorMentions.Add(HyperAIStudio::Mentions::FromActor(*Actor));
 			}
 		}
 	}
@@ -1126,6 +1129,11 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildContextMenu()
 		FUIAction(
 			FExecuteAction::CreateSPLambda(this, [this, SelectedAssets]()
 			{
+				if (NativeView.IsValid())
+				{
+					NativeView->AddMentions(HyperAIStudio::Mentions::FromAssets(SelectedAssets));
+					return;
+				}
 				TArray<FString> Paths;
 				for (const FAssetData& Asset : SelectedAssets)
 				{
@@ -1139,8 +1147,13 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildContextMenu()
 		LOCTEXT("InsertActorsTooltip", "Paste the path of each selected level actor."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Level"),
 		FUIAction(
-			FExecuteAction::CreateSPLambda(this, [this, ActorPaths]()
+			FExecuteAction::CreateSPLambda(this, [this, ActorPaths, ActorMentions]()
 			{
+				if (NativeView.IsValid())
+				{
+					NativeView->AddMentions(ActorMentions);
+					return;
+				}
 				InsertIntoAgentPrompt(FString::Join(ActorPaths, TEXT("\n")), TEXT("selected actors"));
 			}),
 			FCanExecuteAction::CreateLambda([ActorPaths]() { return ActorPaths.Num() > 0; })));
@@ -1599,6 +1612,33 @@ FReply SHyperAIStudioQuickActionWindow::OnDragOver(const FGeometry& MyGeometry, 
 
 FReply SHyperAIStudioQuickActionWindow::OnDrop(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent)
 {
+	// HyperAI's chat view takes them as @-mention chips, the same ones its @ picker and a paste make.
+	if (NativeView.IsValid())
+	{
+		TArray<FHyperAIStudioMention> Dropped;
+		if (const TSharedPtr<FAssetDragDropOp> AssetDrop = DragDropEvent.GetOperationAs<FAssetDragDropOp>())
+		{
+			Dropped = HyperAIStudio::Mentions::FromAssets(AssetDrop->GetAssets());
+		}
+		else if (const TSharedPtr<FActorDragDropOp> ActorDrop = DragDropEvent.GetOperationAs<FActorDragDropOp>())
+		{
+			for (const TWeakObjectPtr<AActor>& Actor : ActorDrop->Actors)
+			{
+				if (Actor.IsValid())
+				{
+					Dropped.AddUnique(HyperAIStudio::Mentions::FromActor(*Actor));
+				}
+			}
+		}
+		if (Dropped.IsEmpty())
+		{
+			return FReply::Unhandled();
+		}
+		NativeView->AddMentions(Dropped);
+		LastMessage = FText::Format(LOCTEXT("MentionsDropped", "Added {0} {0}|plural(one=reference,other=references) to the message."), Dropped.Num());
+		AddTranscriptLine(LastMessage.ToString());
+		return FReply::Handled();
+	}
 	TArray<FString> Paths;
 	FString Label;
 	if (const TSharedPtr<FAssetDragDropOp> AssetDrop = DragDropEvent.GetOperationAs<FAssetDragDropOp>())
