@@ -6315,6 +6315,36 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.compare-before-after.ph.change.label",
+   "source": "The change to measure",
+   "text": "要测量的改动"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.compare-before-after.ph.seconds.hint",
+   "source": "1 to 60",
+   "text": "1 到 60"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.compare-before-after.ph.seconds.label",
+   "source": "Seconds to measure",
+   "text": "测量秒数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.compare-before-after.summary",
+   "source": "Profile, make one change, profile again the same way, and report what got better or worse with the bound before and after.",
+   "text": "先分析一次，做一处改动，再用相同方式分析，报告哪些变好或变差，以及前后的瓶颈。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.compare-before-after.title",
+   "source": "Compare performance before and after a change",
+   "text": "比较改动前后的性能"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "diagnostics-perf.find-asset-referencers.ph.depth.hint",
    "source": "How many levels of referencers to follow",
    "text": "向上追溯引用者的层数"
@@ -6411,6 +6441,36 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.live-nanite-niagara.ph.sample_seconds.hint",
+   "source": "0 reads now; 1 to 10 also measures cost",
+   "text": "0 表示立即读取；1 到 10 还会测量开销"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.live-nanite-niagara.ph.sample_seconds.label",
+   "source": "Seconds to sample",
+   "text": "采样秒数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.live-nanite-niagara.ph.top_n.label",
+   "source": "Systems and meshes to list",
+   "text": "列出的系统和网格数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.live-nanite-niagara.summary",
+   "source": "Sample the running game: Nanite's streaming pool and fallback meshes, Niagara systems with their particles, caps and cost, and renderer settings.",
+   "text": "采样运行中的游戏：Nanite 流送池和回退网格、Niagara 系统的粒子、上限和开销，以及渲染器设置。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.live-nanite-niagara.title",
+   "source": "Read Nanite and Niagara live during play",
+   "text": "游玩时实时读取 Nanite 和 Niagara"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "diagnostics-perf.play-and-read-new-log-errors.ph.play_seconds.hint",
    "source": "At most 28",
    "text": "最多 28"
@@ -6435,12 +6495,6 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
-   "key": "diagnostics-perf.play-session-cost.ph.duration_ms.label",
-   "source": "Profile length (ms)",
-   "text": "分析时长（毫秒）"
-  },
-  {
-   "namespace": "HyperAIStudioPrompts",
    "key": "diagnostics-perf.play-session-cost.ph.max_draws.label",
    "source": "Draw-call budget in play",
    "text": "运行时绘制调用预算"
@@ -6460,8 +6514,8 @@
   {
    "namespace": "HyperAIStudioPrompts",
    "key": "diagnostics-perf.play-session-cost.summary",
-   "source": "Compare the editor and Play In Editor costs of a level, read the last frame's draw calls, and prepare a CPU and frame profile plan.",
-   "text": "对比关卡在编辑器中和运行时的开销，读取上一帧的绘制调用，并准备 CPU 与帧分析采集方案。"
+   "source": "Compare the editor and Play In Editor costs of a level, read the last frame's draw calls, and profile the play session's frame.",
+   "text": "比较关卡在编辑器中和编辑器内游玩时的开销，读取最后一帧的绘制调用，并分析游玩会话的帧。"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -6492,6 +6546,84 @@
    "key": "diagnostics-perf.preflight-assets-before-move.title",
    "source": "Preflight selected assets before a move or rename",
    "text": "移动或重命名前预检选中的资产"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.profile-bot-route.ph.goal.hint",
+   "source": "Explore, Survive, Collect, Defeat or Reach",
+   "text": "Explore、Survive、Collect、Defeat 或 Reach"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.profile-bot-route.ph.goal.label",
+   "source": "Bot goal",
+   "text": "机器人目标"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.profile-bot-route.ph.seconds.hint",
+   "source": "1 to 60",
+   "text": "1 到 60"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.profile-bot-route.ph.seconds.label",
+   "source": "Seconds to measure",
+   "text": "测量秒数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.profile-bot-route.ph.target.label",
+   "source": "Goal target (blank for none)",
+   "text": "目标对象（留空则无）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.profile-bot-route.summary",
+   "source": "Let the playtest bot explore or fight while the session is measured, then report frame time, hitches and where they happened.",
+   "text": "让测试机器人探索或战斗，同时测量会话，然后报告帧时间、卡顿及其发生位置。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.profile-bot-route.title",
+   "source": "Profile the game while the bot plays a route",
+   "text": "在机器人跑路线时分析游戏性能"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.profile-play-session.ph.hitch_ms.label",
+   "source": "Hitch threshold (ms)",
+   "text": "卡顿阈值（毫秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.profile-play-session.ph.label.label",
+   "source": "Label for the profile",
+   "text": "性能档案标签"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.profile-play-session.ph.seconds.hint",
+   "source": "1 to 60",
+   "text": "1 到 60"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.profile-play-session.ph.seconds.label",
+   "source": "Seconds to measure",
+   "text": "测量秒数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.profile-play-session.summary",
+   "source": "Measure Play In Editor, say whether it is game-thread, render-thread, RHI or GPU bound or capped, and list its hitches and hot functions.",
+   "text": "测量编辑器内游玩，判断是游戏线程、渲染线程、RHI 还是 GPU 受限或被帧率上限限制，并列出卡顿和热点函数。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.profile-play-session.title",
+   "source": "Profile a play session and find what bounds it",
+   "text": "分析一次游玩会话并找出瓶颈"
   },
   {
    "namespace": "HyperAIStudioPrompts",

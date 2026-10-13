@@ -4,12 +4,12 @@
 static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatalog& OutCatalog)
 {
 	OutCatalog.Schema = TEXT("hyperai.capability-pack-catalog.v2");
-	OutCatalog.GeneratedFingerprint = TEXT("sha256:899b8faa0dc40d76eea2a3be77008edc064ce12accde8ec3ec692f5b90e0dfa8");
+	OutCatalog.GeneratedFingerprint = TEXT("sha256:110fcdba32304cd3070a3610977ae04491eeae26bc167b7eaf3677ca47bce5c3");
 	OutCatalog.ApprovedPlanFingerprint = TEXT("sha256:0111a6ad1e4b2f81b6da0439a22d83ffbfd8f7ccb20f958d8494eaeee84c6d1a");
 	OutCatalog.AdmissionMatrixFingerprint = TEXT("sha256:404ea0204015fb9558cf2b5fcc092d77fb7e6dc323f0adde7032252e025c23c9");
 	OutCatalog.SourceLedgerFingerprint = TEXT("sha256:2954241d83a1a24feaf00a28c6884cae62c6b138923cd8d2deae23b7dc9c4e2e");
 	OutCatalog.SourceArtifactFingerprint = TEXT("sha256:52806e6f474cb0216a8cecb2531649612ef1b87f7381a560d023fd8389fd6f4b");
-	OutCatalog.SourceArtifactCount = 171;
+	OutCatalog.SourceArtifactCount = 174;
 
 	{
 		FHyperAIStudioCapabilityPrerequisiteDefinition& Item = OutCatalog.Prerequisites.AddDefaulted_GetRef();
@@ -1285,11 +1285,15 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 		Pack.bContainsExternalEffects = true;
 		Pack.DependsOnPackIds.Add(TEXT("shared_foundation"));
 		Pack.AtomicCohortIds.Add(TEXT("cohort.source.hyperaistudioautomationtoolset.v1"));
+		Pack.AtomicCohortIds.Add(TEXT("cohort.source.hyperaistudioprofilingtoolset.v1"));
 		Pack.ToolNames.Add(TEXT("hyper_test_inspect"));
 		Pack.ToolNames.Add(TEXT("hyper_test_run"));
 		Pack.ToolNames.Add(TEXT("hyper_test_validate"));
 		Pack.ToolNames.Add(TEXT("hyper_profile_capture"));
 		Pack.ToolNames.Add(TEXT("hyper_build_diagnose"));
+		Pack.ToolNames.Add(TEXT("hyper_profile_session"));
+		Pack.ToolNames.Add(TEXT("hyper_profile_compare"));
+		Pack.ToolNames.Add(TEXT("hyper_profile_live"));
 		{
 			FHyperAIStudioCapabilityRequirementGroup& Group = Pack.Requirements.AddDefaulted_GetRef();
 			Group.Id = TEXT("automation");
@@ -4026,6 +4030,58 @@ static void PopulateGeneratedCapabilityPackCatalog(FHyperAIStudioCapabilityCatal
 		Tool.ProductEvidenceRows = 0;
 		Tool.SupplementalEvidenceRows = 0;
 		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::ExternalEffect);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_profile_session");
+		Tool.PackId = TEXT("automation_profiling_build");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudioprofilingtoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:afde2b9d8ce4d6ed0d64f7875977bbcff6e4cc2341d3a47bf73ed5bd4407ccdb");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Read);
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Edit);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_profile_compare");
+		Tool.PackId = TEXT("automation_profiling_build");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudioprofilingtoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:4adc002c4c429fbecfc6fcfd2872b00b95ebd07a76b745dcc5a2dca383b44c4e");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Read);
+	}
+	{
+		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();
+		Tool.Name = TEXT("hyper_profile_live");
+		Tool.PackId = TEXT("automation_profiling_build");
+		Tool.AtomicCohortId = TEXT("cohort.source.hyperaistudioprofilingtoolset.v1");
+		Tool.AdmissionState = EHyperAIStudioCapabilityAdmissionState::SourceCandidate;
+		Tool.bMayCauseExternalEffects = false;
+		Tool.SourceArtifactCount = 1;
+		Tool.SourceArtifactFingerprint = TEXT("sha256:2b5fa865d448c790065aac17140c61f7e405c5e8f6e2ad90311258a83faa1189");
+		Tool.SourceLedgerRowCount = 0;
+		Tool.SourceLedgerFingerprint = TEXT("sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
+		Tool.SourceLedgerCoverage = EHyperAIStudioCapabilityLedgerCoverage::ApprovedPlanExtension;
+		Tool.PlatformEvidenceRows = 0;
+		Tool.ProductEvidenceRows = 0;
+		Tool.SupplementalEvidenceRows = 0;
+		Tool.AllowedSafetyClasses.Add(EHyperAIStudioCapabilitySafetyClass::Read);
 	}
 	{
 		FHyperAIStudioCapabilityToolDefinition& Tool = OutCatalog.Tools.AddDefaulted_GetRef();

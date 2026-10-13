@@ -407,20 +407,21 @@
   {
    "id": "diagnostics-perf.play-session-cost",
    "title": "Measure a level's rendering cost during play",
-   "summary": "Compare the editor and Play In Editor costs of a level, read the last frame's draw calls, and prepare a CPU and frame profile plan.",
+   "summary": "Compare the editor and Play In Editor costs of a level, read the last frame's draw calls, and profile the play session's frame.",
    "packs": [
     "level_design",
     "automation_profiling_build"
    ],
    "skills": [
-    "unreal-playtest"
+    "unreal-playtest",
+    "performance"
    ],
    "tools": [
     "hyper_scene_cost_report",
     "hyper_playtest_run",
     "hyper_operation_wait",
     "hyper_pie_query",
-    "hyper_profile_capture"
+    "hyper_profile_session"
    ],
    "difficulty": "advanced",
    "tags": [
@@ -438,17 +439,188 @@
      "hint": "At most 28"
     },
     {
-     "name": "duration_ms",
-     "label": "Profile length (ms)",
-     "default": "5000"
-    },
-    {
      "name": "max_draws",
      "label": "Draw-call budget in play",
      "default": "3000"
     }
    ],
-   "prompt": "Measure {{level}}'s rendering cost while it plays. Change nothing in the level.\n1. hyper_scene_cost_report with world editor, scope level, topN 10: the editor baseline. If it or the level_design pack is unavailable, say so and stop.\n2. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown LeaveSessionRunning, and Bot steps: Play goal Explore seconds {{play_seconds}}; Capture text pie-view. Then hyper_operation_wait with timeoutMs 120000 and bWaitThroughApproval true.\n3. With play still running: hyper_pie_query to confirm the PIE world, then hyper_scene_cost_report with world pie and scope level, including measuredLastFrameDrawCalls and measuredLastFramePrimitives.\n4. hyper_profile_capture with bDryRun true, categories cpu and frame, durationMs {{duration_ms}} and bIncludePIE true: report its status and planHash. A real capture may not be available in this editor; if so, say it and do not retry.\n5. Stop play with Epic's StopPIE.\n6. A table of editor versus play: draw calls, shadow draws, triangles, instances, lights, last-frame figures. PASS/FAIL: estimated draw calls in play at most {{max_draws}}; no finding in play that the editor did not have. Show the capture on its own line as ![in play](path)."
+   "prompt": "Measure {{level}}'s rendering cost while it plays. Change nothing in the level.\n1. hyper_scene_cost_report with world editor, scope level, topN 10: the editor baseline. If it or the level_design pack is unavailable, say so and stop.\n2. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown LeaveSessionRunning, and Bot steps: Play goal Explore seconds {{play_seconds}}; Capture text pie-view. Then hyper_operation_wait with timeoutMs 120000 and bWaitThroughApproval true.\n3. With play still running: hyper_pie_query to confirm the PIE world, then hyper_scene_cost_report with world pie and scope level, including measuredLastFrameDrawCalls and measuredLastFramePrimitives.\n4. With play still running, hyper_profile_session with mode attach, durationSeconds 10, bHotFunctions true and a fresh operationId: report verdict.bound with its summary, frame time p50/p95/p99 and hitchCount.\n5. Stop play with Epic's StopPIE.\n6. A table of editor versus play: draw calls, shadow draws, triangles, instances, lights, last-frame figures. PASS/FAIL: estimated draw calls in play at most {{max_draws}}; no finding in play that the editor did not have. Show the capture on its own line as ![in play](path)."
+  },
+  {
+   "id": "diagnostics-perf.profile-play-session",
+   "title": "Profile a play session and find what bounds it",
+   "summary": "Measure Play In Editor, say whether it is game-thread, render-thread, RHI or GPU bound or capped, and list its hitches and hot functions.",
+   "packs": [
+    "automation_profiling_build",
+    "level_design"
+   ],
+   "skills": [
+    "performance"
+   ],
+   "tools": [
+    "hyper_profile_session",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "performance",
+    "profiling",
+    "fps",
+    "frame time",
+    "bound",
+    "gpu",
+    "cpu",
+    "hitches",
+    "insights"
+   ],
+   "placeholders": [
+    {
+     "name": "seconds",
+     "label": "Seconds to measure",
+     "default": "10",
+     "hint": "1 to 60"
+    },
+    {
+     "name": "hitch_ms",
+     "label": "Hitch threshold (ms)",
+     "default": "50"
+    },
+    {
+     "name": "label",
+     "label": "Label for the profile",
+     "default": "baseline"
+    }
+   ],
+   "prompt": "Profile {{level}} while it plays and tell me what limits its frame rate. Change nothing in the level.\n1. hyper_profile_session with mode auto, durationSeconds {{seconds}}, hitchThresholdMs {{hitch_ms}}, bHotFunctions true, bSceneCost true, label {{label}} and a fresh operationId. If it answers awaiting_user_approval, hyper_operation_wait with that operationId, timeoutMs 180000 and bWaitThroughApproval true, then hyper_profile_session with profileId set to it. If the automation_profiling_build pack is unavailable, say so and stop.\n2. Lead with verdict.bound and verdict.summary, then the evidence lines and the breakdown. If gpuNote says GPU time unavailable, say so plainly.\n3. A table of frame time (average, p50, p95, p99, max), each thread from threads, draw calls and hitchCount.\n4. The five worst hitches: frame, atSeconds, frameMs, bound, spikes and events.\n5. The top CPU stats or GPU passes for the bound, and hotFunctions (and hotFunctionsInWorstFrame), or hotFunctionsNote when there are none.\n6. The advice, and the profileId so later changes can be compared with hyper_profile_compare."
+  },
+  {
+   "id": "diagnostics-perf.profile-bot-route",
+   "title": "Profile the game while the bot plays a route",
+   "summary": "Let the playtest bot explore or fight while the session is measured, then report frame time, hitches and where they happened.",
+   "packs": [
+    "automation_profiling_build",
+    "pie_runtime"
+   ],
+   "skills": [
+    "performance",
+    "unreal-playtest"
+   ],
+   "tools": [
+    "hyper_profile_session",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "performance",
+    "profiling",
+    "bot",
+    "route",
+    "combat",
+    "hitches",
+    "stutter"
+   ],
+   "placeholders": [
+    {
+     "name": "seconds",
+     "label": "Seconds to measure",
+     "default": "30",
+     "hint": "1 to 60"
+    },
+    {
+     "name": "goal",
+     "label": "Bot goal",
+     "default": "Explore",
+     "hint": "Explore, Survive, Collect, Defeat or Reach"
+    },
+    {
+     "name": "target",
+     "label": "Goal target (blank for none)",
+     "default": ""
+    }
+   ],
+   "prompt": "Measure {{level}} while the playtest bot plays it, to find the stutters a player meets. Change nothing in the level.\n1. hyper_profile_session with mode start, warmupSeconds 3, durationSeconds {{seconds}}, bHotFunctions true, bSceneCost true, a fresh operationId, and bot steps: one Play step with goal {{goal}}, target {{target}} (leave target out when blank) and timeoutSeconds {{seconds}}. Starting play asks for approval when edits do: hyper_operation_wait with the operationId, timeoutMs 240000 and bWaitThroughApproval true, then hyper_profile_session with profileId set to it.\n2. Say how the bot route went (bot).\n3. The verdict with its evidence, and a table of frame time (average, p95, p99, max) and hitchCount.\n4. Every listed hitch: atSeconds, frameMs, bound, spikes and events, and hotFunctionsInWorstFrame for the slowest.\n5. PASS/FAIL: p99 frame time under 33 ms, and no hitch over 100 ms. Then the advice."
+  },
+  {
+   "id": "diagnostics-perf.compare-before-after",
+   "title": "Compare performance before and after a change",
+   "summary": "Profile, make one change, profile again the same way, and report what got better or worse with the bound before and after.",
+   "packs": [
+    "automation_profiling_build"
+   ],
+   "skills": [
+    "performance"
+   ],
+   "tools": [
+    "hyper_profile_session",
+    "hyper_profile_compare",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "performance",
+    "profiling",
+    "compare",
+    "regression",
+    "optimisation",
+    "before",
+    "after"
+   ],
+   "placeholders": [
+    {
+     "name": "change",
+     "label": "The change to measure",
+     "default": "set r.ScreenPercentage to 75 in this session"
+    },
+    {
+     "name": "seconds",
+     "label": "Seconds to measure",
+     "default": "10",
+     "hint": "1 to 60"
+    }
+   ],
+   "prompt": "Measure what this change does to {{level}}'s performance: {{change}}.\n1. hyper_profile_session with mode start, durationSeconds {{seconds}}, label before, operationId perf-before plus a short suffix of your own. If it waits for approval, hyper_operation_wait with bWaitThroughApproval true, then read it by profileId.\n2. Make the change, and only that change. If it needs an edit tool, follow that pack's plan, wait and validate steps.\n3. hyper_profile_session again with exactly the same mode, duration and level, label after, operationId perf-after with the same suffix.\n4. hyper_profile_compare with baseline the first id and candidate the second.\n5. Report summary, boundBefore and boundAfter, a table of metrics (metric, before, after, change %, verdict), and the stats that moved most. A change under 5% is noise: say so rather than claim it.\n6. PASS if frame_ms_avg and frame_ms_p99 are better or the same; FAIL otherwise, with the stat that got worse."
+  },
+  {
+   "id": "diagnostics-perf.live-nanite-niagara",
+   "title": "Read Nanite and Niagara live during play",
+   "summary": "Sample the running game: Nanite's streaming pool and fallback meshes, Niagara systems with their particles, caps and cost, and renderer settings.",
+   "packs": [
+    "automation_profiling_build",
+    "niagara_vfx"
+   ],
+   "skills": [
+    "performance"
+   ],
+   "tools": [
+    "hyper_profile_live",
+    "hyper_playtest_run",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "performance",
+    "nanite",
+    "niagara",
+    "streaming",
+    "particles",
+    "effect type",
+    "budget",
+    "live"
+   ],
+   "placeholders": [
+    {
+     "name": "sample_seconds",
+     "label": "Seconds to sample",
+     "default": "3",
+     "hint": "0 reads now; 1 to 10 also measures cost"
+    },
+    {
+     "name": "top_n",
+     "label": "Systems and meshes to list",
+     "default": "10"
+    }
+   ],
+   "prompt": "Read what {{level}} draws while it plays, read-only.\n1. If Play In Editor is not running, start it with hyper_playtest_run (mode StartInProcess, teardown LeaveSessionRunning, one Bot step Wait seconds 5) and hyper_operation_wait with bWaitThroughApproval true.\n2. hyper_profile_live with sampleSeconds {{sample_seconds}} and topN {{top_n}}.\n3. Nanite: enabled, streaming pool MB, qualityScale, Nanite, fallback and plain mesh counts, each fallback with its reason, and the sampled root, visible and requested streaming data. Say which figures it notes it cannot read.\n4. Niagara: active components, emitters, CPU and GPU particles; a table of systems (system, effect type, instances, particles, game-thread us, render-thread us, GPU us); effect types at their caps; overBudget; the FX budget.\n5. The renderer lines.\n6. PASS/FAIL: no effect type at its cap, no system over 500 us a frame on the game thread, qualityScale 1. Stop play with Epic's StopPIE if you started it."
   }
  ]
 }

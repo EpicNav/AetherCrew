@@ -1350,6 +1350,13 @@ private:
 					TEXT("hyper_test_validate"), TEXT("hyper_profile_capture"),
 					TEXT("hyper_build_diagnose")},
 				{}
+			},
+			{
+				TEXT("HyperAIStudioProfiling"),
+				TEXT("automation_profiling_build"),
+				TEXT("cohort.source.hyperaistudioprofilingtoolset.v1"),
+				{TEXT("hyper_profile_session"), TEXT("hyper_profile_compare"), TEXT("hyper_profile_live")},
+				{TEXT("Niagara")}
 			}
 		};
 		const bool bAllowSourceCandidate =

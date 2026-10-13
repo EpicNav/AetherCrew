@@ -3434,6 +3434,31 @@
       0,
       0
      ]
+    },
+    {
+     "name": "hyper_profile_session",
+     "cohort": "cohort.source.hyperaistudioprofilingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read",
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_profile_compare",
+     "cohort": "cohort.source.hyperaistudioprofilingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_profile_live",
+     "cohort": "cohort.source.hyperaistudioprofilingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
     }
    ]
   },

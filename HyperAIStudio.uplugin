@@ -463,6 +463,19 @@
 			]
 		},
 		{
+			"Name": "HyperAIStudioProfiling",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
 			"Name": "HyperAIStudioScripting",
 			"Type": "Editor",
 			"LoadingPhase": "None",

@@ -291,6 +291,10 @@ public:
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Automation")
 	static FHyperAITestValidateReport hyper_test_validate(const FHyperAITestValidateRequest& Request);
 
+	/**
+	 * Seals a bounded profile-capture intent (cpu, frame, bookmark, memory) and its plan hash; it starts no capture. To
+	 * measure a play session and get its bound, hitches and hot functions, use hyper_profile_session.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Automation")
 	static FHyperAIProfileCaptureReport hyper_profile_capture(
 		const FHyperAIProfileCaptureRequest& Request);
