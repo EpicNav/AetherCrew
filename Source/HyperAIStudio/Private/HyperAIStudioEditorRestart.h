@@ -76,6 +76,8 @@ struct FHyperAIStudioRestartChat
 	FString Title;
 	/** A Claude Code chat running in the background outlives the editor; its tab attaches to it again. */
 	FString BackgroundId;
+	/** A native chat whose agent HyperAI's background host runs: its tab reattaches to that session. */
+	FString HostSession;
 	/** Its turn was running when the restart began. MCP calls carry no caller, so this is the chat that asked. */
 	bool bWorking = false;
 	/** After the restart: what this chat is told first. Empty for a chat that did not ask. */
@@ -186,4 +188,23 @@ public:
 	 */
 	static bool LoadResume(const FString& Folder, const FString& Token, double MaxAgeSeconds);
 	static FString GetFolder();
+
+	/**
+	 * The chats of background-host sessions no editor shows (FHyperAIStudioAgentHost::FindDetachedSessions) join the
+	 * chats waiting for their tabs, beside a restart's own. A chat that was working when its editor went away is told
+	 * the editor is back. Returns how many joined.
+	 */
+	static int32 AdoptHostedChats(const TArray<struct FHyperAIStudioHostSessionMeta>& Sessions);
+	/** One such session as a chat to resume: pure, for tests. */
+	static FHyperAIStudioRestartChat ChatFromHostSession(const struct FHyperAIStudioHostSessionMeta& Session);
+
+	/**
+	 * No second editor: one the restart helper opened (it carries the restart's token) gives way when another editor of
+	 * this user has the same project open already, such as one opened by hand while the editor was being reopened.
+	 */
+	static bool ShouldGiveWay(const FString& Token, const TArray<uint32>& OtherEditors);
+	/** The other editors of this user open on ProjectFile (HyperAIStudioRecovery.ps1); ProcessList is a test's fake list. */
+	static TArray<uint32> FindOtherEditors(const FString& ProjectFile, const FString& ProcessList = FString());
+	/** The helper found this editor (Pid) open already and handed it the plan: its result says so. */
+	static bool IsHandedTo(const TSharedPtr<FJsonObject>& Plan, const TSharedPtr<FJsonObject>& Result, uint32 Pid);
 };

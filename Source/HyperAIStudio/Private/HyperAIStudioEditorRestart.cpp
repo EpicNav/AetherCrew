@@ -11,6 +11,7 @@
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
+#include "HyperAIStudioAgentHost.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioSettings.h"
@@ -115,6 +116,8 @@ namespace HyperAIStudio::EditorRestart::Private
 		FString WatchPath;
 		FString WatchText;
 		FTSTicker::FDelegateHandle WatchTicker;
+		/** Looks for a plan the restart helper handed to this editor, open already when it would have opened one. */
+		FTSTicker::FDelegateHandle HandOverTicker;
 	};
 
 	FState& State()
@@ -228,6 +231,7 @@ namespace HyperAIStudio::EditorRestart::Private
 		Object->SetStringField(TEXT("subagent"), Chat.Subagent);
 		Object->SetStringField(TEXT("title"), Chat.Title);
 		Object->SetStringField(TEXT("backgroundId"), Chat.BackgroundId);
+		Object->SetStringField(TEXT("hostSession"), Chat.HostSession);
 		Object->SetBoolField(TEXT("working"), Chat.bWorking);
 		return Object;
 	}
@@ -248,6 +252,7 @@ namespace HyperAIStudio::EditorRestart::Private
 		Chat.Subagent = StringField(Object, TEXT("subagent"));
 		Chat.Title = StringField(Object, TEXT("title"));
 		Chat.BackgroundId = StringField(Object, TEXT("backgroundId"));
+		Chat.HostSession = StringField(Object, TEXT("hostSession"));
 		return Chat;
 	}
 
@@ -321,6 +326,7 @@ namespace HyperAIStudio::EditorRestart::Private
 	FString DescribeChat(const FHyperAIStudioRestartChat& Chat)
 	{
 		const FString How = !Chat.BackgroundId.IsEmpty() ? FString(TEXT("attaches to its background session again"))
+			: !Chat.HostSession.IsEmpty() ? FString(TEXT("reattaches to its agent, which keeps running in HyperAI's background host"))
 			: Chat.SessionId.IsEmpty() ? FString(TEXT("starts a new conversation, since its id is not known"))
 			: FString::Printf(TEXT("resumes %s"), *Chat.SessionId);
 		return FString::Printf(TEXT("Chat %d, %s: %s%s"), Chat.TabIndex, *Chat.Agent, *How, Chat.bWorking ? TEXT(", and is told to continue") : TEXT(""));
@@ -844,6 +850,43 @@ namespace HyperAIStudio::EditorRestart::Private
 		UE_LOG(LogHyperAIStudioRestart, Display, TEXT("Offering to resume %d chat(s) from a restart that closed the editor and never opened it again."), Count);
 	}
 
+	/**
+	 * The restart helper found this editor open already when it would have opened one (by hand, during a crash's
+	 * countdown or a build), so it handed it the plan instead: the chats come here, as they would to an editor it opened.
+	 */
+	bool CheckHandOver(float)
+	{
+		const FString Folder = FHyperAIStudioEditorRestart::GetFolder();
+		const TSharedPtr<FJsonObject> Result = ReadJson(Folder / TEXT("result.json"));
+		if (!Result.IsValid())
+		{
+			return true;
+		}
+		const TSharedPtr<FJsonObject> Plan = ReadJson(Folder / TEXT("request.json"));
+		if (!FHyperAIStudioEditorRestart::IsHandedTo(Plan, Result, FPlatformProcess::GetCurrentProcessId()))
+		{
+			return true;
+		}
+		IFileManager::Get().Delete(*(Folder / TEXT("request.json")), false, true, true);
+		IFileManager::Get().Delete(*(Folder / TEXT("result.json")), false, true, true);
+		UE_LOG(LogHyperAIStudioRestart, Display, TEXT("The restart helper found this editor open already and handed it the chats."));
+		if (AdoptChats(Folder, Plan, Result))
+		{
+			SHyperAIStudioQuickActionWindow::TakeRestartChats();
+			ShowChats();
+		}
+		return true;
+	}
+
+	void StartHandOverWatch()
+	{
+		FState& Current = State();
+		if (!Current.HandOverTicker.IsValid() && IsInteractiveEditor())
+		{
+			Current.HandOverTicker = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateStatic(&CheckHandOver), WatchSeconds);
+		}
+	}
+
 	void RegisterToolset()
 	{
 		FState& Current = State();
@@ -1081,7 +1124,17 @@ FString FHyperAIStudioEditorRestart::DescribeRestart(const TSharedPtr<FJsonObjec
 		: FString(TEXT("The Unreal Editor restarted, as you asked with hyper_editor_restart, and this chat resumed.")), FString()};
 	if (Crash.IsValid())
 	{
+		const FString Type = StringField(Crash, TEXT("type"));
+		double Uptime = 0.0;
+		Crash->TryGetNumberField(TEXT("uptimeSeconds"), Uptime);
 		Lines.Add(TEXT("- Crash: ") + StringField(Crash, TEXT("error")));
+		if (!Type.IsEmpty() || Uptime > 0.0)
+		{
+			// An assert is a check that failed in code; a crash an access violation or the like; how long it had run tells a
+			// crash on load from one in the middle of work.
+			Lines.Add(FString::Printf(TEXT("  Kind: %s%s"), Type.IsEmpty() ? TEXT("Crash") : *Type,
+				Uptime > 0.0 ? *FString::Printf(TEXT(", %d min after the editor started"), FMath::Max(1, FMath::RoundToInt(Uptime / 60.0))) : TEXT("")));
+		}
 		const TArray<FString> Frames = StringArray(Crash, TEXT("callstack"));
 		if (!Frames.IsEmpty())
 		{
@@ -1089,6 +1142,15 @@ FString FHyperAIStudioEditorRestart::DescribeRestart(const TSharedPtr<FJsonObjec
 			for (const FString& Frame : Frames)
 			{
 				Lines.Add(TEXT("      ") + Frame);
+			}
+		}
+		const TArray<FString> LogTail = StringArray(Crash, TEXT("logTail"));
+		if (!LogTail.IsEmpty())
+		{
+			Lines.Add(TEXT("  Last logged before it:"));
+			for (const FString& Logged : LogTail)
+			{
+				Lines.Add(TEXT("      ") + Logged);
 			}
 		}
 		Lines.Add(TEXT("  The report: ") + StringField(Crash, TEXT("report")));
@@ -1156,6 +1218,19 @@ FString FHyperAIStudioEditorRestart::DescribeRestart(const TSharedPtr<FJsonObjec
 	if (Crash.IsValid())
 	{
 		Lines.Add(TEXT("Work not saved before the crash is lost, unless the editor offered to restore it from an autosave. If an Unreal tool call of yours never got its answer, it may be what crashed the editor: check that call before you make it again."));
+	}
+	bool bHosted = false;
+	const TArray<TSharedPtr<FJsonValue>>* PlanChats = nullptr;
+	if (Plan.IsValid() && Plan->TryGetArrayField(TEXT("chats"), PlanChats) && PlanChats)
+	{
+		for (const TSharedPtr<FJsonValue>& Value : *PlanChats)
+		{
+			bHosted = bHosted || !ChatFromJson(Value.IsValid() ? Value->AsObject() : nullptr).HostSession.IsEmpty();
+		}
+	}
+	if (bHosted)
+	{
+		Lines.Add(TEXT("This chat's agent kept running in HyperAI's background host while the editor was away; Unreal MCP calls made then failed, so repeat any you still need."));
 	}
 	Lines.Add(TEXT("Unreal MCP is up again. Continue where you left off."));
 	return FString::Join(Lines, TEXT("\n"));
@@ -1365,6 +1440,103 @@ void FHyperAIStudioEditorRestart::DeclineResumeOffer()
 	EndOffer();
 }
 
+FHyperAIStudioRestartChat FHyperAIStudioEditorRestart::ChatFromHostSession(const FHyperAIStudioHostSessionMeta& Session)
+{
+	FHyperAIStudioRestartChat Chat;
+	Chat.TabIndex = FMath::Max(1, Session.TabIndex);
+	Chat.Agent = Session.Agent;
+	Chat.Model = Session.Model;
+	Chat.SessionId = Session.SessionId.IsEmpty() ? Session.ResumeSessionId : Session.SessionId;
+	Chat.Subagent = Session.Subagent;
+	Chat.Title = Session.Title;
+	Chat.HostSession = Session.Id;
+	Chat.bWorking = Session.bBusyAtDetach;
+	// Sent once its turn ends (the chat queues it): the agent hears why its Unreal calls failed for a while.
+	Chat.Message = Session.bBusyAtDetach
+		? FString(TEXT("The Unreal Editor closed while you were working and is open again; this chat reattached to you, as you kept running in HyperAI's background host. Unreal MCP calls you made while it was closed failed, so repeat any you still need, then continue where you left off."))
+		: FString();
+	return Chat;
+}
+
+int32 FHyperAIStudioEditorRestart::AdoptHostedChats(const TArray<FHyperAIStudioHostSessionMeta>& Sessions)
+{
+	using namespace HyperAIStudio::EditorRestart::Private;
+	int32 Added = 0;
+	for (const FHyperAIStudioHostSessionMeta& Session : Sessions)
+	{
+		FHyperAIStudioRestartChat Chat = ChatFromHostSession(Session);
+		if (Chat.Agent.IsEmpty())
+		{
+			continue;
+		}
+		UE_LOG(LogHyperAIStudioRestart, Display, TEXT("Chat %d (%s) kept running in the background host; it reattaches."), Chat.TabIndex, *Chat.Agent);
+		State().Pages.AddUnique(Chat.TabIndex);
+		State().Chats.Add(MoveTemp(Chat));
+		++Added;
+	}
+	return Added;
+}
+
+bool FHyperAIStudioEditorRestart::ShouldGiveWay(const FString& Token, const TArray<uint32>& OtherEditors)
+{
+	// Only an editor a restart or a crash reopened gives way; one opened by hand never closes itself.
+	return !Token.IsEmpty() && !OtherEditors.IsEmpty();
+}
+
+TArray<uint32> FHyperAIStudioEditorRestart::FindOtherEditors(const FString& ProjectFile, const FString& ProcessList)
+{
+	using namespace HyperAIStudio::EditorRestart::Private;
+	TArray<uint32> Found;
+	const FString ScriptPath = Script(TEXT("HyperAIStudioRecovery.ps1"));
+	if (!PLATFORM_WINDOWS || !FPaths::FileExists(ScriptPath) || ProjectFile.IsEmpty())
+	{
+		return Found;
+	}
+	FString Params = FString::Printf(TEXT("-NoProfile -ExecutionPolicy Bypass -File \"%s\" -ProjectFile \"%s\" -ExcludeId %u"), *Native(ScriptPath), *Native(ProjectFile),
+		FPlatformProcess::GetCurrentProcessId());
+	if (!ProcessList.IsEmpty())
+	{
+		Params += FString::Printf(TEXT(" -ProcessList \"%s\""), *Native(ProcessList));
+	}
+	int32 Code = -1;
+	FString Out;
+	FString Err;
+	FPlatformProcess::ExecProcess(TEXT("powershell.exe"), *Params, &Code, &Out, &Err);
+	TArray<TSharedPtr<FJsonValue>> Values;
+	const FString Text = Out.TrimStartAndEnd();
+	if (Code == 0 && FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Values))
+	{
+		for (const TSharedPtr<FJsonValue>& Value : Values)
+		{
+			const TSharedPtr<FJsonObject> Editor = Value.IsValid() && Value->Type == EJson::Object ? Value->AsObject() : nullptr;
+			double Id = 0.0;
+			if (Editor.IsValid() && Editor->TryGetNumberField(TEXT("processId"), Id) && Id > 0.0)
+			{
+				Found.Add(static_cast<uint32>(Id));
+			}
+		}
+	}
+	else if (Code != 0)
+	{
+		UE_LOG(LogHyperAIStudioRestart, Warning, TEXT("Could not list the editors open on this project: %s"), *Err.Left(300));
+	}
+	return Found;
+}
+
+bool FHyperAIStudioEditorRestart::IsHandedTo(const TSharedPtr<FJsonObject>& Plan, const TSharedPtr<FJsonObject>& Result, const uint32 Pid)
+{
+	using namespace HyperAIStudio::EditorRestart::Private;
+	double Editor = 0.0;
+	if (!Plan.IsValid() || !Result.IsValid() || !Result->TryGetNumberField(TEXT("editorProcessId"), Editor))
+	{
+		return false;
+	}
+	const FString Token = StringField(Plan, TEXT("token"));
+	return StringField(Result, TEXT("state")) == TEXT("already_open") && static_cast<uint32>(Editor) == Pid && !Token.IsEmpty()
+		&& StringField(Result, TEXT("token")) == Token
+		&& (!FPaths::IsProjectFilePathSet() || FPaths::IsSamePath(StringField(Plan, TEXT("projectFile")), FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath())));
+}
+
 void FHyperAIStudioEditorRestart::Startup()
 {
 	using namespace HyperAIStudio::EditorRestart::Private;
@@ -1391,12 +1563,41 @@ void FHyperAIStudioEditorRestart::Startup()
 
 	FString Token;
 	FParse::Value(FCommandLine::Get(), TEXT("HyperAIResume="), Token);
-	const bool bResume = IsInteractiveEditor() && LoadResume(GetFolder(), Token, MaxResumeAgeSeconds);
+	// No second editor: one the helper opened gives way to an editor of the same project opened by hand meanwhile, before
+	// it takes the restart's chats (they stay for that editor) or writes anything.
+	if (IsInteractiveEditor() && !Token.IsEmpty() && FPaths::IsProjectFilePathSet())
+	{
+		const TArray<uint32> Others = FindOtherEditors(FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath()));
+		if (ShouldGiveWay(Token, Others))
+		{
+			UE_LOG(LogHyperAIStudioRestart, Warning, TEXT("This project is open already in another editor (process %u), so this one, opened by a HyperAI restart, closes; that editor takes the chats."),
+				Others[0]);
+			const TSharedRef<FJsonObject> Note = MakeShared<FJsonObject>();
+			Note->SetNumberField(TEXT("editorProcessId"), Others[0]);
+			Note->SetStringField(TEXT("at"), FDateTime::UtcNow().ToIso8601());
+			WriteJson(StudioFolder(TEXT("Recovery")) / TEXT("gave-way.json"), Note);
+			// At once and with nothing saved: this editor never got as far as anything worth keeping.
+			FPlatformMisc::RequestExit(/*Force=*/true, TEXT("HyperAIStudio.SecondEditor"));
+			return;
+		}
+	}
+	bool bResume = IsInteractiveEditor() && LoadResume(GetFolder(), Token, MaxResumeAgeSeconds);
+	// Chats whose agents kept running in the background host while no editor showed them come back too.
+	if (IsInteractiveEditor() && FHyperAIStudioAgentHost::ShouldHost() && FPaths::IsProjectFilePathSet())
+	{
+		TSet<FString> Taken;
+		for (const FHyperAIStudioRestartChat& Chat : Current.Chats)
+		{
+			Taken.Add(Chat.HostSession);
+		}
+		bResume = AdoptHostedChats(FHyperAIStudioAgentHost::FindDetachedSessions(FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath()), Taken)) > 0 || bResume;
+	}
 	// Once the main frame is up: the crash watch, and after a restart, every restored chat tab a moment later. Tabs the
 	// Studio layout brings back take their chats as they open. A restart too old to resume by itself is offered.
 	auto WhenUp = [bResume]()
 	{
 		StartCrashWatch();
+		StartHandOverWatch();
 		if (bResume)
 		{
 			FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([](float)
@@ -1423,6 +1624,11 @@ void FHyperAIStudioEditorRestart::Shutdown()
 	using namespace HyperAIStudio::EditorRestart::Private;
 	FState& Current = State();
 	EndCrashWatch();
+	if (Current.HandOverTicker.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(Current.HandOverTicker);
+		Current.HandOverTicker.Reset();
+	}
 	StopWatchingClose();
 	if (Current.PreExit.IsValid())
 	{

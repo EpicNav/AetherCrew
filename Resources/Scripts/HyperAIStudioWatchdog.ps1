@@ -8,6 +8,7 @@ param([Parameter(Mandatory = $true)][string]$Session)
 $ErrorActionPreference = 'Continue'
 $Utf8 = New-Object System.Text.UTF8Encoding($false)
 $Folder = Split-Path -Parent $Session
+. (Join-Path $PSScriptRoot 'HyperAIStudioRecovery.ps1')
 
 function Say([string]$Text) {
   [IO.File]::AppendAllText((Join-Path $Folder 'watchdog.log'), ('{0}  {1}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $Text) + [Environment]::NewLine, $Utf8)
@@ -36,17 +37,11 @@ $Crash = $null
 for ($Try = 0; $Try -lt 10 -and -not $Crash; $Try++) {
   if ($Try) { Start-Sleep -Milliseconds 500 }
   foreach ($Dir in @(Get-ChildItem -LiteralPath $Plan.crashes -Directory -ErrorAction SilentlyContinue | Where-Object { $_.CreationTimeUtc -ge $Since })) {
-    try { $Context = ([xml][IO.File]::ReadAllText((Join-Path $Dir.FullName 'CrashContext.runtime-xml'))).FGenericCrashContext.RuntimeProperties } catch { continue }
-    if ("$($Context.ProcessId)" -ne "$($Plan.editorProcessId)" -or $Context.CrashType -notin 'Crash', 'Assert', 'GPUCrash', 'OutOfMemory' -or "$($Context.IsRequestingExit)" -eq 'true') { continue }
-    $Crash = @{
-      error = (@("$($Context.ErrorMessage)" -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join ' ')
-      callstack = @("$($Context.CallStack)" -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -First 8)
-      report = 'Saved/Crashes/' + $Dir.Name
-      # For the helper: the crash reporter still showing this editor's crash, and the report it would send.
-      processId = [int]$Plan.editorProcessId
-      folder = $Dir.FullName
-    }
-    if ($Crash.error.Length -gt 400) { $Crash.error = $Crash.error.Substring(0, 400) + '...' }
+    # Its kind, error, first frames and the last lines it logged: what the chats are told (HyperAIStudioRecovery.ps1).
+    $Report = Read-CrashReport -Folder $Dir.FullName -ProcessId $Plan.editorProcessId
+    if (-not $Report -or $Report.type -notin 'Crash', 'Assert', 'GPUCrash', 'OutOfMemory' -or $Report.requestingExit) { continue }
+    $Crash = $Report
+    $Crash.Remove('requestingExit')
   }
 }
 if (-not $Crash) {
