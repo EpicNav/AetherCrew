@@ -23,6 +23,14 @@
 #include "EnhancedActionKeyMapping.h"
 #include "EnhancedInputSubsystems.h"
 #include "EnhancedPlayerInput.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
+#include "Field/FieldSystemObjects.h"
+#include "GeometryCollection/GeometryCollection.h"
+#include "GeometryCollection/GeometryCollectionAlgo.h"
+#include "GeometryCollection/GeometryCollectionComponent.h"
+#include "GeometryCollection/GeometryCollectionObject.h"
+#include "GeometryCollectionProxyData.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/GameModeBase.h"
@@ -584,7 +592,7 @@ namespace HyperAIStudio::Bot::Private
 	{
 		return Action == EHyperAIBotAction::AssertProperty || Action == EHyperAIBotAction::AssertNear
 			|| Action == EHyperAIBotAction::AssertOnScreen || Action == EHyperAIBotAction::AssertExists
-			|| Action == EHyperAIBotAction::AssertGone;
+			|| Action == EHyperAIBotAction::AssertGone || Action == EHyperAIBotAction::AssertBroken;
 	}
 
 	TArray<FString> Words(const FString& Name)
@@ -781,6 +789,213 @@ namespace HyperAIStudio::Bot::Private
 		Out.Summary = Lines.IsEmpty() ? FString(TEXT("no actions mapped yet")) : FString::Join(Lines, TEXT(" | "));
 		return Out;
 	}
+
+	// --- Destruction ------------------------------------------------------------------------------------------------
+
+	/** The geometry collections of the actors matching Target, or of every actor when Target is empty. */
+	TArray<UGeometryCollectionComponent*> GeometryCollections(UWorld& World, const FString& Target, const int32 PlayerIndex)
+	{
+		TArray<AActor*> Actors;
+		if (Target.IsEmpty())
+		{
+			for (TActorIterator<AActor> It(&World); It; ++It)
+			{
+				if (IsValid(*It) && !It->IsActorBeingDestroyed()) Actors.Add(*It);
+			}
+		}
+		else
+		{
+			Actors = FindAll(World, Target, PlayerIndex);
+		}
+		TArray<UGeometryCollectionComponent*> Out;
+		for (AActor* Actor : Actors)
+		{
+			TInlineComponentArray<UGeometryCollectionComponent*> Components(Actor);
+			for (UGeometryCollectionComponent* Component : Components)
+			{
+				if (Component && Component->GetRestCollection() && Component->GetRestCollection()->GetGeometryCollection().IsValid()) Out.Add(Component);
+			}
+		}
+		return Out;
+	}
+
+	FBox BoundsOf(const TArray<UGeometryCollectionComponent*>& Components)
+	{
+		FBox Bounds(ForceInit);
+		for (const UGeometryCollectionComponent* Component : Components)
+		{
+			Bounds += Component->Bounds.GetBox();
+		}
+		return Bounds;
+	}
+
+	/** The strain a Damage step applies when its Value is empty: twice the highest threshold any of them holds. */
+	float StrainFor(const TArray<UGeometryCollectionComponent*>& Components)
+	{
+		float Highest = 0.f;
+		for (UGeometryCollectionComponent* Component : Components)
+		{
+			for (const float Threshold : Component->GetDamageThreshold()) Highest = FMath::Max(Highest, Threshold);
+			if (Component->bUseSizeSpecificDamageThreshold)
+			{
+				for (const FGeometryCollectionSizeSpecificData& Data : Component->GetRestCollection()->SizeSpecificData)
+				{
+					Highest = FMath::Max(Highest, static_cast<float>(Data.DamageThreshold));
+				}
+			}
+		}
+		return FMath::Max(2.f * Highest, 1000.f);
+	}
+
+	/**
+	 * The "master field" way to break a collection: an external strain field, a sphere of Strain about At reaching every
+	 * piece (Maximum resolution), not only the clusters whole at the moment; and a dynamic-state field over the same
+	 * sphere, so kinematic or static pieces it frees fall instead of hanging where they were.
+	 */
+	void ApplyStrain(const TArray<TWeakObjectPtr<UGeometryCollectionComponent>>& Components, const FVector& At, const float Radius, const float Strain)
+	{
+		for (const TWeakObjectPtr<UGeometryCollectionComponent>& Weak : Components)
+		{
+			UGeometryCollectionComponent* Component = Weak.Get();
+			if (!Component) continue;
+			URadialFalloff* Falloff = NewObject<URadialFalloff>(Component);
+			Falloff->SetRadialFalloff(Strain, 0.f, 1.f, 0.f, Radius, At, EFieldFalloffType::Field_FallOff_None);
+			UFieldSystemMetaDataProcessingResolution* Resolution = NewObject<UFieldSystemMetaDataProcessingResolution>(Component);
+			Resolution->ResolutionType = EFieldResolutionType::Field_Resolution_Maximum;
+			Component->ApplyPhysicsField(true, EGeometryCollectionPhysicsTypeEnum::Chaos_ExternalClusterStrain, Resolution, Falloff);
+			// Only inside the sphere: the culling field leaves every piece outside it as it was.
+			URadialFalloff* Inside = NewObject<URadialFalloff>(Component);
+			Inside->SetRadialFalloff(1.f, 0.f, 1.f, 0.f, Radius, At, EFieldFalloffType::Field_FallOff_None);
+			UUniformInteger* Dynamic = NewObject<UUniformInteger>(Component);
+			Dynamic->SetUniformInteger(static_cast<int32>(EObjectStateTypeEnum::Chaos_Object_Dynamic));
+			UCullingField* Culled = NewObject<UCullingField>(Component);
+			Culled->SetCullingField(Inside, Dynamic, EFieldCullingOperationType::Field_Culling_Outside);
+			Component->ApplyPhysicsField(true, EGeometryCollectionPhysicsTypeEnum::Chaos_DynamicState, nullptr, Culled);
+			// And straight onto the children of each cluster still whole and active, as the component's ApplyExternalStrain
+			// does, measured from where their cluster is now.
+			const UGeometryCollection* Rest = Component->GetRestCollection();
+			FGeometryDynamicCollection* Live = Component->GetDynamicCollection();
+			if (!Rest || !Rest->GetGeometryCollection().IsValid() || !Live) continue;
+			const FGeometryCollection& Collection = *Rest->GetGeometryCollection();
+			const int32 Num = Collection.NumElements(FGeometryCollection::TransformGroup);
+			if (Live->GetNumTransforms() != Num) continue;
+			FGeometryCollectionDynamicStateFacade State(*Live);
+			if (!State.IsValid()) continue;
+			for (int32 Index = 0; Index < Num; ++Index)
+			{
+				if (!Collection.Children[Index].IsEmpty() && State.IsActive(Index))
+				{
+					Component->ApplyExternalStrain(Index, At, Radius, /*PropagationDepth=*/0, /*PropagationFactor=*/1.f, Strain);
+				}
+			}
+		}
+	}
+
+	/** How Components broke: pieces broken off, clusters broken, and what fell how far from where it began. */
+	struct FBreakCount
+	{
+		int32 BrokenOff = 0;
+		int32 Pieces = 0;
+		int32 ClustersBroken = 0;
+		int32 Clusters = 0;
+		int32 Fell = 0;
+		double Lowest = 0.0;
+		double Farthest = 0.0;
+		int32 NotSimulating = 0;
+		TArray<TPair<double, FString>> Falls;
+	};
+
+	FBreakCount CountBreaks(const TArray<UGeometryCollectionComponent*>& Components)
+	{
+		FBreakCount Count;
+		for (UGeometryCollectionComponent* Component : Components)
+		{
+			const FGeometryCollection& Rest = *Component->GetRestCollection()->GetGeometryCollection();
+			const int32 Num = Rest.NumElements(FGeometryCollection::TransformGroup);
+			FGeometryDynamicCollection* Dynamic = Component->GetDynamicCollection();
+			if (!Dynamic || Dynamic->GetNumTransforms() != Num)
+			{
+				++Count.NotSimulating;
+				continue;
+			}
+			FGeometryCollectionDynamicStateFacade State(*Dynamic);
+			if (!State.IsValid())
+			{
+				++Count.NotSimulating;
+				continue;
+			}
+			TArray<FTransform> RestGlobals;
+			GeometryCollectionAlgo::GlobalMatrices(Rest.Transform, Rest.Parent, RestGlobals);
+			const TArray<FTransform3f>& Now = Component->GetComponentSpaceTransforms3f();
+			const FTransform ToWorld = Component->GetComponentTransform();
+			const FString Owner = Component->GetOwner() ? Component->GetOwner()->GetActorNameOrLabel() : Component->GetName();
+			// A piece is off once it is a body of its own (active, no parent) or sits in a cluster the break made; kinematic or
+			// anchored pieces count too, where the engine's HasBrokenOff counts only those that move.
+			auto Released = [&State, &Rest, Dynamic](const int32 Index)
+			{
+				return Rest.Parent[Index] != INDEX_NONE
+					&& ((State.IsActive(Index) && !Dynamic->GetHasParent(Index)) || State.HasInternalClusterParent(Index));
+			};
+			for (int32 Index = 0; Index < Num; ++Index)
+			{
+				const bool bLeaf = Rest.Children[Index].IsEmpty();
+				if (Released(Index)) ++Count.BrokenOff;
+				if (!bLeaf)
+				{
+					++Count.Clusters;
+					for (const int32 Child : Rest.Children[Index])
+					{
+						if (Released(Child))
+						{
+							++Count.ClustersBroken;
+							break;
+						}
+					}
+					continue;
+				}
+				++Count.Pieces;
+				const int32 Geometry = Rest.TransformToGeometryIndex[Index];
+				if (Geometry == INDEX_NONE || !Now.IsValidIndex(Index)) continue;
+				const FVector Centre = Rest.BoundingBox[Geometry].GetCenter();
+				const FVector Was = ToWorld.TransformPosition(RestGlobals[Index].TransformPosition(Centre));
+				const FVector Is = ToWorld.TransformPosition(FTransform(Now[Index]).TransformPosition(Centre));
+				const double Drop = Was.Z - Is.Z;
+				Count.Farthest = FMath::Max(Count.Farthest, FVector::Dist(Was, Is));
+				if (Drop > 50.0)
+				{
+					++Count.Fell;
+					Count.Lowest = FMath::Max(Count.Lowest, Drop);
+					const FString Name = Rest.BoneName.IsValidIndex(Index) && !Rest.BoneName[Index].IsEmpty() ? Rest.BoneName[Index] : FString::Printf(TEXT("piece %d"), Index);
+					Count.Falls.Emplace(Drop, FString::Printf(TEXT("%s %s"), *Owner, *Name));
+				}
+			}
+		}
+		Count.Falls.Sort([](const TPair<double, FString>& A, const TPair<double, FString>& B) { return A.Key > B.Key; });
+		return Count;
+	}
+
+	FString DescribeBreaks(const FBreakCount& Count, const int32 Collections)
+	{
+		FString Text = FString::Printf(TEXT("%d piece(s) broken off in %d geometry collection(s) (%d leaves, %d of %d clusters broken)"), Count.BrokenOff, Collections,
+			Count.Pieces, Count.ClustersBroken, Count.Clusters);
+		if (Count.Fell > 0)
+		{
+			TArray<FString> What;
+			for (int32 Index = 0; Index < Count.Falls.Num() && Index < 5; ++Index)
+			{
+				What.Add(FString::Printf(TEXT("%s %.0f cm"), *Count.Falls[Index].Value, Count.Falls[Index].Key));
+			}
+			Text += FString::Printf(TEXT("; %d fell more than 50 cm, the furthest down %.0f cm (%s%s)"), Count.Fell, Count.Lowest, *FString::Join(What, TEXT(", ")),
+				Count.Falls.Num() > 5 ? TEXT(", ...") : TEXT(""));
+		}
+		else
+		{
+			Text += TEXT("; nothing fell more than 50 cm");
+		}
+		Text += FString::Printf(TEXT("; the farthest piece moved %.0f cm"), Count.Farthest);
+		if (Count.NotSimulating > 0) Text += FString::Printf(TEXT("; %d not simulating (no physics state yet)"), Count.NotSimulating);
+		return Text;
+	}
 }
 
 FHyperAIBotResult FHyperAIBotResult::Passed(const FString& Detail, const FString& File)
@@ -882,7 +1097,7 @@ bool FHyperAIBotExecutor::Validate(const FHyperAIBotStep& Step, FString& OutErro
 		}
 		return bHas;
 	};
-	if (Step.Action == EHyperAIBotAction::WaitUntil && !Require(IsAssertion(Step.Until), TEXT("until set to AssertProperty, AssertNear, AssertOnScreen, AssertExists or AssertGone")))
+	if (Step.Action == EHyperAIBotAction::WaitUntil && !Require(IsAssertion(Step.Until), TEXT("until set to AssertProperty, AssertNear, AssertOnScreen, AssertExists, AssertGone or AssertBroken")))
 	{
 		return false;
 	}
@@ -926,8 +1141,30 @@ bool FHyperAIBotExecutor::Validate(const FHyperAIBotStep& Step, FString& OutErro
 	case EHyperAIBotAction::UiAssert:
 		if (!Require(!Step.Widget.IsEmpty(), TEXT("widget"))) return false;
 		break;
+	case EHyperAIBotAction::Damage:
+	case EHyperAIBotAction::Fire:
+	{
+		if (!Require(!Step.Target.IsEmpty() || !Step.Location.IsZero(), TEXT("target or location"))) return false;
+		double Number = 0.0;
+		if (!Step.Value.IsEmpty() && (!LexTryParseString(Number, *Step.Value.TrimStartAndEnd()) || !FMath::IsFinite(Number) || Number < 0.0 || Number > 1.0e12))
+		{
+			OutError = FString::Printf(TEXT("%s's value is a number of 0 or more: %s."), *ActionName(Step.Action),
+				Step.Action == EHyperAIBotAction::Damage ? TEXT("the strain") : TEXT("the speed in cm/s"));
+			return false;
+		}
+		break;
+	}
 	default:
 		break;
+	}
+	if (Checked == EHyperAIBotAction::AssertBroken)
+	{
+		double Number = 0.0;
+		if (!Require(LexTryParseString(Number, *Step.Value.TrimStartAndEnd()), TEXT("value, the number of pieces to compare with")) || Step.Compare == TEXT("contains"))
+		{
+			if (Step.Compare == TEXT("contains")) OutError = TEXT("AssertBroken compares a count: ==, !=, <, <=, > or >=.");
+			return false;
+		}
 	}
 	if (Checked == EHyperAIBotAction::AssertProperty && !Require(!Step.Property.IsEmpty(), TEXT("property")))
 	{
@@ -1348,6 +1585,95 @@ FHyperAIBotResult FHyperAIBotExecutor::Begin(const FHyperAIBotStep& InStep)
 	case EHyperAIBotAction::AddPlayer:
 		Result = AddPlayer();
 		break;
+	case EHyperAIBotAction::Damage:
+	{
+		TArray<UGeometryCollectionComponent*> Components = GeometryCollections(*W, Step.Target, Step.PlayerIndex);
+		DamageAt = Step.Location.IsZero() && !Components.IsEmpty() ? BoundsOf(Components).GetCenter() : Step.Location;
+		if (Step.Target.IsEmpty())
+		{
+			const double Reach = static_cast<double>(Step.Radius) * Step.Radius;
+			Components.RemoveAll([this, Reach](const UGeometryCollectionComponent* Component) { return Component->Bounds.GetBox().ComputeSquaredDistanceToPoint(DamageAt) > Reach; });
+		}
+		if (Components.IsEmpty())
+		{
+			Result = FResult::Failed(TEXT("not_found"), Step.Target.IsEmpty()
+				? FString::Printf(TEXT("No geometry collection is within %.0f cm of %s."), Step.Radius, *Vec(DamageAt))
+				: FString::Printf(TEXT("No geometry collection matches %s."), *Step.Target));
+			break;
+		}
+		double Strain = 0.0;
+		DamageStrain = LexTryParseString(Strain, *Step.Value.TrimStartAndEnd()) ? static_cast<float>(Strain) : StrainFor(Components);
+		Damaged.Reset();
+		for (UGeometryCollectionComponent* Component : Components) Damaged.Add(Component);
+		// Applied now and again each frame until Tick ends the step (a tenth of a second unless Seconds says), so clusters
+		// a first break frees are reached too.
+		ApplyStrain(Damaged, DamageAt, Step.Radius, DamageStrain);
+		break;
+	}
+	case EHyperAIBotAction::Fire:
+	{
+		const TArray<UGeometryCollectionComponent*> Collections = Step.Target.IsEmpty() ? TArray<UGeometryCollectionComponent*>() : GeometryCollections(*W, Step.Target, Step.PlayerIndex);
+		const AActor* Aimed = Step.Target.IsEmpty() ? nullptr : Cast<AActor>(FindTarget(*W, Step.Target, Step.PlayerIndex));
+		if (!Step.Target.IsEmpty() && !Aimed)
+		{
+			Result = FResult::Failed(TEXT("not_found"), FString::Printf(TEXT("No actor matches %s."), *Step.Target));
+			break;
+		}
+		FVector Origin;
+		FVector Extent;
+		if (Aimed) Aimed->GetActorBounds(/*bOnlyCollidingComponents=*/false, Origin, Extent);
+		const FVector Aim = !Collections.IsEmpty() ? BoundsOf(Collections).GetCenter() : Aimed ? Origin : Step.Location;
+		UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		if (!Sphere)
+		{
+			Result = FResult::Failed(TEXT("no_test_ball"), TEXT("The engine's sphere mesh (/Engine/BasicShapes/Sphere) is missing."));
+			break;
+		}
+		FVector From = Aim + FVector(0.0, 0.0, Step.Range);
+		FVector Velocity = FVector::ZeroVector;
+		double Speed = 3000.0;
+		LexTryParseString(Speed, *Step.Value.TrimStartAndEnd());
+		if (Step.Range <= 0.f)
+		{
+			FVector Eye = Aim + FVector(-1000.0, 0.0, 200.0);
+			FRotator Ignored;
+			if (APlayerController* Controller = PlayerController(*W, Step.PlayerIndex))
+			{
+				Controller->GetPlayerViewPoint(Eye, Ignored);
+			}
+			const FVector Direction = (Aim - Eye).GetSafeNormal();
+			// Clear of the player's own capsule.
+			From = Eye + Direction * 150.0;
+			Velocity = Direction * Speed;
+		}
+		FActorSpawnParameters Spawn;
+		Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		Spawn.ObjectFlags |= RF_Transient;
+		AStaticMeshActor* Ball = W->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), FTransform(From), Spawn);
+		UStaticMeshComponent* Mesh = Ball ? Ball->GetStaticMeshComponent() : nullptr;
+		if (!Mesh)
+		{
+			Result = FResult::Failed(TEXT("spawn_failed"), TEXT("The test ball could not be spawned."));
+			break;
+		}
+		Ball->SetMobility(EComponentMobility::Movable);
+		Mesh->SetStaticMesh(Sphere);
+		// The engine sphere is 100 cm across.
+		Mesh->SetWorldScale3D(FVector(0.4));
+		Mesh->SetCollisionProfileName(TEXT("PhysicsActor"));
+		Mesh->SetSimulatePhysics(true);
+		Mesh->SetMassOverrideInKg(NAME_None, 200.f, true);
+		Mesh->SetNotifyRigidBodyCollision(true);
+		Mesh->SetPhysicsLinearVelocity(Velocity);
+		Ball->Tags.Add(TEXT("HyperAITestBall"));
+		Result = FResult::Passed(Step.Range > 0.f
+			? FString::Printf(TEXT("dropped a 40 cm, 200 kg test ball from %.0f cm above %s"), Step.Range, *Vec(Aim))
+			: FString::Printf(TEXT("fired a 40 cm, 200 kg test ball from %s at %s, %.0f cm/s"), *Vec(From), *Vec(Aim), Speed));
+		break;
+	}
+	case EHyperAIBotAction::AssertBroken:
+		Result = Evaluate(Step.Action);
+		break;
 	default:
 		Result = FResult::Failed(TEXT("unsupported_action"), TEXT("The bot has no route for this action."));
 		break;
@@ -1459,6 +1785,14 @@ FHyperAIBotResult FHyperAIBotExecutor::Tick()
 		break;
 	case EHyperAIBotAction::Play:
 		Result = Brain ? Brain->Tick() : FResult::Failed(TEXT("no_step"), TEXT("The player's brain has ended."));
+		break;
+	case EHyperAIBotAction::Damage:
+		ApplyStrain(Damaged, DamageAt, Step.Radius, DamageStrain);
+		if (Elapsed >= FMath::Max(Step.Seconds, 0.1f))
+		{
+			Result = FResult::Passed(FString::Printf(TEXT("strain %.0f within %.0f cm of %s on %d geometry collection(s) for %.1f s"), DamageStrain, Step.Radius, *Vec(DamageAt),
+				Damaged.Num(), Elapsed));
+		}
 		break;
 	default:
 		Result = FResult::Failed(TEXT("not_running"), TEXT("This step finished when it began."));
@@ -1589,6 +1923,25 @@ FHyperAIBotResult FHyperAIBotExecutor::Evaluate(const EHyperAIBotAction Assertio
 	if (!W)
 	{
 		return FResult::Failed(TEXT("world_unavailable"), TEXT("The game world has ended."));
+	}
+	if (Assertion == EHyperAIBotAction::AssertBroken)
+	{
+		const TArray<UGeometryCollectionComponent*> Components = GeometryCollections(*W, Step.Target, Step.PlayerIndex);
+		if (Components.IsEmpty())
+		{
+			return FResult::Failed(TEXT("not_found"), Step.Target.IsEmpty() ? FString(TEXT("The level has no geometry collection."))
+				: FString::Printf(TEXT("No geometry collection matches %s."), *Step.Target));
+		}
+		const FBreakCount Count = CountBreaks(Components);
+		FReading Reading;
+		Reading.bOk = true;
+		Reading.bNumeric = true;
+		Reading.Number = Count.BrokenOff;
+		Reading.Text = FString::FromInt(Count.BrokenOff);
+		const FString Detail = DescribeBreaks(Count, Components.Num());
+		return Holds(Reading, Step.Compare, Step.Value)
+			? FResult::Passed(Detail)
+			: FResult::Failed(TEXT("assertion_failed"), FString::Printf(TEXT("%s; expected %s %s broken off"), *Detail, *Step.Compare, *Step.Value));
 	}
 	const FString TargetName = Step.Target.IsEmpty() ? FString(TEXT("Player")) : Step.Target;
 	UObject* Target = FindTarget(*W, Step.Target, Step.PlayerIndex);

@@ -10,6 +10,7 @@
 #include "HyperAIStudioBot.generated.h"
 
 class FHyperAIBotBrain;
+class UGeometryCollectionComponent;
 class UInputAction;
 class USceneCaptureComponent2D;
 class UTextureRenderTarget2D;
@@ -67,7 +68,23 @@ enum class EHyperAIBotAction : uint8
 	 */
 	Play,
 	/** Another local player joins, with the controller and pawn the game mode gives it; standing at Location when set. Later steps act as it with PlayerIndex. */
-	AddPlayer
+	AddPlayer,
+	/**
+	 * Damage Chaos geometry collections: a strain field at Location (Target's middle when Location is 0,0,0) reaching
+	 * Radius cm, of Value strain (twice the highest damage threshold of what it reaches, unless set), applied again every
+	 * frame for Seconds when set. Target names the collections; empty takes every one within Radius.
+	 */
+	Damage,
+	/**
+	 * Fire a 40 cm, 200 kg test ball at Target or Location: from the player's view at Value cm/s (3000 unless set), or,
+	 * with Range set, dropped from Range cm above it. What it hits takes collision damage.
+	 */
+	Fire,
+	/**
+	 * The pieces broken off Target's geometry collections (every one in the level when empty), compared with Value; the
+	 * detail counts the clusters broken and says which pieces fell how far.
+	 */
+	AssertBroken
 };
 
 /** What a Play step plays for. */
@@ -99,7 +116,7 @@ struct HYPERAISTUDIOBOT_API FHyperAIBotStep
 	UPROPERTY()
 	EHyperAIBotAction Action = EHyperAIBotAction::Wait;
 
-	/** WaitUntil only: the assertion to wait for (AssertProperty, AssertNear, AssertOnScreen, AssertExists or AssertGone). */
+	/** WaitUntil only: the assertion to wait for (AssertProperty, AssertNear, AssertOnScreen, AssertExists, AssertGone or AssertBroken). */
 	UPROPERTY()
 	EHyperAIBotAction Until = EHyperAIBotAction::AssertExists;
 
@@ -111,7 +128,7 @@ struct HYPERAISTUDIOBOT_API FHyperAIBotStep
 	UPROPERTY()
 	FString Other;
 
-	/** A world location, for MoveTo, LookAt and Play Reach without a Target, AssertNear without Other, and where AddPlayer's player stands. */
+	/** A world location, for MoveTo, LookAt and Play Reach without a Target, AssertNear without Other, where AddPlayer's player stands, and Damage's and Fire's point. */
 	UPROPERTY()
 	FVector Location = FVector::ZeroVector;
 
@@ -123,7 +140,7 @@ struct HYPERAISTUDIOBOT_API FHyperAIBotStep
 	UPROPERTY()
 	FString Compare = TEXT("==");
 
-	/** Expected value; for Press and Hold, the input value, such as 1 or 0,1 for a 2D axis. */
+	/** Expected value; for Press and Hold, the input value, such as 1 or 0,1 for a 2D axis; Damage's strain; Fire's speed in cm/s. */
 	UPROPERTY()
 	FString Value;
 
@@ -163,7 +180,7 @@ struct HYPERAISTUDIOBOT_API FHyperAIBotStep
 	UPROPERTY()
 	float Skill = 0.5f;
 
-	/** Play only, in cm: Defeat's attack distance, 1500 unless set, closing in when hits from there do nothing; Survive's distance to keep, 2500 unless set; Flee's distance to get away, 1500 unless set. */
+	/** In cm. Play: Defeat's attack distance, 1500 unless set, closing in when hits from there do nothing; Survive's distance to keep, 2500 unless set; Flee's distance to get away, 1500 unless set. Fire: drop the ball from this high above the point instead. */
 	UPROPERTY()
 	float Range = 0.f;
 
@@ -286,6 +303,11 @@ private:
 
 	/** A Play step's player. */
 	TUniquePtr<FHyperAIBotBrain> Brain;
+
+	/** A Damage step's strain field, applied again each frame for its Seconds. */
+	TArray<TWeakObjectPtr<UGeometryCollectionComponent>> Damaged;
+	FVector DamageAt = FVector::ZeroVector;
+	float DamageStrain = 0.f;
 	/** Steps running alongside, each with its own executor. */
 	TArray<TUniquePtr<FHyperAIBotExecutor>> Background;
 	/** What background steps did since a result last reported it. */

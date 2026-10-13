@@ -20,7 +20,11 @@ public class HyperAIStudioBot : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
 			"ApplicationCore",
+			// Damage, Fire and AssertBroken: Chaos geometry collections, their dynamic state and strain fields.
+			"Chaos",
 			"EnhancedInput",
+			"FieldSystemEngine",
+			"GeometryCollectionEngine",
 			"InputCore",
 			"NavigationSystem",
 			"Slate",
