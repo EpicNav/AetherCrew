@@ -22,7 +22,7 @@ Freeze status: **STATIC FREEZE**. This source candidate is closed for central re
 | Non-blocking descriptor groups | exact empty set |
 | Non-dry blocker | `staged_backend_required`, except widget animation plans (below) |
 
-The atomic manifest is exactly `hyper_ui_inspect`, `hyper_ui_apply_plan`, and `hyper_ui_validate`. There are exactly three `AICallable` declarations. Registration is gated by the catalog-exact source cohort/development policy and goes only through the central capability runtime index's publication, owned registration, owned rollback, and withdrawal seam.
+The atomic manifest is exactly `hyper_ui_inspect`, `hyper_ui_apply_plan`, `hyper_ui_validate` and `hyper_ui_render_review`. There are exactly four `AICallable` declarations. Registration is gated by the catalog-exact source cohort/development policy and goes only through the central capability runtime index's publication, owned registration, owned rollback, and withdrawal seam.
 
 ## Epic delegation matrix — 46/46
 
@@ -122,6 +122,10 @@ A plan made only of `animation.create` and `animation.add_float_track` takes its
 - Phases: apply as one undo step (the Animations tab's recipe: own movie scene, playback range, blueprint variable; a direct `FWidgetAnimationBinding` by widget name; a float track replacing any earlier RenderOpacity track), compile, validate that every animation and track landed, save, and verify the saved revision fresh.
 - The adapter registers with probe `probe.widget_blueprint_editor` and covers the whole cohort (inspect and validate as Read variants, `ui.widget_animation_edit.v1` as Edit).
 - Automation: `HyperAIStudio.NativeTools.UI.WidgetAnimationEndToEnd`.
+
+## Render review (read-only)
+
+`hyper_ui_render_review` (`Private/HyperAIStudioUIRenderReview.*`) draws a Widget Blueprint off screen with `FWidgetRenderer` at chosen screen sizes and UI scale (a transient design-time instance, as the thumbnail renderer makes one, or the instance playing in PIE, whose parent is restored after each draw), writes PNGs under `Saved/HyperAIStudio/UIReview`, and checks the painted geometry: clipped text, small text, contrast against the render, off screen, safe zone, clipping parents, overlapping interactive widgets, focus and explicit navigation. With a reference image it calls the lighting pack's `hyper_image_compare` through reflection. It mutates nothing; the adapter covers it as the Read variant `ui.render_review.v1`. Automation: `HyperAIStudio.NativeTools.UI.RenderReview.*`.
 
 ## Unsupported/delegated matrix
 

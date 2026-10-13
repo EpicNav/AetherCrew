@@ -15,6 +15,7 @@
 #include "HyperAIStudioNiagaraAssetsGate.h"
 #include "HyperAIStudioNiagaraExternalEditGate.h"
 #include "HyperAIStudioNiagaraGraphGate.h"
+#include "HyperAIStudioNiagaraLive.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioAsyncJobHost.h"
@@ -669,7 +670,8 @@ const TArray<FHyperAIStudioNiagaraManifestEntry>& FHyperAIStudioNiagaraContracts
 	static const TArray<FHyperAIStudioNiagaraManifestEntry> Manifest = {
 		{TEXT("hyper_niagara_inspect"), GetQualifiedToolsetName()},
 		{TEXT("hyper_niagara_apply_plan"), GetQualifiedToolsetName()},
-		{TEXT("hyper_niagara_validate"), GetQualifiedToolsetName()}};
+		{TEXT("hyper_niagara_validate"), GetQualifiedToolsetName()},
+		{TEXT("hyper_niagara_live"), GetQualifiedToolsetName()}};
 	return Manifest;
 }
 
@@ -677,7 +679,7 @@ bool FHyperAIStudioNiagaraContracts::IsRegistrationAllowed(
 	const bool bAllowSourceCandidateForDev)
 {
 	const TArray<FHyperAIStudioNiagaraManifestEntry>& Manifest = GetManifest();
-	if (Manifest.Num() != 3)
+	if (Manifest.Num() != 4)
 	{
 		return false;
 	}
@@ -789,6 +791,53 @@ FString FHyperAIStudioNiagaraContracts::MutationResultSchemaFingerprint()
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
 		TEXT("niagara.edit_ops.result.v1|phase|content_key|valid|bounded"));
 	return Value;
+}
+
+FString FHyperAIStudioNiagaraContracts::LivePayloadSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("niagara.live.payload.v1|filter|sample_seconds|top_n|include_inactive"));
+	return Value;
+}
+
+FString FHyperAIStudioNiagaraContracts::LiveResultSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("niagara.live.result.v1|level|sampled|components|systems[emitters(particles,spawned,spawning,bounds,sim_target,state,issues)]|errors|notes"));
+	return Value;
+}
+
+FString FHyperAIStudioNiagaraLivePayload::GetTypeId() const
+{
+	return FHyperAIStudioNiagaraContracts::LivePayloadTypeId;
+}
+
+FString FHyperAIStudioNiagaraLivePayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioNiagaraContracts::LivePayloadSchemaFingerprint();
+}
+
+int32 FHyperAIStudioNiagaraLivePayload::GetBoundedByteSize() const
+{
+	return 128 + 2 * FMath::Min(Request.Filter.Len(), 4096);
+}
+
+FString FHyperAIStudioNiagaraLiveResultPayload::GetTypeId() const
+{
+	return FHyperAIStudioNiagaraContracts::LiveResultTypeId;
+}
+
+FString FHyperAIStudioNiagaraLiveResultPayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioNiagaraContracts::LiveResultSchemaFingerprint();
+}
+
+int32 FHyperAIStudioNiagaraLiveResultPayload::GetBoundedByteSize() const
+{
+	int64 Size = 1024 + 2ll * (Report.Status.Len() + Report.Diagnostic.Len());
+	for (const FHyperAINiagaraLiveSystem& System : Report.Systems) Size += 512 + 384ll * System.Emitters.Num();
+	for (const FString& Error : Report.Errors) Size += 16 + 2ll * Error.Len();
+	return static_cast<int32>(FMath::Min<int64>(Size, MAX_int32));
 }
 
 FString FHyperAIStudioNiagaraContracts::ValidateResultSchemaFingerprint()
@@ -1038,6 +1087,10 @@ const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioNiagaraContracts::Get
 		Value.Variants.Add({TEXT("hyper_niagara_validate"), ValidateVariantId,
 			ValidatePayloadTypeId, ValidatePayloadSchemaFingerprint(), ValidateResultTypeId,
 			ValidateResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
+		// Read: one look at what plays in Play In Editor; a dispatch reads once, without the sample window.
+		Value.Variants.Add({TEXT("hyper_niagara_live"), LiveVariantId,
+			LivePayloadTypeId, LivePayloadSchemaFingerprint(), LiveResultTypeId,
+			LiveResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
 		Value.ContractFingerprint =
 			FHyperAIStudioDomainAdapterRegistry::ComputeContractFingerprint(Value);
 		Value.AdapterFingerprint =
@@ -2163,6 +2216,21 @@ FHyperAIStudioDomainAdapterResult FHyperAIStudioNiagaraDomainAdapter::Execute(
 		const TSharedRef<FHyperAIStudioNiagaraValidateResultPayload, ESPMode::ThreadSafe> Output =
 			MakeShared<FHyperAIStudioNiagaraValidateResultPayload, ESPMode::ThreadSafe>();
 		Output->Report = FHyperAIStudioNiagaraContracts::Validate(Typed.Request);
+		Result.Outcome = EHyperAIStudioDomainDispatchOutcome::Succeeded;
+		Result.StatusCode = Output->Report.Status.Left(FHyperAIStudioDomainLimits::MaxStatusCodeChars);
+		Result.Diagnostic = Output->Report.Diagnostic.Left(FHyperAIStudioDomainLimits::MaxDiagnosticChars);
+		Result.Payload = Output;
+		return Result;
+	}
+	if (Context.Binding.ToolName == TEXT("hyper_niagara_live")
+		&& Context.Binding.VariantId == FHyperAIStudioNiagaraContracts::LiveVariantId
+		&& Context.Safety == EHyperAIStudioDomainSafety::Read
+		&& Payload.GetTypeId() == FHyperAIStudioNiagaraContracts::LivePayloadTypeId
+		&& Payload.GetSchemaFingerprint() == FHyperAIStudioNiagaraContracts::LivePayloadSchemaFingerprint())
+	{
+		const TSharedRef<FHyperAIStudioNiagaraLiveResultPayload, ESPMode::ThreadSafe> Output =
+			MakeShared<FHyperAIStudioNiagaraLiveResultPayload, ESPMode::ThreadSafe>();
+		Output->Report = HyperAIStudio::Niagara::Live::ReadOnce(static_cast<const FHyperAIStudioNiagaraLivePayload&>(Payload).Request);
 		Result.Outcome = EHyperAIStudioDomainDispatchOutcome::Succeeded;
 		Result.StatusCode = Output->Report.Status.Left(FHyperAIStudioDomainLimits::MaxStatusCodeChars);
 		Result.Diagnostic = Output->Report.Diagnostic.Left(FHyperAIStudioDomainLimits::MaxDiagnosticChars);

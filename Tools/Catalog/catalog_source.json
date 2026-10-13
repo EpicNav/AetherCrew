@@ -1891,6 +1891,15 @@
      ]
     },
     {
+     "name": "hyper_material_recipe",
+     "cohort": "cohort.source.hyperaistudiomaterialstoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read",
+      "Edit"
+     ]
+    },
+    {
      "name": "hyper_dynamic_material_inspect",
      "cohort": "cohort.source.hyperaistudiodynamicmaterialtoolset.v1",
      "admission": "SourceCandidate",
@@ -2025,6 +2034,14 @@
       0,
       0,
       0
+     ]
+    },
+    {
+     "name": "hyper_niagara_live",
+     "cohort": "cohort.source.hyperaistudioniagaratoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
      ]
     }
    ]
@@ -2587,6 +2604,14 @@
       0,
       0,
       1
+     ]
+    },
+    {
+     "name": "hyper_ui_render_review",
+     "cohort": "cohort.source.hyperaistudiouitoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
      ]
     }
    ]

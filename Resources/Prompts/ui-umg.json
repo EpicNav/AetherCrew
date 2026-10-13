@@ -831,6 +831,129 @@
     }
    ],
    "prompt": "Find and fix leftover placeholder text in the Widget Blueprints under {{content_folder}}.\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop. Epic's UMGToolSet ListWidgetBlueprints for the folder; load each with AssetTools load_asset and keep their editor tabs closed.\n2. hyper_ui_inspect them with bIncludeTree true, up to 32 per call, following nextCursor. Flag text, hint text and tool tips that read like a placeholder ({{patterns}}) and visible labels that are empty.\n3. Propose the real string for each from the widget's name and screen (a `QuitLabel` says \"Quit\"); ask me before writing any you cannot infer. Then one hyper_ui_apply_plan per Widget Blueprint (bDryRun false, fresh operationId) of widget.set_property text, hint_text or tool_tip ops only. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n4. hyper_ui_inspect again and hyper_ui_validate each changed asset.\nReport a PASS/FAIL table with one row per Widget Blueprint (placeholders found, fixed, left for me and why) and validate 0 errors; then the full list of old and new strings."
+  },
+  {
+   "id": "ui-umg.polish-against-mockup",
+   "title": "Polish a screen against its mock-up",
+   "summary": "Render a Widget Blueprint at full size, score it against a mock-up with a heat map, fix the worst differences and render again until it matches.",
+   "packs": [
+    "ui_slate_mvvm",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-umg",
+    "image-match"
+   ],
+   "agent": "ui-designer",
+   "tools": [
+    "hyper_ui_render_review",
+    "hyper_ui_inspect",
+    "hyper_ui_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "polish",
+    "mock-up",
+    "reference",
+    "render",
+    "heat map",
+    "pixel perfect",
+    "review"
+   ],
+   "placeholders": [
+    {
+     "name": "widget",
+     "label": "Widget Blueprint",
+     "default": "WBP_MainMenu"
+    },
+    {
+     "name": "mockup",
+     "label": "Mock-up image in the project",
+     "default": "Saved/References/MainMenu.png",
+     "hint": "A PNG or JPG inside the project folder."
+    },
+    {
+     "name": "target",
+     "label": "Score to reach (0-100)",
+     "default": "85"
+    }
+   ],
+   "prompt": "Make `{{content_folder}}/UI/{{widget}}` match the mock-up `{{mockup}}` for {{project}}.\n1. hyper_ui_render_review with targetPath the Widget Blueprint's object path, resolutions [\"1920x1080\"], referenceImagePath {{mockup}}, targetScore {{target}}, a sessionId named after the widget and note \"start\". If the lighting_lookdev pack is off, reference.diagnostic says so: review the layout without a score. Open the render and the heat map.\n2. Name the three biggest differences from reference.worstRegions and the heat map, and the review's errors. hyper_ui_inspect the widget for the names and values to change.\n3. Fix the worst one with one hyper_ui_apply_plan (bDryRun false, fresh operationId); follow a reply still running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n4. hyper_ui_render_review again in the same session with a note naming the change. Repeat steps 2-4 until the score reaches {{target}}, it stops rising for three passes, or six passes are done.\nReport each pass: the change, the score and its rise, the issues left. End with the final render and heat map paths on their own lines."
+  },
+  {
+   "id": "ui-umg.review-three-resolutions",
+   "title": "Review a screen at 720p, 1080p and 1440p",
+   "summary": "Render a Widget Blueprint at three screen sizes at the project's UI scale and list clipped or tiny text, contrast, safe-zone, overlap and focus problems.",
+   "packs": [
+    "ui_slate_mvvm"
+   ],
+   "skills": [
+    "unreal-umg"
+   ],
+   "agent": "ui-designer",
+   "tools": [
+    "hyper_ui_render_review"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "review",
+    "resolution",
+    "safe zone",
+    "contrast",
+    "clipped text",
+    "accessibility",
+    "focus",
+    "gamepad"
+   ],
+   "placeholders": [
+    {
+     "name": "widget",
+     "label": "Widget Blueprint",
+     "default": "WBP_HUD"
+    },
+    {
+     "name": "backdrop",
+     "label": "Colour behind the UI (r,g,b 0-1)",
+     "default": "0.12,0.12,0.12",
+     "hint": "Near the game view behind this UI, for the contrast check."
+    }
+   ],
+   "prompt": "Review `{{content_folder}}/UI/{{widget}}` the way players will see it. Change nothing.\n1. hyper_ui_render_review with targetPath the Widget Blueprint's object path, resolutions [\"1280x720\", \"1920x1080\", \"2560x1440\"] and backdrop {{backdrop}} (r, g, b, a 1). If the UI pack is off, say so and stop.\n2. Open each PNG. A table per resolution: its UI scale, then every error and warning with the widget, its rect and the fix the message gives.\n3. Group what repeats across sizes (a layout problem) apart from what only 720p shows (scale and room).\nReport PASS when there are no errors at any size, else FAIL with the three fixes that matter most. Put the three PNG paths on their own lines."
+  },
+  {
+   "id": "ui-umg.review-hud-in-play",
+   "title": "Review the HUD as it plays",
+   "summary": "Render the HUD instance on screen in Play In Editor, with its live values, and check its text, contrast, safe zone and focus.",
+   "packs": [
+    "ui_slate_mvvm"
+   ],
+   "skills": [
+    "unreal-umg",
+    "unreal-playtest"
+   ],
+   "agent": "ui-designer",
+   "tools": [
+    "hyper_ui_render_review",
+    "hyper_playtest_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "hud",
+    "play",
+    "pie",
+    "live",
+    "review",
+    "safe zone"
+   ],
+   "placeholders": [
+    {
+     "name": "hud",
+     "label": "HUD Widget Blueprint",
+     "default": "WBP_HUD"
+    }
+   ],
+   "prompt": "Check `{{content_folder}}/UI/{{hud}}` while {{level}} plays, with its live values.\n1. If Play In Editor is not running, start it with hyper_playtest_run and a short Wait step, and keep it running.\n2. hyper_ui_render_review with targetPath the HUD's object path, bFromPlay true and resolutions [\"1920x1080\", \"1280x720\"]. If it answers not_found, the HUD is not on screen: say what shows it and stop.\n3. Open the PNGs. List the errors and warnings with widget, rect and fix; note text that only overflows with live values (long names, big numbers).\nReport PASS or FAIL per resolution, then the PNG paths on their own lines."
   }
  ]
 }

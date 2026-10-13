@@ -1898,6 +1898,12 @@
    "text": "HyperAI 材质编辑"
   },
   {
+   "namespace": "HyperAIStudioMaterialsRecipes",
+   "key": "MaterialRecipe",
+   "source": "HyperAI: Material Recipe",
+   "text": "HyperAI：材质配方"
+  },
+  {
    "namespace": "HyperAIStudioMcpBypass",
    "key": "ActivityNote",
    "source": "Not covered here: agents can also change this editor through {0}, with no HyperAI approval, auto-approval, undo grouping or checks.",
@@ -12045,6 +12051,126 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-hlsl-function.ph.inputs.hint",
+   "source": "Types: scalar, vector2, vector3, vector4.",
+   "text": "类型：scalar、vector2、vector3、vector4。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-hlsl-function.ph.inputs.label",
+   "source": "Inputs as Name:type",
+   "text": "输入（名称:类型）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-hlsl-function.ph.name.label",
+   "source": "Function name",
+   "text": "函数名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-hlsl-function.ph.what.label",
+   "source": "What it computes",
+   "text": "计算内容"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-hlsl-function.summary",
+   "source": "Make a material function from Custom HLSL with typed inputs, compiled in the dry run, and a material that calls it with parameters.",
+   "text": "用带类型输入的自定义 HLSL 制作材质函数（在试运行中编译），并制作一个用参数调用它的材质。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-hlsl-function.title",
+   "source": "Write HLSL as a material function",
+   "text": "把 HLSL 写成材质函数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-landscape-layers.ph.layers.hint",
+   "source": "1 to 8 names, comma separated.",
+   "text": "1 到 8 个名称，以逗号分隔。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-landscape-layers.ph.layers.label",
+   "source": "Paint layers",
+   "text": "绘制图层"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-landscape-layers.ph.name.label",
+   "source": "Material name",
+   "text": "材质名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-landscape-layers.summary",
+   "source": "Build a landscape material whose paint layers blend by height, named as the landscape pack paints them, then put it on the landscape.",
+   "text": "构建按高度混合绘制图层的地形材质，图层名与地形包一致，然后将其应用到地形上。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-landscape-layers.title",
+   "source": "Make a height-blended landscape material",
+   "text": "制作按高度混合的地形材质"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-layered-pbr.ph.name.label",
+   "source": "Material name",
+   "text": "材质名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-layered-pbr.ph.textures.label",
+   "source": "Base colour, normal and ORM textures (blank for flat ones)",
+   "text": "基础色、法线和 ORM 贴图（留空用平坦贴图）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-layered-pbr.ph.tiling.label",
+   "source": "Tiling",
+   "text": "平铺"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-layered-pbr.summary",
+   "source": "Build a PBR master from a recipe: base colour, normal with a detail normal, ORM and tiling as parameters, compiled and previewed, then an instance.",
+   "text": "用配方构建 PBR 主材质：基础色、带细节法线的法线、ORM 和平铺作为参数，编译并预览，然后创建实例。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-layered-pbr.title",
+   "source": "Make a layered PBR master material",
+   "text": "制作分层 PBR 主材质"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-water.ph.look.label",
+   "source": "Water look",
+   "text": "水的外观"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-water.ph.name.label",
+   "source": "Material name",
+   "text": "材质名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-water.summary",
+   "source": "Build lake or sea water from a recipe: depth absorption, scattering, panning normals and refraction, compiled and previewed.",
+   "text": "用配方构建湖水或海水：深度吸收、散射、平移法线和折射，并编译和预览。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.recipe-water.title",
+   "source": "Make a Single Layer Water material",
+   "text": "制作单层水体材质"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "materials-textures.repair-broken-graph.summary",
    "source": "Find why the selected material fails, preview HyperAI's repair as a dry run, fix the graph at its revision, and prove it compiles clean.",
    "text": "找出所选材质失败的原因，以试运行预览 HyperAI 的修复，在当前版本上修正节点图，并证明它干净地编译通过。"
@@ -16719,6 +16845,42 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.polish-against-mockup.ph.mockup.hint",
+   "source": "A PNG or JPG inside the project folder.",
+   "text": "项目文件夹内的 PNG 或 JPG。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.polish-against-mockup.ph.mockup.label",
+   "source": "Mock-up image in the project",
+   "text": "项目中的设计稿图片"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.polish-against-mockup.ph.target.label",
+   "source": "Score to reach (0-100)",
+   "text": "目标分数（0-100）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.polish-against-mockup.ph.widget.label",
+   "source": "Widget Blueprint",
+   "text": "控件蓝图"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.polish-against-mockup.summary",
+   "source": "Render a Widget Blueprint at full size, score it against a mock-up with a heat map, fix the worst differences and render again until it matches.",
+   "text": "以完整分辨率渲染控件蓝图，用热力图与设计稿比对评分，修正差异最大的地方并重新渲染，直到匹配。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.polish-against-mockup.title",
+   "source": "Polish a screen against its mock-up",
+   "text": "对照设计稿打磨界面"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "ui-umg.quest-toast-animation.ph.detail.label",
    "source": "Detail text",
    "text": "详情文字"
@@ -16776,6 +16938,54 @@
    "key": "ui-umg.replace-placeholder-text.title",
    "source": "Find and replace placeholder text in your UI",
    "text": "查找并替换界面中的占位文字"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.review-hud-in-play.ph.hud.label",
+   "source": "HUD Widget Blueprint",
+   "text": "HUD 控件蓝图"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.review-hud-in-play.summary",
+   "source": "Render the HUD instance on screen in Play In Editor, with its live values, and check its text, contrast, safe zone and focus.",
+   "text": "在 PIE 中渲染屏幕上的 HUD 实例及其实时数值，检查文字、对比度、安全区和焦点。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.review-hud-in-play.title",
+   "source": "Review the HUD as it plays",
+   "text": "在游戏运行时审查 HUD"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.review-three-resolutions.ph.backdrop.hint",
+   "source": "Near the game view behind this UI, for the contrast check.",
+   "text": "接近此界面背后的游戏画面，用于对比度检查。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.review-three-resolutions.ph.backdrop.label",
+   "source": "Colour behind the UI (r,g,b 0-1)",
+   "text": "界面背后的颜色（r,g,b 0-1）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.review-three-resolutions.ph.widget.label",
+   "source": "Widget Blueprint",
+   "text": "控件蓝图"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.review-three-resolutions.summary",
+   "source": "Render a Widget Blueprint at three screen sizes at the project's UI scale and list clipped or tiny text, contrast, safe-zone, overlap and focus problems.",
+   "text": "按项目 UI 缩放以三种屏幕尺寸渲染控件蓝图，列出被裁切或过小的文字、对比度、安全区、重叠和焦点问题。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.review-three-resolutions.title",
+   "source": "Review a screen at 720p, 1080p and 1440p",
+   "text": "在 720p、1080p 和 1440p 下审查界面"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -17217,6 +17427,36 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.inspect-effects-in-play.ph.filter.label",
+   "source": "System, actor or component (blank for all)",
+   "text": "系统、Actor 或组件（留空为全部）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.inspect-effects-in-play.ph.seconds.hint",
+   "source": "0 to 5.",
+   "text": "0 到 5。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.inspect-effects-in-play.ph.seconds.label",
+   "source": "Seconds to watch spawning",
+   "text": "观察生成的秒数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.inspect-effects-in-play.summary",
+   "source": "Read each Niagara system and emitter while the game plays: particles, spawning, bounds, CPU or GPU, and why an effect shows nothing.",
+   "text": "在游戏运行时读取每个 Niagara 系统和发射器：粒子、是否生成、包围盒、CPU 或 GPU，以及特效不显示的原因。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.inspect-effects-in-play.title",
+   "source": "See what every effect does in play",
+   "text": "查看每个特效在游戏中的表现"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "vfx-niagara.intensity-user-parameter.ph.param.label",
    "source": "User parameter name",
    "text": "用户参数名称"
@@ -17472,6 +17712,36 @@
    "key": "vfx-niagara.team-color-variant.title",
    "source": "Make a team-coloured copy of an effect",
    "text": "为特效制作队伍配色副本"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.tune-hlsl-module.ph.change.label",
+   "source": "What to change",
+   "text": "要修改的内容"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.tune-hlsl-module.ph.module.label",
+   "source": "Scratch pad module",
+   "text": "暂存区模块"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.tune-hlsl-module.ph.system.label",
+   "source": "Niagara System",
+   "text": "Niagara 系统"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.tune-hlsl-module.summary",
+   "source": "Rewrite a scratch pad HLSL module's body as one undo step, recompile, and prove the emitter still spawns.",
+   "text": "以一个撤销步骤重写暂存区 HLSL 模块的代码，重新编译，并证明发射器仍在生成粒子。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.tune-hlsl-module.title",
+   "source": "Tune a custom HLSL module in place",
+   "text": "就地调整自定义 HLSL 模块"
   },
   {
    "namespace": "HyperAIStudioPrompts",

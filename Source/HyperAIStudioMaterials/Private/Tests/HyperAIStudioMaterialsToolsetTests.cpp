@@ -149,7 +149,7 @@ bool FHyperAIMaterialsManifestReflectionCohortTest::RunTest(const FString& Param
 {
 	const TArray<FHyperAIStudioMaterialManifestEntry>& Manifest =
 		FHyperAIStudioMaterialsContracts::GetManifest();
-	TestEqual(TEXT("atomic core Materials cohort owns exactly three names"), Manifest.Num(), 3);
+	TestEqual(TEXT("atomic core Materials cohort owns exactly four names"), Manifest.Num(), 4);
 	TestEqual(TEXT("canonical runtime toolset identity"),
 		FHyperAIStudioMaterialsContracts::GetQualifiedToolsetName(),
 		FString(TEXT("HyperAIStudioMaterials.HyperAIStudioMaterialsToolset")));
@@ -163,11 +163,12 @@ bool FHyperAIMaterialsManifestReflectionCohortTest::RunTest(const FString& Param
 	TestTrue(TEXT("exact inspect"), Names.Contains(TEXT("hyper_material_inspect")));
 	TestTrue(TEXT("exact apply"), Names.Contains(TEXT("hyper_material_apply_plan")));
 	TestTrue(TEXT("exact validate"), Names.Contains(TEXT("hyper_material_validate")));
+	TestTrue(TEXT("exact recipe"), Names.Contains(TEXT("hyper_material_recipe")));
 	TSet<FString> Reflected;
 	for (TFieldIterator<UFunction> It(UHyperAIStudioMaterialsToolset::StaticClass(),
 		EFieldIteratorFlags::ExcludeSuper); It; ++It)
 		if (It->HasMetaData(TEXT("AICallable"))) Reflected.Add(It->GetName());
-	TestEqual(TEXT("reflection exposes only the atomic cohort"), Reflected.Num(), 3);
+	TestEqual(TEXT("reflection exposes only the atomic cohort"), Reflected.Num(), 4);
 	TestTrue(TEXT("reflection/manifest exact"), Reflected.Difference(Names).IsEmpty()
 		&& Names.Difference(Reflected).IsEmpty());
 	TArray<FString> ExactNames = Names.Array(); ExactNames.Sort();

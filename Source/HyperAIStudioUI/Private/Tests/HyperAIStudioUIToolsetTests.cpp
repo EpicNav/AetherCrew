@@ -190,10 +190,11 @@ bool FHyperAIStudioUIManifestAndDelegationTest::RunTest(const FString& Parameter
 	TestEqual(TEXT("Central loading phase handoff"),
 		FString(FHyperAIStudioUIContracts::RequiredLoadingPhase), FString(TEXT("None")));
 	const TArray<FHyperAIStudioUIManifestEntry>& Manifest = FHyperAIStudioUIContracts::GetManifest();
-	TestEqual(TEXT("Exactly three UI callables"), Manifest.Num(), 3);
+	if (!TestEqual(TEXT("Exactly four UI callables"), Manifest.Num(), 4)) return false;
 	TestEqual(TEXT("Inspect name"), Manifest[0].Name, FString(TEXT("hyper_ui_inspect")));
 	TestEqual(TEXT("Apply name"), Manifest[1].Name, FString(TEXT("hyper_ui_apply_plan")));
 	TestEqual(TEXT("Validate name"), Manifest[2].Name, FString(TEXT("hyper_ui_validate")));
+	TestEqual(TEXT("Render review name"), Manifest[3].Name, FString(TEXT("hyper_ui_render_review")));
 	const FHyperAIStudioDomainAdapterDescriptor& Descriptor =
 		FHyperAIStudioUIContracts::GetPreparationDescriptor();
 	TestEqual(TEXT("Two separately typed apply safety variants"), Descriptor.Variants.Num(), 2);

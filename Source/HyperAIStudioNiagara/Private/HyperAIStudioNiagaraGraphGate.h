@@ -22,7 +22,7 @@ namespace HyperAIStudio::Niagara::GraphGate
 	static constexpr int32 MaxStageIterations = 64;
 
 	/**
-	 * add_simulation_stage, add_hlsl_module, set_emitter_property, set_renderer_property, and add_module or
+	 * add_simulation_stage, add_hlsl_module, set_hlsl_module, set_emitter_property, set_renderer_property, and add_module or
 	 * set_module_enabled addressed to a simulation stage (stage_name set).
 	 */
 	bool IsGraphOp(const FHyperAINiagaraEditOp& Op);

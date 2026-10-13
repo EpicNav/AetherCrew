@@ -1076,7 +1076,7 @@ private:
 				TEXT("materials_dynamic_material"),
 				TEXT("cohort.source.hyperaistudiomaterialstoolset.v1"),
 				{TEXT("hyper_material_inspect"), TEXT("hyper_material_apply_plan"),
-					TEXT("hyper_material_validate")},
+					TEXT("hyper_material_validate"), TEXT("hyper_material_recipe")},
 				{}
 			},
 			{
@@ -1092,7 +1092,7 @@ private:
 				TEXT("niagara_vfx"),
 				TEXT("cohort.source.hyperaistudioniagaratoolset.v1"),
 				{TEXT("hyper_niagara_inspect"), TEXT("hyper_niagara_apply_plan"),
-					TEXT("hyper_niagara_validate")},
+					TEXT("hyper_niagara_validate"), TEXT("hyper_niagara_live")},
 				{TEXT("Niagara")}
 			},
 			{
@@ -1278,7 +1278,7 @@ private:
 				TEXT("ui_slate_mvvm"),
 				TEXT("cohort.source.hyperaistudiouitoolset.v1"),
 				{TEXT("hyper_ui_inspect"), TEXT("hyper_ui_apply_plan"),
-					TEXT("hyper_ui_validate")},
+					TEXT("hyper_ui_validate"), TEXT("hyper_ui_render_review")},
 				{TEXT("ModelViewViewModel")}
 			},
 			{

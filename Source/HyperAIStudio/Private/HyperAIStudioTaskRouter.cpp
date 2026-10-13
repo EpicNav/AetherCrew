@@ -98,6 +98,7 @@ namespace HyperAIStudio::TaskRouter
 			{TEXT("enhanced_input"), TEXT("unreal-blueprint")},
 			{TEXT("gas"), TEXT("unreal-gas")},
 			{TEXT("niagara_vfx"), TEXT("unreal-niagara")},
+			{TEXT("materials_dynamic_material"), TEXT("unreal-materials")},
 			{TEXT("lighting_lookdev"), TEXT("image-match")},
 			{TEXT("level_design"), TEXT("unreal-level-design")},
 			{TEXT("worldbuilding_navigation"), TEXT("unreal-level-design")},
