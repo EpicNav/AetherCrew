@@ -30,6 +30,7 @@ public class HyperAIStudio : ModuleRules
 			"EnhancedInput",
 			"GraphEditor",
 			"ImageCore",
+			"ImageWrapper",
 			"HTTP",
 			// The remote page's server, and the stand-in servers tests talk to, such as Ollama's.
 			"HTTPServer",

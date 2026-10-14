@@ -4,9 +4,12 @@
 
 #include "HAL/FileManager.h"
 #include "HyperAIStudioVideoWriter.h"
+#include "IImageWrapper.h"
+#include "IImageWrapperModule.h"
 #include "ImageCore.h"
-#include "ImageUtils.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Modules/ModuleManager.h"
 
 namespace HyperAIStudio::LevelSurvey
 {
@@ -24,11 +27,24 @@ namespace HyperAIStudio::LevelSurvey
 		FHyperAIStudioVideoWriter Writer;
 		for (const FString& Name : Frames)
 		{
-			FImage Image;
-			if (!FImageUtils::LoadImage(*FPaths::Combine(Folder, Name), Image))
+			// Not FImageUtils::LoadImage: windows.h renames it to LoadImageW in unity bundles, which does not link.
+			TArray<uint8> Bytes;
+			if (!FFileHelper::LoadFileToArray(Bytes, *FPaths::Combine(Folder, Name)))
 			{
 				continue;
 			}
+			IImageWrapperModule& WrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+			const EImageFormat Format = WrapperModule.DetectImageFormat(Bytes.GetData(), Bytes.Num());
+			const TSharedPtr<IImageWrapper> Wrapper = Format == EImageFormat::Invalid ? nullptr : WrapperModule.CreateImageWrapper(Format);
+			TArray64<uint8> Raw;
+			if (!Wrapper.IsValid() || !Wrapper->SetCompressed(Bytes.GetData(), Bytes.Num())
+				|| !Wrapper->GetRaw(ERGBFormat::BGRA, 8, Raw))
+			{
+				continue;
+			}
+			FImage Image;
+			Image.Init(Wrapper->GetWidth(), Wrapper->GetHeight(), ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+			FMemory::Memcpy(Image.RawData.GetData(), Raw.GetData(), FMath::Min<int64>(Raw.Num(), Image.RawData.Num()));
 			FImage Bgra;
 			Image.CopyTo(Bgra, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
 			if (!Writer.IsOpen() && !Writer.Open(Path, Bgra.SizeX, Bgra.SizeY, VideoFps, OutError))
