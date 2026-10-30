@@ -201,7 +201,10 @@ struct FHyperAIStudioMeshTaskPrice
 
 	/**
 	 * rig; animate (one preset action); motion (a clip made from words) or motion_swift (Meshy's quicker one);
-	 * motion_apply (Meshy: a clip put on a rig); texture, texture_hd (Tripo's detailed) or texture_8k.
+	 * motion_apply (Meshy: a clip put on a rig); texture, texture_hd (Tripo's detailed) or texture_8k. The model creator's
+	 * Tripo prices: h3_text and h3_image (with _standard, _detailed or _extreme for the texture tier), p2 (likewise),
+	 * addon_detailed_geometry, addon_quad, addon_smart_low_poly, addon_parts, convert, convert_advanced, retopo,
+	 * retopo_quad, smart_uv, segment, complete, complete_quick, image_to_multiview, edit_multiview.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "3D Generation")
 	FString Task;

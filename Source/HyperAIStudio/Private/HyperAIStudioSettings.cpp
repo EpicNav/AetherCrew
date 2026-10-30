@@ -86,6 +86,10 @@ TArray<FHyperAIStudioMeshTaskPrice> UHyperAIStudioSettings::GetMeshTaskPrices()
 	// The providers' own price lists: Tripo's (developers.tripo3d.ai/en/pricing: rig 25, retarget 10 an animation,
 	// texture 10, HD 20, 8K 30), Meshy's (docs.meshy.ai/api/pricing: rig 5, 3 an action, text to motion 10 or 3 swift,
 	// retexture 10, 8K 15) and Viggle's (10 a clip).
+	// The model creator's Tripo v3 prices (October 2026, credits at $0.01): H3.1 from words 10/20/30/40 and from pictures
+	// 20/30/40/50 by texture tier (none, standard or fast, detailed, extreme); P2 100/110/120/130; add-ons detailed geometry
+	// 20, quads 5, smart low poly 10, parts 20; convert 5 or 10 with mesh options; retopology v3.0 35 or 40 for quads
+	// (mesh-decimate); Smart UV 20; segmentation 40; completion 50, quick cap 30. Multiview pictures are priced unverified.
 	return {
 		Price(TEXT("meshy"), TEXT("rig"), 0.10f),
 		Price(TEXT("meshy"), TEXT("animate"), 0.06f),
@@ -99,6 +103,32 @@ TArray<FHyperAIStudioMeshTaskPrice> UHyperAIStudioSettings::GetMeshTaskPrices()
 		Price(TEXT("tripo"), TEXT("texture"), 0.10f),
 		Price(TEXT("tripo"), TEXT("texture_hd"), 0.20f),
 		Price(TEXT("tripo"), TEXT("texture_8k"), 0.30f),
+		Price(TEXT("tripo"), TEXT("h3_text"), 0.10f),
+		Price(TEXT("tripo"), TEXT("h3_text_standard"), 0.20f),
+		Price(TEXT("tripo"), TEXT("h3_text_detailed"), 0.30f),
+		Price(TEXT("tripo"), TEXT("h3_text_extreme"), 0.40f),
+		Price(TEXT("tripo"), TEXT("h3_image"), 0.20f),
+		Price(TEXT("tripo"), TEXT("h3_image_standard"), 0.30f),
+		Price(TEXT("tripo"), TEXT("h3_image_detailed"), 0.40f),
+		Price(TEXT("tripo"), TEXT("h3_image_extreme"), 0.50f),
+		Price(TEXT("tripo"), TEXT("p2"), 1.00f),
+		Price(TEXT("tripo"), TEXT("p2_standard"), 1.10f),
+		Price(TEXT("tripo"), TEXT("p2_detailed"), 1.20f),
+		Price(TEXT("tripo"), TEXT("p2_extreme"), 1.30f),
+		Price(TEXT("tripo"), TEXT("addon_detailed_geometry"), 0.20f),
+		Price(TEXT("tripo"), TEXT("addon_quad"), 0.05f),
+		Price(TEXT("tripo"), TEXT("addon_smart_low_poly"), 0.10f),
+		Price(TEXT("tripo"), TEXT("addon_parts"), 0.20f),
+		Price(TEXT("tripo"), TEXT("convert"), 0.05f),
+		Price(TEXT("tripo"), TEXT("convert_advanced"), 0.10f),
+		Price(TEXT("tripo"), TEXT("retopo"), 0.35f),
+		Price(TEXT("tripo"), TEXT("retopo_quad"), 0.40f),
+		Price(TEXT("tripo"), TEXT("smart_uv"), 0.20f),
+		Price(TEXT("tripo"), TEXT("segment"), 0.40f),
+		Price(TEXT("tripo"), TEXT("complete"), 0.50f),
+		Price(TEXT("tripo"), TEXT("complete_quick"), 0.30f),
+		Price(TEXT("tripo"), TEXT("image_to_multiview"), 0.10f),
+		Price(TEXT("tripo"), TEXT("edit_multiview"), 0.10f),
 		Price(TEXT("viggle"), TEXT("motion"), 0.10f)};
 }
 

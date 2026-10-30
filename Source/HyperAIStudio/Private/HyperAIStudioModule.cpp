@@ -1173,7 +1173,8 @@ private:
 				TEXT("mesh_generation"),
 				TEXT("cohort.source.hyperaistudiomeshgentoolset.v1"),
 				{TEXT("hyper_mesh_generate"), TEXT("hyper_mesh_status"), TEXT("hyper_mesh_rig"), TEXT("hyper_mesh_animate"),
-					TEXT("hyper_mesh_retexture"), TEXT("hyper_mesh_actions"), TEXT("hyper_mesh_cancel")},
+					TEXT("hyper_mesh_retexture"), TEXT("hyper_mesh_actions"), TEXT("hyper_mesh_cancel"), TEXT("hyper_model_create"), TEXT("hyper_model_status"),
+					TEXT("hyper_model_check_and_fix"), TEXT("hyper_tripo_account")},
 				{TEXT("Interchange")}
 			},
 			{

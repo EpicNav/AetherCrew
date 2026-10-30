@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioMeshGenJob.h"
+#include "HyperAIStudioModelCreator.h"
 
 #include "Algo/AllOf.h"
 #include "Animation/AnimData/IAnimationDataModel.h"
@@ -60,6 +61,7 @@ namespace HyperAIStudio::MeshGen::Characters
 	const TCHAR* const RigProviders[] = {TEXT("meshy"), TEXT("tripo")};
 	constexpr const TCHAR* TripoRigV1 = TEXT("v1.0-20240301");
 	constexpr const TCHAR* TripoRigV25 = TEXT("v2.5-20260210");
+	constexpr const TCHAR* TripoRigV3 = TEXT("v3.0-20260909");
 	constexpr const TCHAR* TripoTextureModel = TEXT("v3.0-20250812");
 	/** Tripo uploads one file up to 60 MB; larger ones need its presigned upload, which this does not use. */
 	constexpr int64 MaxTripoUploadBytes = 60 * 1024 * 1024;
@@ -730,10 +732,21 @@ namespace HyperAIStudio::MeshGen::Characters
 
 	void Upload(const TSharedRef<FJob>& Job)
 	{
+		// The creator's pictures go up one at a time; a view left out ("") has no token. Otherwise the one exported mesh.
+		while (Job->UploadTokens.Num() < Job->UploadFiles.Num() && Job->UploadFiles[Job->UploadTokens.Num()].IsEmpty())
+		{
+			Job->UploadTokens.Add(FString());
+		}
+		if (!Job->UploadFiles.IsEmpty() && Job->UploadTokens.Num() >= Job->UploadFiles.Num())
+		{
+			Enter(*Job, After(*Job, EPhase::Upload));
+			return;
+		}
+		const FString File = Job->UploadFiles.IsEmpty() ? Job->ExportFile : Job->UploadFiles[Job->UploadTokens.Num()];
 		TArray<uint8> Bytes;
-		FFileHelper::LoadFileToArray(Bytes, *Job->ExportFile);
+		FFileHelper::LoadFileToArray(Bytes, *File);
 		FForm Form;
-		Form.File(TEXT("file"), Job->ExportFile, Bytes);
+		Form.File(TEXT("file"), File, Bytes);
 		TMap<FString, FString> Headers = KeyHeaders(*Job);
 		Headers.Add(TEXT("Content-Type"), Form.ContentType());
 		Send(Job, TEXT("POST"), Job->Service.BaseUrl + TEXT("/files"), Headers, Form.Finish(), [](FJob& Job, const int32 Code, const TArray<uint8>& Body)
@@ -743,6 +756,14 @@ namespace HyperAIStudio::MeshGen::Characters
 			{
 				Fail(Job, ProviderError(Job, Code, Body));
 				return;
+			}
+			if (!Job.UploadFiles.IsEmpty())
+			{
+				Job.UploadTokens.Add(Job.Token);
+				if (Job.UploadTokens.Num() < Job.UploadFiles.Num())
+				{
+					return;
+				}
 			}
 			Enter(Job, After(Job, EPhase::Upload));
 		}, 300.f);
@@ -875,6 +896,28 @@ namespace HyperAIStudio::MeshGen::Characters
 		Send(Job, TEXT("GET"), Job->Downloads[Job->DownloadIndex].Url, {}, {}, [](FJob& Job, const int32 Code, const TArray<uint8>& Body)
 		{
 			FDownload& Download = Job.Downloads[Job.DownloadIndex];
+			if (Download.Role == TEXT("preview"))
+			{
+				// The provider's own render of the result, for the visual check: PNG, JPEG or WebP, never fatal.
+				const bool bPng = Body.Num() > 8 && Body[0] == 0x89 && Body[1] == 'P';
+				const bool bJpeg = Body.Num() > 3 && Body[0] == 0xFF && Body[1] == 0xD8;
+				const bool bWebp = Body.Num() > 12 && FMemory::Memcmp(Body.GetData() + 8, "WEBP", 4) == 0;
+				if (Code == 200 && (bPng || bJpeg || bWebp) && Body.Num() < 32 * 1024 * 1024)
+				{
+					Download.File = ModelsRoot() / Job.Info.OperationId / FString::Printf(TEXT("preview_%d.%s"), Job.DownloadIndex, bPng ? TEXT("png") : bJpeg ? TEXT("jpg") : TEXT("webp"));
+					IFileManager::Get().MakeDirectory(*FPaths::GetPath(Download.File), /*Tree=*/true);
+					if (FFileHelper::SaveArrayToFile(Body, *Download.File))
+					{
+						Job.PreviewFile = ProjectRelative(Download.File);
+					}
+				}
+				++Job.DownloadIndex;
+				if (Job.DownloadIndex >= Job.Downloads.Num())
+				{
+					Enter(Job, EPhase::Import);
+				}
+				return;
+			}
 			const FString Extension = ModelExtension(Body);
 			if (Code != 200 || Extension.IsEmpty() || Body.Num() > MaxModelBytes)
 			{
@@ -917,6 +960,8 @@ namespace HyperAIStudio::MeshGen::Characters
 		Task->bReplaceExisting = false;
 		Task->bSave = true;
 		Task->Options = Options;
+		// HyperAI's own import: the Tripo Studio watch looks away.
+		const HyperAIStudio::MeshGen::Creator::FOwnImport Own;
 		AssetTools.ImportAssetTasks({Task});
 		return Task->ImportedObjectPaths;
 	}
@@ -994,6 +1039,10 @@ namespace HyperAIStudio::MeshGen::Characters
 		}
 		for (const FDownload& Download : Job.Downloads)
 		{
+			if (Download.Role == TEXT("preview"))
+			{
+				continue;
+			}
 			if (Download.Role == TEXT("model"))
 			{
 				const TArray<FString> Paths = ImportFile(Download.File, Job.AssetFolder, Job.AssetName, nullptr);
@@ -1027,7 +1076,12 @@ namespace HyperAIStudio::MeshGen::Characters
 						Job.Info.Textures.Add(Path);
 					}
 				}
-				if (Job.Kind != EKind::Retexture && Job.Info.SkeletalMesh.IsEmpty())
+				if (Job.Kind == EKind::Model && Job.Info.AssetPath.IsEmpty())
+				{
+					OutError = FString::Printf(TEXT("Unreal imported %d assets from the model but no mesh; the file is %s."), Paths.Num(), *ProjectRelative(Download.File));
+					return false;
+				}
+				if (Job.Kind != EKind::Retexture && Job.Kind != EKind::Model && Job.Info.SkeletalMesh.IsEmpty())
 				{
 					OutError = FString::Printf(TEXT("Unreal imported %d assets from the rigged model but no skeletal mesh; the file is %s."),
 						Paths.Num(), *ProjectRelative(Download.File));
@@ -1221,7 +1275,7 @@ namespace HyperAIStudio::MeshGen::Characters
 		Job.Phase = EPhase::Done;
 		Job.Info.State = TEXT("completed");
 		Job.Info.Progress = 100;
-		FString What = Job.Kind == EKind::Retexture ? FString::Printf(TEXT("Imported %s with %d material(s) and %d texture(s)"), *Job.Info.AssetPath,
+		FString What = Job.Kind == EKind::Retexture || Job.Kind == EKind::Model ? FString::Printf(TEXT("Imported %s with %d material(s) and %d texture(s)"), *Job.Info.AssetPath,
 				Job.Info.Materials.Num(), Job.Info.Textures.Num())
 			: Job.Kind == EKind::Rig ? FString::Printf(TEXT("Imported %s, its skeleton %s and physics asset %s"), *Job.Info.SkeletalMesh, *Job.Info.Skeleton,
 				Job.Info.PhysicsAsset.IsEmpty() ? TEXT("(none)") : *Job.Info.PhysicsAsset)
@@ -1604,7 +1658,7 @@ FString FHyperAIStudioMeshGenContracts::TripoPreset(const FString& RigModel, con
 	using namespace HyperAIStudio::MeshGen::Characters;
 	FString Name = Action.TrimStartAndEnd().ToLower();
 	Name.RemoveFromStart(TEXT("preset:"));
-	if (RigModel.StartsWith(TEXT("v2.5")))
+	if (RigModel.StartsWith(TEXT("v2.5")) || RigModel.StartsWith(TEXT("v3.0")))
 	{
 		for (const TCHAR* Preset : TripoV25)
 		{
@@ -1664,10 +1718,13 @@ FHyperAIMeshTaskReport FHyperAIStudioMeshGenContracts::Rig(const FHyperAIMeshRig
 		return Report;
 	}
 	const FString Spec = Request.BoneNaming.TrimStartAndEnd().IsEmpty() ? FString(TEXT("mixamo")) : Request.BoneNaming.TrimStartAndEnd().ToLower();
-	const FString RigModel = Request.Model.TrimStartAndEnd().IsEmpty() ? FString(TripoRigV1) : Request.Model.TrimStartAndEnd();
-	if (Provider == TEXT("tripo") && ((Spec != TEXT("mixamo") && Spec != TEXT("tripo")) || (RigModel != TripoRigV1 && RigModel != TripoRigV25)))
+	// Unreal's, Unity's, ActorCore's and VRM's conventions come only from Tripo's v3.0 rig model, which is then the default.
+	const bool bV3Spec = Spec == TEXT("unreal") || Spec == TEXT("unity") || Spec == TEXT("actorcore") || Spec == TEXT("vrm");
+	const FString RigModel = Request.Model.TrimStartAndEnd().IsEmpty() ? FString(bV3Spec ? TripoRigV3 : TripoRigV1) : Request.Model.TrimStartAndEnd();
+	if (Provider == TEXT("tripo") && ((Spec != TEXT("mixamo") && Spec != TEXT("tripo") && !bV3Spec)
+		|| (RigModel != TripoRigV1 && RigModel != TripoRigV25 && RigModel != TripoRigV3) || (bV3Spec && RigModel != TripoRigV3)))
 	{
-		Refuse(Report, TEXT("invalid_request"), TEXT("Tripo: BoneNaming is mixamo or tripo, and Model is v1.0-20240301 or v2.5-20260210."));
+		Refuse(Report, TEXT("invalid_request"), TEXT("Tripo: BoneNaming is mixamo or tripo (Model v1.0-20240301, v2.5-20260210 or v3.0-20260909), or unreal, unity, actorcore or vrm (Model v3.0-20260909)."));
 		return Report;
 	}
 	FString RetargetTo;
@@ -2076,6 +2133,11 @@ FHyperAIMeshCancelReport FHyperAIStudioMeshGenContracts::Cancel(const FString& O
 {
 	using namespace HyperAIStudio::MeshGen::Private;
 	FHyperAIMeshCancelReport Report;
+	// A model creator or check-and-fix job stops its provider step and its pending approvals together.
+	if (HyperAIStudio::MeshGen::Creator::Cancel(OperationId, Report))
+	{
+		return Report;
+	}
 	const TSharedPtr<FJob> Job = FindJob(OperationId.TrimStartAndEnd());
 	if (!Job.IsValid())
 	{

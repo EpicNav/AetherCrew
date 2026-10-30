@@ -14,6 +14,7 @@
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioExternalService.h"
 #include "HyperAIStudioMeshGenJob.h"
+#include "HyperAIStudioModelCreator.h"
 #include "HyperAIStudioNames.h"
 #include "HyperAIStudioSettings.h"
 #include "IAssetTools.h"
@@ -256,6 +257,7 @@ namespace HyperAIStudio::MeshGen::Private
 			Task->bAutomated = true;
 			Task->bReplaceExisting = false;
 			Task->bSave = true;
+			const HyperAIStudio::MeshGen::Creator::FOwnImport Own;
 			AssetTools.ImportAssetTasks({Task});
 			Job->Info.ImportedAssets = Task->ImportedObjectPaths;
 			for (const FString& Path : Task->ImportedObjectPaths)
@@ -304,7 +306,8 @@ FString FHyperAIStudioMeshGenContracts::GetQualifiedToolsetName()
 
 TArray<FString> FHyperAIStudioMeshGenContracts::GetToolNames()
 {
-	return {GenerateToolName, StatusToolName, RigToolName, AnimateToolName, RetextureToolName, ActionsToolName, CancelToolName};
+	return {GenerateToolName, StatusToolName, RigToolName, AnimateToolName, RetextureToolName, ActionsToolName, CancelToolName, ModelCreateToolName,
+		ModelStatusToolName, ModelCheckFixToolName, TripoAccountToolName};
 }
 
 bool FHyperAIStudioMeshGenContracts::IsRegistrationAllowed(const bool bAllowSourceCandidateForDev)
@@ -528,6 +531,30 @@ FHyperAIMeshCancelReport UHyperAIStudioMeshGenToolset::hyper_mesh_cancel(const F
 	return FHyperAIStudioMeshGenContracts::Cancel(Request.OperationId);
 }
 
+FHyperAIModelCreateReport UHyperAIStudioMeshGenToolset::hyper_model_create(const FHyperAIModelCreateRequest& Request)
+{
+	FHyperAIModelCreateReport Report;
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
+	return HyperAIStudio::MeshGen::Creator::Create(Request);
+}
+
+FHyperAIModelStatusReport UHyperAIStudioMeshGenToolset::hyper_model_status(const FHyperAIModelStatusRequest& Request)
+{
+	return HyperAIStudio::MeshGen::Creator::Status(Request.OperationId.TrimStartAndEnd());
+}
+
+FHyperAIModelCheckFixReport UHyperAIStudioMeshGenToolset::hyper_model_check_and_fix(const FHyperAIModelCheckFixRequest& Request)
+{
+	FHyperAIModelCheckFixReport Report;
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
+	return HyperAIStudio::MeshGen::Creator::CheckAndFix(Request);
+}
+
+FHyperAIModelAccountReport UHyperAIStudioMeshGenToolset::hyper_tripo_account(const FHyperAIModelAccountRequest& Request)
+{
+	return HyperAIStudio::MeshGen::Creator::Account(Request);
+}
+
 void FHyperAIStudioMeshGenRegistration::Startup()
 {
 	if (bStarted)
@@ -549,6 +576,7 @@ void FHyperAIStudioMeshGenRegistration::Shutdown()
 		FCoreDelegates::GetOnPostEngineInit().Remove(PostEngineInitHandle);
 		PostEngineInitHandle.Reset();
 	}
+	HyperAIStudio::MeshGen::Creator::StopWatch();
 	if (bOwnsToolset && IsInGameThread() && UObjectInitialized() && UToolsetRegistry::IsAvailable())
 	{
 		FString Error;
@@ -581,4 +609,6 @@ void FHyperAIStudioMeshGenRegistration::RegisterAfterEngineInit()
 		return;
 	}
 	bOwnsToolset = true;
+	// Models Tripo's DCC Bridge sends from Tripo Studio, and the Tripo account in the settings.
+	HyperAIStudio::MeshGen::Creator::StartWatch();
 }
