@@ -17,17 +17,32 @@ public class HyperAIStudioMeshGen : ModuleRules
 			"AssetTools",
 			"Core",
 			"CoreUObject",
+			"DeveloperSettings",
+			// The model creator's checks and free fixes: meshes read as dynamic meshes, holes capped, UVs unwrapped (xatlas).
+			"DynamicMesh",
 			"Engine",
+			"GeometryAlgorithms",
+			"GeometryCore",
 			"HTTP",
 			// The stand-in services the tests answer from.
 			"HTTPServer",
 			"HyperAIStudio",
+			"ImageCore",
 			"InterchangeCore",
 			"InterchangeEngine",
 			"InterchangePipelines",
 			"Json",
+			"JsonUtilities",
+			"MeshConversion",
+			"MeshDescription",
+			"PhysicsCore",
 			"PhysicsUtilities",
 			"Projects",
+			// The Tripo account panel in the creator's settings, and the notification offering to fix a Tripo Studio model.
+			"PropertyEditor",
+			"Slate",
+			"SlateCore",
+			"StaticMeshDescription",
 			"ToolsetRegistry",
 			"UnrealEd"
 		});

@@ -21,6 +21,15 @@ A job takes one to ten minutes.
 | stop a job | `hyper_mesh_cancel` | |
 | IK Rigs, retargeter, copies on your skeleton | handed to `hyper_retarget_apply_plan` | animation_rigging pack |
 
+## A game-ready model first
+
+For a model that must be game-ready before it is rigged (a face budget, quads that deform, PBR materials, the
+right size and pivot), make it with the tripo-model-creator skill: `hyper_model_create` with `Brief.Use: character`
+classifies it as P2 quads, checks and fixes it in the editor, and with `bRig: true` and `RetargetTo` rigs it with
+Tripo's v3.0 rig model in Unreal's own bone names (spec `unreal`) once its checks pass. `hyper_mesh_rig` takes
+`BoneNaming: unreal` (or `unity`, `actorcore`, `vrm`) too, which picks that rig model (`v3.0-20260909`). A model sent
+from Tripo Studio by Tripo's DCC Bridge is checked and fixed with `hyper_model_check_and_fix` before rigging.
+
 ## Prompt to a rigged, animated character on the Mannequin
 
 1. `hyper_mesh_generate` with a prompt that asks for what riggers need: "full-body humanoid character, standing in a
@@ -65,8 +74,8 @@ the material instance to your own mesh when you kept its UVs.
   Tripo by upload (60 MB). The glTF Exporter plugin writes the GLB.
 - `hyper_mesh_actions` knows Tripo's 117 presets and Meshy's first 40 actions offline; any other Meshy name is looked up
   in its library when the job runs (free), and the whole library is kept for the next search.
-- Tripo's presets depend on its rig model: `v1.0-20240301` (the default, humanoids, `preset:biped:<name>`) or
-  `v2.5-20260210` (other creatures too, 16 presets). Pass `walk` or the full id.
+- Tripo's presets depend on its rig model: `v1.0-20240301` (the default, humanoids, `preset:biped:<name>`), or
+  `v2.5-20260210` and `v3.0-20260909` (other creatures too, 16 presets). Pass `walk` or the full id.
 - `hyper_mesh_cancel` stops a job: before approval nothing is spent; after, a task the provider already took runs on
   there and stays booked (neither Meshy nor Tripo stops a running task).
 - A failed job says why in the provider's words (`out of credits`, `Pose estimation failed`); the provider refunds a

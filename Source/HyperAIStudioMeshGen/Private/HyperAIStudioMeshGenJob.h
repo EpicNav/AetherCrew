@@ -55,7 +55,9 @@ namespace HyperAIStudio::MeshGen::Private
 		Generate,
 		Rig,
 		Animate,
-		Retexture
+		Retexture,
+		/** A model the creator makes or fixes: provider tasks whose last result is a static (or rigged) mesh to import. */
+		Model
 	};
 
 	struct FJob;
@@ -138,6 +140,15 @@ namespace HyperAIStudio::MeshGen::Private
 		FString RigModel;
 		/** A skeletal mesh to retarget onto, through hyper_retarget_apply_plan, once everything is imported. */
 		FString RetargetTo;
+
+		// The model creator.
+		/** Files to upload in turn for file tokens (a picture, or views where "" skips one), and the tokens they gave. */
+		TArray<FString> UploadFiles;
+		TArray<FString> UploadTokens;
+		/** The provider's render of the result, downloaded beside the model; relative to the project. */
+		FString PreviewFile;
+		/** Credits the provider reported its finished tasks consumed (Tripo's credits_consumed); negative while none said. */
+		float CreditsConsumed = -1.f;
 	};
 
 	TArray<TSharedRef<FJob>>& Jobs();

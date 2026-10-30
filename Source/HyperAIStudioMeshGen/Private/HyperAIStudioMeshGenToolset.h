@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HyperAIStudioModelCreatorTypes.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
 #include "HyperAIStudioMeshGenToolset.generated.h"
@@ -319,7 +320,7 @@ class HYPERAISTUDIOMESHGEN_API UHyperAIStudioMeshGenToolset final : public UTool
 	GENERATED_BODY()
 
 public:
-	virtual FString GetToolsetVersion() const override { return TEXT("1.1.0"); }
+	virtual FString GetToolsetVersion() const override { return TEXT("1.2.0"); }
 
 	/**
 	 * Makes a textured 3D model with Tripo, Meshy or Hi3D, from words (Tripo, Meshy) or a picture in the project, and
@@ -368,6 +369,37 @@ public:
 	/** Stops a 3D job: one waiting for approval never runs; a running one stops being followed, and nothing more is booked. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|MeshGen")
 	static FHyperAIMeshCancelReport hyper_mesh_cancel(const FHyperAIMeshCancelRequest& Request);
+
+	/**
+	 * Makes a game-ready model with Tripo and fixes it in the editor as part of making it. The brief (prompt and/or a
+	 * picture or views, its use, platform and size) is classified into H3.1 (high detail) or P2 (Smart Poly), a face
+	 * budget, quads or triangles, a texture tier, PBR, parts and smart low poly, each with its reason; any choice can be
+	 * overridden. Then: generate (paid, approved), import, check (budget, topology, holes, winding, stray bits, size,
+	 * pivot, UVs, texel density, PBR maps, Nanite, collision, a visual compare), free fixes, and paid Tripo fixes
+	 * cheapest first (retopology, Smart UV, texture, completion, a new generation), each priced and approved, within a
+	 * fix budget and a round cap; PBR maps become an ORM material instance; optionally a rig (spec unreal). Dry-run first
+	 * (the default) to read the plan and price; follow operation_id with hyper_operation_wait, then hyper_model_status.
+	 * resume_operation_id picks up a journaled job.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|MeshGen")
+	static FHyperAIModelCreateReport hyper_model_create(const FHyperAIModelCreateRequest& Request);
+
+	/** Model creator and check-and-fix jobs: state, plan, every step with its price and credits, the checks, materials, and why it stopped. */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|MeshGen")
+	static FHyperAIModelStatusReport hyper_model_status(const FHyperAIModelStatusRequest& Request);
+
+	/**
+	 * Checks any static or skeletal mesh as the model creator does (such as one Tripo's DCC Bridge sent from Tripo Studio)
+	 * and lists the free and paid fixes. bCheckOnly false asks the user once for the free fixes (pivot, scale, normals,
+	 * winding, stray bits, small holes, auto UVs, collision, lightmap UVs, Nanite, materials); bAllowPaidFixes also offers
+	 * paid Tripo fixes, each priced and approved on its own, when the Tripo API key is set.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|MeshGen")
+	static FHyperAIModelCheckFixReport hyper_model_check_and_fix(const FHyperAIModelCheckFixRequest& Request);
+
+	/** Tripo's API credit balance (available and held) and recent per-task usage, read with the stored key, which is never returned. */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|MeshGen")
+	static FHyperAIModelAccountReport hyper_tripo_account(const FHyperAIModelAccountRequest& Request);
 };
 
 class FHyperAIStudioMeshGenContracts final
@@ -382,6 +414,10 @@ public:
 	static constexpr const TCHAR* RetextureToolName = TEXT("hyper_mesh_retexture");
 	static constexpr const TCHAR* ActionsToolName = TEXT("hyper_mesh_actions");
 	static constexpr const TCHAR* CancelToolName = TEXT("hyper_mesh_cancel");
+	static constexpr const TCHAR* ModelCreateToolName = TEXT("hyper_model_create");
+	static constexpr const TCHAR* ModelStatusToolName = TEXT("hyper_model_status");
+	static constexpr const TCHAR* ModelCheckFixToolName = TEXT("hyper_model_check_and_fix");
+	static constexpr const TCHAR* TripoAccountToolName = TEXT("hyper_tripo_account");
 	static constexpr int32 MaxPromptCharacters = 800;
 	static constexpr int32 MaxMotionPromptCharacters = 400;
 	static constexpr int32 MaxImageBytes = 20 * 1024 * 1024;
