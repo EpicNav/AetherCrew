@@ -381,7 +381,7 @@ bool FHyperAIStudioModelCreatorClassifyTest::RunTest(const FString& Parameters)
 		bool bNanite;
 	};
 	const FRow Rows[] = {
-		{TEXT("an ornate golden throne"), TEXT("hero_prop"), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("hero_prop"), false, 500000, TEXT("extreme"), false, false, true},
+		{TEXT("an ornate golden throne"), TEXT("hero_prop"), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("hero_prop"), false, 300000, TEXT("extreme"), false, false, true},
 		{TEXT("a wooden crate"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("P2"), TEXT("prop"), false, 20000, TEXT("standard"), false, false, false},
 		{TEXT("a sci-fi soldier in armour"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("P2"), TEXT("character"), true, 20000, TEXT("detailed"), false, false, false},
 		{TEXT("a sci-fi soldier in armour"), TEXT(""), TEXT("mobile"), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("P2"), TEXT("character"), true, 5000, TEXT("standard"), false, false, false},
@@ -391,6 +391,9 @@ bool FHyperAIStudioModelCreatorClassifyTest::RunTest(const FString& Parameters)
 		{TEXT("a low poly pine tree"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("P2"), TEXT("foliage"), false, 8000, TEXT("standard"), false, false, true},
 		{TEXT("a low poly treasure chest"), TEXT("prop"), TEXT(""), TEXT("H3.1"), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("prop"), false, 20000, TEXT("standard"), false, true, false},
 		{TEXT("a robot with separate parts"), TEXT("prop"), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("prop"), false, 20000, TEXT("standard"), true, false, false},
+		// Detail on a light use is four times its budget, not a flat 500K; a dense static weapon turns Nanite on.
+		{TEXT("an ornate engraved longsword"), TEXT("weapon"), TEXT(""), TEXT("H3.1"), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("weapon"), false, 60000, TEXT("extreme"), false, false, false},
+		{TEXT("a longsword"), TEXT("weapon"), TEXT(""), TEXT("H3.1"), 200000, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("weapon"), false, 200000, TEXT("detailed"), false, false, true},
 		{TEXT("a medieval sword"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT("quads"), TEXT(""), TEXT("P2"), TEXT("weapon"), true, 7500, TEXT("detailed"), false, false, false},
 		{TEXT("a distant mountain"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("P2"), TEXT("background"), false, 5000, TEXT("standard"), false, false, false},
 		{TEXT("a gem"), TEXT(""), TEXT(""), TEXT("P2"), 1200, TEXT(""), TEXT(""), TEXT("P2"), TEXT("miniature"), false, 1200, TEXT("standard"), false, false, false},

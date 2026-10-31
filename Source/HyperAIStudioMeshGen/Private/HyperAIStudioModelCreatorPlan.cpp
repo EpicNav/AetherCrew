@@ -516,8 +516,13 @@ namespace HyperAIStudio::MeshGen::Creator
 		}
 		if (bDetailWords && bH && Brief.FaceLimit <= 0)
 		{
-			Faces = FMath::Max(Faces, Out.bQuad ? 40000 : 500000);
-			Why.Add(TEXT("faces raised for the detail the brief asks for"));
+			// Four times the use's budget, not a flat figure: a sword asked for in detail is not a cliff.
+			const int32 Raised = FMath::Clamp(Faces * 4, Out.bQuad ? 20000 : 40000, Out.bQuad ? 50000 : 300000);
+			if (Raised > Faces)
+			{
+				Faces = Raised;
+				Why.Add(FString::Printf(TEXT("faces raised to %d (four times a %s's budget) for the detail the brief asks for"), Faces, *Use));
+			}
 		}
 		if (Out.Platform == TEXT("mobile"))
 		{
@@ -616,7 +621,14 @@ namespace HyperAIStudio::MeshGen::Creator
 		Why.Add(Brief.SizeMeters > 0.f ? FString::Printf(TEXT("size: %.2f m, as given"), Out.SizeMeters)
 			: FString::Printf(TEXT("size: %.2f m, a typical %s (give size_meters to set it)"), Out.SizeMeters, *Use));
 		Out.TexelDensity = Out.Platform == TEXT("mobile") ? Row.TexelDensity / 2.f : Row.TexelDensity;
-		Out.bNanite = Row.bNanite && !Out.bQuad && Use != TEXT("character") && Use != TEXT("creature");
+		const bool bDeforms = Use == TEXT("character") || Use == TEXT("creature");
+		Out.bNanite = Row.bNanite && !Out.bQuad && !bDeforms;
+		if (!Out.bNanite && !Out.bQuad && !bDeforms && Out.FaceLimit > 100000)
+		{
+			// Dense triangles without Nanite cost every frame; a static mesh this dense should be Nanite.
+			Out.bNanite = true;
+			Why.Add(FString::Printf(TEXT("Nanite on: %d triangles is too dense to draw without it"), Out.FaceLimit));
+		}
 		Out.Collision = Row.Collision;
 
 		// Input.
