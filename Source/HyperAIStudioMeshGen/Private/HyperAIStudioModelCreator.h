@@ -23,6 +23,11 @@ namespace HyperAIStudio::MeshGen::Private
 	struct FForm;
 }
 
+namespace UE::Geometry
+{
+	class FDynamicMesh3;
+}
+
 namespace HyperAIStudio::MeshGen::Creator
 {
 	/** Tripo's models, as its v3 docs list them (developers.tripo3d.ai/en/docs/models-and-versions, October 2026). */
@@ -281,6 +286,73 @@ namespace HyperAIStudio::MeshGen::Creator
 
 	// ---------------------------------------------------------------- checks and free fixes (HyperAIStudioModelInspect.cpp)
 
+	// ---------------------------------------------------------------- weapons (HyperAIStudioModelCreatorWeapon.cpp)
+
+	/**
+	 * How a weapon is finished in the editor, free: the long axis on Y with the head toward -Y and the handle toward +Y,
+	 * the pivot in the grip, the real length, then thinned to real proportions, the flat of the blade across X, and reduced
+	 * to the budget, Nanite off. HyperAI's defaults, or the project's convention, or a reference mesh's.
+	 */
+	struct FWeaponFinish
+	{
+		float LengthCm = 0.f;
+		int32 TargetTris = 20000;
+		float BladeRatio = 0.18f;
+		float GripCm = 3.4f;
+		float GuardDepthCm = 3.f;
+		/** From the handle's end, 0-1; 0 puts the pivot in the middle of the grip. */
+		float PivotFraction = 0.f;
+		bool bNanite = false;
+		int32 ColorSize = 2048;
+		int32 NormalSize = 2048;
+		int32 MaskSize = 1024;
+		/** Where these came from, for the plan's reasons and the notes: defaults, the project's convention, or a reference. */
+		FString Source;
+	};
+
+	/**
+	 * A weapon measured where it lies. Sections along its longest axis: the widest is the guard (or an axe's head), the
+	 * handle the narrower side of it; a weapon whose widest section is at one end (axe, hammer, mace) is headed.
+	 */
+	struct FWeaponShape
+	{
+		bool bValid = false;
+		/** 0 X, 1 Y, 2 Z; and whether the handle's end is toward + on it. */
+		int32 Axis = 1;
+		bool bHandlePositive = true;
+		bool bHeaded = false;
+		float Length = 0.f;
+		/** The axis across the blade's thickness (never Axis). */
+		int32 ThicknessAxis = 2;
+		/** The blade's (or head's) median width and thickness, and their ratio; 0 when there is none. */
+		float BladeWidth = 0.f;
+		float BladeThickness = 0.f;
+		float BladeRatio = 0.f;
+		float GripCm = 0.f;
+		float GuardDepthCm = 0.f;
+		float GuardSpanCm = 0.f;
+		/** The origin along the length from the handle's end (0-1), and whether it lies within the grip. */
+		float PivotFraction = 0.f;
+		bool bPivotInGrip = false;
+	};
+
+	FWeaponShape MeasureWeapon(const TArray<FVector3d>& Points);
+	/**
+	 * Orients, places, scales and thins a weapon in place (no reduction): what the free weapon_finish fix does to the
+	 * geometry before the simplifier. Notes say what changed. False when it does not read as a weapon.
+	 */
+	bool ShapeWeapon(UE::Geometry::FDynamicMesh3& Mesh, const FWeaponFinish& Finish, TArray<FString>& OutNotes);
+	/** The finishing a plan's weapon gets: the project's convention when there is one, else HyperAI's defaults. */
+	FWeaponFinish WeaponFinishFor(float SizeMeters, int32 Triangles);
+	/**
+	 * Measures a reference static mesh (match_asset) into a finishing and its reasons: triangles, Nanite, LODs, UV channels,
+	 * slots, long axis and head end, pivot, flat axis, proportions, texture sizes and mask packing, collision. bKeep: kept
+	 * as the project's weapon convention. False, with a reason, when it is not a static mesh.
+	 */
+	bool MatchReference(const FString& AssetPath, FWeaponFinish& Out, TArray<FString>& OutReasons, FString& OutError, bool bKeep);
+	/** A weapon's textures capped at the finishing's sizes (their sources kept): run again after the material build. */
+	void CapWeaponTextureSizes(UObject& Mesh, const FWeaponFinish& Finish, TArray<FString>& OutNotes);
+
 	/** What a check measures against. */
 	struct FCheckTargets
 	{
@@ -304,6 +376,9 @@ namespace HyperAIStudio::MeshGen::Creator
 		bool bFromGltf = true;
 		/** Over the budget, a static mesh is reduced in the editor for free (simplify) before anything paid: Hi3D's 100,000-face floor. */
 		bool bLocalReduce = false;
+		/** A weapon: its proportions and convention checked, and the free weapon_finish fix offered. */
+		bool bWeapon = false;
+		FWeaponFinish Weapon;
 	};
 
 	/** The targets a use implies, for a mesh that did not come from the creator. */

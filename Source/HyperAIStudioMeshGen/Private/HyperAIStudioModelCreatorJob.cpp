@@ -1079,6 +1079,11 @@ namespace HyperAIStudio::MeshGen::Creator
 				{
 					FMaterialResult Materials;
 					bOk = BuildMaterials(*Mesh, false, Materials, Error);
+					if (bOk && Targets.bWeapon)
+					{
+						// The material build may have packed a new ORM: capped as the weapon's other textures are.
+						CapWeaponTextureSizes(*Mesh, Targets.Weapon, Materials.Notes);
+					}
 					Notes.Append(Materials.Notes);
 					C.Info.Materials = Materials.Materials;
 					C.Info.Textures = Materials.Textures;
@@ -1712,6 +1717,16 @@ namespace HyperAIStudio::MeshGen::Creator
 		C->Service = Service;
 		C->Hi3D = Hi3D;
 		C->bTripoKey = bTripoKey;
+		if (!Plan.MatchAsset.IsEmpty())
+		{
+			// The reference the brief matched becomes the project's weapon convention: later weapons follow it untold.
+			FWeaponFinish Matched;
+			TArray<FString> Kept;
+			if (MatchReference(Plan.MatchAsset, Matched, Kept, Error, /*bKeep=*/true) && !Kept.IsEmpty())
+			{
+				C->Info.Plan.Reasons.Add(Kept.Last());
+			}
+		}
 		C->Targets = TargetsFromPlan(Plan);
 		C->Folder = Folder;
 		C->Name = Name;
@@ -1825,7 +1840,30 @@ namespace HyperAIStudio::MeshGen::Creator
 		{
 			Use = UseFromWords(Mesh->GetName().Replace(TEXT("_"), TEXT(" ")));
 		}
-		FCheckTargets Targets = TargetsForUse(Use, Request.Platform, Request.SizeMeters, Request.FaceLimit, Request.Topology);
+		// A reference to match: measured, applied, and (when this run changes anything) kept as the project's convention.
+		FWeaponFinish Matched;
+		TArray<FString> MatchLines;
+		const FString Match = Request.MatchAsset.TrimStartAndEnd();
+		if (!Match.IsEmpty())
+		{
+			FString MatchError;
+			if (!MatchReference(Match, Matched, MatchLines, MatchError, /*bKeep=*/!Request.bCheckOnly || bPreApproved))
+			{
+				return Refuse(TEXT("invalid_request"), MatchError);
+			}
+			Use = Use.IsEmpty() || Use == TEXT("prop") ? FString(TEXT("weapon")) : Use;
+		}
+		FCheckTargets Targets = TargetsForUse(Use, Request.Platform, Request.SizeMeters, Request.FaceLimit > 0 ? Request.FaceLimit : Match.IsEmpty() ? 0 : Matched.TargetTris, Request.Topology);
+		if (!Match.IsEmpty() && Targets.bWeapon)
+		{
+			// Its size as asked, else the reference's length.
+			const float Length = Request.SizeMeters > 0.f || Matched.LengthCm <= 0.f ? Targets.Weapon.LengthCm : Matched.LengthCm;
+			Targets.Weapon = Matched;
+			Targets.Weapon.LengthCm = Length;
+			Targets.SizeMeters = Length / 100.f;
+			Targets.Weapon.TargetTris = Targets.FaceLimit > 0 ? Targets.FaceLimit : Matched.TargetTris;
+			Targets.bNanite = Matched.bNanite;
+		}
 		const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 		if (!Request.ReferenceImagePath.TrimStartAndEnd().IsEmpty())
 		{

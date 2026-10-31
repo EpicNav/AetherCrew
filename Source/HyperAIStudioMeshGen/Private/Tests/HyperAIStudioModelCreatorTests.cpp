@@ -44,6 +44,7 @@
 #include "PhysicsEngine/BodySetup.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
+#include "StaticMeshAttributes.h"
 #include "StaticMeshResources.h"
 
 /**
@@ -484,6 +485,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelCreatorClassifyTest, "HyperA
 bool FHyperAIStudioModelCreatorClassifyTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::ModelCreatorTests;
+	// HyperAI's own weapon defaults here, whatever this project has learned.
+	FHyperAIStudioWeaponConvention& Convention = GetMutableDefault<UHyperAIStudioTripoSettings>()->WeaponConvention;
+	const FHyperAIStudioWeaponConvention SavedConvention = Convention;
+	Convention = FHyperAIStudioWeaponConvention();
+	ON_SCOPE_EXIT { Convention = SavedConvention; };
 	struct FRow
 	{
 		const TCHAR* Prompt;
@@ -514,10 +520,11 @@ bool FHyperAIStudioModelCreatorClassifyTest::RunTest(const FString& Parameters)
 		{TEXT("a low poly pine tree"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("P2"), TEXT("foliage"), false, 8000, TEXT("standard"), false, false, true},
 		{TEXT("a low poly treasure chest"), TEXT("prop"), TEXT(""), TEXT("H3.1"), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("prop"), false, 20000, TEXT("standard"), false, true, false},
 		{TEXT("a robot with separate parts"), TEXT("prop"), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("prop"), false, 20000, TEXT("standard"), true, false, false},
-		// Detail on a light use is four times its budget, not a flat 500K; a dense static weapon turns Nanite on.
-		{TEXT("an ornate engraved longsword"), TEXT("weapon"), TEXT(""), TEXT("H3.1"), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("weapon"), false, 60000, TEXT("extreme"), false, false, false},
+		// A weapon is finished in the editor to 20K, whatever detail it is generated at (four times that, here); a dense one
+		// asked for outright keeps Nanite on.
+		{TEXT("an ornate engraved longsword"), TEXT("weapon"), TEXT(""), TEXT("H3.1"), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("weapon"), false, 20000, TEXT("extreme"), false, false, false},
 		{TEXT("a longsword"), TEXT("weapon"), TEXT(""), TEXT("H3.1"), 200000, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("weapon"), false, 200000, TEXT("detailed"), false, false, true},
-		{TEXT("a medieval sword"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT("quads"), TEXT(""), TEXT("P2"), TEXT("weapon"), true, 7500, TEXT("detailed"), false, false, false},
+		{TEXT("a medieval sword"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT("quads"), TEXT(""), TEXT("H3.1"), TEXT("weapon"), true, 10000, TEXT("detailed"), false, false, false},
 		{TEXT("a distant mountain"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("P2"), TEXT("background"), false, 5000, TEXT("standard"), false, false, false},
 		{TEXT("a gem"), TEXT(""), TEXT(""), TEXT("P2"), 1200, TEXT(""), TEXT(""), TEXT("P2"), TEXT("miniature"), false, 1200, TEXT("standard"), false, false, false},
 		{TEXT("a huge cathedral"), TEXT("environment"), TEXT(""), TEXT("H3.1"), 1800000, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("environment"), false, 1800000, TEXT("detailed"), false, false, true},
@@ -1177,6 +1184,289 @@ bool FHyperAIStudioModelCreatorMaterialsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ---------------------------------------------------------------- weapons: finishing, checks, a reference to match
+
+namespace HyperAIStudio::ModelCreatorTests
+{
+	/**
+	 * A deliberately bulky sword, as a generator makes one, upright in glTF (Y up, so Z in Unreal) with the handle up: a
+	 * box blade 6 x 4 cm, 75 cm long; a guard 22 cm across and 10 deep; a grip 6 cm across; a ball pommel. Every part is cut
+	 * a centimetre at a time along its length, as a generated mesh is dense.
+	 */
+	TArray<uint8> WeaponGlb()
+	{
+		TArray<FVector3f> P, N;
+		TArray<FVector2f> UV;
+		TArray<uint32> I;
+		auto Quad = [&I](const uint32 A, const uint32 B, const uint32 C, const uint32 D) { I.Append({A, B, C, A, C, D}); };
+		// A box from Min to Max, its sides cut every centimetre along Y.
+		auto Box = [&](const FVector3f& Min, const FVector3f& Max)
+		{
+			const int32 Rings = FMath::Max(1, FMath::RoundToInt((Max.Y - Min.Y) / 0.01f));
+			const FVector3f Corners[4] = {FVector3f(Min.X, 0, Min.Z), FVector3f(Max.X, 0, Min.Z), FVector3f(Max.X, 0, Max.Z), FVector3f(Min.X, 0, Max.Z)};
+			const FVector3f Centre = (Min + Max) * 0.5f;
+			const uint32 Base = P.Num();
+			for (int32 Ring = 0; Ring <= Rings; ++Ring)
+			{
+				const float Y = FMath::Lerp(Min.Y, Max.Y, float(Ring) / Rings);
+				for (int32 Corner = 0; Corner < 4; ++Corner)
+				{
+					P.Add(FVector3f(Corners[Corner].X, Y, Corners[Corner].Z));
+					N.Add((FVector3f(Corners[Corner].X, Centre.Y, Corners[Corner].Z) - FVector3f(Centre.X, Centre.Y, Centre.Z)).GetSafeNormal());
+					UV.Add(FVector2f(0.05f + 0.2f * Corner, 0.05f + 0.9f * Ring / Rings));
+				}
+			}
+			for (int32 Ring = 0; Ring < Rings; ++Ring)
+			{
+				for (int32 Corner = 0; Corner < 4; ++Corner)
+				{
+					const uint32 A = Base + Ring * 4 + Corner, B = Base + Ring * 4 + (Corner + 1) % 4;
+					Quad(A, A + 4, B + 4, B);
+				}
+			}
+			Quad(Base + 3, Base + 2, Base + 1, Base + 0);
+			const uint32 Top = Base + Rings * 4;
+			Quad(Top + 0, Top + 1, Top + 2, Top + 3);
+		};
+		// A tube of Radius from Y0 to Y1, or a ball when bBall (its radius following a half circle).
+		auto Round = [&](const float Y0, const float Y1, const float Radius, const bool bBall)
+		{
+			constexpr int32 Sides = 16;
+			const int32 Rings = FMath::Max(2, FMath::RoundToInt((Y1 - Y0) / 0.01f));
+			const uint32 Base = P.Num();
+			for (int32 Ring = 0; Ring <= Rings; ++Ring)
+			{
+				const float T = float(Ring) / Rings;
+				const float Y = FMath::Lerp(Y0, Y1, T);
+				const float R = bBall ? Radius * FMath::Max(0.05f, FMath::Sin(T * UE_PI)) : Radius;
+				for (int32 Side = 0; Side < Sides; ++Side)
+				{
+					const float Angle = 2.f * UE_PI * Side / Sides;
+					P.Add(FVector3f(R * FMath::Cos(Angle), Y, R * FMath::Sin(Angle)));
+					N.Add(FVector3f(FMath::Cos(Angle), 0.f, FMath::Sin(Angle)));
+					UV.Add(FVector2f(0.05f + 0.9f * Side / Sides, 0.05f + 0.9f * T));
+				}
+			}
+			for (int32 Ring = 0; Ring < Rings; ++Ring)
+			{
+				for (int32 Side = 0; Side < Sides; ++Side)
+				{
+					const uint32 A = Base + Ring * Sides + Side, B = Base + Ring * Sides + (Side + 1) % Sides;
+					Quad(A, B, B + Sides, A + Sides);
+				}
+			}
+		};
+		Box(FVector3f(-0.03f, 0.f, -0.02f), FVector3f(0.03f, 0.75f, 0.02f));
+		Box(FVector3f(-0.11f, 0.75f, -0.05f), FVector3f(0.11f, 0.79f, 0.05f));
+		Round(0.79f, 0.97f, 0.03f, false);
+		Round(0.97f, 1.04f, 0.035f, true);
+
+		FFixture Shell;
+		Shell.Grid = 1;
+		TArray<uint8> Bin;
+		const TSharedPtr<FJsonObject> Json = GlbJson(CubeGlb(Shell), &Bin);
+		Bin.Reset();
+		auto Append = [&Bin](const void* Data, const int32 Bytes) { while (Bin.Num() % 4) { Bin.Add(0); } const int32 Offset = Bin.Num(); Bin.Append(static_cast<const uint8*>(Data), Bytes); return Offset; };
+		const int32 PO = Append(P.GetData(), P.Num() * 12), NO = Append(N.GetData(), N.Num() * 12), UO = Append(UV.GetData(), UV.Num() * 8), IO = Append(I.GetData(), I.Num() * 4);
+		while (Bin.Num() % 4)
+		{
+			Bin.Add(0);
+		}
+		auto View = [](const int32 Offset, const int32 Bytes)
+		{
+			const TSharedRef<FJsonObject> Each = MakeShared<FJsonObject>();
+			Each->SetNumberField(TEXT("buffer"), 0);
+			Each->SetNumberField(TEXT("byteOffset"), Offset);
+			Each->SetNumberField(TEXT("byteLength"), Bytes);
+			return MakeShared<FJsonValueObject>(Each);
+		};
+		Json->SetArrayField(TEXT("bufferViews"), {View(PO, P.Num() * 12), View(NO, N.Num() * 12), View(UO, UV.Num() * 8), View(IO, I.Num() * 4)});
+		FVector3f Min(FLT_MAX), Max(-FLT_MAX);
+		for (const FVector3f& X : P)
+		{
+			Min = FVector3f::Min(Min, X);
+			Max = FVector3f::Max(Max, X);
+		}
+		const TArray<TSharedPtr<FJsonValue>> Accessors = Json->GetArrayField(TEXT("accessors"));
+		Accessors[0]->AsObject()->SetNumberField(TEXT("count"), P.Num());
+		Accessors[0]->AsObject()->SetArrayField(TEXT("min"), {MakeShared<FJsonValueNumber>(Min.X), MakeShared<FJsonValueNumber>(Min.Y), MakeShared<FJsonValueNumber>(Min.Z)});
+		Accessors[0]->AsObject()->SetArrayField(TEXT("max"), {MakeShared<FJsonValueNumber>(Max.X), MakeShared<FJsonValueNumber>(Max.Y), MakeShared<FJsonValueNumber>(Max.Z)});
+		Accessors[1]->AsObject()->SetNumberField(TEXT("count"), N.Num());
+		Accessors[2]->AsObject()->SetNumberField(TEXT("count"), UV.Num());
+		Accessors[3]->AsObject()->SetNumberField(TEXT("count"), I.Num());
+		Json->GetArrayField(TEXT("buffers"))[0]->AsObject()->SetNumberField(TEXT("byteLength"), Bin.Num());
+		return GlbOf(Json.ToSharedRef(), Bin);
+	}
+
+	FWeaponShape ShapeOf(UStaticMesh& Mesh)
+	{
+		TArray<FVector3d> Points;
+		const FMeshDescription* Source = Mesh.GetMeshDescription(0);
+		if (Source)
+		{
+			FStaticMeshConstAttributes Attributes(*Source);
+			for (const FVertexID Vertex : Source->Vertices().GetElementIDs())
+			{
+				Points.Add(FVector3d(Attributes.GetVertexPositions()[Vertex]));
+			}
+		}
+		return MeasureWeapon(Points);
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelCreatorWeaponTest, "HyperAIStudio.MeshGen.Creator.WeaponFinishAndMatch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioModelCreatorWeaponTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelCreatorTests;
+	UHyperAIStudioTripoSettings* Settings = GetMutableDefault<UHyperAIStudioTripoSettings>();
+	const FHyperAIStudioWeaponConvention SavedConvention = Settings->WeaponConvention;
+	Settings->WeaponConvention = FHyperAIStudioWeaponConvention();
+	TArray<FString> Imported;
+	ON_SCOPE_EXIT
+	{
+		Settings->WeaponConvention = SavedConvention;
+		Settings->SaveConfig();
+		DeleteAll(Imported);
+	};
+
+	// A bulky sword, standing on Z with its handle up, as Tripo's come in lying any way.
+	UStaticMesh* Sword = Import(WeaponGlb(), TEXT("SM_CreatorBulkySword"), Imported);
+	if (!TestNotNull(TEXT("The bulky sword imports"), Sword))
+	{
+		return false;
+	}
+	const FWeaponShape Raw = ShapeOf(*Sword);
+	AddInfo(FString::Printf(TEXT("As imported: length on %d, handle %s, %.0f cm, blade %.1f x %.1f (%.2f), grip %.1f, guard %.1f deep, headed %d, %d triangles"), Raw.Axis,
+		Raw.bHandlePositive ? TEXT("+") : TEXT("-"), Raw.Length, Raw.BladeWidth, Raw.BladeThickness, Raw.BladeRatio, Raw.GripCm, Raw.GuardDepthCm, Raw.bHeaded ? 1 : 0,
+		Sword->GetMeshDescription(0)->Triangles().Num()));
+	TestTrue(TEXT("It is measured as it lies: length on Z, handle up, not headed, bulky"), Raw.bValid && Raw.Axis == 2 && Raw.bHandlePositive && !Raw.bHeaded && Raw.BladeRatio > 0.5f
+		&& Raw.GripCm > 5.5f && Raw.GuardDepthCm > 9.f);
+
+	FHyperAIModelBrief Brief;
+	Brief.Prompt = TEXT("a longsword");
+	Brief.Use = TEXT("weapon");
+	Brief.SizeMeters = 1.1f;
+	FHyperAIModelPlan Plan;
+	FString Error;
+	TestTrue(TEXT("A weapon classifies: ") + Error, Classify(Brief, Plan, Error));
+	TestTrue(TEXT("H3.1 generated at three times a 20K budget, finished to it, Nanite off"), Plan.Family == TEXT("H3.1") && Plan.FaceLimit == 20000 && Plan.ProviderFaces == 60000
+		&& Plan.bLocalReduce && !Plan.bNanite && Plan.Reasons.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("weapon: HyperAI's defaults")); }));
+	TestTrue(TEXT("Tripo is asked for the denser mesh"), Plan.RequestJson.Contains(TEXT("\"face_limit\":60000")));
+	FCheckTargets Targets = TargetsFromPlan(Plan);
+	// A budget the finishing must reduce to, light enough to keep the grip's 16 sides (a coarser fixture's grip would shrink).
+	Targets.FaceLimit = 1350;
+	Targets.Weapon.TargetTris = 1350;
+	Targets.bTextures = false;
+	Targets.bPbr = false;
+	TestTrue(TEXT("Its targets are a weapon's"), Targets.bWeapon && FMath::IsNearlyEqual(Targets.Weapon.LengthCm, 110.f));
+
+	FHyperAIModelCheckReport Before;
+	Inspect(*Sword, Targets, Before, Error);
+	AddInfo(TEXT("Before: ") + Before.Summary);
+	for (const TCHAR* Id : {TEXT("weapon_axis"), TEXT("weapon_blade"), TEXT("weapon_grip"), TEXT("weapon_guard")})
+	{
+		const FHyperAIModelCheck* Check = Find(Before, Id);
+		TestTrue(FString::Printf(TEXT("Bulky and lying on Z, %s fails and names the free weapon finishing (%s)"), Id, Check ? *Check->Value : TEXT("missing")),
+			Check && Check->Result == TEXT("fail") && Check->LocalFix == TEXT("weapon_finish"));
+	}
+	TestTrue(TEXT("Over its budget, faces name the weapon finishing too, and the free fixes start with it"), Find(Before, TEXT("faces")) && Find(Before, TEXT("faces"))->LocalFix == TEXT("weapon_finish")
+		&& LocalFixesFor(Before).Contains(TEXT("weapon_finish")) && !LocalFixesFor(Before).Contains(TEXT("pivot")) && !LocalFixesFor(Before).Contains(TEXT("scale")));
+
+	TArray<FString> Notes;
+	TestTrue(TEXT("The free fixes run: ") + Error, ApplyLocalFixes(*Sword, Targets, LocalFixesFor(Before), Notes, Error));
+	for (const FString& Note : Notes)
+	{
+		AddInfo(Note);
+	}
+	const FWeaponShape Done = ShapeOf(*Sword);
+	AddInfo(FString::Printf(TEXT("Finished: length on %d, handle %s, %.1f cm, blade %.2f x %.2f (%.2f), grip %.2f, guard %.2f deep, pivot %.2f in grip %d, thickness on %d"), Done.Axis,
+		Done.bHandlePositive ? TEXT("+") : TEXT("-"), Done.Length, Done.BladeWidth, Done.BladeThickness, Done.BladeRatio, Done.GripCm, Done.GuardDepthCm, Done.PivotFraction,
+		Done.bPivotInGrip ? 1 : 0, Done.ThicknessAxis));
+	TestTrue(TEXT("The handle is toward +Y, the head toward -Y, and the pivot in the grip"), Done.Axis == 1 && Done.bHandlePositive && Done.bPivotInGrip);
+	TestTrue(TEXT("It is its real length, 110 cm"), FMath::IsNearlyEqual(Done.Length, 110.f, 1.5f));
+	TestTrue(TEXT("The blade is at most a fifth as thick as it is wide"), Done.BladeRatio > 0.f && Done.BladeRatio <= 0.2f);
+	TestTrue(TEXT("The grip is 3.4 cm across"), FMath::IsNearlyEqual(Done.GripCm, 3.4f, 0.3f));
+	TestTrue(TEXT("The guard is at most 3 cm deep"), Done.GuardDepthCm > 0.f && Done.GuardDepthCm <= 3.05f);
+	TestTrue(TEXT("The flat of the blade lies across X, its thickness along Z"), Done.ThicknessAxis == 2);
+	TestTrue(TEXT("Within the budget, with Nanite off and one LOD"), Sword->GetMeshDescription(0)->Triangles().Num() <= 1350 && !Sword->GetNaniteSettings().bEnabled
+		&& Sword->GetNumSourceModels() == 1);
+	FHyperAIModelCheckReport After;
+	Inspect(*Sword, Targets, After, Error);
+	AddInfo(TEXT("After: ") + After.Summary);
+	for (const TCHAR* Id : {TEXT("weapon_axis"), TEXT("weapon_blade"), TEXT("weapon_grip"), TEXT("weapon_guard"), TEXT("faces")})
+	{
+		TestEqual(FString::Printf(TEXT("Finished, %s passes"), Id), ResultOf(After, Id), FString(TEXT("pass")));
+	}
+	TestTrue(TEXT("The pommel stays rounder and wider than the grip"), [&]()
+	{
+		TArray<FVector3d> Top;
+		FStaticMeshConstAttributes Attributes(*Sword->GetMeshDescription(0));
+		double YMax = -1e30;
+		for (const FVertexID Vertex : Sword->GetMeshDescription(0)->Vertices().GetElementIDs())
+		{
+			YMax = FMath::Max(YMax, double(Attributes.GetVertexPositions()[Vertex].Y));
+		}
+		FBox3d Pommel(ForceInit);
+		for (const FVertexID Vertex : Sword->GetMeshDescription(0)->Vertices().GetElementIDs())
+		{
+			const FVector3d Point(Attributes.GetVertexPositions()[Vertex]);
+			if (Point.Y > YMax - 5.0 && Point.Y < YMax - 2.0)
+			{
+				Pommel += Point;
+			}
+		}
+		const FVector3d Size = Pommel.GetSize();
+		return Pommel.IsValid && FMath::Max(Size.X, Size.Z) > Done.GripCm * 1.2 && FMath::Min(Size.X, Size.Z) / FMath::Max(Size.X, Size.Z) > 0.8;
+	}());
+
+	// A reference to match: a sword finished to its own convention (the pivot a third of the way down, a slim blade).
+	UStaticMesh* Reference = Import(WeaponGlb(), TEXT("SM_CreatorReferenceSword"), Imported);
+	FCheckTargets Authored = Targets;
+	Authored.Weapon.PivotFraction = 0.3f;
+	Authored.Weapon.BladeRatio = 0.1f;
+	Authored.Weapon.LengthCm = 120.f;
+	Authored.Weapon.TargetTris = 1200;
+	Authored.Weapon.Source = TEXT("the test's own reference");
+	TArray<FString> AuthoredNotes;
+	TestTrue(TEXT("The reference is made"), Reference && ApplyLocalFixes(*Reference, Authored, {TEXT("weapon_finish")}, AuthoredNotes, Error));
+	if (!Reference)
+	{
+		return false;
+	}
+	const int32 ReferenceTriangles = Reference->GetMeshDescription(0)->Triangles().Num();
+	FWeaponFinish Matched;
+	TArray<FString> Reasons;
+	TestTrue(TEXT("It is measured: ") + Error, MatchReference(Reference->GetPathName(), Matched, Reasons, Error, /*bKeep=*/true));
+	for (const FString& Line : Reasons)
+	{
+		AddInfo(Line);
+	}
+	TestTrue(TEXT("Its budget, Nanite, pivot and blade are read from it"), Matched.TargetTris == ReferenceTriangles && !Matched.bNanite && FMath::IsNearlyEqual(Matched.PivotFraction, 0.3f, 0.03f)
+		&& FMath::IsNearlyEqual(Matched.BladeRatio, 0.1f, 0.03f));
+	TestTrue(TEXT("and every value is said"), Reasons.Num() >= 5 && Reasons[0].Contains(FString::Printf(TEXT("%d triangles"), ReferenceTriangles))
+		&& Reasons.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("toward -Y, as HyperAI finishes weapons")); }));
+	TestTrue(TEXT("It is kept as the project's weapon convention"), Settings->WeaponConvention.Source == Reference->GetPathName() && Settings->WeaponConvention.Triangles == ReferenceTriangles
+		&& FMath::IsNearlyEqual(Settings->WeaponConvention.PivotFraction, 0.3f, 0.03f));
+
+	// A later weapon follows it untold.
+	FHyperAIModelPlan Later;
+	TestTrue(TEXT("A later weapon classifies"), Classify(Brief, Later, Error));
+	TestTrue(TEXT("and follows the project's convention: its budget, three times it generated, the convention in its reasons"), Later.FaceLimit == FMath::Max(ReferenceTriangles, MinFaces)
+		&& Later.ProviderFaces == Later.FaceLimit * 3 && Later.Reasons.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("weapon: the project's convention")); }));
+	const FCheckTargets LaterTargets = TargetsFromPlan(Later);
+	TestTrue(TEXT("and is finished to it: the pivot 30% from the handle's end"), LaterTargets.bWeapon && FMath::IsNearlyEqual(LaterTargets.Weapon.PivotFraction, 0.3f, 0.03f));
+	// A brief naming the reference itself.
+	Brief.MatchAsset = Reference->GetPathName();
+	FHyperAIModelPlan Named;
+	TestTrue(TEXT("A brief that names the reference classifies"), Classify(Brief, Named, Error) && Named.MatchAsset == Reference->GetPathName()
+		&& Named.Reasons.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("match SM_CreatorReferenceSword")); }));
+	Brief.MatchAsset = TEXT("/Game/Nope/SM_Missing.SM_Missing");
+	TestFalse(TEXT("and one naming no mesh is refused"), Classify(Brief, Named, Error));
+	return true;
+}
+
 // ---------------------------------------------------------------- import and export fidelity
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelCreatorFidelityTest, "HyperAIStudio.MeshGen.Creator.ImportExportFidelity",
@@ -1259,6 +1549,39 @@ bool FHyperAIStudioModelCreatorFidelityTest::RunTest(const FString& Parameters)
 			AddInfo(TEXT("The exported material: ") + MaterialText);
 			TestTrue(TEXT("The exported material carries a base colour texture"), MaterialText.Contains(TEXT("baseColorTexture")));
 		}
+	}
+
+	// A free reduction keeps every UV island whole: a cube's six faces are six islands in their own cells of the atlas, and
+	// no triangle may come to span two of them (collapsing across a seam smeared a Tripo sword's textures).
+	{
+		FFixture Atlas;
+		Atlas.Grid = 8;
+		UStaticMesh* Islands = Import(CubeGlb(Atlas), TEXT("SM_CreatorIslands"), Imported);
+		FCheckTargets Reduce = TargetsForUse(TEXT("prop"), TEXT("pc"), 0.f, 200, TEXT("tris"));
+		Reduce.bLocalReduce = true;
+		TArray<FString> ReduceNotes;
+		TestTrue(TEXT("The reduction runs: ") + Error, Islands && ApplyLocalFixes(*Islands, Reduce, {TEXT("simplify")}, ReduceNotes, Error));
+		for (const FString& Note : ReduceNotes)
+		{
+			AddInfo(Note);
+		}
+		const FMeshDescription* Reduced = Islands ? Islands->GetMeshDescription(0) : nullptr;
+		int32 Spanning = 0;
+		if (Reduced)
+		{
+			FStaticMeshConstAttributes Attributes(*Reduced);
+			for (const FTriangleID Triangle : Reduced->Triangles().GetElementIDs())
+			{
+				FBox2f Box(ForceInit);
+				for (const FVertexInstanceID Corner : Reduced->GetTriangleVertexInstances(Triangle))
+				{
+					Box += Attributes.GetVertexInstanceUVs().Get(Corner, 0);
+				}
+				Spanning += Box.GetSize().X > 0.34f || Box.GetSize().Y > 0.5f;
+			}
+		}
+		TestTrue(FString::Printf(TEXT("Reduced (%d triangles), no triangle spans two islands (%d do)"), Reduced ? Reduced->Triangles().Num() : 0, Spanning), Reduced && Reduced->Triangles().Num() < 768
+			&& Spanning == 0);
 	}
 
 	// A file of several nodes imports as a static mesh a node; merged, it is one mesh with a slot a part.

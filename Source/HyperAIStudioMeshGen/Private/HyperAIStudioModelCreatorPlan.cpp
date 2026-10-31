@@ -2,8 +2,11 @@
 
 #include "HyperAIStudioModelCreator.h"
 
+#include "Engine/StaticMesh.h"
 #include "HyperAIStudioMeshGenJob.h"
 #include "HyperAIStudioSettings.h"
+#include "HyperAIStudioTripoSettings.h"
+#include "PhysicsEngine/BodySetup.h"
 
 /**
  * The pure parts of the model creator: the brief classified into a plan, Tripo's v3 request bodies, prices, and the
@@ -46,8 +49,8 @@ namespace HyperAIStudio::MeshGen::Creator
 				TEXT("a creature deforms when animated: P2 quads at 25K")},
 			{TEXT("vehicle"), TEXT("H3.1"), false, 150000, TEXT("detailed"), 4.5f, 5.12f, true, TEXT("box"),
 				TEXT("a vehicle is a large hard-surface hero: H3.1 at 150K triangles with Nanite")},
-			{TEXT("weapon"), TEXT("P2"), false, 15000, TEXT("detailed"), 1.0f, 10.24f, false, TEXT("box"),
-				TEXT("a held weapon is close to the camera but light: P2 at 15K with detailed textures")},
+			{TEXT("weapon"), TEXT("H3.1"), false, 20000, TEXT("detailed"), 1.0f, 10.24f, false, TEXT("box"),
+				TEXT("a held weapon is close to the camera but light: H3.1's detail generated at several times the budget, then finished in the editor to 20K, Nanite off")},
 			{TEXT("foliage"), TEXT("P2"), false, 8000, TEXT("standard"), 2.0f, 5.12f, true, TEXT("none"),
 				TEXT("foliage is placed by the thousand: P2 at 8K with Nanite (Tripo makes solid geometry, not alpha cards)")},
 			{TEXT("miniature"), TEXT("P2"), false, 2000, TEXT("standard"), 0.3f, 5.12f, false, TEXT("box"),
@@ -364,6 +367,64 @@ namespace HyperAIStudio::MeshGen::Creator
 		return Tripo(TEXT("the default for a picture of a game piece of this kind"));
 	}
 
+	/**
+	 * A weapon: the project's convention (or the reference the brief matches) sets its budget, Nanite and finishing; the
+	 * generation asks for three times the budget (four for a detailed brief), so the detail survives in the normal map,
+	 * and the free finishing reduces it to the budget.
+	 */
+	static bool PlanWeapon(const FHyperAIModelBrief& Brief, const bool bDetailWords, FHyperAIModelPlan& Out, TArray<FString>& Why, FString& OutError)
+	{
+		FWeaponFinish Finish;
+		const FString Match = Brief.MatchAsset.TrimStartAndEnd();
+		if (!Match.IsEmpty())
+		{
+			TArray<FString> Lines;
+			if (!MatchReference(Match, Finish, Lines, OutError, /*bKeep=*/false))
+			{
+				return false;
+			}
+			Why.Append(Lines);
+			Out.MatchAsset = Match;
+			if (Brief.SizeMeters <= 0.f && Finish.LengthCm > 0.f)
+			{
+				Out.SizeMeters = Finish.LengthCm / 100.f;
+				Why.Add(FString::Printf(TEXT("size: %.2f m, the reference's length"), Out.SizeMeters));
+			}
+		}
+		else
+		{
+			Finish = WeaponFinishFor(Out.SizeMeters, 0);
+			const FHyperAIStudioWeaponConvention& Convention = GetDefault<UHyperAIStudioTripoSettings>()->WeaponConvention;
+			Why.Add(Convention.Source.IsEmpty() ? FString(TEXT("weapon: HyperAI's defaults (length on Y, head toward -Y, pivot in the grip, blade a fifth as thick as wide, grip 3.4 cm, guard 3 cm deep); give match_asset to follow one of the project's weapons"))
+				: FString::Printf(TEXT("weapon: the project's convention, %s"), *Convention.Summary));
+		}
+		if (Brief.FaceLimit <= 0)
+		{
+			const int32 Budget = FMath::Clamp(Finish.TargetTris, Out.MinFaces, Out.MaxFaces);
+			if (Budget != Out.FaceLimit)
+			{
+				Out.FaceLimit = Budget;
+				Why.Add(FString::Printf(TEXT("budget: %d triangles, from %s"), Budget, *Finish.Source));
+			}
+			Out.bNanite = Finish.bNanite;
+		}
+		if (Out.Collision == TEXT("box") && !Match.IsEmpty())
+		{
+			const UStaticMesh* Reference = LoadObject<UStaticMesh>(nullptr, *Match, nullptr, LOAD_NoWarn | LOAD_Quiet);
+			const UBodySetup* Body = Reference ? Reference->GetBodySetup() : nullptr;
+			if (Body && Body->AggGeom.GetElementCount() == 0 && Body->CollisionTraceFlag != CTF_UseComplexAsSimple)
+			{
+				Out.Collision = TEXT("none");
+				Why.Add(TEXT("collision: none, as the reference has"));
+			}
+		}
+		Out.ProviderFaces = FMath::Clamp(Out.FaceLimit * (bDetailWords ? 4 : 3), Out.MinFaces, Out.MaxFaces);
+		Out.bLocalReduce = Out.ProviderFaces > Out.FaceLimit;
+		Why.Add(FString::Printf(TEXT("generated at %d triangles, then finished in the editor for free: turned and placed, thinned to real proportions, reduced to %d, Nanite %s"),
+			Out.ProviderFaces, Out.FaceLimit, Out.bNanite ? TEXT("on") : TEXT("off")));
+		return true;
+	}
+
 	static bool ClassifyTripo(const FHyperAIModelBrief& Brief, FHyperAIModelPlan& Out, FString& OutError)
 	{
 		Out = FHyperAIModelPlan();
@@ -514,7 +575,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			// The use's budget is in its own topology: a quad is two triangles.
 			Faces = Out.bQuad ? Faces / 2 : Faces * 2;
 		}
-		if (bDetailWords && bH && Brief.FaceLimit <= 0)
+		if (bDetailWords && bH && Brief.FaceLimit <= 0 && Use != TEXT("weapon"))
 		{
 			// Four times the use's budget, not a flat figure: a sword asked for in detail is not a cliff.
 			const int32 Raised = FMath::Clamp(Faces * 4, Out.bQuad ? 20000 : 40000, Out.bQuad ? 50000 : 300000);
@@ -724,6 +785,10 @@ namespace HyperAIStudio::MeshGen::Creator
 		for (int32 Index = 0; Index < Brief.MultiviewImages.Num(); ++Index)
 		{
 			Placeholders.Add(Brief.MultiviewImages[Index].TrimStartAndEnd().IsEmpty() ? FString() : FString::Printf(TEXT("<file_token of view %d>"), Index));
+		}
+		if (Out.Use == TEXT("weapon") && !Out.bQuad && !PlanWeapon(Brief, bDetailWords, Out, Why, OutError))
+		{
+			return false;
 		}
 		Out.RequestJson = HyperAIStudio::MeshGen::Private::JsonText(GenerationBody(Out, Brief, Placeholders));
 		return true;
@@ -1288,7 +1353,8 @@ namespace HyperAIStudio::MeshGen::Creator
 			return false;
 		}
 		Out.Provider = TEXT("tripo");
-		Out.ProviderFaces = Out.FaceLimit;
+		// A weapon is generated denser than its budget and finished down to it; anything else is asked for at its budget.
+		Out.ProviderFaces = Out.ProviderFaces > 0 ? Out.ProviderFaces : Out.FaceLimit;
 		Out.Reasons.Insert(ProviderWhy, 0);
 		if (!PlanReference(Brief, Out, OutError))
 		{
@@ -1407,7 +1473,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			Json->SetArrayField(TEXT("inputs"), Views);
 			Json->SetStringField(TEXT("texture_alignment"), TEXT("original_image"));
 		}
-		Json->SetNumberField(TEXT("face_limit"), Plan.FaceLimit);
+		Json->SetNumberField(TEXT("face_limit"), Plan.ProviderFaces > 0 ? Plan.ProviderFaces : Plan.FaceLimit);
 		const bool bTextured = Plan.TextureQuality != TEXT("none") && !Plan.bParts;
 		Json->SetBoolField(TEXT("texture"), bTextured);
 		Json->SetBoolField(TEXT("pbr"), bTextured && Plan.bPbr);
@@ -1773,7 +1839,7 @@ namespace HyperAIStudio::MeshGen::Creator
 	TArray<FString> LocalFixesFor(const FHyperAIModelCheckReport& Report)
 	{
 		// The order matters: bits go before holes are filled, orientation before normals, geometry before pivot and scale.
-		static const TCHAR* const Order[] = {TEXT("remove_bits"), TEXT("simplify"), TEXT("orient"), TEXT("fill_holes"), TEXT("normals"), TEXT("auto_uv"), TEXT("scale"), TEXT("pivot"),
+		static const TCHAR* const Order[] = {TEXT("remove_bits"), TEXT("weapon_finish"), TEXT("simplify"), TEXT("orient"), TEXT("fill_holes"), TEXT("normals"), TEXT("auto_uv"), TEXT("scale"), TEXT("pivot"),
 			TEXT("collision"), TEXT("lightmap_uv"), TEXT("nanite"), TEXT("materials")};
 		TSet<FString> Wanted;
 		for (const FHyperAIModelCheck& Check : Report.Checks)
