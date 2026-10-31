@@ -213,7 +213,7 @@ namespace HyperAIStudio::MeshGen::Private
 				return;
 			}
 			Job.NextPollAt = FPlatformTime::Seconds() + PollSeconds();
-		}, 60.f);
+		}, 60.f, /*bRetry=*/true);
 	}
 
 	void Download(const TSharedRef<FJob>& Job)

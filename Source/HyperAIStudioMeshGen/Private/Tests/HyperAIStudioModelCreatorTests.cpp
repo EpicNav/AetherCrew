@@ -18,6 +18,7 @@
 #include "HttpServerResponse.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioExternalService.h"
+#include "HyperAIStudioMeshGenJob.h"
 #include "HyperAIStudioMeshGenToolset.h"
 #include "HyperAIStudioModelCreator.h"
 #include "HyperAIStudioSettings.h"
@@ -29,10 +30,14 @@
 #include "JsonObjectConverter.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Base64.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
+#include "Misc/OutputDevice.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
+#include "Misc/ScopeLock.h"
 #include "ObjectTools.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "Serialization/JsonSerializer.h"
@@ -41,6 +46,9 @@
  * The Tripo model creator: classification, Tripo v3 request bodies, prices, the checks on small GLB fixtures with known
  * defects, each free fix, the paid-fix ladder, the material build from PBR maps, a whole job against a stand-in Tripo
  * (never the real one) with its budget, round cap, refusals and cancel, the Tripo Studio watch, and the account read.
+ * Then Hi3D: its rules, form, prices, error codes and provider choice, a whole job against a stand-in Hi3D (the token
+ * flow, the 100,000-face floor reduced for free, texture only, a refunded task tried again, no key anywhere), and the
+ * reference picture first, on the user's own sword brief, against a stand-in Tripo.
  */
 namespace HyperAIStudio::ModelCreatorTests
 {
@@ -287,12 +295,22 @@ namespace HyperAIStudio::ModelCreatorTests
 					Service.ApiKeyVariable = TEXT("HYPERAI_TEST_CREATOR_TRIPO_KEY");
 					Settings->ExternalServices.Add(Service);
 				}
+				// Hi3D at the stand-in too, with a key only a Hi3D test sets: no test reaches the real Hi3D.
+				if (Service.Id == TEXT("hi3d"))
+				{
+					Service.BaseUrl = Base + TEXT("/hi3d");
+					Service.ApiKeyVariable = TEXT("HYPERAI_TEST_CREATOR_HI3D_KEY");
+					Settings->ExternalServices.Add(Service);
+				}
 			}
 			Settings->MeshImportFolder = TestFolder;
 			Settings->ExternalServiceSessionSpendCap = 100.f;
 			FPlatformMisc::SetEnvironmentVar(TEXT("HYPERAI_TEST_CREATOR_TRIPO_KEY"), TEXT("tripo-creator-test-key"));
+			FPlatformMisc::SetEnvironmentVar(TEXT("HYPERAI_TEST_CREATOR_HI3D_KEY"), TEXT(""));
 			FHyperAIStudioMeshGenContracts::SetPollSecondsForTests(0.1);
 			FHyperAIStudioExternalServices::ResetSessionSpend();
+			HyperAIStudio::MeshGen::Private::RetryScale() = 0.01;
+			ForgetHi3DTokenForTests();
 		}
 
 		~FStandIn()
@@ -303,8 +321,11 @@ namespace HyperAIStudio::ModelCreatorTests
 			Settings->ExternalServiceSessionSpendCap = SavedCap;
 			Settings->MeshTaskPrices = SavedPrices;
 			FPlatformMisc::SetEnvironmentVar(TEXT("HYPERAI_TEST_CREATOR_TRIPO_KEY"), TEXT(""));
+			FPlatformMisc::SetEnvironmentVar(TEXT("HYPERAI_TEST_CREATOR_HI3D_KEY"), TEXT(""));
 			FHyperAIStudioMeshGenContracts::SetPollSecondsForTests(0.0);
 			FHyperAIStudioExternalServices::ResetSessionSpend();
+			HyperAIStudio::MeshGen::Private::RetryScale() = 1.0;
+			ForgetHi3DTokenForTests();
 		}
 	};
 
@@ -484,6 +505,7 @@ bool FHyperAIStudioModelCreatorRequestsTest::RunTest(const FString& Parameters)
 	using namespace HyperAIStudio::ModelCreatorTests;
 	FHyperAIModelBrief Brief;
 	Brief.Prompt = TEXT("a wooden crate with iron bands");
+	Brief.ReferenceImage = TEXT("off");
 	Brief.Model = TEXT("H3.1");
 	Brief.Use = TEXT("prop");
 	Brief.Topology = TEXT("quads");
@@ -579,9 +601,16 @@ bool FHyperAIStudioModelCreatorRequestsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("edit-multiview: {prompt, view} edits on the multiview task"), Body->GetStringField(TEXT("input")) == TEXT("mv_1") && Body->TryGetArrayField(TEXT("prompts"), Prompts)
 		&& Prompts->Num() == 2 && (*Prompts)[1]->AsObject()->GetStringField(TEXT("view")) == TEXT("back"));
 	TestEqual(TEXT("image-to-multiview: one input"), ImageToMultiviewBody(TEXT("file_x"))->GetStringField(TEXT("input")), FString(TEXT("file_x")));
-	Body = RigBody(TEXT("task_1"), TEXT("unreal"));
-	TestTrue(TEXT("rig: v3.0 rig model, biped, spec unreal"), Body->GetStringField(TEXT("model")) == TEXT("v3.0-20260909") && Body->GetStringField(TEXT("spec")) == TEXT("unreal")
+	FString RigModel, RigSpec;
+	RigChoice(TEXT("biped"), RigModel, RigSpec);
+	Body = RigBody(TEXT("task_1"), RigModel, TEXT("biped"), RigSpec);
+	TestTrue(TEXT("rig: a biped gets the v3.0 rig model and spec unreal"), Body->GetStringField(TEXT("model")) == TEXT("v3.0-20260909") && Body->GetStringField(TEXT("spec")) == TEXT("unreal")
 		&& Body->GetStringField(TEXT("rig_type")) == TEXT("biped"));
+	RigChoice(TEXT("quadruped"), RigModel, RigSpec);
+	Body = RigBody(TEXT("task_1"), RigModel, TEXT("quadruped"), RigSpec);
+	TestTrue(TEXT("any other body v2.5 with its rig_type and no spec"), Body->GetStringField(TEXT("model")) == TEXT("v2.5-20260210") && !Body->HasField(TEXT("spec"))
+		&& Body->GetStringField(TEXT("rig_type")) == TEXT("quadruped"));
+	TestEqual(TEXT("the rig check takes the input alone"), RigCheckBody(TEXT("task_1"))->GetStringField(TEXT("input")), FString(TEXT("task_1")));
 
 	// Prices, from MeshTaskPrices, which the user can correct.
 	auto PriceOf = [&](const TCHAR* Model, const TCHAR* Prompt, const TCHAR* Image, const TCHAR* Tier, const TCHAR* Topology, const TCHAR* Geometry, const TCHAR* Parts, const TCHAR* LowPoly)
@@ -596,6 +625,7 @@ bool FHyperAIStudioModelCreatorRequestsTest::RunTest(const FString& Parameters)
 		B.Parts = Parts;
 		B.SmartLowPoly = LowPoly;
 		B.Use = TEXT("prop");
+		B.ReferenceImage = TEXT("off");
 		FHyperAIModelPlan Out;
 		FString Why;
 		return Classify(B, Out, Why) ? Out.Credits : -1;
@@ -1007,6 +1037,7 @@ bool FHyperAIStudioModelCreatorJobTest::RunTest(const FString& Parameters)
 
 	FHyperAIModelCreateRequest Request;
 	Request.Brief.Prompt = TEXT("a wooden crate");
+	Request.Brief.ReferenceImage = TEXT("off");
 	Request.Brief.Use = TEXT("prop");
 	Request.Brief.Model = TEXT("H3.1");
 	Request.Brief.FaceLimit = 600;
@@ -1326,9 +1357,9 @@ bool FHyperAIStudioModelCreatorStudioTest::RunTest(const FString& Parameters)
 		const TArray<FHyperAIStudioExternalServiceSettings> Saved = Studio->ExternalServices;
 		for (FHyperAIStudioExternalServiceSettings Service : UHyperAIStudioSettings::GetMeshServices())
 		{
-			if (Service.Id == TEXT("tripo"))
+			if (Service.Id == TEXT("tripo") || Service.Id == TEXT("hi3d"))
 			{
-				Service.BaseUrl = Base + TEXT("/tripo/v3");
+				Service.BaseUrl = Base + (Service.Id == TEXT("tripo") ? TEXT("/tripo/v3") : TEXT("/hi3d"));
 				Service.ApiKeyVariable = TEXT("TRIPO_API_KEY_HYPERAI_NONE");
 				Studio->ExternalServices.Add(Service);
 			}
@@ -1337,6 +1368,806 @@ bool FHyperAIStudioModelCreatorStudioTest::RunTest(const FString& Parameters)
 		Studio->ExternalServices = Saved;
 	}
 	TestTrue(TEXT("Without a key it says where to add one"), bDone && Missing.Status == TEXT("missing_key") && Missing.Diagnostic.Contains(TEXT("Keys")));
+	TestTrue(TEXT("and so does Hi3D's balance"), Missing.Hi3DStatus == TEXT("missing_key") && Missing.Hi3DDiagnostic.Contains(TEXT("client_id:client_secret")));
+	return true;
+}
+
+
+// ---------------------------------------------------------------- Hi3D and the reference picture
+
+namespace HyperAIStudio::ModelCreatorTests
+{
+	/** Everything the log says while a test runs, to show no key or token reaches it. */
+	struct FHi3DLogCatch : public FOutputDevice
+	{
+		FString Text;
+		FCriticalSection Lock;
+		virtual void Serialize(const TCHAR* Value, ELogVerbosity::Type, const FName&) override
+		{
+			FScopeLock Guard(&Lock);
+			Text += Value;
+			Text += TEXT("\n");
+		}
+	};
+
+	/** What a stand-in saw: each call by path, its body (multipart as text), its Authorization header. */
+	struct FHi3DSeen
+	{
+		TArray<FString> Calls;
+		TMap<FString, TArray<FString>> Bodies;
+		TArray<FString> Auth;
+		int32 Tokens = 0;
+		int32 Submits = 0;
+		TMap<FString, int32> Polls;
+	};
+
+	FString AuthOf(const FHttpServerRequest& Request)
+	{
+		for (const TPair<FString, TArray<FString>>& Header : Request.Headers)
+		{
+			if (Header.Key.Equals(TEXT("Authorization"), ESearchCase::IgnoreCase) && !Header.Value.IsEmpty())
+			{
+				return Header.Value[0];
+			}
+		}
+		return FString();
+	}
+
+	TUniquePtr<FHttpServerResponse> JsonReply(const FString& Text, const EHttpServerResponseCodes Code = EHttpServerResponseCodes::Ok)
+	{
+		TUniquePtr<FHttpServerResponse> Reply = FHttpServerResponse::Create(Text, TEXT("application/json"));
+		Reply->Code = Code;
+		return Reply;
+	}
+
+	/** A form field's value in a multipart body, as the stand-in received it. */
+	FString FormField(const FString& Body, const FString& Name)
+	{
+		const FString Marker = FString::Printf(TEXT("name=\"%s\"\r\n\r\n"), *Name);
+		const int32 At = Body.Find(Marker);
+		if (At == INDEX_NONE)
+		{
+			return FString();
+		}
+		const int32 Start = At + Marker.Len();
+		const int32 End = Body.Find(TEXT("\r\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Start);
+		return Body.Mid(Start, End == INDEX_NONE ? MAX_int32 : End - Start);
+	}
+
+	FString WritePicture(const FString& Name)
+	{
+		const FString Relative = TEXT("Saved/HyperAIStudio/Tests/Creator/") + Name;
+		const FString File = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / Relative);
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(File), /*Tree=*/true);
+		FFileHelper::SaveArrayToFile(Png(64, [](int32 X, int32 Y) { return (X - 32) * (X - 32) + (Y - 32) * (Y - 32) < 400 ? FColor(150, 110, 70) : FColor(240, 240, 240); }), *File);
+		return Relative;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelCreatorHi3DPlanTest, "HyperAIStudio.MeshGen.Creator.Hi3D.PlanAndRequests",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioModelCreatorHi3DPlanTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelCreatorTests;
+	using HyperAIStudio::MeshGen::Private::RetryDelaySeconds;
+	FString Error;
+
+	// The model, resolution and face rules.
+	FHi3DRequest Request;
+	Request.Images = {TEXT("C:/x/front.png")};
+	TestTrue(TEXT("v3.0 at 2048quality, 2,000,000 faces, one picture: valid"), Hi3DValidate(Request, Error));
+	Request.Resolution = TEXT("1536pro");
+	TestFalse(TEXT("v3.0 does not take 1536pro"), Hi3DValidate(Request, Error));
+	Request.Resolution = TEXT("2048quality");
+	Request.Faces = 99999;
+	TestFalse(TEXT("under 100,000 faces is refused"), Hi3DValidate(Request, Error));
+	Request.Faces = 5000000;
+	TestFalse(TEXT("5,000,000 faces only at 2048master"), Hi3DValidate(Request, Error));
+	Request.Resolution = TEXT("2048master");
+	TestTrue(TEXT("5,000,000 at 2048master is valid"), Hi3DValidate(Request, Error));
+	Request.Faces = 5000001;
+	TestFalse(TEXT("but not more"), Hi3DValidate(Request, Error));
+	FHi3DRequest Old;
+	Old.Model = TEXT("hitem3dv1.5");
+	Old.Resolution = TEXT("512");
+	Old.Faces = 500000;
+	Old.Images = {TEXT("C:/x/a.png")};
+	TestFalse(TEXT("v1.5 has no PBR"), Hi3DValidate(Old, Error));
+	Old.bPbr = false;
+	TestTrue(TEXT("v1.5 at 512 without PBR"), Hi3DValidate(Old, Error));
+	Old.Model = TEXT("hitem3dv9");
+	TestFalse(TEXT("an unknown model is refused"), Hi3DValidate(Old, Error));
+	FHi3DRequest Texture;
+	Texture.RequestType = 2;
+	Texture.Model = TEXT("hitem3dv2.1");
+	Texture.Images = {TEXT("C:/x/a.png")};
+	Texture.Mesh = TEXT("C:/x/m.glb");
+	TestFalse(TEXT("texture only is offered on v3.0 and v1.5 alone"), Hi3DValidate(Texture, Error));
+	Texture.Model = TEXT("hi3dv3.0");
+	TestTrue(TEXT("on v3.0 it is valid"), Hi3DValidate(Texture, Error));
+	Texture.Mesh = TEXT("C:/x/m.fbx");
+	TestFalse(TEXT("its mesh is a GLB"), Hi3DValidate(Texture, Error));
+	TestEqual(TEXT("Recommended faces by resolution"), FString::Printf(TEXT("%d %d %d %d %d"), Hi3DRecommendedFaces(TEXT("512")), Hi3DRecommendedFaces(TEXT("1024")),
+		Hi3DRecommendedFaces(TEXT("1536fast")), Hi3DRecommendedFaces(TEXT("2048quality")), Hi3DRecommendedFaces(TEXT("2048master"))), FString(TEXT("500000 1000000 2000000 2000000 5000000")));
+	TestEqual(TEXT("portrait v2.1 takes 1536fast and 1536pro (the docs' 1536profast)"), FString::Join(Hi3DResolutions(TEXT("scene-portraitv2.1")), TEXT(",")), FString(TEXT("1536fast,1536pro")));
+
+	// The multipart fields.
+	TArray<TPair<FString, FString>> Text, Files;
+	FHi3DRequest Whole;
+	Whole.Faces = 100000;
+	Whole.Images = {TEXT("C:/x/front.png")};
+	Hi3DFields(Whole, Text, Files);
+	auto Value = [&Text](const TCHAR* Name) { const TPair<FString, FString>* Found = Text.FindByPredicate([Name](const TPair<FString, FString>& Pair) { return Pair.Key == Name; }); return Found ? Found->Value : FString(TEXT("-")); };
+	TestEqual(TEXT("Fields: request_type, model, resolution, face, pbr, shading, rmbg, format"), FString::Printf(TEXT("%s %s %s %s %s %s %s %s"), *Value(TEXT("request_type")), *Value(TEXT("model")),
+		*Value(TEXT("resolution")), *Value(TEXT("face")), *Value(TEXT("pbr")), *Value(TEXT("shading")), *Value(TEXT("rmbg")), *Value(TEXT("format"))),
+		FString(TEXT("3 hi3dv3.0 2048quality 100000 1 0.5 1 2")));
+	TestTrue(TEXT("one picture goes as images"), Files.Num() == 1 && Files[0].Key == TEXT("images") && Value(TEXT("multi_images_bit")) == TEXT("-"));
+	Text.Reset();
+	Files.Reset();
+	FHi3DRequest Views = Whole;
+	Views.bMultiview = true;
+	Views.Images = Hi3DViewOrder({TEXT("C:/f.png"), TEXT(""), TEXT("C:/b.png"), TEXT("C:/r.png")});
+	Hi3DFields(Views, Text, Files);
+	TestTrue(TEXT("views go as multi_images in Hi3D's order (front, back, left, right), multi_images_bit counting them"), Value(TEXT("multi_images_bit")) == TEXT("1101")
+		&& Files.Num() == 3 && Files[0].Value == TEXT("C:/f.png") && Files[1].Value == TEXT("C:/b.png") && Files[2].Value == TEXT("C:/r.png") && Files[2].Key == TEXT("multi_images"));
+	Text.Reset();
+	Files.Reset();
+	Texture.Mesh = TEXT("C:/x/m.glb");
+	Hi3DFields(Texture, Text, Files);
+	TestTrue(TEXT("texture only: request_type 2, the mesh as a file, no face or resolution"), Value(TEXT("request_type")) == TEXT("2") && Value(TEXT("face")) == TEXT("-")
+		&& Value(TEXT("resolution")) == TEXT("-") && Files.ContainsByPredicate([](const TPair<FString, FString>& Pair) { return Pair.Key == TEXT("mesh"); }));
+	TestEqual(TEXT("The token call's header is Basic base64(client_id:client_secret)"), Hi3DBasicAuth(TEXT(" ak_123:sk_456 ")), TEXT("Basic ") + FBase64::Encode(TEXT("ak_123:sk_456")));
+
+	// Every documented error code says what it means.
+	for (const TCHAR* Code : {TEXT("30010000"), TEXT("10031001"), TEXT("10031002"), TEXT("10031003"), TEXT("10031005"), TEXT("10031006"), TEXT("10031007"), TEXT("10031008"),
+		TEXT("10031009"), TEXT("10031011"), TEXT("10031016"), TEXT("10031017"), TEXT("10000000"), TEXT("50010001"), TEXT("40010000")})
+	{
+		TestFalse(FString::Printf(TEXT("code %s is put into words"), Code), Hi3DCodeMessage(Code).IsEmpty());
+	}
+	TestTrue(TEXT("balance, faces, texture and refund say so"), Hi3DCodeMessage(TEXT("30010000")).Contains(TEXT("balance")) && Hi3DCodeMessage(TEXT("10031002")).Contains(TEXT("face"))
+		&& Hi3DCodeMessage(TEXT("10031017")).Contains(TEXT("hi3dv3.0")) && Hi3DCodeMessage(TEXT("50010001")).Contains(TEXT("refunded")));
+	TestTrue(TEXT("A 401 or a 4001 code asks for a new token"), Hi3DIsAuthError(401, TEXT("")) && Hi3DIsAuthError(200, TEXT("40010001")) && !Hi3DIsAuthError(200, TEXT("10031003")));
+
+	// Prices, in Hi3D credits at $0.02, from MeshTaskPrices.
+	TestEqual(TEXT("Hi3D credits: v3.0 45 / 145, v2.1 fast 25, v2.0 1536 35, v1.5 512 15 and 1536pro 40, portrait v1.5 30"),
+		FString::Printf(TEXT("%d %d %d %d %d %d %d"), Hi3DCredits(Hi3DPrice(TEXT("hi3dv3.0"), TEXT("2048quality"), 3, true)), Hi3DCredits(Hi3DPrice(TEXT("hi3dv3.0"), TEXT("2048master"), 3, true)),
+			Hi3DCredits(Hi3DPrice(TEXT("hitem3dv2.1"), TEXT("1536fast"), 3, true)), Hi3DCredits(Hi3DPrice(TEXT("hitem3dv2.0"), TEXT("1536"), 3, true)),
+			Hi3DCredits(Hi3DPrice(TEXT("hitem3dv1.5"), TEXT("512"), 3, false)), Hi3DCredits(Hi3DPrice(TEXT("hitem3dv1.5"), TEXT("1536pro"), 3, false)),
+			Hi3DCredits(Hi3DPrice(TEXT("scene-portraitv1.5"), TEXT("1536"), 3, false))),
+		FString(TEXT("45 145 25 35 15 40 30")));
+	TestEqual(TEXT("Geometry alone: v3.0 30, master 130; without PBR 40; texture only 10, with PBR 15"),
+		FString::Printf(TEXT("%d %d %d %d %d"), Hi3DCredits(Hi3DPrice(TEXT("hi3dv3.0"), TEXT("2048quality"), 1, false)), Hi3DCredits(Hi3DPrice(TEXT("hi3dv3.0"), TEXT("2048master"), 1, false)),
+			Hi3DCredits(Hi3DPrice(TEXT("hi3dv3.0"), TEXT("2048quality"), 3, false)), Hi3DCredits(Hi3DTexturePrice(false)), Hi3DCredits(Hi3DTexturePrice(true))),
+		FString(TEXT("30 130 40 10 15")));
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const TArray<FHyperAIStudioMeshTaskPrice> SavedPrices = Settings->MeshTaskPrices;
+	FHyperAIStudioMeshTaskPrice Own;
+	Own.Provider = TEXT("hi3d");
+	Own.Task = TEXT("hi3dv3.0_2048quality");
+	Own.Cost = 1.00f;
+	Settings->MeshTaskPrices.Add(Own);
+	TestEqual(TEXT("A Hi3D price set in MeshTaskPrices replaces the built-in one"), Hi3DCredits(Hi3DPrice(TEXT("hi3dv3.0"), TEXT("2048quality"), 3, true)), 50);
+	Settings->MeshTaskPrices = SavedPrices;
+
+	// The provider, chosen per brief.
+	const FString Picture = WritePicture(TEXT("hi3d_plan.png"));
+	struct FChoice
+	{
+		const TCHAR* Prompt;
+		const TCHAR* Use;
+		bool bPicture;
+		const TCHAR* Topology;
+		const TCHAR* Platform;
+		int32 Faces;
+		bool bRig;
+		const TCHAR* Expected;
+	};
+	const FChoice Choices[] = {
+		{TEXT("a carved stone altar"), TEXT("hero_prop"), true, TEXT(""), TEXT(""), 0, false, TEXT("hi3d")},
+		{TEXT("a mossy cliff"), TEXT("environment"), true, TEXT(""), TEXT(""), 0, false, TEXT("hi3d")},
+		{TEXT("a rusty pickup truck"), TEXT(""), true, TEXT(""), TEXT(""), 0, false, TEXT("hi3d")},
+		{TEXT("a photoreal leather boot"), TEXT("prop"), true, TEXT(""), TEXT(""), 0, false, TEXT("hi3d")},
+		{TEXT("a marble bust of an emperor"), TEXT("prop"), true, TEXT(""), TEXT(""), 0, false, TEXT("hi3d")},
+		{TEXT("a carved stone altar"), TEXT("hero_prop"), false, TEXT(""), TEXT(""), 0, false, TEXT("tripo")},
+		{TEXT("a wooden crate"), TEXT("prop"), true, TEXT(""), TEXT(""), 0, false, TEXT("tripo")},
+		{TEXT("a carved stone altar"), TEXT("hero_prop"), true, TEXT("quads"), TEXT(""), 0, false, TEXT("tripo")},
+		{TEXT("a carved stone altar"), TEXT("hero_prop"), true, TEXT(""), TEXT("mobile"), 0, false, TEXT("tripo")},
+		{TEXT("a carved stone altar"), TEXT("hero_prop"), true, TEXT(""), TEXT(""), 20000, false, TEXT("tripo")},
+		{TEXT("a photoreal knight"), TEXT("character"), true, TEXT(""), TEXT(""), 0, false, TEXT("tripo")},
+		{TEXT("a carved stone altar"), TEXT("hero_prop"), true, TEXT(""), TEXT(""), 0, true, TEXT("tripo")},
+	};
+	for (const FChoice& Row : Choices)
+	{
+		FHyperAIModelBrief Brief;
+		Brief.Prompt = Row.Prompt;
+		Brief.Use = Row.Use;
+		Brief.ImagePath = Row.bPicture ? Picture : FString();
+		Brief.Topology = Row.Topology;
+		Brief.Platform = Row.Platform;
+		Brief.FaceLimit = Row.Faces;
+		FString Why;
+		TestEqual(FString::Printf(TEXT("\"%s\" (%s%s%s%s) goes to"), Row.Prompt, Row.Use, Row.bPicture ? TEXT(", picture") : TEXT(", words"), Row.Topology, Row.Platform),
+			ChooseProvider(Brief, Row.bRig, Why, Error), FString(Row.Expected));
+	}
+
+	// Hi3D plans.
+	FHyperAIModelBrief Hero;
+	Hero.Prompt = TEXT("a carved stone altar");
+	Hero.Use = TEXT("hero_prop");
+	Hero.ImagePath = Picture;
+	FHyperAIModelPlan Plan;
+	TestTrue(TEXT("A picture of a hero prop classifies to Hi3D: ") + Error, Classify(Hero, Plan, Error));
+	TestTrue(TEXT("v3.0 at 2048quality, Hi3D's 2,000,000 faces kept dense with Nanite, PBR, 45 credits"), Plan.Provider == TEXT("hi3d") && Plan.Model == TEXT("hi3dv3.0")
+		&& Plan.Resolution == TEXT("2048quality") && Plan.ProviderFaces == 2000000 && Plan.FaceLimit == 2000000 && Plan.bNanite && !Plan.bLocalReduce && Plan.bPbr && Plan.Credits == 45
+		&& Plan.Endpoint == Hi3DSubmitPath && Plan.RequestJson.Contains(TEXT("\"face\":\"2000000\"")));
+	FHyperAIModelBrief Master = Hero;
+	Master.Prompt = TEXT("an extreme detail carved altar, master quality");
+	TestTrue(TEXT("An extreme or master brief gets 2048master (145)"), Classify(Master, Plan, Error) && Plan.Resolution == TEXT("2048master") && Plan.Credits == 145);
+	FHyperAIModelBrief Prop = Hero;
+	Prop.Provider = TEXT("hi3d");
+	Prop.Use = TEXT("prop");
+	Prop.FaceLimit = 20000;
+	TestTrue(TEXT("Under 100,000: made at 100,000, then reduced in the editor to the budget"), Classify(Prop, Plan, Error) && Plan.ProviderFaces == 100000 && Plan.FaceLimit == 20000
+		&& Plan.bLocalReduce && TargetsFromPlan(Plan).bLocalReduce);
+	FHyperAIModelBrief Bust = Hero;
+	Bust.Prompt = TEXT("a bronze bust of a general");
+	Bust.Use = TEXT("prop");
+	TestTrue(TEXT("A bust from a picture: Hi3D's portrait model"), Classify(Bust, Plan, Error) && Plan.Model == TEXT("scene-portraitv2.1") && Plan.Resolution == TEXT("1536pro"));
+	FHyperAIModelBrief Quads = Prop;
+	Quads.Topology = TEXT("quads");
+	TestFalse(TEXT("Hi3D with quads is refused"), Classify(Quads, Plan, Error));
+	FHyperAIModelBrief Wrong = Prop;
+	Wrong.Resolution = TEXT("1536fast");
+	TestFalse(TEXT("A resolution its model does not take is refused"), Classify(Wrong, Plan, Error));
+	FHyperAIModelBrief Words;
+	Words.Prompt = TEXT("an ornate brass lantern");
+	Words.Provider = TEXT("hi3d");
+	TestTrue(TEXT("Hi3D from words: a reference picture first, then Hi3D"), Classify(Words, Plan, Error) && Plan.Provider == TEXT("hi3d") && Plan.bReferenceFirst
+		&& Plan.ReferenceSource == TEXT("tripo") && Plan.PriceLines.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("reference picture")); }));
+	UseImageGenReference(Plan);
+	TestTrue(TEXT("and without a Tripo key HyperAI's image generation makes it"), Plan.ReferenceSource == TEXT("imagegen") && !Plan.ImageModel.IsEmpty());
+	Words.ReferenceImage = TEXT("off");
+	TestFalse(TEXT("Hi3D from words with the picture off is refused"), Classify(Words, Plan, Error));
+
+	// The ladder for a Hi3D model.
+	FFixContext Context;
+	Context.Provider = TEXT("hi3d");
+	Context.bTripo = false;
+	Context.InputToken = TEXT("{input}");
+	Context.RemainingUSD = 5.f;
+	Context.bCanRegenerate = true;
+	Context.Hi3DImages = {TEXT("C:/x/front.png")};
+	Classify(Hero, Context.Plan, Error);
+	FHyperAIModelCheckReport Failing;
+	for (const TCHAR* Id : {TEXT("textures"), TEXT("visual"), TEXT("faces")})
+	{
+		FHyperAIModelCheck& Check = Failing.Checks.AddDefaulted_GetRef();
+		Check.Id = Id;
+		Check.Result = TEXT("fail");
+	}
+	TArray<FPaidFix> Ladder = PaidLadder(Failing, Context);
+	TestTrue(TEXT("Hi3D's fixes: texture only (15) before a resolution up (145); no Tripo fix without its key"), Ladder.Num() == 2 && Ladder[0].Id == TEXT("hi3d_texture")
+		&& Ladder[0].Hi3D.RequestType == 2 && Hi3DCredits(Ladder[0].PriceUSD) == 15 && Ladder[1].Id == TEXT("hi3d_regenerate") && Ladder[1].Hi3D.Resolution == TEXT("2048master"));
+	Context.bTripo = true;
+	Ladder = PaidLadder(Failing, Context);
+	TestTrue(TEXT("With Tripo's key, Tripo's retopology on the uploaded GLB is offered too, first for faces"), !Ladder.IsEmpty() && Ladder[0].Id == TEXT("retopo")
+		&& Ladder[0].Bodies[0]->GetStringField(TEXT("input")) == TEXT("{input}") && !Ladder.ContainsByPredicate([](const FPaidFix& Fix) { return Fix.Id == TEXT("regenerate"); }));
+
+	// The reference picture: names, models, sizes, prices.
+	FString Id, Note;
+	TestTrue(TEXT("gpt-image-2.5-sunburn is chat_image_2.5_sunburst, and says so"), ImageModelFromName(TEXT("gpt-image-2.5-sunburn"), Id, Note) && Id == TEXT("chat_image_2.5_sunburst")
+		&& Note.Contains(TEXT("gpt-image-2.5-sunburn")));
+	TestTrue(TEXT("nano banana pro is banana_pro"), ImageModelFromName(TEXT("Nano Banana Pro"), Id, Note) && Id == TEXT("banana_pro"));
+	TestTrue(TEXT("nano banana 2 is banana2"), ImageModelFromName(TEXT("nano-banana-2"), Id, Note) && Id == TEXT("banana2"));
+	TestTrue(TEXT("seedream 5 is seedream_v5"), ImageModelFromName(TEXT("Seedream 5"), Id, Note) && Id == TEXT("seedream_v5"));
+	TestTrue(TEXT("chatgpt image with no version is the newest, flare"), ImageModelFromName(TEXT("chatgpt image"), Id, Note) && Id == TEXT("chat_image_2.5_flare"));
+	TestTrue(TEXT("a tier misspelt within two letters: flair is flare"), ImageModelFromName(TEXT("chat_image_2.5_flair"), Id, Note) && Id == TEXT("chat_image_2.5_flare"));
+	TestFalse(TEXT("chat_image_1 is retired"), ImageModelFromName(TEXT("chat_image_1"), Id, Note));
+	TestTrue(TEXT("chat_image_1.5 is taken with a warning"), ImageModelFromName(TEXT("chat_image_1.5"), Id, Note) && Note.Contains(TEXT("retires")));
+	TestTrue(TEXT("anything else is refused with the list"), !ImageModelFromName(TEXT("dall-e-3"), Id, Note) && Note.Contains(TEXT("chat_image_2.5_sunburst")));
+	TestTrue(TEXT("quality: chat_image_2 low/medium/high, 2.5 also xhigh and max, others none"), ImageModelTakesQuality(TEXT("chat_image_2"), TEXT("high"))
+		&& !ImageModelTakesQuality(TEXT("chat_image_2"), TEXT("xhigh")) && ImageModelTakesQuality(TEXT("chat_image_2.5_flare"), TEXT("max")) && !ImageModelTakesQuality(TEXT("banana2"), TEXT("high")));
+	TestTrue(TEXT("sizes: presets, custom WxH in multiples of 16 within the pixel range, seedream's K sizes"), ImageSizeValid(TEXT("chat_image_2.5_flare"), TEXT("1024x1024"), Error)
+		&& ImageSizeValid(TEXT("chat_image_2.5_flare"), TEXT("1280x720"), Error) && !ImageSizeValid(TEXT("chat_image_2.5_flare"), TEXT("1000x1000"), Error)
+		&& !ImageSizeValid(TEXT("chat_image_2.5_flare"), TEXT("3840x1024"), Error) && ImageSizeValid(TEXT("seedream_v5"), TEXT("3K"), Error) && !ImageSizeValid(TEXT("seedream_v5"), TEXT("4K"), Error));
+	TestEqual(TEXT("Picture prices: sunburst high 20 / 25 / 40, xhigh 2K 30, max 4K 50, auto bills 2K, seedream 5, banana_pro 4K 20"),
+		FString::Printf(TEXT("%d %d %d %d %d %d %d %d"), Credits(ImagePrice(TEXT("chat_image_2.5_sunburst"), TEXT("high"), TEXT("1024x1024"))),
+			Credits(ImagePrice(TEXT("chat_image_2.5_sunburst"), TEXT("high"), TEXT("2048x2048"))), Credits(ImagePrice(TEXT("chat_image_2.5_sunburst"), TEXT("high"), TEXT("3840x2160"))),
+			Credits(ImagePrice(TEXT("chat_image_2.5_flare"), TEXT("xhigh"), TEXT("2048x1152"))), Credits(ImagePrice(TEXT("chat_image_2.5_flare"), TEXT("max"), TEXT("3840x2160"))),
+			Credits(ImagePrice(TEXT("chat_image_2.5_flare"), TEXT("high"), TEXT("auto"))), Credits(ImagePrice(TEXT("seedream_v5"), TEXT(""), TEXT("2K"))),
+			Credits(ImagePrice(TEXT("banana_pro"), TEXT(""), TEXT("4K")))),
+		FString(TEXT("20 25 40 30 50 25 5 20")));
+	FHyperAIModelBrief Lamp;
+	Lamp.Prompt = TEXT("a brass oil lamp");
+	Lamp.Use = TEXT("prop");
+	Lamp.ImageModel = TEXT("banana2");
+	TestTrue(TEXT("A picture from banana2: no quality or background sent, a plain grey background asked for in the words"), Classify(Lamp, Plan, Error) && [&]()
+	{
+		const TSharedRef<FJsonObject> Body = TextToImageBody(Plan);
+		return !Body->HasField(TEXT("quality")) && !Body->HasField(TEXT("background")) && !Body->HasField(TEXT("size")) && Body->GetStringField(TEXT("prompt")).Contains(TEXT("light-grey"));
+	}());
+	Lamp.ImageQuality = TEXT("high");
+	TestFalse(TEXT("quality on a model that takes none is refused"), Classify(Lamp, Plan, Error));
+
+	// Tripo's fixes, prices, errors and retries.
+	FHyperAIModelBrief Edited;
+	Edited.ImagePath = Picture;
+	Edited.Model = TEXT("H3.1");
+	Edited.ViewEdits = {TEXT("back: a quiver"), TEXT("front: a red cloak"), TEXT("left: a scar")};
+	TestTrue(TEXT("Edit-multiview costs 5 credits an edited view: 3 edits, 15"), Classify(Edited, Plan, Error) && Plan.PriceLines.ContainsByPredicate([](const FString& Line)
+	{
+		return Line.Contains(TEXT("edit-multiview, 3")) && Line.Contains(TEXT(": 15 credits"));
+	}));
+	TSharedRef<FJsonObject> Body = TextureBody(TEXT("task_1"), TEXT("standard"), true, {}, TEXT("ignored"), TEXT("task_ref"), 77, TEXT("original_image"));
+	TestTrue(TEXT("texture: the reference as texture_prompt.image, texture_seed, texture_alignment"), Body->GetObjectField(TEXT("texture_prompt"))->GetStringField(TEXT("image")) == TEXT("task_ref")
+		&& !Body->GetObjectField(TEXT("texture_prompt"))->HasField(TEXT("text")) && Body->GetIntegerField(TEXT("texture_seed")) == 77 && Body->GetStringField(TEXT("texture_alignment")) == TEXT("original_image"));
+	FFixContext Tripo;
+	Tripo.InputTaskId = TEXT("task_gen");
+	Tripo.RemainingUSD = 5.f;
+	Tripo.ReferenceInput = TEXT("task_ref");
+	FHyperAIModelBrief Crate;
+	Crate.Prompt = TEXT("a crate");
+	Classify(Crate, Tripo.Plan, Error);
+	FHyperAIModelCheckReport NoTexture;
+	FHyperAIModelCheck& Missing = NoTexture.Checks.AddDefaulted_GetRef();
+	Missing.Id = TEXT("textures");
+	Missing.Result = TEXT("fail");
+	Tripo.Tried.Add(TEXT("texture"), 1);
+	Ladder = PaidLadder(NoTexture, Tripo);
+	TestTrue(TEXT("The first texture retry keeps the tier and price and changes the seed"), Ladder.Num() == 1 && Credits(Ladder[0].PriceUSD) == 10 && Ladder[0].Bodies[0]->HasField(TEXT("texture_seed"))
+		&& Ladder[0].Bodies[0]->GetObjectField(TEXT("texture_prompt"))->GetStringField(TEXT("image")) == TEXT("task_ref"));
+	Tripo.Tried.Add(TEXT("texture"), 2);
+	Ladder = PaidLadder(NoTexture, Tripo);
+	TestTrue(TEXT("the next goes a tier up"), Ladder.Num() == 1 && Credits(Ladder[0].PriceUSD) == 20);
+	HyperAIStudio::MeshGen::Private::FJob Job;
+	Job.Service.Label = TEXT("Tripo 3D");
+	auto Says = [&Job](const int32 Code, const TCHAR* Json) { return HyperAIStudio::MeshGen::Private::ProviderError(Job, Code, HyperAIStudio::MeshGen::Private::Utf8(Json)); };
+	TestTrue(TEXT("Tripo's codes: 2010 credits, 2008 content policy, 2015 retired, 2018 too complex"), Says(403, TEXT(R"({"code":2010,"message":"no"})")).Contains(TEXT("out of credits"))
+		&& Says(400, TEXT(R"({"code":2008})")).Contains(TEXT("content policy")) && Says(400, TEXT(R"({"code":2015})")).Contains(TEXT("retired"))
+		&& Says(400, TEXT(R"({"code":2018})")).Contains(TEXT("decimate")) && Says(400, TEXT(R"({"code":1004,"message":"face_limit too large"})")).Contains(TEXT("face_limit too large")));
+	const double Scale = HyperAIStudio::MeshGen::Private::RetryScale();
+	HyperAIStudio::MeshGen::Private::RetryScale() = 1.0;
+	TestEqual(TEXT("Retries back off 1, 2, 4, 8, 16, 32, 32 seconds"), FString::Printf(TEXT("%.0f %.0f %.0f %.0f %.0f %.0f %.0f"), RetryDelaySeconds(0, TEXT(""), TEXT("")),
+		RetryDelaySeconds(1, TEXT(""), TEXT("")), RetryDelaySeconds(2, TEXT(""), TEXT("")), RetryDelaySeconds(3, TEXT(""), TEXT("")), RetryDelaySeconds(4, TEXT(""), TEXT("")),
+		RetryDelaySeconds(5, TEXT(""), TEXT("")), RetryDelaySeconds(9, TEXT(""), TEXT(""))), FString(TEXT("1 2 4 8 16 32 32")));
+	TestTrue(TEXT("and honour Retry-After and X-RateLimit-Reset"), FMath::IsNearlyEqual(RetryDelaySeconds(0, TEXT("7"), TEXT("")), 7.0)
+		&& FMath::IsNearlyEqual(RetryDelaySeconds(0, TEXT(""), TEXT("3")), 3.0));
+	HyperAIStudio::MeshGen::Private::RetryScale() = Scale;
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelCreatorHi3DJobTest, "HyperAIStudio.MeshGen.Creator.Hi3D.Job",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioModelCreatorHi3DJobTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelCreatorTests;
+	constexpr uint32 Port = 18355;
+	const TSharedPtr<IHttpRouter> Router = FHttpServerModule::Get().GetHttpRouter(Port, /*bFailOnBindFailure=*/true);
+	if (!Router.IsValid())
+	{
+		AddWarning(TEXT("Port 18355 is taken, so the stand-in for Hi3D could not start."));
+		return true;
+	}
+	const FString Base = FString::Printf(TEXT("http://127.0.0.1:%u"), Port);
+	const FString Secret = TEXT("hi3d-client-id:hi3d-client-secret");
+	const TSharedRef<FHi3DSeen> Seen = MakeShared<FHi3DSeen>();
+	FFixture Dense;
+	Dense.Grid = 12;
+	const TSharedRef<TArray<uint8>> Generated = MakeShared<TArray<uint8>>(CubeGlb(Dense));
+	FFixture Painted;
+	Painted.Grid = 6;
+	Painted.bTextured = true;
+	const TSharedRef<TArray<uint8>> Textured = MakeShared<TArray<uint8>>(CubeGlb(Painted));
+	const TSharedRef<TArray<uint8>> Cover = MakeShared<TArray<uint8>>(Png(32, [](int32, int32) { return FColor(150, 110, 70); }));
+	TArray<FHttpRouteHandle> Routes;
+	auto Bind = [&](const TCHAR* Path, const EHttpServerRequestVerbs Verb, TFunction<TUniquePtr<FHttpServerResponse>(const FHttpServerRequest&)> Answer)
+	{
+		Routes.Add(Router->BindRoute(FHttpPath(Path), Verb, FHttpRequestHandler::CreateLambda([Seen, Path = FString(Path), Answer](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
+		{
+			Seen->Calls.Add(Path);
+			Seen->Bodies.FindOrAdd(Path).Add(BodyText(Request).Left(6000));
+			Seen->Auth.Add(Path + TEXT(" ") + AuthOf(Request));
+			OnComplete(Answer(Request));
+			return true;
+		})));
+	};
+	Bind(TEXT("/hi3d/open-api/v1/auth/token"), EHttpServerRequestVerbs::VERB_POST, [Seen](const FHttpServerRequest&)
+	{
+		++Seen->Tokens;
+		return JsonReply(FString::Printf(TEXT(R"({"code":200,"data":{"accessToken":"hi3d-token-%d","tokenType":"Bearer","nonce":"n"}})"), Seen->Tokens));
+	});
+	Bind(TEXT("/hi3d/open-api/v1/submit-task"), EHttpServerRequestVerbs::VERB_POST, [Seen](const FHttpServerRequest&)
+	{
+		++Seen->Submits;
+		const TCHAR* const Ids[] = {TEXT("t_gen"), TEXT("t_tex1"), TEXT("t_tex2"), TEXT("t_more")};
+		return JsonReply(FString::Printf(TEXT(R"({"code":200,"data":{"task_id":"%s"},"msg":"success"})"), Ids[FMath::Min(Seen->Submits - 1, 3)]));
+	});
+	Bind(TEXT("/hi3d/open-api/v1/query-task"), EHttpServerRequestVerbs::VERB_GET, [Seen, Base](const FHttpServerRequest& Request)
+	{
+		const FString Task = Request.QueryParams.FindRef(TEXT("task_id"));
+		const int32 Poll = Seen->Polls.FindOrAdd(Task)++;
+		// The first token "expires" before the generation is asked after: a 401, a new token, the same question again.
+		if (AuthOf(Request) == TEXT("Bearer hi3d-token-1") && Task == TEXT("t_gen"))
+		{
+			return JsonReply(TEXT(R"({"code":401,"msg":"token expired"})"), EHttpServerResponseCodes::Denied);
+		}
+		if (Task == TEXT("t_tex1"))
+		{
+			return JsonReply(TEXT(R"({"code":50010001,"msg":"generate failed"})"));
+		}
+		if (Poll == 0)
+		{
+			return JsonReply(FString::Printf(TEXT(R"({"code":200,"data":{"task_id":"%s","state":"processing"}})"), *Task));
+		}
+		return JsonReply(FString::Printf(TEXT(R"({"code":200,"data":{"task_id":"%s","state":"success","url":"%s/hi3d/files/%s.glb","cover_url":"%s/hi3d/files/cover.png"}})"),
+			*Task, *Base, Task == TEXT("t_gen") ? TEXT("gen") : TEXT("tex"), *Base));
+	});
+	Bind(TEXT("/hi3d/open-api/v1/balance"), EHttpServerRequestVerbs::VERB_GET, [](const FHttpServerRequest&) { return JsonReply(TEXT(R"({"code":200,"data":{"totalBalance":512}})")); });
+	Bind(TEXT("/hi3d/files/gen.glb"), EHttpServerRequestVerbs::VERB_GET, [Generated](const FHttpServerRequest&) { return FHttpServerResponse::Create(TArray<uint8>(*Generated), TEXT("model/gltf-binary")); });
+	Bind(TEXT("/hi3d/files/tex.glb"), EHttpServerRequestVerbs::VERB_GET, [Textured](const FHttpServerRequest&) { return FHttpServerResponse::Create(TArray<uint8>(*Textured), TEXT("model/gltf-binary")); });
+	Bind(TEXT("/hi3d/files/cover.png"), EHttpServerRequestVerbs::VERB_GET, [Cover](const FHttpServerRequest&) { return FHttpServerResponse::Create(TArray<uint8>(*Cover), TEXT("image/png")); });
+	// Tripo's text-to-image, for Hi3D from words.
+	Bind(TEXT("/tripo/v3/generation/text-to-image"), EHttpServerRequestVerbs::VERB_POST, [](const FHttpServerRequest&) { return JsonReply(TEXT(R"({"code":0,"data":{"task_id":"task_lantern"}})")); });
+	Bind(TEXT("/tripo/v3/tasks/task_lantern"), EHttpServerRequestVerbs::VERB_GET, [Base](const FHttpServerRequest&)
+	{
+		return JsonReply(FString::Printf(TEXT(R"({"code":0,"data":{"status":"success","progress":100,"credits_consumed":20,"output":{"generated_image_url":"%s/hi3d/files/cover.png"}}})"), *Base));
+	});
+	FHttpServerModule::Get().StartAllListeners();
+
+	FStandIn StandIn(Base);
+	FPlatformMisc::SetEnvironmentVar(TEXT("HYPERAI_TEST_CREATOR_HI3D_KEY"), *Secret);
+	// Only Hi3D's key: Tripo's fixes are not offered on its model.
+	FPlatformMisc::SetEnvironmentVar(TEXT("HYPERAI_TEST_CREATOR_TRIPO_KEY"), TEXT(""));
+	FHi3DLogCatch Logged;
+	GLog->AddOutputDevice(&Logged);
+	TArray<FString> Operations;
+	TArray<FString> Cleanup;
+	ON_SCOPE_EXIT
+	{
+		GLog->RemoveOutputDevice(&Logged);
+		for (const FHttpRouteHandle& Route : Routes)
+		{
+			Router->UnbindRoute(Route);
+		}
+		for (const FString& Operation : Operations)
+		{
+			IFileManager::Get().DeleteDirectory(*(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Models") / Operation), false, true);
+		}
+		DeleteAll(Cleanup);
+	};
+
+	FHyperAIModelCreateRequest Request;
+	Request.Brief.Prompt = TEXT("a carved wooden chest");
+	Request.Brief.Provider = TEXT("hi3d");
+	Request.Brief.Use = TEXT("prop");
+	Request.Brief.ImagePath = WritePicture(TEXT("hi3d_chest.png"));
+	Request.Brief.FaceLimit = 600;
+	Request.Brief.SizeMeters = 1.f;
+	Request.FixBudgetUSD = 2.f;
+	Request.MaxRounds = 3;
+	Request.bDryRun = false;
+	Request.OperationId = TEXT("model-hi3d-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	Operations.Add(Request.OperationId);
+	const FHyperAIModelCreateReport Asked = Create(Request);
+	if (!TestEqual(TEXT("A Hi3D job waits for approval, priced in Hi3D credits: ") + Asked.Diagnostic, Asked.Status, FString(TEXT("awaiting_user_approval"))))
+	{
+		return false;
+	}
+	TestTrue(TEXT("its plan: Hi3D v3.0, made at 100,000 faces and reduced to 600 in the editor, 45 credits"), Asked.Plan.Provider == TEXT("hi3d") && Asked.Plan.ProviderFaces == 100000
+		&& Asked.Plan.FaceLimit == 600 && Asked.Plan.bLocalReduce && Asked.Plan.Credits == 45 && Asked.Diagnostic.Contains(TEXT("Hi3D credits")));
+	FString Error;
+	TestTrue(TEXT("Approved"), FHyperAIStudioApprovalGate::Approve(Asked.OperationId, Error));
+	FHyperAIModelJob Job;
+	TickUntil([&]() { Job = JobOf(Asked.OperationId); return Job.State == TEXT("awaiting_fix_approval") || Job.State == TEXT("completed") || Job.State == TEXT("stopped") || Job.State == TEXT("failed"); }, 60.0);
+	AddInfo(FString::Printf(TEXT("After generation: %s, %s"), *Job.State, *Job.Diagnostic));
+	for (const FHyperAIModelStep& Step : Job.Steps)
+	{
+		AddInfo(FString::Printf(TEXT("  round %d %s %s: %s (%s)"), Step.Round, *Step.Kind, *Step.Status, *Step.What.Left(160), *Step.Detail.Left(300)));
+	}
+	Cleanup.Add(Job.AssetPath);
+
+	// The token flow: Basic with the key, then Bearer; a refused token traded for a new one.
+	TestTrue(TEXT("The token call sent Basic base64(client_id:client_secret)"), Seen->Auth.Contains(TEXT("/hi3d/open-api/v1/auth/token Basic ") + FBase64::Encode(Secret)));
+	TestTrue(TEXT("the submit sent the token as a Bearer"), Seen->Auth.Contains(TEXT("/hi3d/open-api/v1/submit-task Bearer hi3d-token-1")));
+	TestTrue(TEXT("and after the 401 a new token was asked for and used"), Seen->Tokens == 2 && Seen->Auth.Contains(TEXT("/hi3d/open-api/v1/query-task Bearer hi3d-token-2")));
+	const FString Form = Seen->Bodies.FindRef(TEXT("/hi3d/open-api/v1/submit-task")).IsEmpty() ? FString() : Seen->Bodies.FindRef(TEXT("/hi3d/open-api/v1/submit-task"))[0];
+	TestEqual(TEXT("The multipart form: request_type 3, hi3dv3.0, 2048quality, 100,000 faces, PBR, glb"), FString::Printf(TEXT("%s %s %s %s %s %s"), *FormField(Form, TEXT("request_type")),
+		*FormField(Form, TEXT("model")), *FormField(Form, TEXT("resolution")), *FormField(Form, TEXT("face")), *FormField(Form, TEXT("pbr")), *FormField(Form, TEXT("format"))),
+		FString(TEXT("3 hi3dv3.0 2048quality 100000 1 2")));
+	TestTrue(TEXT("with the picture as images"), Form.Contains(TEXT("name=\"images\"; filename=\"hi3d_chest.png\"")) && !Form.Contains(TEXT("multi_images")));
+
+	// Polled, downloaded, imported, checked; the 100,000 faces reduced for free to the budget.
+	TestTrue(TEXT("Imported from Hi3D's GLB, with its cover for the visual check"), !Job.AssetPath.IsEmpty() && !Job.PreviewImages.IsEmpty() && Job.Provider == TEXT("hi3d"));
+	TestTrue(TEXT("The budget was met by the free simplify"), Job.Steps.ContainsByPredicate([](const FHyperAIModelStep& Step)
+	{
+		return Step.Kind == TEXT("local_fix") && Step.What.Contains(TEXT("simplify")) && Step.Status == TEXT("done");
+	}) && Job.LastCheck.Triangles <= 630 && ResultOf(Job.LastCheck, TEXT("faces")) != TEXT("fail") && Job.FirstCheck.Triangles > 1000);
+	TestTrue(TEXT("and it stays closed: the seams were welded before the reduction"), ResultOf(Job.LastCheck, TEXT("holes")) != TEXT("fail")
+		&& ResultOf(Job.LastCheck, TEXT("open_edges")) != TEXT("fail"));
+
+	// Untextured: Hi3D's texture-only fix, priced in Hi3D credits.
+	const FHyperAIModelStep* Offer = Job.Steps.FindByPredicate([](const FHyperAIModelStep& Step) { return Step.Kind == TEXT("paid_fix") && Step.Status == TEXT("awaiting_user_approval"); });
+	TestTrue(TEXT("Missing textures: Hi3D's texture-only fix is offered at 15 Hi3D credits, and nothing of Tripo's"), Job.State == TEXT("awaiting_fix_approval") && Offer
+		&& Offer->What.Contains(TEXT("Hi3D")) && Offer->Credits == 15 && Offer->Endpoint == Hi3DSubmitPath);
+	if (!Offer)
+	{
+		return false;
+	}
+	TestTrue(TEXT("Approved"), FHyperAIStudioApprovalGate::Approve(Job.CurrentOperationId, Error));
+	// The texture task fails with 50010001 (refunded): a retry is offered, priced and approved.
+	TickUntil([&]() { Job = JobOf(Asked.OperationId); return Job.Steps.ContainsByPredicate([](const FHyperAIModelStep& Step) { return Step.What.StartsWith(TEXT("Try again")); })
+		|| Job.State == TEXT("completed") || Job.State == TEXT("stopped") || Job.State == TEXT("failed"); }, 60.0);
+	const FHyperAIModelStep* Retry = Job.Steps.FindByPredicate([](const FHyperAIModelStep& Step) { return Step.What.StartsWith(TEXT("Try again")); });
+	TestTrue(TEXT("50010001: refunded, and a retry is offered at the same price"), Retry && Retry->Status == TEXT("awaiting_user_approval") && Retry->Credits == 15
+		&& Retry->Detail.Contains(TEXT("refunded")) && FHyperAIStudioApprovalGate::HasPending(Job.CurrentOperationId));
+	const TArray<FString>& Forms = Seen->Bodies.FindRef(TEXT("/hi3d/open-api/v1/submit-task"));
+	const FString TextureForm = Forms.Num() > 1 ? Forms[1] : FString();
+	TestTrue(TEXT("The texture-only form: request_type 2, v3.0, the current mesh as a GLB, no face count"), FormField(TextureForm, TEXT("request_type")) == TEXT("2")
+		&& FormField(TextureForm, TEXT("model")) == TEXT("hi3dv3.0") && TextureForm.Contains(TEXT("name=\"mesh\"; filename=")) && TextureForm.Contains(TEXT(".glb\""))
+		&& FormField(TextureForm, TEXT("face")).IsEmpty() && TextureForm.Contains(TEXT("name=\"images\"")));
+	FHyperAIStudioApprovalGate::Approve(Job.CurrentOperationId, Error);
+	TickUntil([&]() { Job = JobOf(Asked.OperationId); return Job.State == TEXT("completed") || Job.State == TEXT("stopped") || Job.State == TEXT("failed") || (Job.State == TEXT("awaiting_fix_approval")
+		&& !Job.Steps.Last().What.StartsWith(TEXT("Try again"))); }, 60.0);
+	AddInfo(FString::Printf(TEXT("After the retexture: %s, %s"), *Job.State, *Job.Diagnostic));
+	for (const FHyperAIModelStep& Step : Job.Steps)
+	{
+		AddInfo(FString::Printf(TEXT("  round %d %s %s: %s (%s)"), Step.Round, *Step.Kind, *Step.Status, *Step.What.Left(160), *Step.Detail.Left(300)));
+	}
+	TestTrue(TEXT("The retried texture came in: the model now has its textures"), ResultOf(Job.LastCheck, TEXT("textures")) != TEXT("fail") && Seen->Submits == 3);
+	if (FHyperAIStudioApprovalGate::HasPending(Job.CurrentOperationId))
+	{
+		FHyperAIStudioApprovalGate::Reject(Job.CurrentOperationId, TEXT("Enough."));
+	}
+	for (const FHyperAIModelStep& Step : Job.Steps)
+	{
+		if (Step.Kind == TEXT("paid_fix"))
+		{
+			Cleanup.Add(FPaths::GetBaseFilename(Step.Detail));
+		}
+	}
+	if (const UStaticMesh* Fixed = LoadObject<UStaticMesh>(nullptr, *Job.AssetPath))
+	{
+		Cleanup.Add(FPackageName::GetLongPackagePath(Fixed->GetOutermost()->GetName()) / TEXT("Fixes"));
+	}
+
+	// The balance, with the token, beside Tripo's.
+	bool bRead = false;
+	FHyperAIModelAccountReport Account;
+	RefreshAccount([&bRead, &Account](const FHyperAIModelAccountReport& Report) { Account = Report; bRead = true; });
+	TickUntil([&bRead]() { return bRead; }, 10.0);
+	TestTrue(TEXT("Hi3D's balance is read (data.totalBalance) beside Tripo's"), Account.Hi3DStatus == TEXT("ok") && FMath::IsNearlyEqual(Account.Hi3DBalance, 512.f));
+
+	// Nowhere: the key, its base64, the tokens.
+	FString Output;
+	FJsonObjectConverter::UStructToJsonObjectString(HyperAIStudio::MeshGen::Creator::Status(Asked.OperationId), Output);
+	FString AccountJson;
+	FJsonObjectConverter::UStructToJsonObjectString(UHyperAIStudioMeshGenToolset::hyper_tripo_account(FHyperAIModelAccountRequest()), AccountJson);
+	FString Journal;
+	FFileHelper::LoadFileToString(Journal, *(FPaths::ProjectDir() / Job.Journal));
+	for (const FString& Secretive : {Secret, FBase64::Encode(Secret), FString(TEXT("hi3d-client-secret")), FString(TEXT("hi3d-token-1")), FString(TEXT("hi3d-token-2"))})
+	{
+		TestFalse(TEXT("Never in the log: ") + Secretive.Left(10), Logged.Text.Contains(Secretive));
+		TestFalse(TEXT("Never in hyper_model_status or the account: ") + Secretive.Left(10), Output.Contains(Secretive) || AccountJson.Contains(Secretive));
+		TestFalse(TEXT("Never in the journal: ") + Secretive.Left(10), Journal.Contains(Secretive));
+	}
+	TestTrue(TEXT("The token went to Hi3D alone: every Bearer call was the stand-in's Hi3D"), !Seen->Auth.ContainsByPredicate([](const FString& Line)
+	{
+		return Line.Contains(TEXT("hi3d-token")) && !Line.StartsWith(TEXT("/hi3d/open-api/"));
+	}));
+
+	// Hi3D from words: Tripo's text-to-image makes the picture first (one approval for both), then Hi3D makes the model from it.
+	FPlatformMisc::SetEnvironmentVar(TEXT("HYPERAI_TEST_CREATOR_TRIPO_KEY"), TEXT("tripo-creator-test-key"));
+	FHyperAIModelCreateRequest Lantern;
+	Lantern.Brief.Prompt = TEXT("an ornate brass lantern");
+	Lantern.Brief.Provider = TEXT("hi3d");
+	Lantern.Brief.Use = TEXT("prop");
+	Lantern.Brief.ReviewReference = TEXT("off");
+	Lantern.Brief.TextureQuality = TEXT("none");
+	Lantern.bLocalFixesOnly = true;
+	Lantern.bDryRun = false;
+	Lantern.Name = TEXT("SM_Hi3DLantern");
+	Lantern.OperationId = TEXT("model-hi3d-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	Operations.Add(Lantern.OperationId);
+	const FHyperAIModelCreateReport LanternAsked = Create(Lantern);
+	TestTrue(TEXT("Hi3D from words plans Tripo's picture first: ") + LanternAsked.Diagnostic, LanternAsked.Status == TEXT("awaiting_user_approval")
+		&& LanternAsked.Plan.bReferenceFirst && LanternAsked.Plan.ReferenceSource == TEXT("tripo"));
+	FHyperAIStudioApprovalGate::Approve(LanternAsked.OperationId, Error);
+	const int32 SubmitsBefore = Seen->Submits;
+	TickUntil([&]() { Job = JobOf(Lantern.OperationId); return Job.State == TEXT("completed") || Job.State == TEXT("stopped") || Job.State == TEXT("failed"); }, 60.0);
+	AddInfo(FString::Printf(TEXT("Lantern: %s, %s"), *Job.State, *Job.Diagnostic));
+	Cleanup.Add(Job.AssetPath);
+	const TArray<FString>& LanternForms = Seen->Bodies.FindRef(TEXT("/hi3d/open-api/v1/submit-task"));
+	TestTrue(TEXT("one approval: the picture, then Hi3D from it (geometry only), the picture as images"), Seen->Calls.Contains(TEXT("/tripo/v3/generation/text-to-image"))
+		&& Seen->Submits == SubmitsBefore + 1 && !LanternForms.IsEmpty() && LanternForms.Last().Contains(TEXT("filename=\"reference.png\""))
+		&& FormField(LanternForms.Last(), TEXT("request_type")) == TEXT("1") && !Job.AssetPath.IsEmpty());
+	FPlatformMisc::SetEnvironmentVar(TEXT("HYPERAI_TEST_CREATOR_TRIPO_KEY"), TEXT(""));
+
+	// Auto: a picture of a hero prop goes to Hi3D only with its key; without it, Tripo.
+	FHyperAIModelCreateRequest Auto;
+	Auto.Brief.Prompt = TEXT("a carved stone altar");
+	Auto.Brief.Use = TEXT("hero_prop");
+	Auto.Brief.ImagePath = Request.Brief.ImagePath;
+	TestEqual(TEXT("With Hi3D's key, auto chooses Hi3D"), Create(Auto).Plan.Provider, FString(TEXT("hi3d")));
+	FPlatformMisc::SetEnvironmentVar(TEXT("HYPERAI_TEST_CREATOR_HI3D_KEY"), TEXT(""));
+	const FHyperAIModelCreateReport Without = Create(Auto);
+	TestTrue(TEXT("Without it, Tripo, saying why"), Without.Plan.Provider == TEXT("tripo") && Without.Plan.Reasons[0].Contains(TEXT("key")));
+	Auto.Brief.Provider = TEXT("hi3d");
+	Auto.bDryRun = false;
+	const FHyperAIModelCreateReport NoKey = Create(Auto);
+	TestTrue(TEXT("Asked for, Hi3D without its key is refused, saying where the AK:SK goes"), NoKey.Status == TEXT("missing_key") && NoKey.Diagnostic.Contains(TEXT("client_id:client_secret")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelCreatorReferenceSwordTest, "HyperAIStudio.MeshGen.Creator.ReferenceSword",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioModelCreatorReferenceSwordTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelCreatorTests;
+	constexpr uint32 Port = 18356;
+	const TSharedPtr<IHttpRouter> Router = FHttpServerModule::Get().GetHttpRouter(Port, /*bFailOnBindFailure=*/true);
+	if (!Router.IsValid())
+	{
+		AddWarning(TEXT("Port 18356 is taken, so the stand-in for Tripo could not start."));
+		return true;
+	}
+	const FString Base = FString::Printf(TEXT("http://127.0.0.1:%u"), Port);
+	const TSharedRef<FHi3DSeen> Seen = MakeShared<FHi3DSeen>();
+	FFixture Blade;
+	Blade.Grid = 4;
+	Blade.Size = 1.f;
+	Blade.bTextured = true;
+	const TSharedRef<TArray<uint8>> Sword = MakeShared<TArray<uint8>>(CubeGlb(Blade));
+	const TSharedRef<TArray<uint8>> Picture = MakeShared<TArray<uint8>>(Png(64, [](int32 X, int32 Y) { return FMath::Abs(X - 32) < 4 ? FColor(200, 200, 210) : FColor(240, 240, 240); }));
+	TArray<FHttpRouteHandle> Routes;
+	auto Bind = [&](const TCHAR* Path, const EHttpServerRequestVerbs Verb, TFunction<TUniquePtr<FHttpServerResponse>(const FHttpServerRequest&)> Answer)
+	{
+		Routes.Add(Router->BindRoute(FHttpPath(Path), Verb, FHttpRequestHandler::CreateLambda([Seen, Path = FString(Path), Answer](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
+		{
+			Seen->Calls.Add(Path);
+			Seen->Bodies.FindOrAdd(Path).Add(BodyText(Request).Left(6000));
+			OnComplete(Answer(Request));
+			return true;
+		})));
+	};
+	Bind(TEXT("/tripo/v3/generation/text-to-image"), EHttpServerRequestVerbs::VERB_POST, [Seen](const FHttpServerRequest&)
+	{
+		// Busy the first time (rate limited): sent again after the back-off.
+		if (++Seen->Submits == 1)
+		{
+			TUniquePtr<FHttpServerResponse> Busy = JsonReply(TEXT(R"({"code":1007,"message":"rate limited"})"), EHttpServerResponseCodes::TooManyRequests);
+			Busy->Headers.Add(TEXT("Retry-After"), {TEXT("1")});
+			return Busy;
+		}
+		return JsonReply(TEXT(R"({"code":0,"data":{"task_id":"task_picture"}})"));
+	});
+	Bind(TEXT("/tripo/v3/generation/image-to-model"), EHttpServerRequestVerbs::VERB_POST, [](const FHttpServerRequest&) { return JsonReply(TEXT(R"({"code":0,"data":{"task_id":"task_sword"}})")); });
+	Bind(TEXT("/tripo/v3/tasks/task_picture"), EHttpServerRequestVerbs::VERB_GET, [Seen, Base](const FHttpServerRequest&)
+	{
+		// "unknown" once: polled on.
+		const int32 Poll = Seen->Polls.FindOrAdd(TEXT("picture"))++;
+		if (Poll == 0)
+		{
+			return JsonReply(TEXT(R"({"code":0,"data":{"status":"unknown"}})"));
+		}
+		return JsonReply(FString::Printf(TEXT(R"({"code":0,"data":{"status":"success","progress":100,"credits_consumed":20,"output":{"generated_image_url":"%s/files/sword.png"}}})"), *Base));
+	});
+	Bind(TEXT("/tripo/v3/tasks/task_sword"), EHttpServerRequestVerbs::VERB_GET, [Seen, Base](const FHttpServerRequest&)
+	{
+		if (Seen->Polls.FindOrAdd(TEXT("sword"))++ == 0)
+		{
+			return JsonReply(TEXT(R"({"code":0,"data":{"status":"running","progress":40}})"));
+		}
+		return JsonReply(FString::Printf(TEXT(R"({"code":0,"data":{"status":"success","progress":100,"credits_consumed":60,"output":{"model_url":"%s/files/sword.glb"}}})"), *Base));
+	});
+	Bind(TEXT("/files/sword.png"), EHttpServerRequestVerbs::VERB_GET, [Picture](const FHttpServerRequest&) { return FHttpServerResponse::Create(TArray<uint8>(*Picture), TEXT("image/png")); });
+	Bind(TEXT("/files/sword.glb"), EHttpServerRequestVerbs::VERB_GET, [Sword](const FHttpServerRequest&) { return FHttpServerResponse::Create(TArray<uint8>(*Sword), TEXT("model/gltf-binary")); });
+	FHttpServerModule::Get().StartAllListeners();
+
+	FStandIn StandIn(Base);
+	TArray<FString> Operations;
+	TArray<FString> Cleanup;
+	ON_SCOPE_EXIT
+	{
+		for (const FHttpRouteHandle& Route : Routes)
+		{
+			Router->UnbindRoute(Route);
+		}
+		for (const FString& Operation : Operations)
+		{
+			IFileManager::Get().DeleteDirectory(*(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Models") / Operation), false, true);
+		}
+		DeleteAll(Cleanup);
+	};
+
+	// The user's first run: a sword, a weapon, its picture from chat_image_2.5_sunburst at high quality on a transparent
+	// background (asked for as people say it), then H3.1 detailed from that picture.
+	FHyperAIModelCreateRequest Request;
+	Request.Brief.Prompt = TEXT("a sword");
+	Request.Brief.Use = TEXT("weapon");
+	Request.Brief.ImageModel = TEXT("gpt-image-2.5-sunburn");
+	Request.Brief.ImageQuality = TEXT("high");
+	Request.Brief.ImageBackground = TEXT("transparent");
+	Request.Brief.Model = TEXT("H3.1");
+	Request.Brief.GeometryQuality = TEXT("detailed");
+	Request.Brief.TextureQuality = TEXT("detailed");
+	Request.FixBudgetUSD = 1.f;
+	Request.MaxRounds = 2;
+	const FHyperAIModelCreateReport Dry = Create(Request);
+	const FHyperAIModelPlan& Plan = Dry.Plan;
+	TestTrue(TEXT("The plan: a picture first, chat_image_2.5_sunburst (read from the name), high, 1024, transparent, asset extraction, reviewed: ") + Dry.Diagnostic,
+		Dry.bOk && Plan.bReferenceFirst && Plan.ReferenceSource == TEXT("tripo") && Plan.ImageModel == TEXT("chat_image_2.5_sunburst") && Plan.ImageQuality == TEXT("high")
+		&& Plan.ImageSize == TEXT("1024x1024") && Plan.ImageBackground == TEXT("transparent") && Plan.ImageTemplate == TEXT("asset_extraction") && Plan.bReviewReference
+		&& Plan.Reasons.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("gpt-image-2.5-sunburn")); }));
+	TestTrue(TEXT("then H3.1 detailed from the picture's task: image-to-model"), Plan.Family == TEXT("H3.1") && Plan.GeometryQuality == TEXT("detailed") && Plan.Endpoint == TEXT("/generation/image-to-model")
+		&& Plan.Input == TEXT("image") && Plan.Provider == TEXT("tripo"));
+	TestTrue(TEXT("Priced: the picture 20, H3.1 from a picture detailed 40, detailed geometry 20: 80 credits"), Plan.Credits == 80
+		&& Plan.PriceLines.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("reference picture (chat_image_2.5_sunburst high, up to 1K): 20 credits")); }));
+	TestTrue(TEXT("Nothing was sent by the dry run"), Seen->Calls.IsEmpty());
+
+	Request.bDryRun = false;
+	Request.OperationId = TEXT("model-sword-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	Operations.Add(Request.OperationId);
+	const FHyperAIModelCreateReport Asked = Create(Request);
+	if (!TestEqual(TEXT("The picture is asked for first: ") + Asked.Diagnostic, Asked.Status, FString(TEXT("awaiting_user_approval"))))
+	{
+		return false;
+	}
+	FHyperAIModelJob Job = JobOf(Asked.OperationId);
+	TestTrue(TEXT("its step is the picture alone, 20 credits"), !Job.Steps.IsEmpty() && Job.Steps.Last().Kind == TEXT("reference") && Job.Steps.Last().Credits == 20);
+	FString Error;
+	TestTrue(TEXT("Approved"), FHyperAIStudioApprovalGate::Approve(Asked.OperationId, Error));
+	TickUntil([&]() { Job = JobOf(Asked.OperationId); return Job.State == TEXT("awaiting_reference_review") || Job.State == TEXT("failed") || Job.State == TEXT("stopped"); }, 30.0);
+	AddInfo(FString::Printf(TEXT("After the picture: %s, %s"), *Job.State, *Job.Diagnostic));
+	const TSharedPtr<FJsonObject> Sent = Parse(Seen->Bodies.FindRef(TEXT("/tripo/v3/generation/text-to-image")).IsEmpty() ? FString() : Seen->Bodies.FindRef(TEXT("/tripo/v3/generation/text-to-image")).Last());
+	TestTrue(TEXT("Text-to-image: sunburst, high, 1024x1024, transparent, PNG, asset_extraction, negatives after --no"), Sent.IsValid() && Sent->GetStringField(TEXT("model")) == TEXT("chat_image_2.5_sunburst")
+		&& Sent->GetStringField(TEXT("quality")) == TEXT("high") && Sent->GetStringField(TEXT("size")) == TEXT("1024x1024") && Sent->GetStringField(TEXT("background")) == TEXT("transparent")
+		&& Sent->GetStringField(TEXT("output_format")) == TEXT("png") && Sent->GetStringField(TEXT("template")) == TEXT("asset_extraction")
+		&& Sent->GetStringField(TEXT("prompt")).StartsWith(TEXT("a sword, single isolated object")) && Sent->GetStringField(TEXT("prompt")).Contains(TEXT(" --no ")));
+	TestEqual(TEXT("The 429 was sent again after Retry-After"), Seen->Calls.FilterByPredicate([](const FString& Call) { return Call == TEXT("/tripo/v3/generation/text-to-image"); }).Num(), 2);
+	TestTrue(TEXT("Polled through an unknown status"), Seen->Polls.FindRef(TEXT("picture")) >= 2);
+	TestEqual(TEXT("The job holds for the review"), Job.State, FString(TEXT("awaiting_reference_review")));
+	TestTrue(TEXT("with the picture downloaded into its folder and shown"), Job.PreviewImages.ContainsByPredicate([](const FString& Image) { return Image.EndsWith(TEXT("reference.png")); })
+		&& IFileManager::Get().FileSize(*(FPaths::ProjectDir() / Job.PreviewImages[0])) > 0);
+	TestTrue(TEXT("and the 3D generation waits for its own approval, 60 credits"), FHyperAIStudioApprovalGate::HasPending(Job.CurrentOperationId) && Job.Steps.Last().Kind == TEXT("generate")
+		&& Job.Steps.Last().Credits == 60 && !Seen->Calls.Contains(TEXT("/tripo/v3/generation/image-to-model")));
+	TestTrue(TEXT("Approved"), FHyperAIStudioApprovalGate::Approve(Job.CurrentOperationId, Error));
+	TickUntil([&]() { Job = JobOf(Asked.OperationId); return Job.State == TEXT("awaiting_fix_approval") || Job.State == TEXT("completed") || Job.State == TEXT("stopped") || Job.State == TEXT("failed"); }, 60.0);
+	AddInfo(FString::Printf(TEXT("After the sword: %s, %s"), *Job.State, *Job.Diagnostic));
+	for (const FHyperAIModelStep& Step : Job.Steps)
+	{
+		AddInfo(FString::Printf(TEXT("  round %d %s %s: %s (%s)"), Step.Round, *Step.Kind, *Step.Status, *Step.What.Left(160), *Step.Detail.Left(300)));
+	}
+	Cleanup.Add(Job.AssetPath);
+	const TSharedPtr<FJsonObject> Model = Parse(Seen->Bodies.FindRef(TEXT("/tripo/v3/generation/image-to-model")).IsEmpty() ? FString() : Seen->Bodies.FindRef(TEXT("/tripo/v3/generation/image-to-model"))[0]);
+	TestTrue(TEXT("Image-to-model took the picture's task as input, H3.1, detailed geometry and textures, the picture's colours"), Model.IsValid() && Model->GetStringField(TEXT("input")) == TEXT("task_picture")
+		&& Model->GetStringField(TEXT("model")) == TEXT("v3.1-20260211") && Model->GetStringField(TEXT("geometry_quality")) == TEXT("detailed")
+		&& Model->GetStringField(TEXT("texture_quality")) == TEXT("detailed") && Model->GetStringField(TEXT("texture_alignment")) == TEXT("original_image"));
+	TestTrue(TEXT("Nothing was uploaded: no picture went to /files"), !Seen->Calls.Contains(TEXT("/tripo/v3/files")));
+	TestTrue(TEXT("The sword is imported and checked, the picture its visual reference"), !Job.AssetPath.IsEmpty() && Job.FirstCheck.Checks.Num() > 10
+		&& Job.Steps.ContainsByPredicate([](const FHyperAIModelStep& Step) { return Step.Kind == TEXT("check"); }));
+	TestTrue(TEXT("Spent: the picture and the model, with Tripo's own count (20 + 60)"), FMath::IsNearlyEqual(Job.SpentUSD, 0.80f, 0.001f) && FMath::IsNearlyEqual(Job.CreditsConsumed, 80.f, 0.01f));
+	if (FHyperAIStudioApprovalGate::HasPending(Job.CurrentOperationId))
+	{
+		FHyperAIStudioApprovalGate::Reject(Job.CurrentOperationId, TEXT("Enough."));
+	}
+
+	// Seen and turned down: the review declines the 3D, nothing more is paid.
+	Seen->Polls.Reset();
+	FHyperAIModelCreateRequest Again = Request;
+	Again.OperationId = TEXT("model-sword-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	Again.Name = TEXT("SM_SwordDeclined");
+	Operations.Add(Again.OperationId);
+	const FHyperAIModelCreateReport Second = Create(Again);
+	FHyperAIStudioApprovalGate::Approve(Second.OperationId, Error);
+	TickUntil([&]() { Job = JobOf(Second.OperationId); return Job.State == TEXT("awaiting_reference_review") || Job.State == TEXT("failed"); }, 30.0);
+	const int32 Models = Seen->Calls.FilterByPredicate([](const FString& Call) { return Call == TEXT("/tripo/v3/generation/image-to-model"); }).Num();
+	FHyperAIStudioApprovalGate::Reject(Job.CurrentOperationId, TEXT("Not that sword."));
+	TickUntil([&]() { Job = JobOf(Second.OperationId); return Job.State == TEXT("stopped"); }, 5.0);
+	TestTrue(TEXT("Declining at the review stops the job, fix_declined, and no 3D is asked of Tripo"), Job.StopReason == TEXT("fix_declined")
+		&& Seen->Calls.FilterByPredicate([](const FString& Call) { return Call == TEXT("/tripo/v3/generation/image-to-model"); }).Num() == Models);
 	return true;
 }
 

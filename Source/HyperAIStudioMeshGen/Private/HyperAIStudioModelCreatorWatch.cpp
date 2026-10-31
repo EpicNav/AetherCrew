@@ -122,6 +122,11 @@ namespace HyperAIStudio::MeshGen::Creator
 			bool bPending = false;
 			double ReadAt = -1.0;
 			TArray<TFunction<void(const FHyperAIModelAccountReport&)>> Waiters;
+			/** Tripo's read and Hi3D's run side by side; the waiters hear once both are in. */
+			int32 Outstanding = 0;
+			FString Hi3DStatus;
+			float Hi3DBalance = 0.f;
+			FString Hi3DDiagnostic;
 		};
 
 		FAccount& Account()
@@ -130,17 +135,33 @@ namespace HyperAIStudio::MeshGen::Creator
 			return Value;
 		}
 
+		/** The report with Hi3D's part, which Tripo's read does not touch. */
+		FHyperAIModelAccountReport WithHi3D(const FAccount& State)
+		{
+			FHyperAIModelAccountReport Report = State.Report;
+			Report.Hi3DStatus = State.Hi3DStatus.IsEmpty() && State.bPending ? FString(TEXT("pending")) : State.Hi3DStatus;
+			Report.Hi3DBalance = State.Hi3DBalance;
+			Report.Hi3DDiagnostic = State.Hi3DDiagnostic;
+			return Report;
+		}
+
 		void Done(FAccount& State)
 		{
+			if (--State.Outstanding > 0)
+			{
+				return;
+			}
+			State.Outstanding = 0;
 			State.bPending = false;
 			State.ReadAt = FPlatformTime::Seconds();
 			State.Report.ReadAt = FDateTime::UtcNow().ToIso8601();
 			TArray<TFunction<void(const FHyperAIModelAccountReport&)>> Waiters = MoveTemp(State.Waiters);
+			const FHyperAIModelAccountReport Report = WithHi3D(State);
 			for (const TFunction<void(const FHyperAIModelAccountReport&)>& Waiter : Waiters)
 			{
 				if (Waiter)
 				{
-					Waiter(State.Report);
+					Waiter(Report);
 				}
 			}
 		}
@@ -169,6 +190,16 @@ namespace HyperAIStudio::MeshGen::Creator
 					Report.Balance, Report.Balance * 0.01f, Report.Frozen, *Report.ReadAt.Left(19).Replace(TEXT("T"), TEXT(" "))));
 			}
 			return FText::FromString(Account().bPending ? FString(TEXT("Reading Tripo's balance...")) : Report.Diagnostic.IsEmpty() ? FString(TEXT("Not read yet: press Refresh.")) : Report.Diagnostic);
+		}
+
+		FText Hi3DBalanceText()
+		{
+			const FAccount& State = Account();
+			if (State.Hi3DStatus.IsEmpty())
+			{
+				return FText::FromString(State.bPending ? TEXT("Hi3D: reading its balance...") : TEXT("Hi3D: not read yet."));
+			}
+			return FText::FromString(TEXT("Hi3D: ") + State.Hi3DDiagnostic);
 		}
 
 		FText UsageText()
@@ -207,6 +238,16 @@ namespace HyperAIStudio::MeshGen::Creator
 					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 2.f)
 					[
 						SNew(STextBlock).Font(IDetailLayoutBuilder::GetDetailFont()).Text_Static(&UsageText)
+					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 2.f)
+					[
+						SNew(STextBlock).AutoWrapText(true).Text_Static(&Hi3DBalanceText)
+					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 2.f)
+					[
+						SNew(STextBlock).AutoWrapText(true).Font(IDetailLayoutBuilder::GetDetailFont())
+						.Text(LOCTEXT("Hi3DAccountNote", "Hi3D (Hitem3D) is the creator's second provider, for the densest, most faithful models from a picture. Its key is client_id:client_secret "
+							"from Hi3D's developer platform, kept in Settings > Agents > Keys as Hi3D (Hitem3D) or in HITEM3D_API_KEY or HYPERAI_HI3D_KEY, and never shown. Credits are $0.02 each."))
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 4.f)
 					[
@@ -404,6 +445,18 @@ namespace HyperAIStudio::MeshGen::Creator
 		{
 			return;
 		}
+		State.bPending = true;
+		State.Outstanding = 2;
+		State.Hi3DStatus.Reset();
+		// Hi3D's balance beside Tripo's: its key traded for a token, the token sent only to Hi3D.
+		Hi3DReadBalance([](const FString& Status, const float Balance, const FString& Diagnostic)
+		{
+			FAccount& State = Account();
+			State.Hi3DStatus = Status;
+			State.Hi3DBalance = Balance;
+			State.Hi3DDiagnostic = Diagnostic;
+			Done(State);
+		});
 		FHyperAIStudioExternalServiceSettings Service;
 		if (!FHyperAIStudioExternalServices::Find(TEXT("tripo"), Service) || Key(Service).IsEmpty())
 		{
@@ -413,7 +466,6 @@ namespace HyperAIStudio::MeshGen::Creator
 			Done(State);
 			return;
 		}
-		State.bPending = true;
 		Get(Service, TEXT("/account/balance"), [Service](const int32 Code, const TArray<uint8>& Body)
 		{
 			FAccount& State = Account();
@@ -467,7 +519,7 @@ namespace HyperAIStudio::MeshGen::Creator
 		{
 			RefreshAccount();
 		}
-		FHyperAIModelAccountReport Report = State.Report;
+		FHyperAIModelAccountReport Report = WithHi3D(State);
 		if (State.bPending && State.ReadAt < 0.0)
 		{
 			Report.bOk = true;

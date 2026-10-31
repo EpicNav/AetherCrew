@@ -195,7 +195,7 @@ struct FHyperAIStudioMeshTaskPrice
 {
 	GENERATED_BODY()
 
-	/** The service's id: tripo, meshy or viggle. */
+	/** The service's id: tripo, meshy, hi3d or viggle. */
 	UPROPERTY(Config, EditAnywhere, Category = "3D Generation")
 	FString Provider;
 
@@ -204,7 +204,9 @@ struct FHyperAIStudioMeshTaskPrice
 	 * motion_apply (Meshy: a clip put on a rig); texture, texture_hd (Tripo's detailed) or texture_8k. The model creator's
 	 * Tripo prices: h3_text and h3_image (with _standard, _detailed or _extreme for the texture tier), p2 (likewise),
 	 * addon_detailed_geometry, addon_quad, addon_smart_low_poly, addon_parts, convert, convert_advanced, retopo,
-	 * retopo_quad, smart_uv, segment, complete, complete_quick, image_to_multiview, edit_multiview.
+	 * retopo_quad, smart_uv, segment, complete, complete_quick, image_to_multiview, edit_multiview. Its Hi3D prices:
+	 * <model>_<resolution> for a whole textured model with PBR (such as hi3dv3.0_2048quality), texture and pbr (the parts
+	 * of it taken off for geometry alone, or no PBR), texture_only and texture_only_pbr (texturing a given mesh).
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "3D Generation")
 	FString Task;

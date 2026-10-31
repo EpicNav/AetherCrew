@@ -2360,6 +2360,66 @@
    "text": "HyperAI：网格地形编辑"
   },
   {
+   "namespace": "HyperAIStudioModelCreatorWatch",
+   "key": "AccountCategory",
+   "source": "Tripo API account",
+   "text": "Tripo API 账户"
+  },
+  {
+   "namespace": "HyperAIStudioModelCreatorWatch",
+   "key": "AccountNote",
+   "source": "The key is read from Settings > Agents > Keys (Windows Credential Manager) or TRIPO_API_KEY and is never shown. These are API credits: a Tripo Studio subscription's credits are a separate balance the API cannot read or spend. Models made in Tripo Studio come in through Tripo's own DCC Bridge, and HyperAI checks them.",
+   "text": "密钥从“设置 > 代理 > 密钥”（Windows 凭据管理器）或 TRIPO_API_KEY 读取，从不显示。这些是 API 积分：Tripo Studio 订阅的积分是另一份余额，API 无法读取或使用。在 Tripo Studio 中制作的模型通过 Tripo 自己的 DCC Bridge 导入，并由 HyperAI 检查。"
+  },
+  {
+   "namespace": "HyperAIStudioModelCreatorWatch",
+   "key": "AccountRow",
+   "source": "Tripo API account balance usage",
+   "text": "Tripo API 账户 余额 用量"
+  },
+  {
+   "namespace": "HyperAIStudioModelCreatorWatch",
+   "key": "Arrived",
+   "source": "{0} arrived from Tripo Studio. Check it and make the free fixes?",
+   "text": "{0} 已从 Tripo Studio 送达。要检查它并进行免费修复吗？"
+  },
+  {
+   "namespace": "HyperAIStudioModelCreatorWatch",
+   "key": "CheckAndFix",
+   "source": "Check and fix",
+   "text": "检查并修复"
+  },
+  {
+   "namespace": "HyperAIStudioModelCreatorWatch",
+   "key": "CheckAndFixTip",
+   "source": "Approve the free check and fixes (also waiting in Activity)",
+   "text": "批准免费检查和修复（也在“活动”中等待）"
+  },
+  {
+   "namespace": "HyperAIStudioModelCreatorWatch",
+   "key": "Dismiss",
+   "source": "Dismiss",
+   "text": "忽略"
+  },
+  {
+   "namespace": "HyperAIStudioModelCreatorWatch",
+   "key": "DismissTip",
+   "source": "Leave the model as it came",
+   "text": "保持模型原样"
+  },
+  {
+   "namespace": "HyperAIStudioModelCreatorWatch",
+   "key": "Hi3DAccountNote",
+   "source": "Hi3D (Hitem3D) is the creator's second provider, for the densest, most faithful models from a picture. Its key is client_id:client_secret from Hi3D's developer platform, kept in Settings > Agents > Keys as Hi3D (Hitem3D) or in HITEM3D_API_KEY or HYPERAI_HI3D_KEY, and never shown. Credits are $0.02 each.",
+   "text": "Hi3D（Hitem3D）是模型创建器的第二个提供方，用于从图片生成最密集、最忠实的模型。其密钥为 Hi3D 开发者平台提供的 client_id:client_secret，保存在“设置 > 代理 > 密钥”中的 Hi3D (Hitem3D) 下，或 HITEM3D_API_KEY、HYPERAI_HI3D_KEY 中，从不显示。每个积分 0.02 美元。"
+  },
+  {
+   "namespace": "HyperAIStudioModelCreatorWatch",
+   "key": "Refresh",
+   "source": "Refresh",
+   "text": "刷新"
+  },
+  {
    "namespace": "HyperAIStudioModeling",
    "key": "BakeMaps",
    "source": "HyperAI: Bake Maps",

@@ -45,7 +45,18 @@ namespace HyperAIStudio::MeshGen::Creator
 		{
 			FHyperAIModelJob Info;
 			FHyperAIModelBrief Brief;
+			/** Tripo, whose tasks every Tripo stage runs (a Tripo plan's generation, the fixes, the picture, the rig). */
 			FHyperAIStudioExternalServiceSettings Service;
+			/** Hi3D, for a Hi3D plan's generation and its Hi3D fixes; and whether Tripo's key is set, for Tripo's fixes on it. */
+			FHyperAIStudioExternalServiceSettings Hi3D;
+			bool bTripoKey = true;
+			/** The reference picture's Tripo task (image-to-model's input and texture_prompt.image), or the picture's file token. */
+			FString ReferenceTaskId;
+			FString PictureToken;
+			/** The picture was approved on its own; the generation now waits for its own approval (the review). */
+			bool bReviewing = false;
+			/** A Hi3D regeneration's resolution, the plan's once it is done. */
+			FString PendingResolution;
 			FCheckTargets Targets;
 			/** Where the generation imports: Folder/Name, as hyper_mesh_generate's models land. */
 			FString Folder;
@@ -117,6 +128,8 @@ namespace HyperAIStudio::MeshGen::Creator
 			Json->SetStringField(TEXT("generationTaskId"), C.GenerationTaskId);
 			Json->SetBoolField(TEXT("inputIsGeneration"), C.bInputIsGeneration);
 			Json->SetNumberField(TEXT("fixSpentUSD"), C.FixSpentUSD);
+			Json->SetStringField(TEXT("referenceTaskId"), C.ReferenceTaskId);
+			Json->SetStringField(TEXT("pictureToken"), C.PictureToken);
 			const TSharedRef<FJsonObject> Tried = MakeShared<FJsonObject>();
 			for (const TPair<FString, int32>& Pair : C.Tried)
 			{
@@ -159,6 +172,8 @@ namespace HyperAIStudio::MeshGen::Creator
 			C.GenerationTaskId = Json->GetStringField(TEXT("generationTaskId"));
 			C.bInputIsGeneration = Json->GetBoolField(TEXT("inputIsGeneration"));
 			C.FixSpentUSD = static_cast<float>(Json->GetNumberField(TEXT("fixSpentUSD")));
+			Json->TryGetStringField(TEXT("referenceTaskId"), C.ReferenceTaskId);
+			Json->TryGetStringField(TEXT("pictureToken"), C.PictureToken);
 			const TSharedPtr<FJsonObject>* Tried = nullptr;
 			if (Json->TryGetObjectField(TEXT("tried"), Tried))
 			{
@@ -207,8 +222,8 @@ namespace HyperAIStudio::MeshGen::Creator
 				: FCString::Strcmp(Reason, TEXT("budget_used")) == 0 ? FString(TEXT("Checks still fail and the next paid fix costs more than the fix budget has left."))
 				: FCString::Strcmp(Reason, TEXT("rounds_used")) == 0 ? FString(TEXT("Checks still fail after the most rounds allowed."))
 				: FCString::Strcmp(Reason, TEXT("fix_declined")) == 0 ? FString(TEXT("Checks still fail; the user turned the paid fix down."))
-				: FCString::Strcmp(Reason, TEXT("no_paid_fix")) == 0 ? FString(TEXT("Checks still fail and no paid Tripo fix addresses what is left."))
-				: FCString::Strcmp(Reason, TEXT("local_only")) == 0 ? FString(TEXT("Checks still fail; only free fixes were allowed (or no Tripo key is set)."))
+				: FCString::Strcmp(Reason, TEXT("no_paid_fix")) == 0 ? FString(TEXT("Checks still fail and no paid fix addresses what is left."))
+				: FCString::Strcmp(Reason, TEXT("local_only")) == 0 ? FString(TEXT("Checks still fail; only free fixes were allowed (or the provider's key is not set)."))
 				: FString(Reason);
 			AddStep(C, TEXT("stop"), Why, TEXT("done"));
 			C.Info.Diagnostic = FString::Printf(TEXT("%s %s Spent $%.2f (%.0f credits by Tripo's count) over %d round(s). %s"), *C.Info.State, *Why, C.Info.SpentUSD,
@@ -270,20 +285,116 @@ namespace HyperAIStudio::MeshGen::Creator
 			return Out;
 		}
 
-		TSharedRef<FJob> NewStage(const FCreator& C, const FString& OperationId, const FString& Folder, const FString& Name)
+		TSharedRef<FJob> NewStage(const FCreator& C, const FString& OperationId, const FString& Folder, const FString& Name, const bool bHi3D = false)
 		{
 			const TSharedRef<FJob> Job = MakeShared<FJob>();
 			Job->Kind = EKind::Model;
 			Job->ToolName = C.Info.Kind == TEXT("create") ? CreateToolName : CheckFixToolName;
-			Job->Service = C.Service;
+			Job->Service = bHi3D ? C.Hi3D : C.Service;
 			Job->AssetFolder = Folder;
 			Job->AssetName = Name;
 			Job->Info.Kind = TEXT("model");
 			Job->Info.OperationId = OperationId;
-			Job->Info.Provider = TEXT("tripo");
+			Job->Info.Provider = bHi3D ? TEXT("hi3d") : TEXT("tripo");
 			Job->Info.Model = C.Info.Plan.Model;
 			Job->Info.Prompt = C.Brief.Prompt;
 			return Job;
+		}
+
+		/** A Hi3D task: its multipart form built when it is sent, the model and its cover taken from the finished task. */
+		FTask Hi3DTask(const FCreator& C, const FString& Label, const FHi3DRequest& Request, const double Cost)
+		{
+			FTask Out;
+			Out.Label = Label;
+			Out.CreateUrl = C.Hi3D.BaseUrl + Hi3DSubmitPath;
+			Out.QueryUrl = C.Hi3D.BaseUrl + TEXT("/open-api/v1/query-task?task_id={id}");
+			Out.TaskIdPath = TEXT("data.task_id");
+			Out.StatePath = TEXT("data.state");
+			Out.Cost = Cost;
+			Out.Form = [Request](const FJob& Job, FForm& Form, FString& OutError)
+			{
+				FHi3DRequest Now = Request;
+				if (Now.Images.IsEmpty() && !Job.ImageFile.IsEmpty())
+				{
+					Now.Images = {Job.ImageFile};
+				}
+				if (Now.RequestType == 2 && Now.Mesh.IsEmpty())
+				{
+					Now.Mesh = Job.ExportFile;
+				}
+				return Hi3DForm(Now, Form, OutError);
+			};
+			Out.OnDone = [](FJob& Job, const TSharedPtr<FJsonObject>& Json, FString& OutError)
+			{
+				// Both links last an hour: they are fetched as soon as the task is done.
+				const FString Model = Field(Json, TEXT("data.url"));
+				if (!Model.StartsWith(TEXT("http://")) && !Model.StartsWith(TEXT("https://")))
+				{
+					OutError = TEXT("Hi3D finished the task without a model to download.");
+					return false;
+				}
+				Job.Downloads.Add({Model, TEXT("model"), FString()});
+				const FString Cover = Field(Json, TEXT("data.cover_url"));
+				if (Cover.StartsWith(TEXT("http://")) || Cover.StartsWith(TEXT("https://")))
+				{
+					Job.Downloads.Add({Cover, TEXT("preview"), FString()});
+				}
+				return true;
+			};
+			return Out;
+		}
+
+		/** The pictures a Hi3D task is made from, absolute: the views in Hi3D's order, the brief's picture, or the reference made first. */
+		TArray<FString> Hi3DImagesOf(const FCreator& C, bool& bOutMultiview)
+		{
+			const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+			auto Absolute = [&ProjectDir](const FString& Path) { return Path.IsEmpty() ? FString() : FPaths::ConvertRelativePathToFull(FPaths::IsRelative(Path) ? ProjectDir / Path : Path); };
+			bOutMultiview = C.Brief.MultiviewImages.Num() > 0;
+			if (bOutMultiview)
+			{
+				TArray<FString> Views;
+				for (const FString& View : Hi3DViewOrder(C.Brief.MultiviewImages))
+				{
+					Views.Add(Absolute(View));
+				}
+				return Views;
+			}
+			const FString Picture = !C.Brief.ImagePath.TrimStartAndEnd().IsEmpty() ? Absolute(C.Brief.ImagePath.TrimStartAndEnd()) : C.ReferenceImage;
+			return Picture.IsEmpty() ? TArray<FString>() : TArray<FString>{Picture};
+		}
+
+		/** Tripo's text-to-image: the reference picture, downloaded at once (its link lasts minutes) as the visual check's reference. */
+		FTask ReferenceTask(const FCreator& C)
+		{
+			const FHyperAIModelPlan& Plan = C.Info.Plan;
+			FTask Out;
+			Out.Label = TEXT("reference");
+			Out.CreateUrl = C.Service.BaseUrl + TEXT("/generation/text-to-image");
+			Out.QueryUrl = C.Service.BaseUrl + TEXT("/tasks/{id}");
+			Out.TaskIdPath = TEXT("data.task_id");
+			Out.StatePath = TEXT("data.status");
+			Out.ProgressPath = TEXT("data.progress");
+			Out.Cost = ImagePrice(Plan.ImageModel, Plan.ImageQuality, Plan.ImageSize);
+			const TSharedRef<FJsonObject> Body = TextToImageBody(Plan);
+			Out.Body = [Body](const FJob&) { return Body; };
+			Out.OnDone = [](FJob& Job, const TSharedPtr<FJsonObject>& Json, FString& OutError)
+			{
+				const FString Consumed = Field(Json, TEXT("data.credits_consumed"));
+				if (!Consumed.IsEmpty())
+				{
+					Job.CreditsConsumed = FMath::Max(Job.CreditsConsumed, 0.f) + FCString::Atof(*Consumed);
+				}
+				FString Url = Field(Json, TEXT("data.output.generated_image_url"));
+				Url = Url.IsEmpty() ? Field(Json, TEXT("data.output.image_url")) : Url;
+				if (!Url.StartsWith(TEXT("http://")) && !Url.StartsWith(TEXT("https://")))
+				{
+					OutError = TEXT("Tripo finished the picture without one to download.");
+					return false;
+				}
+				Job.Downloads.Add({Url, TEXT("reference"), FString()});
+				return true;
+			};
+			return Out;
 		}
 
 		/** The model as Tripo's input: its generation task while that is still what the asset is, else the asset exported and uploaded. */
@@ -298,16 +409,28 @@ namespace HyperAIStudio::MeshGen::Creator
 			return TEXT("{input}");
 		}
 
-		/** Asks the user for a stage and, approved, runs it; the stage's job carries the price, booked against the session's cap. */
-		bool AskStage(FCreator& C, const TSharedRef<FJob>& Job, const FString& What, const float PriceUSD, const TCHAR* VariantId, const TArray<FString>& Lines, FString& OutError)
+		/**
+		 * Asks the user for a stage and, approved, runs it; the stage's job carries the price, booked against the session's
+		 * cap. bApproved: the user approved it already (in the picture's approval, which priced both): it runs at once.
+		 */
+		bool AskStage(FCreator& C, const TSharedRef<FJob>& Job, const FString& What, const float PriceUSD, const TCHAR* VariantId, const TArray<FString>& Lines, FString& OutError,
+			const bool bApproved = false)
 		{
 			Job->Price = PriceUSD;
 			Job->Info.Cost = PriceUSD;
 			Job->Info.State = TEXT("awaiting_user_approval");
 			double Cost = 0.0;
-			if (!FHyperAIStudioExternalServices::Reserve(C.Service.Id, 1, Cost, OutError, PriceUSD))
+			if (!FHyperAIStudioExternalServices::Reserve(Job->Service.Id, 1, Cost, OutError, PriceUSD))
 			{
 				return false;
+			}
+			if (bApproved)
+			{
+				Jobs().Insert(Job, 0);
+				C.Stage = Job;
+				C.Info.CurrentOperationId = Job->Info.OperationId;
+				Begin(Job);
+				return true;
 			}
 			FHyperAIStudioApprovalSummary Summary;
 			Summary.PackId = FHyperAIStudioMeshGenContracts::PackId;
@@ -315,7 +438,9 @@ namespace HyperAIStudio::MeshGen::Creator
 			Summary.VariantId = VariantId;
 			Summary.Safety = EHyperAIStudioDomainSafety::ExternalEffect;
 			Summary.EffectTarget = C.Info.AssetPath.IsEmpty() ? C.Folder / C.Name : C.Info.AssetPath;
-			Summary.Effects = {What, FString::Printf(TEXT("Pay Tripo %d API credits ($%.2f), against this session's spend cap"), Credits(PriceUSD), PriceUSD)};
+			const bool bHi3D = Job->Service.Id == TEXT("hi3d");
+			Summary.Effects = {What, FString::Printf(TEXT("Pay %s %d %s ($%.2f), against this session's spend cap"), bHi3D ? TEXT("Hi3D") : TEXT("Tripo"),
+				ProviderCredits(Job->Service.Id, PriceUSD), bHi3D ? TEXT("credits") : TEXT("API credits"), PriceUSD)};
 			for (const FString& Line : Lines)
 			{
 				Summary.Effects.Add(TEXT("| ") + Line);
@@ -338,7 +463,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			const FHyperAIModelPlan& Plan = C.Info.Plan;
 			const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 			auto Absolute = [&ProjectDir](const FString& Path) { return Path.IsEmpty() ? FString() : FPaths::ConvertRelativePathToFull(FPaths::IsRelative(Path) ? ProjectDir / Path : Path); };
-			if (Plan.Input == TEXT("image") || Plan.bMakeViews)
+			if ((Plan.Input == TEXT("image") || Plan.bMakeViews) && !Plan.bReferenceFirst)
 			{
 				Job->UploadFiles = {Absolute(Brief.ImagePath)};
 			}
@@ -361,7 +486,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			{
 				const TArray<FString> EditLines = Plan.ViewEdits;
 				const FString Given = Brief.MultiviewTaskId.TrimStartAndEnd();
-				FTask Edit = Task(C, TEXT("view edits"), TEXT("/generation/edit-multiview"), nullptr, Price(TEXT("edit_multiview")), /*bLast=*/false);
+				FTask Edit = Task(C, TEXT("view edits"), TEXT("/generation/edit-multiview"), nullptr, Price(TEXT("edit_multiview")) * Plan.ViewEdits.Num(), /*bLast=*/false);
 				Edit.Body = [EditLines, Given](const FJob& Job)
 				{
 					TArray<TPair<FString, FString>> Edits;
@@ -375,10 +500,14 @@ namespace HyperAIStudio::MeshGen::Creator
 				};
 				Job->Tasks.Add(MoveTemp(Edit));
 			}
-			FTask Generate = Task(C, TEXT("generate"), Plan.Endpoint, nullptr, GenerationPrice(Plan), !(Plan.bParts && Plan.TextureQuality != TEXT("none")));
+			// The picture made first is its own stage, priced on its own: what the generation costs is the 3D alone.
+			FHyperAIModelPlan Priced = Plan;
+			Priced.bReferenceFirst = false;
+			FTask Generate = Task(C, TEXT("generate"), Plan.Endpoint, nullptr, GenerationPrice(Priced), !(Plan.bParts && Plan.TextureQuality != TEXT("none")));
 			const FHyperAIModelPlan PlanCopy = Plan;
 			const FHyperAIModelBrief BriefCopy = Brief;
-			Generate.Body = [PlanCopy, BriefCopy, bAutofix](const FJob& Job)
+			const FString ReferenceTaskId = C.ReferenceTaskId;
+			Generate.Body = [PlanCopy, BriefCopy, bAutofix, ReferenceTaskId](const FJob& Job)
 			{
 				FHyperAIModelBrief Now = BriefCopy;
 				if (Job.TaskIndex > 0)
@@ -387,7 +516,9 @@ namespace HyperAIStudio::MeshGen::Creator
 					Now.MultiviewTaskId = Job.Tasks[Job.TaskIndex - 1].TaskId;
 					Now.MultiviewImages.Reset();
 				}
-				const TSharedRef<FJsonObject> Json = GenerationBody(PlanCopy, Now, Job.TaskIndex > 0 ? TArray<FString>() : Job.UploadTokens);
+				// Reference first: image-to-model takes the picture's text-to-image task as its input, nothing downloaded or uploaded.
+				const TArray<FString> Inputs = PlanCopy.bReferenceFirst ? TArray<FString>{ReferenceTaskId} : Job.TaskIndex > 0 ? TArray<FString>() : Job.UploadTokens;
+				const TSharedRef<FJsonObject> Json = GenerationBody(PlanCopy, Now, Inputs);
 				if (bAutofix && PlanCopy.Input == TEXT("image"))
 				{
 					Json->SetBoolField(TEXT("enable_image_autofix"), true);
@@ -406,6 +537,51 @@ namespace HyperAIStudio::MeshGen::Creator
 				Job->Tasks.Add(MoveTemp(Texture));
 			}
 			return Job;
+		}
+
+		/** A Hi3D plan's generation: one submit-task from the picture, the views, or the reference made first (by HyperAI's image generation without Tripo). */
+		TSharedRef<FJob> Hi3DGenerationStage(FCreator& C, const FString& OperationId, const FHyperAIModelPlan& Plan)
+		{
+			const TSharedRef<FJob> Job = NewStage(C, OperationId, C.Folder, C.Name, /*bHi3D=*/true);
+			bool bMultiview = false;
+			const TArray<FString> Images = Hi3DImagesOf(C, bMultiview);
+			FHyperAIModelPlan Priced = Plan;
+			Priced.bReferenceFirst = false;
+			const float Hi3DUSD = GenerationPrice(Priced);
+			Job->Tasks.Add(Hi3DTask(C, TEXT("generate"), Hi3DRequestFromPlan(Plan, Images, bMultiview), Hi3DUSD));
+			if (Plan.bReferenceFirst && Plan.ReferenceSource == TEXT("imagegen") && Images.IsEmpty())
+			{
+				Job->ReferencePrompt = Plan.ImagePrompt.IsEmpty() ? C.Brief.Prompt : Plan.ImagePrompt;
+				Job->ReferenceModel = Plan.ImageModel;
+				Job->ReferenceCost = ReferenceImagePrice(Plan.ImageModel);
+			}
+			return Job;
+		}
+
+		/** The picture alone, as a stage: approved and paid on its own when it is reviewed, or the first of two the user approved together. */
+		TSharedRef<FJob> ReferenceStage(FCreator& C, const FString& OperationId)
+		{
+			const TSharedRef<FJob> Job = NewStage(C, OperationId, C.Folder, C.Name);
+			Job->Tasks.Add(ReferenceTask(C));
+			return Job;
+		}
+
+		/** The model's generation for the plan's provider; a reference-first plan's picture is a stage before it. */
+		TSharedRef<FJob> MakeGeneration(FCreator& C, const FString& OperationId, const FHyperAIModelBrief& Brief, const bool bAutofix)
+		{
+			return C.Info.Plan.Provider == TEXT("hi3d") ? Hi3DGenerationStage(C, OperationId, C.Info.Plan) : GenerationStage(C, OperationId, Brief, bAutofix);
+		}
+
+		/** What the generation costs without the picture (paid in a stage of its own when the plan makes one with Tripo). */
+		float ModelPrice(const FHyperAIModelPlan& Plan)
+		{
+			if (Plan.bReferenceFirst && Plan.ReferenceSource == TEXT("tripo"))
+			{
+				FHyperAIModelPlan Priced = Plan;
+				Priced.bReferenceFirst = false;
+				return GenerationPrice(Priced);
+			}
+			return Plan.EstimatedCost;
 		}
 
 		/** A copy of a fix's or a new generation's mesh onto the asset the user already has, so its path and references stay. */
@@ -443,6 +619,91 @@ namespace HyperAIStudio::MeshGen::Creator
 			return Cast<UStaticMesh>(Object) || Cast<USkeletalMesh>(Object) ? Object : nullptr;
 		}
 
+		// ------------------------------------------------------------ the generation, a retry
+
+		/**
+		 * The 3D generation, asked for (the review: after the user saw the picture, or with no picture made first) or run at
+		 * once when the picture's approval already covered it.
+		 */
+		void AskGeneration(FCreator& C, const bool bApproved)
+		{
+			const FHyperAIModelPlan& Plan = C.Info.Plan;
+			const TSharedRef<FJob> Job = MakeGeneration(C, C.Info.OperationId + TEXT("-model"), C.Brief, false);
+			const float USD = ModelPrice(Plan);
+			const FString What = FString::Printf(TEXT("Make the %s with %s %s from the reference picture %s; check and fix it in the editor; import it into %s/%s"), *Plan.Use,
+				Plan.Provider == TEXT("hi3d") ? TEXT("Hi3D") : TEXT("Tripo"), *Plan.Model, C.ReferenceImage.IsEmpty() ? TEXT("(made first)") : *ProjectRelative(C.ReferenceImage), *C.Folder, *C.Name);
+			TArray<FString> Lines;
+			for (const FString& Line : Plan.PriceLines)
+			{
+				if (!Line.StartsWith(TEXT("reference picture")))
+				{
+					Lines.Add(Line);
+				}
+			}
+			FString Error;
+			C.bReviewing = !bApproved;
+			if (!AskStage(C, Job, What, USD, TEXT("model.generate.v1"), Lines, Error, bApproved))
+			{
+				AddStep(C, TEXT("generate"), What, TEXT("failed"), USD, Error);
+				Finish(C, Error.Contains(TEXT("cap")) ? TEXT("budget_used") : TEXT("failed"));
+				return;
+			}
+			C.StageKind = TEXT("generate");
+			C.StageStep = AddStep(C, TEXT("generate"), What, bApproved ? TEXT("running") : TEXT("awaiting_user_approval"), USD, Plan.RequestJson);
+			C.Info.Steps[C.StageStep].Credits = ProviderCredits(Plan.Provider, USD);
+			C.Info.Steps[C.StageStep].Endpoint = Plan.Endpoint;
+			C.Info.Steps[C.StageStep].OperationId = Job->Info.OperationId;
+			C.Info.State = bApproved ? TEXT("generating") : TEXT("awaiting_reference_review");
+			if (!bApproved)
+			{
+				C.Info.Diagnostic = FString::Printf(TEXT("The reference picture is ready (%s): look at it, then approve the 3D generation (%s) in Activity, or turn it down."),
+					*FString::Join(C.Info.PreviewImages, TEXT(", ")), *Job->Info.OperationId);
+			}
+			Journal(C);
+		}
+
+		/** Hi3D failed the task with 50010001 and refunded it: offered once or twice more, priced and approved, within the budget. */
+		bool AskRetry(FCreator& C, const TSharedRef<FJob>& Failed, const FString& Kind)
+		{
+			const int32 Tries = C.Tried.FindRef(TEXT("retry"));
+			if (!Failed->bRefunded || Tries >= 2)
+			{
+				return false;
+			}
+			const bool bPictureMade = !Failed->ImageFile.IsEmpty() && IFileManager::Get().FileSize(*Failed->ImageFile) > 0;
+			const float USD = static_cast<float>(Failed->Price - (bPictureMade ? Failed->ReferenceCost : 0.0));
+			if (Kind != TEXT("generate") && USD > FMath::Max(C.Info.FixBudgetUSD - C.FixSpentUSD, 0.f) + KINDA_SMALL_NUMBER)
+			{
+				return false;
+			}
+			const TSharedRef<FJob> Job = NewStage(C, FString::Printf(TEXT("%s-retry%d"), *Failed->Info.OperationId, Tries + 1), Failed->AssetFolder, Failed->AssetName, Failed->Service.Id == TEXT("hi3d"));
+			Job->Tasks = Failed->Tasks;
+			for (FTask& Each : Job->Tasks)
+			{
+				Each.TaskId.Reset();
+			}
+			Job->ExportMesh = Failed->ExportMesh;
+			Job->ImageFile = bPictureMade ? Failed->ImageFile : FString();
+			Job->ReferenceFile = Failed->ReferenceFile;
+			Job->ReferencePrompt = bPictureMade ? FString() : Failed->ReferencePrompt;
+			Job->ReferenceModel = Failed->ReferenceModel;
+			Job->ReferenceCost = bPictureMade ? 0.0 : Failed->ReferenceCost;
+			const FString What = FString::Printf(TEXT("Try again: Hi3D could not generate it (50010001) and refunded its credits"));
+			FString Error;
+			if (!AskStage(C, Job, What, USD, TEXT("model.retry.v1"), {FString::Printf(TEXT("retry %d of 2: %d Hi3D credits ($%.2f)"), Tries + 1, Hi3DCredits(USD), USD)}, Error))
+			{
+				return false;
+			}
+			C.Tried.Add(TEXT("retry"), Tries + 1);
+			C.StageKind = Kind;
+			C.StageStep = AddStep(C, Kind == TEXT("generate") ? TEXT("generate") : TEXT("paid_fix"), What, TEXT("awaiting_user_approval"), USD, Failed->Info.Diagnostic);
+			C.Info.Steps[C.StageStep].Credits = Hi3DCredits(USD);
+			C.Info.Steps[C.StageStep].OperationId = Job->Info.OperationId;
+			C.Info.State = Kind == TEXT("generate") ? TEXT("awaiting_user_approval") : TEXT("awaiting_fix_approval");
+			Journal(C);
+			return true;
+		}
+
 		// ------------------------------------------------------------ rounds
 
 		void AskRig(FCreator& C);
@@ -472,6 +733,10 @@ namespace HyperAIStudio::MeshGen::Creator
 			FFixContext Context;
 			Context.InputTaskId = C.bInputIsGeneration ? C.GenerationTaskId : FString();
 			Context.InputToken = TEXT("{input}");
+			Context.Provider = C.Info.Plan.Provider.IsEmpty() ? FString(TEXT("tripo")) : C.Info.Plan.Provider;
+			Context.bTripo = C.bTripoKey;
+			Context.Hi3DImages = Hi3DImagesOf(C, Context.bHi3DMultiview);
+			Context.ReferenceInput = !C.ReferenceTaskId.IsEmpty() ? C.ReferenceTaskId : C.PictureToken;
 			Context.bHasTextures = C.Info.LastCheck.Checks.ContainsByPredicate([](const FHyperAIModelCheck& Check) { return Check.Id == TEXT("textures") && Check.Result != TEXT("fail") && Check.Result != TEXT("skip"); });
 			Context.bSkeletal = Cast<USkeletalMesh>(LoadMesh(C.Info.AssetPath)) != nullptr;
 			Context.Tried = C.Tried;
@@ -504,15 +769,27 @@ namespace HyperAIStudio::MeshGen::Creator
 			const FString FixFolder = FPackageName::GetLongPackagePath(PackageOf(C.Info.AssetPath)) / TEXT("Fixes");
 			if (Fix.Id == TEXT("regenerate"))
 			{
+				// A new model_seed; a reference-first model is made again from the same picture's task (the picture is re-made only when asked).
 				FHyperAIModelBrief Again = C.Brief;
 				Again.Seed = 1 + (FMath::Rand() % 100000);
 				if (C.Info.Plan.Input == TEXT("text"))
 				{
 					Again.Prompt = (Again.Prompt + TEXT(", one complete object, true to the description, clean silhouette")).Left(MaxPromptCharacters);
 				}
-				Job = GenerationStage(C, OperationId, Again, /*bAutofix=*/true);
+				Job = GenerationStage(C, OperationId, Again, /*bAutofix=*/!C.Info.Plan.bReferenceFirst);
 				Job->AssetFolder = FixFolder;
 				Job->AssetName = FString::Printf(TEXT("%s_R%d"), *AssetName, C.Info.Round + 1);
+			}
+			else if (Fix.Provider == TEXT("hi3d"))
+			{
+				Job = NewStage(C, OperationId, FixFolder, FString::Printf(TEXT("%s_R%d"), *AssetName, C.Info.Round + 1), /*bHi3D=*/true);
+				if (Fix.Hi3D.RequestType == 2)
+				{
+					// Texture only: the asset as it is now, written as a GLB and sent as the mesh.
+					Job->ExportMesh = C.Info.AssetPath;
+				}
+				Job->Tasks.Add(Hi3DTask(C, Fix.Id, Fix.Hi3D, Fix.PriceUSD));
+				C.PendingResolution = Fix.Id == TEXT("hi3d_regenerate") ? Fix.Hi3D.Resolution : FString();
 			}
 			else
 			{
@@ -530,9 +807,10 @@ namespace HyperAIStudio::MeshGen::Creator
 				Finish(C, Error.Contains(TEXT("cap")) ? TEXT("budget_used") : TEXT("no_paid_fix"));
 				return;
 			}
-			C.StageKind = Fix.Id == TEXT("regenerate") ? TEXT("regenerate") : TEXT("paid_fix");
+			C.StageKind = Fix.Id == TEXT("regenerate") || Fix.Id == TEXT("hi3d_regenerate") ? TEXT("regenerate") : TEXT("paid_fix");
 			C.StageFixId = Fix.Id;
 			C.StageStep = AddStep(C, TEXT("paid_fix"), Fix.What, TEXT("awaiting_user_approval"), Fix.PriceUSD, FString::Join(Fix.Clears, TEXT(", ")));
+			C.Info.Steps[C.StageStep].Credits = ProviderCredits(Fix.Provider, Fix.PriceUSD);
 			C.Info.Steps[C.StageStep].Endpoint = FString::Join(Fix.Endpoints.IsEmpty() ? TArray<FString>{C.Info.Plan.Endpoint} : Fix.Endpoints, TEXT(" + "));
 			C.Info.Steps[C.StageStep].OperationId = OperationId;
 			C.Info.State = TEXT("awaiting_fix_approval");
@@ -552,11 +830,40 @@ namespace HyperAIStudio::MeshGen::Creator
 			const TSharedRef<FJob> Job = NewStage(C, OperationId, FPackageName::GetLongPackagePath(PackageOf(C.Info.AssetPath)), TEXT("SK_") + Stem);
 			const FString Input = InputFor(C, *Job);
 			const float Price_ = Price(TEXT("rig"));
-			Job->Tasks.Add(Task(C, TEXT("rig"), TEXT("/animations/rig"), RigBody(Input, TEXT("unreal")), Price_, /*bLast=*/true));
+			// The free rig check first: a biped is rigged with v3.0 and Unreal's bone names, any other body with v2.5 as its
+			// rig_type; a model Tripo cannot rig stops here, nothing paid.
+			FTask Check = Task(C, TEXT("rig_check"), TEXT("/animations/rig-check"), RigCheckBody(Input), 0.0, /*bLast=*/false);
+			Check.OnDone = [](FJob& Job, const TSharedPtr<FJsonObject>& Json, FString& OutError)
+			{
+				const TSharedPtr<FJsonObject>* Data = nullptr;
+				const TSharedPtr<FJsonObject>* Output = nullptr;
+				bool bRiggable = true;
+				if (Json.IsValid() && Json->TryGetObjectField(TEXT("data"), Data) && (*Data)->TryGetObjectField(TEXT("output"), Output))
+				{
+					(*Output)->TryGetBoolField(TEXT("riggable"), bRiggable);
+				}
+				const FString Type = Field(Json, TEXT("data.output.rig_type"));
+				if (!bRiggable)
+				{
+					OutError = FString::Printf(TEXT("Tripo's rig check says the model cannot be rigged%s; nothing was paid."), Type.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (%s)"), *Type));
+					return false;
+				}
+				Job.RigModel = Type.IsEmpty() ? FString(TEXT("biped")) : Type;
+				return true;
+			};
+			Job->Tasks.Add(MoveTemp(Check));
+			FTask Rig = Task(C, TEXT("rig"), TEXT("/animations/rig"), nullptr, Price_, /*bLast=*/true);
+			Rig.Body = [Input](const FJob& Job)
+			{
+				FString Model, Spec;
+				RigChoice(Job.RigModel, Model, Spec);
+				return RigBody(Input == TEXT("{input}") ? Job.Token : Input, Model, Job.RigModel, Spec);
+			};
+			Job->Tasks.Add(MoveTemp(Rig));
 			Job->RetargetTo = C.RetargetTo;
 			FString Error;
-			const FString What = FString::Printf(TEXT("Rig %s with Tripo (v3.0, Unreal Mannequin bone names) and import it as a skeletal mesh%s"), *C.Info.AssetPath,
-				C.RetargetTo.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(", then set up retargeting onto %s"), *C.RetargetTo));
+			const FString What = FString::Printf(TEXT("Rig %s with Tripo (a free rig check first: a biped with v3.0 and the Unreal Mannequin's bone names, another body with v2.5) and import it as a skeletal mesh%s"),
+				*C.Info.AssetPath, C.RetargetTo.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(", then set up retargeting onto %s"), *C.RetargetTo));
 			if (!AskStage(C, Job, What, Price_, TEXT("model.rig.v1"), {}, Error))
 			{
 				AddStep(C, TEXT("rig"), What, TEXT("failed"), Price_, Error);
@@ -654,6 +961,22 @@ namespace HyperAIStudio::MeshGen::Creator
 			const FString Kind = C.StageKind;
 			C.Stage.Reset();
 			C.StageKind.Reset();
+			if (!Job->Normalization.IsEmpty() && Step)
+			{
+				Step->Detail += TEXT(" Tripo normalised the result: ") + Job->Normalization + TEXT(".");
+			}
+			if (Kind == TEXT("reference"))
+			{
+				// The picture is in: the reference for the visual check, and the generation's input.
+				C.ReferenceTaskId = Job->Tasks.IsEmpty() ? FString() : Job->Tasks[0].TaskId;
+				if (!Job->ReferenceFile.IsEmpty())
+				{
+					C.ReferenceImage = Job->ReferenceFile;
+					C.Info.PreviewImages.AddUnique(ProjectRelative(Job->ReferenceFile));
+				}
+				AskGeneration(C, /*bApproved=*/!C.Info.Plan.bReviewReference);
+				return;
+			}
 			if (Kind == TEXT("rig"))
 			{
 				C.Info.SkeletalMesh = Job->Info.SkeletalMesh;
@@ -662,10 +985,28 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 			if (Kind == TEXT("generate"))
 			{
+				if (C.bReviewing)
+				{
+					// The review is over: the picture was approved into a model.
+					C.bReviewing = false;
+					C.Info.Diagnostic.Reset();
+				}
 				C.Info.AssetPath = Job->Info.AssetPath;
-				C.GenerationTaskId = GenerationTaskOf(*Job);
-				// A parts model's texture task follows its generation; Tripo's operations then take the textured result as a file.
-				C.bInputIsGeneration = Job->Tasks.Last().Label == TEXT("generate");
+				C.GenerationTaskId = Job->Service.Id == TEXT("hi3d") ? FString() : GenerationTaskOf(*Job);
+				if (C.PictureToken.IsEmpty() && !Job->UploadTokens.IsEmpty() && C.Info.Plan.Input == TEXT("image"))
+				{
+					C.PictureToken = Job->UploadTokens[0];
+				}
+				if (!Job->ReferenceFile.IsEmpty() && C.ReferenceImage.IsEmpty())
+				{
+					// HyperAI's image generation made the reference inside the Hi3D stage.
+					C.ReferenceImage = Job->ReferenceFile;
+					C.Brief.ImagePath = ProjectRelative(Job->ReferenceFile);
+					C.Info.PreviewImages.AddUnique(ProjectRelative(Job->ReferenceFile));
+				}
+				// A parts model's texture task follows its generation; Tripo's operations then take the textured result as a file. Hi3D's
+				// task is no input Tripo takes: Tripo's fixes go as an uploaded file.
+				C.bInputIsGeneration = Job->Service.Id != TEXT("hi3d") && Job->Tasks.Last().Label == TEXT("generate");
 				if (C.Info.Plan.bParts)
 				{
 					// A slot a part, before the first check, so the checks see the materials the model will keep.
@@ -702,10 +1043,15 @@ namespace HyperAIStudio::MeshGen::Creator
 					}
 					C.Info.AssetPath = Job->Info.AssetPath;
 				}
-				C.bInputIsGeneration = Kind == TEXT("regenerate");
-				if (Kind == TEXT("regenerate"))
+				C.bInputIsGeneration = Kind == TEXT("regenerate") && Job->Service.Id != TEXT("hi3d");
+				if (C.bInputIsGeneration)
 				{
 					C.GenerationTaskId = GenerationTaskOf(*Job);
+				}
+				if (C.StageFixId == TEXT("hi3d_regenerate") && !C.PendingResolution.IsEmpty())
+				{
+					C.Info.Plan.Resolution = C.PendingResolution;
+					C.PendingResolution.Reset();
 				}
 			}
 			// A round is a paid fix: the generation's own check is round 0.
@@ -745,7 +1091,12 @@ namespace HyperAIStudio::MeshGen::Creator
 					}
 					const FString Kind = C.StageKind;
 					C.Stage.Reset();
-					if (Kind == TEXT("generate"))
+					if (Kind == TEXT("generate") && C.bReviewing)
+					{
+						// The picture was seen and the generation turned down.
+						Finish(C, TEXT("fix_declined"));
+					}
+					else if (Kind == TEXT("generate") || Kind == TEXT("reference"))
 					{
 						Finish(C, TEXT("cancelled"));
 					}
@@ -772,8 +1123,13 @@ namespace HyperAIStudio::MeshGen::Creator
 						Step->Detail = Snap.Diagnostic.Left(1000);
 					}
 					const FString Kind = C.StageKind;
+					const TSharedRef<FJob> Failed = C.Stage.ToSharedRef();
 					C.Stage.Reset();
-					if (Kind == TEXT("generate"))
+					if (Snap.State == TEXT("failed") && AskRetry(C, Failed, Kind))
+					{
+						return;
+					}
+					if (Kind == TEXT("generate") || Kind == TEXT("reference"))
 					{
 						C.Info.Diagnostic = Snap.Diagnostic;
 						Finish(C, Snap.State == TEXT("cancelled") ? TEXT("cancelled") : TEXT("failed"));
@@ -802,7 +1158,8 @@ namespace HyperAIStudio::MeshGen::Creator
 						Step->TaskId = C.Stage->Info.TaskId;
 						Journal(C);
 					}
-					C.Info.State = C.StageKind == TEXT("generate") ? TEXT("generating") : C.StageKind == TEXT("rig") ? TEXT("rigging") : TEXT("fixing");
+					C.Info.State = C.StageKind == TEXT("generate") ? TEXT("generating") : C.StageKind == TEXT("reference") ? TEXT("making_reference")
+						: C.StageKind == TEXT("rig") ? TEXT("rigging") : TEXT("fixing");
 				}
 				return;
 			}
@@ -870,6 +1227,10 @@ namespace HyperAIStudio::MeshGen::Creator
 		{
 			return Refuse(TEXT("unknown_provider"), TEXT("No Tripo service is configured."));
 		}
+		FHyperAIStudioExternalServiceSettings Hi3D;
+		FHyperAIStudioExternalServices::Find(TEXT("hi3d"), Hi3D);
+		const bool bTripoKey = !Key(Service).IsEmpty();
+		const bool bHi3DKey = !Hi3D.Id.IsEmpty() && !Key(Hi3D).IsEmpty();
 
 		// Resume: pick a journaled job up where it stopped.
 		const FString Resume = Request.ResumeOperationId.TrimStartAndEnd();
@@ -900,8 +1261,11 @@ namespace HyperAIStudio::MeshGen::Creator
 				return Report;
 			}
 			C->Service = Service;
+			C->Hi3D = Hi3D;
+			C->bTripoKey = bTripoKey;
+			const bool bHi3DPlan = C->Info.Plan.Provider == TEXT("hi3d");
 			C->Targets = C->Info.Plan.Family.IsEmpty() ? TargetsForUse(FString(), FString(), 0.f, 0, FString()) : TargetsFromPlan(C->Info.Plan);
-			if (Key(Service).IsEmpty())
+			if (bHi3DPlan ? !bHi3DKey : !bTripoKey)
 			{
 				C->bAllowPaid = false;
 			}
@@ -914,12 +1278,27 @@ namespace HyperAIStudio::MeshGen::Creator
 			if (C->Info.AssetPath.IsEmpty())
 			{
 				// The generation never finished here. Its task, when Tripo had taken it, is asked after again: nothing is paid twice.
-				const FString TaskId = Running ? Running->TaskId : FString();
-				if (TaskId.IsEmpty())
+				const FString TaskId = Running && Running->Kind == TEXT("generate") ? Running->TaskId : FString();
+				const bool bPictureNeeded = C->Info.Plan.bReferenceFirst && C->Info.Plan.ReferenceSource == TEXT("tripo") && C->ReferenceTaskId.IsEmpty();
+				if (TaskId.IsEmpty() && bPictureNeeded)
 				{
-					const TSharedRef<FJob> Job = GenerationStage(*C, Resume, C->Brief, false);
-					if (!AskStage(*C, Job, TEXT("Make the model with Tripo (resumed: the earlier generation was never approved)"), C->Info.Plan.EstimatedCost, TEXT("model.generate.v1"),
-						C->Info.Plan.PriceLines, Error))
+					// The picture never finished here: asked for again (a picture Tripo had made is paid again; its task is not journaled until it is done).
+					const TSharedRef<FJob> Job = ReferenceStage(*C, Resume + TEXT("-reference"));
+					const float PictureUSD = ImagePrice(C->Info.Plan.ImageModel, C->Info.Plan.ImageQuality, C->Info.Plan.ImageSize);
+					if (!AskStage(*C, Job, TEXT("Make the reference picture with Tripo (resumed)"), PictureUSD, TEXT("model.reference.v1"), C->Info.Plan.PriceLines, Error))
+					{
+						return Refuse(TEXT("approval_not_queued"), Error);
+					}
+					C->StageKind = TEXT("reference");
+					C->StageStep = INDEX_NONE;
+					C->Info.State = TEXT("awaiting_user_approval");
+					Note = TEXT("Asked for the reference picture's approval again.");
+				}
+				else if (TaskId.IsEmpty())
+				{
+					const TSharedRef<FJob> Job = MakeGeneration(*C, Resume, C->Brief, false);
+					if (!AskStage(*C, Job, FString::Printf(TEXT("Make the model with %s (resumed: the earlier generation was never approved)"), bHi3DPlan ? TEXT("Hi3D") : TEXT("Tripo")),
+						ModelPrice(C->Info.Plan), TEXT("model.generate.v1"), C->Info.Plan.PriceLines, Error))
 					{
 						return Refuse(TEXT("approval_not_queued"), Error);
 					}
@@ -930,11 +1309,24 @@ namespace HyperAIStudio::MeshGen::Creator
 				}
 				else
 				{
-					const TSharedRef<FJob> Job = NewStage(*C, Resume + TEXT("-resume"), C->Folder, C->Name);
-					FTask Poll = Task(*C, TEXT("generate"), C->Info.Plan.Endpoint, nullptr, 0.0, /*bLast=*/true);
-					Poll.TaskId = TaskId;
-					Job->Tasks.Add(MoveTemp(Poll));
-					Job->Phase = EPhase::Generate;
+					const TSharedRef<FJob> Job = NewStage(*C, Resume + TEXT("-resume"), C->Folder, C->Name, bHi3DPlan);
+					if (bHi3DPlan)
+					{
+						// Hi3D: a token first, then straight to asking after the task.
+						bool bMultiview = false;
+						FTask Poll = Hi3DTask(*C, TEXT("generate"), Hi3DRequestFromPlan(C->Info.Plan, Hi3DImagesOf(*C, bMultiview), bMultiview), 0.0);
+						Poll.TaskId = TaskId;
+						Job->Tasks.Add(MoveTemp(Poll));
+						Job->Phase = EPhase::Prepare;
+						Job->AuthReturn = EPhase::Generate;
+					}
+					else
+					{
+						FTask Poll = Task(*C, TEXT("generate"), C->Info.Plan.Endpoint, nullptr, 0.0, /*bLast=*/true);
+						Poll.TaskId = TaskId;
+						Job->Tasks.Add(MoveTemp(Poll));
+						Job->Phase = EPhase::Generate;
+					}
 					Job->Price = 0.0;
 					Jobs().Insert(Job, 0);
 					Begin(Job);
@@ -943,7 +1335,7 @@ namespace HyperAIStudio::MeshGen::Creator
 					C->StageStep = C->Info.Steps.IndexOfByPredicate([&TaskId](const FHyperAIModelStep& Step) { return Step.TaskId == TaskId; });
 					C->Info.State = TEXT("generating");
 					C->Info.CurrentOperationId = Job->Info.OperationId;
-					Note = FString::Printf(TEXT("Asking Tripo after its task %s again; nothing new is paid."), *TaskId);
+					Note = FString::Printf(TEXT("Asking %s after its task %s again; nothing new is paid."), bHi3DPlan ? TEXT("Hi3D") : TEXT("Tripo"), *TaskId);
 				}
 			}
 			else
@@ -976,24 +1368,46 @@ namespace HyperAIStudio::MeshGen::Creator
 
 		FHyperAIModelPlan Plan;
 		FString Error;
-		if (!Classify(Request.Brief, Plan, Error))
+		if (!Classify(Request.Brief, Plan, Error, Request.bRig))
 		{
 			return Refuse(TEXT("invalid_request"), Error);
 		}
+		// Auto chose Hi3D, but its key is not set: Tripo instead, with the reason.
+		const bool bAutoProvider = (Request.Brief.Provider.TrimStartAndEnd().IsEmpty() || Request.Brief.Provider.TrimStartAndEnd().Equals(TEXT("auto"), ESearchCase::IgnoreCase))
+			&& !Hi3DIsModel(Request.Brief.Model) && Request.Brief.Resolution.TrimStartAndEnd().IsEmpty();
+		if (Plan.Provider == TEXT("hi3d") && bAutoProvider && !bHi3DKey)
+		{
+			FHyperAIModelBrief Tripo = Request.Brief;
+			Tripo.Provider = TEXT("tripo");
+			FHyperAIModelPlan Instead;
+			if (Classify(Tripo, Instead, Error, Request.bRig))
+			{
+				Instead.Reasons.Insert(FString::Printf(TEXT("provider: tripo after all; Hi3D would suit this brief (%s), but its key (%s) is not set"),
+					*Plan.Reasons[0].Replace(TEXT("provider: hi3d, "), TEXT("")), Hi3D.ApiKeyVariable.IsEmpty() ? TEXT("HITEM3D_API_KEY") : *Hi3D.ApiKeyVariable), 0);
+				Instead.Reasons.RemoveAt(1);
+				Plan = Instead;
+			}
+		}
+		// Hi3D from words without Tripo's key: HyperAI's own image generation draws the picture.
+		if (Plan.Provider == TEXT("hi3d") && Plan.bReferenceFirst && !bTripoKey)
+		{
+			UseImageGenReference(Plan);
+		}
 		Report.Plan = Plan;
 		const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
-		auto CheckPicture = [&ProjectDir](const FString& Path, FString& OutAbsolute)
+		auto CheckPicture = [&ProjectDir, &Plan](const FString& Path, FString& OutAbsolute)
 		{
 			OutAbsolute = FPaths::ConvertRelativePathToFull(FPaths::IsRelative(Path) ? ProjectDir / Path : Path);
 			const FString Extension = FPaths::GetExtension(OutAbsolute).ToLower();
 			const int64 Size = IFileManager::Get().FileSize(*OutAbsolute);
 			return FPaths::IsUnderDirectory(OutAbsolute, ProjectDir) && Size > 0 && Size <= FHyperAIStudioMeshGenContracts::MaxImageBytes
-				&& (Extension == TEXT("png") || Extension == TEXT("jpg") || Extension == TEXT("jpeg"));
+				&& (Extension == TEXT("png") || Extension == TEXT("jpg") || Extension == TEXT("jpeg") || (Extension == TEXT("webp") && Plan.Provider == TEXT("hi3d")));
 		};
 		FString Reference;
-		if ((Plan.Input == TEXT("image") || Plan.bMakeViews) && !CheckPicture(Request.Brief.ImagePath.TrimStartAndEnd(), Reference))
+		if ((Plan.Input == TEXT("image") || Plan.bMakeViews) && !Plan.bReferenceFirst && !CheckPicture(Request.Brief.ImagePath.TrimStartAndEnd(), Reference))
 		{
-			return Refuse(TEXT("invalid_image"), TEXT("image_path is a PNG or JPEG inside the project, up to 20 MB."));
+			return Refuse(TEXT("invalid_image"), Plan.Provider == TEXT("hi3d") ? TEXT("image_path is a PNG, JPEG or WebP inside the project, up to 20 MB.")
+				: TEXT("image_path is a PNG or JPEG inside the project, up to 20 MB."));
 		}
 		for (const FString& View : Request.Brief.MultiviewImages)
 		{
@@ -1032,31 +1446,60 @@ namespace HyperAIStudio::MeshGen::Creator
 		{
 			return Refuse(TEXT("operation_id_used"), TEXT("That operation_id already names a job; pass a new one or leave it empty."));
 		}
-		const FString Price_ = FString::Printf(TEXT("%d Tripo API credits ($%.2f) for the generation, then paid fixes only as needed, each approved, up to $%.2f in %d round(s)"),
-			Plan.Credits, Plan.EstimatedCost, Report.FixBudgetUSD, Report.MaxRounds);
+		const bool bHi3DPlan = Plan.Provider == TEXT("hi3d");
+		const FString Price_ = FString::Printf(TEXT("%d %s ($%.2f in all%s) for the generation, then paid fixes only as needed, each approved, up to $%.2f in %d round(s)"),
+			Plan.Credits, bHi3DPlan ? TEXT("Hi3D credits") : TEXT("Tripo API credits"), Plan.EstimatedCost, Plan.bReferenceFirst ? TEXT(", the reference picture included") : TEXT(""),
+			Report.FixBudgetUSD, Report.MaxRounds);
+		const FString Shape = bHi3DPlan ? FString::Printf(TEXT("Hi3D (%s at %s, %d faces asked%s, %s%s)"), *Plan.Model, *Plan.Resolution, Plan.ProviderFaces,
+				Plan.bLocalReduce ? *FString::Printf(TEXT(", reduced in the editor to %d"), Plan.FaceLimit) : TEXT(""), Plan.TextureQuality == TEXT("none") ? TEXT("geometry only") : TEXT("textured"),
+				Plan.bPbr ? TEXT(", PBR") : TEXT(""))
+			: FString::Printf(TEXT("%s (%s, %d %s, %s textures%s%s%s)"), *Plan.Family, *Plan.Model, Plan.FaceLimit, Plan.bQuad ? TEXT("quads") : TEXT("triangles"), *Plan.TextureQuality,
+				Plan.bPbr ? TEXT(", PBR") : TEXT(""), Plan.bParts ? TEXT(", parts") : TEXT(""), Plan.bSmartLowPoly ? TEXT(", smart low poly") : TEXT(""));
+		const FString Picture = Plan.bReferenceFirst ? FString::Printf(TEXT(" from a reference picture made first (%s%s)"), *Plan.ImageModel,
+			Plan.bReviewReference ? TEXT(", which you approve and see before the 3D is asked for") : TEXT("")) : FString();
 		if (Request.bDryRun)
 		{
 			Report.bOk = true;
 			Report.Status = TEXT("checked");
-			Report.Diagnostic = FString::Printf(TEXT("Would make it with %s (%s, %d %s, %s textures%s%s%s): %s. Imported into %s. Nothing was spent; resubmit with bDryRun false to ask the user."),
-				*Plan.Family, *Plan.Model, Plan.FaceLimit, Plan.bQuad ? TEXT("quads") : TEXT("triangles"), *Plan.TextureQuality, Plan.bPbr ? TEXT(", PBR") : TEXT(""),
-				Plan.bParts ? TEXT(", parts") : TEXT(""), Plan.bSmartLowPoly ? TEXT(", smart low poly") : TEXT(""), *Price_, *Report.Destination);
+			Report.Diagnostic = FString::Printf(TEXT("Would make it with %s%s: %s. Imported into %s. Nothing was spent; resubmit with bDryRun false to ask the user."),
+				*Shape, *Picture, *Price_, *Report.Destination);
 			return Report;
 		}
-		if (Key(Service).IsEmpty())
+		if (!bHi3DPlan && !bTripoKey)
 		{
 			return Refuse(TEXT("missing_key"), FString::Printf(TEXT("Tripo's API key is not set: add it in Settings > Agents > Keys, or set %s. Tripo Studio's own credits cannot be used through the API; ")
 				TEXT("a model made in Tripo Studio can be sent with Tripo's DCC Bridge and checked with hyper_model_check_and_fix."), *Service.ApiKeyVariable));
+		}
+		if (bHi3DPlan && !bHi3DKey)
+		{
+			return Refuse(TEXT("missing_key"), FString::Printf(TEXT("Hi3D's key is not set: from Hi3D's developer platform (API keys), add client_id:client_secret in Settings > Agents > Keys ")
+				TEXT("as Hi3D (Hitem3D), or set %s (or HYPERAI_HI3D_KEY). Or choose provider tripo."), Hi3D.ApiKeyVariable.IsEmpty() ? TEXT("HITEM3D_API_KEY") : *Hi3D.ApiKeyVariable));
+		}
+		if (bHi3DPlan && Request.bRig && !bTripoKey)
+		{
+			return Refuse(TEXT("missing_key"), TEXT("Rigging is Tripo's: set Tripo's API key, or leave bRig off."));
+		}
+		if (Plan.ReferenceSource == TEXT("imagegen"))
+		{
+			FHyperAIStudioImageModelSettings Image;
+			FHyperAIStudioExternalServiceSettings ImageService;
+			if (!ReferenceImageModel(Image) || !FHyperAIStudioExternalServices::Find(Image.ServiceId, ImageService) || !FHyperAIStudioExternalServices::HasApiKey(ImageService))
+			{
+				return Refuse(TEXT("missing_key"), TEXT("Hi3D works from a picture, and none can be made: set Tripo's API key (its text-to-image) or an image service's key, or give image_path."));
+			}
 		}
 
 		const TSharedRef<FCreator> C = MakeShared<FCreator>();
 		C->Info.OperationId = Report.OperationId;
 		C->Info.Kind = TEXT("create");
+		C->Info.Provider = Plan.Provider;
 		C->Info.Plan = Plan;
 		C->Info.FixBudgetUSD = Report.FixBudgetUSD;
 		C->Info.MaxRounds = Report.MaxRounds;
 		C->Brief = Request.Brief;
 		C->Service = Service;
+		C->Hi3D = Hi3D;
+		C->bTripoKey = bTripoKey;
 		C->Targets = TargetsFromPlan(Plan);
 		C->Folder = Folder;
 		C->Name = Name;
@@ -1064,21 +1507,48 @@ namespace HyperAIStudio::MeshGen::Creator
 		C->bLocalOnly = Request.bLocalFixesOnly;
 		C->bRig = Request.bRig;
 		C->RetargetTo = Request.RetargetTo.TrimStartAndEnd();
-		AddStep(*C, TEXT("classify"), FString::Printf(TEXT("%s, %d %s, %s textures"), *Plan.Family, Plan.FaceLimit, Plan.bQuad ? TEXT("quads") : TEXT("triangles"), *Plan.TextureQuality),
+		AddStep(*C, TEXT("classify"), bHi3DPlan ? Shape : FString::Printf(TEXT("%s, %d %s, %s textures"), *Plan.Family, Plan.FaceLimit, Plan.bQuad ? TEXT("quads") : TEXT("triangles"), *Plan.TextureQuality),
 			TEXT("done"), 0.f, FString::Join(Plan.Reasons, TEXT("; ")));
-		const TSharedRef<FJob> Job = GenerationStage(*C, Report.OperationId, Request.Brief, false);
-		const FString What = FString::Printf(TEXT("Make a %s with Tripo %s (%s) from %s, %d %s, %s textures%s; check and fix it in the editor; import it into %s"), *Plan.Use, *Plan.Family,
-			*Plan.Model, Plan.Input == TEXT("text") ? *FString::Printf(TEXT("words: \"%s\""), *Request.Brief.Prompt.Left(100)) : *FString::Printf(TEXT("%s picture(s)"), Plan.Input == TEXT("image") ? TEXT("one") : TEXT("multiview")),
-			Plan.FaceLimit, Plan.bQuad ? TEXT("quads") : TEXT("triangles"), *Plan.TextureQuality, Plan.bPbr ? TEXT(" with PBR") : TEXT(""), *Report.Destination);
+		const FString Source = Plan.bReferenceFirst ? FString::Printf(TEXT("a reference picture made from the words \"%s\""), *Request.Brief.Prompt.Left(100))
+			: Plan.Input == TEXT("text") ? FString::Printf(TEXT("words: \"%s\""), *Request.Brief.Prompt.Left(100))
+			: FString::Printf(TEXT("%s picture(s)"), Plan.Input == TEXT("image") ? TEXT("one") : TEXT("multiview"));
+		const FString What = FString::Printf(TEXT("Make a %s with %s from %s; check and fix it in the editor; import it into %s"), *Plan.Use, *Shape, *Source, *Report.Destination);
 		TArray<FString> Lines = Plan.PriceLines;
 		Lines.Add(FString::Printf(TEXT("later paid fixes: each asked for on its own, up to $%.2f in %d round(s)"), Report.FixBudgetUSD, Report.MaxRounds));
-		if (!AskStage(*C, Job, What, Plan.EstimatedCost, TEXT("model.generate.v1"), Lines, Error))
+		const bool bPictureStage = Plan.bReferenceFirst && Plan.ReferenceSource == TEXT("tripo");
+		const float PictureUSD = bPictureStage ? ImagePrice(Plan.ImageModel, Plan.ImageQuality, Plan.ImageSize) : 0.f;
+		if (bPictureStage)
 		{
-			return Refuse(Error.Contains(TEXT("cap")) ? TEXT("over_spend_cap") : TEXT("approval_not_queued"), Error);
+			// The picture first: on its own (reviewed: the 3D is asked for once it is seen), or both in this one approval.
+			const TSharedRef<FJob> Job = ReferenceStage(*C, Report.OperationId);
+			const FString PictureWhat = Plan.bReviewReference ? FString::Printf(TEXT("Make the reference picture for a %s with Tripo (%s); you see it before the 3D is asked for"), *Plan.Use, *Plan.ImageModel)
+				: What;
+			if (Plan.bReviewReference)
+			{
+				Lines.Insert(TEXT("now: the reference picture only; the 3D generation is asked for after you see it"), 0);
+			}
+			if (!AskStage(*C, Job, PictureWhat, Plan.bReviewReference ? PictureUSD : Plan.EstimatedCost, TEXT("model.reference.v1"), Lines, Error))
+			{
+				return Refuse(Error.Contains(TEXT("cap")) ? TEXT("over_spend_cap") : TEXT("approval_not_queued"), Error);
+			}
+			// The stage's job books what it runs: the picture; the 3D is booked by its own stage.
+			Job->Price = PictureUSD;
+			C->StageKind = TEXT("reference");
+			C->StageStep = AddStep(*C, TEXT("reference"), PictureWhat, TEXT("awaiting_user_approval"), PictureUSD, JsonText(TextToImageBody(Plan)));
+			C->Info.Steps[C->StageStep].Endpoint = TEXT("/generation/text-to-image");
 		}
-		C->StageKind = TEXT("generate");
-		C->StageStep = AddStep(*C, TEXT("generate"), What, TEXT("awaiting_user_approval"), Plan.EstimatedCost, Plan.RequestJson);
-		C->Info.Steps[C->StageStep].Endpoint = Plan.Endpoint;
+		else
+		{
+			const TSharedRef<FJob> Job = MakeGeneration(*C, Report.OperationId, Request.Brief, false);
+			if (!AskStage(*C, Job, What, Plan.EstimatedCost, TEXT("model.generate.v1"), Lines, Error))
+			{
+				return Refuse(Error.Contains(TEXT("cap")) ? TEXT("over_spend_cap") : TEXT("approval_not_queued"), Error);
+			}
+			C->StageKind = TEXT("generate");
+			C->StageStep = AddStep(*C, TEXT("generate"), What, TEXT("awaiting_user_approval"), Plan.EstimatedCost, Plan.RequestJson);
+			C->Info.Steps[C->StageStep].Credits = ProviderCredits(Plan.Provider, ModelPrice(Plan));
+			C->Info.Steps[C->StageStep].Endpoint = Plan.Endpoint;
+		}
 		C->Info.Steps[C->StageStep].OperationId = Report.OperationId;
 		C->Info.State = TEXT("awaiting_user_approval");
 		Creators().Insert(C, 0);
@@ -1086,8 +1556,9 @@ namespace HyperAIStudio::MeshGen::Creator
 		Journal(*C);
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = FString::Printf(TEXT("Waiting for the user's approval in HyperAI Chat, Activity: %s. Then it generates, imports, checks and fixes in a few minutes: ")
-			TEXT("follow operation_id with hyper_operation_wait (bWaitThroughApproval), then hyper_model_status, whose current_operation_id names any paid fix waiting for approval."), *Price_);
+		Report.Diagnostic = FString::Printf(TEXT("Waiting for the user's approval in HyperAI Chat, Activity: %s%s. Then it generates, imports, checks and fixes in a few minutes: ")
+			TEXT("follow operation_id with hyper_operation_wait (bWaitThroughApproval), then hyper_model_status, whose current_operation_id names whatever waits for approval next ")
+			TEXT("(the 3D generation after a reviewed picture, or a paid fix)."), bPictureStage && Plan.bReviewReference ? TEXT("the reference picture first; ") : TEXT(""), *Price_);
 		FHyperAIStudioApprovalGate::DescribeHeld(Report.OperationId, Report.Status, Report.Diagnostic);
 		return Report;
 	}
@@ -1191,6 +1662,7 @@ namespace HyperAIStudio::MeshGen::Creator
 		const TSharedRef<FCreator> C = MakeShared<FCreator>();
 		C->Info.OperationId = Report.OperationId;
 		C->Info.Kind = TEXT("check_and_fix");
+		C->Info.Provider = TEXT("tripo");
 		C->Info.AssetPath = Mesh->GetPathName();
 		C->Info.FixBudgetUSD = Request.bAllowPaidFixes ? (Request.FixBudgetUSD > 0.f ? Request.FixBudgetUSD : GetDefault<UHyperAIStudioTripoSettings>()->FixBudgetUSD) : 0.f;
 		C->Info.MaxRounds = Request.MaxRounds > 0 ? FMath::Min(Request.MaxRounds, 10) : GetDefault<UHyperAIStudioTripoSettings>()->MaxFixRounds;

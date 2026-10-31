@@ -62,9 +62,10 @@ namespace HyperAIStudio::MeshGen::Characters
 	constexpr const TCHAR* TripoRigV1 = TEXT("v1.0-20240301");
 	constexpr const TCHAR* TripoRigV25 = TEXT("v2.5-20260210");
 	constexpr const TCHAR* TripoRigV3 = TEXT("v3.0-20260909");
-	constexpr const TCHAR* TripoTextureModel = TEXT("v3.0-20250812");
-	/** Tripo uploads one file up to 60 MB; larger ones need its presigned upload, which this does not use. */
-	constexpr int64 MaxTripoUploadBytes = 60 * 1024 * 1024;
+	constexpr const TCHAR* TripoTextureModel = TEXT("v3.5-20260815");
+	/** Tripo's /files takes one file up to 60 MB; up to 150 MB goes through its presigned upload (/files/presign, then a PUT). */
+	constexpr int64 MaxTripoDirectUploadBytes = 60 * 1024 * 1024;
+	constexpr int64 MaxTripoUploadBytes = 150 * 1024 * 1024;
 
 	struct FLibraryAction
 	{
@@ -743,20 +744,16 @@ namespace HyperAIStudio::MeshGen::Characters
 			return;
 		}
 		const FString File = Job->UploadFiles.IsEmpty() ? Job->ExportFile : Job->UploadFiles[Job->UploadTokens.Num()];
+		if (FPaths::GetExtension(File).ToLower() == TEXT("webp"))
+		{
+			// Tripo's /files takes JPEG or PNG pictures; WebP is refused on some of its routes.
+			Fail(*Job, FString::Printf(TEXT("%s is a WebP picture; Tripo takes JPEG or PNG. Save it as PNG and try again; nothing was spent."), *FPaths::GetCleanFilename(File)));
+			return;
+		}
 		TArray<uint8> Bytes;
 		FFileHelper::LoadFileToArray(Bytes, *File);
-		FForm Form;
-		Form.File(TEXT("file"), File, Bytes);
-		TMap<FString, FString> Headers = KeyHeaders(*Job);
-		Headers.Add(TEXT("Content-Type"), Form.ContentType());
-		Send(Job, TEXT("POST"), Job->Service.BaseUrl + TEXT("/files"), Headers, Form.Finish(), [](FJob& Job, const int32 Code, const TArray<uint8>& Body)
+		auto Uploaded = [](FJob& Job)
 		{
-			Job.Token = Field(ParseJson(Body), TEXT("data.file_token"));
-			if (Code != 200 || Job.Token.IsEmpty())
-			{
-				Fail(Job, ProviderError(Job, Code, Body));
-				return;
-			}
 			if (!Job.UploadFiles.IsEmpty())
 			{
 				Job.UploadTokens.Add(Job.Token);
@@ -766,7 +763,53 @@ namespace HyperAIStudio::MeshGen::Characters
 				}
 			}
 			Enter(Job, After(Job, EPhase::Upload));
-		}, 300.f);
+		};
+		if (Bytes.Num() > MaxTripoDirectUploadBytes)
+		{
+			// Over 60 MB: a presigned address first, then the file PUT there with no key, as Tripo's docs describe.
+			const TSharedRef<FJsonObject> Ask = MakeShared<FJsonObject>();
+			Ask->SetStringField(TEXT("format"), FPaths::GetExtension(File).ToLower());
+			const TWeakPtr<FJob> Weak = Job;
+			Send(Job, TEXT("POST"), Job->Service.BaseUrl + TEXT("/files/presign"), JsonHeaders(*Job), Utf8(JsonText(Ask)),
+				[Weak, Bytes = MoveTemp(Bytes), Uploaded](FJob& Job, const int32 Code, const TArray<uint8>& Body) mutable
+				{
+					const TSharedPtr<FJsonObject> Json = ParseJson(Body);
+					const FString Url = Field(Json, TEXT("data.presigned_url"));
+					const FString Token = Field(Json, TEXT("data.file_token"));
+					const TSharedPtr<FJob> Pinned = Weak.Pin();
+					if (Code != 200 || Token.IsEmpty() || !Pinned.IsValid() || (!Url.StartsWith(TEXT("https://")) && !Url.StartsWith(TEXT("http://"))))
+					{
+						Fail(Job, ProviderError(Job, Code, Body));
+						return;
+					}
+					Send(Pinned.ToSharedRef(), TEXT("PUT"), Url, {{TEXT("Content-Type"), TEXT("application/octet-stream")}}, MoveTemp(Bytes),
+						[Token, Uploaded](FJob& Job, const int32 PutCode, const TArray<uint8>&)
+						{
+							if (PutCode < 200 || PutCode >= 300)
+							{
+								Fail(Job, FString::Printf(TEXT("The presigned upload to Tripo answered %d."), PutCode));
+								return;
+							}
+							Job.Token = Token;
+							Uploaded(Job);
+						}, 600.f);
+				}, 60.f);
+			return;
+		}
+		FForm Form;
+		Form.File(TEXT("file"), File, Bytes);
+		TMap<FString, FString> Headers = KeyHeaders(*Job);
+		Headers.Add(TEXT("Content-Type"), Form.ContentType());
+		Send(Job, TEXT("POST"), Job->Service.BaseUrl + TEXT("/files"), Headers, Form.Finish(), [Uploaded](FJob& Job, const int32 Code, const TArray<uint8>& Body)
+		{
+			Job.Token = Field(ParseJson(Body), TEXT("data.file_token"));
+			if (Code != 200 || Job.Token.IsEmpty())
+			{
+				Fail(Job, ProviderError(Job, Code, Body));
+				return;
+			}
+			Uploaded(Job);
+		}, 300.f, /*bRetry=*/true);
 	}
 
 	/** Meshy's library, free to read: action names become ids, and the whole library is kept for hyper_mesh_actions. */
@@ -802,6 +845,16 @@ namespace HyperAIStudio::MeshGen::Characters
 			});
 	}
 
+	/** Tripo runs one picture at a time an account: a picture task waits while another of this editor's runs. */
+	bool ImageTaskRunning(const FJob& Self)
+	{
+		return Jobs().ContainsByPredicate([&Self](const TSharedRef<FJob>& Other)
+		{
+			return &Other.Get() != &Self && Other->Phase == EPhase::Generate && Other->Tasks.IsValidIndex(Other->TaskIndex)
+				&& Other->Tasks[Other->TaskIndex].CreateUrl.EndsWith(TEXT("-to-image"));
+		});
+	}
+
 	void SubmitTask(const TSharedRef<FJob>& Job)
 	{
 		FTask& Task = Job->Tasks[Job->TaskIndex];
@@ -810,6 +863,13 @@ namespace HyperAIStudio::MeshGen::Characters
 			// Reads what the task before it made.
 			Task.TaskId = Job->TaskIndex > 0 ? Job->Tasks[Job->TaskIndex - 1].TaskId : FString();
 			Enter(*Job, EPhase::Generate);
+			return;
+		}
+		if (Task.CreateUrl.EndsWith(TEXT("-to-image")) && ImageTaskRunning(*Job))
+		{
+			Job->Info.State = TEXT("queued");
+			Job->Info.Diagnostic = TEXT("Waiting for this editor's other picture at Tripo (one at a time an account).");
+			Job->NextPollAt = FPlatformTime::Seconds() + 1.0;
 			return;
 		}
 		Send(Job, TEXT("POST"), Task.CreateUrl, JsonHeaders(*Job), Utf8(JsonText(Task.Body(*Job))), [](FJob& Job, const int32 Code, const TArray<uint8>& Body)
@@ -835,7 +895,7 @@ namespace HyperAIStudio::MeshGen::Characters
 			Enter(Job, EPhase::Generate);
 			Job.NextPollAt = FPlatformTime::Seconds() + PollSeconds();
 			WriteRecord(Job);
-		});
+		}, 120.f, /*bRetry=*/true);
 	}
 
 	void QueryTask(const TSharedRef<FJob>& Job)
@@ -855,8 +915,35 @@ namespace HyperAIStudio::MeshGen::Characters
 				const FString Progress = Task.ProgressPath.IsEmpty() ? FString() : Field(Json, Task.ProgressPath);
 				const int32 Own = Progress.IsEmpty() ? 50 : FMath::Clamp(FCString::Atoi(*Progress), 0, 100);
 				Job.Info.Progress = (Job.TaskIndex * 100 + Own) / FMath::Max(1, Job.Tasks.Num());
+				if (State == TEXT("unknown"))
+				{
+					// Tripo's "unknown": poll on, for a bounded while.
+					if (++Job.UnknownPolls > 40)
+					{
+						Fail(Job, FString::Printf(TEXT("%s's %s task stayed unknown for %d polls; ask Tripo after task %s."), *Job.Service.Label, *Task.Label, Job.UnknownPolls, *Task.TaskId));
+						return;
+					}
+					Job.NextPollAt = FPlatformTime::Seconds() + PollSeconds();
+					return;
+				}
+				Job.UnknownPolls = 0;
 				if (State == TEXT("succeeded") || State == TEXT("success") || State == TEXT("ready"))
 				{
+					const FString Scale = Field(Json, TEXT("data.output.normalize_scale"));
+					if (!Scale.IsEmpty())
+					{
+						// A result made from a token or a URL comes normalised; what was done is kept beside the step.
+						const TSharedPtr<FJsonObject>* Data = nullptr;
+						const TSharedPtr<FJsonObject>* Output = nullptr;
+						const TArray<TSharedPtr<FJsonValue>>* Offset = nullptr;
+						FString Translation;
+						if (Json->TryGetObjectField(TEXT("data"), Data) && (*Data)->TryGetObjectField(TEXT("output"), Output)
+							&& (*Output)->TryGetArrayField(TEXT("normalize_translation"), Offset))
+						{
+							Translation = FString::JoinBy(*Offset, TEXT(","), [](const TSharedPtr<FJsonValue>& Value) { return FString::Printf(TEXT("%g"), Value->AsNumber()); });
+						}
+						Job.Normalization = FString::Printf(TEXT("normalize_scale %s, normalize_translation [%s]"), *Scale, *Translation);
+					}
 					FString Error;
 					if (Task.OnDone && !Task.OnDone(Job, Json, Error))
 					{
@@ -869,13 +956,13 @@ namespace HyperAIStudio::MeshGen::Characters
 					return;
 				}
 				if (State == TEXT("failed") || State == TEXT("banned") || State == TEXT("expired") || State == TEXT("cancelled")
-					|| State == TEXT("canceled") || State == TEXT("unknown"))
+					|| State == TEXT("canceled"))
 				{
 					Fail(Job, FString::Printf(TEXT("%s's %s task %s: %s"), *Job.Service.Label, *Task.Label, *State, *ProviderError(Job, Code, Body)));
 					return;
 				}
 				Job.NextPollAt = FPlatformTime::Seconds() + PollSeconds();
-			}, 60.f);
+			}, 60.f, /*bRetry=*/true);
 	}
 
 	/** GLB or FBX, by what the file starts with; empty for anything else. */
@@ -896,6 +983,31 @@ namespace HyperAIStudio::MeshGen::Characters
 		Send(Job, TEXT("GET"), Job->Downloads[Job->DownloadIndex].Url, {}, {}, [](FJob& Job, const int32 Code, const TArray<uint8>& Body)
 		{
 			FDownload& Download = Job.Downloads[Job.DownloadIndex];
+			if (Download.Role == TEXT("reference"))
+			{
+				// The reference picture Tripo drew, kept beside the model as the visual check's reference; its link lasts minutes.
+				const bool bPng = Body.Num() > 8 && Body[0] == 0x89 && Body[1] == 'P';
+				const bool bJpeg = Body.Num() > 3 && Body[0] == 0xFF && Body[1] == 0xD8;
+				if (Code != 200 || (!bPng && !bJpeg) || Body.Num() > 64 * 1024 * 1024)
+				{
+					Fail(Job, FString::Printf(TEXT("The reference picture could not be downloaded as a PNG or JPEG (HTTP %d, %d bytes)."), Code, Body.Num()));
+					return;
+				}
+				Download.File = ModelsRoot() / Job.Info.OperationId / (bPng ? TEXT("reference.png") : TEXT("reference.jpg"));
+				IFileManager::Get().MakeDirectory(*FPaths::GetPath(Download.File), /*Tree=*/true);
+				if (!FFileHelper::SaveArrayToFile(Body, *Download.File))
+				{
+					Fail(Job, TEXT("The reference picture could not be written under Saved/HyperAIStudio/Models."));
+					return;
+				}
+				Job.ReferenceFile = Download.File;
+				++Job.DownloadIndex;
+				if (Job.DownloadIndex >= Job.Downloads.Num())
+				{
+					Enter(Job, EPhase::Import);
+				}
+				return;
+			}
 			if (Download.Role == TEXT("preview"))
 			{
 				// The provider's own render of the result, for the visual check: PNG, JPEG or WebP, never fatal.
@@ -1031,6 +1143,12 @@ namespace HyperAIStudio::MeshGen::Characters
 	/** Everything the job downloaded, imported: the model first, then the clips onto its skeleton (or the rig's). */
 	bool ImportFiles(FJob& Job, FString& OutError)
 	{
+		if (Job.Kind == EKind::Model && !Job.Downloads.ContainsByPredicate([](const FDownload& Download) { return Download.Role == TEXT("model"); }))
+		{
+			// A creator stage that only made the reference picture: nothing to import.
+			Job.Info.Diagnostic = Job.ReferenceFile.IsEmpty() ? FString() : FString::Printf(TEXT(" The reference picture is %s."), *ProjectRelative(Job.ReferenceFile));
+			return true;
+		}
 		FString Note;
 		USkeleton* Skeleton = nullptr;
 		if (USkeletalMesh* Rig = LoadAsset<USkeletalMesh>(Job.RigMesh))
@@ -1039,7 +1157,7 @@ namespace HyperAIStudio::MeshGen::Characters
 		}
 		for (const FDownload& Download : Job.Downloads)
 		{
-			if (Download.Role == TEXT("preview"))
+			if (Download.Role == TEXT("preview") || Download.Role == TEXT("reference"))
 			{
 				continue;
 			}
@@ -1281,6 +1399,11 @@ namespace HyperAIStudio::MeshGen::Characters
 				Job.Info.PhysicsAsset.IsEmpty() ? TEXT("(none)") : *Job.Info.PhysicsAsset)
 			: FString::Printf(TEXT("Imported %d animation(s) onto %s"), Job.Info.Animations.Num(), *Job.RigMesh);
 		What += FString::Printf(TEXT("; %d assets in all, from %s."), Job.Info.ImportedAssets.Num(), *Job.Info.ModelFile);
+		if (Job.Kind == EKind::Model && Job.Info.AssetPath.IsEmpty() && !Job.ReferenceFile.IsEmpty())
+		{
+			// A creator stage that made the reference picture alone.
+			What = TEXT("Made the reference picture.");
+		}
 		if (Job.Kind == EKind::Rig && !Job.Info.Animations.IsEmpty())
 		{
 			What += FString::Printf(TEXT(" With %d clip(s) Meshy made with the rig."), Job.Info.Animations.Num());

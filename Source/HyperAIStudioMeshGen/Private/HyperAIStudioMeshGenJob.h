@@ -26,7 +26,10 @@ namespace HyperAIStudio::MeshGen::Private
 
 	/** How often a running job asks its provider; tests shorten it. */
 	double& PollSeconds();
-	/** Read at the moment of the call, never kept in a setting, and never reported. */
+	/**
+	 * Read at the moment of the call, never kept in a setting, and never reported. Hi3D's built-in service also takes
+	 * HYPERAI_HI3D_KEY from the environment when HITEM3D_API_KEY (its slot in Settings > Agents > Keys) holds nothing.
+	 */
 	FString Key(const FHyperAIStudioExternalServiceSettings& Service);
 	FString ProjectRelative(const FString& Path);
 	FString ModelsRoot();
@@ -61,6 +64,7 @@ namespace HyperAIStudio::MeshGen::Private
 	};
 
 	struct FJob;
+	struct FForm;
 
 	/** One task a provider runs for a job: how to start it, how to ask after it, and what to take from it once it is done. */
 	struct FTask
@@ -80,6 +84,8 @@ namespace HyperAIStudio::MeshGen::Private
 		double Cost = 0.0;
 		/** Reads the finished task: the files to download, the ids later tasks need. False, with a reason, fails the job. */
 		TFunction<bool(FJob&, const TSharedPtr<FJsonObject>&, FString&)> OnDone;
+		/** Hi3D: the task is POSTed as this multipart form instead of Body's JSON; false, with a reason, fails the job unspent. */
+		TFunction<bool(const FJob&, FForm&, FString&)> Form;
 		FString TaskId;
 	};
 
@@ -149,6 +155,23 @@ namespace HyperAIStudio::MeshGen::Private
 		FString PreviewFile;
 		/** Credits the provider reported its finished tasks consumed (Tripo's credits_consumed); negative while none said. */
 		float CreditsConsumed = -1.f;
+
+		// Hi3D in the model creator (HyperAIStudioModelCreatorHi3D.cpp).
+		/** Words for a reference picture to make first with HyperAI's image generation, its image model, and what it costs. */
+		FString ReferencePrompt;
+		FString ReferenceModel;
+		double ReferenceCost = 0.0;
+		/** The reference picture once it is on disk: made by HyperAI's image generation, or Tripo's text-to-image downloaded. */
+		FString ReferenceFile;
+		/** Polls that came back with Tripo's "unknown" status in a row: polled on, up to a bound. */
+		int32 UnknownPolls = 0;
+		/** Tripo's normalize_scale and normalize_translation of a post-processing result made from a token or a URL. */
+		FString Normalization;
+		/** The phase to go back to once a new access token is in hand (Hi3D's token ran out mid-job), and how often that happened. */
+		EPhase AuthReturn = EPhase::Prepare;
+		int32 AuthTries = 0;
+		/** Hi3D failed the task with 50010001 ("generate failed"): its credits came back, and it can be tried again. */
+		bool bRefunded = false;
 	};
 
 	TArray<TSharedRef<FJob>>& Jobs();
@@ -186,7 +209,16 @@ namespace HyperAIStudio::MeshGen::Private
 
 	/** One request for the job; OnReply runs on the game thread, and not at all once the job has failed or stopped. */
 	void Send(const TSharedRef<FJob>& Job, const TCHAR* Verb, const FString& Url, const TMap<FString, FString>& Headers,
-		TArray<uint8> Body, FOnReply OnReply, float TimeoutSeconds = 120.f);
+		TArray<uint8> Body, FOnReply OnReply, float TimeoutSeconds = 120.f, bool bRetry = false);
+	/**
+	 * bRetry: a 429 or a 5xx (or a read whose answer was lost) is sent again after 1, 2, 4... seconds up to 32, or what
+	 * Retry-After or X-RateLimit-Reset says, five tries at most (twenty while Tripo is at its concurrency limit, 429/2000).
+	 */
+	void SendAttempt(const TSharedRef<FJob>& Job, const TCHAR* Verb, const FString& Url, const TMap<FString, FString>& Headers,
+		TArray<uint8> Body, FOnReply OnReply, float TimeoutSeconds, bool bRetry, int32 Attempt);
+	double RetryDelaySeconds(int32 Attempt, const FString& RetryAfter, const FString& RateLimitReset);
+	/** Multiplies every retry's wait; tests shorten it. */
+	double& RetryScale();
 
 	/** The key in the service's own header (Authorization: Bearer for Tripo, Meshy and Viggle). */
 	TMap<FString, FString> KeyHeaders(const FJob& Job);
@@ -209,4 +241,10 @@ namespace HyperAIStudio::MeshGen::Private
 	void StepGenerate(const TSharedRef<FJob>& Job);
 	/** The steps of rigging, animating and texturing. */
 	void StepCharacter(const TSharedRef<FJob>& Job);
+	/**
+	 * A creator job's Hi3D steps (HyperAIStudioModelCreatorHi3D.cpp): the reference picture and the access token
+	 * (Prepare), the multipart submit and the polling; true when it took the step. Exporting, downloading and importing
+	 * are StepCharacter's, as for Tripo.
+	 */
+	bool StepHi3D(const TSharedRef<FJob>& Job);
 }

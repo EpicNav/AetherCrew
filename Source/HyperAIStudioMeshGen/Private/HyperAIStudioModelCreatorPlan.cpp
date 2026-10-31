@@ -140,6 +140,86 @@ namespace HyperAIStudio::MeshGen::Creator
 		}
 
 		const TCHAR* const DefaultNegative = TEXT("blurry, low quality, broken mesh, floating parts, holes, baked lighting, ground plane, text, watermark");
+
+		// Words that move a choice, shared by the provider choice and Tripo's classification.
+		bool AsksDetail(const FString& Words)
+		{
+			return HasAny(Words, {TEXT("photoreal"), TEXT("highly detailed"), TEXT("intricate"), TEXT("ornate"), TEXT("cinematic"), TEXT("hero asset"),
+				TEXT("scanned"), TEXT("realistic"), TEXT("hyper-detailed"), TEXT("ultra detailed")});
+		}
+
+		bool AsksLowPoly(const FString& Words)
+		{
+			return HasAny(Words, {TEXT("low poly"), TEXT("low-poly"), TEXT("lowpoly"), TEXT("mobile game"), TEXT("flat shaded"), TEXT("ps1")});
+		}
+
+		bool AsksQuads(const FString& Words)
+		{
+			return HasAny(Words, {TEXT("quad"), TEXT("subdivision"), TEXT("subd"), TEXT("clean topology"), TEXT("edge loops"), TEXT("retopo")});
+		}
+
+		bool AsksParts(const FString& Words)
+		{
+			return HasAny(Words, {TEXT("separate parts"), TEXT("editable parts"), TEXT("modular parts"), TEXT("segmented"), TEXT("in parts")});
+		}
+
+		/** What Hi3D is chosen for: the most faithful, densest shape. */
+		bool AsksFidelity(const FString& Words)
+		{
+			return HasAny(Words, {TEXT("photoreal"), TEXT("intricate"), TEXT("max detail"), TEXT("maximum detail"), TEXT("highest detail"), TEXT("sculpt"),
+				TEXT("scanned"), TEXT("photogrammetry")});
+		}
+
+		bool AsksPortrait(const FString& Words)
+		{
+			return HasWord(Words, {TEXT("portrait"), TEXT("bust"), TEXT("headshot")}) || HasAny(Words, {TEXT("head sculpt"), TEXT("face scan")});
+		}
+
+		bool IsAuto(const FString& Value)
+		{
+			const FString Text = Value.TrimStartAndEnd().ToLower();
+			return Text.IsEmpty() || Text == TEXT("auto");
+		}
+
+		/** Tripo's image models: the chat_image family's quality ladder, and the families that take none. */
+		const TArray<FString>& ImageQualities()
+		{
+			static const TArray<FString> Values = {TEXT("low"), TEXT("medium"), TEXT("high"), TEXT("xhigh"), TEXT("max")};
+			return Values;
+		}
+
+		/** Levenshtein distance, for a tier word misheard or misspelt: sunburn, sunbust, flair. */
+		int32 EditDistance(const FString& A, const FString& B)
+		{
+			TArray<int32> Row;
+			for (int32 J = 0; J <= B.Len(); ++J)
+			{
+				Row.Add(J);
+			}
+			for (int32 I = 1; I <= A.Len(); ++I)
+			{
+				int32 Diagonal = Row[0];
+				Row[0] = I;
+				for (int32 J = 1; J <= B.Len(); ++J)
+				{
+					const int32 Above = Row[J];
+					Row[J] = FMath::Min3(Row[J] + 1, Row[J - 1] + 1, Diagonal + (FChar::ToLower(A[I - 1]) == FChar::ToLower(B[J - 1]) ? 0 : 1));
+					Diagonal = Above;
+				}
+			}
+			return Row[B.Len()];
+		}
+
+		/** The picture's template for a use: props are extracted as assets, characters stood in a T-pose, creatures left free. */
+		FString TemplateForUse(const FString& Use, const FString& Words)
+		{
+			if (HasWord(Words, {TEXT("options"), TEXT("variants"), TEXT("variations")}))
+			{
+				return TEXT("variants");
+			}
+			return Use == TEXT("character") ? FString(TEXT("t_pose")) : Use == TEXT("creature") || Use == TEXT("foliage") || Use == TEXT("background") ? FString()
+				: FString(TEXT("asset_extraction"));
+		}
 	}
 
 	FString UseFromWords(const FString& Words)
@@ -194,7 +274,97 @@ namespace HyperAIStudio::MeshGen::Creator
 		return FString();
 	}
 
-	bool Classify(const FHyperAIModelBrief& Brief, FHyperAIModelPlan& Out, FString& OutError)
+	FString ChooseProvider(const FHyperAIModelBrief& Brief, const bool bRig, FString& OutReason, FString& OutError)
+	{
+		const FString Asked = Brief.Provider.TrimStartAndEnd().ToLower();
+		const FString Model = Brief.Model.TrimStartAndEnd();
+		const bool bHi3DModel = Hi3DIsModel(Model);
+		const bool bTripoModel = !Model.IsEmpty() && !bHi3DModel;
+		if (!IsAuto(Asked) && Asked != TEXT("tripo") && Asked != TEXT("hi3d") && Asked != TEXT("hitem3d"))
+		{
+			OutError = TEXT("provider is auto, tripo or hi3d.");
+			return FString();
+		}
+		if (Asked == TEXT("tripo") || Asked == TEXT("hi3d") || Asked == TEXT("hitem3d"))
+		{
+			const bool bHi = Asked != TEXT("tripo");
+			if (bHi && bTripoModel)
+			{
+				OutError = FString::Printf(TEXT("model %s is Tripo's; Hi3D's are %s."), *Model, *FString::Join(Hi3DModels(), TEXT(", ")));
+				return FString();
+			}
+			if (!bHi && (bHi3DModel || !Brief.Resolution.TrimStartAndEnd().IsEmpty()))
+			{
+				OutError = TEXT("Hi3D's model ids and resolution are for provider hi3d; with Tripo the model is H3.1 or P2.");
+				return FString();
+			}
+			OutReason = FString::Printf(TEXT("provider: %s, as given"), bHi ? TEXT("hi3d") : TEXT("tripo"));
+			return bHi ? TEXT("hi3d") : TEXT("tripo");
+		}
+		if (bHi3DModel || !Brief.Resolution.TrimStartAndEnd().IsEmpty())
+		{
+			OutReason = bHi3DModel ? FString::Printf(TEXT("provider: hi3d, because model %s is Hi3D's"), *Model) : FString(TEXT("provider: hi3d, because resolution is Hi3D's"));
+			return TEXT("hi3d");
+		}
+		if (bTripoModel)
+		{
+			OutReason = FString::Printf(TEXT("provider: tripo, because model %s is Tripo's"), *Model);
+			return TEXT("tripo");
+		}
+		// Auto. Tripo for what only it does, or what Hi3D's 100,000-face floor does not suit.
+		const FString Words = Brief.Prompt.ToLower();
+		FString Use = Brief.Use.TrimStartAndEnd().ToLower();
+		Use = Use.IsEmpty() ? UseFromWords(Brief.Prompt) : Use == TEXT("hero") ? FString(TEXT("hero_prop")) : Use;
+		const bool bPicture = !Brief.ImagePath.TrimStartAndEnd().IsEmpty() || Brief.MultiviewImages.ContainsByPredicate([](const FString& View) { return !View.TrimStartAndEnd().IsEmpty(); });
+		const FString Platform = Brief.Platform.TrimStartAndEnd().ToLower();
+		auto Tripo = [&OutReason](const TCHAR* Why) { OutReason = FString(TEXT("provider: tripo, ")) + Why; return FString(TEXT("tripo")); };
+		if (!bPicture)
+		{
+			return Tripo(TEXT("for a brief in words (Hi3D works from pictures; ask for provider hi3d to have a reference picture made first)"));
+		}
+		if (!Brief.ViewEdits.IsEmpty() || !Brief.MultiviewTaskId.TrimStartAndEnd().IsEmpty())
+		{
+			return Tripo(TEXT("because view edits and multiview tasks are Tripo's"));
+		}
+		if (Brief.Topology.TrimStartAndEnd().ToLower().StartsWith(TEXT("quad")) || AsksQuads(Words) || Use == TEXT("character") || Use == TEXT("creature"))
+		{
+			return Tripo(TEXT("because the model wants quads (or deforms, as a character or creature does); Hi3D makes triangles"));
+		}
+		if (Switch(Brief.Parts).Get(false) || AsksParts(Words) || Switch(Brief.SmartLowPoly).Get(false) || AsksLowPoly(Words) || !Brief.GeometryQuality.TrimStartAndEnd().IsEmpty())
+		{
+			return Tripo(TEXT("because parts, low poly and geometry quality are Tripo's"));
+		}
+		if (bRig)
+		{
+			return Tripo(TEXT("because the model will be rigged, which Tripo does"));
+		}
+		if (Platform == TEXT("mobile") || Platform == TEXT("vr"))
+		{
+			return Tripo(TEXT("because mobile and VR want light models, and Hi3D starts at 100,000 faces"));
+		}
+		if (Brief.FaceLimit > 0 && Brief.FaceLimit < Hi3DMinFaces)
+		{
+			return Tripo(TEXT("because an exact budget under 100,000 faces is Tripo's to make (Hi3D starts at 100,000)"));
+		}
+		if (AsksPortrait(Words))
+		{
+			OutReason = TEXT("provider: hi3d, a portrait or bust from a picture, which Hi3D's portrait models make");
+			return TEXT("hi3d");
+		}
+		if (Use == TEXT("hero_prop") || Use == TEXT("environment") || Use == TEXT("vehicle"))
+		{
+			OutReason = FString::Printf(TEXT("provider: hi3d, a picture of a %s wants the most faithful, densest shape, which Nanite renders as it is"), *Use);
+			return TEXT("hi3d");
+		}
+		if (AsksFidelity(Words))
+		{
+			OutReason = TEXT("provider: hi3d, because the brief asks for maximum fidelity (photoreal, intricate, max detail, sculpted)");
+			return TEXT("hi3d");
+		}
+		return Tripo(TEXT("the default for a picture of a game piece of this kind"));
+	}
+
+	static bool ClassifyTripo(const FHyperAIModelBrief& Brief, FHyperAIModelPlan& Out, FString& OutError)
 	{
 		Out = FHyperAIModelPlan();
 		const FString Prompt = Brief.Prompt.TrimStartAndEnd();
@@ -229,11 +399,10 @@ namespace HyperAIStudio::MeshGen::Creator
 		Why.Add(Row.Why);
 
 		// Words that move the choice: detail up, poly down, quads, parts.
-		const bool bDetailWords = HasAny(Words, {TEXT("photoreal"), TEXT("highly detailed"), TEXT("intricate"), TEXT("ornate"), TEXT("cinematic"), TEXT("hero asset"),
-			TEXT("scanned"), TEXT("realistic"), TEXT("hyper-detailed"), TEXT("ultra detailed")});
-		const bool bLowWords = HasAny(Words, {TEXT("low poly"), TEXT("low-poly"), TEXT("lowpoly"), TEXT("mobile game"), TEXT("flat shaded"), TEXT("ps1")});
-		const bool bQuadWords = HasAny(Words, {TEXT("quad"), TEXT("subdivision"), TEXT("subd"), TEXT("clean topology"), TEXT("edge loops"), TEXT("retopo")});
-		const bool bPartsWords = HasAny(Words, {TEXT("separate parts"), TEXT("editable parts"), TEXT("modular parts"), TEXT("segmented"), TEXT("in parts")});
+		const bool bDetailWords = AsksDetail(Words);
+		const bool bLowWords = AsksLowPoly(Words);
+		const bool bQuadWords = AsksQuads(Words);
+		const bool bPartsWords = AsksParts(Words);
 		const bool b8kWords = HasAny(Words, {TEXT("8k"), TEXT("extreme detail texture")});
 
 		// The family.
@@ -522,7 +691,7 @@ namespace HyperAIStudio::MeshGen::Creator
 		Out.Endpoint = bMultiview ? TEXT("/generation/multiview-to-model") : bImage ? TEXT("/generation/image-to-model") : TEXT("/generation/text-to-model");
 		if (Out.bQuad && bH)
 		{
-			Why.Add(TEXT("H3.1 returns quads as FBX, which is imported as it is"));
+			Why.Add(TEXT("H3.1 returns quads as FBX, which is imported as it is; quads held to your range, 500-50,000 (Tripo's own cap is 150,000)"));
 		}
 
 		const FString Negative = Brief.NegativePrompt.TrimStartAndEnd();
@@ -546,6 +715,603 @@ namespace HyperAIStudio::MeshGen::Creator
 		}
 		Out.RequestJson = HyperAIStudio::MeshGen::Private::JsonText(GenerationBody(Out, Brief, Placeholders));
 		return true;
+	}
+
+	// ---------------------------------------------------------------- the reference picture
+
+	TArray<FString> TripoImageModels()
+	{
+		return {TEXT("chat_image_2.5_sunburst"), TEXT("chat_image_2.5_flare"), TEXT("chat_image_2"), TEXT("chat_image_1.5"), TEXT("banana2"), TEXT("banana_pro"),
+			TEXT("banana"), TEXT("seedream_v5"), TEXT("seedream_v4")};
+	}
+
+	bool ImageModelFromName(const FString& In, FString& OutId, FString& OutNote)
+	{
+		FString Name = In.TrimStartAndEnd().ToLower().Replace(TEXT(" "), TEXT("_")).Replace(TEXT("-"), TEXT("_"));
+		while (Name.Contains(TEXT("__")))
+		{
+			Name = Name.Replace(TEXT("__"), TEXT("_"));
+		}
+		auto Refuse = [&OutNote, &In](const FString& Why)
+		{
+			OutNote = Why.IsEmpty() ? FString::Printf(TEXT("image_model %s is not one of Tripo's: %s."), *In, *FString::Join(TripoImageModels(), TEXT(", "))) : Why;
+			return false;
+		};
+		// What people call OpenAI's models is Tripo's chat_image family.
+		for (const TCHAR* Prefix : {TEXT("gpt_image"), TEXT("chatgpt_image"), TEXT("openai_image"), TEXT("image_gen"), TEXT("chat_image")})
+		{
+			if (Name.StartsWith(Prefix))
+			{
+				Name = TEXT("chat_image") + Name.Mid(FCString::Strlen(Prefix));
+				break;
+			}
+		}
+		Name = Name.Replace(TEXT("nano_banana_pro"), TEXT("banana_pro")).Replace(TEXT("nano_banana_2"), TEXT("banana2")).Replace(TEXT("nano_banana2"), TEXT("banana2"))
+			.Replace(TEXT("nano_banana"), TEXT("banana")).Replace(TEXT("banana_2"), TEXT("banana2"));
+		if (Name == TEXT("seedream_5") || Name == TEXT("seedream5") || Name == TEXT("seedream"))
+		{
+			Name = TEXT("seedream_v5");
+		}
+		else if (Name == TEXT("seedream_4") || Name == TEXT("seedream4"))
+		{
+			Name = TEXT("seedream_v4");
+		}
+		if (Name.StartsWith(TEXT("chat_image")))
+		{
+			TArray<FString> Tokens;
+			Name.Mid(10).ParseIntoArray(Tokens, TEXT("_"));
+			FString Version = Tokens.IsEmpty() ? FString(TEXT("2.5")) : Tokens[0];
+			FString Tier = Tokens.Num() > 1 ? Tokens[1] : FString();
+			if (Version.Len() > 0 && !FChar::IsDigit(Version[0]))
+			{
+				// chat_image_sunburst: the tier with no version, the newest version.
+				Tier = Version;
+				Version = TEXT("2.5");
+			}
+			if (Version == TEXT("1") || Version == TEXT("1.0"))
+			{
+				return Refuse(TEXT("chat_image_1 was retired on 23 October 2026: use chat_image_2.5_flare or chat_image_2.5_sunburst."));
+			}
+			if (Version == TEXT("2.5"))
+			{
+				if (Tier.IsEmpty())
+				{
+					Tier = TEXT("flare");
+				}
+				else if (EditDistance(Tier, TEXT("sunburst")) <= 2)
+				{
+					Tier = TEXT("sunburst");
+				}
+				else if (EditDistance(Tier, TEXT("flare")) <= 2)
+				{
+					Tier = TEXT("flare");
+				}
+				else
+				{
+					return Refuse(FString::Printf(TEXT("chat_image_2.5 comes as flare (quick) or sunburst (most faithful), not %s."), *Tier));
+				}
+				Name = TEXT("chat_image_2.5_") + Tier;
+			}
+			else
+			{
+				Name = TEXT("chat_image_") + Version;
+			}
+			if (Version == TEXT("1.5"))
+			{
+				OutNote = TEXT("(chat_image_1.5 retires on 1 December 2026; chat_image_2.5 replaces it)");
+			}
+		}
+		if (!TripoImageModels().Contains(Name))
+		{
+			return Refuse(FString());
+		}
+		OutId = Name;
+		const FString Given = In.TrimStartAndEnd();
+		if (!Given.Equals(Name, ESearchCase::IgnoreCase))
+		{
+			OutNote = FString::Printf(TEXT("(read from '%s')%s%s"), *Given, OutNote.IsEmpty() ? TEXT("") : TEXT(" "), *OutNote);
+		}
+		return true;
+	}
+
+	bool ImageModelTakesQuality(const FString& Model, const FString& Quality)
+	{
+		if (Model == TEXT("chat_image_2"))
+		{
+			return Quality == TEXT("low") || Quality == TEXT("medium") || Quality == TEXT("high");
+		}
+		return Model.StartsWith(TEXT("chat_image_2.5")) && ImageQualities().Contains(Quality);
+	}
+
+	bool ImageModelTakesBackground(const FString& Model)
+	{
+		return Model.StartsWith(TEXT("chat_image_2.5"));
+	}
+
+	bool ImageSizeValid(const FString& Model, const FString& Size, FString& OutError)
+	{
+		if (Size.IsEmpty())
+		{
+			return true;
+		}
+		int32 Width = 0, Height = 0;
+		FString W, H;
+		const bool bPixels = Size.ToLower().Split(TEXT("x"), &W, &H) && W.IsNumeric() && H.IsNumeric();
+		if (bPixels)
+		{
+			Width = FCString::Atoi(*W);
+			Height = FCString::Atoi(*H);
+		}
+		if (Model.StartsWith(TEXT("chat_image")))
+		{
+			static const TArray<FString> Presets = {TEXT("1024x1024"), TEXT("1536x1024"), TEXT("1024x1536"), TEXT("2048x2048"), TEXT("2048x1152"), TEXT("3840x2160"),
+				TEXT("2160x3840"), TEXT("auto")};
+			if (Presets.Contains(Size.ToLower()))
+			{
+				return true;
+			}
+			const int64 Pixels = int64(Width) * Height;
+			if (!bPixels || Width <= 0 || Height <= 0 || Width > 3840 || Height > 3840 || Width % 16 || Height % 16 || FMath::Max(Width, Height) > 3 * FMath::Min(Width, Height)
+				|| Pixels < 655360 || Pixels > 8294400)
+			{
+				OutError = TEXT("image_size for chat_image is a preset (1024x1024, 1536x1024, 1024x1536, 2048x2048, 2048x1152, 3840x2160, 2160x3840, auto) or WxH: ")
+					TEXT("edges up to 3840 in multiples of 16, the long edge at most three times the short, 655,360 to 8,294,400 pixels.");
+				return false;
+			}
+			return true;
+		}
+		if (Model == TEXT("seedream_v5"))
+		{
+			if (Size == TEXT("2K") || Size == TEXT("3K"))
+			{
+				return true;
+			}
+			OutError = TEXT("image_size for seedream_v5 is 2K or 3K.");
+			return false;
+		}
+		if (Model == TEXT("seedream_v4"))
+		{
+			const double Mega = double(Width) * Height / 1e6;
+			if (Size == TEXT("2K") || Size == TEXT("4K") || (bPixels && Mega >= 3.69 && Mega <= 16.78))
+			{
+				return true;
+			}
+			OutError = TEXT("image_size for seedream_v4 is 2K, 4K, or WxH of 3.69 to 16.78 megapixels.");
+			return false;
+		}
+		OutError = FString::Printf(TEXT("%s takes no image_size."), *Model);
+		return false;
+	}
+
+	FString ImageSizeTier(const FString& Size)
+	{
+		FString W, H;
+		if (Size.ToLower() == TEXT("auto") || Size == TEXT("2K"))
+		{
+			return TEXT("2k");
+		}
+		if (Size == TEXT("3K") || Size == TEXT("4K"))
+		{
+			return TEXT("4k");
+		}
+		if (Size.ToLower().Split(TEXT("x"), &W, &H))
+		{
+			const int32 Long = FMath::Max(FCString::Atoi(*W), FCString::Atoi(*H));
+			return Long <= 1024 ? TEXT("1k") : Long <= 2048 ? TEXT("2k") : TEXT("4k");
+		}
+		return TEXT("1k");
+	}
+
+	float ImagePrice(const FString& Model, const FString& Quality, const FString& Size)
+	{
+		const FString Key = TEXT("img_") + Model + (Quality.IsEmpty() ? FString() : TEXT("_") + Quality) + TEXT("_") + ImageSizeTier(Size);
+		return FMath::Max(UHyperAIStudioSettings::FindMeshTaskPrice(TEXT("tripo"), Key), 0.f);
+	}
+
+	TSharedRef<FJsonObject> TextToImageBody(const FHyperAIModelPlan& Plan)
+	{
+		const TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+		Json->SetStringField(TEXT("model"), Plan.ImageModel);
+		Json->SetStringField(TEXT("prompt"), Plan.ImagePrompt);
+		if (!Plan.ImageSize.IsEmpty())
+		{
+			Json->SetStringField(TEXT("size"), Plan.ImageSize);
+		}
+		// quality only where the model takes it: any other model refuses the field.
+		if (!Plan.ImageQuality.IsEmpty() && ImageModelTakesQuality(Plan.ImageModel, Plan.ImageQuality))
+		{
+			Json->SetStringField(TEXT("quality"), Plan.ImageQuality);
+		}
+		if (!Plan.ImageBackground.IsEmpty() && ImageModelTakesBackground(Plan.ImageModel))
+		{
+			Json->SetStringField(TEXT("background"), Plan.ImageBackground);
+		}
+		Json->SetStringField(TEXT("output_format"), TEXT("png"));
+		if (!Plan.ImageTemplate.IsEmpty())
+		{
+			Json->SetStringField(TEXT("template"), Plan.ImageTemplate);
+		}
+		return Json;
+	}
+
+	/** The picture made first, when the brief is words alone: its model, quality, size, background, template and words. */
+	static bool PlanReference(const FHyperAIModelBrief& Brief, FHyperAIModelPlan& Out, FString& OutError)
+	{
+		TArray<FString>& Why = Out.Reasons;
+		const FString Choice = Brief.ReferenceImage.TrimStartAndEnd().ToLower();
+		const TOptional<bool> Asked = Switch(Choice);
+		if (!IsAuto(Choice) && !Asked.IsSet())
+		{
+			OutError = TEXT("reference_image is auto, on or off.");
+			return false;
+		}
+		const bool bHi = Out.Provider == TEXT("hi3d");
+		if (Out.Input != TEXT("text"))
+		{
+			if (Asked.Get(false))
+			{
+				OutError = TEXT("reference_image on makes a picture from the words; this brief already gives a picture or views.");
+				return false;
+			}
+			return true;
+		}
+		bool bOn = true;
+		if (bHi)
+		{
+			if (Asked.IsSet() && !Asked.GetValue())
+			{
+				OutError = TEXT("Hi3D works from a picture: from words alone it needs reference_image on (or auto), or choose provider tripo.");
+				return false;
+			}
+			Why.Add(TEXT("reference picture: made first from the words, as Hi3D works from pictures"));
+		}
+		else if (Asked.IsSet())
+		{
+			bOn = Asked.GetValue();
+			Why.Add(bOn ? FString(TEXT("reference picture: on, as given")) : FString(TEXT("reference picture: off, as given; text-to-model")));
+		}
+		else
+		{
+			bOn = Out.Family == TEXT("P2") || (Out.Use != TEXT("background") && Out.Use != TEXT("miniature"));
+			Why.Add(bOn ? FString(TEXT("reference picture: made first, so the shape is pinned before the 3D is paid for and the visual check has a reference"))
+				: FString(TEXT("reference picture: off for a background or miniature piece; text-to-model")));
+		}
+		if (!bOn)
+		{
+			return true;
+		}
+		Out.bReferenceFirst = true;
+		Out.ReferenceSource = TEXT("tripo");
+		FString Model = TEXT("chat_image_2.5_flare");
+		FString Note;
+		if (!Brief.ImageModel.TrimStartAndEnd().IsEmpty() && !ImageModelFromName(Brief.ImageModel, Model, Note))
+		{
+			OutError = Note;
+			return false;
+		}
+		Out.ImageModel = Model;
+		Why.Add(Brief.ImageModel.TrimStartAndEnd().IsEmpty() ? FString::Printf(TEXT("image model: %s, the quick chat_image tier (chat_image_2.5_sunburst is the most faithful)"), *Model)
+			: FString::Printf(TEXT("image model: %s%s%s"), *Model, Note.IsEmpty() ? TEXT(", as given") : TEXT(" "), *Note));
+		const bool bBig = Out.Use == TEXT("hero_prop") || Out.Use == TEXT("vehicle") || Out.TextureQuality == TEXT("extreme");
+		FString Quality = Brief.ImageQuality.TrimStartAndEnd().ToLower();
+		if (!Quality.IsEmpty())
+		{
+			if (!ImageModelTakesQuality(Model, Quality))
+			{
+				OutError = Model.StartsWith(TEXT("chat_image_2.5")) ? FString(TEXT("image_quality is low, medium, high, xhigh or max."))
+					: Model == TEXT("chat_image_2") ? FString(TEXT("chat_image_2 takes image_quality low, medium or high."))
+					: FString::Printf(TEXT("%s takes no image_quality; only the chat_image models do."), *Model);
+				return false;
+			}
+		}
+		else if (ImageModelTakesQuality(Model, TEXT("high")))
+		{
+			Quality = Out.Platform == TEXT("mobile") ? TEXT("medium") : TEXT("high");
+		}
+		FString Size = Brief.ImageSize.TrimStartAndEnd();
+		if (Size.IsEmpty())
+		{
+			Size = Model.StartsWith(TEXT("chat_image")) ? FString(bBig ? TEXT("2048x2048") : TEXT("1024x1024")) : Model.StartsWith(TEXT("seedream")) ? FString(TEXT("2K")) : FString();
+		}
+		if (!ImageSizeValid(Model, Size, OutError))
+		{
+			return false;
+		}
+		FString Background = Brief.ImageBackground.TrimStartAndEnd().ToLower();
+		if (!Background.IsEmpty() && Background != TEXT("auto") && Background != TEXT("opaque") && Background != TEXT("transparent"))
+		{
+			OutError = TEXT("image_background is auto, opaque or transparent.");
+			return false;
+		}
+		if (ImageModelTakesBackground(Model))
+		{
+			Background = Background.IsEmpty() ? FString(TEXT("transparent")) : Background;
+		}
+		else if (Background == TEXT("transparent"))
+		{
+			OutError = FString::Printf(TEXT("A transparent background is the chat_image_2.5 models'; %s draws one."), *Model);
+			return false;
+		}
+		else
+		{
+			Background.Reset();
+		}
+		FString Template = Brief.ImageTemplate.TrimStartAndEnd().ToLower();
+		if (Template == TEXT("none"))
+		{
+			Template.Reset();
+		}
+		else if (Template.IsEmpty())
+		{
+			Template = TemplateForUse(Out.Use, Brief.Prompt.ToLower());
+		}
+		else if (Template != TEXT("asset_extraction") && Template != TEXT("character_completion") && Template != TEXT("t_pose") && Template != TEXT("variants") && Template != TEXT("figure"))
+		{
+			OutError = TEXT("image_template is asset_extraction, character_completion, t_pose, variants, figure or none.");
+			return false;
+		}
+		Out.ImageQuality = Quality;
+		Out.ImageSize = Size;
+		Out.ImageBackground = Background;
+		Out.ImageTemplate = Template;
+		const FString Negative = Out.NegativePrompt.IsEmpty() ? FString(DefaultNegative) : Out.NegativePrompt;
+		const FString View = Out.Use == TEXT("creature") ? FString(TEXT(", full body, side three-quarter view"))
+			: FString(TEXT(", single isolated object, entire object in frame, three-quarter front view, centred"));
+		Out.ImagePrompt = Brief.Prompt.TrimStartAndEnd() + View + TEXT(", even neutral lighting, no cast shadows, no ground plane, no text")
+			+ (Background.IsEmpty() ? TEXT(", plain light-grey background") : TEXT("")) + TEXT(" --no ") + Negative;
+		Why.Add(FString::Printf(TEXT("picture: %s%s%s, %s%s%s, PNG"), *Model, Quality.IsEmpty() ? TEXT("") : TEXT(" "), *Quality, Size.IsEmpty() ? TEXT("the model's own size") : *Size,
+			Background.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(", %s background"), *Background), Template.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(", template %s"), *Template)));
+		const TOptional<bool> Review = Switch(Brief.ReviewReference);
+		if (!IsAuto(Brief.ReviewReference) && !Review.IsSet())
+		{
+			OutError = TEXT("review_reference is auto, on or off.");
+			return false;
+		}
+		Out.bReviewReference = Review.IsSet() ? Review.GetValue()
+			: Out.Use == TEXT("hero_prop") || Out.Use == TEXT("character") || Out.Use == TEXT("vehicle") || Out.Use == TEXT("weapon");
+		Why.Add(Out.bReviewReference ? FString(TEXT("review: the picture is approved and paid for first; the 3D generation is asked for once you have seen it"))
+			: FString(TEXT("review: one approval for the picture and the 3D generation")));
+		Out.Input = TEXT("image");
+		if (!bHi)
+		{
+			Out.Endpoint = TEXT("/generation/image-to-model");
+			Why.Add(TEXT("the model is made from the picture's task (image-to-model, the picture's colours kept)"));
+		}
+		return true;
+	}
+
+	/** Hi3D's plan: the shared choices (use, platform, size, textures, Nanite) as Tripo's H3.1 would make them, then Hi3D's own. */
+	static bool ClassifyHi3D(const FHyperAIModelBrief& Brief, const FString& ProviderWhy, FHyperAIModelPlan& Out, FString& OutError)
+	{
+		if (Brief.Topology.TrimStartAndEnd().ToLower().StartsWith(TEXT("quad")))
+		{
+			OutError = TEXT("Hi3D makes triangles; quads are Tripo's (provider tripo).");
+			return false;
+		}
+		if (Switch(Brief.Parts).Get(false) || Switch(Brief.SmartLowPoly).Get(false) || !Brief.GeometryQuality.TrimStartAndEnd().IsEmpty())
+		{
+			OutError = TEXT("parts, smart_low_poly and geometry_quality are Tripo's options (provider tripo).");
+			return false;
+		}
+		if (!Brief.ViewEdits.IsEmpty() || !Brief.MultiviewTaskId.TrimStartAndEnd().IsEmpty())
+		{
+			OutError = TEXT("view_edits and multiview_task_id are Tripo's; Hi3D takes views as multiview_images.");
+			return false;
+		}
+		FHyperAIModelBrief Base = Brief;
+		Base.Provider = TEXT("tripo");
+		Base.Model = TEXT("H3.1");
+		Base.FaceLimit = 0;
+		Base.Topology = TEXT("tris");
+		Base.Parts = TEXT("off");
+		Base.SmartLowPoly = TEXT("off");
+		Base.Resolution.Reset();
+		FHyperAIModelPlan Shared;
+		if (!ClassifyTripo(Base, Shared, OutError))
+		{
+			return false;
+		}
+		Out = FHyperAIModelPlan();
+		TArray<FString>& Why = Out.Reasons;
+		Why.Add(ProviderWhy);
+		for (const FString& Line : Shared.Reasons)
+		{
+			if (Line.StartsWith(TEXT("use:")) || Line.StartsWith(TEXT("size:")) || Line.StartsWith(TEXT("faces quartered")) || Line.StartsWith(TEXT("faces halved")))
+			{
+				Why.Add(Line);
+			}
+		}
+		Out.Provider = TEXT("hi3d");
+		Out.Family = TEXT("Hi3D");
+		Out.Use = Shared.Use;
+		Out.Platform = Shared.Platform;
+		Out.SizeMeters = Shared.SizeMeters;
+		Out.TexelDensity = Shared.TexelDensity;
+		Out.Collision = Shared.Collision;
+		Out.bNanite = Shared.bNanite;
+		Out.Input = Shared.Input;
+		Out.NegativePrompt = Shared.NegativePrompt;
+		Out.Endpoint = Hi3DSubmitPath;
+		const FString Words = Brief.Prompt.ToLower();
+
+		// Model and resolution.
+		const FString GivenModel = Brief.Model.TrimStartAndEnd().ToLower();
+		if (!GivenModel.IsEmpty() && !Hi3DIsModel(GivenModel))
+		{
+			OutError = FString::Printf(TEXT("model is one of Hi3D's: %s."), *FString::Join(Hi3DModels(), TEXT(", ")));
+			return false;
+		}
+		Out.Model = !GivenModel.IsEmpty() ? GivenModel : AsksPortrait(Words) ? FString(Hi3DDefaultPortrait) : FString(Hi3DDefaultModel);
+		Why.Add(!GivenModel.IsEmpty() ? FString::Printf(TEXT("model: %s, as given"), *Out.Model)
+			: Hi3DIsPortrait(Out.Model) ? FString::Printf(TEXT("model: %s, Hi3D's portrait model for a head or bust"), *Out.Model)
+			: FString::Printf(TEXT("model: %s (Ultra3D), Hi3D's most detailed"), *Out.Model));
+		const TArray<FString> Resolutions = Hi3DResolutions(Out.Model);
+		const FString GivenResolution = Brief.Resolution.TrimStartAndEnd().ToLower();
+		if (!GivenResolution.IsEmpty())
+		{
+			if (!Resolutions.Contains(GivenResolution))
+			{
+				OutError = FString::Printf(TEXT("%s takes resolution %s."), *Out.Model, *FString::Join(Resolutions, TEXT(" or ")));
+				return false;
+			}
+			Out.Resolution = GivenResolution;
+			Why.Add(FString::Printf(TEXT("resolution: %s, as given"), *Out.Resolution));
+		}
+		else if (Out.Model == Hi3DDefaultModel)
+		{
+			const bool bMaster = HasWord(Words, {TEXT("extreme"), TEXT("master")}) || Brief.TextureQuality.TrimStartAndEnd().ToLower() == TEXT("extreme");
+			Out.Resolution = bMaster ? TEXT("2048master") : TEXT("2048quality");
+			Why.Add(bMaster ? FString(TEXT("resolution: 2048master, for an extreme or master brief (up to 5,000,000 faces)")) : FString(TEXT("resolution: 2048quality, v3.0's default")));
+		}
+		else
+		{
+			Out.Resolution = Resolutions.Last();
+			Why.Add(FString::Printf(TEXT("resolution: %s, the model's finest"), *Out.Resolution));
+		}
+
+		// Textures and PBR.
+		const FString Tier = Brief.TextureQuality.TrimStartAndEnd().ToLower();
+		Out.TextureQuality = Tier == TEXT("none") ? FString(TEXT("none")) : Shared.TextureQuality;
+		const TOptional<bool> PbrChoice = Switch(Brief.Pbr);
+		if (PbrChoice.Get(false) && !Hi3DSupportsPbr(Out.Model))
+		{
+			OutError = FString::Printf(TEXT("%s has no PBR maps; v2.0, v2.1 and v3.0 do."), *Out.Model);
+			return false;
+		}
+		Out.bPbr = Out.TextureQuality != TEXT("none") && Hi3DSupportsPbr(Out.Model) && PbrChoice.Get(true);
+		Why.Add(Out.TextureQuality == TEXT("none") ? FString(TEXT("textures: none, geometry only (request type 1)"))
+			: FString::Printf(TEXT("textures: Hi3D's own, made with the geometry%s"), Out.bPbr ? TEXT(", with PBR maps into an ORM material") : TEXT(", no PBR")));
+
+		// Faces: Hi3D makes 100,000 at least.
+		const int32 Most = Hi3DMaxFacesFor(Out.Resolution);
+		if (Brief.FaceLimit > 0 && (Brief.FaceLimit < MinFaces || Brief.FaceLimit > Most))
+		{
+			OutError = FString::Printf(TEXT("face_limit %d is outside Hi3D's reach at %s: up to %d (and 100,000 at least, smaller budgets reduced in the editor)."),
+				Brief.FaceLimit, *Out.Resolution, Most);
+			return false;
+		}
+		const int32 Budget = Brief.FaceLimit > 0 ? Brief.FaceLimit : Shared.FaceLimit;
+		Out.MinFaces = MinFaces;
+		Out.MaxFaces = Most;
+		if (Out.bNanite && Brief.FaceLimit <= 0)
+		{
+			Out.ProviderFaces = FMath::Min(Hi3DRecommendedFaces(Out.Resolution), Most);
+			Out.FaceLimit = Out.ProviderFaces;
+			Why.Add(FString::Printf(TEXT("faces: %d, Hi3D's own count at %s; a Nanite piece keeps the dense mesh"), Out.ProviderFaces, *Out.Resolution));
+		}
+		else if (Budget < Hi3DMinFaces)
+		{
+			Out.ProviderFaces = Hi3DMinFaces;
+			Out.FaceLimit = Budget;
+			Out.bLocalReduce = true;
+			Why.Add(FString::Printf(TEXT("faces: made at 100,000 (Hi3D's least), then reduced in the editor for free to the budget of %d triangles"), Budget));
+		}
+		else
+		{
+			Out.ProviderFaces = FMath::Min(Budget, Most);
+			Out.FaceLimit = Out.ProviderFaces;
+			Why.Add(FString::Printf(TEXT("faces: %d%s"), Out.FaceLimit, Brief.FaceLimit > 0 ? TEXT(", as given") : TEXT(", the use's budget")));
+		}
+		Why.Add(Out.bNanite ? FString(TEXT("Nanite: on")) : FString(TEXT("Nanite: off for this use")));
+		if (!PlanReference(Brief, Out, OutError))
+		{
+			return false;
+		}
+		Out.EstimatedCost = GenerationPrice(Out, &Out.PriceLines);
+		Out.Credits = Hi3DCredits(Hi3DPrice(Out.Model, Out.Resolution, Out.TextureQuality == TEXT("none") ? 1 : 3, Out.bPbr));
+
+		// The form as it will go, pictures as placeholders.
+		TArray<FString> Images;
+		const bool bViews = Brief.MultiviewImages.Num() > 0;
+		if (bViews)
+		{
+			for (const FString& View : Hi3DViewOrder(Brief.MultiviewImages))
+			{
+				Images.Add(View.IsEmpty() ? FString() : TEXT("<view>"));
+			}
+		}
+		else
+		{
+			Images.Add(Out.bReferenceFirst ? TEXT("<reference picture>") : TEXT("<image>"));
+		}
+		TArray<TPair<FString, FString>> Text, Files;
+		Hi3DFields(Hi3DRequestFromPlan(Out, Images, bViews), Text, Files);
+		const TSharedRef<FJsonObject> Form = MakeShared<FJsonObject>();
+		for (const TPair<FString, FString>& Pair : Text)
+		{
+			Form->SetStringField(Pair.Key, Pair.Value);
+		}
+		for (const TPair<FString, FString>& Pair : Files)
+		{
+			Form->SetStringField(Pair.Key, Pair.Value);
+		}
+		if (Out.bReferenceFirst)
+		{
+			const TSharedRef<FJsonObject> Both = MakeShared<FJsonObject>();
+			Both->SetObjectField(TEXT("text_to_image"), TextToImageBody(Out));
+			Both->SetObjectField(TEXT("submit_task"), Form);
+			Out.RequestJson = HyperAIStudio::MeshGen::Private::JsonText(Both);
+		}
+		else
+		{
+			Out.RequestJson = HyperAIStudio::MeshGen::Private::JsonText(Form);
+		}
+		return true;
+	}
+
+	bool Classify(const FHyperAIModelBrief& Brief, FHyperAIModelPlan& Out, FString& OutError, const bool bRig)
+	{
+		FString ProviderWhy;
+		const FString Provider = ChooseProvider(Brief, bRig, ProviderWhy, OutError);
+		if (Provider.IsEmpty())
+		{
+			return false;
+		}
+		if (Provider == TEXT("hi3d"))
+		{
+			return ClassifyHi3D(Brief, ProviderWhy, Out, OutError);
+		}
+		if (!ClassifyTripo(Brief, Out, OutError))
+		{
+			return false;
+		}
+		Out.Provider = TEXT("tripo");
+		Out.ProviderFaces = Out.FaceLimit;
+		Out.Reasons.Insert(ProviderWhy, 0);
+		if (!PlanReference(Brief, Out, OutError))
+		{
+			return false;
+		}
+		if (Out.bReferenceFirst)
+		{
+			Out.PriceLines.Reset();
+			Out.EstimatedCost = GenerationPrice(Out, &Out.PriceLines);
+			Out.Credits = Credits(Out.EstimatedCost);
+			const TSharedRef<FJsonObject> Both = MakeShared<FJsonObject>();
+			Both->SetObjectField(TEXT("text_to_image"), TextToImageBody(Out));
+			Both->SetObjectField(TEXT("image_to_model"), GenerationBody(Out, Brief, {TEXT("<task_id of the reference picture>")}));
+			Out.RequestJson = HyperAIStudio::MeshGen::Private::JsonText(Both);
+		}
+		return true;
+	}
+
+	void UseImageGenReference(FHyperAIModelPlan& Plan)
+	{
+		FHyperAIStudioImageModelSettings Model;
+		if (!Plan.bReferenceFirst || !ReferenceImageModel(Model))
+		{
+			return;
+		}
+		Plan.ReferenceSource = TEXT("imagegen");
+		Plan.ImageModel = Model.Id;
+		Plan.ImageQuality.Reset();
+		Plan.ImageSize.Reset();
+		Plan.ImageBackground.Reset();
+		Plan.ImageTemplate.Reset();
+		Plan.bReviewReference = false;
+		Plan.Reasons.Add(FString::Printf(TEXT("picture: no Tripo key, so HyperAI's image generation (%s) makes it, in the same approval as the 3D"), *Model.Label));
+		Plan.PriceLines.Reset();
+		Plan.EstimatedCost = GenerationPrice(Plan, &Plan.PriceLines);
 	}
 
 	FCheckTargets TargetsForUse(const FString& Use, const FString& Platform, const float SizeMeters, const int32 FaceLimit, const FString& Topology)
@@ -688,7 +1454,8 @@ namespace HyperAIStudio::MeshGen::Creator
 		return Json;
 	}
 
-	TSharedRef<FJsonObject> TextureBody(const FString& Input, const FString& Quality, const bool bPbr, const TArray<FString>& PartNames, const FString& Prompt)
+	TSharedRef<FJsonObject> TextureBody(const FString& Input, const FString& Quality, const bool bPbr, const TArray<FString>& PartNames, const FString& Prompt,
+		const FString& Image, const int32 Seed, const FString& Alignment)
 	{
 		const TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
 		Json->SetStringField(TEXT("input"), Input);
@@ -697,11 +1464,26 @@ namespace HyperAIStudio::MeshGen::Creator
 		Json->SetBoolField(TEXT("pbr"), bPbr);
 		Json->SetBoolField(TEXT("delight"), true);
 		Json->SetBoolField(TEXT("bake"), true);
-		if (!Prompt.TrimStartAndEnd().IsEmpty())
+		// texture_prompt takes one of text, image or images: the reference picture wins, as Tripo recommends for a task input.
+		if (!Image.IsEmpty())
+		{
+			const TSharedRef<FJsonObject> Guide = MakeShared<FJsonObject>();
+			Guide->SetStringField(TEXT("image"), Image);
+			Json->SetObjectField(TEXT("texture_prompt"), Guide);
+		}
+		else if (!Prompt.TrimStartAndEnd().IsEmpty())
 		{
 			const TSharedRef<FJsonObject> Guide = MakeShared<FJsonObject>();
 			Guide->SetStringField(TEXT("text"), Prompt.TrimStartAndEnd().Left(MaxPromptCharacters));
 			Json->SetObjectField(TEXT("texture_prompt"), Guide);
+		}
+		if (Seed > 0)
+		{
+			Json->SetNumberField(TEXT("texture_seed"), Seed);
+		}
+		if (!Alignment.IsEmpty())
+		{
+			Json->SetStringField(TEXT("texture_alignment"), Alignment);
 		}
 		if (!PartNames.IsEmpty())
 		{
@@ -802,16 +1584,34 @@ namespace HyperAIStudio::MeshGen::Creator
 		return Json;
 	}
 
-	TSharedRef<FJsonObject> RigBody(const FString& Input, const FString& Spec)
+	TSharedRef<FJsonObject> RigBody(const FString& Input, const FString& RigModel, const FString& RigType, const FString& Spec)
 	{
 		const TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
 		Json->SetStringField(TEXT("input"), Input);
-		// The v3.0 rig model is the one that knows Unreal's skeleton convention.
-		Json->SetStringField(TEXT("model"), RigModelV3);
-		Json->SetStringField(TEXT("rig_type"), TEXT("biped"));
-		Json->SetStringField(TEXT("spec"), Spec);
+		Json->SetStringField(TEXT("model"), RigModel);
+		Json->SetStringField(TEXT("rig_type"), RigType.IsEmpty() ? FString(TEXT("biped")) : RigType);
+		// spec (unreal: the UE Mannequin's bone names) is a biped's only.
+		if (!Spec.IsEmpty() && (RigType.IsEmpty() || RigType == TEXT("biped")))
+		{
+			Json->SetStringField(TEXT("spec"), Spec);
+		}
 		Json->SetStringField(TEXT("out_format"), TEXT("glb"));
 		return Json;
+	}
+
+	TSharedRef<FJsonObject> RigCheckBody(const FString& Input)
+	{
+		const TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+		Json->SetStringField(TEXT("input"), Input);
+		return Json;
+	}
+
+	void RigChoice(const FString& RigType, FString& OutModel, FString& OutSpec)
+	{
+		// The v3.0 rig model knows Unreal's humanoid skeleton; v2.5 rigs every other body Tripo recognises.
+		const bool bBiped = RigType.IsEmpty() || RigType == TEXT("biped");
+		OutModel = bBiped ? RigModelV3 : RigModelV25;
+		OutSpec = bBiped ? TEXT("unreal") : TEXT("");
 	}
 
 	// ---------------------------------------------------------------- prices
@@ -844,13 +1644,42 @@ namespace HyperAIStudio::MeshGen::Creator
 		// Parts come untextured; their texture is a task of its own.
 		const FString Tier = Plan.bParts ? FString(TEXT("none")) : Plan.TextureQuality;
 		float Total = 0.f;
+		if (Plan.bReferenceFirst)
+		{
+			if (Plan.ReferenceSource == TEXT("imagegen"))
+			{
+				const float USD = ReferenceImagePrice(Plan.ImageModel);
+				Total += USD;
+				if (OutLines)
+				{
+					OutLines->Add(FString::Printf(TEXT("reference picture (HyperAI image generation, %s): $%.2f"), *Plan.ImageModel, USD));
+				}
+			}
+			else
+			{
+				const FString Tier_ = ImageSizeTier(Plan.ImageSize);
+				Total += Line(FString::Printf(TEXT("reference picture (%s%s%s, %s)"), *Plan.ImageModel, Plan.ImageQuality.IsEmpty() ? TEXT("") : TEXT(" "), *Plan.ImageQuality,
+					Tier_ == TEXT("1k") ? TEXT("up to 1K") : Tier_ == TEXT("2k") ? TEXT("2K") : TEXT("4K")), ImagePrice(Plan.ImageModel, Plan.ImageQuality, Plan.ImageSize));
+			}
+		}
+		if (Plan.Provider == TEXT("hi3d"))
+		{
+			const int32 Type = Plan.TextureQuality == TEXT("none") ? 1 : 3;
+			const float USD = Hi3DPrice(Plan.Model, Plan.Resolution, Type, Plan.bPbr);
+			if (OutLines)
+			{
+				OutLines->Add(FString::Printf(TEXT("Hi3D %s at %s, %s: %d Hi3D credits ($%.2f)"), *Plan.Model, *Plan.Resolution,
+					Type == 1 ? TEXT("geometry only") : Plan.bPbr ? TEXT("textured with PBR") : TEXT("textured"), Hi3DCredits(USD), USD));
+			}
+			return Total + USD;
+		}
 		if (Plan.bMakeViews)
 		{
 			Total += Line(TEXT("four views from the picture (image-to-multiview)"), Price(TEXT("image_to_multiview")));
 		}
 		if (!Plan.ViewEdits.IsEmpty())
 		{
-			Total += Line(FString::Printf(TEXT("view edits (edit-multiview, %d)"), Plan.ViewEdits.Num()), Price(TEXT("edit_multiview")));
+			Total += Line(FString::Printf(TEXT("view edits (edit-multiview, %d at 5 credits an edited view)"), Plan.ViewEdits.Num()), Price(TEXT("edit_multiview")) * Plan.ViewEdits.Num());
 		}
 		if (Plan.Family == TEXT("P2"))
 		{
@@ -927,7 +1756,7 @@ namespace HyperAIStudio::MeshGen::Creator
 	TArray<FString> LocalFixesFor(const FHyperAIModelCheckReport& Report)
 	{
 		// The order matters: bits go before holes are filled, orientation before normals, geometry before pivot and scale.
-		static const TCHAR* const Order[] = {TEXT("remove_bits"), TEXT("orient"), TEXT("fill_holes"), TEXT("normals"), TEXT("auto_uv"), TEXT("scale"), TEXT("pivot"),
+		static const TCHAR* const Order[] = {TEXT("remove_bits"), TEXT("simplify"), TEXT("orient"), TEXT("fill_holes"), TEXT("normals"), TEXT("auto_uv"), TEXT("scale"), TEXT("pivot"),
 			TEXT("collision"), TEXT("lightmap_uv"), TEXT("nanite"), TEXT("materials")};
 		TSet<FString> Wanted;
 		for (const FHyperAIModelCheck& Check : Report.Checks)
@@ -964,12 +1793,13 @@ namespace HyperAIStudio::MeshGen::Creator
 		const bool bQuad = Context.Plan.Family.IsEmpty() ? false : Context.Plan.bQuad;
 		auto Tried = [&Context](const TCHAR* Id) { return Context.Tried.FindRef(Id); };
 		auto Add = [&Candidates](FPaidFix&& Fix) { Candidates.Add(MoveTemp(Fix)); };
+		const bool bTripo = Context.bTripo;
 
 		// Faces over budget or the wrong topology: retopology to the budget, unwrapping UVs in the same task at no extra price.
 		const bool bFaces = Failing(Report, {TEXT("faces")});
 		const bool bBroken = Failing(Report, {TEXT("non_manifold"), TEXT("holes"), TEXT("open_edges"), TEXT("flipped")});
 		const bool bUv = Failing(Report, {TEXT("uv_overlap"), TEXT("uv_present"), TEXT("uv_range")});
-		if ((bFaces || bBroken) && Tried(TEXT("retopo")) < 1)
+		if (bTripo && (bFaces || bBroken) && Tried(TEXT("retopo")) < 1)
 		{
 			const int32 Budget = Context.Plan.FaceLimit > 0 ? Context.Plan.FaceLimit : bQuad ? RetopoMaxQuads : RetopoMaxTris;
 			FPaidFix Fix;
@@ -983,7 +1813,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			Add(MoveTemp(Fix));
 		}
 		// UVs that overlap with textures on them: Smart UV re-unwraps and re-bakes; it takes 80,000 triangles at most.
-		if (bUv && Context.bHasTextures && Report.Triangles <= SmartUvMaxTris && Tried(TEXT("smart_uv")) < 1)
+		if (bTripo && bUv && Context.bHasTextures && Report.Triangles <= SmartUvMaxTris && Tried(TEXT("smart_uv")) < 1)
 		{
 			FPaidFix Fix;
 			Fix.Id = TEXT("smart_uv");
@@ -994,25 +1824,29 @@ namespace HyperAIStudio::MeshGen::Creator
 			Fix.Clears = FailingIds(Report, {TEXT("uv_overlap"), TEXT("uv_present"), TEXT("uv_range")});
 			Add(MoveTemp(Fix));
 		}
-		// Missing or weak textures: texture again, a tier up after the first try.
-		if (Failing(Report, {TEXT("textures"), TEXT("pbr"), TEXT("normal_map"), TEXT("roughness_metal")}) && Tried(TEXT("texture")) < 2)
+		// Missing or weak textures: texture again; the first retry changes only the seed (same tier, same price), the next goes a tier up.
+		if (bTripo && Failing(Report, {TEXT("textures"), TEXT("pbr"), TEXT("normal_map"), TEXT("roughness_metal")}) && Tried(TEXT("texture")) < 3)
 		{
 			FString Tier = Context.Plan.TextureQuality.IsEmpty() || Context.Plan.TextureQuality == TEXT("none") ? FString(TEXT("standard")) : Context.Plan.TextureQuality;
-			if (Tried(TEXT("texture")) > 0 && Tier != TEXT("extreme"))
+			if (Tried(TEXT("texture")) > 1 && Tier != TEXT("extreme"))
 			{
 				Tier = TierUp(Tier);
 			}
+			const int32 Seed = Tried(TEXT("texture")) > 0 ? 1 + (FMath::Rand() % 100000) : 0;
+			const bool bImage = !Context.ReferenceInput.IsEmpty();
 			FPaidFix Fix;
 			Fix.Id = TEXT("texture");
-			Fix.What = FString::Printf(TEXT("Texture it again with Tripo (%s, PBR)"), *Tier);
+			Fix.What = FString::Printf(TEXT("Texture it again with Tripo (%s, PBR%s%s)"), *Tier, bImage ? TEXT(", from the reference picture") : TEXT(""),
+				Seed > 0 ? TEXT(", a new texture seed") : TEXT(""));
 			Fix.Endpoints = {TEXT("/models/texture")};
-			Fix.Bodies = {TextureBody(Input, Tier, /*bPbr=*/true, {}, FString())};
+			Fix.Bodies = {TextureBody(Input, Tier, /*bPbr=*/true, {}, FString(), Context.ReferenceInput, Seed,
+				bImage ? FString(TEXT("original_image")) : FString(TEXT("geometry")))};
 			Fix.PriceUSD = Price(TexturePriceKey(Tier));
 			Fix.Clears = FailingIds(Report, {TEXT("textures"), TEXT("pbr"), TEXT("normal_map"), TEXT("roughness_metal")});
 			Add(MoveTemp(Fix));
 		}
 		// Holes and broken parts the free hole fill and retopology left: segment, then cap (quick) or complete (AI).
-		if (bBroken && Tried(TEXT("retopo")) >= 1)
+		if (bTripo && bBroken && Tried(TEXT("retopo")) >= 1)
 		{
 			const bool bQuick = Tried(TEXT("quick_cap")) < 1;
 			if (bQuick || Tried(TEXT("complete")) < 1)
@@ -1030,7 +1864,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 		}
 		// A skeletal mesh is not reshaped in the editor: Tripo's convert moves its pivot and scale.
-		if (Context.bSkeletal && Failing(Report, {TEXT("pivot"), TEXT("scale")}) && Tried(TEXT("convert")) < 1)
+		if (bTripo && Context.bSkeletal && Failing(Report, {TEXT("pivot"), TEXT("scale")}) && Tried(TEXT("convert")) < 1)
 		{
 			FConvertOptions Options;
 			Options.Format = TEXT("FBX");
@@ -1054,7 +1888,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			Add(MoveTemp(Fix));
 		}
 		// The shape is wrong: only a new generation fixes that. It is the dearest, so it comes last.
-		if (Context.bCanRegenerate && Failing(Report, {TEXT("visual")}) && Tried(TEXT("regenerate")) < 2)
+		if (bTripo && Context.Provider == TEXT("tripo") && Context.bCanRegenerate && Failing(Report, {TEXT("visual")}) && Tried(TEXT("regenerate")) < 2)
 		{
 			FPaidFix Fix;
 			Fix.Id = TEXT("regenerate");
@@ -1062,6 +1896,46 @@ namespace HyperAIStudio::MeshGen::Creator
 			Fix.PriceUSD = GenerationPrice(Context.Plan);
 			Fix.Clears = FailingIds(Report, {TEXT("visual")});
 			Add(MoveTemp(Fix));
+		}
+
+		// A Hi3D model: Hi3D textures the current mesh again (texture only, v3.0 or v1.5), or makes it again a resolution up.
+		if (Context.Provider == TEXT("hi3d") && !Context.Hi3DImages.IsEmpty())
+		{
+			const FString PlanModel = Context.Plan.Model.IsEmpty() ? FString(Hi3DDefaultModel) : Context.Plan.Model;
+			if (Failing(Report, {TEXT("textures"), TEXT("pbr"), TEXT("normal_map"), TEXT("roughness_metal")}) && Tried(TEXT("hi3d_texture")) < 2)
+			{
+				FPaidFix Fix;
+				Fix.Id = TEXT("hi3d_texture");
+				Fix.Provider = TEXT("hi3d");
+				Fix.Hi3D.RequestType = 2;
+				Fix.Hi3D.Model = Hi3DCanTextureOnly(PlanModel) ? PlanModel : FString(Hi3DDefaultModel);
+				Fix.Hi3D.Resolution = Fix.Hi3D.Model == PlanModel ? Context.Plan.Resolution : Hi3DResolutions(Fix.Hi3D.Model)[0];
+				Fix.Hi3D.bPbr = Hi3DSupportsPbr(Fix.Hi3D.Model);
+				Fix.Hi3D.Images = Context.Hi3DImages;
+				Fix.Hi3D.bMultiview = Context.bHi3DMultiview;
+				Fix.What = FString::Printf(TEXT("Texture it again with Hi3D (%s, texture only on the current mesh%s)"), *Fix.Hi3D.Model, Fix.Hi3D.bPbr ? TEXT(", PBR") : TEXT(""));
+				Fix.Endpoints = {Hi3DSubmitPath};
+				Fix.PriceUSD = Hi3DTexturePrice(Fix.Hi3D.bPbr);
+				Fix.Clears = FailingIds(Report, {TEXT("textures"), TEXT("pbr"), TEXT("normal_map"), TEXT("roughness_metal")});
+				Add(MoveTemp(Fix));
+			}
+			if (Context.bCanRegenerate && Failing(Report, {TEXT("visual")}) && Tried(TEXT("hi3d_regenerate")) < 2)
+			{
+				const FString Up = Hi3DResolutionUp(PlanModel, Context.Plan.Resolution);
+				FPaidFix Fix;
+				Fix.Id = TEXT("hi3d_regenerate");
+				Fix.Provider = TEXT("hi3d");
+				Fix.Hi3D = Hi3DRequestFromPlan(Context.Plan, Context.Hi3DImages, Context.bHi3DMultiview);
+				Fix.Hi3D.Model = PlanModel;
+				Fix.Hi3D.Resolution = Up.IsEmpty() ? Context.Plan.Resolution : Up;
+				Fix.Hi3D.Faces = FMath::Clamp(Context.Plan.ProviderFaces, Hi3DMinFaces, Hi3DMaxFacesFor(Fix.Hi3D.Resolution));
+				Fix.What = FString::Printf(TEXT("Make it again with Hi3D %s at %s%s, the shape being wrong"), *PlanModel, *Fix.Hi3D.Resolution,
+					Up.IsEmpty() ? (Context.bHi3DMultiview ? TEXT(" from the views") : TEXT(" (already its finest)")) : TEXT(", a resolution up"));
+				Fix.Endpoints = {Hi3DSubmitPath};
+				Fix.PriceUSD = Hi3DPrice(PlanModel, Fix.Hi3D.Resolution, Fix.Hi3D.RequestType, Fix.Hi3D.bPbr);
+				Fix.Clears = FailingIds(Report, {TEXT("visual")});
+				Add(MoveTemp(Fix));
+			}
 		}
 
 		// Cheapest first; among equal prices, the one that clears most.
