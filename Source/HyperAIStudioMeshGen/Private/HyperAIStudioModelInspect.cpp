@@ -30,7 +30,9 @@
 #include "MeshBoundaryLoops.h"
 #include "MeshConversionOptions.h"
 #include "MeshDescription.h"
+#include "MeshConstraintsUtil.h"
 #include "MeshDescriptionToDynamicMesh.h"
+#include "MeshSimplification.h"
 #include "DynamicMeshToMeshDescription.h"
 #include "Misc/ObjectThumbnail.h"
 #include "Misc/PackageName.h"
@@ -665,6 +667,32 @@ namespace HyperAIStudio::MeshGen::Creator
 			return true;
 		}
 
+		/**
+		 * Quadric simplification to a triangle count, as Geometry Script's ApplySimplifyToTriangleCount does it: boundaries
+		 * kept from flipping, UV and normal seams allowed to collapse, bowties split first. Free, in the editor.
+		 */
+		template <typename SimplifierType>
+		void SimplifyMeshTo(FDynamicMesh3& Mesh, const int32 Triangles)
+		{
+			// A GLB splits its vertices along UV seams: welded first, so collapses close over the seams instead of opening them.
+			FMergeCoincidentMeshEdges Merge(&Mesh);
+			Merge.MergeVertexTolerance = FMath::Max(Mesh.GetBounds().DiagonalLength() * 1e-6, 1e-6);
+			Merge.Apply();
+			if (Mesh.HasAttributes())
+			{
+				Mesh.Attributes()->SplitAllBowties();
+			}
+			SimplifierType Simplifier(&Mesh);
+			Simplifier.DEBUG_CHECK_LEVEL = 0;
+			Simplifier.bAllowSeamCollapse = true;
+			Simplifier.SetEdgeFlipTolerance(1.e-5);
+			FMeshConstraints Constraints;
+			FMeshConstraintsUtil::ConstrainAllBoundariesAndSeams(Constraints, Mesh, EEdgeRefineFlags::NoFlip, EEdgeRefineFlags::NoConstraint, EEdgeRefineFlags::NoConstraint,
+				/*bAllowSeamSplits=*/true, /*bAllowSeamSmoothing=*/true, /*bAllowSeamCollapse=*/true);
+			Simplifier.SetExternalConstraints(MoveTemp(Constraints));
+			Simplifier.SimplifyToTriangleCount(Triangles);
+		}
+
 		/** Every triangle of the given welded components, as dynamic-mesh triangle ids. */
 		TArray<int32> TrianglesOf(const FWelded& Welded, const FTopology& Topology, const TSet<int32>& Components)
 		{
@@ -1067,6 +1095,7 @@ namespace HyperAIStudio::MeshGen::Creator
 		Targets.bPbr = Plan.bPbr;
 		Targets.bNanite = Plan.bNanite;
 		Targets.Collision = Plan.Collision;
+		Targets.bLocalReduce = Plan.bLocalReduce;
 		return Targets;
 	}
 
@@ -1119,7 +1148,9 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 			else if (Have > Targets.FaceLimit * 1.05)
 			{
-				Add(Out, TEXT("faces"), TEXT("fail"), Value, Expected, FString::Printf(TEXT("%d over the budget of %d."), Have - Targets.FaceLimit, Targets.FaceLimit), TEXT(""), TEXT("retopo"));
+				// A model made denser than its budget on purpose (Hi3D's 100,000-face floor) is reduced in the editor first, for free.
+				Add(Out, TEXT("faces"), TEXT("fail"), Value, Expected, FString::Printf(TEXT("%d over the budget of %d."), Have - Targets.FaceLimit, Targets.FaceLimit),
+					Targets.bLocalReduce && Static && !Targets.bQuad ? TEXT("simplify") : TEXT(""), TEXT("retopo"));
 			}
 			else if (Targets.MinFaces > 0 && Have < Targets.MinFaces)
 			{
@@ -1496,7 +1527,7 @@ namespace HyperAIStudio::MeshGen::Creator
 	bool ApplyLocalFixes(UObject& Object, const FCheckTargets& Targets, const TArray<FString>& Fixes, TArray<FString>& OutNotes, FString& OutError)
 	{
 		UStaticMesh* Static = Cast<UStaticMesh>(&Object);
-		static const TSet<FString> GeometryFixes = {TEXT("remove_bits"), TEXT("orient"), TEXT("fill_holes"), TEXT("normals"), TEXT("degenerate"), TEXT("auto_uv"),
+		static const TSet<FString> GeometryFixes = {TEXT("remove_bits"), TEXT("simplify"), TEXT("orient"), TEXT("fill_holes"), TEXT("normals"), TEXT("degenerate"), TEXT("auto_uv"),
 			TEXT("scale"), TEXT("pivot"), TEXT("upright")};
 		bool bGeometry = false;
 		for (const FString& Fix : Fixes)
@@ -1527,6 +1558,19 @@ namespace HyperAIStudio::MeshGen::Creator
 					Mesh.RemoveTriangle(Tid, /*bRemoveIsolatedVertices=*/true, /*bPreserveManifold=*/false);
 				}
 				OutNotes.Add(FString::Printf(TEXT("remove_bits: removed %d stray bit(s), %d triangles."), Small.Num(), Doomed.Num()));
+			}
+			if (Fixes.Contains(TEXT("simplify")) && Targets.FaceLimit > 0 && Mesh.TriangleCount() > Targets.FaceLimit)
+			{
+				const int32 From = Mesh.TriangleCount();
+				if (Mesh.HasAttributes() && Mesh.Attributes()->PrimaryNormals())
+				{
+					SimplifyMeshTo<FAttrMeshSimplification>(Mesh, Targets.FaceLimit);
+				}
+				else
+				{
+					SimplifyMeshTo<FQEMSimplification>(Mesh, Targets.FaceLimit);
+				}
+				OutNotes.Add(FString::Printf(TEXT("simplify: reduced from %d to %d triangles in the editor (quadric simplification, UVs carried), free."), From, Mesh.TriangleCount()));
 			}
 			if (Fixes.Contains(TEXT("degenerate")))
 			{

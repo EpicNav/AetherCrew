@@ -3,6 +3,7 @@
 #include "HyperAIStudioMeshGenJob.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Containers/Ticker.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformTime.h"
@@ -32,7 +33,13 @@ namespace HyperAIStudio::MeshGen::Private
 	FString Key(const FHyperAIStudioExternalServiceSettings& Service)
 	{
 		// The key stored in Settings > Agents first, then the environment variable.
-		return HyperAIStudio::Credentials::ReadKey(Service.ApiKeyVariable);
+		const FString Stored = HyperAIStudio::Credentials::ReadKey(Service.ApiKeyVariable);
+		if (Stored.IsEmpty() && Service.ApiKeyVariable == TEXT("HITEM3D_API_KEY"))
+		{
+			// Hi3D's client_id:client_secret, under the name HyperAI's own docs give it as well.
+			return FPlatformMisc::GetEnvironmentVariable(TEXT("HYPERAI_HI3D_KEY")).TrimStartAndEnd();
+		}
+		return Stored;
 	}
 
 	FString ProjectRelative(const FString& Path)
@@ -187,7 +194,35 @@ namespace HyperAIStudio::MeshGen::Private
 	}
 
 	void Send(const TSharedRef<FJob>& Job, const TCHAR* Verb, const FString& Url, const TMap<FString, FString>& Headers,
-		TArray<uint8> Body, FOnReply OnReply, const float TimeoutSeconds)
+		TArray<uint8> Body, FOnReply OnReply, const float TimeoutSeconds, const bool bRetry)
+	{
+		SendAttempt(Job, Verb, Url, Headers, MoveTemp(Body), MoveTemp(OnReply), TimeoutSeconds, bRetry, 0);
+	}
+
+	double RetryDelaySeconds(const int32 Attempt, const FString& RetryAfter, const FString& RateLimitReset)
+	{
+		// The server's word first (Retry-After in seconds, X-RateLimit-Reset as seconds or a Unix time), else 1, 2, 4... up to 32.
+		double Delay = FMath::Min(32.0, double(1 << FMath::Min(Attempt, 5)));
+		if (RetryAfter.IsNumeric())
+		{
+			Delay = FCString::Atod(*RetryAfter);
+		}
+		else if (RateLimitReset.IsNumeric())
+		{
+			const double Reset = FCString::Atod(*RateLimitReset);
+			Delay = Reset > 1e9 ? Reset - double(FDateTime::UtcNow().ToUnixTimestamp()) : Reset;
+		}
+		return FMath::Clamp(Delay, 0.0, 60.0) * RetryScale();
+	}
+
+	double& RetryScale()
+	{
+		static double Scale = 1.0;
+		return Scale;
+	}
+
+	void SendAttempt(const TSharedRef<FJob>& Job, const TCHAR* Verb, const FString& Url, const TMap<FString, FString>& Headers, TArray<uint8> Body, FOnReply OnReply,
+		const float TimeoutSeconds, const bool bRetry, const int32 Attempt)
 	{
 		const TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
 		Request->SetURL(Url);
@@ -197,13 +232,21 @@ namespace HyperAIStudio::MeshGen::Private
 		{
 			Request->SetHeader(Header.Key, Header.Value);
 		}
+		// Kept for a retry; a request that goes once gives its body up.
+		TArray<uint8> Again;
+		if (bRetry)
+		{
+			Again = Body;
+		}
 		if (!Body.IsEmpty())
 		{
 			Request->SetContent(MoveTemp(Body));
 		}
 		Job->bWaiting = true;
 		Job->Request = Request;
-		Request->OnProcessRequestComplete().BindLambda([Job, OnReply = MoveTemp(OnReply)](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnected)
+		const FString VerbText = Verb;
+		Request->OnProcessRequestComplete().BindLambda([Job, VerbText, Url, Headers, Again = MoveTemp(Again), OnReply = MoveTemp(OnReply), TimeoutSeconds, bRetry, Attempt]
+			(FHttpRequestPtr, FHttpResponsePtr Response, bool bConnected) mutable
 		{
 			Job->bWaiting = false;
 			Job->Request.Reset();
@@ -211,12 +254,42 @@ namespace HyperAIStudio::MeshGen::Private
 			{
 				return;
 			}
-			if (!bConnected || !Response.IsValid())
+			const int32 Code = bConnected && Response.IsValid() ? Response->GetResponseCode() : 0;
+			const FString ProviderCode = Code > 0 ? Field(ParseJson(Response->GetContent()), TEXT("code")) : FString();
+			// 429 and 5xx mean nothing was taken: send again. A lost answer is sent again only for a read; a create whose answer
+			// was lost may have made a task, so it is not sent blind.
+			const bool bConcurrency = Code == 429 && ProviderCode == TEXT("2000");
+			const bool bTransient = Code == 429 || Code >= 500 || (Code == 0 && VerbText == TEXT("GET"));
+			const int32 Most = bConcurrency ? 20 : 5;
+			if (bRetry && bTransient && Attempt + 1 < Most)
 			{
-				Fail(*Job, FString::Printf(TEXT("%s did not answer."), *Job->Service.Label));
+				const double Delay = RetryDelaySeconds(Attempt, Code > 0 ? Response->GetHeader(TEXT("Retry-After")) : FString(),
+					Code > 0 ? Response->GetHeader(TEXT("X-RateLimit-Reset")) : FString());
+				Job->Info.Diagnostic = bConcurrency ? FString::Printf(TEXT("Queued at %s (its concurrency limit); trying again in %.0f s."), *Job->Service.Label, Delay)
+					: FString::Printf(TEXT("%s answered %d; trying again in %.0f s (attempt %d of %d)."), *Job->Service.Label, Code, Delay, Attempt + 2, Most);
+				if (bConcurrency)
+				{
+					Job->Info.State = TEXT("queued");
+				}
+				Job->bWaiting = true;
+				FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Job, VerbText, Url, Headers, Again = MoveTemp(Again), OnReply = MoveTemp(OnReply), TimeoutSeconds, Attempt](float) mutable
+				{
+					Job->bWaiting = false;
+					if (Job->Phase != EPhase::Failed && Job->Phase != EPhase::Done)
+					{
+						SendAttempt(Job, *VerbText, Url, Headers, MoveTemp(Again), MoveTemp(OnReply), TimeoutSeconds, /*bRetry=*/true, Attempt + 1);
+					}
+					return false;
+				}), static_cast<float>(Delay));
 				return;
 			}
-			OnReply(*Job, Response->GetResponseCode(), Response->GetContent());
+			if (Code == 0)
+			{
+				Fail(*Job, VerbText == TEXT("GET") ? FString::Printf(TEXT("%s did not answer."), *Job->Service.Label)
+					: FString::Printf(TEXT("%s did not answer. If it took the task before the answer was lost, its usage shows it: check before asking again."), *Job->Service.Label));
+				return;
+			}
+			OnReply(*Job, Code, Response->GetContent());
 		});
 		Request->ProcessRequest();
 	}
@@ -244,9 +317,17 @@ namespace HyperAIStudio::MeshGen::Private
 			Message = Message.IsEmpty() ? Field(Json, Path) : Message;
 		}
 		const FString ProviderCode = Field(Json, TEXT("code"));
-		const FString Credits = Code == 402 || ProviderCode == TEXT("30010000") || ProviderCode == TEXT("2010")
-			? FString(TEXT(" The account is out of credits.")) : FString();
-		return FString::Printf(TEXT("%s answered %d%s%s%s"), *Job.Service.Label, Code, Message.IsEmpty() ? TEXT("") : TEXT(": "), *Message.Left(300), *Credits);
+		// Tripo's codes (developers.tripo3d.ai, read 31 October 2026), put into what to do; 1004 is its message alone.
+		const FString Advice = Code == 402 || ProviderCode == TEXT("30010000") || ProviderCode == TEXT("2010") || (Code == 403 && ProviderCode == TEXT("2010"))
+				? FString(TEXT(" The account is out of credits."))
+			: ProviderCode == TEXT("2008") ? FString(TEXT(" Tripo's content policy refused it: rewrite the prompt (or use another picture)."))
+			: ProviderCode == TEXT("2015") ? FString(TEXT(" That model version is retired at Tripo: choose a current one."))
+			: ProviderCode == TEXT("2018") ? FString(TEXT(" The model is too complex for this step: reduce it first (decimate), then try again."))
+			: ProviderCode == TEXT("2002") || ProviderCode == TEXT("2003") || ProviderCode == TEXT("2004") ? FString(TEXT(" Tripo could not take the file (format or size)."))
+			: ProviderCode == TEXT("2") || ProviderCode == TEXT("1002") ? FString(TEXT(" Tripo refused the key."))
+			: FString();
+		return FString::Printf(TEXT("%s answered %d%s%s%s%s"), *Job.Service.Label, Code, ProviderCode.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (code %s)"), *ProviderCode),
+			Message.IsEmpty() ? TEXT("") : TEXT(": "), *Message.Left(300), *Advice);
 	}
 
 	FString AssetNameFor(const FString& Name, const FString& Prompt, const TCHAR* Prefix)
@@ -330,7 +411,14 @@ namespace HyperAIStudio::MeshGen::Private
 		{
 			return EHyperAIStudioAsyncJobPoll::Running;
 		}
-		Job->Kind == EKind::Generate ? StepGenerate(Job) : StepCharacter(Job);
+		if (Job->Kind == EKind::Generate)
+		{
+			StepGenerate(Job);
+		}
+		else if (Job->Kind != EKind::Model || Job->Service.Id != TEXT("hi3d") || !StepHi3D(Job))
+		{
+			StepCharacter(Job);
+		}
 		return EHyperAIStudioAsyncJobPoll::Running;
 	}
 

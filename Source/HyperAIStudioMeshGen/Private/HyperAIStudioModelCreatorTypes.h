@@ -45,8 +45,24 @@ struct FHyperAIModelBrief
 	/** The real-world size in metres: the height of a character, creature or tree, otherwise the longest side. 0 uses the use's default. */
 	UPROPERTY() float SizeMeters = 0.f;
 
-	/** H3.1 (high detail), P2 (Smart Poly) or a full Tripo model id; empty lets the classification choose. */
+	/**
+	 * auto (the default), tripo or hi3d. Hi3D (Hitem3D's Sparc3D/Ultra3D models) makes the densest, most faithful shape
+	 * from a picture or views; auto chooses it for a picture of a hero prop, an environment piece, a vehicle, a bust or
+	 * portrait, or a brief that asks for photoreal, intricate, max detail or sculpted, and Tripo for words alone, a face
+	 * budget under 100,000, quads, parts, a rig, view edits, or mobile and VR. Hi3D from words alone makes a reference
+	 * picture first with HyperAI's image generation, priced in the same approval.
+	 */
+	UPROPERTY() FString Provider;
+	/**
+	 * Tripo: H3.1 (high detail), P2 (Smart Poly) or a full model id. Hi3D: hi3dv3.0 (the default), hitem3dv2.1,
+	 * hitem3dv2.0, hitem3dv1.5, or a portrait model (scene-portraitv2.1, v2.0, v1.5). Empty lets the classification choose.
+	 */
 	UPROPERTY() FString Model;
+	/**
+	 * Hi3D only: the resolution its model takes (v3.0 2048quality or 2048master; v2.1 1536fast or 1536pro; v2.0 1536 or
+	 * 1536pro; v1.5 512, 1024, 1536 or 1536pro). Empty chooses: 2048quality, or 2048master for an extreme or master brief.
+	 */
+	UPROPERTY() FString Resolution;
 	/** The face budget: triangles, or quads when Topology is quads. 0 lets the classification choose. */
 	UPROPERTY() int32 FaceLimit = 0;
 	/** tris or quads; empty chooses. */
@@ -63,6 +79,29 @@ struct FHyperAIModelBrief
 	UPROPERTY() FString GeometryQuality;
 	/** A seed for the geometry, to make the same shape again or (changed) a different one; 0 is random. */
 	UPROPERTY() int32 Seed = 0;
+
+	/**
+	 * auto, on or off: make a reference picture first with Tripo's text-to-image and the model from it (image-to-model).
+	 * auto: on for words alone except background and miniature pieces (always for P2); off when a picture or views are
+	 * given. Hi3D from words alone always does.
+	 */
+	UPROPERTY() FString ReferenceImage;
+	/**
+	 * The picture's model, as Tripo names it or as people say it ("gpt-image-2.5-sunburn" is chat_image_2.5_sunburst):
+	 * chat_image_2.5_flare (the default, quick), chat_image_2.5_sunburst (most faithful), chat_image_2, banana2,
+	 * banana_pro, banana, seedream_v5, seedream_v4.
+	 */
+	UPROPERTY() FString ImageModel;
+	/** low, medium, high (the default), and on the 2.5 models xhigh or max. Only chat_image models take it. */
+	UPROPERTY() FString ImageQuality;
+	/** chat_image: 1024x1024 (the default), 2048x2048, 1536x1024, auto or WxH; seedream: 2K, 3K or 4K. */
+	UPROPERTY() FString ImageSize;
+	/** auto, opaque or transparent (the default on the 2.5 models, sent as PNG). */
+	UPROPERTY() FString ImageBackground;
+	/** asset_extraction (props), t_pose (characters), character_completion, variants, figure, or none; chosen by the use when empty. */
+	UPROPERTY() FString ImageTemplate;
+	/** auto, on or off: approve and look at the picture before the 3D generation is asked for. auto: on for hero props, characters, vehicles and weapons. */
+	UPROPERTY() FString ReviewReference;
 };
 
 /** The choices hyper_model_create made from a brief, with the reason for each, and what the generation costs. */
@@ -71,13 +110,39 @@ struct FHyperAIModelPlan
 {
 	GENERATED_BODY()
 
-	/** H3.1 or P2. */
+	/** tripo or hi3d: who makes it. */
+	UPROPERTY() FString Provider;
+	/** H3.1 or P2 (Tripo), or Hi3D. */
 	UPROPERTY() FString Family;
-	/** The Tripo model id sent: v3.1-20260211 or P2-20260801. */
+	/** The model id sent: Tripo's v3.1-20260211 or P2-20260801, or Hi3D's, such as hi3dv3.0. */
 	UPROPERTY() FString Model;
+	/** Hi3D's resolution, such as 2048quality; empty for Tripo. */
+	UPROPERTY() FString Resolution;
+	/**
+	 * The faces asked of the provider. Tripo: the budget. Hi3D: 100,000 at least, so a smaller budget is generated at
+	 * 100,000 and then reduced in the editor for free (bLocalReduce); a Nanite piece keeps Hi3D's dense mesh.
+	 */
+	UPROPERTY() int32 ProviderFaces = 0;
+	UPROPERTY() bool bLocalReduce = false;
+	/**
+	 * A reference picture is made first and the model is made from it: Tripo's text-to-image (ReferenceSource tripo), or,
+	 * for Hi3D without a Tripo key, HyperAI's own image generation (imagegen). Then the generation is image-to-model.
+	 */
+	UPROPERTY() bool bReferenceFirst = false;
+	UPROPERTY() FString ReferenceSource;
+	/** Tripo's image model (such as chat_image_2.5_flare), or HyperAI's image model id for imagegen. */
+	UPROPERTY() FString ImageModel;
+	UPROPERTY() FString ImageQuality;
+	UPROPERTY() FString ImageSize;
+	UPROPERTY() FString ImageBackground;
+	UPROPERTY() FString ImageTemplate;
+	/** The words sent for the picture, negatives after --no. */
+	UPROPERTY() FString ImagePrompt;
+	/** The picture is approved and paid for first; the job then holds (awaiting_reference_review) until the generation is approved. */
+	UPROPERTY() bool bReviewReference = false;
 	/** text, image or multiview. */
 	UPROPERTY() FString Input;
-	/** The v3 endpoint the generation goes to, such as /generation/text-to-model. */
+	/** Where the generation goes: Tripo's v3 endpoint, such as /generation/text-to-model, or Hi3D's /open-api/v1/submit-task. */
 	UPROPERTY() FString Endpoint;
 	/** Views made from the picture first (image-to-multiview), and the edits made to them (edit-multiview), as "view: prompt". */
 	UPROPERTY() bool bMakeViews = false;
@@ -109,13 +174,16 @@ struct FHyperAIModelPlan
 	UPROPERTY() FString NegativePrompt;
 	/** One line a choice: what was chosen and why (from the use, the platform, the prompt's words, or an override). */
 	UPROPERTY() TArray<FString> Reasons;
-	/** Tripo credits the generation costs, add-ons included, and the follow-up texture task a parts model needs. */
+	/**
+	 * The provider's credits the generation costs: Tripo's at $0.01 (add-ons and a parts model's texture task included),
+	 * or Hi3D's at $0.02. A reference picture is priced in USD beside them, in PriceLines and EstimatedCost.
+	 */
 	UPROPERTY() int32 Credits = 0;
 	/** The same in USD, from MeshTaskPrices. */
 	UPROPERTY() float EstimatedCost = 0.f;
 	/** Each priced part of the generation, as "what: credits". */
 	UPROPERTY() TArray<FString> PriceLines;
-	/** The generation's request body as it will be sent (image inputs show as file tokens to come). */
+	/** The generation's request as it will be sent (Tripo's pictures show as file tokens to come; Hi3D's form as its fields). */
 	UPROPERTY() FString RequestJson;
 };
 
@@ -171,7 +239,7 @@ struct FHyperAIModelStep
 	GENERATED_BODY()
 
 	UPROPERTY() int32 Round = 0;
-	/** classify, generate, check, local_fix, paid_fix, materials, rig, stop. */
+	/** classify, reference, generate, check, local_fix, paid_fix, materials, rig, stop. */
 	UPROPERTY() FString Kind;
 	UPROPERTY() FString What;
 	/** done, failed, skipped, declined, awaiting_user_approval, running. */
@@ -241,9 +309,12 @@ struct FHyperAIModelJob
 	UPROPERTY() FString OperationId;
 	/** create or check_and_fix. */
 	UPROPERTY() FString Kind;
+	/** Who made the model: tripo or hi3d. A check-and-fix job's paid fixes are Tripo's. */
+	UPROPERTY() FString Provider;
 	/**
-	 * awaiting_user_approval, generating, checking, fixing, awaiting_fix_approval, materials, rigging, completed,
-	 * stopped (checks still failing when the budget or the rounds ran out, or a fix was declined), failed, cancelled.
+	 * awaiting_user_approval, making_reference, awaiting_reference_review (the picture is in; the 3D waits for its own
+	 * approval), generating, checking, fixing, awaiting_fix_approval, materials, rigging, completed, stopped (checks still
+	 * failing when the budget or the rounds ran out, or a fix or the reviewed generation was declined), failed, cancelled.
 	 */
 	UPROPERTY() FString State;
 	/** The operation to follow now with hyper_operation_wait: a provider step's job, or a fix waiting for approval. */
@@ -368,4 +439,9 @@ struct FHyperAIModelAccountReport
 	UPROPERTY() TArray<FHyperAIModelUsage> Usage;
 	/** When this was read, UTC. */
 	UPROPERTY() FString ReadAt;
+	/** Hi3D's balance, read with its key (client_id:client_secret, traded for a token): ok, pending, missing_key, or the error. */
+	UPROPERTY() FString Hi3DStatus;
+	/** Hi3D credits, at $0.02 each. */
+	UPROPERTY() float Hi3DBalance = 0.f;
+	UPROPERTY() FString Hi3DDiagnostic;
 };

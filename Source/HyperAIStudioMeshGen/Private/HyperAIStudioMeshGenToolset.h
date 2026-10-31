@@ -371,14 +371,18 @@ public:
 	static FHyperAIMeshCancelReport hyper_mesh_cancel(const FHyperAIMeshCancelRequest& Request);
 
 	/**
-	 * Makes a game-ready model with Tripo and fixes it in the editor as part of making it. The brief (prompt and/or a
-	 * picture or views, its use, platform and size) is classified into H3.1 (high detail) or P2 (Smart Poly), a face
-	 * budget, quads or triangles, a texture tier, PBR, parts and smart low poly, each with its reason; any choice can be
-	 * overridden. Then: generate (paid, approved), import, check (budget, topology, holes, winding, stray bits, size,
-	 * pivot, UVs, texel density, PBR maps, Nanite, collision, a visual compare), free fixes, and paid Tripo fixes
-	 * cheapest first (retopology, Smart UV, texture, completion, a new generation), each priced and approved, within a
-	 * fix budget and a round cap; PBR maps become an ORM material instance; optionally a rig (spec unreal). Dry-run first
-	 * (the default) to read the plan and price; follow operation_id with hyper_operation_wait, then hyper_model_status.
+	 * Makes a game-ready model with Tripo or Hi3D and fixes it in the editor as part of making it. The brief (prompt
+	 * and/or a picture or views, its use, platform and size) is classified into a provider (auto: Hi3D for a picture of a
+	 * hero prop, environment piece, vehicle or bust, or a max-fidelity brief; Tripo otherwise), Tripo's H3.1 (high
+	 * detail) or P2 (Smart Poly) or Hi3D's model and resolution, a face budget, quads or triangles, a texture tier, PBR,
+	 * parts and smart low poly, each with its reason; any choice can be overridden. Words alone get a reference picture
+	 * first (Tripo text-to-image, chat_image_2.5 by default; reviewed before the 3D for hero props, characters, vehicles
+	 * and weapons). Then: generate (paid, approved), import, check (budget, topology, holes, winding, stray bits, size,
+	 * pivot, UVs, texel density, PBR maps, Nanite, collision, a visual compare), free fixes (a free reduction for Hi3D's
+	 * 100,000-face floor), and paid fixes cheapest first (Tripo's retopology, Smart UV, texture, completion, a new
+	 * generation; Hi3D's texture-only retexture and a resolution up), each priced and approved, within a fix budget and a
+	 * round cap; PBR maps become an ORM material instance; optionally a rig (a free rig check first). Dry-run first (the
+	 * default) to read the plan and price; follow operation_id with hyper_operation_wait, then hyper_model_status.
 	 * resume_operation_id picks up a journaled job.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|MeshGen")
@@ -397,7 +401,10 @@ public:
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|MeshGen")
 	static FHyperAIModelCheckFixReport hyper_model_check_and_fix(const FHyperAIModelCheckFixRequest& Request);
 
-	/** Tripo's API credit balance (available and held) and recent per-task usage, read with the stored key, which is never returned. */
+	/**
+	 * Tripo's API credit balance (available and held) and recent per-task usage, and Hi3D's balance (Hi3DStatus,
+	 * Hi3DBalance), read with the stored keys, which are never returned.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|MeshGen")
 	static FHyperAIModelAccountReport hyper_tripo_account(const FHyperAIModelAccountRequest& Request);
 };

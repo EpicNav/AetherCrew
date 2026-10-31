@@ -1,6 +1,6 @@
 ---
 name: tripo-model-creator
-description: Make game-ready 3D models with Tripo inside Unreal and fix them as part of making them - hyper_model_create classifies a brief into H3.1 (high detail) or P2 (Smart Poly), a face budget, quads or triangles and a texture tier, generates, checks the model in the editor (budget, holes, winding, stray bits, size, pivot, UVs, texel density, PBR maps, Nanite, collision, a visual compare) and fixes it, free fixes first and paid Tripo fixes priced and approved; and hyper_model_check_and_fix for any mesh, including models sent from Tripo Studio by Tripo's DCC Bridge. Use when the user wants a generated prop, environment piece, vehicle, weapon or character that must be game-ready, or wants a Tripo model checked or repaired; for rigging and animation follow generated-characters, for props modelled for free follow unreal-modeling.
+description: Make game-ready 3D models with Tripo or Hi3D inside Unreal and fix them as part of making them - hyper_model_create picks the provider (Hi3D for the densest, most faithful models from a picture), makes a reference picture first from words, classifies a brief into H3.1 (high detail) or P2 (Smart Poly) or Hi3D's model and resolution, a face budget, quads or triangles and a texture tier, generates, checks the model in the editor (budget, holes, winding, stray bits, size, pivot, UVs, texel density, PBR maps, Nanite, collision, a visual compare) and fixes it, free fixes first and paid Tripo fixes priced and approved; and hyper_model_check_and_fix for any mesh, including models sent from Tripo Studio by Tripo's DCC Bridge. Use when the user wants a generated prop, environment piece, vehicle, weapon or character that must be game-ready, or wants a Tripo model checked or repaired; for rigging and animation follow generated-characters, for props modelled for free follow unreal-modeling.
 ---
 
 # Tripo model creator: a brief to a checked, fixed, textured model
@@ -14,6 +14,39 @@ Two routes, and they use different credits:
   *Send to Unreal* in Tripo's DCC Bridge plugin. HyperAI notices the import and offers *Check and fix* (free fixes) in
   a notification and in Activity. Studio credits cannot be spent through the API, and HyperAI never drives the Studio
   website or asks for a Tripo login. To move credits between the two, the user asks Tripo (support@tripo3d.ai).
+
+## Tripo or Hi3D
+
+`Brief.Provider` is `auto` (the default), `tripo` or `hi3d`. Hi3D (Hitem3D: Sparc3D and Ultra3D) works only from a
+picture or up to four views, at 100,000 to 2,000,000 faces (5,000,000 at `2048master`). Auto chooses:
+
+- **Hi3D** for a picture of a hero prop, environment piece or vehicle (Nanite keeps the dense mesh), a portrait or bust
+  (portrait models), or a brief asking for photoreal, intricate, max detail or sculpted - and only when Hi3D's key is
+  set (otherwise Tripo, saying why).
+- **Tripo** for words alone, a face budget under 100,000, quads, parts, low poly, geometry quality, a rig, view edits or
+  a multiview task, mobile or VR, characters and creatures.
+
+Hi3D's plan: `Model` `hi3dv3.0` (default), `hitem3dv2.1`, `hitem3dv2.0`, `hitem3dv1.5`, or `scene-portraitv2.1` (busts);
+`Resolution` `2048quality` (default) or `2048master` (an extreme or master brief). Under 100,000 faces it is made at
+100,000 and reduced in the editor for free (`bLocalReduce`). `provider: hi3d` with words alone makes a reference
+picture first (Tripo's text-to-image, or HyperAI's image generation without a Tripo key). Credits at $0.02: v3.0 45 or
+145, v2.1 25/45, v2.0 35/45, v1.5 15-40, portraits 25-45; texture only 10 (15 with PBR, inferred).
+
+The key: on Hi3D's developer platform make an API key (AK and SK); store `client_id:client_secret` as one value in
+Settings > Agents > Keys under Hi3D (Hitem3D), or `HITEM3D_API_KEY` / `HYPERAI_HI3D_KEY`. HyperAI trades it for an
+access token sent to Hi3D only; neither is ever shown or logged. `hyper_tripo_account` shows Hi3D's balance too
+(`Hi3DStatus`, `Hi3DBalance`).
+
+## A picture first (words alone)
+
+`ReferenceImage` auto turns it on for words (not background or miniature pieces on H3.1): Tripo's text-to-image draws
+the object, then image-to-model makes it from that picture's task, and the picture becomes the visual check's
+reference. `ImageModel` (names as people say them work: "gpt-image-2.5-sunburn" is `chat_image_2.5_sunburst`; default
+`chat_image_2.5_flare`), `ImageQuality` (high by default), `ImageSize` (1024x1024, 2048x2048 for hero pieces),
+`ImageBackground` (transparent), `ImageTemplate` (asset_extraction for props, t_pose for characters).
+`ReviewReference` (auto: on for hero props, characters, vehicles, weapons) approves the picture first; the job then
+waits in `awaiting_reference_review` with the picture in `PreviewImages`, and `CurrentOperationId` is the 3D
+generation's approval. Show the user the picture; turning the generation down ends the job (`fix_declined`).
 
 ## The job
 
@@ -94,10 +127,16 @@ Paid, each priced and approved, one a round, within the fix budget:
 | over the face budget, wrong topology, non-manifold, holes | `/mesh/decimate` v3.0 retopology to the budget, `smart_uv` included | 35 (40 quads) |
 | holes or a broken part retopology left | `/mesh/segment` then `/mesh/complete` quick cap, then AI completion | 70, then 90 |
 | a skeletal mesh's pivot or scale | `/models/convert` with `pivot_to_center_bottom`, `scale_factor` | 10 |
-| the shape is wrong (the visual compare against the reference fails) | a new generation: new seed, refined prompt, image autofix | the generation's price |
+| the shape is wrong (the visual compare against the reference fails) | a new generation: new seed (from the same reference picture), refined prompt, image autofix | the generation's price |
+| Hi3D model: textures missing or weak | Hi3D texture only on the current mesh (v3.0 or v1.5) | 15 Hi3D credits |
+| Hi3D model: the shape is wrong | Hi3D again, a resolution up (or from the views) | that resolution's price |
+| Hi3D failed a task with 50010001 | the same task again (Hi3D refunded it) | the same price, approved again |
 
-Over the face budget always goes to retopology first: nothing cheaper fixes it. A fix Tripo fails is refunded by Tripo,
-and the ladder climbs past it.
+Over the face budget always goes to retopology first: nothing cheaper fixes it (for Hi3D's floor, the free reduction
+runs first). A fix Tripo fails is refunded by Tripo, and the ladder climbs past it. A texture retry changes only its
+seed first, then goes a tier up. A rig runs Tripo's free rig check first: a biped gets v3.0 with spec unreal, another
+body v2.5 as its rig_type, and a model it cannot rig stops there. Rate-limited or busy answers (429, 5xx) are sent
+again after a back-off.
 
 ## Judging the result
 
