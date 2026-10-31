@@ -567,7 +567,16 @@ bool BuildTestRequest(const FHyperAIStudioKeySlot& Slot, const FString& Key, con
 	}
 	else if (Slot.Test == TEXT("tripo"))
 	{
-		OutRequest.Url = TEXT("https://openapi.tripo3d.com/v3/account/balance");
+		// The same address generation uses (a project's own tripo entry wins). openapi.tripo3d.com is the China site,
+		// which refuses an international key with 401.
+		FHyperAIStudioExternalServiceSettings Tripo;
+		FString TripoBase = FHyperAIStudioExternalServices::Find(TEXT("tripo"), Tripo) ? Tripo.BaseUrl.TrimStartAndEnd() : FString();
+		if (TripoBase.IsEmpty())
+		{
+			TripoBase = TEXT("https://openapi.tripo3d.ai/v3");
+		}
+		TripoBase.RemoveFromEnd(TEXT("/"));
+		OutRequest.Url = TripoBase + TEXT("/account/balance");
 		OutRequest.Headers.Add(TEXT("Authorization"), TEXT("Bearer ") + Key);
 	}
 	else if (Slot.Test == TEXT("stability"))
