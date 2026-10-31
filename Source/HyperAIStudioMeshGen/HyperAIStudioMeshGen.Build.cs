@@ -38,6 +38,8 @@ public class HyperAIStudioMeshGen : ModuleRules
 			"PhysicsCore",
 			"PhysicsUtilities",
 			"Projects",
+			// The tests ask whether a material compiled for the editor's shader platform.
+			"RHI",
 			// The Tripo account panel in the creator's settings, and the notification offering to fix a Tripo Studio model.
 			"PropertyEditor",
 			"Slate",

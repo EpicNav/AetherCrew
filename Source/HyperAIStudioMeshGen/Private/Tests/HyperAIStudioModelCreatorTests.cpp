@@ -7,6 +7,7 @@
 #include "AssetToolsModule.h"
 #include "Containers/Ticker.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshSocket.h"
 #include "Engine/Texture2D.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformMisc.h"
@@ -29,6 +30,8 @@
 #include "ImageCore.h"
 #include "ImageUtils.h"
 #include "JsonObjectConverter.h"
+#include "MaterialShared.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Base64.h"
@@ -520,9 +523,9 @@ bool FHyperAIStudioModelCreatorClassifyTest::RunTest(const FString& Parameters)
 		{TEXT("a low poly pine tree"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("P2"), TEXT("foliage"), false, 8000, TEXT("standard"), false, false, true},
 		{TEXT("a low poly treasure chest"), TEXT("prop"), TEXT(""), TEXT("H3.1"), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("prop"), false, 20000, TEXT("standard"), false, true, false},
 		{TEXT("a robot with separate parts"), TEXT("prop"), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("prop"), false, 20000, TEXT("standard"), true, false, false},
-		// A weapon is finished in the editor to 20K, whatever detail it is generated at (four times that, here); a dense one
-		// asked for outright keeps Nanite on.
-		{TEXT("an ornate engraved longsword"), TEXT("weapon"), TEXT(""), TEXT("H3.1"), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("weapon"), false, 20000, TEXT("extreme"), false, false, false},
+		// A sword is finished in the editor to a hero sword's 36K, whatever detail it is generated at (four times that, here);
+		// a dense one asked for outright keeps Nanite on.
+		{TEXT("an ornate engraved longsword"), TEXT("weapon"), TEXT(""), TEXT("H3.1"), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("weapon"), false, 36000, TEXT("extreme"), false, false, false},
 		{TEXT("a longsword"), TEXT("weapon"), TEXT(""), TEXT("H3.1"), 200000, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("weapon"), false, 200000, TEXT("detailed"), false, false, true},
 		{TEXT("a medieval sword"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT("quads"), TEXT(""), TEXT("H3.1"), TEXT("weapon"), true, 10000, TEXT("detailed"), false, false, false},
 		{TEXT("a distant mountain"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("P2"), TEXT("background"), false, 5000, TEXT("standard"), false, false, false},
@@ -1193,18 +1196,40 @@ namespace HyperAIStudio::ModelCreatorTests
 	 * box blade 6 x 4 cm, 75 cm long; a guard 22 cm across and 10 deep; a grip 6 cm across; a ball pommel. Every part is cut
 	 * a centimetre at a time along its length, as a generated mesh is dense.
 	 */
-	TArray<uint8> WeaponGlb()
+	TArray<uint8> WeaponGlb(const bool bTextured = false)
 	{
 		TArray<FVector3f> P, N;
 		TArray<FVector2f> UV;
 		TArray<uint32> I;
-		auto Quad = [&I](const uint32 A, const uint32 B, const uint32 C, const uint32 D) { I.Append({A, B, C, A, C, D}); };
+		// Each quad wound outward, as glTF winds a front face (counter-clockwise, (B - A) x (C - A) out), away from Inside:
+		// a closed, consistently wound part, as a generator makes one.
+		FVector3f Inside = FVector3f::ZeroVector;
+		bool bAxis = false;
+		auto Quad = [&I, &P, &Inside, &bAxis](const uint32 A, const uint32 B, const uint32 C, const uint32 D)
+		{
+			for (const FIntVector Tri : {FIntVector(A, B, C), FIntVector(A, C, D)})
+			{
+				const FVector3f Mid = (P[Tri.X] + P[Tri.Y] + P[Tri.Z]) / 3.f;
+				const FVector3f From = bAxis ? FVector3f(Inside.X, Mid.Y, Inside.Z) : Inside;
+				const FVector3f Normal = (P[Tri.Y] - P[Tri.X]) ^ (P[Tri.Z] - P[Tri.X]);
+				if ((Normal | (Mid - From)) < 0.f)
+				{
+					I.Append({uint32(Tri.X), uint32(Tri.Z), uint32(Tri.Y)});
+				}
+				else
+				{
+					I.Append({uint32(Tri.X), uint32(Tri.Y), uint32(Tri.Z)});
+				}
+			}
+		};
 		// A box from Min to Max, its sides cut every centimetre along Y.
 		auto Box = [&](const FVector3f& Min, const FVector3f& Max)
 		{
 			const int32 Rings = FMath::Max(1, FMath::RoundToInt((Max.Y - Min.Y) / 0.01f));
 			const FVector3f Corners[4] = {FVector3f(Min.X, 0, Min.Z), FVector3f(Max.X, 0, Min.Z), FVector3f(Max.X, 0, Max.Z), FVector3f(Min.X, 0, Max.Z)};
 			const FVector3f Centre = (Min + Max) * 0.5f;
+			Inside = Centre;
+			bAxis = false;
 			const uint32 Base = P.Num();
 			for (int32 Ring = 0; Ring <= Rings; ++Ring)
 			{
@@ -1233,6 +1258,8 @@ namespace HyperAIStudio::ModelCreatorTests
 		{
 			constexpr int32 Sides = 16;
 			const int32 Rings = FMath::Max(2, FMath::RoundToInt((Y1 - Y0) / 0.01f));
+			Inside = FVector3f::ZeroVector;
+			bAxis = true;
 			const uint32 Base = P.Num();
 			for (int32 Ring = 0; Ring <= Rings; ++Ring)
 			{
@@ -1294,8 +1321,79 @@ namespace HyperAIStudio::ModelCreatorTests
 		Accessors[1]->AsObject()->SetNumberField(TEXT("count"), N.Num());
 		Accessors[2]->AsObject()->SetNumberField(TEXT("count"), UV.Num());
 		Accessors[3]->AsObject()->SetNumberField(TEXT("count"), I.Num());
+		if (bTextured)
+		{
+			// A generated hilt's atlas: gold on the left, leather wound with 2-texel silver wire on the right.
+			const TArray<uint8> Atlas = Png(128, [](const int32 X, const int32 Y)
+			{
+				return X < 64 ? FColor(205, 160, 70) : (Y % 8 < 2 ? FColor(185, 185, 190) : FColor(90, 50, 30));
+			});
+			const TArray<uint8> Normal = Png(64, [](int32, int32) { return FColor(128, 128, 255); });
+			while (Bin.Num() % 4)
+			{
+				Bin.Add(0);
+			}
+			const int32 AO = Bin.Num();
+			Bin.Append(Atlas);
+			while (Bin.Num() % 4)
+			{
+				Bin.Add(0);
+			}
+			const int32 NO2 = Bin.Num();
+			Bin.Append(Normal);
+			while (Bin.Num() % 4)
+			{
+				Bin.Add(0);
+			}
+			TArray<TSharedPtr<FJsonValue>> Views = Json->GetArrayField(TEXT("bufferViews"));
+			Views.Add(View(AO, Atlas.Num()));
+			Views.Add(View(NO2, Normal.Num()));
+			Json->SetArrayField(TEXT("bufferViews"), Views);
+			const TSharedPtr<FJsonObject> Parsed = Parse(TEXT(R"({"images":[{"bufferView":4,"mimeType":"image/png","name":"Color_hilt"},{"bufferView":5,"mimeType":"image/png","name":"NormalGL_hilt"}],)")
+				TEXT(R"("textures":[{"source":0},{"source":1}],"materials":[{"name":"tripo_material_hilt","pbrMetallicRoughness":{"baseColorTexture":{"index":0}},"normalTexture":{"index":1}}]})"));
+			Json->SetArrayField(TEXT("images"), Parsed->GetArrayField(TEXT("images")));
+			Json->SetArrayField(TEXT("textures"), Parsed->GetArrayField(TEXT("textures")));
+			Json->SetArrayField(TEXT("materials"), Parsed->GetArrayField(TEXT("materials")));
+			Json->GetArrayField(TEXT("meshes"))[0]->AsObject()->GetArrayField(TEXT("primitives"))[0]->AsObject()->SetNumberField(TEXT("material"), 0);
+		}
 		Json->GetArrayField(TEXT("buffers"))[0]->AsObject()->SetNumberField(TEXT("byteLength"), Bin.Num());
 		return GlbOf(Json.ToSharedRef(), Bin);
+	}
+
+	/** A closed box (or a prism of Sides around Y when Sides > 4) from Y0 to Y1, its faces wound outward as Unreal winds them. */
+	void ClosedPrism(TArray<FVector3d>& P, TArray<FIntVector>& T, const double Y0, const double Y1, const double HalfX, const double HalfZ, const int32 Sides)
+	{
+		const int32 Base = P.Num();
+		for (const double Y : {Y0, Y1})
+		{
+			for (int32 Side = 0; Side < Sides; ++Side)
+			{
+				const double Angle = 2.0 * UE_DOUBLE_PI * (Side + (Sides == 4 ? 0.5 : 0.0)) / Sides;
+				const double Reach = Sides == 4 ? UE_DOUBLE_SQRT_2 : 1.0;
+				P.Add(FVector3d(HalfX * Reach * FMath::Cos(Angle), Y, HalfZ * Reach * FMath::Sin(Angle)));
+			}
+		}
+		const FVector3d Middle(0.0, (Y0 + Y1) * 0.5, 0.0);
+		auto Add = [&](int32 A, int32 B, int32 C)
+		{
+			const FVector3d Normal = (P[C] - P[A]).Cross(P[B] - P[A]);
+			if (Normal.Dot((P[A] + P[B] + P[C]) / 3.0 - Middle) < 0.0)
+			{
+				Swap(B, C);
+			}
+			T.Add(FIntVector(A, B, C));
+		};
+		for (int32 Side = 0; Side < Sides; ++Side)
+		{
+			const int32 A = Base + Side, B = Base + (Side + 1) % Sides;
+			Add(A, B, A + Sides);
+			Add(B, B + Sides, A + Sides);
+		}
+		for (int32 Side = 1; Side + 1 < Sides; ++Side)
+		{
+			Add(Base, Base + Side, Base + Side + 1);
+			Add(Base + Sides, Base + Sides + Side, Base + Sides + Side + 1);
+		}
 	}
 
 	FWeaponShape ShapeOf(UStaticMesh& Mesh)
@@ -1345,12 +1443,13 @@ bool FHyperAIStudioModelCreatorWeaponTest::RunTest(const FString& Parameters)
 		&& Raw.GripCm > 5.5f && Raw.GuardDepthCm > 9.f);
 
 	FHyperAIModelBrief Brief;
-	Brief.Prompt = TEXT("a longsword");
+	// A weapon the brief does not call a sword: finished, but not given the AAA sword stage.
+	Brief.Prompt = TEXT("a knightly weapon");
 	Brief.Use = TEXT("weapon");
 	Brief.SizeMeters = 1.1f;
 	FHyperAIModelPlan Plan;
 	FString Error;
-	TestTrue(TEXT("A weapon classifies: ") + Error, Classify(Brief, Plan, Error));
+	TestTrue(TEXT("A weapon classifies: ") + Error, Classify(Brief, Plan, Error) && !Plan.bSword);
 	TestTrue(TEXT("H3.1 generated at three times a 20K budget, finished to it, Nanite off"), Plan.Family == TEXT("H3.1") && Plan.FaceLimit == 20000 && Plan.ProviderFaces == 60000
 		&& Plan.bLocalReduce && !Plan.bNanite && Plan.Reasons.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("weapon: HyperAI's defaults")); }));
 	TestTrue(TEXT("Tripo is asked for the denser mesh"), Plan.RequestJson.Contains(TEXT("\"face_limit\":60000")));
@@ -1464,6 +1563,380 @@ bool FHyperAIStudioModelCreatorWeaponTest::RunTest(const FString& Parameters)
 		&& Named.Reasons.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("match SM_CreatorReferenceSword")); }));
 	Brief.MatchAsset = TEXT("/Game/Nope/SM_Missing.SM_Missing");
 	TestFalse(TEXT("and one naming no mesh is refused"), Classify(Brief, Named, Error));
+	return true;
+}
+
+// ---------------------------------------------------------------- AAA swords
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelCreatorSwordTest, "HyperAIStudio.MeshGen.Creator.SwordAAA",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioModelCreatorSwordTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelCreatorTests;
+	UHyperAIStudioTripoSettings* Settings = GetMutableDefault<UHyperAIStudioTripoSettings>();
+	const FHyperAIStudioWeaponConvention SavedConvention = Settings->WeaponConvention;
+	Settings->WeaponConvention = FHyperAIStudioWeaponConvention();
+	TArray<FString> Imported;
+	ON_SCOPE_EXIT
+	{
+		Settings->WeaponConvention = SavedConvention;
+		DeleteAll(Imported);
+	};
+
+	// The exact blade: 92 cm, its section, its fuller, its two faces, its UVs.
+	const FSwordSpec Spec;
+	const FBladeMesh Blade = BuildBlade(Spec, 0.0, FVector2d::Zero());
+	double Low = 1e30, High = -1e30;
+	for (const FVector3d& P : Blade.Positions)
+	{
+		Low = FMath::Min(Low, P.Y);
+		High = FMath::Max(High, P.Y);
+	}
+	TestTrue(FString::Printf(TEXT("The blade runs 92 cm from the guard, its ricasso 3.5 cm up into it (%.2f to %.2f)"), Low, High), FMath::IsNearlyEqual(Low, -92.0, 1e-6)
+		&& FMath::IsNearlyEqual(High, 3.5, 1e-6));
+	double Widest = 0.0, Thickest = 0.0;
+	for (const FVector3d& P : Blade.Positions)
+	{
+		Widest = FMath::Max(Widest, FMath::Abs(P.X) * 2.0);
+		Thickest = FMath::Max(Thickest, FMath::Abs(P.Z) * 2.0);
+	}
+	TestTrue(FString::Printf(TEXT("No wider where it seats (%.3f cm at most, 5.4 at its base), at most 15%% thicker (%.3f)"), Widest, Thickest), Widest <= 5.4 + 1e-9
+		&& Thickest <= 0.85 * 1.15 + 1e-9);
+	const int32 Columns = 2 * Spec.Columns + 1;
+	const int32 Rings = int32(Spec.BladeLength / Spec.RingCm) + 1;
+	auto Ring = [&](const int32 Index, const int32 Side)
+	{
+		FBox3d Box(ForceInit);
+		const int32 Base = (Side > 0 ? 0 : Blade.FrontVertices) + Index * Columns;
+		for (int32 Column = 0; Column < Columns; ++Column)
+		{
+			Box += Blade.Positions[Base + Column];
+		}
+		return Box;
+	};
+	{
+		const int32 Middle = Rings / 2;
+		double Width = 0.0, Thick = 0.0;
+		BladeProfile(Spec, double(Middle) / Rings, Width, Thick);
+		const FBox3d Front = Ring(Middle, 1), Back = Ring(Middle, -1);
+		TestTrue(FString::Printf(TEXT("Halfway down it is %.2f cm wide (%.2f expected), tapering from 5.4 to 3.2"), Front.GetSize().X, Width), FMath::IsNearlyEqual(Front.GetSize().X, Width, 1e-4)
+			&& Width < 5.4 && Width > 3.2);
+		const int32 Late = int32(Rings * 0.75);
+		BladeProfile(Spec, double(Late) / Rings, Width, Thick);
+		const double Measured = Ring(Late, 1).Max.Z - Ring(Late, -1).Min.Z;
+		TestTrue(FString::Printf(TEXT("Past the fuller it is %.3f cm thick (%.3f expected): distal taper from 0.85 toward 0.15"), Measured, Thick), FMath::IsNearlyEqual(Measured, Thick, 1e-4)
+			&& Thick < 0.85 && Thick > 0.15);
+		// The fuller: the middle of a face sits its depth below the lenticular section's crown.
+		const int32 Fuller = int32(Rings * 0.3);
+		BladeProfile(Spec, double(Fuller) / Rings, Width, Thick);
+		const double Crown = Blade.Positions[Fuller * Columns + Spec.Columns].Z;
+		TestTrue(FString::Printf(TEXT("The fuller is %.3f cm deep a face (0.12 wanted)"), Thick * 0.5 - Crown), FMath::IsNearlyEqual(Thick * 0.5 - Crown, Spec.FullerDepth, 1e-3));
+		(void)Back;
+	}
+	bool bSeparate = true, bOutward = true, bUVs = true;
+	for (const FIntVector& Tri : Blade.Triangles)
+	{
+		const bool bFront = Tri.X < Blade.FrontVertices;
+		bSeparate &= bFront == (Tri.Y < Blade.FrontVertices) && bFront == (Tri.Z < Blade.FrontVertices);
+		const FVector3d Normal = (Blade.Positions[Tri.Z] - Blade.Positions[Tri.X]).Cross(Blade.Positions[Tri.Y] - Blade.Positions[Tri.X]);
+		// Across a face, along its side's Z; side-on at the point, away from the blade's middle.
+		const bool bSideOn = FMath::Abs(Normal.Z) <= 1e-6 * Normal.Length();
+		bOutward &= bSideOn ? Normal.Dot((Blade.Positions[Tri.X] + Blade.Positions[Tri.Y] + Blade.Positions[Tri.Z]) / 3.0 - FVector3d(0.0, -46.0, 0.0)) > 0.0
+			: (bFront ? Normal.Z : -Normal.Z) > 0.0;
+	}
+	for (int32 Index = 0; Index < Blade.UVs.Num(); ++Index)
+	{
+		const FVector2f UV = Blade.UVs[Index];
+		bUVs &= Index < Blade.FrontVertices ? UV.X >= 0.0099f && UV.X <= 0.4901f : UV.X >= 0.5099f && UV.X <= 0.9901f;
+		bUVs &= UV.Y >= 0.f && UV.Y <= 1.f;
+	}
+	int32 Inward = 0;
+	for (const FIntVector& Tri : Blade.Triangles)
+	{
+		const FVector3d Normal = (Blade.Positions[Tri.Z] - Blade.Positions[Tri.X]).Cross(Blade.Positions[Tri.Y] - Blade.Positions[Tri.X]);
+		const bool bSideOn = FMath::Abs(Normal.Z) <= 1e-6 * Normal.Length();
+		const bool bOk = bSideOn ? Normal.Dot((Blade.Positions[Tri.X] + Blade.Positions[Tri.Y] + Blade.Positions[Tri.Z]) / 3.0 - FVector3d(0.0, -46.0, 0.0)) > 0.0
+			: (Tri.X < Blade.FrontVertices ? Normal.Z : -Normal.Z) > 0.0;
+		if (!bOk && Inward++ < 3)
+		{
+			AddInfo(FString::Printf(TEXT("Inward: %s %s %s, normal %s"), *Blade.Positions[Tri.X].ToString(), *Blade.Positions[Tri.Y].ToString(), *Blade.Positions[Tri.Z].ToString(), *Normal.ToString()));
+		}
+	}
+	TestTrue(FString::Printf(TEXT("Its faces share no vertex, so the edges stay hard (%d), and each faces outward (%d inward)"), bSeparate ? 1 : 0, Inward), bSeparate && bOutward
+		&& Blade.FrontVertices * 2 == Blade.Positions.Num());
+	TestTrue(TEXT("The front's UVs are U 0.01-0.49, the back's 0.51-0.99, V along the length"), bUVs);
+	TestTrue(TEXT("Its edges meet: the front's first column lies on the back's"), Blade.Positions[0].Equals(Blade.Positions[Blade.FrontVertices], 1e-9));
+
+	// Sections by Green's theorem: a 4 x 2 box, and a 64-sided cylinder of radius 2.
+	{
+		TArray<FVector3d> P;
+		TArray<FIntVector> T;
+		ClosedPrism(P, T, 0.0, 10.0, 2.0, 1.0, 4);
+		const TArray<double> Box = SliceAreas(P, T, {5.0});
+		P.Reset();
+		T.Reset();
+		ClosedPrism(P, T, 0.0, 10.0, 2.0, 2.0, 64);
+		const TArray<double> Round = SliceAreas(P, T, {2.0, 7.5});
+		const double Polygon = 32.0 * 4.0 * FMath::Sin(2.0 * UE_DOUBLE_PI / 64.0);
+		TestTrue(FString::Printf(TEXT("A 4 x 2 box's section is 8 cm2 (%.4f); a 64-gon of radius 2, %.4f (%.4f, %.4f)"), Box[0], Polygon, Round[0], Round[1]),
+			FMath::IsNearlyEqual(Box[0], 8.0, 1e-6) && FMath::IsNearlyEqual(Round[0], Polygon, 1e-6) && FMath::IsNearlyEqual(Round[1], Polygon, 1e-6));
+	}
+
+	// Balance: a heavier pommel draws the point of balance toward the guard, and the scale chosen is the nearest the window.
+	{
+		TArray<FVector3d> Hilt;
+		TArray<FIntVector> T;
+		ClosedPrism(Hilt, T, 0.0, 1.3, 13.0, 0.65, 4);   // a guard
+		ClosedPrism(Hilt, T, 1.3, 19.0, 1.7, 1.7, 16);   // a grip
+		ClosedPrism(Hilt, T, 19.0, 24.0, 2.7, 2.7, 16);  // a pommel
+		FHiltFrame Frame;
+		Frame.bValid = true;
+		Frame.GuardBottom = 0.0;
+		Frame.GuardTop = 1.3;
+		Frame.HandleTop = 24.0;
+		Frame.GripEnd = 19.0;
+		TArray<FVector3d> Light = Hilt, Heavy = Hilt;
+		ScalePommel(Light, Frame, 0.8);
+		ScalePommel(Heavy, Frame, 1.25);
+		const FSwordBalance A = SwordBalance(Spec, Light, T, Frame), B = SwordBalance(Spec, Heavy, T, Frame);
+		AddInfo(FString::Printf(TEXT("Balance: a light pommel %.1f cm (%.0f g), a heavy one %.1f cm (%.0f g); the blade %.0f g"), A.BalanceCm, A.MassG, B.BalanceCm, B.MassG, A.BladeG));
+		TestTrue(TEXT("A heavier pommel brings the point of balance toward the guard"), B.BalanceCm < A.BalanceCm && B.MassG > A.MassG);
+		TestTrue(TEXT("The blade weighs what its sections say (some 1.2 kg of steel)"), A.BladeG > 900.0 && A.BladeG < 1500.0);
+		const FSwordBalance Chosen = BalanceSword(Spec, Hilt, T, Frame);
+		TestTrue(FString::Printf(TEXT("The pommel's scale chosen (%.2f) lands it %.1f cm in front of the guard, in the window or as near as the pommel can"), Chosen.PommelScale, Chosen.BalanceCm),
+			Chosen.PommelScale >= 0.75 && Chosen.PommelScale <= 1.3 && (Chosen.bInWindow || FMath::Abs(Chosen.BalanceCm - 11.5) <= FMath::Min(FMath::Abs(A.BalanceCm - 11.5), FMath::Abs(B.BalanceCm - 11.5)) + 1e-6));
+	}
+
+	// The atlas: thin wire on leather stays wire; each material made physically based.
+	{
+		constexpr int32 Size = 64;
+		TArray<FColor> Pixels;
+		for (int32 Y = 0; Y < Size; ++Y)
+		{
+			for (int32 X = 0; X < Size; ++X)
+			{
+				Pixels.Add(Y < 32 ? (X % 8 < 2 ? FColor(205, 160, 70) : FColor(90, 50, 30)) : X < 32 ? FColor(170, 170, 175) : X >= 48 ? FColor(40, 60, 200) : FColor(170, 170, 175));
+			}
+		}
+		TArray<FString> Reasons;
+		const TArray<FMaterialClass> Palette = MaterialPalette({}, {}, Reasons);
+		TestEqual(TEXT("Nothing named: an ornate hilt's sapphire, gold, leather and silver"), FString::JoinBy(Palette, TEXT(","), [](const FMaterialClass& Class) { return Class.Name; }),
+			FString(TEXT("sapphire,gold,leather,silver")));
+		const FAtlasResult Atlas = CorrectAtlas(Pixels, Size, Size, Palette);
+		auto ClassAt = [&](const int32 X, const int32 Y) { return Palette[Atlas.Classes[Y * Size + X]].Name; };
+		int32 WireKept = 0, Wire = 0, LeatherKept = 0, Leather = 0;
+		for (int32 Y = 1; Y < 31; ++Y)
+		{
+			for (int32 X = 1; X < Size - 1; ++X)
+			{
+				if (X % 8 < 2)
+				{
+					++Wire;
+					WireKept += ClassAt(X, Y) == TEXT("gold");
+				}
+				else
+				{
+					++Leather;
+					LeatherKept += ClassAt(X, Y) == TEXT("leather");
+				}
+			}
+		}
+		TestTrue(FString::Printf(TEXT("Two-texel gold wire on leather stays gold (%d of %d), the leather between stays leather (%d of %d)"), WireKept, Wire, LeatherKept, Leather),
+			WireKept == Wire && LeatherKept == Leather);
+		TestTrue(TEXT("The silver and the stone are told apart"), ClassAt(16, 48) == TEXT("silver") && ClassAt(56, 48) == TEXT("sapphire"));
+		const FColor LeatherBC = Atlas.BaseColor[16 * Size + 4];
+		const FColor WireORM = Atlas.ORM[16 * Size + 8];
+		const FColor LeatherORM = Atlas.ORM[16 * Size + 4];
+		TestTrue(FString::Printf(TEXT("Leather's colour is held in its physical range (sRGB at most 0.35: %d)"), LeatherBC.R), LeatherBC.R <= 90);
+		TestTrue(FString::Printf(TEXT("Metal is 0 or 1 by material: the wire %d, the leather %d"), WireORM.B, LeatherORM.B), WireORM.B >= 128 && LeatherORM.B == 0);
+		TestTrue(TEXT("Leather is rough, the stone glossy"), LeatherORM.G > 120 && Atlas.ORM[48 * Size + 56].G < 20);
+
+		// The palette from the brief's words, and from the reference picture.
+		TArray<FString> Named;
+		const TArray<FMaterialClass> Words = MaterialPalette(PaletteWords(TEXT("An ornate longsword, a brass guard set with a ruby, a leather grip")), {}, Named);
+		TestEqual(TEXT("The brief's materials: ruby, brass, leather, then silver for the rest"), FString::JoinBy(Words, TEXT(","), [](const FMaterialClass& Class) { return Class.Name; }),
+			FString(TEXT("ruby,brass,leather,silver")));
+		TArray<FColor> Picture;
+		Picture.Init(FColor(220, 220, 225), 1000);
+		for (int32 Index = 0; Index < 80; ++Index)
+		{
+			Picture[Index] = FColor(210, 165, 60);
+			Picture[100 + Index / 4] = FColor(30, 60, 210);
+		}
+		TArray<FString> Seen;
+		const TArray<FMaterialClass> FromPicture = MaterialPalette(PaletteWords(TEXT("a steel longsword")), Picture, Seen);
+		TestEqual(TEXT("A steel sword whose picture shows gold and a blue stone"), FString::JoinBy(FromPicture, TEXT(","), [](const FMaterialClass& Class) { return Class.Name; }),
+			FString(TEXT("sapphire,gold,steel")));
+	}
+
+	// A whole sword: the bulky one, textured, finished to AAA.
+	FHyperAIModelBrief Brief;
+	Brief.Prompt = TEXT("an ornate longsword, a gold guard and a leather grip wound with silver wire");
+	Brief.Use = TEXT("weapon");
+	Brief.SizeMeters = 1.1f;
+	FHyperAIModelPlan Plan;
+	FString Error;
+	TestTrue(TEXT("A sword classifies: ") + Error, Classify(Brief, Plan, Error));
+	TestTrue(TEXT("as a sword for the AAA stage, a hero's 36K budget, its palette from the brief"), Plan.bSword && Plan.FaceLimit == 36000 && Plan.Palette.Contains(TEXT("gold"))
+		&& Plan.Palette.Contains(TEXT("leather")) && Plan.Reasons.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("sword:")); }));
+	UStaticMesh* Sword = Import(WeaponGlb(/*bTextured=*/true), TEXT("SM_CreatorAAASword"), Imported);
+	if (!TestNotNull(TEXT("The textured bulky sword imports"), Sword))
+	{
+		return false;
+	}
+	const FCheckTargets Targets = TargetsFromPlan(Plan);
+	TestTrue(TEXT("Its targets: a sword, guard 26 x 1.3 cm, pommel 5.4 cm, textures 4K, 4K and 2K"), Targets.Weapon.bSword && FMath::IsNearlyEqual(Targets.Weapon.GuardSpanCm, 26.f)
+		&& FMath::IsNearlyEqual(Targets.Weapon.GuardDepthCm, 1.3f) && Targets.Weapon.ColorSize == 4096 && Targets.Weapon.MaskSize == 2048);
+	FHyperAIModelCheckReport Before;
+	Inspect(*Sword, Targets, Before, Error);
+	TestEqual(TEXT("Unfinished, sword_finish fails"), ResultOf(Before, TEXT("sword_finish")), FString(TEXT("fail")));
+	TArray<FString> Notes;
+	TestTrue(TEXT("The AAA stage runs: ") + Error, ApplyLocalFixes(*Sword, Targets, {TEXT("weapon_finish")}, Notes, Error));
+	for (const FString& Note : Notes)
+	{
+		AddInfo(Note);
+	}
+	const UStaticMeshSocket* Grip = Sword->FindSocket(TEXT("Grip"));
+	const UStaticMeshSocket* Start = Sword->FindSocket(TEXT("Trail_Start"));
+	const UStaticMeshSocket* End = Sword->FindSocket(TEXT("Trail_End"));
+	const UStaticMeshSocket* Point = Sword->FindSocket(TEXT("BalancePoint"));
+	TestTrue(TEXT("Sockets: Grip, Trail_Start, Trail_End, BalancePoint"), Grip && Start && End && Point);
+	if (Start && End && Point)
+	{
+		const double Guard = Start->RelativeLocation.Y;
+		TestTrue(FString::Printf(TEXT("The trail runs the blade's 92 cm (%.1f to %.1f)"), Guard, End->RelativeLocation.Y), FMath::IsNearlyEqual(Guard - End->RelativeLocation.Y, 91.0, 0.5));
+		const double Balance = Guard - Point->RelativeLocation.Y;
+		const bool bReasoned = Notes.ContainsByPredicate([](const FString& Note) { return Note.StartsWith(TEXT("sword_balance:")) && Note.Contains(TEXT("out of reach")); });
+		TestTrue(FString::Printf(TEXT("Balanced %.1f cm in front of the guard: in 10-13, or the note says why not"), Balance), (Balance >= 10.0 && Balance <= 13.0) || bReasoned);
+	}
+	const FWeaponShape Done = ShapeOf(*Sword);
+	const FHiltFrame Frame = [&]()
+	{
+		TArray<FVector3d> Points;
+		FStaticMeshConstAttributes Attributes(*Sword->GetMeshDescription(0));
+		for (const FVertexID Vertex : Sword->GetMeshDescription(0)->Vertices().GetElementIDs())
+		{
+			Points.Add(FVector3d(Attributes.GetVertexPositions()[Vertex]));
+		}
+		return MeasureHilt(Points);
+	}();
+	AddInfo(FString::Printf(TEXT("Finished: %.1f cm, blade %.2f x %.2f (%.2f), grip %.2f, guard %.2f deep and %.1f across, %d triangles"), Done.Length, Done.BladeWidth, Done.BladeThickness,
+		Done.BladeRatio, Done.GripCm, Done.GuardDepthCm, Frame.GuardSpan, Sword->GetMeshDescription(0)->Triangles().Num()));
+	// The joint: the hilt closed around the blade's seat (no open edge there), and the blade narrower than the seat it enters.
+	{
+		const FMeshDescription* Source = Sword->GetMeshDescription(0);
+		FStaticMeshConstAttributes Attributes(*Source);
+		const TPolygonGroupAttributesConstRef<FName> SlotNames = Attributes.GetPolygonGroupMaterialSlotNames();
+		const TVertexAttributesConstRef<FVector3f> Positions = Attributes.GetVertexPositions();
+		auto Key = [](const FVector3f& P) { return FIntVector(FMath::RoundToInt(P.X * 1000.f), FMath::RoundToInt(P.Y * 1000.f), FMath::RoundToInt(P.Z * 1000.f)); };
+		TMap<TPair<FIntVector, FIntVector>, int32> Edges;
+		FBox3d BladeBox(ForceInit);
+		double BladeTopWidth = 0.0;
+		const double Guard = Start ? Start->RelativeLocation.Y : 0.0;
+		for (const FTriangleID Triangle : Source->Triangles().GetElementIDs())
+		{
+			const bool bBlade = SlotNames[Source->GetTrianglePolygonGroup(Triangle)] == TEXT("Blade");
+			const TArrayView<const FVertexInstanceID> Corners = Source->GetTriangleVertexInstances(Triangle);
+			FVector3f Corner[3];
+			for (int32 Index = 0; Index < 3; ++Index)
+			{
+				Corner[Index] = Positions[Source->GetVertexInstanceVertex(Corners[Index])];
+				if (bBlade)
+				{
+					BladeBox += FVector3d(Corner[Index]);
+					if (Corner[Index].Y >= Guard - 4.0)
+					{
+						BladeTopWidth = FMath::Max(BladeTopWidth, double(FMath::Abs(Corner[Index].X)));
+					}
+				}
+			}
+			if (bBlade)
+			{
+				continue;
+			}
+			for (int32 Index = 0; Index < 3; ++Index)
+			{
+				FIntVector A = Key(Corner[Index]), B = Key(Corner[(Index + 1) % 3]);
+				if (A == B)
+				{
+					continue;
+				}
+				if (B.X < A.X || (B.X == A.X && (B.Y < A.Y || (B.Y == A.Y && B.Z < A.Z))))
+				{
+					Swap(A, B);
+				}
+				++Edges.FindOrAdd({A, B});
+			}
+		}
+		const FVector2d Centre(BladeBox.GetCenter().X, BladeBox.GetCenter().Z);
+		int32 Open = 0;
+		for (const TPair<TPair<FIntVector, FIntVector>, int32>& Edge : Edges)
+		{
+			const FVector3d Mid = (FVector3d(Edge.Key.Key) + FVector3d(Edge.Key.Value)) * 0.0005;
+			if (Edge.Value == 1 && Mid.Y >= Guard - 6.5 && Mid.Y <= Guard + 2.5 && FMath::Abs(Mid.X - Centre.X) <= 5.1 && FMath::Abs(Mid.Z - Centre.Y) <= 2.9)
+			{
+				if (Open++ < 8)
+				{
+					AddInfo(FString::Printf(TEXT("Open edge at the seat: %s to %s (the guard's underside at %.2f)"), *(FVector3d(Edge.Key.Key) * 0.001).ToString(),
+						*(FVector3d(Edge.Key.Value) * 0.001).ToString(), Guard));
+				}
+			}
+		}
+		const double TopWidth = (BladeTopWidth - FMath::Abs(Centre.X)) * 2.0;
+		TestEqual(TEXT("The hilt has no open edge about the blade's seat: the cut is sealed"), Open, 0);
+		TestTrue(FString::Printf(TEXT("The blade leaves the guard %.2f cm wide, narrower than the seat's 9.2 cm throat"), TopWidth), TopWidth > 0.0 && TopWidth < 9.2 && TopWidth <= 5.4 + 1e-3);
+		const bool bSealedNote = Notes.ContainsByPredicate([](const FString& Note) { return Note.Contains(TEXT("sealed box")); });
+		TestTrue(TEXT("and the notes say the seat was cut as a sealed box"), bSealedNote);
+	}
+	TestTrue(TEXT("Its guard at most 26 cm across and 1.3 cm deep, its grip 3.4 cm"), Frame.bValid && Frame.GuardSpan <= 26.2 && Done.GuardDepthCm <= 1.35f && FMath::IsNearlyEqual(Done.GripCm, 3.4f, 0.35f));
+	TestTrue(TEXT("Within the hero budget, Nanite off"), Sword->GetMeshDescription(0)->Triangles().Num() <= 36000 && !Sword->GetNaniteSettings().bEnabled);
+	// Its materials: the hilt's corrected maps on HyperAI's master; the blade's clean steel.
+	const FStaticMaterial* BladeSlot = Sword->GetStaticMaterials().FindByPredicate([](const FStaticMaterial& Each) { return Each.ImportedMaterialSlotName == TEXT("Blade"); });
+	TestTrue(TEXT("The blade has a slot of its own, in clean steel"), BladeSlot && BladeSlot->MaterialInterface && BladeSlot->MaterialInterface->GetMaterial()
+		&& BladeSlot->MaterialInterface->GetMaterial()->GetPathName().StartsWith(TEXT("/Game/HyperAI/Materials/M_HyperAI_BladeSteel_Clean")));
+	const UMaterialInstanceConstant* Hilt = Cast<UMaterialInstanceConstant>(Sword->GetStaticMaterials()[0].MaterialInterface);
+	UTexture* Color = nullptr;
+	UTexture* ORM = nullptr;
+	UTexture* NormalMap = nullptr;
+	if (Hilt)
+	{
+		Hilt->GetTextureParameterValue(FMaterialParameterInfo(TEXT("BaseColor")), Color);
+		Hilt->GetTextureParameterValue(FMaterialParameterInfo(TEXT("ORM")), ORM);
+		Hilt->GetTextureParameterValue(FMaterialParameterInfo(TEXT("Normal")), NormalMap);
+		Imported.Add(Hilt->GetPathName());
+	}
+	if (BladeSlot && BladeSlot->MaterialInterface)
+	{
+		Imported.Add(BladeSlot->MaterialInterface->GetPathName());
+	}
+	TestTrue(TEXT("The hilt's colour is rebuilt, 4K at most, sRGB, not a virtual texture"), Color && Color->GetName().EndsWith(TEXT("_Hilt_BC")) && Color->SRGB && Color->MaxTextureSize == 4096
+		&& !Color->VirtualTextureStreaming);
+	TestTrue(TEXT("its ORM 2K at most, linear masks"), ORM && ORM->GetName().EndsWith(TEXT("_Hilt_ORM")) && !ORM->SRGB && ORM->CompressionSettings == TC_Masks && ORM->MaxTextureSize == 2048);
+	TestTrue(TEXT("its NormalGL map's green flipped"), NormalMap && Cast<UTexture2D>(NormalMap) && Cast<UTexture2D>(NormalMap)->bFlipGreenChannel);
+	if (Color)
+	{
+		Imported.Add(Color->GetPathName());
+	}
+	if (ORM)
+	{
+		Imported.Add(ORM->GetPathName());
+	}
+	// The steel compiles (no noise texture in it).
+	if (const UMaterial* Steel = LoadObject<UMaterial>(nullptr, TEXT("/Game/HyperAI/Materials/M_HyperAI_BladeSteel_Clean.M_HyperAI_BladeSteel_Clean")))
+	{
+		FAssetCompilingManager::Get().FinishAllCompilation();
+		const FMaterialResource* Resource = Steel->GetMaterialResource(GMaxRHIShaderPlatform);
+		TestTrue(TEXT("The clean steel compiles"), Resource && Resource->GetCompileErrors().IsEmpty());
+	}
+	FHyperAIModelCheckReport After;
+	Inspect(*Sword, Targets, After, Error);
+	AddInfo(TEXT("After: ") + After.Summary);
+	for (const TCHAR* Id : {TEXT("weapon_axis"), TEXT("weapon_blade"), TEXT("weapon_grip"), TEXT("weapon_guard")})
+	{
+		TestEqual(FString::Printf(TEXT("Finished, %s passes"), Id), ResultOf(After, Id), FString(TEXT("pass")));
+	}
+	TestTrue(TEXT("and sword_finish no longer fails"), ResultOf(After, TEXT("sword_finish")) != TEXT("fail"));
 	return true;
 }
 

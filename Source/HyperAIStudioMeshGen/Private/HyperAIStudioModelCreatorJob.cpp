@@ -1075,6 +1075,14 @@ namespace HyperAIStudio::MeshGen::Creator
 				const bool bMaterials = Fixes.Remove(TEXT("materials")) > 0;
 				TArray<FString> Notes;
 				bool bOk = Fixes.IsEmpty() || ApplyLocalFixes(*Mesh, Targets, Fixes, Notes, Error);
+				for (const FString& Note : Notes)
+				{
+					// A sword whose balance the hilt keeps out of reach: said where the plan's reasons are read.
+					if (Note.StartsWith(TEXT("sword_balance:")) && Note.Contains(TEXT("out of reach")))
+					{
+						C.Info.Plan.Reasons.AddUnique(Note);
+					}
+				}
 				if (bOk && bMaterials)
 				{
 					FMaterialResult Materials;
@@ -1854,6 +1862,12 @@ namespace HyperAIStudio::MeshGen::Creator
 			Use = Use.IsEmpty() || Use == TEXT("prop") ? FString(TEXT("weapon")) : Use;
 		}
 		FCheckTargets Targets = TargetsForUse(Use, Request.Platform, Request.SizeMeters, Request.FaceLimit > 0 ? Request.FaceLimit : Match.IsEmpty() ? 0 : Matched.TargetTris, Request.Topology);
+		if (Targets.bWeapon && IsSwordWords(Mesh->GetName().Replace(TEXT("_"), TEXT(" "))))
+		{
+			// A sword by its name: the AAA finishing, free, its budget the request's or the hero sword's.
+			MakeSwordFinish(Targets.Weapon, /*bKeepBudget=*/Request.FaceLimit > 0 || !Match.IsEmpty());
+			Targets.FaceLimit = Targets.Weapon.TargetTris;
+		}
 		if (!Match.IsEmpty() && Targets.bWeapon)
 		{
 			// Its size as asked, else the reference's length.

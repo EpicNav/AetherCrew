@@ -308,6 +308,16 @@ namespace HyperAIStudio::MeshGen::Creator
 		int32 MaskSize = 1024;
 		/** Where these came from, for the plan's reasons and the notes: defaults, the project's convention, or a reference. */
 		FString Source;
+		/** The guard's span across, and the pommel's, at most (cm); 0 keeps the span and scales the pommel with the grip. */
+		float GuardSpanCm = 0.f;
+		float PommelCm = 0.f;
+		/**
+		 * A sword finished to AAA: its generated blade replaced by an exact one (FSwordSpec), its hilt's textures made
+		 * physically based by material (Palette), balanced, and given gameplay sockets. HyperAIStudioModelCreatorSword.cpp.
+		 */
+		bool bSword = false;
+		/** The hilt's materials, as words (gold, silver, leather, sapphire...): from the brief; the reference picture adds to them. */
+		TArray<FString> Palette;
 	};
 
 	/**
@@ -352,6 +362,190 @@ namespace HyperAIStudio::MeshGen::Creator
 	bool MatchReference(const FString& AssetPath, FWeaponFinish& Out, TArray<FString>& OutReasons, FString& OutError, bool bKeep);
 	/** A weapon's textures capped at the finishing's sizes (their sources kept): run again after the material build. */
 	void CapWeaponTextureSizes(UObject& Mesh, const FWeaponFinish& Finish, TArray<FString>& OutNotes);
+
+	/** A weapon lying as HyperAI finishes them (length on Y, handle toward +Y): where its guard and grip are, in cm. */
+	struct FHiltFrame
+	{
+		bool bValid = false;
+		double GuardBottom = 0.0;
+		double GuardTop = 0.0;
+		double HandleTop = 0.0;
+		/** Where the grip ends and the pommel begins: 70% of the way from the guard to the handle's end. */
+		double GripEnd = 0.0;
+		/** The guard's centre across (X, Z), and its span. */
+		FVector2d Centre = FVector2d::Zero();
+		double GuardSpan = 0.0;
+	};
+	FHiltFrame MeasureHilt(const TArray<FVector3d>& Points);
+
+	// ---------------------------------------------------------------- AAA swords (HyperAIStudioModelCreatorSword.cpp)
+
+	/** Words for a sword (not a dagger, an axe or a spear): the briefs and names the AAA sword finishing serves. */
+	bool IsSwordWords(const FString& Words);
+	/** The materials a brief's words name (gold, leather, sapphire...), for the hilt's palette; empty when it names none. */
+	TArray<FString> PaletteWords(const FString& Text);
+	/**
+	 * A weapon's finishing made a sword's: the AAA stage on, the guard 26 cm across and 1.3 cm deep, a 5.4 cm pommel, hero
+	 * textures (colour and normal 4K, the mask 2K), and a hero budget of 36,000 triangles unless bKeepBudget (a budget the
+	 * brief, the project's convention or a reference set).
+	 */
+	void MakeSwordFinish(FWeaponFinish& Finish, bool bKeepBudget);
+
+	/** An exact blade, in centimetres. The defaults are a hand-and-a-half longsword's, its blade 92 cm. */
+	struct FSwordSpec
+	{
+		double BladeLength = 92.0;
+		double BaseWidth = 5.4;
+		double PointWidth = 3.2;
+		double BaseThickness = 0.85;
+		double MidThickness = 0.40;
+		double TipThickness = 0.15;
+		/** Where along the blade (0 at the guard, 1 at the point) the ogival point begins. */
+		double PointStart = 0.80;
+		/** The fuller: from, to (fractions of the blade), its width and its depth a face. */
+		double FullerStart = 0.02;
+		double FullerEnd = 0.62;
+		double FullerWidth = 1.5;
+		double FullerDepth = 0.12;
+		/**
+		 * Up into the guard, 1.5 cm past the cut that seats it; no wider where it seats (it must leave the guard narrower
+		 * than the guard's throat), at most 15% thicker.
+		 */
+		double Ricasso = 3.5;
+		double RicassoThicken = 0.15;
+		/**
+		 * The box cut from the hilt where the generated blade's root was, sealed (a boolean, holes filled): half its width
+		 * across X and its thickness along Z about the blade's centre, and how far it reaches below the guard and up into it.
+		 */
+		double SeatHalfWidth = 4.6;
+		double SeatHalfThickness = 2.4;
+		double SeatBelow = 6.0;
+		double SeatAbove = 2.0;
+		/** Columns across each face (2K + 1 vertices) and a ring every RingCm. */
+		int32 Columns = 20;
+		double RingCm = 2.0;
+		double GuardSpan = 26.0;
+		double GuardDepth = 1.3;
+		double GripDiameter = 3.4;
+		double PommelDiameter = 5.4;
+		/** g/cm^3: the blade's steel, the guard's and pommel's brass, the grip (a wood core under leather and wire). */
+		double SteelDensity = 7.85;
+		double BrassDensity = 8.5;
+		double GripDensity = 1.0;
+		/** The point of balance wanted, cm in front of the guard. */
+		double BalanceMin = 10.0;
+		double BalanceMax = 13.0;
+		/** The pommel's scale the balance may choose from. */
+		double PommelScaleMin = 0.75;
+		double PommelScaleMax = 1.3;
+	};
+
+	/** A longsword's spec scaled to a whole length (cm): the blade is 92/110 of it, widths following within reason. */
+	FSwordSpec SwordSpecFor(double LengthCm);
+	/** The blade's width and thickness at S, 0 at the guard and 1 at the point (no ricasso flare, no fuller). */
+	void BladeProfile(const FSwordSpec& Spec, double S, double& OutWidth, double& OutThickness);
+
+	/** A blade as built: positions (cm), per-vertex normals, UVs and triangles; the front face's vertices first. */
+	struct FBladeMesh
+	{
+		TArray<FVector3d> Positions;
+		TArray<FVector3f> Normals;
+		TArray<FVector2f> UVs;
+		TArray<FIntVector> Triangles;
+		/** Vertices of the front face (+Z); the back face's follow. Edges are where they meet, so they stay hard. */
+		int32 FrontVertices = 0;
+	};
+	/**
+	 * The exact blade, its point toward -Y: lenticular section x = t/2 (1 - |u|^1.9) with a cos^2 fuller on both faces,
+	 * distal taper, an ogival point, the ricasso up into the guard from GuardBottom. Width along X, thickness along Z,
+	 * centred on Centre (X, Z). UVs: the front face U 0.01-0.49, the back 0.51-0.99, V along the length.
+	 */
+	FBladeMesh BuildBlade(const FSwordSpec& Spec, double GuardBottom, const FVector2d& Centre);
+
+	/** The area a closed mesh encloses in each plane Y = Ys[k] (Green's theorem on the cut segments, oriented by the faces). */
+	TArray<double> SliceAreas(const TArray<FVector3d>& Positions, const TArray<FIntVector>& Triangles, const TArray<double>& Ys);
+
+	/** A sword's mass and point of balance, and the pommel's scale chosen for it. */
+	struct FSwordBalance
+	{
+		double MassG = 0.0;
+		double BladeG = 0.0;
+		double HiltG = 0.0;
+		/** cm in front of the guard. */
+		double BalanceCm = 0.0;
+		double PommelScale = 1.0;
+		bool bInWindow = false;
+	};
+	/** The blade integrated from its spec, the hilt sliced every 2.5 mm; guard and pommel brass, the grip lighter. */
+	FSwordBalance SwordBalance(const FSwordSpec& Spec, const TArray<FVector3d>& Hilt, const TArray<FIntVector>& Triangles, const FHiltFrame& Frame);
+	/** The hilt's pommel (above Frame.GripEnd) scaled by K about its base and centre. */
+	void ScalePommel(TArray<FVector3d>& Hilt, const FHiltFrame& Frame, double K);
+	/** The pommel scale between the spec's bounds that brings the balance nearest the middle of its window, and the balance then. */
+	FSwordBalance BalanceSword(const FSwordSpec& Spec, const TArray<FVector3d>& Hilt, const TArray<FIntVector>& Triangles, const FHiltFrame& Frame);
+
+	/**
+	 * One class of material in a generated texture atlas: how it is told (hue, saturation and value), and what a texel of
+	 * it becomes (a metal pulled toward its physical albedo, or a dielectric held in its range), with its roughness.
+	 */
+	struct FMaterialClass
+	{
+		FString Name;
+		bool bMetal = false;
+		/** Linear albedo a metal is pulled toward, by Pull; the generated colour keeps the rest. */
+		FVector3f Albedo = FVector3f(1.f);
+		float Pull = 0.f;
+		/** Hue (degrees; a range with Min over Max wraps through red), saturation and value a texel must have. */
+		float HueMin = 0.f;
+		float HueMax = 360.f;
+		float SatMin = 0.f;
+		float ValueMin = 0.f;
+		float ValueMax = 1.f;
+		/** The texel's colour scaled by its tone (lighting taken out), or by Darken; then held in LinearMin-LinearMax. */
+		bool bUseTone = false;
+		float Darken = 1.f;
+		float LinearMin = 0.f;
+		float LinearMax = 1.f;
+		/** Roughness: Base, plus Span by how deep in a cavity (metals) or how dark against its surroundings (others). */
+		float RoughBase = 0.5f;
+		float RoughSpan = 0.f;
+		/** Its weight in the one-texel vote; the class every other texel falls to; and the steel a generated blade is made of. */
+		float VoteWeight = 1.f;
+		bool bFallback = false;
+		bool bBladeSteel = false;
+	};
+
+	/**
+	 * The hilt's materials from the brief's words (gold, brass, silver, steel, leather, wood, sapphire, ruby...) and the
+	 * reference picture's colours (BGRA8, may be empty): a class each, in the order they are told apart, a metal last to
+	 * catch the rest. Nothing named gives gold, silver, leather and a blue gem. Reasons say what was read.
+	 */
+	TArray<FMaterialClass> MaterialPalette(const TArray<FString>& Words, const TArray<FColor>& Picture, TArray<FString>& OutReasons);
+
+	/** A generated colour atlas made physically based: per-texel classes, a corrected base colour (sRGB) and an ORM (linear). */
+	struct FAtlasResult
+	{
+		int32 Width = 0;
+		int32 Height = 0;
+		/** An index into the palette per texel. */
+		TArray<uint8> Classes;
+		TArray<FColor> BaseColor;
+		/** R occlusion, G roughness, B metal. */
+		TArray<FColor> ORM;
+		/** The share of texels in each class. */
+		TArray<float> Shares;
+	};
+	/**
+	 * Per texel: its class by hue, saturation and value, with only a one-texel majority clean-up (a wider vote swallowed the
+	 * leather between a grip's wires); the generated colour kept with baked highlights clipped at 1.05 x the local mean,
+	 * metals pulled toward their albedo, metal 0 or 1, roughness by class from the cavity, occlusion lum / 12-texel mean
+	 * clamped 0.35-1 to the power 0.8.
+	 */
+	FAtlasResult CorrectAtlas(const TArray<FColor>& Pixels, int32 Width, int32 Height, const TArray<FMaterialClass>& Palette);
+	/**
+	 * A texel to paint the seat's cap faces with: the centre of a Window x Window block wholly of the palette's first
+	 * coloured metal (gold, brass), fully metal, unoccluded; else of its white metal. False when there is none.
+	 */
+	bool SolidMetalTexel(const FAtlasResult& Atlas, const TArray<FMaterialClass>& Palette, int32 Window, FVector2f& OutUV);
 
 	/** What a check measures against. */
 	struct FCheckTargets
