@@ -1284,14 +1284,14 @@ bool FHyperAIStudioModelCreatorStudioTest::RunTest(const FString& Parameters)
 					*Auth = Header.Value[0];
 				}
 			}
-			OnComplete(FHttpServerResponse::Create(TEXT(R"({"code":0,"data":{"balance":1234.5,"frozen":40}})"), TEXT("application/json")));
+			OnComplete(FHttpServerResponse::Create(FString(TEXT(R"({"code":0,"data":{"balance":1234.5,"frozen":40}})")), TEXT("application/json")));
 			return true;
 		})));
 	Routes.Add(Router->BindRoute(FHttpPath(TEXT("/tripo/v3/account/usage")), EHttpServerRequestVerbs::VERB_GET, FHttpRequestHandler::CreateLambda(
 		[](const FHttpServerRequest&, const FHttpResultCallback& OnComplete)
 		{
-			OnComplete(FHttpServerResponse::Create(TEXT(R"({"code":0,"data":[{"task_id":"task_a","type":"text_to_model","credits_consumed":20,"created_at":"2026-10-30T10:00:00Z"},)")
-				TEXT(R"({"task_id":"task_b","type":"mesh_decimate","credits_consumed":35,"created_at":"2026-10-30T10:05:00Z"}]})"), TEXT("application/json")));
+			OnComplete(FHttpServerResponse::Create(FString(TEXT(R"({"code":0,"data":[{"task_id":"task_a","type":"text_to_model","credits_consumed":20,"created_at":"2026-10-30T10:00:00Z"},)")
+				TEXT(R"({"task_id":"task_b","type":"mesh_decimate","credits_consumed":35,"created_at":"2026-10-30T10:05:00Z"}]})")), TEXT("application/json")));
 			return true;
 		})));
 	FHttpServerModule::Get().StartAllListeners();
