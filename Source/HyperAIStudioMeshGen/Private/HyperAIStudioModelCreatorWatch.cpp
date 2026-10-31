@@ -47,7 +47,7 @@ namespace HyperAIStudio::MeshGen::Creator
 		int32 OwnImports = 0;
 		FDelegateHandle PostImportHandle;
 		FDelegateHandle AddedHandle;
-		TSet<FString> Seen;
+		TSet<FString> OfferedImportPaths;
 		TArray<FString> Offers;
 
 		FString SourceFileOf(UObject& Mesh)
@@ -72,11 +72,11 @@ namespace HyperAIStudio::MeshGen::Creator
 				return;
 			}
 			const FString Path = Object->GetPathName();
-			if (Seen.Contains(Path) || !IsTripoImport(Object->GetClass()->GetName(), Path, SourceFileOf(*Object), Settings->TripoBridgeFolders, Settings->TripoNameMarkers))
+			if (OfferedImportPaths.Contains(Path) || !IsTripoImport(Object->GetClass()->GetName(), Path, SourceFileOf(*Object), Settings->TripoBridgeFolders, Settings->TripoNameMarkers))
 			{
 				return;
 			}
-			Seen.Add(Path);
+			OfferedImportPaths.Add(Path);
 			// The importer may not be done with it this frame: the offer is made a moment later.
 			const FSoftObjectPath Soft(Object);
 			const bool bNotify = Settings->bNotifyTripoBridgeImports;
