@@ -407,8 +407,20 @@ namespace HyperAIStudio::MeshGen::Creator
 		double FullerEnd = 0.62;
 		double FullerWidth = 1.5;
 		double FullerDepth = 0.12;
-		/** Up into the guard, flared 22% wider and 40% thicker where it seats. */
-		double Ricasso = 2.5;
+		/**
+		 * Up into the guard, 1.5 cm past the cut that seats it; no wider where it seats (it must leave the guard narrower
+		 * than the guard's throat), at most 15% thicker.
+		 */
+		double Ricasso = 3.5;
+		double RicassoThicken = 0.15;
+		/**
+		 * The box cut from the hilt where the generated blade's root was, sealed (a boolean, holes filled): half its width
+		 * across X and its thickness along Z about the blade's centre, and how far it reaches below the guard and up into it.
+		 */
+		double SeatHalfWidth = 4.6;
+		double SeatHalfThickness = 2.4;
+		double SeatBelow = 6.0;
+		double SeatAbove = 2.0;
 		/** Columns across each face (2K + 1 vertices) and a ring every RingCm. */
 		int32 Columns = 20;
 		double RingCm = 2.0;
@@ -529,6 +541,11 @@ namespace HyperAIStudio::MeshGen::Creator
 	 * clamped 0.35-1 to the power 0.8.
 	 */
 	FAtlasResult CorrectAtlas(const TArray<FColor>& Pixels, int32 Width, int32 Height, const TArray<FMaterialClass>& Palette);
+	/**
+	 * A texel to paint the seat's cap faces with: the centre of a Window x Window block wholly of the palette's first
+	 * coloured metal (gold, brass), fully metal, unoccluded; else of its white metal. False when there is none.
+	 */
+	bool SolidMetalTexel(const FAtlasResult& Atlas, const TArray<FMaterialClass>& Palette, int32 Window, FVector2f& OutUV);
 
 	/** What a check measures against. */
 	struct FCheckTargets

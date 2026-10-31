@@ -1201,13 +1201,35 @@ namespace HyperAIStudio::ModelCreatorTests
 		TArray<FVector3f> P, N;
 		TArray<FVector2f> UV;
 		TArray<uint32> I;
-		auto Quad = [&I](const uint32 A, const uint32 B, const uint32 C, const uint32 D) { I.Append({A, B, C, A, C, D}); };
+		// Each quad wound outward, as glTF winds a front face (counter-clockwise, (B - A) x (C - A) out), away from Inside:
+		// a closed, consistently wound part, as a generator makes one.
+		FVector3f Inside = FVector3f::ZeroVector;
+		bool bAxis = false;
+		auto Quad = [&I, &P, &Inside, &bAxis](const uint32 A, const uint32 B, const uint32 C, const uint32 D)
+		{
+			for (const FIntVector Tri : {FIntVector(A, B, C), FIntVector(A, C, D)})
+			{
+				const FVector3f Mid = (P[Tri.X] + P[Tri.Y] + P[Tri.Z]) / 3.f;
+				const FVector3f From = bAxis ? FVector3f(Inside.X, Mid.Y, Inside.Z) : Inside;
+				const FVector3f Normal = (P[Tri.Y] - P[Tri.X]) ^ (P[Tri.Z] - P[Tri.X]);
+				if ((Normal | (Mid - From)) < 0.f)
+				{
+					I.Append({uint32(Tri.X), uint32(Tri.Z), uint32(Tri.Y)});
+				}
+				else
+				{
+					I.Append({uint32(Tri.X), uint32(Tri.Y), uint32(Tri.Z)});
+				}
+			}
+		};
 		// A box from Min to Max, its sides cut every centimetre along Y.
 		auto Box = [&](const FVector3f& Min, const FVector3f& Max)
 		{
 			const int32 Rings = FMath::Max(1, FMath::RoundToInt((Max.Y - Min.Y) / 0.01f));
 			const FVector3f Corners[4] = {FVector3f(Min.X, 0, Min.Z), FVector3f(Max.X, 0, Min.Z), FVector3f(Max.X, 0, Max.Z), FVector3f(Min.X, 0, Max.Z)};
 			const FVector3f Centre = (Min + Max) * 0.5f;
+			Inside = Centre;
+			bAxis = false;
 			const uint32 Base = P.Num();
 			for (int32 Ring = 0; Ring <= Rings; ++Ring)
 			{
@@ -1236,6 +1258,8 @@ namespace HyperAIStudio::ModelCreatorTests
 		{
 			constexpr int32 Sides = 16;
 			const int32 Rings = FMath::Max(2, FMath::RoundToInt((Y1 - Y0) / 0.01f));
+			Inside = FVector3f::ZeroVector;
+			bAxis = true;
 			const uint32 Base = P.Num();
 			for (int32 Ring = 0; Ring <= Rings; ++Ring)
 			{
@@ -1569,8 +1593,16 @@ bool FHyperAIStudioModelCreatorSwordTest::RunTest(const FString& Parameters)
 		Low = FMath::Min(Low, P.Y);
 		High = FMath::Max(High, P.Y);
 	}
-	TestTrue(FString::Printf(TEXT("The blade runs 92 cm from the guard, its ricasso 2.5 cm up into it (%.2f to %.2f)"), Low, High), FMath::IsNearlyEqual(Low, -92.0, 1e-6)
-		&& FMath::IsNearlyEqual(High, 2.5, 1e-6));
+	TestTrue(FString::Printf(TEXT("The blade runs 92 cm from the guard, its ricasso 3.5 cm up into it (%.2f to %.2f)"), Low, High), FMath::IsNearlyEqual(Low, -92.0, 1e-6)
+		&& FMath::IsNearlyEqual(High, 3.5, 1e-6));
+	double Widest = 0.0, Thickest = 0.0;
+	for (const FVector3d& P : Blade.Positions)
+	{
+		Widest = FMath::Max(Widest, FMath::Abs(P.X) * 2.0);
+		Thickest = FMath::Max(Thickest, FMath::Abs(P.Z) * 2.0);
+	}
+	TestTrue(FString::Printf(TEXT("No wider where it seats (%.3f cm at most, 5.4 at its base), at most 15%% thicker (%.3f)"), Widest, Thickest), Widest <= 5.4 + 1e-9
+		&& Thickest <= 0.85 * 1.15 + 1e-9);
 	const int32 Columns = 2 * Spec.Columns + 1;
 	const int32 Rings = int32(Spec.BladeLength / Spec.RingCm) + 1;
 	auto Ring = [&](const int32 Index, const int32 Side)
@@ -1791,6 +1823,72 @@ bool FHyperAIStudioModelCreatorSwordTest::RunTest(const FString& Parameters)
 	}();
 	AddInfo(FString::Printf(TEXT("Finished: %.1f cm, blade %.2f x %.2f (%.2f), grip %.2f, guard %.2f deep and %.1f across, %d triangles"), Done.Length, Done.BladeWidth, Done.BladeThickness,
 		Done.BladeRatio, Done.GripCm, Done.GuardDepthCm, Frame.GuardSpan, Sword->GetMeshDescription(0)->Triangles().Num()));
+	// The joint: the hilt closed around the blade's seat (no open edge there), and the blade narrower than the seat it enters.
+	{
+		const FMeshDescription* Source = Sword->GetMeshDescription(0);
+		FStaticMeshConstAttributes Attributes(*Source);
+		const TPolygonGroupAttributesConstRef<FName> SlotNames = Attributes.GetPolygonGroupMaterialSlotNames();
+		const TVertexAttributesConstRef<FVector3f> Positions = Attributes.GetVertexPositions();
+		auto Key = [](const FVector3f& P) { return FIntVector(FMath::RoundToInt(P.X * 1000.f), FMath::RoundToInt(P.Y * 1000.f), FMath::RoundToInt(P.Z * 1000.f)); };
+		TMap<TPair<FIntVector, FIntVector>, int32> Edges;
+		FBox3d BladeBox(ForceInit);
+		double BladeTopWidth = 0.0;
+		const double Guard = Start ? Start->RelativeLocation.Y : 0.0;
+		for (const FTriangleID Triangle : Source->Triangles().GetElementIDs())
+		{
+			const bool bBlade = SlotNames[Source->GetTrianglePolygonGroup(Triangle)] == TEXT("Blade");
+			const TArrayView<const FVertexInstanceID> Corners = Source->GetTriangleVertexInstances(Triangle);
+			FVector3f Corner[3];
+			for (int32 Index = 0; Index < 3; ++Index)
+			{
+				Corner[Index] = Positions[Source->GetVertexInstanceVertex(Corners[Index])];
+				if (bBlade)
+				{
+					BladeBox += FVector3d(Corner[Index]);
+					if (Corner[Index].Y >= Guard - 4.0)
+					{
+						BladeTopWidth = FMath::Max(BladeTopWidth, double(FMath::Abs(Corner[Index].X)));
+					}
+				}
+			}
+			if (bBlade)
+			{
+				continue;
+			}
+			for (int32 Index = 0; Index < 3; ++Index)
+			{
+				FIntVector A = Key(Corner[Index]), B = Key(Corner[(Index + 1) % 3]);
+				if (A == B)
+				{
+					continue;
+				}
+				if (B.X < A.X || (B.X == A.X && (B.Y < A.Y || (B.Y == A.Y && B.Z < A.Z))))
+				{
+					Swap(A, B);
+				}
+				++Edges.FindOrAdd({A, B});
+			}
+		}
+		const FVector2d Centre(BladeBox.GetCenter().X, BladeBox.GetCenter().Z);
+		int32 Open = 0;
+		for (const TPair<TPair<FIntVector, FIntVector>, int32>& Edge : Edges)
+		{
+			const FVector3d Mid = (FVector3d(Edge.Key.Key) + FVector3d(Edge.Key.Value)) * 0.0005;
+			if (Edge.Value == 1 && Mid.Y >= Guard - 6.5 && Mid.Y <= Guard + 2.5 && FMath::Abs(Mid.X - Centre.X) <= 5.1 && FMath::Abs(Mid.Z - Centre.Y) <= 2.9)
+			{
+				if (Open++ < 8)
+				{
+					AddInfo(FString::Printf(TEXT("Open edge at the seat: %s to %s (the guard's underside at %.2f)"), *(FVector3d(Edge.Key.Key) * 0.001).ToString(),
+						*(FVector3d(Edge.Key.Value) * 0.001).ToString(), Guard));
+				}
+			}
+		}
+		const double TopWidth = (BladeTopWidth - FMath::Abs(Centre.X)) * 2.0;
+		TestEqual(TEXT("The hilt has no open edge about the blade's seat: the cut is sealed"), Open, 0);
+		TestTrue(FString::Printf(TEXT("The blade leaves the guard %.2f cm wide, narrower than the seat's 9.2 cm throat"), TopWidth), TopWidth > 0.0 && TopWidth < 9.2 && TopWidth <= 5.4 + 1e-3);
+		const bool bSealedNote = Notes.ContainsByPredicate([](const FString& Note) { return Note.Contains(TEXT("sealed box")); });
+		TestTrue(TEXT("and the notes say the seat was cut as a sealed box"), bSealedNote);
+	}
 	TestTrue(TEXT("Its guard at most 26 cm across and 1.3 cm deep, its grip 3.4 cm"), Frame.bValid && Frame.GuardSpan <= 26.2 && Done.GuardDepthCm <= 1.35f && FMath::IsNearlyEqual(Done.GripCm, 3.4f, 0.35f));
 	TestTrue(TEXT("Within the hero budget, Nanite off"), Sword->GetMeshDescription(0)->Triangles().Num() <= 36000 && !Sword->GetNaniteSettings().bEnabled);
 	// Its materials: the hilt's corrected maps on HyperAI's master; the blade's clean steel.

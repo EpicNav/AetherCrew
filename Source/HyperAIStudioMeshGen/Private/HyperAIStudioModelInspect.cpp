@@ -46,6 +46,9 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "ObjectTools.h"
+#include "Generators/MinimalBoxMeshGenerator.h"
+#include "Operations/MeshBoolean.h"
+#include "Operations/MinimalHoleFiller.h"
 #include "Operations/SimpleHoleFiller.h"
 #include "Parameterization/DynamicMeshUVEditor.h"
 #include "PhysicsEngine/BodySetup.h"
@@ -1445,6 +1448,146 @@ namespace HyperAIStudio::MeshGen::Creator
 			return Found ? Found : Texture;
 		}
 
+		/**
+		 * The blade's seat: a box cut from the hilt where the generated blade's root was (a boolean subtract, its holes
+		 * filled), so the guard's underside is a closed, flat face the new blade's ricasso enters. The cut's new faces take
+		 * the guard's material and a texel of solid metal from its atlas.
+		 */
+		void SeatBlade(FDynamicMesh3& Mesh, const FSwordSpec& Spec, const FHiltFrame& Frame, const TArray<FMaterialClass>& Palette, const FAtlasResult& Atlas,
+			TArray<FString>& OutNotes)
+		{
+			const double Low = Frame.GuardBottom - Spec.SeatBelow;
+			const double High = Frame.GuardBottom + Spec.SeatAbove;
+			const FVector3d Middle(Frame.Centre.X, (Low + High) * 0.5, Frame.Centre.Y);
+			const FVector3d Half(Spec.SeatHalfWidth, (High - Low) * 0.5, Spec.SeatHalfThickness);
+			FMinimalBoxMeshGenerator Box;
+			Box.Box = FOrientedBox3d(FFrame3d(Middle), Half);
+			FDynamicMesh3 Tool(&Box.Generate());
+			// The tool carries the hilt's attribute layout, so the boolean keeps the hilt's own.
+			Tool.EnableMatchingAttributes(Mesh);
+			int32 HiltMaterial = 0;
+			{
+				TMap<int32, int32> Counts;
+				for (const int32 Tid : Mesh.TriangleIndicesItr())
+				{
+					++Counts.FindOrAdd(Mesh.Attributes()->GetMaterialID()->GetValue(Tid));
+				}
+				int32 Most = -1;
+				for (const TPair<int32, int32>& Each : Counts)
+				{
+					if (Each.Value > Most)
+					{
+						Most = Each.Value;
+						HiltMaterial = Each.Key;
+					}
+				}
+			}
+			FDynamicMesh3 Result;
+			FMeshBoolean Boolean(&Mesh, &Tool, &Result, FMeshBoolean::EBooleanOp::Difference);
+			Boolean.bPutResultInInputSpace = true;
+			Boolean.bSimplifyAlongNewEdges = false;
+			Boolean.Compute();
+			if (Result.TriangleCount() == 0)
+			{
+				OutNotes.Add(TEXT("sword_finish: the blade's seat could not be cut; the guard is left whole."));
+				return;
+			}
+			TSet<int32> Filled;
+			if (!Boolean.CreatedBoundaryEdges.IsEmpty())
+			{
+				FMeshBoundaryLoops Open(&Result, false);
+				const TSet<int32> Consider(Boolean.CreatedBoundaryEdges);
+				Open.EdgeFilterFunc = [&Consider](const int32 Eid) { return Consider.Contains(Eid); };
+				Open.Compute();
+				for (const FEdgeLoop& Loop : Open.Loops)
+				{
+					FMinimalHoleFiller Filler(&Result, Loop);
+					if (Filler.Fill())
+					{
+						Filled.Append(Filler.NewTriangles);
+					}
+				}
+			}
+			const FAxisAlignedBox3d Near(Middle - Half - FVector3d(0.5), Middle + Half + FVector3d(0.5));
+			// Whatever is still open about the seat (a piece of the cut's face the boolean dropped): each loop filled.
+			{
+				FMeshBoundaryLoops Remaining(&Result, false);
+				Remaining.EdgeFilterFunc = [&Result, &Near](const int32 Eid)
+				{
+					const FIndex2i Ab = Result.GetEdgeV(Eid);
+					return Near.Contains(Result.GetVertex(Ab.A)) && Near.Contains(Result.GetVertex(Ab.B));
+				};
+				Remaining.Compute();
+				for (const FEdgeLoop& Loop : Remaining.Loops)
+				{
+					FMinimalHoleFiller Filler(&Result, Loop);
+					if (Filler.Fill())
+					{
+						Filled.Append(Filler.NewTriangles);
+						continue;
+					}
+					FSimpleHoleFiller Fan(&Result, Loop, FSimpleHoleFiller::EFillType::TriangleFan);
+					if (Fan.Fill())
+					{
+						Filled.Append(Fan.NewTriangles);
+					}
+				}
+			}
+			// The cap: faces lying on the box's planes, and what filled its holes.
+			FVector2f Metal(0.5f, 0.5f);
+			const bool bMetal = SolidMetalTexel(Atlas, Palette, 25, Metal);
+			FDynamicMeshAttributeSet& Attributes = *Result.Attributes();
+			auto OnPlane = [&](const FVector3d& A, const FVector3d& B, const FVector3d& C)
+			{
+				for (int32 Axis : {0, 1, 2})
+				{
+					for (const double Plane : {Middle[Axis] - Half[Axis], Middle[Axis] + Half[Axis]})
+					{
+						if (FMath::Abs(A[Axis] - Plane) < 0.02 && FMath::Abs(B[Axis] - Plane) < 0.02 && FMath::Abs(C[Axis] - Plane) < 0.02)
+						{
+							return true;
+						}
+					}
+				}
+				return false;
+			};
+			int32 Capped = 0;
+			for (const int32 Tid : Result.TriangleIndicesItr())
+			{
+				FVector3d A, B, C;
+				Result.GetTriVertices(Tid, A, B, C);
+				if (!Filled.Contains(Tid) && !OnPlane(A, B, C))
+				{
+					continue;
+				}
+				++Capped;
+				Attributes.GetMaterialID()->SetValue(Tid, HiltMaterial);
+				for (int32 Layer = 0; Layer < Attributes.NumUVLayers(); ++Layer)
+				{
+					FDynamicMeshUVOverlay* UVs = Attributes.GetUVLayer(Layer);
+					const int32 Element = UVs->AppendElement(Metal);
+					UVs->SetTriangle(Tid, FIndex3i(Element, Element, Element));
+				}
+				if (FDynamicMeshNormalOverlay* Normals = Attributes.PrimaryNormals())
+				{
+					// Flat, so the cap's edges stay crisp.
+					const int32 Element = Normals->AppendElement(FVector3f(Result.GetTriNormal(Tid)));
+					Normals->SetTriangle(Tid, FIndex3i(Element, Element, Element));
+				}
+			}
+			int32 Left = 0;
+			for (const int32 Eid : Result.BoundaryEdgeIndicesItr())
+			{
+				const FIndex2i Ab = Result.GetEdgeV(Eid);
+				Left += Near.Contains(Result.GetVertex(Ab.A)) && Near.Contains(Result.GetVertex(Ab.B));
+			}
+			Mesh = MoveTemp(Result);
+			Mesh.CompactInPlace();
+			OutNotes.Add(FString::Printf(TEXT("sword_finish: the blade's seat cut from the guard as a sealed box (%.1f x %.1f cm, from %.1f cm below the guard to %.1f into it), %d open edge(s) left there (%d filled); %d cap face(s) %s."),
+				Half.X * 2.0, Half.Z * 2.0, Spec.SeatBelow, Spec.SeatAbove, Left, Filled.Num(), Capped,
+				bMetal ? *FString::Printf(TEXT("in the guard's solid metal (UV %.3f, %.3f)"), Metal.X, Metal.Y) : TEXT("in the guard's material (no solid metal found in its atlas)")));
+		}
+
 		/** What the sword's geometry stage leaves for the asset stage. */
 		struct FSwordWork
 		{
@@ -1512,51 +1655,30 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 			const FHiltFrame& Frame = Work.Frame;
 			const double Bottom = Frame.GuardBottom;
-			// The generated blade below the guard, its root inside it (whatever its texture), and the steel-textured remnants
-			// near the axis in the guard's lower part: the exact blade's flared ricasso takes their place.
-			const FDynamicMeshUVOverlay* UVs = Mesh.HasAttributes() && Mesh.Attributes()->NumUVLayers() > 0 ? Mesh.Attributes()->PrimaryUV() : nullptr;
-			auto Steel = [&](const int32 Tid)
+			// The generated blade below the guard: everything under its lower face, and up to 4 mm into it where the blade's
+			// seat will be cut (the guard's own underside beyond the seat stays, or the guard would be left open). Its root
+			// inside the guard is not torn out triangle by triangle (that left a shredded underside and a hole above the new
+			// blade): a sealed box cut takes it below, once the normals are set.
+			auto InSeat = [&Frame, &Spec](const FVector3d& P)
 			{
-				if (!UVs || !UVs->IsSetTriangle(Tid) || Work.Atlas.Width <= 0)
-				{
-					return false;
-				}
-				FVector2f A, B, C;
-				UVs->GetTriElements(Tid, A, B, C);
-				const FVector2f Mid = (A + B + C) / 3.f;
-				const int32 X = FMath::Clamp(int32(FMath::Frac(Mid.X) * Work.Atlas.Width), 0, Work.Atlas.Width - 1);
-				const int32 Y = FMath::Clamp(int32(FMath::Frac(Mid.Y) * Work.Atlas.Height), 0, Work.Atlas.Height - 1);
-				return Palette[Work.Atlas.Classes[int64(Y) * Work.Atlas.Width + X]].bBladeSteel;
+				return FMath::Abs(P.X - Frame.Centre.X) <= Spec.SeatHalfWidth && FMath::Abs(P.Z - Frame.Centre.Y) <= Spec.SeatHalfThickness;
 			};
-			TArray<int32> Cut, Root, Remnant;
+			TArray<int32> Cut;
 			for (const int32 Tid : Mesh.TriangleIndicesItr())
 			{
 				FVector3d A, B, C;
 				Mesh.GetTriVertices(Tid, A, B, C);
-				const FVector3d Mid = (A + B + C) / 3.0;
-				const FVector2d Off(FMath::Abs(Mid.X - Frame.Centre.X), FMath::Abs(Mid.Z - Frame.Centre.Y));
-				if (FMath::Max3(A.Y, B.Y, C.Y) < Bottom + 0.4)
+				const double Top = FMath::Max3(A.Y, B.Y, C.Y);
+				if (Top < Bottom - 0.01 || (Top < Bottom + 0.4 && InSeat(A) && InSeat(B) && InSeat(C)))
 				{
 					Cut.Add(Tid);
 				}
-				else if (Mid.Y < Bottom + Spec.Ricasso && Off.X < 3.2)
-				{
-					Root.Add(Tid);
-				}
-				else if (Mid.Y >= Bottom - 0.5 && Mid.Y <= Bottom + 5.0 && Off.X < 4.2 && Off.Y < 3.0 && Steel(Tid))
-				{
-					Remnant.Add(Tid);
-				}
 			}
-			for (const TArray<int32>* Doomed : {&Cut, &Root, &Remnant})
+			for (const int32 Tid : Cut)
 			{
-				for (const int32 Tid : *Doomed)
-				{
-					Mesh.RemoveTriangle(Tid, /*bRemoveIsolatedVertices=*/true, /*bPreserveManifold=*/false);
-				}
+				Mesh.RemoveTriangle(Tid, /*bRemoveIsolatedVertices=*/true, /*bPreserveManifold=*/false);
 			}
-			OutNotes.Add(FString::Printf(TEXT("sword_finish: the generated blade cut away (%d triangles), its root in the guard (%d) and its steel remnants (%d)."),
-				Cut.Num(), Root.Num(), Remnant.Num()));
+			OutNotes.Add(FString::Printf(TEXT("sword_finish: the generated blade cut away below the guard (%d triangles)."), Cut.Num()));
 
 			// The exact blade, built now to know what of the budget it leaves the hilt.
 			const FBladeMesh Blade = BuildBlade(Spec, Bottom, Frame.Centre);
@@ -1597,20 +1719,25 @@ namespace HyperAIStudio::MeshGen::Creator
 				Work.Balance.bInWindow ? TEXT("") : *FString::Printf(TEXT("; %.0f-%.0f cm was out of reach: the hilt's guard is too heavy or the pommel too light for the pommel's scale alone to move it"),
 					Spec.BalanceMin, Spec.BalanceMax)));
 
-			// Smooth normals per vertex over the hilt; then the blade with its own, each face separate so its edges stay hard.
+			// Smooth normals per vertex over the hilt, before the seat is cut, so the cut's edges stay crisp.
 			if (!Mesh.HasAttributes())
 			{
 				Mesh.EnableAttributes();
 			}
+			if (Mesh.Attributes()->PrimaryNormals())
+			{
+				FMeshNormals::InitializeOverlayToPerVertexNormals(Mesh.Attributes()->PrimaryNormals(), /*bUseMeshVertexNormalsIfAvailable=*/false);
+			}
+			if (!Mesh.Attributes()->HasMaterialID())
+			{
+				Mesh.Attributes()->EnableMaterialID();
+			}
+			if (Mesh.Attributes()->NumUVLayers() == 0)
+			{
+				Mesh.Attributes()->SetNumUVLayers(1);
+			}
+			SeatBlade(Mesh, Spec, Frame, Palette, Work.Atlas, OutNotes);
 			FDynamicMeshAttributeSet& Attributes = *Mesh.Attributes();
-			if (Attributes.PrimaryNormals())
-			{
-				FMeshNormals::InitializeOverlayToPerVertexNormals(Attributes.PrimaryNormals(), /*bUseMeshVertexNormalsIfAvailable=*/false);
-			}
-			if (!Attributes.HasMaterialID())
-			{
-				Attributes.EnableMaterialID();
-			}
 			int32 Highest = 0;
 			for (const int32 Tid : Mesh.TriangleIndicesItr())
 			{

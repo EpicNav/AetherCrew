@@ -289,10 +289,10 @@ namespace HyperAIStudio::MeshGen::Creator
 				double Width = 0.0, Thick = 0.0;
 				BladeProfile(Spec, S, Width, Thick);
 				const double Y = GuardBottom + Spec.Ricasso - S * (Spec.BladeLength + Spec.Ricasso);
-				// Flared where it seats into the guard: the 2 cm below it and the ricasso inside it.
+				// A little thicker where it seats (the 2 cm below the guard and the ricasso inside it), never wider: a blade
+				// wider than the guard's throat shows its top as a shelf.
 				const double Flare = FMath::Square(FMath::Clamp((Y - (GuardBottom - 2.0)) / (Spec.Ricasso + 2.0), 0.0, 1.0));
-				Width *= 1.0 + 0.22 * Flare;
-				Thick *= 1.0 + 0.40 * Flare;
+				Thick *= 1.0 + Spec.RicassoThicken * Flare;
 				for (int32 Column = 0; Column < Columns; ++Column)
 				{
 					const double U = -1.0 + 2.0 * Column / (Columns - 1);
@@ -496,6 +496,62 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 		}
 		return Best;
+	}
+
+	bool SolidMetalTexel(const FAtlasResult& Atlas, const TArray<FMaterialClass>& Palette, const int32 Window, FVector2f& OutUV)
+	{
+		if (Atlas.Width < Window || Atlas.Height < Window || Palette.IsEmpty())
+		{
+			return false;
+		}
+		// Gold or brass first; the white metal when the hilt has no coloured one.
+		TArray<int32> Wanted;
+		for (int32 Class = 0; Class < Palette.Num(); ++Class)
+		{
+			if (Palette[Class].bMetal && !Palette[Class].bFallback)
+			{
+				Wanted.Add(Class);
+			}
+		}
+		for (int32 Class = 0; Class < Palette.Num(); ++Class)
+		{
+			if (Palette[Class].bMetal && Palette[Class].bFallback)
+			{
+				Wanted.Add(Class);
+			}
+		}
+		const int32 Width = Atlas.Width, Height = Atlas.Height;
+		for (const int32 Class : Wanted)
+		{
+			// A summed-area table of the texels that are this metal, fully metal and unoccluded.
+			TArray<int32> Sum;
+			Sum.Init(0, (Width + 1) * (Height + 1));
+			for (int32 Y = 0; Y < Height; ++Y)
+			{
+				int32 Row = 0;
+				for (int32 X = 0; X < Width; ++X)
+				{
+					const int64 Index = int64(Y) * Width + X;
+					const FColor& ORM = Atlas.ORM[Index];
+					Row += Atlas.Classes[Index] == Class && ORM.B >= 240 && ORM.R >= 230;
+					Sum[(Y + 1) * (Width + 1) + X + 1] = Sum[Y * (Width + 1) + X + 1] + Row;
+				}
+			}
+			const int32 Full = Window * Window;
+			for (int32 Y = 0; Y + Window <= Height; Y += 2)
+			{
+				for (int32 X = 0; X + Window <= Width; X += 2)
+				{
+					const int32 Count = Sum[(Y + Window) * (Width + 1) + X + Window] - Sum[Y * (Width + 1) + X + Window] - Sum[(Y + Window) * (Width + 1) + X] + Sum[Y * (Width + 1) + X];
+					if (Count == Full)
+					{
+						OutUV = FVector2f((X + Window * 0.5f) / Width, (Y + Window * 0.5f) / Height);
+						return true;
+					}
+				}
+			}
+		}
+		return false;
 	}
 
 	TArray<FMaterialClass> MaterialPalette(const TArray<FString>& Words, const TArray<FColor>& Picture, TArray<FString>& OutReasons)
