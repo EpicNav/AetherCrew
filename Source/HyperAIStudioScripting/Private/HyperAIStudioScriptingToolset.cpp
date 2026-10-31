@@ -171,6 +171,8 @@ namespace HyperAIStudio::Scripting::Private
 	FHyperAIScriptRunReport Execute(const FString& OperationId, const FString& Folder, const int32 TimeoutSeconds, const bool bGuarded,
 		const bool bChangesLevel = false)
 	{
+		// An agent's script: what it imports is HyperAI's doing, not Tripo Studio's (the creator's watch looks away).
+		const FHyperAIStudioAgentWorkScope Work;
 		FHyperAIScriptRunReport Report;
 		Report.OperationId = OperationId;
 		Report.Safety = !bGuarded ? TEXT("needs_approval") : bChangesLevel ? TEXT("changes_level") : TEXT("undoable");

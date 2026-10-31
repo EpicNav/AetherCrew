@@ -18,6 +18,8 @@
 #include "HyperAIStudioSourceControl.h"
 #include "HyperAIStudioTripoSettings.h"
 #include "JsonObjectConverter.h"
+#include "MeshDescription.h"
+#include "StaticMeshAttributes.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/PackageName.h"
@@ -80,6 +82,18 @@ namespace HyperAIStudio::MeshGen::Creator
 			bool bLocalApproved = true;
 			int32 LocalRound = -1;
 			bool bFinished = false;
+			/** Started from the Tripo Studio watch's offer: whatever it asks for later waits for a click, never auto-approval. */
+			bool bClickOnly = false;
+			/**
+			 * The static mesh as it was when the paid fix under way was asked for (geometry and slots), and the check it had
+			 * then: a fix that leaves more failing, or looks worse, is undone from this. Kept in memory for this session; the
+			 * round's folder keeps a GLB of it as well.
+			 */
+			TOptional<FMeshDescription> Before;
+			TArray<FStaticMaterial> BeforeMaterials;
+			FString BeforeAssetPath;
+			FHyperAIModelCheckReport BeforeCheck;
+			bool bCompareAfterFix = false;
 		};
 
 		FString PackageOf(const FString& ObjectPath)
@@ -224,6 +238,7 @@ namespace HyperAIStudio::MeshGen::Creator
 				: FCString::Strcmp(Reason, TEXT("fix_declined")) == 0 ? FString(TEXT("Checks still fail; the user turned the paid fix down."))
 				: FCString::Strcmp(Reason, TEXT("no_paid_fix")) == 0 ? FString(TEXT("Checks still fail and no paid fix addresses what is left."))
 				: FCString::Strcmp(Reason, TEXT("local_only")) == 0 ? FString(TEXT("Checks still fail; only free fixes were allowed (or the provider's key is not set)."))
+				: FCString::Strcmp(Reason, TEXT("fix_made_it_worse")) == 0 ? FString(TEXT("The last paid fix made the model worse, so it was undone and no more paid fixes are offered."))
 				: FString(Reason);
 			AddStep(C, TEXT("stop"), Why, TEXT("done"));
 			C.Info.Diagnostic = FString::Printf(TEXT("%s %s Spent $%.2f (%.0f credits by Tripo's count) over %d round(s). %s"), *C.Info.State, *Why, C.Info.SpentUSD,
@@ -437,6 +452,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			Summary.ToolName = Job->ToolName;
 			Summary.VariantId = VariantId;
 			Summary.Safety = EHyperAIStudioDomainSafety::ExternalEffect;
+			Summary.bClickOnly = C.bClickOnly;
 			Summary.EffectTarget = C.Info.AssetPath.IsEmpty() ? C.Folder / C.Name : C.Info.AssetPath;
 			const bool bHi3D = Job->Service.Id == TEXT("hi3d");
 			Summary.Effects = {What, FString::Printf(TEXT("Pay %s %d %s ($%.2f), against this session's spend cap"), bHi3D ? TEXT("Hi3D") : TEXT("Tripo"),
@@ -617,6 +633,150 @@ namespace HyperAIStudio::MeshGen::Creator
 		{
 			UObject* Object = LoadObject<UObject>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
 			return Cast<UStaticMesh>(Object) || Cast<USkeletalMesh>(Object) ? Object : nullptr;
+		}
+
+		// ------------------------------------------------------------ before and after a paid fix
+
+		/** What the guard compares: triangles, extents sorted small to large, mapped UV area, and slots with a material. */
+		struct FMeshFacts
+		{
+			int32 Triangles = 0;
+			FVector3d Extents = FVector3d::ZeroVector;
+			double UVArea = 0.0;
+			int32 Materials = 0;
+		};
+
+		bool FactsOf(const FString& Path, FMeshFacts& Out)
+		{
+			UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+			const FMeshDescription* Source = Mesh && Mesh->IsMeshDescriptionValid(0) ? Mesh->GetMeshDescription(0) : nullptr;
+			if (!Source)
+			{
+				return false;
+			}
+			FStaticMeshConstAttributes Attributes(*Source);
+			const TVertexAttributesConstRef<FVector3f> Positions = Attributes.GetVertexPositions();
+			const TVertexInstanceAttributesConstRef<FVector2f> UVs = Attributes.GetVertexInstanceUVs();
+			FBox3d Box(ForceInit);
+			for (const FVertexID Vertex : Source->Vertices().GetElementIDs())
+			{
+				Box += FVector3d(Positions[Vertex]);
+			}
+			Out.Triangles = Source->Triangles().Num();
+			if (Box.IsValid)
+			{
+				TArray<double> Sizes = {Box.GetSize().X, Box.GetSize().Y, Box.GetSize().Z};
+				Sizes.Sort();
+				Out.Extents = FVector3d(Sizes[0], Sizes[1], Sizes[2]);
+			}
+			if (UVs.IsValid() && UVs.GetNumChannels() > 0)
+			{
+				for (const FTriangleID Triangle : Source->Triangles().GetElementIDs())
+				{
+					const TArrayView<const FVertexInstanceID> Corners = Source->GetTriangleVertexInstances(Triangle);
+					const FVector2f A = UVs.Get(Corners[0], 0), B = UVs.Get(Corners[1], 0), Cc = UVs.Get(Corners[2], 0);
+					Out.UVArea += 0.5 * FMath::Abs(double((B.X - A.X) * (Cc.Y - A.Y) - (Cc.X - A.X) * (B.Y - A.Y)));
+				}
+			}
+			for (const FStaticMaterial& Slot : Mesh->GetStaticMaterials())
+			{
+				Out.Materials += Slot.MaterialInterface != nullptr;
+			}
+			return true;
+		}
+
+		/**
+		 * Why a paid fix's result must not replace the asset, or empty when it may: a fraction of its triangles (unless the
+		 * fix was a reduction asked for, and even then not far under the budget), its shape collapsed (Tripo hands results
+		 * back at its own scale, so proportions are compared, not sizes), or its UVs or materials gone when the asset had them.
+		 */
+		FString BrokenResult(const FCreator& C, const FString& ResultPath, const FString& FixId)
+		{
+			FMeshFacts Now, Result;
+			if (!FactsOf(C.Info.AssetPath, Now) || !FactsOf(ResultPath, Result))
+			{
+				// A skeletal result, or nothing to compare with: the checks after it decide.
+				return FString();
+			}
+			const int32 Budget = C.Info.Plan.FaceLimit > 0 ? C.Info.Plan.FaceLimit : Now.Triangles;
+			const bool bReduction = FixId == TEXT("retopo") && Now.Triangles > Budget;
+			const int32 Floor = bReduction ? FMath::Min(Budget, Now.Triangles) : Now.Triangles;
+			if (Result.Triangles * 4 < Floor)
+			{
+				return FString::Printf(TEXT("it came back with %d triangles, under a quarter of the %d %s"), Result.Triangles, Floor,
+					bReduction ? TEXT("the budget asked for") : TEXT("the model has"));
+			}
+			if (Now.Extents.Z > 0.0 && Result.Extents.Z > 0.0)
+			{
+				for (int32 Axis = 0; Axis < 2; ++Axis)
+				{
+					const double Was = Now.Extents[Axis] / Now.Extents.Z;
+					const double Is = Result.Extents[Axis] / Result.Extents.Z;
+					if (Was > 0.02 && Is < Was * 0.5)
+					{
+						return FString::Printf(TEXT("its shape collapsed: %.2f x %.2f of its longest side, against %.2f x %.2f before"), Result.Extents.X / Result.Extents.Z,
+							Result.Extents.Y / Result.Extents.Z, Now.Extents.X / Now.Extents.Z, Now.Extents.Y / Now.Extents.Z);
+					}
+				}
+			}
+			if (Now.UVArea > 0.0 && Result.UVArea <= 0.0)
+			{
+				return TEXT("it came back with no UVs, and the model had them");
+			}
+			if (Now.Materials > 0 && Result.Materials == 0)
+			{
+				return TEXT("it came back with no materials, and the model had them");
+			}
+			return FString();
+		}
+
+		/** The asset as it is now, to undo a paid fix with; and a GLB of it in the round's folder, for the record. */
+		void KeepBefore(FCreator& C)
+		{
+			C.Before.Reset();
+			C.BeforeMaterials.Reset();
+			C.bCompareAfterFix = false;
+			C.BeforeCheck = C.Info.LastCheck;
+			C.BeforeAssetPath = C.Info.AssetPath;
+			UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *C.Info.AssetPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+			if (!Mesh || !Mesh->IsMeshDescriptionValid(0))
+			{
+				return;
+			}
+			C.Before = *Mesh->GetMeshDescription(0);
+			C.BeforeMaterials = Mesh->GetStaticMaterials();
+			FString Error;
+			const FString File = ModelsRoot() / C.Info.OperationId / FString::Printf(TEXT("round%d"), C.Info.Round) / TEXT("before_fix.glb");
+			if (!HyperAIStudio::MeshGen::Characters::ExportGlb(C.Info.AssetPath, File, Error))
+			{
+				UE_LOG(LogHyperAIStudioModelCreator, Warning, TEXT("Model job %s: the round's snapshot was not written: %s"), *C.Info.OperationId, *Error);
+			}
+		}
+
+		/** Puts back what KeepBefore kept: the geometry and slots on the same asset, or the asset itself when a fix replaced it. */
+		bool RestoreBefore(FCreator& C, FString& OutNote)
+		{
+			if (!C.BeforeAssetPath.IsEmpty() && C.BeforeAssetPath != C.Info.AssetPath)
+			{
+				// A skeletal result became the asset checked; the one before it was never changed.
+				C.Info.AssetPath = C.BeforeAssetPath;
+				return true;
+			}
+			UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *C.Info.AssetPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+			if (!Mesh || !C.Before.IsSet())
+			{
+				OutNote = TEXT("nothing was kept to undo it with");
+				return false;
+			}
+			Mesh->Modify();
+			FMeshDescription* To = Mesh->IsMeshDescriptionValid(0) ? Mesh->GetMeshDescription(0) : Mesh->CreateMeshDescription(0);
+			Mesh->ModifyMeshDescription(0);
+			*To = C.Before.GetValue();
+			Mesh->CommitMeshDescription(0);
+			Mesh->GetStaticMaterials() = C.BeforeMaterials;
+			Mesh->PostEditChange();
+			Mesh->MarkPackageDirty();
+			return FHyperAIStudioSourceControl::SaveAsset(*Mesh, OutNote);
 		}
 
 		// ------------------------------------------------------------ the generation, a retry
@@ -809,6 +969,8 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 			C.StageKind = Fix.Id == TEXT("regenerate") || Fix.Id == TEXT("hi3d_regenerate") ? TEXT("regenerate") : TEXT("paid_fix");
 			C.StageFixId = Fix.Id;
+			// What it is now, to compare the fix with and undo it from if it makes things worse.
+			KeepBefore(C);
 			C.StageStep = AddStep(C, TEXT("paid_fix"), Fix.What, TEXT("awaiting_user_approval"), Fix.PriceUSD, FString::Join(Fix.Clears, TEXT(", ")));
 			C.Info.Steps[C.StageStep].Credits = ProviderCredits(Fix.Provider, Fix.PriceUSD);
 			C.Info.Steps[C.StageStep].Endpoint = FString::Join(Fix.Endpoints.IsEmpty() ? TArray<FString>{C.Info.Plan.Endpoint} : Fix.Endpoints, TEXT(" + "));
@@ -917,6 +1079,11 @@ namespace HyperAIStudio::MeshGen::Creator
 				{
 					FMaterialResult Materials;
 					bOk = BuildMaterials(*Mesh, false, Materials, Error);
+					if (bOk && Targets.bWeapon)
+					{
+						// The material build may have packed a new ORM: capped as the weapon's other textures are.
+						CapWeaponTextureSizes(*Mesh, Targets.Weapon, Materials.Notes);
+					}
 					Notes.Append(Materials.Notes);
 					C.Info.Materials = Materials.Materials;
 					C.Info.Textures = Materials.Textures;
@@ -936,6 +1103,31 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 			C.Info.LastCheck = Report;
 			C.Info.State = TEXT("checking");
+			if (C.bCompareAfterFix)
+			{
+				C.bCompareAfterFix = false;
+				// A paid fix must leave fewer checks failing, and must not look worse against the reference; otherwise it is undone.
+				const bool bNoBetter = Report.Failed >= C.BeforeCheck.Failed;
+				const bool bLooksWorse = Report.VisualScore >= 0.f && C.BeforeCheck.VisualScore >= 0.f && Report.VisualScore < C.BeforeCheck.VisualScore - 5.f;
+				if (bNoBetter || bLooksWorse)
+				{
+					const FString Why = bNoBetter ? FString::Printf(TEXT("%d check(s) failed after it, %d before"), Report.Failed, C.BeforeCheck.Failed)
+						: FString::Printf(TEXT("its capture scored %.0f against the reference, %.0f before"), Report.VisualScore, C.BeforeCheck.VisualScore);
+					FString Note;
+					const bool bUndone = RestoreBefore(C, Note);
+					UObject* Restored = bUndone ? LoadMesh(C.Info.AssetPath) : nullptr;
+					FHyperAIModelCheckReport Again;
+					if (Restored && Inspect(*Restored, Targets, Again, Error))
+					{
+						C.Info.LastCheck = Again;
+					}
+					AddStep(C, TEXT("paid_fix"), FString::Printf(TEXT("Undo the %s fix"), *C.StageFixId), bUndone ? TEXT("done") : TEXT("failed"), 0.f,
+						FString::Printf(TEXT("It made the model worse: %s. %s"), *Why, bUndone ? TEXT("The asset is back as it was before the fix.") : *(TEXT("It could not be undone: ") + Note)));
+					C.Info.Diagnostic = FString::Printf(TEXT("The %s fix made the model worse (%s)%s."), *C.StageFixId, *Why, bUndone ? TEXT(" and was undone") : TEXT(""));
+					Finish(C, TEXT("fix_made_it_worse"));
+					return;
+				}
+			}
 			Journal(C);
 			AfterChecks(C);
 		}
@@ -1026,6 +1218,20 @@ namespace HyperAIStudio::MeshGen::Creator
 				C.FixSpentUSD += Job->Price;
 				const int32 Tries = C.Tried.FindRef(C.StageFixId);
 				C.Tried.Add(C.StageFixId, Tries + 1);
+				const FString Broken = BrokenResult(C, Job->Info.AssetPath, C.StageFixId);
+				if (!Broken.IsEmpty())
+				{
+					// Clearly broken: the asset keeps what it had, and no more is spent on it.
+					if (Step)
+					{
+						Step->Status = TEXT("failed");
+						Step->Detail += FString::Printf(TEXT(" Not copied onto %s: %s (the result is %s)."), *C.Info.AssetPath, *Broken, *Job->Info.AssetPath);
+					}
+					++C.Info.Round;
+					C.Info.Diagnostic = FString::Printf(TEXT("The %s fix's result was not used: %s."), *C.StageFixId, *Broken);
+					Finish(C, TEXT("fix_made_it_worse"));
+					return;
+				}
 				FString Note;
 				if (CopyOnto(C.Info.AssetPath, Job->Info.AssetPath, Note))
 				{
@@ -1053,6 +1259,8 @@ namespace HyperAIStudio::MeshGen::Creator
 					C.Info.Plan.Resolution = C.PendingResolution;
 					C.PendingResolution.Reset();
 				}
+				// The next round's check says whether it helped.
+				C.bCompareAfterFix = true;
 			}
 			// A round is a paid fix: the generation's own check is round 0.
 			if (Kind != TEXT("generate"))
@@ -1196,6 +1404,15 @@ namespace HyperAIStudio::MeshGen::Creator
 	}
 
 	using namespace JobDetail;
+
+	bool IsAssetBusy(const FString& AssetPath)
+	{
+		const FString Package = PackageOf(AssetPath.TrimStartAndEnd());
+		return !Package.IsEmpty() && Creators().ContainsByPredicate([&Package](const TSharedRef<FCreator>& C)
+		{
+			return !C->bFinished && !C->Info.AssetPath.IsEmpty() && PackageOf(C->Info.AssetPath) == Package;
+		});
+	}
 
 	void TickJobs()
 	{
@@ -1500,6 +1717,16 @@ namespace HyperAIStudio::MeshGen::Creator
 		C->Service = Service;
 		C->Hi3D = Hi3D;
 		C->bTripoKey = bTripoKey;
+		if (!Plan.MatchAsset.IsEmpty())
+		{
+			// The reference the brief matched becomes the project's weapon convention: later weapons follow it untold.
+			FWeaponFinish Matched;
+			TArray<FString> Kept;
+			if (MatchReference(Plan.MatchAsset, Matched, Kept, Error, /*bKeep=*/true) && !Kept.IsEmpty())
+			{
+				C->Info.Plan.Reasons.Add(Kept.Last());
+			}
+		}
 		C->Targets = TargetsFromPlan(Plan);
 		C->Folder = Folder;
 		C->Name = Name;
@@ -1613,7 +1840,30 @@ namespace HyperAIStudio::MeshGen::Creator
 		{
 			Use = UseFromWords(Mesh->GetName().Replace(TEXT("_"), TEXT(" ")));
 		}
-		FCheckTargets Targets = TargetsForUse(Use, Request.Platform, Request.SizeMeters, Request.FaceLimit, Request.Topology);
+		// A reference to match: measured, applied, and (when this run changes anything) kept as the project's convention.
+		FWeaponFinish Matched;
+		TArray<FString> MatchLines;
+		const FString Match = Request.MatchAsset.TrimStartAndEnd();
+		if (!Match.IsEmpty())
+		{
+			FString MatchError;
+			if (!MatchReference(Match, Matched, MatchLines, MatchError, /*bKeep=*/!Request.bCheckOnly || bPreApproved))
+			{
+				return Refuse(TEXT("invalid_request"), MatchError);
+			}
+			Use = Use.IsEmpty() || Use == TEXT("prop") ? FString(TEXT("weapon")) : Use;
+		}
+		FCheckTargets Targets = TargetsForUse(Use, Request.Platform, Request.SizeMeters, Request.FaceLimit > 0 ? Request.FaceLimit : Match.IsEmpty() ? 0 : Matched.TargetTris, Request.Topology);
+		if (!Match.IsEmpty() && Targets.bWeapon)
+		{
+			// Its size as asked, else the reference's length.
+			const float Length = Request.SizeMeters > 0.f || Matched.LengthCm <= 0.f ? Targets.Weapon.LengthCm : Matched.LengthCm;
+			Targets.Weapon = Matched;
+			Targets.Weapon.LengthCm = Length;
+			Targets.SizeMeters = Length / 100.f;
+			Targets.Weapon.TargetTris = Targets.FaceLimit > 0 ? Targets.FaceLimit : Matched.TargetTris;
+			Targets.bNanite = Matched.bNanite;
+		}
 		const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 		if (!Request.ReferenceImagePath.TrimStartAndEnd().IsEmpty())
 		{
@@ -1625,6 +1875,16 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 		}
 		Report.OperationId = NewOperationId(Request.OperationId, TEXT("check-"));
+		if ((!Request.bCheckOnly || bPreApproved) && IsAssetBusy(Mesh->GetPathName()))
+		{
+			// One job changes an asset at a time: a second would race the first's fixes and copies.
+			const TSharedRef<FCreator>* Holder = Creators().FindByPredicate([Package = Mesh->GetOutermost()->GetName()](const TSharedRef<FCreator>& C)
+			{
+				return !C->bFinished && PackageOf(C->Info.AssetPath) == Package;
+			});
+			return Refuse(TEXT("asset_busy"), FString::Printf(TEXT("%s is already being checked or fixed by %s (%s): follow it with hyper_model_status, or stop it with hyper_mesh_cancel, then ask again."),
+				*Mesh->GetPathName(), Holder ? *(*Holder)->Info.OperationId : TEXT("another job"), Holder ? *(*Holder)->Info.State : TEXT("running")));
+		}
 		if (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Report.OperationId) || FindCreator(Report.OperationId).IsValid())
 		{
 			return Refuse(TEXT("invalid_operation_id"), TEXT("operation_id must be a new, short journal-safe id, or empty to have one made."));
@@ -1668,6 +1928,9 @@ namespace HyperAIStudio::MeshGen::Creator
 		C->Info.MaxRounds = Request.MaxRounds > 0 ? FMath::Min(Request.MaxRounds, 10) : GetDefault<UHyperAIStudioTripoSettings>()->MaxFixRounds;
 		C->Info.FirstCheck = Report.Check;
 		C->Info.Plan.Use = Use;
+		// The use's budget, so a paid retopology aims at it rather than at Tripo's own ceiling.
+		C->Info.Plan.FaceLimit = Targets.FaceLimit;
+		C->Info.Plan.MinFaces = Targets.MinFaces;
 		C->Service = Service;
 		C->Targets = Targets;
 		C->ReferenceImage = Targets.ReferenceImage;
@@ -1693,6 +1956,8 @@ namespace HyperAIStudio::MeshGen::Creator
 		{
 			// The user approved this already (the Tripo Studio offer): it starts at once.
 			C->bLocalApproved = true;
+			// Started from the watch's offer, which only a click approves: anything it asks for later waits for a click as well.
+			C->bClickOnly = true;
 			C->Info.State = TEXT("checking");
 			C->Info.CurrentOperationId.Reset();
 			AddStep(*C, TEXT("check"), Report.Check.Summary, Report.Check.bPassed ? TEXT("done") : TEXT("failed"));

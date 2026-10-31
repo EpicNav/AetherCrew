@@ -277,6 +277,11 @@ namespace HyperAIStudio::Approval::Private
 		const TOptional<EHyperAIStudioDomainSafety> SealedSafety)
 	{
 		using ESafety = EHyperAIStudioDomainSafety;
+		// An offer HyperAI made by itself waits for a click: nothing files it under a category auto-approval covers.
+		if (Summary.bClickOnly)
+		{
+			return {};
+		}
 		// Escalated scripts run without the undo step and the guard, whatever safety their summary carries.
 		if (Summary.bEscalatedScript || (Summary.PackId == TEXT("scripting") && Summary.Safety != ESafety::Edit))
 		{
@@ -423,7 +428,10 @@ namespace HyperAIStudio::Approval::Private
 			FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
 			LogApproval();
 			FHyperAIStudioApprovalGate::OnChanged().Broadcast();
-			Item.Action();
+			{
+				const FHyperAIStudioAgentWorkScope Work;
+				Item.Action();
+			}
 			return true;
 		}
 
@@ -816,6 +824,30 @@ TOptional<FHyperAIStudioApprovalRecord> FHyperAIStudioApprovalGate::FindApproval
 	const FHyperAIStudioApprovalRecord* Record = HyperAIStudio::Approval::Private::Records().FindByPredicate(
 		[&OperationId](const FHyperAIStudioApprovalRecord& Item) { return Item.OperationId == OperationId; });
 	return Record ? TOptional<FHyperAIStudioApprovalRecord>(*Record) : TOptional<FHyperAIStudioApprovalRecord>();
+}
+
+namespace HyperAIStudio::Approval::Private
+{
+	int32& AgentWorkDepth()
+	{
+		static int32 Depth = 0;
+		return Depth;
+	}
+}
+
+FHyperAIStudioAgentWorkScope::FHyperAIStudioAgentWorkScope()
+{
+	++HyperAIStudio::Approval::Private::AgentWorkDepth();
+}
+
+FHyperAIStudioAgentWorkScope::~FHyperAIStudioAgentWorkScope()
+{
+	--HyperAIStudio::Approval::Private::AgentWorkDepth();
+}
+
+bool FHyperAIStudioAgentWorkScope::IsRunning()
+{
+	return HyperAIStudio::Approval::Private::AgentWorkDepth() > 0;
 }
 
 bool FHyperAIStudioApprovalGate::Approve(const FString& OperationId, FString& OutError)

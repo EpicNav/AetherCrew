@@ -34,6 +34,7 @@
 #include "Misc/Base64.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
+#include "Misc/ObjectThumbnail.h"
 #include "Misc/OutputDevice.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
@@ -41,7 +42,10 @@
 #include "Misc/ScopeLock.h"
 #include "ObjectTools.h"
 #include "PhysicsEngine/BodySetup.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
+#include "StaticMeshAttributes.h"
+#include "StaticMeshResources.h"
 
 /**
  * The Tripo model creator: classification, Tripo v3 request bodies, prices, the checks on small GLB fixtures with known
@@ -190,12 +194,116 @@ namespace HyperAIStudio::ModelCreatorTests
 		return Glb;
 	}
 
+	/** A GLB's JSON chunk, and its binary chunk as it is. */
+	TSharedPtr<FJsonObject> GlbJson(const TArray<uint8>& Glb, TArray<uint8>* OutBin = nullptr)
+	{
+		if (Glb.Num() < 20)
+		{
+			return nullptr;
+		}
+		const uint32 Length = *reinterpret_cast<const uint32*>(Glb.GetData() + 12);
+		const FUTF8ToTCHAR Text(reinterpret_cast<const ANSICHAR*>(Glb.GetData() + 20), Length);
+		TSharedPtr<FJsonObject> Json;
+		FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(FString(Text.Length(), Text.Get())), Json);
+		const int32 BinAt = 20 + Length;
+		if (OutBin && Glb.Num() >= BinAt + 8)
+		{
+			const uint32 BinLength = *reinterpret_cast<const uint32*>(Glb.GetData() + BinAt);
+			OutBin->Append(Glb.GetData() + BinAt + 8, BinLength);
+		}
+		return Json;
+	}
+
+	/** A GLB from a JSON object and a binary chunk. */
+	TArray<uint8> GlbOf(const TSharedRef<FJsonObject>& Json, const TArray<uint8>& Bin)
+	{
+		FString Text;
+		FJsonSerializer::Serialize(Json, TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Text));
+		while (Text.Len() % 4 != 0)
+		{
+			Text.AppendChar(TEXT(' '));
+		}
+		const FTCHARToUTF8 Encoded(*Text);
+		TArray<uint8> Glb;
+		auto Word = [&Glb](const uint32 Value) { Glb.Append(reinterpret_cast<const uint8*>(&Value), 4); };
+		Word(0x46546C67u);
+		Word(2);
+		Word(12 + 8 + Encoded.Length() + 8 + Bin.Num());
+		Word(Encoded.Length());
+		Word(0x4E4F534Au);
+		Glb.Append(reinterpret_cast<const uint8*>(Encoded.Get()), Encoded.Length());
+		Word(Bin.Num());
+		Word(0x004E4942u);
+		Glb.Append(Bin);
+		return Glb;
+	}
+
+	/**
+	 * Parts nodes, each its own mesh (the same small cube's data) moved 0.3 m along glTF's X, no material: what Tripo's
+	 * segmentation and completion hand back, which Unreal imports as a static mesh a node.
+	 */
+	TArray<uint8> PartsGlb(const int32 Parts, const int32 Grid)
+	{
+		FFixture Cube;
+		Cube.Size = 0.2f;
+		Cube.Grid = Grid;
+		TArray<uint8> Bin;
+		const TSharedPtr<FJsonObject> Json = GlbJson(CubeGlb(Cube), &Bin);
+		const TSharedPtr<FJsonObject> Mesh = Json->GetArrayField(TEXT("meshes"))[0]->AsObject();
+		TArray<TSharedPtr<FJsonValue>> Meshes, Nodes, Roots;
+		for (int32 Part = 0; Part < Parts; ++Part)
+		{
+			const TSharedRef<FJsonObject> Copy = MakeShared<FJsonObject>(*Mesh);
+			Copy->SetStringField(TEXT("name"), FString::Printf(TEXT("tripo_mesh_%d"), Part));
+			Meshes.Add(MakeShared<FJsonValueObject>(Copy));
+			const TSharedRef<FJsonObject> Node = MakeShared<FJsonObject>();
+			Node->SetNumberField(TEXT("mesh"), Part);
+			Node->SetStringField(TEXT("name"), FString::Printf(TEXT("tripo_part_%d"), Part));
+			Node->SetArrayField(TEXT("translation"), {MakeShared<FJsonValueNumber>(Part * 0.3), MakeShared<FJsonValueNumber>(0.0), MakeShared<FJsonValueNumber>(0.0)});
+			Nodes.Add(MakeShared<FJsonValueObject>(Node));
+			Roots.Add(MakeShared<FJsonValueNumber>(Part));
+		}
+		Json->SetArrayField(TEXT("meshes"), Meshes);
+		Json->SetArrayField(TEXT("nodes"), Nodes);
+		const TSharedRef<FJsonObject> Scene = MakeShared<FJsonObject>();
+		Scene->SetArrayField(TEXT("nodes"), Roots);
+		Json->SetArrayField(TEXT("scenes"), {MakeShared<FJsonValueObject>(Scene)});
+		return GlbOf(Json.ToSharedRef(), Bin);
+	}
+
+	/** The triangles a GLB on disk holds, every primitive's indices counted. */
+	int32 GlbTriangles(const FString& File)
+	{
+		TArray<uint8> Glb;
+		FFileHelper::LoadFileToArray(Glb, *File);
+		const TSharedPtr<FJsonObject> Json = GlbJson(Glb);
+		if (!Json.IsValid())
+		{
+			return -1;
+		}
+		const TArray<TSharedPtr<FJsonValue>>& Accessors = Json->GetArrayField(TEXT("accessors"));
+		int32 Triangles = 0;
+		for (const TSharedPtr<FJsonValue>& Mesh : Json->GetArrayField(TEXT("meshes")))
+		{
+			for (const TSharedPtr<FJsonValue>& Primitive : Mesh->AsObject()->GetArrayField(TEXT("primitives")))
+			{
+				int32 Indices = INDEX_NONE;
+				if (Primitive->AsObject()->TryGetNumberField(TEXT("indices"), Indices) && Accessors.IsValidIndex(Indices))
+				{
+					Triangles += Accessors[Indices]->AsObject()->GetIntegerField(TEXT("count")) / 3;
+				}
+			}
+		}
+		return Triangles;
+	}
+
 	const TCHAR* const TestFolder = TEXT("/Game/HyperAITests/Creator");
 
-	/** Imports a fixture as HyperAI's own jobs do; the first static mesh it makes. */
-	UStaticMesh* Import(const TArray<uint8>& Glb, const FString& Name, TArray<FString>& OutImported, const FString& Folder = TestFolder, const bool bOwn = true)
+	/** Imports a fixture as HyperAI's own jobs do; the first static mesh it makes. FileFolder: where the GLB is written first. */
+	UStaticMesh* Import(const TArray<uint8>& Glb, const FString& Name, TArray<FString>& OutImported, const FString& Folder = TestFolder, const bool bOwn = true,
+		const FString& FileFolder = FString())
 	{
-		const FString File = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Tests/Creator") / Name + TEXT(".glb"));
+		const FString File = FPaths::ConvertRelativePathToFull((FileFolder.IsEmpty() ? FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Tests/Creator") : FileFolder) / Name + TEXT(".glb"));
 		IFileManager::Get().MakeDirectory(*FPaths::GetPath(File), /*Tree=*/true);
 		FFileHelper::SaveArrayToFile(Glb, *File);
 		UAssetImportTask* Task = NewObject<UAssetImportTask>();
@@ -352,6 +460,21 @@ namespace HyperAIStudio::ModelCreatorTests
 		const FHyperAIModelStatusReport Status = HyperAIStudio::MeshGen::Creator::Status(OperationId);
 		return Status.Jobs.IsEmpty() ? FHyperAIModelJob() : Status.Jobs[0];
 	}
+
+	/** The share of a picture's pixels in the fixture's warm browns (red well over blue): textured, not grey clay. */
+	double WarmShare(const FImageView& Picture)
+	{
+		FImage Bgra;
+		Picture.CopyTo(Bgra, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+		const int64 Pixels = int64(Bgra.SizeX) * Bgra.SizeY;
+		int64 Warm = 0;
+		for (int64 Index = 0; Index < Pixels; ++Index)
+		{
+			const uint8* Pixel = Bgra.RawData.GetData() + Index * 4;
+			Warm += Pixel[2] > 50 && Pixel[2] > Pixel[0] + 25;
+		}
+		return Pixels > 0 ? double(Warm) / Pixels : 0.0;
+	}
 }
 
 // ---------------------------------------------------------------- classification
@@ -362,6 +485,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelCreatorClassifyTest, "HyperA
 bool FHyperAIStudioModelCreatorClassifyTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::ModelCreatorTests;
+	// HyperAI's own weapon defaults here, whatever this project has learned.
+	FHyperAIStudioWeaponConvention& Convention = GetMutableDefault<UHyperAIStudioTripoSettings>()->WeaponConvention;
+	const FHyperAIStudioWeaponConvention SavedConvention = Convention;
+	Convention = FHyperAIStudioWeaponConvention();
+	ON_SCOPE_EXIT { Convention = SavedConvention; };
 	struct FRow
 	{
 		const TCHAR* Prompt;
@@ -392,10 +520,11 @@ bool FHyperAIStudioModelCreatorClassifyTest::RunTest(const FString& Parameters)
 		{TEXT("a low poly pine tree"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("P2"), TEXT("foliage"), false, 8000, TEXT("standard"), false, false, true},
 		{TEXT("a low poly treasure chest"), TEXT("prop"), TEXT(""), TEXT("H3.1"), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("prop"), false, 20000, TEXT("standard"), false, true, false},
 		{TEXT("a robot with separate parts"), TEXT("prop"), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("prop"), false, 20000, TEXT("standard"), true, false, false},
-		// Detail on a light use is four times its budget, not a flat 500K; a dense static weapon turns Nanite on.
-		{TEXT("an ornate engraved longsword"), TEXT("weapon"), TEXT(""), TEXT("H3.1"), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("weapon"), false, 60000, TEXT("extreme"), false, false, false},
+		// A weapon is finished in the editor to 20K, whatever detail it is generated at (four times that, here); a dense one
+		// asked for outright keeps Nanite on.
+		{TEXT("an ornate engraved longsword"), TEXT("weapon"), TEXT(""), TEXT("H3.1"), 0, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("weapon"), false, 20000, TEXT("extreme"), false, false, false},
 		{TEXT("a longsword"), TEXT("weapon"), TEXT(""), TEXT("H3.1"), 200000, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("weapon"), false, 200000, TEXT("detailed"), false, false, true},
-		{TEXT("a medieval sword"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT("quads"), TEXT(""), TEXT("P2"), TEXT("weapon"), true, 7500, TEXT("detailed"), false, false, false},
+		{TEXT("a medieval sword"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT("quads"), TEXT(""), TEXT("H3.1"), TEXT("weapon"), true, 10000, TEXT("detailed"), false, false, false},
 		{TEXT("a distant mountain"), TEXT(""), TEXT(""), TEXT(""), 0, TEXT(""), TEXT(""), TEXT("P2"), TEXT("background"), false, 5000, TEXT("standard"), false, false, false},
 		{TEXT("a gem"), TEXT(""), TEXT(""), TEXT("P2"), 1200, TEXT(""), TEXT(""), TEXT("P2"), TEXT("miniature"), false, 1200, TEXT("standard"), false, false, false},
 		{TEXT("a huge cathedral"), TEXT("environment"), TEXT(""), TEXT("H3.1"), 1800000, TEXT(""), TEXT(""), TEXT("H3.1"), TEXT("environment"), false, 1800000, TEXT("detailed"), false, false, true},
@@ -756,6 +885,38 @@ bool FHyperAIStudioModelCreatorLadderTest::RunTest(const FString& Parameters)
 	Wind.Result = TEXT("fail");
 	Wind.LocalFix = TEXT("orient,normals");
 	TestEqual(TEXT("Free fixes run in order: bits, winding, normals, then pivot"), FString::Join(LocalFixesFor(Local), TEXT(",")), FString(TEXT("remove_bits,orient,normals,pivot")));
+
+	// The live sword: a 60,000-triangle budget, 57,050 triangles in. Retopology never aims far under the budget.
+	FFixContext Sword;
+	Sword.InputTaskId = TEXT("task_sword");
+	Sword.bHasTextures = true;
+	Sword.RemainingUSD = 5.f;
+	Sword.Plan = Context.Plan;
+	Sword.Plan.FaceLimit = 60000;
+	Sword.Plan.bQuad = false;
+	FHyperAIModelCheckReport Broken = Report({TEXT("non_manifold"), TEXT("holes")});
+	Broken.Triangles = 57050;
+	Ladder = PaidLadder(Broken, Sword);
+	const FPaidFix* Retopo = Ladder.FindByPredicate([](const FPaidFix& Fix) { return Fix.Id == TEXT("retopo"); });
+	TestTrue(TEXT("Under a 60,000 budget, a retopology is decimation v1.0 to 60,000 (10 credits, no bake), never v3.0's 20,000"), Retopo && Retopo->Bodies[0]->GetStringField(TEXT("model")) == TEXT("v1.0")
+		&& Retopo->Bodies[0]->GetIntegerField(TEXT("face_limit")) == 60000 && !Retopo->Bodies[0]->HasField(TEXT("bake")) && Credits(Retopo->PriceUSD) == 10);
+	TestFalse(TEXT("and no fix anywhere asks for 20,000"), Ladder.ContainsByPredicate([](const FPaidFix& Fix)
+	{
+		return !Fix.Bodies.IsEmpty() && Fix.Bodies[0].IsValid() && Fix.Bodies[0]->HasField(TEXT("face_limit")) && Fix.Bodies[0]->GetIntegerField(TEXT("face_limit")) == RetopoMaxTris;
+	}));
+	FHyperAIModelCheckReport OverBudget = Report({TEXT("faces")});
+	OverBudget.Triangles = 90000;
+	Ladder = PaidLadder(OverBudget, Sword);
+	TestTrue(TEXT("Over a 60,000 budget, decimation v1.0 reduces it to the budget"), !Ladder.IsEmpty() && Ladder[0].Id == TEXT("retopo")
+		&& Ladder[0].Bodies[0]->GetStringField(TEXT("model")) == TEXT("v1.0") && Ladder[0].Bodies[0]->GetIntegerField(TEXT("face_limit")) == 60000);
+	Sword.Plan.FaceLimit = 15000;
+	Ladder = PaidLadder(Broken, Sword);
+	TestTrue(TEXT("Within v3.0's reach (15,000), retopology is v3.0 to the budget, with smart UV and a bake"), !Ladder.IsEmpty() && Ladder[0].Id == TEXT("retopo")
+		&& Ladder[0].Bodies[0]->GetStringField(TEXT("model")) == TEXT("v3.0") && Ladder[0].Bodies[0]->GetIntegerField(TEXT("face_limit")) == 15000 && Ladder[0].Bodies[0]->GetBoolField(TEXT("bake")));
+	Sword.Plan = FHyperAIModelPlan();
+	Ladder = PaidLadder(Broken, Sword);
+	TestTrue(TEXT("With no budget known (a check-and-fix on any mesh), the target is the faces it has: v1.0 at 57,050"), !Ladder.IsEmpty() && Ladder[0].Id == TEXT("retopo")
+		&& Ladder[0].Bodies[0]->GetIntegerField(TEXT("face_limit")) == 57050);
 	return true;
 }
 
@@ -811,6 +972,8 @@ bool FHyperAIStudioModelCreatorChecksTest::RunTest(const FString& Parameters)
 		FFixture Fixture;
 		const TCHAR* Check;
 		const TCHAR* Fix;
+		/** Held as a mesh walked on (complex collision): its defects fail, as a character's would. */
+		bool bStrict = false;
 	};
 	FFixture Hole; Hole.bHole = true;
 	FFixture Flip; Flip.bFlipOne = true;
@@ -819,35 +982,52 @@ bool FHyperAIStudioModelCreatorChecksTest::RunTest(const FString& Parameters)
 	FFixture Overlap; Overlap.bOverlapUV = true;
 	FFixture Off; Off.Offset = FVector3f(0.4f, 0.3f, -0.2f);
 	const FCase Cases[] = {
-		{TEXT("SM_CreatorHole"), Hole, TEXT("holes"), TEXT("fill_holes")},
+		{TEXT("SM_CreatorHole"), Hole, TEXT("holes"), TEXT("fill_holes"), /*bStrict=*/true},
 		{TEXT("SM_CreatorFlip"), Flip, TEXT("flipped"), TEXT("orient")},
 		{TEXT("SM_CreatorFloat"), Float, TEXT("floating"), TEXT("remove_bits")},
 		{TEXT("SM_CreatorSmall"), Small, TEXT("scale"), TEXT("scale")},
 		{TEXT("SM_CreatorOverlap"), Overlap, TEXT("uv_overlap"), TEXT("auto_uv")},
 		{TEXT("SM_CreatorOffset"), Off, TEXT("pivot"), TEXT("pivot")},
 	};
+	FCheckTargets Strict = Targets;
+	Strict.Collision = TEXT("complex");
 	for (const FCase& Case : Cases)
 	{
+		const FCheckTargets& CaseTargets = Case.bStrict ? Strict : Targets;
 		UStaticMesh* Defective = Import(CubeGlb(Case.Fixture), Case.Name, Imported);
 		if (!TestNotNull(FString(Case.Name) + TEXT(" imports"), Defective))
 		{
 			continue;
 		}
 		FHyperAIModelCheckReport Before;
-		Inspect(*Defective, Targets, Before, Error);
+		Inspect(*Defective, CaseTargets, Before, Error);
 		const FHyperAIModelCheck* Check = Find(Before, Case.Check);
 		AddInfo(FString::Printf(TEXT("%s: %s (%s)"), Case.Name, *Before.Summary, Check ? *Check->Detail : TEXT("")));
 		TestEqual(FString::Printf(TEXT("%s fails %s"), Case.Name, Case.Check), ResultOf(Before, Case.Check), FString(TEXT("fail")));
 		TestTrue(FString::Printf(TEXT("%s names the free fix %s"), Case.Name, Case.Fix), Check && Check->LocalFix.Contains(Case.Fix) && LocalFixesFor(Before).Contains(Case.Fix));
 		TArray<FString> Notes;
-		TestTrue(FString::Printf(TEXT("%s: the free fixes run: %s"), Case.Name, *Error), ApplyLocalFixes(*Defective, Targets, LocalFixesFor(Before), Notes, Error));
+		TestTrue(FString::Printf(TEXT("%s: the free fixes run: %s"), Case.Name, *Error), ApplyLocalFixes(*Defective, CaseTargets, LocalFixesFor(Before), Notes, Error));
 		FHyperAIModelCheckReport After;
-		Inspect(*Defective, Targets, After, Error);
+		Inspect(*Defective, CaseTargets, After, Error);
 		AddInfo(FString::Printf(TEXT("%s fixed: %s; %s"), Case.Name, *After.Summary, *FString::Join(Notes, TEXT(" "))));
 		TestEqual(FString::Printf(TEXT("%s passes %s after %s"), Case.Name, Case.Check, Case.Fix), ResultOf(After, Case.Check), FString(TEXT("pass")));
 		TestEqual(FString::Printf(TEXT("%s has collision after the fixes"), Case.Name), ResultOf(After, TEXT("collision")), FString(TEXT("pass")));
 		TestEqual(FString::Printf(TEXT("%s keeps its pivot at the bottom centre"), Case.Name), ResultOf(After, TEXT("pivot")), FString(TEXT("pass")));
 		TestTrue(FString::Printf(TEXT("%s passes every check after its free fixes: %s"), Case.Name, *After.Summary), After.bPassed);
+	}
+
+	// The same hole on a static prop that only renders: a warning, the free fill still offered, no paid fix behind it.
+	UStaticMesh* Prop = Import(CubeGlb(Hole), TEXT("SM_CreatorHoleProp"), Imported);
+	if (Prop)
+	{
+		FHyperAIModelCheckReport Minor;
+		Inspect(*Prop, Targets, Minor, Error);
+		TestTrue(TEXT("A small hole on a static prop warns (open edges too), and the free fill still runs: ") + Minor.Summary, ResultOf(Minor, TEXT("holes")) == TEXT("warn")
+			&& ResultOf(Minor, TEXT("open_edges")) == TEXT("warn") && LocalFixesFor(Minor).Contains(TEXT("fill_holes")));
+		FCheckTargets Character = Targets;
+		Character.Use = TEXT("character");
+		Inspect(*Prop, Character, Minor, Error);
+		TestEqual(TEXT("For a character to be rigged it still fails"), ResultOf(Minor, TEXT("holes")), FString(TEXT("fail")));
 	}
 
 	// The fixes that need no defect to try: lightmap UVs, Nanite, normals.
@@ -944,6 +1124,53 @@ bool FHyperAIStudioModelCreatorMaterialsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("After the build: the master on every slot, the normal map well formed, roughness and metal linear"), ResultOf(Report, TEXT("material_setup")) == TEXT("pass")
 		&& ResultOf(Report, TEXT("normal_map")) == TEXT("pass") && ResultOf(Report, TEXT("roughness_metal")) == TEXT("pass") && ResultOf(Report, TEXT("pbr")) == TEXT("pass"));
 
+	// glTF's normal maps (Tripo's NormalGL) are OpenGL, +Y: read by Unreal (-Y) only with their green flipped.
+	if (UTexture2D* NormalMap = Cast<UTexture2D>(Normal))
+	{
+		TestTrue(TEXT("The glTF normal map comes in with its green flipped"), NormalMap->bFlipGreenChannel);
+		// As a route that does not flip it would leave it.
+		NormalMap->bFlipGreenChannel = false;
+		Inspect(*Mesh, Targets, Report, Error);
+		const FHyperAIModelCheck* NormalCheck = Find(Report, TEXT("normal_map"));
+		TestTrue(TEXT("Unflipped, the normal-map check fails and names the free material fix"), NormalCheck && NormalCheck->Result == TEXT("fail") && NormalCheck->LocalFix == TEXT("materials")
+			&& NormalCheck->Value.Contains(TEXT("green not flipped")));
+		FMaterialResult Again;
+		TestTrue(TEXT("The material build runs again: ") + Error, BuildMaterials(*Mesh, false, Again, Error));
+		Inspect(*Mesh, Targets, Report, Error);
+		TestTrue(TEXT("and flips it back: the check passes"), NormalMap->bFlipGreenChannel && ResultOf(Report, TEXT("normal_map")) == TEXT("pass"));
+	}
+
+	// The visual check sees the textured model, Nanite or not: the live sword's captures were grey clay.
+	{
+		FMeshNaniteSettings Nanite = Mesh->GetNaniteSettings();
+		Nanite.bEnabled = true;
+		Mesh->SetNaniteSettings(Nanite);
+		Mesh->PostEditChange();
+		FAssetCompilingManager::Get().FinishAllCompilation();
+		FCheckTargets Look = Targets;
+		Look.CaptureFolder = FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Tests/Creator/capture");
+		Inspect(*Mesh, Look, Report, Error);
+		FImage Captured;
+		if (Report.Images.IsEmpty() || !FImageUtils::LoadImage(*Report.Images[0], Captured))
+		{
+			AddWarning(TEXT("No renderer in this session: the capture's colour is not checked."));
+		}
+		else
+		{
+			// What the thumbnail of the Nanite mesh itself gives, for the record.
+			FObjectThumbnail Direct;
+			ThumbnailTools::RenderThumbnail(Mesh, 512, 512, ThumbnailTools::EThumbnailTextureFlushMode::AlwaysFlush, nullptr, &Direct);
+			double DirectShare = -1.0;
+			if (Direct.GetImageWidth() > 0 && Direct.GetUncompressedImageData().Num() >= Direct.GetImageWidth() * Direct.GetImageHeight() * 4)
+			{
+				TArray<uint8> Bytes = Direct.GetUncompressedImageData();
+				DirectShare = WarmShare(FImageView(Bytes.GetData(), Direct.GetImageWidth(), Direct.GetImageHeight(), ERawImageFormat::BGRA8));
+			}
+			AddInfo(FString::Printf(TEXT("Warm pixels: the creator's capture %.1f%%, the Nanite mesh's own thumbnail %.1f%%"), WarmShare(Captured) * 100.0, DirectShare * 100.0));
+			TestTrue(TEXT("The capture of a Nanite mesh shows its texture, not grey clay"), WarmShare(Captured) > 0.02);
+		}
+	}
+
 	// A parts model: one slot a part.
 	FFixture PartsFixture;
 	PartsFixture.bFloating = true;
@@ -954,6 +1181,433 @@ bool FHyperAIStudioModelCreatorMaterialsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A parts model gets a material slot a part"), Parts && BuildMaterials(*Parts, true, PartsResult, Error) && Parts->GetStaticMaterials().Num() == 2 && PartsResult.Materials.Num() == 2);
 	Imported.Append(PartsResult.Materials);
 	Imported.Append(PartsResult.Textures);
+	return true;
+}
+
+// ---------------------------------------------------------------- weapons: finishing, checks, a reference to match
+
+namespace HyperAIStudio::ModelCreatorTests
+{
+	/**
+	 * A deliberately bulky sword, as a generator makes one, upright in glTF (Y up, so Z in Unreal) with the handle up: a
+	 * box blade 6 x 4 cm, 75 cm long; a guard 22 cm across and 10 deep; a grip 6 cm across; a ball pommel. Every part is cut
+	 * a centimetre at a time along its length, as a generated mesh is dense.
+	 */
+	TArray<uint8> WeaponGlb()
+	{
+		TArray<FVector3f> P, N;
+		TArray<FVector2f> UV;
+		TArray<uint32> I;
+		auto Quad = [&I](const uint32 A, const uint32 B, const uint32 C, const uint32 D) { I.Append({A, B, C, A, C, D}); };
+		// A box from Min to Max, its sides cut every centimetre along Y.
+		auto Box = [&](const FVector3f& Min, const FVector3f& Max)
+		{
+			const int32 Rings = FMath::Max(1, FMath::RoundToInt((Max.Y - Min.Y) / 0.01f));
+			const FVector3f Corners[4] = {FVector3f(Min.X, 0, Min.Z), FVector3f(Max.X, 0, Min.Z), FVector3f(Max.X, 0, Max.Z), FVector3f(Min.X, 0, Max.Z)};
+			const FVector3f Centre = (Min + Max) * 0.5f;
+			const uint32 Base = P.Num();
+			for (int32 Ring = 0; Ring <= Rings; ++Ring)
+			{
+				const float Y = FMath::Lerp(Min.Y, Max.Y, float(Ring) / Rings);
+				for (int32 Corner = 0; Corner < 4; ++Corner)
+				{
+					P.Add(FVector3f(Corners[Corner].X, Y, Corners[Corner].Z));
+					N.Add((FVector3f(Corners[Corner].X, Centre.Y, Corners[Corner].Z) - FVector3f(Centre.X, Centre.Y, Centre.Z)).GetSafeNormal());
+					UV.Add(FVector2f(0.05f + 0.2f * Corner, 0.05f + 0.9f * Ring / Rings));
+				}
+			}
+			for (int32 Ring = 0; Ring < Rings; ++Ring)
+			{
+				for (int32 Corner = 0; Corner < 4; ++Corner)
+				{
+					const uint32 A = Base + Ring * 4 + Corner, B = Base + Ring * 4 + (Corner + 1) % 4;
+					Quad(A, A + 4, B + 4, B);
+				}
+			}
+			Quad(Base + 3, Base + 2, Base + 1, Base + 0);
+			const uint32 Top = Base + Rings * 4;
+			Quad(Top + 0, Top + 1, Top + 2, Top + 3);
+		};
+		// A tube of Radius from Y0 to Y1, or a ball when bBall (its radius following a half circle).
+		auto Round = [&](const float Y0, const float Y1, const float Radius, const bool bBall)
+		{
+			constexpr int32 Sides = 16;
+			const int32 Rings = FMath::Max(2, FMath::RoundToInt((Y1 - Y0) / 0.01f));
+			const uint32 Base = P.Num();
+			for (int32 Ring = 0; Ring <= Rings; ++Ring)
+			{
+				const float T = float(Ring) / Rings;
+				const float Y = FMath::Lerp(Y0, Y1, T);
+				const float R = bBall ? Radius * FMath::Max(0.05f, FMath::Sin(T * UE_PI)) : Radius;
+				for (int32 Side = 0; Side < Sides; ++Side)
+				{
+					const float Angle = 2.f * UE_PI * Side / Sides;
+					P.Add(FVector3f(R * FMath::Cos(Angle), Y, R * FMath::Sin(Angle)));
+					N.Add(FVector3f(FMath::Cos(Angle), 0.f, FMath::Sin(Angle)));
+					UV.Add(FVector2f(0.05f + 0.9f * Side / Sides, 0.05f + 0.9f * T));
+				}
+			}
+			for (int32 Ring = 0; Ring < Rings; ++Ring)
+			{
+				for (int32 Side = 0; Side < Sides; ++Side)
+				{
+					const uint32 A = Base + Ring * Sides + Side, B = Base + Ring * Sides + (Side + 1) % Sides;
+					Quad(A, B, B + Sides, A + Sides);
+				}
+			}
+		};
+		Box(FVector3f(-0.03f, 0.f, -0.02f), FVector3f(0.03f, 0.75f, 0.02f));
+		Box(FVector3f(-0.11f, 0.75f, -0.05f), FVector3f(0.11f, 0.79f, 0.05f));
+		Round(0.79f, 0.97f, 0.03f, false);
+		Round(0.97f, 1.04f, 0.035f, true);
+
+		FFixture Shell;
+		Shell.Grid = 1;
+		TArray<uint8> Bin;
+		const TSharedPtr<FJsonObject> Json = GlbJson(CubeGlb(Shell), &Bin);
+		Bin.Reset();
+		auto Append = [&Bin](const void* Data, const int32 Bytes) { while (Bin.Num() % 4) { Bin.Add(0); } const int32 Offset = Bin.Num(); Bin.Append(static_cast<const uint8*>(Data), Bytes); return Offset; };
+		const int32 PO = Append(P.GetData(), P.Num() * 12), NO = Append(N.GetData(), N.Num() * 12), UO = Append(UV.GetData(), UV.Num() * 8), IO = Append(I.GetData(), I.Num() * 4);
+		while (Bin.Num() % 4)
+		{
+			Bin.Add(0);
+		}
+		auto View = [](const int32 Offset, const int32 Bytes)
+		{
+			const TSharedRef<FJsonObject> Each = MakeShared<FJsonObject>();
+			Each->SetNumberField(TEXT("buffer"), 0);
+			Each->SetNumberField(TEXT("byteOffset"), Offset);
+			Each->SetNumberField(TEXT("byteLength"), Bytes);
+			return MakeShared<FJsonValueObject>(Each);
+		};
+		Json->SetArrayField(TEXT("bufferViews"), {View(PO, P.Num() * 12), View(NO, N.Num() * 12), View(UO, UV.Num() * 8), View(IO, I.Num() * 4)});
+		FVector3f Min(FLT_MAX), Max(-FLT_MAX);
+		for (const FVector3f& X : P)
+		{
+			Min = FVector3f::Min(Min, X);
+			Max = FVector3f::Max(Max, X);
+		}
+		const TArray<TSharedPtr<FJsonValue>> Accessors = Json->GetArrayField(TEXT("accessors"));
+		Accessors[0]->AsObject()->SetNumberField(TEXT("count"), P.Num());
+		Accessors[0]->AsObject()->SetArrayField(TEXT("min"), {MakeShared<FJsonValueNumber>(Min.X), MakeShared<FJsonValueNumber>(Min.Y), MakeShared<FJsonValueNumber>(Min.Z)});
+		Accessors[0]->AsObject()->SetArrayField(TEXT("max"), {MakeShared<FJsonValueNumber>(Max.X), MakeShared<FJsonValueNumber>(Max.Y), MakeShared<FJsonValueNumber>(Max.Z)});
+		Accessors[1]->AsObject()->SetNumberField(TEXT("count"), N.Num());
+		Accessors[2]->AsObject()->SetNumberField(TEXT("count"), UV.Num());
+		Accessors[3]->AsObject()->SetNumberField(TEXT("count"), I.Num());
+		Json->GetArrayField(TEXT("buffers"))[0]->AsObject()->SetNumberField(TEXT("byteLength"), Bin.Num());
+		return GlbOf(Json.ToSharedRef(), Bin);
+	}
+
+	FWeaponShape ShapeOf(UStaticMesh& Mesh)
+	{
+		TArray<FVector3d> Points;
+		const FMeshDescription* Source = Mesh.GetMeshDescription(0);
+		if (Source)
+		{
+			FStaticMeshConstAttributes Attributes(*Source);
+			for (const FVertexID Vertex : Source->Vertices().GetElementIDs())
+			{
+				Points.Add(FVector3d(Attributes.GetVertexPositions()[Vertex]));
+			}
+		}
+		return MeasureWeapon(Points);
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelCreatorWeaponTest, "HyperAIStudio.MeshGen.Creator.WeaponFinishAndMatch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioModelCreatorWeaponTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelCreatorTests;
+	UHyperAIStudioTripoSettings* Settings = GetMutableDefault<UHyperAIStudioTripoSettings>();
+	const FHyperAIStudioWeaponConvention SavedConvention = Settings->WeaponConvention;
+	Settings->WeaponConvention = FHyperAIStudioWeaponConvention();
+	TArray<FString> Imported;
+	ON_SCOPE_EXIT
+	{
+		Settings->WeaponConvention = SavedConvention;
+		Settings->SaveConfig();
+		DeleteAll(Imported);
+	};
+
+	// A bulky sword, standing on Z with its handle up, as Tripo's come in lying any way.
+	UStaticMesh* Sword = Import(WeaponGlb(), TEXT("SM_CreatorBulkySword"), Imported);
+	if (!TestNotNull(TEXT("The bulky sword imports"), Sword))
+	{
+		return false;
+	}
+	const FWeaponShape Raw = ShapeOf(*Sword);
+	AddInfo(FString::Printf(TEXT("As imported: length on %d, handle %s, %.0f cm, blade %.1f x %.1f (%.2f), grip %.1f, guard %.1f deep, headed %d, %d triangles"), Raw.Axis,
+		Raw.bHandlePositive ? TEXT("+") : TEXT("-"), Raw.Length, Raw.BladeWidth, Raw.BladeThickness, Raw.BladeRatio, Raw.GripCm, Raw.GuardDepthCm, Raw.bHeaded ? 1 : 0,
+		Sword->GetMeshDescription(0)->Triangles().Num()));
+	TestTrue(TEXT("It is measured as it lies: length on Z, handle up, not headed, bulky"), Raw.bValid && Raw.Axis == 2 && Raw.bHandlePositive && !Raw.bHeaded && Raw.BladeRatio > 0.5f
+		&& Raw.GripCm > 5.5f && Raw.GuardDepthCm > 9.f);
+
+	FHyperAIModelBrief Brief;
+	Brief.Prompt = TEXT("a longsword");
+	Brief.Use = TEXT("weapon");
+	Brief.SizeMeters = 1.1f;
+	FHyperAIModelPlan Plan;
+	FString Error;
+	TestTrue(TEXT("A weapon classifies: ") + Error, Classify(Brief, Plan, Error));
+	TestTrue(TEXT("H3.1 generated at three times a 20K budget, finished to it, Nanite off"), Plan.Family == TEXT("H3.1") && Plan.FaceLimit == 20000 && Plan.ProviderFaces == 60000
+		&& Plan.bLocalReduce && !Plan.bNanite && Plan.Reasons.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("weapon: HyperAI's defaults")); }));
+	TestTrue(TEXT("Tripo is asked for the denser mesh"), Plan.RequestJson.Contains(TEXT("\"face_limit\":60000")));
+	FCheckTargets Targets = TargetsFromPlan(Plan);
+	// A budget the finishing must reduce to, light enough to keep the grip's 16 sides (a coarser fixture's grip would shrink).
+	Targets.FaceLimit = 1350;
+	Targets.Weapon.TargetTris = 1350;
+	Targets.bTextures = false;
+	Targets.bPbr = false;
+	TestTrue(TEXT("Its targets are a weapon's"), Targets.bWeapon && FMath::IsNearlyEqual(Targets.Weapon.LengthCm, 110.f));
+
+	FHyperAIModelCheckReport Before;
+	Inspect(*Sword, Targets, Before, Error);
+	AddInfo(TEXT("Before: ") + Before.Summary);
+	for (const TCHAR* Id : {TEXT("weapon_axis"), TEXT("weapon_blade"), TEXT("weapon_grip"), TEXT("weapon_guard")})
+	{
+		const FHyperAIModelCheck* Check = Find(Before, Id);
+		TestTrue(FString::Printf(TEXT("Bulky and lying on Z, %s fails and names the free weapon finishing (%s)"), Id, Check ? *Check->Value : TEXT("missing")),
+			Check && Check->Result == TEXT("fail") && Check->LocalFix == TEXT("weapon_finish"));
+	}
+	TestTrue(TEXT("Over its budget, faces name the weapon finishing too, and the free fixes start with it"), Find(Before, TEXT("faces")) && Find(Before, TEXT("faces"))->LocalFix == TEXT("weapon_finish")
+		&& LocalFixesFor(Before).Contains(TEXT("weapon_finish")) && !LocalFixesFor(Before).Contains(TEXT("pivot")) && !LocalFixesFor(Before).Contains(TEXT("scale")));
+
+	TArray<FString> Notes;
+	TestTrue(TEXT("The free fixes run: ") + Error, ApplyLocalFixes(*Sword, Targets, LocalFixesFor(Before), Notes, Error));
+	for (const FString& Note : Notes)
+	{
+		AddInfo(Note);
+	}
+	const FWeaponShape Done = ShapeOf(*Sword);
+	AddInfo(FString::Printf(TEXT("Finished: length on %d, handle %s, %.1f cm, blade %.2f x %.2f (%.2f), grip %.2f, guard %.2f deep, pivot %.2f in grip %d, thickness on %d"), Done.Axis,
+		Done.bHandlePositive ? TEXT("+") : TEXT("-"), Done.Length, Done.BladeWidth, Done.BladeThickness, Done.BladeRatio, Done.GripCm, Done.GuardDepthCm, Done.PivotFraction,
+		Done.bPivotInGrip ? 1 : 0, Done.ThicknessAxis));
+	TestTrue(TEXT("The handle is toward +Y, the head toward -Y, and the pivot in the grip"), Done.Axis == 1 && Done.bHandlePositive && Done.bPivotInGrip);
+	TestTrue(TEXT("It is its real length, 110 cm"), FMath::IsNearlyEqual(Done.Length, 110.f, 1.5f));
+	TestTrue(TEXT("The blade is at most a fifth as thick as it is wide"), Done.BladeRatio > 0.f && Done.BladeRatio <= 0.2f);
+	TestTrue(TEXT("The grip is 3.4 cm across"), FMath::IsNearlyEqual(Done.GripCm, 3.4f, 0.3f));
+	TestTrue(TEXT("The guard is at most 3 cm deep"), Done.GuardDepthCm > 0.f && Done.GuardDepthCm <= 3.05f);
+	TestTrue(TEXT("The flat of the blade lies across X, its thickness along Z"), Done.ThicknessAxis == 2);
+	TestTrue(TEXT("Within the budget, with Nanite off and one LOD"), Sword->GetMeshDescription(0)->Triangles().Num() <= 1350 && !Sword->GetNaniteSettings().bEnabled
+		&& Sword->GetNumSourceModels() == 1);
+	FHyperAIModelCheckReport After;
+	Inspect(*Sword, Targets, After, Error);
+	AddInfo(TEXT("After: ") + After.Summary);
+	for (const TCHAR* Id : {TEXT("weapon_axis"), TEXT("weapon_blade"), TEXT("weapon_grip"), TEXT("weapon_guard"), TEXT("faces")})
+	{
+		TestEqual(FString::Printf(TEXT("Finished, %s passes"), Id), ResultOf(After, Id), FString(TEXT("pass")));
+	}
+	TestTrue(TEXT("The pommel stays rounder and wider than the grip"), [&]()
+	{
+		TArray<FVector3d> Top;
+		FStaticMeshConstAttributes Attributes(*Sword->GetMeshDescription(0));
+		double YMax = -1e30;
+		for (const FVertexID Vertex : Sword->GetMeshDescription(0)->Vertices().GetElementIDs())
+		{
+			YMax = FMath::Max(YMax, double(Attributes.GetVertexPositions()[Vertex].Y));
+		}
+		FBox3d Pommel(ForceInit);
+		for (const FVertexID Vertex : Sword->GetMeshDescription(0)->Vertices().GetElementIDs())
+		{
+			const FVector3d Point(Attributes.GetVertexPositions()[Vertex]);
+			if (Point.Y > YMax - 5.0 && Point.Y < YMax - 2.0)
+			{
+				Pommel += Point;
+			}
+		}
+		const FVector3d Size = Pommel.GetSize();
+		return Pommel.IsValid && FMath::Max(Size.X, Size.Z) > Done.GripCm * 1.2 && FMath::Min(Size.X, Size.Z) / FMath::Max(Size.X, Size.Z) > 0.8;
+	}());
+
+	// A reference to match: a sword finished to its own convention (the pivot a third of the way down, a slim blade).
+	UStaticMesh* Reference = Import(WeaponGlb(), TEXT("SM_CreatorReferenceSword"), Imported);
+	FCheckTargets Authored = Targets;
+	Authored.Weapon.PivotFraction = 0.3f;
+	Authored.Weapon.BladeRatio = 0.1f;
+	Authored.Weapon.LengthCm = 120.f;
+	Authored.Weapon.TargetTris = 1200;
+	Authored.Weapon.Source = TEXT("the test's own reference");
+	TArray<FString> AuthoredNotes;
+	TestTrue(TEXT("The reference is made"), Reference && ApplyLocalFixes(*Reference, Authored, {TEXT("weapon_finish")}, AuthoredNotes, Error));
+	if (!Reference)
+	{
+		return false;
+	}
+	const int32 ReferenceTriangles = Reference->GetMeshDescription(0)->Triangles().Num();
+	FWeaponFinish Matched;
+	TArray<FString> Reasons;
+	TestTrue(TEXT("It is measured: ") + Error, MatchReference(Reference->GetPathName(), Matched, Reasons, Error, /*bKeep=*/true));
+	for (const FString& Line : Reasons)
+	{
+		AddInfo(Line);
+	}
+	TestTrue(TEXT("Its budget, Nanite, pivot and blade are read from it"), Matched.TargetTris == ReferenceTriangles && !Matched.bNanite && FMath::IsNearlyEqual(Matched.PivotFraction, 0.3f, 0.03f)
+		&& FMath::IsNearlyEqual(Matched.BladeRatio, 0.1f, 0.03f));
+	TestTrue(TEXT("and every value is said"), Reasons.Num() >= 5 && Reasons[0].Contains(FString::Printf(TEXT("%d triangles"), ReferenceTriangles))
+		&& Reasons.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("toward -Y, as HyperAI finishes weapons")); }));
+	TestTrue(TEXT("It is kept as the project's weapon convention"), Settings->WeaponConvention.Source == Reference->GetPathName() && Settings->WeaponConvention.Triangles == ReferenceTriangles
+		&& FMath::IsNearlyEqual(Settings->WeaponConvention.PivotFraction, 0.3f, 0.03f));
+
+	// A later weapon follows it untold.
+	FHyperAIModelPlan Later;
+	TestTrue(TEXT("A later weapon classifies"), Classify(Brief, Later, Error));
+	TestTrue(TEXT("and follows the project's convention: its budget, three times it generated, the convention in its reasons"), Later.FaceLimit == FMath::Max(ReferenceTriangles, MinFaces)
+		&& Later.ProviderFaces == Later.FaceLimit * 3 && Later.Reasons.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("weapon: the project's convention")); }));
+	const FCheckTargets LaterTargets = TargetsFromPlan(Later);
+	TestTrue(TEXT("and is finished to it: the pivot 30% from the handle's end"), LaterTargets.bWeapon && FMath::IsNearlyEqual(LaterTargets.Weapon.PivotFraction, 0.3f, 0.03f));
+	// A brief naming the reference itself.
+	Brief.MatchAsset = Reference->GetPathName();
+	FHyperAIModelPlan Named;
+	TestTrue(TEXT("A brief that names the reference classifies"), Classify(Brief, Named, Error) && Named.MatchAsset == Reference->GetPathName()
+		&& Named.Reasons.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("match SM_CreatorReferenceSword")); }));
+	Brief.MatchAsset = TEXT("/Game/Nope/SM_Missing.SM_Missing");
+	TestFalse(TEXT("and one naming no mesh is refused"), Classify(Brief, Named, Error));
+	return true;
+}
+
+// ---------------------------------------------------------------- import and export fidelity
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioModelCreatorFidelityTest, "HyperAIStudio.MeshGen.Creator.ImportExportFidelity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioModelCreatorFidelityTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ModelCreatorTests;
+	TArray<FString> Imported;
+	const FString Folder = FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Tests/Creator/export");
+	ON_SCOPE_EXIT
+	{
+		DeleteAll(Imported);
+		IFileManager::Get().DeleteDirectory(*Folder, false, true);
+	};
+
+	// Tripo's models are in metres with millimetre triangles (the live sword: 57,050 of them, median edge 3 mm). A 10 cm
+	// cube of 2 mm squares, 30,000 triangles, imported as the creator imports.
+	FFixture Fine;
+	Fine.Size = 0.1f;
+	Fine.Grid = 50;
+	UStaticMesh* Mesh = Import(CubeGlb(Fine), TEXT("SM_CreatorFine"), Imported);
+	if (!TestNotNull(TEXT("The millimetre fixture imports"), Mesh))
+	{
+		return false;
+	}
+	const FMeshDescription* Source = Mesh->GetMeshDescription(0);
+	TestEqual(TEXT("Its source mesh keeps every triangle"), Source ? Source->Triangles().Num() : 0, 30000);
+	FHyperAIModelCheckReport Report;
+	FString Error;
+	Inspect(*Mesh, TargetsForUse(TEXT("prop"), TEXT("pc"), 0.1f, 60000, TEXT("tris")), Report, Error);
+	TestTrue(TEXT("and the checks measure that mesh: 30,000 triangles, 10 cm, none degenerate"), Report.Triangles == 30000 && FMath::IsNearlyEqual(Report.Size.GetMax(), 10.0, 0.2)
+		&& ResultOf(Report, TEXT("degenerate")) == TEXT("pass"));
+	// The rendered mesh too, built without Nanite: nothing is dropped as degenerate at this scale.
+	FMeshNaniteSettings Nanite = Mesh->GetNaniteSettings();
+	Nanite.bEnabled = false;
+	Mesh->SetNaniteSettings(Nanite);
+	Mesh->Build(/*bInSilent=*/true);
+	FAssetCompilingManager::Get().FinishAllCompilation();
+	const int32 Rendered = Mesh->GetRenderData() && Mesh->GetRenderData()->LODResources.Num() > 0 ? Mesh->GetRenderData()->LODResources[0].GetNumTriangles() : 0;
+	TestEqual(TEXT("Its render data, without Nanite, keeps every triangle"), Rendered, 30000);
+
+	// With Nanite on, the render data is the coarse fallback; Tripo must still be sent the whole mesh.
+	Nanite.bEnabled = true;
+	Mesh->SetNaniteSettings(Nanite);
+	Mesh->Build(/*bInSilent=*/true);
+	FAssetCompilingManager::Get().FinishAllCompilation();
+	const int32 Fallback = Mesh->GetRenderData() && Mesh->GetRenderData()->LODResources.Num() > 0 ? Mesh->GetRenderData()->LODResources[0].GetNumTriangles() : 0;
+	const FString File = Folder / TEXT("SM_CreatorFine.glb");
+	if (!FModuleManager::Get().ModuleExists(TEXT("GLTFExporter")))
+	{
+		AddWarning(TEXT("The glTF Exporter plugin is not here: the export is not checked."));
+	}
+	else
+	{
+		TestTrue(TEXT("It exports: ") + Error, HyperAIStudio::MeshGen::Characters::ExportGlb(Mesh->GetPathName(), File, Error));
+		AddInfo(FString::Printf(TEXT("Nanite's fallback has %d triangles; the GLB sent to Tripo has %d"), Fallback, GlbTriangles(File)));
+		TestEqual(TEXT("The GLB sent to Tripo holds the source model, every triangle, not Nanite's fallback"), GlbTriangles(File), 30000);
+
+		// A textured model with HyperAI's material goes out with its colour, not black.
+		FFixture Painted;
+		Painted.bTextured = true;
+		Painted.Grid = 2;
+		UStaticMesh* Textured = Import(CubeGlb(Painted), TEXT("SM_CreatorExportPainted"), Imported);
+		FMaterialResult Materials;
+		if (Textured && BuildMaterials(*Textured, false, Materials, Error))
+		{
+			Imported.Append(Materials.Materials);
+			Imported.Append(Materials.Textures);
+			const FString PaintedFile = Folder / TEXT("SM_CreatorExportPainted.glb");
+			TArray<uint8> Glb;
+			const bool bWritten = HyperAIStudio::MeshGen::Characters::ExportGlb(Textured->GetPathName(), PaintedFile, Error) && FFileHelper::LoadFileToArray(Glb, *PaintedFile);
+			const TSharedPtr<FJsonObject> Json = bWritten ? GlbJson(Glb) : nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* MaterialList = nullptr;
+			FString MaterialText;
+			if (Json.IsValid() && Json->TryGetArrayField(TEXT("materials"), MaterialList) && !MaterialList->IsEmpty())
+			{
+				FJsonSerializer::Serialize((*MaterialList)[0]->AsObject().ToSharedRef(), TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&MaterialText));
+			}
+			AddInfo(TEXT("The exported material: ") + MaterialText);
+			TestTrue(TEXT("The exported material carries a base colour texture"), MaterialText.Contains(TEXT("baseColorTexture")));
+		}
+	}
+
+	// A free reduction keeps every UV island whole: a cube's six faces are six islands in their own cells of the atlas, and
+	// no triangle may come to span two of them (collapsing across a seam smeared a Tripo sword's textures).
+	{
+		FFixture Atlas;
+		Atlas.Grid = 8;
+		UStaticMesh* Islands = Import(CubeGlb(Atlas), TEXT("SM_CreatorIslands"), Imported);
+		FCheckTargets Reduce = TargetsForUse(TEXT("prop"), TEXT("pc"), 0.f, 200, TEXT("tris"));
+		Reduce.bLocalReduce = true;
+		TArray<FString> ReduceNotes;
+		TestTrue(TEXT("The reduction runs: ") + Error, Islands && ApplyLocalFixes(*Islands, Reduce, {TEXT("simplify")}, ReduceNotes, Error));
+		for (const FString& Note : ReduceNotes)
+		{
+			AddInfo(Note);
+		}
+		const FMeshDescription* Reduced = Islands ? Islands->GetMeshDescription(0) : nullptr;
+		int32 Spanning = 0;
+		if (Reduced)
+		{
+			FStaticMeshConstAttributes Attributes(*Reduced);
+			for (const FTriangleID Triangle : Reduced->Triangles().GetElementIDs())
+			{
+				FBox2f Box(ForceInit);
+				for (const FVertexInstanceID Corner : Reduced->GetTriangleVertexInstances(Triangle))
+				{
+					Box += Attributes.GetVertexInstanceUVs().Get(Corner, 0);
+				}
+				Spanning += Box.GetSize().X > 0.34f || Box.GetSize().Y > 0.5f;
+			}
+		}
+		TestTrue(FString::Printf(TEXT("Reduced (%d triangles), no triangle spans two islands (%d do)"), Reduced ? Reduced->Triangles().Num() : 0, Spanning), Reduced && Reduced->Triangles().Num() < 768
+			&& Spanning == 0);
+	}
+
+	// A file of several nodes imports as a static mesh a node; merged, it is one mesh with a slot a part.
+	TArray<FString> PartPaths;
+	const int32 Before = Imported.Num();
+	Import(PartsGlb(3, 2), TEXT("SM_CreatorPieces"), Imported);
+	for (int32 Index = Before; Index < Imported.Num(); ++Index)
+	{
+		if (LoadObject<UStaticMesh>(nullptr, *Imported[Index], nullptr, LOAD_NoWarn | LOAD_Quiet))
+		{
+			PartPaths.Add(Imported[Index]);
+		}
+	}
+	TestEqual(TEXT("Unreal imports the three nodes as three static meshes"), PartPaths.Num(), 3);
+	FString Note;
+	TestTrue(TEXT("They merge: ") + Note, PartPaths.Num() == 3 && HyperAIStudio::MeshGen::Characters::MergeParts(PartPaths, Note));
+	UStaticMesh* Whole = PartPaths.IsEmpty() ? nullptr : LoadObject<UStaticMesh>(nullptr, *PartPaths[0]);
+	if (Whole)
+	{
+		Inspect(*Whole, TargetsForUse(TEXT("prop"), TEXT("pc"), 0.f, 0, TEXT("tris")), Report, Error);
+		AddInfo(TEXT("Merged: ") + Report.Summary + TEXT(" ") + Note);
+		TestTrue(TEXT("into one mesh of every part's triangles, three slots, as wide as the three together (80 cm)"), Report.Triangles == 144 && Whole->GetStaticMaterials().Num() == 3
+			&& Report.Components == 3 && FMath::IsNearlyEqual(Report.Size.GetMax(), 80.0, 1.0));
+		TestTrue(TEXT("and the other parts' assets are gone"), !LoadObject<UStaticMesh>(nullptr, *PartPaths[1], nullptr, LOAD_NoWarn | LOAD_Quiet)
+			&& !LoadObject<UStaticMesh>(nullptr, *PartPaths[2], nullptr, LOAD_NoWarn | LOAD_Quiet));
+	}
 	return true;
 }
 
@@ -980,6 +1634,8 @@ bool FHyperAIStudioModelCreatorJobTest::RunTest(const FString& Parameters)
 		TArray<FString> Auth;
 		int32 Polls = 0;
 		bool bFixRepairs = true;
+		/** The fix comes back as Tripo's segmentation does: three nodes of a single small cube each, 36 triangles in all. */
+		bool bFixInParts = false;
 	};
 	const TSharedRef<FSeen> Seen = MakeShared<FSeen>();
 	FFixture Generated;
@@ -991,6 +1647,7 @@ bool FHyperAIStudioModelCreatorJobTest::RunTest(const FString& Parameters)
 	Light.Grid = 4;
 	Light.Size = 0.8f;
 	const TSharedRef<TArray<uint8>> Retopologised = MakeShared<TArray<uint8>>(CubeGlb(Light));
+	const TSharedRef<TArray<uint8>> Shards = MakeShared<TArray<uint8>>(PartsGlb(3, 1));
 	const TSharedRef<TArray<uint8>> Render = MakeShared<TArray<uint8>>(Png(32, [](int32, int32) { return FColor(120, 90, 60); }));
 	TArray<FHttpRouteHandle> Routes;
 	auto Bind = [&](const TCHAR* Path, const EHttpServerRequestVerbs Verb, TFunction<TUniquePtr<FHttpServerResponse>(const FHttpServerRequest&)> Answer)
@@ -1029,9 +1686,9 @@ bool FHyperAIStudioModelCreatorJobTest::RunTest(const FString& Parameters)
 	Bind(TEXT("/tripo/v3/tasks/task_gen"), EHttpServerRequestVerbs::VERB_GET, Task(TEXT("/dense.glb"), 10.f));
 	Bind(TEXT("/tripo/v3/tasks/task_retopo"), EHttpServerRequestVerbs::VERB_GET, Task(TEXT("/retopo.glb"), 35.f));
 	Bind(TEXT("/dense.glb"), EHttpServerRequestVerbs::VERB_GET, [Dense](const FHttpServerRequest&) { return FHttpServerResponse::Create(TArray<uint8>(*Dense), TEXT("model/gltf-binary")); });
-	Bind(TEXT("/retopo.glb"), EHttpServerRequestVerbs::VERB_GET, [Seen, Dense, Retopologised](const FHttpServerRequest&)
+	Bind(TEXT("/retopo.glb"), EHttpServerRequestVerbs::VERB_GET, [Seen, Dense, Retopologised, Shards](const FHttpServerRequest&)
 	{
-		return FHttpServerResponse::Create(TArray<uint8>(Seen->bFixRepairs ? *Retopologised : *Dense), TEXT("model/gltf-binary"));
+		return FHttpServerResponse::Create(TArray<uint8>(Seen->bFixInParts ? *Shards : Seen->bFixRepairs ? *Retopologised : *Dense), TEXT("model/gltf-binary"));
 	});
 	Bind(TEXT("/render.png"), EHttpServerRequestVerbs::VERB_GET, [Render](const FHttpServerRequest&) { return FHttpServerResponse::Create(TArray<uint8>(*Render), TEXT("image/png")); });
 	FHttpServerModule::Get().StartAllListeners();
@@ -1168,8 +1825,40 @@ bool FHyperAIStudioModelCreatorJobTest::RunTest(const FString& Parameters)
 	Cleanup.Add(Job.AssetPath);
 	FHyperAIStudioApprovalGate::Approve(Job.CurrentOperationId, Error);
 	TickUntil([&]() { Job = JobOf(Stubborn.OperationId); return Job.State == TEXT("completed") || Job.State == TEXT("stopped") || Job.State == TEXT("failed"); });
-	TestTrue(TEXT("After its one round (one paid fix, which did not help) it stops, rounds_used"), Job.State == TEXT("stopped") && Job.StopReason == TEXT("rounds_used") && Job.Round == 1
-		&& Job.Steps.FilterByPredicate([](const FHyperAIModelStep& Step) { return Step.Kind == TEXT("paid_fix") && Step.Status == TEXT("done"); }).Num() == 1);
+	AddInfo(FString::Printf(TEXT("Stubborn: %s, %s"), *Job.State, *Job.Diagnostic));
+	TestTrue(TEXT("A paid fix that leaves as many checks failing is undone, and the job stops, fix_made_it_worse"), Job.State == TEXT("stopped") && Job.StopReason == TEXT("fix_made_it_worse")
+		&& Job.Steps.ContainsByPredicate([](const FHyperAIModelStep& Step) { return Step.Kind == TEXT("paid_fix") && Step.What.StartsWith(TEXT("Undo")) && Step.Status == TEXT("done"); }));
+	TestTrue(TEXT("and the round's folder keeps the model as it was before the fix"), IFileManager::Get().FileSize(*(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Models") / Stubborn.OperationId
+		/ TEXT("round0/before_fix.glb"))) > 0 || !FModuleManager::Get().ModuleExists(TEXT("GLTFExporter")));
+
+	// A fix that comes back in pieces (Tripo's segmentation): its parts are merged into one mesh first, then the guard sees
+	// it is a fraction of the model and keeps the asset as it was; nothing more is paid for.
+	Seen->Polls = 0;
+	Seen->bFixRepairs = true;
+	Seen->bFixInParts = true;
+	FHyperAIModelCreateRequest Shattered = Request;
+	Shattered.OperationId = TEXT("model-test-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	Shattered.FixBudgetUSD = 5.f;
+	Shattered.Name = TEXT("SM_CreatorShattered");
+	Operations.Add(Shattered.OperationId);
+	FHyperAIModelCreateReport ShatteredAsked = Create(Shattered);
+	FHyperAIStudioApprovalGate::Approve(ShatteredAsked.OperationId, Error);
+	TickUntil([&]() { Job = JobOf(Shattered.OperationId); return Job.State == TEXT("awaiting_fix_approval") || Job.State == TEXT("stopped") || Job.State == TEXT("failed"); });
+	Cleanup.Add(Job.AssetPath);
+	const int32 TrianglesBefore = Job.LastCheck.Triangles;
+	FHyperAIStudioApprovalGate::Approve(Job.CurrentOperationId, Error);
+	TickUntil([&]() { Job = JobOf(Shattered.OperationId); return Job.State == TEXT("completed") || Job.State == TEXT("stopped") || Job.State == TEXT("failed"); });
+	AddInfo(FString::Printf(TEXT("Shattered: %s, %s"), *Job.State, *Job.Diagnostic));
+	const FHyperAIModelStep* Pieces = Job.Steps.FindByPredicate([](const FHyperAIModelStep& Step) { return Step.Kind == TEXT("paid_fix") && Step.Status == TEXT("failed"); });
+	TestTrue(TEXT("The three parts were merged into one mesh before anything took it"), Pieces && Pieces->Detail.Contains(TEXT("Merged 3 parts")));
+	TestTrue(TEXT("and the guard kept the asset: 36 triangles is not a model of hundreds"), Job.StopReason == TEXT("fix_made_it_worse") && Pieces && Pieces->Detail.Contains(TEXT("Not copied onto")));
+	const UStaticMesh* Kept = LoadObject<UStaticMesh>(nullptr, *Job.AssetPath);
+	TestTrue(TEXT("The asset still has its own triangles"), Kept && const_cast<UStaticMesh*>(Kept)->GetMeshDescription(0) && const_cast<UStaticMesh*>(Kept)->GetMeshDescription(0)->Triangles().Num() == TrianglesBefore);
+	if (Kept)
+	{
+		Cleanup.Add(FPackageName::GetLongPackagePath(Kept->GetOutermost()->GetName()) / TEXT("Fixes"));
+	}
+	Seen->bFixInParts = false;
 
 	// Declined: the user turns the paid fix down; the job stops and keeps what it has.
 	Seen->Polls = 0;
@@ -1246,6 +1935,12 @@ bool FHyperAIStudioModelCreatorStudioTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Not an ordinary mesh elsewhere"), IsTripoImport(TEXT("StaticMesh"), TEXT("/Game/Props/SM_Lamp.SM_Lamp"), TEXT("D:/Art/lamp.fbx"), Folders, Markers));
 	TestFalse(TEXT("Not a texture from the bridge's folder"), IsTripoImport(TEXT("Texture2D"), TEXT("/Game/Tripo/T_Chair.T_Chair"), FString(), Folders, Markers));
 	TestFalse(TEXT("Not /Game/TripoX for /Game/Tripo"), IsTripoImport(TEXT("StaticMesh"), TEXT("/Game/TripoX/SM_A.SM_A"), FString(), Folders, {}));
+	TestTrue(TEXT("A file from a Tripo folder outside the project is the bridge's own evidence"), TripoImportEvidence(TEXT("StaticMesh"), TEXT("/Game/Props/SM_Lamp.SM_Lamp"),
+		TEXT("C:/Users/x/AppData/Local/Tripo/bridge/lamp.fbx"), Folders, Markers) == ETripoImportEvidence::Strong);
+	TestTrue(TEXT("a folder or a name alone is only a guess"), TripoImportEvidence(TEXT("StaticMesh"), TEXT("/Game/Tripo/Chair/SM_Chair.SM_Chair"), TEXT("D:/Art/chair.glb"), Folders, Markers) == ETripoImportEvidence::Weak
+		&& TripoImportEvidence(TEXT("StaticMesh"), TEXT("/Game/Art/SM_Longsword_Tripo.SM_Longsword_Tripo"), FString(), Folders, Markers) == ETripoImportEvidence::Weak);
+	TestTrue(TEXT("and a Tripo folder inside the project is no better than a guess"), TripoImportEvidence(TEXT("StaticMesh"), TEXT("/Game/Props/SM_Lamp.SM_Lamp"),
+		FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("Tripo/lamp.fbx")), {}, Markers) == ETripoImportEvidence::Weak);
 
 	// A real import into a watched folder, as the bridge's would be: offered, approved, checked and fixed for free.
 	UHyperAIStudioTripoSettings* Settings = GetMutableDefault<UHyperAIStudioTripoSettings>();
@@ -1275,6 +1970,9 @@ bool FHyperAIStudioModelCreatorStudioTest::RunTest(const FString& Parameters)
 	const TArray<FHyperAIStudioPendingApproval> Pending = FHyperAIStudioApprovalGate::GetPending();
 	const FHyperAIStudioPendingApproval* Offer = Pending.FindByPredicate([](const FHyperAIStudioPendingApproval& Item) { return Item.Summary.VariantId == TEXT("model.tripo_studio.v1"); });
 	TestTrue(TEXT("as an approval in Activity, an edit, free"), Offer && Offer->Summary.Safety == EHyperAIStudioDomainSafety::Edit);
+	TestTrue(TEXT("which only a click approves: auto-approval has no category to file it under, and no agent job may approve it"), Offer && Offer->Summary.bClickOnly
+		&& !Offer->Category.IsSet() && !Offer->IsPlainEdit());
+	TestTrue(TEXT("Nothing ran before the click: no job holds the mesh"), Mesh && !IsAssetBusy(Mesh->GetPathName()));
 	FString Error;
 	if (Offer)
 	{
@@ -1286,7 +1984,24 @@ bool FHyperAIStudioModelCreatorStudioTest::RunTest(const FString& Parameters)
 		{
 			return Step.Kind == TEXT("local_fix") && Step.What.Contains(TEXT("remove_bits")) && Step.What.Contains(TEXT("pivot"));
 		}) && ResultOf(Job.LastCheck, TEXT("floating")) == TEXT("pass") && ResultOf(Job.LastCheck, TEXT("pivot")) == TEXT("pass"));
-		TestEqual(TEXT("and no paid fix is offered without a key"), Job.Steps.FilterByPredicate([](const FHyperAIModelStep& Step) { return Step.Kind == TEXT("paid_fix"); }).Num(), 0);
+		TestEqual(TEXT("and no paid fix is offered: the watch's jobs are free fixes only"), Job.Steps.FilterByPredicate([](const FHyperAIModelStep& Step) { return Step.Kind == TEXT("paid_fix"); }).Num(), 0);
+		TestTrue(TEXT("with no fix budget at all"), Job.FixBudgetUSD == 0.f && (Job.StopReason == TEXT("checks_passed") || Job.StopReason == TEXT("local_only")));
+	}
+	// An import an agent's work made (hyper_script_run's script, an approved action) is not the bridge's, whatever its folder.
+	{
+		const int32 OffersBeforeScript = OfferedAssets().Num();
+		const FHyperAIStudioAgentWorkScope Script;
+		Import(CubeGlb(Sent), TEXT("SM_ScriptImport"), Imported, TEXT("/Game/HyperAITests/TripoBridge"), /*bOwn=*/false);
+		TestEqual(TEXT("A script's import into the watched folder is not offered"), OfferedAssets().Num(), OffersBeforeScript);
+	}
+	// Nor is a re-import of a file from HyperAI's own downloads (a creator model's GLB), as the live run's were.
+	{
+		const int32 OffersBeforeOwn = OfferedAssets().Num();
+		const FString Downloads = FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Models/creator-watch-test");
+		Import(CubeGlb(Sent), TEXT("SM_Tripo_Reimport"), Imported, TEXT("/Game/HyperAITests/TripoBridge"), /*bOwn=*/false, Downloads);
+		TickUntil([]() { return false; }, 1.5);
+		TestEqual(TEXT("A re-import of HyperAI's own download is not offered"), OfferedAssets().Num(), OffersBeforeOwn);
+		IFileManager::Get().DeleteDirectory(*Downloads, false, true);
 	}
 	// HyperAI's own imports are not offered.
 	const int32 OffersAfter = OfferedAssets().Num();
@@ -1304,8 +2019,17 @@ bool FHyperAIStudioModelCreatorStudioTest::RunTest(const FString& Parameters)
 	Check.bCheckOnly = false;
 	const FHyperAIModelCheckFixReport Asked = HyperAIStudio::MeshGen::Creator::CheckAndFix(Check);
 	TestEqual(TEXT("The free fixes wait for one approval"), Asked.Status, FString(TEXT("awaiting_user_approval")));
+	// One job changes an asset at a time: while that one waits, a second is refused, and the watch offers nothing.
+	const FHyperAIModelCheckFixReport Second = HyperAIStudio::MeshGen::Creator::CheckAndFix(Check);
+	TestTrue(TEXT("A second check-and-fix on the same mesh is refused while the first holds it: ") + Second.Diagnostic, Second.Status == TEXT("asset_busy")
+		&& Second.Diagnostic.Contains(Asked.OperationId));
+	if (UObject* Held = StaticLoadObject(UObject::StaticClass(), nullptr, *Check.AssetPath))
+	{
+		TestTrue(TEXT("and the watch makes no offer on it"), OfferCheckAndFix(*Held, false).IsEmpty());
+	}
 	FHyperAIStudioApprovalGate::Reject(Asked.OperationId, TEXT("Leave it."));
 	TickUntil([&]() { return JobOf(Asked.OperationId).State == TEXT("stopped"); }, 3.0);
+	TestFalse(TEXT("Once it stopped, the mesh is free again"), IsAssetBusy(Check.AssetPath));
 	TestEqual(TEXT("Turned down, it stops and changes nothing"), JobOf(Asked.OperationId).StopReason, FString(TEXT("fix_declined")));
 	Check.bCheckOnly = true;
 	Check.AssetPath = TEXT("/Game/Nope/SM_Missing.SM_Missing");

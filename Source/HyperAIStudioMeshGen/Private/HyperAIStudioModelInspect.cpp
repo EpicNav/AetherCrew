@@ -2,6 +2,7 @@
 
 #include "HyperAIStudioModelCreator.h"
 
+#include "AssetCompilingManager.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
@@ -34,6 +35,7 @@
 #include "MeshDescriptionToDynamicMesh.h"
 #include "MeshSimplification.h"
 #include "DynamicMeshToMeshDescription.h"
+#include "EditorFramework/AssetImportData.h"
 #include "Misc/ObjectThumbnail.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
@@ -44,6 +46,7 @@
 #include "PhysicsEngine/BoxElem.h"
 #include "StaticMeshAttributes.h"
 #include "UObject/Package.h"
+#include "UObject/StrongObjectPtr.h"
 #include "XAtlasWrapper.h"
 
 /**
@@ -60,6 +63,8 @@ namespace HyperAIStudio::MeshGen::Creator
 		const TCHAR* const MasterPath = TEXT("/Game/HyperAI/Materials/M_HyperAIGeneratedMaster");
 		const TCHAR* const WhiteTexture = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
 		const TCHAR* const FlatNormalTexture = TEXT("/Engine/EngineMaterials/FlatNormal.FlatNormal");
+		/** The ORM's default: a linear white mask of HyperAI's own. The engine's white square is sRGB colour, which a Masks sampler refuses. */
+		const TCHAR* const WhiteMaskPath = TEXT("/Game/HyperAI/Materials/T_HyperAIWhiteMask");
 		/** A hole with more edges than this is a missing part, not a hole: Tripo's completion fixes those. */
 		constexpr int32 MaxFillEdges = 256;
 
@@ -572,15 +577,48 @@ namespace HyperAIStudio::MeshGen::Creator
 			return Score;
 		}
 
-		/** The editor's thumbnail renderer draws the asset as the Content Browser shows it, into a PNG. */
+		/**
+		 * The editor's thumbnail renderer draws the asset, textured, into a PNG. A Nanite mesh is drawn from a transient copy
+		 * built without Nanite: a thumbnail of the Nanite mesh itself showed its coarse fallback or first streamed pages and,
+		 * until its materials were compiled for Nanite, the default grey, so the visual check compared a grey, blocky clay
+		 * model with a textured reference. Every texture and shader is compiled and streamed in first (AlwaysFlush).
+		 */
 		bool Capture(UObject& Mesh, const FString& File)
 		{
 			if (!FApp::CanEverRender())
 			{
 				return false;
 			}
+			FAssetCompilingManager::Get().FinishAllCompilation();
+			// A material whose shaders are not compiled yet renders as the default grey one in the thumbnail.
+			for (const FSlot& Slot : SlotsOf(Mesh))
+			{
+				if (Slot.Material)
+				{
+					Slot.Material->EnsureIsComplete();
+				}
+			}
+			UObject* Drawn = &Mesh;
+			TStrongObjectPtr<UStaticMesh> Copy;
+			const UStaticMesh* Static = Cast<UStaticMesh>(&Mesh);
+			if (Static && Static->GetNaniteSettings().bEnabled && Static->IsMeshDescriptionValid(0))
+			{
+				Copy.Reset(DuplicateObject<UStaticMesh>(Static, GetTransientPackage(), MakeUniqueObjectName(GetTransientPackage(), UStaticMesh::StaticClass(), TEXT("HyperAICapture"))));
+				FMeshNaniteSettings Nanite = Copy->GetNaniteSettings();
+				Nanite.bEnabled = false;
+				Copy->SetNaniteSettings(Nanite);
+				Copy->Build(/*bInSilent=*/true);
+				FAssetCompilingManager::Get().FinishAllCompilation();
+				Drawn = Copy.Get();
+			}
 			FObjectThumbnail Thumbnail;
-			ThumbnailTools::RenderThumbnail(&Mesh, 512, 512, ThumbnailTools::EThumbnailTextureFlushMode::AlwaysFlush, nullptr, &Thumbnail);
+			ThumbnailTools::RenderThumbnail(Drawn, 512, 512, ThumbnailTools::EThumbnailTextureFlushMode::AlwaysFlush, nullptr, &Thumbnail);
+			if (Copy.IsValid())
+			{
+				Copy->ClearFlags(RF_Standalone | RF_Public);
+				Copy->MarkAsGarbage();
+				Copy.Reset();
+			}
 			const TArray<uint8>& Data = Thumbnail.GetUncompressedImageData();
 			const int32 Width = Thumbnail.GetImageWidth(), Height = Thumbnail.GetImageHeight();
 			if (Width <= 0 || Height <= 0 || Data.Num() < Width * Height * 4)
@@ -668,13 +706,16 @@ namespace HyperAIStudio::MeshGen::Creator
 		}
 
 		/**
-		 * Quadric simplification to a triangle count, as Geometry Script's ApplySimplifyToTriangleCount does it: boundaries
-		 * kept from flipping, UV and normal seams allowed to collapse, bowties split first. Free, in the editor.
+		 * Quadric simplification to a triangle count: boundaries kept from flipping, bowties split first, and UV seams never
+		 * collapsed. A provider's texture atlas is hundreds of small islands; collapsing across their seams (the editor's
+		 * standard simplify does) smeared a Tripo sword's dark leather grip white. Seams may slide along themselves only, so
+		 * a mesh of many islands may stop above the count. Free, in the editor.
 		 */
 		template <typename SimplifierType>
 		void SimplifyMeshTo(FDynamicMesh3& Mesh, const int32 Triangles)
 		{
-			// A GLB splits its vertices along UV seams: welded first, so collapses close over the seams instead of opening them.
+			// A GLB splits its vertices along UV seams: welded first, so the surface is one piece and the seams are attribute
+			// seams the constraints can hold.
 			FMergeCoincidentMeshEdges Merge(&Mesh);
 			Merge.MergeVertexTolerance = FMath::Max(Mesh.GetBounds().DiagonalLength() * 1e-6, 1e-6);
 			Merge.Apply();
@@ -684,13 +725,87 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 			SimplifierType Simplifier(&Mesh);
 			Simplifier.DEBUG_CHECK_LEVEL = 0;
-			Simplifier.bAllowSeamCollapse = true;
+			Simplifier.bAllowSeamCollapse = false;
 			Simplifier.SetEdgeFlipTolerance(1.e-5);
 			FMeshConstraints Constraints;
 			FMeshConstraintsUtil::ConstrainAllBoundariesAndSeams(Constraints, Mesh, EEdgeRefineFlags::NoFlip, EEdgeRefineFlags::NoConstraint, EEdgeRefineFlags::NoConstraint,
-				/*bAllowSeamSplits=*/true, /*bAllowSeamSmoothing=*/true, /*bAllowSeamCollapse=*/true);
+				/*bAllowSeamSplits=*/false, /*bAllowSeamSmoothing=*/true, /*bAllowSeamCollapse=*/false);
 			Simplifier.SetExternalConstraints(MoveTemp(Constraints));
 			Simplifier.SimplifyToTriangleCount(Triangles);
+		}
+
+		/**
+		 * How far a mesh's texture mapping is from even, as the mean of |log| of each triangle's UV area over its surface area,
+		 * against the whole mesh's ratio. 0 when there is no UV layer. A reduction that smears textures raises it.
+		 */
+		double UVDistortion(const FDynamicMesh3& Mesh)
+		{
+			const FDynamicMeshUVOverlay* UVs = Mesh.HasAttributes() && Mesh.Attributes()->NumUVLayers() > 0 ? Mesh.Attributes()->PrimaryUV() : nullptr;
+			if (!UVs)
+			{
+				return 0.0;
+			}
+			TArray<TPair<double, double>> Areas;
+			double UVTotal = 0.0, SurfaceTotal = 0.0;
+			for (const int32 Tid : Mesh.TriangleIndicesItr())
+			{
+				if (!UVs->IsSetTriangle(Tid))
+				{
+					continue;
+				}
+				FVector2f A, B, C;
+				UVs->GetTriElements(Tid, A, B, C);
+				const double UVArea = 0.5 * FMath::Abs(double((B.X - A.X) * (C.Y - A.Y) - (C.X - A.X) * (B.Y - A.Y)));
+				const double Surface = Mesh.GetTriArea(Tid);
+				if (UVArea > 0.0 && Surface > 0.0)
+				{
+					Areas.Add({UVArea, Surface});
+					UVTotal += UVArea;
+					SurfaceTotal += Surface;
+				}
+			}
+			if (Areas.IsEmpty() || UVTotal <= 0.0 || SurfaceTotal <= 0.0)
+			{
+				return 0.0;
+			}
+			const double Ratio = UVTotal / SurfaceTotal;
+			double Sum = 0.0, Weight = 0.0;
+			for (const TPair<double, double>& Each : Areas)
+			{
+				Sum += FMath::Abs(FMath::Loge((Each.Key / Each.Value) / Ratio)) * Each.Value;
+				Weight += Each.Value;
+			}
+			return Sum / Weight;
+		}
+
+		/**
+		 * Reduces to Triangles keeping UV seams, then checks the textures still fit: when the mapping's distortion grew by
+		 * more than a quarter, the reduction is undone and the mesh kept as it was. Notes say which. True when reduced.
+		 */
+		bool ReduceKeepingTextures(FDynamicMesh3& Mesh, const int32 Triangles, const TCHAR* Label, TArray<FString>& OutNotes)
+		{
+			const int32 From = Mesh.TriangleCount();
+			const FDynamicMesh3 Kept = Mesh;
+			const double Before = UVDistortion(Mesh);
+			if (Mesh.HasAttributes() && Mesh.Attributes()->PrimaryNormals())
+			{
+				SimplifyMeshTo<FAttrMeshSimplification>(Mesh, Triangles);
+			}
+			else
+			{
+				SimplifyMeshTo<FQEMSimplification>(Mesh, Triangles);
+			}
+			const double After = UVDistortion(Mesh);
+			if (After > Before + 0.25)
+			{
+				Mesh = Kept;
+				OutNotes.Add(FString::Printf(TEXT("%s: a reduction from %d to %d triangles stretched the texture mapping (distortion %.2f, from %.2f), so it was undone; the mesh keeps %d triangles."),
+					Label, From, Triangles, After, Before, From));
+				return false;
+			}
+			OutNotes.Add(FString::Printf(TEXT("%s: reduced from %d to %d triangles in the editor, UV seams kept (texture mapping distortion %.2f, was %.2f), free."), Label, From, Mesh.TriangleCount(),
+				After, Before));
+			return true;
 		}
 
 		/** Every triangle of the given welded components, as dynamic-mesh triangle ids. */
@@ -871,16 +986,79 @@ namespace HyperAIStudio::MeshGen::Creator
 			return Typed;
 		}
 
-		UMaterialInterface* Master(FString& OutError)
+		/** A 4x4 linear white mask, made once beside the master: occlusion, roughness and metal all 1 until an ORM is set. */
+		UTexture2D* WhiteMask(FString& OutError)
 		{
 			UObject* Other = nullptr;
-			if (UMaterialInterface* Found = FindOrLoad<UMaterialInterface>(MasterPath, Other))
+			if (UTexture2D* Found = FindOrLoad<UTexture2D>(WhiteMaskPath, Other))
 			{
 				return Found;
 			}
 			if (Other)
 			{
+				OutError = FString::Printf(TEXT("%s exists but is not a texture."), WhiteMaskPath);
+				return nullptr;
+			}
+			TArray<uint8> Pixels;
+			Pixels.Init(255, 4 * 4 * 4);
+			UTexture2D* Texture = NewObject<UTexture2D>(CreatePackage(WhiteMaskPath), *FPackageName::GetShortName(WhiteMaskPath), RF_Public | RF_Standalone);
+			Texture->Source.Init(4, 4, 1, 1, TSF_BGRA8, Pixels.GetData());
+			Texture->SRGB = false;
+			Texture->CompressionSettings = TC_Masks;
+			Texture->PostEditChange();
+			FAssetRegistryModule::AssetCreated(Texture);
+			Texture->MarkPackageDirty();
+			return FHyperAIStudioSourceControl::SaveAsset(*Texture, OutError) ? Texture : nullptr;
+		}
+
+		/**
+		 * A master made before 31 October 2026 gave its ORM sampler (Masks) the engine's sRGB white square: the material does
+		 * not compile, and every instance of it draws as the default grey material. Its default becomes the linear white mask.
+		 */
+		void RepairMaster(UMaterial& Material)
+		{
+			UMaterialExpressionTextureSampleParameter2D* Broken = nullptr;
+			for (UMaterialExpression* Expression : Material.GetExpressions())
+			{
+				UMaterialExpressionTextureSampleParameter2D* Sample = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression);
+				if (Sample && Sample->SamplerType == SAMPLERTYPE_Masks && Sample->Texture && Sample->Texture->SRGB)
+				{
+					Broken = Sample;
+				}
+			}
+			FString Error;
+			UTexture2D* Mask = Broken ? WhiteMask(Error) : nullptr;
+			if (!Mask)
+			{
+				return;
+			}
+			Material.Modify();
+			Broken->Modify();
+			Broken->Texture = Mask;
+			Material.PostEditChange();
+			Material.MarkPackageDirty();
+			FHyperAIStudioSourceControl::SaveAsset(Material, Error);
+		}
+
+		UMaterialInterface* Master(FString& OutError)
+		{
+			UObject* Other = nullptr;
+			if (UMaterialInterface* Found = FindOrLoad<UMaterialInterface>(MasterPath, Other))
+			{
+				if (UMaterial* Base = Cast<UMaterial>(Found))
+				{
+					RepairMaster(*Base);
+				}
+				return Found;
+			}
+			if (Other)
+			{
 				OutError = FString::Printf(TEXT("%s exists but is not a material; move it, and the master is made again."), MasterPath);
+				return nullptr;
+			}
+			UTexture2D* Mask = WhiteMask(OutError);
+			if (!Mask)
+			{
 				return nullptr;
 			}
 			UTexture* White = LoadObject<UTexture>(nullptr, WhiteTexture, nullptr, LOAD_NoWarn | LOAD_Quiet);
@@ -927,7 +1105,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			All.Add(Tint);
 			UMaterialExpressionTextureSampleParameter2D* Normal = Texture(TEXT("Normal"), Flat, SAMPLERTYPE_Normal, Tiled);
 			UMaterialExpressionTextureSampleParameter2D* Detail = Texture(TEXT("DetailNormal"), Flat, SAMPLERTYPE_Normal, DetailTiled);
-			UMaterialExpressionTextureSampleParameter2D* Packed = Texture(TEXT("ORM"), White, SAMPLERTYPE_Masks, Tiled);
+			UMaterialExpressionTextureSampleParameter2D* Packed = Texture(TEXT("ORM"), Mask, SAMPLERTYPE_Masks, Tiled);
 			// The detail's slope added to the base normal's (a whiteout blend), by DetailNormalStrength (0: off).
 			UMaterialExpressionComponentMask* DetailXY = NewObject<UMaterialExpressionComponentMask>(Material);
 			DetailXY->R = true;
@@ -982,18 +1160,36 @@ namespace HyperAIStudio::MeshGen::Creator
 			return Material;
 		}
 
+		/**
+		 * A normal map in OpenGL's convention, +Y: glTF's (Tripo's NormalGL maps) by its name or the file it came from.
+		 * Unreal reads -Y, so its green must be flipped; Interchange's glTF import does that, other routes may not.
+		 */
+		bool IsOpenGLNormal(const UTexture2D& Texture)
+		{
+			const FString Name = Texture.GetName().ToLower();
+			if (Name.Contains(TEXT("normalgl")) || Name.EndsWith(TEXT("_gl")))
+			{
+				return true;
+			}
+			const FString File = Texture.AssetImportData ? Texture.AssetImportData->GetFirstFilename() : FString();
+			const FString Extension = FPaths::GetExtension(File).ToLower();
+			return Extension == TEXT("glb") || Extension == TEXT("gltf");
+		}
+
 		/** Sets a texture up for what it holds; true when anything changed. */
 		bool SetUp(UTexture2D& Texture, const ERole Role)
 		{
 			const bool bColor = Role == ERole::BaseColor || Role == ERole::Emissive;
 			const TextureCompressionSettings Compression = Role == ERole::Normal ? TC_Normalmap : bColor ? TC_Default : TC_Masks;
-			if (Texture.SRGB == bColor && Texture.CompressionSettings == Compression)
+			const bool bFlip = Role == ERole::Normal ? Texture.bFlipGreenChannel || IsOpenGLNormal(Texture) : Texture.bFlipGreenChannel;
+			if (Texture.SRGB == bColor && Texture.CompressionSettings == Compression && Texture.bFlipGreenChannel == bFlip)
 			{
 				return false;
 			}
 			Texture.Modify();
 			Texture.SRGB = bColor;
 			Texture.CompressionSettings = Compression;
+			Texture.bFlipGreenChannel = bFlip;
 			Texture.PostEditChange();
 			return true;
 		}
@@ -1064,6 +1260,37 @@ namespace HyperAIStudio::MeshGen::Creator
 			return FHyperAIStudioSourceControl::SaveAsset(*Texture, OutError) ? Texture : nullptr;
 		}
 
+		/** Weapon textures capped as the convention says (2K colour and normal, a 1K mask by default); the sources keep their size. */
+		void CapWeaponTextures(UObject& Mesh, const FWeaponFinish& Finish, TArray<FString>& OutNotes)
+		{
+			int32 Capped = 0;
+			for (const FSlot& Slot : SlotsOf(Mesh))
+			{
+				for (const TPair<ERole, UTexture2D*>& Map : Slot.Maps)
+				{
+					if (!Map.Value || Map.Value->GetPathName().StartsWith(TEXT("/Engine/")))
+					{
+						continue;
+					}
+					const int32 Cap = Map.Key == ERole::BaseColor || Map.Key == ERole::Emissive ? Finish.ColorSize : Map.Key == ERole::Normal ? Finish.NormalSize : Finish.MaskSize;
+					if (Cap > 0 && Map.Value->MaxTextureSize != Cap)
+					{
+						Map.Value->Modify();
+						Map.Value->MaxTextureSize = Cap;
+						Map.Value->PostEditChange();
+						FString Error;
+						FHyperAIStudioSourceControl::SaveAsset(*Map.Value, Error);
+						++Capped;
+					}
+				}
+			}
+			if (Capped > 0)
+			{
+				OutNotes.Add(FString::Printf(TEXT("weapon_finish: %d texture(s) capped at colour %d, normal %d, mask %d (their sources kept)."), Capped, Finish.ColorSize, Finish.NormalSize,
+					Finish.MaskSize));
+			}
+		}
+
 		FString CleanName(const FString& Name)
 		{
 			FString Out;
@@ -1082,6 +1309,11 @@ namespace HyperAIStudio::MeshGen::Creator
 		return MasterPath;
 	}
 
+	void CapWeaponTextureSizes(UObject& Mesh, const FWeaponFinish& Finish, TArray<FString>& OutNotes)
+	{
+		CapWeaponTextures(Mesh, Finish, OutNotes);
+	}
+
 	FCheckTargets TargetsFromPlan(const FHyperAIModelPlan& Plan)
 	{
 		FCheckTargets Targets;
@@ -1096,6 +1328,13 @@ namespace HyperAIStudio::MeshGen::Creator
 		Targets.bNanite = Plan.bNanite;
 		Targets.Collision = Plan.Collision;
 		Targets.bLocalReduce = Plan.bLocalReduce;
+		// A weapon (not quads, which the finishing's reduction would undo) is finished to the project's convention.
+		Targets.bWeapon = Plan.Use == TEXT("weapon") && !Plan.bQuad;
+		if (Targets.bWeapon)
+		{
+			Targets.Weapon = WeaponFinishFor(Plan.SizeMeters, Plan.FaceLimit);
+			Targets.Weapon.bNanite = Plan.bNanite;
+		}
 		return Targets;
 	}
 
@@ -1150,7 +1389,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			{
 				// A model made denser than its budget on purpose (Hi3D's 100,000-face floor) is reduced in the editor first, for free.
 				Add(Out, TEXT("faces"), TEXT("fail"), Value, Expected, FString::Printf(TEXT("%d over the budget of %d."), Have - Targets.FaceLimit, Targets.FaceLimit),
-					Targets.bLocalReduce && Static && !Targets.bQuad ? TEXT("simplify") : TEXT(""), TEXT("retopo"));
+					Targets.bWeapon && Static && !Targets.bQuad ? TEXT("weapon_finish") : Targets.bLocalReduce && Static && !Targets.bQuad ? TEXT("simplify") : TEXT(""), TEXT("retopo"));
 			}
 			else if (Targets.MinFaces > 0 && Have < Targets.MinFaces)
 			{
@@ -1162,11 +1401,17 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 		}
 
-		// The surface.
-		Add(Out, TEXT("non_manifold"), Topology.NonManifoldEdges > 0 ? TEXT("fail") : TEXT("pass"), FString::FromInt(Topology.NonManifoldEdges), TEXT("0"),
-			Topology.NonManifoldEdges > 0 ? TEXT("Edges shared by more than two faces: they break baking, boolean and physics cooking.") : TEXT("Every edge joins at most two faces."),
+		// The surface. Generated meshes nearly always have a few of these defects; on a static mesh that only renders (no
+		// skinning, no complex collision) a handful are a warning the free fixes try, never a reason to pay for a retopology
+		// that throws the model's detail away. A character or creature to be rigged, or a mesh walked on, keeps them failing.
+		const bool bOnlyRenders = Static && Targets.Use != TEXT("character") && Targets.Use != TEXT("creature") && Targets.Collision != TEXT("complex");
+		const bool bMinor = bOnlyRenders && Topology.LargestHole <= MaxFillEdges && Topology.NonManifoldEdges <= FMath::Max(50, Out.Triangles / 200)
+			&& Topology.Holes <= FMath::Max(50, Out.Triangles / 500);
+		const FString MinorNote = bMinor ? FString(TEXT(" A handful on a static mesh that only renders: a warning, not worth a paid fix.")) : FString();
+		Add(Out, TEXT("non_manifold"), Topology.NonManifoldEdges == 0 ? TEXT("pass") : bMinor ? TEXT("warn") : TEXT("fail"), FString::FromInt(Topology.NonManifoldEdges), TEXT("0"),
+			Topology.NonManifoldEdges > 0 ? TEXT("Edges shared by more than two faces: they break baking, boolean and physics cooking.") + MinorNote : FString(TEXT("Every edge joins at most two faces.")),
 			TEXT(""), TEXT("retopo"));
-		const bool bOpenOk = Targets.Use == TEXT("foliage") || Targets.Use == TEXT("background");
+		const bool bOpenOk = Targets.Use == TEXT("foliage") || Targets.Use == TEXT("background") || bMinor;
 		const TCHAR* OpenResult = Topology.BoundaryEdges == 0 ? TEXT("pass") : bOpenOk ? TEXT("warn") : TEXT("fail");
 		Add(Out, TEXT("open_edges"), OpenResult, FString::FromInt(Topology.BoundaryEdges), TEXT("0"),
 			Topology.BoundaryEdges == 0 ? TEXT("Closed: no open edges.") : TEXT("Open edges where the surface stops."), Static_(TEXT("fill_holes")), TEXT("retopo"));
@@ -1226,13 +1471,18 @@ namespace HyperAIStudio::MeshGen::Creator
 			const bool bOk = Measure > 0.0 && FMath::Abs(Measure - Want) <= Want * 0.15;
 			FHyperAIModelCheck& Check = Add(Out, TEXT("scale"), bOk ? TEXT("pass") : TEXT("fail"), FString::Printf(TEXT("%.1f"), Measure), FString::Printf(TEXT("%.1f"), Want),
 				FString::Printf(TEXT("%s is %.1f cm; %.1f cm wanted (within 15%%)."), Upright(Targets.Use) ? TEXT("Height") : TEXT("Longest side"), Measure, Want),
-				Static_(TEXT("scale")), Static ? TEXT("") : TEXT("convert"));
+				Targets.bWeapon ? Static_(TEXT("weapon_finish")) : Static_(TEXT("scale")), Static ? TEXT("") : TEXT("convert"));
 			(void)Check;
 		}
 		else
 		{
 			Add(Out, TEXT("scale"), TEXT("skip"), FString::Printf(TEXT("%.1f"), Longest), TEXT(""), TEXT("No real-world size to hold it to."));
 		}
+		if (Targets.bWeapon && Static)
+		{
+			Add(Out, TEXT("pivot"), TEXT("skip"), FString(), TEXT("in the grip"), TEXT("A weapon's pivot is in its grip, not at its bottom: weapon_axis checks it."));
+		}
+		else
 		{
 			const FVector3d Centre = Bounds.IsEmpty() ? FVector3d::Zero() : Bounds.Center();
 			const double Tolerance = FMath::Max(Longest * 0.02, 0.5);
@@ -1252,6 +1502,46 @@ namespace HyperAIStudio::MeshGen::Creator
 		{
 			Add(Out, TEXT("orientation"), TEXT("pass"), FString::Printf(TEXT("%.0f x %.0f x %.0f cm"), Out.Size.X, Out.Size.Y, Out.Size.Z), TEXT("Z up"),
 				TEXT("Imported Z up; Tripo models face +X, as Unreal's forward."));
+		}
+		if (Targets.bWeapon && Static)
+		{
+			// A weapon's convention and proportions: generated ones come out lying any way and inflated.
+			TArray<FVector3d> Points;
+			Points.Reserve(Mesh.VertexCount());
+			for (const int32 Vid : Mesh.VertexIndicesItr())
+			{
+				Points.Add(Mesh.GetVertex(Vid));
+			}
+			const FWeaponShape Shape = MeasureWeapon(Points);
+			const TCHAR* const Finish = TEXT("weapon_finish");
+			if (!Shape.bValid)
+			{
+				Add(Out, TEXT("weapon_axis"), TEXT("warn"), FString(), TEXT("a weapon"), TEXT("It does not read as a weapon: no handle beside its widest section."));
+			}
+			else
+			{
+				const bool bPivot = Targets.Weapon.PivotFraction > 0.f ? FMath::Abs(Shape.PivotFraction - Targets.Weapon.PivotFraction) <= 0.05f : Shape.bPivotInGrip;
+				const bool bAxis = Shape.Axis == 1 && Shape.bHandlePositive && Shape.ThicknessAxis == 2 && bPivot;
+				Add(Out, TEXT("weapon_axis"), bAxis ? TEXT("pass") : TEXT("fail"),
+					FString::Printf(TEXT("length on %s, handle toward %s, thickness on %s, pivot %.0f%% from the handle's end%s"), Shape.Axis == 0 ? TEXT("X") : Shape.Axis == 1 ? TEXT("Y") : TEXT("Z"),
+						Shape.bHandlePositive ? TEXT("+") : TEXT("-"), Shape.ThicknessAxis == 0 ? TEXT("X") : Shape.ThicknessAxis == 1 ? TEXT("Y") : TEXT("Z"), Shape.PivotFraction * 100.f,
+						Shape.bPivotInGrip ? TEXT(" (in the grip)") : TEXT("")),
+					Targets.Weapon.PivotFraction > 0.f ? FString::Printf(TEXT("length on Y, head toward -Y, flat across X, pivot %.0f%% from the handle's end"), Targets.Weapon.PivotFraction * 100.f)
+						: FString(TEXT("length on Y, head toward -Y, flat across X, pivot in the grip")),
+					bAxis ? FString(TEXT("It follows the convention: ")) + Targets.Weapon.Source + TEXT(".") : FString(TEXT("It does not lie as the project's weapons do: ")) + Targets.Weapon.Source + TEXT("."), Finish);
+				if (!Shape.bHeaded)
+				{
+					Add(Out, TEXT("weapon_blade"), Shape.BladeRatio > 0.3f ? TEXT("fail") : TEXT("pass"), FString::Printf(TEXT("%.1f cm thick, %.1f cm wide (%.2f)"), Shape.BladeThickness, Shape.BladeWidth, Shape.BladeRatio),
+						TEXT("thickness under 0.3 of the width"), Shape.BladeRatio > 0.3f ? TEXT("A bulky blade: real ones are a fifth as thick as they are wide, or less.") : TEXT("A blade of real proportions."), Finish);
+				}
+				Add(Out, TEXT("weapon_grip"), Shape.GripCm > 5.f ? TEXT("fail") : TEXT("pass"), FString::Printf(TEXT("%.1f cm"), Shape.GripCm), TEXT("5 cm across at most"),
+					Shape.GripCm > 5.f ? TEXT("Too fat for a hand to hold.") : TEXT("A hand holds it."), Finish);
+				if (!Shape.bHeaded && Shape.Length < 130.f)
+				{
+					Add(Out, TEXT("weapon_guard"), Shape.GuardDepthCm > 4.f ? TEXT("fail") : TEXT("pass"), FString::Printf(TEXT("%.1f cm deep"), Shape.GuardDepthCm), TEXT("4 cm deep at most"),
+						Shape.GuardDepthCm > 4.f ? TEXT("A guard like a brick: a one-handed weapon's is a few centimetres deep.") : TEXT("A guard of real depth."), Finish);
+				}
+			}
 		}
 
 		// UVs.
@@ -1387,13 +1677,16 @@ namespace HyperAIStudio::MeshGen::Creator
 				const double Z = Stats.Mean.Z * 2.0 - 1.0;
 				const bool bFormed = !bRead || (Z > 0.3 && FMath::Abs(Stats.Mean.X - 0.5) < 0.25 && FMath::Abs(Stats.Mean.Y - 0.5) < 0.25);
 				const bool bCompressed = Normal->CompressionSettings == TC_Normalmap && !Normal->SRGB;
-				Add(Out, TEXT("normal_map"), !bFormed ? TEXT("fail") : !bCompressed ? TEXT("fail") : TEXT("pass"),
+				// glTF's (and Tripo's NormalGL) maps are +Y; read unflipped, every bump lights from the wrong side.
+				const bool bGreen = !Targets.bFromGltf || !IsOpenGLNormal(*Normal) || Normal->bFlipGreenChannel;
+				Add(Out, TEXT("normal_map"), !bFormed || !bCompressed || !bGreen ? TEXT("fail") : TEXT("pass"),
 					FString::Printf(TEXT("%s, mean (%.2f, %.2f, %.2f)%s"), bCompressed ? TEXT("normal-map compression") : TEXT("not set up as a normal map"), Stats.Mean.X, Stats.Mean.Y, Stats.Mean.Z,
-						Targets.bFromGltf && !Normal->bFlipGreenChannel ? TEXT(", green not flipped") : TEXT("")),
-					TEXT("normal-map compression, a tangent-space map (mostly blue)"),
+						bGreen ? TEXT("") : TEXT(", green not flipped")),
+					TEXT("normal-map compression, a tangent-space map (mostly blue), an OpenGL (+Y) map's green flipped"),
 					!bFormed ? TEXT("It does not read as a tangent-space normal map.") : !bCompressed ? TEXT("Compressed as a colour; it must be a normal map.")
-					: TEXT("A well-formed tangent-space normal map. glTF stores +Y (OpenGL) normals; Unreal's glTF import flips green to its -Y."),
-					!bCompressed ? TEXT("materials") : TEXT(""), !bFormed ? TEXT("texture") : TEXT(""));
+					: !bGreen ? TEXT("An OpenGL (+Y) normal map, glTF's convention, read without its green flipped: Unreal's is -Y, so bumps light from the wrong side.")
+					: TEXT("A well-formed tangent-space normal map. glTF stores +Y (OpenGL) normals; its green is flipped to Unreal's -Y."),
+					!bCompressed || !bGreen ? TEXT("materials") : TEXT(""), !bFormed ? TEXT("texture") : TEXT(""));
 			}
 			if (RoughSource)
 			{
@@ -1443,10 +1736,17 @@ namespace HyperAIStudio::MeshGen::Creator
 				bTranslucent |= Slot.Material && IsTranslucentBlendMode(Slot.Material->GetBlendMode());
 			}
 			const bool bSuits = !bTranslucent && Out.Triangles >= 5000;
-			Add(Out, TEXT("nanite"), Targets.bNanite && bSuits && !bNanite ? TEXT("warn") : bNanite && bTranslucent ? TEXT("warn") : TEXT("pass"),
-				bNanite ? TEXT("on") : TEXT("off"), Targets.bNanite ? TEXT("on") : TEXT("either"),
-				bTranslucent ? TEXT("A translucent material: Nanite does not draw it.") : Targets.bNanite && bSuits && !bNanite ? TEXT("Dense and opaque: Nanite renders it for less.")
-				: TEXT("Nanite is set sensibly."), Targets.bNanite && bSuits && !bNanite ? TEXT("nanite") : TEXT(""));
+			if (Targets.bWeapon && bNanite && !Targets.Weapon.bNanite)
+			{
+				Add(Out, TEXT("nanite"), TEXT("warn"), TEXT("on"), TEXT("off"), TEXT("Nanite is on; the project's weapons are drawn without it (one LOD)."), TEXT("weapon_finish"));
+			}
+			else
+			{
+				Add(Out, TEXT("nanite"), Targets.bNanite && bSuits && !bNanite ? TEXT("warn") : bNanite && bTranslucent ? TEXT("warn") : TEXT("pass"),
+					bNanite ? TEXT("on") : TEXT("off"), Targets.bNanite ? TEXT("on") : TEXT("either"),
+					bTranslucent ? TEXT("A translucent material: Nanite does not draw it.") : Targets.bNanite && bSuits && !bNanite ? TEXT("Dense and opaque: Nanite renders it for less.")
+					: TEXT("Nanite is set sensibly."), Targets.bNanite && bSuits && !bNanite ? TEXT("nanite") : TEXT(""));
+			}
 			const UBodySetup* Body = Static->GetBodySetup();
 			const bool bCollision = Body && (Body->AggGeom.GetElementCount() > 0 || Body->CollisionTraceFlag == CTF_UseComplexAsSimple);
 			const bool bWanted = !Targets.Collision.IsEmpty() && Targets.Collision != TEXT("none");
@@ -1527,7 +1827,7 @@ namespace HyperAIStudio::MeshGen::Creator
 	bool ApplyLocalFixes(UObject& Object, const FCheckTargets& Targets, const TArray<FString>& Fixes, TArray<FString>& OutNotes, FString& OutError)
 	{
 		UStaticMesh* Static = Cast<UStaticMesh>(&Object);
-		static const TSet<FString> GeometryFixes = {TEXT("remove_bits"), TEXT("simplify"), TEXT("orient"), TEXT("fill_holes"), TEXT("normals"), TEXT("degenerate"), TEXT("auto_uv"),
+		static const TSet<FString> GeometryFixes = {TEXT("remove_bits"), TEXT("weapon_finish"), TEXT("simplify"), TEXT("orient"), TEXT("fill_holes"), TEXT("normals"), TEXT("degenerate"), TEXT("auto_uv"),
 			TEXT("scale"), TEXT("pivot"), TEXT("upright")};
 		bool bGeometry = false;
 		for (const FString& Fix : Fixes)
@@ -1559,18 +1859,12 @@ namespace HyperAIStudio::MeshGen::Creator
 				}
 				OutNotes.Add(FString::Printf(TEXT("remove_bits: removed %d stray bit(s), %d triangles."), Small.Num(), Doomed.Num()));
 			}
+			// A weapon is oriented, placed, scaled and thinned first; it is reduced to its budget last, after any holes are
+			// capped, with UV seams kept so its textures still fit.
+			const bool bWeaponReduce = Fixes.Contains(TEXT("weapon_finish")) && Targets.bWeapon && ShapeWeapon(Mesh, Targets.Weapon, OutNotes);
 			if (Fixes.Contains(TEXT("simplify")) && Targets.FaceLimit > 0 && Mesh.TriangleCount() > Targets.FaceLimit)
 			{
-				const int32 From = Mesh.TriangleCount();
-				if (Mesh.HasAttributes() && Mesh.Attributes()->PrimaryNormals())
-				{
-					SimplifyMeshTo<FAttrMeshSimplification>(Mesh, Targets.FaceLimit);
-				}
-				else
-				{
-					SimplifyMeshTo<FQEMSimplification>(Mesh, Targets.FaceLimit);
-				}
-				OutNotes.Add(FString::Printf(TEXT("simplify: reduced from %d to %d triangles in the editor (quadric simplification, UVs carried), free."), From, Mesh.TriangleCount()));
+				ReduceKeepingTextures(Mesh, Targets.FaceLimit, TEXT("simplify"), OutNotes);
 			}
 			if (Fixes.Contains(TEXT("degenerate")))
 			{
@@ -1657,6 +1951,10 @@ namespace HyperAIStudio::MeshGen::Creator
 				}
 				OutNotes.Add(TEXT("pivot: moved to the bottom centre."));
 			}
+			if (bWeaponReduce && Targets.Weapon.TargetTris > 0 && Mesh.TriangleCount() > Targets.Weapon.TargetTris)
+			{
+				ReduceKeepingTextures(Mesh, Targets.Weapon.TargetTris, TEXT("weapon_finish"), OutNotes);
+			}
 			Mesh.CompactInPlace();
 			Static->Modify();
 			if (!Write(*Static, Mesh, {}, OutError))
@@ -1713,6 +2011,22 @@ namespace HyperAIStudio::MeshGen::Creator
 				Nanite.bEnabled = true;
 				Static->SetNaniteSettings(Nanite);
 				OutNotes.Add(TEXT("nanite: on."));
+				bChanged = true;
+			}
+			if (Fixes.Contains(TEXT("weapon_finish")) && Targets.bWeapon)
+			{
+				// As the project's weapons are drawn: one LOD, Nanite as the convention says (off unless told), and the
+				// render data rebuilt from it (PostEditChange below), or Nanite's coarse fallback would stay.
+				Static->Modify();
+				FMeshNaniteSettings Nanite = Static->GetNaniteSettings();
+				Nanite.bEnabled = Targets.Weapon.bNanite;
+				Static->SetNaniteSettings(Nanite);
+				if (Static->GetNumSourceModels() > 1)
+				{
+					Static->SetNumSourceModels(1);
+				}
+				OutNotes.Add(FString::Printf(TEXT("weapon_finish: one LOD, Nanite %s."), Targets.Weapon.bNanite ? TEXT("on") : TEXT("off")));
+				CapWeaponTextures(*Static, Targets.Weapon, OutNotes);
 				bChanged = true;
 			}
 			if (bChanged)

@@ -102,6 +102,12 @@ struct FHyperAIModelBrief
 	UPROPERTY() FString ImageTemplate;
 	/** auto, on or off: approve and look at the picture before the 3D generation is asked for. auto: on for hero props, characters, vehicles and weapons. */
 	UPROPERTY() FString ReviewReference;
+	/**
+	 * A static mesh in the project to match, such as the project's own weapon: its triangles, Nanite, long axis and head
+	 * end, pivot, blade, grip and guard proportions, and texture sizes are measured and followed. For a weapon, they are
+	 * also kept as the project's weapon convention, so later weapons follow it without being told.
+	 */
+	UPROPERTY() FString MatchAsset;
 };
 
 /** The choices hyper_model_create made from a brief, with the reason for each, and what the generation costs. */
@@ -168,6 +174,8 @@ struct FHyperAIModelPlan
 	UPROPERTY() float TexelDensity = 0.f;
 	/** Whether the static mesh should render with Nanite. */
 	UPROPERTY() bool bNanite = false;
+	/** The reference mesh a brief matches (match_asset), kept as the project's weapon convention when the job starts. */
+	UPROPERTY() FString MatchAsset;
 	/** box, convex, complex or none. */
 	UPROPERTY() FString Collision;
 	/** The negative prompt sent. */
@@ -334,7 +342,7 @@ struct FHyperAIModelJob
 	/** Paid in USD, the generation included; and the Tripo credits it consumed where Tripo said. */
 	UPROPERTY() float SpentUSD = 0.f;
 	UPROPERTY() float CreditsConsumed = 0.f;
-	/** checks_passed, budget_used, rounds_used, fix_declined, no_paid_fix, local_only, or empty while it runs. */
+	/** checks_passed, budget_used, rounds_used, fix_declined, no_paid_fix, local_only, fix_made_it_worse (a paid fix undone), or empty while it runs. */
 	UPROPERTY() FString StopReason;
 	/** The journal, relative to the project: every step and decision, to audit or resume. */
 	UPROPERTY() FString Journal;
@@ -384,6 +392,8 @@ struct FHyperAIModelCheckFixRequest
 	UPROPERTY() float FixBudgetUSD = 0.f;
 	UPROPERTY() int32 MaxRounds = 0;
 	UPROPERTY() FString OperationId;
+	/** A static mesh in the project to match, as in a brief: a weapon is finished to its convention, which is kept for the project. */
+	UPROPERTY() FString MatchAsset;
 };
 
 USTRUCT(BlueprintType)
@@ -392,7 +402,7 @@ struct FHyperAIModelCheckFixReport
 	GENERATED_BODY()
 
 	UPROPERTY() bool bOk = false;
-	/** checked, awaiting_user_approval, queued, or why it was refused. */
+	/** checked, awaiting_user_approval, queued, or why it was refused (asset_busy: another job is changing that asset). */
 	UPROPERTY() FString Status;
 	UPROPERTY() FString Diagnostic;
 	UPROPERTY() FString OperationId;

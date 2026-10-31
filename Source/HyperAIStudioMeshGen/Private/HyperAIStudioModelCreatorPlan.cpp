@@ -2,8 +2,11 @@
 
 #include "HyperAIStudioModelCreator.h"
 
+#include "Engine/StaticMesh.h"
 #include "HyperAIStudioMeshGenJob.h"
 #include "HyperAIStudioSettings.h"
+#include "HyperAIStudioTripoSettings.h"
+#include "PhysicsEngine/BodySetup.h"
 
 /**
  * The pure parts of the model creator: the brief classified into a plan, Tripo's v3 request bodies, prices, and the
@@ -46,8 +49,8 @@ namespace HyperAIStudio::MeshGen::Creator
 				TEXT("a creature deforms when animated: P2 quads at 25K")},
 			{TEXT("vehicle"), TEXT("H3.1"), false, 150000, TEXT("detailed"), 4.5f, 5.12f, true, TEXT("box"),
 				TEXT("a vehicle is a large hard-surface hero: H3.1 at 150K triangles with Nanite")},
-			{TEXT("weapon"), TEXT("P2"), false, 15000, TEXT("detailed"), 1.0f, 10.24f, false, TEXT("box"),
-				TEXT("a held weapon is close to the camera but light: P2 at 15K with detailed textures")},
+			{TEXT("weapon"), TEXT("H3.1"), false, 20000, TEXT("detailed"), 1.0f, 10.24f, false, TEXT("box"),
+				TEXT("a held weapon is close to the camera but light: H3.1's detail generated at several times the budget, then finished in the editor to 20K, Nanite off")},
 			{TEXT("foliage"), TEXT("P2"), false, 8000, TEXT("standard"), 2.0f, 5.12f, true, TEXT("none"),
 				TEXT("foliage is placed by the thousand: P2 at 8K with Nanite (Tripo makes solid geometry, not alpha cards)")},
 			{TEXT("miniature"), TEXT("P2"), false, 2000, TEXT("standard"), 0.3f, 5.12f, false, TEXT("box"),
@@ -364,6 +367,64 @@ namespace HyperAIStudio::MeshGen::Creator
 		return Tripo(TEXT("the default for a picture of a game piece of this kind"));
 	}
 
+	/**
+	 * A weapon: the project's convention (or the reference the brief matches) sets its budget, Nanite and finishing; the
+	 * generation asks for three times the budget (four for a detailed brief), so the detail survives in the normal map,
+	 * and the free finishing reduces it to the budget.
+	 */
+	static bool PlanWeapon(const FHyperAIModelBrief& Brief, const bool bDetailWords, FHyperAIModelPlan& Out, TArray<FString>& Why, FString& OutError)
+	{
+		FWeaponFinish Finish;
+		const FString Match = Brief.MatchAsset.TrimStartAndEnd();
+		if (!Match.IsEmpty())
+		{
+			TArray<FString> Lines;
+			if (!MatchReference(Match, Finish, Lines, OutError, /*bKeep=*/false))
+			{
+				return false;
+			}
+			Why.Append(Lines);
+			Out.MatchAsset = Match;
+			if (Brief.SizeMeters <= 0.f && Finish.LengthCm > 0.f)
+			{
+				Out.SizeMeters = Finish.LengthCm / 100.f;
+				Why.Add(FString::Printf(TEXT("size: %.2f m, the reference's length"), Out.SizeMeters));
+			}
+		}
+		else
+		{
+			Finish = WeaponFinishFor(Out.SizeMeters, 0);
+			const FHyperAIStudioWeaponConvention& Convention = GetDefault<UHyperAIStudioTripoSettings>()->WeaponConvention;
+			Why.Add(Convention.Source.IsEmpty() ? FString(TEXT("weapon: HyperAI's defaults (length on Y, head toward -Y, pivot in the grip, blade a fifth as thick as wide, grip 3.4 cm, guard 3 cm deep); give match_asset to follow one of the project's weapons"))
+				: FString::Printf(TEXT("weapon: the project's convention, %s"), *Convention.Summary));
+		}
+		if (Brief.FaceLimit <= 0)
+		{
+			const int32 Budget = FMath::Clamp(Finish.TargetTris, Out.MinFaces, Out.MaxFaces);
+			if (Budget != Out.FaceLimit)
+			{
+				Out.FaceLimit = Budget;
+				Why.Add(FString::Printf(TEXT("budget: %d triangles, from %s"), Budget, *Finish.Source));
+			}
+			Out.bNanite = Finish.bNanite;
+		}
+		if (Out.Collision == TEXT("box") && !Match.IsEmpty())
+		{
+			const UStaticMesh* Reference = LoadObject<UStaticMesh>(nullptr, *Match, nullptr, LOAD_NoWarn | LOAD_Quiet);
+			const UBodySetup* Body = Reference ? Reference->GetBodySetup() : nullptr;
+			if (Body && Body->AggGeom.GetElementCount() == 0 && Body->CollisionTraceFlag != CTF_UseComplexAsSimple)
+			{
+				Out.Collision = TEXT("none");
+				Why.Add(TEXT("collision: none, as the reference has"));
+			}
+		}
+		Out.ProviderFaces = FMath::Clamp(Out.FaceLimit * (bDetailWords ? 4 : 3), Out.MinFaces, Out.MaxFaces);
+		Out.bLocalReduce = Out.ProviderFaces > Out.FaceLimit;
+		Why.Add(FString::Printf(TEXT("generated at %d triangles, then finished in the editor for free: turned and placed, thinned to real proportions, reduced to %d, Nanite %s"),
+			Out.ProviderFaces, Out.FaceLimit, Out.bNanite ? TEXT("on") : TEXT("off")));
+		return true;
+	}
+
 	static bool ClassifyTripo(const FHyperAIModelBrief& Brief, FHyperAIModelPlan& Out, FString& OutError)
 	{
 		Out = FHyperAIModelPlan();
@@ -514,7 +575,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			// The use's budget is in its own topology: a quad is two triangles.
 			Faces = Out.bQuad ? Faces / 2 : Faces * 2;
 		}
-		if (bDetailWords && bH && Brief.FaceLimit <= 0)
+		if (bDetailWords && bH && Brief.FaceLimit <= 0 && Use != TEXT("weapon"))
 		{
 			// Four times the use's budget, not a flat figure: a sword asked for in detail is not a cliff.
 			const int32 Raised = FMath::Clamp(Faces * 4, Out.bQuad ? 20000 : 40000, Out.bQuad ? 50000 : 300000);
@@ -724,6 +785,10 @@ namespace HyperAIStudio::MeshGen::Creator
 		for (int32 Index = 0; Index < Brief.MultiviewImages.Num(); ++Index)
 		{
 			Placeholders.Add(Brief.MultiviewImages[Index].TrimStartAndEnd().IsEmpty() ? FString() : FString::Printf(TEXT("<file_token of view %d>"), Index));
+		}
+		if (Out.Use == TEXT("weapon") && !Out.bQuad && !PlanWeapon(Brief, bDetailWords, Out, Why, OutError))
+		{
+			return false;
 		}
 		Out.RequestJson = HyperAIStudio::MeshGen::Private::JsonText(GenerationBody(Out, Brief, Placeholders));
 		return true;
@@ -1288,7 +1353,8 @@ namespace HyperAIStudio::MeshGen::Creator
 			return false;
 		}
 		Out.Provider = TEXT("tripo");
-		Out.ProviderFaces = Out.FaceLimit;
+		// A weapon is generated denser than its budget and finished down to it; anything else is asked for at its budget.
+		Out.ProviderFaces = Out.ProviderFaces > 0 ? Out.ProviderFaces : Out.FaceLimit;
 		Out.Reasons.Insert(ProviderWhy, 0);
 		if (!PlanReference(Brief, Out, OutError))
 		{
@@ -1407,7 +1473,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			Json->SetArrayField(TEXT("inputs"), Views);
 			Json->SetStringField(TEXT("texture_alignment"), TEXT("original_image"));
 		}
-		Json->SetNumberField(TEXT("face_limit"), Plan.FaceLimit);
+		Json->SetNumberField(TEXT("face_limit"), Plan.ProviderFaces > 0 ? Plan.ProviderFaces : Plan.FaceLimit);
 		const bool bTextured = Plan.TextureQuality != TEXT("none") && !Plan.bParts;
 		Json->SetBoolField(TEXT("texture"), bTextured);
 		Json->SetBoolField(TEXT("pbr"), bTextured && Plan.bPbr);
@@ -1444,13 +1510,18 @@ namespace HyperAIStudio::MeshGen::Creator
 		return Json;
 	}
 
-	TSharedRef<FJsonObject> RetopoBody(const FString& Input, const int32 FaceLimit, const bool bQuad, const bool bSmartUv)
+	TSharedRef<FJsonObject> RetopoBody(const FString& Input, const int32 FaceLimit, const bool bQuad, const bool bSmartUv, const bool bV1)
 	{
 		const TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
 		Json->SetStringField(TEXT("input"), Input);
-		Json->SetStringField(TEXT("model"), RetopoModel);
-		Json->SetNumberField(TEXT("face_limit"), FMath::Clamp(FaceLimit, MinFaces, bQuad ? RetopoMaxQuads : RetopoMaxTris));
+		Json->SetStringField(TEXT("model"), bV1 ? RetopoModelV1 : RetopoModel);
+		Json->SetNumberField(TEXT("face_limit"), FMath::Clamp(FaceLimit, MinFaces, bV1 ? (bQuad ? RetopoV1MaxQuads : RetopoV1MaxTris) : bQuad ? RetopoMaxQuads : RetopoMaxTris));
 		Json->SetBoolField(TEXT("quad"), bQuad);
+		if (bV1)
+		{
+			// v1.0 takes neither smart_uv nor bake: the model keeps the UVs it has.
+			return Json;
+		}
 		// smart_uv is valid only on v3.0 and does not change the price.
 		Json->SetBoolField(TEXT("smart_uv"), bSmartUv);
 		Json->SetBoolField(TEXT("bake"), true);
@@ -1768,7 +1839,7 @@ namespace HyperAIStudio::MeshGen::Creator
 	TArray<FString> LocalFixesFor(const FHyperAIModelCheckReport& Report)
 	{
 		// The order matters: bits go before holes are filled, orientation before normals, geometry before pivot and scale.
-		static const TCHAR* const Order[] = {TEXT("remove_bits"), TEXT("simplify"), TEXT("orient"), TEXT("fill_holes"), TEXT("normals"), TEXT("auto_uv"), TEXT("scale"), TEXT("pivot"),
+		static const TCHAR* const Order[] = {TEXT("remove_bits"), TEXT("weapon_finish"), TEXT("simplify"), TEXT("orient"), TEXT("fill_holes"), TEXT("normals"), TEXT("auto_uv"), TEXT("scale"), TEXT("pivot"),
 			TEXT("collision"), TEXT("lightmap_uv"), TEXT("nanite"), TEXT("materials")};
 		TSet<FString> Wanted;
 		for (const FHyperAIModelCheck& Check : Report.Checks)
@@ -1811,17 +1882,24 @@ namespace HyperAIStudio::MeshGen::Creator
 		const bool bFaces = Failing(Report, {TEXT("faces")});
 		const bool bBroken = Failing(Report, {TEXT("non_manifold"), TEXT("holes"), TEXT("open_edges"), TEXT("flipped")});
 		const bool bUv = Failing(Report, {TEXT("uv_overlap"), TEXT("uv_present"), TEXT("uv_range")});
-		if (bTripo && (bFaces || bBroken) && Tried(TEXT("retopo")) < 1)
+		// The target is the budget (with none known, the faces the model has): never one far under it, which would throw away
+		// the detail the plan paid for. Above v3.0's 20,000, decimation v1.0 takes the budget whole (no bake, so the UVs stay).
+		const int32 FacesNow = bQuad ? Report.Quads : Report.Triangles;
+		const int32 Budget = Context.Plan.FaceLimit > 0 ? Context.Plan.FaceLimit : FacesNow;
+		const bool bV1 = Budget > (bQuad ? RetopoMaxQuads : RetopoMaxTris);
+		const int32 Target = FMath::Clamp(Budget, MinFaces, bV1 ? (bQuad ? RetopoV1MaxQuads : RetopoV1MaxTris) : bQuad ? RetopoMaxQuads : RetopoMaxTris);
+		const bool bKeepsDetail = bFaces || Target * 5 >= Budget * 4;
+		if (bTripo && (bFaces || bBroken) && bKeepsDetail && Budget > 0 && Tried(TEXT("retopo")) < 1)
 		{
-			const int32 Budget = Context.Plan.FaceLimit > 0 ? Context.Plan.FaceLimit : bQuad ? RetopoMaxQuads : RetopoMaxTris;
 			FPaidFix Fix;
 			Fix.Id = TEXT("retopo");
-			Fix.What = FString::Printf(TEXT("Retopologise to %d %s with Tripo (v3.0), unwrapping UVs and baking the textures onto it"),
-				FMath::Clamp(Budget, MinFaces, bQuad ? RetopoMaxQuads : RetopoMaxTris), bQuad ? TEXT("quads") : TEXT("triangles"));
+			Fix.What = bV1 ? FString::Printf(TEXT("Reduce it to %d %s with Tripo's decimation (v1.0), keeping its UVs (no bake)"), Target, bQuad ? TEXT("quads") : TEXT("triangles"))
+				: FString::Printf(TEXT("Retopologise to %d %s with Tripo (v3.0), unwrapping UVs and baking the textures onto it"), Target, bQuad ? TEXT("quads") : TEXT("triangles"));
 			Fix.Endpoints = {TEXT("/mesh/decimate")};
-			Fix.Bodies = {RetopoBody(Input, Budget, bQuad, /*bSmartUv=*/true)};
-			Fix.PriceUSD = Price(bQuad ? TEXT("retopo_quad") : TEXT("retopo"));
-			Fix.Clears = FailingIds(Report, {TEXT("faces"), TEXT("non_manifold"), TEXT("holes"), TEXT("open_edges"), TEXT("flipped"), TEXT("uv_overlap"), TEXT("uv_present"), TEXT("uv_range")});
+			Fix.Bodies = {RetopoBody(Input, Target, bQuad, /*bSmartUv=*/!bV1, bV1)};
+			Fix.PriceUSD = Price(bV1 ? TEXT("retopo_v1") : bQuad ? TEXT("retopo_quad") : TEXT("retopo"));
+			Fix.Clears = bV1 ? FailingIds(Report, {TEXT("faces"), TEXT("non_manifold"), TEXT("holes"), TEXT("open_edges"), TEXT("flipped")})
+				: FailingIds(Report, {TEXT("faces"), TEXT("non_manifold"), TEXT("holes"), TEXT("open_edges"), TEXT("flipped"), TEXT("uv_overlap"), TEXT("uv_present"), TEXT("uv_range")});
 			Add(MoveTemp(Fix));
 		}
 		// UVs that overlap with textures on them: Smart UV re-unwraps and re-bakes; it takes 80,000 triangles at most.

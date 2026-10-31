@@ -248,3 +248,18 @@ namespace HyperAIStudio::MeshGen::Private
 	 */
 	bool StepHi3D(const TSharedRef<FJob>& Job);
 }
+
+namespace HyperAIStudio::MeshGen::Characters
+{
+	/**
+	 * Writes a project mesh as a GLB through the glTF Exporter plugin: its source model (never a Nanite mesh's coarse
+	 * fallback), every compile finished first. An editor operation: the jobs run it on a tick of its own.
+	 */
+	bool ExportGlb(const FString& MeshPath, const FString& File, FString& OutError);
+	/**
+	 * A model provider's file that Unreal imported as several static meshes (one a node: Tripo's segmented or parts
+	 * results) made one: every part's geometry appended into the first, a material slot a part (its own material, or
+	 * none). The other parts' assets are deleted. False, with a reason, when they cannot be merged.
+	 */
+	bool MergeParts(const TArray<FString>& StaticMeshPaths, FString& OutNote);
+}
