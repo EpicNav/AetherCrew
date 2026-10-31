@@ -17,6 +17,7 @@
 #include "HttpServerRequest.h"
 #include "HttpServerResponse.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioCredentials.h"
 #include "HyperAIStudioExternalService.h"
 #include "HyperAIStudioMeshGenJob.h"
 #include "HyperAIStudioMeshGenToolset.h"
@@ -657,6 +658,19 @@ bool FHyperAIStudioModelCreatorRequestsTest::RunTest(const FString& Parameters)
 	Settings->MeshTaskPrices.Add(Own);
 	TestEqual(TEXT("A price set in MeshTaskPrices replaces the built-in one"), PriceOf(TEXT("P2"), TEXT("a cup"), TEXT(""), TEXT("none"), TEXT(""), TEXT(""), TEXT(""), TEXT("")), 90);
 	Settings->MeshTaskPrices = Saved;
+
+	// Settings > Keys checks a Tripo key where generation sends it, not at the China site (which answered 401).
+	FHyperAIStudioKeySlot TripoSlot;
+	TripoSlot.Test = TEXT("tripo");
+	FHyperAIStudioKeyTestRequest KeyCheck;
+	TestTrue(TEXT("A Tripo key check is built"), HyperAIStudio::Credentials::BuildTestRequest(TripoSlot, TEXT("tsk_test"), FString(), KeyCheck));
+	FHyperAIStudioExternalServiceSettings Tripo;
+	TestTrue(TEXT("The tripo service is there"), FHyperAIStudioExternalServices::Find(TEXT("tripo"), Tripo));
+	FString TripoBase = Tripo.BaseUrl;
+	TripoBase.RemoveFromEnd(TEXT("/"));
+	TestEqual(TEXT("The key check reads the balance from the generation address"), KeyCheck.Url, TripoBase + TEXT("/account/balance"));
+	TestFalse(TEXT("The key check never goes to the China site"), KeyCheck.Url.Contains(TEXT("tripo3d.com")));
+	TestEqual(TEXT("The key goes as a Bearer token"), KeyCheck.Headers.FindRef(TEXT("Authorization")), FString(TEXT("Bearer tsk_test")));
 	return true;
 }
 
