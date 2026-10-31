@@ -7,6 +7,7 @@
 #include "Animation/AnimData/IAnimationDataModel.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/Skeleton.h"
+#include "AssetCompilingManager.h"
 #include "AssetExportTask.h"
 #include "AssetImportTask.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -37,6 +38,7 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
+#include "ObjectTools.h"
 #include "PhysicsAssetUtils.h"
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
@@ -44,6 +46,8 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "StaticMeshAttributes.h"
+#include "StaticMeshOperations.h"
 #include "UObject/Package.h"
 #include "UObject/StrongObjectPtr.h"
 
@@ -673,7 +677,6 @@ namespace HyperAIStudio::MeshGen::Characters
 		}
 	}
 
-	/** Writes a project mesh as a GLB through the glTF Exporter plugin, on a tick of its own: exporting is an editor operation. */
 	bool ExportGlb(const FString& MeshPath, const FString& File, FString& OutError)
 	{
 		UObject* Mesh = LoadAsset<UStaticMesh>(MeshPath);
@@ -684,6 +687,9 @@ namespace HyperAIStudio::MeshGen::Characters
 			return false;
 		}
 		IFileManager::Get().MakeDirectory(*FPaths::GetPath(File), /*Tree=*/true);
+		// Textures, shaders and the mesh's own build finished first: the exporter bakes the materials by rendering them,
+		// and an unfinished one comes out black.
+		FAssetCompilingManager::Get().FinishAllCompilation();
 		UAssetExportTask* Task = NewObject<UAssetExportTask>();
 		const TStrongObjectPtr<UAssetExportTask> Keep(Task);
 		Task->Object = Mesh;
@@ -691,6 +697,19 @@ namespace HyperAIStudio::MeshGen::Characters
 		Task->bAutomated = true;
 		Task->bPrompt = false;
 		Task->bReplaceIdentical = true;
+		// The exporter writes the render data by default, which for a Nanite mesh is its coarse fallback (a 57,000-triangle
+		// sword went out as 4,900): the source model is what Tripo must be sent. Set through reflection, as the glTF
+		// Exporter plugin is only needed at run time.
+		TStrongObjectPtr<UObject> Options;
+		if (UClass* OptionsClass = FindObject<UClass>(nullptr, TEXT("/Script/GLTFExporter.GLTFExportOptions")))
+		{
+			Options.Reset(NewObject<UObject>(GetTransientPackage(), OptionsClass));
+			if (const FBoolProperty* SourceModel = CastField<FBoolProperty>(OptionsClass->FindPropertyByName(TEXT("bExportSourceModel"))))
+			{
+				SourceModel->SetPropertyValue_InContainer(Options.Get(), true);
+			}
+			Task->Options = Options.Get();
+		}
 		const bool bWritten = UExporter::RunAssetExportTask(Task) && IFileManager::Get().FileSize(*File) > 0;
 		if (!bWritten)
 		{
@@ -1078,6 +1097,81 @@ namespace HyperAIStudio::MeshGen::Characters
 		return Task->ImportedObjectPaths;
 	}
 
+	bool MergeParts(const TArray<FString>& StaticMeshPaths, FString& OutNote)
+	{
+		TArray<UStaticMesh*> Parts;
+		for (const FString& Path : StaticMeshPaths)
+		{
+			if (UStaticMesh* Part = LoadAsset<UStaticMesh>(Path); Part && Part->IsMeshDescriptionValid(0))
+			{
+				Parts.Add(Part);
+			}
+		}
+		if (Parts.Num() < 2)
+		{
+			OutNote = Parts.IsEmpty() ? TEXT("no part has a source mesh") : FString();
+			return !Parts.IsEmpty();
+		}
+		FAssetCompilingManager::Get().FinishAllCompilation();
+		// Each part's polygon groups are renamed after the part, so appending keeps them apart: a slot a part, as the parts
+		// route gives them, each with the material the part came with (Tripo's segmented parts come with none).
+		TOptional<FMeshDescription> Merged;
+		TArray<FStaticMaterial> Slots;
+		FStaticMeshOperations::FAppendSettings Settings;
+		for (int32 Channel = 0; Channel < FStaticMeshOperations::FAppendSettings::MAX_NUM_UV_CHANNELS; ++Channel)
+		{
+			Settings.bMergeUVChannels[Channel] = true;
+		}
+		for (UStaticMesh* Part : Parts)
+		{
+			FMeshDescription Copy = *Part->GetMeshDescription(0);
+			FStaticMeshAttributes CopyAttributes(Copy);
+			TPolygonGroupAttributesRef<FName> Names = CopyAttributes.GetPolygonGroupMaterialSlotNames();
+			const TArray<FStaticMaterial>& Own = Part->GetStaticMaterials();
+			int32 Group = 0;
+			for (const FPolygonGroupID GroupId : Copy.PolygonGroups().GetElementIDs())
+			{
+				const int32 Slot = Own.IndexOfByPredicate([&](const FStaticMaterial& Each) { return Each.ImportedMaterialSlotName == Names[GroupId]; });
+				UMaterialInterface* Material = Own.IsValidIndex(Slot) ? Own[Slot].MaterialInterface : Own.IsEmpty() ? nullptr : Own[0].MaterialInterface;
+				const FName Renamed(Group == 0 ? Part->GetName() : FString::Printf(TEXT("%s_%d"), *Part->GetName(), Group));
+				Names[GroupId] = Renamed;
+				Slots.Add(FStaticMaterial(Material, Renamed, Renamed));
+				++Group;
+			}
+			if (!Merged.IsSet())
+			{
+				Merged = MoveTemp(Copy);
+			}
+			else
+			{
+				FStaticMeshOperations::AppendMeshDescription(Copy, Merged.GetValue(), Settings);
+			}
+		}
+		UStaticMesh* Target = Parts[0];
+		const int32 Triangles = Merged->Triangles().Num();
+		Target->Modify();
+		FMeshDescription* To = Target->GetMeshDescription(0);
+		Target->ModifyMeshDescription(0);
+		*To = MoveTemp(Merged.GetValue());
+		Target->CommitMeshDescription(0);
+		Target->GetStaticMaterials() = Slots;
+		Target->PostEditChange();
+		Target->MarkPackageDirty();
+		if (!FHyperAIStudioSourceControl::SaveAsset(*Target, OutNote))
+		{
+			return false;
+		}
+		TArray<UObject*> Others;
+		for (int32 Index = 1; Index < Parts.Num(); ++Index)
+		{
+			Others.Add(Parts[Index]);
+		}
+		FAssetCompilingManager::Get().FinishAllCompilation();
+		ObjectTools::ForceDeleteObjects(Others, /*ShowConfirmation=*/false);
+		OutNote = FString::Printf(TEXT("Merged %d parts into %s: %d triangles, a material slot a part."), Parts.Num(), *Target->GetName(), Triangles);
+		return true;
+	}
+
 	/**
 	 * Animations only, onto Skeleton, through Interchange's generic pipeline in place of the project's: the clips are
 	 * imported, the mesh, materials and textures in the file are not.
@@ -1192,6 +1286,34 @@ namespace HyperAIStudio::MeshGen::Characters
 					else if (Cast<UTexture>(Object))
 					{
 						Job.Info.Textures.Add(Path);
+					}
+				}
+				if (Job.Kind == EKind::Model)
+				{
+					// A file of several nodes (Tripo's segmented, completed or parts results) imports as a static mesh a node:
+					// merged into one before anything takes "the" mesh, or the first part (once, a single triangle) would stand in.
+					TArray<FString> Statics;
+					for (const FString& Path : Paths)
+					{
+						if (LoadAsset<UStaticMesh>(Path))
+						{
+							Statics.Add(Path);
+						}
+					}
+					if (Statics.Num() > 1)
+					{
+						FString Merged;
+						if (!MergeParts(Statics, Merged))
+						{
+							OutError = FString::Printf(TEXT("Unreal imported %d parts from %s and they could not be made one mesh: %s"), Statics.Num(), *ProjectRelative(Download.File), *Merged);
+							return false;
+						}
+						Job.Info.AssetPath = Statics[0];
+						for (int32 Index = 1; Index < Statics.Num(); ++Index)
+						{
+							Job.Info.ImportedAssets.Remove(Statics[Index]);
+						}
+						Note += TEXT(" ") + Merged;
 					}
 				}
 				if (Job.Kind == EKind::Model && Job.Info.AssetPath.IsEmpty())

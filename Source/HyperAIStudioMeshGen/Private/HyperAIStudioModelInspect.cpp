@@ -2,6 +2,7 @@
 
 #include "HyperAIStudioModelCreator.h"
 
+#include "AssetCompilingManager.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
@@ -34,6 +35,7 @@
 #include "MeshDescriptionToDynamicMesh.h"
 #include "MeshSimplification.h"
 #include "DynamicMeshToMeshDescription.h"
+#include "EditorFramework/AssetImportData.h"
 #include "Misc/ObjectThumbnail.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
@@ -44,6 +46,7 @@
 #include "PhysicsEngine/BoxElem.h"
 #include "StaticMeshAttributes.h"
 #include "UObject/Package.h"
+#include "UObject/StrongObjectPtr.h"
 #include "XAtlasWrapper.h"
 
 /**
@@ -60,6 +63,8 @@ namespace HyperAIStudio::MeshGen::Creator
 		const TCHAR* const MasterPath = TEXT("/Game/HyperAI/Materials/M_HyperAIGeneratedMaster");
 		const TCHAR* const WhiteTexture = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
 		const TCHAR* const FlatNormalTexture = TEXT("/Engine/EngineMaterials/FlatNormal.FlatNormal");
+		/** The ORM's default: a linear white mask of HyperAI's own. The engine's white square is sRGB colour, which a Masks sampler refuses. */
+		const TCHAR* const WhiteMaskPath = TEXT("/Game/HyperAI/Materials/T_HyperAIWhiteMask");
 		/** A hole with more edges than this is a missing part, not a hole: Tripo's completion fixes those. */
 		constexpr int32 MaxFillEdges = 256;
 
@@ -572,15 +577,48 @@ namespace HyperAIStudio::MeshGen::Creator
 			return Score;
 		}
 
-		/** The editor's thumbnail renderer draws the asset as the Content Browser shows it, into a PNG. */
+		/**
+		 * The editor's thumbnail renderer draws the asset, textured, into a PNG. A Nanite mesh is drawn from a transient copy
+		 * built without Nanite: a thumbnail of the Nanite mesh itself showed its coarse fallback or first streamed pages and,
+		 * until its materials were compiled for Nanite, the default grey, so the visual check compared a grey, blocky clay
+		 * model with a textured reference. Every texture and shader is compiled and streamed in first (AlwaysFlush).
+		 */
 		bool Capture(UObject& Mesh, const FString& File)
 		{
 			if (!FApp::CanEverRender())
 			{
 				return false;
 			}
+			FAssetCompilingManager::Get().FinishAllCompilation();
+			// A material whose shaders are not compiled yet renders as the default grey one in the thumbnail.
+			for (const FSlot& Slot : SlotsOf(Mesh))
+			{
+				if (Slot.Material)
+				{
+					Slot.Material->EnsureIsComplete();
+				}
+			}
+			UObject* Drawn = &Mesh;
+			TStrongObjectPtr<UStaticMesh> Copy;
+			const UStaticMesh* Static = Cast<UStaticMesh>(&Mesh);
+			if (Static && Static->GetNaniteSettings().bEnabled && Static->IsMeshDescriptionValid(0))
+			{
+				Copy.Reset(DuplicateObject<UStaticMesh>(Static, GetTransientPackage(), MakeUniqueObjectName(GetTransientPackage(), UStaticMesh::StaticClass(), TEXT("HyperAICapture"))));
+				FMeshNaniteSettings Nanite = Copy->GetNaniteSettings();
+				Nanite.bEnabled = false;
+				Copy->SetNaniteSettings(Nanite);
+				Copy->Build(/*bInSilent=*/true);
+				FAssetCompilingManager::Get().FinishAllCompilation();
+				Drawn = Copy.Get();
+			}
 			FObjectThumbnail Thumbnail;
-			ThumbnailTools::RenderThumbnail(&Mesh, 512, 512, ThumbnailTools::EThumbnailTextureFlushMode::AlwaysFlush, nullptr, &Thumbnail);
+			ThumbnailTools::RenderThumbnail(Drawn, 512, 512, ThumbnailTools::EThumbnailTextureFlushMode::AlwaysFlush, nullptr, &Thumbnail);
+			if (Copy.IsValid())
+			{
+				Copy->ClearFlags(RF_Standalone | RF_Public);
+				Copy->MarkAsGarbage();
+				Copy.Reset();
+			}
 			const TArray<uint8>& Data = Thumbnail.GetUncompressedImageData();
 			const int32 Width = Thumbnail.GetImageWidth(), Height = Thumbnail.GetImageHeight();
 			if (Width <= 0 || Height <= 0 || Data.Num() < Width * Height * 4)
@@ -871,16 +909,79 @@ namespace HyperAIStudio::MeshGen::Creator
 			return Typed;
 		}
 
-		UMaterialInterface* Master(FString& OutError)
+		/** A 4x4 linear white mask, made once beside the master: occlusion, roughness and metal all 1 until an ORM is set. */
+		UTexture2D* WhiteMask(FString& OutError)
 		{
 			UObject* Other = nullptr;
-			if (UMaterialInterface* Found = FindOrLoad<UMaterialInterface>(MasterPath, Other))
+			if (UTexture2D* Found = FindOrLoad<UTexture2D>(WhiteMaskPath, Other))
 			{
 				return Found;
 			}
 			if (Other)
 			{
+				OutError = FString::Printf(TEXT("%s exists but is not a texture."), WhiteMaskPath);
+				return nullptr;
+			}
+			TArray<uint8> Pixels;
+			Pixels.Init(255, 4 * 4 * 4);
+			UTexture2D* Texture = NewObject<UTexture2D>(CreatePackage(WhiteMaskPath), *FPackageName::GetShortName(WhiteMaskPath), RF_Public | RF_Standalone);
+			Texture->Source.Init(4, 4, 1, 1, TSF_BGRA8, Pixels.GetData());
+			Texture->SRGB = false;
+			Texture->CompressionSettings = TC_Masks;
+			Texture->PostEditChange();
+			FAssetRegistryModule::AssetCreated(Texture);
+			Texture->MarkPackageDirty();
+			return FHyperAIStudioSourceControl::SaveAsset(*Texture, OutError) ? Texture : nullptr;
+		}
+
+		/**
+		 * A master made before 31 October 2026 gave its ORM sampler (Masks) the engine's sRGB white square: the material does
+		 * not compile, and every instance of it draws as the default grey material. Its default becomes the linear white mask.
+		 */
+		void RepairMaster(UMaterial& Material)
+		{
+			UMaterialExpressionTextureSampleParameter2D* Broken = nullptr;
+			for (UMaterialExpression* Expression : Material.GetExpressions())
+			{
+				UMaterialExpressionTextureSampleParameter2D* Sample = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression);
+				if (Sample && Sample->SamplerType == SAMPLERTYPE_Masks && Sample->Texture && Sample->Texture->SRGB)
+				{
+					Broken = Sample;
+				}
+			}
+			FString Error;
+			UTexture2D* Mask = Broken ? WhiteMask(Error) : nullptr;
+			if (!Mask)
+			{
+				return;
+			}
+			Material.Modify();
+			Broken->Modify();
+			Broken->Texture = Mask;
+			Material.PostEditChange();
+			Material.MarkPackageDirty();
+			FHyperAIStudioSourceControl::SaveAsset(Material, Error);
+		}
+
+		UMaterialInterface* Master(FString& OutError)
+		{
+			UObject* Other = nullptr;
+			if (UMaterialInterface* Found = FindOrLoad<UMaterialInterface>(MasterPath, Other))
+			{
+				if (UMaterial* Base = Cast<UMaterial>(Found))
+				{
+					RepairMaster(*Base);
+				}
+				return Found;
+			}
+			if (Other)
+			{
 				OutError = FString::Printf(TEXT("%s exists but is not a material; move it, and the master is made again."), MasterPath);
+				return nullptr;
+			}
+			UTexture2D* Mask = WhiteMask(OutError);
+			if (!Mask)
+			{
 				return nullptr;
 			}
 			UTexture* White = LoadObject<UTexture>(nullptr, WhiteTexture, nullptr, LOAD_NoWarn | LOAD_Quiet);
@@ -927,7 +1028,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			All.Add(Tint);
 			UMaterialExpressionTextureSampleParameter2D* Normal = Texture(TEXT("Normal"), Flat, SAMPLERTYPE_Normal, Tiled);
 			UMaterialExpressionTextureSampleParameter2D* Detail = Texture(TEXT("DetailNormal"), Flat, SAMPLERTYPE_Normal, DetailTiled);
-			UMaterialExpressionTextureSampleParameter2D* Packed = Texture(TEXT("ORM"), White, SAMPLERTYPE_Masks, Tiled);
+			UMaterialExpressionTextureSampleParameter2D* Packed = Texture(TEXT("ORM"), Mask, SAMPLERTYPE_Masks, Tiled);
 			// The detail's slope added to the base normal's (a whiteout blend), by DetailNormalStrength (0: off).
 			UMaterialExpressionComponentMask* DetailXY = NewObject<UMaterialExpressionComponentMask>(Material);
 			DetailXY->R = true;
@@ -982,18 +1083,36 @@ namespace HyperAIStudio::MeshGen::Creator
 			return Material;
 		}
 
+		/**
+		 * A normal map in OpenGL's convention, +Y: glTF's (Tripo's NormalGL maps) by its name or the file it came from.
+		 * Unreal reads -Y, so its green must be flipped; Interchange's glTF import does that, other routes may not.
+		 */
+		bool IsOpenGLNormal(const UTexture2D& Texture)
+		{
+			const FString Name = Texture.GetName().ToLower();
+			if (Name.Contains(TEXT("normalgl")) || Name.EndsWith(TEXT("_gl")))
+			{
+				return true;
+			}
+			const FString File = Texture.AssetImportData ? Texture.AssetImportData->GetFirstFilename() : FString();
+			const FString Extension = FPaths::GetExtension(File).ToLower();
+			return Extension == TEXT("glb") || Extension == TEXT("gltf");
+		}
+
 		/** Sets a texture up for what it holds; true when anything changed. */
 		bool SetUp(UTexture2D& Texture, const ERole Role)
 		{
 			const bool bColor = Role == ERole::BaseColor || Role == ERole::Emissive;
 			const TextureCompressionSettings Compression = Role == ERole::Normal ? TC_Normalmap : bColor ? TC_Default : TC_Masks;
-			if (Texture.SRGB == bColor && Texture.CompressionSettings == Compression)
+			const bool bFlip = Role == ERole::Normal ? Texture.bFlipGreenChannel || IsOpenGLNormal(Texture) : Texture.bFlipGreenChannel;
+			if (Texture.SRGB == bColor && Texture.CompressionSettings == Compression && Texture.bFlipGreenChannel == bFlip)
 			{
 				return false;
 			}
 			Texture.Modify();
 			Texture.SRGB = bColor;
 			Texture.CompressionSettings = Compression;
+			Texture.bFlipGreenChannel = bFlip;
 			Texture.PostEditChange();
 			return true;
 		}
@@ -1162,11 +1281,17 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 		}
 
-		// The surface.
-		Add(Out, TEXT("non_manifold"), Topology.NonManifoldEdges > 0 ? TEXT("fail") : TEXT("pass"), FString::FromInt(Topology.NonManifoldEdges), TEXT("0"),
-			Topology.NonManifoldEdges > 0 ? TEXT("Edges shared by more than two faces: they break baking, boolean and physics cooking.") : TEXT("Every edge joins at most two faces."),
+		// The surface. Generated meshes nearly always have a few of these defects; on a static mesh that only renders (no
+		// skinning, no complex collision) a handful are a warning the free fixes try, never a reason to pay for a retopology
+		// that throws the model's detail away. A character or creature to be rigged, or a mesh walked on, keeps them failing.
+		const bool bOnlyRenders = Static && Targets.Use != TEXT("character") && Targets.Use != TEXT("creature") && Targets.Collision != TEXT("complex");
+		const bool bMinor = bOnlyRenders && Topology.LargestHole <= MaxFillEdges && Topology.NonManifoldEdges <= FMath::Max(50, Out.Triangles / 200)
+			&& Topology.Holes <= FMath::Max(50, Out.Triangles / 500);
+		const FString MinorNote = bMinor ? FString(TEXT(" A handful on a static mesh that only renders: a warning, not worth a paid fix.")) : FString();
+		Add(Out, TEXT("non_manifold"), Topology.NonManifoldEdges == 0 ? TEXT("pass") : bMinor ? TEXT("warn") : TEXT("fail"), FString::FromInt(Topology.NonManifoldEdges), TEXT("0"),
+			Topology.NonManifoldEdges > 0 ? TEXT("Edges shared by more than two faces: they break baking, boolean and physics cooking.") + MinorNote : FString(TEXT("Every edge joins at most two faces.")),
 			TEXT(""), TEXT("retopo"));
-		const bool bOpenOk = Targets.Use == TEXT("foliage") || Targets.Use == TEXT("background");
+		const bool bOpenOk = Targets.Use == TEXT("foliage") || Targets.Use == TEXT("background") || bMinor;
 		const TCHAR* OpenResult = Topology.BoundaryEdges == 0 ? TEXT("pass") : bOpenOk ? TEXT("warn") : TEXT("fail");
 		Add(Out, TEXT("open_edges"), OpenResult, FString::FromInt(Topology.BoundaryEdges), TEXT("0"),
 			Topology.BoundaryEdges == 0 ? TEXT("Closed: no open edges.") : TEXT("Open edges where the surface stops."), Static_(TEXT("fill_holes")), TEXT("retopo"));
@@ -1387,13 +1512,16 @@ namespace HyperAIStudio::MeshGen::Creator
 				const double Z = Stats.Mean.Z * 2.0 - 1.0;
 				const bool bFormed = !bRead || (Z > 0.3 && FMath::Abs(Stats.Mean.X - 0.5) < 0.25 && FMath::Abs(Stats.Mean.Y - 0.5) < 0.25);
 				const bool bCompressed = Normal->CompressionSettings == TC_Normalmap && !Normal->SRGB;
-				Add(Out, TEXT("normal_map"), !bFormed ? TEXT("fail") : !bCompressed ? TEXT("fail") : TEXT("pass"),
+				// glTF's (and Tripo's NormalGL) maps are +Y; read unflipped, every bump lights from the wrong side.
+				const bool bGreen = !Targets.bFromGltf || !IsOpenGLNormal(*Normal) || Normal->bFlipGreenChannel;
+				Add(Out, TEXT("normal_map"), !bFormed || !bCompressed || !bGreen ? TEXT("fail") : TEXT("pass"),
 					FString::Printf(TEXT("%s, mean (%.2f, %.2f, %.2f)%s"), bCompressed ? TEXT("normal-map compression") : TEXT("not set up as a normal map"), Stats.Mean.X, Stats.Mean.Y, Stats.Mean.Z,
-						Targets.bFromGltf && !Normal->bFlipGreenChannel ? TEXT(", green not flipped") : TEXT("")),
-					TEXT("normal-map compression, a tangent-space map (mostly blue)"),
+						bGreen ? TEXT("") : TEXT(", green not flipped")),
+					TEXT("normal-map compression, a tangent-space map (mostly blue), an OpenGL (+Y) map's green flipped"),
 					!bFormed ? TEXT("It does not read as a tangent-space normal map.") : !bCompressed ? TEXT("Compressed as a colour; it must be a normal map.")
-					: TEXT("A well-formed tangent-space normal map. glTF stores +Y (OpenGL) normals; Unreal's glTF import flips green to its -Y."),
-					!bCompressed ? TEXT("materials") : TEXT(""), !bFormed ? TEXT("texture") : TEXT(""));
+					: !bGreen ? TEXT("An OpenGL (+Y) normal map, glTF's convention, read without its green flipped: Unreal's is -Y, so bumps light from the wrong side.")
+					: TEXT("A well-formed tangent-space normal map. glTF stores +Y (OpenGL) normals; its green is flipped to Unreal's -Y."),
+					!bCompressed || !bGreen ? TEXT("materials") : TEXT(""), !bFormed ? TEXT("texture") : TEXT(""));
 			}
 			if (RoughSource)
 			{

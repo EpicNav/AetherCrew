@@ -2415,6 +2415,12 @@
   },
   {
    "namespace": "HyperAIStudioModelCreatorWatch",
+   "key": "LooksLikeTripo",
+   "source": "{0} looks like a Tripo model by its folder or name. Check it and make the free fixes?",
+   "text": "{0} 的文件夹或名称看起来像 Tripo 模型。要检查它并进行免费修复吗？"
+  },
+  {
+   "namespace": "HyperAIStudioModelCreatorWatch",
    "key": "Refresh",
    "source": "Refresh",
    "text": "刷新"

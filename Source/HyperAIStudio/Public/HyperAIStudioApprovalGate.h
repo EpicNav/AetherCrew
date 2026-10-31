@@ -25,6 +25,11 @@ struct FHyperAIStudioApprovalSummary
 	TArray<FString> Touches;
 	/** hyper_script_run's escalated scripts. Auto-approval files them under Scripts whatever Safety says. */
 	bool bEscalatedScript = false;
+	/**
+	 * Only a person's click approves it: auto-approval and running agent jobs never do, whatever its safety. For offers
+	 * HyperAI makes on its own (a model that looks as if Tripo Studio sent it) and the paid work they lead to.
+	 */
+	bool bClickOnly = false;
 };
 
 struct FHyperAIStudioPendingApproval
@@ -42,6 +47,21 @@ struct FHyperAIStudioPendingApproval
 	{
 		return Summary.Safety == EHyperAIStudioDomainSafety::Edit && Category == EHyperAIStudioApprovalCategory::Edits;
 	}
+};
+
+/**
+ * Work HyperAI runs for an agent on the game thread: an approved action, an agent's script. While one runs, whatever it
+ * imports or creates is HyperAI's own doing, not something a person or another plugin brought in (the Tripo Studio watch
+ * looks away). A plain count, game thread only.
+ */
+struct HYPERAISTUDIO_API FHyperAIStudioAgentWorkScope
+{
+	FHyperAIStudioAgentWorkScope();
+	~FHyperAIStudioAgentWorkScope();
+	FHyperAIStudioAgentWorkScope(const FHyperAIStudioAgentWorkScope&) = delete;
+	FHyperAIStudioAgentWorkScope& operator=(const FHyperAIStudioAgentWorkScope&) = delete;
+
+	static bool IsRunning();
 };
 
 /** Who approved a held request. */

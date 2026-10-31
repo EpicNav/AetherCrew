@@ -1444,13 +1444,18 @@ namespace HyperAIStudio::MeshGen::Creator
 		return Json;
 	}
 
-	TSharedRef<FJsonObject> RetopoBody(const FString& Input, const int32 FaceLimit, const bool bQuad, const bool bSmartUv)
+	TSharedRef<FJsonObject> RetopoBody(const FString& Input, const int32 FaceLimit, const bool bQuad, const bool bSmartUv, const bool bV1)
 	{
 		const TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
 		Json->SetStringField(TEXT("input"), Input);
-		Json->SetStringField(TEXT("model"), RetopoModel);
-		Json->SetNumberField(TEXT("face_limit"), FMath::Clamp(FaceLimit, MinFaces, bQuad ? RetopoMaxQuads : RetopoMaxTris));
+		Json->SetStringField(TEXT("model"), bV1 ? RetopoModelV1 : RetopoModel);
+		Json->SetNumberField(TEXT("face_limit"), FMath::Clamp(FaceLimit, MinFaces, bV1 ? (bQuad ? RetopoV1MaxQuads : RetopoV1MaxTris) : bQuad ? RetopoMaxQuads : RetopoMaxTris));
 		Json->SetBoolField(TEXT("quad"), bQuad);
+		if (bV1)
+		{
+			// v1.0 takes neither smart_uv nor bake: the model keeps the UVs it has.
+			return Json;
+		}
 		// smart_uv is valid only on v3.0 and does not change the price.
 		Json->SetBoolField(TEXT("smart_uv"), bSmartUv);
 		Json->SetBoolField(TEXT("bake"), true);
@@ -1811,17 +1816,24 @@ namespace HyperAIStudio::MeshGen::Creator
 		const bool bFaces = Failing(Report, {TEXT("faces")});
 		const bool bBroken = Failing(Report, {TEXT("non_manifold"), TEXT("holes"), TEXT("open_edges"), TEXT("flipped")});
 		const bool bUv = Failing(Report, {TEXT("uv_overlap"), TEXT("uv_present"), TEXT("uv_range")});
-		if (bTripo && (bFaces || bBroken) && Tried(TEXT("retopo")) < 1)
+		// The target is the budget (with none known, the faces the model has): never one far under it, which would throw away
+		// the detail the plan paid for. Above v3.0's 20,000, decimation v1.0 takes the budget whole (no bake, so the UVs stay).
+		const int32 FacesNow = bQuad ? Report.Quads : Report.Triangles;
+		const int32 Budget = Context.Plan.FaceLimit > 0 ? Context.Plan.FaceLimit : FacesNow;
+		const bool bV1 = Budget > (bQuad ? RetopoMaxQuads : RetopoMaxTris);
+		const int32 Target = FMath::Clamp(Budget, MinFaces, bV1 ? (bQuad ? RetopoV1MaxQuads : RetopoV1MaxTris) : bQuad ? RetopoMaxQuads : RetopoMaxTris);
+		const bool bKeepsDetail = bFaces || Target * 5 >= Budget * 4;
+		if (bTripo && (bFaces || bBroken) && bKeepsDetail && Budget > 0 && Tried(TEXT("retopo")) < 1)
 		{
-			const int32 Budget = Context.Plan.FaceLimit > 0 ? Context.Plan.FaceLimit : bQuad ? RetopoMaxQuads : RetopoMaxTris;
 			FPaidFix Fix;
 			Fix.Id = TEXT("retopo");
-			Fix.What = FString::Printf(TEXT("Retopologise to %d %s with Tripo (v3.0), unwrapping UVs and baking the textures onto it"),
-				FMath::Clamp(Budget, MinFaces, bQuad ? RetopoMaxQuads : RetopoMaxTris), bQuad ? TEXT("quads") : TEXT("triangles"));
+			Fix.What = bV1 ? FString::Printf(TEXT("Reduce it to %d %s with Tripo's decimation (v1.0), keeping its UVs (no bake)"), Target, bQuad ? TEXT("quads") : TEXT("triangles"))
+				: FString::Printf(TEXT("Retopologise to %d %s with Tripo (v3.0), unwrapping UVs and baking the textures onto it"), Target, bQuad ? TEXT("quads") : TEXT("triangles"));
 			Fix.Endpoints = {TEXT("/mesh/decimate")};
-			Fix.Bodies = {RetopoBody(Input, Budget, bQuad, /*bSmartUv=*/true)};
-			Fix.PriceUSD = Price(bQuad ? TEXT("retopo_quad") : TEXT("retopo"));
-			Fix.Clears = FailingIds(Report, {TEXT("faces"), TEXT("non_manifold"), TEXT("holes"), TEXT("open_edges"), TEXT("flipped"), TEXT("uv_overlap"), TEXT("uv_present"), TEXT("uv_range")});
+			Fix.Bodies = {RetopoBody(Input, Target, bQuad, /*bSmartUv=*/!bV1, bV1)};
+			Fix.PriceUSD = Price(bV1 ? TEXT("retopo_v1") : bQuad ? TEXT("retopo_quad") : TEXT("retopo"));
+			Fix.Clears = bV1 ? FailingIds(Report, {TEXT("faces"), TEXT("non_manifold"), TEXT("holes"), TEXT("open_edges"), TEXT("flipped")})
+				: FailingIds(Report, {TEXT("faces"), TEXT("non_manifold"), TEXT("holes"), TEXT("open_edges"), TEXT("flipped"), TEXT("uv_overlap"), TEXT("uv_present"), TEXT("uv_range")});
 			Add(MoveTemp(Fix));
 		}
 		// UVs that overlap with textures on them: Smart UV re-unwraps and re-bakes; it takes 80,000 triangles at most.

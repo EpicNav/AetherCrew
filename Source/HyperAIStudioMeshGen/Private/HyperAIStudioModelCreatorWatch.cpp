@@ -64,6 +64,20 @@ namespace HyperAIStudio::MeshGen::Creator
 			return Data ? Data->GetFirstFilename() : FString();
 		}
 
+		/**
+		 * Imports HyperAI made itself, whoever asked: its own jobs (FOwnImport), work it runs for an agent (hyper_script_run's
+		 * scripts, approved actions), and a file from HyperAI's own downloads under
+		 * Saved/HyperAIStudio/Models, which is what a re-import of a creator model reads.
+		 */
+		bool IsHyperAIImport(const FString& SourceFile)
+		{
+			if (OwnImports > 0 || FHyperAIStudioAgentWorkScope::IsRunning())
+			{
+				return true;
+			}
+			return !SourceFile.IsEmpty() && FPaths::IsUnderDirectory(FPaths::ConvertRelativePathToFull(SourceFile), ModelsRoot());
+		}
+
 		void Consider(UObject* Object)
 		{
 			const UHyperAIStudioTripoSettings* Settings = GetDefault<UHyperAIStudioTripoSettings>();
@@ -72,19 +86,32 @@ namespace HyperAIStudio::MeshGen::Creator
 				return;
 			}
 			const FString Path = Object->GetPathName();
-			if (OfferedImportPaths.Contains(Path) || !IsTripoImport(Object->GetClass()->GetName(), Path, SourceFileOf(*Object), Settings->TripoBridgeFolders, Settings->TripoNameMarkers))
+			const FString SourceFile = SourceFileOf(*Object);
+			if (OfferedImportPaths.Contains(Path) || IsHyperAIImport(SourceFile))
+			{
+				return;
+			}
+			const ETripoImportEvidence Evidence = TripoImportEvidence(Object->GetClass()->GetName(), Path, SourceFile, Settings->TripoBridgeFolders, Settings->TripoNameMarkers);
+			if (Evidence == ETripoImportEvidence::None)
 			{
 				return;
 			}
 			OfferedImportPaths.Add(Path);
-			// The importer may not be done with it this frame: the offer is made a moment later.
+			// The importer may not be done with it this frame: the offer is made a moment later. It is only an offer: nothing
+			// runs until the user clicks Check and fix.
 			const FSoftObjectPath Soft(Object);
 			const bool bNotify = Settings->bNotifyTripoBridgeImports;
-			FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Soft, bNotify](float)
+			FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Soft, bNotify, Evidence](float)
 			{
-				if (UObject* Mesh = Soft.ResolveObject())
+				UObject* Mesh = Soft.ResolveObject();
+				// A new asset is seen before its importer records the file it came from: looked at again now that it has.
+				const FString Source = Mesh ? SourceFileOf(*Mesh) : FString();
+				const bool bOurDownload = !Source.IsEmpty() && FPaths::IsUnderDirectory(FPaths::ConvertRelativePathToFull(Source), ModelsRoot());
+				if (Mesh && !bOurDownload)
 				{
-					OfferCheckAndFix(*Mesh, bNotify);
+					const UHyperAIStudioTripoSettings* Now = GetDefault<UHyperAIStudioTripoSettings>();
+					const ETripoImportEvidence Again = TripoImportEvidence(Mesh->GetClass()->GetName(), Mesh->GetPathName(), Source, Now->TripoBridgeFolders, Now->TripoNameMarkers);
+					OfferCheckAndFix(*Mesh, bNotify, Again == ETripoImportEvidence::None ? Evidence : Again);
 				}
 				return false;
 			}), 1.0f);
@@ -284,11 +311,24 @@ namespace HyperAIStudio::MeshGen::Creator
 		--OwnImports;
 	}
 
-	bool IsTripoImport(const FString& ClassName, const FString& ObjectPath, const FString& SourceFile, const TArray<FString>& Folders, const TArray<FString>& Markers)
+	ETripoImportEvidence TripoImportEvidence(const FString& ClassName, const FString& ObjectPath, const FString& SourceFile, const TArray<FString>& Folders, const TArray<FString>& Markers)
 	{
 		if (ClassName != TEXT("StaticMesh") && ClassName != TEXT("SkeletalMesh"))
 		{
-			return false;
+			return ETripoImportEvidence::None;
+		}
+		// The bridge downloads Tripo's file to a folder of its own outside the project: a marker in that folder's path is
+		// the best sign there is that the bridge sent it. Names and content folders are guesses anyone's import can match.
+		const FString SourceFolder = FPaths::GetPath(SourceFile);
+		const bool bOutsideProject = !SourceFolder.IsEmpty() && !FPaths::IsUnderDirectory(FPaths::ConvertRelativePathToFull(SourceFolder),
+			FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()));
+		for (const FString& Marker : Markers)
+		{
+			const FString Word = Marker.TrimStartAndEnd();
+			if (!Word.IsEmpty() && bOutsideProject && SourceFolder.Contains(Word, ESearchCase::IgnoreCase))
+			{
+				return ETripoImportEvidence::Strong;
+			}
 		}
 		FString Package = ObjectPath;
 		int32 Dot = INDEX_NONE;
@@ -302,7 +342,7 @@ namespace HyperAIStudio::MeshGen::Creator
 			Folder.RemoveFromEnd(TEXT("/"));
 			if (!Folder.IsEmpty() && Package.StartsWith(Folder + TEXT("/"), ESearchCase::IgnoreCase))
 			{
-				return true;
+				return ETripoImportEvidence::Weak;
 			}
 		}
 		const FString Name = FPackageName::GetShortName(Package);
@@ -310,42 +350,55 @@ namespace HyperAIStudio::MeshGen::Creator
 		for (const FString& Marker : Markers)
 		{
 			const FString Word = Marker.TrimStartAndEnd();
-			if (!Word.IsEmpty() && (Name.Contains(Word, ESearchCase::IgnoreCase) || File.Contains(Word, ESearchCase::IgnoreCase)
-				|| FPaths::GetPath(SourceFile).Contains(Word, ESearchCase::IgnoreCase)))
+			if (!Word.IsEmpty() && (Name.Contains(Word, ESearchCase::IgnoreCase) || File.Contains(Word, ESearchCase::IgnoreCase) || SourceFolder.Contains(Word, ESearchCase::IgnoreCase)))
 			{
-				return true;
+				return ETripoImportEvidence::Weak;
 			}
 		}
-		return false;
+		return ETripoImportEvidence::None;
 	}
 
-	FString OfferCheckAndFix(UObject& Mesh, const bool bNotify)
+	bool IsTripoImport(const FString& ClassName, const FString& ObjectPath, const FString& SourceFile, const TArray<FString>& Folders, const TArray<FString>& Markers)
+	{
+		return TripoImportEvidence(ClassName, ObjectPath, SourceFile, Folders, Markers) != ETripoImportEvidence::None;
+	}
+
+	FString OfferCheckAndFix(UObject& Mesh, const bool bNotify, const ETripoImportEvidence Evidence)
 	{
 		const FString Path = Mesh.GetPathName();
+		if (IsAssetBusy(Path))
+		{
+			// A check-and-fix (or a creator job) already holds it: a second one would race it.
+			return FString();
+		}
 		const FString OperationId = TEXT("tripo-studio-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(10).ToLower();
-		FHyperAIStudioExternalServiceSettings Service;
-		const bool bKey = FHyperAIStudioExternalServices::Find(TEXT("tripo"), Service) && !Key(Service).IsEmpty();
 		FHyperAIStudioApprovalSummary Summary;
 		Summary.PackId = FHyperAIStudioMeshGenContracts::PackId;
 		Summary.ToolName = TEXT("hyper_model_check_and_fix");
 		Summary.VariantId = TEXT("model.tripo_studio.v1");
 		Summary.Safety = EHyperAIStudioDomainSafety::Edit;
+		// HyperAI noticed the import by itself: only the user's own click starts anything, never auto-approval.
+		Summary.bClickOnly = true;
 		Summary.EffectTarget = Path;
-		Summary.Effects = {FString::Printf(TEXT("Check %s, a model from Tripo Studio, and make the free fixes in the editor (pivot, scale, normals, stray bits, holes, collision, materials)"), *Path),
-			bKey ? FString(TEXT("Paid Tripo fixes, if checks still fail, are each priced and asked for on their own (API credits, not Studio credits)"))
-				: FString(TEXT("Free fixes only: no Tripo API key is set"))};
+		Summary.Effects = {FString::Printf(TEXT("Check %s, %s, and make the free fixes in the editor (pivot, scale, normals, stray bits, holes, collision, materials)"), *Path,
+				Evidence == ETripoImportEvidence::Strong ? TEXT("a model Tripo Studio's bridge sent") : TEXT("which looks like a Tripo model by its folder or name")),
+			FString(TEXT("Free fixes only: nothing is paid for. Paid Tripo fixes need hyper_model_check_and_fix with paid fixes allowed, each priced and approved by you"))};
 		Summary.Touches = {Path};
 		const FSoftObjectPath Soft(&Mesh);
 		FString Error;
-		const bool bQueued = FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Soft, OperationId, bKey]()
+		const bool bQueued = FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [Soft, OperationId]()
 		{
 			FHyperAIModelCheckFixRequest Request;
 			Request.AssetPath = Soft.ToString();
 			Request.bCheckOnly = false;
-			Request.bAllowPaidFixes = bKey;
+			// Free fixes only: the user never asked HyperAI to spend anything on a model it noticed by itself.
+			Request.bAllowPaidFixes = false;
 			Request.OperationId = OperationId + TEXT("-run");
 			FString RunError;
-			StartApprovedCheckAndFix(Request, RunError);
+			if (!StartApprovedCheckAndFix(Request, RunError))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("HyperAI could not check %s: %s"), *Request.AssetPath, *RunError);
+			}
 		}, Error);
 		if (!bQueued)
 		{
@@ -355,7 +408,8 @@ namespace HyperAIStudio::MeshGen::Creator
 		Offers.Add(Path);
 		if (bNotify && FSlateApplication::IsInitialized())
 		{
-			FNotificationInfo Info(FText::Format(LOCTEXT("Arrived", "{0} arrived from Tripo Studio. Check it and make the free fixes?"), FText::FromString(Mesh.GetName())));
+			FNotificationInfo Info(FText::Format(Evidence == ETripoImportEvidence::Strong ? LOCTEXT("Arrived", "{0} arrived from Tripo Studio. Check it and make the free fixes?")
+				: LOCTEXT("LooksLikeTripo", "{0} looks like a Tripo model by its folder or name. Check it and make the free fixes?"), FText::FromString(Mesh.GetName())));
 			Info.bFireAndForget = false;
 			Info.bUseLargeFont = false;
 			Info.FadeOutDuration = 0.5f;

@@ -45,6 +45,13 @@ namespace HyperAIStudio::MeshGen::Creator
 	/** Retopology v3.0 and Smart UV limits (mesh-decimate, mesh-uv): retopo 500-20,000 triangles or 500-10,000 quads, UV 80,000 triangles. */
 	constexpr int32 RetopoMaxTris = 20000;
 	constexpr int32 RetopoMaxQuads = 10000;
+	/**
+	 * Decimation v1.0 (mesh-decimate's model v1.0): face_limit required, up to 2,000,000 triangles or 150,000 quads, no
+	 * smart UV and no bake, 10 credits. What a budget above v3.0's 20,000 reduces with.
+	 */
+	constexpr const TCHAR* RetopoModelV1 = TEXT("v1.0");
+	constexpr int32 RetopoV1MaxTris = 2000000;
+	constexpr int32 RetopoV1MaxQuads = 150000;
 	constexpr int32 SmartUvMaxTris = 80000;
 	constexpr int32 MaxPromptCharacters = 1024;
 	constexpr int32 MaxNegativeCharacters = 255;
@@ -65,7 +72,8 @@ namespace HyperAIStudio::MeshGen::Creator
 
 	/** The generation's body; Inputs are the file tokens of the picture or the views (front, left, back, right, "" skipping one). */
 	TSharedRef<FJsonObject> GenerationBody(const FHyperAIModelPlan& Plan, const FHyperAIModelBrief& Brief, const TArray<FString>& Inputs);
-	TSharedRef<FJsonObject> RetopoBody(const FString& Input, int32 FaceLimit, bool bQuad, bool bSmartUv);
+	/** v3.0 (smart UV and a bake, up to 20,000 triangles), or with bV1 decimation v1.0 (up to 2,000,000, neither). */
+	TSharedRef<FJsonObject> RetopoBody(const FString& Input, int32 FaceLimit, bool bQuad, bool bSmartUv, bool bV1 = false);
 	TSharedRef<FJsonObject> SmartUvBody(const FString& Input);
 	/**
 	 * Image, when set, goes as texture_prompt.image (the reference: Tripo recommends sending it again when the input is a
@@ -341,8 +349,24 @@ namespace HyperAIStudio::MeshGen::Creator
 	 * Folders, or whose name or source file carries one of Markers.
 	 */
 	bool IsTripoImport(const FString& ClassName, const FString& ObjectPath, const FString& SourceFile, const TArray<FString>& Folders, const TArray<FString>& Markers);
-	/** Offers a check and its free fixes for an imported mesh: an approval in Activity and, when asked, a notification. Returns its operation id. */
-	FString OfferCheckAndFix(UObject& Mesh, bool bNotify);
+	/** How sure the watch is that the bridge sent an import. */
+	enum class ETripoImportEvidence : uint8
+	{
+		None,
+		/** Only its content folder or a name looks like Tripo's: anyone's import can. */
+		Weak,
+		/** Its file came from a Tripo folder outside the project, where the bridge downloads. */
+		Strong
+	};
+	ETripoImportEvidence TripoImportEvidence(const FString& ClassName, const FString& ObjectPath, const FString& SourceFile, const TArray<FString>& Folders, const TArray<FString>& Markers);
+	/**
+	 * Offers a check and its free fixes for an imported mesh: an approval in Activity only a click approves (never
+	 * auto-approval) and, when asked, a notification. Free fixes only. Returns its operation id; empty when the asset is
+	 * already held by another job, or the offer could not be queued.
+	 */
+	FString OfferCheckAndFix(UObject& Mesh, bool bNotify, ETripoImportEvidence Evidence = ETripoImportEvidence::Weak);
+	/** A creator or check-and-fix job that has not finished holds this asset (an object path); a second job on it is refused. */
+	bool IsAssetBusy(const FString& AssetPath);
 	/** The offers made this session, newest last. */
 	TArray<FString> OfferedAssets();
 	void StartWatch();
