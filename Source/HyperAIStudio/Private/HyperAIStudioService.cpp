@@ -6419,11 +6419,13 @@ bool FHyperAIStudioService::GenerateHelperScripts(const FString& ProjectRoot, co
 	StartScript += TEXT("if (!(Test-Path -LiteralPath $EngineExe)) { throw \"UnrealEditor.exe not found at $EngineExe\" }") LINE_TERMINATOR;
 	StartScript += TEXT("if (!(Test-Path -LiteralPath $ProjectFile)) { throw \"Project file not found at $ProjectFile\" }") LINE_TERMINATOR;
 	StartScript += TEXT("$escapedProject = $ProjectFile.Replace('\\', '\\\\')") LINE_TERMINATOR;
-	StartScript += TEXT("$running = Get-CimInstance Win32_Process -Filter \"Name = 'UnrealEditor.exe'\" | Where-Object { $_.CommandLine -like \"*$ProjectFile*\" }") LINE_TERMINATOR;
+	// Windows reports the command line with backslashes, the project path here has forward slashes.
+	StartScript += TEXT("$running = Get-CimInstance Win32_Process -Filter \"Name = 'UnrealEditor.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine.Replace('\\', '/') -like \"*$ProjectFile*\" }") LINE_TERMINATOR;
 	StartScript += TEXT("if ($ForceRestart -and $running) { $running | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; $running = $null }") LINE_TERMINATOR;
 	StartScript += TEXT("if (-not $running) {") LINE_TERMINATOR;
-	StartScript += TEXT("  $args = @($ProjectFile, '-ModelContextProtocolStartServer', \"-ModelContextProtocolPort=$Port\")") LINE_TERMINATOR;
-	StartScript += TEXT("  Start-Process -FilePath $EngineExe -ArgumentList $args -WorkingDirectory (Split-Path -Parent $ProjectFile) | Out-Null") LINE_TERMINATOR;
+	// One string with the project quoted: Start-Process does not quote array items, so a path with a space opened the Project Browser.
+	StartScript += TEXT("  $EditorArgs = '\"' + $ProjectFile + '\" -ModelContextProtocolStartServer -ModelContextProtocolPort=' + $Port") LINE_TERMINATOR;
+	StartScript += TEXT("  Start-Process -FilePath $EngineExe -ArgumentList $EditorArgs -WorkingDirectory (Split-Path -Parent $ProjectFile) | Out-Null") LINE_TERMINATOR;
 	StartScript += TEXT("}") LINE_TERMINATOR;
 	StartScript += TEXT("& (Join-Path $PSScriptRoot 'Wait-HyperAIStudioMCP.ps1') -Port $Port -UrlPath $UrlPath -TimeoutSeconds $TimeoutSeconds") LINE_TERMINATOR;
 
