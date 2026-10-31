@@ -418,6 +418,19 @@ namespace HyperAIStudio::MeshGen::Creator
 				Why.Add(TEXT("collision: none, as the reference has"));
 			}
 		}
+		// A sword: the AAA finishing makes its blade exactly and its hilt physically based; a hero sword's budget is 36K.
+		Out.bSword = IsSwordWords(Brief.Prompt);
+		if (Out.bSword)
+		{
+			Out.Palette = PaletteWords(Brief.Prompt);
+			const bool bBudgetSet = Brief.FaceLimit > 0 || !Match.IsEmpty() || !GetDefault<UHyperAIStudioTripoSettings>()->WeaponConvention.Source.IsEmpty();
+			if (!bBudgetSet)
+			{
+				Out.FaceLimit = FMath::Clamp(36000, Out.MinFaces, Out.MaxFaces);
+			}
+			Why.Add(FString::Printf(TEXT("sword: finished to AAA in the editor, free: the generated hilt kept and slimmed (guard 26 cm across, 1.3 cm deep), the blade made exactly (92 of 110 cm, distal taper, a fuller, sharp edges), the hilt's textures made physically based by material%s, balanced by the pommel toward 10-13 cm in front of the guard; %d triangles"),
+				Out.Palette.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (%s)"), *FString::Join(Out.Palette, TEXT(", "))), Out.FaceLimit));
+		}
 		Out.ProviderFaces = FMath::Clamp(Out.FaceLimit * (bDetailWords ? 4 : 3), Out.MinFaces, Out.MaxFaces);
 		Out.bLocalReduce = Out.ProviderFaces > Out.FaceLimit;
 		Why.Add(FString::Printf(TEXT("generated at %d triangles, then finished in the editor for free: turned and placed, thinned to real proportions, reduced to %d, Nanite %s"),

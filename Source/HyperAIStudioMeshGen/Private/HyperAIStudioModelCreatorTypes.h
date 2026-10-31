@@ -176,6 +176,10 @@ struct FHyperAIModelPlan
 	UPROPERTY() bool bNanite = false;
 	/** The reference mesh a brief matches (match_asset), kept as the project's weapon convention when the job starts. */
 	UPROPERTY() FString MatchAsset;
+	/** A sword finished to AAA in the editor (an exact blade, physically based hilt textures, balance, sockets), free. */
+	UPROPERTY() bool bSword = false;
+	/** The hilt's materials the brief names (gold, leather, sapphire...); the reference picture adds what it shows. */
+	UPROPERTY() TArray<FString> Palette;
 	/** box, convex, complex or none. */
 	UPROPERTY() FString Collision;
 	/** The negative prompt sent. */

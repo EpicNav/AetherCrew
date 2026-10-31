@@ -416,12 +416,22 @@ namespace HyperAIStudio::MeshGen::Creator
 				}
 				BladeAfter = FMath::Max(BladeAfter, FMath::Min(Extent[Thin], Target));
 			}
+			double GuardSpan = 0.0;
+			for (int32 Bin = Along.GuardLo; Bin <= Along.GuardHi; ++Bin)
+			{
+				GuardSpan = FMath::Max(GuardSpan, Along.Extent(Bin)[Wide]);
+			}
 			for (int32 Bin = Along.GuardLo; Bin <= Along.GuardHi; ++Bin)
 			{
 				const double Depth = Along.Extent(Bin)[Thin];
 				if (Depth > Finish.GuardDepthCm)
 				{
 					Factor[Bin][Thin] = Finish.GuardDepthCm / Depth;
+				}
+				// A span given (an AAA sword's 26 cm): the whole guard narrowed together, so its shape is kept.
+				if (Finish.GuardSpanCm > 0.f && GuardSpan > Finish.GuardSpanCm)
+				{
+					Factor[Bin][Wide] = Finish.GuardSpanCm / GuardSpan;
 				}
 			}
 		}
@@ -433,9 +443,16 @@ namespace HyperAIStudio::MeshGen::Creator
 		}
 		const double GripBefore = Median(GripSpans);
 		const double GripFactor = GripBefore > 0.0 ? FMath::Min(1.0, Finish.GripCm / GripBefore) : 1.0;
+		// The pommel: to its diameter when one is given, else by the square root of the grip's factor (round, not a tall oval).
+		double PommelSpan = 0.0;
+		for (int32 Index = Grip; Index < Along.Handle.Num(); ++Index)
+		{
+			PommelSpan = FMath::Max(PommelSpan, Along.Span(Along.Handle[Index]));
+		}
+		const double PommelFactor = Finish.PommelCm > 0.f && PommelSpan > 0.0 ? FMath::Min(1.0, Finish.PommelCm / PommelSpan) : FMath::Sqrt(GripFactor);
 		for (int32 Index = 0; Index < Along.Handle.Num(); ++Index)
 		{
-			const double Each = Index < Grip ? GripFactor : FMath::Sqrt(GripFactor);
+			const double Each = Index < Grip ? GripFactor : PommelFactor;
 			Factor[Along.Handle[Index]] = FVector2d(Each, Each);
 		}
 		// Which part each section is (0 blade or spike, 1 guard or head, 2 handle; -1 empty): smoothing and blending stay
@@ -520,6 +537,34 @@ namespace HyperAIStudio::MeshGen::Creator
 			FMeshNormals::QuickRecomputeOverlayNormals(Mesh);
 		}
 		return true;
+	}
+
+	FHiltFrame MeasureHilt(const TArray<FVector3d>& Points)
+	{
+		FHiltFrame Frame;
+		FCut Sections;
+		if (!WeaponDetail::Cut(Points, Sections) || Sections.Axis != 1 || Sections.Sign < 0.0)
+		{
+			return Frame;
+		}
+		Frame.bValid = true;
+		Frame.GuardBottom = Sections.Lo + Sections.GuardLo * Sections.Step;
+		Frame.GuardTop = Sections.Lo + (Sections.GuardHi + 1) * Sections.Step;
+		Frame.HandleTop = Sections.Hi;
+		Frame.GripEnd = Frame.GuardTop + (Frame.HandleTop - Frame.GuardTop) * 0.7;
+		FVector2d Sum = FVector2d::Zero();
+		int32 Count = 0;
+		for (int32 Bin = Sections.GuardLo; Bin <= Sections.GuardHi; ++Bin)
+		{
+			if (Sections.Has(Bin))
+			{
+				Sum += Sections.Centre(Bin);
+				++Count;
+				Frame.GuardSpan = FMath::Max(Frame.GuardSpan, Sections.Span(Bin));
+			}
+		}
+		Frame.Centre = Count > 0 ? Sum / double(Count) : FVector2d::Zero();
+		return Frame;
 	}
 
 	FWeaponFinish WeaponFinishFor(const float SizeMeters, const int32 Triangles)

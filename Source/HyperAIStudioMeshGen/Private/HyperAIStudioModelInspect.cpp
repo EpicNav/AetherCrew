@@ -17,13 +17,18 @@
 #include "ImageCore.h"
 #include "ImageUtils.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialExpressionAbs.h"
 #include "Materials/MaterialExpressionAdd.h"
 #include "Materials/MaterialExpressionAppendVector.h"
 #include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionFrac.h"
+#include "Materials/MaterialExpressionLinearInterpolate.h"
 #include "Materials/MaterialExpressionMultiply.h"
 #include "Materials/MaterialExpressionNormalize.h"
+#include "Materials/MaterialExpressionPower.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionSubtract.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
@@ -39,11 +44,13 @@
 #include "Misc/ObjectThumbnail.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "ObjectTools.h"
 #include "Operations/SimpleHoleFiller.h"
 #include "Parameterization/DynamicMeshUVEditor.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "PhysicsEngine/BoxElem.h"
+#include "Engine/StaticMeshSocket.h"
 #include "StaticMeshAttributes.h"
 #include "UObject/Package.h"
 #include "UObject/StrongObjectPtr.h"
@@ -401,7 +408,7 @@ namespace HyperAIStudio::MeshGen::Creator
 					return;
 				}
 				const UMaterialInterface* Base = Slot.Material->GetMaterial();
-				Slot.bOurs = Base && Base->GetPathName().StartsWith(MasterPath);
+				Slot.bOurs = Base && (Base->GetPathName().StartsWith(MasterPath) || Base->GetPathName().StartsWith(TEXT("/Game/HyperAI/Materials/M_HyperAI_BladeSteel_Clean")));
 				if (const UMaterialInstance* Instance = Cast<UMaterialInstance>(Slot.Material))
 				{
 					for (const FTextureParameterValue& Value : Instance->TextureParameterValues)
@@ -598,6 +605,27 @@ namespace HyperAIStudio::MeshGen::Creator
 					Slot.Material->EnsureIsComplete();
 				}
 			}
+			// A fresh texture shows at a low mip until it streams in: every mip held resident for the capture, then let go.
+			TArray<UTexture2D*> Held;
+			for (const FSlot& Slot : SlotsOf(Mesh))
+			{
+				for (const TPair<ERole, UTexture2D*>& Map : Slot.Maps)
+				{
+					if (Map.Value && !Map.Value->bForceMiplevelsToBeResident)
+					{
+						Map.Value->bForceMiplevelsToBeResident = true;
+						Map.Value->WaitForStreaming();
+						Held.Add(Map.Value);
+					}
+				}
+			}
+			ON_SCOPE_EXIT
+			{
+				for (UTexture2D* Texture : Held)
+				{
+					Texture->bForceMiplevelsToBeResident = false;
+				}
+			};
 			UObject* Drawn = &Mesh;
 			TStrongObjectPtr<UStaticMesh> Copy;
 			const UStaticMesh* Static = Cast<UStaticMesh>(&Mesh);
@@ -1291,6 +1319,504 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 		}
 
+		FString CleanName(const FString& Name);
+
+		// ------------------------------------------------------------ AAA swords: the asset work
+
+		const TCHAR* const BladeSteelPath = TEXT("/Game/HyperAI/Materials/M_HyperAI_BladeSteel_Clean");
+
+		/**
+		 * Clean blade steel: steel's albedo (0.56, 0.57, 0.58), metal, and roughness from an edge mask (frac(2U), U being
+		 * 0.01-0.49 on the front face and 0.51-0.99 on the back, raised to the 8th) between FlatRoughness 0.28 and
+		 * EdgeRoughness 0.10, so the edges catch the light. No noise texture: the engine's 64 x 64 one read as blocky bands.
+		 */
+		UMaterialInterface* BladeSteel(FString& OutError)
+		{
+			UObject* Other = nullptr;
+			if (UMaterialInterface* Found = FindOrLoad<UMaterialInterface>(BladeSteelPath, Other))
+			{
+				return Found;
+			}
+			if (Other)
+			{
+				OutError = FString::Printf(TEXT("%s exists but is not a material."), BladeSteelPath);
+				return nullptr;
+			}
+			TGuardValue<ITransaction*> NoUndo(GUndo, nullptr);
+			UMaterial* Material = NewObject<UMaterial>(CreatePackage(BladeSteelPath), *FPackageName::GetShortName(BladeSteelPath), RF_Public | RF_Standalone);
+			TArray<UMaterialExpression*> All;
+			auto Make = [&](auto* Expression) { All.Add(Expression); return Expression; };
+			UMaterialExpressionVectorParameter* Color = Make(NewObject<UMaterialExpressionVectorParameter>(Material));
+			Color->ParameterName = TEXT("SteelColor");
+			Color->DefaultValue = FLinearColor(0.56f, 0.57f, 0.58f, 1.f);
+			UMaterialExpressionConstant* Metal = Make(NewObject<UMaterialExpressionConstant>(Material));
+			Metal->R = 1.f;
+			UMaterialExpressionTextureCoordinate* Coordinates = Make(NewObject<UMaterialExpressionTextureCoordinate>(Material));
+			UMaterialExpressionComponentMask* U = Make(NewObject<UMaterialExpressionComponentMask>(Material));
+			U->R = true;
+			U->Input.Connect(0, Coordinates);
+			UMaterialExpressionMultiply* Twice = Make(NewObject<UMaterialExpressionMultiply>(Material));
+			Twice->A.Connect(0, U);
+			Twice->ConstB = 2.f;
+			UMaterialExpressionFrac* Frac = Make(NewObject<UMaterialExpressionFrac>(Material));
+			Frac->Input.Connect(0, Twice);
+			UMaterialExpressionSubtract* Half = Make(NewObject<UMaterialExpressionSubtract>(Material));
+			Half->A.Connect(0, Frac);
+			Half->ConstB = 0.5f;
+			UMaterialExpressionAbs* Abs = Make(NewObject<UMaterialExpressionAbs>(Material));
+			Abs->Input.Connect(0, Half);
+			UMaterialExpressionMultiply* Edge = Make(NewObject<UMaterialExpressionMultiply>(Material));
+			Edge->A.Connect(0, Abs);
+			Edge->ConstB = 2.08f;
+			UMaterialExpressionPower* Sharp = Make(NewObject<UMaterialExpressionPower>(Material));
+			Sharp->Base.Connect(0, Edge);
+			Sharp->ConstExponent = 8.f;
+			UMaterialExpressionScalarParameter* Flat = Make(NewObject<UMaterialExpressionScalarParameter>(Material));
+			Flat->ParameterName = TEXT("FlatRoughness");
+			Flat->DefaultValue = 0.28f;
+			UMaterialExpressionScalarParameter* EdgeRough = Make(NewObject<UMaterialExpressionScalarParameter>(Material));
+			EdgeRough->ParameterName = TEXT("EdgeRoughness");
+			EdgeRough->DefaultValue = 0.10f;
+			UMaterialExpressionLinearInterpolate* Rough = Make(NewObject<UMaterialExpressionLinearInterpolate>(Material));
+			Rough->A.Connect(0, Flat);
+			Rough->B.Connect(0, EdgeRough);
+			Rough->Alpha.Connect(0, Sharp);
+			int32 Row = 0;
+			for (UMaterialExpression* Expression : All)
+			{
+				Expression->MaterialExpressionEditorX = -900 + (Row % 4) * 220;
+				Expression->MaterialExpressionEditorY = (Row / 4) * 200;
+				++Row;
+				Material->GetExpressionCollection().AddExpression(Expression);
+			}
+			Material->GetEditorOnlyData()->BaseColor.Connect(0, Color);
+			Material->GetEditorOnlyData()->Metallic.Connect(0, Metal);
+			Material->GetEditorOnlyData()->Roughness.Connect(0, Rough);
+			Material->PostEditChange();
+			FAssetRegistryModule::AssetCreated(Material);
+			Material->MarkPackageDirty();
+			return FHyperAIStudioSourceControl::SaveAsset(*Material, OutError) ? Material : nullptr;
+		}
+
+		/** A texture written in place (a fresh one, or the same asset's source replaced): never a re-import over stale data. */
+		UTexture2D* WriteTexture(const FString& Package, const TArray<FColor>& Pixels, const int32 Width, const int32 Height, const bool bSRGB, const TextureCompressionSettings Compression,
+			const int32 MaxSize, FString& OutError)
+		{
+			UObject* Other = nullptr;
+			UTexture2D* Texture = FindOrLoad<UTexture2D>(Package, Other);
+			if (Other)
+			{
+				OutError = FString::Printf(TEXT("%s is already something other than a texture"), *Package);
+				return nullptr;
+			}
+			const bool bNew = Texture == nullptr;
+			if (bNew)
+			{
+				Texture = NewObject<UTexture2D>(CreatePackage(*Package), *FPackageName::GetShortName(Package), RF_Public | RF_Standalone);
+			}
+			else
+			{
+				Texture->Modify();
+			}
+			Texture->Source.Init(Width, Height, 1, 1, TSF_BGRA8, reinterpret_cast<const uint8*>(Pixels.GetData()));
+			Texture->SRGB = bSRGB;
+			Texture->CompressionSettings = Compression;
+			Texture->MaxTextureSize = MaxSize;
+			Texture->VirtualTextureStreaming = false;
+			Texture->PostEditChange();
+			if (bNew)
+			{
+				FAssetRegistryModule::AssetCreated(Texture);
+			}
+			Texture->MarkPackageDirty();
+			return FHyperAIStudioSourceControl::SaveAsset(*Texture, OutError) ? Texture : nullptr;
+		}
+
+		/** Interchange's _nonVT copy (made in projects with virtual textures) stands for its original: the original is used. */
+		UTexture2D* Original(UTexture2D* Texture)
+		{
+			if (!Texture || !Texture->GetName().EndsWith(TEXT("_nonVT")))
+			{
+				return Texture;
+			}
+			const FString Package = Texture->GetOutermost()->GetName().LeftChop(6);
+			UObject* Other = nullptr;
+			UTexture2D* Found = FindOrLoad<UTexture2D>(Package, Other);
+			return Found ? Found : Texture;
+		}
+
+		/** What the sword's geometry stage leaves for the asset stage. */
+		struct FSwordWork
+		{
+			bool bDone = false;
+			int32 BladeMaterial = INDEX_NONE;
+			FHiltFrame Frame;
+			FSwordBalance Balance;
+			FAtlasResult Atlas;
+			UTexture2D* Normal = nullptr;
+			UTexture2D* SourceColor = nullptr;
+			double TipY = 0.0;
+		};
+
+		/**
+		 * The sword's geometry, after ShapeWeapon has turned and slimmed it: the hilt's atlas read into classes, the generated
+		 * blade and its root cut away, the hilt reduced (seams kept) to what the blade leaves of the budget, the pommel
+		 * scaled for balance, smooth normals, then the exact blade appended as a material of its own.
+		 */
+		bool FinishSwordGeometry(FDynamicMesh3& Mesh, UObject& Object, const FCheckTargets& Targets, TArray<FString>& OutNotes, FSwordWork& Work)
+		{
+			const FSwordSpec Spec = SwordSpecFor(Targets.Weapon.LengthCm);
+			// The hilt's atlas, read into material classes: the brief's words and the reference picture name them.
+			const TArray<FSlot> Slots = SlotsOf(Object);
+			Work.SourceColor = Slots.IsEmpty() ? nullptr : Original(Slots[0].Maps.FindRef(ERole::BaseColor));
+			Work.Normal = Slots.IsEmpty() ? nullptr : Original(Slots[0].Maps.FindRef(ERole::Normal));
+			TArray<FColor> Picture;
+			FImage Reference;
+			if (IsPicture(Targets.ReferenceImage) && FImageUtils::LoadImage(*Targets.ReferenceImage, Reference))
+			{
+				FImage Small;
+				Reference.ResizeTo(Small, FMath::Min(Reference.SizeX, 512), FMath::Min(Reference.SizeY, 512), ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+				Picture.Append(reinterpret_cast<const FColor*>(Small.RawData.GetData()), Small.SizeX * Small.SizeY);
+			}
+			TArray<FString> PaletteNotes;
+			const TArray<FMaterialClass> Palette = MaterialPalette(Targets.Weapon.Palette, Picture, PaletteNotes);
+			OutNotes.Add(TEXT("sword_finish: ") + FString::Join(PaletteNotes, TEXT("; ")) + TEXT("."));
+			FImage Colour;
+			if (Work.SourceColor && RawPixels(*Work.SourceColor, Colour))
+			{
+				TArray<FColor> Pixels;
+				Pixels.Append(reinterpret_cast<const FColor*>(Colour.RawData.GetData()), Colour.SizeX * Colour.SizeY);
+				Work.Atlas = CorrectAtlas(Pixels, Colour.SizeX, Colour.SizeY, Palette);
+				TArray<FString> Shares;
+				for (int32 Class = 0; Class < Palette.Num(); ++Class)
+				{
+					Shares.Add(FString::Printf(TEXT("%s %.0f%%"), *Palette[Class].Name, Work.Atlas.Shares[Class] * 100.f));
+				}
+				OutNotes.Add(FString::Printf(TEXT("sword_finish: the hilt's %d x %d atlas made physically based by texel: %s."), Colour.SizeX, Colour.SizeY, *FString::Join(Shares, TEXT(", "))));
+			}
+			else
+			{
+				OutNotes.Add(TEXT("sword_finish: no base colour texture on the hilt; its textures are left as they are."));
+			}
+
+			TArray<FVector3d> Points;
+			for (const int32 Vid : Mesh.VertexIndicesItr())
+			{
+				Points.Add(Mesh.GetVertex(Vid));
+			}
+			Work.Frame = MeasureHilt(Points);
+			if (!Work.Frame.bValid)
+			{
+				OutNotes.Add(TEXT("sword_finish: no guard and grip found; the generated blade is kept."));
+				return false;
+			}
+			const FHiltFrame& Frame = Work.Frame;
+			const double Bottom = Frame.GuardBottom;
+			// The generated blade below the guard, its root inside it (whatever its texture), and the steel-textured remnants
+			// near the axis in the guard's lower part: the exact blade's flared ricasso takes their place.
+			const FDynamicMeshUVOverlay* UVs = Mesh.HasAttributes() && Mesh.Attributes()->NumUVLayers() > 0 ? Mesh.Attributes()->PrimaryUV() : nullptr;
+			auto Steel = [&](const int32 Tid)
+			{
+				if (!UVs || !UVs->IsSetTriangle(Tid) || Work.Atlas.Width <= 0)
+				{
+					return false;
+				}
+				FVector2f A, B, C;
+				UVs->GetTriElements(Tid, A, B, C);
+				const FVector2f Mid = (A + B + C) / 3.f;
+				const int32 X = FMath::Clamp(int32(FMath::Frac(Mid.X) * Work.Atlas.Width), 0, Work.Atlas.Width - 1);
+				const int32 Y = FMath::Clamp(int32(FMath::Frac(Mid.Y) * Work.Atlas.Height), 0, Work.Atlas.Height - 1);
+				return Palette[Work.Atlas.Classes[int64(Y) * Work.Atlas.Width + X]].bBladeSteel;
+			};
+			TArray<int32> Cut, Root, Remnant;
+			for (const int32 Tid : Mesh.TriangleIndicesItr())
+			{
+				FVector3d A, B, C;
+				Mesh.GetTriVertices(Tid, A, B, C);
+				const FVector3d Mid = (A + B + C) / 3.0;
+				const FVector2d Off(FMath::Abs(Mid.X - Frame.Centre.X), FMath::Abs(Mid.Z - Frame.Centre.Y));
+				if (FMath::Max3(A.Y, B.Y, C.Y) < Bottom + 0.4)
+				{
+					Cut.Add(Tid);
+				}
+				else if (Mid.Y < Bottom + Spec.Ricasso && Off.X < 3.2)
+				{
+					Root.Add(Tid);
+				}
+				else if (Mid.Y >= Bottom - 0.5 && Mid.Y <= Bottom + 5.0 && Off.X < 4.2 && Off.Y < 3.0 && Steel(Tid))
+				{
+					Remnant.Add(Tid);
+				}
+			}
+			for (const TArray<int32>* Doomed : {&Cut, &Root, &Remnant})
+			{
+				for (const int32 Tid : *Doomed)
+				{
+					Mesh.RemoveTriangle(Tid, /*bRemoveIsolatedVertices=*/true, /*bPreserveManifold=*/false);
+				}
+			}
+			OutNotes.Add(FString::Printf(TEXT("sword_finish: the generated blade cut away (%d triangles), its root in the guard (%d) and its steel remnants (%d)."),
+				Cut.Num(), Root.Num(), Remnant.Num()));
+
+			// The exact blade, built now to know what of the budget it leaves the hilt.
+			const FBladeMesh Blade = BuildBlade(Spec, Bottom, Frame.Centre);
+			const int32 HiltBudget = FMath::Max(Targets.Weapon.TargetTris - Blade.Triangles.Num(), 1000);
+			if (Mesh.TriangleCount() > HiltBudget)
+			{
+				ReduceKeepingTextures(Mesh, HiltBudget, TEXT("sword_finish"), OutNotes);
+			}
+			else
+			{
+				// Welded, so the smooth normals below run across the atlas's seams.
+				FMergeCoincidentMeshEdges Merge(&Mesh);
+				Merge.MergeVertexTolerance = FMath::Max(Mesh.GetBounds().DiagonalLength() * 1e-6, 1e-6);
+				Merge.Apply();
+			}
+			Mesh.CompactInPlace();
+
+			// Balance: the pommel scaled (0.75-1.3) toward a point of balance 10-13 cm in front of the guard.
+			TArray<FVector3d> Hilt;
+			TArray<FIntVector> Triangles;
+			for (const int32 Vid : Mesh.VertexIndicesItr())
+			{
+				Hilt.Add(Mesh.GetVertex(Vid));
+			}
+			for (const int32 Tid : Mesh.TriangleIndicesItr())
+			{
+				const FIndex3i T = Mesh.GetTriangle(Tid);
+				Triangles.Add(FIntVector(T.A, T.B, T.C));
+			}
+			Work.Balance = BalanceSword(Spec, Hilt, Triangles, Frame);
+			ScalePommel(Hilt, Frame, Work.Balance.PommelScale);
+			for (const int32 Vid : Mesh.VertexIndicesItr())
+			{
+				Mesh.SetVertex(Vid, Hilt[Vid]);
+			}
+			OutNotes.Add(FString::Printf(TEXT("sword_balance: %.0f g (blade %.0f g, hilt %.0f g), the point of balance %.1f cm in front of the guard, the pommel scaled %.2f%s."),
+				Work.Balance.MassG, Work.Balance.BladeG, Work.Balance.HiltG, Work.Balance.BalanceCm, Work.Balance.PommelScale,
+				Work.Balance.bInWindow ? TEXT("") : *FString::Printf(TEXT("; %.0f-%.0f cm was out of reach: the hilt's guard is too heavy or the pommel too light for the pommel's scale alone to move it"),
+					Spec.BalanceMin, Spec.BalanceMax)));
+
+			// Smooth normals per vertex over the hilt; then the blade with its own, each face separate so its edges stay hard.
+			if (!Mesh.HasAttributes())
+			{
+				Mesh.EnableAttributes();
+			}
+			FDynamicMeshAttributeSet& Attributes = *Mesh.Attributes();
+			if (Attributes.PrimaryNormals())
+			{
+				FMeshNormals::InitializeOverlayToPerVertexNormals(Attributes.PrimaryNormals(), /*bUseMeshVertexNormalsIfAvailable=*/false);
+			}
+			if (!Attributes.HasMaterialID())
+			{
+				Attributes.EnableMaterialID();
+			}
+			int32 Highest = 0;
+			for (const int32 Tid : Mesh.TriangleIndicesItr())
+			{
+				Highest = FMath::Max(Highest, Attributes.GetMaterialID()->GetValue(Tid));
+			}
+			Work.BladeMaterial = Highest + 1;
+			if (Attributes.NumUVLayers() == 0)
+			{
+				Attributes.SetNumUVLayers(1);
+			}
+			TArray<int32> Vertices;
+			for (const FVector3d& P : Blade.Positions)
+			{
+				Vertices.Add(Mesh.AppendVertex(P));
+			}
+			TArray<TArray<int32>> UVElements;
+			UVElements.SetNum(Attributes.NumUVLayers());
+			for (int32 Layer = 0; Layer < Attributes.NumUVLayers(); ++Layer)
+			{
+				for (const FVector2f& UV : Blade.UVs)
+				{
+					UVElements[Layer].Add(Attributes.GetUVLayer(Layer)->AppendElement(UV));
+				}
+			}
+			TArray<int32> NormalElements;
+			FDynamicMeshNormalOverlay* Normals = Attributes.PrimaryNormals();
+			if (Normals)
+			{
+				for (const FVector3f& Normal : Blade.Normals)
+				{
+					NormalElements.Add(Normals->AppendElement(Normal));
+				}
+			}
+			int32 Added = 0;
+			Work.TipY = TNumericLimits<double>::Max();
+			for (const FIntVector& Tri : Blade.Triangles)
+			{
+				const int32 Tid = Mesh.AppendTriangle(Vertices[Tri.X], Vertices[Tri.Y], Vertices[Tri.Z]);
+				if (Tid < 0)
+				{
+					continue;
+				}
+				++Added;
+				Attributes.GetMaterialID()->SetValue(Tid, Work.BladeMaterial);
+				for (int32 Layer = 0; Layer < Attributes.NumUVLayers(); ++Layer)
+				{
+					Attributes.GetUVLayer(Layer)->SetTriangle(Tid, FIndex3i(UVElements[Layer][Tri.X], UVElements[Layer][Tri.Y], UVElements[Layer][Tri.Z]));
+				}
+				if (Normals)
+				{
+					Normals->SetTriangle(Tid, FIndex3i(NormalElements[Tri.X], NormalElements[Tri.Y], NormalElements[Tri.Z]));
+				}
+			}
+			for (const FVector3d& P : Blade.Positions)
+			{
+				Work.TipY = FMath::Min(Work.TipY, P.Y);
+			}
+			OutNotes.Add(FString::Printf(TEXT("sword_finish: an exact blade, %.0f cm from the guard (%d triangles): %.1f cm wide tapering to %.1f, %.2f cm thick to %.2f at the point, a fuller %.1f cm wide and %.2f cm deep, a %.1f cm ricasso into the guard."),
+				Spec.BladeLength, Added, Spec.BaseWidth, Spec.PointWidth, Spec.BaseThickness, Spec.TipThickness, Spec.FullerWidth, Spec.FullerDepth, Spec.Ricasso));
+			Work.bDone = Added > 0;
+			return Work.bDone;
+		}
+
+		/**
+		 * The sword's asset work: the hilt's corrected textures written (not virtual textures; colour and normal 4K, the ORM
+		 * 2K linear masks), the normal map's OpenGL green flipped, Interchange's _nonVT copies dropped, the hilt and the
+		 * blade given their materials, and the gameplay sockets placed along Y.
+		 */
+		void FinishSwordAsset(UStaticMesh& Static, const FCheckTargets& Targets, const FSwordWork& Work, TArray<FString>& OutNotes)
+		{
+			FString Error;
+			UMaterialInterface* Parent = Master(Error);
+			UMaterialInterface* Steel = BladeSteel(Error);
+			const FString Folder = FPackageName::GetLongPackagePath(Static.GetOutermost()->GetName());
+			const FString MeshName = CleanName(Static.GetName());
+			UTexture2D* Color = Work.SourceColor;
+			UTexture2D* ORM = nullptr;
+			if (Work.Atlas.Width > 0)
+			{
+				Color = WriteTexture(Folder / FString::Printf(TEXT("T_%s_Hilt_BC"), *MeshName), Work.Atlas.BaseColor, Work.Atlas.Width, Work.Atlas.Height, /*bSRGB=*/true, TC_Default,
+					Targets.Weapon.ColorSize, Error);
+				ORM = WriteTexture(Folder / FString::Printf(TEXT("T_%s_Hilt_ORM"), *MeshName), Work.Atlas.ORM, Work.Atlas.Width, Work.Atlas.Height, /*bSRGB=*/false, TC_Masks,
+					Targets.Weapon.MaskSize, Error);
+			}
+			if (UTexture2D* Normal = Work.Normal)
+			{
+				Normal->Modify();
+				Normal->VirtualTextureStreaming = false;
+				Normal->SRGB = false;
+				Normal->CompressionSettings = TC_Normalmap;
+				Normal->bFlipGreenChannel = Normal->bFlipGreenChannel || IsOpenGLNormal(*Normal);
+				Normal->MaxTextureSize = Targets.Weapon.NormalSize;
+				Normal->PostEditChange();
+				FHyperAIStudioSourceControl::SaveAsset(*Normal, Error);
+			}
+			// The hilt: an instance of HyperAI's master with the corrected maps, on every slot but the blade's.
+			UMaterialInstanceConstant* HiltMaterial = nullptr;
+			if (Parent)
+			{
+				const FString Package = Folder / FString::Printf(TEXT("MI_%s_Hilt"), *MeshName);
+				UObject* Other = nullptr;
+				HiltMaterial = FindOrLoad<UMaterialInstanceConstant>(Package, Other);
+				if (!HiltMaterial && !Other)
+				{
+					HiltMaterial = NewObject<UMaterialInstanceConstant>(CreatePackage(*Package), *FPackageName::GetShortName(Package), RF_Public | RF_Standalone);
+					FAssetRegistryModule::AssetCreated(HiltMaterial);
+				}
+				if (HiltMaterial)
+				{
+					HiltMaterial->Modify();
+					HiltMaterial->SetParentEditorOnly(Parent);
+					if (Color)
+					{
+						HiltMaterial->SetTextureParameterValueEditorOnly(FMaterialParameterInfo(TEXT("BaseColor")), Color);
+					}
+					if (Work.Normal)
+					{
+						HiltMaterial->SetTextureParameterValueEditorOnly(FMaterialParameterInfo(TEXT("Normal")), Work.Normal);
+					}
+					if (ORM)
+					{
+						HiltMaterial->SetTextureParameterValueEditorOnly(FMaterialParameterInfo(TEXT("ORM")), ORM);
+					}
+					HiltMaterial->PostEditChange();
+					HiltMaterial->MarkPackageDirty();
+					FHyperAIStudioSourceControl::SaveAsset(*HiltMaterial, Error);
+				}
+			}
+			UMaterialInstanceConstant* BladeMaterial = nullptr;
+			if (Steel)
+			{
+				const FString Package = Folder / FString::Printf(TEXT("MI_%s_Blade"), *MeshName);
+				UObject* Other = nullptr;
+				BladeMaterial = FindOrLoad<UMaterialInstanceConstant>(Package, Other);
+				if (!BladeMaterial && !Other)
+				{
+					BladeMaterial = NewObject<UMaterialInstanceConstant>(CreatePackage(*Package), *FPackageName::GetShortName(Package), RF_Public | RF_Standalone);
+					FAssetRegistryModule::AssetCreated(BladeMaterial);
+				}
+				if (BladeMaterial)
+				{
+					BladeMaterial->Modify();
+					BladeMaterial->SetParentEditorOnly(Steel);
+					BladeMaterial->PostEditChange();
+					BladeMaterial->MarkPackageDirty();
+					FHyperAIStudioSourceControl::SaveAsset(*BladeMaterial, Error);
+				}
+			}
+			static const FName BladeSlot(TEXT("Blade"));
+			TArray<FStaticMaterial>& Materials = Static.GetStaticMaterials();
+			if (!Materials.ContainsByPredicate([](const FStaticMaterial& Each) { return Each.ImportedMaterialSlotName == BladeSlot; }))
+			{
+				Materials.Add(FStaticMaterial(BladeMaterial, BladeSlot, BladeSlot));
+			}
+			for (FStaticMaterial& Each : Materials)
+			{
+				if (Each.ImportedMaterialSlotName == BladeSlot)
+				{
+					Each.MaterialInterface = BladeMaterial;
+				}
+				else if (HiltMaterial)
+				{
+					Each.MaterialInterface = HiltMaterial;
+				}
+			}
+			// Interchange's _nonVT copies beside the originals now used: dropped.
+			TArray<UObject*> Copies;
+			IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+			TArray<FAssetData> Found;
+			Registry.GetAssetsByPath(FName(*FPackageName::GetLongPackagePath(Folder)), Found, /*bRecursive=*/true);
+			for (const FAssetData& Asset : Found)
+			{
+				const FString Name = Asset.AssetName.ToString();
+				if (Name.EndsWith(TEXT("_nonVT")) && FPackageName::DoesPackageExist(Asset.PackageName.ToString().LeftChop(6)))
+				{
+					if (UObject* Copy = Asset.GetAsset())
+					{
+						Copies.Add(Copy);
+					}
+				}
+			}
+			if (!Copies.IsEmpty())
+			{
+				FAssetCompilingManager::Get().FinishAllCompilation();
+				ObjectTools::ForceDeleteObjects(Copies, /*ShowConfirmation=*/false);
+			}
+			// Gameplay sockets along Y: the grip at the origin, the trail from the guard to the point, the point of balance.
+			const double Guard = Work.Frame.GuardBottom;
+			const TPair<const TCHAR*, double> Sockets[] = {{TEXT("Grip"), 0.0}, {TEXT("Trail_Start"), Guard}, {TEXT("Trail_End"), Work.TipY + 1.0},
+				{TEXT("BalancePoint"), Guard - Work.Balance.BalanceCm}};
+			for (const TPair<const TCHAR*, double>& Each : Sockets)
+			{
+				if (UStaticMeshSocket* Old = Static.FindSocket(Each.Key))
+				{
+					Static.RemoveSocket(Old);
+				}
+				UStaticMeshSocket* Socket = NewObject<UStaticMeshSocket>(&Static);
+				Socket->SocketName = Each.Key;
+				Socket->RelativeLocation = FVector(0.0, Each.Value, 0.0);
+				Static.AddSocket(Socket);
+			}
+			OutNotes.Add(FString::Printf(TEXT("sword_finish: the hilt's textures %s (colour %d, normal %d with its OpenGL green flipped, ORM %d as linear masks, no virtual texturing)%s; the blade in clean steel; sockets Grip, Trail_Start, Trail_End and BalancePoint."),
+				Work.Atlas.Width > 0 ? TEXT("rebuilt") : TEXT("kept"), Targets.Weapon.ColorSize, Targets.Weapon.NormalSize, Targets.Weapon.MaskSize,
+				Copies.IsEmpty() ? TEXT("") : *FString::Printf(TEXT("; %d _nonVT cop(ies) dropped"), Copies.Num())));
+		}
+
 		FString CleanName(const FString& Name)
 		{
 			FString Out;
@@ -1334,6 +1860,11 @@ namespace HyperAIStudio::MeshGen::Creator
 		{
 			Targets.Weapon = WeaponFinishFor(Plan.SizeMeters, Plan.FaceLimit);
 			Targets.Weapon.bNanite = Plan.bNanite;
+			if (Plan.bSword)
+			{
+				MakeSwordFinish(Targets.Weapon, /*bKeepBudget=*/true);
+				Targets.Weapon.Palette = Plan.Palette;
+			}
 		}
 		return Targets;
 	}
@@ -1502,6 +2033,17 @@ namespace HyperAIStudio::MeshGen::Creator
 		{
 			Add(Out, TEXT("orientation"), TEXT("pass"), FString::Printf(TEXT("%.0f x %.0f x %.0f cm"), Out.Size.X, Out.Size.Y, Out.Size.Z), TEXT("Z up"),
 				TEXT("Imported Z up; Tripo models face +X, as Unreal's forward."));
+		}
+		if (Targets.bWeapon && Targets.Weapon.bSword && Static)
+		{
+			// The AAA stage leaves its sockets: their absence says it has not run on this geometry.
+			const UStaticMeshSocket* Balance = Static->FindSocket(TEXT("BalancePoint"));
+			const UStaticMeshSocket* Trail = Static->FindSocket(TEXT("Trail_Start"));
+			const double Point = Balance && Trail ? Trail->RelativeLocation.Y - Balance->RelativeLocation.Y : 0.0;
+			Add(Out, TEXT("sword_finish"), !Balance || !Trail ? TEXT("fail") : Point >= 10.0 && Point <= 13.0 ? TEXT("pass") : TEXT("warn"),
+				Balance && Trail ? FString::Printf(TEXT("balance %.1f cm in front of the guard"), Point) : FString(TEXT("not finished")), TEXT("an exact blade, balanced 10-13 cm in front of the guard"),
+				!Balance || !Trail ? TEXT("The AAA sword finishing has not run: the generated blade is still on it.") : Point >= 10.0 && Point <= 13.0 ? TEXT("Finished and balanced.")
+				: TEXT("Finished; the hilt's weight keeps the balance outside 10-13 cm."), !Balance || !Trail ? TEXT("weapon_finish") : TEXT(""));
 		}
 		if (Targets.bWeapon && Static)
 		{
@@ -1839,6 +2381,8 @@ namespace HyperAIStudio::MeshGen::Creator
 			OutNotes.Add(TEXT("Geometry fixes are not made on a skeletal mesh in the editor (its skin weights would not follow); Tripo's convert can move its pivot and scale."));
 			bGeometry = false;
 		}
+		// What an AAA sword's geometry leaves for its asset work further down.
+		FSwordWork Sword;
 		if (bGeometry)
 		{
 			FDynamicMesh3 Mesh;
@@ -1861,7 +2405,13 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 			// A weapon is oriented, placed, scaled and thinned first; it is reduced to its budget last, after any holes are
 			// capped, with UV seams kept so its textures still fit.
-			const bool bWeaponReduce = Fixes.Contains(TEXT("weapon_finish")) && Targets.bWeapon && ShapeWeapon(Mesh, Targets.Weapon, OutNotes);
+			bool bWeaponReduce = Fixes.Contains(TEXT("weapon_finish")) && Targets.bWeapon && ShapeWeapon(Mesh, Targets.Weapon, OutNotes);
+			// A sword finished to AAA: its blade made exactly, its hilt reduced with the budget the blade leaves, so it is
+			// not reduced again below.
+			if (bWeaponReduce && Targets.Weapon.bSword && FinishSwordGeometry(Mesh, Object, Targets, OutNotes, Sword))
+			{
+				bWeaponReduce = false;
+			}
 			if (Fixes.Contains(TEXT("simplify")) && Targets.FaceLimit > 0 && Mesh.TriangleCount() > Targets.FaceLimit)
 			{
 				ReduceKeepingTextures(Mesh, Targets.FaceLimit, TEXT("simplify"), OutNotes);
@@ -1957,7 +2507,12 @@ namespace HyperAIStudio::MeshGen::Creator
 			}
 			Mesh.CompactInPlace();
 			Static->Modify();
-			if (!Write(*Static, Mesh, {}, OutError))
+			TMap<int32, FName> NewSlots;
+			if (Sword.bDone)
+			{
+				NewSlots.Add(Sword.BladeMaterial, FName(TEXT("Blade")));
+			}
+			if (!Write(*Static, Mesh, NewSlots, OutError))
 			{
 				return false;
 			}
@@ -2026,6 +2581,10 @@ namespace HyperAIStudio::MeshGen::Creator
 					Static->SetNumSourceModels(1);
 				}
 				OutNotes.Add(FString::Printf(TEXT("weapon_finish: one LOD, Nanite %s."), Targets.Weapon.bNanite ? TEXT("on") : TEXT("off")));
+				if (Sword.bDone)
+				{
+					FinishSwordAsset(*Static, Targets, Sword, OutNotes);
+				}
 				CapWeaponTextures(*Static, Targets.Weapon, OutNotes);
 				bChanged = true;
 			}
@@ -2118,6 +2677,12 @@ namespace HyperAIStudio::MeshGen::Creator
 		for (int32 Index = 0; Index < Slots.Num(); ++Index)
 		{
 			FSlot& Slot = Slots[Index];
+			const UMaterialInterface* SlotBase = Slot.Material ? Slot.Material->GetMaterial() : nullptr;
+			if (SlotBase && SlotBase->GetPathName().StartsWith(BladeSteelPath))
+			{
+				// An AAA sword's blade: its clean steel is its material already.
+				continue;
+			}
 			int32 Changed = 0;
 			for (const TPair<ERole, UTexture2D*>& Map : Slot.Maps)
 			{
