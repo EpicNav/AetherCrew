@@ -18,8 +18,24 @@ enum class EHyperAIStudioAutoApprovalDuration : uint8
 	FifteenMinutes,
 	OneHour,
 	FourHours,
+	EightHours,
+	/** As many hours as the user typed, from MinCustomHours to MaxCustomHours. */
+	Custom,
 	UntilEditorCloses
 };
+
+namespace HyperAIStudio::AutoApproval
+{
+	constexpr double MinCustomHours = 0.25;
+	/** A kept-on auto-approval never comes back 24 hours after it was turned on, so no duration outlasts that. */
+	constexpr double MaxCustomHours = 24.0;
+	constexpr double DefaultCustomHours = 10.0;
+
+	/** Within the limits; DefaultCustomHours for anything that is not a number. */
+	double ClampCustomHours(double Hours);
+	/** How long a duration lasts; 0 for "until the editor closes". CustomHours counts only for Custom. */
+	double DurationSeconds(EHyperAIStudioAutoApprovalDuration Duration, double CustomHours);
+}
 
 /** Why auto-approval turned off. */
 enum class EHyperAIStudioAutoApprovalEnd : uint8
@@ -44,6 +60,8 @@ struct FHyperAIStudioAutoApprovalStatus
 	bool bActive = false;
 	TArray<EHyperAIStudioApprovalCategory> Categories;
 	EHyperAIStudioAutoApprovalDuration Duration = EHyperAIStudioAutoApprovalDuration::OneHour;
+	/** The hours it was turned on for, when Duration is Custom. */
+	double CustomHours = HyperAIStudio::AutoApproval::DefaultCustomHours;
 	/** Negative while it lasts until the editor closes. */
 	double SecondsLeft = -1.0;
 	int32 Approved = 0;
@@ -66,12 +84,14 @@ struct FHyperAIStudioAutoApprovalChoices
 {
 	TArray<EHyperAIStudioApprovalCategory> Categories = {EHyperAIStudioApprovalCategory::Edits};
 	EHyperAIStudioAutoApprovalDuration Duration = EHyperAIStudioAutoApprovalDuration::OneHour;
+	/** What the Custom field holds, whichever duration is chosen. */
+	double CustomHours = HyperAIStudio::AutoApproval::DefaultCustomHours;
 	bool bAlsoApproveWaiting = true;
 	bool bStayOnAfterRestart = false;
 
 	bool operator==(const FHyperAIStudioAutoApprovalChoices& Other) const
 	{
-		return Categories == Other.Categories && Duration == Other.Duration && bAlsoApproveWaiting == Other.bAlsoApproveWaiting
+		return Categories == Other.Categories && Duration == Other.Duration && CustomHours == Other.CustomHours && bAlsoApproveWaiting == Other.bAlsoApproveWaiting
 			&& bStayOnAfterRestart == Other.bStayOnAfterRestart;
 	}
 };
@@ -79,8 +99,10 @@ struct FHyperAIStudioAutoApprovalChoices
 /**
  * For a while the user chose, requests in the categories they chose are approved as their click would approve them.
  *
- * Only SHyperAIStudioAutoApprovalDialog turns it on, after its warning and a native confirmation: nothing reflected,
- * configured, exported or registered as a console command can. It lives in this process's memory, so it is off at every
+ * Only two things turn it on: SHyperAIStudioAutoApprovalDialog, after its warning and a native confirmation, and the
+ * command the user types in a chat's composer, sent with the Enter key held on the real keyboard (RunTypedCommand). No
+ * agent is told of the command or sees it, and nothing reflected, configured, exported or registered as a console
+ * command can turn it on. It lives in this process's memory, so it is off at every
  * editor start, unless the user ticked "Stay on after the editor restarts": then a record sealed with Windows DPAPI for
  * this user and project (HyperAIStudioAutoApprovalKeepOn.h) follows it under Saved/, and the next editor brings it back
  * once, if the record is valid, unexpired, younger than 24 hours, under the same spend settings and, for "until the
@@ -154,6 +176,17 @@ public:
 	static FSimpleMulticastDelegate& OnChanged();
 	/** Opens the warning dialog, modal to Parent's window. It turns on only if the person confirms there. */
 	static void OpenDialog(const TSharedPtr<const SWidget>& Parent);
+	/** The composer's text is the auto-approval command, well formed or not: it never goes to an agent. */
+	static bool IsTypedCommand(const FString& Text);
+	/**
+	 * Runs the command: on with the choices the user last turned it on with, optionally for the hours it names. No dialog
+	 * asks, so bEnterKeyIsReal stands in for the native confirmation: a client that synthesizes Slate input, as Epic's
+	 * Slate tools can, does not hold down the keyboard's Enter key. It is no barrier to a program with input of its own
+	 * at the OS level, as a native dialog is not. OutMessage says what happened; false when it stayed as it was.
+	 */
+	static bool RunTypedCommand(const FString& Text, bool bEnterKeyIsReal, FText& OutMessage);
+	/** The keyboard's Enter key is down now, as Windows sees it. */
+	static bool IsEnterKeyDown();
 
 	/** Edits, Scripts, Destructive, External effects, Sandbox saves. */
 	static FText GetCategoryName(EHyperAIStudioApprovalCategory Category);
@@ -181,10 +214,12 @@ private:
 	 * The dialog's confirm path, after the native confirmation. Replaces a running activation, except that a test's
 	 * activation never replaces the user's own. ChosenWaiting names requests that were waiting as the dialog opened
 	 * and that the user chose there to approve as well; it covers no other request held before it began. With
-	 * bStayOnAfterRestart a protected record follows it under Saved/; without, any earlier record is deleted.
+	 * bStayOnAfterRestart a protected record follows it under Saved/; without, any earlier record is deleted. bTyped says
+	 * the typed command turned it on, for the log and Activity.
 	 */
 	static bool Activate(const TArray<EHyperAIStudioApprovalCategory>& Categories,
-		EHyperAIStudioAutoApprovalDuration Duration, const TSet<FString>& ChosenWaiting, bool bStayOnAfterRestart, FString& OutError);
+		EHyperAIStudioAutoApprovalDuration Duration, double CustomHours, const TSet<FString>& ChosenWaiting, bool bStayOnAfterRestart, FString& OutError,
+		bool bTyped = false);
 	/** The dialog's Turn On, once it turned on: what the next dialog opens with. */
 	static void SaveChoices(const FHyperAIStudioAutoApprovalChoices& Choices);
 #if WITH_DEV_AUTOMATION_TESTS
@@ -219,6 +254,11 @@ struct FHyperAIStudioAutoApprovalTestAccess
 	static bool IsTicked(const SHyperAIStudioAutoApprovalDialog& Dialog, EHyperAIStudioApprovalCategory Category);
 	static void SetDuration(SHyperAIStudioAutoApprovalDialog& Dialog, EHyperAIStudioAutoApprovalDuration Duration);
 	static EHyperAIStudioAutoApprovalDuration GetDuration(const SHyperAIStudioAutoApprovalDialog& Dialog);
+	/** Types hours into the Custom field, as committing it would, which also chooses Custom. */
+	static void CommitCustomHours(SHyperAIStudioAutoApprovalDialog& Dialog, double Hours);
+	static double GetCustomHours(const SHyperAIStudioAutoApprovalDialog& Dialog);
+	/** The typed command as the composer runs it; what it turns on covers only OperationIds. */
+	static bool RunCommand(const FString& Text, bool bEnterKeyIsReal, const TSet<FString>& OperationIds, FText& OutMessage);
 	static bool CanTurnOn(const SHyperAIStudioAutoApprovalDialog& Dialog);
 	/** Presses Turn On through its real handler; the activation covers only OperationIds. */
 	static void PressTurnOn(SHyperAIStudioAutoApprovalDialog& Dialog, const TSet<FString>& OperationIds);

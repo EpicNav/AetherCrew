@@ -16,9 +16,11 @@
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SNumericEntryBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
@@ -100,6 +102,7 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 			bTicked[Index] = Choices.Categories.Contains(static_cast<EHyperAIStudioApprovalCategory>(Index));
 		}
 		Duration = Choices.Duration;
+		CustomHours = Choices.CustomHours;
 		bAlsoApproveWaiting = Choices.bAlsoApproveWaiting;
 		bStayOnAfterRestart = Choices.bStayOnAfterRestart;
 	}
@@ -216,9 +219,11 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 		.AutoHeight()
 		.Padding(0.0f, 14.0f, 0.0f, 0.0f)
 		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
+			// They wrap: with Custom's field they are wider than the dialog.
+			SNew(SWrapBox)
+			.UseAllottedSize(true)
+			.InnerSlotPadding(FVector2D(0.0f, 6.0f))
+			+ SWrapBox::Slot()
 			.VAlign(VAlign_Center)
 			.Padding(0.0f, 0.0f, 12.0f, 0.0f)
 			[
@@ -226,10 +231,12 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 				.Text(LOCTEXT("TurnOffAfter", "Turn off after"))
 				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
 			]
-			+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::FifteenMinutes, LOCTEXT("FifteenMinutes", "15 minutes"))]
-			+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::OneHour, LOCTEXT("OneHour", "1 hour"))]
-			+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::FourHours, LOCTEXT("FourHours", "4 hours"))]
-			+ SHorizontalBox::Slot().AutoWidth()[BuildDuration(EHyperAIStudioAutoApprovalDuration::UntilEditorCloses, LOCTEXT("WhenEditorCloses", "When the editor closes"))]
+			+ SWrapBox::Slot().VAlign(VAlign_Center)[BuildDuration(EHyperAIStudioAutoApprovalDuration::FifteenMinutes, LOCTEXT("FifteenMinutes", "15 minutes"))]
+			+ SWrapBox::Slot().VAlign(VAlign_Center)[BuildDuration(EHyperAIStudioAutoApprovalDuration::OneHour, LOCTEXT("OneHour", "1 hour"))]
+			+ SWrapBox::Slot().VAlign(VAlign_Center)[BuildDuration(EHyperAIStudioAutoApprovalDuration::FourHours, LOCTEXT("FourHours", "4 hours"))]
+			+ SWrapBox::Slot().VAlign(VAlign_Center)[BuildDuration(EHyperAIStudioAutoApprovalDuration::EightHours, LOCTEXT("EightHours", "8 hours"))]
+			+ SWrapBox::Slot().VAlign(VAlign_Center)[BuildCustomDuration()]
+			+ SWrapBox::Slot().VAlign(VAlign_Center)[BuildDuration(EHyperAIStudioAutoApprovalDuration::UntilEditorCloses, LOCTEXT("WhenEditorCloses", "When the editor closes"))]
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -378,6 +385,53 @@ TSharedRef<SWidget> SHyperAIStudioAutoApprovalDialog::BuildDuration(const EHyper
 				SNew(STextBlock)
 				.Text(Label)
 			]
+		];
+}
+
+void SHyperAIStudioAutoApprovalDialog::CommitCustomHours(const double Hours)
+{
+	CustomHours = HyperAIStudio::AutoApproval::ClampCustomHours(Hours);
+	Duration = EHyperAIStudioAutoApprovalDuration::Custom;
+}
+
+TSharedRef<SWidget> SHyperAIStudioAutoApprovalDialog::BuildCustomDuration()
+{
+	const FText Tooltip = FText::Format(LOCTEXT("CustomHoursTooltip", "Any number of hours from {0} to {1}."),
+		HyperAIStudio::AutoApproval::MinCustomHours, HyperAIStudio::AutoApproval::MaxCustomHours);
+	return SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		[
+			SNew(SBox)
+			.Padding(FMargin(0.0f, 0.0f, -6.0f, 0.0f))
+			[
+				BuildDuration(EHyperAIStudioAutoApprovalDuration::Custom, LOCTEXT("CustomDuration", "Custom"))
+			]
+		]
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		[
+			SNew(SBox)
+			.WidthOverride(56.0f)
+			.ToolTipText(Tooltip)
+			[
+				SNew(SNumericEntryBox<double>)
+				.AllowSpin(false)
+				.MinValue(HyperAIStudio::AutoApproval::MinCustomHours)
+				.MaxValue(HyperAIStudio::AutoApproval::MaxCustomHours)
+				.Value_Lambda([this]() { return TOptional<double>(CustomHours); })
+				.OnValueCommitted_Lambda([this](const double Hours, ETextCommit::Type) { CommitCustomHours(Hours); })
+			]
+		]
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		.Padding(4.0f, 0.0f, 12.0f, 0.0f)
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("CustomDurationUnit", "hours"))
 		];
 }
 
@@ -608,6 +662,10 @@ FText SHyperAIStudioAutoApprovalDialog::BuildConfirmation() const
 	{
 	case EHyperAIStudioAutoApprovalDuration::FifteenMinutes: When = LOCTEXT("ConfirmFifteenMinutes", "For the next 15 minutes"); break;
 	case EHyperAIStudioAutoApprovalDuration::FourHours: When = LOCTEXT("ConfirmFourHours", "For the next 4 hours"); break;
+	case EHyperAIStudioAutoApprovalDuration::EightHours: When = LOCTEXT("ConfirmEightHours", "For the next 8 hours"); break;
+	case EHyperAIStudioAutoApprovalDuration::Custom:
+		When = FText::Format(LOCTEXT("ConfirmCustomHours", "For the next {0} {0}|plural(one=hour,other=hours)"), CustomHours);
+		break;
 	case EHyperAIStudioAutoApprovalDuration::UntilEditorCloses: When = LOCTEXT("ConfirmUntilClose", "Until the editor closes"); break;
 	default: When = LOCTEXT("ConfirmOneHour", "For the next hour"); break;
 	}
@@ -672,12 +730,13 @@ FReply SHyperAIStudioAutoApprovalDialog::OnTurnOnClicked()
 	}
 #endif
 	FString Error;
-	if (FHyperAIStudioAutoApproval::Activate(GetChosen(), Duration, GetChosenWaiting(), bStayOnAfterRestart, Error))
+	if (FHyperAIStudioAutoApproval::Activate(GetChosen(), Duration, CustomHours, GetChosenWaiting(), bStayOnAfterRestart, Error))
 	{
 		// What it turned on with is what the next dialog opens with.
 		FHyperAIStudioAutoApprovalChoices Choices;
 		Choices.Categories = GetChosen();
 		Choices.Duration = Duration;
+		Choices.CustomHours = CustomHours;
 		Choices.bAlsoApproveWaiting = bAlsoApproveWaiting;
 		Choices.bStayOnAfterRestart = bStayOnAfterRestart;
 		FHyperAIStudioAutoApproval::SaveChoices(Choices);
@@ -755,6 +814,16 @@ void FHyperAIStudioAutoApprovalTestAccess::SetDuration(SHyperAIStudioAutoApprova
 EHyperAIStudioAutoApprovalDuration FHyperAIStudioAutoApprovalTestAccess::GetDuration(const SHyperAIStudioAutoApprovalDialog& Dialog)
 {
 	return Dialog.Duration;
+}
+
+void FHyperAIStudioAutoApprovalTestAccess::CommitCustomHours(SHyperAIStudioAutoApprovalDialog& Dialog, const double Hours)
+{
+	Dialog.CommitCustomHours(Hours);
+}
+
+double FHyperAIStudioAutoApprovalTestAccess::GetCustomHours(const SHyperAIStudioAutoApprovalDialog& Dialog)
+{
+	return Dialog.CustomHours;
 }
 
 bool FHyperAIStudioAutoApprovalTestAccess::CanTurnOn(const SHyperAIStudioAutoApprovalDialog& Dialog)
