@@ -777,6 +777,24 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
+   "key": "CommandHoursUsage",
+   "source": "Auto-approval is unchanged. After the command, name the hours from {0} to {1}, such as 8h, or nothing.",
+   "text": "自动批准未改变。请在命令后写明 {0} 到 {1} 之间的小时数（例如 8h），或不写。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "CommandNeedsEnter",
+   "source": "Auto-approval is unchanged. This command works only with the Enter key on your keyboard: press Enter, holding it a moment if the editor is slow.",
+   "text": "自动批准未改变。此命令只能用键盘上的 Enter 键发送：请按 Enter；如果编辑器较慢，请多按住片刻。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "CommandOn",
+   "source": "Auto-approval is on {0}: {1}. Stop is in Activity and above this chat.",
+   "text": "自动批准已开启，{0}：{1}。“停止”位于“活动”和此聊天上方。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
    "key": "ConfirmAlsoWaiting",
    "source": "{0}\n\nIt also approves the {1} {1}|plural(one=request,other=requests) in these categories waiting now.",
    "text": "{0}\n\n它还会批准这些类别中当前正在等待的 {1} 个请求。"
@@ -795,6 +813,12 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmCustomHours",
+   "source": "For the next {0} {0}|plural(one=hour,other=hours)",
+   "text": "接下来 {0} 小时内"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
    "key": "ConfirmDestructive",
    "source": "- Destructive tools (cannot be undone)",
    "text": "- 破坏性工具（不可撤销）"
@@ -804,6 +828,12 @@
    "key": "ConfirmEditsMostly",
    "source": "- Edits (mostly undoable asset and level changes, and scripts the runner's checks passed)",
    "text": "- 编辑（大多可撤销的资产和关卡更改，以及通过了运行器检查的脚本）"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ConfirmEightHours",
+   "source": "For the next 8 hours",
+   "text": "接下来 8 小时内"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -867,6 +897,24 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
+   "key": "CustomDuration",
+   "source": "Custom",
+   "text": "自定义"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "CustomDurationUnit",
+   "source": "hours",
+   "text": "小时"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "CustomHoursTooltip",
+   "source": "Any number of hours from {0} to {1}.",
+   "text": "{0} 到 {1} 之间的任意小时数。"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
    "key": "DestructiveBody",
    "source": "Plans that delete or replace things, such as UI plans (hyper_ui_apply_plan) that delete or replace widgets, bindings or animations, and any other plan its tool marks destructive. The one-time permission the editor requires for each of these is issued without your click. Agent scripts are not part of this; they are under Scripts.",
    "text": "会删除或替换内容的计划，例如删除或替换控件、绑定或动画的 UI 计划（hyper_ui_apply_plan），以及其工具标记为破坏性的任何其他计划。编辑器为每个此类计划要求的一次性许可，将在你不点击的情况下签发。智能体脚本不在此列，它们属于“脚本”。"
@@ -915,6 +963,12 @@
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
+   "key": "EightHours",
+   "source": "8 hours",
+   "text": "8 小时"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
    "key": "EndingStayOn",
    "source": "It ends when its time runs out, when you press Stop, when the editor closes (unless you tick Stay on after the editor restarts below), when the spend cap or an external service's or image model's settings change, or by itself after {0} approvals, {1} external-effect requests, or {2} failures in a row. What it approved that has not started by then waits for your approval again.",
    "text": "时间到、你按下“停止”、编辑器关闭（除非你勾选了下方的“编辑器重启后保持开启”），或者花费上限、外部服务或图片模型的设置发生变化时，它都会结束；批准 {0} 次、批准 {1} 个外部影响请求或连续失败 {2} 次后，它也会自行关闭。届时它已批准但尚未开始的请求，会重新等待你的审批。"
@@ -960,6 +1014,18 @@
    "key": "FifteenMinutes",
    "source": "15 minutes",
    "text": "15 分钟"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ForCustomHours",
+   "source": "for {0} {0}|plural(one=hour,other=hours)",
+   "text": "{0} 小时"
+  },
+  {
+   "namespace": "HyperAIStudioAutoApproval",
+   "key": "ForEightHours",
+   "source": "for 8 hours",
+   "text": "8 小时"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",

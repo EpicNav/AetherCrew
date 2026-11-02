@@ -9,6 +9,7 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "HyperAIStudioAgents.h"
+#include "HyperAIStudioAutoApproval.h"
 #include "HyperAIStudioChatModes.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "SHyperAIStudioModesPanel.h"
@@ -394,7 +395,14 @@ void SHyperAIStudioNativeChatView::Construct(const FArguments& InArgs)
 						}
 						if (Key == EKeys::Enter && bPlain)
 						{
-							Submit();
+							if (FHyperAIStudioAutoApproval::IsTypedCommand(GetComposerText()))
+							{
+								RunAutoApprovalCommand(/*bFromEnterKey=*/true);
+							}
+							else
+							{
+								Submit();
+							}
 							return FReply::Handled();
 						}
 						// Ctrl+Space, not "/": a slash starts the agent's own commands and skills.
@@ -716,11 +724,35 @@ FHyperAIStudioMessageHints SHyperAIStudioNativeChatView::GetPendingHints() const
 	return Hints;
 }
 
+void SHyperAIStudioNativeChatView::RunAutoApprovalCommand(const bool bFromEnterKey)
+{
+	FText Message;
+	const bool bOn = FHyperAIStudioAutoApproval::RunTypedCommand(GetComposerText(), bFromEnterKey && FHyperAIStudioAutoApproval::IsEnterKeyDown(), Message);
+	Notice = Message.ToString();
+	if (bOn)
+	{
+		Composer->SetText(FText::GetEmpty());
+	}
+}
+
+#if WITH_DEV_AUTOMATION_TESTS
+void SHyperAIStudioNativeChatView::SubmitForTest(const FString& Text)
+{
+	SetComposerText(Text, Text.Len());
+	Submit();
+}
+#endif
+
 void SHyperAIStudioNativeChatView::Submit()
 {
 	const FString Text = Composer.IsValid() ? Composer->GetText().ToString().TrimStartAndEnd() : FString();
 	if (Text.IsEmpty())
 	{
+		return;
+	}
+	if (FHyperAIStudioAutoApproval::IsTypedCommand(Text))
+	{
+		RunAutoApprovalCommand(/*bFromEnterKey=*/false);
 		return;
 	}
 	// A preset's blanks: the first send says what is left to fill, the next sends it as it is.

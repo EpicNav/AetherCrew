@@ -56,6 +56,9 @@ private:
 	TSharedRef<SWidget> BuildCategory(EHyperAIStudioApprovalCategory Category, const FText& Label, const FText& Body,
 		const TSharedRef<SWidget>& Note);
 	TSharedRef<SWidget> BuildDuration(EHyperAIStudioAutoApprovalDuration Choice, const FText& Label);
+	/** The Custom choice with its field for hours; committing the field chooses it. */
+	TSharedRef<SWidget> BuildCustomDuration();
+	void CommitCustomHours(double Hours);
 	/** What waits now, each with its category, and whether Turn On approves those in the ticked categories too. */
 	TSharedRef<SWidget> BuildWaiting();
 	/** MessageBoxW, Cancel by default; false wherever nobody can answer it. */
@@ -73,6 +76,7 @@ private:
 	/** How many files Sandbox Mode held as it opened. */
 	int32 SandboxHeldAtOpen = 0;
 	EHyperAIStudioAutoApprovalDuration Duration = EHyperAIStudioAutoApprovalDuration::OneHour;
+	double CustomHours = HyperAIStudio::AutoApproval::DefaultCustomHours;
 	TArray<FHyperAIStudioPendingApproval> PendingAtOpen;
 	/** Other MCP servers agents can use that bypass approvals entirely, as it opened; empty when there are none. */
 	FText BypassLine;

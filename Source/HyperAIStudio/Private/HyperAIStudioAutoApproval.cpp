@@ -24,6 +24,10 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "Widgets/SWindow.h"
 
+#if PLATFORM_WINDOWS
+#include "Windows/WindowsHWrapper.h"
+#endif
+
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Misc/AutomationTest.h"
 #endif
@@ -32,8 +36,33 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioAutoApproval, Log, All);
 
+namespace HyperAIStudio::AutoApproval
+{
+	double ClampCustomHours(const double Hours)
+	{
+		return FMath::IsFinite(Hours) ? FMath::Clamp(Hours, MinCustomHours, MaxCustomHours) : DefaultCustomHours;
+	}
+
+	double DurationSeconds(const EHyperAIStudioAutoApprovalDuration Duration, const double CustomHours)
+	{
+		switch (Duration)
+		{
+		case EHyperAIStudioAutoApprovalDuration::FifteenMinutes: return 15.0 * 60.0;
+		case EHyperAIStudioAutoApprovalDuration::FourHours: return 4.0 * 3600.0;
+		case EHyperAIStudioAutoApprovalDuration::EightHours: return 8.0 * 3600.0;
+		case EHyperAIStudioAutoApprovalDuration::Custom: return ClampCustomHours(CustomHours) * 3600.0;
+		case EHyperAIStudioAutoApprovalDuration::UntilEditorCloses: return 0.0;
+		default: return 3600.0;
+		}
+	}
+}
+
 namespace HyperAIStudio::AutoApproval::Private
 {
+	/** The command, in its words: it may name hours after them, as "8" or "8h". */
+	const TCHAR* const CommandVerb = TEXT("/activate");
+	const TCHAR* const CommandName = TEXT("auto-hyper-approval");
+
 	constexpr int32 MaxTracked = 256;
 	constexpr EHyperAIStudioApprovalCategory AllCategories[] = {
 		EHyperAIStudioApprovalCategory::Edits,
@@ -57,6 +86,7 @@ namespace HyperAIStudio::AutoApproval::Private
 		uint64 Id = 0;
 		uint8 CategoryMask = 0;
 		EHyperAIStudioAutoApprovalDuration Duration = EHyperAIStudioAutoApprovalDuration::OneHour;
+		double CustomHours = HyperAIStudio::AutoApproval::DefaultCustomHours;
 		/** When it ends, on the monotonic clock; 0 while it lasts until the editor closes. */
 		double EndsAt = 0.0;
 		/** Requests held before it started keep waiting for a click, except those the user chose in its dialog. */
@@ -263,37 +293,43 @@ namespace HyperAIStudio::AutoApproval::Private
 		return static_cast<uint8>(1u << static_cast<uint8>(Category));
 	}
 
-	double DurationSeconds(const EHyperAIStudioAutoApprovalDuration Duration)
-	{
-		switch (Duration)
-		{
-		case EHyperAIStudioAutoApprovalDuration::FifteenMinutes: return 15.0 * 60.0;
-		case EHyperAIStudioAutoApprovalDuration::FourHours: return 4.0 * 3600.0;
-		case EHyperAIStudioAutoApprovalDuration::UntilEditorCloses: return 0.0;
-		default: return 3600.0;
-		}
-	}
-
-	const TCHAR* DurationName(const EHyperAIStudioAutoApprovalDuration Duration)
+	FString DurationName(const EHyperAIStudioAutoApprovalDuration Duration, const double CustomHours)
 	{
 		switch (Duration)
 		{
 		case EHyperAIStudioAutoApprovalDuration::FifteenMinutes: return TEXT("for 15 minutes");
 		case EHyperAIStudioAutoApprovalDuration::FourHours: return TEXT("for 4 hours");
+		case EHyperAIStudioAutoApprovalDuration::EightHours: return TEXT("for 8 hours");
+		case EHyperAIStudioAutoApprovalDuration::Custom: return FString::Printf(TEXT("for %g hours"), ClampCustomHours(CustomHours));
 		case EHyperAIStudioAutoApprovalDuration::UntilEditorCloses: return TEXT("until the editor closes");
 		default: return TEXT("for 1 hour");
 		}
 	}
 
-	FText DurationPhrase(const EHyperAIStudioAutoApprovalDuration Duration)
+	FText DurationPhrase(const EHyperAIStudioAutoApprovalDuration Duration, const double CustomHours)
 	{
 		switch (Duration)
 		{
 		case EHyperAIStudioAutoApprovalDuration::FifteenMinutes: return LOCTEXT("ForFifteenMinutes", "for 15 minutes");
 		case EHyperAIStudioAutoApprovalDuration::FourHours: return LOCTEXT("ForFourHours", "for 4 hours");
+		case EHyperAIStudioAutoApprovalDuration::EightHours: return LOCTEXT("ForEightHours", "for 8 hours");
+		case EHyperAIStudioAutoApprovalDuration::Custom:
+			return FText::Format(LOCTEXT("ForCustomHours", "for {0} {0}|plural(one=hour,other=hours)"), ClampCustomHours(CustomHours));
 		case EHyperAIStudioAutoApprovalDuration::UntilEditorCloses: return LOCTEXT("UntilClose", "until the editor closes");
 		default: return LOCTEXT("ForOneHour", "for 1 hour");
 		}
+	}
+
+	/** Hours as the command names them: "8", "2.5" or "8h". False for anything else, or past the Custom field's limits. */
+	bool ParseCommandHours(FString Word, double& OutHours)
+	{
+		Word.RemoveFromEnd(TEXT("h"), ESearchCase::IgnoreCase);
+		if (!Word.IsNumeric())
+		{
+			return false;
+		}
+		OutHours = FCString::Atod(*Word);
+		return OutHours >= MinCustomHours && OutHours <= MaxCustomHours;
 	}
 
 	/** Why it ended, in the activity log's and the log's English. */
@@ -395,6 +431,7 @@ namespace HyperAIStudio::AutoApproval::Private
 		KeepOn::FRecord Record;
 		Record.CategoryMask = Activation.CategoryMask;
 		Record.Duration = Activation.Duration;
+		Record.CustomHours = Activation.CustomHours;
 		Record.TurnedOnUtc = Activation.TurnedOnUtc;
 		Record.ExpiresUtc = Activation.ExpiresUtc;
 		Record.Approved = Activation.Approved;
@@ -879,6 +916,7 @@ namespace HyperAIStudio::AutoApproval::Private
 		Activation.Id = ++LastActivationId();
 		Activation.CategoryMask = Record.CategoryMask;
 		Activation.Duration = Record.Duration;
+		Activation.CustomHours = Record.CustomHours;
 		Activation.TurnedOnUtc = Record.TurnedOnUtc;
 		Activation.ExpiresUtc = Record.ExpiresUtc;
 		Activation.EndsAt = Record.ExpiresUtc.IsSet() ? Now() + FMath::Max(0.0, (*Record.ExpiresUtc - Context.NowUtc).GetTotalSeconds()) : 0.0;
@@ -1030,6 +1068,7 @@ FHyperAIStudioAutoApprovalStatus FHyperAIStudioAutoApproval::GetStatus()
 	Status.bActive = true;
 	Status.Categories = CategoriesOf(Active->CategoryMask);
 	Status.Duration = Active->Duration;
+	Status.CustomHours = Active->CustomHours;
 	Status.SecondsLeft = Active->EndsAt > 0.0 ? FMath::Max(0.0, Active->EndsAt - Now()) : -1.0;
 	Status.Approved = Active->Approved;
 	Status.ExternalEffectsApproved = Active->ExternalApproved;
@@ -1201,9 +1240,11 @@ void FHyperAIStudioAutoApproval::NoteApproved(const EHyperAIStudioApprovalCatego
 bool FHyperAIStudioAutoApproval::Activate(
 	const TArray<EHyperAIStudioApprovalCategory>& Categories,
 	const EHyperAIStudioAutoApprovalDuration Duration,
+	const double CustomHours,
 	const TSet<FString>& ChosenWaiting,
 	const bool bStayOnAfterRestart,
-	FString& OutError)
+	FString& OutError,
+	const bool bTyped)
 {
 	using namespace HyperAIStudio::AutoApproval::Private;
 	OutError.Reset();
@@ -1265,7 +1306,8 @@ bool FHyperAIStudioAutoApproval::Activate(
 
 	Activation.Id = ++LastActivationId();
 	Activation.Duration = Duration;
-	const double Seconds = DurationSeconds(Duration);
+	Activation.CustomHours = HyperAIStudio::AutoApproval::ClampCustomHours(CustomHours);
+	const double Seconds = HyperAIStudio::AutoApproval::DurationSeconds(Duration, CustomHours);
 	Activation.EndsAt = Seconds > 0.0 ? Now() + Seconds : 0.0;
 	Activation.FirstSequence = HyperAIStudio::Approval::Private::PeekNextSequence();
 	Activation.ChosenWaiting = ChosenWaiting;
@@ -1291,6 +1333,8 @@ bool FHyperAIStudioAutoApproval::Activate(
 		DeleteRecord(*Current());
 	}
 	const TCHAR* const KeptOn = bStayOnAfterRestart ? TEXT("; it stays on after the editor restarts") : TEXT("");
+	const FString Lasting = DurationName(Duration, CustomHours);
+	const TCHAR* const Confirmed = bTyped ? TEXT("typed in a chat with the keyboard's Enter key") : TEXT("confirmed in its dialog");
 
 	TArray<FString> Names;
 	for (const EHyperAIStudioApprovalCategory Category : Categories)
@@ -1308,7 +1352,8 @@ bool FHyperAIStudioAutoApproval::Activate(
 	}
 	const int32 Chosen = Scheduled - Carried;
 	FString AlsoWaiting = Chosen > 0
-		? FString::Printf(TEXT("; it also approves %d request(s) that were waiting, as chosen in its dialog"), Chosen) : FString();
+		? FString::Printf(TEXT("; it also approves %d request(s) that were waiting, as %s"), Chosen,
+			bTyped ? TEXT("last chosen in its dialog") : TEXT("chosen in its dialog")) : FString();
 	if (Carried > 0)
 	{
 		AlsoWaiting += FString::Printf(TEXT("; it approves again %d request(s) the auto-approval it replaced had approved before they started"), Carried);
@@ -1325,27 +1370,103 @@ bool FHyperAIStudioAutoApproval::Activate(
 	{
 		// What a test turns on covers only its own requests, so it is recorded as such and tells the user nothing.
 		UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Auto-approval on for an automation test's own requests: %s (%s)%s%s."),
-			*Covered, DurationName(Duration), *AlsoWaiting, KeptOn);
+			*Covered, *Lasting, *AlsoWaiting, KeptOn);
 		RecordAudit(TEXT("turned on"), TEXT("auto_approval_on"),
-			FString::Printf(TEXT("%s %s (automation test; it covers only the test's own requests%s%s)"), *Covered, DurationName(Duration), *AlsoWaiting, KeptOn));
+			FString::Printf(TEXT("%s %s (automation test; it covers only the test's own requests%s%s)"), *Covered, *Lasting, *AlsoWaiting, KeptOn));
 	}
 	else
 	{
 		UE_LOG(LogHyperAIStudioAutoApproval, Warning,
-			TEXT("Auto-approval ON for %s (%s), confirmed in its dialog%s%s. It covers every agent and MCP client connected to this editor."),
-			*Covered, DurationName(Duration), *AlsoWaiting, KeptOn);
+			TEXT("Auto-approval ON for %s (%s), %s%s%s. It covers every agent and MCP client connected to this editor."),
+			*Covered, *Lasting, Confirmed, *AlsoWaiting, KeptOn);
 		RecordAudit(TEXT("turned on"), TEXT("auto_approval_on"),
-			FString::Printf(TEXT("%s %s (confirmed in its dialog%s%s)"), *Covered, DurationName(Duration), *AlsoWaiting, KeptOn));
+			FString::Printf(TEXT("%s %s (%s%s%s)"), *Covered, *Lasting, Confirmed, *AlsoWaiting, KeptOn));
 		Notify(FText::Format(bStayOnAfterRestart
 			? LOCTEXT("OnToastKeptOn",
 				"Auto-approval is on {0}: {1}. Requests in these categories now run without asking you, and it stays on if the editor restarts; Stop is in Activity and in each chat window.")
 			: LOCTEXT("OnToast",
 				"Auto-approval is on {0}: {1}. Requests in these categories now run without asking you; Stop is in Activity and in each chat window."),
-			DurationPhrase(Duration), DescribeCategories(Categories)), /*bWarning=*/true);
+			DurationPhrase(Duration, CustomHours), DescribeCategories(Categories)), /*bWarning=*/true);
 	}
 	OnChanged().Broadcast();
 	FHyperAIStudioApprovalGate::OnChanged().Broadcast();
 	return true;
+}
+
+bool FHyperAIStudioAutoApproval::IsTypedCommand(const FString& Text)
+{
+	using namespace HyperAIStudio::AutoApproval::Private;
+	TArray<FString> Words;
+	Text.ParseIntoArrayWS(Words);
+	return Words.Num() >= 2 && Words[0].Equals(CommandVerb, ESearchCase::IgnoreCase) && Words[1].Equals(CommandName, ESearchCase::IgnoreCase);
+}
+
+bool FHyperAIStudioAutoApproval::RunTypedCommand(const FString& Text, const bool bEnterKeyIsReal, FText& OutMessage)
+{
+	using namespace HyperAIStudio::AutoApproval::Private;
+	if (!IsTypedCommand(Text))
+	{
+		return false;
+	}
+	TArray<FString> Words;
+	Text.ParseIntoArrayWS(Words);
+	FHyperAIStudioAutoApprovalChoices Choices = LoadChoices();
+	if (Words.Num() > 3 || (Words.Num() == 3 && !ParseCommandHours(Words[2], Choices.CustomHours)))
+	{
+		OutMessage = FText::Format(LOCTEXT("CommandHoursUsage", "Auto-approval is unchanged. After the command, name the hours from {0} to {1}, such as 8h, or nothing."),
+			HyperAIStudio::AutoApproval::MinCustomHours, HyperAIStudio::AutoApproval::MaxCustomHours);
+		return false;
+	}
+	if (Words.Num() == 3)
+	{
+		Choices.Duration = EHyperAIStudioAutoApprovalDuration::Custom;
+	}
+	if (!bEnterKeyIsReal)
+	{
+		UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("The auto-approval command was refused: it did not come with the keyboard's Enter key held down."));
+		RecordAudit(TEXT("command refused"), TEXT("auto_approval_command_refused"), TEXT("Not sent with the keyboard's Enter key"));
+		OutMessage = LOCTEXT("CommandNeedsEnter", "Auto-approval is unchanged. This command works only with the Enter key on your keyboard: press Enter, holding it a moment if the editor is slow.");
+		return false;
+	}
+	TArray<EHyperAIStudioApprovalCategory> Categories;
+	const bool bSandboxOn = HyperAIStudio::Sandbox::GetStatus(/*bWithChanges=*/false).State != HyperAIStudio::Sandbox::EState::Off;
+	for (const EHyperAIStudioApprovalCategory Category : Choices.Categories)
+	{
+		// As in the dialog, which offers Sandbox Mode's held saves only while Sandbox Mode is on.
+		if (Category != EHyperAIStudioApprovalCategory::SandboxSaves || bSandboxOn)
+		{
+			Categories.Add(Category);
+		}
+	}
+	TSet<FString> ChosenWaiting;
+	if (Choices.bAlsoApproveWaiting)
+	{
+		for (const FHyperAIStudioPendingApproval& Pending : FHyperAIStudioApprovalGate::GetPending())
+		{
+			if (Pending.Category.IsSet() && *Pending.Category != EHyperAIStudioApprovalCategory::SandboxSaves && Categories.Contains(*Pending.Category))
+			{
+				ChosenWaiting.Add(Pending.OperationId);
+			}
+		}
+	}
+	FString Error;
+	if (!Activate(Categories, Choices.Duration, Choices.CustomHours, ChosenWaiting, Choices.bStayOnAfterRestart, Error, /*bTyped=*/true))
+	{
+		OutMessage = FText::FromString(Error);
+		return false;
+	}
+	OutMessage = FText::Format(LOCTEXT("CommandOn", "Auto-approval is on {0}: {1}. Stop is in Activity and above this chat."),
+		DurationPhrase(Choices.Duration, Choices.CustomHours), DescribeCategories(Categories));
+	return true;
+}
+
+bool FHyperAIStudioAutoApproval::IsEnterKeyDown()
+{
+#if PLATFORM_WINDOWS
+	return (::GetAsyncKeyState(VK_RETURN) & 0x8000) != 0;
+#else
+	return false;
+#endif
 }
 
 void FHyperAIStudioAutoApproval::Stop(const EHyperAIStudioAutoApprovalEnd Why)
@@ -1604,6 +1725,11 @@ FHyperAIStudioAutoApprovalChoices FHyperAIStudioAutoApproval::ReadChoices(const 
 	{
 		HyperAIStudio::AutoApproval::KeepOn::ParseDuration(Text.TrimStartAndEnd(), Choices.Duration);
 	}
+	double Hours = 0.0;
+	if (GConfig->GetDouble(Section, TEXT("CustomHours"), Hours, IniFile))
+	{
+		Choices.CustomHours = HyperAIStudio::AutoApproval::ClampCustomHours(Hours);
+	}
 	bool bValue = false;
 	if (GConfig->GetBool(Section, TEXT("AlsoApproveWaiting"), bValue, IniFile))
 	{
@@ -1630,6 +1756,7 @@ void FHyperAIStudioAutoApproval::WriteChoices(const FString& IniFile, const FHyp
 	const TCHAR* Section = GetChoicesSection();
 	GConfig->SetString(Section, TEXT("Categories"), *FString::Join(Names, TEXT(",")), IniFile);
 	GConfig->SetString(Section, TEXT("Duration"), HyperAIStudio::AutoApproval::KeepOn::DurationKey(Choices.Duration), IniFile);
+	GConfig->SetDouble(Section, TEXT("CustomHours"), Choices.CustomHours, IniFile);
 	GConfig->SetBool(Section, TEXT("AlsoApproveWaiting"), Choices.bAlsoApproveWaiting, IniFile);
 	GConfig->SetBool(Section, TEXT("StayOnAfterRestart"), Choices.bStayOnAfterRestart, IniFile);
 	GConfig->Flush(/*bRemoveFromCache=*/false, IniFile);
@@ -1700,6 +1827,14 @@ void FHyperAIStudioAutoApprovalTestAccess::Reset()
 	TestRecordPath().Reset();
 	TestChoices() = FTestChoices();
 	LastNotice().Reset();
+}
+
+bool FHyperAIStudioAutoApprovalTestAccess::RunCommand(const FString& Text, const bool bEnterKeyIsReal, const TSet<FString>& OperationIds, FText& OutMessage)
+{
+	FHyperAIStudioAutoApproval::TestScopeForNextActivation() = OperationIds;
+	const bool bOn = FHyperAIStudioAutoApproval::RunTypedCommand(Text, bEnterKeyIsReal, OutMessage);
+	FHyperAIStudioAutoApproval::TestScopeForNextActivation().Reset();
+	return bOn;
 }
 
 void FHyperAIStudioAutoApprovalTestAccess::SetRecordPath(const FString& Path)

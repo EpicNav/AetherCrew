@@ -92,12 +92,21 @@ public:
 	bool IsAtEnd() const;
 	/** Opens or closes a step's details, as clicking its row does. */
 	void SetOpen(const FString& ItemId, bool bOpen);
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Types Text into the composer and sends it as the Send button does. */
+	void SubmitForTest(const FString& Text);
+#endif
 
 private:
 	using FItemPtr = TSharedPtr<FHyperAIStudioChatItem>;
 
 	void Refresh();
 	void Submit();
+	/**
+	 * The composer holds the auto-approval command: runs it here, so no agent ever sees it, and empties the composer if it
+	 * turned on. bFromEnterKey is false for the Send button, which the command does not work from.
+	 */
+	void RunAutoApprovalCommand(bool bFromEnterKey);
 	/** The composer's text with one character per line end, and the cursor as an index into it. */
 	FString GetComposerTextAndCursor(int32& OutCursor) const;
 	void SetComposerText(const FString& Text, int32 Cursor);

@@ -57,23 +57,14 @@ namespace HyperAIStudio::AutoApproval::KeepOn
 			return Mask;
 		}
 
-		double DurationSeconds(const EHyperAIStudioAutoApprovalDuration Duration)
-		{
-			switch (Duration)
-			{
-			case EHyperAIStudioAutoApprovalDuration::FifteenMinutes: return 15.0 * 60.0;
-			case EHyperAIStudioAutoApprovalDuration::FourHours: return 4.0 * 3600.0;
-			case EHyperAIStudioAutoApprovalDuration::UntilEditorCloses: return 0.0;
-			default: return 3600.0;
-			}
-		}
-
-		const TCHAR* DurationWords(const EHyperAIStudioAutoApprovalDuration Duration)
+		FString DurationWords(const EHyperAIStudioAutoApprovalDuration Duration, const double CustomHours)
 		{
 			switch (Duration)
 			{
 			case EHyperAIStudioAutoApprovalDuration::FifteenMinutes: return TEXT("15 minutes");
 			case EHyperAIStudioAutoApprovalDuration::FourHours: return TEXT("4 hours");
+			case EHyperAIStudioAutoApprovalDuration::EightHours: return TEXT("8 hours");
+			case EHyperAIStudioAutoApprovalDuration::Custom: return FString::Printf(TEXT("%g hours"), CustomHours);
 			case EHyperAIStudioAutoApprovalDuration::UntilEditorCloses: return TEXT("until the editor closes");
 			default: return TEXT("1 hour");
 			}
@@ -124,6 +115,8 @@ namespace HyperAIStudio::AutoApproval::KeepOn
 		{
 		case EHyperAIStudioAutoApprovalDuration::FifteenMinutes: return TEXT("fifteen_minutes");
 		case EHyperAIStudioAutoApprovalDuration::FourHours: return TEXT("four_hours");
+		case EHyperAIStudioAutoApprovalDuration::EightHours: return TEXT("eight_hours");
+		case EHyperAIStudioAutoApprovalDuration::Custom: return TEXT("custom");
 		case EHyperAIStudioAutoApprovalDuration::UntilEditorCloses: return TEXT("until_editor_closes");
 		default: return TEXT("one_hour");
 		}
@@ -133,6 +126,7 @@ namespace HyperAIStudio::AutoApproval::KeepOn
 	{
 		for (const EHyperAIStudioAutoApprovalDuration Duration : {EHyperAIStudioAutoApprovalDuration::FifteenMinutes,
 			EHyperAIStudioAutoApprovalDuration::OneHour, EHyperAIStudioAutoApprovalDuration::FourHours,
+			EHyperAIStudioAutoApprovalDuration::EightHours, EHyperAIStudioAutoApprovalDuration::Custom,
 			EHyperAIStudioAutoApprovalDuration::UntilEditorCloses})
 		{
 			if (Key == DurationKey(Duration))
@@ -183,6 +177,10 @@ namespace HyperAIStudio::AutoApproval::KeepOn
 		}
 		Object->SetArrayField(TEXT("categories"), Names);
 		Object->SetStringField(TEXT("duration"), DurationKey(Record.Duration));
+		if (Record.Duration == EHyperAIStudioAutoApprovalDuration::Custom)
+		{
+			Object->SetNumberField(TEXT("customHours"), Record.CustomHours);
+		}
 		Object->SetBoolField(TEXT("keepOnAfterRestart"), true);
 		Object->SetStringField(TEXT("turnedOnUtc"), Iso(Record.TurnedOnUtc));
 		if (Record.ExpiresUtc.IsSet())
@@ -242,6 +240,7 @@ namespace HyperAIStudio::AutoApproval::KeepOn
 			Record.CategoryMask |= Bit(*Found);
 		}
 		if (!Object->TryGetStringField(TEXT("duration"), Value) || !ParseDuration(Value, Record.Duration)
+			|| (Record.Duration == EHyperAIStudioAutoApprovalDuration::Custom && !Object->TryGetNumberField(TEXT("customHours"), Record.CustomHours))
 			|| !ParseTime(Object, TEXT("turnedOnUtc"), Record.TurnedOnUtc)
 			|| !ParseTime(Object, TEXT("writtenUtc"), Record.WrittenUtc)
 			|| !ParseCount(Object, TEXT("approved"), Record.Approved)
@@ -396,7 +395,13 @@ namespace HyperAIStudio::AutoApproval::KeepOn
 		{
 			return ERefusal::Inconsistent;
 		}
-		if (bTimed && FMath::Abs((*Record.ExpiresUtc - Record.TurnedOnUtc).GetTotalSeconds() - DurationSeconds(Record.Duration)) > ExpiryToleranceSeconds)
+		// A custom duration past the field's limits is not one the dialog can give, so it is never read as the nearest it could.
+		if (Record.Duration == EHyperAIStudioAutoApprovalDuration::Custom
+			&& !(Record.CustomHours >= HyperAIStudio::AutoApproval::MinCustomHours && Record.CustomHours <= HyperAIStudio::AutoApproval::MaxCustomHours))
+		{
+			return ERefusal::Inconsistent;
+		}
+		if (bTimed && FMath::Abs((*Record.ExpiresUtc - Record.TurnedOnUtc).GetTotalSeconds() - HyperAIStudio::AutoApproval::DurationSeconds(Record.Duration, Record.CustomHours)) > ExpiryToleranceSeconds)
 		{
 			return ERefusal::Inconsistent;
 		}
@@ -459,7 +464,7 @@ namespace HyperAIStudio::AutoApproval::KeepOn
 				(Context.NowUtc - Record.TurnedOnUtc).GetTotalHours());
 		case ERefusal::Expired:
 			return FString::Printf(TEXT("its %s ran out at %s UTC, counting the time the editor was closed"),
-				DurationWords(Record.Duration), Record.ExpiresUtc.IsSet() ? *Record.ExpiresUtc->ToString(TEXT("%Y-%m-%d %H:%M")) : TEXT("?"));
+				*DurationWords(Record.Duration, Record.CustomHours), Record.ExpiresUtc.IsSet() ? *Record.ExpiresUtc->ToString(TEXT("%Y-%m-%d %H:%M")) : TEXT("?"));
 		case ERefusal::ClosedTooLong:
 			return Record.ClosedUtc.IsSet()
 				? FString::Printf(TEXT("it lasted until the editor closed, and the editor stayed closed %d min; it comes back only if the editor opens again within %d min"),

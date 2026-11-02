@@ -37,6 +37,8 @@ namespace HyperAIStudio::AutoApproval::KeepOn
 	{
 		uint8 CategoryMask = 0;
 		EHyperAIStudioAutoApprovalDuration Duration = EHyperAIStudioAutoApprovalDuration::OneHour;
+		/** The hours, when Duration is Custom; the record holds them only then. */
+		double CustomHours = HyperAIStudio::AutoApproval::DefaultCustomHours;
 		/** When the user turned it on; a restore keeps the first time, so the 24-hour cap spans every restart. */
 		FDateTime TurnedOnUtc;
 		/** When a timed duration ends, in wall-clock time, so time the editor spent closed counts; unset until it closes. */
@@ -93,7 +95,7 @@ namespace HyperAIStudio::AutoApproval::KeepOn
 		FString SpendFingerprint;
 	};
 
-	/** fifteen_minutes, one_hour, four_hours, until_editor_closes: as the record and the dialog's saved choices name them. */
+	/** fifteen_minutes, one_hour, four_hours, eight_hours, custom, until_editor_closes: as the record and the dialog's saved choices name them. */
 	const TCHAR* DurationKey(EHyperAIStudioAutoApprovalDuration Duration);
 	bool ParseDuration(const FString& Key, EHyperAIStudioAutoApprovalDuration& OutDuration);
 
