@@ -18950,6 +18950,84 @@
    "text": "HyperAI：编辑世界分区"
   },
   {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "ConversionArgumentInvalidValue",
+   "source": "'{0}' is not a valid value for pin '{1}': {2}",
+   "text": "“{0}”不是引脚“{1}”的有效值：{2}"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "ConversionArgumentNoFunctionConversion",
+   "source": "The binding has no function conversion in that direction. Arguments of node-based conversions cannot be set.",
+   "text": "该绑定在此方向上没有函数转换。无法设置基于节点的转换的参数。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "ConversionArgumentPinBoundToPath",
+   "source": "Pin '{0}' is bound to a property path. Clear the path before setting a literal value.",
+   "text": "引脚“{0}”已绑定到属性路径。请先清除路径，再设置字面量值。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "ConversionArgumentUnknownBinding",
+   "source": "No binding with id '{0}' in the view.",
+   "text": "视图中没有 ID 为“{0}”的绑定。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "ConversionArgumentUnknownPin",
+   "source": "The conversion function has no input pin '{0}'.",
+   "text": "转换函数没有输入引脚“{0}”。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "ConversionArgumentUnsupportedPinType",
+   "source": "Pin '{0}' has type '{1}'. Only bool, int, int64, float, name and string pins can be set to a literal.",
+   "text": "引脚“{0}”的类型为“{1}”。只有 bool、int、int64、float、name 和 string 引脚可以设置为字面量。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "EventArgumentInvalidValue",
+   "source": "'{0}' is not a valid value for pin '{1}': {2}",
+   "text": "“{0}”不是引脚“{1}”的有效值：{2}"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "EventArgumentPinBoundToPath",
+   "source": "Pin '{0}' is bound to a property path. Clear the path before setting a literal value.",
+   "text": "引脚“{0}”已绑定到属性路径。请先清除路径，再设置字面量值。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "EventArgumentUnknownEvent",
+   "source": "The event is not in the view.",
+   "text": "该事件不在视图中。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "EventArgumentUnknownPin",
+   "source": "The event has no input pin '{0}'.",
+   "text": "该事件没有输入引脚“{0}”。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "EventArgumentUnsupportedPinType",
+   "source": "Pin '{0}' has type '{1}'. Only bool, int, int64, float, name and string pins can be set to a literal.",
+   "text": "引脚“{0}”的类型为“{1}”。只有 bool、int、int64、float、name 和 string 引脚可以设置为字面量。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "SetConversionFunctionArgumentLiteral",
+   "source": "Set conversion function argument {0}",
+   "text": "设置转换函数参数 {0}"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "SetEventArgumentLiteral",
+   "source": "Set event argument {0}",
+   "text": "设置事件参数 {0}"
+  },
+  {
    "namespace": "MVVMToolset",
    "key": "AddViewCondition",
    "source": "MVVM Add Condition",
@@ -18960,12 +19038,6 @@
    "key": "CreateViewBinding",
    "source": "MVVM Create Binding",
    "text": "MVVM 创建绑定"
-  },
-  {
-   "namespace": "MVVMToolset",
-   "key": "LiteralArgumentsNeed59",
-   "source": "Setting a literal argument needs UE 5.9's MVVM editor; this UE 5.8 port cannot.",
-   "text": "设置字面量参数需要 UE 5.9 的 MVVM 编辑器；此 UE 5.8 移植版本无法完成。"
   },
   {
    "namespace": "MVVMToolset",

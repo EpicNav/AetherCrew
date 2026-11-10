@@ -15,6 +15,11 @@
 #include "MVVMEditorSubsystem.h"
 #include "MVVMWidgetBlueprintExtension_View.h"
 #include "WidgetBlueprint.h"
+#include "EdGraphSchema_K2.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "ScopedTransaction.h"
+
+#define LOCTEXT_NAMESPACE "MVVMEditorSubsystem"
 
 namespace UE::MVVM::Epic59
 {
@@ -123,6 +128,128 @@ bool FindFieldChainFromPath(UStruct* InStruct, const FString& Path, TArray<UE::M
 	}
 
 	return !OutChain.IsEmpty();
+}
+
+void OnBindingPreEditChange(UMVVMBlueprintView* BlueprintView, FName PropertyName)
+{
+	FProperty* ChangedProperty = FMVVMBlueprintViewBinding::StaticStruct()->FindPropertyByName(PropertyName);
+	check(ChangedProperty != nullptr);
+
+	FEditPropertyChain EditChain;
+	EditChain.AddTail(UMVVMBlueprintView::StaticClass()->FindPropertyByName("Bindings"));
+	EditChain.AddTail(ChangedProperty);
+	EditChain.SetActivePropertyNode(ChangedProperty);
+
+	BlueprintView->PreEditChange(EditChain);
+}
+
+void OnBindingPostEditChange(UMVVMBlueprintView* BlueprintView, FName PropertyName)
+{
+	FProperty* ChangedProperty = FMVVMBlueprintViewBinding::StaticStruct()->FindPropertyByName(PropertyName);
+	check(ChangedProperty != nullptr);
+
+	FEditPropertyChain EditChain;
+	EditChain.AddTail(UMVVMBlueprintView::StaticClass()->FindPropertyByName("Bindings"));
+	EditChain.AddTail(ChangedProperty);
+	EditChain.SetActivePropertyNode(ChangedProperty);
+
+	FPropertyChangedEvent ChangeEvent(ChangedProperty, EPropertyChangeType::ValueSet);
+	FPropertyChangedChainEvent ChainEvent(EditChain, ChangeEvent);
+	BlueprintView->PostEditChangeChainProperty(ChainEvent);
+}
+
+void OnEventPreEditChange(UMVVMBlueprintViewEvent* Event, FName PropertyName)
+{
+	FProperty* ChangedProperty = UMVVMBlueprintViewEvent::StaticClass()->FindPropertyByName(PropertyName);
+	check(ChangedProperty != nullptr);
+
+	FEditPropertyChain EditChain;
+	EditChain.AddTail(ChangedProperty);
+	EditChain.SetActivePropertyNode(ChangedProperty);
+
+	Event->SetFlags(RF_Transactional);
+	Event->PreEditChange(EditChain);
+}
+
+void OnEventPostEditChange(UMVVMBlueprintViewEvent* Event, FName PropertyName)
+{
+	FProperty* ChangedProperty = UMVVMBlueprintViewEvent::StaticClass()->FindPropertyByName(PropertyName);
+	check(ChangedProperty != nullptr);
+
+	FEditPropertyChain EditChain;
+	EditChain.AddTail(ChangedProperty);
+	EditChain.SetActivePropertyNode(ChangedProperty);
+
+	FPropertyChangedEvent ChangeEvent(ChangedProperty, EPropertyChangeType::ValueSet);
+	FPropertyChangedChainEvent ChainEvent(EditChain, ChangeEvent);
+	Event->PostEditChangeChainProperty(ChainEvent);
+}
+
+UEdGraphPin* GetGraphPin(const UMVVMEditorSubsystem* Subsystem, const UWidgetBlueprint* WidgetBlueprint, const FMVVMBlueprintViewBinding& ViewBinding, const FMVVMBlueprintPinId& ParameterId, bool bSourceToDestination)
+{
+	if (WidgetBlueprint == nullptr)
+	{
+		return nullptr;
+	}
+	return Subsystem->GetConversionFunctionArgumentPin(WidgetBlueprint, ViewBinding, ParameterId, bSourceToDestination);
+}
+
+UEdGraphPin* GetGraphPin(const UWidgetBlueprint* WidgetBlueprint, UMVVMBlueprintViewEvent* ViewEvent,  const FMVVMBlueprintPinId& ParameterId)
+{
+	if (WidgetBlueprint == nullptr || ViewEvent == nullptr)
+	{
+		return nullptr;
+	}
+
+	return ViewEvent->GetOrCreateGraphPin(ParameterId);
+}
+
+void DoAction(const UMVVMEditorSubsystem* Subsystem, UWidgetBlueprint* WidgetBlueprint, UMVVMBlueprintViewEvent* ViewEvent, FMVVMBlueprintViewBinding* Binding,  const FMVVMBlueprintPinId& ParameterId, bool bSourceToDestination
+	, FText TransactionName
+	, TFunctionRef<bool(const UEdGraphSchema_K2*, UEdGraphPin*)> Test, TFunctionRef<void(const UEdGraphSchema_K2*, UEdGraphPin*)> Action)
+{
+	UEdGraphPin* GraphPin;
+	if (ViewEvent)
+	{
+		GraphPin = Private::GetGraphPin(WidgetBlueprint, ViewEvent, ParameterId);
+	}
+	else if (Binding)
+	{
+		GraphPin = Private::GetGraphPin(Subsystem, WidgetBlueprint, *Binding, ParameterId, bSourceToDestination);
+	}
+	else
+	{
+		return;
+	}
+
+	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+	if (!Test(K2Schema, GraphPin))
+	{
+		return;
+	}
+
+	FScopedTransaction Transaction(TransactionName);
+	if (ViewEvent)
+	{
+		FName NAME_SavedPin = "SavedPins";
+		Private::OnEventPreEditChange(ViewEvent, NAME_SavedPin);
+		Action(K2Schema, GraphPin);
+		ViewEvent->SavePinValues();
+		Private::OnEventPostEditChange(ViewEvent, NAME_SavedPin);
+	}
+	else if (Binding)
+	{
+		FName NAME_Conversion = GET_MEMBER_NAME_CHECKED(FMVVMBlueprintViewBinding, Conversion);
+		UMVVMBlueprintView* View = Subsystem->GetView(WidgetBlueprint);
+		UMVVMBlueprintViewConversionFunction* ConversionFunction = Binding->Conversion.GetConversionFunction(bSourceToDestination);
+		check(View);
+		check(ConversionFunction);
+
+		Private::OnBindingPreEditChange(View, NAME_Conversion);
+		Action(K2Schema, GraphPin);
+		ConversionFunction->SavePinValues(WidgetBlueprint);
+		Private::OnBindingPostEditChange(View, NAME_Conversion);
+	}
 }
 }
 
@@ -371,4 +498,175 @@ void RecreateGeneratedGraphs(UMVVMBlueprintView& View)
 		}
 	}
 }
+
+bool SetConversionFunctionArgumentLiteral(const UMVVMEditorSubsystem& Subsystem, UWidgetBlueprint* WidgetBlueprint, FGuid BindingId, const FString& PinName, const FString& Value, bool bSourceToDestination, FText& OutError)
+{
+	UMVVMBlueprintView* View = Subsystem.GetView(WidgetBlueprint);
+	FMVVMBlueprintViewBinding* Binding = View ? View->GetBinding(BindingId) : nullptr;
+	if (Binding == nullptr)
+	{
+		OutError = FText::Format(LOCTEXT("ConversionArgumentUnknownBinding", "No binding with id '{0}' in the view."), FText::FromString(BindingId.ToString()));
+		return false;
+	}
+
+	const UMVVMBlueprintViewConversionFunction* ConversionFunction = Binding->Conversion.GetConversionFunction(bSourceToDestination);
+	if (ConversionFunction == nullptr || ConversionFunction->GetConversionFunction().GetType() != EMVVMBlueprintFunctionReferenceType::Function)
+	{
+		OutError = LOCTEXT("ConversionArgumentNoFunctionConversion", "The binding has no function conversion in that direction. Arguments of node-based conversions cannot be set.");
+		return false;
+	}
+
+	const FName Name(*PinName);
+	const FMVVMBlueprintPinId PinId(MakeArrayView(&Name, 1));
+	UEdGraphPin* Pin = Subsystem.GetConversionFunctionArgumentPin(WidgetBlueprint, *Binding, PinId, bSourceToDestination);
+	if (Pin == nullptr || Pin->bOrphanedPin || !UE::MVVM::ConversionFunctionHelper::IsInputPin(Pin))
+	{
+		OutError = FText::Format(LOCTEXT("ConversionArgumentUnknownPin", "The conversion function has no input pin '{0}'."), FText::FromString(PinName));
+		return false;
+	}
+
+	if (Pin->LinkedTo.Num() > 0)
+	{
+		OutError = FText::Format(LOCTEXT("ConversionArgumentPinBoundToPath", "Pin '{0}' is bound to a property path. Clear the path before setting a literal value."), FText::FromString(PinName));
+		return false;
+	}
+
+	const FName Category = Pin->PinType.PinCategory;
+	const bool bSupportedType = !Pin->PinType.IsContainer()
+		&& (Category == UEdGraphSchema_K2::PC_Boolean
+			|| Category == UEdGraphSchema_K2::PC_Int
+			|| Category == UEdGraphSchema_K2::PC_Int64
+			|| Category == UEdGraphSchema_K2::PC_Real
+			|| Category == UEdGraphSchema_K2::PC_Name
+			|| Category == UEdGraphSchema_K2::PC_String);
+	if (!bSupportedType)
+	{
+		OutError = FText::Format(LOCTEXT("ConversionArgumentUnsupportedPinType", "Pin '{0}' has type '{1}'. Only bool, int, int64, float, name and string pins can be set to a literal."), FText::FromString(PinName), UEdGraphSchema_K2::TypeToText(Pin->PinType));
+		return false;
+	}
+
+	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+	FString UseDefaultValue;
+	TObjectPtr<UObject> UseDefaultObject = nullptr;
+	FText UseDefaultText;
+	const bool bPreserveTextIdentity = false;
+	K2Schema->GetPinDefaultValuesFromString(Pin->PinType, Pin->GetOwningNodeUnchecked(), Value, UseDefaultValue, UseDefaultObject, UseDefaultText, bPreserveTextIdentity);
+	const FString SchemaError = K2Schema->IsPinDefaultValid(Pin, UseDefaultValue, UseDefaultObject, UseDefaultText);
+	if (!SchemaError.IsEmpty())
+	{
+		OutError = FText::Format(LOCTEXT("ConversionArgumentInvalidValue", "'{0}' is not a valid value for pin '{1}': {2}"), FText::FromString(Value), FText::FromString(PinName), FText::FromString(SchemaError));
+		return false;
+	}
+
+	// An empty value resets the pin: FMVVMBlueprintPin::CopyTo skips an empty saved value, so the autogenerated default is what a rebuild would give anyway.
+	const FText TransactionName = FText::Format(LOCTEXT("SetConversionFunctionArgumentLiteral", "Set conversion function argument {0}"), FText::FromString(PinName));
+	Private::DoAction(&Subsystem, WidgetBlueprint, nullptr, Binding, PinId, bSourceToDestination, TransactionName
+		, [&Value](const UEdGraphSchema_K2* K2Schema, UEdGraphPin* GraphPin)->bool
+		{
+			return GraphPin != nullptr
+				&& (Value.IsEmpty() ? !K2Schema->DoesDefaultValueMatchAutogenerated(*GraphPin) : !GraphPin->DefaultValue.Equals(Value, ESearchCase::CaseSensitive));
+		}
+		, [WidgetBlueprint, Binding, bSourceToDestination, &Value](const UEdGraphSchema_K2* K2Schema, UEdGraphPin* GraphPin)
+		{
+			// The conversion function is not transactional by default; without that, undo would not restore its SavedPins.
+			UMVVMBlueprintViewConversionFunction* EditedConversionFunction = Binding->Conversion.GetConversionFunction(bSourceToDestination);
+			EditedConversionFunction->SetFlags(RF_Transactional);
+			EditedConversionFunction->Modify();
+			GraphPin->Modify();
+			if (Value.IsEmpty())
+			{
+				K2Schema->ResetPinToAutogeneratedDefaultValue(GraphPin);
+			}
+			else
+			{
+				const bool bMarkAsModified = false;
+				K2Schema->TrySetDefaultValue(*GraphPin, Value, bMarkAsModified);
+			}
+			FBlueprintEditorUtils::MarkBlueprintAsModified(WidgetBlueprint);
+		});
+
+	return true;
 }
+
+bool SetEventArgumentLiteral(const UMVVMEditorSubsystem& Subsystem, UWidgetBlueprint* WidgetBlueprint, UMVVMBlueprintViewEvent* Event, const FString& PinName, const FString& Value, FText& OutError)
+{
+	const UMVVMBlueprintView* View = Subsystem.GetView(WidgetBlueprint);
+	if (View == nullptr || Event == nullptr || !View->GetEvents().Contains(Event))
+	{
+		OutError = LOCTEXT("EventArgumentUnknownEvent", "The event is not in the view.");
+		return false;
+	}
+
+	const FName Name(*PinName);
+	const FMVVMBlueprintPinId PinId(MakeArrayView(&Name, 1));
+	UEdGraphPin* Pin = Event->GetOrCreateGraphPin(PinId);
+	if (Pin == nullptr || Pin->bOrphanedPin || !UE::MVVM::ConversionFunctionHelper::IsInputPin(Pin))
+	{
+		OutError = FText::Format(LOCTEXT("EventArgumentUnknownPin", "The event has no input pin '{0}'."), FText::FromString(PinName));
+		return false;
+	}
+
+	if (Pin->LinkedTo.Num() > 0)
+	{
+		OutError = FText::Format(LOCTEXT("EventArgumentPinBoundToPath", "Pin '{0}' is bound to a property path. Clear the path before setting a literal value."), FText::FromString(PinName));
+		return false;
+	}
+
+	const FName Category = Pin->PinType.PinCategory;
+	const bool bSupportedType = !Pin->PinType.IsContainer()
+		&& (Category == UEdGraphSchema_K2::PC_Boolean
+			|| Category == UEdGraphSchema_K2::PC_Int
+			|| Category == UEdGraphSchema_K2::PC_Int64
+			|| Category == UEdGraphSchema_K2::PC_Real
+			|| Category == UEdGraphSchema_K2::PC_Name
+			|| Category == UEdGraphSchema_K2::PC_String);
+	if (!bSupportedType)
+	{
+		OutError = FText::Format(LOCTEXT("EventArgumentUnsupportedPinType", "Pin '{0}' has type '{1}'. Only bool, int, int64, float, name and string pins can be set to a literal."), FText::FromString(PinName), UEdGraphSchema_K2::TypeToText(Pin->PinType));
+		return false;
+	}
+
+	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+	FString UseDefaultValue;
+	TObjectPtr<UObject> UseDefaultObject = nullptr;
+	FText UseDefaultText;
+	const bool bPreserveTextIdentity = false;
+	K2Schema->GetPinDefaultValuesFromString(Pin->PinType, Pin->GetOwningNodeUnchecked(), Value, UseDefaultValue, UseDefaultObject, UseDefaultText, bPreserveTextIdentity);
+	const FString SchemaError = K2Schema->IsPinDefaultValid(Pin, UseDefaultValue, UseDefaultObject, UseDefaultText);
+	if (!SchemaError.IsEmpty())
+	{
+		OutError = FText::Format(LOCTEXT("EventArgumentInvalidValue", "'{0}' is not a valid value for pin '{1}': {2}"), FText::FromString(Value), FText::FromString(PinName), FText::FromString(SchemaError));
+		return false;
+	}
+
+	// An empty value resets the pin: FMVVMBlueprintPin::CopyTo skips an empty saved value, so the autogenerated default is what a rebuild would give anyway.
+	const FText TransactionName = FText::Format(LOCTEXT("SetEventArgumentLiteral", "Set event argument {0}"), FText::FromString(PinName));
+	Private::DoAction(&Subsystem, WidgetBlueprint, Event, nullptr, PinId, true, TransactionName
+		, [&Value](const UEdGraphSchema_K2* K2Schema, UEdGraphPin* GraphPin)->bool
+		{
+			return GraphPin != nullptr
+				&& (Value.IsEmpty() ? !K2Schema->DoesDefaultValueMatchAutogenerated(*GraphPin) : !GraphPin->DefaultValue.Equals(Value, ESearchCase::CaseSensitive));
+		}
+		, [WidgetBlueprint, Event, &Value](const UEdGraphSchema_K2* K2Schema, UEdGraphPin* GraphPin)
+		{
+			// The event may not be transactional; without that, undo would not restore its SavedPins.
+			Event->SetFlags(RF_Transactional);
+			Event->Modify();
+			GraphPin->Modify();
+			if (Value.IsEmpty())
+			{
+				K2Schema->ResetPinToAutogeneratedDefaultValue(GraphPin);
+			}
+			else
+			{
+				const bool bMarkAsModified = false;
+				K2Schema->TrySetDefaultValue(*GraphPin, Value, bMarkAsModified);
+			}
+			FBlueprintEditorUtils::MarkBlueprintAsModified(WidgetBlueprint);
+		});
+
+	return true;
+}
+}
+
+#undef LOCTEXT_NAMESPACE

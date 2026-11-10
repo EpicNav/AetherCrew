@@ -834,12 +834,7 @@ void UMVVMToolset59::SetConversionFunctionArgumentLiteral(UWidgetBlueprint* Widg
 	}
 
 	FText Error;
-#if 0 // UE 5.8: UMVVMEditorSubsystem::SetConversionFunctionArgumentLiteral is new in 5.9 (built on its private DoAction helper)
-	if (!MVVMEditorSubsystem->SetConversionFunctionArgumentLiteral(WidgetBlueprint, BindingID, ArgumentName, Value, bSourceToDestination, Error))
-#else
-	Error = NSLOCTEXT("MVVMToolset", "LiteralArgumentsNeed59", "Setting a literal argument needs UE 5.9's MVVM editor; this UE 5.8 port cannot.");
-	if (!Error.IsEmpty())
-#endif
+	if (!UE::MVVM::Epic59::SetConversionFunctionArgumentLiteral(*MVVMEditorSubsystem, WidgetBlueprint, BindingID, ArgumentName, Value, bSourceToDestination, Error)) // UE 5.8: 5.9 subsystem addition
 	{
 		UKismetSystemLibrary::RaiseScriptError(FString::Printf(TEXT("%s '%s'. %s"), FailurePrefix, *ArgumentName, *Error.ToString()));
 		
@@ -1567,12 +1562,7 @@ void UMVVMToolset59::SetEventBindingArgumentLiteral(UWidgetBlueprint* WidgetBlue
 	}
 
 	FText Error;
-#if 0 // UE 5.8: UMVVMEditorSubsystem::SetEventArgumentLiteral is new in 5.9 (built on its private DoAction helper)
-	if (!MVVMEditorSubsystem->SetEventArgumentLiteral(WidgetBlueprint, Event, ArgumentName, Value, Error))
-#else
-	Error = NSLOCTEXT("MVVMToolset", "LiteralArgumentsNeed59", "Setting a literal argument needs UE 5.9's MVVM editor; this UE 5.8 port cannot.");
-	if (!Error.IsEmpty())
-#endif
+	if (!UE::MVVM::Epic59::SetEventArgumentLiteral(*MVVMEditorSubsystem, WidgetBlueprint, Event, ArgumentName, Value, Error)) // UE 5.8: 5.9 subsystem addition
 	{
 		UKismetSystemLibrary::RaiseScriptError(FString::Printf(TEXT("%s '%s'. %s"), FailurePrefix, *ArgumentName, *Error.ToString()));
 
