@@ -2,6 +2,7 @@
 
 // RewindDebuggerToolset
 #include "RewindDebuggerToolset.h"
+#include "RewindDebuggerToolset58.h" // UE 5.8: static front
 #include "RewindDebuggerToolsetEventDecoder.h"
 
 // Core
@@ -78,15 +79,15 @@ void URewindDebuggerToolset::SetToolsetEnabled(bool bEnabled)
 	// here would latch the flag on and stop the guard below ever retrying.
 	if (bEnabled && !bToolsetRegistered)
 	{
-		UToolsetRegistry::RegisterToolsetClass(URewindDebuggerToolset::StaticClass());
+		UToolsetRegistry::RegisterToolsetClass(URewindDebuggerToolset58::StaticClass() /* UE 5.8: register the UToolsetDefinition front */);
 		bToolsetRegistered = UToolsetRegistry::IsToolsetClassRegistered(
-			URewindDebuggerToolset::StaticClass());
+			URewindDebuggerToolset58::StaticClass() /* UE 5.8: register the UToolsetDefinition front */);
 	}
 	else if (!bEnabled && bToolsetRegistered)
 	{
-		UToolsetRegistry::UnregisterToolsetClass(URewindDebuggerToolset::StaticClass());
+		UToolsetRegistry::UnregisterToolsetClass(URewindDebuggerToolset58::StaticClass() /* UE 5.8: register the UToolsetDefinition front */);
 		bToolsetRegistered = UToolsetRegistry::IsToolsetClassRegistered(
-			URewindDebuggerToolset::StaticClass());
+			URewindDebuggerToolset58::StaticClass() /* UE 5.8: register the UToolsetDefinition front */);
 	}
 }
 
