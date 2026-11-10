@@ -511,7 +511,8 @@
     "hyper_sound_asset_inspect",
     "hyper_sound_mix_plan",
     "hyper_sound_cue_plan",
-    "hyper_operation_wait"
+    "hyper_operation_wait",
+    "hyper_audio_analyze"
    ],
    "ops": [
     "switch",
@@ -543,7 +544,7 @@
      "default": "Stone, Grass"
     }
    ],
-   "prompt": "Build `{{content_folder}}/SC_Footsteps`, a footstep Sound Cue that switches by surface. Follow the game-audio skill; if the audio_metasound tools are missing, say so and stop.\n1. hyper_sound_asset_inspect with Folder `{{waves_folder}}`: list the SoundWaves for each of {{surfaces}} (2 to 8 per surface). Stop if a surface has none.\n2. One hyper_sound_mix_plan (fresh OperationId): an attenuation `{{content_folder}}/ATT_Footsteps` (FalloffDistance 2500, DistanceAlgorithm NaturalSound, bAttenuateWithLPF true) and a concurrency `{{content_folder}}/CON_Footsteps` (MaxCount 4, ResolutionRule StopOldest). Dry-run it, then send it with bDryRun false; if it is awaiting_user_approval, hyper_operation_wait with bWaitThroughApproval true.\n3. One hyper_sound_cue_plan: root an attenuation node on ATT_Footsteps, then a modulator (PitchMin 0.95, PitchMax 1.05, VolumeMin 0.85, VolumeMax 1), then a switch on Parameter `Surface` whose inputs are unset (the first surface again) and one random node per surface (bNoRepeat true) over that surface's wave players. Concurrency [CON_Footsteps]. Dry-run, read Nodes for the layout, then apply.\n4. hyper_sound_asset_inspect the cue.\n5. Reply with a PASS/FAIL table: every take in the graph, no error Issues, the switch has one input per surface plus unset, each random node no-repeat, attenuation and concurrency set, the cue saved. Say which Surface value plays which takes."
+   "prompt": "Build `{{content_folder}}/SC_Footsteps`, a footstep Sound Cue that switches by surface. Follow the game-audio skill; if the audio_metasound tools are missing, say so and stop.\n1. hyper_sound_asset_inspect with Folder `{{waves_folder}}`: list the SoundWaves for each of {{surfaces}} (2 to 8 per surface). Stop if a surface has none.\n2. One hyper_sound_mix_plan (fresh OperationId): an attenuation `{{content_folder}}/ATT_Footsteps` (FalloffDistance 2500, DistanceAlgorithm NaturalSound, bAttenuateWithLPF true) and a concurrency `{{content_folder}}/CON_Footsteps` (MaxCount 4, ResolutionRule StopOldest). Dry-run it, then send it with bDryRun false; if it is awaiting_user_approval, hyper_operation_wait with bWaitThroughApproval true.\n3. One hyper_sound_cue_plan: root an attenuation node on ATT_Footsteps, then a modulator (PitchMin 0.95, PitchMax 1.05, VolumeMin 0.85, VolumeMax 1), then a switch on Parameter `Surface` whose inputs are unset (the first surface again) and one random node per surface (bNoRepeat true) over that surface's wave players. Concurrency [CON_Footsteps]. Dry-run, read Nodes for the layout, then apply.\n4. hyper_sound_asset_inspect the cue. A Sound Cue is not rendered, so hyper_audio_analyze two takes per surface instead: their IntegratedLufs within 3 LU of each other across surfaces, PeakDb under -1, OnsetMs under 10.\n5. Reply with a PASS/FAIL table: every take in the graph, no error Issues, the switch has one input per surface plus unset, each random node no-repeat, attenuation and concurrency set, the cue saved, the takes level-matched. Say which Surface value plays which takes."
   },
   {
    "id": "audio.mix-classes-duck-reverb",
@@ -606,7 +607,8 @@
     "hyper_audio_generate",
     "hyper_operation_wait",
     "hyper_audio_generate_status",
-    "hyper_sound_asset_inspect"
+    "hyper_sound_asset_inspect",
+    "hyper_audio_analyze"
    ],
    "difficulty": "starter",
    "tags": [
@@ -639,7 +641,7 @@
      "default": "0.10"
     }
    ],
-   "prompt": "Make {{takes}} takes of \"{{sound}}\" with ElevenLabs and a MetaSound that plays one at random. This spends real money: it runs only after my approval and never above {{max_cost}} USD. If the audio_generation tools are missing, say the pack is off and stop.\n1. hyper_audio_generate with bDryRun true, Provider elevenlabs, Prompt \"{{sound}}\", DurationSeconds {{seconds}}, Variations {{takes}}, Folder `{{content_folder}}/Generated` and Wrap metasound_random. Report each take's Name, Seconds and Cost, EstimatedCost and WrapperPath. If EstimatedCost is above {{max_cost}} or the status is missing_key, stop and say why.\n2. Send it again with bDryRun false and a fresh OperationId. Call hyper_operation_wait with that OperationId, bWaitThroughApproval true and TimeoutMs 120000, then hyper_audio_generate_status until the State is completed, failed or rejected.\n3. hyper_sound_asset_inspect the wrapper and each take.\n4. Reply with a PASS/FAIL table: the job completed, {{takes}} SoundWaves imported with their lengths, the wrapper is a MetaSound Source with a Sounds input, the actual Cost at or under {{max_cost}} USD. List the asset paths and ask me to listen."
+   "prompt": "Make {{takes}} takes of \"{{sound}}\" with ElevenLabs and a MetaSound that plays one at random. This spends real money: it runs only after my approval and never above {{max_cost}} USD. If the audio_generation tools are missing, say the pack is off and stop.\n1. hyper_audio_generate with bDryRun true, Provider elevenlabs, Prompt \"{{sound}}\", DurationSeconds {{seconds}}, Variations {{takes}}, Folder `{{content_folder}}/Generated` and Wrap metasound_random. Report each take's Name, Seconds and Cost, EstimatedCost and WrapperPath. If EstimatedCost is above {{max_cost}} or the status is missing_key, stop and say why.\n2. Send it again with bDryRun false and a fresh OperationId. Call hyper_operation_wait with that OperationId, bWaitThroughApproval true and TimeoutMs 120000, then hyper_audio_generate_status until the State is completed, failed or rejected.\n3. hyper_sound_asset_inspect the wrapper and each take. hyper_audio_analyze the wrapper with Plays {{takes}}: LoudnessSpreadLu under 4, ClippedSamples 0, OnsetMs under 30 on every play (no silent lead-in).\n4. Reply with a PASS/FAIL table: the job completed, {{takes}} SoundWaves imported with their lengths, the wrapper is a MetaSound Source with a Sounds input, the actual Cost at or under {{max_cost}} USD, the wrapper's plays measured as above. List the asset paths and ask me to listen."
   },
   {
    "id": "audio.price-generated-audio",
@@ -692,7 +694,9 @@
    "tools": [
     "hyper_metasound_recipe",
     "hyper_operation_wait",
-    "hyper_sound_asset_inspect"
+    "hyper_sound_asset_inspect",
+    "hyper_audio_analyze",
+    "hyper_audio_preview"
    ],
    "difficulty": "starter",
    "tags": [
@@ -716,7 +720,7 @@
      "default": "900"
     }
    ],
-   "prompt": "Build `{{content_folder}}/MS_EngineHum` from the experimental engine_hum recipe. Follow the game-audio skill; if the audio_metasound tools are missing, say so and stop.\n1. hyper_metasound_recipe with an empty Recipe: read engine_hum's inputs and their ranges.\n2. hyper_metasound_recipe with Recipe engine_hum, Path `{{content_folder}}/MS_EngineHum`, Inputs Cylinders {{cylinders}} and RPM {{idle_rpm}}, bDryRun true; then again with bDryRun false and a fresh OperationId, and hyper_operation_wait if it waits for approval.\n3. hyper_sound_asset_inspect the new asset.\n4. Reply with a PASS/FAIL table: a MetaSound Source made, inputs RPM, Cylinders, Load and Volume exposed, defaults as asked. Then explain in two lines how a vehicle Blueprint drives it (an Audio Component's Set Float Parameter for RPM and Load each tick), and that the recipe is experimental and needs tuning by ear."
+   "prompt": "Build `{{content_folder}}/MS_EngineHum` from the experimental engine_hum recipe. Follow the game-audio skill; if the audio_metasound tools are missing, say so and stop.\n1. hyper_metasound_recipe with an empty Recipe: read engine_hum's inputs and their ranges.\n2. hyper_metasound_recipe with Recipe engine_hum, Path `{{content_folder}}/MS_EngineHum`, Inputs Cylinders {{cylinders}} and RPM {{idle_rpm}}, bDryRun true; then again with bDryRun false and a fresh OperationId, and hyper_operation_wait if it waits for approval.\n3. hyper_sound_asset_inspect the new asset.\n4. hyper_audio_analyze it with MaxSeconds 2, once with Parameters RPM {{idle_rpm}} and once with RPM 4000: not silent, ClippedSamples 0, and SpectralCentroidHz higher at 4000 (the hum follows RPM).\n5. Reply with a PASS/FAIL table: a MetaSound Source made, inputs RPM, Cylinders, Load and Volume exposed, defaults as asked, the two renders measured as above. Offer a hyper_audio_preview play. Then explain in two lines how a vehicle Blueprint drives it (an Audio Component's Set Float Parameter for RPM and Load each tick), and that the recipe is experimental and needs tuning by ear."
   },
   {
    "id": "audio.footsteps-per-surface-recipe",

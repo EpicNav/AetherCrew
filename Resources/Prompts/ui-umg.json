@@ -953,7 +953,7 @@
      "default": "WBP_HUD"
     }
    ],
-   "prompt": "Check `{{content_folder}}/UI/{{hud}}` while {{level}} plays, with its live values.\n1. If Play In Editor is not running, start it with hyper_playtest_run and a short Wait step, and keep it running.\n2. hyper_ui_render_review with targetPath the HUD's object path, bFromPlay true and resolutions [\"1920x1080\", \"1280x720\"]. If it answers not_found, the HUD is not on screen: say what shows it and stop.\n3. Open the PNGs. List the errors and warnings with widget, rect and fix; note text that only overflows with live values (long names, big numbers).\nReport PASS or FAIL per resolution, then the PNG paths on their own lines."
+   "prompt": "Check `{{content_folder}}/UI/{{hud}}` while {{level}} plays, with its live values. If hyper_ui_render_review is not available, the UI pack is off: say so and stop.\n1. If Play In Editor is not running, start it with hyper_playtest_run and a short Wait step, and keep it running.\n2. hyper_ui_render_review with targetPath the HUD's object path, bFromPlay true and resolutions [\"1920x1080\", \"1280x720\"]. If it answers not_found, the HUD is not on screen: say what shows it and stop.\n3. Open the PNGs. List the errors and warnings with widget, rect and fix; note text that only overflows with live values (long names, big numbers).\nReport PASS or FAIL per resolution, then the PNG paths on their own lines."
   },
   {
    "id": "ui-umg.tidy-widget-animations",
