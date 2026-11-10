@@ -807,6 +807,87 @@
     }
    ],
    "prompt": "Review the Environment Query {{selected_asset}}. Change nothing.\n1. If hyper_eqs_inspect is not available, the EQS tools are off: say so and stop. hyper_eqs_inspect with Asset {{selected_asset}}: per option its generator, items and settings, per test its purpose, description and settings, the QueryParams and Warnings.\n2. hyper_eqs_run with Querier `{{querier}}`, RunMode all and MaxItems 10, giving a sensible value for each QueryParam.\nReport a table with one row per option and test: what it does, PASS or a problem (a test that cannot test the items, a filter that drops everything, a navmesh the level lacks, an option with no tests that hides the options after it), and the fix. End with the run: which option won, how many items passed, the best three."
+  },
+  {
+   "id": "ai-behavior.build-tree-with-aimodule",
+   "title": "Build a guard behaviour tree node by node with AIModule",
+   "summary": "With Epic's BehaviorTreeToolset: a blackboard, a selector with a chase branch behind a decorator and a patrol branch, keys wired and validated.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "skills": [
+    "unreal-ai"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gameplay_ai_inspect",
+    "hyper_gameplay_ai_validate"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "behavior tree",
+    "behaviour tree",
+    "blackboard",
+    "guard",
+    "patrol",
+    "chase",
+    "decorator",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Tree name",
+     "default": "Guard"
+    },
+    {
+     "name": "wait",
+     "label": "Patrol wait (s)",
+     "default": "2"
+    }
+   ],
+   "prompt": "Build `{{content_folder}}/AI/BT_{{name}}` and its blackboard `BB_{{name}}` with Epic's `AIModuleToolset59.BehaviorTreeToolset`: a Selector root; a chase Sequence that runs while TargetActor is set, moving to it; and a patrol Sequence that moves to PatrolLocation and waits {{wait}} s. If that toolset is not listed, say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. CreateBlackboardData in {{content_folder}}/AI named BB_{{name}}; AddBlackboardKey TargetActor (/Script/AIModule.BlackboardKeyType_Object) and PatrolLocation (/Script/AIModule.BlackboardKeyType_Vector); GetBlackboardKeyNames.\n2. CreateBehaviorTree named BT_{{name}}; SetBlackboard to BB_{{name}}; AddRootComposite /Script/AIModule.BTComposite_Selector.\n3. Under the root, AddComposite two BTComposite_Sequence nodes: chase at index 0, patrol at 1. On chase, AddDecorator /Script/AIModule.BTDecorator_Blackboard, then SetNodeBlackboardKey on its node instance (GetNodeInstance) for TargetActor, with GetAllowedBlackboardKeys to check the selector's name. AddTask BTTask_MoveTo under chase with its key TargetActor.\n4. Under patrol, AddTask BTTask_MoveTo with key PatrolLocation, then BTTask_Wait; set the wait's time to {{wait}} with Epic's ObjectTools set_properties on its node instance.\n5. GetChildGraphNodes from the root down and GetDecoratorGraphNodes on chase, to read the tree back. Save both assets.\n6. hyper_gameplay_ai_inspect BT_{{name}} and BB_{{name}}, then hyper_gameplay_ai_validate both.\nReply with the tree as an indented outline, then a PASS/FAIL table: blackboard with 2 keys, tree uses it, chase before patrol, the decorator on TargetActor, both MoveTo keys set, wait {{wait}} s, validate 0 errors."
+  },
+  {
+   "id": "ai-behavior.eqs-find-filtering-test",
+   "title": "Find the EQS test that empties a query",
+   "summary": "Run an EQS query, then switch its tests off one at a time with Epic's EnvironmentQueryToolset to find the one that drops every item, and restore them.",
+   "packs": [
+    "gameplay_ai"
+   ],
+   "skills": [
+    "unreal-eqs"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_eqs_inspect",
+    "hyper_eqs_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "eqs",
+    "environment query",
+    "test",
+    "filter",
+    "debug",
+    "empty",
+    "epic toolset"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "EnvQuery"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "querier",
+     "label": "Querier actor",
+     "default": "BP_Guard"
+    }
+   ],
+   "prompt": "{{selected_asset}} returns no items for `{{querier}}`. Find which test filters them all out, and leave the query exactly as it was. Use Epic's `AIModuleToolset59.EnvironmentQueryToolset`; if it is not listed, say so and stop. If hyper_eqs_inspect is not available, the EQS tools are off: say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. hyper_eqs_inspect with Asset {{selected_asset}}: options, generators, tests and QueryParams. hyper_eqs_run with Querier `{{querier}}`, RunMode all and MaxItems 10: confirm it is empty, and note the generated item count.\n2. EnvironmentQueryToolset GetOptionGraphNodes, then GetTestGraphNodes per option and GetTestInstance on each: note each test's class and whether it is enabled, to restore.\n3. For each enabled test in turn: SetTestEnabled false, hyper_eqs_run as before, note the item count, then SetTestEnabled true again before the next.\n4. If no single test explains it, switch off the tests of the first option all together and run once more: then it is the generator (no items, or none on the navmesh).\n5. Restore every test to the state step 2 read, and hyper_eqs_run once more to prove the query is as it was.\nReply with a table per test: class, items passing with it off, and whether it is the filter that empties the query; then the cause in that test's settings (a distance in the wrong units, a trace channel that always hits, a context that is null) and the fix, as a proposal. PASS only if every test is restored."
   }
  ]
 }

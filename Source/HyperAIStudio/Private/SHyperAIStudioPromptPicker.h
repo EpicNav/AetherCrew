@@ -40,6 +40,9 @@ public:
 	static const TCHAR* const ForSelection;
 	static const TCHAR* const RecentCategory;
 
+	/** The size its owners give it: room for most prompts in full, scaled to the display and never smaller than the old 720 x 460. */
+	static FVector2D PreferredSize();
+
 	void Construct(const FArguments& InArgs);
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;

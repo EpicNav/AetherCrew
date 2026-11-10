@@ -1385,6 +1385,41 @@
     }
    ],
    "prompt": "Write `{{content_folder}}/Materials/{{name}}`, a material function that computes {{what}}, and a material that uses it.\n1. Write the HLSL body (ending in a return of float3) over the inputs {{inputs}}.\n2. hyper_material_recipe with recipe material_function, path {{content_folder}}/Materials/{{name}}, settings inputs \"{{inputs}}\" and caller_output emissive, the code, and callerPath {{content_folder}}/Materials/M_{{name}}_Preview; dry run first. On compile_errors, read the errors, fix the code and dry-run again.\n3. The same with bDryRun false and a fresh operationId; hyper_operation_wait with bWaitThroughApproval true if it waits.\nReport the code, the compile result and the caller's preview path on its own line."
+  },
+  {
+   "id": "materials-textures.tg-multi-output-graph",
+   "title": "Build a Texture Graph with parameters and two outputs",
+   "summary": "With Epic's TextureGraphTools: a graph with exposed inputs, a noise-driven mask and a height output, checked for issues and exported.",
+   "packs": [
+    "texture_graph"
+   ],
+   "tools": [
+    "hyper_texture_graph_inspect",
+    "hyper_texture_graph_validate"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "texture graph",
+    "procedural",
+    "mask",
+    "height",
+    "parameters",
+    "export",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Graph name",
+     "default": "Grunge"
+    },
+    {
+     "name": "size",
+     "label": "Output size (px)",
+     "default": "1024"
+    }
+   ],
+   "prompt": "Build the Texture Graph `{{content_folder}}/TG_{{name}}` with Epic's `TextureGraphToolset.TextureGraphTools`: exposed graph params `Scale` and `Contrast` that generate a procedural, tileable grunge pattern as a seamless mask `T_{{name}}_Mask` and a height map texture `T_{{name}}_Height`, both {{size}} px. If that toolset is not listed (it needs the TextureGraph plugin), or the texture_graph pack is unavailable, say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. hyper_texture_graph_inspect on that path with bIncludeExpressionCatalog true: it does not exist yet. TextureGraphTools ListNodeTypes for the noise, levels and blur expressions' classes.\n2. CreateTextureGraph in {{content_folder}} named TG_{{name}}. AddInputParam `Scale` and `Contrast` (scalar expression classes from ListNodeTypes); AddNode a noise, a levels or contrast node and a blur, laid out left to right.\n3. ConnectPins: Scale into the noise's frequency or scale pin; the noise into the levels node, Contrast into its contrast pin; the levels node to a new AddOutput `Mask`; the noise through the blur to AddOutput `Height`. Set pins with SetPinValue by the names GetGraph lists, never guessed.\n4. SetOutputSettings on each output: baseName T_{{name}}_Mask and T_{{name}}_Height, folderPath {{content_folder}}, a grayscale (linear) preset.\n5. GetGraphIssues on the Texture Graph: fix each and check again until it is empty. ExportTextureGraph to {{content_folder}}.\n6. hyper_texture_graph_validate with Policy exported; while ExportsInFlight is above 0, validate again. hyper_texture_graph_inspect for the outputs' texture paths and sizes.\nReply with a PASS/FAIL table: both inputs listed (ListInputParams), both outputs connected (ListOutputs), 0 graph issues, both textures exported at {{size}} x {{size}}. Give their object paths."
   }
  ]
 }

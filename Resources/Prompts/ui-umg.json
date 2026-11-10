@@ -59,7 +59,7 @@
      "hint": "#RRGGBB or #RRGGBBAA."
     }
    ],
-   "prompt": "Build the main menu `{{content_folder}}/UI/{{menu_name}}` for {{project}}.\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop. hyper_memory_recall `UI palette fonts` and reuse what it finds. If it exists, hyper_ui_inspect it and stop unless its widget tree is empty; else create it with Epic's UMGToolSet CreateWidgetBlueprint (parent /Script/UMG.UserWidget). Keep its editor tab closed during plans.\n2. One hyper_ui_apply_plan (bDryRun false, fresh operationId) with widget.add, widget.set_property, widget.set_style, widget.set_slot and widget.set_navigation: CanvasPanel `Root`; VerticalBox `Menu` with anchors center, alignment 0.5,0.5 and auto_size true; TextBlock `Title` \"{{game_title}}\", font_size 48, color_and_opacity {{accent}}, bottom padding 24; Buttons `PlayButton`, `OptionsButton` and `QuitButton`, each h_align fill, padding 0,8, with accessible_text and a 24 pt TextBlock label; explicit up and down links between them and wrap at both ends. In the same plan, animation.create `Intro` (0.3 s), animation.add_float_track on Menu RenderOpacity `0=0, 0.3=1` and an eased animation.add_transform_track on Menu translation_y `0=30, 0.3=0`. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n3. hyper_ui_validate it. Picture it: Epic's EditorAppToolset OpenEditorForAsset, then SlateInspectorToolset Screenshot.\n4. If no palette was recalled, hyper_memory_remember the colours and font sizes as the project's UI style.\nReport a PASS/FAIL table: 3 labelled buttons with accessible text, navigation wraps both ways, Intro 0.3 s with 2 tracks, validate 0 errors and 0 warnings. Show the screenshot on its own line."
+   "prompt": "Build the main menu `{{content_folder}}/UI/{{menu_name}}` for {{project}}.\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop. hyper_memory_recall `UI palette fonts` and reuse what it finds. If it exists, hyper_ui_inspect it and stop unless its widget tree is empty; else create it with Epic's UMGToolSet CreateWidgetBlueprint (parent /Script/UMG.UserWidget). Keep its editor tab closed during plans.\n2. One hyper_ui_apply_plan (bDryRun false, fresh operationId) with widget.add, widget.set_property, widget.set_style, widget.set_slot and widget.set_navigation: CanvasPanel `Root`; VerticalBox `Menu` with anchors center, alignment 0.5,0.5 and auto_size true; TextBlock `Title` \"{{game_title}}\", font_size 48, color_and_opacity {{accent}}, bottom padding 24; Buttons `PlayButton`, `OptionsButton` and `QuitButton`, each h_align fill, padding 0,8, with accessible_text and a 24 pt TextBlock label; explicit up and down links between them and wrap at both ends. In the same plan, animation.create `Intro` (0.3 s), animation.add_float_track on Menu RenderOpacity `0=0, 0.3=1` and an eased animation.add_transform_track on Menu translation_y `0=30, 0.3=0`. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n3. hyper_ui_validate it. Picture it: Epic's EditorAppToolset OpenEditorForAsset, then SlateInspectorToolset59 Screenshot.\n4. If no palette was recalled, hyper_memory_remember the colours and font sizes as the project's UI style.\nReport a PASS/FAIL table: 3 labelled buttons with accessible text, navigation wraps both ways, Intro 0.3 s with 2 tracks, validate 0 errors and 0 warnings. Show the screenshot on its own line."
   },
   {
    "id": "ui-umg.shooter-hud",
@@ -261,7 +261,7 @@
      "default": "The old road north is closed. Bring me three ember shards and I will open the gate."
     }
    ],
-   "prompt": "Build an RPG dialogue box `{{content_folder}}/UI/WBP_Dialogue`.\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop. If it exists, hyper_ui_inspect it and stop unless its widget tree is empty; else create it with Epic's UMGToolSet CreateWidgetBlueprint (parent /Script/UMG.UserWidget). Keep its editor tab closed during plans.\n2. One hyper_ui_apply_plan (bDryRun false, fresh operationId) with widget.add, widget.set_property, widget.set_style and widget.set_slot: CanvasPanel root; Border `Box` with anchors bottom_fill and offsets 64,-268,64,220 (64 px side margins, 220 px tall, its bottom 48 px above the screen edge), brush_color #12100EE6, padding 20; inside it a HorizontalBox holding SizeBox `PortraitFrame` (width_override and height_override 160) with Image `Portrait` (image set by code), and a VerticalBox with fill 1 and left padding 20 holding TextBlock `SpeakerName` \"{{speaker}}\" 26 pt in #E8C170, TextBlock `Body` \"{{sample_line}}\" 20 pt with auto_wrap true, and TextBlock `ContinuePrompt` \"Continue\" 18 pt, h_align right.\n3. In the same or a second plan: animation.create `Open` (0.25 s) with animation.add_float_track Box RenderOpacity `0=0, 0.25=1` and an eased animation.add_transform_track on Box translation_y `0=40, 0.25=0`; animation.create `PromptPulse` (1 s) with a float track on ContinuePrompt RenderOpacity `0=1, 0.5=0.3, 1=1`. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n4. hyper_ui_inspect and hyper_ui_validate. Picture it: Epic's EditorAppToolset OpenEditorForAsset, then SlateInspectorToolset Screenshot.\nReport a PASS/FAIL table: Box anchors and margins, body text 18 pt or more and wrapping, 2 animations with keys inside their length, validate 0 errors and 0 warnings. Show the screenshot on its own line."
+   "prompt": "Build an RPG dialogue box `{{content_folder}}/UI/WBP_Dialogue`.\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop. If it exists, hyper_ui_inspect it and stop unless its widget tree is empty; else create it with Epic's UMGToolSet CreateWidgetBlueprint (parent /Script/UMG.UserWidget). Keep its editor tab closed during plans.\n2. One hyper_ui_apply_plan (bDryRun false, fresh operationId) with widget.add, widget.set_property, widget.set_style and widget.set_slot: CanvasPanel root; Border `Box` with anchors bottom_fill and offsets 64,-268,64,220 (64 px side margins, 220 px tall, its bottom 48 px above the screen edge), brush_color #12100EE6, padding 20; inside it a HorizontalBox holding SizeBox `PortraitFrame` (width_override and height_override 160) with Image `Portrait` (image set by code), and a VerticalBox with fill 1 and left padding 20 holding TextBlock `SpeakerName` \"{{speaker}}\" 26 pt in #E8C170, TextBlock `Body` \"{{sample_line}}\" 20 pt with auto_wrap true, and TextBlock `ContinuePrompt` \"Continue\" 18 pt, h_align right.\n3. In the same or a second plan: animation.create `Open` (0.25 s) with animation.add_float_track Box RenderOpacity `0=0, 0.25=1` and an eased animation.add_transform_track on Box translation_y `0=40, 0.25=0`; animation.create `PromptPulse` (1 s) with a float track on ContinuePrompt RenderOpacity `0=1, 0.5=0.3, 1=1`. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n4. hyper_ui_inspect and hyper_ui_validate. Picture it: Epic's EditorAppToolset OpenEditorForAsset, then SlateInspectorToolset59 Screenshot.\nReport a PASS/FAIL table: Box anchors and margins, body text 18 pt or more and wrapping, 2 animations with keys inside their length, validate 0 errors and 0 warnings. Show the screenshot on its own line."
   },
   {
    "id": "ui-umg.interaction-prompt",
@@ -309,7 +309,7 @@
      "default": "Open"
     }
    ],
-   "prompt": "Make the interaction prompt `{{content_folder}}/UI/WBP_InteractPrompt`: a key cap `{{key}}` beside the word \"{{action}}\".\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop. If it exists, hyper_ui_inspect it and stop unless its widget tree is empty; else create it with Epic's UMGToolSet CreateWidgetBlueprint (parent /Script/UMG.UserWidget). Keep its editor tab closed during plans.\n2. One hyper_ui_apply_plan (bDryRun false, fresh operationId) with widget.add, widget.set_property, widget.set_style, widget.set_slot, animation.create and animation.add_float_track: CanvasPanel root; HorizontalBox `Prompt` with anchors bottom, alignment 0.5,1, position 0,-160, auto_size true; Border `KeyCap` (brush_color #F2F2F2, padding 10,4) holding TextBlock `KeyLabel` \"{{key}}\" at 22 pt, color_and_opacity #111111; TextBlock `ActionLabel` \"{{action}}\" at 22 pt, color_and_opacity #FFFFFF, left padding 12, v_align center. Add animation `Show` (0.15 s) with a float track on Prompt RenderOpacity `0=0, 0.15=1`. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n3. hyper_ui_validate: 0 errors, 0 warnings. Picture it: Epic's EditorAppToolset OpenEditorForAsset, then SlateInspectorToolset Screenshot.\nReport a PASS/FAIL table: both texts as given at 22 pt, prompt anchored bottom centre 160 px up, Show is 0.15 s with 1 track, validate clean. Show the screenshot on its own line."
+   "prompt": "Make the interaction prompt `{{content_folder}}/UI/WBP_InteractPrompt`: a key cap `{{key}}` beside the word \"{{action}}\".\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop. If it exists, hyper_ui_inspect it and stop unless its widget tree is empty; else create it with Epic's UMGToolSet CreateWidgetBlueprint (parent /Script/UMG.UserWidget). Keep its editor tab closed during plans.\n2. One hyper_ui_apply_plan (bDryRun false, fresh operationId) with widget.add, widget.set_property, widget.set_style, widget.set_slot, animation.create and animation.add_float_track: CanvasPanel root; HorizontalBox `Prompt` with anchors bottom, alignment 0.5,1, position 0,-160, auto_size true; Border `KeyCap` (brush_color #F2F2F2, padding 10,4) holding TextBlock `KeyLabel` \"{{key}}\" at 22 pt, color_and_opacity #111111; TextBlock `ActionLabel` \"{{action}}\" at 22 pt, color_and_opacity #FFFFFF, left padding 12, v_align center. Add animation `Show` (0.15 s) with a float track on Prompt RenderOpacity `0=0, 0.15=1`. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n3. hyper_ui_validate: 0 errors, 0 warnings. Picture it: Epic's EditorAppToolset OpenEditorForAsset, then SlateInspectorToolset59 Screenshot.\nReport a PASS/FAIL table: both texts as given at 22 pt, prompt anchored bottom centre 160 px up, Show is 0.15 s with 1 track, validate clean. Show the screenshot on its own line."
   },
   {
    "id": "ui-umg.inventory-grid",
@@ -360,7 +360,7 @@
      "default": "96"
     }
    ],
-   "prompt": "Build an RPG inventory of {{rows}} x {{columns}} slots from one reusable slot widget, under {{content_folder}}/UI.\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop. Create `WBP_InventorySlot` and `WBP_Inventory` with Epic's UMGToolSet CreateWidgetBlueprint if missing; keep their editor tabs closed while plans run.\n2. The slot, in one hyper_ui_apply_plan (bDryRun false, fresh operationId) of widget.add, widget.set_property, widget.set_style and widget.set_slot: SizeBox root with width_override and height_override {{slot_size}}; Border `Frame` (brush_color #2A2420, padding 4) holding an Overlay with Image `Icon` (h_align and v_align fill) and TextBlock `Count` at 16 pt, h_align right, v_align bottom.\n3. The inventory: CanvasPanel root; VerticalBox `Window` (anchors center, alignment 0.5,0.5, auto_size true) holding TextBlock `Title` \"Inventory\" at 28 pt and UniformGridPanel `Grid`. Then the slots: widget.add with the slot's object path as the class, named `Slot_<row>_<column>`, parent Grid, plus widget.set_slot row and column. At 3 ops per slot, spread them over plans of at most 64 ops, each with a fresh operationId. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n4. hyper_ui_inspect WBP_Inventory: count Grid's children and their row and column pairs. hyper_ui_validate both assets. Picture it: Epic's EditorAppToolset OpenEditorForAsset, then SlateInspectorToolset Screenshot.\nReport a PASS/FAIL table: slot layout as asked, {{rows}} x {{columns}} children with every row and column pair exactly once, validate 0 errors on both. Show the screenshot on its own line."
+   "prompt": "Build an RPG inventory of {{rows}} x {{columns}} slots from one reusable slot widget, under {{content_folder}}/UI.\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop. Create `WBP_InventorySlot` and `WBP_Inventory` with Epic's UMGToolSet CreateWidgetBlueprint if missing; keep their editor tabs closed while plans run.\n2. The slot, in one hyper_ui_apply_plan (bDryRun false, fresh operationId) of widget.add, widget.set_property, widget.set_style and widget.set_slot: SizeBox root with width_override and height_override {{slot_size}}; Border `Frame` (brush_color #2A2420, padding 4) holding an Overlay with Image `Icon` (h_align and v_align fill) and TextBlock `Count` at 16 pt, h_align right, v_align bottom.\n3. The inventory: CanvasPanel root; VerticalBox `Window` (anchors center, alignment 0.5,0.5, auto_size true) holding TextBlock `Title` \"Inventory\" at 28 pt and UniformGridPanel `Grid`. Then the slots: widget.add with the slot's object path as the class, named `Slot_<row>_<column>`, parent Grid, plus widget.set_slot row and column. At 3 ops per slot, spread them over plans of at most 64 ops, each with a fresh operationId. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n4. hyper_ui_inspect WBP_Inventory: count Grid's children and their row and column pairs. hyper_ui_validate both assets. Picture it: Epic's EditorAppToolset OpenEditorForAsset, then SlateInspectorToolset59 Screenshot.\nReport a PASS/FAIL table: slot layout as asked, {{rows}} x {{columns}} children with every row and column pair exactly once, validate 0 errors on both. Show the screenshot on its own line."
   },
   {
    "id": "ui-umg.boss-health-bar",
@@ -409,7 +409,7 @@
      "default": "900"
     }
    ],
-   "prompt": "Add a boss health bar `{{content_folder}}/UI/WBP_BossBar` for {{boss_name}}.\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop. If it exists, hyper_ui_inspect it and stop unless its widget tree is empty; else create it with Epic's UMGToolSet CreateWidgetBlueprint (parent /Script/UMG.UserWidget). Keep its editor tab closed during plans.\n2. One hyper_ui_apply_plan (bDryRun false, fresh operationId) with widget.add, widget.set_property, widget.set_style, widget.set_slot, animation.create, animation.add_float_track and animation.add_transform_track: CanvasPanel root; VerticalBox `BossFrame` with anchors top, alignment 0.5,0, position 0,54, auto_size true; TextBlock `BossName` \"{{boss_name}}\" at 28 pt, #F2E6C8, justification center; SizeBox `HealthSize` (width_override {{bar_width}}, height_override 24) with ProgressBar `HealthBar` (percent 1, fill_color_and_opacity #C02828); SizeBox `StaggerSize` (width_override {{bar_width}}, height_override 8, top padding 4) with ProgressBar `StaggerBar` (percent 0, fill_color_and_opacity #F0C060). Animation `Intro` (0.4 s): BossFrame RenderOpacity `0=0, 0.4=1` and eased scale_x `0=0.6, 0.4=1`. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n3. hyper_ui_inspect and hyper_ui_validate: 0 errors (no progress_percent_out_of_range), 0 warnings. Picture it: Epic's EditorAppToolset OpenEditorForAsset, then SlateInspectorToolset Screenshot.\nReport a PASS/FAIL table: frame anchored top centre 54 px down, health bar {{bar_width}} x 24 at percent 1, stagger bar {{bar_width}} x 8 at percent 0, Intro 0.4 s with 2 tracks, validate clean. Show the screenshot on its own line and name the bars a programmer will drive."
+   "prompt": "Add a boss health bar `{{content_folder}}/UI/WBP_BossBar` for {{boss_name}}.\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop. If it exists, hyper_ui_inspect it and stop unless its widget tree is empty; else create it with Epic's UMGToolSet CreateWidgetBlueprint (parent /Script/UMG.UserWidget). Keep its editor tab closed during plans.\n2. One hyper_ui_apply_plan (bDryRun false, fresh operationId) with widget.add, widget.set_property, widget.set_style, widget.set_slot, animation.create, animation.add_float_track and animation.add_transform_track: CanvasPanel root; VerticalBox `BossFrame` with anchors top, alignment 0.5,0, position 0,54, auto_size true; TextBlock `BossName` \"{{boss_name}}\" at 28 pt, #F2E6C8, justification center; SizeBox `HealthSize` (width_override {{bar_width}}, height_override 24) with ProgressBar `HealthBar` (percent 1, fill_color_and_opacity #C02828); SizeBox `StaggerSize` (width_override {{bar_width}}, height_override 8, top padding 4) with ProgressBar `StaggerBar` (percent 0, fill_color_and_opacity #F0C060). Animation `Intro` (0.4 s): BossFrame RenderOpacity `0=0, 0.4=1` and eased scale_x `0=0.6, 0.4=1`. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n3. hyper_ui_inspect and hyper_ui_validate: 0 errors (no progress_percent_out_of_range), 0 warnings. Picture it: Epic's EditorAppToolset OpenEditorForAsset, then SlateInspectorToolset59 Screenshot.\nReport a PASS/FAIL table: frame anchored top centre 54 px down, health bar {{bar_width}} x 24 at percent 1, stagger bar {{bar_width}} x 8 at percent 0, Intro 0.4 s with 2 tracks, validate clean. Show the screenshot on its own line and name the bars a programmer will drive."
   },
   {
    "id": "ui-umg.match-ui-mockup",
@@ -658,7 +658,7 @@
      "default": "VM_PlayerStats"
     }
    ],
-   "prompt": "Drive a player stats panel from an MVVM view model under {{content_folder}}/UI.\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop.\n2. Epic's MVVMToolset: CreateViewModel `{{viewmodel}}` (parentClass /Script/ModelViewViewModel.MVVMViewModelBase, packagePath {{content_folder}}/UI/ViewModels), then AddViewModelProperty for `PlayerName` (string, \"Player\"), `HealthPercent` (float, 1) and `Level` (int, 1).\n3. Create `WBP_PlayerStats` with Epic's UMGToolSet CreateWidgetBlueprint if missing, editor tab closed, then one hyper_ui_apply_plan (bDryRun false, fresh operationId) with widget.add, widget.set_property, widget.set_style and widget.set_slot: VerticalBox root; TextBlock `NameText` at 22 pt; SizeBox (width_override 320, height_override 18) with ProgressBar `HealthBar` (percent 1, fill_color_and_opacity #D94040); TextBlock `LevelText` at 18 pt. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n4. MVVMToolset AddViewModelToWidget, then CreateViewBinding for PlayerName to NameText's Text, HealthPercent to HealthBar's Percent, and Level to LevelText's Text, with a conversion from ListConversionFunctions where the types differ. UMGToolSet CompileWidgetBlueprint.\n5. hyper_ui_inspect with bIncludeMVVM true and hyper_ui_validate with bCheckMVVM true; MVVMToolset ListWidgetViewBindings.\nReport a PASS/FAIL table: view model with 3 properties, 3 bindings with the right source and destination, compile clean, validate 0 errors (no mvvm_binding_endpoint_invalid or mvvm_view_setting_missing). Note that game code sets the view model's values."
+   "prompt": "Drive a player stats panel from an MVVM view model under {{content_folder}}/UI.\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop.\n2. Epic's MVVMToolset59: CreateViewModel `{{viewmodel}}` (parentClass /Script/ModelViewViewModel.MVVMViewModelBase, packagePath {{content_folder}}/UI/ViewModels), then AddViewModelProperty for `PlayerName` (string, \"Player\"), `HealthPercent` (float, 1) and `Level` (int, 1).\n3. Create `WBP_PlayerStats` with Epic's UMGToolSet CreateWidgetBlueprint if missing, editor tab closed, then one hyper_ui_apply_plan (bDryRun false, fresh operationId) with widget.add, widget.set_property, widget.set_style and widget.set_slot: VerticalBox root; TextBlock `NameText` at 22 pt; SizeBox (width_override 320, height_override 18) with ProgressBar `HealthBar` (percent 1, fill_color_and_opacity #D94040); TextBlock `LevelText` at 18 pt. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n4. MVVMToolset59 AddViewModelToWidget, then CreateViewBinding for PlayerName to NameText's Text, HealthPercent to HealthBar's Percent, and Level to LevelText's Text, with a conversion from ListConversionFunctions where the types differ. UMGToolSet CompileWidgetBlueprint.\n5. hyper_ui_inspect with bIncludeMVVM true and hyper_ui_validate with bCheckMVVM true; MVVMToolset59 ListWidgetViewBindings.\nReport a PASS/FAIL table: view model with 3 properties, 3 bindings with the right source and destination, compile clean, validate 0 errors (no mvvm_binding_endpoint_invalid or mvvm_view_setting_missing). Note that game code sets the view model's values."
   },
   {
    "id": "ui-umg.audit-legacy-bindings",
@@ -739,7 +739,7 @@
      "default": "Reach the Sunken Archive"
     }
    ],
-   "prompt": "Build a quest-update toast `{{content_folder}}/UI/WBP_QuestToast` that slides in from the right and back out.\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop. If it exists, hyper_ui_inspect it and stop unless its widget tree is empty; else create it with Epic's UMGToolSet CreateWidgetBlueprint (parent /Script/UMG.UserWidget). Keep its editor tab closed during plans.\n2. One hyper_ui_apply_plan (bDryRun false, fresh operationId) with widget.add, widget.set_property, widget.set_style, widget.set_slot, animation.create, animation.add_float_track and animation.add_transform_track: CanvasPanel root; Border `Toast` with anchors top_right, alignment 1,0, position -96,140, auto_size true, brush_color #141414D9, padding 16; inside it a HorizontalBox with a SizeBox (48 x 48) holding Image `Icon`, and a VerticalBox (left padding 12) holding TextBlock `Header` \"{{header}}\" at 18 pt in #E8C170 and TextBlock `Detail` \"{{detail}}\" at 20 pt. Animations on Toast: `SlideIn` (0.25 s) with eased translation_x `0=420, 0.25=0` and RenderOpacity `0=0, 0.25=1`; `SlideOut` (0.2 s) with translation_x `0=0, 0.2=420` and RenderOpacity `0=1, 0.2=0`. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n3. hyper_ui_inspect: both animations with their tracks and keys. hyper_ui_validate: 0 errors, no animation_range_invalid.\n4. Picture it: Epic's EditorAppToolset OpenEditorForAsset, then SlateInspectorToolset Screenshot.\nReport a PASS/FAIL table: anchored top right inside a 5% margin, both texts as given, SlideIn 0.25 s and SlideOut 0.2 s with 2 tracks each, every key inside its animation, validate clean. Show the screenshot on its own line."
+   "prompt": "Build a quest-update toast `{{content_folder}}/UI/WBP_QuestToast` that slides in from the right and back out.\n1. If hyper_ui_validate is not available, the UI pack is off: say so and stop. If it exists, hyper_ui_inspect it and stop unless its widget tree is empty; else create it with Epic's UMGToolSet CreateWidgetBlueprint (parent /Script/UMG.UserWidget). Keep its editor tab closed during plans.\n2. One hyper_ui_apply_plan (bDryRun false, fresh operationId) with widget.add, widget.set_property, widget.set_style, widget.set_slot, animation.create, animation.add_float_track and animation.add_transform_track: CanvasPanel root; Border `Toast` with anchors top_right, alignment 1,0, position -96,140, auto_size true, brush_color #141414D9, padding 16; inside it a HorizontalBox with a SizeBox (48 x 48) holding Image `Icon`, and a VerticalBox (left padding 12) holding TextBlock `Header` \"{{header}}\" at 18 pt in #E8C170 and TextBlock `Detail` \"{{detail}}\" at 20 pt. Animations on Toast: `SlideIn` (0.25 s) with eased translation_x `0=420, 0.25=0` and RenderOpacity `0=0, 0.25=1`; `SlideOut` (0.2 s) with translation_x `0=0, 0.2=420` and RenderOpacity `0=1, 0.2=0`. Follow any reply still queued, running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n3. hyper_ui_inspect: both animations with their tracks and keys. hyper_ui_validate: 0 errors, no animation_range_invalid.\n4. Picture it: Epic's EditorAppToolset OpenEditorForAsset, then SlateInspectorToolset59 Screenshot.\nReport a PASS/FAIL table: anchored top right inside a 5% margin, both texts as given, SlideIn 0.25 s and SlideOut 0.2 s with 2 tracks each, every key inside its animation, validate clean. Show the screenshot on its own line."
   },
   {
    "id": "ui-umg.wire-menu-buttons",
@@ -953,7 +953,146 @@
      "default": "WBP_HUD"
     }
    ],
-   "prompt": "Check `{{content_folder}}/UI/{{hud}}` while {{level}} plays, with its live values.\n1. If Play In Editor is not running, start it with hyper_playtest_run and a short Wait step, and keep it running.\n2. hyper_ui_render_review with targetPath the HUD's object path, bFromPlay true and resolutions [\"1920x1080\", \"1280x720\"]. If it answers not_found, the HUD is not on screen: say what shows it and stop.\n3. Open the PNGs. List the errors and warnings with widget, rect and fix; note text that only overflows with live values (long names, big numbers).\nReport PASS or FAIL per resolution, then the PNG paths on their own lines."
+   "prompt": "Check `{{content_folder}}/UI/{{hud}}` while {{level}} plays, with its live values. If hyper_ui_render_review is not available, the UI pack is off: say so and stop.\n1. If Play In Editor is not running, start it with hyper_playtest_run and a short Wait step, and keep it running.\n2. hyper_ui_render_review with targetPath the HUD's object path, bFromPlay true and resolutions [\"1920x1080\", \"1280x720\"]. If it answers not_found, the HUD is not on screen: say what shows it and stop.\n3. Open the PNGs. List the errors and warnings with widget, rect and fix; note text that only overflows with live values (long names, big numbers).\nReport PASS or FAIL per resolution, then the PNG paths on their own lines."
+  },
+  {
+   "id": "ui-umg.tidy-widget-animations",
+   "title": "Tidy a widget's animations: names, lengths and bindings",
+   "summary": "List a Widget Blueprint's animations with Epic's WidgetAnimationToolset, rename them to a convention, fit their lengths and drop unbound ones.",
+   "packs": [
+    "ui_slate_mvvm"
+   ],
+   "skills": [
+    "unreal-umg"
+   ],
+   "agent": "ui-designer",
+   "tools": [
+    "hyper_ui_inspect",
+    "hyper_ui_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "widget animation",
+    "umg",
+    "animation",
+    "rename",
+    "cleanup",
+    "bindings",
+    "epic toolset"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "WidgetBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Anim_"
+    }
+   ],
+   "prompt": "Tidy the animations of {{selected_asset}}: every name starts with `{{prefix}}`, each length covers its keys and no more, and an animation that binds no widget is removed after I agree. Change nothing else. Use Epic's `WidgetAnimationToolset.WidgetAnimationToolset`; if it is not listed, say so and stop. If hyper_ui_validate is not available, the UI pack is off: say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. hyper_ui_inspect {{selected_asset}} for its animations, their tracks and keys (the last key time of each). Keep its editor tab closed.\n2. WidgetAnimationToolset ListWidgetAnimations, and GetWidgetAnimationBindings for each.\n3. RenameWidgetAnimation each one whose name lacks `{{prefix}}` (keeping the rest of its name), and SetWidgetAnimationDisplayLabel to match. Search the project's Blueprints for the old names first with Epic's BlueprintTools; skip a rename that a graph calls by name, and say so.\n4. SetWidgetAnimationLength on each whose length differs from its last key by more than 0.05 s, to that key time.\n5. List the animations with no bindings and ask before RemoveWidgetAnimation on any.\n6. hyper_ui_inspect again and hyper_ui_validate: 0 errors, no animation_range_invalid.\nReply with a table per animation: old and new name, old and new length, binding count, and kept, renamed or removed; then the validate result."
+  },
+  {
+   "id": "ui-umg.lint-widget-blueprints",
+   "title": "Lint the Widget Blueprints in a folder",
+   "summary": "Static analysis with Epic's WidgetStaticAnalysisToolset: tree depth, property overrides and connections per widget, flagged against simple rules.",
+   "packs": [
+    "ui_slate_mvvm"
+   ],
+   "skills": [
+    "unreal-umg"
+   ],
+   "agent": "ui-designer",
+   "tools": [
+    "hyper_project_search",
+    "hyper_ui_validate",
+    "hyper_ui_inspect"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "lint",
+    "umg",
+    "widget",
+    "static analysis",
+    "depth",
+    "overrides",
+    "audit",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "max_depth",
+     "label": "Deepest tree allowed",
+     "default": "12"
+    },
+    {
+     "name": "limit",
+     "label": "Most widgets",
+     "default": "30"
+    }
+   ],
+   "prompt": "Lint the Widget Blueprints under {{content_folder}} and change nothing. Use Epic's `WidgetStaticAnalysisToolset.WidgetStaticAnalysisToolset`; if it is not listed (it needs the ModelViewViewModel plugin), use the hyper UI tools alone and say so. If hyper_ui_validate is not available, the UI pack is off: say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. hyper_project_search with kinds [asset] for Widget Blueprints under {{content_folder}}, at most {{limit}}.\n2. For each: WidgetStaticAnalysisToolset GetWidgetTreeDepth; TraceWidgetPropertyOverrides (propertyNameFilter \"\", widgetNameFilter \"\"); GetWidgetConnectionMap (scopeFilter \"\"). Then hyper_ui_validate on it.\n3. For the three worst, DescribeWidget (no start widget, maxDepth 4, bSkipDefaultValues true) and hyper_ui_inspect for the detail behind the flags.\n4. Flag: a tree deeper than {{max_depth}}; the same property overridden on many children where a style or parent would do; a hard-coded colour or font size repeated across widgets; a widget nothing binds or calls; per-frame property bindings; anything hyper_ui_validate reports.\nReply with a table, worst first: widget, depth, overrides, connections, validate errors and warnings, PASS/WARN/FAIL with the rule broken. Then the three fixes that would help most, as proposals."
+  },
+  {
+   "id": "ui-umg.mvvm-events-conditions",
+   "title": "Wire MVVM bindings, a button event and a view condition",
+   "summary": "With Epic's MVVMToolset59, bind view model fields one way, send a button's click to the view model, and show a warning when health is low.",
+   "packs": [
+    "ui_slate_mvvm"
+   ],
+   "skills": [
+    "unreal-umg"
+   ],
+   "agent": "ui-designer",
+   "tools": [
+    "hyper_ui_inspect",
+    "hyper_ui_validate"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "mvvm",
+    "view model",
+    "binding",
+    "event",
+    "condition",
+    "button",
+    "low health",
+    "epic toolset"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "WidgetBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "viewmodel",
+     "label": "View model class",
+     "default": "VM_PlayerStats"
+    },
+    {
+     "name": "button",
+     "label": "Button widget",
+     "default": "HealButton"
+    },
+    {
+     "name": "warning",
+     "label": "Warning widget",
+     "default": "LowHealthText"
+    },
+    {
+     "name": "threshold",
+     "label": "Low health below",
+     "default": "0.25"
+    }
+   ],
+   "prompt": "In {{selected_asset}}, drive the UI from the view model `{{viewmodel}}`: one-way bindings for its fields, `{{button}}`'s click calling the view model, and `{{warning}}` shown only while HealthPercent is under {{threshold}}. Change only this widget's MVVM setup. Use Epic's `MVVMToolset59.MVVMToolset59`; if it is not listed, say so and stop. If hyper_ui_validate is not available, the UI pack is off: say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. hyper_ui_inspect with bIncludeMVVM true: the widgets, `{{button}}` and `{{warning}}` among them. MVVMToolset59 ListWidgetViewModels; AddViewModelToWidget if `{{viewmodel}}` is missing. ListWidgetViewBindings for what exists.\n2. ListClassBindableFields on the view model, and ListBindableWidgetProperties on each target widget. CreateViewBinding for each field to its widget property, with a conversion from ListBindingConversionOptions where the types differ; SetBindingMode OneWayToDestination on each.\n3. ListWidgetViewEvents; CreateViewEventBinding from `{{button}}`'s OnClicked to the view model's function for it (from ListClassBindableFields); SetEventBindingArgumentLiteral for any argument it needs.\n4. AddViewCondition from HealthPercent to `{{warning}}`'s Visibility, then SetViewConditionOperation LessThan with value {{threshold}}.\n5. Compile with Epic's UMGToolSet CompileWidgetBlueprint. hyper_ui_validate with bCheckMVVM true; ListWidgetViewBindings, ListWidgetViewEventBindings and ListViewConditions to read it all back.\nReply with a PASS/FAIL table: each binding with its source, destination and mode; the click event; the condition and its threshold; compile clean; validate 0 errors. The 5.9 design-time preview tools refuse on this engine: do not use them."
   }
  ]
 }

@@ -97,5 +97,9 @@
  "gameplay-systems.game-feature-drift.ph.feature_plugin.label": "Game Feature 插件",
  "gameplay-systems.game-feature-drift.ph.entity_config.label": "Mass 实体配置",
  "gameplay-systems.game-feature-drift.ph.schema_class.label": "世界条件 Schema 类",
- "gameplay-systems.game-feature-drift.ph.milestone.label": "里程碑"
+ "gameplay-systems.game-feature-drift.ph.milestone.label": "里程碑",
+ "gameplay-systems.toggle-game-feature.title": "安全地开启和关闭 Game Feature 插件",
+ "gameplay-systems.toggle-game-feature.summary": "用 Epic 的 GameFeaturesToolset59 读取 Game Feature 状态并激活，运行验证其可用，然后恢复原状态。",
+ "gameplay-systems.toggle-game-feature.ph.feature_plugin.label": "Game Feature 插件",
+ "gameplay-systems.toggle-game-feature.ph.seconds.label": "运行秒数"
 }

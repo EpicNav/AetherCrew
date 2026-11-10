@@ -44,5 +44,10 @@
  "data-config-l10n.data-registry-over-tables.ph.folder.label": "更多表所在文件夹",
  "data-config-l10n.data-registry-over-tables.ph.folder.hint": "其中匹配的表也会加入的文件夹（元数据源）；留空表示没有。",
  "data-config-l10n.audit-data-registry.title": "检查数据注册表的数据源和 ID",
- "data-config-l10n.audit-data-registry.summary": "读取所选数据注册表的数据源、它们解析到的表、被其他数据源遮蔽的条目，以及游戏是否会加载它。不做任何更改。"
+ "data-config-l10n.audit-data-registry.summary": "读取所选数据注册表的数据源、它们解析到的表、被其他数据源遮蔽的条目，以及游戏是否会加载它。不做任何更改。",
+ "data-config-l10n.tag-branch-own-source.title": "把一个 Gameplay Tag 分支移到独立的标签源",
+ "data-config-l10n.tag-branch-own-source.summary": "用 Epic 的 GameplayTagsToolset59 为一个标签分支建立独立的标签 ini，移入其标签并新增标签，证明引用者没有丢失。",
+ "data-config-l10n.tag-branch-own-source.ph.branch.label": "标签分支",
+ "data-config-l10n.tag-branch-own-source.ph.source.label": "新标签源（ini 名称）",
+ "data-config-l10n.tag-branch-own-source.ph.new_tags.label": "要新增的标签"
 }
