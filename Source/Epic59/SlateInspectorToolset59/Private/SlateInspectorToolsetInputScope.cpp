@@ -16,12 +16,30 @@
 namespace UE::SlateInspectorToolset::Private
 {
 
-// UE 5.8: 5.9 added FSlateApplication::IsUsingPlatformCursorForCursorUser; the same test from what 5.8 exposes.
+// UE 5.8: 5.9 added FSlateApplication::IsUsingPlatformCursorForCursorUser, which compares the cursor user's cursor
+// with the platform cursor. 5.8 has the same test inside UsePlatformCursorForCursorUser, but FSlateUser::GetCursor is
+// protected (FSlateApplication is its friend), so the member is reached through the standard explicit-instantiation
+// access idiom rather than an engine edit.
+struct FSlateUserGetCursorTag
+{
+	using Type = TSharedPtr<ICursor> (FSlateUser::*)() const;
+	friend Type GetMember(FSlateUserGetCursorTag);
+};
+
+template <typename Tag, typename Tag::Type Member>
+struct TSlateUserMemberAccess
+{
+	friend typename Tag::Type GetMember(Tag) { return Member; }
+};
+
+template struct TSlateUserMemberAccess<FSlateUserGetCursorTag, &FSlateUser::GetCursor>;
+
 static bool IsUsingPlatformCursorForCursorUser()
 {
 	const TSharedPtr<FSlateUser> CursorUser = FSlateApplication::Get().GetCursorUser();
 	const TSharedPtr<GenericApplication> PlatformApplication = FSlateApplication::Get().GetPlatformApplication();
-	return CursorUser.IsValid() && PlatformApplication.IsValid() && CursorUser->GetCursor() == PlatformApplication->Cursor;
+	return CursorUser.IsValid() && PlatformApplication.IsValid()
+		&& (CursorUser.Get()->*GetMember(FSlateUserGetCursorTag()))() == PlatformApplication->Cursor;
 }
 
 #if PLATFORM_MAC
