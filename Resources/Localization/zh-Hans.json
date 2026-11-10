@@ -18950,6 +18950,30 @@
    "text": "HyperAI：编辑世界分区"
   },
   {
+   "namespace": "MVVMToolset",
+   "key": "AddViewCondition",
+   "source": "MVVM Add Condition",
+   "text": "MVVM 添加条件"
+  },
+  {
+   "namespace": "MVVMToolset",
+   "key": "CreateViewBinding",
+   "source": "MVVM Create Binding",
+   "text": "MVVM 创建绑定"
+  },
+  {
+   "namespace": "MVVMToolset",
+   "key": "LiteralArgumentsNeed59",
+   "source": "Setting a literal argument needs UE 5.9's MVVM editor; this UE 5.8 port cannot.",
+   "text": "设置字面量参数需要 UE 5.9 的 MVVM 编辑器；此 UE 5.8 移植版本无法完成。"
+  },
+  {
+   "namespace": "MVVMToolset",
+   "key": "SetViewConditionOperation",
+   "source": "MVVM Set Condition Operation",
+   "text": "MVVM 设置条件操作"
+  },
+  {
    "namespace": "SHyperAIStudioAgentsPanel",
    "key": "AddTeamTitle",
    "source": "Gameplay team",
@@ -25986,6 +26010,114 @@
    "key": "ViewPrerequisitesTooltip",
    "source": "Open the detailed prerequisite checklist.",
    "text": "打开详细的前置组件清单。"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "AddInputParam",
+   "source": "Add TextureGraph Input Parameter",
+   "text": "添加 TextureGraph 输入参数"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "AddNode",
+   "source": "Add TextureGraph Node",
+   "text": "添加 TextureGraph 节点"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "AddOutput",
+   "source": "Add TextureGraph Output",
+   "text": "添加 TextureGraph 输出"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "ConnectPins",
+   "source": "Connect TextureGraph Pins",
+   "text": "连接 TextureGraph 引脚"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "DisconnectPins",
+   "source": "Disconnect TextureGraph Pins",
+   "text": "断开 TextureGraph 引脚"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "RemoveNode",
+   "source": "Remove TextureGraph Node",
+   "text": "移除 TextureGraph 节点"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "RemoveParamNode",
+   "source": "Remove TextureGraph Node",
+   "text": "移除 TextureGraph 节点"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "SetNodeAlias",
+   "source": "Rename TextureGraph Node",
+   "text": "重命名 TextureGraph 节点"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "SetOutputSettings",
+   "source": "Configure TextureGraph Output",
+   "text": "配置 TextureGraph 输出"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "SetPinValue",
+   "source": "Set TextureGraph Pin Value",
+   "text": "设置 TextureGraph 引脚值"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "SetPinValueVariant",
+   "source": "Set TextureGraph Variant Pin Value",
+   "text": "设置 TextureGraph 变体引脚值"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "AddWidgetToAnimation",
+   "source": "Add Widget to Animation",
+   "text": "将控件添加到动画"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "CreateWidgetAnimation",
+   "source": "Create Widget Animation",
+   "text": "创建控件动画"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "RemoveWidgetAnimation",
+   "source": "Remove Widget Animation",
+   "text": "移除控件动画"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "RemoveWidgetBinding",
+   "source": "Remove Widget Binding",
+   "text": "移除控件绑定"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "RenameWidgetAnimation",
+   "source": "Rename Widget Animation",
+   "text": "重命名控件动画"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "SetAnimDisplayLabel",
+   "source": "Set Widget Animation Display Label",
+   "text": "设置控件动画显示标签"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "SetAnimLength",
+   "source": "Set Widget Animation Length",
+   "text": "设置控件动画长度"
   }
  ]
 }
