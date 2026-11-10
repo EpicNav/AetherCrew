@@ -504,20 +504,20 @@
     {
      "name": "branch",
      "label": "Tag branch",
-     "default": "Ability"
+     "default": "Status"
     },
     {
      "name": "source",
      "label": "New tag source (ini name)",
-     "default": "AbilityTags.ini"
+     "default": "StatusTags.ini"
     },
     {
      "name": "new_tags",
      "label": "Tags to add",
-     "default": "Ability.Movement.Dash, Ability.Movement.Slide"
+     "default": "Status.Poisoned, Status.Burning"
     }
    ],
-   "prompt": "Put every tag under `{{branch}}` into its own tag source `{{source}}`, then add {{new_tags}} there. Change no other tags. Use Epic's `GameplayTagsToolset59.GameplayTagsToolset59`; if it is not listed, say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. hyper_memory_recall \"gameplay tag naming\" for the project's tag rules; check each new tag against them.\n2. ListTagSources and ListTagSourceRoots; ListTags with parentTag {{branch}}; GetTagInfo on each (its source) and FindReferencersByTag (count only).\n3. If `{{source}}` does not exist, AddTagSource with sourceName {{source}} and tagRoot the first root ListTagSourceRoots gives.\n4. MoveTags with the branch's tags that are not already there and targetTagSource {{source}}; read the result's moved and skipped lists. Tags defined in C++ or a DataTable cannot move: name them.\n5. AddTag for each of {{new_tags}} with a one-line devComment and tagSource {{source}}.\n6. ListTagsInSource {{source}}; GetTagInfo and FindReferencersByTag again for each moved tag. hyper_project_search (kinds cpp_symbol) for the branch name, for native tags.\nReply with a PASS/FAIL table, one row per tag: old source, new source, referencers before and after (unchanged), or why it stayed. Then the new tags with their sources."
+   "prompt": "Put every gameplay tag under `{{branch}}` into its own tag source `{{source}}` (a tag config ini in the project's Config/Tags), then add {{new_tags}} there. Change no other tags. Use Epic's `GameplayTagsToolset59.GameplayTagsToolset59`; if it is not listed, say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. hyper_memory_recall \"gameplay tag naming\" for the project's tag rules; check each new tag against them.\n2. ListTagSources and ListTagSourceRoots; ListTags with parentTag {{branch}}; GetTagInfo on each (its source) and FindReferencersByTag (count only).\n3. If `{{source}}` does not exist, AddTagSource with sourceName {{source}} and tagRoot the first root ListTagSourceRoots gives.\n4. MoveTags with the branch's tags that are not already there and targetTagSource {{source}}; read the result's moved and skipped lists. Native tags cannot move: name them.\n5. AddTag for each of {{new_tags}} with a one-line devComment and tagSource {{source}}.\n6. ListTagsInSource {{source}}; GetTagInfo and FindReferencersByTag again for each moved tag. hyper_project_search (kinds cpp_symbol) for the branch name, for native tags.\nReply with a PASS/FAIL table, one row per tag: old source, new source, referencers before and after (unchanged), or why it stayed. Then the new tags with their sources."
   }
  ]
 }
