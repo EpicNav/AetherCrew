@@ -10,9 +10,49 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "HAL/FileManager.h" // UE 5.8: DetectCsvFormat58
+#include "Serialization/Archive.h" // UE 5.8: DetectCsvFormat58
 
 namespace UE::CsvProfilerToolset::Private
 {
+	// UE 5.8: 5.9 CsvUtils' ECsvFormat and DetectCsvFormat (CSVProfilerUtils.cpp), copied: 5.8's CsvUtils lacks them.
+	enum class ECsvFormat58 : uint8
+	{
+		Csv,
+		CsvBin,
+		Unknown
+	};
+
+	ECsvFormat58 DetectCsvFormat58(const FString& FilePath)
+	{
+		if (TUniquePtr<FArchive> Reader(IFileManager::Get().CreateFileReader(*FilePath)); Reader.IsValid())
+		{
+			constexpr uint8 Magic[] = { 0x06, 'C', 'S', 'V', 'B', 'I', 'N' };
+			if (Reader->TotalSize() >= static_cast<int64>(sizeof(Magic)))
+			{
+				uint8 Header[UE_ARRAY_COUNT(Magic)] = {};
+				Reader->Serialize(Header, sizeof(Header));
+				if (Reader->IsError())
+				{
+					return ECsvFormat58::Unknown;
+				}
+				if (FMemory::Memcmp(Header, Magic, sizeof(Magic)) == 0)
+				{
+					return ECsvFormat58::CsvBin;
+				}
+			}
+		}
+		if (FilePath.EndsWith(TEXT(".csv.bin"), ESearchCase::IgnoreCase))
+		{
+			return ECsvFormat58::CsvBin;
+		}
+		if (FilePath.EndsWith(TEXT(".csv"), ESearchCase::IgnoreCase))
+		{
+			return ECsvFormat58::Csv;
+		}
+		return ECsvFormat58::Unknown;
+	}
+
 	using namespace UE::CsvProfilerToolset;
 
 	// Resolves a virtual content path to a filesystem path. '/Saved/' has no real package mount, so it
@@ -101,15 +141,15 @@ namespace UE::CsvProfilerToolset::Private
 			return false;
 		}
 
-		const CsvUtils::ECsvFormat Format = CsvUtils::DetectCsvFormat(FullPath);
-		if (Format == CsvUtils::ECsvFormat::Unknown)
+		const ECsvFormat58 Format = DetectCsvFormat58(FullPath); // UE 5.8: 5.8's CsvUtils has no DetectCsvFormat
+		if (Format == ECsvFormat58::Unknown)
 		{
 			OutError = FString::Printf(TEXT("Could not determine the format of '%s'; expected a readable .csv or .csv.bin capture."), *Path);
 			return false;
 		}
 
 		TArray<FText> ReadErrors;
-		const bool bRead = (Format == CsvUtils::ECsvFormat::CsvBin)
+		const bool bRead = (Format == ECsvFormat58::CsvBin)
 			? CsvUtils::ReadFromCsvBin(OutCapture, *FullPath, &ReadErrors)
 			: CsvUtils::ReadFromCsv(OutCapture, *FullPath, &ReadErrors);
 

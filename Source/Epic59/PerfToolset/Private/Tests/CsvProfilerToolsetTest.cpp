@@ -1293,6 +1293,7 @@ void FCsvProfilerToolsetSpec::Define()
 		});
 	});
 
+#if 0 // UE 5.8: these test 5.9 CsvUtils' v4/v5 .csv.bin reader (per-event timestamps); 5.8's reader stops at v3 and has no FCsvProfilerEvent::Timestamp
 	Describe("ReadFromCsvBin", [this]()
 	{
 		It(TEXT("reads a v4 capture and populates each event timestamp with the written value"), [this]()
@@ -1439,6 +1440,7 @@ void FCsvProfilerToolsetSpec::Define()
 			}
 		});
 	});
+#endif // UE 5.8
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

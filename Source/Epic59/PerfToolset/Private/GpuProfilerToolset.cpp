@@ -22,6 +22,10 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(GpuProfilerToolset)
 
+// UE 5.8: 5.8's RHI has no UE::RHI::GPUProfiler::SetProfileCaptureCallback or ProfileNextFrame, so a frame
+// cannot be captured as JSON; TriggerGPUProfile reports that instead of capturing.
+#define UE58_GPU_PROFILE_CAPTURE 0
+
 TSharedRef<FJsonObject> UGpuProfileResult::MakeJsonSchema() const
 {
 	TSharedRef<FJsonObject> NameProp = MakeShared<FJsonObject>();
@@ -224,7 +228,7 @@ namespace
 		}
 	};
 
-#if WITH_PROFILEGPU
+#if WITH_PROFILEGPU && UE58_GPU_PROFILE_CAPTURE // UE 5.8: see UE58_GPU_PROFILE_CAPTURE
 	// Number of rendered frames to wait before arming the next-frame capture.
 	// An agent driving this tool can stall the game thread around the call
 	// (LLM response, blocking IO in the assistant UI, etc.); deferring past
@@ -319,7 +323,10 @@ namespace
 
 UGpuProfileResult* UGpuProfilerToolset::TriggerGPUProfile(float MinInclusiveMs)
 {
-#if WITH_PROFILEGPU
+#if !UE58_GPU_PROFILE_CAPTURE // UE 5.8: no JSON frame capture in 5.8's RHI
+	return UE::AsyncFunctionResult::MakeErrorResult<UGpuProfileResult>(
+		TEXT("TriggerGPUProfile needs the GPU profiler capture API of UE 5.9; on UE 5.8 run the ProfileGPU console command and read the log instead."));
+#elif WITH_PROFILEGPU
 	UGpuProfileResult* Result = NewObject<UGpuProfileResult>();
 	TStrongObjectPtr<UGpuProfileResult> StrongResult(Result);
 
