@@ -41,20 +41,25 @@ or renamed parts of that and added more; the three compat modules fill the gap. 
 | `ToolsetRegistryEditor` | 5.9-only `ToolsetRegistry/*.h`: `ToolsetDefinition59.h` (the 5.9 additions to `ToolsetDefinition.h`: `UE::ToolsetRegistry::IsFunctionAIRuntimeCallable`, `GetFunctionAccessMode`, `IsFunctionMarkedAsTool`, `TakesInstanceArgument`), `ToolAccessMode.h`, `RaiseScriptError.h`, `ToolCallContext.h`, `ToolsetPermissionProvider.h`, `ToolCallAsyncResultImageArray.h`, `ToolCallAsyncResultImages.h`, and 5.9 UnrealEd's `FTestAssetSandbox`
 (`Tests/TestAssetSandbox.h`, plus the `ToolsetRegistry/Tests/TestAssetSandbox.h` forwarder). Registers an `IToolsetRegistrar` that forwards `FToolsetRegistration` to 5.8's `UToolsetRegistry`. Publicly re-exports `ToolsetRegistry`, `AsyncFunctionResult` and `ToolsetCore`. | 5.9's `ToolsetLibrary.h` and `ToolsetRegistrySubsystem.h` sit at the same include paths in 5.8's `ToolsetRegistry`, so includes resolve to the 5.8 versions. The registrar accepts `UToolsetDefinition` classes only. |
 
-Not in the compat layer yet (the port script flags each use): `ToolsetRegistry/AssetHelpers.h`, the
-`UToolsetLibrary` functions 5.9
-added (`ListObjectPropertyNames`, `StructToJson`, `IsClassAllowed`, `GetPluginContentPaths`, `GetAssetContentRoots`,
-`ValidateAssetPath`, `TryValidateAssetPath`, `IsPathVisible`, `IsPathWritable`, `ResolveAssetPath`,
-`ConvertToVirtualPath`), `ToolsetJsonSchema.h`, `UndoCaptureParticipant.h`, `MarkdownAgentSkills.h`, `CodeBlock.h`,
-`ToolsetManifestSeed.h`, `ToolsetRegistrySettings.h`, `FToolsetRegistry::Get()/Create()`, the
-`FScopedScriptExceptionCapture`-based `FToolCallExceptionHandler::HandleScriptMessage`, and the registry's private
-test fixtures. The first two are the most used (EditorToolset, GASToolsets, AIModuleToolset, BlueprintToolsets,
-MetaHuman toolsets): add them here before porting those, as `ToolsetRegistry/AssetHelpers.h` (5.9's
-ToolsetRegistryEditor `AssetHelpers.h/.cpp`) and a holder for the added functions, since 5.8's `UToolsetLibrary`
-cannot gain members (for example `FToolsetLibrary59` in `ToolsetRegistry/ToolsetLibrary59.h`, with the port script
-rewriting `UToolsetLibrary::<added function>` to it). Expect two further gaps there: 5.9's `AssetScriptingUtils`
-(`ConvertToVirtualPath`, `TryConvertToInternalPath`) is not public in 5.8's EditorScriptingUtilities, and
-`UE::PropertyEditor::IsClassAllowed` does not exist in 5.8; copy the 5.9 implementations into the compat module.
+Also in `ToolsetRegistryEditor` (added for the wave-2 ports):
+
+| Piece | What it is | 5.8 behaviour to know |
+|---|---|---|
+| `ToolsetRegistry/AssetHelpers.h` | 5.9's ToolsetRegistryEditor `AssetHelpers.h/.cpp` copied (`CreateAsset`, `ImportAsset` + `UAsyncImportResult`, `CheckImportDestination`, `AssetExists`, `IsPathVisible`, `LoadAssetIfVisible`, `AssetIsDirty`, the diff helpers) | Its `UToolsetLibrary` calls go to `FToolsetLibrary59`. `CanonicalProperties` reads through 5.8's `ListStructProperties`/`GetObjectProperties`. |
+| `ToolsetRegistry/ToolsetLibrary59.h` | `FToolsetLibrary59`: the 11 functions 5.9 added to `UToolsetLibrary`, and 5.9's 4-argument `ListStructProperties(Struct, bUserVisible, RootPath, MaxDepth)`. The port script rewrites `UToolsetLibrary::<added function>` and 3- or 4-argument `ListStructProperties` calls to it (marked `// UE 5.8:`) and adds the include. | Plain C++ statics, not visible to Blueprint or Python. `ListObjectPropertyNames` uses a port of 5.9's property listing (`ToolsetPropertyListing59.cpp`): readability is 5.8's `PropertyAccessUtil::CanGetPropertyValue` (no 5.9 property-editor read gate), a struct with a custom JSON converter (FTransform...) expands into its fields, and an unknown RootPath segment lists the names there rather than 5.9's closest matches. `StructToJson` goes through 5.8's ToolsetJson pipeline. The 4-argument `ListStructProperties` narrows and prunes 5.8's schema the way 5.9 does. |
+| `AssetScriptingUtils.h` | 5.9 AssetTools' path functions: `TryConvertToInternalPath`, `ConvertToVirtualPath`, `ConvertToVirtualPathsInText`, `ConvertToInternalPathsInText` | 5.8 has no such header. 5.9's access checks (`GetAssetAccess`, `ResolveNewAssetPath`, `LoadAccessibleObject`, `PassesAssetReferenceFilter`...) are not ported; the script flags them. |
+| `PropertyAccessCheck.h` | `UE::PropertyEditor::IsClassAllowed` (5.9 PropertyEditor) | Only that function; the script flags 5.9's property gates (`CheckCanSetProperty`, `CheckCanGetProperty`, `CanReferenceAsset`, `FPropertyAccessResult`). |
+| `ToolsetRegistry/ToolsetJsonSchema.h` | 5.9's `FToolsetJsonSchema` value type and `ToJsonArrayString` | Exported from `ToolsetRegistryEditor`, not `ToolsetRegistry`; 5.8's registry never produces one. |
+| `ToolsetRegistryEditor/OptionalPortedModules.inl` | Ported modules whose plugin dependency HyperAI does not force on (e.g. GameFeatures, GameplayAbilities): list the module in the `.uplugin` with `"LoadingPhase": "None"` and add a row `EPIC59_OPTIONAL_MODULE(Module, TEXT("Plugin"), ...)`; the compat module loads it at `OnPostEngineInit` when every named plugin is enabled. `EPIC59_SUPERSEDES(Module, TEXT("/Script/<5.8 module>.<class>"))` rows unregister the 5.8 toolset class a loaded port replaces (see "Name collisions"). | A module whose plugin is off is simply not loaded (Verbose log line). |
+
+The compat module now also depends on AssetTools, BlueprintEditorLibrary, ClassViewer, ContentBrowserData,
+EditorScriptingUtilities (listed in the `.uplugin`'s `Plugins`; 5.8's ToolsetRegistry needs it anyway),
+EditorSubsystem, InterchangeCore/InterchangeEngine, JsonUtilities, Projects and SubobjectDataInterface, and publicly on Json.
+
+Not in the compat layer yet (the port script flags each use): `UndoCaptureParticipant.h`, `MarkdownAgentSkills.h`,
+`CodeBlock.h`, `ToolsetManifestSeed.h`, `ToolsetRegistrySettings.h`, `FToolsetRegistry::Get()/Create()`, the
+`FScopedScriptExceptionCapture`-based `FToolCallExceptionHandler::HandleScriptMessage`, 5.9's `AssetScriptingUtils`
+access checks and `PropertyAccessCheck` gates, and the registry's private test fixtures.
 
 Behaviour of 5.8's registry that agents and tests notice: every tool parameter is required (5.9 honours C++
 defaults, 5.8 rejects a call that omits one), arguments are camelCase (`nameFilter`, `logFilePath`), and an
@@ -87,6 +92,8 @@ The first run indexes UE 5.8's reflected types, module names and headers (about 
 4. `#include "ToolsetRegistry/ToolsetDefinition.h"` becomes `ToolsetRegistry/ToolsetDefinition59.h`.
 5. `UToolsetDefinition::IsFunctionAIRuntimeCallable|GetFunctionAccessMode|IsFunctionMarkedAsTool` become
    `UE::ToolsetRegistry::...` (5.8's class cannot gain statics).
+5a. `UToolsetLibrary::<function 5.9 added>` and `UToolsetLibrary::ListStructProperties` called with 5.9's RootPath or
+   MaxDepth become `FToolsetLibrary59::...` (with the `ToolsetRegistry/ToolsetLibrary59.h` include), each line marked.
 6. A class declared `: public UToolsetDefinition` also lists `public IToolsetProvider`, so its 5.9 hook overrides
    compile.
 7. In toolset classes, `AIRuntimeCallable` gains `AICallable` (5.8 recognises only the latter; the 5.9 metadata
@@ -133,19 +140,27 @@ class names make `FindFirstObject` and Python's `unreal.<Class>` ambiguous), so:
   names a toolset `<Module>.<Class>`, so agents see `EditorToolset59.EditorAppToolset59` next to 5.8's
   `EditorToolset.EditorAppToolset`. Non-colliding classes keep their names (`ConsoleToolset.ConsoleToolset`).
   ConsoleToolset's `ULogsToolset` collides with 5.8 EditorToolset's and is ported as `ConsoleToolset.LogsToolset59`.
-- **Hide the 5.8 version** once its 5.9 port passes its tests, in one of two ways:
-  - *Block list* (keeps the 5.8 plugin loaded, hides its toolsets from every MCP client): add anchored regular
-    expressions to `[/Script/ToolsetRegistry.ToolsetRegistrySettings]` in the project's
-    `Config/DefaultEditorPerProjectUserSettings.ini`, e.g. `+BlockedNames=/^EditorToolset\.LogsToolset$/`. Plain
-    patterns are case-insensitive substrings, so `LogsToolset` would also hide `LogsToolset59`; always anchor.
-    HyperAI's capability index already reports a non-empty block list (HyperAIStudioCapabilityRuntimeIndex.cpp).
-  - *Capability presets* (stops enabling the 5.8 plugin): remove the plugin from `GetAllToolsetsDependencies`,
-    `GetAutomaticToolsetRules`, `GetDomainPlugins` or `GetOptionalExtraPlugins` in
-    `Source/HyperAIStudio/Private/HyperAIStudioCapabilityPreset.cpp` and update the exact counts in
-    `Tests/HyperAIStudioCapabilityPresetTests.cpp`. Do this only for a plugin whose every toolset has a passing 5.9
-    port; EditorToolset and MCPClientToolset are foundation plugins (`GetFoundationPlugins`) that HyperAI itself
-    needs, so hide their overlapping toolsets with the block list instead. "Everything" enables Epic's `AllToolsets`
-    aggregator, which pulls the 5.8 plugins back in, so that preset needs the block list either way.
+- **Load the port where the 5.8 toolset is enabled, and hide the 5.8 version** once the port passes its tests.
+  Both go in `ToolsetRegistryEditor/Private/ToolsetRegistryEditor/OptionalPortedModules.inl`:
+  - `EPIC59_OPTIONAL_MODULE(GameplayTagsToolset59, TEXT("GameplayTagsToolset"))` with the module's `.uplugin` entry at
+    `"LoadingPhase": "None"`: the port loads (at `OnPostEngineInit`) only where HyperAI's capability presets, or the
+    user, enabled the 5.8 toolset plugin it replaces, so presets and opt-ins (LiveCodingToolset is opt-in) keep
+    deciding what agents get. List the port's own plugin dependencies there too.
+  - `EPIC59_SUPERSEDES(GameplayTagsToolset59, TEXT("/Script/GameplayTagsToolset.GameplayTagsToolset"))`: while the port
+    is loaded, the compat module unregisters that 5.8 toolset class (at engine init and whenever a module loads,
+    since some 5.8 toolset modules load later). Only for a 5.8 class whose every tool the port has: 5.8's
+    `GASToolsets.GameplayCueToolset` keeps `FindCueNotifyAssets`, which 5.9 dropped, so it stays visible.
+  - Point HyperAI's references to the 5.8 names at the port (`GetEpicDelegates` lists, the Data delegation matrix,
+    `Resources/Skills`): `git grep "<Module>\.<Class>"`.
+  - Why not the two documented alternatives: a registry block list (`BlockedNames`, or
+    `FToolsetRegistry::AddBlockedName`) makes HyperAI refuse its own runtime toolset registrations
+    (`owned_registration_requires_unfiltered_registry` in HyperAIStudioCapabilityRuntimeIndex.cpp), and removing the
+    5.8 plugin from the capability presets hides nothing in projects that already enabled it, nor under
+    "Everything", whose `AllToolsets` aggregator enables it again. EditorToolset and MCPClientToolset are foundation
+    plugins; supersede their overlapping classes the same way rather than disabling them.
+- **Test names.** 5.8's toolset tests register automation tests under the same C++ class names as 5.9's (the spec or
+  `TEST_CLASS` name is the registration key, whatever its path), and whichever loads second is dropped with "Failed to
+  register test with the name ...". Rename the port's spec classes `...59` (and their `friend` declarations).
 
 ## HyperAI's tool catalog
 
@@ -159,7 +174,8 @@ The capability preset tests count Epic *plugins*; the ports live inside HyperAIS
 1. `python Tools/Epic59/port_toolset.py --check <Toolset>`: read the notes and the hand-edit list.
 2. If it needs a compat piece listed as missing above, add it to the compat layer first (in its own commit).
 3. `python Tools/Epic59/port_toolset.py <Toolset>`.
-4. Add missing plugin dependencies to `HyperAIStudio.uplugin` (`Plugins`), and any module dependency that is
+4. Add missing plugin dependencies to `HyperAIStudio.uplugin` (`Plugins`); a plugin that is not enabled by default
+   gets `"Enabled": false`, the module `"LoadingPhase": "None"` and a row in `OptionalPortedModules.inl`. Any module dependency that is
    optional for HyperAI users behind the same guard HyperAI's own optional modules use.
 5. Make the hand edits, each marked `// UE 5.8:`.
 6. Build on a bench project: `HYPERAI_BENCH_PROJECT=E:/HyperAIWork/Bench59 HYPERAI_BENCH_PORT=8031 python
@@ -178,6 +194,13 @@ The capability preset tests count Epic *plugins*; the ports live inside HyperAIS
 | CheatsToolset | include, IToolsetProvider base | none |
 | ConsoleToolset | include, IToolsetProvider base, AICallable on 9 AIRuntimeCallable tools, cooked opt-in dropped, `ULogsToolset` and `LogsToolset.h` renamed `...59` | `SetVerbosity`: 5.8 has no `FLogSuppressionInterface::FindCategory`, so it checks the category through `GetVerbosity` and cannot check the compile-time maximum |
 | NavMeshToolset (+ Tests) | include, IToolsetProvider base, AICallable on 21 tools, cooked opt-in dropped, `IsFunctionAIRuntimeCallable` moved | 5.8 lacks the adaptive navmesh build API: adaptive stats report `bAvailable=false`, tiles report build state `Unknown` and take their bounds from the first layer, no tile state grid or updated-tile count; the dirty-area controller is read through a member pointer (protected in 5.8); invokers are listed from 5.8's raw invoker records (no actor or name); `EWorldType`, `ENetMode`, `ENavigationBuildLock`, `ENavigationShapeType`, `ENavigationAreaMode` properties are `uint8` (not UENUMs in 5.8); the test's `ExecuteTool` result type |
+| ConfigSettingsToolset59 | module and types renamed | `SetObjectProperties` has no PropertyListHint argument, and 5.8's records no undo transaction, so the call is wrapped in an `FScopedTransaction` for the rollback; the unparseable-value test is skipped (5.8's `SetObjectProperties` accepts a JSON object for a bool, UE-402853) |
+| GameFeaturesToolset59 | module and types renamed | `EBuiltInAutoState` has no `Count`; name lookups use the UTF-8 `GetPluginURLByName`; 5.9's `GameFeaturePluginTestHelper` copied into the test folder; the two synthetic-plugin transition tests are skipped (the by-name transitions never complete on 5.8, so they time out) |
+| GameplayTagsToolset59 | module and types renamed | 5.8's `IGameplayTagsEditorModule` INI functions have no `OutErrors`: AddTag refuses a source without a tag ini itself (5.8 would write the default config), MoveTags checks the target source and each tag first and reports them as 5.9 does |
+| PluginToolset59 | module and types renamed | `OnPluginCreated` has no error out-parameter; the test template folder ships with the port (`PluginToolset59/TestPluginTemplate`) |
+| LiveCodingToolset59 (+ Tests) | modules and types renamed, CVar `LiveCodingToolset59.Enable` | 5.8's registry takes `UToolsetDefinition` classes only, so `ULiveCodingToolsetTools59` carries the three tools and the subsystem registers it (`LiveCodingToolset59.LiveCodingToolsetTools59`); no `IsReadyForReload` (ready = started, enabled, not compiling) and no compile-finished delegate (CompileLiveCoding polls `IsCompiling`; a patch applied reads as Success, otherwise "Failure or NoChanges") |
+| GASToolsets59 | module and types renamed, 2 `ValidateAssetPath` calls to `FToolsetLibrary59` | specs use BeforeEach/AfterEach for 5.9's BeforeAll/AfterAll; the inspector test expects the renamed attribute set |
+| AIModuleToolset59 | module renamed (no type collides), 3 `ValidateAssetPath` calls to `FToolsetLibrary59` | specs use BeforeEach/AfterEach for BeforeAll/AfterAll |
 
 Pilot results on a UE 5.8 bench (Bench59): Epic's own tests `AIAssistant.Toolsets.CheatsToolset` (17),
 `ConsoleToolset` (28) and `NavMeshToolset` (23) pass, 68 of 68, with no registry errors in the log; HyperAI's
@@ -185,7 +208,20 @@ Pilot results on a UE 5.8 bench (Bench59): Epic's own tests `AIAssistant.Toolset
 `CheatsToolset.CheatsToolset`, `ConsoleToolset.ConsoleToolset`, `ConsoleToolset.LogsToolset59` and
 `NavMeshToolset.NavMeshToolset`, and `GetCVarValue`, `GetLogCategories` and `ListWorlds` answer.
 
+Wave 2a results on a UE 5.8 bench (BenchPortA): Epic's tests `AIAssistant.Toolsets.ConfigSettingsToolset` (37),
+`GameFeatureToolset` (31), `GameplayTagsToolset` (38), `PluginToolset` (54), `GASToolsets` (57), `AIModuleToolset`
+(26) and four of LiveCodingToolset's five (the fifth, `CompileLiveCoding_EventuallyResolvesWithResult`, starts a real
+Live Coding build, which would take the UBT mutex the user's editor and other benches share, so it was not run), with
+the pilot suites and HyperAI's `HyperAIStudio.NativeTools.Capability*`, `GAS`, `Data` and `GameplaySystems`: 350 of
+350. Over MCP, `list_toolsets` shows the seven ports and no longer the superseded 5.8 toolsets (only 5.8's
+`GASToolsets.GameplayCueToolset` stays, next to `GASToolsets59.GameplayCueToolset59`), and `ListContainers`,
+`ListTagSources`, `GetAdditionalPluginDirectories`, `GetConfiguredAdditionalMetadataKeys`, `IsLiveCodingReady` and
+`FindAttributeSetClasses` answer.
+
 ## Remaining toolsets
+
+Ported since the pilot (wave 2a): ConfigSettingsToolset, GameFeaturesToolset, GameplayTagsToolset, PluginToolset,
+LiveCodingToolset, GASToolsets and AIModuleToolset (see the table above).
 
 `port_toolset.py --check` over every 5.9 toolset gives the following starting points (counts are flagged lines, many
 are informational). Toolsets in Epic's `UE59-DISABLED.md` (CommonUIToolset, CaptureManagerToolset and the MetaHuman
@@ -195,8 +231,8 @@ toolsets) need newer plugin APIs than even 5.9 has and are not worth porting to 
 |---|---|---|---|---|
 | ConversationToolset, StateTreeToolset, GeometryToolset, MetaHumanGenerator | < 100 | CommonConversation, StateTree, GeometryScripting, MetaHuman | module rename only (5.8 has the first two) | < 1 h each |
 | PerfToolset, RewindDebuggerToolset, WorldConditionsToolset, DataRegistryToolset, InputToolset | 260-4100 | GameplayInsights, WorldConditions, DataRegistry, EnhancedInput | few flags; InputToolset has 3 non-static tools | 1-3 h each |
-| PhysicsToolsets, ChaosClothAssetToolset, DataflowAgent, GameplayTagsToolset, LiveCodingToolset, AnimationAssistantToolset, TextureGraphToolset, WidgetAnimationToolset | 500-2900 | as their .uplugin | module and type renames, a few 5.9 UToolsetLibrary calls | 2-4 h each |
-| AIModuleToolset, GASToolsets, GameFeaturesToolset, ConfigSettingsToolset, PluginToolset, NiagaraToolsets, PCGToolset, MetaSoundToolset, AutomationTestToolset | 1400-5900 | EnvironmentQueryEditor, GameplayAbilities, GameFeatures, PluginUtils, Niagara, PCG, Metasound | renames; AssetHelpers / added UToolsetLibrary functions; PCG uses the 5.9 exception-capture API (25 sites); AutomationTest has OnCompleted handlers and non-static tools | 0.5-1 day each, after the AssetHelpers/ToolsetLibrary compat piece (about 1 day, once) |
+| PhysicsToolsets, ChaosClothAssetToolset, DataflowAgent, AnimationAssistantToolset, TextureGraphToolset, WidgetAnimationToolset | 500-2900 | as their .uplugin | module and type renames, a few 5.9 UToolsetLibrary calls | 2-4 h each |
+| NiagaraToolsets, PCGToolset, MetaSoundToolset, AutomationTestToolset | 1400-5900 | Niagara, PCG, Metasound | renames; AssetHelpers / added UToolsetLibrary functions (now in the compat layer); PCG uses the 5.9 exception-capture API (25 sites); AutomationTest has OnCompleted handlers and non-static tools | 0.5-1 day each |
 | FileSystemToolset, MediaToolset, SceneCaptureToolset, AgentPluginToolset, KnowledgeBaseToolset, MCPClientToolset, MVVMToolset, WidgetStaticAnalysisToolset, SlateInspectorToolset | 670-14500 | FileSystemToolset, MediaToolset, AgentCapability, KnowledgeBase, ModelViewViewModel, WidgetHelper | `FToolsetRegistry::Get`, async results through `ExecuteTool`, sibling 5.9 plugins (AgentCapability, KnowledgeBase, WidgetHelper) to port first | 1-2 days each |
 | EditorToolset, BlueprintToolsets | 35000, 48700 | DataValidation, Interchange, GraphDsl | ~100 missing includes each (GraphDsl plugin, newer editor APIs), AssetHelpers | 3-5 days each |
 | CommonUIToolset, CaptureManagerToolset, MetaHuman*Toolset | | newer plugin APIs than 5.9 has | not worth porting | - |

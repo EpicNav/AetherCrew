@@ -21,6 +21,7 @@ public class ToolsetRegistryEditor : ModuleRules
 				"ToolsetRegistry",
 				"AsyncFunctionResult",
 				"ToolsetCore",
+				"Json", // UE 5.8: AssetHelpers.h and ToolsetJsonSchema.h use FJsonObject
 			}
 			);
 
@@ -28,6 +29,19 @@ public class ToolsetRegistryEditor : ModuleRules
 			new string[]
 			{
 				"AssetRegistry",
+				// UE 5.8: what 5.9's AssetHelpers, ToolsetLibrary additions, AssetScriptingUtils path functions and
+				// UE::PropertyEditor::IsClassAllowed need (see Source/Epic59/PORTING.md).
+				"AssetTools",
+				"BlueprintEditorLibrary",
+				"ClassViewer",
+				"ContentBrowserData",
+				"EditorScriptingUtilities",
+				"EditorSubsystem",
+				"InterchangeCore",
+				"InterchangeEngine",
+				"JsonUtilities",
+				"Projects",
+				"SubobjectDataInterface",
 				"UnrealEd",
 			}
 			);

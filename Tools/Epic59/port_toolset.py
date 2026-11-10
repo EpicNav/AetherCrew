@@ -40,6 +40,14 @@ SUFFIX = "59"
 MARK = "// UE 5.8:"
 SOURCE_EXT = (".h", ".hpp", ".inl", ".cpp")
 
+# Functions 5.9 added to UToolsetLibrary. 5.8's class cannot gain them, so the compat layer has them on
+# FToolsetLibrary59 (ToolsetRegistry/ToolsetLibrary59.h) and calls are rewritten there, as are calls of
+# ListStructProperties with 5.9's extra RootPath/MaxDepth arguments.
+TOOLSET_LIBRARY_ADDED = ("ListObjectPropertyNames", "StructToJson", "IsClassAllowed", "GetPluginContentPaths",
+                         "GetAssetContentRoots", "ValidateAssetPath", "TryValidateAssetPath", "IsPathVisible",
+                         "IsPathWritable", "ResolveAssetPath", "ConvertToVirtualPath")
+TOOLSET_LIBRARY59_H = "ToolsetRegistry/ToolsetLibrary59.h"
+
 # Build.cs dependencies 5.9 has and 5.8 lacks: replacement (None drops the entry).
 DEPENDENCY_MAP = {
     "ToolsetRegistryEngine": "ToolsetRegistryEditor",
@@ -62,11 +70,15 @@ FLAGS = [
      "5.9-only registry access; on 5.8 use UToolsetRegistrySubsystem::Get()"),
     (r"\bRegisterToolsetForPlugin\b|\bUnregisterToolsetsForPlugin\b|\bFToolCallContext\b\s+\w+\s*[,)]",
      "5.9-only FToolsetRegistry API"),
-    (r"UToolsetLibrary::(ListObjectPropertyNames|StructToJson|IsClassAllowed|GetPluginContentPaths|"
-     r"GetAssetContentRoots|ValidateAssetPath|TryValidateAssetPath|IsPathVisible|IsPathWritable|"
-     r"ResolveAssetPath|ConvertToVirtualPath)\b", "UToolsetLibrary function added in 5.9; 5.8's class lacks it"),
-    (r"ToolsetRegistry/AssetHelpers\.h", "5.9 ToolsetRegistryEditor helper not in the compat layer yet"),
-    (r"ToolsetRegistry/(ToolsetJsonSchema|UndoCaptureParticipant|MarkdownAgentSkills|CodeBlock|"
+    (r"FToolsetLibrary59::ListObjectPropertyNames\b", "compat ListObjectPropertyNames: no 5.9 property-editor read "
+     "gate, and a struct with a custom JSON converter expands into its fields (see PORTING.md)"),
+    (r"\bAssetScriptingUtils::(GetAssetAccess|GetNewAssetAccess|ResolveNewAssetPath|LoadAccessibleObject|"
+     r"GetOwningAsset|PassesAssetReferenceFilter)\b",
+     "5.9 AssetScriptingUtils access check; the compat layer has only its path functions"),
+    (r"\bUE::PropertyEditor::(CheckCanSetProperty|CheckCanGetProperty|CanReferenceAsset|"
+     r"ShouldEnforceEditorPropertyAccess)\b|\bFPropertyAccessResult\b",
+     "5.9 PropertyAccessCheck gate; the compat layer has only UE::PropertyEditor::IsClassAllowed"),
+    (r"ToolsetRegistry/(UndoCaptureParticipant|MarkdownAgentSkills|CodeBlock|"
      r"ToolsetManifestSeed|ToolsetRegistrySettings)\.h", "5.9-only ToolsetRegistry header not in the compat layer"),
     (r"ToolsetRegistry/Private/", "includes the registry's private test fixtures"),
     (r"\bUE59\b", "Epic's own 5.9 adaptation note: check it against 5.8"),
@@ -196,6 +208,27 @@ def find_balanced(text, open_index):
                 return i + 1
         i += 1
     return len(text)
+
+
+def count_args(args):
+    """Number of top-level comma-separated arguments in a call's argument text."""
+    if not args.strip():
+        return 0
+    depth, count, i = 0, 1, 0
+    while i < len(args):
+        c = args[i]
+        if c in "\"'":
+            i += 1
+            while i < len(args) and args[i] != c:
+                i += 2 if args[i] == "\\" else 1
+        elif c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == "," and depth == 0:
+            count += 1
+        i += 1
+    return count
 
 
 def line_of(text, index):
@@ -365,6 +398,12 @@ class Port:
             new_text = self.add_include(new_text, "ToolsetRegistry/ToolsetDefinition59.h", eol)
         text = new_text
 
+        # UToolsetLibrary's 5.9 additions (and 5.9's RootPath/MaxDepth ListStructProperties) -> FToolsetLibrary59.
+        new_text = self.rewrite_toolset_library(text)
+        if new_text != text and TOOLSET_LIBRARY59_H not in new_text:
+            new_text = self.add_include(new_text, TOOLSET_LIBRARY59_H, eol, "5.9 UToolsetLibrary additions")
+        text = new_text
+
         # Direct toolset classes gain IToolsetProvider, 5.9's base interface (5.8's base lacks it).
         text = re.sub(r"(\bclass\s+(?:\w+_API\s+)?\w+\s*(?:final\s*)?:\s*public\s+UToolsetDefinition\b)"
                       r"(?!\s*,\s*public\s+IToolsetProvider)([^\r\n]*)",
@@ -407,9 +446,40 @@ class Port:
                     self._port_headers.add("/".join(parts[-depth:]))
         return self._port_headers
 
-    def add_include(self, text, header, eol):
-        line = '#include "%s" %s 5.9 ToolsetDefinition additions' % (header, MARK)
-        m = list(re.finditer(r'(?m)^#include\s+"[^"]+"[^\r\n]*$', text))
+    def rewrite_toolset_library(self, text):
+        """UToolsetLibrary::<5.9 addition> -> FToolsetLibrary59::, and ListStructProperties called with more
+        than 5.8's two arguments. Each rewritten line gets a MARK comment."""
+        names = "|".join(TOOLSET_LIBRARY_ADDED + ("ListStructProperties",))
+        out = []
+        pos = 0
+        marked_lines = set()
+        for m in re.finditer(r"\bUToolsetLibrary::(%s)\b" % names, text):
+            if m.group(1) == "ListStructProperties":
+                paren = text.find("(", m.end())
+                if paren < 0 or text[m.end():paren].strip():
+                    continue
+                if count_args(text[paren + 1:find_balanced(text, paren) - 1]) <= 2:
+                    continue
+            out.append(text[pos:m.start()])
+            out.append("FToolsetLibrary59::" + m.group(1))
+            pos = m.end()
+            marked_lines.add(line_of(text, m.start()))
+        if not marked_lines:
+            return text
+        out.append(text[pos:])
+        lines = "".join(out).split("\n")
+        for number in marked_lines:
+            line = lines[number - 1]
+            cr = "\r" if line.endswith("\r") else ""
+            body = line[:-1] if cr else line
+            # A line ending inside a block comment or a string continuation keeps its text; flag it instead.
+            if MARK not in body and not body.rstrip().endswith("\\"):
+                lines[number - 1] = body + " %s 5.9 UToolsetLibrary addition" % MARK + cr
+        return "\n".join(lines)
+
+    def add_include(self, text, header, eol, why="5.9 ToolsetDefinition additions"):
+        line = '#include "%s" %s %s' % (header, MARK, why)
+        m = list(re.finditer(r'(?m)^#include\s+"[^"]+"[^\r\n]*(?=\r?$)', text))  # CRLF files too
         m = [x for x in m if "generated" not in x.group(0) and "UE_INLINE" not in x.group(0)]
         if not m:
             return line + eol + text
