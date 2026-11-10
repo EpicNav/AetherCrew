@@ -202,12 +202,15 @@ struct FHyperAIAudioValidateRequest
 {
 	GENERATED_BODY()
 
+	/** loaded_only, on_disk_index, or loaded_and_on_disk. */
 	UPROPERTY()
 	FString Scope = TEXT("loaded_only");
 
+	/** Families to check, as in hyper_audio_inspect; empty checks them all. */
 	UPROPERTY()
 	TArray<FString> Variants;
 
+	/** Exact /Game object paths only. */
 	UPROPERTY()
 	TArray<FString> ObjectPaths;
 
@@ -266,6 +269,7 @@ struct FHyperAIAudioParameterValue
 {
 	GENERATED_BODY()
 
+	/** The semantic setting, such as volume, falloff_distance or attenuation. */
 	UPROPERTY()
 	FString Name;
 
@@ -298,9 +302,11 @@ struct FHyperAIAudioPlanOperation
 {
 	GENERATED_BODY()
 
+	/** The operation, such as sound_cue.create, sound_class.configure, sound_mix.add_adjuster or metasound.connect; hyper_audio_apply_plan lists them. */
 	UPROPERTY()
 	FString Variant;
 
+	/** The asset changed or made, as an object path: /Game/Audio/SC_Steps.SC_Steps. */
 	UPROPERTY()
 	FString TargetPath;
 
@@ -308,18 +314,23 @@ struct FHyperAIAudioPlanOperation
 	UPROPERTY()
 	FString ExpectedRevision;
 
+	/** The asset a reference variant points at: set_root_wave a SoundWave, set_parent and add_adjuster a Sound Class, add_context a DialogueVoice. */
 	UPROPERTY()
 	FString ReferencePath;
 
+	/** sound_cue_template, sound_utility.sound_simple and soundscape.palette: the sounds they play, as object paths. */
 	UPROPERTY()
 	TArray<FString> SourcePaths;
 
+	/** metasound.add_input, add_output, add_variable, remove_member: the member name; declare_interface: source or source_one_shot. */
 	UPROPERTY()
 	FString MemberName;
 
+	/** dialogue_wave contexts: the target. */
 	UPROPERTY()
 	FString SecondaryName;
 
+	/** metasound members: bool, int32, float, string, trigger, audio, object, wave_asset or time; remove_member: input, output or variable. */
 	UPROPERTY()
 	FString DataType;
 
@@ -331,6 +342,7 @@ struct FHyperAIAudioPlanOperation
 	UPROPERTY()
 	int32 NodeDescriptorVersion = 0;
 
+	/** metasound.add_node: a new GUID for the node; configure_node, remove_node, set_literal: the existing node. */
 	UPROPERTY()
 	FGuid NodeId;
 
@@ -361,15 +373,18 @@ struct FHyperAIAudioPlanOperation
 	UPROPERTY()
 	FString ToPortName;
 
+	/** The position in an ordered list (mix stages, effect chains, mutators, components); removals need it. */
 	UPROPERTY()
 	int32 Index = -1;
 
 	UPROPERTY()
 	int32 Count = 0;
 
+	/** sound_mix adjusters: volume (0-4); modulation stages, effects, mutators and MotorSim components: their scalar. */
 	UPROPERTY()
 	double Value = 0.0;
 
+	/** sound_mix adjusters: pitch (0-8). */
 	UPROPERTY()
 	double SecondaryValue = 0.0;
 
@@ -379,12 +394,14 @@ struct FHyperAIAudioPlanOperation
 	UPROPERTY()
 	bool bEnabled = false;
 
+	/** audio_gameplay_volume.create: where the volume goes and its half size. */
 	UPROPERTY()
 	FVector Location = FVector::ZeroVector;
 
 	UPROPERTY()
 	FVector Extent = FVector::ZeroVector;
 
+	/** Typed settings by semantic name (volume, pitch, falloff_distance...); set_literal takes one named value. */
 	UPROPERTY()
 	TArray<FHyperAIAudioParameterValue> Parameters;
 };
@@ -394,18 +411,21 @@ struct FHyperAIAudioApplyPlanRequest
 {
 	GENERATED_BODY()
 
+	/** true checks the plan and returns PlanHash; false (with ExpectedPlanHash) submits it for approval and waits for the edit. */
 	UPROPERTY()
 	bool bDryRun = true;
 
 	UPROPERTY()
 	FString OperationId;
 
+	/** The PlanHash from the dry run of the same Operations. */
 	UPROPERTY()
 	FString ExpectedPlanHash;
 
 	UPROPERTY()
 	int32 DeadlineMs = 1000;
 
+	/** Applied in order in one undo step, up to 64. */
 	UPROPERTY()
 	TArray<FHyperAIAudioPlanOperation> Operations;
 };
@@ -539,12 +559,44 @@ class HYPERAISTUDIOAUDIO_API UHyperAIStudioAudioToolset final : public UToolsetD
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
+	/**
+	 * Lists the project's audio assets as records: SoundWaves, Sound Cues, Sound Classes, Sound Mixes, attenuation,
+	 * concurrency, dialogue, MetaSound Sources and Patches, and the optional plugins' assets (modulation, wave tables,
+	 * synthesis presets, Synesthesia analyzers, Soundscape, Audio Gameplay Volumes, MotorSim). Each record carries its
+	 * Revision, the CAS that hyper_audio_apply_plan's ExpectedRevision takes. Variants filters by family (sound_wave,
+	 * sound_cue, metasound_source...); ObjectPaths by exact /Game/Folder/Asset.Asset paths. Scope loaded_only (the
+	 * default) reads loaded assets; Prerequisites says which optional audio plugins are enabled. Changes nothing.
+	 * For a Sound Cue's graph, a mix's settings or a MetaSound's inputs and nodes, hyper_sound_asset_inspect is simpler.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Audio")
 	static FHyperAIAudioInspectReport hyper_audio_inspect(const FHyperAIAudioInspectRequest& Request);
 
+	/**
+	 * Low-level typed audio edits, a list of Operations applied in one undo step: first with bDryRun true (the default),
+	 * which returns PlanHash, then the same Operations with bDryRun false and ExpectedPlanHash, which waits for approval.
+	 * Each operation's Variant decides which fields it uses (others must stay empty): *.create (TargetPath a free
+	 * /Game/Folder/Name.Name, no ExpectedRevision) and *.configure (TargetPath, ExpectedRevision from hyper_audio_inspect,
+	 * Parameters by semantic name: sound_wave volume, pitch, looping, streaming, compression_quality; sound_cue
+	 * volume_multiplier, pitch_multiplier, attenuation, concurrency; sound_class volume, pitch, low_pass_frequency, parent,
+	 * default_submix; sound_mix initial_delay, duration, fade_in_time, fade_out_time, apply_eq; attenuation inner_radius,
+	 * falloff_distance, spatialize...; concurrency max_count, resolution_rule, retrigger_time...). Reference variants take
+	 * ReferencePath: sound_cue.set_root_wave (a SoundWave), sound_class.set_parent, sound_mix.add_adjuster and
+	 * remove_adjuster (a Sound Class; Value volume 0-4, SecondaryValue pitch 0-8). MetaSound variants (metasound.source.create,
+	 * add_input/add_output/add_variable with MemberName and DataType bool, int32, float, string, trigger, audio, wave_asset
+	 * or time, add_node and configure_node with NodeKind oscillator, gain, random, math_add or math_multiply and
+	 * NodeDescriptorVersion 1, connect and disconnect by node GUIDs and port names, set_literal) cover only a fixed handful of
+	 * nodes: build real MetaSounds with hyper_metasound_graph_plan (any registered node) or hyper_metasound_recipe instead,
+	 * and Sound Cues with hyper_sound_cue_plan. Never plays audio.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Audio")
 	static UHyperAIAudioApplyPlanResult* hyper_audio_apply_plan(const FHyperAIAudioApplyPlanRequest& Request);
 
+	/**
+	 * Checks audio assets for broken references, empty or dangling Sound Cue graphs, MetaSound documents that do not
+	 * validate, and disabled optional plugins, as Issues with a severity (error, warning, info). Same Scope, Variants and
+	 * ObjectPaths as hyper_audio_inspect. Changes nothing. To hear whether a sound works, render and measure it with
+	 * hyper_audio_analyze.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Audio")
 	static FHyperAIAudioValidateReport hyper_audio_validate(const FHyperAIAudioValidateRequest& Request);
 };

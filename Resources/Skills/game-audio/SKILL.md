@@ -20,7 +20,20 @@ false. With approval on, the reply is `awaiting_user_approval`: call `hyper_oper
 - `hyper_metasound_recipe` (experimental): a procedural MetaSound Source from a recipe, its controls exposed as inputs.
 - `hyper_audio_generate` and `hyper_audio_generate_status`: paid sound effects and music from words, imported and wrapped.
 
-For MetaSound graph edits node by node (add a node, connect, set a literal), use `hyper_audio_apply_plan`.
+## Which tool
+
+| The job | Tool |
+| --- | --- |
+| Variation from SoundWaves you have (footsteps, impacts, UI), the classic way | `hyper_sound_cue_plan` (a Sound Cue) |
+| A procedural or parameter-driven sound (wind, engine with RPM, UI tones) | `hyper_metasound_recipe` |
+| Sound Classes, Sound Mixes, ducking, attenuation, concurrency, submix effects | `hyper_sound_mix_plan` |
+| Read what is there (a cue's graph, a mix, a MetaSound's inputs) | `hyper_sound_asset_inspect` |
+| A clip from words, paid, when the project has no suitable waves | `hyper_audio_generate` (always approved first) |
+| Designed, layered or musical sound with nothing paid | the `sound-design` skill (Decibel) |
+| Revisions, CAS-checked low-level edits, the optional plugins' assets | `hyper_audio_inspect`, `hyper_audio_apply_plan`, `hyper_audio_validate` |
+
+`hyper_audio_apply_plan` only knows five MetaSound node kinds (oscillator, gain, random, math_add, math_multiply):
+do not build footsteps or impacts with it.
 
 ## Sound Cues
 
