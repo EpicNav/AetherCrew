@@ -37,12 +37,20 @@ FNavMeshToolsetTileInfo UNavMeshToolset::GetTileInfo(
 	Info.TileX = TileX;
 	Info.TileY = TileY;
 	const FIntPoint Coord(TileX, TileY);
+#if 0 // UE 5.8: no GetNavMeshTileBoundsFromCoord or tile build state grid; bounds come from the tile's first layer.
 	Info.CoordBounds = Navmesh->GetNavMeshTileBoundsFromCoord(Coord);
 	Info.BuildState = NavMeshToolset::ConvertTileBuildState(Navmesh->GetTileBuildState(Coord));
+#else
+	Info.BuildState = ENavMeshToolsetTileBuildState::Unknown;
+#endif
 	Info.bInActiveSet = Navmesh->GetActiveTileSet().Contains(Coord);
 
 	TArray<FNavTileRef> TileRefs;
 	Navmesh->GetNavMeshTilesAt(TileX, TileY, TileRefs);
+	if (!TileRefs.IsEmpty())
+	{
+		Info.CoordBounds = Navmesh->GetNavMeshTileBounds(TileRefs[0]); // UE 5.8: see above
+	}
 	for (const FNavTileRef& TileRef : TileRefs)
 	{
 		FNavMeshToolsetTileLayerInfo& Layer = Info.Layers.AddDefaulted_GetRef();

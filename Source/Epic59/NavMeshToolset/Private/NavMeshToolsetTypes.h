@@ -128,11 +128,11 @@ struct FNavMeshToolsetWorldInfo
 
 	/** Editor, PIE, or Game (other world types are not listed). */
 	UPROPERTY()
-	TEnumAsByte<EWorldType::Type> WorldType = EWorldType::None;
+	uint8 WorldType = EWorldType::None; // UE 5.8: EWorldType is not a UENUM in 5.8, so UHT cannot reflect it; stored as its numeric value
 
 	/** Net mode; navmesh truth lives on authority worlds. */
 	UPROPERTY()
-	TEnumAsByte<ENetMode> NetMode = NM_Standalone;
+	uint8 NetMode = NM_Standalone; // UE 5.8: ENetMode is not a UENUM in 5.8, so UHT cannot reflect it; stored as its numeric value
 
 	/** True when this world has authority over game state (server or standalone play world);
 	 *  always false for non-play editor worlds, which have no game state. */
@@ -180,7 +180,7 @@ struct FNavMeshToolsetNavSystemInfo
 
 	/** Active build lock reasons, empty when unlocked. */
 	UPROPERTY()
-	TArray<TEnumAsByte<ENavigationBuildLock::Type>> BuildLockReasons;
+	TArray<uint8> BuildLockReasons; // UE 5.8: ENavigationBuildLock is not a UENUM in 5.8, so UHT cannot reflect it; stored as its numeric value
 
 	/** True while the navigation octree is locked (map changes are not stored). */
 	UPROPERTY()
@@ -683,11 +683,11 @@ struct FNavMeshToolsetAreaModifierInfo
 
 	/** Modifier shape. */
 	UPROPERTY()
-	TEnumAsByte<ENavigationShapeType::Type> Shape = ENavigationShapeType::Unknown;
+	uint8 Shape = ENavigationShapeType::Unknown; // UE 5.8: ENavigationShapeType is not a UENUM in 5.8, so UHT cannot reflect it; stored as its numeric value
 
 	/** How the area applies. */
 	UPROPERTY()
-	TEnumAsByte<ENavigationAreaMode::Type> ApplyMode = ENavigationAreaMode::Apply;
+	uint8 ApplyMode = ENavigationAreaMode::Apply; // UE 5.8: ENavigationAreaMode is not a UENUM in 5.8, so UHT cannot reflect it; stored as its numeric value
 
 	/** World-space bounds of the modifier shape. */
 	UPROPERTY()

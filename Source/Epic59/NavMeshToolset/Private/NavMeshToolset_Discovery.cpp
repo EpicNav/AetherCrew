@@ -338,7 +338,9 @@ FNavMeshToolsetBuildStatusReport UNavMeshToolset::GetNavMeshBuildStatus(
 	Report.NumRunningBuildTasks = NavSys->GetNumRunningBuildTasks();
 	Report.NumRemainingBuildTasks = NavSys->GetNumRemainingBuildTasks();
 
-	const FNavigationDirtyAreasController& DirtyAreasController = NavSys->GetDefaultDirtyAreasController();
+	// UE 5.8: DefaultDirtyAreasController is protected with no getter; read it through a derived-class member pointer.
+	struct FDirtyAreasAccess : UNavigationSystemV1 { using UNavigationSystemV1::DefaultDirtyAreasController; };
+	const FNavigationDirtyAreasController& DirtyAreasController = NavSys->*(&FDirtyAreasAccess::DefaultDirtyAreasController);
 	for (const FNavigationDirtyArea& DirtyArea : DirtyAreasController.DirtyAreas)
 	{
 		if (Report.PendingDirtyAreas.Num() >= NavMeshToolsetBudgets::MaxResultsCeiling)
@@ -372,7 +374,9 @@ FNavMeshToolsetBuildStatusReport UNavMeshToolset::GetNavMeshBuildStatus(
 			continue;
 		}
 
+#if 0 // UE 5.8: no GetTotalUpdatedTilesCount
 		Entry.TotalUpdatedTilesCount = static_cast<int64>(RecastNavmesh->GetTotalUpdatedTilesCount());
+#endif
 		NavMeshToolset::FillAdaptiveStats(*RecastNavmesh, Entry.AdaptiveStats);
 
 		if (bSpecificTarget)
@@ -386,6 +390,7 @@ FNavMeshToolsetBuildStatusReport UNavMeshToolset::GetNavMeshBuildStatus(
 				*RecastNavmesh, TEXT("TilePoolSize"), 0, &Entry.UnresolvedProperties));
 			Entry.NavmeshBounds = RecastNavmesh->GetNavMeshBounds();
 
+#if 0 // UE 5.8: no tile state grid (GetTileGridExtent); bHasTileStateGrid stays false.
 			const FNavMeshTileGridExtent& GridExtent = RecastNavmesh->GetTileGridExtent();
 			if (GridExtent.Num() > 0)
 			{
@@ -393,6 +398,7 @@ FNavMeshToolsetBuildStatusReport UNavMeshToolset::GetNavMeshBuildStatus(
 				Entry.GridMin = GridExtent.Origin;
 				Entry.GridMax = GridExtent.Origin + FIntPoint(GridExtent.Width - 1, GridExtent.Height - 1);
 			}
+#endif
 		}
 	}
 

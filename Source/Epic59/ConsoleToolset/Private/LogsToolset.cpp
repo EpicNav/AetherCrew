@@ -270,6 +270,7 @@ void ULogsToolset59::SetVerbosity(const FString& LogCategory, const FString& Ver
 
 	// The log command would silently ignore an unknown category, and would trip an ensure
 	// for a verbosity above the category's compile-time maximum, so check both up front.
+#if 0 // UE 5.8: FLogSuppressionInterface has no FindCategory, so the compile-time maximum cannot be checked.
 	const FLogCategoryBase* Category =
 		FLogSuppressionInterface::Get().FindCategory(FName(*LogCategory));
 	if (!Category)
@@ -287,6 +288,13 @@ void ULogsToolset59::SetVerbosity(const FString& LogCategory, const FString& Ver
 			*Verbosity, ToString(MaxVerbosity), *LogCategory));
 		return;
 	}
+#else
+	// UE 5.8: the category must be registered; GetVerbosity raises the same "not found" error otherwise.
+	if (GetVerbosity(LogCategory).IsEmpty())
+	{
+		return;
+	}
+#endif
 
 	FOutputDeviceNull Null;
 	FSelfRegisteringExec::StaticExec(

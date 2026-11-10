@@ -101,7 +101,7 @@ def eol_of(text):
 
 TYPE_RE = re.compile(
     r"\b(UCLASS|USTRUCT|UENUM|UINTERFACE)\s*\((?:[^()]|\([^()]*\))*\)\s*"
-    r"(?:class|struct|enum(?:\s+class)?)\s+(?:\w+_API\s+)?(\w+)")
+    r"(?:class|struct|enum(?:\s+class)?|namespace)\s+(?:\w+_API\s+)?(\w+)")
 
 
 def scan_types(text):
@@ -111,7 +111,7 @@ def scan_types(text):
 # UHT refuses two reflected headers with one file name in a target, so those are indexed too, as
 # HEADER_KEY + lowercase file name.
 HEADER_KEY = "header:"
-INDEX_VERSION = 2
+INDEX_VERSION = 3
 
 
 def build_ue58_index(ue58):
@@ -235,6 +235,7 @@ class Port:
         types58, modules58, self.headers58 = build_ue58_index(self.ue58)
         hyper_types, hyper_modules = hyperai_names()
         taken_types = types58 | hyper_types
+        self.taken_types = taken_types
         taken_modules = modules58 | hyper_modules
         for name in names:
             self.port_one(name, taken_types, taken_modules)
@@ -375,6 +376,11 @@ class Port:
 
         if rel.suffix == ".h":
             text = self.fix_ufunctions(rel, text)
+            # 5.9 made some engine enums UENUMs; 5.8's UHT cannot reflect a property of an unreflected enum.
+            for m in re.finditer(r"\bUPROPERTY\s*\([^)]*\)\s*[^;]*?TEnumAsByte<\s*(\w+)", text):
+                if m.group(1) not in self.taken_types and m.group(1) not in declared:
+                    self.hand(rel, text, m.start(1), "TEnumAsByte<%s>: not a UENUM in UE 5.8 (UHT fails 'Unable "
+                              "to find enum'); store it as uint8" % m.group(1))
 
         for pattern, advice in FLAGS:
             for m in re.finditer(pattern, text):

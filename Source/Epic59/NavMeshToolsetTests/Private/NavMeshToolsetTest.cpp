@@ -371,7 +371,7 @@ void FNavMeshToolsetSpec::Define()
 			ExceptionHandler->CaptureErrorsIn([this]()
 			{
 				// Toolsets register under "<ModuleName>.<ClassName>".
-				UAsyncFunctionResultString* const Result =
+				UToolCallAsyncResultString* const Result = // UE 5.8: the 5.8 registry's result type
 					UToolsetRegistry::ExecuteTool(TEXT("NavMeshToolset.NavMeshToolset"), TEXT("ListWorlds"), TEXT("{}"));
 				if (TestNotNull(TEXT("Result object"), Result))
 				{

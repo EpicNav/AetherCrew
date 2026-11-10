@@ -321,6 +321,7 @@ FNavMeshToolsetInvokersReport UNavMeshToolset::ListNavInvokers(UWorld* const Wor
 	Report.bInvokerOnlyGeneration = NavSys->IsActiveTilesGenerationEnabled();
 	Report.SeedBounds = NavSys->GetInvokersSeedBounds();
 
+#if 0 // UE 5.8: no ForEachNavigationInvoker (the invoker map is private); the raw records below carry no actor or name.
 	NavSys->ForEachNavigationInvoker([&Report, NavSys](const FNavigationInvoker& Invoker)
 	{
 		if (Report.Invokers.Num() >= NavMeshToolsetBudgets::MaxResultsCeiling)
@@ -344,6 +345,24 @@ FNavMeshToolsetInvokersReport UNavMeshToolset::ListNavInvokers(UWorld* const Wor
 			Entry.Location = InvokerLocation;
 		}
 	});
+#else
+	for (const FNavigationInvokerRaw& Invoker : NavSys->GetInvokerLocations())
+	{
+		if (Report.Invokers.Num() >= NavMeshToolsetBudgets::MaxResultsCeiling)
+		{
+			Report.bTruncated = true;
+			break;
+		}
+
+		FNavMeshToolsetInvokerInfo& Entry = Report.Invokers.AddDefaulted_GetRef();
+		Entry.GenerationRadius = Invoker.RadiusMin;
+		Entry.RemovalRadius = Invoker.RadiusMax;
+		Entry.SupportedAgentNames = NavMeshToolset::GetAgentNamesFromSelector(*NavSys, Invoker.SupportedAgents);
+		Entry.Priority = Invoker.Priority;
+		Entry.Location = Invoker.Location;
+		Entry.bLocationValid = true;
+	}
+#endif
 
 	for (const TObjectPtr<ANavigationData>& NavData : NavSys->NavDataSet)
 	{

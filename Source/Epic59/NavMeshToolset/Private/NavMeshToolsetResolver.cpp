@@ -453,6 +453,7 @@ namespace NavMeshToolset
 
 	void FillAdaptiveStats(const ARecastNavMesh& Navmesh, FNavMeshToolsetAdaptiveBuildStats& OutStats)
 	{
+#if 0 // UE 5.8: no FAdaptiveNavMeshBuildStats / GetAdaptiveBuildStats; report the feature as off.
 		FAdaptiveNavMeshBuildStats EngineStats;
 		if (!Navmesh.GetAdaptiveBuildStats(EngineStats))
 		{
@@ -470,8 +471,12 @@ namespace NavMeshToolset
 		OutStats.PassiveCount = EngineStats.FrozenCount; // UE59: 5.9 predates the Frozen->Passive rename (UE6 55795088)
 		OutStats.DeferredDirtyCount = EngineStats.DeferredDirtyCount;
 		OutStats.bPreserveTiles = EngineStats.bPreserveTiles;
+#else
+		OutStats.bAvailable = false;
+#endif
 	}
 
+#if 0 // UE 5.8: no ENavMeshTileBuildState; tiles report ENavMeshToolsetTileBuildState::Unknown.
 	ENavMeshToolsetTileBuildState ConvertTileBuildState(const ENavMeshTileBuildState EngineState)
 	{
 		switch (EngineState)
@@ -492,6 +497,7 @@ namespace NavMeshToolset
 				return ENavMeshToolsetTileBuildState::Unknown;
 		}
 	}
+#endif
 
 	namespace
 	{

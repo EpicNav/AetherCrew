@@ -105,7 +105,9 @@ namespace NavMeshToolset
 	void FillAdaptiveStats(const ARecastNavMesh& Navmesh, FNavMeshToolsetAdaptiveBuildStats& OutStats);
 
 	/** Maps the engine per-tile build state onto the toolset mirror enum. */
+#if 0 // UE 5.8: no ENavMeshTileBuildState
 	ENavMeshToolsetTileBuildState ConvertTileBuildState(ENavMeshTileBuildState EngineState);
+#endif
 
 	/**
 	 * Reads a protected enum/byte/int UPROPERTY by name; for values with no public accessor.
