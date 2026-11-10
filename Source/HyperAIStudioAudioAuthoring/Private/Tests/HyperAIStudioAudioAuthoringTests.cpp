@@ -11,6 +11,7 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioAudioAuthoringToolset.h"
 #include "HyperAIStudioAudioWrappers.h"
+#include "HyperAIStudioMetaSoundGraph.h"
 #include "HyperAIStudioMetaSoundRecipes.h"
 #include "HyperAIStudioNames.h"
 #include "HyperAIStudioSettings.h"
@@ -600,9 +601,14 @@ bool FHyperAIStudioAudioRecipesTest::RunTest(const FString& Parameters)
 	const FScratch Scratch;
 	FHyperAIMetaSoundRecipeRequest List;
 	const FHyperAIMetaSoundRecipeReport Listed = C::Recipe(List);
-	TestTrue(TEXT("An empty recipe lists the six, labelled experimental"), Listed.bOk && Listed.Recipes.Num() == 6 && Listed.bExperimental);
+	TestTrue(TEXT("An empty recipe lists the ten, labelled experimental"), Listed.bOk && Listed.Recipes.Num() == 10 && Listed.bExperimental);
 	for (const FHyperAIMetaSoundRecipeInfo& Info : Listed.Recipes)
 	{
+		// The recipes that need SoundWaves are tested with takes in WaveRecipes; whoosh also builds from noise alone.
+		if (Info.bUsesWaves && Info.Recipe != TEXT("whoosh"))
+		{
+			continue;
+		}
 		FHyperAIMetaSoundRecipeRequest Request;
 		Request.Recipe = Info.Recipe;
 		Request.Path = Scratch.Path(*(TEXT("MS_") + Info.Recipe));
@@ -687,6 +693,482 @@ bool FHyperAIStudioAudioWrappersTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("over a no-repeat random node of the three takes"), Random && Random->ChildNodes.Num() == 3 && Random->bRandomizeWithoutReplacement);
 		TestFalse(TEXT("and it validates clean"), HasErrors(HyperAIStudio::AudioAuthoring::CueGraph::Validate(*Zap)));
 	}
+	return true;
+}
+
+namespace HyperAIStudio::AudioAuthoringTests
+{
+	/** A mono 16-bit WAV of the samples, imported as a SoundWave: footstep-like thumps, noise bursts, sines. */
+	USoundWave* ImportSamples(const FString& Folder, const FString& Name, const TArray<float>& Samples, const int32 SampleRate = 48000)
+	{
+		TArray<uint8> Bytes;
+		auto U32 = [&Bytes](const uint32 V) { Bytes.Append(reinterpret_cast<const uint8*>(&V), 4); };
+		auto U16 = [&Bytes](const uint16 V) { Bytes.Append(reinterpret_cast<const uint8*>(&V), 2); };
+		Bytes.Append(reinterpret_cast<const uint8*>("RIFF"), 4);
+		U32(36 + Samples.Num() * 2);
+		Bytes.Append(reinterpret_cast<const uint8*>("WAVEfmt "), 8);
+		U32(16);
+		U16(1);
+		U16(1);
+		U32(SampleRate);
+		U32(SampleRate * 2);
+		U16(2);
+		U16(16);
+		Bytes.Append(reinterpret_cast<const uint8*>("data"), 4);
+		U32(Samples.Num() * 2);
+		for (const float Sample : Samples)
+		{
+			const int16 Value = static_cast<int16>(FMath::Clamp(Sample, -1.f, 1.f) * 32767.f);
+			Bytes.Append(reinterpret_cast<const uint8*>(&Value), 2);
+		}
+		const FString File = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("HyperAIStudio/Tests") / Name + TEXT(".wav"));
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(File), /*Tree=*/true);
+		FFileHelper::SaveArrayToFile(Bytes, *File);
+		UAssetImportTask* Task = NewObject<UAssetImportTask>();
+		Task->Filename = File;
+		Task->DestinationPath = Folder;
+		Task->DestinationName = Name;
+		Task->bAutomated = true;
+		Task->bReplaceExisting = true;
+		Task->bSave = false;
+		FAssetToolsModule::GetModule().Get().ImportAssetTasks({Task});
+		IFileManager::Get().Delete(*File, false, true, true);
+		for (UObject* Object : Task->GetObjects())
+		{
+			if (USoundWave* Wave = Cast<USoundWave>(Object))
+			{
+				// Inline: tests run with no audio device, whose streaming manager is a dummy that never loads a streamed chunk.
+				Wave->LoadingBehavior = ESoundWaveLoadingBehavior::ForceInline;
+				Wave->PostEditChange();
+				return Wave;
+			}
+		}
+		return nullptr;
+	}
+
+	/** A step: a low thump with a short decay and a burst of filtered noise for the scuff. */
+	TArray<float> Step(const int32 Seed, const float Seconds = 0.25f, const int32 Rate = 48000)
+	{
+		FRandomStream Random(Seed);
+		TArray<float> Out;
+		Out.SetNumZeroed(FMath::RoundToInt(Seconds * Rate));
+		float Low = 0.f;
+		const float Hz = 70.f + 15.f * Seed;
+		for (int32 Index = 0; Index < Out.Num(); ++Index)
+		{
+			const float T = Index / static_cast<float>(Rate);
+			Low += 0.25f * (Random.FRandRange(-1.f, 1.f) - Low);
+			Out[Index] = 0.5f * FMath::Sin(2.f * PI * Hz * T) * FMath::Exp(-T * 30.f) + 0.35f * Low * FMath::Exp(-T * 18.f);
+		}
+		return Out;
+	}
+
+	/** A hit's transient: a click of white noise; or its tail: a long, darker ring. */
+	TArray<float> Burst(const int32 Seed, const float Seconds, const float Decay, const float Smooth, const int32 Rate = 48000)
+	{
+		FRandomStream Random(Seed);
+		TArray<float> Out;
+		Out.SetNumZeroed(FMath::RoundToInt(Seconds * Rate));
+		float State = 0.f;
+		for (int32 Index = 0; Index < Out.Num(); ++Index)
+		{
+			const float T = Index / static_cast<float>(Rate);
+			State += Smooth * (Random.FRandRange(-1.f, 1.f) - State);
+			Out[Index] = 0.7f * State * FMath::Exp(-T * Decay);
+		}
+		return Out;
+	}
+
+	TArray<float> Sine(const float Hz, const float Seconds, const float Amplitude, const int32 Rate = 48000)
+	{
+		TArray<float> Out;
+		Out.SetNumZeroed(FMath::RoundToInt(Seconds * Rate));
+		for (int32 Index = 0; Index < Out.Num(); ++Index)
+		{
+			Out[Index] = Amplitude * FMath::Sin(2.f * PI * Hz * Index / Rate);
+		}
+		return Out;
+	}
+
+	FHyperAIAudioAnalyzeReport Analyze(const FString& Sound, const int32 Plays = 1, const float MaxSeconds = 3.f, TArray<FHyperAIAudioSetting> Parameters = {})
+	{
+		FHyperAIAudioAnalyzeRequest Request;
+		Request.Sound = Sound;
+		Request.Plays = Plays;
+		Request.MaxSeconds = MaxSeconds;
+		Request.Parameters = MoveTemp(Parameters);
+		return C::Analyze(Request);
+	}
+
+	FHyperAIMetaSoundGraphNode GraphNode(const TCHAR* Id, const TCHAR* Class, TArray<FHyperAIAudioSetting> Defaults = {})
+	{
+		FHyperAIMetaSoundGraphNode Out;
+		Out.Id = Id;
+		Out.Class = Class;
+		Out.Defaults = MoveTemp(Defaults);
+		return Out;
+	}
+
+	FHyperAIMetaSoundConnection Wire(const TCHAR* FromNode, const TCHAR* FromPin, const TCHAR* ToNode, const TCHAR* ToPin)
+	{
+		FHyperAIMetaSoundConnection Out;
+		Out.FromNode = FromNode;
+		Out.FromPin = FromPin;
+		Out.ToNode = ToNode;
+		Out.ToPin = ToPin;
+		return Out;
+	}
+
+	/** A blip: a sine through an AD envelope, finished when the envelope is, its pitch a graph input. */
+	FHyperAIMetaSoundGraphPlanRequest BlipPlan(const FString& Path)
+	{
+		FHyperAIMetaSoundGraphPlanRequest Request;
+		Request.Path = Path;
+		FHyperAIMetaSoundGraphMember& Pitch = Request.Inputs.AddDefaulted_GetRef();
+		Pitch.Name = TEXT("Pitch");
+		Pitch.Type = TEXT("Float");
+		Pitch.Default = TEXT("880");
+		Request.Nodes = {
+			GraphNode(TEXT("tone"), TEXT("UE.Sine.Audio")),
+			GraphNode(TEXT("env"), TEXT("AD Envelope.AD Envelope.Audio"), {Set(TEXT("Attack Time"), TEXT("0.005")), Set(TEXT("Decay Time"), TEXT("0.3"))}),
+			GraphNode(TEXT("shape"), TEXT("UE.Multiply.Audio")),
+			GraphNode(TEXT("gain"), TEXT("UE.Multiply.Audio by Float"), {Set(TEXT("AdditionalOperands"), TEXT("0.5"))})};
+		Request.Connections = {
+			Wire(TEXT("graph"), TEXT("Pitch"), TEXT("tone"), TEXT("Frequency")),
+			Wire(TEXT("graph"), TEXT("On Play"), TEXT("env"), TEXT("Trigger")),
+			Wire(TEXT("tone"), TEXT("Audio"), TEXT("shape"), TEXT("PrimaryOperand")),
+			Wire(TEXT("env"), TEXT("Out Envelope"), TEXT("shape"), TEXT("AdditionalOperands")),
+			Wire(TEXT("shape"), TEXT("Out"), TEXT("gain"), TEXT("PrimaryOperand")),
+			Wire(TEXT("gain"), TEXT("Out"), TEXT("graph"), TEXT("Out Mono")),
+			Wire(TEXT("env"), TEXT("On Done"), TEXT("graph"), TEXT("On Finished"))};
+		Request.bDryRun = false;
+		return Request;
+	}
+
+	FHyperAIMetaSoundRecipeReport WaveRecipe(const TCHAR* Recipe, const FString& Path, const TArray<USoundWave*>& Waves, const TArray<USoundWave*>& Tails = {},
+		const TCHAR* Kind = TEXT(""), const bool bDryRun = false)
+	{
+		FHyperAIMetaSoundRecipeRequest Request;
+		Request.Recipe = Recipe;
+		Request.Path = Path;
+		Request.Kind = Kind;
+		for (const USoundWave* Wave : Waves) Request.Waves.Add(Wave->GetPathName());
+		for (const USoundWave* Wave : Tails) Request.Tails.Add(Wave->GetPathName());
+		Request.bDryRun = bDryRun;
+		return C::Recipe(Request);
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioAudioNodeRegistryTest, "HyperAIStudio.Audio.Authoring.NodeRegistry", HyperAIStudio::AudioAuthoringTests::Flags)
+
+bool FHyperAIStudioAudioNodeRegistryTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::AudioAuthoringTests;
+	FHyperAIMetaSoundNodeSearchRequest Search;
+	Search.Query = TEXT("wave player");
+	const FHyperAIMetaSoundNodeSearchReport Players = C::NodeSearch(Search);
+	TestTrue(TEXT("Searching finds the Wave Player: ") + Players.Diagnostic, Players.bOk && Players.Nodes.ContainsByPredicate(
+		[](const FHyperAIMetaSoundNodeClass& Node) { return Node.Class == TEXT("UE.Wave Player.Mono"); }));
+	TestTrue(TEXT("with its pins"), Players.Nodes.Num() > 0 && Players.Nodes[0].Inputs.Num() > 2 && Players.Nodes[0].Outputs.Num() > 1);
+	Search.Query = TEXT("");
+	Search.InputType = TEXT("WaveAsset:Array");
+	const FHyperAIMetaSoundNodeSearchReport Arrays = C::NodeSearch(Search);
+	TestTrue(TEXT("An input type filter keeps nodes with such a pin, Random Get among them"), Arrays.bOk && Arrays.Nodes.Num() > 0
+		&& Arrays.Nodes.ContainsByPredicate([](const FHyperAIMetaSoundNodeClass& Node) { return Node.Class == TEXT("Array.Random Get.WaveAsset:Array"); })
+		&& !Arrays.Nodes.ContainsByPredicate([](const FHyperAIMetaSoundNodeClass& Node) { return Node.Class == TEXT("UE.Sine.Audio"); }));
+	Search.InputType.Reset();
+	Search.MaxResults = 5;
+	const FHyperAIMetaSoundNodeSearchReport Page = C::NodeSearch(Search);
+	TestTrue(TEXT("Every node, a page at a time"), Page.bOk && Page.Nodes.Num() == 5 && Page.bTruncated && Page.TotalMatches > 100);
+	Search.Query = TEXT("zzqx no such node");
+	TestTrue(TEXT("Nothing matches nonsense"), C::NodeSearch(Search).TotalMatches == 0);
+
+	FHyperAIMetaSoundNodeDescribeRequest Describe;
+	Describe.Classes = {TEXT("UE.Wave Player.Mono"), TEXT("UE.Noise.Audio"), TEXT("UE.TriggerRepeat")};
+	Describe.bListDataTypes = true;
+	const FHyperAIMetaSoundNodeDescribeReport Described = C::NodeDescribe(Describe);
+	TestTrue(TEXT("Three classes described: ") + Described.Diagnostic, Described.bOk && Described.Nodes.Num() == 3);
+	if (Described.Nodes.Num() == 3)
+	{
+		const FHyperAIMetaSoundNodeClass& Player = Described.Nodes[0];
+		const FHyperAIMetaSoundPin* Pitch = Player.Inputs.FindByPredicate([](const FHyperAIMetaSoundPin& Pin) { return Pin.Name == TEXT("Pitch Shift"); });
+		TestTrue(TEXT("The Wave Player's inputs have types and defaults"), Pitch && Pitch->Type == TEXT("Float") && !Pitch->Default.IsEmpty()
+			&& Player.Inputs.ContainsByPredicate([](const FHyperAIMetaSoundPin& Pin) { return Pin.Name == TEXT("Wave Asset") && Pin.Type == TEXT("WaveAsset"); }));
+		const FHyperAIMetaSoundPin* Type = Described.Nodes[1].Inputs.FindByPredicate([](const FHyperAIMetaSoundPin& Pin) { return Pin.Name == TEXT("Type"); });
+		TestTrue(TEXT("An enum pin lists its values"), Type && Type->EnumValues.Num() >= 2);
+		TestTrue(TEXT("A class with no variant is found by Namespace.Name"), Described.Nodes[2].Class == TEXT("UE.TriggerRepeat"));
+	}
+	TestTrue(TEXT("The data types are listed"), Described.DataTypes.Contains(TEXT("Float")) && Described.DataTypes.Contains(TEXT("WaveAsset:Array")));
+	Describe.Classes = {TEXT("UE.No Such Node.Audio")};
+	Describe.bListDataTypes = false;
+	const FHyperAIMetaSoundNodeDescribeReport Missing = C::NodeDescribe(Describe);
+	TestTrue(TEXT("An unknown class is named as missing"), !Missing.bOk && Missing.Status == TEXT("not_found") && Missing.Diagnostic.Contains(TEXT("No Such Node")));
+
+	FMetasoundFrontendLiteral Literal;
+	FString Error;
+	TestTrue(TEXT("An enum takes its name"), HyperAIStudio::AudioAuthoring::Graph::MakeLiteral(TEXT("Enum:NoiseType"), TEXT("Pink"), Literal, Error)
+		|| HyperAIStudio::AudioAuthoring::Graph::MakeLiteral(TEXT("Enum:NoiseGenerator"), TEXT("0"), Literal, Error));
+	TestTrue(TEXT("A float array takes a comma list"), HyperAIStudio::AudioAuthoring::Graph::MakeLiteral(TEXT("Float:Array"), TEXT("[1, 2.5, 3]"), Literal, Error)
+		&& Literal.GetType() == EMetasoundFrontendLiteralType::FloatArray);
+	TestFalse(TEXT("A float refuses words"), HyperAIStudio::AudioAuthoring::Graph::MakeLiteral(TEXT("Float"), TEXT("loud"), Literal, Error));
+	TestFalse(TEXT("An audio pin takes no value"), HyperAIStudio::AudioAuthoring::Graph::MakeLiteral(TEXT("Audio"), TEXT("1"), Literal, Error));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioAudioGraphPlanTest, "HyperAIStudio.Audio.Authoring.GraphPlan", HyperAIStudio::AudioAuthoringTests::Flags)
+
+bool FHyperAIStudioAudioGraphPlanTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::AudioAuthoringTests;
+	const FScratch Scratch;
+	const FString Path = Scratch.Path(TEXT("MS_GraphBlip"));
+	FHyperAIMetaSoundGraphPlanRequest Request = BlipPlan(Path);
+	Request.bDryRun = true;
+	const FHyperAIMetaSoundGraphPlanReport Checked = C::GraphPlan(Request);
+	TestTrue(TEXT("The plan dry-runs, laid out, and makes nothing: ") + Checked.Diagnostic, Checked.bOk && Checked.Status == TEXT("checked") && Checked.bCreates
+		&& Checked.Nodes.Num() == 4 && Checked.Warnings.IsEmpty() && FHyperAIStudioNames::IsFreePackage(Path));
+	TestTrue(TEXT("The layout follows the signal: the gain right of the tone"), Checked.Nodes.Num() == 4 && Checked.Nodes[3].Column > Checked.Nodes[0].Column);
+
+	auto Refused = [&](const TCHAR* What, TFunctionRef<void(FHyperAIMetaSoundGraphPlanRequest&)> Break, const TCHAR* Expect)
+	{
+		FHyperAIMetaSoundGraphPlanRequest Broken = BlipPlan(Scratch.Path(TEXT("MS_Broken")));
+		Broken.bDryRun = true;
+		Break(Broken);
+		const FHyperAIMetaSoundGraphPlanReport Report = C::GraphPlan(Broken);
+		TestTrue(FString(What) + TEXT(": ") + Report.Diagnostic, !Report.bOk && Report.Status == TEXT("invalid_request") && Report.Diagnostic.Contains(Expect));
+	};
+	Refused(TEXT("An unknown class"), [](FHyperAIMetaSoundGraphPlanRequest& R) { R.Nodes[0].Class = TEXT("UE.Sinus.Audio"); }, TEXT("not a registered"));
+	Refused(TEXT("An unknown pin"), [](FHyperAIMetaSoundGraphPlanRequest& R) { R.Connections[2].FromPin = TEXT("Wave"); }, TEXT("no output Wave"));
+	Refused(TEXT("Two types joined"), [](FHyperAIMetaSoundGraphPlanRequest& R) { R.Connections[2].ToNode = TEXT("gain"); R.Connections[2].ToPin = TEXT("AdditionalOperands"); }, TEXT("joins a Audio to a Float"));
+	Refused(TEXT("An input fed twice"), [](FHyperAIMetaSoundGraphPlanRequest& R) { R.Connections.Add(Wire(TEXT("tone"), TEXT("Audio"), TEXT("shape"), TEXT("PrimaryOperand"))); }, TEXT("already fed"));
+	Refused(TEXT("A value its pin cannot take"), [](FHyperAIMetaSoundGraphPlanRequest& R) { R.Nodes[1].Defaults[0].Value = TEXT("soon"); }, TEXT("takes a number"));
+	Refused(TEXT("A default on a pin the node lacks"), [](FHyperAIMetaSoundGraphPlanRequest& R) { R.Nodes[1].Defaults.Add(Set(TEXT("Sustain"), TEXT("1"))); }, TEXT("no input Sustain"));
+	Refused(TEXT("A graph member the source lacks"), [](FHyperAIMetaSoundGraphPlanRequest& R) { R.Connections[5].ToPin = TEXT("Out Left"); }, TEXT("no output"));
+	Refused(TEXT("A node id twice"), [](FHyperAIMetaSoundGraphPlanRequest& R) { R.Nodes[1].Id = TEXT("tone"); }, TEXT("Id of its own"));
+	{
+		FHyperAIMetaSoundGraphPlanRequest Loose = BlipPlan(Scratch.Path(TEXT("MS_Loose")));
+		Loose.bDryRun = true;
+		Loose.Connections.RemoveAt(6);
+		const FHyperAIMetaSoundGraphPlanReport Report = C::GraphPlan(Loose);
+		TestTrue(TEXT("A one-shot whose On Finished is not wired is warned of"), Report.bOk && Report.Warnings.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("never finishes")); }));
+	}
+
+	// With approval on, the plan waits and makes nothing until it is approved.
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	Settings->bRequireApprovalForAgentEdits = true;
+	Request.bDryRun = false;
+	const FHyperAIMetaSoundGraphPlanReport Held = C::GraphPlan(Request);
+	TestTrue(TEXT("With approval on, the plan waits: ") + Held.Diagnostic, Held.bOk && Held.Status == TEXT("awaiting_user_approval") && FHyperAIStudioApprovalGate::HasPending(Held.OperationId));
+	FHyperAIStudioApprovalGate::Reject(Held.OperationId, TEXT("Not now."));
+	TestTrue(TEXT("Rejected, nothing is made"), FHyperAIStudioNames::IsFreePackage(Path));
+	Settings->bRequireApprovalForAgentEdits = false;
+
+	const FHyperAIMetaSoundGraphPlanReport Built = C::GraphPlan(Request);
+	UMetaSoundSource* Source = Cast<UMetaSoundSource>(HyperAIStudio::AudioAuthoring::CueGraph::LoadAsset(Path, *UMetaSoundSource::StaticClass()));
+	TestTrue(TEXT("The plan builds a MetaSound Source: ") + Built.Diagnostic, Built.bOk && Built.Status == TEXT("completed") && Source != nullptr);
+	if (!Source)
+	{
+		return false;
+	}
+	TestTrue(TEXT("Each node reports its GUID"), Built.Nodes.Num() == 4 && Built.Nodes.FindByPredicate([](const FHyperAIMetaSoundBuiltNode& Node) { return Node.NodeId.IsEmpty(); }) == nullptr);
+	const FHyperAISoundAssetInfo Read = Inspect(Path);
+	const int32 NodeLines = Read.Details.FilterByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("node ")); }).Num();
+	TestTrue(TEXT("Inspect shows its input, nodes and wires: ") + FString::Join(Read.Details, TEXT(" | ")), Read.Details.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("input Pitch (Float)")); })
+		&& NodeLines == 4 && Read.Details.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("wire ")) && Line.Contains(TEXT("Frequency")); }));
+
+	// It sounds: an 880 Hz tone a little under -6 dBFS, finished in about 0.3 s.
+	const FHyperAIAudioAnalyzeReport Heard = Analyze(Path, 1, 2.f);
+	TestTrue(TEXT("Rendered offline it is heard: ") + Heard.Diagnostic, Heard.bOk && Heard.Plays.Num() == 1 && !Heard.Plays[0].bSilent && Heard.Method == TEXT("metasound_offline"));
+	if (Heard.Plays.Num() == 1)
+	{
+		const FHyperAIAudioMeasure& M = Heard.Plays[0];
+		TestTrue(FString::Printf(TEXT("its centroid is near 880 Hz (%.0f)"), M.SpectralCentroidHz), FMath::Abs(M.SpectralCentroidHz - 880.f) < 120.f);
+		TestTrue(FString::Printf(TEXT("it finishes about 0.3 s in (%.2f s)"), M.DurationSeconds), M.bFinished && M.DurationSeconds > 0.2f && M.DurationSeconds < 0.6f);
+		TestTrue(FString::Printf(TEXT("its peak is about -6 dBFS (%.1f)"), M.PeakDb), M.PeakDb < -4.f && M.PeakDb > -9.f && M.ClippedSamples == 0);
+	}
+	const FHyperAIAudioAnalyzeReport Lower = Analyze(Path, 1, 2.f, {Set(TEXT("Pitch"), TEXT("220"))});
+	TestTrue(TEXT("A graph input set for the render moves the centroid down"), Lower.bOk && Lower.Plays.Num() == 1 && Heard.Plays.Num() == 1
+		&& Lower.Plays[0].SpectralCentroidHz < Heard.Plays[0].SpectralCentroidHz * 0.5f);
+
+	// Adding to the source: one more node on an existing one, in one undo step.
+	if (GEditor && GEditor->Trans)
+	{
+		FHyperAIMetaSoundGraphPlanRequest Add;
+		Add.Path = Path;
+		Add.bDryRun = false;
+		Add.bSave = false;
+		const FString* ToneLine = Read.Details.FindByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("node ")) && Line.EndsWith(TEXT("UE.Sine.Audio")); });
+		const FString ToneId = ToneLine ? ToneLine->Mid(5, 36) : FString();
+		Add.Nodes = {GraphNode(TEXT("lfo"), TEXT("UE.LFO.Audio"), {Set(TEXT("Frequency"), TEXT("3"))}), GraphNode(*ToneId, TEXT(""))};
+		const FHyperAIMetaSoundGraphPlanReport Added = C::GraphPlan(Add);
+		const auto Count = [&Path]() { return Inspect(Path).Details.FilterByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("node ")); }).Num(); };
+		TestTrue(TEXT("A node is added to the existing source: ") + Added.Diagnostic + TEXT(" ") + FString::Join(Inspect(Path).Details, TEXT(" | ")), Added.bOk && !Added.bCreates && Count() == 5);
+		TestTrue(TEXT("Edit > Undo takes it back"), GEditor->UndoTransaction() && Count() == 4);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioAudioAnalyzeTest, "HyperAIStudio.Audio.Authoring.Analyze", HyperAIStudio::AudioAuthoringTests::Flags)
+
+bool FHyperAIStudioAudioAnalyzeTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::AudioAuthoringTests;
+	const FScratch Scratch;
+	// A 1 kHz sine at 0.5 for 2 s: -6.02 dBFS peak, and by BS.1770 -6.02 - 3.01 = -9.03 LUFS (K-weighting is flat at 1 kHz but for +0.69 dB, which its -0.691 offset cancels).
+	USoundWave* Tone = ImportSamples(Scratch.Folder, TEXT("SW_Tone1k"), Sine(1000.f, 2.f, 0.5f));
+	USoundWave* Thud = ImportSamples(Scratch.Folder, TEXT("SW_Thud"), Step(3, 0.6f));
+	if (!TestTrue(TEXT("Waves import"), Tone && Thud))
+	{
+		return false;
+	}
+	const FHyperAIAudioAnalyzeReport Sine1k = Analyze(Tone->GetPathName());
+	TestTrue(TEXT("A SoundWave is read from its samples: ") + Sine1k.Diagnostic, Sine1k.bOk && Sine1k.Method == TEXT("sound_wave_pcm") && Sine1k.Plays.Num() == 1);
+	if (Sine1k.Plays.Num() == 1)
+	{
+		const FHyperAIAudioMeasure& M = Sine1k.Plays[0];
+		TestTrue(FString::Printf(TEXT("peak -6.0 dBFS (%.2f)"), M.PeakDb), FMath::Abs(M.PeakDb + 6.02f) < 0.2f);
+		TestTrue(FString::Printf(TEXT("integrated loudness -9.0 LUFS (%.2f)"), M.IntegratedLufs), FMath::Abs(M.IntegratedLufs + 9.03f) < 0.4f);
+		TestTrue(FString::Printf(TEXT("centroid 1 kHz (%.0f)"), M.SpectralCentroidHz), FMath::Abs(M.SpectralCentroidHz - 1000.f) < 60.f);
+		TestTrue(FString::Printf(TEXT("onset at once (%.1f ms), lasting 2 s (%.2f)"), M.OnsetMs, M.DurationSeconds), M.OnsetMs < 2.f && FMath::Abs(M.DurationSeconds - 2.f) < 0.01f);
+		TestTrue(TEXT("no clipping"), M.ClippedSamples == 0 && !M.bSilent);
+	}
+	const FHyperAIAudioAnalyzeReport Thump = Analyze(Thud->GetPathName());
+	TestTrue(TEXT("A thud is dark and decays: ") + Thump.Diagnostic, Thump.bOk && Thump.Plays.Num() == 1 && Thump.Plays[0].SpectralCentroidHz < 1500.f
+		&& Thump.Plays[0].TailSeconds > 0.1f && Thump.Plays[0].TailSeconds < 0.6f);
+	const FHyperAIAudioAnalyzeReport Loud = Analyze(ImportSamples(Scratch.Folder, TEXT("SW_Hot"), Sine(200.f, 0.5f, 1.2f))->GetPathName());
+	TestTrue(TEXT("A clipped wave is reported as clipping"), Loud.bOk && Loud.Issues.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("clipping")); }));
+	TestTrue(TEXT("A sound that is not there is not found"), Analyze(Scratch.Path(TEXT("SC_None"))).Status == TEXT("not_found"));
+	FHyperAIAudioAnalyzeRequest Empty;
+	TestTrue(TEXT("A request without a sound is refused"), !C::Analyze(Empty).bOk);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioAudioWaveRecipesTest, "HyperAIStudio.Audio.Authoring.WaveRecipes", HyperAIStudio::AudioAuthoringTests::Flags)
+
+bool FHyperAIStudioAudioWaveRecipesTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::AudioAuthoringTests;
+	const FScratch Scratch;
+	TArray<USoundWave*> Steps;
+	for (int32 Seed = 1; Seed <= 4; ++Seed)
+	{
+		Steps.Add(ImportSamples(Scratch.Folder, FString::Printf(TEXT("SW_Step_%02d"), Seed), Step(Seed)));
+	}
+	USoundWave* HitA = ImportSamples(Scratch.Folder, TEXT("SW_HitA"), Burst(11, 0.12f, 40.f, 0.9f));
+	USoundWave* HitB = ImportSamples(Scratch.Folder, TEXT("SW_HitB"), Burst(12, 0.12f, 45.f, 0.8f));
+	USoundWave* Tail = ImportSamples(Scratch.Folder, TEXT("SW_Tail"), Burst(13, 1.2f, 4.f, 0.05f));
+	USoundWave* BedA = ImportSamples(Scratch.Folder, TEXT("SW_BedA"), Burst(21, 3.f, 0.f, 0.1f));
+	USoundWave* BedB = ImportSamples(Scratch.Folder, TEXT("SW_BedB"), Burst(22, 3.f, 0.f, 0.3f));
+	if (!TestTrue(TEXT("The takes import"), !Steps.Contains(nullptr) && HitA && HitB && Tail && BedA && BedB))
+	{
+		return false;
+	}
+
+	FHyperAIMetaSoundRecipeRequest List;
+	const FHyperAIMetaSoundRecipeReport Listed = C::Recipe(List);
+	TestTrue(TEXT("The four wave recipes are listed, with a Sound Cue version each"), Listed.Recipes.FilterByPredicate([](const FHyperAIMetaSoundRecipeInfo& Info) { return Info.bUsesWaves && Info.bSoundCue; }).Num() == 4);
+
+	// Footsteps: a different take most steps, a pitch and level that move, and each step finishes.
+	const FString Footsteps = Scratch.Path(TEXT("MS_Footsteps"));
+	TestTrue(TEXT("footstep dry-runs"), WaveRecipe(TEXT("footstep"), Footsteps, Steps, {}, TEXT(""), true).Status == TEXT("checked"));
+	const FHyperAIMetaSoundRecipeReport Made = WaveRecipe(TEXT("footstep"), Footsteps, Steps);
+	TestTrue(TEXT("footstep builds: ") + Made.Diagnostic, Made.bOk && Made.NodeCount >= 8);
+	const FHyperAIAudioAnalyzeReport Walk = Analyze(Footsteps, 6, 2.f);
+	TestTrue(TEXT("Six steps render, none silent, each finished: ") + Walk.Diagnostic, Walk.bOk && Walk.Plays.Num() == 6
+		&& !Walk.Plays.ContainsByPredicate([](const FHyperAIAudioMeasure& M) { return M.bSilent || !M.bFinished; }));
+	TestTrue(FString::Printf(TEXT("and vary (%.2f LU, %.0f Hz)"), Walk.LoudnessSpreadLu, Walk.CentroidSpreadHz), Walk.LoudnessSpreadLu > 0.2f || Walk.CentroidSpreadHz > 5.f);
+	const FHyperAIAudioAnalyzeReport Still = Analyze(Footsteps, 3, 2.f, {Set(TEXT("Pitch Jitter"), TEXT("0")), Set(TEXT("Volume Jitter"), TEXT("0"))});
+	TestTrue(TEXT("Rendered with its inputs set, it still plays"), Still.bOk && Still.Plays.Num() == 3 && !Still.Plays[0].bSilent);
+
+	// Impact: the tail keeps it ringing well past the transient.
+	const FString Impact = Scratch.Path(TEXT("MS_Impact"));
+	const FHyperAIMetaSoundRecipeReport Hit = WaveRecipe(TEXT("impact"), Impact, {HitA, HitB}, {Tail});
+	TestTrue(TEXT("impact builds: ") + Hit.Diagnostic, Hit.bOk);
+	const FHyperAIAudioAnalyzeReport Crash = Analyze(Impact, 3, 3.f);
+	TestTrue(TEXT("impact renders and finishes: ") + Crash.Diagnostic, Crash.bOk && Crash.Plays.Num() == 3 && !Crash.Plays[0].bSilent && Crash.Plays[0].bFinished);
+	TestTrue(FString::Printf(TEXT("with a tail of more than half a second (%.2f s)"), Crash.Plays.Num() ? Crash.Plays[0].TailSeconds : 0.f), Crash.Plays.Num() && Crash.Plays[0].TailSeconds > 0.5f);
+	TestTrue(TEXT("A transient-only impact builds too"), WaveRecipe(TEXT("impact"), Scratch.Path(TEXT("MS_Tap")), {HitA}).bOk);
+
+	// Whoosh: from takes, and from noise alone.
+	TestTrue(TEXT("whoosh builds from takes"), WaveRecipe(TEXT("whoosh"), Scratch.Path(TEXT("MS_WhooshTakes")), {BedA}).bOk);
+	const FString Whoosh = Scratch.Path(TEXT("MS_Whoosh"));
+	TestTrue(TEXT("whoosh builds from noise"), WaveRecipe(TEXT("whoosh"), Whoosh, {}).bOk);
+	const FHyperAIAudioAnalyzeReport Swish = Analyze(Whoosh, 1, 3.f);
+	TestTrue(TEXT("and sounds, finishing about 0.6 s in: ") + Swish.Diagnostic, Swish.bOk && Swish.Plays.Num() == 1 && !Swish.Plays[0].bSilent && Swish.Plays[0].bFinished
+		&& Swish.Plays[0].DurationSeconds < 1.2f);
+
+	// Crossfade loop: never finishes, never silent once it has faded in.
+	const FString Bed = Scratch.Path(TEXT("MS_Bed"));
+	TestTrue(TEXT("crossfade_loop builds"), WaveRecipe(TEXT("crossfade_loop"), Bed, {BedA, BedB}).bOk);
+	const FHyperAIAudioAnalyzeReport Ambience = Analyze(Bed, 1, 8.f, {Set(TEXT("Segment"), TEXT("1"))});
+	TestTrue(TEXT("crossfade_loop plays on past its beds without finishing: ") + Ambience.Diagnostic, Ambience.bOk && Ambience.Plays.Num() == 1 && !Ambience.Plays[0].bSilent
+		&& !Ambience.Plays[0].bFinished && Ambience.Plays[0].DurationSeconds > 7.9f);
+
+	// The Sound Cue versions.
+	const FString StepCue = Scratch.Path(TEXT("SC_Footsteps"));
+	const FHyperAIMetaSoundRecipeReport Cue = WaveRecipe(TEXT("footstep"), StepCue, Steps, {}, TEXT("sound_cue"));
+	USoundCue* Steps1 = LoadCue(StepCue);
+	TestTrue(TEXT("footstep as a Sound Cue: ") + Cue.Diagnostic, Cue.bOk && Steps1 && Steps1->FirstNode && Steps1->FirstNode->IsA<USoundNodeModulator>() && Steps1->AllNodes.Num() == 6);
+	const FString HitCue = Scratch.Path(TEXT("SC_Impact"));
+	TestTrue(TEXT("impact as a Sound Cue"), WaveRecipe(TEXT("impact"), HitCue, {HitA, HitB}, {Tail}, TEXT("sound_cue")).bOk && LoadCue(HitCue) && LoadCue(HitCue)->AllNodes.Num() == 9);
+	TestTrue(TEXT("crossfade_loop as a Sound Cue"), WaveRecipe(TEXT("crossfade_loop"), Scratch.Path(TEXT("SC_Bed")), {BedA, BedB}, {}, TEXT("sound_cue")).bOk);
+
+	// Refusals.
+	TestTrue(TEXT("A wave recipe without waves is refused"), WaveRecipe(TEXT("footstep"), Scratch.Path(TEXT("MS_NoSteps")), {}).Status == TEXT("invalid_request"));
+	TestTrue(TEXT("A procedural recipe refuses waves"), WaveRecipe(TEXT("wind_loop"), Scratch.Path(TEXT("MS_WindWaves")), Steps).Status == TEXT("invalid_request"));
+	TestTrue(TEXT("Only impact takes tails"), WaveRecipe(TEXT("footstep"), Scratch.Path(TEXT("MS_StepTails")), Steps, {Tail}).Status == TEXT("invalid_request"));
+	TestTrue(TEXT("A procedural recipe has no Sound Cue version"), WaveRecipe(TEXT("ui_blip"), Scratch.Path(TEXT("SC_Blip")), {}, {}, TEXT("sound_cue")).Status == TEXT("invalid_request"));
+	FHyperAIMetaSoundRecipeRequest Bad;
+	Bad.Recipe = TEXT("footstep");
+	Bad.Path = Scratch.Path(TEXT("MS_BadWave"));
+	Bad.Waves = {Scratch.Path(TEXT("SW_Missing"))};
+	TestTrue(TEXT("A missing wave is named"), C::Recipe(Bad).Diagnostic.Contains(TEXT("SW_Missing")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHyperAIStudioAudioPreviewTest, "HyperAIStudio.Audio.Authoring.Preview", HyperAIStudio::AudioAuthoringTests::Flags)
+
+bool FHyperAIStudioAudioPreviewTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::AudioAuthoringTests;
+	const FScratch Scratch;
+	USoundWave* Tone = ImportSamples(Scratch.Folder, TEXT("SW_PreviewTone"), Sine(440.f, 0.5f, 0.3f));
+	if (!TestNotNull(TEXT("A wave imports"), Tone))
+	{
+		return false;
+	}
+	FHyperAIAudioPreviewRequest Request;
+	Request.Action = TEXT("status");
+	const FHyperAIAudioPreviewReport Status = C::Preview(Request);
+	TestTrue(TEXT("Status answers: ") + Status.Diagnostic, Status.bOk && Status.Status == TEXT("ok"));
+	Request.Action = TEXT("dance");
+	TestTrue(TEXT("An unknown action is refused"), C::Preview(Request).Status == TEXT("invalid_request"));
+	Request.Action = TEXT("play");
+	Request.Sound = Tone->GetPathName();
+	Request.Parameters = {Set(TEXT("Pitch"), TEXT("loud"))};
+	const FHyperAIAudioPreviewReport Played = C::Preview(Request);
+	if (Status.bAudioAvailable)
+	{
+		TestTrue(TEXT("A bad parameter is refused"), Played.Status == TEXT("invalid_request"));
+		Request.Parameters = {Set(TEXT("Gain"), TEXT("0.5"))};
+		const FHyperAIAudioPreviewReport Playing = C::Preview(Request);
+		TestTrue(TEXT("With a device it plays: ") + Playing.Diagnostic, Playing.bOk && Playing.bPreviewing);
+		Request.Action = TEXT("mute");
+		Request.Target = Tone->GetPathName();
+		TestTrue(TEXT("and mutes a wave"), C::Preview(Request).Muted.Contains(Tone->GetPathName()));
+		Request.Action = TEXT("clear");
+		TestTrue(TEXT("and clears it"), C::Preview(Request).Muted.IsEmpty());
+	}
+	else
+	{
+		TestTrue(TEXT("Without a device play says so: ") + Played.Diagnostic, !Played.bOk && Played.Status == TEXT("no_audio_device") && !Played.bAudioAvailable);
+		Request.Action = TEXT("solo");
+		Request.Target = Tone->GetPathName();
+		TestTrue(TEXT("and so does solo"), C::Preview(Request).Status == TEXT("no_audio_device"));
+	}
+	Request.Action = TEXT("stop");
+	const FHyperAIAudioPreviewReport Stopped = C::Preview(Request);
+	TestTrue(TEXT("Stop always answers, leaving nothing playing"), Stopped.bOk && !Stopped.bPreviewing);
 	return true;
 }
 

@@ -902,17 +902,17 @@ const TArray<FHyperAIStudioGASManifestEntry>& FHyperAIStudioGASContracts::GetMan
 const TArray<FHyperAIGASEpicDelegate>& FHyperAIStudioGASContracts::GetEpicDelegates()
 {
 	static const TArray<FHyperAIGASEpicDelegate> Delegates = {
-		{TEXT("inspect_attribute_values"), TEXT("GASToolsets.AbilitySystemInspectorToolset"),
+		{TEXT("inspect_attribute_values"), TEXT("GASToolsets59.AbilitySystemInspectorToolset59"),
 			TEXT("GetAttributeValues"), TEXT("read"), TEXT("Runtime ASC inspection is already native in Epic GAS Toolsets.")},
-		{TEXT("inspect_active_effects"), TEXT("GASToolsets.AbilitySystemInspectorToolset"),
+		{TEXT("inspect_active_effects"), TEXT("GASToolsets59.AbilitySystemInspectorToolset59"),
 			TEXT("GetActiveEffects"), TEXT("read"), TEXT("Runtime active-effect inspection remains an Epic delegate.")},
-		{TEXT("inspect_granted_abilities"), TEXT("GASToolsets.AbilitySystemInspectorToolset"),
+		{TEXT("inspect_granted_abilities"), TEXT("GASToolsets59.AbilitySystemInspectorToolset59"),
 			TEXT("GetGrantedAbilities"), TEXT("read"), TEXT("Runtime granted-ability inspection remains an Epic delegate.")},
-		{TEXT("inspect_active_tags"), TEXT("GASToolsets.AbilitySystemInspectorToolset"),
+		{TEXT("inspect_active_tags"), TEXT("GASToolsets59.AbilitySystemInspectorToolset59"),
 			TEXT("GetActiveTags"), TEXT("read"), TEXT("Runtime active-tag inspection remains an Epic delegate.")},
-		{TEXT("find_attribute_set_classes"), TEXT("GASToolsets.AttributeSetToolset"),
+		{TEXT("find_attribute_set_classes"), TEXT("GASToolsets59.AttributeSetToolset59"),
 			TEXT("FindAttributeSetClasses"), TEXT("read"), TEXT("Epic owns broad native AttributeSet class discovery.")},
-		{TEXT("list_attributes"), TEXT("GASToolsets.AttributeSetToolset"),
+		{TEXT("list_attributes"), TEXT("GASToolsets59.AttributeSetToolset59"),
 			TEXT("ListAttributes"), TEXT("read"), TEXT("Epic owns direct AttributeSet member listing.")},
 		{TEXT("list_gameplay_cues"), TEXT("GASToolsets.GameplayCueToolset"),
 			TEXT("ListCues"), TEXT("read"), TEXT("Cue-manager inventory remains an Epic delegate.")},

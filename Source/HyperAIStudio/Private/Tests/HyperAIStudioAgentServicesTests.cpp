@@ -390,7 +390,8 @@ bool FHyperAIStudioCohortMismatchTest::RunTest(const FString& Parameters)
 	using FRuntime = FHyperAIStudioExtensionRuntime;
 	// Niagara is in the generated catalog, so its real cohort must report no mismatch at all.
 	const TArray<FString> NiagaraTools = {
-		TEXT("hyper_niagara_inspect"), TEXT("hyper_niagara_apply_plan"), TEXT("hyper_niagara_validate"), TEXT("hyper_niagara_live")};
+		TEXT("hyper_niagara_inspect"), TEXT("hyper_niagara_apply_plan"), TEXT("hyper_niagara_validate"), TEXT("hyper_niagara_live"),
+		TEXT("hyper_niagara_discover"), TEXT("hyper_niagara_preview")};
 	const FString Cohort = TEXT("cohort.source.hyperaistudioniagaratoolset.v1");
 	TestEqual(TEXT("A catalog-matching cohort reports nothing"),
 		FRuntime::DescribeExactGeneratedCohortMismatch(TEXT("niagara_vfx"), Cohort, NiagaraTools), FString());

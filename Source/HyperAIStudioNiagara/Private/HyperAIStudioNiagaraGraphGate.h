@@ -37,6 +37,12 @@ namespace HyperAIStudio::Niagara::GraphGate
 	 */
 	bool ValidatePlanAgainstSystem(UNiagaraSystem& System, const TArray<FHyperAINiagaraEditOp>& Ops, FString& OutStatus, FString& OutDiagnostic);
 
+	/**
+	 * The same walk for a plan that makes its System: with no System, the walk starts from create_system's template
+	 * emitters (those its value keeps) or from none, and create_system must be the first op.
+	 */
+	bool ValidatePlanAgainstSystem(UNiagaraSystem* System, const TArray<FHyperAINiagaraEditOp>& Ops, FString& OutStatus, FString& OutDiagnostic);
+
 	/** Applies one graph op inside the caller's transaction; OutStatus names what it made. */
 	bool ApplyGraphOp(UNiagaraSystem& System, const FHyperAINiagaraEditOp& Op, FString& OutStatus, FString& OutError);
 

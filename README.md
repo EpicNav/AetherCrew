@@ -14,7 +14,7 @@ What it does:
   Native and terminal views share conversations; output limits are configurable (0 = Auto, provider limits apply).
   Keys stay in Windows Credential Manager. Existing CLI routes also support API-key authentication.
   See [API setup](Docs/api-authentication.md).
-- Adds 212 tools in 42 capability packs (Blueprints, levels, lighting, materials, Niagara, animation, GAS, UI, PCG
+- Adds 219 tools in 42 capability packs (Blueprints, levels, lighting, materials, Niagara, animation, GAS, UI, PCG
   and more), every edit planned, approved, journaled and undoable.
 - Runs a team: director, programmer, level designer, lighting artist, technical artist and QA tester.
 - Matches a reference image: the preferred agent lights or builds the level, and HyperAI scores every attempt and

@@ -12,6 +12,8 @@ public class HyperAIStudioAudioAuthoring : ModuleRules
 		{
 			"AssetRegistry",
 			"AssetTools",
+			// Audio parameters for the offline renders and the preview.
+			"AudioExtensions",
 			// The submix effect presets: reverb, EQ and the dynamics processor.
 			"AudioMixer",
 			"Core",
@@ -22,6 +24,8 @@ public class HyperAIStudioAudioAuthoring : ModuleRules
 			"MetasoundEditor",
 			"MetasoundEngine",
 			"MetasoundFrontend",
+			// The MetaSound generator, run without an audio device to render and measure a source.
+			"MetasoundGenerator",
 			"MetasoundGraphCore",
 			"Projects",
 			"ToolsetRegistry",

@@ -11,7 +11,7 @@ You make the materials, textures, visual effects and animation data of this Unre
   1. Call the pack's `*_apply_plan` with `bDryRun: false` and a fresh `operationId`.
   2. Call `hyper_operation_wait` with that `operationId`. If another role's edit is running, yours shows `queued`, and the wait covers the queue too.
   3. Call the pack's validate tool.
-- For Niagara effects, follow the unreal-niagara skill: emitters, modules, HLSL modules, simulation stages and renderer settings in one plan, then validate and probe that the emitters are live; in play, `hyper_niagara_live` says what each emitter is doing.
+- For Niagara effects, follow the unreal-niagara skill: start from an effect recipe or a template (`hyper_niagara_discover`), build the System, emitters, inputs and renderers in one plan, then look at `hyper_niagara_preview`'s contact sheet yourself and probe that the emitters are live; in play, `hyper_niagara_live` says what each emitter is doing.
 - For a new material, follow the unreal-materials skill: start from a `hyper_material_recipe` (layered PBR, water, decal, landscape layers, Custom HLSL, Substrate, material functions), then tune it with `hyper_material_apply_plan`.
 - For animation, follow the unreal-animation skill: montages and sequences with `hyper_animation_apply_plan`, retargeting with `hyper_retarget_apply_plan`, and motion matching databases with `hyper_pose_search_apply_plan`.
 - Paid generated characters only when the user asks for them: follow the generated-characters skill to rig a model (`hyper_mesh_rig`), animate it from presets or words (`hyper_mesh_animate`), retexture it (`hyper_mesh_retexture`) and retarget the clips onto the project's skeletons. Dry-run each first and say its price.

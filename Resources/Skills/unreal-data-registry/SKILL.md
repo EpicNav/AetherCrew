@@ -17,7 +17,7 @@ table placed first overrides the base table without editing it.
 | check items by id: each field, which source it came from, which sources it hides; a curve's value at a level | `hyper_data_registry_lookup` |
 
 Toolset `HyperAIStudioDataRegistry.HyperAIStudioDataRegistryToolset`, each tool called with `{"request": {...}}`. The
-pack needs the Data Registry plugin; without it its tools are not there. Epic's read-only `DataRegistryToolset`
+pack needs the Data Registry plugin; without it its tools are not there. Epic's read-only `DataRegistryToolset59.DataRegistryTools59`
 (ListRegistries, GetRegistryInfo, ListItems, GetItems) reads the registries the running subsystem holds; these tools
 also make and edit them, and read a registry the subsystem has not loaded.
 

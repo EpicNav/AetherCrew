@@ -1079,7 +1079,9 @@ private:
 				TEXT("audio_metasound"),
 				TEXT("cohort.source.hyperaistudioaudioauthoringtoolset.v1"),
 				{TEXT("hyper_sound_cue_plan"), TEXT("hyper_sound_mix_plan"),
-					TEXT("hyper_sound_asset_inspect"), TEXT("hyper_metasound_recipe")},
+					TEXT("hyper_sound_asset_inspect"), TEXT("hyper_metasound_recipe"),
+					TEXT("hyper_metasound_node_search"), TEXT("hyper_metasound_node_describe"), TEXT("hyper_metasound_graph_plan"),
+					TEXT("hyper_audio_analyze"), TEXT("hyper_audio_preview")},
 				{TEXT("Metasound")}
 			},
 			{
@@ -1103,7 +1105,8 @@ private:
 				TEXT("niagara_vfx"),
 				TEXT("cohort.source.hyperaistudioniagaratoolset.v1"),
 				{TEXT("hyper_niagara_inspect"), TEXT("hyper_niagara_apply_plan"),
-					TEXT("hyper_niagara_validate"), TEXT("hyper_niagara_live")},
+					TEXT("hyper_niagara_validate"), TEXT("hyper_niagara_live"), TEXT("hyper_niagara_discover"),
+					TEXT("hyper_niagara_preview")},
 				{TEXT("Niagara")}
 			},
 			{
