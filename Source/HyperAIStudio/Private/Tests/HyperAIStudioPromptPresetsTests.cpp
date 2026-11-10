@@ -787,6 +787,18 @@ bool FHyperAIStudioPromptPresetsPickerTest::RunTest(const FString& Parameters)
 	// It builds with whatever the plugin ships.
 	const TSharedRef<SHyperAIStudioPromptPicker> Shipped = SNew(SHyperAIStudioPromptPicker).Context(FPromptContext());
 	TestEqual(TEXT("The shipped library's presets all show"), Shipped->NumShown(), Load(BuiltInDirectory(), FString()).Presets.Num());
+	{
+		// A long prompt reads in full at the picker's own size, not in a few squeezed lines; the shots are for a person to check.
+		const FVector2D Size = SHyperAIStudioPromptPicker::PreferredSize();
+		TestTrue(TEXT("The picker is never smaller than it was"), Size.X >= 720.0f && Size.Y >= 460.0f);
+		Shipped->SetSearchText(TEXT("capture-the-flag"));
+		if (Shipped->NumShown() > 0)
+		{
+			HyperAIStudio::Tests::SaveWidgetShot(Shipped, FIntPoint(FMath::RoundToInt(Size.X), FMath::RoundToInt(Size.Y)), TEXT("prompt-picker"));
+			HyperAIStudio::Tests::SaveWidgetShot(Shipped, FIntPoint(720, 460), TEXT("prompt-picker-small"));
+		}
+		Shipped->SetSearchText(FString());
+	}
 
 	FScratch Scratch;
 	SetBuiltInDirectoryForTests(WriteFixture(Scratch.Dir));

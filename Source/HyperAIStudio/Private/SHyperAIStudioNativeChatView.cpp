@@ -654,8 +654,8 @@ TSharedRef<SWidget> SHyperAIStudioNativeChatView::BuildPromptPicker()
 		PromptsButton->SetMenuContentWidgetToFocus(Built->GetSearchBox());
 	}
 	return SNew(SBox)
-		.WidthOverride(720.0f)
-		.HeightOverride(460.0f)
+		.WidthOverride(SHyperAIStudioPromptPicker::PreferredSize().X)
+		.HeightOverride(SHyperAIStudioPromptPicker::PreferredSize().Y)
 		[
 			Built
 		];

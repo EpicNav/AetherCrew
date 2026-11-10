@@ -18735,6 +18735,12 @@
   },
   {
    "namespace": "HyperAIStudioSandbox",
+   "key": "LeftoverSandboxStale",
+   "source": "{0}\n\n{1} of them {1}|plural(one=was,other=were) saved again in the project after that session ({2}): approving would put the older {1}|plural(one=copy,other=copies) back.",
+   "text": "{0}\n\n其中 {1} 个在该会话之后（{2}）又在项目中保存过：批准会把较旧的副本放回去。"
+  },
+  {
+   "namespace": "HyperAIStudioSandbox",
    "key": "ModeStaysOn",
    "source": "Sandbox Mode stays on until its held changes are approved or discarded in HyperAI's Activity panel.",
    "text": "在 HyperAI 的活动面板中批准或丢弃保留的更改之前，沙盒模式会保持开启。"
@@ -20823,6 +20829,18 @@
   },
   {
    "namespace": "SHyperAIStudioKeysPanel",
+   "key": "CursorAuth",
+   "source": "Cursor API setup",
+   "text": "Cursor API 设置"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "DesktopAuth",
+   "source": "Desktop editors: VS Code/Copilot > Chat: Manage Language Models > Add Models; Cursor > Settings > Models. Enter provider keys there. These editors manage their own credentials; the Cursor Agent CLI key below is a separate Cursor account key.",
+   "text": "桌面编辑器：VS Code/Copilot > Chat: Manage Language Models > Add Models；Cursor > Settings > Models。在那里输入提供商密钥。这些编辑器自行管理凭据；下方的 Cursor Agent CLI 密钥是单独的 Cursor 账户密钥。"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
    "key": "EditTitle",
    "source": "{0}: {1}",
    "text": "{0}：{1}"
@@ -20841,6 +20859,12 @@
   },
   {
    "namespace": "SHyperAIStudioKeysPanel",
+   "key": "GetKey",
+   "source": "Get key",
+   "text": "获取密钥"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
    "key": "KeyHint",
    "source": "Paste the key",
    "text": "粘贴密钥"
@@ -20856,6 +20880,24 @@
    "key": "NotUrl",
    "source": "An address starts with http:// or https://.",
    "text": "地址须以 http:// 或 https:// 开头。"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "OutputLimit",
+   "source": "Max output tokens (0 = Auto)",
+   "text": "最大输出令牌数（0 = 自动）"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "OutputLimitHelp",
+   "source": "Direct API output: 0 selects Auto. Claude uses its model's maximum; OpenAI and Gemini use provider defaults. A positive number sets a custom limit. Changes apply to the next request in either view. Provider limits still apply. Uncheck Native View in Chat to use the API terminal.",
+   "text": "直连 API 输出：0 表示自动。Claude 使用其模型的最大值；OpenAI 和 Gemini 使用提供商默认值。正数设置自定义上限。更改会在任一视图的下一次请求中生效。提供商的限制仍然适用。在 Chat 中取消勾选 Native View 即可使用 API 终端。"
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "OutputSaveFailed",
+   "source": "The API output limit could not be saved. Check project folder permissions.",
+   "text": "无法保存 API 输出上限。请检查项目文件夹的权限。"
   },
   {
    "namespace": "SHyperAIStudioKeysPanel",
@@ -20920,14 +20962,14 @@
   {
    "namespace": "SHyperAIStudioKeysPanel",
    "key": "Subtitle",
-   "source": "Give an agent your own API key or an OpenAI-compatible address, and give HyperAI's image, audio and 3D tools their providers' keys. Keys are kept in Windows Credential Manager for your user (targets named HyperAIStudio/...), never in the project, an ini file, a log or Activity, and go only into the environment of the agent HyperAI starts. A key set here wins over the same environment variable. Agents read a new key when their chat next starts.",
-   "text": "为智能体提供你自己的 API 密钥或 OpenAI 兼容地址，并为 HyperAI 的图像、音频和 3D 工具提供各服务商的密钥。密钥保存在当前用户的 Windows 凭据管理器中（目标名为 HyperAIStudio/...），绝不写入项目、ini 文件、日志或活动记录，只会进入 HyperAI 启动的智能体进程的环境变量。在此设置的密钥优先于同名环境变量。智能体在下次开始对话时读取新密钥。"
+   "source": "Set a key below, then choose Claude API, OpenAI API or Gemini API in Chat. These routes send generation requests directly to the provider; no agent CLI or balance check is required. Stored keys take precedence over environment variables and stay in Windows Credential Manager. Provider billing and eligible promotional credits apply to the key's account. HyperAI's tool spend cap does not limit agent API usage.",
+   "text": "在下方设置密钥，然后在 Chat 中选择 Claude API、OpenAI API 或 Gemini API。这些方式会把生成请求直接发送给提供商，无需代理 CLI 或余额检查。已存储的密钥优先于环境变量，并保存在 Windows 凭据管理器中。费用和符合条件的促销额度计入该密钥所属的账户。HyperAI 的工具花费上限不限制代理的 API 用量。"
   },
   {
    "namespace": "SHyperAIStudioKeysPanel",
    "key": "Test",
-   "source": "Test",
-   "text": "测试"
+   "source": "Check key",
+   "text": "检查密钥"
   },
   {
    "namespace": "SHyperAIStudioKeysPanel",
@@ -20944,14 +20986,20 @@
   {
    "namespace": "SHyperAIStudioKeysPanel",
    "key": "Title",
-   "source": "Your own keys",
-   "text": "你自己的密钥"
+   "source": "API keys & authentication",
+   "text": "API 密钥与身份验证"
   },
   {
    "namespace": "SHyperAIStudioKeysPanel",
    "key": "UrlHint",
    "source": "https://...",
    "text": "https://..."
+  },
+  {
+   "namespace": "SHyperAIStudioKeysPanel",
+   "key": "VSCodeAuth",
+   "source": "VS Code API setup",
+   "text": "VS Code API 设置"
   },
   {
    "namespace": "SHyperAIStudioLoreSetupPanel",
@@ -23043,6 +23091,12 @@
   },
   {
    "namespace": "SHyperAIStudioPromptPicker",
+   "key": "PreviewHeading",
+   "source": "Prompt",
+   "text": "提示词"
+  },
+  {
+   "namespace": "SHyperAIStudioPromptPicker",
    "key": "PreviewTooltip",
    "source": "The prompt as it goes in the composer. Edit it there before you send.",
    "text": "提示词放进输入框后的样子。发送前可以在输入框里修改。"
@@ -23776,8 +23830,8 @@
   {
    "namespace": "SHyperAIStudioQuickActionWindow",
    "key": "NativeViewAgentsTooltip",
-   "source": "Show this chat in HyperAI's own view instead of the terminal: a transcript with tool calls, approvals and the plan, and a message box. New chats open the way you leave it. Switching keeps a Claude Code conversation, and a Codex one opened from the history or started in this view; a Gemini chat starts fresh. A Claude Code chat with Remote Control stays in the terminal.",
-   "text": "在 HyperAI 自己的视图中而不是终端中显示此对话：包含工具调用、审批和计划的记录，以及一个消息框。新对话会沿用你最后的选择。切换时会保留 Claude Code 对话，以及从历史打开或在此视图中启动的 Codex 对话；Gemini 对话会重新开始。开启了远程控制的 Claude Code 对话会留在终端中。"
+   "source": "Switch between the native transcript and terminal. Direct API agents use the same API engine and saved conversation in both views. Finish or stop an active request before switching; an in-flight request is stopped when its view closes. New chats open the way you leave this switch.",
+   "text": "在原生记录视图和终端之间切换。直连 API 代理在两个视图中使用同一个 API 引擎和已保存的对话。切换前请先完成或停止正在进行的请求；视图关闭时，进行中的请求会被停止。新聊天会按你离开时此开关的状态打开。"
   },
   {
    "namespace": "SHyperAIStudioQuickActionWindow",

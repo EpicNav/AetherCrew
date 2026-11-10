@@ -18,6 +18,7 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
+#include "Framework/Application/SlateApplication.h"
 
 #define LOCTEXT_NAMESPACE "SHyperAIStudioPromptPicker"
 
@@ -55,6 +56,27 @@ namespace HyperAIStudio::PromptPicker
 				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 			];
 	}
+}
+
+FVector2D SHyperAIStudioPromptPicker::PreferredSize()
+{
+	// The old fixed 720 x 460 left a long prompt a few lines; scale with the display's work area instead.
+	FVector2D Size(960.0f, 640.0f);
+	if (FSlateApplication::IsInitialized())
+	{
+		FDisplayMetrics Metrics;
+		FSlateApplication::Get().GetCachedDisplayMetrics(Metrics);
+		const FPlatformRect& Work = Metrics.PrimaryDisplayWorkAreaRect;
+		const float Scale = FMath::Max(FSlateApplication::Get().GetApplicationScale(), 0.5f);
+		const float Width = (Work.Right - Work.Left) / Scale;
+		const float Height = (Work.Bottom - Work.Top) / Scale;
+		if (Width > 0.0f && Height > 0.0f)
+		{
+			Size.X = FMath::Clamp(Width * 0.55f, 720.0f, 1100.0f);
+			Size.Y = FMath::Clamp(Height * 0.7f, 460.0f, 780.0f);
+		}
+	}
+	return Size;
 }
 
 void SHyperAIStudioPromptPicker::Construct(const FArguments& InArgs)
@@ -123,7 +145,7 @@ void SHyperAIStudioPromptPicker::Construct(const FArguments& InArgs)
 				]
 			]
 			+ SHorizontalBox::Slot()
-			.FillWidth(0.5f)
+			.FillWidth(0.42f)
 			.Padding(8.0f, 0.0f)
 			[
 				SNew(SVerticalBox)
@@ -176,65 +198,73 @@ void SHyperAIStudioPromptPicker::Construct(const FArguments& InArgs)
 				]
 			]
 			+ SHorizontalBox::Slot()
-			.FillWidth(0.5f)
+			.FillWidth(0.58f)
 			[
 				SNew(SVerticalBox)
 				.Visibility_Lambda([this]() { return Selected.IsValid() ? EVisibility::Visible : EVisibility::Hidden; })
+				// One scroll for everything about the preset, so the prompt reads in full at its own height
+				// instead of squeezing into whatever the title, tags and fields leave; only the buttons stay put.
 				+ SVerticalBox::Slot()
-				.AutoHeight()
+				.FillHeight(1.0f)
 				[
-					SNew(STextBlock)
-					.TextStyle(&Style(), "HyperAIStudio.Text.CardTitle")
-					.AutoWrapText(true)
-					.Text_Lambda([this]() { return Selected.IsValid() ? Selected->DisplayTitle() : FText::GetEmpty(); })
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 2.0f, 0.0f, 0.0f)
-				[
-					SNew(STextBlock)
-					.TextStyle(&Style(), "HyperAIStudio.Text.Caption")
-					.AutoWrapText(true)
-					.Text_Lambda([this]() { return Selected.IsValid() ? Selected->DisplaySummary() : FText::GetEmpty(); })
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-				[
-					SAssignNew(Tags, SWrapBox)
-					.UseAllottedSize(true)
-					.InnerSlotPadding(FVector2D(4.0f, 4.0f))
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-				[
-					SNew(SBox)
-					.MaxDesiredHeight(150.0f)
+					SNew(SScrollBox)
+					+ SScrollBox::Slot()
+					.Padding(0.0f, 0.0f, 6.0f, 0.0f)
 					[
-						SNew(SScrollBox)
-						+ SScrollBox::Slot()
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						[
+							SNew(STextBlock)
+							.TextStyle(&Style(), "HyperAIStudio.Text.CardTitle")
+							.AutoWrapText(true)
+							.Text_Lambda([this]() { return Selected.IsValid() ? Selected->DisplayTitle() : FText::GetEmpty(); })
+						]
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 2.0f, 0.0f, 0.0f)
+						[
+							SNew(STextBlock)
+							.TextStyle(&Style(), "HyperAIStudio.Text.Caption")
+							.AutoWrapText(true)
+							.Text_Lambda([this]() { return Selected.IsValid() ? Selected->DisplaySummary() : FText::GetEmpty(); })
+						]
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 8.0f, 0.0f, 0.0f)
 						[
 							SAssignNew(Fields, SVerticalBox)
 						]
-					]
-				]
-				+ SVerticalBox::Slot()
-				.FillHeight(1.0f)
-				.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-				[
-					SNew(SBorder)
-					.BorderImage(Style().GetBrush("HyperAIStudio.CodeBlock"))
-					.Padding(FMargin(8.0f, 6.0f))
-					[
-						SNew(SScrollBox)
-						+ SScrollBox::Slot()
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 8.0f, 0.0f, 2.0f)
 						[
 							SNew(STextBlock)
-							.AutoWrapText(true)
-							.Font(FCoreStyle::GetDefaultFontStyle("Mono", 8))
-							.ToolTipText(LOCTEXT("PreviewTooltip", "The prompt as it goes in the composer. Edit it there before you send."))
-							.Text_Lambda([this]() { return FText::FromString(GetFilledText()); })
+							.TextStyle(&Style(), "HyperAIStudio.Text.Caption")
+							.Text(LOCTEXT("PreviewHeading", "Prompt"))
+						]
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						[
+							SNew(SBorder)
+							.BorderImage(Style().GetBrush("HyperAIStudio.CodeBlock"))
+							.Padding(FMargin(10.0f, 8.0f))
+							[
+								SNew(STextBlock)
+								.AutoWrapText(true)
+								.LineHeightPercentage(1.15f)
+								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+								.ToolTipText(LOCTEXT("PreviewTooltip", "The prompt as it goes in the composer. Edit it there before you send."))
+								.Text_Lambda([this]() { return FText::FromString(GetFilledText()); })
+							]
+						]
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 8.0f, 0.0f, 0.0f)
+						[
+							SAssignNew(Tags, SWrapBox)
+							.UseAllottedSize(true)
+							.InnerSlotPadding(FVector2D(4.0f, 4.0f))
 						]
 					]
 				]
