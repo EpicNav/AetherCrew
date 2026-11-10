@@ -11,9 +11,15 @@
  */
 namespace HyperAIStudio::Epic59Modules
 {
+	struct FGuardedModule
+	{
+		FName ModuleName;
+		TArray<FString> Plugins;
+	};
+
 	/** Loads each guarded module whose plugins are enabled (at PostEngineInit, or now if that has passed). */
 	void Startup();
 
 	/** Names of the guarded modules and the plugins each needs, for tests and diagnostics. */
-	const TArray<TPair<FName, TArray<FString>>>& GetGuardedModules();
+	const TArray<FGuardedModule>& GetGuardedModules();
 }

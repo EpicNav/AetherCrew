@@ -11,15 +11,15 @@ DEFINE_LOG_CATEGORY_STATIC(LogHyperAIStudioEpic59, Log, All);
 
 namespace HyperAIStudio::Epic59Modules
 {
-	const TArray<TPair<FName, TArray<FString>>>& GetGuardedModules()
+	const TArray<FGuardedModule>& GetGuardedModules()
 	{
 		// Module name (as in HyperAIStudio.uplugin) and the optional plugins its Build.cs links against. Tests modules
 		// follow the module they test.
-		static const TArray<TPair<FName, TArray<FString>>> Modules = {
-			{ TEXT("RewindDebuggerToolset"), { TEXT("GameplayInsights") } },
-			{ TEXT("RewindDebuggerToolsetTests"), { TEXT("GameplayInsights") } },
-			{ TEXT("WorldConditionsToolset59"), { TEXT("WorldConditions") } },
-			{ TEXT("DataRegistryToolset59"), { TEXT("DataRegistry") } },
+		static const TArray<FGuardedModule> Modules = {
+			{ FName(TEXT("RewindDebuggerToolset")), { TEXT("GameplayInsights") } },
+			{ FName(TEXT("RewindDebuggerToolsetTests")), { TEXT("GameplayInsights") } },
+			{ FName(TEXT("WorldConditionsToolset59")), { TEXT("WorldConditions") } },
+			{ FName(TEXT("DataRegistryToolset59")), { TEXT("DataRegistry") } },
 		};
 		return Modules;
 	}
@@ -27,10 +27,10 @@ namespace HyperAIStudio::Epic59Modules
 	static void LoadGuardedModules()
 	{
 		TArray<FString> Loaded;
-		for (const TPair<FName, TArray<FString>>& Module : GetGuardedModules())
+		for (const FGuardedModule& Module : GetGuardedModules())
 		{
 			TArray<FString> Missing;
-			for (const FString& PluginName : Module.Value)
+			for (const FString& PluginName : Module.Plugins)
 			{
 				const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(PluginName);
 				if (!Plugin.IsValid() || !Plugin->IsEnabled())
@@ -42,17 +42,17 @@ namespace HyperAIStudio::Epic59Modules
 			{
 				UE_LOG(LogHyperAIStudioEpic59, Display,
 					TEXT("Ported 5.9 toolset module %s stays unloaded until these project plugins are enabled: %s."),
-					*Module.Key.ToString(), *FString::Join(Missing, TEXT(", ")));
+					*Module.ModuleName.ToString(), *FString::Join(Missing, TEXT(", ")));
 				continue;
 			}
-			if (FModuleManager::Get().LoadModule(Module.Key) == nullptr)
+			if (FModuleManager::Get().LoadModule(Module.ModuleName) == nullptr)
 			{
 				UE_LOG(LogHyperAIStudioEpic59, Warning,
 					TEXT("Ported 5.9 toolset module %s did not load; check the log above for its startup error and that it was built."),
-					*Module.Key.ToString());
+					*Module.ModuleName.ToString());
 				continue;
 			}
-			Loaded.Add(Module.Key.ToString());
+			Loaded.Add(Module.ModuleName.ToString());
 		}
 		UE_LOG(LogHyperAIStudioEpic59, Display, TEXT("Ported 5.9 toolset modules loaded on demand: %d of %d%s"),
 			Loaded.Num(), GetGuardedModules().Num(),
