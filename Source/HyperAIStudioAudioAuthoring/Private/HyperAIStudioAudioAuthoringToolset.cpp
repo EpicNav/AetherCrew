@@ -690,7 +690,7 @@ FHyperAIMetaSoundRecipeReport FHyperAIStudioAudioAuthoringContracts::Recipe(cons
 		Report.bOk = true;
 		Report.Status = TEXT("listed");
 		Report.Recipes = MetaSounds::Recipes();
-		Report.Diagnostic = FString::Printf(TEXT("%d experimental recipes; pick one with Recipe and Path."), Report.Recipes.Num());
+		Report.Diagnostic = FString::Printf(TEXT("%d recipes; pick one with Recipe and Path (the wave recipes take Waves)."), Report.Recipes.Num());
 		return Report;
 	}
 	Report.Recipes = MetaSounds::Recipes(RecipeId);
@@ -760,10 +760,10 @@ FHyperAIMetaSoundRecipeReport FHyperAIStudioAudioAuthoringContracts::Recipe(cons
 	{
 		Report.bOk = true;
 		Report.Status = TEXT("checked");
-		Report.Diagnostic = FString::Printf(TEXT("Would build the experimental recipe %s as %s; nothing was changed. Recipes shows its inputs."), *RecipeId, *Package);
+		Report.Diagnostic = FString::Printf(TEXT("Would build the recipe %s as %s; nothing was changed. Recipes shows its inputs."), *RecipeId, *Package);
 		return Report;
 	}
-	TArray<FString> Effects = {FString::Printf(TEXT("MetaSound Source %s from the experimental recipe %s, then saved"), *Package, *RecipeId)};
+	TArray<FString> Effects = {FString::Printf(TEXT("MetaSound Source %s from the recipe %s, then saved"), *Package, *RecipeId)};
 	for (const FHyperAIAudioSetting& Input : Request.Inputs)
 	{
 		Effects.Add(FString::Printf(TEXT("| %s = %s"), *Input.Name, *Input.Value));
