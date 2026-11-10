@@ -149,12 +149,16 @@ public:
 				UE::ToolsetRegistry::Epic59::HideSupersededToolsets();
 			}
 		});
+		// UE 5.8: toolsets that register later (a port's or a 5.8 plugin's OnAllModuleLoadingPhasesComplete handler) are
+		// superseded once more when every module has loaded.
+		AllPhasesHandle = FCoreDelegates::OnAllModuleLoadingPhasesComplete.AddStatic(&UE::ToolsetRegistry::Epic59::HideSupersededToolsets);
 	}
 
 	virtual void ShutdownModule() override
 	{
 		FCoreDelegates::OnPostEngineInit.Remove(PostEngineInitHandle);
 		FModuleManager::Get().OnModulesChanged().Remove(ModulesChangedHandle);
+		FCoreDelegates::OnAllModuleLoadingPhasesComplete.Remove(AllPhasesHandle);
 		IModularFeatures::Get().UnregisterModularFeature(
 			UE::Toolset::IToolsetRegistrar::ModularFeatureName, &Registrar);
 	}
@@ -163,6 +167,7 @@ private:
 	FDelegateHandle PostEngineInitHandle;
 	FDelegateHandle ModulesChangedHandle;
 	bool bPostEngineInit = false;
+	FDelegateHandle AllPhasesHandle;
 	UE::ToolsetRegistry::Epic59::FToolsetRegistrar Registrar;
 };
 

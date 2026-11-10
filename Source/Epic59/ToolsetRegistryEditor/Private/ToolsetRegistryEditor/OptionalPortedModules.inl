@@ -27,3 +27,13 @@ EPIC59_SUPERSEDES(PluginToolset59, TEXT("/Script/PluginToolset.PluginToolset"))
 EPIC59_SUPERSEDES(LiveCodingToolset59, TEXT("/Script/LiveCodingToolset.LiveCodingToolset"))
 EPIC59_SUPERSEDES(GASToolsets59, TEXT("/Script/GASToolsets.AbilitySystemInspectorToolset"))
 EPIC59_SUPERSEDES(GASToolsets59, TEXT("/Script/GASToolsets.AttributeSetToolset"))
+
+// Wave 2c: the UI and texture ports.
+EPIC59_OPTIONAL_MODULE(TextureGraphToolset, TEXT("TextureGraph"))
+EPIC59_OPTIONAL_MODULE(MVVMToolset59, TEXT("ModelViewViewModel"))
+EPIC59_OPTIONAL_MODULE(WidgetStaticAnalysisToolset, TEXT("ModelViewViewModel"))
+
+// UE 5.9 ports that replace a UE 5.8 toolset (their Epic tests pass on 5.8). The 5.8 SlateInspectorToolset has no guard for
+// HyperAI Studio's own UI, so superseding it also removes that approval bypass while the port is loaded.
+EPIC59_SUPERSEDES(MVVMToolset59, TEXT("/Script/MVVMToolset.MVVMToolset"))
+EPIC59_SUPERSEDES(SlateInspectorToolset59, TEXT("/Script/SlateInspectorToolset.SlateInspectorToolset"))

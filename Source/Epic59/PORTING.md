@@ -201,6 +201,11 @@ The capability preset tests count Epic *plugins*; the ports live inside HyperAIS
 | LiveCodingToolset59 (+ Tests) | modules and types renamed, CVar `LiveCodingToolset59.Enable` | 5.8's registry takes `UToolsetDefinition` classes only, so `ULiveCodingToolsetTools59` carries the three tools and the subsystem registers it (`LiveCodingToolset59.LiveCodingToolsetTools59`); no `IsReadyForReload` (ready = started, enabled, not compiling) and no compile-finished delegate (CompileLiveCoding polls `IsCompiling`; a patch applied reads as Success, otherwise "Failure or NoChanges") |
 | GASToolsets59 | module and types renamed, 2 `ValidateAssetPath` calls to `FToolsetLibrary59` | specs use BeforeEach/AfterEach for 5.9's BeforeAll/AfterAll; the inspector test expects the renamed attribute set |
 | AIModuleToolset59 | module renamed (no type collides), 3 `ValidateAssetPath` calls to `FToolsetLibrary59` | specs use BeforeEach/AfterEach for BeforeAll/AfterAll |
+| WidgetAnimationToolset | include, IToolsetProvider base | `Kismet2/Kismet2NameValidators.h` (5.9 renamed it); `IsClassAllowed` via `FToolsetLibrary59`; the 5.9 `AnimationAssistantToolset` plugin dependency is dropped (no module uses it); Epic ships no tests |
+| TextureGraphToolset | include, IToolsetProvider base | `ValidateAssetPath` via `FToolsetLibrary59`; optional on `TextureGraph` (`OptionalPortedModules.inl`); `IsToolsetHidden` is never called by 5.8 |
+| MVVMToolset59 (31 tools; 5.8 has 9) | renamed `...59`, test fixtures renamed | 5.9's `UMVVMEditorSubsystem::ResolvePropertyPath`, `TryAutoConvertBinding`, `SetConversionFunctionArgumentLiteral`, `SetEventArgumentLiteral` (with its private `DoAction`) and `UMVVMBlueprintView::RecreateGeneratedGraphs` are copied as free functions (`MVVMEditorSubsystem59.h/.cpp`); the 3 design-time preview tools refuse (5.9 designer feature); test `BeforeAll/AfterAll` become `BeforeEach/AfterEach`; optional on `ModelViewViewModel`; supersedes 5.8's `MVVMToolset.MVVMToolset` |
+| SlateInspectorToolset59 (+ Tests; 30 tools, 5.8 has 14) | renamed `...59`; needs the 5.9 `WidgetHelper` module, copied unchanged to `Source/Epic59/WidgetHelper` | the class is a `UToolsetDefinition` (5.8's registry takes no other) and its subsystem half is `USlateInspectorToolset59Subsystem`; `FEditorDelegates::EndPIE`; `FToolsetImage::SetFromBitmap`; `IsUsingPlatformCursorForCursorUser` rebuilt (reads the protected `FSlateUser::GetCursor` via explicit-instantiation access); **HyperAI guard** (`SlateInspectorToolsetHyperAIGuard.h/.cpp`): refs, focus-bound keys/chars, window actions and pointer/touch/wheel events headed to HyperAI Studio's widgets (created by `HyperAIStudio*` sources or typed `*HyperAIStudio*`) or to toast windows are refused or dropped, and snapshots hide them; guard tests `...SlateInspectorToolset.HyperAIGuard`; supersedes 5.8's `SlateInspectorToolset.SlateInspectorToolset` (which had no guard) |
+| WidgetStaticAnalysisToolset | include, IToolsetProvider base | 5.9's `UWidgetBlueprintEditorSubsystem` helpers are 5.8's `FWidgetBlueprintOperationUtils` (same signatures); test `BeforeAll/AfterAll`; optional on `ModelViewViewModel` |
 
 Pilot results on a UE 5.8 bench (Bench59): Epic's own tests `AIAssistant.Toolsets.CheatsToolset` (17),
 `ConsoleToolset` (28) and `NavMeshToolset` (23) pass, 68 of 68, with no registry errors in the log; HyperAI's
@@ -217,6 +222,12 @@ the pilot suites and HyperAI's `HyperAIStudio.NativeTools.Capability*`, `GAS`, `
 `GASToolsets.GameplayCueToolset` stays, next to `GASToolsets59.GameplayCueToolset59`), and `ListContainers`,
 `ListTagSources`, `GetAdditionalPluginDirectories`, `GetConfiguredAdditionalMetadataKeys`, `IsLiveCodingReady` and
 `FindAttributeSetClasses` answer.
+
+Wave 2c on a UE 5.8 bench (BenchPortC): `AIAssistant.Toolsets.TextureGraphToolset` (61), `WidgetStaticAnalysisToolset` (101),
+`MVVM` (91) and `SlateInspectorToolset` (61 Epic + 4 HyperAI guard) pass, 318 of 318. CommonUIToolset was tried and dropped: its
+5.9 CommonUIDebugging module reads `UCommonUIActionRouterBase` debug internals (`GetActivatableTreeDebugInfo`, `FDebug*Info`,
+`ECommonUIFocusRedirectReason`, `UCommonActivatableWidget::OnAnyActivationChanged`, `UCommonInputSubsystem::GetCurrentInputLocks`)
+that 5.8's CommonUI does not have, so it cannot be ported without engine edits.
 
 ## Remaining toolsets
 

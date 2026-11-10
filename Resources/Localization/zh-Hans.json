@@ -18962,6 +18962,102 @@
    "text": "HyperAI：编辑世界分区"
   },
   {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "ConversionArgumentInvalidValue",
+   "source": "'{0}' is not a valid value for pin '{1}': {2}",
+   "text": "“{0}”不是引脚“{1}”的有效值：{2}"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "ConversionArgumentNoFunctionConversion",
+   "source": "The binding has no function conversion in that direction. Arguments of node-based conversions cannot be set.",
+   "text": "该绑定在此方向上没有函数转换。无法设置基于节点的转换的参数。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "ConversionArgumentPinBoundToPath",
+   "source": "Pin '{0}' is bound to a property path. Clear the path before setting a literal value.",
+   "text": "引脚“{0}”已绑定到属性路径。请先清除路径，再设置字面量值。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "ConversionArgumentUnknownBinding",
+   "source": "No binding with id '{0}' in the view.",
+   "text": "视图中没有 ID 为“{0}”的绑定。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "ConversionArgumentUnknownPin",
+   "source": "The conversion function has no input pin '{0}'.",
+   "text": "转换函数没有输入引脚“{0}”。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "ConversionArgumentUnsupportedPinType",
+   "source": "Pin '{0}' has type '{1}'. Only bool, int, int64, float, name and string pins can be set to a literal.",
+   "text": "引脚“{0}”的类型为“{1}”。只有 bool、int、int64、float、name 和 string 引脚可以设置为字面量。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "EventArgumentInvalidValue",
+   "source": "'{0}' is not a valid value for pin '{1}': {2}",
+   "text": "“{0}”不是引脚“{1}”的有效值：{2}"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "EventArgumentPinBoundToPath",
+   "source": "Pin '{0}' is bound to a property path. Clear the path before setting a literal value.",
+   "text": "引脚“{0}”已绑定到属性路径。请先清除路径，再设置字面量值。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "EventArgumentUnknownEvent",
+   "source": "The event is not in the view.",
+   "text": "该事件不在视图中。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "EventArgumentUnknownPin",
+   "source": "The event has no input pin '{0}'.",
+   "text": "该事件没有输入引脚“{0}”。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "EventArgumentUnsupportedPinType",
+   "source": "Pin '{0}' has type '{1}'. Only bool, int, int64, float, name and string pins can be set to a literal.",
+   "text": "引脚“{0}”的类型为“{1}”。只有 bool、int、int64、float、name 和 string 引脚可以设置为字面量。"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "SetConversionFunctionArgumentLiteral",
+   "source": "Set conversion function argument {0}",
+   "text": "设置转换函数参数 {0}"
+  },
+  {
+   "namespace": "MVVMEditorSubsystem",
+   "key": "SetEventArgumentLiteral",
+   "source": "Set event argument {0}",
+   "text": "设置事件参数 {0}"
+  },
+  {
+   "namespace": "MVVMToolset",
+   "key": "AddViewCondition",
+   "source": "MVVM Add Condition",
+   "text": "MVVM 添加条件"
+  },
+  {
+   "namespace": "MVVMToolset",
+   "key": "CreateViewBinding",
+   "source": "MVVM Create Binding",
+   "text": "MVVM 创建绑定"
+  },
+  {
+   "namespace": "MVVMToolset",
+   "key": "SetViewConditionOperation",
+   "source": "MVVM Set Condition Operation",
+   "text": "MVVM 设置条件操作"
+  },
+  {
    "namespace": "SHyperAIStudioAgentsPanel",
    "key": "AddTeamTitle",
    "source": "Gameplay team",
@@ -25998,6 +26094,114 @@
    "key": "ViewPrerequisitesTooltip",
    "source": "Open the detailed prerequisite checklist.",
    "text": "打开详细的前置组件清单。"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "AddInputParam",
+   "source": "Add TextureGraph Input Parameter",
+   "text": "添加 TextureGraph 输入参数"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "AddNode",
+   "source": "Add TextureGraph Node",
+   "text": "添加 TextureGraph 节点"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "AddOutput",
+   "source": "Add TextureGraph Output",
+   "text": "添加 TextureGraph 输出"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "ConnectPins",
+   "source": "Connect TextureGraph Pins",
+   "text": "连接 TextureGraph 引脚"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "DisconnectPins",
+   "source": "Disconnect TextureGraph Pins",
+   "text": "断开 TextureGraph 引脚"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "RemoveNode",
+   "source": "Remove TextureGraph Node",
+   "text": "移除 TextureGraph 节点"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "RemoveParamNode",
+   "source": "Remove TextureGraph Node",
+   "text": "移除 TextureGraph 节点"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "SetNodeAlias",
+   "source": "Rename TextureGraph Node",
+   "text": "重命名 TextureGraph 节点"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "SetOutputSettings",
+   "source": "Configure TextureGraph Output",
+   "text": "配置 TextureGraph 输出"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "SetPinValue",
+   "source": "Set TextureGraph Pin Value",
+   "text": "设置 TextureGraph 引脚值"
+  },
+  {
+   "namespace": "TextureGraphToolset",
+   "key": "SetPinValueVariant",
+   "source": "Set TextureGraph Variant Pin Value",
+   "text": "设置 TextureGraph 变体引脚值"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "AddWidgetToAnimation",
+   "source": "Add Widget to Animation",
+   "text": "将控件添加到动画"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "CreateWidgetAnimation",
+   "source": "Create Widget Animation",
+   "text": "创建控件动画"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "RemoveWidgetAnimation",
+   "source": "Remove Widget Animation",
+   "text": "移除控件动画"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "RemoveWidgetBinding",
+   "source": "Remove Widget Binding",
+   "text": "移除控件绑定"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "RenameWidgetAnimation",
+   "source": "Rename Widget Animation",
+   "text": "重命名控件动画"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "SetAnimDisplayLabel",
+   "source": "Set Widget Animation Display Label",
+   "text": "设置控件动画显示标签"
+  },
+  {
+   "namespace": "WidgetAnimationToolset",
+   "key": "SetAnimLength",
+   "source": "Set Widget Animation Length",
+   "text": "设置控件动画长度"
   }
  ]
 }
