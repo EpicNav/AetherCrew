@@ -1000,6 +1000,16 @@
 			]
 		},
 		{
+			"Name": "EditorScriptingUtilities",
+			"Enabled": true,
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
 			"Name": "EditorToolset",
 			"Enabled": true,
 			"PlatformAllowList": [
