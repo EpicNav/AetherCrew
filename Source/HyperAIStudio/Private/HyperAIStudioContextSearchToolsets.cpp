@@ -1776,6 +1776,14 @@ bool FHyperAIStudioContextSearchContracts::EnumerateProjectCppSourceFiles(
 		}
 	}
 
+	// HyperAI Studio's Source/Epic59 holds Epic's UE 5.9 toolsets ported to 5.8 (vendored engine code, not the project's):
+	// left in, its 2 MB fill the symbol bound before HyperAI's own sources and the project's later plugins are read.
+	FString ExcludedEpic59Directory;
+	if (const TSharedPtr<IPlugin> HyperAIPlugin = IPluginManager::Get().FindPlugin(TEXT("HyperAIStudio")))
+	{
+		ExcludedEpic59Directory = FPaths::ConvertRelativePathToFull(FPaths::Combine(HyperAIPlugin->GetBaseDir(), TEXT("Source"), TEXT("Epic59")));
+	}
+
 	PendingDirectories.Sort();
 	TSet<FString> VisitedFinalDirectories;
 	int32 DirectoriesProcessed = 0;
@@ -1834,7 +1842,10 @@ bool FHyperAIStudioContextSearchContracts::EnumerateProjectCppSourceFiles(
 			}
 			if ((Entry.Attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
 			{
-				PendingDirectories.Add(Child);
+				if (ExcludedEpic59Directory.IsEmpty() || !FPaths::IsSamePath(Child, ExcludedEpic59Directory))
+				{
+					PendingDirectories.Add(Child);
+				}
 			}
 			else if (IsCppExtension(Child))
 			{
