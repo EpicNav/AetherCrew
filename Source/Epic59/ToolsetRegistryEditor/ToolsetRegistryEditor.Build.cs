@@ -28,6 +28,7 @@ public class ToolsetRegistryEditor : ModuleRules
 			new string[]
 			{
 				"AssetRegistry",
+				"Projects", // UE 5.8: Epic59Ports.cpp checks which plugins are enabled
 				"UnrealEd",
 			}
 			);

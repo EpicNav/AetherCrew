@@ -6,6 +6,7 @@
 // UE::Toolset::FToolsetRegistration works against 5.8's registry. See Source/Epic59/PORTING.md.
 
 #include "ToolsetRegistryEditor/Module.h"
+#include "ToolsetRegistryEditor/Epic59Ports.h" // UE 5.8: optional-plugin ports and 5.8 duplicates
 
 #include "Features/IModularFeatures.h"
 #include "Modules/ModuleManager.h"
@@ -55,10 +56,12 @@ public:
 	{
 		IModularFeatures::Get().RegisterModularFeature(
 			UE::Toolset::IToolsetRegistrar::ModularFeatureName, &Registrar);
+		UE::ToolsetRegistry::Epic59::StartupPorts();
 	}
 
 	virtual void ShutdownModule() override
 	{
+		UE::ToolsetRegistry::Epic59::ShutdownPorts();
 		IModularFeatures::Get().UnregisterModularFeature(
 			UE::Toolset::IToolsetRegistrar::ModularFeatureName, &Registrar);
 	}

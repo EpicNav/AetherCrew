@@ -824,7 +824,7 @@
 		{
 			"Name": "TextureGraphToolset",
 			"Type": "Editor",
-			"LoadingPhase": "PostEngineInit",
+			"LoadingPhase": "None",
 			"PlatformAllowList": [
 				"Win64"
 			]
@@ -832,7 +832,7 @@
 		{
 			"Name": "MVVMToolset59",
 			"Type": "Editor",
-			"LoadingPhase": "PostEngineInit",
+			"LoadingPhase": "None",
 			"PlatformAllowList": [
 				"Win64"
 			]
@@ -856,7 +856,7 @@
 		{
 			"Name": "WidgetStaticAnalysisToolset",
 			"Type": "Editor",
-			"LoadingPhase": "PostEngineInit",
+			"LoadingPhase": "None",
 			"PlatformAllowList": [
 				"Win64"
 			]
