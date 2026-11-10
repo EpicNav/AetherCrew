@@ -267,6 +267,11 @@ Wave 2c on a UE 5.8 bench (BenchPortC): `AIAssistant.Toolsets.TextureGraphToolse
 `ECommonUIFocusRedirectReason`, `UCommonActivatableWidget::OnAnyActivationChanged`, `UCommonInputSubsystem::GetCurrentInputLocks`)
 that 5.8's CommonUI does not have, so it cannot be ported without engine edits.
 
+Integration of the pilot and waves 2a, 2b and 2c with the audio and Niagara branches (feat/integration-1110, BenchIntegration):
+Epic's `AIAssistant.Toolsets` tests 851 of 851 (every port; LiveCoding's `CompileLiveCoding_EventuallyResolvesWithResult` again
+not run, as it starts a real Live Coding build), with no "Failed to register test" line in the log, and HyperAI's `HyperAIStudio`
+suite 736 of 736. Over MCP, `list_toolsets` shows every port and none of the 11 superseded 5.8 classes.
+
 ## Remaining toolsets
 
 Ported since the pilot: wave 2a ConfigSettingsToolset, GameFeaturesToolset, GameplayTagsToolset, PluginToolset,
