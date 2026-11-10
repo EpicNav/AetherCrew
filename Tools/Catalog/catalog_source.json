@@ -1900,6 +1900,46 @@
      "safety": [
       "Edit"
      ]
+    },
+    {
+     "name": "hyper_metasound_node_search",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_metasound_node_describe",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_metasound_graph_plan",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_audio_analyze",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_audio_preview",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
     }
    ]
   },
