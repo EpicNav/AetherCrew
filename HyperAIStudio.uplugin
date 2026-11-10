@@ -924,6 +924,54 @@
 			"PlatformAllowList": [
 				"Win64"
 			]
+		},
+		{
+			"Name": "PerfToolset",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "RewindDebuggerToolset",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "RewindDebuggerToolsetTests",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "InputToolset",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "WorldConditionsToolset59",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "DataRegistryToolset59",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
 		}
 	],
 	"Plugins": [
@@ -1169,6 +1217,10 @@
 		},
 		{
 			"Name": "Chooser",
+			"Enabled": false
+		},
+		{
+			"Name": "GameplayInsights",
 			"Enabled": false
 		}
 	]
