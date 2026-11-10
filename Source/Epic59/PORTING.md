@@ -108,10 +108,10 @@ The first run indexes UE 5.8's reflected types, module names and headers (about 
 ### Optional plugin dependencies
 
 A port that links against a plugin HyperAI lists as optional (`Enabled: false` in `HyperAIStudio.uplugin`'s `Plugins`) has
-`LoadingPhase: None`: loading it while that plugin is disabled would fail the whole plugin. `HyperAIStudio::Epic59Modules`
-(`Source/HyperAIStudio/Private/HyperAIStudioEpic59Modules.cpp`) loads each such module after engine init when all its
-plugins are enabled, and logs the ones it leaves unloaded. Add new ones to its table (tests modules too) and re-set
-`LoadingPhase` after a `--force` re-port, which writes Epic's phase back. Bench projects enable the plugin through
+`LoadingPhase: None`: loading it while that plugin is disabled would fail the whole plugin. Give it (and its tests module)
+an `EPIC59_OPTIONAL_MODULE` row in `ToolsetRegistryEditor/Private/ToolsetRegistryEditor/OptionalPortedModules.inl`, naming
+every plugin it needs; the compat module loads it after engine init when they are all enabled (see "The compat layer").
+Re-set `LoadingPhase` after a `--force` re-port, which writes Epic's phase back. Bench projects enable the plugin through
 `REQUIRED_PLUGINS` in `Tools/Benchmark/bench.py`.
 
 ### What the script does not catch

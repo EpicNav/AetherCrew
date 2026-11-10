@@ -37,3 +37,9 @@ EPIC59_OPTIONAL_MODULE(WidgetStaticAnalysisToolset, TEXT("ModelViewViewModel"))
 // HyperAI Studio's own UI, so superseding it also removes that approval bypass while the port is loaded.
 EPIC59_SUPERSEDES(MVVMToolset59, TEXT("/Script/MVVMToolset.MVVMToolset"))
 EPIC59_SUPERSEDES(SlateInspectorToolset59, TEXT("/Script/SlateInspectorToolset.SlateInspectorToolset"))
+
+// Wave 2b: ports that link against an optional engine plugin (test modules follow the module they test).
+EPIC59_OPTIONAL_MODULE(RewindDebuggerToolset, TEXT("GameplayInsights"))
+EPIC59_OPTIONAL_MODULE(RewindDebuggerToolsetTests, TEXT("GameplayInsights"))
+EPIC59_OPTIONAL_MODULE(WorldConditionsToolset59, TEXT("WorldConditions"))
+EPIC59_OPTIONAL_MODULE(DataRegistryToolset59, TEXT("DataRegistry"))

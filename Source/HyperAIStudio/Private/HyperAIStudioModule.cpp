@@ -32,7 +32,6 @@
 #include "HyperAIStudioContextSearchToolsets.h"
 #include "HyperAIStudioDiagnosticsRegistration.h"
 #include "HyperAIStudioDocs.h"
-#include "HyperAIStudioEpic59Modules.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioCapabilityCatalogCounts.h"
@@ -589,8 +588,6 @@ public:
 		{
 			FCoreDelegates::GetOnPostEngineInit().AddLambda([]() { HyperAIStudio::Sandbox::Startup(); });
 		}
-		// The ported 5.9 toolsets whose engine plugins are optional load once those plugins are known to be enabled.
-		HyperAIStudio::Epic59Modules::Startup();
 		EnginePreExitHandle = FCoreDelegates::OnEnginePreExit.AddRaw(
 			this, &FHyperAIStudioModule::BeginEnginePreExit);
 		// Agent chats still working get a say before the editor closes.
