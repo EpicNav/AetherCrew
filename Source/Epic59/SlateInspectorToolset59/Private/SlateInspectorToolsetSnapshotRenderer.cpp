@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SlateInspectorToolsetSnapshotRenderer.h"
+#include "SlateInspectorToolsetHyperAIGuard.h" // UE 5.8: HyperAI Studio's UI is not rendered
 
 #include "SlateInspectorToolsetUMGResolver.h"
 #include "SlateInspectorToolsetWidgetTree.h"
@@ -206,6 +207,19 @@ void FSlateInspectorToolsetSnapshotRenderer::RenderWidget(
 	// Skip collapsed/hidden widgets.
 	if (Widget->GetVisibility() == EVisibility::Collapsed || Widget->GetVisibility() == EVisibility::Hidden)
 	{
+		return;
+	}
+
+	// UE 5.8: HyperAI Studio's own widgets and windows render as one ref-less node, so a snapshot neither discloses
+	// their text (a pairing code, a pending approval) nor mints refs the action tools could aim at. Toasts stay
+	// readable; the action tools refuse them.
+	if (UE::SlateInspectorToolset::HyperAIGuard::IsHyperAIStudioCreated(*Widget))
+	{
+		for (int32 Index = 0; Index < IndentLevel; ++Index)
+		{
+			Output.Append(TEXT("  "));
+		}
+		Output.Append(TEXT("hidden \"HyperAI Studio UI (not inspectable)\"\n"));
 		return;
 	}
 

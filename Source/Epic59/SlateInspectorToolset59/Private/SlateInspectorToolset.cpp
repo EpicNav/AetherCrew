@@ -2,6 +2,7 @@
 
 #include "SlateInspectorToolset59.h"
 
+#include "SlateInspectorToolsetHyperAIGuard.h" // UE 5.8: keeps tool input out of HyperAI Studio
 #include "SlateInspectorToolsetInputScope.h"
 #include "SlateInspectorToolsetObserverManager.h"
 #include "SlateInspectorToolsetSnapshotRenderer.h"
@@ -516,6 +517,11 @@ bool IsAnyInputHeld()
 TSharedPtr<SWidget> USlateInspectorToolset59::ResolveRefOrWarn(const FString& Ref)
 {
 	TSharedPtr<SWidget> Widget = UE::WidgetHelper::FWidgetRefCache::Get().ResolveRef(FStringView(Ref));
+	if (UE::SlateInspectorToolset::HyperAIGuard::IsProtectedWidget(Widget)) // UE 5.8: HyperAI Studio's own UI is off-limits
+	{
+		UE_LOGFMT(LogSlateInspectorToolset, Warning, "SlateInspectorToolset: ref '{Ref}' refused -- {Reason}", Ref, UE::SlateInspectorToolset::HyperAIGuard::GetRefusalReason());
+		return nullptr;
+	}
 	if (!Widget.IsValid())
 	{
 		UE_LOGFMT(LogSlateInspectorToolset, Warning, "SlateInspectorToolset: Could not resolve ref '{Ref}'", Ref);
@@ -526,6 +532,11 @@ TSharedPtr<SWidget> USlateInspectorToolset59::ResolveRefOrWarn(const FString& Re
 TSharedPtr<SWidget> USlateInspectorToolset59::ResolveRefOrRefuse(const FString& Tool, const FString& Ref)
 {
 	TSharedPtr<SWidget> Widget = UE::WidgetHelper::FWidgetRefCache::Get().ResolveRef(FStringView(Ref));
+	if (UE::SlateInspectorToolset::HyperAIGuard::IsProtectedWidget(Widget)) // UE 5.8: HyperAI Studio's own UI is off-limits
+	{
+		RecordRefusal(Tool, Ref, UE::SlateInspectorToolset::HyperAIGuard::GetRefusalReason());
+		return nullptr;
+	}
 	if (!Widget.IsValid())
 	{
 		RecordRefusal(Tool, Ref, FString::Printf(TEXT("could not resolve ref '%s'"), *Ref));
@@ -929,6 +940,11 @@ FToolsetImage USlateInspectorToolset59::Screenshot(const FString& Ref)
 	if (!Ref.IsEmpty())
 	{
 		Widget = UE::WidgetHelper::FWidgetRefCache::Get().ResolveRef(FStringView(Ref));
+		if (UE::SlateInspectorToolset::HyperAIGuard::IsProtectedWidget(Widget)) // UE 5.8: HyperAI Studio's own UI is off-limits
+		{
+			UE::SlateInspectorToolset::Private::RaiseToolError(FString::Printf(TEXT("Screenshot refused ref '%s': %s."), *Ref, *UE::SlateInspectorToolset::HyperAIGuard::GetRefusalReason()));
+			return Result;
+		}
 		if (!Widget.IsValid())
 		{
 			UE::SlateInspectorToolset::Private::RaiseToolError(FString::Printf(
@@ -999,6 +1015,7 @@ FToolsetImage USlateInspectorToolset59::Screenshot(const FString& Ref)
 
 bool USlateInspectorToolset59::Click(const FString& Ref, const FSlateInspectorToolsetClickParams& Params)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1030,6 +1047,7 @@ bool USlateInspectorToolset59::Click(const FString& Ref, const FSlateInspectorTo
 
 bool USlateInspectorToolset59::Hover(const FString& Ref, const FSlateInspectorToolsetHoverParams& Params)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1152,6 +1170,7 @@ FString USlateInspectorToolset59::HitTest(const FString& Ref, const FSlateInspec
 
 bool USlateInspectorToolset59::Scroll(const FString& Ref, const FSlateInspectorToolsetScrollParams& Params)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1277,6 +1296,7 @@ bool USlateInspectorToolset59::TickHeldInputWatchdog(float DeltaTime)
 
 bool USlateInspectorToolset59::MouseMove(double X, double Y, const FSlateInspectorToolsetModifierKeys59& Modifiers)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1300,6 +1320,7 @@ bool USlateInspectorToolset59::MouseMove(double X, double Y, const FSlateInspect
 
 bool USlateInspectorToolset59::MouseMoveTo(const FString& Ref, double OffsetX, double OffsetY, const FSlateInspectorToolsetModifierKeys59& Modifiers)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1325,6 +1346,7 @@ bool USlateInspectorToolset59::MouseMoveTo(const FString& Ref, double OffsetX, d
 
 bool USlateInspectorToolset59::MouseDown(const FString& Ref, const FString& Button, const FSlateInspectorToolsetModifierKeys59& Modifiers)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1381,6 +1403,7 @@ bool USlateInspectorToolset59::MouseDown(const FString& Ref, const FString& Butt
 
 bool USlateInspectorToolset59::MouseUp(const FString& Button, const FSlateInspectorToolsetModifierKeys59& Modifiers)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1400,6 +1423,7 @@ bool USlateInspectorToolset59::MouseUp(const FString& Button, const FSlateInspec
 
 int32 USlateInspectorToolset59::ReleaseHeldInput()
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	using namespace UE::SlateInspectorToolset::Private;
 
 	if (!FSlateApplication::IsInitialized())
@@ -1509,6 +1533,7 @@ void USlateInspectorToolset59::SimulateTouch(ETouchPhase Phase, const FResolvedT
 
 bool USlateInspectorToolset59::TouchStart(const FString& Ref, double X, double Y, int32 TouchIndex)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1576,6 +1601,7 @@ bool USlateInspectorToolset59::TouchStart(const FString& Ref, double X, double Y
 
 bool USlateInspectorToolset59::TouchMove(double X, double Y, int32 TouchIndex)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1603,6 +1629,7 @@ bool USlateInspectorToolset59::TouchMove(double X, double Y, int32 TouchIndex)
 
 bool USlateInspectorToolset59::TouchEnd(double X, double Y, int32 TouchIndex)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1629,6 +1656,7 @@ bool USlateInspectorToolset59::TouchEnd(double X, double Y, int32 TouchIndex)
 
 bool USlateInspectorToolset59::Type(const FString& Ref, const FString& Text, bool Submit)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1658,6 +1686,12 @@ bool USlateInspectorToolset59::Type(const FString& Ref, const FString& Text, boo
 	}
 
 	FModifierKeysState ModifierKeys;
+
+	if (UE::SlateInspectorToolset::HyperAIGuard::IsFocusProtected(0)) // UE 5.8: the chars below go to user 0's focus; never into HyperAI Studio
+	{
+		RecordRefusal(TEXT("type"), Ref, UE::SlateInspectorToolset::HyperAIGuard::GetRefusalReason());
+		return false;
+	}
 
 	// Send each character as a key char event.
 	for (TCHAR Character : Text)
@@ -1786,8 +1820,17 @@ bool USlateInspectorToolset59::ResolveInputUser(const FKey& Key, int32 UserIndex
 
 bool USlateInspectorToolset59::ResolveKeySpec(const FString& KeySpec, int32 UserIndex, FResolvedKeyInput& OutInput, FString& OutInvalidReason)
 {
-	return ParseKeyWithModifiers(KeySpec, OutInput.Key, OutInput.ModifierKeys, OutInvalidReason)
-		&& ResolveInputUser(OutInput.Key, UserIndex, OutInput.DeviceId, OutInput.SlateUserIndex, OutInvalidReason);
+	if (!ParseKeyWithModifiers(KeySpec, OutInput.Key, OutInput.ModifierKeys, OutInvalidReason)
+		|| !ResolveInputUser(OutInput.Key, UserIndex, OutInput.DeviceId, OutInput.SlateUserIndex, OutInvalidReason))
+	{
+		return false;
+	}
+	if (UE::SlateInspectorToolset::HyperAIGuard::IsFocusProtected(OutInput.SlateUserIndex)) // UE 5.8: keyboard focus is in HyperAI Studio
+	{
+		OutInvalidReason = TEXT("keyboard focus is in HyperAI Studio: ") + UE::SlateInspectorToolset::HyperAIGuard::GetRefusalReason();
+		return false;
+	}
+	return true;
 }
 
 bool USlateInspectorToolset59::SendKeyEvent(const FResolvedKeyInput& Input, bool bDown, bool bRepeat)
@@ -1816,7 +1859,8 @@ bool USlateInspectorToolset59::SendKeyEvent(const FResolvedKeyInput& Input, bool
 			{ EKeys::Escape,    TCHAR('\x1b') },
 		};
 
-		if (const TCHAR* CharCode = KeyToCharacter.Find(Input.Key))
+		const TCHAR* CharCode = UE::SlateInspectorToolset::HyperAIGuard::IsFocusProtected(Input.SlateUserIndex) ? nullptr : KeyToCharacter.Find(Input.Key); // UE 5.8: no chars into HyperAI Studio
+		if (CharCode)
 		{
 			FCharacterEvent CharEvent(*CharCode, ModifierKeys, Input.SlateUserIndex, bRepeat);
 			bHandled |= FSlateApplication::Get().ProcessKeyCharEvent(CharEvent);
@@ -1828,6 +1872,7 @@ bool USlateInspectorToolset59::SendKeyEvent(const FResolvedKeyInput& Input, bool
 
 bool USlateInspectorToolset59::PressKey(const FString& Key, int32 UserIndex, int32 RepeatCount)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1871,6 +1916,7 @@ bool USlateInspectorToolset59::PressKey(const FString& Key, int32 UserIndex, int
 
 bool USlateInspectorToolset59::KeyDown(const FString& Key, int32 UserIndex)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1898,6 +1944,7 @@ bool USlateInspectorToolset59::KeyDown(const FString& Key, int32 UserIndex)
 
 bool USlateInspectorToolset59::KeyUp(const FString& Key, int32 UserIndex)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1921,6 +1968,7 @@ bool USlateInspectorToolset59::KeyUp(const FString& Key, int32 UserIndex)
 
 bool USlateInspectorToolset59::AnalogInput(const FString& Key, double Value, int32 UserIndex)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1958,6 +2006,7 @@ bool USlateInspectorToolset59::AnalogInput(const FString& Key, double Value, int
 
 bool USlateInspectorToolset59::Focus(const FString& Ref, int32 UserIndex)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -1987,6 +2036,7 @@ bool USlateInspectorToolset59::Focus(const FString& Ref, int32 UserIndex)
 
 bool USlateInspectorToolset59::SelectOption(const FString& Ref, const FString& Value)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -2070,6 +2120,7 @@ bool USlateInspectorToolset59::SelectOption(const FString& Ref, const FString& V
 
 bool USlateInspectorToolset59::Drag(const FString& StartRef, const FString& EndRef, const FSlateInspectorToolsetDragParams& Params)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return false;
@@ -2253,6 +2304,7 @@ bool USlateInspectorToolset59::Drag(const FString& StartRef, const FString& EndR
 
 FString USlateInspectorToolset59::Windows(const FString& Action, int32 Index, int32 Width, int32 Height, const FString& Ref)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	if (!FSlateApplication::IsInitialized())
 	{
 		return TEXT("Error: Slate not initialized");
@@ -2323,6 +2375,11 @@ FString USlateInspectorToolset59::Windows(const FString& Action, int32 Index, in
 				TEXT("Error: the window holding ref '%s' ('%s') is not in the visible window list."),
 				*Ref, *Named->GetTitle().ToString());
 		}
+	}
+
+	if (VisibleWindows.IsValidIndex(Index) && UE::SlateInspectorToolset::HyperAIGuard::IsProtectedWindow(VisibleWindows[Index])) // UE 5.8: HyperAI Studio's windows are off-limits
+	{
+		return FString::Printf(TEXT("Error: window %d refused: %s."), Index, *UE::SlateInspectorToolset::HyperAIGuard::GetRefusalReason());
 	}
 
 	if (Action.Equals(TEXT("select"), ESearchCase::IgnoreCase))
@@ -2467,6 +2524,7 @@ bool USlateInspectorToolset59::WaitFor(const FString& Text, const FString& TextG
 
 bool USlateInspectorToolset59::FillForm(const TArray<FSlateInspectorToolsetFormField59>& Fields)
 {
+	UE::SlateInspectorToolset::HyperAIGuard::FInjectionScope HyperAIGuardScope; // UE 5.8: drop synthetic input headed to HyperAI Studio
 	bool bAllSuccess = true;
 
 	for (const FSlateInspectorToolsetFormField59& Field : Fields)
