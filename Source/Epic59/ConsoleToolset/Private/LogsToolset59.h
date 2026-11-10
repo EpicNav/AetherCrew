@@ -6,7 +6,7 @@
 
 #include "ToolsetRegistry/ToolsetDefinition59.h" // UE 5.8: 5.9 ToolsetDefinition additions
 
-#include "LogsToolset.generated.h"
+#include "LogsToolset59.generated.h"
 
 /// Provides tools for reading the Unreal Engine output log and controlling
 /// log category verbosity.

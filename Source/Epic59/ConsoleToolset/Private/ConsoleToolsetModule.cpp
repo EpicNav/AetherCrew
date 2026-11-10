@@ -4,7 +4,7 @@
 #include "ToolsetRegistry/UToolsetRegistry.h"
 
 #include "ConsoleToolset.h"
-#include "LogsToolset.h"
+#include "LogsToolset59.h"
 
 #define LOCTEXT_NAMESPACE "FConsoleToolsetModule"
 

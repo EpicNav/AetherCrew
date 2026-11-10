@@ -108,12 +108,18 @@ def scan_types(text):
     return {m.group(2) for m in TYPE_RE.finditer(text)}
 
 
+# UHT refuses two reflected headers with one file name in a target, so those are indexed too, as
+# HEADER_KEY + lowercase file name.
+HEADER_KEY = "header:"
+INDEX_VERSION = 2
+
+
 def build_ue58_index(ue58):
     CACHE.mkdir(parents=True, exist_ok=True)
     cache = CACHE / "ue58_index.json"
     if cache.exists():
         data = json.loads(cache.read_text(encoding="utf-8"))
-        if data.get("engine") == str(ue58):
+        if data.get("engine") == str(ue58) and data.get("version") == INDEX_VERSION:
             return set(data["types"]), set(data["modules"]), set(data["headers"])
     log("Indexing UE 5.8 reflected types, modules and headers (cached in %s)." % cache.relative_to(PLUGIN))
     types, modules, headers = set(), set(), set()
@@ -136,7 +142,8 @@ def build_ue58_index(ue58):
                             continue
                         if "GENERATED_" in text:
                             types |= scan_types(text)
-    cache.write_text(json.dumps({"engine": str(ue58), "types": sorted(types), "modules": sorted(modules),
+                            types.add(HEADER_KEY + name.lower())
+    cache.write_text(json.dumps({"engine": str(ue58), "version": INDEX_VERSION, "types": sorted(types), "modules": sorted(modules),
                                  "headers": sorted(headers)}), encoding="utf-8")
     return types, modules, headers
 
@@ -150,7 +157,10 @@ def hyperai_names():
         if path.name.endswith(".Build.cs"):
             modules.add(path.name[:-len(".Build.cs")])
         elif path.suffix == ".h":
-            types |= scan_types(path.read_text(encoding="utf-8", errors="replace"))
+            text = path.read_text(encoding="utf-8", errors="replace")
+            types |= scan_types(text)
+            if "GENERATED_" in text:
+                types.add(HEADER_KEY + path.name.lower())
     return types, modules
 
 
@@ -270,6 +280,16 @@ class Port:
             if old in declared:
                 self.notes.append("%s: type %s exists in UE 5.8 or HyperAI; renamed %s" % (name, old, new))
 
+        # Reflected headers whose file name UE 5.8 or HyperAI already uses (UHT needs unique names).
+        header_renames = {}
+        for src, _ in copied:
+            for h in src.rglob("*.h"):
+                if HEADER_KEY + h.name.lower() in taken_types and "GENERATED_" in read_text(h):
+                    header_renames[h.stem] = h.stem + SUFFIX
+        for old, new in header_renames.items():
+            self.notes.append("%s: reflected header %s.h exists in UE 5.8 or HyperAI; renamed %s.h" % (name, old, new))
+        self.header_renames = header_renames
+
         if self.args.check:
             for src, dest in copied:
                 for path in sorted(src.rglob("*")):
@@ -284,6 +304,9 @@ class Port:
             if old_module != new_module:
                 old_cs = dest / (old_module + ".Build.cs")
                 old_cs.rename(dest / (new_module + ".Build.cs"))
+            for h in list(dest.rglob("*.h")):
+                if h.stem in header_renames:
+                    h.rename(h.with_name(header_renames[h.stem] + ".h"))
             for path in sorted(dest.rglob("*")):
                 if path.suffix in SOURCE_EXT:
                     text = read_text(path)
@@ -323,6 +346,11 @@ class Port:
             # A qualified name ("Module.LogsToolset", "/Script/Module.LogsToolset") is what the registry sees.
             for m in re.finditer(r'"[\w/]*[./]%s\b[^"\n]*"' % re.escape(short_old), text):
                 self.hand(rel, text, m.start(), "string mentions %s (renamed %s): check it" % (short_old, short_new))
+
+        # Renamed reflected headers: their includes, generated header and inline .gen.cpp.
+        for old, new in getattr(self, "header_renames", {}).items():
+            text = re.sub(r'(#\s*include\s+"(?:[^"]*/)?)%s(\.h"|\.generated\.h")' % re.escape(old), r"\g<1>%s\2" % new, text)
+            text = re.sub(r"(UE_INLINE_GENERATED_CPP_BY_NAME\s*\(\s*)%s(\s*\))" % re.escape(old), r"\g<1>%s\2" % new, text)
 
         # 5.9's ToolsetDefinition.h -> compat header with the 5.9 additions.
         text = re.sub(r'#include\s+"ToolsetRegistry/ToolsetDefinition\.h"',

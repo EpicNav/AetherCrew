@@ -8,7 +8,7 @@
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 
-#include "LogsToolset.h"
+#include "LogsToolset59.h"
 #include "ToolsetRegistry/ToolCallExceptionHandler.h"
 
 #if WITH_DEV_AUTOMATION_TESTS

@@ -1,6 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "LogsToolset.h"
+#include "LogsToolset59.h"
 
 #include "HAL/FileManager.h"
 #include "HAL/PlatformOutputDevices.h"
@@ -14,7 +14,7 @@
 #include "Misc/OutputDeviceNull.h"
 #include "Misc/Paths.h"
 
-#include UE_INLINE_GENERATED_CPP_BY_NAME(LogsToolset)
+#include UE_INLINE_GENERATED_CPP_BY_NAME(LogsToolset59)
 
 namespace
 {
