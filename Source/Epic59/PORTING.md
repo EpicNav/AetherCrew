@@ -56,6 +56,10 @@ rewriting `UToolsetLibrary::<added function>` to it). Expect two further gaps th
 (`ConvertToVirtualPath`, `TryConvertToInternalPath`) is not public in 5.8's EditorScriptingUtilities, and
 `UE::PropertyEditor::IsClassAllowed` does not exist in 5.8; copy the 5.9 implementations into the compat module.
 
+Behaviour of 5.8's registry that agents and tests notice: every tool parameter is required (5.9 honours C++
+defaults, 5.8 rejects a call that omits one), arguments are camelCase (`nameFilter`, `logFilePath`), and an
+`AIAccessMode` is not reported in the schema.
+
 ## The port script
 
 ```
@@ -89,8 +93,9 @@ The first run indexes UE 5.8's reflected types, module names and headers (about 
    stays for tests that read it), and a UFUNCTION with neither gains `AIIgnore` (5.9 skips unmarked functions
    silently; 5.8 logs an error for each).
 8. `UToolsetRegistry::EnableCookedRuntimeSupport(...)` is commented out (5.8 has no cooked-runtime toolsets).
-9. Build.cs: a module depending on `ToolsetRegistry` also depends on `ToolsetRegistryEditor` (the compat layer);
-   `ToolsetRegistryEngine` maps to `ToolsetRegistryEditor`; `AsyncFunctionResultEditor` is dropped.
+9. Build.cs: a module depending on `ToolsetRegistry` also depends on `ToolsetRegistryEditor`, `ToolsetCore` and
+   `AsyncFunctionResult` (all three: UBT passes a public dependency's include paths on but not its import library,
+   so a class implementing `IToolsetProvider` must link ToolsetCore itself); `ToolsetRegistryEngine` maps to `ToolsetRegistryEditor`; `AsyncFunctionResultEditor` is dropped.
 10. `HyperAIStudio.uplugin` gains the modules (Editor, Epic's loading phase, Win64).
 
 ### What it reports for hand edits
@@ -173,6 +178,12 @@ The capability preset tests count Epic *plugins*; the ports live inside HyperAIS
 | CheatsToolset | include, IToolsetProvider base | none |
 | ConsoleToolset | include, IToolsetProvider base, AICallable on 9 AIRuntimeCallable tools, cooked opt-in dropped, `ULogsToolset` and `LogsToolset.h` renamed `...59` | `SetVerbosity`: 5.8 has no `FLogSuppressionInterface::FindCategory`, so it checks the category through `GetVerbosity` and cannot check the compile-time maximum |
 | NavMeshToolset (+ Tests) | include, IToolsetProvider base, AICallable on 21 tools, cooked opt-in dropped, `IsFunctionAIRuntimeCallable` moved | 5.8 lacks the adaptive navmesh build API: adaptive stats report `bAvailable=false`, tiles report build state `Unknown` and take their bounds from the first layer, no tile state grid or updated-tile count; the dirty-area controller is read through a member pointer (protected in 5.8); invokers are listed from 5.8's raw invoker records (no actor or name); `EWorldType`, `ENetMode`, `ENavigationBuildLock`, `ENavigationShapeType`, `ENavigationAreaMode` properties are `uint8` (not UENUMs in 5.8); the test's `ExecuteTool` result type |
+
+Pilot results on a UE 5.8 bench (Bench59): Epic's own tests `AIAssistant.Toolsets.CheatsToolset` (17),
+`ConsoleToolset` (28) and `NavMeshToolset` (23) pass, 68 of 68, with no registry errors in the log; HyperAI's
+`HyperAIStudio.NativeTools.Capability*` tests pass (5 of 5). Over MCP, `list_toolsets` shows
+`CheatsToolset.CheatsToolset`, `ConsoleToolset.ConsoleToolset`, `ConsoleToolset.LogsToolset59` and
+`NavMeshToolset.NavMeshToolset`, and `GetCVarValue`, `GetLogCategories` and `ListWorlds` answer.
 
 ## Remaining toolsets
 
