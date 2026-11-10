@@ -185,7 +185,11 @@ class names make `FindFirstObject` and Python's `unreal.<Class>` ambiguous), so:
     plugins; supersede their overlapping classes the same way rather than disabling them.
 - **Test names.** 5.8's toolset tests register automation tests under the same C++ class names as 5.9's (the spec or
   `TEST_CLASS` name is the registration key, whatever its path), and whichever loads second is dropped with "Failed to
-  register test with the name ...". Rename the port's spec classes `...59` (and their `friend` declarations).
+  register test with the name ...". Rename the port's spec classes `...59` (and their `friend` declarations): wave 2a's
+  specs, `FLogsToolsetSpec59`, `FDataRegistryToolsSpec59`, `SlateInspectorToolsetTest59` and the MVVM port's
+  `FMVVMTest_WorkingPath59`, `FMVVMTest_Errors59` and `FMVVMTest_Registration59`. To find them, compare the port's
+  `BEGIN_DEFINE_SPEC`/`IMPLEMENT_*_AUTOMATION_TEST`/`TEST_CLASS` names with UE 5.8's `Engine/Plugins` sources, or grep a
+  bench log for "Failed to register test".
 
 ## HyperAI's tool catalog
 

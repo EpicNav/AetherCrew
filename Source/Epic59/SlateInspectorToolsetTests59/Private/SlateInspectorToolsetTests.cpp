@@ -24,7 +24,7 @@
 #include "Widgets/Views/SListView.h"
 #include "Widgets/Views/STableRow.h"
 
-TEST_CLASS(SlateInspectorToolsetTest, "AIAssistant.Toolsets.SlateInspectorToolset")
+TEST_CLASS(SlateInspectorToolsetTest59, "AIAssistant.Toolsets.SlateInspectorToolset")
 {
 	TUniquePtr<FCQTestSlateComponent> SlateComponent;
 	TSharedPtr<SWindow> TestWindow;

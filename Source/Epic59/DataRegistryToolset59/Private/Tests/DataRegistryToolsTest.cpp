@@ -20,7 +20,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-BEGIN_DEFINE_SPEC(FDataRegistryToolsSpec, "AIAssistant.Toolsets.DataRegistryToolset",
+BEGIN_DEFINE_SPEC(FDataRegistryToolsSpec59, "AIAssistant.Toolsets.DataRegistryToolset",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 	TUniquePtr<UE::ToolsetRegistry::FToolCallExceptionHandler> ExceptionHandler;
@@ -41,9 +41,9 @@ BEGIN_DEFINE_SPEC(FDataRegistryToolsSpec, "AIAssistant.Toolsets.DataRegistryTool
 	TSharedPtr<FJsonObject> ParseJson(const FString& JsonString);
 	void ExpectExceptionContains(const FString& Fragment);
 
-END_DEFINE_SPEC(FDataRegistryToolsSpec)
+END_DEFINE_SPEC(FDataRegistryToolsSpec59)
 
-bool FDataRegistryToolsSpec::CreateFixtureRegistry()
+bool FDataRegistryToolsSpec59::CreateFixtureRegistry()
 {
 	UDataRegistrySubsystem* Subsystem = UDataRegistrySubsystem::Get();
 	if (!TestNotNull(TEXT("DataRegistrySubsystem"), Subsystem))
@@ -95,7 +95,7 @@ bool FDataRegistryToolsSpec::CreateFixtureRegistry()
 	return TestNotNull(TEXT("Fixture registry is registered"), Subsystem->GetRegistryForType(FName(*FixtureRegistryName)));
 }
 
-void FDataRegistryToolsSpec::DestroyFixtureRegistry()
+void FDataRegistryToolsSpec59::DestroyFixtureRegistry()
 {
 	if (FixtureRegistry)
 	{
@@ -123,7 +123,7 @@ void FDataRegistryToolsSpec::DestroyFixtureRegistry()
 	FixtureRegistryName.Reset();
 }
 
-TSharedPtr<FJsonObject> FDataRegistryToolsSpec::ParseJson(const FString& JsonString)
+TSharedPtr<FJsonObject> FDataRegistryToolsSpec59::ParseJson(const FString& JsonString)
 {
 	TSharedPtr<FJsonObject> Root;
 	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
@@ -131,7 +131,7 @@ TSharedPtr<FJsonObject> FDataRegistryToolsSpec::ParseJson(const FString& JsonStr
 	return Root;
 }
 
-void FDataRegistryToolsSpec::ExpectExceptionContains(const FString& Fragment)
+void FDataRegistryToolsSpec59::ExpectExceptionContains(const FString& Fragment)
 {
 	if (!TestTrue(TEXT("ExceptionHandler is valid"), ExceptionHandler.IsValid()))
 	{
@@ -142,7 +142,7 @@ void FDataRegistryToolsSpec::ExpectExceptionContains(const FString& Fragment)
 		ExceptionHandler->GetException().Contains(Fragment));
 }
 
-void FDataRegistryToolsSpec::Define()
+void FDataRegistryToolsSpec59::Define()
 {
 	BeforeEach([this]()
 	{

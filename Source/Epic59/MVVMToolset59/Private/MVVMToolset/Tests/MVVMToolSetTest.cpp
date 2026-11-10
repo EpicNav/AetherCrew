@@ -35,16 +35,16 @@
 #include "ToolsetRegistry/ToolCallExceptionHandler.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
 
-BEGIN_DEFINE_SPEC(FMVVMTest_WorkingPath,
+BEGIN_DEFINE_SPEC(FMVVMTest_WorkingPath59,
 	"AIAssistant.Toolsets.MVVM.WorkingPath", MVVMToolSetTest::Flags)
 	TUniquePtr<FTestAssetSandbox> Sandbox;
 	UWidgetBlueprint* WidgetBlueprint = nullptr;
 	UBlueprint* ViewModel = nullptr;
 	int32 TestCounter = 0;
 	TUniquePtr<UE::ToolsetRegistry::FToolCallExceptionHandler> Handler;
-END_DEFINE_SPEC(FMVVMTest_WorkingPath)
+END_DEFINE_SPEC(FMVVMTest_WorkingPath59)
 
-void FMVVMTest_WorkingPath::Define()
+void FMVVMTest_WorkingPath59::Define()
 {
 	// Shared by every test; each creates its assets under names no other test uses
 	BeforeEach([this]() // UE 5.8: 5.8 specs have no BeforeAll; one sandbox per test
@@ -1543,14 +1543,14 @@ void FMVVMTest_WorkingPath::Define()
 // Error / Negative Path Tests
 // ============================================================================
 
-BEGIN_DEFINE_SPEC(FMVVMTest_Errors,
+BEGIN_DEFINE_SPEC(FMVVMTest_Errors59,
 	"AIAssistant.Toolsets.MVVM.Errors", MVVMToolSetTest::Flags)
 	TUniquePtr<FTestAssetSandbox> Sandbox;
 	int32 TestCounter = 0;
 	TUniquePtr<UE::ToolsetRegistry::FToolCallExceptionHandler> Handler;
-END_DEFINE_SPEC(FMVVMTest_Errors)
+END_DEFINE_SPEC(FMVVMTest_Errors59)
 
-void FMVVMTest_Errors::Define()
+void FMVVMTest_Errors59::Define()
 {
 	// Shared by every test; each creates its assets under names no other test uses
 	BeforeEach([this]() // UE 5.8: 5.8 specs have no BeforeAll; one sandbox per test
@@ -2537,11 +2537,11 @@ void FMVVMTest_EventArgument::Define()
 // ============================================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FMVVMTest_Registration,
+	FMVVMTest_Registration59,
 	"AIAssistant.Toolsets.MVVM.Registration.ToolsetRegistered",
 	MVVMToolSetTest::Flags)
 
-bool FMVVMTest_Registration::RunTest(const FString&)
+bool FMVVMTest_Registration59::RunTest(const FString&)
 {
 	FString Schemas = UToolsetRegistry::GetAllToolsetJsonSchemas();
 	TestTrue(TEXT("MVVMToolset in registry"), Schemas.Contains(TEXT("MVVMToolset59.MVVMToolset59"))); // UE 5.8: 5.8's own MVVMToolset would match the bare name
