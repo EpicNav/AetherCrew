@@ -3,19 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HyperAIStudioAudioToolTypes.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
 #include "HyperAIStudioAudioAuthoringToolset.generated.h"
-
-/** A setting by its Unreal property name, such as Volume, FalloffDistance or MaxCount, and its value as the Details panel would take it. */
-USTRUCT(BlueprintType)
-struct FHyperAIAudioSetting
-{
-	GENERATED_BODY()
-
-	UPROPERTY() FString Name;
-	UPROPERTY() FString Value;
-};
 
 USTRUCT(BlueprintType)
 struct FHyperAISoundIssue
@@ -315,10 +306,19 @@ struct FHyperAIMetaSoundRecipeRequest
 {
 	GENERATED_BODY()
 
-	/** wind_loop, ui_blip, ui_confirm, engine_hum, rain_bed or laser_zap. Empty lists the recipes and their inputs. */
+	/**
+	 * From SoundWaves you have: footstep, impact, whoosh, crossfade_loop. Procedural: wind_loop, ui_blip, ui_confirm,
+	 * engine_hum, rain_bed, laser_zap (and whoosh with no Waves). Empty lists the recipes and their inputs.
+	 */
 	UPROPERTY() FString Recipe;
-	/** The MetaSound Source to make, such as /Game/Audio/MS_Wind. */
+	/** The asset to make, such as /Game/Audio/MS_Footsteps (a MetaSound Source) or /Game/Audio/SC_Footsteps (a Sound Cue). */
 	UPROPERTY() FString Path;
+	/** metasound (the default) or sound_cue: the wave recipes make either; a cue has no filter sweep or crossfades (see each recipe). */
+	UPROPERTY() FString Kind;
+	/** Wave recipes: the SoundWaves to play, one picked per play and never the same twice running (footstep, whoosh), the impact's transient layer, or the beds a crossfade_loop moves between. */
+	UPROPERTY() TArray<FString> Waves;
+	/** impact: the tail layer (debris, ring, room), one picked per hit; empty makes a transient-only impact. */
+	UPROPERTY() TArray<FString> Tails;
 	/** Defaults for the recipe's inputs, by name, such as RPM 2400. */
 	UPROPERTY() TArray<FHyperAIAudioSetting> Inputs;
 	UPROPERTY() bool bDryRun = true;
@@ -347,6 +347,10 @@ struct FHyperAIMetaSoundRecipeInfo
 	UPROPERTY() FString Recipe;
 	UPROPERTY() FString Description;
 	UPROPERTY() bool bOneShot = false;
+	/** It plays SoundWaves given in Waves (and Tails). */
+	UPROPERTY() bool bUsesWaves = false;
+	/** It can be made as a Sound Cue (Kind sound_cue). */
+	UPROPERTY() bool bSoundCue = false;
 	UPROPERTY() TArray<FHyperAIMetaSoundInputInfo> Inputs;
 };
 
@@ -368,7 +372,7 @@ struct FHyperAIMetaSoundRecipeReport
 	UPROPERTY() TArray<FString> Saved;
 };
 
-/** Sound Cues, the mix (Sound Classes, Sound Mixes, attenuation, concurrency, submixes) and procedural MetaSound recipes. */
+/** Sound Cues, the mix (Sound Classes, Sound Mixes, attenuation, concurrency, submixes), MetaSound recipes and graphs, offline analysis and preview. */
 UCLASS()
 class UHyperAIStudioAudioAuthoringToolset final : public UToolsetDefinition
 {
@@ -402,12 +406,59 @@ public:
 	static FHyperAISoundAssetInspectReport hyper_sound_asset_inspect(const FHyperAISoundAssetInspectRequest& Request);
 
 	/**
-	 * Experimental: builds a procedural MetaSound Source from a recipe of oscillators, noise, envelopes, filters and LFOs
-	 * (wind_loop, ui_blip, ui_confirm, engine_hum with an RPM input, rain_bed, laser_zap), with its controls exposed as
-	 * MetaSound inputs. An empty Recipe lists them. Dry-run first (the default); a recipe is a starting point to tune by ear.
+	 * Builds a ready sound from a recipe, its controls exposed as MetaSound inputs. From SoundWaves you have (no paid
+	 * generation): footstep (a take per step, never the same twice running, pitch and volume jitter), impact (a transient
+	 * layer and a delayed tail layer), whoosh (takes through a swept band pass; procedural noise when Waves is empty) and
+	 * crossfade_loop (beds crossfaded into one endless loop); each also as a Sound Cue with Kind sound_cue. Procedural:
+	 * wind_loop, ui_blip, ui_confirm, engine_hum (RPM input), rain_bed, laser_zap. An empty Recipe lists them and their
+	 * inputs. Dry-run first (the default); then measure the result with hyper_audio_analyze.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Audio")
 	static FHyperAIMetaSoundRecipeReport hyper_metasound_recipe(const FHyperAIMetaSoundRecipeRequest& Request);
+
+	/**
+	 * Searches the MetaSound node registry (every registered node class, Epic's and plugins') by words, category and pin
+	 * data types, best match first, with each node's pins. Use it to find the Class a graph plan needs: "wave player",
+	 * "random get", "ad envelope", "state variable filter", "trigger delay". Changes nothing.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Audio")
+	static FHyperAIMetaSoundNodeSearchReport hyper_metasound_node_search(const FHyperAIMetaSoundNodeSearchRequest& Request);
+
+	/**
+	 * Describes MetaSound node classes by Namespace.Name.Variant: every input pin with its type, default, description and
+	 * enum values, every output pin, the version and category; bListDataTypes lists the registered data types. Changes nothing.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Audio")
+	static FHyperAIMetaSoundNodeDescribeReport hyper_metasound_node_describe(const FHyperAIMetaSoundNodeDescribeRequest& Request);
+
+	/**
+	 * Builds a MetaSound Source from any registered nodes in one undo step, through Epic's MetaSound Builder: Nodes (by
+	 * Class, with pin Defaults), graph Inputs and Outputs, and Connections between pins (node "graph" for On Play, the
+	 * graph inputs, Out Mono/Left/Right and On Finished), laid out left to right. A new Path makes the source (mono or
+	 * stereo, one-shot or loop); an existing one gets the nodes, inputs and wires added (its nodes by NodeId GUID from
+	 * hyper_sound_asset_inspect). Dry-run first (the default): every class, pin, type and value is checked against the
+	 * registry. Find classes with hyper_metasound_node_search; hear the result with hyper_audio_analyze.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Audio")
+	static FHyperAIMetaSoundGraphPlanReport hyper_metasound_graph_plan(const FHyperAIMetaSoundGraphPlanRequest& Request);
+
+	/**
+	 * Listens to a sound without an audio device and measures it: renders a MetaSound Source offline through its own
+	 * generator (several Plays to hear its variation, Parameters to set its inputs) or reads a SoundWave's samples, then
+	 * reports integrated loudness (LUFS), peak and RMS, onset, spectral centroid, tail length, clipping, whether a one-shot
+	 * finishes and whether a loop clicks at its seam, with Issues saying what to fix. Changes nothing.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Audio")
+	static FHyperAIAudioAnalyzeReport hyper_audio_analyze(const FHyperAIAudioAnalyzeRequest& Request);
+
+	/**
+	 * The editor's audio preview, for the user to hear: play a SoundWave, Sound Cue or MetaSound Source (with parameters),
+	 * stop it, set its parameters, volume and pitch while it plays, report what is playing (active sounds, active Sound
+	 * Mixes), and solo or mute a Sound Class, Submix, SoundWave or Sound Cue (clear undoes them). Nothing is saved; with no
+	 * audio device (tests, -nosound) only status works.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Audio")
+	static FHyperAIAudioPreviewReport hyper_audio_preview(const FHyperAIAudioPreviewRequest& Request);
 };
 
 class FHyperAIStudioAudioAuthoringContracts final
@@ -419,6 +470,13 @@ public:
 	static constexpr const TCHAR* MixToolName = TEXT("hyper_sound_mix_plan");
 	static constexpr const TCHAR* InspectToolName = TEXT("hyper_sound_asset_inspect");
 	static constexpr const TCHAR* RecipeToolName = TEXT("hyper_metasound_recipe");
+	static constexpr const TCHAR* NodeSearchToolName = TEXT("hyper_metasound_node_search");
+	static constexpr const TCHAR* NodeDescribeToolName = TEXT("hyper_metasound_node_describe");
+	static constexpr const TCHAR* GraphPlanToolName = TEXT("hyper_metasound_graph_plan");
+	static constexpr const TCHAR* AnalyzeToolName = TEXT("hyper_audio_analyze");
+	static constexpr const TCHAR* PreviewToolName = TEXT("hyper_audio_preview");
+	static constexpr int32 MaxGraphNodes = 256;
+	static constexpr int32 MaxGraphConnections = 1024;
 	static constexpr int32 MaxCueNodes = 128;
 	static constexpr int32 MaxMixAssets = 32;
 	static constexpr int32 MaxSettings = 64;
@@ -430,6 +488,11 @@ public:
 	static FHyperAISoundMixPlanReport MixPlan(const FHyperAISoundMixPlanRequest& Request);
 	static FHyperAISoundAssetInspectReport Inspect(const FHyperAISoundAssetInspectRequest& Request);
 	static FHyperAIMetaSoundRecipeReport Recipe(const FHyperAIMetaSoundRecipeRequest& Request);
+	static FHyperAIMetaSoundNodeSearchReport NodeSearch(const FHyperAIMetaSoundNodeSearchRequest& Request);
+	static FHyperAIMetaSoundNodeDescribeReport NodeDescribe(const FHyperAIMetaSoundNodeDescribeRequest& Request);
+	static FHyperAIMetaSoundGraphPlanReport GraphPlan(const FHyperAIMetaSoundGraphPlanRequest& Request);
+	static FHyperAIAudioAnalyzeReport Analyze(const FHyperAIAudioAnalyzeRequest& Request);
+	static FHyperAIAudioPreviewReport Preview(const FHyperAIAudioPreviewRequest& Request);
 };
 
 class FHyperAIStudioAudioAuthoringRegistration final

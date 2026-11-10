@@ -7,9 +7,11 @@
 #include "Editor.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioAudioAnalysis.h"
 #include "HyperAIStudioAudioWrappers.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioMetaSoundGraph.h"
 #include "HyperAIStudioMetaSoundRecipes.h"
 #include "HyperAIStudioNames.h"
 #include "HyperAIStudioSoundCueGraph.h"
@@ -42,7 +44,7 @@ FString FHyperAIStudioAudioAuthoringContracts::GetQualifiedToolsetName()
 
 TArray<FString> FHyperAIStudioAudioAuthoringContracts::GetToolNames()
 {
-	return {CueToolName, MixToolName, InspectToolName, RecipeToolName};
+	return {CueToolName, MixToolName, InspectToolName, RecipeToolName, NodeSearchToolName, NodeDescribeToolName, GraphPlanToolName, AnalyzeToolName, PreviewToolName};
 }
 
 bool FHyperAIStudioAudioAuthoringContracts::IsRegistrationAllowed(const bool bAllowSourceCandidateForDev)
@@ -102,6 +104,24 @@ namespace HyperAIStudio::AudioAuthoring::Private
 		{
 			OutError = Reason.IsEmpty() ? FString::Printf(TEXT("%s %s is not a %s in the project."), Field, *Trimmed, *T::StaticClass()->GetName()) : Reason;
 			return false;
+		}
+		return true;
+	}
+
+	/** SoundWaves by path; false with the first that is not one. */
+	bool LoadWaves(const TArray<FString>& Paths, const TCHAR* Field, TArray<USoundWave*>& OutWaves, FString& OutError)
+	{
+		OutWaves.Reset();
+		for (const FString& Path : Paths)
+		{
+			FString Reason;
+			USoundWave* Wave = Cast<USoundWave>(CueGraph::LoadAsset(Path.TrimStartAndEnd(), *USoundWave::StaticClass(), &Reason));
+			if (!Wave || Wave->IsA<UMetaSoundSource>())
+			{
+				OutError = Reason.IsEmpty() ? FString::Printf(TEXT("%s: %s is not a SoundWave in the project."), Field, *Path) : FString::Printf(TEXT("%s: %s"), Field, *Reason);
+				return false;
+			}
+			OutWaves.Add(Wave);
 		}
 		return true;
 	}
@@ -340,9 +360,17 @@ namespace HyperAIStudio::AudioAuthoring::Private
 			return Report;
 		}
 		FString Error;
+		TArray<USoundWave*> Waves;
+		TArray<USoundWave*> Tails;
+		if (!LoadWaves(Request.Waves, TEXT("Waves"), Waves, Error) || !LoadWaves(Request.Tails, TEXT("Tails"), Tails, Error))
+		{
+			Report.Status = TEXT("operation_failed");
+			Report.Diagnostic = TEXT("A wave went missing while the plan waited; nothing was made: ") + Error;
+			return Report;
+		}
 		{
 			const FScopedTransaction Transaction(LOCTEXT("MetaSoundRecipe", "HyperAI: MetaSound Recipe"));
-			Report.Path = MetaSounds::BuildRecipe(Request.Recipe.TrimStartAndEnd(), Package, Request.Inputs, Report.NodeCount, Error);
+			Report.Path = MetaSounds::BuildRecipe(Request.Recipe.TrimStartAndEnd(), Package, Request.Inputs, Waves, Tails, Report.NodeCount, Error);
 		}
 		if (Report.Path.IsEmpty())
 		{
@@ -353,8 +381,43 @@ namespace HyperAIStudio::AudioAuthoring::Private
 		Report.bOk = true;
 		Report.Status = TEXT("completed");
 		Report.Saved.Add(Report.Path);
-		Report.Diagnostic = FString::Printf(TEXT("Experimental recipe %s built as %s (%d nodes) and saved. Its inputs are MetaSound parameters: set them from a Blueprint ")
-			TEXT("(Set Float Parameter on the Audio Component) or in the Details panel, and tune the sound by ear."), *Request.Recipe, *Report.Path, Report.NodeCount);
+		Report.Diagnostic = FString::Printf(TEXT("Recipe %s built as %s (%d nodes) and saved. Its inputs are MetaSound parameters: set them from a Blueprint ")
+			TEXT("(Set Float Parameter on the Audio Component) or in the Details panel. Measure it with hyper_audio_analyze, then let the user tune it by ear."), *Request.Recipe, *Report.Path, Report.NodeCount);
+		return Report;
+	}
+
+	FHyperAIMetaSoundGraphPlanReport ExecuteGraph(const FHyperAIMetaSoundGraphPlanRequest& Request, const FString& OperationId)
+	{
+		FHyperAIMetaSoundGraphPlanReport Report;
+		Report.OperationId = OperationId;
+		// Checked again: the registry, the MetaSound or a wave it names may have changed while the plan waited.
+		Graph::FCheckedPlan Plan;
+		if (!Graph::Check(Request, Plan, Report))
+		{
+			Report.Diagnostic = TEXT("The plan no longer passes its check; nothing was changed: ") + Report.Diagnostic;
+			return Report;
+		}
+		if (Report.bCreates && !FHyperAIStudioNames::IsFreePackage(Plan.Package))
+		{
+			Report.Status = TEXT("operation_failed");
+			Report.Diagnostic = FString::Printf(TEXT("%s appeared while the plan waited; nothing was made over it."), *Plan.Package);
+			return Report;
+		}
+		bool bBuilt = false;
+		{
+			const FScopedTransaction Transaction(LOCTEXT("MetaSoundGraphPlan", "HyperAI: MetaSound Graph Plan"));
+			bBuilt = Graph::Build(Plan, Request.bSave, Report);
+		}
+		if (!bBuilt)
+		{
+			Report.Diagnostic += TEXT(" Edit > Undo takes back what was changed.");
+			return Report;
+		}
+		Report.bOk = true;
+		Report.Status = TEXT("completed");
+		Report.Diagnostic = FString::Printf(TEXT("%s %s in one undo step%s: %d node(s), %d wire(s)%s. Hear it with hyper_audio_analyze."), *Report.Path,
+			Report.bCreates ? TEXT("made") : TEXT("extended"), Request.bSave ? TEXT(" and saved") : TEXT(", unsaved"), Report.Nodes.Num(), Report.ConnectionCount,
+			Report.Warnings.IsEmpty() ? TEXT("") : *FString::Printf(TEXT("; %d warning(s)"), Report.Warnings.Num()));
 		return Report;
 	}
 
@@ -405,6 +468,7 @@ namespace HyperAIStudio::AudioAuthoring::Private
 			Info.Kind = TEXT("metasound_source");
 			Info.Settings = Mix::ReadSettings(*Source, bAll);
 			Info.Details = MetaSounds::DescribeInputs(*Source);
+			Info.Details.Append(Graph::DescribeGraph(*Source));
 			Info.DurationSeconds = Source->GetDuration() >= INDEFINITELY_LOOPING_DURATION ? -1.f : Source->GetDuration();
 			return Info;
 		}
@@ -631,10 +695,44 @@ FHyperAIMetaSoundRecipeReport FHyperAIStudioAudioAuthoringContracts::Recipe(cons
 	}
 	Report.Recipes = MetaSounds::Recipes(RecipeId);
 	FString Error;
-	if (!MetaSounds::CheckInputs(RecipeId, Request.Inputs, Error))
+	TArray<USoundWave*> Waves;
+	TArray<USoundWave*> Tails;
+	const FString Kind = Request.Kind.TrimStartAndEnd().ToLower();
+	if (!MetaSounds::CheckInputs(RecipeId, Request.Inputs, Error) || !LoadWaves(Request.Waves, TEXT("Waves"), Waves, Error)
+		|| !LoadWaves(Request.Tails, TEXT("Tails"), Tails, Error) || !MetaSounds::CheckWaves(RecipeId, Kind, Waves, Tails, Error))
 	{
 		Report.Status = TEXT("invalid_request");
 		Report.Diagnostic = Error;
+		return Report;
+	}
+	if (Kind == TEXT("sound_cue"))
+	{
+		// The cue version is a Sound Cue plan: the same check, approval and undo step as hyper_sound_cue_plan.
+		FHyperAISoundCuePlanRequest Cue;
+		Cue.Cue = Request.Path;
+		Cue.bDryRun = Request.bDryRun;
+		Cue.OperationId = Report.OperationId;
+		if (!MetaSounds::CueRecipe(RecipeId, Waves, Tails, Request.Inputs, Cue.Nodes, Cue.Root, Cue.VolumeMultiplier, Error))
+		{
+			Report.Status = TEXT("invalid_request");
+			Report.Diagnostic = Error;
+			return Report;
+		}
+		Cue.VolumeMultiplier = FMath::Clamp(Cue.VolumeMultiplier, 0.01f, 4.f);
+		if (!FHyperAIStudioNames::IsFreePackage(CueGraph::PackageOf(Request.Path)))
+		{
+			Report.Status = TEXT("asset_exists");
+			Report.Diagnostic = FString::Printf(TEXT("%s is taken; a recipe makes a new Sound Cue, so give a path of its own."), *Request.Path);
+			return Report;
+		}
+		const FHyperAISoundCuePlanReport Planned = CuePlan(Cue);
+		Report.bOk = Planned.bOk;
+		Report.Status = Planned.Status;
+		Report.Diagnostic = Planned.Diagnostic;
+		Report.OperationId = Planned.OperationId;
+		Report.Path = Planned.Cue;
+		Report.NodeCount = Planned.Nodes.Num();
+		Report.Saved = Planned.Saved;
 		return Report;
 	}
 	if (!IsInGameThread() || RefuseWhilePlaying(Report.Status, Report.Diagnostic))
@@ -673,6 +771,88 @@ FHyperAIMetaSoundRecipeReport FHyperAIStudioAudioAuthoringContracts::Recipe(cons
 	const FString OperationId = Report.OperationId;
 	return Submit(Report, RecipeToolName, TEXT("metasound.recipe.v1"), Package, Effects, {Package},
 		[Request, Package, OperationId]() { return ExecuteRecipe(Request, Package, OperationId); });
+}
+
+FHyperAIMetaSoundNodeSearchReport FHyperAIStudioAudioAuthoringContracts::NodeSearch(const FHyperAIMetaSoundNodeSearchRequest& Request)
+{
+	FHyperAIMetaSoundNodeSearchReport Report;
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
+	if (!IsInGameThread())
+	{
+		Report.Status = TEXT("invalid_request");
+		Report.Diagnostic = TEXT("hyper_metasound_node_search runs on the game thread.");
+		return Report;
+	}
+	return HyperAIStudio::AudioAuthoring::Graph::Search(Request);
+}
+
+FHyperAIMetaSoundNodeDescribeReport FHyperAIStudioAudioAuthoringContracts::NodeDescribe(const FHyperAIMetaSoundNodeDescribeRequest& Request)
+{
+	FHyperAIMetaSoundNodeDescribeReport Report;
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
+	if (!IsInGameThread())
+	{
+		Report.Status = TEXT("invalid_request");
+		Report.Diagnostic = TEXT("hyper_metasound_node_describe runs on the game thread.");
+		return Report;
+	}
+	return HyperAIStudio::AudioAuthoring::Graph::DescribeClasses(Request);
+}
+
+FHyperAIMetaSoundGraphPlanReport FHyperAIStudioAudioAuthoringContracts::GraphPlan(const FHyperAIMetaSoundGraphPlanRequest& Request)
+{
+	using namespace HyperAIStudio::AudioAuthoring;
+	using namespace HyperAIStudio::AudioAuthoring::Private;
+	FHyperAIMetaSoundGraphPlanReport Report;
+	Report.OperationId = NewOperationId(Request.OperationId, TEXT("metasoundgraph"));
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
+	if (!IsInGameThread() || RefuseWhilePlaying(Report.Status, Report.Diagnostic))
+	{
+		Report.Status = Report.Status.IsEmpty() ? TEXT("invalid_request") : Report.Status;
+		Report.Diagnostic = Report.Diagnostic.IsEmpty() ? TEXT("hyper_metasound_graph_plan runs on the game thread.") : Report.Diagnostic;
+		return Report;
+	}
+	Graph::FCheckedPlan Plan;
+	if (!Graph::Check(Request, Plan, Report))
+	{
+		return Report;
+	}
+	if (Request.bDryRun)
+	{
+		Report.bOk = true;
+		Report.Status = TEXT("checked");
+		Report.Diagnostic = FString::Printf(TEXT("Would %s %s with %d node(s), %d wire(s), %d input(s) and %d output(s)%s; nothing was changed. Nodes shows where each goes."),
+			Report.bCreates ? TEXT("make") : TEXT("extend"), *Plan.Package, Plan.Nodes.Num(), Plan.Connections.Num(), Plan.Inputs.Num(), Plan.Outputs.Num(),
+			Report.Warnings.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(". %d warning(s): see Warnings"), Report.Warnings.Num()));
+		return Report;
+	}
+	TArray<FString> Effects = {FString::Printf(TEXT("MetaSound Source %s: %s, one undo step%s"), *Plan.Package,
+		Report.bCreates ? TEXT("made") : TEXT("nodes and wires added"), Request.bSave ? TEXT(", then saved") : TEXT(""))};
+	for (int32 Index = 0; Index < Report.Nodes.Num() && Index < 24; ++Index)
+	{
+		Effects.Add(FString::Printf(TEXT("| node %s %s"), *Report.Nodes[Index].Id, *Report.Nodes[Index].Class));
+	}
+	for (const TPair<FName, FName>& Input : Plan.Inputs)
+	{
+		Effects.Add(FString::Printf(TEXT("| input %s (%s)"), *Input.Key.ToString(), *Input.Value.ToString()));
+	}
+	Effects.Add(FString::Printf(TEXT("| %d wire(s)"), Plan.Connections.Num()));
+	const FString OperationId = Report.OperationId;
+	return Submit(Report, GraphPlanToolName, TEXT("metasound.graph_plan.v1"), Plan.Package, Effects, {Plan.Package},
+		[Request, OperationId]() { return ExecuteGraph(Request, OperationId); });
+}
+
+FHyperAIAudioAnalyzeReport FHyperAIStudioAudioAuthoringContracts::Analyze(const FHyperAIAudioAnalyzeRequest& Request)
+{
+	FHyperAIAudioAnalyzeReport Report;
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
+	if (!IsInGameThread())
+	{
+		Report.Status = TEXT("invalid_request");
+		Report.Diagnostic = TEXT("hyper_audio_analyze runs on the game thread.");
+		return Report;
+	}
+	return HyperAIStudio::AudioAuthoring::Analysis::Analyze(Request);
 }
 
 FString FHyperAIStudioAudioWrappers::MakeMetaSoundPlayer(const FString& Package, const TArray<USoundWave*>& Waves, const FString& Mode,
@@ -772,6 +952,31 @@ FHyperAISoundAssetInspectReport UHyperAIStudioAudioAuthoringToolset::hyper_sound
 FHyperAIMetaSoundRecipeReport UHyperAIStudioAudioAuthoringToolset::hyper_metasound_recipe(const FHyperAIMetaSoundRecipeRequest& Request)
 {
 	return FHyperAIStudioAudioAuthoringContracts::Recipe(Request);
+}
+
+FHyperAIMetaSoundNodeSearchReport UHyperAIStudioAudioAuthoringToolset::hyper_metasound_node_search(const FHyperAIMetaSoundNodeSearchRequest& Request)
+{
+	return FHyperAIStudioAudioAuthoringContracts::NodeSearch(Request);
+}
+
+FHyperAIMetaSoundNodeDescribeReport UHyperAIStudioAudioAuthoringToolset::hyper_metasound_node_describe(const FHyperAIMetaSoundNodeDescribeRequest& Request)
+{
+	return FHyperAIStudioAudioAuthoringContracts::NodeDescribe(Request);
+}
+
+FHyperAIMetaSoundGraphPlanReport UHyperAIStudioAudioAuthoringToolset::hyper_metasound_graph_plan(const FHyperAIMetaSoundGraphPlanRequest& Request)
+{
+	return FHyperAIStudioAudioAuthoringContracts::GraphPlan(Request);
+}
+
+FHyperAIAudioAnalyzeReport UHyperAIStudioAudioAuthoringToolset::hyper_audio_analyze(const FHyperAIAudioAnalyzeRequest& Request)
+{
+	return FHyperAIStudioAudioAuthoringContracts::Analyze(Request);
+}
+
+FHyperAIAudioPreviewReport UHyperAIStudioAudioAuthoringToolset::hyper_audio_preview(const FHyperAIAudioPreviewRequest& Request)
+{
+	return FHyperAIStudioAudioAuthoringContracts::Preview(Request);
 }
 
 void FHyperAIStudioAudioAuthoringRegistration::Startup()

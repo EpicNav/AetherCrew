@@ -693,6 +693,12 @@
   },
   {
    "namespace": "HyperAIStudioAudioAuthoring",
+   "key": "MetaSoundGraphPlan",
+   "source": "HyperAI: MetaSound Graph Plan",
+   "text": "HyperAI：MetaSound 图表计划"
+  },
+  {
+   "namespace": "HyperAIStudioAudioAuthoring",
    "key": "MetaSoundRecipe",
    "source": "HyperAI: MetaSound Recipe",
    "text": "HyperAI：MetaSound 配方"
