@@ -67,6 +67,7 @@ Intermediate/*
  
 # Cache files for the editor to use
 DerivedDataCache/*
+__pycache__/
 .idea
 Plugins/Developer
 Builds

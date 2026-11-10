@@ -15,6 +15,7 @@
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "InstancedFoliageActor.h"
 #include "Interfaces/IPluginManager.h"
 #include "LandscapeProxy.h"
@@ -1155,8 +1156,9 @@ bool FHyperAIStudioWorldbuildingContracts::IsRegistrationAllowed(const bool bAll
 
 bool FHyperAIStudioWorldbuildingContracts::IsCanonicalProjectObjectPath(const FString& Path)
 {
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
 	if (!HyperAIStudio::Worldbuilding::Private::IsSafeExactObjectPath(Path)
-		|| !FPackageName::IsValidObjectPath(Path)) return false;
+		|| !FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path)) return false;
 	const FSoftObjectPath Reference(Path);
 	const FString PackageName = Reference.GetLongPackageName();
 	const FString AssetName = Reference.GetAssetName();
@@ -1650,6 +1652,8 @@ FHyperAIWorldApplyPlanReport FHyperAIStudioWorldbuildingContracts::BuildPlan(
 	FHyperAIWorldApplyPlanReport Report;
 	Report.bDryRun = Request.bDryRun;
 	Report.OperationId = Clip(Request.OperationId, 128);
+	// Names, layers and paths become FNames and lookups, which stop the editor past an FName's length.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	if (Request.Operations.IsEmpty() || Request.Operations.Num() > MaxOperations)
 	{
 		Report.Status = TEXT("invalid_operation_count");
@@ -1811,6 +1815,25 @@ FHyperAIWorldApplyPlanReport FHyperAIStudioWorldbuildingContracts::BuildPlan(
 	Report.Status = TEXT("staged_backend_required");
 	Report.Diagnostic = TEXT("No artifact or mutation was submitted: this source candidate awaits an admitted typed mutator, "
 		"independent validator, durable journal, and trusted authorization route.");
+	if (Operations.ContainsByPredicate([](const FHyperAIWorldBackendOperation& Operation) { return Operation.Variant.StartsWith(TEXT("landscape.")); }))
+	{
+		Report.Diagnostic += TEXT(" Landscapes are made and edited with hyper_landscape_apply_plan.");
+	}
+	if (Operations.ContainsByPredicate([](const FHyperAIWorldBackendOperation& Operation) { return Operation.Variant.StartsWith(TEXT("spline.")); }))
+	{
+		Report.Diagnostic += TEXT(" Roads and paths over a landscape are laid with hyper_landscape_apply_plan's landscape.road.");
+	}
+	if (Operations.ContainsByPredicate([](const FHyperAIWorldBackendOperation& Operation) { return Operation.Variant.StartsWith(TEXT("foliage.")); }))
+	{
+		Report.Diagnostic += TEXT(" Foliage types, scatter, placement and erasing are done with hyper_foliage_apply_plan.");
+	}
+	if (Operations.ContainsByPredicate([](const FHyperAIWorldBackendOperation& Operation)
+		{
+			return Operation.Variant.StartsWith(TEXT("world_partition.")) || Operation.Variant.StartsWith(TEXT("data_layer.")) || Operation.Variant.StartsWith(TEXT("hlod."));
+		}))
+	{
+		Report.Diagnostic += TEXT(" Data layers, HLOD layers, streaming and editor regions are set up with hyper_world_partition_apply_plan.");
+	}
 	return Report;
 }
 

@@ -2,10 +2,13 @@
 
 #include "HyperAIStudioUIValueModel.h"
 
+#include "Animation/MovieScene2DTransformSection.h"
+#include "Animation/MovieScene2DTransformTrack.h"
 #include "Animation/WidgetAnimation.h"
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Blueprint/WidgetNavigation.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/CanvasPanelSlot.h"
@@ -17,6 +20,7 @@
 #include "Components/PanelSlot.h"
 #include "Components/PanelWidget.h"
 #include "Components/ProgressBar.h"
+#include "Components/SlateWrapperTypes.h"
 #include "Components/Slider.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBoxSlot.h"
@@ -34,7 +38,9 @@
 #include "MVVMBlueprintViewModelContext.h"
 #include "MVVMPropertyPath.h"
 #include "MVVMWidgetBlueprintExtension_View.h"
+#include "Sections/MovieSceneFloatSection.h"
 #include "Styling/StyleColors.h"
+#include "Tracks/MovieSceneFloatTrack.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectIterator.h"
 #include "WidgetBlueprint.h"
@@ -386,6 +392,22 @@ namespace HyperAIStudio::UI::Capture::Private
 		AddBool(Record, TEXT("is_enabled"), Widget->bIsEnabled, Context);
 		PRAGMA_ENABLE_DEPRECATION_WARNINGS
 		AddBool(Record, TEXT("is_variable"), Widget->bIsVariable, Context);
+		if (const UWidgetNavigation* Navigation = Widget->Navigation)
+		{
+			// Only directions that leave the default escape rule: "explicit:QuitButton", "wrap", "stop" or "custom".
+			const TPair<const TCHAR*, const FWidgetNavigationData*> Directions[] = {
+				{TEXT("navigation_up"), &Navigation->Up}, {TEXT("navigation_down"), &Navigation->Down},
+				{TEXT("navigation_left"), &Navigation->Left}, {TEXT("navigation_right"), &Navigation->Right},
+				{TEXT("navigation_next"), &Navigation->Next}, {TEXT("navigation_previous"), &Navigation->Previous}};
+			for (const TPair<const TCHAR*, const FWidgetNavigationData*>& Direction : Directions)
+			{
+				const EUINavigationRule Rule = Direction.Value->Rule;
+				if (Rule == EUINavigationRule::Escape) continue;
+				AddString(Record, Direction.Key, TEXT("string"), Rule == EUINavigationRule::Explicit
+					? TEXT("explicit:") + Direction.Value->WidgetToFocus.ToString()
+					: Rule == EUINavigationRule::Wrap ? FString(TEXT("wrap")) : Rule == EUINavigationRule::Stop ? FString(TEXT("stop")) : FString(TEXT("custom")), Context);
+			}
+		}
 #if WITH_EDITORONLY_DATA
 		AddBool(Record, TEXT("override_accessible_defaults"),
 			Widget->bOverrideAccessibleDefaults, Context);
@@ -412,6 +434,7 @@ namespace HyperAIStudio::UI::Capture::Private
 				AddString(Record, TEXT("text"), TEXT("string"), Value, Context);
 			}
 			CaptureSlateColor(Text->ColorAndOpacity, Record, TEXT("color_and_opacity"), Context);
+			AddNumber(Record, TEXT("font_size"), Text->Font.Size, Context);
 			PRAGMA_ENABLE_DEPRECATION_WARNINGS
 		}
 		else if (const UImage* Image = Cast<UImage>(Widget))
@@ -455,6 +478,64 @@ namespace HyperAIStudio::UI::Capture::Private
 			AddInt(Record, TEXT("active_widget_index"), Switcher->ActiveWidgetIndex, Context);
 			PRAGMA_ENABLE_DEPRECATION_WARNINGS
 		}
+	}
+
+	/**
+	 * Button, border, size box, scale box, scroll box, wrap box, uniform grid and similar slots hold only padding,
+	 * alignment, size and grid cells. A slot class with any other editable field is not projected here.
+	 */
+	bool CaptureSharedSlotFields(const UPanelSlot* Slot, FHyperAIUIRecord& Record, FCaptureContext& Context)
+	{
+		static const TSet<FName> Shared = {TEXT("Padding"), TEXT("HorizontalAlignment"), TEXT("VerticalAlignment"), TEXT("Size"),
+			TEXT("Row"), TEXT("Column"), TEXT("RowSpan"), TEXT("ColumnSpan")};
+		for (TFieldIterator<FProperty> It(Slot->GetClass()); It; ++It)
+		{
+			if (It->HasAnyPropertyFlags(CPF_Edit) && !It->HasAnyPropertyFlags(CPF_Deprecated) && !Shared.Contains(It->GetFName()))
+			{
+				return false;
+			}
+		}
+		auto Int = [Slot](const FProperty* Property) -> int64
+		{
+			const void* Value = Property->ContainerPtrToValuePtr<void>(Slot);
+			if (const FEnumProperty* Enum = CastField<FEnumProperty>(Property)) return Enum->GetUnderlyingProperty()->GetSignedIntPropertyValue(Value);
+			const FNumericProperty* Numeric = CastField<FNumericProperty>(Property);
+			return Numeric ? Numeric->GetSignedIntPropertyValue(Value) : 0;
+		};
+		if (const FStructProperty* Padding = CastField<FStructProperty>(Slot->GetClass()->FindPropertyByName(TEXT("Padding"))))
+		{
+			if (Padding->Struct == FMargin::StaticStruct())
+			{
+				AddMargin(Record, TEXT("padding"), *Padding->ContainerPtrToValuePtr<FMargin>(Slot), Context);
+			}
+		}
+		if (const FProperty* Horizontal = Slot->GetClass()->FindPropertyByName(TEXT("HorizontalAlignment")))
+		{
+			AddInt(Record, TEXT("horizontal_alignment"), static_cast<int32>(Int(Horizontal)), Context);
+		}
+		if (const FProperty* Vertical = Slot->GetClass()->FindPropertyByName(TEXT("VerticalAlignment")))
+		{
+			AddInt(Record, TEXT("vertical_alignment"), static_cast<int32>(Int(Vertical)), Context);
+		}
+		if (const FStructProperty* Size = CastField<FStructProperty>(Slot->GetClass()->FindPropertyByName(TEXT("Size"))))
+		{
+			if (Size->Struct == FSlateChildSize::StaticStruct())
+			{
+				const FSlateChildSize& Value = *Size->ContainerPtrToValuePtr<FSlateChildSize>(Slot);
+				AddInt(Record, TEXT("size_rule"), static_cast<int32>(Value.SizeRule), Context);
+				AddNumber(Record, TEXT("size_value"), Value.Value, Context);
+			}
+		}
+		const TPair<const TCHAR*, const TCHAR*> Cells[] = {{TEXT("Row"), TEXT("row")}, {TEXT("Column"), TEXT("column")},
+			{TEXT("RowSpan"), TEXT("row_span")}, {TEXT("ColumnSpan"), TEXT("column_span")}};
+		for (const TPair<const TCHAR*, const TCHAR*>& Cell : Cells)
+		{
+			if (const FProperty* Property = Slot->GetClass()->FindPropertyByName(Cell.Key))
+			{
+				AddInt(Record, Cell.Value, static_cast<int32>(Int(Property)), Context);
+			}
+		}
+		return true;
 	}
 
 	void CaptureSlotFields(
@@ -502,7 +583,7 @@ namespace HyperAIStudio::UI::Capture::Private
 			AddInt(Record, TEXT("horizontal_alignment"), Grid->GetHorizontalAlignment(), Context);
 			AddInt(Record, TEXT("vertical_alignment"), Grid->GetVerticalAlignment(), Context);
 		}
-		else
+		else if (!CaptureSharedSlotFields(Slot, Record, Context))
 		{
 			AddString(Record, TEXT("layout_projection"), TEXT("enum"),
 				TEXT("unsupported_slot_class"), Context);
@@ -801,6 +882,7 @@ namespace HyperAIStudio::UI::Capture::Private
 				else
 				{
 					AddInt(BindingRecord, TEXT("track_count"), Tracks.Num(), Context);
+					bool bDelegated = false;
 					for (int32 TrackIndex = 0; TrackIndex < Tracks.Num(); ++TrackIndex)
 					{
 						if (!Context.CheckDeadline()) return;
@@ -808,8 +890,30 @@ namespace HyperAIStudio::UI::Capture::Private
 						AddString(BindingRecord,
 							FString::Printf(TEXT("track_class_%03d"), TrackIndex), TEXT("path"),
 							Track ? ClassPath(Track, Context, BindingRecord.RecordKey) : FString(), Context);
+						// Float and 2D transform tracks, the ones hyper_ui_apply_plan writes, are read; other tracks stay delegated.
+						const UMovieSceneSection* First = Track && !Track->GetAllSections().IsEmpty() ? Track->GetAllSections()[0] : nullptr;
+						if (const UMovieSceneFloatTrack* Float = Cast<UMovieSceneFloatTrack>(Track))
+						{
+							const UMovieSceneFloatSection* Section = Cast<UMovieSceneFloatSection>(First);
+							AddString(BindingRecord, FString::Printf(TEXT("track_property_%03d"), TrackIndex), TEXT("string"),
+								Float->GetPropertyName().ToString(), Context);
+							AddInt(BindingRecord, FString::Printf(TEXT("track_keys_%03d"), TrackIndex),
+								Section ? Section->GetChannel().GetNumKeys() : 0, Context);
+						}
+						else if (const UMovieScene2DTransformTrack* Transform = Cast<UMovieScene2DTransformTrack>(Track))
+						{
+							const UMovieScene2DTransformSection* Section = Cast<UMovieScene2DTransformSection>(First);
+							AddString(BindingRecord, FString::Printf(TEXT("track_property_%03d"), TrackIndex), TEXT("string"),
+								Transform->GetPropertyName().ToString(), Context);
+							AddInt(BindingRecord, FString::Printf(TEXT("track_channels_%03d"), TrackIndex),
+								Section ? static_cast<int32>(Section->GetMask().GetChannels()) : 0, Context);
+						}
+						else
+						{
+							bDelegated = true;
+						}
 					}
-					if (!Tracks.IsEmpty())
+					if (bDelegated)
 					{
 						Context.MarkIncomplete(TEXT("animation_track_content_delegated"), TEXT("warning"),
 							BindingRecord.RecordKey,

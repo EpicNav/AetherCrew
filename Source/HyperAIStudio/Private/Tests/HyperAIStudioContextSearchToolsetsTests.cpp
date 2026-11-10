@@ -4,10 +4,13 @@
 
 #include "HyperAIStudioContextSearchToolsets.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
+#include "HyperAIStudioProjectAssetIndex.h"
 
+#include "AssetRegistry/IAssetRegistry.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
@@ -80,6 +83,82 @@ namespace HyperAIStudio::ContextSearch::Tests
 			FPaths::ProjectSavedDir(),
 			TEXT("HyperAIStudioContextSearchTests"),
 			FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	}
+
+	/** One asset row as the asset index builds it: search text from name, class, package and parent class. */
+	FHyperAIProjectAssetRow MakeAssetRow(
+		const FString& ObjectPath,
+		const TCHAR* ClassPath,
+		const TCHAR* ParentClassPath = nullptr)
+	{
+		FHyperAIProjectAssetRow Row;
+		Row.ObjectPath = FSoftObjectPath(ObjectPath);
+		Row.ClassPath = FTopLevelAssetPath(ClassPath);
+		Row.SearchTextLower = Row.ObjectPath.GetAssetName() + TEXT(" ") + ClassPath + TEXT(" ")
+			+ Row.ObjectPath.GetLongPackageName();
+		if (ParentClassPath)
+		{
+			Row.ParentClassPath = FName(ParentClassPath);
+			Row.SearchTextLower += FString(TEXT(" ")) + ParentClassPath;
+		}
+		Row.SearchTextLower.ToLowerInline();
+		return Row;
+	}
+
+	/** A published asset snapshot holding the rows, grouped into folders by package path. */
+	FHyperAIProjectAssetIndexSnapshot MakeAssetSnapshot(
+		const TArray<FHyperAIProjectAssetRow>& Rows,
+		const TCHAR* Status = TEXT("ready"),
+		const int64 Generation = 1)
+	{
+		TMap<FString, TSharedRef<FHyperAIProjectAssetFolder, ESPMode::ThreadSafe>> ByFolder;
+		TArray<FString> Tokens = { TEXT("fixture") };
+		for (const FHyperAIProjectAssetRow& Row : Rows)
+		{
+			const FString Folder = FPackageName::GetLongPackagePath(Row.ObjectPath.GetLongPackageName());
+			if (!ByFolder.Contains(Folder))
+			{
+				TSharedRef<FHyperAIProjectAssetFolder, ESPMode::ThreadSafe> Chunk =
+					MakeShared<FHyperAIProjectAssetFolder, ESPMode::ThreadSafe>();
+				Chunk->Path = FName(*Folder);
+				ByFolder.Add(Folder, Chunk);
+			}
+			ByFolder[Folder]->Rows.Add(Row);
+			Tokens.Add(Row.ObjectPath.ToString());
+			Tokens.Add(Row.ClassPath.ToString());
+		}
+		ByFolder.KeySort(TLess<FString>());
+		FHyperAIProjectAssetIndexSnapshot Snapshot;
+		Snapshot.Status = Status;
+		Snapshot.Generation = Generation;
+		Snapshot.bHasCompletedWalk = FString(Status) == TEXT("ready") || FString(Status) == TEXT("partial");
+		Snapshot.AssetCount = Rows.Num();
+		for (TPair<FString, TSharedRef<FHyperAIProjectAssetFolder, ESPMode::ThreadSafe>>& Pair : ByFolder)
+		{
+			Pair.Value->Fingerprint = FHyperAIStudioContextSearchContracts::HashTokens({ Pair.Key });
+			Snapshot.Folders.Add(Pair.Value);
+		}
+		Snapshot.FolderCount = Snapshot.Folders.Num();
+		Snapshot.Fingerprint = FHyperAIStudioContextSearchContracts::HashTokens(Tokens);
+		return Snapshot;
+	}
+
+	TArray<FHyperAIProjectAssetRow> MakeRockAndUnarmedRows()
+	{
+		return {
+			MakeAssetRow(TEXT("/Game/Env/SM_Rock.SM_Rock"), TEXT("/Script/Engine.StaticMesh")),
+			MakeAssetRow(TEXT("/Game/Anim/Unarmed/AS_Unarmed_Idle.AS_Unarmed_Idle"), TEXT("/Script/Engine.AnimSequence")),
+			MakeAssetRow(TEXT("/Game/Blueprints/BP_Hero.BP_Hero"), TEXT("/Script/Engine.Blueprint"), TEXT("/Script/Engine.Character"))
+		};
+	}
+
+	FString FindField(const FHyperAIReadRecord& Record, const TCHAR* Name)
+	{
+		const FHyperAIReadField* Field = Record.Fields.FindByPredicate([Name](const FHyperAIReadField& Candidate)
+		{
+			return Candidate.Name == Name;
+		});
+		return Field ? Field->Value : FString();
 	}
 }
 
@@ -616,12 +695,40 @@ bool FHyperAIContextSearchProjectLifecycleTest::RunTest(const FString& Parameter
 		FHyperAIStudioContextSearchContracts::SearchProjectIndex(Ready, Request);
 	TestTrue(TEXT("Search continuation succeeds"), Second.bOk);
 	TestEqual(TEXT("Continuation returns one"), Second.ReturnedRecords, 1);
+	for (const FHyperAIReadReport* Report : { &Missing, &First, &Second })
+	{
+		TestFalse(TEXT("No search refuses assets for want of a backend any more"),
+			HasDiagnostic(*Report, TEXT("async_asset_index_backend_required")));
+	}
+	TestEqual(TEXT("Without an asset index the search adds no diagnostics of its own"), First.Diagnostics.Num(), 0);
+	TestFalse(TEXT("Without an asset index a ready snapshot is complete"), First.bIncomplete);
 
 	Request.Kinds = { TEXT("raw_file") };
 	Request.Cursor.Reset();
 	const FHyperAIReadReport UnsafeKind =
 		FHyperAIStudioContextSearchContracts::SearchProjectIndex(Ready, Request);
 	TestEqual(TEXT("Raw file kind fails closed"), UnsafeKind.Status, FString(TEXT("invalid_request")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIContextSearchFirstSearchTest,
+	"HyperAIStudio.NativeTools.ContextSearch.FirstSearchAnswers",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIContextSearchFirstSearchTest::RunTest(const FString& Parameters)
+{
+	// From no index, as in a fresh editor: the search builds it and answers, rather than saying it is being built.
+	FHyperAIStudioProjectIndexStore& Store = FHyperAIStudioProjectIndexStore::Get();
+	TestTrue(TEXT("no other refresh is left running"), Store.WaitForRefresh(10.0));
+	Store.ResetAssetIndexForTests();
+	Store.SetSnapshotForTests(FHyperAIProjectIndexValueSnapshot());
+	FHyperAIProjectSearchRequest Request;
+	Request.Query = TEXT("HyperAIStudio");
+	Request.Kinds = { TEXT("cpp_symbol") };
+	const FHyperAIReadReport First = UHyperAIStudioProjectSearchToolset::hyper_project_search(Request);
+	TestNotEqual(TEXT("the first search does not answer that the index is being built"), First.Status, FString(TEXT("indexing")));
+	TestTrue(FString::Printf(TEXT("it finds the project's C++ (%s, %d record(s))"), *First.Status, First.TotalRecords), First.bOk && First.TotalRecords > 0);
 	return true;
 }
 
@@ -836,6 +943,409 @@ bool FHyperAIContextSearchToolsetSchemaTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Report exposes snapshot fingerprint"), FHyperAIReadReport::StaticStruct()->FindPropertyByName(TEXT("SnapshotFingerprint")) != nullptr);
 	TestTrue(TEXT("Report exposes incomplete semantics"), FHyperAIReadReport::StaticStruct()->FindPropertyByName(TEXT("bIncomplete")) != nullptr);
 	TestTrue(TEXT("Report exposes on-disk semantics"), FHyperAIReadReport::StaticStruct()->FindPropertyByName(TEXT("bOnDiskOnly")) != nullptr);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIContextSearchFindsAssetsTest,
+	"HyperAIStudio.NativeTools.ContextSearch.ProjectSearchFindsAssets",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIContextSearchFindsAssetsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ContextSearch::Tests;
+	const FHyperAIProjectIndexValueSnapshot Cpp = MakeReadyIndex();
+	const FHyperAIProjectAssetIndexSnapshot Assets = MakeAssetSnapshot(MakeRockAndUnarmedRows());
+	FHyperAIProjectSearchRequest Request;
+	Request.bStartIndexIfUnavailable = false;
+	Request.Query = TEXT("rock staticmesh");
+	const FHyperAIReadReport Rock = FHyperAIStudioContextSearchContracts::SearchProjectIndex(Cpp, Request, Assets);
+	TestTrue(TEXT("the search succeeds"), Rock.bOk);
+	TestEqual(TEXT("name and class terms find exactly the rock"), Rock.TotalRecords, 1);
+	if (Rock.Records.Num() == 1)
+	{
+		const FHyperAIReadRecord& Record = Rock.Records[0];
+		TestEqual(TEXT("it is an asset record"), Record.Kind, FString(TEXT("asset")));
+		TestEqual(TEXT("its id is the object path"), Record.RecordId, FString(TEXT("/Game/Env/SM_Rock.SM_Rock")));
+		TestEqual(TEXT("name"), FindField(Record, TEXT("name")), FString(TEXT("SM_Rock")));
+		TestEqual(TEXT("asset_name is kept for older callers"), FindField(Record, TEXT("asset_name")), FString(TEXT("SM_Rock")));
+		TestEqual(TEXT("asset_class_path"), FindField(Record, TEXT("asset_class_path")), FString(TEXT("/Script/Engine.StaticMesh")));
+		TestEqual(TEXT("package_name"), FindField(Record, TEXT("package_name")), FString(TEXT("/Game/Env/SM_Rock")));
+		TestEqual(TEXT("object_path"), FindField(Record, TEXT("object_path")), FString(TEXT("/Game/Env/SM_Rock.SM_Rock")));
+	}
+	TestFalse(TEXT("with both parts ready the answer is complete"), Rock.bIncomplete);
+	TestEqual(TEXT("and says so"), Rock.Status, FString(TEXT("complete")));
+
+	Request.Query = TEXT("unarmed");
+	const FHyperAIReadReport Unarmed = FHyperAIStudioContextSearchContracts::SearchProjectIndex(Cpp, Request, Assets);
+	TestEqual(TEXT("a folder word finds the asset inside it"), Unarmed.TotalRecords, 1);
+	TestTrue(TEXT("it is the idle animation"), Unarmed.Records.Num() == 1
+		&& Unarmed.Records[0].RecordId == TEXT("/Game/Anim/Unarmed/AS_Unarmed_Idle.AS_Unarmed_Idle"));
+
+	Request.Query = TEXT("engine.character");
+	const FHyperAIReadReport Derived = FHyperAIStudioContextSearchContracts::SearchProjectIndex(Cpp, Request, Assets);
+	TestEqual(TEXT("a Blueprint is found by its parent class"), Derived.TotalRecords, 1);
+	TestTrue(TEXT("and reports that parent by default"), Derived.Records.Num() == 1
+		&& FindField(Derived.Records[0], TEXT("parent_class_path")) == TEXT("/Script/Engine.Character"));
+
+	Request.Query = TEXT("rock");
+	Request.Kinds = { TEXT("cpp_symbol") };
+	const FHyperAIReadReport CppOnly = FHyperAIStudioContextSearchContracts::SearchProjectIndex(Cpp, Request, Assets);
+	TestTrue(TEXT("a C++-only search succeeds"), CppOnly.bOk);
+	TestEqual(TEXT("a C++-only search returns no assets"), CppOnly.TotalRecords, 0);
+
+	Request.Kinds = { TEXT("asset") };
+	Request.Fields = { TEXT("asset_class_path") };
+	const FHyperAIReadReport Projected = FHyperAIStudioContextSearchContracts::SearchProjectIndex(Cpp, Request, Assets);
+	TestEqual(TEXT("the projection keeps one record"), Projected.ReturnedRecords, 1);
+	TestTrue(TEXT("only the requested field is returned"), Projected.Records.Num() == 1
+		&& Projected.Records[0].Fields.Num() == 1
+		&& Projected.Records[0].Fields[0].Name == TEXT("asset_class_path"));
+
+	// An asset-only search does not inherit the C++ pass's bounds.
+	FHyperAIProjectIndexValueSnapshot PartialCpp = MakeReadyIndex();
+	PartialCpp.Status = TEXT("partial");
+	PartialCpp.Value.bIncomplete = true;
+	Request.Fields.Reset();
+	const FHyperAIReadReport AssetOnly = FHyperAIStudioContextSearchContracts::SearchProjectIndex(PartialCpp, Request, Assets);
+	TestFalse(TEXT("an asset-only search over a ready asset index is complete"), AssetOnly.bIncomplete);
+	Request.Kinds.Reset();
+	const FHyperAIReadReport Both = FHyperAIStudioContextSearchContracts::SearchProjectIndex(PartialCpp, Request, Assets);
+	TestTrue(TEXT("a search that includes C++ still reports its partial pass"), Both.bIncomplete);
+
+	FHyperAIProjectAssetIndexSnapshot Indexing = MakeAssetSnapshot({}, TEXT("indexing"));
+	const FHyperAIProjectIndexValueSnapshot NoCpp;
+	Request.Kinds = { TEXT("asset") };
+	const FHyperAIReadReport Building = FHyperAIStudioContextSearchContracts::SearchProjectIndex(NoCpp, Request, Indexing);
+	TestEqual(TEXT("an empty asset index mid-walk answers indexing"), Building.Status, FString(TEXT("indexing")));
+	TestTrue(TEXT("and incomplete"), Building.bIncomplete);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIContextSearchAssetMatchBoundTest,
+	"HyperAIStudio.NativeTools.ContextSearch.ProjectSearchAssetMatchBound",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIContextSearchAssetMatchBoundTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ContextSearch::Tests;
+	TArray<FHyperAIProjectAssetRow> Rows;
+	Rows.Reserve(5000);
+	for (int32 Index = 0; Index < 5000; ++Index)
+	{
+		Rows.Add(MakeAssetRow(
+			FString::Printf(TEXT("/Game/Bulk/F%02d/SM_%04d.SM_%04d"), Index / 100, Index, Index),
+			TEXT("/Script/Engine.StaticMesh")));
+	}
+	const FHyperAIProjectAssetIndexSnapshot Assets = MakeAssetSnapshot(Rows);
+	FHyperAIProjectSearchRequest Request;
+	Request.bStartIndexIfUnavailable = false;
+	Request.Query = TEXT("sm");
+	Request.Kinds = { TEXT("asset") };
+	const FHyperAIReadReport Report =
+		FHyperAIStudioContextSearchContracts::SearchProjectIndex(MakeReadyIndex(), Request, Assets);
+	TestNotEqual(TEXT("the record bound of a page is never hit"), Report.Status, FString(TEXT("invalid_request")));
+	TestTrue(TEXT("the bounded search succeeds"), Report.bOk);
+	TestEqual(TEXT("matches stop at the fixed bound"), Report.TotalRecords,
+		FHyperAIStudioContextSearchContracts::MaxProjectSearchMatches);
+	TestTrue(TEXT("the source is reported truncated"), Report.bSourceTruncated);
+	TestTrue(TEXT("the bound has a stable diagnostic"), HasDiagnostic(Report, TEXT("project_search_match_bound_reached")));
+	TestFalse(TEXT("a continuation cursor is offered"), Report.NextCursor.IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIContextSearchAssetCursorTest,
+	"HyperAIStudio.NativeTools.ContextSearch.ProjectSearchCursorBindsAssetGeneration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIContextSearchAssetCursorTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ContextSearch::Tests;
+	TArray<FHyperAIProjectAssetRow> Rows = {
+		MakeAssetRow(TEXT("/Game/Props/SM_Crate.SM_Crate"), TEXT("/Script/Engine.StaticMesh")),
+		MakeAssetRow(TEXT("/Game/Props/SM_Barrel.SM_Barrel"), TEXT("/Script/Engine.StaticMesh")),
+		MakeAssetRow(TEXT("/Game/Props/SM_Lamp.SM_Lamp"), TEXT("/Script/Engine.StaticMesh"))
+	};
+	const FHyperAIProjectAssetIndexSnapshot G1 = MakeAssetSnapshot(Rows, TEXT("ready"), 1);
+	Rows.Add(MakeAssetRow(TEXT("/Game/Props/SM_Table.SM_Table"), TEXT("/Script/Engine.StaticMesh")));
+	const FHyperAIProjectAssetIndexSnapshot G2 = MakeAssetSnapshot(Rows, TEXT("ready"), 2);
+	const FHyperAIProjectIndexValueSnapshot Cpp = MakeReadyIndex();
+
+	FHyperAIProjectSearchRequest Request;
+	Request.bStartIndexIfUnavailable = false;
+	Request.Query = TEXT("props");
+	Request.Kinds = { TEXT("asset") };
+	Request.PageSize = 1;
+	const FHyperAIReadReport First = FHyperAIStudioContextSearchContracts::SearchProjectIndex(Cpp, Request, G1);
+	TestEqual(TEXT("three props match"), First.TotalRecords, 3);
+	TestFalse(TEXT("a cursor is issued"), First.NextCursor.IsEmpty());
+
+	Request.Cursor = First.NextCursor;
+	const FHyperAIReadReport Same = FHyperAIStudioContextSearchContracts::SearchProjectIndex(Cpp, Request, G1);
+	TestTrue(TEXT("the cursor continues on the same asset generation"), Same.bOk);
+	TestEqual(TEXT("and returns the next record"), Same.ReturnedRecords, 1);
+
+	const FHyperAIReadReport Moved = FHyperAIStudioContextSearchContracts::SearchProjectIndex(Cpp, Request, G2);
+	TestEqual(TEXT("a new matching asset invalidates the cursor"), Moved.Status, FString(TEXT("invalid_request")));
+	TestTrue(TEXT("through the snapshot fingerprint"), HasDiagnostic(Moved, TEXT("cursor_snapshot_changed")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIContextSearchStatusCompositionTest,
+	"HyperAIStudio.NativeTools.ContextSearch.ProjectIndexStatusComposition",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIContextSearchStatusCompositionTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ContextSearch::Tests;
+	FHyperAIStudioProjectIndexStore& Store = FHyperAIStudioProjectIndexStore::Get();
+	TestTrue(TEXT("no other refresh is left running"), Store.WaitForRefresh(10.0));
+	const FHyperAIProjectIndexValueSnapshot Cpp = MakeReadyIndex();
+	Store.SetSnapshotForTests(Cpp);
+	const FHyperAIProjectAssetIndexSnapshot ReadyAssets = MakeAssetSnapshot(MakeRockAndUnarmedRows());
+	Store.SetAssetSnapshotForTests(ReadyAssets);
+
+	const FHyperAIProjectIndexStatus Ready = Store.GetStatus();
+	TestEqual(TEXT("C++ ready and assets ready make ready"), Ready.Status, FString(TEXT("ready")));
+	TestFalse(TEXT("ready is complete"), Ready.bIncomplete);
+	TestTrue(TEXT("ready is ok"), Ready.bOk);
+	TestEqual(TEXT("asset count comes from the asset index"), Ready.AssetRecordCount, 3);
+	TestEqual(TEXT("total counts both parts"), Ready.TotalRecordCount, Cpp.Value.Records.Num() + 3);
+	TestEqual(TEXT("the asset walk's own status is reported"), Ready.AssetIndexStatus, FString(TEXT("ready")));
+	TestEqual(TEXT("asset folders are reported"), Ready.AssetFolderCount, ReadyAssets.FolderCount);
+	TestTrue(TEXT("the composite fingerprint is canonical"),
+		Ready.SnapshotFingerprint.StartsWith(TEXT("sha256:")) && Ready.SnapshotFingerprint.Len() == 71);
+
+	FHyperAIProjectAssetIndexSnapshot ChangedAssets = ReadyAssets;
+	ChangedAssets.Fingerprint = FHyperAIStudioContextSearchContracts::HashTokens({ TEXT("changed") });
+	Store.SetAssetSnapshotForTests(ChangedAssets);
+	TestNotEqual(TEXT("an asset change moves the composite fingerprint"),
+		Store.GetStatus().SnapshotFingerprint, Ready.SnapshotFingerprint);
+
+	FHyperAIProjectAssetIndexSnapshot PartialAssets = ReadyAssets;
+	PartialAssets.Status = TEXT("partial");
+	Store.SetAssetSnapshotForTests(PartialAssets);
+	TestEqual(TEXT("partial assets make partial"), Store.GetStatus().Status, FString(TEXT("partial")));
+
+	FHyperAIProjectAssetIndexSnapshot WaitingAssets = MakeAssetSnapshot({}, TEXT("waiting_for_registry"));
+	Store.SetAssetSnapshotForTests(WaitingAssets);
+	const FHyperAIProjectIndexStatus Waiting = Store.GetStatus();
+	TestEqual(TEXT("a registry still scanning keeps the index indexing"), Waiting.Status, FString(TEXT("indexing")));
+	TestTrue(TEXT("but the C++ records are usable"), Waiting.bOk);
+	TestTrue(TEXT("and it is incomplete"), Waiting.bIncomplete);
+
+	Store.ResetAssetIndexForTests();
+	Store.SetSnapshotForTests(FHyperAIProjectIndexValueSnapshot());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIContextSearchAssetBatchTest,
+	"HyperAIStudio.NativeTools.ContextSearch.BatchWithAssetIndex",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIContextSearchAssetBatchTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ContextSearch::Tests;
+	FHyperAIContextSearchValueSnapshot Editor;
+	Editor.SnapshotUtc = TEXT("2026-08-14T10:00:00.000Z");
+	Editor.ObservationScope = TEXT("loaded_editor_context");
+	const FHyperAIProjectIndexValueSnapshot Cpp = MakeReadyIndex();
+	const FHyperAIProjectAssetIndexSnapshot Assets = MakeAssetSnapshot(MakeRockAndUnarmedRows());
+
+	FHyperAIBatchQueryRequest Batch;
+	FHyperAIBatchReadOperation Status;
+	Status.QueryId = TEXT("status");
+	Status.Primitive = TEXT("project_index_status");
+	Batch.Reads.Add(Status);
+	FHyperAIBatchReadOperation Search;
+	Search.QueryId = TEXT("find-rock");
+	Search.Primitive = TEXT("project_search");
+	Search.Query = TEXT("rock");
+	Search.Kinds = { TEXT("asset") };
+	Batch.Reads.Add(Search);
+
+	const FHyperAIReadReport WithAssets = FHyperAIStudioContextSearchContracts::AnalyzeBatch(Editor, Cpp, Assets, Batch);
+	TestTrue(TEXT("the batch succeeds"), WithAssets.bOk);
+	const FHyperAIReadRecord* StatusRecord = WithAssets.Records.FindByPredicate([](const FHyperAIReadRecord& Record)
+	{
+		return Record.QueryId == TEXT("status");
+	});
+	TestNotNull(TEXT("the status read answers"), StatusRecord);
+	if (StatusRecord)
+	{
+		TestEqual(TEXT("asset_count counts the asset rows"), FindField(*StatusRecord, TEXT("asset_count")), FString(TEXT("3")));
+		TestEqual(TEXT("total_record_count includes them"), FindField(*StatusRecord, TEXT("total_record_count")),
+			LexToString(Cpp.Value.Records.Num() + 3));
+		TestEqual(TEXT("the composite status is ready"), FindField(*StatusRecord, TEXT("status")), FString(TEXT("ready")));
+	}
+	TestTrue(TEXT("the search read finds the rock, tagged with its query"),
+		WithAssets.Records.ContainsByPredicate([](const FHyperAIReadRecord& Record)
+		{
+			return Record.QueryId == TEXT("find-rock") && Record.Kind == TEXT("asset")
+				&& Record.RecordId == TEXT("/Game/Env/SM_Rock.SM_Rock");
+		}));
+
+	const FHyperAIReadReport WithoutAssets = FHyperAIStudioContextSearchContracts::AnalyzeBatch(Editor, Cpp, Batch);
+	const FHyperAIReadRecord* LegacyStatus = WithoutAssets.Records.FindByPredicate([](const FHyperAIReadRecord& Record)
+	{
+		return Record.QueryId == TEXT("status");
+	});
+	TestTrue(TEXT("without an asset index asset_count falls back to the value snapshot"),
+		LegacyStatus && FindField(*LegacyStatus, TEXT("asset_count")) == TEXT("1"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIContextSearchFirstSearchFindsAssetsTest,
+	"HyperAIStudio.NativeTools.ContextSearch.FirstSearchFindsAssets",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIContextSearchFirstSearchFindsAssetsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ContextSearch::Tests;
+	// From no index at all: the first search walks the project's assets inside its wait and finds a real one.
+	FHyperAIStudioProjectIndexStore& Store = FHyperAIStudioProjectIndexStore::Get();
+	TestTrue(TEXT("no other refresh is left running"), Store.WaitForRefresh(10.0));
+	Store.ResetAssetIndexForTests();
+	Store.SetSnapshotForTests(FHyperAIProjectIndexValueSnapshot());
+
+	IAssetRegistry* Registry = IAssetRegistry::Get();
+	if (!Registry || Registry->IsLoadingAssets())
+	{
+		AddInfo(TEXT("The Asset Registry is not ready in this run; the live asset search check was skipped."));
+		return true;
+	}
+	FAssetData Target;
+	TArray<FName> Queue = { FName(TEXT("/Game")) };
+	for (int32 Head = 0; Head < Queue.Num() && Head < 256 && !Target.IsValid(); ++Head)
+	{
+		const FName Folder = Queue[Head];
+		if (FHyperAIStudioProjectAssetIndex::IsExcludedFolder(Folder.ToString()))
+		{
+			continue;
+		}
+		TArray<FAssetData> Assets;
+		Registry->GetAssetsByPath(Folder, Assets, false, true);
+		for (const FAssetData& Asset : Assets)
+		{
+			if (!Asset.IsRedirector() && Asset.PackageName.ToString().Len() <= 128)
+			{
+				Target = Asset;
+				break;
+			}
+		}
+		TArray<FName> Children;
+		Registry->GetSubPaths(Folder, Children, false);
+		Children.Sort(FNameLexicalLess());
+		Queue.Append(Children);
+	}
+	if (!Target.IsValid())
+	{
+		AddInfo(TEXT("The project has no on-disk asset under /Game; the live asset search check was skipped."));
+		return true;
+	}
+
+	FHyperAIProjectSearchRequest Request;
+	Request.Query = Target.PackageName.ToString();
+	Request.Kinds = { TEXT("asset") };
+	Request.PageSize = 128;
+	const double StartSeconds = FPlatformTime::Seconds();
+	const FHyperAIReadReport Report = UHyperAIStudioProjectSearchToolset::hyper_project_search(Request);
+	const double ElapsedMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+	TestTrue(FString::Printf(TEXT("the first asset search succeeds (%s)"), *Report.Status), Report.bOk);
+	TestNotEqual(TEXT("it does not answer that the index is being built"), Report.Status, FString(TEXT("indexing")));
+	const FString Expected = Target.GetObjectPathString();
+	TestTrue(FString::Printf(TEXT("it finds %s among %d record(s)"), *Expected, Report.TotalRecords),
+		Report.Records.ContainsByPredicate([&Expected](const FHyperAIReadRecord& Record)
+		{
+			return Record.RecordId == Expected;
+		}));
+	const FHyperAIProjectIndexStatus Status = Store.GetStatus();
+	AddInfo(FString::Printf(TEXT("First asset search took %.1f ms; the asset index holds %d assets in %d folders (%s)."),
+		ElapsedMs, Status.AssetRecordCount, Status.AssetFolderCount, *Status.AssetIndexStatus));
+	// An asset-only search does not wait for the C++ pass; let it finish so later tests can set their own snapshot.
+	TestTrue(TEXT("the C++ pass the search started finishes"), Store.WaitForRefresh(10.0));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIContextSearchFirstSearchWaitsForKindsTest,
+	"HyperAIStudio.NativeTools.ContextSearch.FirstSearchWaitsOnlyForKindsAsked",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIContextSearchFirstSearchWaitsForKindsTest::RunTest(const FString& Parameters)
+{
+	// A first search sits out only the parts it reads: an asset search does not wait for the C++ pass as well.
+	FHyperAIStudioProjectIndexStore& Store = FHyperAIStudioProjectIndexStore::Get();
+	TestTrue(TEXT("no other refresh is left running"), Store.WaitForRefresh(10.0));
+	Store.ResetAssetIndexForTests();
+	Store.SetSnapshotForTests(FHyperAIProjectIndexValueSnapshot());
+	FString Diagnostic;
+	const bool bStarted = Store.RequestRefresh(Diagnostic);
+	TestTrue(FString::Printf(TEXT("a refresh starts (%s)"), *Diagnostic), bStarted);
+	TestFalse(TEXT("a wait that reads no C++ returns while the C++ pass still runs"),
+		Store.WaitForFirstIndex(10.0, false, false));
+	Store.WaitForFirstIndex(10.0, true, false);
+	const auto Assets = Store.GetAssetSnapshotShared();
+	if (Assets->bRegistryScanning)
+	{
+		AddInfo(TEXT("The Asset Registry is still scanning in this run; the asset walk check was skipped."));
+	}
+	else
+	{
+		TestTrue(FString::Printf(TEXT("a wait for assets alone finishes the asset walk (%s)"), *Assets->Status),
+			Assets->bHasCompletedWalk);
+	}
+	TestTrue(TEXT("the C++ pass finishes on its own"), Store.WaitForRefresh(10.0));
+	Store.ResetAssetIndexForTests();
+	Store.SetSnapshotForTests(FHyperAIProjectIndexValueSnapshot());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIContextSearchAssetTimingTest,
+	"HyperAIStudio.NativeTools.ContextSearch.ProjectSearchAssetTiming",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIContextSearchAssetTimingTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::ContextSearch::Tests;
+	// Information only: how long a selective search takes at a large project's scale, against the 10 ms bound.
+	TArray<FHyperAIProjectAssetRow> Rows;
+	Rows.Reserve(20000);
+	static const TCHAR* const Kinds[] = { TEXT("Rock"), TEXT("Tree"), TEXT("Crate"), TEXT("Lamp"), TEXT("Wall") };
+	for (int32 Index = 0; Index < 20000; ++Index)
+	{
+		Rows.Add(MakeAssetRow(
+			FString::Printf(TEXT("/Game/Content%03d/SM_%s_%05d.SM_%s_%05d"),
+				Index / 64, Kinds[Index % 5], Index, Kinds[Index % 5], Index),
+			Index % 7 == 0 ? TEXT("/Script/Engine.SkeletalMesh") : TEXT("/Script/Engine.StaticMesh")));
+	}
+	const FHyperAIProjectAssetIndexSnapshot Assets = MakeAssetSnapshot(Rows);
+	FHyperAIProjectIndexValueSnapshot Cpp = MakeReadyIndex();
+	for (int32 Index = Cpp.Value.Records.Num(); Index < FHyperAIStudioContextSearchContracts::MaxCppSymbols; ++Index)
+	{
+		Cpp.Value.Records.Add(MakeRecord(
+			TEXT("cpp_symbol"),
+			*FString::Printf(TEXT("symbol-%05d"), Index),
+			*FString::Printf(TEXT("Symbol%05d"), Index),
+			TEXT("relative_path"),
+			TEXT("Source/Game/Generated.cpp")));
+	}
+	FHyperAIProjectSearchRequest Request;
+	Request.bStartIndexIfUnavailable = false;
+	Request.Query = TEXT("rock skeletalmesh");
+	const double StartSeconds = FPlatformTime::Seconds();
+	const FHyperAIReadReport Report = FHyperAIStudioContextSearchContracts::SearchProjectIndex(Cpp, Request, Assets);
+	const double ElapsedMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+	AddInfo(FString::Printf(
+		TEXT("Search over %d asset rows and %d C++ records took %.2f ms, %d match(es); work bound %s."),
+		Rows.Num(), Cpp.Value.Records.Num(), ElapsedMs, Report.TotalRecords,
+		HasDiagnostic(Report, TEXT("project_search_work_bound_reached")) ? TEXT("reached") : TEXT("not reached")));
 	return true;
 }
 

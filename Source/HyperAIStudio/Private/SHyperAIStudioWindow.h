@@ -26,10 +26,20 @@ struct FHyperAIStudioWorkbenchSurfaceSmoke
 class SHyperAIStudioWindow : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SHyperAIStudioWindow) {}
+	DECLARE_DELEGATE_OneParam(FOnOpenSection, int32 /*Section*/);
+
+	SLATE_BEGIN_ARGS(SHyperAIStudioWindow)
+		: _Section(0)
+	{}
+		/** The section this shows, as a page of HyperAI Studio's Settings: 0 setup, 1 agents, 2 MCP servers, 3 documentation. */
+		SLATE_ARGUMENT(int32, Section)
+		/** Asked to show another section, as Configure Agents does from Setup. */
+		SLATE_EVENT(FOnOpenSection, OnOpenSection)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	/** Closes the dialogs this section opened: their buttons call back into it. */
+	virtual ~SHyperAIStudioWindow() override;
 	static int32 GetInitialTabIndexForStatus(const FHyperAIStudioStatus& InStatus);
 	static int32 GetPostRefreshTabIndex(int32 CurrentTabIndex, const FHyperAIStudioStatus& NewStatus, bool bUserSelectedTab, bool bAutoRoutePending);
 	static FText GetTerminalPanelHintText();
@@ -39,15 +49,9 @@ public:
 	static FString BuildPrerequisiteInstallTerminalCommandForSmoke(const FString& PrerequisiteId, const FString& DisplayName, const FString& InstallCommand, const FString& ProjectRoot);
 
 private:
-	TSharedRef<SWidget> BuildHeader();
-	TSharedRef<SWidget> BuildTabBar();
-	TSharedRef<SWidget> BuildTabButton(const FText& Label, const FName IconName, int32 TabIndex);
 	TSharedRef<SWidget> BuildIconTextButton(const FText& Label, const FName IconName, const FText& ToolTip, FOnClicked OnClicked) const;
 	TSharedRef<SWidget> BuildSetupTab();
 	TSharedRef<SWidget> BuildAgentsTab();
-	TSharedRef<SWidget> BuildTerminalTab();
-	TSharedRef<SWidget> BuildStatusTab();
-	TSharedRef<SWidget> BuildTestsTab();
 	TSharedRef<SWidget> BuildMCPServersTab();
 	TSharedRef<SWidget> BuildNativeToolSettingsBar();
 	TSharedRef<SWidget> BuildHelpTab();
@@ -57,33 +61,11 @@ private:
 	TSharedRef<SWidget> BuildAgentRow(const FString& PrerequisiteId, const FString& AgentName, const FString& ConfigRelativePath);
 	TSharedRef<SWidget> BuildDocsShortcutRow(const FText& Title, const FText& Body, const FText& PrimaryLabel, FOnClicked PrimaryAction, const FText& SecondaryLabel, FOnClicked SecondaryAction) const;
 	TSharedRef<SWidget> BuildMCPStaticRow(const FText& Name, const FText& Type, TFunction<FText()> StatusGetter, TFunction<FSlateColor()> ColorGetter, const FText& Priority, TFunction<FText()> ToolsGetter, const FText& PrimaryLabel, FOnClicked PrimaryAction, const FText& SecondaryLabel, FOnClicked SecondaryAction) const;
-	TSharedRef<SWidget> BuildFirstRunGuidePanel();
-	TSharedRef<SWidget> BuildPrerequisitesPanel();
-	TSharedRef<SWidget> BuildAgentStatusPanel();
-	TSharedRef<SWidget> BuildAgentStatusRow(const FString& PrerequisiteId, const FString& AgentName, const FText& OpenLabel);
-	TSharedRef<SWidget> BuildContextChipsPanel();
-	TSharedRef<SWidget> BuildContextChip(const FText& Label, TFunction<FText()> ValueGetter, TFunction<FSlateColor()> ColorGetter, const FText& ToolTip) const;
-	TSharedRef<SWidget> BuildSessionLogPanel();
-	TSharedRef<SWidget> BuildTerminalPanel();
-	TSharedRef<SWidget> BuildTestCommandsPanel();
-	TSharedRef<SWidget> BuildStatusPanel();
-	TSharedRef<SWidget> BuildAgentConfigPanel();
-	TSharedRef<SWidget> BuildFilesAndPermissionsPanel();
-	TSharedRef<SWidget> BuildMCPRegistryPanel();
-	TSharedRef<SWidget> BuildActionBar();
-	TSharedRef<SWidget> BuildHeaderMetric(const FText& Label, TFunction<FText()> ValueGetter, TFunction<FSlateColor()> ColorGetter) const;
-	TSharedRef<SWidget> BuildStatusRow(const FText& Label, TFunction<FText()> ValueGetter, TFunction<FSlateColor()> ColorGetter) const;
-	TSharedRef<SWidget> BuildPrerequisiteRow(const FHyperAIStudioPrerequisiteStatus& Prerequisite);
-	TSharedRef<SWidget> BuildTestCommandRow(const FHyperAIStudioTestCommand& Command);
-	TSharedRef<SWidget> BuildMCPServerRow(int32 ServerIndex);
 	void ResetContentScroll();
 
 	FReply OnSetupClicked();
 	FReply OnEnablePluginsClicked();
 	FReply OnRefreshClicked();
-	FReply OnStartClicked();
-	FReply OnStopClicked();
-	FReply OnAddServerClicked();
 	FReply OnEditMCPServerClicked(int32 ServerIndex);
 	FReply OnOpenChatClicked();
 	FReply OnConfigureAgentsClicked();
@@ -103,31 +85,16 @@ private:
 	FReply OnInstallPrerequisiteClicked(FString PrerequisiteId, FString DisplayName, FString InstallCommand);
 	FReply OnInstallMissingPrerequisitesClicked();
 	FReply OnCopyExampleMCPProfileClicked();
-	FReply OnImportExampleMCPProfileClicked();
 	FReply OnImportMCPProfileClicked();
-	FReply OnRemoveMCPServerClicked(int32 ServerIndex);
 	FReply OnTestMCPServerClicked(int32 ServerIndex);
-	void OnMCPServerEnabledChanged(ECheckBoxState State, int32 ServerIndex);
-	void OnMCPServerNameCommitted(const FText& Text, ETextCommit::Type CommitType, int32 ServerIndex);
-	void OnMCPServerDescriptionCommitted(const FText& Text, ETextCommit::Type CommitType, int32 ServerIndex);
-	void OnMCPServerEndpointCommitted(const FText& Text, ETextCommit::Type CommitType, int32 ServerIndex);
-	void OnMCPServerPriorityCommitted(const FText& Text, ETextCommit::Type CommitType, int32 ServerIndex);
 	void SaveMCPServerChange(const FString& ChangeSummary);
-	FReply OnOpenAgentTestClicked(const FString AgentName);
-	FReply OnOpenUnrealTerminalClicked();
-	FReply OnCopyTerminalSetupClicked();
 	FReply OnCopyInspectorCommandClicked();
 	FReply OnOpenAgentsClicked();
-	FReply OnOpenClaudeClicked();
 	FReply OnOpenIncludedDocsClicked();
 	FReply OnCopyFirstRunPromptClicked();
-	FReply OnCopyCodexTomlPatchClicked();
 	FReply OnOpenOfficialMCPDocsClicked();
 	FReply OnOpenProjectFolderClicked();
-	FReply OnCopyPrerequisiteCommandClicked(FString DisplayName, FString InstallCommand);
 	FReply OnOpenPrerequisiteDocsClicked(FString DisplayName, FString DocumentationUrl);
-	FReply OnCopyTestPromptClicked(FString TestId);
-	FReply OnOpenTestTerminalClicked(FString TestId);
 	bool OpenChatTerminalInstallCommand(const FString& TerminalCommand, const FString& Label, FText& OutMessage);
 	void RefreshPrerequisitesCache();
 	const FHyperAIStudioPrerequisiteStatus* FindCachedPrerequisite(const FString& PrerequisiteId) const;
@@ -137,11 +104,6 @@ private:
 	EActiveTimerReturnType RunReadinessRetry(double CurrentTime, float DeltaTime);
 	void AddSessionLogEntry(const FString& Entry);
 
-	FText GetHeadlineText() const;
-	FSlateColor GetHeadlineColor() const;
-	FText GetMessageText() const;
-	FText GetSessionLogText() const;
-	FText BoolText(bool bValue, const FString& TrueText, const FString& FalseText) const;
 	FSlateColor BoolColor(bool bValue) const;
 
 	TSharedPtr<FHyperAIStudioService> Service;
@@ -149,7 +111,11 @@ private:
 	FHyperAIStudioPromptPackage LastPromptPackage;
 	TArray<FHyperAIStudioPrerequisiteStatus> CachedPrerequisites;
 	TSharedPtr<class SScrollBox> MainScrollBox;
-	TSharedPtr<class SWidgetSwitcher> MainTabSwitcher;
+	FOnOpenSection OnOpenSection;
+	/** Dialogs this section has open, closed with it. */
+	TArray<TWeakPtr<SWindow>> OpenDialogs;
+	/** Opens Dialog in front of the window this section is in, as its child, so it closes with that window too. */
+	void ShowDialog(const TSharedRef<SWindow>& Dialog);
 	FText LastMessage;
 	TArray<FString> SessionLog;
 	FString ActiveInstallingPrerequisiteId;

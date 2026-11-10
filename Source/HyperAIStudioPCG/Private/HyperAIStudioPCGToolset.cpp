@@ -1,6 +1,9 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioPCGToolset.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioOperationWait.h"
+#include "HyperAIStudioRequestFit.h"
 
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -9,7 +12,10 @@
 #include "Editor/PCGGraphComment.h"
 #include "Engine/Engine.h"
 #include "GameFramework/Actor.h"
+#include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
+#include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "Internationalization/Text.h"
 #include "IO/IoHash.h"
@@ -525,13 +531,9 @@ namespace HyperAIStudio::PCG::Private
 				Context.MarkIncomplete(TEXT("text_source_unavailable_or_unbounded"));
 				return false;
 			}
+			// The source string identifies a localized value too, such as an engine pin tooltip. Namespace and key access
+			// materializes new strings, so this projector never reads them.
 			const bool bInvariant = Value.IsCultureInvariant();
-			if (!bInvariant && !Value.IsEmpty())
-			{
-				// Namespace/key access returns newly materialized strings; do not use it in this projector.
-				Context.MarkIncomplete(TEXT("localized_text_identity_not_projected"));
-				return false;
-			}
 			return AppendBoundedToken(Context, OutCanonical, *Source)
 				&& AppendBoundedToken(Context, OutCanonical, bInvariant ? TEXT("invariant") : TEXT("localized"));
 		}
@@ -686,6 +688,15 @@ namespace HyperAIStudio::PCG::Private
 		return false;
 	}
 
+	/** Persisted configuration only: never transient state, and never Blueprint event bindings, which are wiring. */
+	bool IsProjectedProperty(const FProperty* Property, const TSet<FName>& ExcludedNames)
+	{
+		return !ExcludedNames.Contains(Property->GetFName())
+			&& !Property->HasAnyPropertyFlags(CPF_Transient | CPF_DuplicateTransient
+				| CPF_NonPIEDuplicateTransient | CPF_SkipSerialization)
+			&& !Property->IsA<FDelegateProperty>() && !Property->IsA<FMulticastDelegateProperty>();
+	}
+
 	bool ProjectObjectProperties(
 		const UObject* Object,
 		const TSet<FName>& ExcludedNames,
@@ -716,9 +727,7 @@ namespace HyperAIStudio::PCG::Private
 				Context.MarkIncomplete(TEXT("object_property_inventory_deadline_exceeded"));
 				return false;
 			}
-			if (!ExcludedNames.Contains(It->GetFName())
-				&& !It->HasAnyPropertyFlags(CPF_Transient | CPF_DuplicateTransient
-					| CPF_NonPIEDuplicateTransient | CPF_SkipSerialization))
+			if (IsProjectedProperty(*It, ExcludedNames))
 			{
 				if (It->ArrayDim <= 0
 					|| It->ArrayDim > FHyperAIStudioPCGContracts::MaxContainerElements
@@ -749,9 +758,7 @@ namespace HyperAIStudio::PCG::Private
 		for (TFieldIterator<FProperty> It(Object->GetClass(), SuperFlag); It; ++It)
 		{
 			const FProperty* Property = *It;
-			if (ExcludedNames.Contains(Property->GetFName())
-				|| Property->HasAnyPropertyFlags(CPF_Transient | CPF_DuplicateTransient
-					| CPF_NonPIEDuplicateTransient | CPF_SkipSerialization))
+			if (!IsProjectedProperty(Property, ExcludedNames))
 			{
 				continue;
 			}
@@ -762,6 +769,11 @@ namespace HyperAIStudio::PCG::Private
 				const void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Object, ArrayIndex);
 				if (!ProjectPropertyValue(Property, ValuePtr, 1, Context, PropertyCanonical))
 				{
+					// Name the field, so an engine property the projector cannot read is found at once.
+					if (!Context.FirstFailure.Contains(TEXT("@")))
+					{
+						Context.FirstFailure += TEXT("@") + Property->GetName();
+					}
 					return false;
 				}
 			}
@@ -983,7 +995,7 @@ TArray<FHyperAIPCGCapabilityStatus> FHyperAIStudioPCGContracts::GetCapabilityMat
 	PCG.UniqueCases = {
 		TEXT("bounded_loaded_only_exact_graph_component_snapshot"),
 		TEXT("independent_value_only_structural_and_generation_ready_validation"),
-		TEXT("compound_generate_validate_cleanup_lifecycle_intent")};
+		TEXT("generate_cleanup_or_generate_validate_cleanup_as_a_cancellable_job")};
 	PCG.UnsupportedCases = {
 		TEXT("asset_or_map_load_open_or_broad_asset_registry_materialization"),
 		TEXT("raw_script_json_python_or_reflection_dispatch"),
@@ -994,10 +1006,10 @@ TArray<FHyperAIPCGCapabilityStatus> FHyperAIStudioPCGContracts::GetCapabilityMat
 		TEXT("extra_editor_node_content_revision_in_v1"),
 		TEXT("derived_current_pin_type_materialization"),
 		TEXT("paging_while_component_task_or_refresh_is_volatile"),
-		TEXT("synchronous_generation_cleanup_compile_or_poll"),
-		TEXT("non_dry_execution_without_pack_specific_pinned_continuation_and_fresh_validator")};
-	PCG.State = TEXT("source_candidate_async_continuation_host_required");
-	PCG.Remediation = TEXT("Use Epic PCGToolset/PCGSpatialToolset for all 31 authoring and execution primitives. HyperAI non-dry lifecycle execution remains zero-effect until one generic pinned begin/poll/cancel continuation host has exact pack-specific PCG semantics and a separately owned fresh value validator.");
+		TEXT("synchronous_generation_cleanup_compile_or_poll")};
+	PCG.bMutationExecutionImplemented = true;
+	PCG.State = TEXT("loaded_exact_lifecycle_jobs");
+	PCG.Remediation = TEXT("Author graphs with Epic's PCGToolset and PCGSpatialToolset. hyper_pcg_apply_plan runs generate, cleanup, or generate_validate_cleanup on one loaded component as a job: hyper_operation_wait waits for it, and it is cancelled at its deadline or from the Activity panel.");
 	return {PCG};
 }
 
@@ -1011,7 +1023,8 @@ bool FHyperAIStudioPCGContracts::IsCanonicalGraphPath(const FString& Path)
 		return false;
 	}
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason)) return false;
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason)) return false;
 	const FString PackageName = FPackageName::ObjectPathToPackageName(Path);
 	const FString ObjectName = FPackageName::ObjectPathToObjectName(Path);
 	return !PackageName.IsEmpty() && !ObjectName.IsEmpty()
@@ -1219,7 +1232,7 @@ FString FHyperAIStudioPCGContracts::InspectPayloadSchemaFingerprint()
 FString FHyperAIStudioPCGContracts::LifecyclePayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("pcg.lifecycle.v1|graph_path:string|component_path:string|base_graph_revision:sha256|base_component_fingerprint:sha256|base_volatile_observation_fingerprint:sha256|lifecycle:generate_validate_cleanup|validation:generation_ready|terminal:clean|async_deadline_ms:int32|force_generate:bool|remove_generated_components:bool"));
+		TEXT("pcg.lifecycle.v2|graph_path:string|component_path:string|base_graph_revision:sha256|base_component_fingerprint:sha256|base_volatile_observation_fingerprint:sha256|lifecycle:generate,cleanup,generate_validate_cleanup|validation:generation_ready|terminal:generated,clean|async_deadline_ms:int32|force_generate:bool|remove_generated_components:bool"));
 	return Value;
 }
 
@@ -1240,7 +1253,7 @@ FString FHyperAIStudioPCGContracts::InspectResultSchemaFingerprint()
 FString FHyperAIStudioPCGContracts::LifecycleResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("pcg.lifecycle.result.v1|terminal_phase|fresh_graph_revision|fresh_component_fingerprint|validation_fingerprint|clean_terminal"));
+		TEXT("pcg.lifecycle.result.v2|phase|content_key"));
 	return Value;
 }
 
@@ -1911,7 +1924,7 @@ const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioPCGContracts::GetAdap
 			InspectResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
 		Value.Variants.Add({TEXT("hyper_pcg_apply_plan"), MutationVariantId,
 			LifecyclePayloadTypeId, LifecyclePayloadSchemaFingerprint(), LifecycleResultTypeId,
-			LifecycleResultSchemaFingerprint(), EHyperAIStudioDomainSafety::ExternalEffect});
+			LifecycleResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Edit});
 		Value.Variants.Add({TEXT("hyper_pcg_validate"), ValidateVariantId,
 			ValidatePayloadTypeId, ValidatePayloadSchemaFingerprint(), ValidateResultTypeId,
 			ValidateResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
@@ -2366,12 +2379,13 @@ FHyperAIPCGApplyPlanReport FHyperAIStudioPCGContracts::BuildPlan(
 		return Reject(TEXT("invalid_exact_cas"),
 			TEXT("Lifecycle planning requires exact loaded graph/component paths and complete graph/component CAS."));
 	}
-	if (Request.Intent.Lifecycle != TEXT("generate_validate_cleanup")
+	const FString TerminalState = TerminalStateFor(Request.Intent.Lifecycle);
+	if (TerminalState.IsEmpty()
 		|| Request.Intent.ValidationPolicy != TEXT("generation_ready")
-		|| Request.Intent.ExpectedTerminalState != TEXT("clean"))
+		|| Request.Intent.ExpectedTerminalState != TerminalState)
 	{
 		return Reject(TEXT("unsupported_lifecycle_intent"),
-			TEXT("v1 accepts only the compound generate_validate_cleanup / generation_ready / clean intent."));
+			TEXT("Lifecycle is generate (terminal generated), cleanup (terminal clean) or generate_validate_cleanup (terminal clean), with validation generation_ready."));
 	}
 	if (Request.DeadlineMs < MinAsyncDeadlineMs || Request.DeadlineMs > MaxAsyncDeadlineMs
 		|| Request.MaxGameThreadMs < 50 || Request.MaxGameThreadMs > MaxMutationGameThreadMs
@@ -2388,7 +2402,7 @@ FHyperAIPCGApplyPlanReport FHyperAIStudioPCGContracts::BuildPlan(
 	if (!Request.bDryRun && !IsSafeOperationId(Request.OperationId))
 	{
 		return Reject(TEXT("invalid_operation_id"),
-			TEXT("Non-dry intent requires one journal-safe operation_id even though v1 never stages it."));
+			TEXT("Running the plan requires one journal-safe operation_id."));
 	}
 	FHyperAIStudioPCGValueSnapshot Snapshot;
 	FString CaptureStatus;
@@ -2465,7 +2479,8 @@ FHyperAIPCGApplyPlanReport FHyperAIStudioPCGContracts::BuildPlan(
 		EstimatedOutput += Bytes;
 		Report.Issues.Add(Issue);
 	}
-	if (bValidationErrors)
+	// Cleaning up never needs a graph that generates.
+	if (bValidationErrors && Request.Intent.Lifecycle != TEXT("cleanup"))
 	{
 		return Reject(TEXT("generation_ready_validation_failed"),
 			TEXT("The detached fresh snapshot is not generation-ready."));
@@ -2504,87 +2519,442 @@ FHyperAIPCGApplyPlanReport FHyperAIStudioPCGContracts::BuildPlan(
 		return Reject(TEXT("immutable_payload_clone_failed"),
 			TEXT("The typed lifecycle payload did not produce an independent exact immutable clone."));
 	}
-	const FString ProjectId = FHyperAIStudioExtensionRuntime::GetCanonicalProjectId();
-	if (ProjectId.IsEmpty())
-	{
-		return Reject(TEXT("canonical_project_identity_unavailable"),
-			TEXT("Typed lifecycle preparation requires the canonical project identity."));
-	}
-	const FHyperAIStudioDomainAdapterDescriptor& Adapter = GetAdapterDescriptor();
-	FHyperAIStudioDomainBinding Binding;
-	Binding.PackId = PackId;
-	Binding.ToolName = TEXT("hyper_pcg_apply_plan");
-	Binding.VariantId = MutationVariantId;
-	Binding.ExpectedSafety = EHyperAIStudioDomainSafety::ExternalEffect;
-	Binding.CanonicalProjectId = ProjectId;
-	Binding.ExpectedAdapterFingerprint = Adapter.AdapterFingerprint;
-	Binding.ExpectedAdapterGeneration = 1;
-	Binding.ExpectedRegistryEpoch = 1;
-	Binding.Prerequisites.PackId = PackId;
-	Binding.Prerequisites.bPackEnabled = true;
-	Binding.Prerequisites.Revision = 1;
-	Binding.Prerequisites.Observations = {
-		{TEXT("module.PCG"), EHyperAIStudioDomainPrerequisiteState::Available},
-		{TEXT("module.PCGEditor"), EHyperAIStudioDomainPrerequisiteState::Available}};
-	Binding.Prerequisites.Fingerprint =
-		FHyperAIStudioDomainAdapterRegistry::ComputePrerequisiteFingerprint(Binding.Prerequisites);
-	Binding.Admission.PackId = PackId;
-	Binding.Admission.bPackAdmitted = false;
-	Binding.Admission.bExternalEffectAdmitted = false;
-	Binding.Admission.Revision = 1;
-	Binding.Admission.Fingerprint =
-		FHyperAIStudioDomainAdapterRegistry::ComputeAdmissionFingerprint(Binding.Admission);
-
-	FHyperAIStudioTypedArtifactContract Contract;
-	Contract.Binding = Binding;
-	Contract.ArtifactTypeId = LifecyclePayloadTypeId;
-	Contract.ArtifactSchemaFingerprint = LifecyclePayloadSchemaFingerprint();
-	Contract.ArtifactSemanticFingerprint = Payload->SemanticFingerprint;
-	Contract.EffectTarget = TEXT("pcg:") + Snapshot.Component.PersistedFingerprint;
-	Contract.DeadlineMs = FMath::Min(Request.DeadlineMs,
-		FHyperAIStudioTypedArtifactLimits::MaxSynchronousDeadlineMs);
-	Contract.MaxNativeOperations = 8;
-	Contract.MaxGameThreadMs = Request.MaxGameThreadMs;
-	Contract.MaxOutputBytes = Request.MaxOutputBytes;
-	Contract.MaxResultBytes = 256;
-	Contract.StageLifetimeMs = StageLifetimeMs;
-	Contract.bCompileOnce = false;
-	Contract.bSaveOnce = false;
-	Contract.bValidateOnce = true;
-	Contract.bVerifyFreshOnce = true;
-	FHyperAIStudioPreparedTypedArtifact Prepared;
+	const bool bGenerates = Request.Intent.Lifecycle != TEXT("cleanup");
+	const bool bCleansUp = Request.Intent.Lifecycle != TEXT("generate");
+	FHyperAIStudioTrustedArtifactRequest Trusted;
+	Trusted.PackId = PackId;
+	Trusted.ToolName = TEXT("hyper_pcg_apply_plan");
+	Trusted.VariantId = MutationVariantId;
+	Trusted.Safety = EHyperAIStudioDomainSafety::Edit;
+	Trusted.ArtifactSemanticFingerprint = Payload->SemanticFingerprint;
+	Trusted.EffectTarget = Request.ComponentPath;
+	Trusted.DeadlineMs = FHyperAIStudioTypedArtifactLimits::MaxArtifactDeadlineMs;
+	Trusted.MaxNativeOperations = 8;
+	Trusted.MaxGameThreadMs = FHyperAIStudioTypedArtifactLimits::MaxArtifactGameThreadMs;
+	Trusted.MaxOutputBytes = Request.MaxOutputBytes;
+	Trusted.MaxResultBytes = 256;
+	Trusted.StageLifetimeMs = StageLifetimeMs;
+	// Generation changes the level in memory; saving the map stays the user's call.
+	Trusted.bCompileOnce = false;
+	Trusted.bSaveOnce = false;
+	Trusted.bValidateOnce = true;
+	Trusted.bVerifyFreshOnce = true;
+	FHyperAIStudioTrustedPreparedArtifact Prepared;
+	FHyperAIStudioTrustedPrepareReport Prepare;
 	FString PrepareError;
-	if (!FHyperAIStudioTypedArtifactExecutor::Prepare(Contract, Prepared, PrepareError))
+	const TSharedRef<FHyperAIStudioPCGFreshVerifier, ESPMode::ThreadSafe> Verifier =
+		MakeShared<FHyperAIStudioPCGFreshVerifier, ESPMode::ThreadSafe>();
+	if (!FHyperAIStudioTrustedExecutionFacade::PrepareDryRun(Trusted, Payload, Verifier, Prepared, Prepare, PrepareError)
+		|| !Prepare.bPrepared)
 	{
-		return Reject(TEXT("typed_artifact_prepare_failed"), PrepareError);
+		FString Diagnostic = PrepareError.IsEmpty() ? Prepare.Status.Diagnostic : PrepareError;
+		if (!Prepare.Status.BlockingPrerequisiteIds.IsEmpty())
+		{
+			Diagnostic += TEXT(" Blocking: ") + FString::Join(Prepare.Status.BlockingPrerequisiteIds, TEXT(", "));
+		}
+		return Reject(Prepare.Status.StatusCode.IsEmpty() ? TEXT("prepare_failed") : *Prepare.Status.StatusCode, Diagnostic);
 	}
 	Report.bTypedPrepared = true;
-	Report.PlanHash = Prepared.PlanHash;
-	Report.AuthorizationPlanHash = Prepared.AuthorizationPlanHash;
-	Report.CapabilityHash = Prepared.CapabilityHash;
-	Report.EffectFingerprint = Prepared.EffectFingerprint;
+	// Bound to the semantic intent, not the host plan hash, which differs between preparations of the same plan.
+	Report.PlanHash = Payload->SemanticFingerprint;
+	Report.AuthorizationPlanHash = Prepare.PlanHash;
+	Report.CapabilityHash = Prepare.ContractFingerprint;
 	Report.Effects.TargetCount = 1;
 	Report.Effects.BeginCallCount = 1;
 	Report.Effects.bTypedPayloadSealed = true;
-	Report.Effects.bWouldGenerateOnce = true;
+	Report.Effects.bWouldGenerateOnce = bGenerates;
 	Report.Effects.bWouldPollWithoutBlocking = true;
 	Report.Effects.bWouldValidateFreshOnce = true;
-	Report.Effects.bWouldCleanupOnce = true;
+	Report.Effects.bWouldCleanupOnce = bCleansUp;
 	Report.Effects.bWouldObserveTerminalState = true;
 	if (Request.bDryRun)
 	{
 		Report.bOk = true;
-		Report.Status = TEXT("dry_run_valid_execution_blocked");
-		Report.Diagnostic = TEXT("Closed persisted CAS, detached generation-ready validation, immutable lifecycle DTO, and public pure typed-artifact hashes are valid. No generation, polling, cleanup, compilation, staging, or execution occurred.");
+		Report.Status = TEXT("planned");
+		Report.Diagnostic = TEXT("Nothing changed. To run it, resubmit the same request with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash; hyper_operation_wait then waits for the generation or cleanup to finish.");
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Prepared.PlanHash)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("expected_plan_hash_mismatch"),
-			TEXT("Non-dry intent must echo the exact current dry-run plan hash."));
+			TEXT("The plan changed since its dry run (graph, component, or its generation state). Dry-run again."));
 	}
-	return Reject(NonDryCallableState,
-		TEXT("Zero effects: no artifact was staged or submitted and no PCG call ran. The shared host still lacks exact pack-specific pinned begin/poll/cancel generation-cleanup semantics plus an independently owned fresh terminal validator."));
+	if (FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::Edit))
+	{
+		FHyperAIStudioApprovalSummary Summary;
+		Summary.PackId = PackId;
+		Summary.ToolName = TEXT("hyper_pcg_apply_plan");
+		Summary.VariantId = MutationVariantId;
+		Summary.Safety = EHyperAIStudioDomainSafety::Edit;
+		Summary.EffectTarget = Request.ComponentPath;
+		Summary.PlanHash = Payload->SemanticFingerprint;
+		Summary.Effects.Add(Request.Intent.Lifecycle == TEXT("generate") ? TEXT("generate the PCG graph on the component and keep the output")
+			: Request.Intent.Lifecycle == TEXT("cleanup") ? TEXT("clean up the component's generated output")
+			: TEXT("generate the PCG graph to check it, then clean the output up again"));
+		Summary.Touches.Add(Request.ComponentPath);
+		Summary.Touches.Add(Request.GraphPath);
+		FString ApprovalError;
+		if (!FHyperAIStudioApprovalGate::Request(Prepared, Request.OperationId, Summary, ApprovalError))
+		{
+			return Reject(TEXT("approval_not_queued"), ApprovalError);
+		}
+		Report.bOk = true;
+		Report.Status = TEXT("awaiting_user_approval");
+		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
+		return Report;
+	}
+	// Another agent's edit may own the project lane; then this one waits its turn.
+	FString QueueStatus;
+	FString QueueError;
+	if (!FHyperAIStudioExecutionQueue::Submit(Prepared, Request.OperationId, QueueStatus, QueueError))
+	{
+		return Reject(*QueueStatus, QueueError);
+	}
+	Report.bStaged = QueueStatus == TEXT("submitted");
+	Report.bExecutionSubmitted = Report.bStaged;
+	Report.bOk = true;
+	Report.Status = QueueStatus;
+	Report.Diagnostic = TEXT("It starts over the next editor ticks and a job watches it. Call hyper_operation_wait with operation_id: it returns when the generation or cleanup has finished.");
+	return Report;
+}
+
+FString FHyperAIStudioPCGContracts::TerminalStateFor(const FString& Lifecycle)
+{
+	return Lifecycle == TEXT("generate") ? FString(TEXT("generated"))
+		: Lifecycle == TEXT("cleanup") || Lifecycle == TEXT("generate_validate_cleanup") ? FString(TEXT("clean"))
+		: FString();
+}
+
+bool FHyperAIStudioPCGContracts::ComputeLifecycleContentKey(
+	const FHyperAIStudioPCGLifecyclePayload& Payload, FString& OutKey, FString& OutError)
+{
+	using namespace HyperAIStudio::PCG::Private;
+	OutKey.Reset();
+	OutError.Reset();
+	FHyperAIStudioPCGValueSnapshot Snapshot;
+	FString Status;
+	if (!CaptureExact(Payload.GraphPath, Payload.ComponentPath, MaxReadGameThreadMs, Snapshot, Status, OutError)
+		|| !Snapshot.Graph.bRevisionComplete || !Snapshot.Component.bPersistedProjectionComplete)
+	{
+		if (OutError.IsEmpty()) OutError = TEXT("The graph or component no longer captures completely.");
+		return false;
+	}
+	// Configuration only: generation dirties the actor's package, which the full component fingerprint includes.
+	FString Canonical;
+	AppendTokenUnchecked(Canonical, TEXT("hyperai.pcg.lifecycle-content-key.v1"));
+	AppendTokenUnchecked(Canonical, Payload.SemanticFingerprint);
+	AppendTokenUnchecked(Canonical, Snapshot.Graph.PersistedRevision);
+	AppendTokenUnchecked(Canonical, Snapshot.Component.ComponentPropertiesFingerprint);
+	AppendTokenUnchecked(Canonical, Snapshot.Component.GraphInstancePropertiesFingerprint);
+	AppendTokenUnchecked(Canonical, Snapshot.Component.InstanceParametersFingerprint);
+	AppendTokenUnchecked(Canonical, Snapshot.Component.OwnerTransformFingerprint);
+	OutKey = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(Canonical);
+	if (!IsCanonicalSha256(OutKey))
+	{
+		OutKey.Reset();
+		OutError = TEXT("Bounded content-key hashing failed.");
+		return false;
+	}
+	return true;
+}
+
+bool FHyperAIStudioPCGContracts::StartLifecycleJob(UPCGComponent& Component, const FString& ComponentPath,
+	const FString& Lifecycle, const bool bForceGenerate, const bool bRemoveGeneratedComponents, const int32 DeadlineMs,
+	const FString& OperationId, FString& OutJobId, FString& OutError)
+{
+	OutJobId.Reset();
+	OutError.Reset();
+	if (TerminalStateFor(Lifecycle).IsEmpty())
+	{
+		OutError = TEXT("Unknown lifecycle.");
+		return false;
+	}
+	if (Component.IsGenerating() || Component.IsCleaningUp())
+	{
+		OutError = TEXT("The component is already generating or cleaning up.");
+		return false;
+	}
+	const bool bGenerate = Lifecycle != TEXT("cleanup");
+	const bool bThenCleanUp = Lifecycle == TEXT("generate_validate_cleanup");
+	bool bUpToDate = false;
+	if (bGenerate)
+	{
+		if (Component.GenerateLocalGetTaskId(bForceGenerate) == InvalidPCGTaskId)
+		{
+			// Nothing was scheduled: either the output is already current, or PCG refused to generate here.
+			if (!Component.bGenerated)
+			{
+				OutError = TEXT("PCG did not start generating. Check that the component is active, has a graph, and is in an editor level.");
+				return false;
+			}
+			bUpToDate = true;
+		}
+	}
+	else
+	{
+		Component.CleanupLocal(bRemoveGeneratedComponents);
+	}
+
+	struct FState
+	{
+		bool bCleaningUp = false;
+	};
+	const TSharedRef<FState> State = MakeShared<FState>();
+	State->bCleaningUp = !bGenerate;
+	const TWeakObjectPtr<UPCGComponent> Weak(&Component);
+	FHyperAIStudioAsyncJobRequest Job;
+	Job.PackId = PackId;
+	Job.ToolName = TEXT("hyper_pcg_apply_plan");
+	Job.Target = ComponentPath;
+	Job.OperationId = OperationId;
+	Job.DeadlineMs = DeadlineMs;
+	Job.PollIntervalMs = 100;
+	Job.OnCancel = [Weak]()
+	{
+		if (UPCGComponent* Live = Weak.Get(); Live && Live->IsGenerating())
+		{
+			Live->CancelGeneration();
+		}
+	};
+	return FHyperAIStudioAsyncJobHost::Start(Job,
+		[Weak, State, bThenCleanUp, bRemoveGeneratedComponents, bUpToDate](FString& OutProgress, FString& OutDiagnostic)
+	{
+		UPCGComponent* Live = Weak.Get();
+		if (!Live)
+		{
+			OutDiagnostic = TEXT("The PCG component was unloaded or destroyed.");
+			return EHyperAIStudioAsyncJobPoll::Failed;
+		}
+		if (State->bCleaningUp)
+		{
+			if (Live->IsCleaningUp())
+			{
+				OutProgress = TEXT("cleaning up");
+				return EHyperAIStudioAsyncJobPoll::Running;
+			}
+			OutDiagnostic = bThenCleanUp ? TEXT("The graph generated, and its output was cleaned up again.")
+				: TEXT("The generated output was cleaned up.");
+			return EHyperAIStudioAsyncJobPoll::Completed;
+		}
+		if (Live->IsGenerating())
+		{
+			OutProgress = TEXT("generating");
+			return EHyperAIStudioAsyncJobPoll::Running;
+		}
+		if (!Live->bGenerated)
+		{
+			OutDiagnostic = TEXT("Generation ended without output: it was cancelled or failed. LogPCG in the Output Log says why.");
+			return EHyperAIStudioAsyncJobPoll::Failed;
+		}
+		if (bThenCleanUp)
+		{
+			Live->CleanupLocal(bRemoveGeneratedComponents);
+			State->bCleaningUp = true;
+			OutProgress = TEXT("cleaning up");
+			return EHyperAIStudioAsyncJobPoll::Running;
+		}
+		OutDiagnostic = bUpToDate ? TEXT("The output was already generated and up to date; set bForceGenerate to regenerate it.")
+			: TEXT("Generated.");
+		return EHyperAIStudioAsyncJobPoll::Completed;
+	}, OutJobId, OutError);
+}
+
+FString FHyperAIStudioPCGLifecycleResultPayload::GetTypeId() const
+{
+	return FHyperAIStudioPCGContracts::LifecycleResultTypeId;
+}
+
+FString FHyperAIStudioPCGLifecycleResultPayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioPCGContracts::LifecycleResultSchemaFingerprint();
+}
+
+int32 FHyperAIStudioPCGLifecycleResultPayload::GetBoundedByteSize() const
+{
+	return 64 + 2 * (Phase.Len() + ContentKey.Len());
+}
+
+FString FHyperAIStudioPCGFreshVerifier::GetOwnerAdapterFingerprint() const
+{
+	return FHyperAIStudioPCGContracts::GetAdapterDescriptor().AdapterFingerprint;
+}
+
+bool FHyperAIStudioPCGFreshVerifier::ResolveCanonicalEffectTarget(
+	const IHyperAIStudioTypedArtifactPayload& Request,
+	FString& OutCanonicalEffectTarget,
+	FString& OutError)
+{
+	using Contracts = FHyperAIStudioPCGContracts;
+	OutCanonicalEffectTarget.Reset();
+	OutError.Reset();
+	if (Request.GetTypeId() != Contracts::LifecyclePayloadTypeId
+		|| Request.GetSchemaFingerprint() != Contracts::LifecyclePayloadSchemaFingerprint())
+	{
+		OutError = TEXT("Fresh verifier received the wrong typed PCG request schema.");
+		return false;
+	}
+	const FHyperAIStudioPCGLifecyclePayload& Typed = static_cast<const FHyperAIStudioPCGLifecyclePayload&>(Request);
+	if (!Contracts::IsCanonicalComponentPath(Typed.ComponentPath)
+		|| Contracts::ComputeLifecycleSemanticFingerprint(Typed) != Typed.SemanticFingerprint)
+	{
+		OutError = TEXT("Fresh verifier rejected the canonical component or the semantic seal.");
+		return false;
+	}
+	OutCanonicalEffectTarget = Typed.ComponentPath;
+	return true;
+}
+
+bool FHyperAIStudioPCGFreshVerifier::VerifyFreshExact(
+	const IHyperAIStudioTypedArtifactPayload& Request,
+	const IHyperAIStudioDomainResultPayload& Result,
+	FString& OutPostconditionHash,
+	FString& OutError)
+{
+	using namespace HyperAIStudio::PCG::Private;
+	using Contracts = FHyperAIStudioPCGContracts;
+	OutPostconditionHash.Reset();
+	OutError.Reset();
+	if (!IsInGameThread())
+	{
+		OutError = TEXT("Fresh PCG verification requires the game thread.");
+		return false;
+	}
+	FString CanonicalTarget;
+	if (!ResolveCanonicalEffectTarget(Request, CanonicalTarget, OutError)
+		|| Result.GetTypeId() != Contracts::LifecycleResultTypeId
+		|| Result.GetSchemaFingerprint() != Contracts::LifecycleResultSchemaFingerprint())
+	{
+		if (OutError.IsEmpty()) OutError = TEXT("Fresh verifier received the wrong result schema.");
+		return false;
+	}
+	const FHyperAIStudioPCGLifecyclePayload& Typed = static_cast<const FHyperAIStudioPCGLifecyclePayload&>(Request);
+	const FHyperAIStudioPCGLifecycleResultPayload& TypedResult = static_cast<const FHyperAIStudioPCGLifecycleResultPayload&>(Result);
+	if (TypedResult.Phase != TEXT("completed") || !Contracts::IsCanonicalSha256(TypedResult.ContentKey))
+	{
+		OutError = TEXT("Only a completed fresh-capture result may be verified.");
+		return false;
+	}
+	FString ContentKey;
+	if (!Contracts::ComputeLifecycleContentKey(Typed, ContentKey, OutError))
+	{
+		return false;
+	}
+	if (ContentKey != TypedResult.ContentKey)
+	{
+		OutError = TEXT("The graph or component changed between fresh capture and verification.");
+		return false;
+	}
+	FString Canonical;
+	AppendTokenUnchecked(Canonical, TEXT("hyperai.pcg.lifecycle-postcondition.v1"));
+	AppendTokenUnchecked(Canonical, Typed.SemanticFingerprint);
+	AppendTokenUnchecked(Canonical, ContentKey);
+	OutPostconditionHash = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(Canonical);
+	if (!Contracts::IsCanonicalSha256(OutPostconditionHash))
+	{
+		OutPostconditionHash.Reset();
+		OutError = TEXT("Bounded postcondition hashing failed.");
+		return false;
+	}
+	return true;
+}
+
+namespace HyperAIStudio::PCG::Private
+{
+	/**
+	 * One typed-executor phase. Apply begins the lifecycle and hands it to a job, since generation runs over many
+	 * ticks; Validate and VerifyFresh prove the graph and component the plan was sealed against are still the ones
+	 * in place. The job's outcome is the operation's outcome in hyper_operation_status.
+	 */
+	FHyperAIStudioDomainAdapterResult ExecuteLifecyclePhase(
+		const FHyperAIStudioDomainDispatchContext& Context,
+		const FHyperAIStudioPCGLifecyclePayload& Payload)
+	{
+		using Contracts = FHyperAIStudioPCGContracts;
+		FHyperAIStudioDomainAdapterResult Result;
+		auto Finish = [&](const EHyperAIStudioDomainDispatchOutcome Outcome, const FString& Status,
+			const FString& Diagnostic, const TCHAR* ResultPhase = nullptr, const FString& ContentKey = FString())
+		{
+			Result.Outcome = Outcome;
+			Result.StatusCode = Status.Left(FHyperAIStudioDomainLimits::MaxStatusCodeChars);
+			Result.Diagnostic = Diagnostic.Left(FHyperAIStudioDomainLimits::MaxDiagnosticChars);
+			if (Outcome == EHyperAIStudioDomainDispatchOutcome::Succeeded)
+			{
+				const TSharedRef<FHyperAIStudioPCGLifecycleResultPayload, ESPMode::ThreadSafe> Output =
+					MakeShared<FHyperAIStudioPCGLifecycleResultPayload, ESPMode::ThreadSafe>();
+				Output->Phase = ResultPhase;
+				Output->ContentKey = ContentKey;
+				Result.Payload = Output;
+			}
+			return Result;
+		};
+		const bool bApply = Context.ActionKind == EHyperAIStudioDomainExecutionActionKind::Apply;
+		const EHyperAIStudioDomainDispatchOutcome FailedOutcome = bApply
+			? EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect
+			: EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect;
+		if (!IsInGameThread())
+		{
+			return Finish(FailedOutcome, TEXT("game_thread_required"), TEXT("PCG lifecycles run on the game thread."));
+		}
+		UPCGComponent* Component = Cast<UPCGComponent>(FSoftObjectPath(Payload.ComponentPath).ResolveObject());
+		if (!Component)
+		{
+			return Finish(FailedOutcome, TEXT("target_not_loaded"), TEXT("The PCG component is no longer loaded."));
+		}
+		switch (Context.ActionKind)
+		{
+		case EHyperAIStudioDomainExecutionActionKind::Apply:
+		{
+			FHyperAIStudioPCGValueSnapshot Snapshot;
+			FString Status;
+			FString Diagnostic;
+			if (!Contracts::CaptureExact(Payload.GraphPath, Payload.ComponentPath, Contracts::MaxReadGameThreadMs, Snapshot, Status, Diagnostic)
+				|| Snapshot.Graph.PersistedRevision != Payload.BasePersistedRevision
+				|| Snapshot.Component.PersistedFingerprint != Payload.BaseComponentFingerprint)
+			{
+				return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("stale_revision"),
+					TEXT("The graph or component changed after planning; nothing ran."));
+			}
+			if (!Contracts::IsPagingStable(Snapshot.Component))
+			{
+				return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("component_not_terminal"),
+					TEXT("The component started generating or cleaning up after planning; nothing ran."));
+			}
+			FString JobId;
+			FString Error;
+			if (!Contracts::StartLifecycleJob(*Component, Payload.ComponentPath, Payload.Lifecycle, Payload.bForceGenerate,
+				Payload.bRemoveGeneratedComponentsOnCleanup, Payload.AsyncDeadlineMs, Context.OperationId, JobId, Error))
+			{
+				return Finish(EHyperAIStudioDomainDispatchOutcome::FailedBeforeEffect, TEXT("lifecycle_not_started"), Error);
+			}
+			return Finish(EHyperAIStudioDomainDispatchOutcome::Succeeded, TEXT("started"),
+				FString::Printf(TEXT("%s started; job %s watches it to the end."), *Payload.Lifecycle, *JobId), TEXT("started"));
+		}
+		case EHyperAIStudioDomainExecutionActionKind::Validate:
+		{
+			FString Key;
+			FString Error;
+			if (!Contracts::ComputeLifecycleContentKey(Payload, Key, Error))
+			{
+				return Finish(EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect, TEXT("capture_failed"), Error);
+			}
+			return Finish(EHyperAIStudioDomainDispatchOutcome::Succeeded, TEXT("validated"),
+				TEXT("The graph and component still capture; the job reports how the lifecycle ends."), TEXT("validated"));
+		}
+		case EHyperAIStudioDomainExecutionActionKind::VerifyFresh:
+		{
+			FString Key;
+			FString Error;
+			if (!Contracts::ComputeLifecycleContentKey(Payload, Key, Error))
+			{
+				return Finish(EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect, TEXT("fresh_capture_failed"), Error);
+			}
+			return Finish(EHyperAIStudioDomainDispatchOutcome::Succeeded, TEXT("fresh_captured"),
+				TEXT("Fresh graph and component captured for verification."), TEXT("completed"), Key);
+		}
+		default:
+			return Finish(FailedOutcome, TEXT("unsupported_phase"), TEXT("PCG lifecycles neither compile nor save."));
+		}
+	}
 }
 
 FHyperAIPCGInspectReport UHyperAIStudioPCGToolset::hyper_pcg_inspect(
@@ -2593,10 +2963,20 @@ FHyperAIPCGInspectReport UHyperAIStudioPCGToolset::hyper_pcg_inspect(
 	return FHyperAIStudioPCGContracts::Inspect(Request);
 }
 
-FHyperAIPCGApplyPlanReport UHyperAIStudioPCGToolset::hyper_pcg_apply_plan(
-	const FHyperAIPCGApplyPlanRequest& Request)
+UHyperAIPCGApplyPlanResult* UHyperAIStudioPCGToolset::hyper_pcg_apply_plan(const FHyperAIPCGApplyPlanRequest& Request)
 {
-	return FHyperAIStudioPCGContracts::BuildPlan(Request);
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIPCGApplyPlanResult>(FHyperAIStudioPCGContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIPCGApplyPlanReport FHyperAIStudioPCGContracts::BuildFittedPlan(
+	const FHyperAIPCGApplyPlanRequest& InRequest)
+{
+	FHyperAIPCGApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAIPCGApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return FHyperAIStudioPCGContracts::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAIPCGValidateReport UHyperAIStudioPCGToolset::hyper_pcg_validate(
@@ -2675,7 +3055,7 @@ FHyperAIStudioDomainAdapterResult FHyperAIStudioPCGDomainAdapter::Execute(
 	}
 	if (Context.Binding.ToolName == TEXT("hyper_pcg_apply_plan")
 		&& Context.Binding.VariantId == FHyperAIStudioPCGContracts::MutationVariantId
-		&& Context.Safety == EHyperAIStudioDomainSafety::ExternalEffect
+		&& Context.Safety == EHyperAIStudioDomainSafety::Edit
 		&& Payload.GetTypeId() == FHyperAIStudioPCGContracts::LifecyclePayloadTypeId
 		&& Payload.GetSchemaFingerprint()
 			== FHyperAIStudioPCGContracts::LifecyclePayloadSchemaFingerprint())
@@ -2688,8 +3068,7 @@ FHyperAIStudioDomainAdapterResult FHyperAIStudioPCGDomainAdapter::Execute(
 			return Reject(TEXT("typed_payload_drift"),
 				TEXT("The exact typed PCG lifecycle semantic fingerprint drifted."));
 		}
-		return Reject(FHyperAIStudioPCGContracts::NonDryCallableState,
-			TEXT("Zero effects: the synchronous PCG adapter cannot begin, poll, cancel, validate, cleanup, compile, or reconcile a lifecycle."));
+		return HyperAIStudio::PCG::Private::ExecuteLifecyclePhase(Context, Typed);
 	}
 	return Reject(TEXT("typed_binding_mismatch"),
 		TEXT("PCG adapter rejected a non-exact tool, variant, safety, schema, or DTO binding."));
@@ -2768,20 +3147,23 @@ void FHyperAIStudioPCGRegistration::RegisterAfterEngineInit()
 		RollBackRegistration();
 		return;
 	}
-	FHyperAIStudioTrustedProbeResult Observation;
-	Observation.bReady = FModuleManager::Get().IsModuleLoaded(TEXT("PCG"))
-		&& FModuleManager::Get().IsModuleLoaded(TEXT("PCGEditor"))
-		&& UPCGGraph::StaticClass() != nullptr && UPCGComponent::StaticClass() != nullptr;
-	Observation.StatusCode = Observation.bReady
-		? TEXT("ready_loaded_only") : TEXT("required_module_not_loaded");
-	Observation.Diagnostic = Observation.bReady
-		? TEXT("PCG and PCGEditor are already loaded; no asset, map, module, or editor was loaded by the probe.")
-		: TEXT("PCG source cohort remains unavailable without already-loaded required modules.");
-	if (!Observation.bReady
-		|| !FHyperAIStudioTrustedExecutionFacade::PublishLiveProbeExact(
-			ProbeHandle, Observation, Error))
+	const auto Observe = []()
 	{
-		if (Error.IsEmpty()) Error = Observation.Diagnostic;
+		FHyperAIStudioTrustedProbeResult Observation;
+		Observation.bReady = FModuleManager::Get().IsModuleLoaded(TEXT("PCG"))
+			&& FModuleManager::Get().IsModuleLoaded(TEXT("PCGEditor"))
+			&& UPCGGraph::StaticClass() != nullptr && UPCGComponent::StaticClass() != nullptr;
+		Observation.StatusCode = Observation.bReady
+			? TEXT("ready_loaded_only") : TEXT("required_module_not_loaded");
+		Observation.Diagnostic = Observation.bReady
+			? TEXT("PCG and PCGEditor are already loaded; no asset, map, module, or editor was loaded by the probe.")
+			: TEXT("PCG source cohort remains unavailable without already-loaded required modules.");
+		return Observation;
+	};
+	const FHyperAIStudioTrustedProbeResult First = Observe();
+	if (!First.bReady || !ProbePublisher.Start(ProbeHandle, Observe, Error))
+	{
+		if (Error.IsEmpty()) Error = First.Diagnostic;
 		UE_LOG(LogHyperAIStudioPCG, Error,
 			TEXT("PCG live-probe publication failed closed: %s"), *Error);
 		RollBackRegistration();
@@ -2815,6 +3197,7 @@ void FHyperAIStudioPCGRegistration::RollBackRegistration()
 		}
 		bOwnsToolset = false;
 	}
+	ProbePublisher.Stop();
 	if (ProbeHandle.IsValid())
 	{
 		FString Error;
@@ -3166,8 +3549,10 @@ namespace HyperAIStudio::PCG::Private
 			return false;
 		}
 		const UPackage* Package = Object->GetPackage();
+		// A newly created package is real content not saved yet, such as a spawned actor's external package; its disk
+		// existence reads does_not_exist. Compiled-in, transient and PIE packages never are.
 		if (Package == GetTransientPackage()
-			|| Package->HasAnyPackageFlags(PKG_InMemoryOnly | PKG_PlayInEditor)
+			|| Package->HasAnyPackageFlags(PKG_CompiledIn | PKG_PlayInEditor)
 			|| Package->GetFName().GetStringLength()
 				> static_cast<uint32>(FHyperAIStudioPCGContracts::MaxPathCharacters))
 		{
@@ -3632,7 +4017,8 @@ namespace HyperAIStudio::PCG::Private
 			TEXT("bGenerated"), TEXT("bDirtyGenerated"),
 			TEXT("GeneratedGraphOutput"), TEXT("PerPinGeneratedOutput"),
 			TEXT("LoadedPreviewGeneratedGraphOutput"), TEXT("LastGeneratedBounds"),
-			TEXT("GeneratedResources_DEPRECATED"), TEXT("GeneratedActors_DEPRECATED")};
+			TEXT("GeneratedResources_DEPRECATED"), TEXT("GeneratedActors_DEPRECATED"),
+			TEXT("ManagedResourceContainer"), TEXT("bProceduralInstancesInUse"), TEXT("RuntimeGridDescriptorHash")};
 		FString ComponentPropertiesFingerprint;
 		ProjectObjectProperties(Component, ExcludedComponentProperties, false, Context,
 			ComponentPropertiesFingerprint);

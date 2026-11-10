@@ -1,0 +1,505 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "networking-framework",
+ "presets": [
+  {
+   "id": "networking-framework.audit-replication",
+   "title": "Audit replication settings on the selected Blueprints",
+   "summary": "Read replication, relevancy, dormancy, update rates, replicated variables and RPCs of the selected actor Blueprints, and validate them.",
+   "packs": [
+    "networking_game_framework"
+   ],
+   "skills": [
+    "unreal-networking"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_network_inspect",
+    "hyper_network_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "networking",
+    "replication",
+    "audit",
+    "multiplayer",
+    "rpc",
+    "dormancy"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [],
+   "prompt": "Audit how these actor Blueprints replicate. Read only:\n{{selected_assets}}\n1. hyper_network_inspect with TargetPaths = their object paths, Scope `all`, Projection `details`; follow NextCursor. If a record has bLoaded false (metadata only), load that Blueprint (Epic's AssetTools.load_asset) and inspect again.\n2. Per Blueprint report from its class_default record bReplicates, bAlwaysRelevant, bOnlyRelevantToOwner, bUseOwnerRelevancy, Dormancy, NetUpdateFrequency, MinNetUpdateFrequency and NetPriority, and from Elements every replicated variable (Condition, RepNotifyFunction), replicated component and RPC (RpcMode, bReliable).\n3. hyper_network_validate with the same TargetPaths and Scope `all`: list every issue by code (dormancy_without_replication, replicated_component_without_actor_replication, missing_rep_notify_function, rpc_direction_missing, invalid_update_policy, contradictory_relevancy, ...).\n4. Flag design risks as well: reliable multicast RPCs, NetUpdateFrequency above 30 on props that rarely change, replicated variables on actors that do not replicate, replicated components on dormant actors.\nReport a PASS/FAIL table with one row per Blueprint (validator ErrorCount 0 = PASS), then a WARN row per risk with the plan op that would fix it (`class.set_update_policy`, `class.set_dormancy`, `property.set_replication`, ...). Change nothing."
+  },
+  {
+   "id": "networking-framework.replicate-actor-state",
+   "title": "Make an actor replicate its state and prove clients see it",
+   "summary": "Turn on replication for the selected actor Blueprint and its state variable, then play a listen server with two players and check the client sees it.",
+   "packs": [
+    "networking_game_framework",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_network_inspect",
+    "hyper_network_apply_plan",
+    "hyper_blueprint_structure_apply_plan",
+    "hyper_operation_wait",
+    "hyper_network_validate",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "class.set_replication",
+    "property.set_replication",
+    "variable.set_replication"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "networking",
+    "replication",
+    "door",
+    "multiplayer",
+    "listen server",
+    "co-op"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "state_variable",
+     "label": "State variable",
+     "default": "bOpen"
+    },
+    {
+     "name": "target_label",
+     "label": "Actor to walk to",
+     "default": "BP_Door",
+     "hint": "Label or class name of a placed instance; walking to it changes the state"
+    },
+    {
+     "name": "radius",
+     "label": "Reach radius (cm)",
+     "default": "150"
+    }
+   ],
+   "prompt": "Make {{selected_asset}} replicate, with its variable `{{state_variable}}` replicated, so every player sees the same state. Change only this Blueprint and do not save. If the Blueprint Structure pack is missing, say so and stop.\n1. Load it if needed, then hyper_network_inspect with TargetPaths [{{selected_asset}}] and Scope `class_defaults`: the class_default record's Revision, bReplicates and the variable's replication.\n2. hyper_network_apply_plan with bDryRun true and two ops, each with ExpectedRevision = that Revision: `class.set_replication` (Replicates 1) and `property.set_replication` (MemberName `{{state_variable}}`, Replicates 1, ReplicationCondition `none`). It must answer valid_dry_run. Send it with bDryRun false, a fresh OperationId and ExpectedPlanHash = its PlanHash.\n3. It answers staged_backend_required (the pack checks and stages edits but does not apply them yet): set `bReplicates` true on the class defaults with Epic's ObjectTools.set_properties, then hyper_blueprint_structure_apply_plan with bSave false and `variable.set_replication` (Name `{{state_variable}}`, Replication `replicated`), which compiles. On awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n4. hyper_network_inspect again, then hyper_network_validate with the same TargetPaths: bReplicates true, the variable replicated, ErrorCount 0.\n5. hyper_playtest_run with mode StartInProcess, netMode `ListenServer` and numPlayers 2: Bot MoveTo `{{target_label}}` (Radius {{radius}}) on pieInstance 0, then on pieInstance 1 WaitUntil AssertProperty on `{{target_label}}`, Property `{{state_variable}}` == true; hyper_operation_wait, hyper_playtest_status.\nReport a PASS/FAIL table: bReplicates true, the variable replicated, validator errors 0, the client saw the change (quote its evidence line)."
+  },
+  {
+   "id": "networking-framework.net-rate-and-dormancy",
+   "title": "Cut network cost of props with update rates and dormancy",
+   "summary": "Lower update rate and priority on the selected replicated props, make the rarely changing ones dormant, then read back and validate.",
+   "packs": [
+    "networking_game_framework",
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-networking"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_network_inspect",
+    "hyper_network_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_network_validate"
+   ],
+   "ops": [
+    "class.set_update_policy",
+    "class.set_dormancy"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "networking",
+    "bandwidth",
+    "optimisation",
+    "dormancy",
+    "net update frequency",
+    "survival"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "update_rate",
+     "label": "Net update frequency (Hz)",
+     "default": "10"
+    },
+    {
+     "name": "min_rate",
+     "label": "Min net update frequency (Hz)",
+     "default": "2"
+    },
+    {
+     "name": "priority",
+     "label": "Net priority",
+     "default": "1.0"
+    },
+    {
+     "name": "dormant_words",
+     "label": "Dormant when name contains",
+     "default": "Chest, Crate, Barrel"
+    }
+   ],
+   "prompt": "Cut the network cost of these replicated survival-game props: NetUpdateFrequency {{update_rate}}, MinNetUpdateFrequency {{min_rate}}, NetPriority {{priority}}, and Dormancy `dormant_all` for those whose name contains any of {{dormant_words}}. Change only these Blueprints:\n{{selected_assets}}\n1. Load them if needed, then hyper_network_inspect with their TargetPaths and Scope `class_defaults`: each class_default record's Revision, bReplicates and current values. Skip and list any that does not replicate.\n2. hyper_network_apply_plan with bDryRun true: per Blueprint one `class.set_update_policy` (NetUpdateFrequency, MinNetUpdateFrequency, NetPriority) and, for the dormant ones, one `class.set_dormancy` (Dormancy `dormant_all`), each with ExpectedRevision = its record's Revision. It must answer valid_dry_run; note Effects.ClassDefaultChanges.\n3. Send it with bDryRun false, a fresh OperationId and ExpectedPlanHash = its PlanHash. It answers staged_backend_required (the pack checks and stages edits but does not apply them yet): set the same values with Epic's ObjectTools.set_properties on each Blueprint's class defaults (NetUpdateFrequency, MinNetUpdateFrequency, NetPriority, NetDormancy `DORM_DormantAll`), then compile each with hyper_blueprint_compile_validate (preview for its PlanHash, then compile with an OperationId; hyper_operation_wait), which also saves it.\n4. hyper_network_inspect again to read the values back, then hyper_network_validate: no dormancy_without_replication or invalid_update_policy.\nReport a PASS/FAIL table per Blueprint: values before and after, dormancy, compile result, validator issues 0. Add a WARN for each dormant prop whose state changes at runtime: its code must call FlushNetDormancy before the change."
+  },
+  {
+   "id": "networking-framework.weapon-fire-rpcs",
+   "title": "Add server and multicast RPCs to a weapon Blueprint",
+   "summary": "Add a reliable Server fire RPC and an unreliable Multicast effects RPC, replicate ammo to the owner, and prove a client's shot reaches the server.",
+   "packs": [
+    "networking_game_framework",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_network_inspect",
+    "hyper_blueprint_structure_apply_plan",
+    "hyper_operation_wait",
+    "hyper_network_validate",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "event.add",
+    "variable.set_replication"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "networking",
+    "rpc",
+    "shooter",
+    "weapon",
+    "server authority",
+    "multicast"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "fire_action",
+     "label": "Fire Input Action",
+     "default": "/Game/Input/Actions/IA_Fire.IA_Fire"
+    },
+    {
+     "name": "ammo",
+     "label": "Starting ammo",
+     "default": "30"
+    }
+   ],
+   "prompt": "Make the weapon Blueprint {{selected_asset}} fire with server authority: the client asks the server to fire, the server spends ammo, everyone sees the muzzle effect. Change only this Blueprint and do not save. If the Blueprint Structure pack is missing, say so and stop.\n1. Load it if needed, then hyper_network_inspect with TargetPaths [{{selected_asset}}] and Scope `all`: bReplicates must be true (if not, report it and stop); list its RPCs and replicated variables.\n2. If there is no int variable `Ammo`, add it (default {{ammo}}) with the unreal-blueprint skill. Then one hyper_blueprint_structure_apply_plan with bSave false: `event.add` `ServerFire` (Inputs AimDirection vector, Rpc `server`, bReliable true), `event.add` `MulticastFireFX` (Inputs MuzzleLocation vector, Rpc `multicast`, bReliable false), and `variable.set_replication` `Ammo` (Replication `replicated`, Condition `owner_only`). On awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true. Read CompileMessages.\n3. With the unreal-blueprint skill write the logic: the fire input calls ServerFire; ServerFire returns if Ammo is 0, subtracts 1, traces along AimDirection and calls MulticastFireFX. The weapon must be owned by the firing player's pawn, or the server drops the RPC.\n4. hyper_network_validate on the Blueprint: no rpc_direction_missing, rpc_declaration_or_signature_invalid or invalid_property_replication_condition.\n5. hyper_playtest_run with mode StartInProcess, netMode `ListenServer` and numPlayers 2: on pieInstance 1 Bot Press `{{fire_action}}` three times with 0.3 s Waits, then on pieInstance 0 AssertProperty `Ammo` on the weapon (its class name) == {{ammo}} minus 3; hyper_operation_wait, hyper_playtest_status.\nReport a PASS/FAIL table: both RPCs with the right mode and reliability, Ammo owner-only, validator errors 0, the server's Ammo down by exactly 3 from the client's presses."
+  },
+  {
+   "id": "networking-framework.health-repnotify-owner-mana",
+   "title": "Replicate hero health with RepNotify and owner-only mana",
+   "summary": "Make a co-op hero's Health RepNotify for hit reactions and Mana owner-only, check it with the networking validator, and read it on a client.",
+   "packs": [
+    "networking_game_framework",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_network_inspect",
+    "hyper_network_apply_plan",
+    "hyper_blueprint_structure_apply_plan",
+    "hyper_operation_wait",
+    "hyper_network_validate",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "property.set_replication",
+    "variable.set_replication"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "networking",
+    "repnotify",
+    "health",
+    "co-op",
+    "fantasy",
+    "replication condition"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "health_var",
+     "label": "Health variable",
+     "default": "Health"
+    },
+    {
+     "name": "mana_var",
+     "label": "Mana variable",
+     "default": "Mana"
+    }
+   ],
+   "prompt": "On the co-op fantasy hero Blueprint {{selected_asset}}, replicate `{{health_var}}` with RepNotify (so every client can play a hit reaction) and `{{mana_var}}` to its owner only. Change only this Blueprint and do not save. If the Blueprint Structure pack is missing, say so and stop.\n1. Load it if needed, then hyper_network_inspect with TargetPaths [{{selected_asset}}] and Scope `class_defaults`: the record's Revision, bReplicates and both variables' replication. If the actor does not replicate, say so and stop.\n2. Check the intent with hyper_network_apply_plan, bDryRun true, ExpectedRevision on each op: `property.set_replication` for `{{health_var}}` (Replicates 1, ReplicationCondition `none`) and for `{{mana_var}}` (Replicates 1, ReplicationCondition `owner_only`). Leave RepNotifyFunction empty: the plan accepts only an existing function, and step 3 makes it. It must answer valid_dry_run.\n3. The pack does not apply edits yet, so make them with hyper_blueprint_structure_apply_plan, bSave false: `variable.set_replication` `{{health_var}}` (Replication `rep_notify`, which creates `OnRep_{{health_var}}`) and `{{mana_var}}` (Replication `replicated`, Condition `owner_only`). On awaiting_user_approval, call hyper_operation_wait with bWaitThroughApproval true.\n4. With the unreal-blueprint skill, fill `OnRep_{{health_var}}` with the hit reaction (a Print String of the new value if there is none).\n5. hyper_network_validate: no missing_rep_notify_function or invalid_property_replication_condition, ErrorCount 0.\n6. hyper_playtest_run with mode StartInProcess, netMode `ListenServer` and numPlayers 2: Bot Sample `{{health_var}}` on `Player1` for 0.5 s on pieInstance 0 (the client's pawn on the server), then Sample it on `Player0` on pieInstance 1 (the same pawn on the client); hyper_operation_wait, hyper_playtest_status.\nReport a PASS/FAIL table: `{{health_var}}` rep_notify with its function, `{{mana_var}}` owner_only, validator errors 0, the server's and client's values match."
+  },
+  {
+   "id": "networking-framework.audit-game-framework",
+   "title": "Audit the game mode, maps and framework classes",
+   "summary": "Read the project's default maps and game mode, the level's override and every framework class, validate the chain, and list what is missing.",
+   "packs": [
+    "networking_game_framework"
+   ],
+   "skills": [
+    "unreal-networking"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_game_framework_inspect",
+    "hyper_game_framework_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "game framework",
+    "game mode",
+    "player controller",
+    "maps",
+    "audit"
+   ],
+   "placeholders": [],
+   "prompt": "Audit the game framework of {{project}} and the level {{level}}. Read only.\n1. hyper_game_framework_inspect with TargetPaths [`project:game_maps_settings`] and Scope `all`: GameDefaultMap, TransitionMap, the global GameModeClassPath and GameInstanceClassPath.\n2. hyper_game_framework_inspect with Scope `world_settings` on {{level}}'s world object path (`/Game/Maps/Arena.Arena`): its game mode override, if any. Then Scope `class_defaults` on the game mode that actually applies (load it if needed): GameStateClassPath, PlayerControllerClassPath, PlayerStateClassPath, PawnClassPath, HUDClassPath, GameSessionClassPath and SpectatorClassPath, and the session class's MaxPlayers and MaxSpectators. Follow NextCursor.\n3. hyper_game_framework_validate with all those TargetPaths: every issue by code (missing_global_game_mode, missing_game_instance_class, game_mode_missing_player_state, game_mode_missing_default_pawn, project_default_role_mismatch, blueprint_compile_error, game_default_map_not_configured, invalid_game_session_limits).\nReport a table of the effective chain (project default, level override, the class used for each role), then a PASS/FAIL table: validator ErrorCount 0, every role set to a project class or a deliberate engine default, default map set, no compile errors. For each FAIL name the plan op that fixes it (`project.set_defaults`, `world.set_game_mode_override`, `game_mode.set_class_defaults`). Change nothing."
+  },
+  {
+   "id": "networking-framework.set-up-game-mode",
+   "title": "Set up a game mode with its framework classes",
+   "summary": "Create game mode, game state, player controller, player state and HUD Blueprints, wire them together, use them in this level, and prove it in play.",
+   "packs": [
+    "networking_game_framework",
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_game_framework_inspect",
+    "hyper_game_framework_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_game_framework_validate",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "framework.create_class",
+    "game_mode.set_class_defaults",
+    "world.set_game_mode_override"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "game framework",
+    "game mode",
+    "game state",
+    "player controller",
+    "hud",
+    "arena"
+   ],
+   "placeholders": [
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Arena"
+    },
+    {
+     "name": "pawn_class",
+     "label": "Default pawn class",
+     "default": "/Game/Characters/BP_PlayerCharacter.BP_PlayerCharacter_C",
+     "hint": "Generated class path of the pawn the game mode spawns"
+    }
+   ],
+   "prompt": "Give {{level}} its own game framework under `{{content_folder}}/Framework`: `BP_{{prefix}}GameMode`, `BP_{{prefix}}GameState`, `BP_{{prefix}}PlayerController`, `BP_{{prefix}}PlayerState` and `BP_{{prefix}}HUD` (object paths `BP_X.BP_X`), the game mode using the other four and the pawn `{{pawn_class}}`. Change no other class or project setting; leave {{level}} unsaved.\n1. Load the pawn's Blueprint (plans reference loaded classes only). hyper_game_framework_inspect with Scope `all` on `project:game_maps_settings` and {{level}}'s world: the current game mode and the Revision of its world_settings record. Stop if any of the five assets exists.\n2. hyper_game_framework_apply_plan with bDryRun true: five `framework.create_class` (Role game_mode, game_state, player_controller, player_state, hud; ParentClassPath `/Script/Engine.` plus GameModeBase, GameStateBase, PlayerController, PlayerState or HUD), then `game_mode.set_class_defaults` on the new game mode naming the other four and the pawn, and `world.set_game_mode_override` on the world with that Revision. It must answer valid_dry_run.\n3. Send it with bDryRun false, a fresh OperationId and ExpectedPlanHash = its PlanHash. It answers staged_backend_required (the pack checks and stages edits but does not apply them yet): build it with the unreal-blueprint skill (BlueprintTools.create per class; ObjectTools.set_properties on the game mode's defaults and the World Settings' DefaultGameMode), then compile each with hyper_blueprint_compile_validate (preview for its PlanHash, then compile with an OperationId; hyper_operation_wait), which also saves it.\n4. hyper_game_framework_validate on the five classes and the world: ErrorCount 0.\n5. hyper_playtest_run (mode StartInProcess) with Bot AssertExists for `BP_{{prefix}}GameMode`, `BP_{{prefix}}GameState`, `BP_{{prefix}}PlayerController` and `BP_{{prefix}}HUD`, then `Survey`; hyper_operation_wait, then hyper_playtest_status.\nReport a PASS/FAIL table: five assets at their paths, each role wired, the override on {{level}}, compiles clean, validator errors 0, each class found in play, Survey's player pawn."
+  },
+  {
+   "id": "networking-framework.match-player-limits",
+   "title": "Cap a match at a set number of players and spectators",
+   "summary": "Give the selected game mode a game session class with player, spectator and splitscreen limits, validate the limits, and read them in a live session.",
+   "packs": [
+    "networking_game_framework",
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_game_framework_inspect",
+    "hyper_game_framework_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_game_framework_validate",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "framework.create_class",
+    "game_mode.set_class_defaults",
+    "game_session.set_limits"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "game framework",
+    "game session",
+    "max players",
+    "spectators",
+    "party game",
+    "multiplayer"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "max_players",
+     "label": "Max players",
+     "default": "8"
+    },
+    {
+     "name": "max_spectators",
+     "label": "Max spectators",
+     "default": "2"
+    },
+    {
+     "name": "splitscreen",
+     "label": "Splitscreen players per connection",
+     "default": "2"
+    }
+   ],
+   "prompt": "Limit party-game matches run by the game mode {{selected_asset}} to {{max_players}} players, {{max_spectators}} spectators and {{splitscreen}} splitscreen players per connection. Change only it and its session class.\n1. Load it if needed, then hyper_game_framework_inspect with TargetPaths [{{selected_asset}}] and Scope `class_defaults`: its record's Revision and GameSessionClassPath. If that is a project Blueprint, inspect it with Scope `session` for its Revision and limits.\n2. hyper_game_framework_apply_plan with bDryRun true. If the game mode still uses the engine's GameSession: `framework.create_class` `{{content_folder}}/Framework/BP_PartyGameSession.BP_PartyGameSession` (Role game_session, ParentClassPath `/Script/Engine.GameSession`) and `game_mode.set_class_defaults` (GameSessionClassPath the new class, ExpectedRevision the game mode's). Then `game_session.set_limits` on the session class: MaxPlayers {{max_players}}, MaxSpectators {{max_spectators}}, MaxSplitscreensPerConnection {{splitscreen}} (ExpectedRevision only for an existing class). It must answer valid_dry_run.\n3. Send it with bDryRun false, a fresh OperationId and ExpectedPlanHash = its PlanHash. It answers staged_backend_required (the pack checks and stages edits but does not apply them yet): make the same change with the unreal-blueprint skill (BlueprintTools.create, ObjectTools.set_properties on the class defaults), then compile each with hyper_blueprint_compile_validate (preview for its PlanHash, then compile with an OperationId; hyper_operation_wait), which also saves it.\n4. hyper_game_framework_validate on both classes: no invalid_game_session_limits or game_mode_missing_* errors.\n5. If {{level}} runs this game mode: hyper_playtest_run with mode StartInProcess, netMode `ListenServer` and numPlayers 2, and on pieInstance 0 Bot AssertProperty on `GameMode` for `GameSession.MaxPlayers` == {{max_players}}, `GameSession.MaxSpectators` == {{max_spectators}} and `GameSession.MaxSplitscreensPerConnection` == {{splitscreen}}; hyper_operation_wait, hyper_playtest_status.\nReport a PASS/FAIL table: each limit read back from the class and asserted in the live session, the session class wired, validator errors 0."
+  },
+  {
+   "id": "networking-framework.listen-server-smoke-test",
+   "title": "Smoke-test a listen server with a late joiner",
+   "summary": "Play the level as host and clients, add a late joiner, and check net drivers, player states and framework classes on every instance.",
+   "packs": [
+    "networking_game_framework"
+   ],
+   "skills": [
+    "unreal-networking",
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status",
+    "hyper_pie_query",
+    "hyper_network_inspect",
+    "hyper_network_validate",
+    "hyper_game_framework_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "networking",
+    "multiplayer",
+    "listen server",
+    "late join",
+    "smoke test",
+    "qa"
+   ],
+   "placeholders": [
+    {
+     "name": "players",
+     "label": "Players at start (2-3)",
+     "default": "2"
+    }
+   ],
+   "prompt": "Check that {{level}} works as a listen server with {{players}} players plus one late joiner. Change nothing.\n1. hyper_playtest_run with mode StartInProcess, netMode `ListenServer`, numPlayers {{players}}, teardown `LeaveSessionRunning`, bRecordVideo true, and steps: Bot `Survey` on pieInstance 0 and on 1, Bot Play goal Explore for 15 s on pieInstance 1, `JoinPlayer`, then Bot `Survey` on the joiner's instance ({{players}}). hyper_operation_wait, then hyper_playtest_status.\n2. While it runs: hyper_pie_query for each instance (world, players, pawns); hyper_network_inspect with Scope `net_drivers` (NetMode, ClientConnectionCount, bHasServerConnection) and with Scope `world_instances` for the replicated actors' roles.\n3. hyper_network_validate with Scope `all` and bRequirePIEMultiplayerEvidence true, and hyper_game_framework_validate with Scope `world_runtime` and bRequirePIEWorldEvidence true.\n4. Stop play: hyper_playtest_run with mode `AttachOnly` and one `StopSession` step, then hyper_operation_wait.\nReport a PASS/FAIL table: every player joined, the host's ClientConnectionCount = {{players}} (the joiner included), each client has a server connection, the host's PlayerStateCount = {{players}} + 1, no pie_multiplayer_evidence_missing, pie_framework_evidence_missing or runtime_player_states_missing, Explore had no falls. Link the video and show the Explore map on its own line."
+  },
+  {
+   "id": "networking-framework.owner-only-relevancy",
+   "title": "Make inventory actors relevant only to their owner",
+   "summary": "Make the selected inventory actors owner-relevant and an objective actor always relevant, validate ownership, and check what each client receives.",
+   "packs": [
+    "networking_game_framework",
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-networking",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_network_inspect",
+    "hyper_network_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_network_validate",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "class.set_relevancy"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "networking",
+    "relevancy",
+    "inventory",
+    "bandwidth",
+    "cheating",
+    "multiplayer"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "objective",
+     "label": "Always-relevant actor Blueprint",
+     "default": "/Game/Gameplay/BP_Objective.BP_Objective"
+    }
+   ],
+   "prompt": "Make these inventory and equipment Blueprints relevant only to their owning player, and `{{objective}}` always relevant, so clients receive only what they should. Change only these Blueprints:\n{{selected_assets}}\n1. Load them if needed, then hyper_network_inspect with all their TargetPaths and Scope `class_defaults`: each class_default record's Revision, bReplicates and relevancy flags. Skip and list any that does not replicate.\n2. hyper_network_apply_plan with bDryRun true: `class.set_relevancy` per inventory Blueprint (OnlyRelevantToOwner 1, AlwaysRelevant 0, UseOwnerRelevancy 0) and for `{{objective}}` (AlwaysRelevant 1, OnlyRelevantToOwner 0, UseOwnerRelevancy 0), each with ExpectedRevision. It must answer valid_dry_run.\n3. Send it with bDryRun false, a fresh OperationId and ExpectedPlanHash = its PlanHash. It answers staged_backend_required (the pack checks and stages edits but does not apply them yet): set bOnlyRelevantToOwner, bAlwaysRelevant and bNetUseOwnerRelevancy with Epic's ObjectTools.set_properties on each Blueprint's class defaults, then compile each with hyper_blueprint_compile_validate (preview for its PlanHash, then compile with an OperationId; hyper_operation_wait), which also saves it.\n4. hyper_network_validate: ErrorCount 0. Owner relevancy needs the spawning code to set Owner: find where they spawn (Epic's AssetTools.get_referencers) and report it without editing that code.\n5. hyper_playtest_run with mode StartInProcess, netMode `ListenServer`, numPlayers 2, teardown LeaveSessionRunning and Bot Wait 3 s; hyper_operation_wait, hyper_playtest_status. Then hyper_network_inspect with empty TargetPaths and Scope `world_instances`: each class's actors per WorldPath, with OwnerPath. Stop with an AttachOnly `StopSession` step.\nReport a PASS/FAIL table per Blueprint (flags read back, compile clean, validator errors 0), plus rows for the client world holding only its own inventory actors, the server both players', and the objective in both."
+  }
+ ]
+}

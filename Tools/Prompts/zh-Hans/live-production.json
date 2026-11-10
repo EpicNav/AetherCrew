@@ -1,0 +1,18 @@
+{
+ "live-production.livelink-asset-check.title": "动捕会话前检查 Live Link 资产",
+ "live-production.livelink-asset-check.summary": "对所选 Live Link 资产做身份快照与验证：类型、磁盘存在、已保存且完整，并列出会话前需修复的问题。",
+ "live-production.livelink-asset-check.ph.session.label": "会话名称",
+ "live-production.show-control-preflight.title": "演出前检查 Remote Control 与 DMX 资产",
+ "live-production.show-control-preflight.summary": "查找、检查并验证文件夹中的 Remote Control 预设和 DMX 库，记录本场演出的基线，并给出可以或不可以开演的结论。",
+ "live-production.show-control-preflight.ph.show.label": "演出名称",
+ "live-production.ndisplay-topology-preflight.title": "预检 nDisplay 集群变更（不实际应用）",
+ "live-production.ndisplay-topology-preflight.summary": "写出当前与目标的节点和视口布局，分别验证，并对变更方案进行试运行，获取方案哈希与影响。",
+ "live-production.ndisplay-topology-preflight.ph.current_nodes.label": "当前节点",
+ "live-production.ndisplay-topology-preflight.ph.current_nodes.hint": "节点 ID、主机地址，且恰好一个节点标为 primary",
+ "live-production.ndisplay-topology-preflight.ph.desired_nodes.label": "目标节点",
+ "live-production.ndisplay-topology-preflight.ph.desired_nodes.hint": "节点 ID、主机地址，且恰好一个节点标为 primary",
+ "live-production.ndisplay-topology-preflight.ph.viewport.label": "每个节点的视口（像素）",
+ "live-production.broadcast-graphics-check.title": "播出前检查广播图形资产",
+ "live-production.broadcast-graphics-check.summary": "对文件夹中的 Motion Design、Text 3D、SVG 和媒体资产做身份快照与验证，给出统计和可否播出的结论。",
+ "live-production.broadcast-graphics-check.ph.program.label": "节目"
+}

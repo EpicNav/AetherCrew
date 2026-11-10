@@ -78,7 +78,10 @@ link_output    Node=Locomotion
 
 `FBlendSmootherTrait` on the blend stack is what stops the switch popping; without it the pose changes in one
 frame. Give it a blend time of 0.15-0.25 s for locomotion, 0.1 s for a landing, and inertialization
-(`FBlendInertializerTrait`) when the two poses are far apart.
+(`FBlendInertializerTrait`) when the two poses are far apart. The inertializer does not blend by itself: it cuts
+instantly and sends an inertialization request up the graph, which only `FInertializationDeadBlendTrait` answers.
+Put that trait on a stack above the blend (for example an Output node with `FPassthroughTrait` and
+`FInertializationDeadBlendTrait`, linked to the Locomotion node and then `link_output`), or the switch pops.
 
 ## 4. Variables
 

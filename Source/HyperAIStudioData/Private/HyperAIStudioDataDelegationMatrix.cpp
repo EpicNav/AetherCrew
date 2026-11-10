@@ -8,14 +8,14 @@ namespace
 		{TEXT(Group), TEXT(Name), TEXT(Life), TEXT(Access), TEXT(Decl), TEXT(Impl), TEXT(Domain)}
 
 	static const FHyperAIStudioDataEpicDelegation EpicRows[] = {
-		EPIC_ROW("ConfigSettingsToolset.ConfigSettingsToolset", "GetSectionPropertyValues", "inspect", "read", "ConfigSettingsToolset.h:74", "ConfigSettingsToolset.cpp:216", "config_section_state"),
-		EPIC_ROW("ConfigSettingsToolset.ConfigSettingsToolset", "GetSectionSchema", "inspect", "read", "ConfigSettingsToolset.h:58", "ConfigSettingsToolset.cpp:193", "config_section_state"),
-		EPIC_ROW("ConfigSettingsToolset.ConfigSettingsToolset", "ListCategories", "discover", "read", "ConfigSettingsToolset.h:33", "ConfigSettingsToolset.cpp:121", "config_settings_catalog"),
-		EPIC_ROW("ConfigSettingsToolset.ConfigSettingsToolset", "ListContainers", "discover", "read", "ConfigSettingsToolset.h:24", "ConfigSettingsToolset.cpp:104", "config_settings_catalog"),
-		EPIC_ROW("ConfigSettingsToolset.ConfigSettingsToolset", "ListSections", "discover", "read", "ConfigSettingsToolset.h:43", "ConfigSettingsToolset.cpp:151", "config_settings_catalog"),
-		EPIC_ROW("ConfigSettingsToolset.ConfigSettingsToolset", "ResetSectionToDefaults", "delete", "destructive", "ConfigSettingsToolset.h:124", "ConfigSettingsToolset.cpp:362", "editor_config_overrides"),
-		EPIC_ROW("ConfigSettingsToolset.ConfigSettingsToolset", "SaveSection", "save", "external", "ConfigSettingsToolset.h:110", "ConfigSettingsToolset.cpp:341", "editor_config_file"),
-		EPIC_ROW("ConfigSettingsToolset.ConfigSettingsToolset", "SetSectionProperties", "save", "external", "ConfigSettingsToolset.h:95", "ConfigSettingsToolset.cpp:249", "editor_config_file"),
+		EPIC_ROW("ConfigSettingsToolset59.ConfigSettingsToolset59", "GetSectionPropertyValues", "inspect", "read", "ConfigSettingsToolset.h:74", "ConfigSettingsToolset.cpp:216", "config_section_state"),
+		EPIC_ROW("ConfigSettingsToolset59.ConfigSettingsToolset59", "GetSectionSchema", "inspect", "read", "ConfigSettingsToolset.h:58", "ConfigSettingsToolset.cpp:193", "config_section_state"),
+		EPIC_ROW("ConfigSettingsToolset59.ConfigSettingsToolset59", "ListCategories", "discover", "read", "ConfigSettingsToolset.h:33", "ConfigSettingsToolset.cpp:121", "config_settings_catalog"),
+		EPIC_ROW("ConfigSettingsToolset59.ConfigSettingsToolset59", "ListContainers", "discover", "read", "ConfigSettingsToolset.h:24", "ConfigSettingsToolset.cpp:104", "config_settings_catalog"),
+		EPIC_ROW("ConfigSettingsToolset59.ConfigSettingsToolset59", "ListSections", "discover", "read", "ConfigSettingsToolset.h:43", "ConfigSettingsToolset.cpp:151", "config_settings_catalog"),
+		EPIC_ROW("ConfigSettingsToolset59.ConfigSettingsToolset59", "ResetSectionToDefaults", "delete", "destructive", "ConfigSettingsToolset.h:124", "ConfigSettingsToolset.cpp:362", "editor_config_overrides"),
+		EPIC_ROW("ConfigSettingsToolset59.ConfigSettingsToolset59", "SaveSection", "save", "external", "ConfigSettingsToolset.h:110", "ConfigSettingsToolset.cpp:341", "editor_config_file"),
+		EPIC_ROW("ConfigSettingsToolset59.ConfigSettingsToolset59", "SetSectionProperties", "save", "external", "ConfigSettingsToolset.h:95", "ConfigSettingsToolset.cpp:249", "editor_config_file"),
 
 		EPIC_ROW("ConversationToolset.ConversationTools", "get_all_nodes", "inspect", "read", "conversation.py:38", "conversation.py:38", "data_observation"),
 		EPIC_ROW("ConversationToolset.ConversationTools", "get_node_by_guid", "inspect", "read", "conversation.py:68", "conversation.py:68", "data_observation"),
@@ -25,13 +25,13 @@ namespace
 		EPIC_ROW("ConversationToolset.ConversationTools", "list_entry_points", "discover", "read", "conversation.py:14", "conversation.py:14", "data_observation"),
 		EPIC_ROW("ConversationToolset.ConversationTools", "list_speakers", "discover", "read", "conversation.py:26", "conversation.py:26", "data_observation"),
 
-		EPIC_ROW("DataRegistryToolset.DataRegistryTools", "GetItems", "inspect", "read", "DataRegistryTools.h:151", "DataRegistryTools.cpp:214", "data_registry_state"),
-		EPIC_ROW("DataRegistryToolset.DataRegistryTools", "GetRegistryInfo", "inspect", "read", "DataRegistryTools.h:104", "DataRegistryTools.cpp:134", "data_registry_state"),
-		EPIC_ROW("DataRegistryToolset.DataRegistryTools", "GetSchema", "inspect", "read", "DataRegistryTools.h:112", "DataRegistryTools.cpp:153", "data_registry_state"),
-		EPIC_ROW("DataRegistryToolset.DataRegistryTools", "ListDataSources", "discover", "read", "DataRegistryTools.h:130", "DataRegistryTools.cpp:192", "data_registry_catalog"),
-		EPIC_ROW("DataRegistryToolset.DataRegistryTools", "ListItems", "discover", "read", "DataRegistryTools.h:120", "DataRegistryTools.cpp:172", "data_registry_catalog"),
-		EPIC_ROW("DataRegistryToolset.DataRegistryTools", "ListRegistries", "discover", "read", "DataRegistryTools.h:96", "DataRegistryTools.cpp:106", "data_registry_catalog"),
-		EPIC_ROW("DataRegistryToolset.DataRegistryTools", "ListRuntimeSources", "discover", "read", "DataRegistryTools.h:140", "DataRegistryTools.cpp:203", "data_registry_catalog"),
+		EPIC_ROW("DataRegistryToolset59.DataRegistryTools59", "GetItems", "inspect", "read", "DataRegistryTools.h:151", "DataRegistryTools.cpp:214", "data_registry_state"),
+		EPIC_ROW("DataRegistryToolset59.DataRegistryTools59", "GetRegistryInfo", "inspect", "read", "DataRegistryTools.h:104", "DataRegistryTools.cpp:134", "data_registry_state"),
+		EPIC_ROW("DataRegistryToolset59.DataRegistryTools59", "GetSchema", "inspect", "read", "DataRegistryTools.h:112", "DataRegistryTools.cpp:153", "data_registry_state"),
+		EPIC_ROW("DataRegistryToolset59.DataRegistryTools59", "ListDataSources", "discover", "read", "DataRegistryTools.h:130", "DataRegistryTools.cpp:192", "data_registry_catalog"),
+		EPIC_ROW("DataRegistryToolset59.DataRegistryTools59", "ListItems", "discover", "read", "DataRegistryTools.h:120", "DataRegistryTools.cpp:172", "data_registry_catalog"),
+		EPIC_ROW("DataRegistryToolset59.DataRegistryTools59", "ListRegistries", "discover", "read", "DataRegistryTools.h:96", "DataRegistryTools.cpp:106", "data_registry_catalog"),
+		EPIC_ROW("DataRegistryToolset59.DataRegistryTools59", "ListRuntimeSources", "discover", "read", "DataRegistryTools.h:140", "DataRegistryTools.cpp:203", "data_registry_catalog"),
 
 		EPIC_ROW("EditorToolset.CurveTableTools", "add_key", "edit", "edit", "curve_table.py:127", "curve_table.py:127", "data_authored_state"),
 		EPIC_ROW("EditorToolset.CurveTableTools", "add_row", "edit", "edit", "curve_table.py:80", "curve_table.py:80", "data_authored_state"),
@@ -65,12 +65,12 @@ namespace
 		EPIC_ROW("EditorToolset.StringTableTools", "remove_entry", "delete", "destructive", "string_table.py:159", "string_table.py:159", "data_authored_removal"),
 		EPIC_ROW("EditorToolset.StringTableTools", "set_entry", "edit", "edit", "string_table.py:142", "string_table.py:142", "data_authored_state"),
 
-		EPIC_ROW("GameplayTagsToolset.GameplayTagsToolset", "AddTag", "save", "external", "GameplayTagsToolset.h:63", "GameplayTagsToolset.cpp:93", "gameplay_tag_ini"),
-		EPIC_ROW("GameplayTagsToolset.GameplayTagsToolset", "FindReferencersByTag", "discover", "read", "GameplayTagsToolset.h:88", "GameplayTagsToolset.cpp:149", "gameplay_tag_catalog"),
-		EPIC_ROW("GameplayTagsToolset.GameplayTagsToolset", "GetTagInfo", "inspect", "read", "GameplayTagsToolset.h:53", "GameplayTagsToolset.cpp:65", "gameplay_tag_state"),
-		EPIC_ROW("GameplayTagsToolset.GameplayTagsToolset", "ListTags", "discover", "read", "GameplayTagsToolset.h:44", "GameplayTagsToolset.cpp:38", "gameplay_tag_catalog"),
-		EPIC_ROW("GameplayTagsToolset.GameplayTagsToolset", "RemoveTag", "delete", "destructive", "GameplayTagsToolset.h:71", "GameplayTagsToolset.cpp:110", "gameplay_tag_ini"),
-		EPIC_ROW("GameplayTagsToolset.GameplayTagsToolset", "RenameTag", "save", "external", "GameplayTagsToolset.h:80", "GameplayTagsToolset.cpp:127", "gameplay_tag_ini")
+		EPIC_ROW("GameplayTagsToolset59.GameplayTagsToolset59", "AddTag", "save", "external", "GameplayTagsToolset.h:63", "GameplayTagsToolset.cpp:93", "gameplay_tag_ini"),
+		EPIC_ROW("GameplayTagsToolset59.GameplayTagsToolset59", "FindReferencersByTag", "discover", "read", "GameplayTagsToolset.h:88", "GameplayTagsToolset.cpp:149", "gameplay_tag_catalog"),
+		EPIC_ROW("GameplayTagsToolset59.GameplayTagsToolset59", "GetTagInfo", "inspect", "read", "GameplayTagsToolset.h:53", "GameplayTagsToolset.cpp:65", "gameplay_tag_state"),
+		EPIC_ROW("GameplayTagsToolset59.GameplayTagsToolset59", "ListTags", "discover", "read", "GameplayTagsToolset.h:44", "GameplayTagsToolset.cpp:38", "gameplay_tag_catalog"),
+		EPIC_ROW("GameplayTagsToolset59.GameplayTagsToolset59", "RemoveTag", "delete", "destructive", "GameplayTagsToolset.h:71", "GameplayTagsToolset.cpp:110", "gameplay_tag_ini"),
+		EPIC_ROW("GameplayTagsToolset59.GameplayTagsToolset59", "RenameTag", "save", "external", "GameplayTagsToolset.h:80", "GameplayTagsToolset.cpp:127", "gameplay_tag_ini")
 	};
 
 	#undef EPIC_ROW

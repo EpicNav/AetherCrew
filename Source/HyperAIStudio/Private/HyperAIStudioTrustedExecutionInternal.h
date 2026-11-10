@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "HyperAIStudioApprovalCategory.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioTrustedExecution.h"
 #include "HyperAIStudioTypedArtifactExecutionService.h"
@@ -126,6 +127,25 @@ public:
 		const FString& OperationId,
 		FHyperAIStudioTypedArtifactOperationStatus& OutStatus,
 		FString& OutError) const;
+	bool QueryLiveStatus(
+		const FString& OperationId,
+		FHyperAIStudioTypedArtifactOperationStatus& OutStatus) const;
+
+	/**
+	 * Prepare a held plan again from the same request, payload and verifier. A preparation's authority seal
+	 * lasts seconds, while an approval or the edit queue can hold a plan for minutes.
+	 */
+	bool Reprepare(
+		const FHyperAIStudioTrustedPreparedArtifact& Held,
+		FHyperAIStudioTrustedPreparedArtifact& OutFresh,
+		FHyperAIStudioTrustedExecutionDiagnostic& OutStatus,
+		FString& OutError);
+	/** The request a preparation was made from, for the edit queue's activity entries. */
+	bool DescribePrepared(
+		const FHyperAIStudioTrustedPreparedArtifact& Prepared,
+		FHyperAIStudioTrustedArtifactRequest& OutRequest) const;
+	/** True while an operation owns the project's one execution lane or is being admitted to it. */
+	bool IsLaneBusy() const;
 
 private:
 	TSharedPtr<FHyperAIStudioTrustedExecutionHostState, ESPMode::ThreadSafe> State;
@@ -138,9 +158,40 @@ namespace HyperAIStudio::TrustedExecution::Private
 	void BeginEnginePreExit();
 	void ShutdownCore();
 	TSharedPtr<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> GetCoreHost();
-	/** Private core-UI hook; deliberately absent from the exported optional-pack facade. */
-	bool IssueCoreUiAuthorizationGrant(
-		const FHyperAIStudioTypedArtifactStageReceipt& Receipt,
-		FString& OutAuthorizationToken,
-		FString& OutError);
+	/**
+	 * The safety sealed into a prepared plan, as the edit queue's host reads it: what its grant follows, and so what
+	 * auto-approval files it under. False when that host cannot describe it.
+	 */
+	bool DescribeQueuedSafety(
+		const FHyperAIStudioTrustedPreparedArtifact& Prepared,
+		EHyperAIStudioDomainSafety& OutSafety);
+	/** Set when the user's auto-approval approved a plan rather than a click. */
+	struct FAutoApprovedBy
+	{
+		/** FHyperAIStudioAutoApproval::GetActivationId() as it approved: the plan starts only while that one is on. */
+		uint64 Activation = 0;
+		EHyperAIStudioApprovalCategory Category = EHyperAIStudioApprovalCategory::Edits;
+	};
+
+	/**
+	 * The approval gate's route onto the edit queue (HyperAIStudioExecutionQueue.cpp). A risky plan's grant is
+	 * issued when its turn comes, by the private core-UI boundary of the host that staged it; deliberately absent
+	 * from the exported queue API. A plan an auto-approval approved gets no grant, and does not start, once that
+	 * auto-approval has ended.
+	 */
+	bool SubmitUserApproved(
+		const FHyperAIStudioTrustedPreparedArtifact& Prepared,
+		const FString& OperationId,
+		FString& OutStatus,
+		FString& OutError,
+		const TOptional<FAutoApprovedBy>& AutoApproved = {});
+	/**
+	 * Takes a plan the given auto-approval approved back out of the edit queue, before its grant is issued, and hands
+	 * back its prepared plan; false when it is not waiting there (it started, failed or was never queued).
+	 */
+	bool WithdrawAutoApproved(const FString& OperationId, uint64 Activation, FHyperAIStudioTrustedPreparedArtifact& OutPrepared);
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Points the edit queue at a test host instead of the core one; nullptr restores the core host. */
+	void SetQueueHostForTests(const TSharedPtr<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe>& Host);
+#endif
 }

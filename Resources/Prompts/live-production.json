@@ -1,0 +1,149 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "live-production",
+ "presets": [
+  {
+   "id": "live-production.livelink-asset-check",
+   "title": "Check Live Link assets before a capture session",
+   "summary": "Identity snapshot and validation of the selected Live Link assets: class, on disk, saved and complete, with what to fix before the session.",
+   "packs": [
+    "live_production"
+   ],
+   "tools": [
+    "hyper_capability_report",
+    "hyper_live_production_inspect",
+    "hyper_live_production_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "live link",
+    "mocap",
+    "virtual production",
+    "preflight",
+    "capture"
+   ],
+   "context": {
+    "selection": "assets",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "session",
+     "label": "Session name",
+     "default": "today's capture"
+    }
+   ],
+   "prompt": "Check the Live Link assets {{selected_assets}} before {{session}}, and change nothing. If the live_production pack is unavailable, say so and stop.\n1. hyper_capability_report: confirm the live_production pack is live.\n2. hyper_live_production_inspect with familyId livelink and targetPaths the exact /Game object paths of {{selected_assets}}. Load any that answer target_not_loaded with Epic's load_asset and inspect again; page with the cursor until done.\n3. hyper_live_production_validate with policy identity_snapshot and the snapshot the inspect returned.\n4. These tools check identity and saved state only, not live connections or subjects: say so in the report.\nReply with a PASS/FAIL table, one row per asset: class matches the livelink family, exists on disk, saved (not dirty), persisted identity complete, validator errors and warnings. Then what to fix before {{session}}."
+  },
+  {
+   "id": "live-production.show-control-preflight",
+   "title": "Run a pre-show check of Remote Control and DMX assets",
+   "summary": "Find, inspect and validate the folder's Remote Control presets and DMX libraries, record the show's baseline and give a GO or NO-GO.",
+   "packs": [
+    "live_production"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_live_production_inspect",
+    "hyper_live_production_validate",
+    "hyper_memory_remember"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "remote control",
+    "dmx",
+    "show",
+    "broadcast",
+    "lighting desk",
+    "preflight"
+   ],
+   "placeholders": [
+    {
+     "name": "show",
+     "label": "Show name",
+     "default": "tonight's show"
+    }
+   ],
+   "prompt": "Run a pre-show check of the Remote Control presets and DMX libraries under {{content_folder}} for {{show}}, and change nothing. If the live_production pack is unavailable, say so and stop.\n1. hyper_memory_recall `show assets` for this production's asset list and conventions.\n2. hyper_project_search with kinds [asset] for Remote Control presets and DMX libraries under {{content_folder}}. Load each with Epic's load_asset, since inspect reads loaded assets only.\n3. hyper_live_production_inspect once with familyId remote_control and once with familyId dmx, each with its targetPaths; page with the cursor.\n4. hyper_live_production_validate with policy identity_snapshot on each returned snapshot.\n5. If memory had no baseline, hyper_memory_remember the checked asset list as the baseline for {{show}}.\nReply with GO or NO-GO for {{show}} on the first line, then a PASS/FAIL table, one row per asset: family class matched, on disk, saved, identity complete, validator issues, and any asset missing against the baseline. Say plainly that live connections and DMX output are not tested."
+  },
+  {
+   "id": "live-production.ndisplay-topology-preflight",
+   "title": "Preflight an nDisplay cluster change without applying it",
+   "summary": "Write the current and desired node and viewport layout, validate both, and dry-run the change plan for its hash and effects.",
+   "packs": [
+    "live_production"
+   ],
+   "tools": [
+    "hyper_live_production_inspect",
+    "hyper_live_production_validate",
+    "hyper_live_production_apply_plan"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "ndisplay",
+    "led wall",
+    "cluster",
+    "virtual production",
+    "preflight",
+    "topology"
+   ],
+   "context": {
+    "selection": "assets",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "current_nodes",
+     "label": "Current nodes",
+     "default": "node_a 10.0.0.11 primary; node_b 10.0.0.12",
+     "hint": "id, host address, and primary for exactly one node"
+    },
+    {
+     "name": "desired_nodes",
+     "label": "Desired nodes",
+     "default": "node_a 10.0.0.11 primary; node_b 10.0.0.12; node_c 10.0.0.13",
+     "hint": "id, host address, and primary for exactly one node"
+    },
+    {
+     "name": "viewport",
+     "label": "Viewport per node (px)",
+     "default": "1920 x 1080"
+    }
+   ],
+   "prompt": "Preflight an nDisplay cluster change on {{selected_asset}} without applying it: from `{{current_nodes}}` to `{{desired_nodes}}`, each node with one viewport of {{viewport}}. If the live_production pack is unavailable, say so and stop.\n1. hyper_live_production_inspect with familyId ndisplay and targetPaths [{{selected_asset}}]; keep the snapshot's persistedFingerprint.\n2. Write both topologies from those lists: nodes sorted by nodeId (case-sensitive), each with an explicit hostAddress and exactly one bPrimary; one viewport per node, sorted by nodeId then viewportId, x and y from 0, positive width and height.\n3. hyper_live_production_validate with policy ndisplay_topology for each topology: 0 errors; fix any ordering, primary count or region it names.\n4. hyper_live_production_apply_plan with bDryRun true, targetPath {{selected_asset}}, expectedPersistedFingerprint, baseTopology and desiredTopology. Do not submit a non-dry run: this pack only preflights, and the change itself is made in the nDisplay editor.\nReply with a PASS/FAIL table: both topologies valid with their fingerprints; the plan's status, planHash and effects (node and viewport counts, physical effects). Then a short diff of the nodes and viewports added, changed or removed."
+  },
+  {
+   "id": "live-production.broadcast-graphics-check",
+   "title": "Check broadcast graphics assets before going on air",
+   "summary": "Identity snapshots and validation for Motion Design, Text 3D, SVG and media assets in the folder, with counts and a ready-for-air line.",
+   "packs": [
+    "live_production"
+   ],
+   "tools": [
+    "hyper_capability_report",
+    "hyper_project_search",
+    "hyper_live_production_inspect",
+    "hyper_live_production_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "broadcast",
+    "motion design",
+    "avalanche",
+    "text3d",
+    "svg",
+    "media",
+    "on air"
+   ],
+   "placeholders": [
+    {
+     "name": "program",
+     "label": "Programme",
+     "default": "the evening broadcast"
+    }
+   ],
+   "prompt": "Check the broadcast graphics under {{content_folder}} before {{program}} goes on air: Motion Design (Avalanche) scenes, Text 3D, SVG and media assets. Change nothing. If the live_production pack is unavailable, say so and stop.\n1. hyper_capability_report: confirm the live_production pack is live.\n2. hyper_project_search with kinds [asset] under {{content_folder}} for each family's assets, and load them with Epic's load_asset.\n3. hyper_live_production_inspect per family (familyId avalanche, text3d, svg and media) with those targetPaths; page with the cursor. Skip a family whose plugin is off and say so.\n4. hyper_live_production_validate with policy identity_snapshot on each snapshot.\nReply with a PASS/FAIL table, one row per asset: family, class matched, on disk, saved, identity complete, issues. Then counts per family and a ready-for-air line for {{program}}. Say plainly that playback, text content and media sources are not checked by these tools."
+  }
+ ]
+}

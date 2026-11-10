@@ -8,6 +8,7 @@
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioGameplayAIToolset.generated.h"
 
 /** One bounded, stable Gameplay AI finding. */
@@ -571,6 +572,22 @@ struct FHyperAIGameplayAIApplyPlanReport
 	TArray<FHyperAIGameplayAIVariantStatus> Variants;
 };
 
+/** hyper_gameplay_ai_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIGameplayAIApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIGameplayAIApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIGameplayAIApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIGameplayAIApplyPlanReport Value;
+};
+
 /** Exactly three names form the Gameplay AI pack's atomic cohort. */
 UCLASS()
 class HYPERAISTUDIOGAMEPLAYAI_API UHyperAIStudioGameplayAIToolset final : public UToolsetDefinition
@@ -585,7 +602,7 @@ public:
 		const FHyperAIGameplayAIInspectRequest& Request);
 
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|GameplayAI")
-	static FHyperAIGameplayAIApplyPlanReport hyper_gameplay_ai_apply_plan(
+	static UHyperAIGameplayAIApplyPlanResult* hyper_gameplay_ai_apply_plan(
 		const FHyperAIGameplayAIApplyPlanRequest& Request);
 
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|GameplayAI")
@@ -778,6 +795,8 @@ public:
 		const FString& OperationId,
 		const FString& PlanHash,
 		const FString& EffectFingerprint);
+	/** hyper_gameplay_ai_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIGameplayAIApplyPlanReport BuildFittedPlan(const FHyperAIGameplayAIApplyPlanRequest& Request);
 	static FHyperAIGameplayAIApplyPlanReport BuildPlan(
 		const FHyperAIGameplayAIApplyPlanRequest& Request);
 };

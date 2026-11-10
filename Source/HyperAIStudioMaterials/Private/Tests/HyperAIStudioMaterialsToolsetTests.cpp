@@ -11,6 +11,12 @@
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Misc/ScopeExit.h"
+#include "HyperAIStudioApprovalGate.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "ToolsetRegistry/ToolCallAsyncResultString.h"
+#include "ToolsetRegistry/UToolsetRegistry.h"
+#include "UObject/StrongObjectPtr.h"
 #include "ObjectTools.h"
 #include "Containers/Ticker.h"
 #include "HyperAIStudioTrustedExecution.h"
@@ -143,7 +149,7 @@ bool FHyperAIMaterialsManifestReflectionCohortTest::RunTest(const FString& Param
 {
 	const TArray<FHyperAIStudioMaterialManifestEntry>& Manifest =
 		FHyperAIStudioMaterialsContracts::GetManifest();
-	TestEqual(TEXT("atomic core Materials cohort owns exactly three names"), Manifest.Num(), 3);
+	TestEqual(TEXT("atomic core Materials cohort owns exactly four names"), Manifest.Num(), 4);
 	TestEqual(TEXT("canonical runtime toolset identity"),
 		FHyperAIStudioMaterialsContracts::GetQualifiedToolsetName(),
 		FString(TEXT("HyperAIStudioMaterials.HyperAIStudioMaterialsToolset")));
@@ -157,11 +163,12 @@ bool FHyperAIMaterialsManifestReflectionCohortTest::RunTest(const FString& Param
 	TestTrue(TEXT("exact inspect"), Names.Contains(TEXT("hyper_material_inspect")));
 	TestTrue(TEXT("exact apply"), Names.Contains(TEXT("hyper_material_apply_plan")));
 	TestTrue(TEXT("exact validate"), Names.Contains(TEXT("hyper_material_validate")));
+	TestTrue(TEXT("exact recipe"), Names.Contains(TEXT("hyper_material_recipe")));
 	TSet<FString> Reflected;
 	for (TFieldIterator<UFunction> It(UHyperAIStudioMaterialsToolset::StaticClass(),
 		EFieldIteratorFlags::ExcludeSuper); It; ++It)
 		if (It->HasMetaData(TEXT("AICallable"))) Reflected.Add(It->GetName());
-	TestEqual(TEXT("reflection exposes only the atomic cohort"), Reflected.Num(), 3);
+	TestEqual(TEXT("reflection exposes only the atomic cohort"), Reflected.Num(), 4);
 	TestTrue(TEXT("reflection/manifest exact"), Reflected.Difference(Names).IsEmpty()
 		&& Names.Difference(Reflected).IsEmpty());
 	TArray<FString> ExactNames = Names.Array(); ExactNames.Sort();
@@ -608,7 +615,7 @@ bool FHyperAIMaterialsCompoundContradictionAndStagedSafetyTest::RunTest(const FS
 	FHyperAIMaterialApplyPlanRequest Request;
 	Request.Operations.Add(CompoundOperation(Target));
 	const FHyperAIMaterialApplyPlanReport DryRun =
-		UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(Request);
+		FHyperAIStudioMaterialsContracts::BuildFittedPlan(Request);
 	TestTrue(TEXT("a valid compound create plans: ") + DryRun.Status + TEXT(" ") + DryRun.Diagnostic, DryRun.bOk);
 	TestEqual(TEXT("dry run reports planned"), DryRun.Status, FString(TEXT("planned")));
 	TestTrue(TEXT("the trusted executor prepared it"), DryRun.bTrustedPrepared);
@@ -623,7 +630,7 @@ bool FHyperAIMaterialsCompoundContradictionAndStagedSafetyTest::RunTest(const FS
 		FHyperAIStudioMaterialsContracts::GetAuthoringModeName());
 	TestNull(TEXT("dry run created no UObject"), FSoftObjectPath(Target).ResolveObject());
 	const FHyperAIMaterialApplyPlanReport SecondDryRun =
-		UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(Request);
+		FHyperAIStudioMaterialsContracts::BuildFittedPlan(Request);
 	TestEqual(TEXT("the plan hash is stable across dry runs"), SecondDryRun.PlanHash, DryRun.PlanHash);
 
 	FHyperAIMaterialPlanOperation Contradiction = CompoundOperation(
@@ -633,7 +640,7 @@ bool FHyperAIMaterialsCompoundContradictionAndStagedSafetyTest::RunTest(const FS
 	Contradiction.Edges = {A, B};
 	FHyperAIMaterialApplyPlanRequest Bad; Bad.Operations.Add(Contradiction);
 	const FHyperAIMaterialApplyPlanReport BadReport =
-		UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(Bad);
+		FHyperAIStudioMaterialsContracts::BuildFittedPlan(Bad);
 	TestFalse(TEXT("contradictory same-input writes rejected"), BadReport.bOk);
 	TestTrue(TEXT("contradiction issue emitted"), BadReport.Issues.ContainsByPredicate([](const auto& Issue)
 	{
@@ -649,7 +656,7 @@ bool FHyperAIMaterialsCompoundContradictionAndStagedSafetyTest::RunTest(const FS
 	FHyperAIMaterialApplyPlanRequest DuplicateRequest;
 	DuplicateRequest.Operations.Add(DuplicateParameter);
 	const FHyperAIMaterialApplyPlanReport DuplicateReport =
-		UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(DuplicateRequest);
+		FHyperAIStudioMaterialsContracts::BuildFittedPlan(DuplicateRequest);
 	TestFalse(TEXT("FName-equivalent duplicate parameter rejected before Prepare"),
 		DuplicateReport.bOk);
 	TestTrue(TEXT("duplicate parameter issue emitted"),
@@ -663,14 +670,20 @@ bool FHyperAIMaterialsCompoundContradictionAndStagedSafetyTest::RunTest(const FS
 	NonDry.OperationId = TEXT("materials-automation-operation-001");
 	NonDry.ExpectedPlanHash = TEXT("sha256:") + FString::ChrN(64, TEXT('0'));
 	const FHyperAIMaterialApplyPlanReport Stale =
-		UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(NonDry);
+		FHyperAIStudioMaterialsContracts::BuildFittedPlan(NonDry);
 	TestFalse(TEXT("a plan hash that was not reviewed is refused"), Stale.bOk);
 	TestEqual(TEXT("plan hash mismatch reported"), Stale.Status, FString(TEXT("plan_hash_mismatch")));
 	TestFalse(TEXT("nothing staged"), Stale.bStaged || Stale.bExecutionSubmitted);
 	TestNull(TEXT("a refused plan caused no mutation"), FSoftObjectPath(Target).ResolveObject());
+	// With one-shot edits turned off, a submission must echo the reviewed hash. (With them on, the same call would
+	// submit a real edit; OneShotApprovalAndWait covers that path.)
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bOneShot = Settings->bAllowOneShotAgentEdits;
+	Settings->bAllowOneShotAgentEdits = false;
+	ON_SCOPE_EXIT { Settings->bAllowOneShotAgentEdits = bOneShot; };
 	NonDry.ExpectedPlanHash.Reset();
-	TestEqual(TEXT("applying without expected_plan_hash is refused"),
-		UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(NonDry).Status, FString(TEXT("operation_identity_required")));
+	TestEqual(TEXT("applying without expected_plan_hash is refused when one-shot edits are off"),
+		FHyperAIStudioMaterialsContracts::BuildFittedPlan(NonDry).Status, FString(TEXT("operation_identity_required")));
 	return true;
 }
 
@@ -783,7 +796,7 @@ bool FHyperAIMaterialsBoundsPaginationCloneTest::RunTest(const FString& Paramete
 		FHyperAIStudioMaterialsContracts::VerifyRepairPostconditions(
 			RepairBackend, PureRepairShadow, RepairEffect, RepairError));
 	const FHyperAIMaterialApplyPlanReport RepairDryRun =
-		UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(RepairRequest);
+		FHyperAIStudioMaterialsContracts::BuildFittedPlan(RepairRequest);
 	TestFalse(TEXT("unsaved DoesNotExist repair target fails closed"), RepairDryRun.bOk);
 	TestTrue(TEXT("exact AR Exists requirement is reported"),
 		RepairDryRun.Issues.ContainsByPredicate([](const auto& Issue)
@@ -1190,7 +1203,7 @@ bool FHyperAIMaterialsEndToEndTest::RunTest(const FString& Parameters)
 
 	FHyperAIMaterialApplyPlanRequest Plan;
 	Plan.Operations = {Create, Instance};
-	const FHyperAIMaterialApplyPlanReport DryRun = UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(Plan);
+	const FHyperAIMaterialApplyPlanReport DryRun = FHyperAIStudioMaterialsContracts::BuildFittedPlan(Plan);
 	FString IssueText;
 	for (const FHyperAIMaterialIssue& Issue : DryRun.Issues) IssueText += Issue.Code + TEXT(": ") + Issue.Message + TEXT(" ");
 	TestTrue(*FString::Printf(TEXT("dry run plans (%s: %s %s)"), *DryRun.Status, *DryRun.Diagnostic, *IssueText), DryRun.bOk);
@@ -1200,7 +1213,7 @@ bool FHyperAIMaterialsEndToEndTest::RunTest(const FString& Parameters)
 	Plan.bDryRun = false;
 	Plan.OperationId = TEXT("materials-e2e-") + Suffix;
 	Plan.ExpectedPlanHash = DryRun.PlanHash;
-	const FHyperAIMaterialApplyPlanReport Submitted = UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(Plan);
+	const FHyperAIMaterialApplyPlanReport Submitted = FHyperAIStudioMaterialsContracts::BuildFittedPlan(Plan);
 	TestTrue(*FString::Printf(TEXT("submission accepted (%s: %s)"), *Submitted.Status, *Submitted.Diagnostic),
 		Submitted.bExecutionSubmitted);
 	FHyperAIStudioTypedArtifactOperationStatus Status;
@@ -1239,6 +1252,217 @@ bool FHyperAIMaterialsEndToEndTest::RunTest(const FString& Parameters)
 	}
 	AddInfo(FString::Printf(TEXT("%s: %d PS instructions, %d samplers, preview %s"), *MaterialName,
 		Validated.Stats.NumPixelShaderInstructions, Validated.Stats.NumSamplers, *Validated.PreviewImagePath));
+	return true;
+}
+
+namespace HyperAIStudio::Materials::OneShotTests
+{
+	/** Calls a tool the way MCP does, pumping the editor until its async result completes. */
+	/** Epic's registry wraps every tool result, sync or async, as {"returnValue": ...}. */
+	TSharedPtr<FJsonObject> Unwrap(const FString& Json)
+	{
+		TSharedPtr<FJsonObject> Object;
+		if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Object) || !Object.IsValid()) return nullptr;
+		const TSharedPtr<FJsonObject>* Inner = nullptr;
+		return Object->TryGetObjectField(TEXT("returnValue"), Inner) ? *Inner : Object;
+	}
+
+	TSharedPtr<FJsonObject> CallTool(const FString& Toolset, const FString& Tool, const FString& JsonInput, FString& OutError, const double TimeoutSeconds = 30.0)
+	{
+		UToolCallAsyncResultString* Result = UToolsetRegistry::ExecuteTool(Toolset, Tool, JsonInput);
+		const TStrongObjectPtr<UToolCallAsyncResultString> Keep(Result);
+		const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
+		while (Result && !Result->bIsComplete && FPlatformTime::Seconds() < Deadline)
+		{
+			FTSTicker::GetCoreTicker().Tick(0.02f);
+			FPlatformProcess::Sleep(0.005f);
+		}
+		if (!Result || !Result->bIsComplete)
+		{
+			OutError = TEXT("the tool did not complete in time");
+			return nullptr;
+		}
+		if (!Result->Error.IsEmpty())
+		{
+			OutError = Result->Error;
+			return nullptr;
+		}
+		const TSharedPtr<FJsonObject> Object = Unwrap(Result->Value);
+		if (!Object.IsValid())
+		{
+			OutError = TEXT("the result is not a JSON object: ") + Result->Value.Left(200);
+		}
+		return Object;
+	}
+
+	const TCHAR* const NativeToolset = TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset");
+
+	FString StatusOf(const FString& OperationId, FString& OutError)
+	{
+		const TSharedPtr<FJsonObject> Status = CallTool(NativeToolset, TEXT("hyper_operation_status"),
+			FString::Printf(TEXT("{\"operationId\":\"%s\"}"), *OperationId), OutError);
+		return Status.IsValid() ? Status->GetStringField(TEXT("status")) : FString();
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIMaterialsOneShotWaitTest,
+	"HyperAIStudio.NativeTools.Materials.OneShotApprovalAndWait",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIMaterialsOneShotWaitTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::Materials::OneShotTests;
+	if (!UToolsetRegistry::IsToolsetRegistered(NativeToolset))
+	{
+		AddWarning(TEXT("The native read toolset is not registered in this editor; nothing to test through the registry."));
+		return true;
+	}
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	const FString Name = TEXT("M_HyperAIOneShot_") + Suffix;
+	const FString MaterialPath = FString::Printf(TEXT("/Game/__HyperAIStudioTests/%s.%s"), *Name, *Name);
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bPreviousApproval = Settings->bRequireApprovalForAgentEdits;
+	const bool bPreviousOneShot = Settings->bAllowOneShotAgentEdits;
+	const EHyperAIStudioMaterialAuthoringMode PreviousMode = Settings->MaterialAuthoringMode;
+	Settings->bRequireApprovalForAgentEdits = true;
+	Settings->bAllowOneShotAgentEdits = true;
+	Settings->MaterialAuthoringMode = EHyperAIStudioMaterialAuthoringMode::Hybrid;
+	ON_SCOPE_EXIT
+	{
+		Settings->bRequireApprovalForAgentEdits = bPreviousApproval;
+		Settings->bAllowOneShotAgentEdits = bPreviousOneShot;
+		Settings->MaterialAuthoringMode = PreviousMode;
+		if (UMaterial* Made = Cast<UMaterial>(FSoftObjectPath(MaterialPath).ResolveObject()))
+		{
+			ObjectTools::ForceDeleteObjects({Made}, /*ShowConfirmation=*/false);
+		}
+	};
+
+	auto MakePlan = [&MaterialPath](const FString& OperationId)
+	{
+		FHyperAIMaterialNodeSpec Tint;
+		Tint.Kind = TEXT("vector_parameter");
+		Tint.NodeId = TEXT("tint");
+		Tint.Properties = {{TEXT("name"), TEXT("Tint")}, {TEXT("default"), TEXT("0.8,0.6,0.4,1")}};
+		FHyperAIMaterialPlanOperation Create;
+		Create.Type = TEXT("create_material");
+		Create.TargetPath = MaterialPath;
+		Create.Nodes = {Tint};
+		Create.Outputs = {{TEXT("base_color"), TEXT("tint"), FString()}};
+		FHyperAIMaterialApplyPlanRequest Plan;
+		Plan.Operations = {Create};
+		Plan.bDryRun = false;
+		Plan.OperationId = OperationId;
+		return Plan;
+	};
+
+	// A one-shot edit with approval on goes straight to the approval queue: no dry run, no hash.
+	const FString Rejected = TEXT("materials-oneshot-reject-") + Suffix;
+	const FHyperAIMaterialApplyPlanReport Queued = FHyperAIStudioMaterialsContracts::BuildFittedPlan(MakePlan(Rejected));
+	if (!TestEqual(*FString::Printf(TEXT("a one-shot edit is queued for approval (%s)"), *Queued.Diagnostic), Queued.Status, FString(TEXT("awaiting_user_approval"))))
+	{
+		return false;
+	}
+	FString Error;
+	TestEqual(TEXT("status reports the pending approval, not not_found"), StatusOf(Rejected, Error), FString(TEXT("awaiting_user_approval")));
+	TSharedPtr<FJsonObject> Wait = CallTool(NativeToolset, TEXT("hyper_operation_wait"),
+		FString::Printf(TEXT("{\"operationId\":\"%s\",\"timeoutMs\":5000}"), *Rejected), Error);
+	TestTrue(TEXT("wait returns at once while approval is needed: ") + Error,
+		Wait.IsValid() && Wait->GetStringField(TEXT("completedBecause")) == TEXT("awaiting_user_approval"));
+	FHyperAIStudioApprovalGate::Reject(Rejected, TEXT("test"));
+	TestEqual(TEXT("a rejected plan reads as rejected_by_user"), StatusOf(Rejected, Error), FString(TEXT("rejected_by_user")));
+	Wait = CallTool(NativeToolset, TEXT("hyper_operation_wait"), FString::Printf(TEXT("{\"operationId\":\"%s\"}"), *Rejected), Error);
+	TestTrue(TEXT("and wait says so"), Wait.IsValid() && Wait->GetStringField(TEXT("completedBecause")) == TEXT("rejected"));
+
+	// A wrong hash is still refused: the handshake is optional, not ignored.
+	FHyperAIMaterialApplyPlanRequest Wrong = MakePlan(TEXT("materials-oneshot-wrong-") + Suffix);
+	Wrong.ExpectedPlanHash = TEXT("sha256:0000000000000000000000000000000000000000000000000000000000000000");
+	TestEqual(TEXT("a mismatched hash is rejected"), FHyperAIStudioMaterialsContracts::BuildFittedPlan(Wrong).Status,
+		FString(TEXT("plan_hash_mismatch")));
+
+	// Waiting through approval: the wait holds while the user decides, then follows the edit to its end.
+	const FString Approved = TEXT("materials-oneshot-approve-") + Suffix;
+	TestEqual(TEXT("a second one-shot edit is queued"), FHyperAIStudioMaterialsContracts::BuildFittedPlan(MakePlan(Approved)).Status,
+		FString(TEXT("awaiting_user_approval")));
+	UToolCallAsyncResultString* Pending = UToolsetRegistry::ExecuteTool(NativeToolset, TEXT("hyper_operation_wait"),
+		FString::Printf(TEXT("{\"operationId\":\"%s\",\"timeoutMs\":60000,\"bWaitThroughApproval\":true}"), *Approved));
+	const TStrongObjectPtr<UToolCallAsyncResultString> KeepPending(Pending);
+	FTSTicker::GetCoreTicker().Tick(0.3f);
+	TestFalse(TEXT("the wait is still open while approval is pending"), Pending->bIsComplete);
+	TestTrue(TEXT("approving runs the edit: ") + Error, FHyperAIStudioApprovalGate::Approve(Approved, Error));
+	const double Deadline = FPlatformTime::Seconds() + 60.0;
+	while (!Pending->bIsComplete && FPlatformTime::Seconds() < Deadline)
+	{
+		FTSTicker::GetCoreTicker().Tick(0.02f);
+		FPlatformProcess::Sleep(0.005f);
+	}
+	TSharedPtr<FJsonObject> Done = Pending->bIsComplete ? Unwrap(Pending->Value) : nullptr;
+	const bool bParsed = Done.IsValid();
+	TestTrue(TEXT("the wait completes"), bParsed);
+	if (bParsed)
+	{
+		TestEqual(TEXT("because the edit finished"), Done->GetStringField(TEXT("completedBecause")), FString(TEXT("terminal")));
+		const TSharedPtr<FJsonObject>* Status = nullptr;
+		TestTrue(TEXT("with the operation completed"), Done->TryGetObjectField(TEXT("status"), Status)
+			&& (*Status)->GetStringField(TEXT("status")) == TEXT("completed"));
+	}
+	const UMaterial* Material = Cast<UMaterial>(FSoftObjectPath(MaterialPath).ResolveObject());
+	TestTrue(TEXT("the material exists and was saved"), Material && !Material->GetOutermost()->IsDirty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIMaterialsApplyRepliesWhenDoneTest,
+	"HyperAIStudio.NativeTools.Materials.ApplyRepliesWhenDone",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIMaterialsApplyRepliesWhenDoneTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::Materials::OneShotTests;
+	const FString MaterialsToolset = FHyperAIStudioMaterialsContracts::GetQualifiedToolsetName();
+	if (!UToolsetRegistry::IsToolsetRegistered(MaterialsToolset))
+	{
+		AddWarning(TEXT("The Materials toolset is not registered in this editor; nothing to test through the registry."));
+		return true;
+	}
+	const FString Suffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	const FString Name = TEXT("M_HyperAIApplyWait_") + Suffix;
+	const FString MaterialPath = FString::Printf(TEXT("/Game/__HyperAIStudioTests/%s.%s"), *Name, *Name);
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bPreviousApproval = Settings->bRequireApprovalForAgentEdits;
+	const EHyperAIStudioMaterialAuthoringMode PreviousMode = Settings->MaterialAuthoringMode;
+	Settings->bRequireApprovalForAgentEdits = false;
+	Settings->MaterialAuthoringMode = EHyperAIStudioMaterialAuthoringMode::Hybrid;
+	ON_SCOPE_EXIT
+	{
+		Settings->bRequireApprovalForAgentEdits = bPreviousApproval;
+		Settings->MaterialAuthoringMode = PreviousMode;
+		if (UMaterial* Made = Cast<UMaterial>(FSoftObjectPath(MaterialPath).ResolveObject()))
+		{
+			ObjectTools::ForceDeleteObjects({Made}, /*ShowConfirmation=*/false);
+		}
+	};
+
+	// As an agent sends it: one new material with a tint parameter feeding base colour.
+	const FString Request = FString::Printf(TEXT(
+		"{\"request\":{\"bDryRun\":false,\"operationId\":\"materials-apply-wait-%s\",\"operations\":[{\"type\":\"create_material\","
+		"\"targetPath\":\"%s\",\"nodes\":[{\"kind\":\"vector_parameter\",\"nodeId\":\"tint\",\"properties\":["
+		"{\"key\":\"name\",\"value\":\"Tint\"},{\"key\":\"default\",\"value\":\"0.2,0.6,0.9,1\"}]}],"
+		"\"outputs\":[{\"property\":\"base_color\",\"fromNodeId\":\"tint\",\"fromOutput\":\"\"}]}]}}"), *Suffix, *MaterialPath);
+
+	// One call plans, applies and waits: the reply is the edit's outcome, with no hyper_operation_wait after it.
+	FString Error;
+	const TSharedPtr<FJsonObject> Reply = CallTool(MaterialsToolset, TEXT("hyper_material_apply_plan"), Request, Error, 60.0);
+	if (!TestTrue(TEXT("the apply replies: ") + Error, Reply.IsValid()))
+	{
+		return false;
+	}
+	TestEqual(*FString::Printf(TEXT("once the edit has completed (%s)"), *Reply->GetStringField(TEXT("diagnostic"))),
+		Reply->GetStringField(TEXT("status")), FString(TEXT("completed")));
+	TestTrue(TEXT("and says it went well"), Reply->GetBoolField(TEXT("bOk")));
+	const UMaterial* Material = Cast<UMaterial>(FSoftObjectPath(MaterialPath).ResolveObject());
+	TestTrue(TEXT("the material exists and was saved"), Material && !Material->GetOutermost()->IsDirty());
 	return true;
 }
 

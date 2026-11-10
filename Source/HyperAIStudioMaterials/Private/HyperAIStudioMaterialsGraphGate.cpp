@@ -6,6 +6,7 @@
 #include "Editor.h"
 #include "Engine/Texture.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "MaterialEditingLibrary.h"
 #include "MaterialGraph/MaterialGraphNode.h"
 #include "MaterialShared.h"
@@ -19,7 +20,9 @@
 #include "Materials/MaterialExpressionConstant4Vector.h"
 #include "Materials/MaterialExpressionCosine.h"
 #include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionDepthFade.h"
 #include "Materials/MaterialExpressionDivide.h"
+#include "Materials/MaterialExpressionDynamicParameter.h"
 #include "Materials/MaterialExpressionFresnel.h"
 #include "Materials/MaterialExpressionFunctionInput.h"
 #include "Materials/MaterialExpressionFunctionOutput.h"
@@ -28,7 +31,11 @@
 #include "Materials/MaterialExpressionMax.h"
 #include "Materials/MaterialExpressionMin.h"
 #include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionNoise.h"
 #include "Materials/MaterialExpressionPanner.h"
+#include "Materials/MaterialExpressionParticleColor.h"
+#include "Materials/MaterialExpressionParticleRandom.h"
+#include "Materials/MaterialExpressionParticleSubUV.h"
 #include "Materials/MaterialExpressionPower.h"
 #include "Materials/MaterialExpressionRotator.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
@@ -219,7 +226,7 @@ namespace HyperAIStudio::Materials::Gate
 		T* ResolveAsset(const FString& Path, FString& OutError)
 		{
 			const FString Trimmed = Path.TrimStartAndEnd();
-			if (Trimmed.Len() > 512 || !Trimmed.StartsWith(TEXT("/")) || !FPackageName::IsValidObjectPath(Trimmed))
+			if (!FHyperAIStudioNames::IsObjectPath(Trimmed, nullptr) || !FPackageName::IsValidObjectPath(Trimmed))
 			{
 				OutError = FString::Printf(TEXT("'%s' is not an object path like /Game/Folder/Asset.Asset."), *Trimmed.Left(128));
 				return nullptr;
@@ -432,6 +439,14 @@ namespace HyperAIStudio::Materials::Gate
 			{TEXT("world_position"), TEXT("/Script/Engine.MaterialExpressionWorldPosition"), {TEXT("offsets")}},
 			{TEXT("object_position"), TEXT("/Script/Engine.MaterialExpressionObjectPositionWS"), {}},
 			{TEXT("vertex_color"), TEXT("/Script/Engine.MaterialExpressionVertexColor"), {}},
+			// Particle materials: what Niagara's sprite, ribbon and mesh renderers feed a material per particle.
+			{TEXT("particle_color"), TEXT("/Script/Engine.MaterialExpressionParticleColor"), {}},
+			{TEXT("particle_random"), TEXT("/Script/Engine.MaterialExpressionParticleRandom"), {}},
+			{TEXT("dynamic_parameter"), TEXT("/Script/Engine.MaterialExpressionDynamicParameter"), {TEXT("index"), TEXT("names"), TEXT("default")}},
+			{TEXT("particle_subuv"), TEXT("/Script/Engine.MaterialExpressionParticleSubUV"), {TEXT("texture"), TEXT("sampler_type"), TEXT("blend")}},
+			{TEXT("depth_fade"), TEXT("/Script/Engine.MaterialExpressionDepthFade"), {TEXT("fade_distance"), TEXT("opacity")}},
+			{TEXT("noise"), TEXT("/Script/Engine.MaterialExpressionNoise"),
+				{TEXT("scale"), TEXT("levels"), TEXT("output_min"), TEXT("output_max"), TEXT("turbulence"), TEXT("quality")}},
 			{TEXT("camera_vector"), TEXT("/Script/Engine.MaterialExpressionCameraVectorWS"), {}},
 			{TEXT("pixel_normal_ws"), TEXT("/Script/Engine.MaterialExpressionPixelNormalWS"), {}},
 			{TEXT("function_call"), TEXT("/Script/Engine.MaterialExpressionMaterialFunctionCall"), {TEXT("function")}},
@@ -522,6 +537,28 @@ namespace HyperAIStudio::Materials::Gate
 		{
 			Add(TEXT("name"), NameText(Switch->ParameterName)); Add(TEXT("group"), NameText(Switch->Group));
 			Add(TEXT("default"), BoolText(Switch->DefaultValue != 0));
+		}
+		else if (const auto* SubUv = Cast<UMaterialExpressionParticleSubUV>(&Expression))
+		{
+			Add(TEXT("texture"), SubUv->Texture ? SubUv->Texture->GetPathName() : FString());
+			Add(TEXT("sampler_type"), EnumName(static_cast<EMaterialSamplerType>(SubUv->SamplerType), SamplerTypes()));
+			Add(TEXT("blend"), BoolText(SubUv->bBlend != 0));
+		}
+		else if (const auto* Dynamic = Cast<UMaterialExpressionDynamicParameter>(&Expression))
+		{
+			Add(TEXT("index"), FString::FromInt(static_cast<int32>(Dynamic->ParameterIndex)));
+			Add(TEXT("names"), FString::Join(Dynamic->ParamNames, TEXT(",")));
+			Add(TEXT("default"), ColorText(Dynamic->DefaultValue));
+		}
+		else if (const auto* Fade = Cast<UMaterialExpressionDepthFade>(&Expression))
+		{
+			Add(TEXT("fade_distance"), FloatText(Fade->FadeDistanceDefault)); Add(TEXT("opacity"), FloatText(Fade->OpacityDefault));
+		}
+		else if (const auto* Noise = Cast<UMaterialExpressionNoise>(&Expression))
+		{
+			Add(TEXT("scale"), FloatText(Noise->Scale)); Add(TEXT("levels"), FString::FromInt(Noise->Levels));
+			Add(TEXT("output_min"), FloatText(Noise->OutputMin)); Add(TEXT("output_max"), FloatText(Noise->OutputMax));
+			Add(TEXT("turbulence"), BoolText(Noise->bTurbulence != 0)); Add(TEXT("quality"), FString::FromInt(Noise->Quality));
 		}
 		else if (const auto* TextureParameter = Cast<UMaterialExpressionTextureSampleParameter2D>(&Expression))
 		{
@@ -717,6 +754,51 @@ namespace HyperAIStudio::Materials::Gate
 			if (Key == TEXT("name")) return Name(TEXT("ParameterName"), E->ParameterName, false);
 			if (Key == TEXT("group")) return Name(TEXT("Group"), E->Group, true);
 			return Bool(TEXT("DefaultValue"), [E](const bool b) { E->DefaultValue = b ? 1 : 0; });
+		}
+		if (auto* E = Cast<UMaterialExpressionParticleSubUV>(&Expression))
+		{
+			if (Key == TEXT("blend")) return Bool(TEXT("bBlend"), [E](const bool b) { E->bBlend = b ? 1 : 0; });
+			return Key == TEXT("texture") ? TextureField(*E) : Sampler(E->SamplerType);
+		}
+		if (auto* E = Cast<UMaterialExpressionDynamicParameter>(&Expression))
+		{
+			if (Key == TEXT("default")) return Color(TEXT("DefaultValue"), E->DefaultValue);
+			if (Key == TEXT("index"))
+			{
+				int32 Index = 0;
+				return ParseInt(Value, 0, 3, Index)
+					? Commit(TEXT("ParameterIndex"), [&]() { E->ParameterIndex = static_cast<uint32>(Index); })
+					: Fail(OutError, TEXT("dynamic_parameter.index must be 0-3: which Dynamic Material Parameters module (0 is the first) feeds it."));
+			}
+			TArray<FString> Names;
+			Value.ParseIntoArray(Names, TEXT(","), false);
+			if (Names.Num() != 4)
+			{
+				return Fail(OutError, TEXT("dynamic_parameter.names must be four names, comma separated, one per channel (R,G,B,A)."));
+			}
+			for (FString& Each : Names)
+			{
+				Each.TrimStartAndEndInline();
+				FName Parsed;
+				if (!ParseName(Each, false, Parsed))
+				{
+					return Fail(OutError, TEXT("dynamic_parameter.names are 1-128 letters, digits, spaces, '_', '-' or '.'."));
+				}
+			}
+			return Commit(TEXT("ParamNames"), [&]() { E->ParamNames = Names; });
+		}
+		if (auto* E = Cast<UMaterialExpressionDepthFade>(&Expression))
+		{
+			return Key == TEXT("fade_distance") ? Float(TEXT("FadeDistanceDefault"), E->FadeDistanceDefault) : Float(TEXT("OpacityDefault"), E->OpacityDefault);
+		}
+		if (auto* E = Cast<UMaterialExpressionNoise>(&Expression))
+		{
+			if (Key == TEXT("scale")) return Float(TEXT("Scale"), E->Scale);
+			if (Key == TEXT("output_min")) return Float(TEXT("OutputMin"), E->OutputMin);
+			if (Key == TEXT("output_max")) return Float(TEXT("OutputMax"), E->OutputMax);
+			if (Key == TEXT("turbulence")) return Bool(TEXT("bTurbulence"), [E](const bool b) { E->bTurbulence = b ? 1 : 0; });
+			if (Key == TEXT("levels")) return Int(TEXT("Levels"), E->Levels, 1, 10);
+			return Int(TEXT("Quality"), E->Quality, 1, 4);
 		}
 		if (auto* E = Cast<UMaterialExpressionTextureSampleParameter2D>(&Expression))
 		{

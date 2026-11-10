@@ -8,6 +8,7 @@
 
 class UEdGraph;
 class UEdGraphNode;
+struct FHyperAIStudioMcpFinding;
 
 enum class EHyperAIStudioSetupOutcome : uint8
 {
@@ -32,6 +33,8 @@ struct FHyperAIStudioStatus
 	bool bToolsListReachable = false;
 	bool bAgentFilesReady = false;
 	bool bProbeInProgress = false;
+	/** The editor has not finished starting, so its own MCP server cannot answer yet; the probe waits for it. */
+	bool bEditorStarting = false;
 	bool bHasProbeRun = false;
 	bool bCapabilityInventoryAvailable = false;
 	bool bCapabilityInventoryInProgress = false;
@@ -150,6 +153,23 @@ public:
 	bool StopUnrealMCP(FText& OutMessage) const;
 	bool RestartUnrealMCP(FText& OutMessage) const;
 	bool GenerateProjectFiles(FText& OutMessage) const;
+	/** False when AGENTS.md or CLAUDE.md holds a HyperAIStudio block other than the one this build writes. */
+	bool AreAgentInstructionsCurrent() const;
+	/**
+	 * Writes the Project Memory block into AGENTS.md, beside the main managed block and with its own markers,
+	 * once Setup has created AGENTS.md. Never touches the other managed files, so it needs no project lock.
+	 */
+	static bool RefreshMemoryInstructions();
+	/**
+	 * Writes the Other MCP Servers block into AGENTS.md, with its own markers, while servers that change this editor
+	 * outside HyperAI are found (FHyperAIStudioMcpBypassMonitor), and removes it when none are. Like the memory block,
+	 * only once Setup has created AGENTS.md, and never touching the other managed files.
+	 */
+	static bool RefreshMcpBypassInstructions();
+	/** The same, for this AGENTS.md and these findings: the block, or none when no finding changes this editor. */
+	static bool WriteMcpBypassInstructions(const FString& AgentsPath, const TArray<FHyperAIStudioMcpFinding>& Findings);
+	/** The managed AGENTS.md block Setup would write with the current settings. */
+	static FString BuildAgentsInstructionText();
 	bool CreateQuickConnectPromptPackage(const FString& AgentName, FHyperAIStudioPromptPackage& OutPackage, FText& OutMessage) const;
 	bool CreatePromptPackage(const FString& UserIntent, const FString& AgentName, FHyperAIStudioPromptPackage& OutPackage, FText& OutMessage) const;
 	bool CreatePromptPackageForAssets(const FString& UserIntent, const FString& AgentName, const TArray<FAssetData>& SelectedAssets, FHyperAIStudioPromptPackage& OutPackage, FText& OutMessage) const;
@@ -186,8 +206,26 @@ public:
 		bool bRuntimeEnabled,
 		bool bProjectDescriptorEnabled);
 	static FString FindUnsupportedCodexServiceTierConfigPath();
+	/**
+	 * Probes this editor's own Unreal MCP server with initialize and tools/list. Until the editor has finished starting
+	 * (FHyperAIStudioEditorStartupGate) nothing is sent: the probe waits and runs as soon as the editor can answer.
+	 * Returns true when it was sent at once. Other servers are probed without waiting (TestExtraMCPServerAsync).
+	 */
+	static bool ProbeOwnServerToolsListAsync(const FString& Endpoint, TFunction<void(bool bReachable, const FString& Message, int32 ToolCount)> OnComplete);
 	static bool FindExecutableOnPath(const FString& ExecutableName, FString& OutPath);
 	static FString GetCodexTerminalLaunchCommand();
+	/**
+	 * Codex's root options HyperAI adds to every launch, terminal or app-server: Unreal MCP by -c, because Codex reads
+	 * a project's .codex/config.toml only once the project is trusted; and, when an OpenAI key is stored in Settings >
+	 * Agents, a provider that takes it from OPENAI_API_KEY (and the stored base URL), since Codex's own provider does
+	 * not read that variable. Starts with a space when not empty.
+	 */
+	static FString GetCodexRootArguments();
+	/**
+	 * Claude Code's --settings file that approves the project's own unreal-mcp server in .mcp.json, which an
+	 * interactive session would otherwise ask about first. Written when missing; empty when it cannot be.
+	 */
+	static FString GetClaudeLaunchSettingsFile();
 	static FString GetAgentTerminalLaunchCommand(const FString& AgentName);
 
 private:

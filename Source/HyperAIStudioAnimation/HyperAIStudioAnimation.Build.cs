@@ -21,6 +21,7 @@ public class HyperAIStudioAnimation : ModuleRules
 			"ToolsetRegistry",
 			"UnrealEd",
 			"AnimGraph",
+			"AnimationBlueprintLibrary",
 			"BlueprintGraph",
 			"Kismet",
 			"Projects"

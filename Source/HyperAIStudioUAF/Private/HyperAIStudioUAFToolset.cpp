@@ -1,6 +1,9 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioUAFToolset.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioOperationWait.h"
+#include "HyperAIStudioRequestFit.h"
 
 #include "Editor.h"
 #include "Engine/Engine.h"
@@ -8,6 +11,7 @@
 #include "Graph/AnimNextAnimationGraph.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioUAFCookbook.h"
@@ -105,7 +109,7 @@ namespace HyperAIStudio::UAF::Private
 			FString Error;
 			if (Payload.bCreate)
 			{
-				if (Graph || FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(Payload.TargetPath)))
+				if (Graph || !FHyperAIStudioNames::IsFreePackage(FPackageName::ObjectPathToPackageName(Payload.TargetPath)))
 				{
 					return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("create_precondition_changed"),
 						TEXT("An asset appeared at target_path after planning; nothing was created."));
@@ -223,7 +227,8 @@ bool FHyperAIStudioUAFContracts::IsCanonicalProjectObjectPath(const FString& Pat
 		if (Character < 0x20 || Character == 0x7F) return false;
 	}
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason)) return false;
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason)) return false;
 	const FString PackageName = FPackageName::ObjectPathToPackageName(Path);
 	const FString ObjectName = FPackageName::ObjectPathToObjectName(Path);
 	return !PackageName.IsEmpty() && !ObjectName.IsEmpty() && FPackageName::GetLongPackageAssetName(PackageName) == ObjectName;
@@ -547,13 +552,20 @@ FHyperAIUAFApplyPlanReport FHyperAIStudioUAFContracts::BuildPlan(const FHyperAIU
 	{
 		return Reject(TEXT("game_thread_required"), TEXT("UAF graph planning runs on the game thread."));
 	}
+	// Ops' node, trait and variable names become FNames, which stop the editor past an FName's length. Values have
+	// their own bound of 512 characters, which an FName holds.
+	FString NameReason;
+	if (!FHyperAIStudioNames::CheckRequest(Request, &NameReason, {TEXT("Value")}))
+	{
+		return Reject(TEXT("invalid_request"), NameReason);
+	}
 	if (Request.bDryRun && (!Request.OperationId.IsEmpty() || !Request.ExpectedPlanHash.IsEmpty()))
 	{
 		return Reject(TEXT("unexpected_submission_fields"), TEXT("A dry run takes no operation_id or expected_plan_hash."));
 	}
-	if (!Request.bDryRun && (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId) || !IsCanonicalSha256(Request.ExpectedPlanHash)))
+	if (!Request.bDryRun && (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId) || !FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(Request.ExpectedPlanHash)))
 	{
-		return Reject(TEXT("invalid_submission_fields"), TEXT("A non-dry submission needs a valid operation_id and the plan_hash its dry run returned."));
+		return Reject(TEXT("invalid_submission_fields"), FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage());
 	}
 	if (!IsCanonicalProjectObjectPath(Request.TargetPath)
 		|| (Request.bCreate ? !Request.ExpectedRevision.IsEmpty() : !IsCanonicalSha256(Request.ExpectedRevision)))
@@ -573,7 +585,8 @@ FHyperAIUAFApplyPlanReport FHyperAIStudioUAFContracts::BuildPlan(const FHyperAIU
 	FString Error;
 	if (Request.bCreate)
 	{
-		if (Graph || FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(Request.TargetPath)))
+		// Free in memory too: an unsaved asset there of another class would stop the editor when the graph is made.
+		if (Graph || !FHyperAIStudioNames::IsFreePackage(FPackageName::ObjectPathToPackageName(Request.TargetPath)))
 		{
 			return Reject(TEXT("target_exists"), TEXT("An asset already exists at target_path; inspect and edit it instead."));
 		}
@@ -656,7 +669,7 @@ FHyperAIUAFApplyPlanReport FHyperAIStudioUAFContracts::BuildPlan(const FHyperAIU
 		Report.Diagnostic = TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash.");
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Payload->SemanticFingerprint)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("plan_hash_mismatch"), TEXT("The plan changed since its dry run (ops or graph state). Dry-run again and review it."));
 	}
@@ -687,33 +700,23 @@ FHyperAIUAFApplyPlanReport FHyperAIStudioUAFContracts::BuildPlan(const FHyperAIU
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Poll hyper_operation_status with operation_id: it starts once approved.");
+		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
 		return Report;
 	}
 
-	FHyperAIStudioTypedArtifactStageReceipt Receipt;
-	FHyperAIStudioTrustedExecutionDiagnostic StageStatus;
-	FString StageError;
-	if (!FHyperAIStudioTrustedExecutionFacade::StageExact(Prepared, Request.OperationId, Receipt, StageStatus, StageError))
+	// Another agent's edit may own the project lane; then this one waits its turn, and hyper_operation_wait
+	// waits through the queue as well as the edit.
+	FString QueueStatus;
+	FString QueueError;
+	if (!FHyperAIStudioExecutionQueue::Submit(Prepared, Request.OperationId, QueueStatus, QueueError))
 	{
-		return Reject(StageStatus.StatusCode.IsEmpty() ? FString(TEXT("stage_failed")) : StageStatus.StatusCode,
-			StageError.IsEmpty() ? StageStatus.Diagnostic : StageError);
+		return Reject(*QueueStatus, QueueError);
 	}
-	Report.bStaged = true;
-	FHyperAIStudioTypedArtifactSubmissionReceipt Submission;
-	FHyperAIStudioTrustedExecutionDiagnostic SubmitStatus;
-	FString SubmitError;
-	// Edit is tokenless; only risky safety classes need a server-issued grant.
-	if (!FHyperAIStudioTrustedExecutionFacade::SubmitExact(Receipt, FString(), Submission, SubmitStatus, SubmitError))
-	{
-		Report.Status = SubmitStatus.StatusCode.IsEmpty() ? FString(TEXT("submit_failed")) : SubmitStatus.StatusCode;
-		Report.Diagnostic = SubmitError.IsEmpty() ? SubmitStatus.Diagnostic : SubmitError;
-		return Report;
-	}
-	Report.bExecutionSubmitted = true;
+	Report.bStaged = QueueStatus == TEXT("submitted");
+	Report.bExecutionSubmitted = Report.bStaged;
 	Report.bOk = true;
-	Report.Status = TEXT("submitted");
-	Report.Diagnostic = TEXT("The edit and compile run over the next editor ticks. Poll hyper_operation_status until it is terminal, then hyper_uaf_validate.");
+	Report.Status = QueueStatus;
+	Report.Diagnostic = TEXT("The edit and compile run over the next editor ticks. Call hyper_operation_wait with operation_id, then hyper_uaf_validate.");
 	return Report;
 }
 
@@ -722,9 +725,19 @@ FHyperAIUAFInspectReport UHyperAIStudioUAFToolset::hyper_uaf_inspect(const FHype
 	return FHyperAIStudioUAFContracts::Inspect(Request);
 }
 
-FHyperAIUAFApplyPlanReport UHyperAIStudioUAFToolset::hyper_uaf_apply_plan(const FHyperAIUAFApplyPlanRequest& Request)
+UHyperAIUAFApplyPlanResult* UHyperAIStudioUAFToolset::hyper_uaf_apply_plan(const FHyperAIUAFApplyPlanRequest& Request)
 {
-	return FHyperAIStudioUAFContracts::BuildPlan(Request);
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIUAFApplyPlanResult>(FHyperAIStudioUAFContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIUAFApplyPlanReport FHyperAIStudioUAFContracts::BuildFittedPlan(const FHyperAIUAFApplyPlanRequest& InRequest)
+{
+	FHyperAIUAFApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAIUAFApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return FHyperAIStudioUAFContracts::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAIUAFValidateReport UHyperAIStudioUAFToolset::hyper_uaf_validate(const FHyperAIUAFValidateRequest& Request)

@@ -10,11 +10,12 @@
 #include "HyperAIStudioDiagnoseToolset.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioLogTailToolset.h"
+#include "HyperAIStudioEditorRestart.h"
 #include "HyperAIStudioNativeReadToolset.h"
 #include "HyperAIStudioPIEPlaytestToolset.h"
 #include "HyperAIStudioPlanExecuteToolset.h"
 #include "HyperAIStudioPlanValidateToolset.h"
-#include "HyperAIStudioViewportCaptureToolset.h"
+#include "HyperAIStudioSourceControlToolset.h"
 #include "Misc/ScopeLock.h"
 #include "ToolsetRegistry/Toolset.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
@@ -216,8 +217,9 @@ namespace HyperAIStudio::CapabilityRuntimeIndex::Private
 			{ UHyperAIStudioDiagnoseToolset::StaticClass() },
 			{ UHyperAIStudioAuditToolset::StaticClass() },
 			{ UHyperAIStudioLogTailToolset::StaticClass() },
-			{ UHyperAIStudioViewportCaptureToolset::StaticClass() },
-			{ UHyperAIStudioPIEPlaytestToolset::StaticClass() }
+			{ UHyperAIStudioPIEPlaytestToolset::StaticClass() },
+			{ UHyperAIStudioEditorRestartToolset::StaticClass() },
+			{ UHyperAIStudioSourceControlToolset::StaticClass() }
 		};
 	}
 

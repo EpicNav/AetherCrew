@@ -10,11 +10,14 @@ public class HyperAIStudioLighting : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
+			// Registers the LUT textures and cloud material instances a plan makes.
+			"AssetRegistry",
 			"Core",
 			"CoreUObject",
 			"Engine",
 			"HyperAIStudio",
 			"ImageCore",
+			"Json",
 			"RenderCore",
 			"ToolsetRegistry",
 			"UnrealEd"

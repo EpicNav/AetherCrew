@@ -10,6 +10,7 @@
 #include "Misc/AssetRegistryInterface.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioPaper2DToolset.generated.h"
 
 USTRUCT(BlueprintType)
@@ -283,6 +284,22 @@ struct FHyperAIPaper2DApplyPlanReport
 	UPROPERTY() TArray<FHyperAIPaper2DCapabilityStatus> Capabilities;
 };
 
+/** hyper_paper2d_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIPaper2DApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIPaper2DApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIPaper2DApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIPaper2DApplyPlanReport Value;
+};
+
 /** Exactly three functions form the Paper2D atomic cohort. */
 UCLASS()
 class HYPERAISTUDIOPAPER2D_API UHyperAIStudioPaper2DToolset final : public UToolsetDefinition
@@ -297,7 +314,7 @@ public:
 		const FHyperAIPaper2DInspectRequest& Request);
 
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Paper2D")
-	static FHyperAIPaper2DApplyPlanReport hyper_paper2d_apply_plan(
+	static UHyperAIPaper2DApplyPlanResult* hyper_paper2d_apply_plan(
 		const FHyperAIPaper2DApplyPlanRequest& Request);
 
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Paper2D")
@@ -451,6 +468,8 @@ public:
 		FHyperAIPaper2DValidateReport& OutReport);
 	static FHyperAIPaper2DInspectReport Inspect(const FHyperAIPaper2DInspectRequest& Request);
 	static FHyperAIPaper2DValidateReport Validate(const FHyperAIPaper2DValidateRequest& Request);
+	/** hyper_paper2d_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIPaper2DApplyPlanReport BuildFittedPlan(const FHyperAIPaper2DApplyPlanRequest& Request);
 	static FHyperAIPaper2DApplyPlanReport BuildPlan(
 		const FHyperAIPaper2DApplyPlanRequest& Request);
 	/** Public-API support matrix for the default fast reversible edit path. */

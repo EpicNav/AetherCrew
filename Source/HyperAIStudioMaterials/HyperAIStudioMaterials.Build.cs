@@ -15,7 +15,11 @@ public class HyperAIStudioMaterials : ModuleRules
 			"Engine",
 			"AssetRegistry",
 			"HyperAIStudio",
+			"Json",
+			// Landscape layer blend and coordinates nodes for the landscape_layers recipe.
+			"Landscape",
 			"MaterialEditor",
+			"RenderCore",
 			"RHI",
 			"ToolsetRegistry",
 			"UnrealEd"

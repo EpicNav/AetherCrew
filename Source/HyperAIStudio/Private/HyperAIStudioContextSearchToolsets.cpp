@@ -17,6 +17,10 @@
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioProjectAssetIndex.h"
+#include "HyperAIStudioSemanticSearch.h"
+#include "HyperAIStudioSettings.h"
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "IModelContextProtocolModule.h"
 #include "Internationalization/Text.h"
@@ -58,6 +62,11 @@ namespace HyperAIStudio::ContextSearch::Private
 	constexpr double MaxEditorCaptureSeconds = 0.050;
 	constexpr double MaxCppIndexSeconds = 1.500;
 	constexpr double MaxProjectSearchSeconds = 0.010;
+	/**
+	 * How long a first search waits for the index: the C++ pass and its enumeration, with room to spare. The asset
+	 * walk runs on the game thread inside the same window, so it does not add to it.
+	 */
+	constexpr double FirstSearchWaitSeconds = MaxCppIndexSeconds + 1.0;
 	constexpr int32 MaxHashTokens = 262144;
 	constexpr int32 MaxHashUtf16Characters = 24 * 1024 * 1024;
 	constexpr int64 MaxHashUtf8Bytes = 64ll * 1024ll * 1024ll;
@@ -715,8 +724,8 @@ namespace HyperAIStudio::ContextSearch::Private
 	{
 		static const TSet<FString> Values = {
 			TEXT("name"), TEXT("asset_name"), TEXT("asset_class_path"), TEXT("package_name"),
-			TEXT("object_path"), TEXT("symbol_kind"), TEXT("relative_path"), TEXT("line"),
-			TEXT("status"), TEXT("generation"), TEXT("asset_count"), TEXT("cpp_file_count"),
+			TEXT("object_path"), TEXT("parent_class_path"), TEXT("symbol_kind"), TEXT("relative_path"), TEXT("line"),
+			TEXT("match"), TEXT("score"), TEXT("status"), TEXT("generation"), TEXT("asset_count"), TEXT("cpp_file_count"),
 			TEXT("cpp_symbol_count"), TEXT("total_record_count")
 		};
 		return Values;
@@ -726,7 +735,8 @@ namespace HyperAIStudio::ContextSearch::Private
 	{
 		static const TArray<FString> Values = {
 			TEXT("name"), TEXT("asset_name"), TEXT("asset_class_path"), TEXT("package_name"),
-			TEXT("object_path"), TEXT("symbol_kind"), TEXT("relative_path"), TEXT("line")
+			TEXT("object_path"), TEXT("parent_class_path"), TEXT("symbol_kind"), TEXT("relative_path"), TEXT("line"),
+			TEXT("match"), TEXT("score")
 		};
 		return Values;
 	}
@@ -1318,7 +1328,8 @@ bool FHyperAIStudioContextSearchContracts::ProjectPage(
 	const int32 PageSize,
 	const FString& Cursor,
 	const int32 MaxOutputBytesValue,
-	FHyperAIReadReport& OutReport)
+	FHyperAIReadReport& OutReport,
+	const bool bKeepOrder)
 {
 	using namespace HyperAIStudio::ContextSearch::Private;
 	OutReport = FHyperAIReadReport();
@@ -1342,7 +1353,8 @@ bool FHyperAIStudioContextSearchContracts::ProjectPage(
 
 	const TArray<FHyperAIContextSearchValueRecord>* Records = &Snapshot.Records;
 	TArray<FHyperAIContextSearchValueRecord> CanonicalRecords;
-	if (!RecordsAreCanonical(Snapshot.Records))
+	// A ranked search keeps its order, best first; its records come with their fields sorted and no duplicates.
+	if (!bKeepOrder && !RecordsAreCanonical(Snapshot.Records))
 	{
 		CanonicalRecords = Snapshot.Records;
 		SortAndDeduplicateRecords(CanonicalRecords);
@@ -1764,6 +1776,14 @@ bool FHyperAIStudioContextSearchContracts::EnumerateProjectCppSourceFiles(
 		}
 	}
 
+	// HyperAI Studio's Source/Epic59 holds Epic's UE 5.9 toolsets ported to 5.8 (vendored engine code, not the project's):
+	// left in, its 2 MB fill the symbol bound before HyperAI's own sources and the project's later plugins are read.
+	FString ExcludedEpic59Directory;
+	if (const TSharedPtr<IPlugin> HyperAIPlugin = IPluginManager::Get().FindPlugin(TEXT("HyperAIStudio")))
+	{
+		ExcludedEpic59Directory = FPaths::ConvertRelativePathToFull(FPaths::Combine(HyperAIPlugin->GetBaseDir(), TEXT("Source"), TEXT("Epic59")));
+	}
+
 	PendingDirectories.Sort();
 	TSet<FString> VisitedFinalDirectories;
 	int32 DirectoriesProcessed = 0;
@@ -1822,7 +1842,10 @@ bool FHyperAIStudioContextSearchContracts::EnumerateProjectCppSourceFiles(
 			}
 			if ((Entry.Attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
 			{
-				PendingDirectories.Add(Child);
+				if (ExcludedEpic59Directory.IsEmpty() || !FPaths::IsSamePath(Child, ExcludedEpic59Directory))
+				{
+					PendingDirectories.Add(Child);
+				}
 			}
 			else if (IsCppExtension(Child))
 			{
@@ -3230,9 +3253,126 @@ namespace HyperAIStudio::ContextSearch::Private
 	}
 }
 
+namespace HyperAIStudio::ContextSearch::Private
+{
+	/** Stands in for "no asset index": no rows, no diagnostics, and no say in completeness. */
+	const FHyperAIProjectAssetIndexSnapshot& NotAttachedAssetSnapshot()
+	{
+		static const FHyperAIProjectAssetIndexSnapshot Snapshot = []
+		{
+			FHyperAIProjectAssetIndexSnapshot Value;
+			Value.Status = TEXT("not_attached");
+			return Value;
+		}();
+		return Snapshot;
+	}
+
+	/**
+	 * Epic's SemanticSearch plugin, read from its plugin state and saved settings without loading it: its embeddings and
+	 * captions come from an OpenAI-compatible HTTP API, so HyperAI says where that is and never sends it anything.
+	 */
+	FString DescribeEpicSemanticSearch()
+	{
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SemanticSearch"));
+		if (!Plugin.IsValid())
+		{
+			return TEXT("not_installed");
+		}
+		if (!Plugin->IsEnabled())
+		{
+			return TEXT("not_enabled: Epic's SemanticSearch (Experimental) is off here. HyperAI does not use it: its only embedding provider is an OpenAI-compatible HTTP API.");
+		}
+		FString Url = TEXT("https://api.openai.com/v1");
+		if (GConfig)
+		{
+			GConfig->GetString(TEXT("/Script/SemanticSearch.SemanticSearchSettings"), TEXT("EmbeddingBaseUrl"), Url, GEditorPerProjectIni);
+		}
+		const FString Lower = Url.ToLower();
+		const bool bLocal = Lower.Contains(TEXT("://localhost")) || Lower.Contains(TEXT("://127.0.0.1")) || Lower.Contains(TEXT("://[::1]"));
+		return FString::Printf(TEXT("%s: Epic's SemanticSearch is enabled and embeds through %s. HyperAI's project search does not call it."),
+			bLocal ? TEXT("enabled_local_endpoint") : TEXT("enabled_remote_endpoint"), *Url);
+	}
+
+	bool IsAssetSnapshotAttached(const FHyperAIProjectAssetIndexSnapshot& Assets)
+	{
+		return Assets.Status != TEXT("not_attached");
+	}
+
+	/** The first walk has not finished, so an empty asset index says nothing about what the project holds. */
+	bool IsAssetIndexUnfinished(const FHyperAIProjectAssetIndexSnapshot& Assets)
+	{
+		return !Assets.bHasCompletedWalk
+			&& (Assets.Status == TEXT("uninitialized") || Assets.Status == TEXT("indexing")
+				|| Assets.Status == TEXT("waiting_for_registry"));
+	}
+
+	/** One lifecycle for the C++ pass and the asset walk together; without an asset index it is the C++ status. */
+	FString ComposeProjectIndexStatus(const FString& CppStatus, const FHyperAIProjectAssetIndexSnapshot& Assets)
+	{
+		if (!IsAssetSnapshotAttached(Assets))
+		{
+			return CppStatus;
+		}
+		if (CppStatus == TEXT("failed"))
+		{
+			return TEXT("failed");
+		}
+		if (CppStatus == TEXT("uninitialized") && Assets.Status == TEXT("uninitialized"))
+		{
+			return TEXT("uninitialized");
+		}
+		if (CppStatus == TEXT("indexing")
+			|| (!Assets.bHasCompletedWalk
+				&& (Assets.Status == TEXT("indexing") || Assets.Status == TEXT("waiting_for_registry"))))
+		{
+			return TEXT("indexing");
+		}
+		return CppStatus == TEXT("ready") && Assets.Status == TEXT("ready") ? TEXT("ready") : TEXT("partial");
+	}
+
+	bool MatchesAllTerms(const FString& SearchTextLower, const TArray<FString>& Terms)
+	{
+		for (const FString& Term : Terms)
+		{
+			if (!SearchTextLower.Contains(Term, ESearchCase::CaseSensitive))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	FHyperAIContextSearchValueRecord MakeAssetRecord(const FHyperAIProjectAssetRow& Row)
+	{
+		FHyperAIContextSearchValueRecord Record;
+		Record.Kind = TEXT("asset");
+		Record.RecordId = Row.ObjectPath.ToString();
+		Record.SearchTextLower = Row.SearchTextLower;
+		const FString AssetName = Row.ObjectPath.GetAssetName();
+		AddField(Record, TEXT("name"), TEXT("name"), AssetName);
+		AddField(Record, TEXT("asset_name"), TEXT("name"), AssetName);
+		AddField(Record, TEXT("asset_class_path"), TEXT("class_path"), Row.ClassPath.ToString());
+		AddField(Record, TEXT("package_name"), TEXT("package_name"), Row.ObjectPath.GetLongPackageName());
+		AddField(Record, TEXT("object_path"), TEXT("object_path"), Record.RecordId);
+		if (!Row.ParentClassPath.IsNone())
+		{
+			AddField(Record, TEXT("parent_class_path"), TEXT("class_path"), Row.ParentClassPath.ToString());
+		}
+		return Record;
+	}
+}
+
 FHyperAIReadReport FHyperAIStudioContextSearchContracts::SearchProjectIndex(
 	const FHyperAIProjectIndexValueSnapshot& Snapshot,
 	const FHyperAIProjectSearchRequest& Request)
+{
+	return SearchProjectIndex(Snapshot, Request, HyperAIStudio::ContextSearch::Private::NotAttachedAssetSnapshot());
+}
+
+FHyperAIReadReport FHyperAIStudioContextSearchContracts::SearchProjectIndex(
+	const FHyperAIProjectIndexValueSnapshot& Snapshot,
+	const FHyperAIProjectSearchRequest& Request,
+	const FHyperAIProjectAssetIndexSnapshot& Assets)
 {
 	using namespace HyperAIStudio::ContextSearch::Private;
 	FString ErrorCode;
@@ -3271,83 +3411,221 @@ FHyperAIReadReport FHyperAIStudioContextSearchContracts::SearchProjectIndex(
 	{
 		return InvalidReport(ErrorCode, TEXT("fields"), Error);
 	}
-
-	if (Snapshot.Value.Records.IsEmpty() && (Snapshot.Status == TEXT("uninitialized") || Snapshot.Status == TEXT("indexing")))
+	const FString Mode = Request.Mode.TrimStartAndEnd().ToLower().IsEmpty() ? FString(TEXT("auto")) : Request.Mode.TrimStartAndEnd().ToLower();
+	if (Mode != TEXT("auto") && Mode != TEXT("literal") && Mode != TEXT("semantic") && Mode != TEXT("hybrid"))
 	{
+		return InvalidReport(TEXT("invalid_mode"), TEXT("mode"), TEXT("Mode is literal, semantic, hybrid or auto (empty)."));
+	}
+
+	TSet<FString> KindSet(Kinds);
+	// Without an asset index, asset records can only come from the value snapshot (fixtures), so it speaks for every
+	// kind, as it always did. With one, an asset-only search does not inherit the C++ pass's bounds, and the reverse.
+	const bool bAssetsAttached = IsAssetSnapshotAttached(Assets);
+	const bool bValuePartCounts = !bAssetsAttached || KindSet.Contains(TEXT("cpp_symbol"));
+	const bool bAssetPartCounts = bAssetsAttached && KindSet.Contains(TEXT("asset"));
+	const bool bValueUnfinished = Snapshot.Value.Records.IsEmpty()
+		&& (Snapshot.Status == TEXT("uninitialized") || Snapshot.Status == TEXT("indexing"));
+	const bool bAssetsUnfinished = Assets.Folders.IsEmpty() && IsAssetIndexUnfinished(Assets);
+	if ((!bValuePartCounts || bValueUnfinished) && (!bAssetPartCounts || bAssetsUnfinished))
+	{
+		const bool bIndexing = (bValuePartCounts && Snapshot.Status == TEXT("indexing"))
+			|| (bAssetPartCounts && Assets.Status != TEXT("uninitialized"));
 		FHyperAIReadReport Report;
-		Report.Status = Snapshot.Status;
-		Report.Diagnostic = Snapshot.Status == TEXT("indexing")
+		Report.Status = bIndexing ? TEXT("indexing") : TEXT("uninitialized");
+		Report.Diagnostic = bIndexing
 			? TEXT("The bounded project index is being built; poll hyper_project_index_status and retry.")
 			: TEXT("No immutable project index is available; request refresh through hyper_project_index_status.");
 		Report.ObservationScope = TEXT("project_on_disk_index");
 		Report.bOnDiskOnly = true;
 		Report.bIncomplete = true;
 		Report.SnapshotGeneration = Snapshot.Value.Generation;
+		if (bAssetPartCounts)
+		{
+			Report.Diagnostics = Assets.Diagnostics;
+		}
 		return Report;
 	}
 
 	TArray<FString> QueryTerms;
 	Query.ToLower().ParseIntoArrayWS(QueryTerms);
-	TSet<FString> KindSet(Kinds);
 	FHyperAIContextSearchValueSnapshot Filtered;
 	Filtered.SnapshotUtc = Snapshot.Value.SnapshotUtc;
 	Filtered.ObservationScope = Snapshot.Value.ObservationScope;
 	Filtered.bOnDiskOnly = Snapshot.Value.bOnDiskOnly;
 	Filtered.bDirty = Snapshot.Value.bDirty;
-	Filtered.bIncomplete = Snapshot.Value.bIncomplete;
-	Filtered.bSourceTruncated = Snapshot.Value.bSourceTruncated;
 	Filtered.bDirtyPackageListTruncated = Snapshot.Value.bDirtyPackageListTruncated;
 	Filtered.Generation = Snapshot.Value.Generation;
 	Filtered.DirtyPackages = Snapshot.Value.DirtyPackages;
-	Filtered.Diagnostics = Snapshot.Value.Diagnostics;
-	Filtered.Records.Reserve(FMath::Min(Snapshot.Value.Records.Num(), MaxProjectIndexRecords));
+	if (bValuePartCounts)
+	{
+		Filtered.bIncomplete = Snapshot.Value.bIncomplete || Snapshot.Status != TEXT("ready");
+		Filtered.bSourceTruncated = Snapshot.Value.bSourceTruncated;
+		Filtered.Diagnostics = Snapshot.Value.Diagnostics;
+	}
+	else
+	{
+		// Unsaved packages still limit what an on-disk asset search can see.
+		Filtered.bIncomplete = Snapshot.Value.bDirty;
+		for (const FHyperAIReadDiagnostic& Diagnostic : Snapshot.Value.Diagnostics)
+		{
+			if (Diagnostic.Field == TEXT("dirty_packages"))
+			{
+				Filtered.Diagnostics.Add(Diagnostic);
+			}
+		}
+	}
+	if (bAssetPartCounts)
+	{
+		Filtered.bIncomplete |= Assets.Status != TEXT("ready");
+		Filtered.bSourceTruncated |= Assets.bTruncated;
+		for (const FHyperAIReadDiagnostic& Diagnostic : Assets.Diagnostics)
+		{
+			if (Filtered.Diagnostics.Num() < MaxDiagnostics)
+			{
+				Filtered.Diagnostics.Add(Diagnostic);
+			}
+		}
+	}
+	Filtered.Records.Reserve(FMath::Min(Snapshot.Value.Records.Num(), MaxProjectSearchMatches));
 	Filtered.ObservationScope = TEXT("project_on_disk_index");
 	Filtered.bOnDiskOnly = true;
-	Filtered.bIncomplete |= Snapshot.Status != TEXT("ready");
 	const double StartSeconds = FPlatformTime::Seconds();
 	int32 Scanned = 0;
+	bool bWorkBoundReached = false;
+	bool bMatchBoundReached = false;
 	for (const FHyperAIContextSearchValueRecord& Record : Snapshot.Value.Records)
 	{
 		if (Scanned >= MaxProjectIndexRecords
 			|| FPlatformTime::Seconds() - StartSeconds > MaxProjectSearchSeconds)
 		{
-			Filtered.bIncomplete = true;
-			Filtered.bSourceTruncated = true;
-			AddDiagnosticOnce(
-				Filtered.Diagnostics,
-				TEXT("project_search_work_bound_reached"),
-				TEXT("warning"),
-				TEXT("query"),
-				TEXT("Value-only search reached its fixed record or elapsed-time work bound."));
+			bWorkBoundReached = true;
 			break;
 		}
 		++Scanned;
-		if (!KindSet.Contains(Record.Kind))
+		if (KindSet.Contains(Record.Kind) && MatchesAllTerms(Record.SearchTextLower, QueryTerms))
 		{
-			continue;
-		}
-		bool bMatches = true;
-		for (const FString& Term : QueryTerms)
-		{
-			if (!Record.SearchTextLower.Contains(Term, ESearchCase::CaseSensitive))
+			if (Filtered.Records.Num() >= MaxProjectSearchMatches)
 			{
-				bMatches = false;
+				bMatchBoundReached = true;
 				break;
 			}
-		}
-		if (bMatches)
-		{
 			Filtered.Records.Add(Record);
 		}
 	}
+	// Asset rows stay compact in the index; only matches become full records, after the timed scan.
+	TArray<const FHyperAIProjectAssetRow*> AssetMatches;
+	if (bAssetPartCounts && !bWorkBoundReached && !bMatchBoundReached)
+	{
+		int32 AssetRowsScanned = 0;
+		for (const TSharedRef<const FHyperAIProjectAssetFolder, ESPMode::ThreadSafe>& Folder : Assets.Folders)
+		{
+			for (const FHyperAIProjectAssetRow& Row : Folder->Rows)
+			{
+				if ((++AssetRowsScanned & 63) == 0
+					&& FPlatformTime::Seconds() - StartSeconds > MaxProjectSearchSeconds)
+				{
+					bWorkBoundReached = true;
+					break;
+				}
+				if (MatchesAllTerms(Row.SearchTextLower, QueryTerms))
+				{
+					if (Filtered.Records.Num() + AssetMatches.Num() >= MaxProjectSearchMatches)
+					{
+						bMatchBoundReached = true;
+						break;
+					}
+					AssetMatches.Add(&Row);
+				}
+			}
+			if (bWorkBoundReached || bMatchBoundReached)
+			{
+				break;
+			}
+		}
+	}
+	if (bWorkBoundReached)
+	{
+		Filtered.bIncomplete = true;
+		Filtered.bSourceTruncated = true;
+		AddDiagnosticOnce(
+			Filtered.Diagnostics,
+			TEXT("project_search_work_bound_reached"),
+			TEXT("warning"),
+			TEXT("query"),
+			TEXT("Value-only search reached its fixed record or elapsed-time work bound."));
+	}
+	if (bMatchBoundReached)
+	{
+		Filtered.bIncomplete = true;
+		Filtered.bSourceTruncated = true;
+		AddDiagnosticOnce(
+			Filtered.Diagnostics,
+			TEXT("project_search_match_bound_reached"),
+			TEXT("warning"),
+			TEXT("query"),
+			FString::Printf(TEXT("The query matched more than %d records; add a term to narrow it."), MaxProjectSearchMatches));
+	}
+	// By meaning: assets ranked on this machine by stems, the built-in concept vocabulary and spelling. They follow the
+	// literal matches (hybrid), or stand alone, best first (semantic); auto ranks a description or a query nothing named.
+	TArray<FHyperAIContextSearchValueRecord> Ranked;
+	if (bAssetPartCounts && Mode != TEXT("literal") && !bWorkBoundReached)
+	{
+		const bool bMeaning = GetDefault<UHyperAIStudioSettings>()->bSearchByMeaning;
+		const HyperAIStudio::SemanticSearch::FQuery Analyzed = HyperAIStudio::SemanticSearch::AnalyzeQuery(Query, bMeaning);
+		const bool bRank = Mode == TEXT("semantic") || Mode == TEXT("hybrid")
+			|| (Mode == TEXT("auto") && (AssetMatches.IsEmpty() || Analyzed.Words.Num() >= 3));
+		if (bRank && !Analyzed.IsEmpty())
+		{
+			if (Mode == TEXT("semantic"))
+			{
+				// Literal matches come back through the ranking, with the name bonus, in score order.
+				AssetMatches.Reset();
+			}
+			HyperAIStudio::SemanticSearch::FRankLimits Limits;
+			Limits.MaxResults = FMath::Clamp(MaxProjectSearchMatches - Filtered.Records.Num() - AssetMatches.Num(), 0, 200);
+			bool bRankTruncated = false;
+			const TArray<HyperAIStudio::SemanticSearch::FRanked> Results =
+				HyperAIStudio::SemanticSearch::Rank(Assets, Analyzed, Limits, bRankTruncated);
+			const TSet<const FHyperAIProjectAssetRow*> Literal(AssetMatches);
+			for (const HyperAIStudio::SemanticSearch::FRanked& Result : Results)
+			{
+				if (Literal.Contains(Result.Row))
+				{
+					continue;
+				}
+				FHyperAIContextSearchValueRecord Record = MakeAssetRecord(*Result.Row);
+				AddField(Record, TEXT("match"), TEXT("string"), Result.Match);
+				AddField(Record, TEXT("score"), TEXT("number"), FString::Printf(TEXT("%.3f"), Result.Score));
+				SortFields(Record);
+				Ranked.Add(MoveTemp(Record));
+			}
+			if (bRankTruncated)
+			{
+				Filtered.bIncomplete = true;
+				AddDiagnosticOnce(Filtered.Diagnostics, TEXT("project_search_rank_budget_reached"), TEXT("warning"), TEXT("query"),
+					TEXT("Ranking by meaning reached its time budget; some folders were not scored."));
+			}
+		}
+	}
+	Filtered.Records.Reserve(Filtered.Records.Num() + AssetMatches.Num() + Ranked.Num());
+	for (const FHyperAIProjectAssetRow* Row : AssetMatches)
+	{
+		Filtered.Records.Add(MakeAssetRecord(*Row));
+	}
 	SortAndDeduplicateRecords(Filtered.Records);
+	const bool bRanked = !Ranked.IsEmpty();
+	Filtered.Records.Append(MoveTemp(Ranked));
 	TArray<FString> FingerprintTokens = {
 		TEXT("project_search.v1"), Query.ToLower(), FString::Join(Kinds, TEXT(",")),
 		FString::Join(Projection, TEXT(",")), LexToString(Request.PageSize), LexToString(Request.MaxOutputBytes)
 	};
+	if (Mode != TEXT("literal"))
+	{
+		FingerprintTokens.Add(TEXT("mode=") + Mode);
+	}
 	const FString RequestFingerprint = HashTokens(FingerprintTokens);
 	FHyperAIReadReport Report;
-	ProjectPage(Filtered, Projection, RequestFingerprint, Request.PageSize, Request.Cursor, Request.MaxOutputBytes, Report);
+	ProjectPage(Filtered, Projection, RequestFingerprint, Request.PageSize, Request.Cursor, Request.MaxOutputBytes, Report, bRanked);
 	return Report;
 }
 
@@ -3359,31 +3637,54 @@ FHyperAIStudioProjectIndexStore& FHyperAIStudioProjectIndexStore::Get()
 
 FHyperAIProjectIndexStatus FHyperAIStudioProjectIndexStore::GetStatus() const
 {
+	using namespace HyperAIStudio::ContextSearch::Private;
+	const TSharedRef<const FHyperAIProjectAssetIndexSnapshot, ESPMode::ThreadSafe> Assets = GetAssetSnapshotShared();
 	FScopeLock Lock(&Mutex);
 	FHyperAIProjectIndexStatus Status;
-	Status.Status = Snapshot.Status;
-	Status.bRefreshInProgress = bWorkerRunning;
+	const FString CompositeStatus = ComposeProjectIndexStatus(Snapshot.Status, *Assets);
+	Status.Status = CompositeStatus;
+	Status.bRefreshInProgress = bWorkerRunning || Assets->Status == TEXT("indexing");
 	Status.StartedUtc = Snapshot.StartedUtc;
 	Status.CompletedUtc = Snapshot.CompletedUtc;
-	Status.SnapshotFingerprint = Snapshot.SnapshotFingerprint;
+	Status.SnapshotFingerprint = Snapshot.SnapshotFingerprint.IsEmpty() && Assets->Fingerprint.IsEmpty()
+		? FString()
+		: FHyperAIStudioContextSearchContracts::HashTokens({
+			TEXT("project_index.v2"), Snapshot.SnapshotFingerprint, Assets->Fingerprint });
 	Status.Generation = Snapshot.Value.Generation;
-	Status.AssetRecordCount = Snapshot.AssetRecordCount;
+	Status.AssetRecordCount = Assets->AssetCount;
+	Status.AssetIndexStatus = Assets->Status;
+	Status.AssetGeneration = Assets->Generation;
+	Status.AssetFolderCount = Assets->FolderCount;
+	Status.AssetPendingFolderCount = Assets->PendingFolderCount;
+	Status.bAssetRegistryScanning = Assets->bRegistryScanning;
+	Status.SearchEngine = GetDefault<UHyperAIStudioSettings>()->bSearchByMeaning ? TEXT("local_concepts.v1") : TEXT("words_only");
+	Status.ConceptCount = HyperAIStudio::SemanticSearch::ConceptCount();
+	Status.IndexFeatureCount = Assets->PostingCount;
+	Status.IndexBytes = Assets->ApproxBytes;
+	Status.bPausedForPlayInEditor = Assets->bPaused;
+	Status.Storage = TEXT("Editor memory only, rebuilt from the Asset Registry's cache each session: per asset its name, class, folder, ")
+		TEXT("parent class and up to 12 short tag values, plus the words, concepts and trigrams found in them. Nothing is written to disk, ")
+		TEXT("no model is downloaded, and no query or asset data leaves this computer.");
+	Status.EpicSemanticSearch = DescribeEpicSemanticSearch();
 	Status.CppFileCount = Snapshot.CppFileCount;
 	Status.CppSymbolCount = Snapshot.CppSymbolCount;
-	Status.TotalRecordCount = Snapshot.Value.Records.Num();
+	Status.TotalRecordCount = Snapshot.Value.Records.Num() + Assets->AssetCount;
 	Status.CppBytesRead = Snapshot.CppBytesRead;
-	Status.bIncomplete = Snapshot.Value.bIncomplete
-		|| Snapshot.Status == TEXT("uninitialized")
-		|| Snapshot.Status == TEXT("indexing")
-		|| Snapshot.Status == TEXT("partial")
-		|| Snapshot.Status == TEXT("failed");
+	Status.bIncomplete = Snapshot.Value.bIncomplete || CompositeStatus != TEXT("ready");
 	Status.bDirty = Snapshot.Value.bDirty;
 	Status.DirtyPackages = Snapshot.Value.DirtyPackages;
 	Status.DirtyPackageCount = Snapshot.Value.DirtyPackages.Num();
 	Status.bDirtyPackageListTruncated = Snapshot.Value.bDirtyPackageListTruncated;
 	Status.Diagnostics = Snapshot.Value.Diagnostics;
-	Status.bOk = Snapshot.Status == TEXT("ready") || Snapshot.Status == TEXT("partial")
-		|| (Snapshot.Status == TEXT("indexing") && !Snapshot.Value.Records.IsEmpty());
+	for (const FHyperAIReadDiagnostic& Diagnostic : Assets->Diagnostics)
+	{
+		if (Status.Diagnostics.Num() < FHyperAIStudioContextSearchContracts::MaxDiagnostics)
+		{
+			Status.Diagnostics.Add(Diagnostic);
+		}
+	}
+	Status.bOk = CompositeStatus == TEXT("ready") || CompositeStatus == TEXT("partial")
+		|| (CompositeStatus == TEXT("indexing") && Status.TotalRecordCount > 0);
 	if (bShuttingDown)
 	{
 		Status.Status = TEXT("shutting_down");
@@ -3391,21 +3692,21 @@ FHyperAIProjectIndexStatus FHyperAIStudioProjectIndexStore::GetStatus() const
 		Status.bIncomplete = true;
 		Status.Diagnostic = TEXT("The project index store is shutting down.");
 	}
-	else if (Snapshot.Status == TEXT("ready"))
+	else if (CompositeStatus == TEXT("ready"))
 	{
 		Status.Diagnostic = TEXT("The immutable fixed-root on-disk project index is ready.");
 	}
-	else if (Snapshot.Status == TEXT("partial"))
+	else if (CompositeStatus == TEXT("partial"))
 	{
 		Status.Diagnostic = TEXT("The immutable project index is usable but explicitly partial; inspect diagnostics and bounds.");
 	}
-	else if (Snapshot.Status == TEXT("indexing"))
+	else if (CompositeStatus == TEXT("indexing"))
 	{
-		Status.Diagnostic = Snapshot.Value.Records.IsEmpty()
+		Status.Diagnostic = Status.TotalRecordCount == 0
 			? TEXT("A bounded asynchronous project index refresh is running.")
 			: TEXT("A refresh is running; the prior immutable snapshot remains available but stale/incomplete.");
 	}
-	else if (Snapshot.Status == TEXT("failed"))
+	else if (CompositeStatus == TEXT("failed"))
 	{
 		Status.Diagnostic = TEXT("The last bounded project index refresh failed; inspect diagnostics.");
 	}
@@ -3432,6 +3733,55 @@ FHyperAIStudioProjectIndexStore::GetSnapshotShared() const
 	return SnapshotView.ToSharedRef();
 }
 
+TSharedRef<const FHyperAIProjectAssetIndexSnapshot, ESPMode::ThreadSafe>
+FHyperAIStudioProjectIndexStore::GetAssetSnapshotShared() const
+{
+	TSharedPtr<FHyperAIStudioProjectAssetIndex, ESPMode::ThreadSafe> Index;
+	{
+		FScopeLock Lock(&Mutex);
+		if (AssetSnapshotOverride.IsValid())
+		{
+			return AssetSnapshotOverride.ToSharedRef();
+		}
+		Index = AssetIndex;
+	}
+	if (Index.IsValid())
+	{
+		return Index->GetPublished();
+	}
+	static const TSharedRef<const FHyperAIProjectAssetIndexSnapshot, ESPMode::ThreadSafe> Uninitialized =
+		MakeShared<FHyperAIProjectAssetIndexSnapshot, ESPMode::ThreadSafe>();
+	return Uninitialized;
+}
+
+bool FHyperAIStudioProjectIndexStore::EnsureAssetIndexStarted()
+{
+	if (!IsInGameThread())
+	{
+		return false;
+	}
+	TSharedPtr<FHyperAIStudioProjectAssetIndex, ESPMode::ThreadSafe> Index;
+	{
+		FScopeLock Lock(&Mutex);
+		if (bShuttingDown || AssetSnapshotOverride.IsValid())
+		{
+			return false;
+		}
+		if (AssetIndex.IsValid() && AssetIndex->IsStarted())
+		{
+			return true;
+		}
+		if (!AssetIndex.IsValid())
+		{
+			AssetIndex = FHyperAIStudioProjectAssetIndex::MakeForRegistry();
+		}
+		Index = AssetIndex;
+	}
+	// Outside the lock: starting publishes the first snapshot and may read the registry.
+	Index->EnsureStarted();
+	return false;
+}
+
 bool FHyperAIStudioProjectIndexStore::RequestRefresh(FString& OutDiagnostic)
 {
 	using namespace HyperAIStudio::ContextSearch::Private;
@@ -3442,7 +3792,10 @@ bool FHyperAIStudioProjectIndexStore::RequestRefresh(FString& OutDiagnostic)
 		return false;
 	}
 
+	// The asset walk is a game-thread cache: the first refresh starts it, a later one walks every folder again.
+	const bool bAssetIndexWasRunning = EnsureAssetIndexStarted();
 	int64 Generation = 0;
+	TSharedPtr<FHyperAIStudioProjectAssetIndex, ESPMode::ThreadSafe> Index;
 	{
 		FScopeLock Lock(&Mutex);
 		if (bShuttingDown)
@@ -3463,6 +3816,11 @@ bool FHyperAIStudioProjectIndexStore::RequestRefresh(FString& OutDiagnostic)
 		Snapshot.CompletedUtc.Reset();
 		Snapshot.Value.bIncomplete = true;
 		Snapshot.Value.Generation = Generation;
+		Index = AssetIndex;
+	}
+	if (bAssetIndexWasRunning && Index.IsValid())
+	{
+		Index->RequestFullRewalk();
 	}
 
 	FHyperAIProjectIndexValueSnapshot Captured;
@@ -3484,20 +3842,9 @@ bool FHyperAIStudioProjectIndexStore::RequestRefresh(FString& OutDiagnostic)
 			TEXT("The index is on-disk only; unsaved loaded package changes are outside this observation."));
 	}
 
-	// UE 5.8's public on-disk EnumerateAssets implementation first copies every
-	// matching /Game asset under a blocking registry read lock, before invoking
-	// the caller callback. A callback deadline/record cap therefore cannot bound
-	// either the lock duration or the pre-callback allocation. Keep the C++ index
-	// useful, but refuse to certify an asset index until a generation-cached,
-	// incrementally populated backend can supply a bounded immutable snapshot.
-	Captured.Value.bIncomplete = true;
-	Captured.AssetRecordCount = 0;
-	AddDiagnostic(
-		Captured.Value.Diagnostics,
-		TEXT("async_asset_index_backend_required"),
-		TEXT("warning"),
-		TEXT("asset_index"),
-		TEXT("Project asset search requires a generation-cached asynchronous typed index; synchronous Asset Registry enumeration was intentionally not called."));
+	// Assets are not part of this pass. UE 5.8's on-disk EnumerateAssets copies every match under the registry read
+	// lock before its callback runs, so no deadline could bound it; FHyperAIStudioProjectAssetIndex reads one folder
+	// per call on the game thread instead, and searches combine the two snapshots.
 	SortAndDeduplicateRecords(Captured.Value.Records);
 
 	const FString ProjectRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
@@ -3615,7 +3962,7 @@ bool FHyperAIStudioProjectIndexStore::RequestRefresh(FString& OutDiagnostic)
 				TEXT("project_index_record_bound_reached"),
 				TEXT("warning"),
 				TEXT("index"),
-				TEXT("Combined asset and C++ symbol records reached the hard index record bound."));
+				TEXT("C++ symbol records reached the hard index record bound."));
 		}
 
 		SortAndDeduplicateRecords(Captured.Value.Records);
@@ -3652,11 +3999,88 @@ void FHyperAIStudioProjectIndexStore::CommitWorkerResult(FHyperAIProjectIndexVal
 	bWorkerRunning = false;
 }
 
-void FHyperAIStudioProjectIndexStore::Shutdown()
+bool FHyperAIStudioProjectIndexStore::WaitForRefresh(const double Seconds)
 {
 	{
 		FScopeLock Lock(&Mutex);
+		if (!bWorkerRunning)
+		{
+			return true;
+		}
+	}
+	// The worker commits its index from its own thread, so the game thread may wait on it.
+	if (WorkerFuture.IsValid())
+	{
+		WorkerFuture.WaitFor(FTimespan::FromSeconds(FMath::Max(Seconds, 0.0)));
+	}
+	FScopeLock Lock(&Mutex);
+	return !bWorkerRunning;
+}
+
+bool FHyperAIStudioProjectIndexStore::WaitForFirstIndex(
+	const double Seconds,
+	const bool bIncludeAssets,
+	const bool bIncludeCpp)
+{
+	if (!IsInGameThread())
+	{
+		return WaitForRefresh(bIncludeCpp ? Seconds : 0.0);
+	}
+	TSharedPtr<FHyperAIStudioProjectAssetIndex, ESPMode::ThreadSafe> Index;
+	{
+		FScopeLock Lock(&Mutex);
+		if (bIncludeAssets && !AssetSnapshotOverride.IsValid())
+		{
+			Index = AssetIndex;
+		}
+	}
+	const double DeadlineSeconds = FPlatformTime::Seconds() + FMath::Max(Seconds, 0.0);
+	for (;;)
+	{
+		// A search that reads no C++ symbols does not wait on the C++ pass, which can take its whole 1.5 s bound.
+		bool bCppRunning = false;
+		if (bIncludeCpp)
+		{
+			FScopeLock Lock(&Mutex);
+			bCppRunning = bWorkerRunning;
+		}
+		const bool bAssetsSettled = !Index.IsValid() || Index->IsSettled();
+		const double RemainingSeconds = DeadlineSeconds - FPlatformTime::Seconds();
+		if ((!bCppRunning && bAssetsSettled) || RemainingSeconds <= 0.0)
+		{
+			break;
+		}
+		if (!bAssetsSettled)
+		{
+			// This wait blocks the core ticker, so it reads the asset folders itself, in short slices.
+			Index->Step(FMath::Min(RemainingSeconds, 0.020), MAX_int32);
+		}
+		if (bCppRunning && WorkerFuture.IsValid())
+		{
+			// The worker commits its index from its own thread, so the game thread may wait on it.
+			WorkerFuture.WaitFor(FTimespan::FromMilliseconds(
+				bAssetsSettled ? FMath::Min(RemainingSeconds * 1000.0, 50.0) : 1.0));
+		}
+	}
+	if (Index.IsValid())
+	{
+		Index->Step(0.0, 0, true);
+	}
+	FScopeLock Lock(&Mutex);
+	return !bWorkerRunning;
+}
+
+void FHyperAIStudioProjectIndexStore::Shutdown()
+{
+	TSharedPtr<FHyperAIStudioProjectAssetIndex, ESPMode::ThreadSafe> Index;
+	{
+		FScopeLock Lock(&Mutex);
 		bShuttingDown = true;
+		Index = AssetIndex;
+	}
+	if (Index.IsValid())
+	{
+		Index->Shutdown();
 	}
 	if (WorkerFuture.IsValid())
 	{
@@ -3676,6 +4100,28 @@ void FHyperAIStudioProjectIndexStore::SetSnapshotForTests(
 		Snapshot = InSnapshot;
 		SnapshotView.Reset();
 		NextGeneration = FMath::Max(NextGeneration, Snapshot.Value.Generation + 1);
+	}
+}
+
+void FHyperAIStudioProjectIndexStore::SetAssetSnapshotForTests(
+	const FHyperAIProjectAssetIndexSnapshot& InSnapshot)
+{
+	FScopeLock Lock(&Mutex);
+	AssetSnapshotOverride = MakeShared<FHyperAIProjectAssetIndexSnapshot, ESPMode::ThreadSafe>(InSnapshot);
+}
+
+void FHyperAIStudioProjectIndexStore::ResetAssetIndexForTests()
+{
+	TSharedPtr<FHyperAIStudioProjectAssetIndex, ESPMode::ThreadSafe> Index;
+	{
+		FScopeLock Lock(&Mutex);
+		Index = MoveTemp(AssetIndex);
+		AssetIndex.Reset();
+		AssetSnapshotOverride.Reset();
+	}
+	if (Index.IsValid())
+	{
+		Index->Shutdown();
 	}
 }
 #endif
@@ -3783,6 +4229,19 @@ namespace HyperAIStudio::ContextSearch::Private
 FHyperAIReadReport FHyperAIStudioContextSearchContracts::AnalyzeBatch(
 	const FHyperAIContextSearchValueSnapshot& EditorSnapshot,
 	const FHyperAIProjectIndexValueSnapshot& ProjectSnapshot,
+	const FHyperAIBatchQueryRequest& Request)
+{
+	return AnalyzeBatch(
+		EditorSnapshot,
+		ProjectSnapshot,
+		HyperAIStudio::ContextSearch::Private::NotAttachedAssetSnapshot(),
+		Request);
+}
+
+FHyperAIReadReport FHyperAIStudioContextSearchContracts::AnalyzeBatch(
+	const FHyperAIContextSearchValueSnapshot& EditorSnapshot,
+	const FHyperAIProjectIndexValueSnapshot& ProjectSnapshot,
+	const FHyperAIProjectAssetIndexSnapshot& Assets,
 	const FHyperAIBatchQueryRequest& Request)
 {
 	using namespace HyperAIStudio::ContextSearch::Private;
@@ -3944,7 +4403,8 @@ FHyperAIReadReport FHyperAIStudioContextSearchContracts::AnalyzeBatch(
 				return InvalidReport(TEXT("invalid_scene_scope"), QueryId + TEXT(".scope"), TEXT("Scene scope must be selected, world, or actor."));
 			}
 			if (Scope == TEXT("actor") && (RawOperation.ActorPath.IsEmpty()
-				|| RawOperation.ActorPath.Len() > MaxPathCharacters || ContainsEmbeddedNull(RawOperation.ActorPath)))
+				|| RawOperation.ActorPath.Len() > MaxPathCharacters || ContainsEmbeddedNull(RawOperation.ActorPath)
+				|| !FHyperAIStudioNames::IsObjectPath(RawOperation.ActorPath, TEXT("actor_path"))))
 			{
 				return InvalidReport(TEXT("invalid_actor_path"), QueryId + TEXT(".actor_path"), TEXT("Actor scope requires one bounded exact already-loaded actor path."));
 			}
@@ -4012,7 +4472,7 @@ FHyperAIReadReport FHyperAIStudioContextSearchContracts::AnalyzeBatch(
 			SearchRequest.PageSize = RawOperation.MaxItems;
 			SearchRequest.MaxOutputBytes = FMath::Min(Request.MaxOutputBytes, 65536);
 			SearchRequest.bStartIndexIfUnavailable = false;
-			const FHyperAIReadReport Search = SearchProjectIndex(ProjectSnapshot, SearchRequest);
+			const FHyperAIReadReport Search = SearchProjectIndex(ProjectSnapshot, SearchRequest, Assets);
 			if (Search.Status == TEXT("invalid_request"))
 			{
 				return InvalidReport(TEXT("nested_project_search_invalid"), QueryId, Search.Diagnostic);
@@ -4055,18 +4515,22 @@ FHyperAIReadReport FHyperAIStudioContextSearchContracts::AnalyzeBatch(
 			}
 			RequestTokens.Add(FString::Join(Projection, TEXT(",")));
 			OuterProjectionSet.Append(Projection);
+			const bool bAssetsAttached = IsAssetSnapshotAttached(Assets);
+			const FString CompositeStatus = ComposeProjectIndexStatus(ProjectSnapshot.Status, Assets);
+			const int32 AssetCount = bAssetsAttached ? Assets.AssetCount : ProjectSnapshot.AssetRecordCount;
 			FHyperAIContextSearchValueRecord StatusRecord;
 			StatusRecord.QueryId = QueryId;
 			StatusRecord.Kind = TEXT("project_index_status");
 			StatusRecord.RecordId = TEXT("project_index_status");
-			AddField(StatusRecord, TEXT("status"), TEXT("string"), ProjectSnapshot.Status);
+			AddField(StatusRecord, TEXT("status"), TEXT("string"), CompositeStatus);
 			AddField(StatusRecord, TEXT("generation"), TEXT("integer"), LexToString(ProjectSnapshot.Value.Generation));
-			AddField(StatusRecord, TEXT("asset_count"), TEXT("integer"), LexToString(ProjectSnapshot.AssetRecordCount));
+			AddField(StatusRecord, TEXT("asset_count"), TEXT("integer"), LexToString(AssetCount));
 			AddField(StatusRecord, TEXT("cpp_file_count"), TEXT("integer"), LexToString(ProjectSnapshot.CppFileCount));
 			AddField(StatusRecord, TEXT("cpp_symbol_count"), TEXT("integer"), LexToString(ProjectSnapshot.CppSymbolCount));
-			AddField(StatusRecord, TEXT("total_record_count"), TEXT("integer"), LexToString(ProjectSnapshot.Value.Records.Num()));
+			AddField(StatusRecord, TEXT("total_record_count"), TEXT("integer"),
+				LexToString(ProjectSnapshot.Value.Records.Num() + (bAssetsAttached ? Assets.AssetCount : 0)));
 			Combined.Records.Add(ProjectRecordFields(StatusRecord, Projection, QueryId));
-			Combined.bIncomplete |= ProjectSnapshot.Status != TEXT("ready");
+			Combined.bIncomplete |= CompositeStatus != TEXT("ready");
 		}
 	}
 
@@ -4191,7 +4655,7 @@ FHyperAIReadReport UHyperAIStudioSceneInspectToolset::hyper_scene_inspect(
 		&& (Request.ActorPath.IsEmpty() || Request.ActorPath.Len() > MaxPathCharacters
 			|| ContainsEmbeddedNull(Request.ActorPath) || !HasWellFormedUtf16(Request.ActorPath)
 			|| !Request.ActorPath.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
-			|| !Request.ActorPath.Contains(TEXT(":"))))
+			|| !Request.ActorPath.Contains(TEXT(":")) || !FHyperAIStudioNames::IsObjectPath(Request.ActorPath, TEXT("actor_path"))))
 	{
 		return InvalidReport(
 			TEXT("invalid_actor_path"),
@@ -4366,7 +4830,8 @@ FHyperAISceneApplyPlanReport UHyperAIStudioSceneInspectToolset::hyper_scene_appl
 			if (ActorPath.IsEmpty() || ActorPath.Len() > MaxPathCharacters
 				|| ContainsEmbeddedNull(ActorPath) || !HasWellFormedUtf16(ActorPath)
 				|| !ActorPath.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
-				|| !ActorPath.Contains(TEXT(":")) || UniqueActors.Contains(ActorPath)
+				|| !ActorPath.Contains(TEXT(":")) || !FHyperAIStudioNames::IsObjectPath(ActorPath, TEXT("actor_paths"))
+				|| UniqueActors.Contains(ActorPath)
 				|| !IsCanonicalSha256(ExpectedRevision))
 			{
 				return Fail(TEXT("invalid_actor_binding"), TEXT("Actor paths must be unique exact loaded /Game subobjects with one canonical revision each."));
@@ -4552,6 +5017,7 @@ FHyperAISceneValidateReport UHyperAIStudioSceneInspectToolset::hyper_scene_valid
 FHyperAIReadReport UHyperAIStudioProjectSearchToolset::hyper_project_search(
 	const FHyperAIProjectSearchRequest& Request)
 {
+	using namespace HyperAIStudio::ContextSearch::Private;
 	FHyperAIStudioProjectIndexStore& Store = FHyperAIStudioProjectIndexStore::Get();
 	auto Snapshot = Store.GetSnapshotShared();
 	if (Request.bStartIndexIfUnavailable
@@ -4562,7 +5028,32 @@ FHyperAIReadReport UHyperAIStudioProjectSearchToolset::hyper_project_search(
 		Store.RequestRefresh(Diagnostic);
 		Snapshot = Store.GetSnapshotShared();
 	}
-	return FHyperAIStudioContextSearchContracts::SearchProjectIndex(*Snapshot, Request);
+	if (Request.bStartIndexIfUnavailable)
+	{
+		Store.EnsureAssetIndexStarted();
+	}
+	const auto WantsKind = [&Request](const TCHAR* Kind)
+	{
+		return Request.Kinds.IsEmpty()
+			|| Request.Kinds.ContainsByPredicate([Kind](const FString& Requested)
+			{
+				return NormalizeToken(Requested) == Kind;
+			});
+	};
+	const bool bWantsAssets = WantsKind(TEXT("asset"));
+	const bool bWantsCpp = WantsKind(TEXT("cpp_symbol"));
+	auto Assets = Store.GetAssetSnapshotShared();
+	// The first search waits out the build of the parts it reads, which is bounded, rather than answering that it is
+	// being built.
+	const bool bCppBuilding = bWantsCpp && Snapshot->Value.Records.IsEmpty() && Snapshot->Status == TEXT("indexing");
+	const bool bAssetsBuilding = bWantsAssets && !Assets->bHasCompletedWalk && Assets->Status == TEXT("indexing");
+	if (Request.bStartIndexIfUnavailable && (bCppBuilding || bAssetsBuilding) && IsInGameThread())
+	{
+		Store.WaitForFirstIndex(FirstSearchWaitSeconds, bWantsAssets, bWantsCpp);
+		Snapshot = Store.GetSnapshotShared();
+		Assets = Store.GetAssetSnapshotShared();
+	}
+	return FHyperAIStudioContextSearchContracts::SearchProjectIndex(*Snapshot, Request, *Assets);
 }
 
 FHyperAIProjectIndexStatus UHyperAIStudioProjectIndexStatusToolset::hyper_project_index_status(
@@ -4744,9 +5235,12 @@ FHyperAIReadReport UHyperAIStudioBatchQueryToolset::hyper_batch_query(
 	{
 		const auto ProjectSnapshot =
 			FHyperAIStudioProjectIndexStore::Get().GetSnapshotShared();
+		const auto AssetSnapshot =
+			FHyperAIStudioProjectIndexStore::Get().GetAssetSnapshotShared();
 		return FHyperAIStudioContextSearchContracts::AnalyzeBatch(
 			EditorSnapshot,
 			*ProjectSnapshot,
+			*AssetSnapshot,
 			Request);
 	}
 	return FHyperAIStudioContextSearchContracts::AnalyzeBatch(

@@ -4,8 +4,10 @@
 
 #include "CoreMinimal.h"
 #include "Delegates/Delegate.h"
+#include "HyperAIStudioBot.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioTypedPlan.h"
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
 #include "HyperAIStudioPIEPlaytestToolset.generated.h"
@@ -28,6 +30,17 @@ enum class EHyperAIPIEPlaytestTeardown : uint8
 {
 	StopOwnedSession,
 	LeaveSessionRunning
+};
+
+/** How a started session plays: every player stays in this editor process, each in a window of their own. */
+UENUM(BlueprintType)
+enum class EHyperAIPIEPlaytestNetMode : uint8
+{
+	Standalone,
+	/** PIE instance 0 hosts and plays; the other players join it as clients. */
+	ListenServer,
+	/** A dedicated server, with every player a client. */
+	Client
 };
 
 /** Closed runtime operations. There is deliberately no console, script, raw tool, reflection-write, or file operation. */
@@ -56,7 +69,11 @@ enum class EHyperAIPIEPlaytestStepKind : uint8
 	ReplayCaptureStart,
 	ReplayCaptureStop,
 	ReplayPlaybackCaptured,
-	StopSession
+	StopSession,
+	/** One playtest bot step, given in bot: move, look, jump, press, wait, capture, check. */
+	Bot,
+	/** Another player joins the running networked session as a client, the way a late joiner would. */
+	JoinPlayer
 };
 
 /** Exact key allowlist; callers never provide an arbitrary FName. */
@@ -115,8 +132,9 @@ struct FHyperAIPIEPlaytestValue
 	UPROPERTY()
 	double Float = 0.0;
 
+	/** Text, not an FName: the JSON import would make an FName of whatever an agent sent, and past 1023 characters that stops the editor. */
 	UPROPERTY()
-	FName Name;
+	FString Name;
 
 	UPROPERTY()
 	FString String;
@@ -176,6 +194,17 @@ struct FHyperAIPIEPlaytestStep
 
 	UPROPERTY()
 	int32 TimeoutMs = 5000;
+
+	/** Kind Bot only: the bot step. timeout_ms still caps it. */
+	UPROPERTY()
+	FHyperAIBotStep Bot;
+
+	/**
+	 * The PIE world the step acts in: -1 for the run's world, or a PIE instance. In a ListenServer session instance 0
+	 * hosts and 1 and up are its clients, so a check on one client proves what replicated to it.
+	 */
+	UPROPERTY()
+	int32 PieInstance = -1;
 };
 
 USTRUCT(BlueprintType)
@@ -211,6 +240,29 @@ struct FHyperAIPIEPlaytestRequest
 
 	UPROPERTY()
 	int32 MaxOutputBytes = 262144;
+
+	/** StartInProcess only: how the session plays. */
+	UPROPERTY()
+	EHyperAIPIEPlaytestNetMode NetMode = EHyperAIPIEPlaytestNetMode::Standalone;
+
+	/**
+	 * StartInProcess only: players, 1-8, each a window of this editor (ListenServer: the host and its clients; Client: a
+	 * dedicated server and its clients). The run starts once every one of them is in. Past 4 players, a machine without
+	 * the memory for them all is refused, with how many it can play.
+	 */
+	UPROPERTY()
+	int32 NumPlayers = 1;
+
+	/**
+	 * Record the run's game view as an MP4, with each step and its result drawn over the game, and a timeline.json of
+	 * the steps beside it: proof a person can watch. The video is the run's last evidence item.
+	 */
+	UPROPERTY()
+	bool bRecordVideo = false;
+
+	/** Frames per second for bRecordVideo, 5-30. */
+	UPROPERTY()
+	int32 VideoFps = 10;
 };
 
 /** Immutable bounded evidence produced by one lifecycle/step transition. */
@@ -438,7 +490,324 @@ struct FHyperAIPIEPlaytestStatusResult
 	TArray<FHyperAIPIEPlaytestEvidence> Evidence;
 };
 
-/** One atomic two-tool SourceCandidate cohort on the single Epic MCP endpoint. */
+/** One verification case: bot steps played in a copy of the open level. */
+USTRUCT(BlueprintType)
+struct FHyperAIVerifyCase
+{
+	GENERATED_BODY()
+
+	/** A short name for the report. */
+	UPROPERTY()
+	FString Name;
+
+	/** Bot steps in order, the same objects as hyper_playtest_run's bot field; the first that fails ends the case. */
+	UPROPERTY()
+	TArray<FHyperAIBotStep> Steps;
+
+	/** Simulated seconds the case may run: 1 to the deadline less 5. */
+	UPROPERTY()
+	float TimeoutSeconds = 20.f;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIVerifyRequest
+{
+	GENERATED_BODY()
+
+	/** Played all at once, one copy of the level each: up to the limit hyper_verify_calibrate reports. */
+	UPROPERTY()
+	TArray<FHyperAIVerifyCase> Cases;
+
+	/** Wall-clock seconds for the whole batch, 10 to 60. */
+	UPROPERTY()
+	float DeadlineSeconds = 60.f;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIVerifyStepReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString Action;
+
+	/** passed or failed */
+	UPROPERTY()
+	FString Status;
+
+	/** passed, or why not: assertion_failed, not_found, stuck, timed_out... */
+	UPROPERTY()
+	FString Code;
+
+	/** What the bot saw: positions, values, counts. */
+	UPROPERTY()
+	FString Detail;
+
+	/** A picture the step wrote: a capture, or a Play step's map of where the player went. Open it and look. */
+	UPROPERTY()
+	FString File;
+
+	/** Simulated seconds into the case when the step ended. */
+	UPROPERTY()
+	float AtSeconds = 0.f;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIVerifyCaseReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString Name;
+
+	/** passed, failed, timed_out, stopped or not_started */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	/** The 0-based step that failed, or -1. */
+	UPROPERTY()
+	int32 FailedStep = -1;
+
+	UPROPERTY()
+	float SimulatedSeconds = 0.f;
+
+	UPROPERTY()
+	TArray<FHyperAIVerifyStepReport> Steps;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIVerifyReport
+{
+	GENERATED_BODY()
+
+	/** The batch ran; its cases may still have failed. */
+	UPROPERTY()
+	bool bOk = false;
+
+	/** completed, deadline, stopped, refused or busy */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	/** The level the cases played. */
+	UPROPERTY()
+	FString Map;
+
+	/** How many cases a batch may hold here. */
+	UPROPERTY()
+	int32 Limit = 0;
+
+	UPROPERTY()
+	int32 Passed = 0;
+
+	UPROPERTY()
+	int32 Failed = 0;
+
+	UPROPERTY()
+	int32 TimedOut = 0;
+
+	UPROPERTY()
+	float WallSeconds = 0.f;
+
+	UPROPERTY()
+	TArray<FHyperAIVerifyCaseReport> Cases;
+};
+
+/** Completes when the batch has ended, while the editor keeps running it. */
+UCLASS()
+class UHyperAIVerifyRunResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIVerifyReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIVerifyReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIVerifyReport Value;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIVerifyCalibrationReport
+{
+	GENERATED_BODY()
+
+	/** calibrated, not_calibrated, measured, failed or busy */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	UPROPERTY()
+	FString Map;
+
+	/** How many cases a hyper_verify_run batch may hold on this machine and level. */
+	UPROPERTY()
+	int32 Limit = 0;
+
+	UPROPERTY()
+	FString MeasuredUtc;
+
+	/** "N cases: S s" for each batch size measured. */
+	UPROPERTY()
+	TArray<FString> Measurements;
+};
+
+UCLASS()
+class UHyperAIVerifyCalibrationResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIVerifyCalibrationReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIVerifyCalibrationReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIVerifyCalibrationReport Value;
+};
+
+/** What a phone playtest streams. */
+UENUM(BlueprintType)
+enum class EHyperAIPhonePlaytestTarget : uint8
+{
+	/** Play In Editor sessions started while it runs (by Play, or hyper_playtest_run with its bot and video), unsaved edits and all. */
+	PlayInEditor,
+	/** A separate game process of the saved level, in a window of its own. */
+	Standalone
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIPhonePlaytestRequest
+{
+	GENERATED_BODY()
+
+	/** Empty makes one. */
+	UPROPERTY()
+	FString OperationId;
+
+	/** Check and describe the plan; nothing starts and nothing is asked. */
+	UPROPERTY()
+	bool bDryRun = false;
+
+	UPROPERTY()
+	EHyperAIPhonePlaytestTarget Target = EHyperAIPhonePlaytestTarget::PlayInEditor;
+
+	/** The player page and the viewers' connections, 1024-65535. */
+	UPROPERTY()
+	int32 HttpPort = 8080;
+
+	/** The game's stream into the server, 1024-65535. */
+	UPROPERTY()
+	int32 StreamerPort = 8888;
+
+	/** Viewers at once, 1-8; more are turned away in Play In Editor. */
+	UPROPERTY()
+	int32 MaxViewers = 8;
+
+	/** Every viewer's touches, keys and mouse reach the game; false gives control to the first viewer only. */
+	UPROPERTY()
+	bool bAllViewersControl = true;
+
+	/** The LAN address phones use; empty picks this PC's private address. */
+	UPROPERTY()
+	FString Address;
+
+	/** Standalone only: the level, a package path such as /Game/Maps/Arena; empty is the open level, as saved. */
+	UPROPERTY()
+	FString Map;
+
+	/** Standalone only: the game window's size. */
+	UPROPERTY()
+	int32 ResX = 1280;
+
+	UPROPERTY()
+	int32 ResY = 720;
+
+	/** Standalone only: render with no window on this PC; phones still see it. */
+	UPROPERTY()
+	bool bOffscreen = false;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIPhonePlaytestReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	bool bOk = false;
+
+	/** checked, awaiting_user_approval, streaming, starting, stopped, idle, refused or failed */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	UPROPERTY()
+	FString OperationId;
+
+	UPROPERTY()
+	FString Target;
+
+	/** What a phone on the same network opens. */
+	UPROPERTY()
+	FString Url;
+
+	/** A PNG of the URL's QR code, to show and scan. */
+	UPROPERTY()
+	FString QrCodePng;
+
+	UPROPERTY()
+	FString Address;
+
+	UPROPERTY()
+	int32 HttpPort = 0;
+
+	UPROPERTY()
+	int32 StreamerPort = 0;
+
+	/** Where the server listens and whom it takes, in words. */
+	UPROPERTY()
+	FString Exposure;
+
+	/** This PC's private (LAN) IPv4 addresses. */
+	UPROPERTY()
+	TArray<FString> LanAddresses;
+
+	UPROPERTY()
+	bool bServerReady = false;
+
+	UPROPERTY()
+	bool bGameRunning = false;
+
+	UPROPERTY()
+	int32 Viewers = 0;
+
+	UPROPERTY()
+	int32 MaxViewers = 0;
+
+	/** Standalone: the game process's command line and log. */
+	UPROPERTY()
+	FString GameCommandLine;
+
+	UPROPERTY()
+	FString GameLog;
+
+	UPROPERTY()
+	TArray<FString> Notes;
+};
+
+/** One atomic SourceCandidate cohort on the single Epic MCP endpoint: playtests and verification. */
 UCLASS()
 class HYPERAISTUDIO_API UHyperAIStudioPIEPlaytestToolset final : public UToolsetDefinition
 {
@@ -447,7 +816,27 @@ class HYPERAISTUDIO_API UHyperAIStudioPIEPlaytestToolset final : public UToolset
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** Accept one bounded typed PIE lifecycle plan and return immediately with operation_id/status. */
+	/**
+	 * Play the game in the editor and check it. mode StartInProcess starts Play In Editor and stops it after;
+	 * AttachOnly uses the session already running. Up to 32 steps run in order and the call returns at once:
+	 * follow it with hyper_operation_wait, then read the evidence with hyper_playtest_status. Steps of kind Bot
+	 * play as the player through the game's own input and movement: MoveTo, LookAt, AimAt, Jump, Press, Hold, Interact,
+	 * Wait, WaitUntil, Survey, Sample, Capture (a PNG you can open), RecordStart and RecordStop, AssertProperty,
+	 * AssertNear, AssertOnScreen, AssertExists, AssertGone, UiClick, UiType and UiAssert; Damage (a strain field on
+	 * Chaos geometry collections), Fire (a test ball) and AssertBroken (pieces broken off) prove destruction. AimAt,
+	 * and Press, Hold and Interact with aim, aim the way the game reads aim (its cursor, right stick or view; auto
+	 * picks) and check the game's own aim after. Play plays toward a goal
+	 * the way a person would (Reach, Collect, Defeat, Survive or Explore: moving, jumping, aiming and attacking
+	 * through the game's controls) and writes a map of it; AddPlayer adds a local player, for PvP. SurveyLevel walks and
+	 * films the level: what the player can reach, where it gets stuck or falls out, an overview image and an MP4.
+	 * AssertCount, AssertDistance, AssertAttribute, AssertTag, AssertAbility and AssertEffect check actors and their
+	 * Gameplay Ability System; UiAssert checks a widget's text, visibility, enabled, focus or progress. The first failing
+	 * step ends the run with its reason. Changes stay in the PIE world. bRecordVideo records the run as an MP4 with
+	 * each step and its result drawn over the game, plus timeline.json: proof to watch. For multiplayer, net_mode
+	 * ListenServer or Client with num_players 2-8 plays every player in this editor; a step's pie_instance picks the
+	 * player it acts as (ListenServer: 0 hosts), so a check on a client proves what replicated, and JoinPlayer adds
+	 * a late joiner.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
 	static FHyperAIPIEPlaytestRunResult hyper_playtest_run(const FHyperAIPIEPlaytestRequest& Request);
 
@@ -457,6 +846,45 @@ public:
 		const FString& OperationId,
 		int32 PageSize = 32,
 		const FString& Cursor = TEXT(""));
+
+	/**
+	 * Verify many things at once: each case plays in its own copy of the open level, all at the same time, and one
+	 * call returns every case's result within DeadlineSeconds (60 at most). A case is bot steps as in
+	 * hyper_playtest_run (Play, AddPlayer, MoveTo, LookAt, AimAt, Jump, Press, Hold, Interact, Wait, WaitUntil, Survey,
+	 * Sample, Capture, RecordStart, RecordStop, Damage, Fire and the Assert steps, AssertBroken counting the pieces a
+	 * geometry collection lost), but no UI, AssertOnScreen or cursor aim steps, since the copies have no screen;
+	 * Capture renders the player's camera. Steps report any picture they wrote in file.
+	 * Unsaved edits are included, and nothing in the level changes. At most the limit hyper_verify_calibrate reports;
+	 * a case still running at the deadline reports timed_out.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
+	static UHyperAIVerifyRunResult* hyper_verify_run(const FHyperAIVerifyRequest& Request);
+
+	/**
+	 * How many verification cases this machine plays at once on the open level. With bMeasure it measures that, in
+	 * about a minute without changing anything, and keeps the result on this machine.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
+	static UHyperAIVerifyCalibrationResult* hyper_verify_calibrate(bool bMeasure = false);
+
+	/**
+	 * Playtest on phones: streams the game with Pixel Streaming 2 to phones and browsers on this PC's local network,
+	 * up to 8 viewers, and returns the URL and a QR code PNG to scan (Studio's Playtest panel shows both). Target
+	 * PlayInEditor streams every PIE session started while it runs, so hyper_playtest_run's bot and video work with it;
+	 * Standalone launches the saved level as its own game process. Needs the Pixel Streaming 2 plugin enabled. Starts a
+	 * server in this editor that phones connect to on HttpPort, so it always asks the user first, showing the address and
+	 * ports; bDryRun describes it without asking. Refused on a PC with a public internet address.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
+	static FHyperAIPhonePlaytestReport hyper_phone_playtest_start(const FHyperAIPhonePlaytestRequest& Request);
+
+	/** The phone playtest now: the URL and QR code, whether the server and game run, and how many viewers watch. */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
+	static FHyperAIPhonePlaytestReport hyper_phone_playtest_status();
+
+	/** Ends the phone playtest: stops streaming and the server, and closes a Standalone game. */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
+	static FHyperAIPhonePlaytestReport hyper_phone_playtest_stop();
 };
 
 struct FHyperAIStudioPIEPlaytestManifestEntry
@@ -580,6 +1008,10 @@ public:
 		const FHyperAIStudioPIENormalizedPlan& Plan,
 		bool bOwnsSession) = 0;
 	virtual void ForceTeardown(const FHyperAIStudioPIENormalizedPlan& Plan, bool bOwnsSession) = 0;
+	/** Starts recording the run's world when the plan asks for video: evidence that it started or why not, or none. */
+	virtual FHyperAIPIEPlaytestEvidence StartRecording(const FHyperAIStudioPIENormalizedPlan& Plan) { return {}; }
+	/** Step Index of Count began (Finished null) or ended, for a recording's overlay and timeline. */
+	virtual void NoteStep(int32 Index, int32 Count, const FHyperAIPIEPlaytestStep& Step, const FHyperAIPIEPlaytestEvidence* Finished) {}
 };
 
 class IHyperAIStudioPIEClock
@@ -744,6 +1176,15 @@ public:
 	static constexpr int32 MaxScreenshotWidth = 1920;
 	static constexpr int32 MaxScreenshotHeight = 1080;
 	static constexpr int32 MaxScreenshotPixels = MaxScreenshotWidth * MaxScreenshotHeight;
+	static constexpr int32 MaxPlayers = 8;
+	/** Up to this many players a session starts without a memory check, as it always has. */
+	static constexpr int32 UncheckedPlayers = 4;
+	/** Memory a player's world, window and renderer take on top of the editor, as estimated before starting. */
+	static constexpr int64 PlayerMemoryBytes = 512ll * 1024 * 1024;
+	/** Memory kept free for the editor and the rest of the machine. */
+	static constexpr int64 ReservedMemoryBytes = 1536ll * 1024 * 1024;
+	static constexpr int32 MinVideoFps = 5;
+	static constexpr int32 MaxVideoFps = 30;
 
 	static const TArray<FHyperAIStudioPIEPlaytestManifestEntry>& GetManifest();
 	static FString GetQualifiedToolsetName();
@@ -763,6 +1204,15 @@ public:
 	static FString StepKindToString(EHyperAIPIEPlaytestStepKind Kind);
 	static FString RuntimeStateToString(EHyperAIStudioPIERuntimeState State);
 	static FString ComputeEvidenceFingerprint(const TArray<FHyperAIPIEPlaytestEvidence>& Evidence);
+	/**
+	 * How many players fit in AvailableBytes of free physical memory, at PlayerMemoryBytes each (a dedicated server
+	 * counts as one more) after ReservedMemoryBytes: 0 to MaxPlayers.
+	 */
+	static int32 PlayersThatFit(int64 AvailableBytes, bool bDedicatedServer);
+	/** How long a started session may take until every one of its worlds is in: 30 s, and 7.5 s more for each world past the first, 90 s at most. */
+	static int32 WorldReadyTimeoutMs(int32 Worlds);
+	/** Whether a scalar read equals an assertion's expected value, as AssertScalarEquals decides. */
+	static bool ScalarEquals(const FHyperAIPIEPlaytestValue& Actual, const FHyperAIPIEPlaytestValue& Expected);
 	static FString MakeCursor(const FString& EvidenceFingerprint, int32 Offset);
 	static bool ParseCursor(
 		const FString& Cursor,

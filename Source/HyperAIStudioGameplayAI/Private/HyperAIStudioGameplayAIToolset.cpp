@@ -1,6 +1,9 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioGameplayAIToolset.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioOperationWait.h"
+#include "HyperAIStudioRequestFit.h"
 
 // Every direct UE Gameplay AI dependency is isolated in this LoadingPhase=None editor module.
 
@@ -605,9 +608,10 @@ FHyperAIStudioGameplayAIFacade::GetVariantDescriptors()
 		{TEXT("state_tree"), {TEXT("StateTree")},
 			{TEXT("StateTreeModule"), TEXT("StateTreeEditorModule")}, false, false, false, {},
 			{TEXT("typed_adapter_not_implemented")}},
-		{TEXT("eqs"), {TEXT("EnvironmentQueryEditor")},
-			{TEXT("AIModule"), TEXT("EnvironmentQueryEditor")}, false, false, false, {},
-			{TEXT("typed_adapter_not_implemented")}},
+		// Environment Queries have their own cohort: hyper_eqs_inspect, hyper_eqs_apply_plan and hyper_eqs_run.
+		{TEXT("eqs"), {},
+			{TEXT("AIModule")}, false, false, false, {},
+			{TEXT("served_by_hyper_eqs_tools")}},
 		{TEXT("smart_object"), {TEXT("SmartObjects"), TEXT("GameplayAbilities")},
 			{TEXT("SmartObjectsModule"), TEXT("SmartObjectsEditorModule"), TEXT("GameplayAbilities")},
 			false, false, false, {}, {TEXT("typed_adapter_not_implemented")}},
@@ -917,7 +921,7 @@ bool FHyperAIStudioGameplayAIContracts::IsCanonicalProjectObjectPath(const FStri
 	if (Path.IsEmpty() || Path.Len() > MaxPathCharacters
 		|| Path.Contains(TEXT("\\")) || Path.Contains(TEXT("..")) || Path.Contains(TEXT(":"))
 		|| !Path.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
-		|| !FPackageName::IsValidObjectPath(Path)) return false;
+		|| !FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path)) return false;
 	FString PackageName;
 	FString ObjectName;
 	return Path.Split(TEXT("."), &PackageName, &ObjectName, ESearchCase::CaseSensitive,
@@ -1399,6 +1403,8 @@ FHyperAIGameplayAIApplyPlanReport FHyperAIStudioGameplayAIContracts::BuildPlan(
 		Report.Diagnostic = TEXT("Gameplay AI UObject planning is allowed only on Unreal's serialized game thread.");
 		return Report;
 	}
+	// Key names and paths become FNames and lookups, which stop the editor past an FName's length.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	if (Request.Operations.IsEmpty() || Request.Operations.Num() > MaxOperations
 		|| Request.DeadlineMs < 100 || Request.DeadlineMs > 2000
 		|| Request.MaxGameThreadMs < 50 || Request.MaxGameThreadMs > 250
@@ -2028,10 +2034,20 @@ FHyperAIGameplayAIValidateReport UHyperAIStudioGameplayAIToolset::hyper_gameplay
 	return Report;
 }
 
-FHyperAIGameplayAIApplyPlanReport UHyperAIStudioGameplayAIToolset::hyper_gameplay_ai_apply_plan(
-	const FHyperAIGameplayAIApplyPlanRequest& Request)
+UHyperAIGameplayAIApplyPlanResult* UHyperAIStudioGameplayAIToolset::hyper_gameplay_ai_apply_plan(const FHyperAIGameplayAIApplyPlanRequest& Request)
 {
-	return FHyperAIStudioGameplayAIContracts::BuildPlan(Request);
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIGameplayAIApplyPlanResult>(FHyperAIStudioGameplayAIContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIGameplayAIApplyPlanReport FHyperAIStudioGameplayAIContracts::BuildFittedPlan(
+	const FHyperAIGameplayAIApplyPlanRequest& InRequest)
+{
+	FHyperAIGameplayAIApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAIGameplayAIApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return FHyperAIStudioGameplayAIContracts::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FString FHyperAIStudioGameplayAITypedPayload::GetTypeId() const

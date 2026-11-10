@@ -1,6 +1,9 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioAnimBlueprintToolset.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioOperationWait.h"
+#include "HyperAIStudioRequestFit.h"
 
 #include "Animation/AnimBlueprint.h"
 #include "Animation/Skeleton.h"
@@ -11,6 +14,7 @@
 #include "HyperAIStudioAnimBlueprintCookbook.h"
 #include "HyperAIStudioAnimBlueprintGate.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "Misc/CoreDelegates.h"
@@ -51,7 +55,7 @@ namespace HyperAIStudio::AnimBlueprint::Private
 		}
 		for (const FHyperAIAnimBlueprintTransition& Transition : Machine.Transitions)
 		{
-			Size += 32 + EstimateBytes(Transition.From) + EstimateBytes(Transition.To) + EstimateBytes(Transition.Rule);
+			Size += 32 + EstimateBytes(Transition.From) + EstimateBytes(Transition.To) + EstimateBytes(Transition.Rule) + EstimateBytes(Transition.BlendLogic);
 		}
 		return Size;
 	}
@@ -104,11 +108,13 @@ namespace HyperAIStudio::AnimBlueprint::Private
 			FString Error;
 			USkeleton* Skeleton = nullptr;
 			UClass* Parent = nullptr;
+			const bool bInterface = Payload.bCreate && Gate::IsLayerInterfaceClass(Payload.ParentClassPath);
 			if (Payload.bCreate)
 			{
 				Skeleton = Gate::ResolveSkeleton(Payload.SkeletonPath);
-				Parent = Gate::ResolveParentClass(Payload.ParentClassPath, Error);
-				if (Blueprint || FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(Payload.TargetPath)) || !Skeleton || !Parent)
+				Parent = bInterface ? nullptr : Gate::ResolveParentClass(Payload.ParentClassPath, Error);
+				if (Blueprint || !FHyperAIStudioNames::IsFreePackage(FPackageName::ObjectPathToPackageName(Payload.TargetPath))
+					|| (!Skeleton && !(bInterface && Payload.SkeletonPath.IsEmpty())) || (!bInterface && !Parent))
 				{
 					return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("create_precondition_changed"),
 						TEXT("The target appeared, or the skeleton or parent class went away, after planning; nothing was created."));
@@ -130,7 +136,7 @@ namespace HyperAIStudio::AnimBlueprint::Private
 					: LOCTEXT("EditAnimBlueprint", "HyperAI: Edit Animation Blueprint"));
 				if (Payload.bCreate)
 				{
-					Blueprint = Gate::Create(Payload.TargetPath, *Skeleton, *Parent, Error);
+					Blueprint = bInterface ? Gate::CreateLayerInterface(Payload.TargetPath, Skeleton, Error) : Gate::Create(Payload.TargetPath, *Skeleton, *Parent, Error);
 					if (!Blueprint)
 					{
 						return Finish(EHyperAIStudioDomainDispatchOutcome::FailedBeforeEffect, TEXT("create_failed"), Error);
@@ -209,9 +215,13 @@ TArray<FString> FHyperAIStudioAnimBlueprintContracts::GetCapabilities()
 		TEXT("state_machines_driving_the_output_pose"),
 		TEXT("states_playing_sequences_or_blend_spaces_bound_to_variables"),
 		TEXT("transitions_with_variable_rules_or_time_remaining_and_blend_times"),
+		TEXT("transitions_blending_by_crossfade_or_inertialization"),
+		TEXT("montage_slots_full_body_or_layered_from_a_bone_over_a_cached_pose"),
+		TEXT("inertialization_node_at_the_output"),
+		TEXT("anim_layer_interfaces_declared_implemented_filled_and_played_by_states"),
 		TEXT("compile_with_errors_reported_as_one_undo_step"),
-		TEXT("checks_entry_reachability_dead_ends_hysteresis_blend_times_skeletons"),
-		TEXT("unsupported:linked_anim_layers_pose_search_retargeting_montage_slots_and_custom_nodes")};
+		TEXT("checks_entry_reachability_dead_ends_hysteresis_blend_times_skeletons_slots_inertialization"),
+		TEXT("unsupported:layer_input_poses_aim_offsets_motion_matching_node_and_custom_nodes")};
 }
 
 bool FHyperAIStudioAnimBlueprintContracts::IsCanonicalProjectObjectPath(const FString& Path)
@@ -226,7 +236,7 @@ bool FHyperAIStudioAnimBlueprintContracts::IsCanonicalProjectObjectPath(const FS
 		if (Character < 0x20 || Character == 0x7F) return false;
 	}
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason)) return false;
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason)) return false;
 	const FString PackageName = FPackageName::ObjectPathToPackageName(Path);
 	const FString ObjectName = FPackageName::ObjectPathToObjectName(Path);
 	return !PackageName.IsEmpty() && !ObjectName.IsEmpty() && FPackageName::GetLongPackageAssetName(PackageName) == ObjectName;
@@ -252,7 +262,7 @@ FString FHyperAIStudioAnimBlueprintContracts::InspectPayloadSchemaFingerprint()
 FString FHyperAIStudioAnimBlueprintContracts::EditOpsPayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("anim_blueprint.edit_ops.payload.v1|one_target|base_revision_or_create|skeleton|parent|ordered_closed_ops|compile|save|deep_clone|bounded"));
+		TEXT("anim_blueprint.edit_ops.payload.v3|one_target|base_revision_or_create|skeleton|parent_or_layer_interface|ordered_closed_ops|slots_layers_inertialization|anim_layers|compile|save|deep_clone|bounded"));
 	return Value;
 }
 
@@ -265,7 +275,7 @@ FString FHyperAIStudioAnimBlueprintContracts::ValidatePayloadSchemaFingerprint()
 FString FHyperAIStudioAnimBlueprintContracts::InspectResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("anim_blueprint.inspect.result.v1|revision|skeleton|parent|compile_status|variables_drivers|machines_states_transitions|bounded"));
+		TEXT("anim_blueprint.inspect.result.v3|revision|skeleton|parent|compile_status|variables_drivers|machines_states_transitions_blend_logic|output_chain|interfaces_layers|bounded"));
 	return Value;
 }
 
@@ -412,8 +422,13 @@ FHyperAIAnimBlueprintInspectReport FHyperAIStudioAnimBlueprintContracts::Inspect
 	Report.bPackageDirty = Blueprint->GetOutermost()->IsDirty();
 	TArray<FHyperAIAnimBlueprintMachine> Machines;
 	Gate::Read(*Blueprint, Report.Variables, Machines);
+	Report.OutputChain = Gate::OutputChain(*Blueprint);
+	Gate::ReadLayers(*Blueprint, Report.Interfaces, Report.Layers);
 	int64 Budget = 2048;
 	for (const FHyperAIAnimBlueprintVariable& Variable : Report.Variables) Budget += 32 + EstimateBytes(Variable.Name) + EstimateBytes(Variable.Driver);
+	for (const FString& Entry : Report.OutputChain) Budget += EstimateBytes(Entry);
+	for (const FString& Entry : Report.Interfaces) Budget += EstimateBytes(Entry);
+	for (const FString& Entry : Report.Layers) Budget += EstimateBytes(Entry);
 	for (FHyperAIAnimBlueprintMachine& Machine : Machines)
 	{
 		const int64 Bytes = EstimateMachineBytes(Machine);
@@ -525,13 +540,19 @@ FHyperAIAnimBlueprintApplyPlanReport FHyperAIStudioAnimBlueprintContracts::Build
 	{
 		return Reject(TEXT("game_thread_required"), TEXT("Animation Blueprint planning runs on the game thread."));
 	}
+	// Ops' names, bones, slots and assets become FNames and lookups, which stop the editor past an FName's length.
+	FString NameReason;
+	if (!FHyperAIStudioNames::CheckRequest(Request, &NameReason))
+	{
+		return Reject(TEXT("invalid_request"), NameReason);
+	}
 	if (Request.bDryRun && (!Request.OperationId.IsEmpty() || !Request.ExpectedPlanHash.IsEmpty()))
 	{
 		return Reject(TEXT("unexpected_submission_fields"), TEXT("A dry run takes no operation_id or expected_plan_hash."));
 	}
-	if (!Request.bDryRun && (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId) || !IsCanonicalSha256(Request.ExpectedPlanHash)))
+	if (!Request.bDryRun && (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId) || !FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(Request.ExpectedPlanHash)))
 	{
-		return Reject(TEXT("invalid_submission_fields"), TEXT("A non-dry submission needs a valid operation_id and the plan_hash its dry run returned."));
+		return Reject(TEXT("invalid_submission_fields"), FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage());
 	}
 	if (!IsCanonicalProjectObjectPath(Request.TargetPath)
 		|| (Request.bCreate ? !Request.ExpectedRevision.IsEmpty() : !IsCanonicalSha256(Request.ExpectedRevision)))
@@ -551,18 +572,20 @@ FHyperAIAnimBlueprintApplyPlanReport FHyperAIStudioAnimBlueprintContracts::Build
 	const UAnimBlueprint* Blueprint = Gate::Resolve(Request.TargetPath, /*bLoad=*/false);
 	const USkeleton* Skeleton = nullptr;
 	FString Error;
+	const bool bCreatingInterface = Request.bCreate && Gate::IsLayerInterfaceClass(Request.ParentClassPath);
 	if (Request.bCreate)
 	{
-		if (Blueprint || FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(Request.TargetPath)))
+		// Free in memory too: an unsaved asset there of another class would stop the editor when the Blueprint is made.
+		if (Blueprint || !FHyperAIStudioNames::IsFreePackage(FPackageName::ObjectPathToPackageName(Request.TargetPath)))
 		{
 			return Reject(TEXT("target_exists"), TEXT("An asset already exists at target_path; inspect and edit it instead."));
 		}
 		Skeleton = Gate::ResolveSkeleton(Request.SkeletonPath);
-		if (!Skeleton)
+		if (!Skeleton && !(bCreatingInterface && Request.SkeletonPath.IsEmpty()))
 		{
-			return Reject(TEXT("invalid_skeleton"), TEXT("Creating needs skeleton_path naming a Skeleton asset."));
+			return Reject(TEXT("invalid_skeleton"), TEXT("Creating needs skeleton_path naming a Skeleton asset (an Animation Layer Interface may leave it empty)."));
 		}
-		if (!Gate::ResolveParentClass(Request.ParentClassPath, Error))
+		if (!bCreatingInterface && !Gate::ResolveParentClass(Request.ParentClassPath, Error))
 		{
 			return Reject(TEXT("invalid_parent_class"), Error);
 		}
@@ -585,7 +608,7 @@ FHyperAIAnimBlueprintApplyPlanReport FHyperAIStudioAnimBlueprintContracts::Build
 		}
 		Skeleton = Blueprint->TargetSkeleton;
 	}
-	if (!Gate::ValidateOps(Blueprint, Skeleton, Request.Ops, Error))
+	if (!Gate::ValidateOps(Blueprint, Skeleton, Request.Ops, Error, bCreatingInterface))
 	{
 		return Reject(TEXT("invalid_op"), Error);
 	}
@@ -648,7 +671,7 @@ FHyperAIAnimBlueprintApplyPlanReport FHyperAIStudioAnimBlueprintContracts::Build
 		Report.Diagnostic = TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash.");
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Payload->SemanticFingerprint)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("plan_hash_mismatch"), TEXT("The plan changed since its dry run (ops or graph state). Dry-run again and review it."));
 	}
@@ -680,33 +703,23 @@ FHyperAIAnimBlueprintApplyPlanReport FHyperAIStudioAnimBlueprintContracts::Build
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Poll hyper_operation_status with operation_id: it starts once approved.");
+		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
 		return Report;
 	}
 
-	FHyperAIStudioTypedArtifactStageReceipt Receipt;
-	FHyperAIStudioTrustedExecutionDiagnostic StageStatus;
-	FString StageError;
-	if (!FHyperAIStudioTrustedExecutionFacade::StageExact(Prepared, Request.OperationId, Receipt, StageStatus, StageError))
+	// Another agent's edit may own the project lane; then this one waits its turn, and hyper_operation_wait
+	// waits through the queue as well as the edit.
+	FString QueueStatus;
+	FString QueueError;
+	if (!FHyperAIStudioExecutionQueue::Submit(Prepared, Request.OperationId, QueueStatus, QueueError))
 	{
-		return Reject(StageStatus.StatusCode.IsEmpty() ? FString(TEXT("stage_failed")) : StageStatus.StatusCode,
-			StageError.IsEmpty() ? StageStatus.Diagnostic : StageError);
+		return Reject(*QueueStatus, QueueError);
 	}
-	Report.bStaged = true;
-	FHyperAIStudioTypedArtifactSubmissionReceipt Submission;
-	FHyperAIStudioTrustedExecutionDiagnostic SubmitStatus;
-	FString SubmitError;
-	// Edit is tokenless; only risky safety classes need a server-issued grant.
-	if (!FHyperAIStudioTrustedExecutionFacade::SubmitExact(Receipt, FString(), Submission, SubmitStatus, SubmitError))
-	{
-		Report.Status = SubmitStatus.StatusCode.IsEmpty() ? FString(TEXT("submit_failed")) : SubmitStatus.StatusCode;
-		Report.Diagnostic = SubmitError.IsEmpty() ? SubmitStatus.Diagnostic : SubmitError;
-		return Report;
-	}
-	Report.bExecutionSubmitted = true;
+	Report.bStaged = QueueStatus == TEXT("submitted");
+	Report.bExecutionSubmitted = Report.bStaged;
 	Report.bOk = true;
-	Report.Status = TEXT("submitted");
-	Report.Diagnostic = TEXT("The edit and compile run over the next editor ticks. Poll hyper_operation_status until it is terminal, then hyper_anim_blueprint_validate.");
+	Report.Status = QueueStatus;
+	Report.Diagnostic = TEXT("The edit and compile run over the next editor ticks. Call hyper_operation_wait with operation_id, then hyper_anim_blueprint_validate.");
 	return Report;
 }
 
@@ -715,9 +728,19 @@ FHyperAIAnimBlueprintInspectReport UHyperAIStudioAnimBlueprintToolset::hyper_ani
 	return FHyperAIStudioAnimBlueprintContracts::Inspect(Request);
 }
 
-FHyperAIAnimBlueprintApplyPlanReport UHyperAIStudioAnimBlueprintToolset::hyper_anim_blueprint_apply_plan(const FHyperAIAnimBlueprintApplyPlanRequest& Request)
+UHyperAIAnimBlueprintApplyPlanResult* UHyperAIStudioAnimBlueprintToolset::hyper_anim_blueprint_apply_plan(const FHyperAIAnimBlueprintApplyPlanRequest& Request)
 {
-	return FHyperAIStudioAnimBlueprintContracts::BuildPlan(Request);
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIAnimBlueprintApplyPlanResult>(FHyperAIStudioAnimBlueprintContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIAnimBlueprintApplyPlanReport FHyperAIStudioAnimBlueprintContracts::BuildFittedPlan(const FHyperAIAnimBlueprintApplyPlanRequest& InRequest)
+{
+	FHyperAIAnimBlueprintApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAIAnimBlueprintApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return FHyperAIStudioAnimBlueprintContracts::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAIAnimBlueprintValidateReport UHyperAIStudioAnimBlueprintToolset::hyper_anim_blueprint_validate(const FHyperAIAnimBlueprintValidateRequest& Request)

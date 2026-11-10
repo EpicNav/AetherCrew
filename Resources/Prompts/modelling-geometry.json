@@ -1,0 +1,1689 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "modelling-geometry",
+ "presets": [
+  {
+   "id": "modelling-geometry.weathered-boulders",
+   "title": "Make three weathered boulders from the rock recipe",
+   "summary": "Build three seeded boulder variants with convex collision and base pivots, then check size, triangle budget and collision.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "recipe",
+    "write_asset"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "rock",
+    "boulder",
+    "recipe",
+    "nature",
+    "props",
+    "fantasy",
+    "variants"
+   ],
+   "placeholders": [
+    {
+     "name": "prefix",
+     "label": "Asset name prefix",
+     "default": "SM_Boulder"
+    },
+    {
+     "name": "size",
+     "label": "Width in cm",
+     "default": "200"
+    },
+    {
+     "name": "seed",
+     "label": "First seed",
+     "default": "11"
+    }
+   ],
+   "prompt": "Make three weathered boulder variants: `{{content_folder}}/Models/{{prefix}}_A`, `{{prefix}}_B` and `{{prefix}}_C`, each about {{size}} cm across. Change only these three assets.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Check that `rock` is in Recipes, and stop if any of the three assets is already listed.\n2. One hyper_model_apply_plan with bDryRun false and a fresh OperationId. Operations: three `recipe` ops into meshes RockA, RockB and RockC with Params `Shape=rock; Size={{size}}; Seed=<n>`, n being {{seed}}, {{seed}}+1 and {{seed}}+2; then one `write_asset` per mesh, Asset its path above, with Params `Nanite=false; Collision=convex`. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true. Writing saves the assets.\n3. hyper_model_validate with the three Assets and Policy `production`.\n4. Report a PASS/FAIL table, one row per asset, from the plan's Meshes and Assets and the validation lines: triangles under 5000, widest side within 15% of {{size}} cm, closed with 0 open edges, bottom at Z 0 (no `pivot_not_at_base`), at least 1 collision shape, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.greybox-prop-kit",
+   "title": "Block out a greybox prop kit from primitives",
+   "summary": "Make five real-scale placeholder props (crate, barrel, sandbag, cone, pallet) with base pivots and box UVs for a greybox level.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.box",
+    "add.cylinder",
+    "add.capsule",
+    "add.cone",
+    "transform",
+    "pivot",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "greybox",
+    "blockout",
+    "placeholder",
+    "primitives",
+    "crate",
+    "barrel",
+    "kit"
+   ],
+   "placeholders": [
+    {
+     "name": "subfolder",
+     "label": "Subfolder",
+     "default": "Greybox"
+    }
+   ],
+   "prompt": "Make five real-scale greybox props under `{{content_folder}}/Models/{{subfolder}}`. Change nothing else.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models/{{subfolder}}`. If the tool is missing, say the mesh_modeling pack is off and stop. Leave out any prop below that is already listed.\n2. One hyper_model_apply_plan with bDryRun false and a fresh OperationId. Size is `x,y,z` in cm, and each shape's base sits at the origin:\n   - SM_GB_Crate: `add.box` Size `100,100,100`.\n   - SM_GB_Barrel: `add.cylinder` Size `60,60,90`, Params `Steps=16`.\n   - SM_GB_Sandbag: `add.capsule` Size `30,30,60`, then `transform` with Rotation `90,0,0` so it lies along X, and `pivot` with Params `At=base`.\n   - SM_GB_Cone: `add.cone` Size `36,36,70`, Params `Top=0.1`.\n   - SM_GB_Pallet: `add.box` Size `120,100,15`.\n   Give each a `uv` with Params `Mode=box; Scale=100`, then `write_asset` with Params `Nanite=false; Collision=box`. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n3. hyper_model_validate the five with Policy `placeholder`.\n4. Report a PASS/FAIL table: each asset written, its size equal to the one above within 1 cm (the sandbag 60 x 30 x 30), bottom at Z 0, UVs present, 1 collision shape, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.jersey-barrier",
+   "title": "Model a concrete jersey barrier from its profile",
+   "summary": "Extrude the standard jersey barrier cross-section to a set length, stand it upright, and check its real-world dimensions.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.extrude_polygon",
+    "transform",
+    "pivot",
+    "normals",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "concrete",
+    "barrier",
+    "road",
+    "urban",
+    "military",
+    "extrude",
+    "profile"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Asset name",
+     "default": "SM_JerseyBarrier"
+    },
+    {
+     "name": "length",
+     "label": "Length in cm",
+     "default": "300"
+    }
+   ],
+   "prompt": "Model a concrete jersey barrier, `{{content_folder}}/Models/{{name}}`: {{length}} cm long (Y), 81 cm tall, 60 cm wide at the base and 15 cm at the top. Change only that asset.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Stop if the asset is already listed.\n2. hyper_model_apply_plan with bDryRun true and these Operations on mesh Barrier:\n   - `add.extrude_polygon` with Points (width, height in cm) `-30,0; 30,0; 30,8; 18,33; 7.5,81; -7.5,81; -18,33; -30,8` and Params `Height={{length}}`.\n   - `transform` with Rotation `0,0,90` to stand the profile up, so the length runs along Y, then `pivot` with Params `At=base`.\n   - `normals` with Params `Mode=split; Angle=30`, and `uv` with Params `Mode=box; Scale=100`.\n   - `write_asset` with Params `Nanite=false; Collision=convex`.\n   Barrier's Size in Meshes must read 60, {{length}}, 81; if two axes are swapped, change the Rotation and dry-run again.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate the asset with Policy `production`.\n5. Report a PASS/FAIL table: size 60 x {{length}} x 81 cm within 1 cm, bottom at Z 0, closed, 1 component, UVs present, at least 1 collision shape, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.giant-mushrooms",
+   "title": "Grow three giant fantasy mushrooms in set sizes",
+   "summary": "Use the mushroom recipe at three heights, seeds and detail levels with your cap colour, then confirm sizes, budgets and collision.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "recipe",
+    "write_asset"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "mushroom",
+    "fantasy",
+    "forest",
+    "recipe",
+    "nature",
+    "variants"
+   ],
+   "placeholders": [
+    {
+     "name": "heights",
+     "label": "Heights in cm (small, medium, large)",
+     "default": "80, 160, 320"
+    },
+    {
+     "name": "cap_colour",
+     "label": "Cap colour",
+     "default": "#B83A2E",
+     "hint": "#rrggbb, or r,g,b from 0 to 1"
+    },
+    {
+     "name": "seed",
+     "label": "First seed",
+     "default": "4"
+    }
+   ],
+   "prompt": "Grow three giant mushrooms for a fantasy forest: `{{content_folder}}/Models/SM_Mushroom_S`, `SM_Mushroom_M` and `SM_Mushroom_L`, {{heights}} cm tall. Change only these three assets.\n1. hyper_memory_recall with \"mushroom\" for sizes or colours the project already uses, and prefer them. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Confirm `mushroom` is in Recipes, and stop if any of the assets is listed.\n2. One hyper_model_apply_plan with bDryRun false and a fresh OperationId: three `recipe` ops into meshes MushS, MushM and MushL with Params `Shape=mushroom; Size=<height>; Seed=<n>; Detail=<d>; Tint={{cap_colour}}`, taking the heights {{heights}} in order, Seeds {{seed}}, {{seed}}+1 and {{seed}}+2, and Detail 1, 2 and 3 so bigger ones get more detail. Then a `write_asset` for each with Params `Nanite=false; Collision=hulls:2`. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n3. hyper_model_validate the three with Policy `production`.\n4. Report a PASS/FAIL table: each written, height within 5% of its target, triangles rising with Detail and under 20000, bottom at Z 0, 1 or 2 collision shapes, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.check-imported-mesh",
+   "title": "Check an imported mesh is ready to build and reimport",
+   "summary": "Read an imported static mesh's LOD build settings, material slots and source file, and validate it for build and reimport.",
+   "packs": [
+    "geometry_interchange"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_geometry_inspect",
+    "hyper_geometry_validate",
+    "hyper_interchange_inspect",
+    "hyper_interchange_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "import",
+    "fbx",
+    "gltf",
+    "audit",
+    "static mesh",
+    "lightmap",
+    "reimport",
+    "read-only"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "StaticMesh"
+    ],
+    "min": 1
+   },
+   "placeholders": [],
+   "prompt": "Check that {{selected_asset}} is ready to build and to reimport. This is read-only: change nothing.\n1. hyper_geometry_inspect with TargetPath {{selected_asset}} (its exact object path). If the geometry_interchange tools are missing, say so and stop. If it reports the asset is not loaded, ask me to open it and stop. Note the PersistedRevision, every LOD's build settings and the material slots.\n2. hyper_geometry_validate with that ExpectedPersistedRevision and Policy `static_mesh_build_ready`.\n3. hyper_interchange_inspect with the same TargetPath: list each source file, its extension, whether it sits inside the project, and its recorded hash.\n4. hyper_interchange_validate with Policy `reimport_ready`.\n5. Report a PASS/FAIL table: build validation 0 errors; LOD0 recomputes normals and tangents (or carries its own); lightmap UVs generated into a separate channel; every material slot has a material; at least 1 source file recorded; the source sits inside the project; reimport validation 0 errors. Under the table, list each issue code with its detail and the one change that would fix it."
+  },
+  {
+   "id": "modelling-geometry.price-paid-model",
+   "title": "Price a paid AI 3D model before buying it",
+   "summary": "Dry-run a Tripo, Meshy or Hi3D model request to see the providers, the price and where it would land, without spending anything.",
+   "packs": [
+    "mesh_generation"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_mesh_status",
+    "hyper_mesh_generate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "paid",
+    "ai",
+    "tripo",
+    "meshy",
+    "hi3d",
+    "price",
+    "cost",
+    "dry run"
+   ],
+   "placeholders": [
+    {
+     "name": "subject",
+     "label": "What to make",
+     "default": "a weathered wooden market cart with two wheels"
+    },
+    {
+     "name": "name",
+     "label": "Asset name",
+     "default": "SM_MarketCart"
+    }
+   ],
+   "prompt": "Find out what a paid AI model of {{subject}} would cost, without spending anything. mesh_generation is a paid service: every real job needs my approval and costs credits, so this preset only dry-runs.\n1. hyper_mesh_status with no OperationId, to list this session's jobs; stop if one already made {{name}}. If the mesh_generation tools are missing, say the pack is off and stop.\n2. hyper_mesh_generate with bDryRun true, Prompt \"{{subject}}, game-ready prop, clean silhouette, PBR textures\", Name {{name}} and Folder `{{content_folder}}/Generated`. Leave Provider empty so the first provider with a key is picked, and read Providers to see which keys are set.\n3. If more than one provider has a key, dry-run once more for each other one (Provider `tripo` or `meshy`) so I can compare. Hi3D makes models only from a picture, so skip it for a text prompt.\n4. Do not call hyper_mesh_generate with bDryRun false.\n5. Report a table with one row per dry run: provider, model, Status (PASS when it is `checked`), EstimatedCost in USD and Destination. Then say which is cheapest, and remind me that running it needs my approval in the Activity panel."
+  },
+  {
+   "id": "modelling-geometry.lathe-tavern-props",
+   "title": "Lathe a set of tavern props from profiles",
+   "summary": "Revolve profiles into a hollow tankard, a wine bottle and a bowl at real scale, with split normals and cylinder UVs.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.revolve",
+    "normals",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "revolve",
+    "lathe",
+    "tavern",
+    "medieval",
+    "props",
+    "bottle",
+    "cup",
+    "dressing"
+   ],
+   "placeholders": [
+    {
+     "name": "steps",
+     "label": "Sides around",
+     "default": "24"
+    }
+   ],
+   "prompt": "Make three tavern props by revolving profiles: `{{content_folder}}/Models/SM_Tankard` (14 cm tall, 9 cm across), `SM_WineBottle` (30 cm tall, 8 cm across) and `SM_Bowl` (7 cm tall, 16 cm across). Change only these three assets.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Stop if any of the assets is listed.\n2. Write each profile as Points `radius,height; ...` in cm: from the axis at the base, out along the bottom, up the outer wall, over a rounded lip, and down the inner wall back to the axis 0.6 cm above the base, so the tankard and bowl are hollow and the bottle has a shoulder and a 1.5 cm wide neck.\n3. hyper_model_apply_plan with bDryRun true: one `add.revolve` per prop with its Points and Params `Steps={{steps}}; Degrees=360`, then `normals` with Params `Mode=split; Angle=60`, `uv` with Params `Mode=cylinder; Scale=10`, and `write_asset` with Params `Nanite=false; Collision=convex`. Compare each mesh's Size in Meshes with its target and fix the profile if it is off.\n4. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n5. hyper_model_validate the three with Policy `production`.\n6. Report a PASS/FAIL table: each written, height and diameter within 0.5 cm, closed, 1 component, triangles under 4000, UVs present, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.fluted-pillar",
+   "title": "Turn a column profile into a fluted stone pillar",
+   "summary": "Revolve a classical base, shaft and capital, cut flutes with a radial array of cutters, and weather it lightly.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.revolve",
+    "add.cylinder",
+    "array.radial",
+    "boolean",
+    "drop",
+    "noise",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pillar",
+    "column",
+    "classical",
+    "temple",
+    "revolve",
+    "boolean",
+    "architecture"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Asset name",
+     "default": "SM_Pillar_Fluted"
+    },
+    {
+     "name": "height",
+     "label": "Height in cm",
+     "default": "450"
+    },
+    {
+     "name": "flutes",
+     "label": "Number of flutes",
+     "default": "16"
+    }
+   ],
+   "prompt": "Model a fluted classical stone pillar, `{{content_folder}}/Models/{{name}}`, {{height}} cm tall with a 70 cm shaft. Change only that asset.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Stop if the asset is listed.\n2. hyper_model_apply_plan with bDryRun true first, since it cuts many booleans:\n   - `add.revolve` mesh Pillar from a (radius, height) profile in cm: a stepped base up to 15% of the height, a straight 35 cm radius shaft, and a flared capital in the top 10%; Params `Steps=32`.\n   - `add.cylinder` mesh Flute, Size `8,8,<shaft length>`, its base at the shaft's bottom; `array.radial` mesh Flutes from Source Flute with Params `Count={{flutes}}; Radius=35`.\n   - `boolean` Pillar with Source Flutes and Params `Op=subtract`, then `drop` Flute and Flutes.\n   - `noise` with Params `Magnitude=0.6; Frequency=0.05; Seed=3`, and `uv` with Params `Mode=cylinder; Scale=100`.\n   - `write_asset` with Params `Nanite=false; Collision=convex`.\n   Pillar must be closed with 1 component in Meshes.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate with Policy `production`.\n5. Report a PASS/FAIL table: height within 2 cm of {{height}}, shaft 70 cm across, {{flutes}} cutters in the array, 1 component, closed, triangles under 50000 (production's limit without Nanite), 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.framed-wooden-crate",
+   "title": "Model a framed wooden crate with recessed panels",
+   "summary": "Fuse an edge frame around panels set 2 cm back, and give frame and panels their own material slots with your materials.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.box",
+    "self_union",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "crate",
+    "wood",
+    "props",
+    "frame",
+    "material slots",
+    "survival",
+    "boolean"
+   ],
+   "placeholders": [
+    {
+     "name": "size",
+     "label": "Edge length in cm",
+     "default": "100"
+    },
+    {
+     "name": "frame_material",
+     "label": "Frame material",
+     "default": "/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial",
+     "hint": "Object path of a material or material instance"
+    },
+    {
+     "name": "panel_material",
+     "label": "Panel material",
+     "default": "/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial",
+     "hint": "Object path of a material or material instance"
+    }
+   ],
+   "prompt": "Model a framed wooden crate, `{{content_folder}}/Models/SM_Crate_Framed`: a {{size}} cm cube with an 8 cm square frame along every edge and panels set 2 cm back. Change only that asset.\n1. hyper_memory_recall with \"wood material\" for the project's wood materials, and prefer them to the defaults. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Stop if the asset is listed.\n2. hyper_model_apply_plan with bDryRun true, everything into mesh Crate (S = {{size}}):\n   - `add.box` Size S-4 each way at Location `0,0,2`, with Params `Material=1`: the panels.\n   - twelve `add.box` frame bars, 8 x 8 cm in section and S long, one along each edge of the cube, on material 0.\n   - `self_union` to fuse them, then `uv` with Params `Mode=box; Scale=100`.\n   - `write_asset` with Params `Nanite=false; Collision=box; Materials=0:{{frame_material}},1:{{panel_material}}`.\n   Crate must read Size S each way, MaterialIds 2, closed and 1 component.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate with Policy `production`.\n5. Report a PASS/FAIL table: size {{size}} cm each way within 1 cm, 2 slots holding the materials above, closed, 1 component, triangles under 3000, 1 collision shape, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.scifi-wall-panel",
+   "title": "Model a symmetric sci-fi wall panel with vents",
+   "summary": "Cut a recessed bay and vent slots into half a corridor wall panel, mirror it, and keep trim, bays and vents in three slots.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.box",
+    "bevel",
+    "boolean",
+    "array.linear",
+    "drop",
+    "mirror",
+    "material",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "sci-fi",
+    "wall",
+    "panel",
+    "corridor",
+    "modular",
+    "mirror",
+    "vents",
+    "hard surface"
+   ],
+   "placeholders": [
+    {
+     "name": "width",
+     "label": "Width in cm",
+     "default": "400"
+    },
+    {
+     "name": "height",
+     "label": "Height in cm",
+     "default": "300"
+    },
+    {
+     "name": "vents",
+     "label": "Vent slots per bay",
+     "default": "5"
+    }
+   ],
+   "prompt": "Model a sci-fi corridor wall panel, `{{content_folder}}/Models/SM_SciFi_WallPanel`: {{width}} cm wide (X), 20 cm deep (Y), {{height}} cm tall (Z), mirrored about X = 0, each half with a bay and {{vents}} vent slots. Change only that asset.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Stop if the asset is listed.\n2. hyper_model_apply_plan with bDryRun true, modelling the half at X of 0 or more:\n   - `add.box` mesh Panel, half the width by 20 by {{height}} cm; `bevel` it with Params `Distance=0.5`.\n   - `add.box` mesh Bay, Params `Material=1`, 15 cm in from the half's edges, reaching 4 cm into the -Y face; `boolean` Panel with Source Bay, Params `Op=subtract`.\n   - `add.box` mesh Slot, 60 x 30 x 6 cm, Params `Material=2`, in the bay; `array.linear` mesh Slots from it, Params `Count={{vents}}`, Location `0,0,20`; `boolean` subtract Slots.\n   - `drop` the cutters; `mirror` Panel at Location `0,0,0`, Params `Normal=-1,0,0; Weld=true`; `uv` with Params `Mode=box; Scale=100`.\n   - `write_asset` with Params `Nanite=false; Collision=box`.\n   Cut faces keep the cutters' ids: Panel must read MaterialIds 3 (else set them with `material` and a `box:` Select), closed, 1 component.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate with Policy `production`.\n5. Report a PASS/FAIL table: size {{width}} x 20 x {{height}} cm within 1 cm, symmetric bounds, MaterialIds 3, closed, 1 component, triangles under 20000, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.ruined-arch",
+   "title": "Model a ruined stone arch gateway",
+   "summary": "Start from the arch recipe, break one side with a tilted plane cut, bite chunks out, weather it, and give it hull collision.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "recipe",
+    "plane_cut",
+    "add.sphere",
+    "noise",
+    "boolean",
+    "drop",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "arch",
+    "ruin",
+    "gateway",
+    "fantasy",
+    "stone",
+    "boolean",
+    "plane cut"
+   ],
+   "placeholders": [
+    {
+     "name": "width",
+     "label": "Arch width in cm",
+     "default": "500"
+    },
+    {
+     "name": "seed",
+     "label": "Seed",
+     "default": "21"
+    }
+   ],
+   "prompt": "Model a ruined stone gateway arch, `{{content_folder}}/Models/SM_RuinedArch`, {{width}} cm wide, with its right side broken away. Change only that asset.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Confirm `arch` is in Recipes, and stop if the asset is listed.\n2. hyper_model_apply_plan with bDryRun true first (booleans and noise):\n   - `recipe` mesh Arch with Params `Shape=arch; Size={{width}}; Seed={{seed}}`. Note its Size in Meshes.\n   - `plane_cut` Arch with Location on the right pier, two thirds up, and Params `Normal=0.42,0,0.9` (25 degrees off vertical), cutting away the top of the right side.\n   - three bites: `add.sphere` meshes Bite1 to Bite3, Size `70,70,70`, Params `Style=box`, each roughened by `noise` (`Magnitude=8; Frequency=0.03; Seed={{seed}}`) and set on an edge of the arch; `boolean` Arch with each Source and Params `Op=subtract`; then `drop` the bites.\n   - `noise` Arch with Params `Magnitude=2; Frequency=0.02; Seed={{seed}}`, and `uv` with Params `Mode=box; Scale=100`.\n   - `write_asset` with Params `Nanite=false; Collision=hulls:4`.\n   Arch must stay closed and 1 component, its height 60% to 90% of the recipe's.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate with Policy `production`.\n5. Report a PASS/FAIL table: width within 5% of {{width}} cm, height 60% to 90% of the unbroken arch, closed, 1 component, 1 to 4 collision shapes, triangles under 50000 (production's limit without Nanite), 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.crystal-cluster",
+   "title": "Grow a glowing crystal cluster from the recipe",
+   "summary": "Build a seeded crystal cluster on a rocky base, colour the shards to glow through vertex colour, and keep base and shards in two slots.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "recipe",
+    "color",
+    "normals",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "crystal",
+    "fantasy",
+    "cave",
+    "magic",
+    "recipe",
+    "vertex colour",
+    "emissive"
+   ],
+   "placeholders": [
+    {
+     "name": "size",
+     "label": "Width in cm",
+     "default": "150"
+    },
+    {
+     "name": "glow",
+     "label": "Crystal colour",
+     "default": "#7FE3FF",
+     "hint": "#rrggbb, or r,g,b from 0 to 1"
+    },
+    {
+     "name": "seed",
+     "label": "Seed",
+     "default": "7"
+    }
+   ],
+   "prompt": "Grow a glowing crystal cluster, `{{content_folder}}/Models/SM_CrystalCluster`, about {{size}} cm across: angular shards on a rocky base. Change only that asset.\n1. hyper_memory_recall with \"crystal\" for the project's crystal colours, and prefer them. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Confirm `crystal_cluster` is in Recipes, and stop if the asset is listed.\n2. One hyper_model_apply_plan with bDryRun false and a fresh OperationId:\n   - `recipe` mesh Cluster with Params `Shape=crystal_cluster; Size={{size}}; Seed={{seed}}; Accent={{glow}}`. The base is on material slot 0 and the shards on slot 1.\n   - `color` Cluster with Select `material:1` and Params `Color={{glow}}; Glow=0.8`, so the shards glow with the default vertex-colour material.\n   - `normals` with Params `Mode=hard`, so each facet catches the light.\n   - `write_asset` with Params `Nanite=false; Collision=hulls:4`.\n   If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n3. hyper_model_validate with Policy `production`.\n4. Report a PASS/FAIL table: written, widest side within 15% of {{size}} cm, MaterialIds 2 with no empty slot, bottom at Z 0, triangles under 25000, 1 to 4 collision shapes, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.twisted-spire",
+   "title": "Model a twisted wizard spire with a pointed cap",
+   "summary": "Twist, flare and bend a tapering square spire with its cap, and keep it one closed piece under a triangle budget.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.cone",
+    "self_union",
+    "twist",
+    "flare",
+    "bend",
+    "normals",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "spire",
+    "tower",
+    "wizard",
+    "fantasy",
+    "twist",
+    "bend",
+    "landmark"
+   ],
+   "placeholders": [
+    {
+     "name": "height",
+     "label": "Body height in cm",
+     "default": "2400"
+    },
+    {
+     "name": "twist",
+     "label": "Twist in degrees",
+     "default": "270"
+    }
+   ],
+   "prompt": "Model a twisted wizard spire, `{{content_folder}}/Models/SM_TwistedSpire`: a square body {{height}} cm tall and 300 cm across at the base, narrowing to a third and twisting {{twist}} degrees, under a 300 cm pointed cap. Change only that asset.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Stop if the asset is listed.\n2. hyper_model_apply_plan with bDryRun true first, everything into mesh Spire:\n   - `add.cone` Size `300,300,{{height}}`, Params `Steps=4; Top=0.33; HeightSteps=24`.\n   - `add.cone` at Location `0,0,{{height}}`, Size `100,100,300`, Params `Steps=4; Top=0.02`; then `self_union`.\n   - `twist` with Params `Angle={{twist}}`, `flare` with Params `Percent=12` for a slight belly, and `bend` with Params `Angle=8`, its tip leaning toward +X (flip the sign if it leans the other way).\n   - `normals` with Params `Mode=split; Angle=35`, and `uv` with Params `Mode=box; Scale=200`.\n   - `write_asset` with Params `Nanite=false; Collision=hulls:3`.\n   Spire must be closed and 1 component, with Size Z near {{height}} + 300.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate with Policy `production`.\n5. Report a PASS/FAIL table: height {{height}} + 300 cm within 3%, base about 300 cm across, top leaning toward +X (Max X above 150), closed, 1 component, triangles under 15000, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.industrial-pipe-run",
+   "title": "Sweep an industrial pipe run with flanges",
+   "summary": "Sweep a round pipe along a path of points, add a flange at every end and bend, and put pipe and flanges in two material slots.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.sweep",
+    "add.cylinder",
+    "boolean",
+    "drop",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pipe",
+    "industrial",
+    "factory",
+    "sweep",
+    "spline",
+    "hard surface",
+    "props"
+   ],
+   "placeholders": [
+    {
+     "name": "path",
+     "label": "Path points in cm (x,y,z; ...)",
+     "default": "0,0,300; 400,0,300; 400,300,300; 400,300,0"
+    },
+    {
+     "name": "radius",
+     "label": "Pipe radius in cm",
+     "default": "15"
+    }
+   ],
+   "prompt": "Model an industrial pipe run, `{{content_folder}}/Models/SM_PipeRun`: a {{radius}} cm radius pipe through the points `{{path}}` (cm), with a flange at each end and at every bend. Change only that asset.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Stop if the asset is listed.\n2. hyper_model_apply_plan with bDryRun true first:\n   - `add.sweep` mesh Pipe with Points `circle:{{radius}},16`, Path `{{path}}` and Params `Capped=true`.\n   - one `add.cylinder` per path point into mesh Flanges: 2 x {{radius}} + 12 cm across and 5 cm long, Params `Steps=16; Material=1; Origin=center`, centred on the point and turned with Rotation to face along the pipe there.\n   - `boolean` Pipe with Source Flanges and Params `Op=union`, then `drop` Flanges.\n   - `uv` with Params `Mode=cylinder; Scale=100`, and `write_asset` with Params `Nanite=false; Collision=hulls:6`.\n   Pipe must read 1 component, closed and MaterialIds 2. If a sharp bend leaves open edges or extra pieces, add points 30 cm either side of it to round the corner, and dry-run again.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate with Policy `production`.\n5. Report a PASS/FAIL table: bounds cover every path point within {{radius}} + 6 cm, one flange per point, MaterialIds 2, 1 component, closed, triangles under 20000, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.victorian-lamp-post",
+   "title": "Model a Victorian street lamp post",
+   "summary": "Revolve the plinth and pole, sweep a curved arm, hang a glazed lantern, and give metal and glass their own material slots.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.revolve",
+    "add.sweep",
+    "add.box",
+    "add.cone",
+    "self_union",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "lamp",
+    "street",
+    "victorian",
+    "urban",
+    "city",
+    "revolve",
+    "sweep",
+    "props"
+   ],
+   "placeholders": [
+    {
+     "name": "height",
+     "label": "Height in cm",
+     "default": "450"
+    },
+    {
+     "name": "metal_material",
+     "label": "Metal material",
+     "default": "/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial",
+     "hint": "Object path of a material or material instance"
+    },
+    {
+     "name": "glass_material",
+     "label": "Glass material",
+     "default": "/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial",
+     "hint": "Object path of a material or material instance"
+    }
+   ],
+   "prompt": "Model a Victorian cast-iron street lamp, `{{content_folder}}/Models/SM_LampPost_Victorian`, {{height}} cm tall, with metal on material slot 0 and glass on slot 1. Change only that asset.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Stop if the asset is listed.\n2. hyper_model_apply_plan with bDryRun true first, everything into mesh Lamp:\n   - `add.revolve` with a (radius, height) profile: a stepped plinth 25 cm in radius and 60 cm tall, then a 6 cm radius pole with two 9 cm rings, up to {{height}} cm; Params `Steps=24`.\n   - `add.sweep` with Points `circle:3,12` along a Path that leaves the pole 40 cm below its top and curls 70 cm out and down, Params `EndScale=0.7`.\n   - at the arm's end, a lantern: `add.box` 26 x 26 x 40 cm glass with Params `Material=1`, a 34 x 34 x 4 cm `add.box` above and below it, and an `add.cone` roof with Params `Steps=4`.\n   - `self_union`, then `uv` with Params `Mode=box; Scale=50`.\n   - `write_asset` with Params `Nanite=false; Collision=hulls:3; Materials=0:{{metal_material}},1:{{glass_material}}`.\n   Lamp must read 1 closed component with MaterialIds 2.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate with Policy `production`.\n5. Report a PASS/FAIL table: height within 3 cm of {{height}}, plinth 50 cm across, 2 slots holding the materials above, 1 component, closed, triangles under 20000, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.stairs-to-player-metrics",
+   "title": "Build stair modules that fit your player's step height",
+   "summary": "Read the player's step height, then make straight and curved stair meshes the character can climb, with per-step collision.",
+   "packs": [
+    "mesh_modeling",
+    "level_design"
+   ],
+   "skills": [
+    "unreal-modeling",
+    "unreal-level-design"
+   ],
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.stairs",
+    "add.curved_stairs",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "stairs",
+    "player metrics",
+    "modular",
+    "traversal",
+    "level design",
+    "collision"
+   ],
+   "placeholders": [
+    {
+     "name": "rise",
+     "label": "Total rise in cm",
+     "default": "300"
+    },
+    {
+     "name": "width",
+     "label": "Stair width in cm",
+     "default": "200"
+    },
+    {
+     "name": "depth",
+     "label": "Step depth in cm",
+     "default": "30"
+    }
+   ],
+   "prompt": "Make two stair modules for {{level}} that the player can climb: `{{content_folder}}/Models/SM_Stairs_Straight` and `SM_Stairs_Curved`, each rising {{rise}} cm and {{width}} cm wide. Change only these two assets.\n1. hyper_level_design_inspect: read MaxStepHeight and CapsuleRadius from the player metrics. N is the fewest whole steps whose rise ({{rise}} / N) is at most MaxStepHeight minus 2 cm; each step is {{depth}} cm deep, and at least 28.\n2. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Stop if either asset is listed.\n3. One hyper_model_apply_plan with bDryRun false and a fresh OperationId:\n   - `add.stairs` mesh Straight, Size `<N x {{depth}}>,{{width}},{{rise}}` (run, width, rise; it climbs toward +X), Params `Steps=<N>`.\n   - `add.curved_stairs` mesh Curved, Size `{{width}},{{width}},{{rise}}` (Y the width, Z the rise), Params `Steps=<N>; Angle=90; InnerRadius=<at least 150 and 2 x CapsuleRadius>`.\n   - `uv` on each with Params `Mode=box; Scale=100`, and `write_asset` each with Params `Nanite=false; Collision=complex`, so the steps themselves collide.\n   If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate both with Policy `production`.\n5. Report a PASS/FAIL table with the metric values: height {{rise}} cm within 1 cm, rise per step at most MaxStepHeight minus 2 cm, the straight run N x {{depth}} cm, width {{width}} cm, bottom at Z 0, complex collision, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.modular-wall-openings",
+   "title": "Make modular wall pieces with a door and a window",
+   "summary": "Build solid, door and window wall modules on one grid, size the door from player metrics, and save the grid as a convention.",
+   "packs": [
+    "mesh_modeling",
+    "level_design"
+   ],
+   "skills": [
+    "unreal-modeling",
+    "unreal-level-design"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_level_design_inspect",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate",
+    "hyper_memory_remember"
+   ],
+   "ops": [
+    "add.box",
+    "bevel",
+    "boolean",
+    "drop",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "modular",
+    "wall",
+    "door",
+    "window",
+    "kit",
+    "grid",
+    "player metrics",
+    "interior"
+   ],
+   "placeholders": [
+    {
+     "name": "width",
+     "label": "Module width in cm",
+     "default": "400"
+    },
+    {
+     "name": "thickness",
+     "label": "Wall thickness in cm",
+     "default": "30"
+    },
+    {
+     "name": "height",
+     "label": "Wall height in cm",
+     "default": "300"
+    }
+   ],
+   "prompt": "Make three modular wall pieces on one {{width}} x {{thickness}} x {{height}} cm grid (X, Y, Z): `{{content_folder}}/Models/SM_Wall_Solid`, `SM_Wall_Door` and `SM_Wall_Window`. Change only these three assets.\n1. hyper_memory_recall with \"modular wall grid\": use the project's grid if it has one, and say so. hyper_level_design_inspect: read MinDoorWidth and PlayerHeight.\n2. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Stop if any of the assets is listed.\n3. One hyper_model_apply_plan with bDryRun false and a fresh OperationId:\n   - `add.box` meshes Solid, Door and Window, Size `{{width}},{{thickness}},{{height}}`, base at Z 0, centred on X 0; `bevel` each with Params `Distance=1`.\n   - `add.box` mesh DoorCut, MinDoorWidth + 20 cm wide, {{thickness}} + 20 deep and PlayerHeight + 40 tall at Location `0,0,-5`; `boolean` Door with Source DoorCut and Params `Op=subtract`.\n   - `add.box` mesh WindowCut, 120 x ({{thickness}} + 20) x 100 cm at Location `0,0,100`; `boolean` subtract it from Window; `drop` both cutters.\n   - `uv` on each with Params `Mode=box; Scale=100`, and `write_asset` each with Params `Nanite=false; Collision=complex`, so the openings stay open.\n   If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate the three with Policy `production`.\n5. hyper_memory_remember: \"Wall modules are {{width}} x {{thickness}} x {{height}} cm, pivot at the base centre.\"\n6. Report a PASS/FAIL table: all three sizes equal, door opening MinDoorWidth + 20 cm wide and PlayerHeight + 35 cm tall from the floor, window sill at 100 cm, 1 component each, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.cover-to-player-metrics",
+   "title": "Model low and high cover barricades to player metrics",
+   "summary": "Size sci-fi barricades from the player's cover heights, so crouching hides and standing shoots over, then validate them.",
+   "packs": [
+    "mesh_modeling",
+    "level_design"
+   ],
+   "skills": [
+    "unreal-modeling",
+    "unreal-level-design"
+   ],
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.box",
+    "bevel",
+    "boolean",
+    "drop",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "cover",
+    "shooter",
+    "sci-fi",
+    "barricade",
+    "player metrics",
+    "combat",
+    "hard surface"
+   ],
+   "placeholders": [
+    {
+     "name": "width",
+     "label": "Barricade width in cm",
+     "default": "240"
+    }
+   ],
+   "prompt": "Make two cover barricades for a sci-fi shooter: `{{content_folder}}/Models/SM_Cover_Low` and `SM_Cover_High`, {{width}} cm wide (X) and 60 cm deep (Y), with recessed armour panels front and back. Change only these two assets.\n1. hyper_level_design_inspect: read LowCoverMin, LowCoverMax and HighCoverMin from the player metrics. Low cover stands halfway between LowCoverMin and LowCoverMax; high cover is HighCoverMin + 10 cm.\n2. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Stop if either asset is listed.\n3. One hyper_model_apply_plan with bDryRun false and a fresh OperationId. For each barricade:\n   - `add.box` at its size, base at Z 0, then `bevel` with Params `Distance=2`.\n   - two `add.box` panel cutters into one cutter mesh, Params `Material=1`, each 20 cm smaller than the face in width and height and reaching 3 cm into the front and back faces; `boolean` with that Source and Params `Op=subtract`, then `drop` it. The cut faces keep material 1.\n   - `uv` with Params `Mode=box; Scale=100`, and `write_asset` with Params `Nanite=false; Collision=box`.\n   If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate both with Policy `production`.\n5. Report a PASS/FAIL table with the metric values: low cover height between LowCoverMin and LowCoverMax, high cover at least HighCoverMin, width {{width}} and depth 60 cm within 1 cm, MaterialIds 2, 1 collision shape, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.near-and-far-versions",
+   "title": "Make a near and a far version of a tree trunk",
+   "summary": "Build a detailed trunk, copy it, simplify the copy to a set share of its triangles, and write both for close and distant use.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "recipe",
+    "copy",
+    "simplify",
+    "normals",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "lod",
+    "optimization",
+    "simplify",
+    "tree",
+    "trunk",
+    "performance",
+    "distance"
+   ],
+   "placeholders": [
+    {
+     "name": "height",
+     "label": "Height in cm",
+     "default": "900"
+    },
+    {
+     "name": "ratio",
+     "label": "Far version, percent of triangles",
+     "default": "10"
+    },
+    {
+     "name": "seed",
+     "label": "Seed",
+     "default": "5"
+    }
+   ],
+   "prompt": "Make a detailed and a distant version of one gnarled tree trunk: `{{content_folder}}/Models/SM_TreeTrunk_Near` and `SM_TreeTrunk_Far`, {{height}} cm tall. Change only these two assets.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Confirm `tree_trunk` is in Recipes, and stop if either asset is listed.\n2. hyper_model_apply_plan with bDryRun true:\n   - `recipe` mesh Near with Params `Shape=tree_trunk; Size={{height}}; Seed={{seed}}; Detail=3`.\n   - `copy` mesh Far from Source Near, then `simplify` Far with Params `Triangles=<{{ratio}}% of Near's>`, and `normals` Far with Params `Mode=smooth`.\n   - `write_asset` Near and Far, both with Params `Nanite=false; Collision=hulls:2`.\n   Read Near's Triangles from Meshes, set the simplify target from it, and dry-run again if you changed it.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate both with Policy `production`.\n5. Report a PASS/FAIL table: Far's triangles within 10% of {{ratio}}% of Near's, both sizes equal within 2%, both closed, Near under 50000 triangles (production's limit without Nanite), 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.shipping-container",
+   "title": "Model a 20 ft shipping container with ribbed walls",
+   "summary": "Build an ISO 20 ft container at real size with ribbed sides, a recessed door end and corner castings, under a triangle budget.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.box",
+    "array.linear",
+    "boolean",
+    "drop",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "container",
+    "shipping",
+    "industrial",
+    "port",
+    "modern",
+    "hard surface",
+    "props"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Asset name",
+     "default": "SM_Container_20ft"
+    }
+   ],
+   "prompt": "Model a 20 ft ISO shipping container, `{{content_folder}}/Models/{{name}}`: 606 cm long (X), 244 cm wide (Y) and 259 cm tall (Z). Change only that asset.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Stop if the asset is listed.\n2. hyper_model_apply_plan with bDryRun true first (many booleans), on mesh Body:\n   - `add.box` Size `600,238,253` at Location `0,0,3`.\n   - `add.box` mesh Rib, Size `8,4,240`, standing 2 cm proud of one long side near its end; `array.linear` mesh Ribs from Source Rib with Params `Count=36` and Location `16,0,0`; do the same along the other side into Ribs; `boolean` Body with Source Ribs and Params `Op=union`.\n   - `add.box` mesh DoorCut, Size `4,214,229`, Params `Material=2`, reaching 2 cm into the +X end; `boolean` subtract it.\n   - eight `add.box` corner castings, 18 x 16 x 12 cm with Params `Material=1`, into mesh Castings at the corners, so the outer bounds reach 606 x 244 x 259 cm; `boolean` union them; `drop` Rib, Ribs, DoorCut and Castings.\n   - `uv` with Params `Mode=box; Scale=100`, and `write_asset` with Params `Nanite=false; Collision=box`.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate with Policy `production`.\n5. Report a PASS/FAIL table: size 606 x 244 x 259 cm within 1 cm, bottom at Z 0, MaterialIds 3, 1 component, closed, triangles under 15000, 1 collision shape, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.lightmap-uv-preflight",
+   "title": "Preflight lightmap UV settings on selected meshes",
+   "summary": "Read each mesh's lightmap build settings, preflight the fix as a sealed plan, and list what to change in Build Settings.",
+   "packs": [
+    "geometry_interchange"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_geometry_inspect",
+    "hyper_geometry_apply_plan",
+    "hyper_geometry_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "lightmap",
+    "uv",
+    "static lighting",
+    "build settings",
+    "audit",
+    "static mesh",
+    "preflight"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "StaticMesh"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "min_res",
+     "label": "Minimum lightmap resolution",
+     "default": "64"
+    }
+   ],
+   "prompt": "Check lightmap UVs on these static meshes and preflight the fix: {{selected_assets}}. The target is generated lightmap UVs from channel 0 into channel 1 at a minimum resolution of {{min_res}}. Change nothing: this pack's mesh edits only preflight.\n1. For each asset, hyper_geometry_inspect with its exact TargetPath. If the geometry_interchange tools are missing, say so and stop. Read LOD0's bGenerateLightmapUVs, SrcLightmapIndex, DstLightmapIndex, MinLightmapResolution and Fingerprint, and the PersistedRevision. A mesh already on target passes; skip it.\n2. For each other mesh, one hyper_geometry_apply_plan with bDryRun true and no OperationId (a dry run refuses one), ExpectedPersistedRevision, and a Patch with LodIndex 0, ExpectedLodFingerprint, bSetGenerateLightmapUVs true with bGenerateLightmapUVs true, and bSetLightmapLayout true with SrcLightmapIndex 0, DstLightmapIndex 1 and MinLightmapResolution {{min_res}}. Expect Status `dry_run_valid_execution_blocked`: the plan is valid, but this pack does not run it. Do not send it non-dry.\n3. hyper_geometry_validate each mesh with Policy `static_mesh_build_ready`.\n4. Report a table, one row per mesh: current values, PASS when already on target or FAIL with the planned values, the preflight Status and PlanHash, and validation errors. End with the exact Build Settings fields to change by hand for each FAIL row."
+  },
+  {
+   "id": "modelling-geometry.reimport-preflight",
+   "title": "Preflight a mesh reimport from an updated source file",
+   "summary": "Check where a mesh was imported from, validate it for reimport, and seal a reimport plan from a new FBX or glTF in the project.",
+   "packs": [
+    "geometry_interchange"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_interchange_inspect",
+    "hyper_interchange_validate",
+    "hyper_geometry_inspect",
+    "hyper_interchange_apply_plan"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "reimport",
+    "fbx",
+    "gltf",
+    "source file",
+    "interchange",
+    "pipeline",
+    "preflight"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "StaticMesh"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "source",
+     "label": "New source file",
+     "default": "SourceArt/Props/SM_Crate_v2.fbx",
+     "hint": "Path relative to the project folder; it must sit inside the project"
+    }
+   ],
+   "prompt": "Prepare to reimport {{selected_asset}} from `{{source}}`, relative to the project folder. Change nothing: this pack preflights reimports but does not run them.\n1. hyper_interchange_inspect with TargetPath {{selected_asset}}. If the geometry_interchange tools are missing, say so and stop. List each source: its index, extension, ProjectRelativePath, whether it is inside the project, ImportedFileHash and Fingerprint. Note the PersistedRevision.\n2. hyper_interchange_validate with ExpectedPersistedRevision and Policy `reimport_ready`.\n3. hyper_geometry_inspect the same asset and note its material slots and LOD count, so the reimport can be checked against them afterwards.\n4. hyper_interchange_apply_plan with bDryRun true and no OperationId (a dry run refuses one), ExpectedPersistedRevision, and a Patch with SourceIndex 0, ExpectedSourceFingerprint from step 1, ProjectRelativeSourcePath `{{source}}` and bPreserveExistingPipelines true. Expect `dry_run_valid_execution_blocked`, and read ResolvedProjectRelativeSourcePath and Effects. Do not send it non-dry.\n5. Report a PASS/FAIL table: a source is recorded, the new source is inside the project and resolves, reimport validation 0 errors, preflight valid, and the PlanHash. Then list the material slots and LODs to recheck after I reimport it myself with Reimport With New File."
+  },
+  {
+   "id": "modelling-geometry.crenellated-watchtower",
+   "title": "Model a crenellated stone watchtower",
+   "summary": "Build a round tower with battlements, arrow slits and a door from cylinders, radial arrays and booleans, within budget.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.cylinder",
+    "add.box",
+    "array.radial",
+    "append",
+    "self_union",
+    "boolean",
+    "drop",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "tower",
+    "castle",
+    "medieval",
+    "fantasy",
+    "battlements",
+    "boolean",
+    "landmark"
+   ],
+   "placeholders": [
+    {
+     "name": "height",
+     "label": "Height in cm",
+     "default": "1200"
+    },
+    {
+     "name": "radius",
+     "label": "Radius in cm",
+     "default": "300"
+    }
+   ],
+   "prompt": "Model a round stone watchtower, `{{content_folder}}/Models/SM_Watchtower`: {{radius}} cm radius, {{height}} cm to its battlement tops. Change only that asset.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Stop if the asset is listed.\n2. hyper_model_apply_plan with bDryRun true first, on mesh Tower:\n   - `add.cylinder` 2 x {{radius}} cm across and {{height}} - 120 cm tall, Params `Steps=32`; into the same mesh, a collar `add.cylinder` 50 cm wider and 40 cm tall round the top of the body, its top flush with the body's.\n   - `add.box` mesh Merlon, 80 x 50 x 120 cm, Params `Material=1`; `array.radial` mesh Merlons from it, on the collar, Params `Count=12; Radius=<{{radius}} + 10>`.\n   - `add.box` mesh Slit, 15 x 80 x 120 cm; `array.radial` it into mesh Slits at Z 600 and at Z 900, Params `Count=4; Radius={{radius}}`.\n   - `add.box` mesh DoorCut, 140 x 80 x 300 cm, at the base on the -Y side.\n   - `append` Merlons into Tower, `self_union`, then `boolean` subtract Slits and DoorCut; `drop` the helpers.\n   - `uv` with Params `Mode=cylinder; Scale=200`, and `write_asset` with Params `Nanite=false; Collision=hulls:8`.\n   Over 50000 Triangles (production's limit without Nanite), lower Steps and dry-run again.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate with Policy `production`.\n5. Report a PASS/FAIL table: height within 2% of {{height}}, 12 merlons and 8 slits in the plan, 1 door, MaterialIds 2, 1 component, closed, triangles under 50000, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.ruined-wall-kit",
+   "title": "Kit a ruined castle wall: straight, broken end and corner",
+   "summary": "Build three matching ruined-wall modules from the recipe on one grid, fit their height, and give them hull collision.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "recipe",
+    "plane_cut",
+    "append",
+    "self_union",
+    "noise",
+    "transform",
+    "pivot",
+    "write_asset"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "ruin",
+    "castle",
+    "wall",
+    "modular",
+    "kit",
+    "fantasy",
+    "medieval",
+    "rubble"
+   ],
+   "placeholders": [
+    {
+     "name": "length",
+     "label": "Grid length in cm",
+     "default": "400"
+    },
+    {
+     "name": "height",
+     "label": "Wall height in cm",
+     "default": "350"
+    },
+    {
+     "name": "seed",
+     "label": "First seed",
+     "default": "31"
+    }
+   ],
+   "prompt": "Kit a ruined castle wall from three modules on a {{length}} cm grid: `{{content_folder}}/Models/SM_RuinWall_Straight`, `SM_RuinWall_BrokenEnd` and `SM_RuinWall_Corner`, about {{height}} cm tall. Change only these three assets.\n1. hyper_memory_recall with \"ruin\" for the project's style. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Confirm `ruined_wall` is in Recipes, and stop if any asset is listed.\n2. hyper_model_apply_plan with bDryRun true first:\n   - Straight: `recipe` with Params `Shape=ruined_wall; Size={{length}}; Seed={{seed}}` (Size is its length; rubble comes with it).\n   - BrokenEnd: the same with Seed {{seed}}+1, then `plane_cut` near its +X end, Params `Normal=0.57,0,0.82`, dropping that end to about 40% height.\n   - Corner: two recipe walls, Seeds {{seed}}+2 and {{seed}}+3, the second with Rotation `0,90,0` so the legs meet square on the grid; `append` it into the first and `self_union`.\n   - `noise` each (`Magnitude=1.5; Frequency=0.05`), `pivot` each at its base corner on the grid (`At=x,y,z`), and `write_asset` each with Params `Nanite=false; Collision=hulls:6` (rubble lies in separate pieces).\n   If a wall's height in Meshes is over 10% off {{height}}, add a `transform` with Scale `1,1,<ratio>` and dry-run again.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate the three with Policy `production`.\n5. Report a PASS/FAIL table: each footprint whole {{length}} cm grid steps within 5 cm, height within 10% of {{height}}, the broken end below 50% height at +X, triangles under 50000 each (production's limit without Nanite), 1 to 6 collision shapes, 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.standing-stone-circle",
+   "title": "Raise a circle of standing stones in the level",
+   "summary": "Make three standing-stone variants, place them as foliage on a ring around a point, and prove it from a camera view.",
+   "packs": [
+    "mesh_modeling",
+    "worldbuilding_navigation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-modeling",
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate",
+    "hyper_foliage_inspect",
+    "hyper_foliage_apply_plan",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "recipe",
+    "write_asset",
+    "foliage_type.create",
+    "foliage.place"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "standing stones",
+    "stone circle",
+    "landmark",
+    "fantasy",
+    "celtic",
+    "foliage",
+    "placement"
+   ],
+   "placeholders": [
+    {
+     "name": "count",
+     "label": "Number of stones",
+     "default": "9"
+    },
+    {
+     "name": "radius",
+     "label": "Ring radius in cm",
+     "default": "1200"
+    },
+    {
+     "name": "center",
+     "label": "Centre in cm (x,y,z)",
+     "default": "0,0,0"
+    },
+    {
+     "name": "seed",
+     "label": "First seed",
+     "default": "13"
+    }
+   ],
+   "prompt": "Raise a circle of {{count}} standing stones in {{level}}, on a {{radius}} cm ring around ({{center}}) cm. Change only the new assets and these foliage instances.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Confirm `standing_stone` is in Recipes, and stop if any of `SM_StandingStone_A` to `_C` is listed.\n2. One hyper_model_apply_plan with bDryRun false and a fresh OperationId: three `recipe` ops with Params `Shape=standing_stone; Size=380; Seed=<n>` (n = {{seed}}, {{seed}}+1, {{seed}}+2), each written by `write_asset` as `{{content_folder}}/Models/SM_StandingStone_A`, `_B` and `_C` with Params `Nanite=false; Collision=hulls:2`. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true. Then hyper_model_validate the three with Policy `production`.\n3. hyper_foliage_inspect with Folder `{{content_folder}}/Foliage`. Then one hyper_foliage_apply_plan with bDryRun false and a fresh OperationId: a `foliage_type.create` per stone (Types `{{content_folder}}/Foliage/FT_StandingStone_A` and so on, Mesh the stone) with Settings AlignToNormal `false`, RandomYaw `true` and ScaleX `(Min=0.9,Max=1.15)`; then one `foliage.place` per type (it places one type), each with every third of {{count}} evenly spaced ring points, set 500 cm above the ground so they drop onto it. Wait the same way if it waits.\n4. hyper_foliage_inspect again for the instance counts. hyper_capture_view with Source `transform`, 2.5 x {{radius}} cm from the centre and 600 cm up, Rotation looking at it, 1280 x 720.\n5. Report a PASS/FAIL table: 3 assets with 0 validation errors, 3 foliage types, {{count}} instances in total, each within 50 cm of the ring. Show the capture on its own line."
+  },
+  {
+   "id": "modelling-geometry.stylised-forest-ecosystem",
+   "title": "Model a stylised tree set and grow it with PCG",
+   "summary": "Model trees, a bush and a grass tuft from recipes, then grow them on a landscape paint layer with a PCG ecosystem and prove it.",
+   "packs": [
+    "mesh_modeling",
+    "pcg",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-modeling",
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate",
+    "hyper_pcg_scatter_inspect",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "recipe",
+    "write_asset",
+    "ecosystem.create",
+    "volume.create"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "forest",
+    "trees",
+    "stylised",
+    "pcg",
+    "ecosystem",
+    "landscape",
+    "fantasy",
+    "nature"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "layer",
+     "label": "Paint layer",
+     "default": "Grass"
+    },
+    {
+     "name": "seed",
+     "label": "First seed",
+     "default": "3"
+    }
+   ],
+   "prompt": "Model a stylised tree set and grow it over {{selected_actor}} on its `{{layer}}` paint layer. Change only the new assets, graph and volume.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models/Forest`. If the tool is missing, say the mesh_modeling pack is off and stop. Confirm `tree`, `bush` and `grass_tuft` are in Recipes.\n2. One hyper_model_apply_plan with bDryRun false and a fresh OperationId: `recipe` ops for two trees (Params `Shape=tree; Size=900`, Seeds {{seed}} and {{seed}}+1), a bush (`Shape=bush; Size=150`) and a grass tuft (`Shape=grass_tuft; Size=40`), written by `write_asset` as `{{content_folder}}/Models/Forest/SM_Tree_A`, `SM_Tree_B`, `SM_Bush` and `SM_GrassTuft`: trees with Params `Nanite=true; Collision=hulls:2`, bush and grass with `Nanite=false; Collision=none`. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true. Then hyper_model_validate the trees with Policy `production`, and the bush and grass with Policy `placeholder`, since they need no collision.\n3. hyper_pcg_scatter_inspect with no Graph. Then one hyper_pcg_scatter_apply_plan with bDryRun false and a fresh OperationId: `ecosystem.create` with Graph `{{content_folder}}/PCG/PCG_StylisedForest` and one biome on Layer `{{layer}}`, species big to small, each naming its Meshes: Trees (both trees, Density 0.02, Footprint 5), Bushes (Density 0.2, Footprint 1.5), Grass (Density 3, Footprint 0.4); then `volume.create` with that Graph and Cover set to the landscape's label. While the Status is `generating`, call hyper_operation_wait.\n4. hyper_pcg_scatter_inspect again for the volume's instances, and hyper_capture_view with Source `viewport`, 1280 x 720.\n5. Report a PASS/FAIL table: 4 assets with 0 validation errors, generation finished, instances above 0, trees spaced apart in the capture. Show the capture on its own line."
+  },
+  {
+   "id": "modelling-geometry.nanite-cliff-chunk",
+   "title": "Build a Nanite cliff chunk with layered noise",
+   "summary": "Make a large, high-detail cliff rock: remesh to a triangle target, add two noise layers, and write it as Nanite with hull collision.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "recipe",
+    "remesh",
+    "noise",
+    "normals",
+    "uv",
+    "write_asset"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "cliff",
+    "rock",
+    "nanite",
+    "high detail",
+    "environment",
+    "noise",
+    "remesh"
+   ],
+   "placeholders": [
+    {
+     "name": "size",
+     "label": "Length in cm",
+     "default": "1500"
+    },
+    {
+     "name": "triangles",
+     "label": "Triangle target",
+     "default": "150000"
+    },
+    {
+     "name": "seed",
+     "label": "Seed",
+     "default": "17"
+    }
+   ],
+   "prompt": "Build a high-detail cliff chunk, `{{content_folder}}/Models/SM_CliffChunk`, about {{size}} cm long, drawn with Nanite. Change only that asset.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Read Limits for the triangles one mesh and one Nanite asset may hold, and stop if the asset is listed.\n2. The plan is large, so dry-run it first. hyper_model_apply_plan with bDryRun true, on mesh Cliff:\n   - `recipe` with Params `Shape=rock; Size={{size}}; Seed={{seed}}; Detail=3` and Scale `1,0.55,0.6`, for a long, low slab.\n   - `remesh` with Params `Triangles={{triangles}}`, even triangles for the detail to sit on.\n   - `noise` twice: broad (`Magnitude=40; Frequency=0.002; Seed={{seed}}`), then fine (`Magnitude=4; Frequency=0.03; Seed=<{{seed}}+1>`).\n   - `normals` with Params `Mode=smooth`, and `uv` with Params `Mode=box; Scale=400`.\n   - `write_asset` with Params `Nanite=true; Collision=hulls:8`.\n   Check Cliff's Triangles are under both limits, and note BuildMs.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate with Policy `production`.\n5. Report a PASS/FAIL table: Nanite on, triangles within 10% of {{triangles}} and under the limits, length within 15% of {{size}} cm, closed, 1 to 8 collision shapes, 0 validation errors, and BuildMs."
+  },
+  {
+   "id": "modelling-geometry.fused-shrine-proxy",
+   "title": "Fuse a kitbashed shrine into one watertight proxy",
+   "summary": "Assemble a shrine from primitives and recipes, then voxel-fuse, close and simplify a copy into one closed mesh for distance.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "ops": [
+    "add.cylinder",
+    "recipe",
+    "array.radial",
+    "add.box",
+    "scatter_on",
+    "drop",
+    "copy",
+    "self_union",
+    "solidify",
+    "morphology",
+    "simplify",
+    "repair",
+    "normals",
+    "uv",
+    "write_asset",
+    "append"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "proxy",
+    "hlod",
+    "kitbash",
+    "shrine",
+    "solidify",
+    "simplify",
+    "optimization",
+    "fantasy"
+   ],
+   "placeholders": [
+    {
+     "name": "proxy_tris",
+     "label": "Proxy triangle budget",
+     "default": "6000"
+    }
+   ],
+   "prompt": "Build a ruined shrine and a fused distance proxy of it: `{{content_folder}}/Models/SM_Shrine` (the kitbash, several parts) and `SM_Shrine_Proxy` (one closed mesh of at most {{proxy_tris}} triangles). Change only these two assets.\n1. hyper_model_inspect with Folder `{{content_folder}}/Models`. If the tool is missing, say the mesh_modeling pack is off and stop. Read Limits, and stop if either asset is listed.\n2. hyper_model_apply_plan with bDryRun true first:\n   - Shrine: `add.cylinder` platform Size `600,600,40`, Params `Steps=32`; `recipe` mesh Pillar with Params `Shape=pillar; Size=350`, then `array.radial` it into Shrine at Location `0,0,40` with Params `Count=6; Radius=230`; a `recipe` mesh Arch with Params `Shape=arch; Size=260`, its Location and Rotation setting it across two neighbouring pillars, then `append` Arch into Shrine (a recipe into Shrine itself would re-pivot and move the whole shrine); `add.box` mesh Rubble, 20 x 15 x 10 cm, and `scatter_on` Shrine with Source Rubble and Params `Count=12; Seed=5`; `drop` Pillar, Arch and Rubble.\n   - Proxy: `copy` Shrine into mesh Proxy, then `self_union`, `solidify` (`Resolution=128`), `morphology` (`Op=close; Distance=5`), `simplify` (`Triangles={{proxy_tris}}`), `repair`, `normals` (`Mode=hard`) and `uv` (`Mode=auto`).\n   - `write_asset` Shrine with Params `Nanite=false; Collision=hulls:8`, and Proxy with `Nanite=false; Collision=none`.\n   Proxy must read 1 component, closed and 0 OpenEdges.\n3. Send the same Operations with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_validate Shrine with Policy `production`, and Proxy with Policy `placeholder`, since a distance proxy needs no collision.\n5. Report a PASS/FAIL table: Proxy 1 component, closed, 0 open edges, at most {{proxy_tris}} triangles, size within 3% of the Shrine's; Shrine 0 validation errors."
+  },
+  {
+   "id": "modelling-geometry.paid-hero-prop",
+   "title": "Buy a paid AI hero prop and check its import",
+   "summary": "Price a textured model from Tripo or Meshy, run it only after your approval and under a cap, then validate the imported mesh.",
+   "packs": [
+    "mesh_generation",
+    "geometry_interchange"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_mesh_status",
+    "hyper_mesh_generate",
+    "hyper_operation_wait",
+    "hyper_geometry_inspect",
+    "hyper_geometry_validate",
+    "hyper_interchange_inspect"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "paid",
+    "ai",
+    "tripo",
+    "meshy",
+    "hero prop",
+    "textured",
+    "import",
+    "validation"
+   ],
+   "placeholders": [
+    {
+     "name": "subject",
+     "label": "What to make",
+     "default": "a brass ship's telescope on a wooden tripod"
+    },
+    {
+     "name": "name",
+     "label": "Asset name",
+     "default": "SM_Telescope"
+    },
+    {
+     "name": "max_cost",
+     "label": "Most to spend (USD)",
+     "default": "1.00"
+    }
+   ],
+   "prompt": "Make a textured hero prop of {{subject}} with a paid AI model service, and check it imported cleanly as `{{content_folder}}/Generated/{{name}}`. This spends real credits: it runs only after my approval and never above {{max_cost}} USD.\n1. hyper_mesh_status: stop if this session already made {{name}}. If the mesh_generation tools are missing, say the pack is off and stop.\n2. hyper_mesh_generate with bDryRun true, Prompt \"{{subject}}, game-ready hero prop, real-world scale, clean topology, PBR textures\", Name {{name}} and Folder `{{content_folder}}/Generated`. Report the provider, EstimatedCost and Destination. If the cost is above {{max_cost}} USD, stop.\n3. Send it again with bDryRun false and a fresh OperationId. It waits for my approval in the Activity panel: call hyper_operation_wait with that OperationId, bWaitThroughApproval true and TimeoutMs 120000, and repeat it (or check hyper_mesh_status) until the State is completed, failed or rejected. A model takes 1 to 5 minutes.\n4. From hyper_mesh_status take AssetPath and ImportedAssets. hyper_geometry_inspect the mesh, hyper_geometry_validate it with Policy `static_mesh_build_ready`, and hyper_interchange_inspect it to confirm its source file is recorded.\n5. Report a PASS/FAIL table: job completed, actual Cost at or under {{max_cost}} USD, the mesh and its materials and textures imported (with counts), every material slot filled, build validation 0 errors, source recorded. List the imported asset paths."
+  },
+  {
+   "id": "modelling-geometry.concept-image-to-model",
+   "title": "Turn a concept image into a textured 3D model",
+   "summary": "Draw a prop concept with an image model, then have Tripo, Meshy or Hi3D build it from that picture, each after your approval.",
+   "packs": [
+    "mesh_generation",
+    "image_generation",
+    "geometry_interchange"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_image_inspect",
+    "hyper_image_generate",
+    "hyper_operation_wait",
+    "hyper_mesh_generate",
+    "hyper_mesh_status",
+    "hyper_geometry_validate"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "concept",
+    "image to 3d",
+    "paid",
+    "ai",
+    "hi3d",
+    "meshy",
+    "tripo",
+    "sci-fi",
+    "pipeline"
+   ],
+   "placeholders": [
+    {
+     "name": "subject",
+     "label": "What to make",
+     "default": "a sci-fi supply crate with glowing status lights"
+    },
+    {
+     "name": "name",
+     "label": "Asset name",
+     "default": "SM_SupplyCrate"
+    }
+   ],
+   "prompt": "Concept a prop, {{subject}}, as a picture, then turn that picture into a textured model at `{{content_folder}}/Generated/{{name}}`. Both steps spend money or my plan: each waits for my approval and costs credits.\n1. hyper_image_inspect: pick a ready model (codex_image_gen if you cannot draw, else nano_banana_2), and note its cost and the session spend cap. If the image_generation or mesh_generation tools are missing, say which and stop.\n2. hyper_image_generate with bDryRun true, Prompt \"{{subject}}, single object, three-quarter view, plain light grey background, even studio light, no text\", Count 2 and BatchName `{{name}}_concept`. Read ComposedPrompt and EstimatedCost, then send it with bDryRun false, ExpectedPlanHash and a fresh OperationId, and call hyper_operation_wait with bWaitThroughApproval true; then hyper_image_inspect the BatchId until its State is complete. Open both images and pick the one with the clearest silhouette.\n3. hyper_mesh_generate with bDryRun true, ImagePath set to that PNG, Name {{name}} and Folder `{{content_folder}}/Generated`; report the provider and EstimatedCost. Then send it with bDryRun false and a fresh OperationId, and use hyper_operation_wait (bWaitThroughApproval true, TimeoutMs 120000) or hyper_mesh_status until it completes.\n4. hyper_geometry_validate the imported mesh with Policy `static_mesh_build_ready`.\n5. Report a PASS/FAIL table: concept images written, model job completed, the total cost of both steps, mesh imported with its materials, validation 0 errors. Show the chosen concept on its own line."
+  },
+  {
+   "id": "modelling-geometry.uv-check-and-unwrap",
+   "title": "Check a mesh's UVs and unwrap them if bad",
+   "summary": "Measure the selected mesh's UV channel, preview an xatlas unwrap, apply it only if it improves, and check it again.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_uv_check",
+    "hyper_model_uv_apply",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "uv",
+    "unwrap",
+    "xatlas",
+    "overlap",
+    "texel density",
+    "static mesh",
+    "audit"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "StaticMesh"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "texture_size",
+     "label": "Texture size (px)",
+     "default": "2048"
+    }
+   ],
+   "prompt": "Check the UVs of {{selected_asset}} and fix them only if they are bad. Change nothing else.\n1. hyper_model_uv_check with Asset {{selected_asset}}, Channel 0 and TextureSize {{texture_size}}. If the tool is missing, say the mesh_modeling pack is off and stop. Report the Verdict, the Problems, the island count, OverlapPercent and the texel density, and open LayoutPath with your image reader. If the Verdict is good, or usable with no overlap problem, stop here and report.\n2. hyper_model_uv_apply with Asset {{selected_asset}}, Method xatlas, Resolution {{texture_size}} and bDryRun true. Read LODs[0] Before and After and bImproved, and open its LayoutPath. If bImproved is false, stop and say why.\n3. Send it again with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_model_uv_check again on {{selected_asset}}.\n5. Report a PASS/FAIL table: overlap under 0.5%, 0 flipped triangles, nothing outside 0-1, Verdict good or usable, the write read back (bVerified), the same material slots as before."
+  },
+  {
+   "id": "modelling-geometry.bake-high-to-low",
+   "title": "Bake normal and AO from a high-poly onto a low-poly",
+   "summary": "Check the low-poly's UVs, unwrap them if they overlap, then bake normal, AO and ORM maps from the high-poly into a new material instance.",
+   "packs": [
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_model_uv_check",
+    "hyper_model_uv_apply",
+    "hyper_model_bake",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "bake",
+    "normal map",
+    "ambient occlusion",
+    "orm",
+    "high poly",
+    "low poly",
+    "material instance",
+    "textures"
+   ],
+   "placeholders": [
+    {
+     "name": "high",
+     "label": "High-poly mesh",
+     "default": "/Game/Models/SM_Statue_High"
+    },
+    {
+     "name": "low",
+     "label": "Low-poly mesh",
+     "default": "/Game/Models/SM_Statue"
+    },
+    {
+     "name": "resolution",
+     "label": "Map size (px)",
+     "default": "2048"
+    }
+   ],
+   "prompt": "Bake the detail of `{{high}}` onto `{{low}}` as {{resolution}} px maps and put them on the low-poly. Change only `{{low}}`'s UVs, its material slots and the new textures and material.\n1. hyper_model_uv_check with Asset `{{low}}`, Channel 0 and TextureSize {{resolution}}. If the tool is missing, say the mesh_modeling pack is off and stop. If the Verdict is bad or missing, or OverlapPercent is above 0.5, run hyper_model_uv_apply on `{{low}}` with Method xatlas and Resolution {{resolution}}: first with bDryRun true (stop unless bImproved), then with bDryRun false and a fresh OperationId.\n2. hyper_model_bake with Target `{{low}}`, Source `{{high}}`, Maps normal and ao, Resolution {{resolution}}, Samples 4, Padding 8, Material `new`, AssignSlots `all`, bDryRun true and bPreviewDryRun true. Report the Textures it names with their compression and sRGB, and open the 128 px PreviewPath. Stop if any texture path is refused.\n3. Send it with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true. Open the PreviewPath.\n4. Report a PASS/FAIL table: the low-poly's channel 0 does not overlap, each map written at {{resolution}} px with the right compression (normal TC_Normalmap, AO and ORM TC_Masks, all linear), the AO map's Min below 0.9 and Max near 1 (it holds occlusion), the material instance made and on every slot."
+  },
+  {
+   "id": "modelling-geometry.prepare-generated-model",
+   "title": "Ready a generated model: UVs, low-poly and baked maps",
+   "summary": "After a paid model imports, check its UVs, unwrap them if bad with its textures carried over, and write a decimated copy with baked maps.",
+   "packs": [
+    "mesh_modeling",
+    "mesh_generation"
+   ],
+   "skills": [
+    "unreal-modeling"
+   ],
+   "tools": [
+    "hyper_mesh_status",
+    "hyper_model_uv_check",
+    "hyper_model_prepare",
+    "hyper_operation_wait",
+    "hyper_model_validate"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "generated",
+    "ai",
+    "tripo",
+    "meshy",
+    "uv",
+    "decimate",
+    "low poly",
+    "bake",
+    "normal map",
+    "game ready"
+   ],
+   "placeholders": [
+    {
+     "name": "name",
+     "label": "Generated asset name",
+     "default": "SM_Telescope"
+    },
+    {
+     "name": "triangles",
+     "label": "Low-poly triangles",
+     "default": "8000"
+    },
+    {
+     "name": "resolution",
+     "label": "Map size (px)",
+     "default": "2048"
+    }
+   ],
+   "prompt": "Make the generated model {{name}} game-ready: clean UVs, and a lighter copy with its detail baked in. Spend no credits: this works on the model already imported.\n1. hyper_mesh_status: find the completed job that made {{name}} and its AssetPath (the static mesh). If there is none, say so and stop. If the mesh_modeling tools are missing, say the pack is off and stop.\n2. hyper_model_uv_check with that Asset, Channel 0 and TextureSize {{resolution}}: report the Verdict, Problems and Metrics, and open LayoutPath.\n3. hyper_model_prepare with Asset that path, LowPoly the same path with `_Low` added, TargetTriangles {{triangles}}, Resolution {{resolution}}, Samples 4, Padding 8 and bDryRun true. Read its Steps: whether it unwraps, which textures it carries, the low-poly's triangles and its UVs.\n4. Send it with bDryRun false and a fresh OperationId. If the Status is `awaiting_user_approval`, call hyper_operation_wait with that OperationId and bWaitThroughApproval true. Open LayoutPath, MapsPreviewPath and PreviewPath.\n5. hyper_model_validate with both meshes and Policy `production`.\n6. Report a PASS/FAIL table: the original's UVs no longer bad, its base colour still showing (a carried texture, or none needed), the low-poly within 10% of {{triangles}} triangles with good or usable UVs, normal, AO and base colour maps written, a material instance on its slots, and 0 validation errors on each mesh. List every asset made."
+  },
+  {
+   "id": "modelling-geometry.retexture-paid-model",
+   "title": "Retexture a model up to 8K with a paid service",
+   "summary": "Give a generated or project mesh a new PBR texture from words with Meshy or Tripo, at 2K to 8K, imported with its material instance.",
+   "packs": [
+    "mesh_generation"
+   ],
+   "skills": [
+    "generated-characters"
+   ],
+   "tools": [
+    "hyper_mesh_status",
+    "hyper_mesh_retexture",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "paid",
+    "ai",
+    "texture",
+    "retexture",
+    "pbr",
+    "8k",
+    "meshy",
+    "tripo"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "StaticMesh"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "look",
+     "label": "New look",
+     "default": "weathered bronze with green patina and worn edges"
+    },
+    {
+     "name": "resolution",
+     "label": "Resolution",
+     "default": "4k",
+     "hint": "Meshy: 2k, 4k or 8k. Tripo: standard, detailed or 8k."
+    },
+    {
+     "name": "max_cost",
+     "label": "Most to spend (USD)",
+     "default": "0.50"
+    }
+   ],
+   "prompt": "Give {{selected_asset}} a new look: \"{{look}}\", at {{resolution}}, with PBR maps, as a new model beside it. It is paid and waits for my approval; never above {{max_cost}} USD. If the mesh_generation tools are missing, say so and stop.\n1. hyper_mesh_status: if a job of this session made {{selected_asset}}, pass its operation id as SourceOperationId (the provider then works from its own model); otherwise MeshPath {{selected_asset}}, sent as a GLB, with bKeepUVs true (Meshy keeps your UVs).\n2. hyper_mesh_retexture with bDryRun true, Prompt \"{{look}}\", Resolution {{resolution}}, bPBR true and Folder `{{content_folder}}/Generated`. Read Provider, Tasks and EstimatedCost; stop if it passes {{max_cost}} USD or the resolution is refused.\n3. Send it with bDryRun false and a fresh OperationId, then hyper_operation_wait (bWaitThroughApproval true, TimeoutMs 120000) until it ends.\n4. hyper_mesh_status: AssetPath, Materials and Textures.\n5. Report a PASS/FAIL table: job completed, Cost at or under {{max_cost}} USD, the mesh, its material instances and textures imported (counts). If bKeepUVs was used, say which material instance to put on {{selected_asset}}."
+  }
+ ]
+}

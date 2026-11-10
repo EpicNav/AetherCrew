@@ -1,0 +1,1429 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "blueprints",
+ "presets": [
+  {
+   "id": "blueprints.score-pickup",
+   "title": "Build a spinning score pickup that adds points",
+   "summary": "A pickup Blueprint that spins, adds points to the Game Mode's score when a pawn touches it and disappears, proven by a bot walking into it.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_context_snapshot",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "pickup",
+    "coin",
+    "score",
+    "collectible",
+    "game mode",
+    "overlap"
+   ],
+   "placeholders": [
+    {
+     "name": "pickup_name",
+     "label": "Pickup Blueprint name",
+     "default": "BP_Coin"
+    },
+    {
+     "name": "points",
+     "label": "Points per pickup",
+     "default": "10"
+    },
+    {
+     "name": "mesh",
+     "label": "Pickup mesh",
+     "default": "/Engine/BasicShapes/Cylinder"
+    },
+    {
+     "name": "mode_name",
+     "label": "New Game Mode name",
+     "default": "BP_ScoreGameMode"
+    }
+   ],
+   "prompt": "Build a score pickup for {{level}} under {{content_folder}}/Blueprints.\n1. hyper_memory_recall \"score pickup game mode\"; hyper_context_snapshot for the open map, then its World Settings DefaultGameMode (Epic's ObjectTools get_properties). If that, or the project's default game mode when it has none, is a Game Mode Blueprint, add int `Score` (0) to it; otherwise make `{{mode_name}}` (Game Mode Base, int `Score` 0) and set it as the level's Game Mode Override.\n2. One execute_tool_script (unreal-blueprint skill), the Game Mode compiled first: `{{pickup_name}}` with Static Mesh `{{mesh}}`, Sphere `Trigger` radius 100 cm, Rotating Movement yaw 90°/s, int `Points` = {{points}} (category Pickup, tooltip). When a Pawn overlaps it, it adds Points to the Game Mode's Score, then destroys itself. Place 3, labelled Pickup_1 to Pickup_3, 400 cm apart, starting 500 cm ahead of the Player Start.\n3. Compile-check both with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n4. hyper_verify_run, one case: MoveTo Pickup_1 (radius 50), WaitUntil AssertGone Pickup_1, AssertProperty GameMode Score == {{points}}, AssertExists Pickup_2.\n5. Report a PASS/FAIL table: compiles clean, pickup removed, Score == {{points}}, the other pickups untouched. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.timeline-door",
+   "title": "Make a door swing open on a timeline when approached",
+   "summary": "A door Blueprint whose hinge eases open over a timeline when a pawn enters its trigger and closes again on exit, checked in a recorded playtest.",
+   "packs": [
+    "blueprint",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_structure_inspect",
+    "hyper_blueprint_structure_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "timeline.add",
+    "pins.connect"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "door",
+    "timeline",
+    "trigger",
+    "interaction",
+    "animation",
+    "playtest"
+   ],
+   "placeholders": [
+    {
+     "name": "door_name",
+     "label": "Door Blueprint name",
+     "default": "BP_Door"
+    },
+    {
+     "name": "open_angle",
+     "label": "Open angle (degrees)",
+     "default": "90"
+    },
+    {
+     "name": "open_seconds",
+     "label": "Opening time (s)",
+     "default": "1.0"
+    },
+    {
+     "name": "mesh",
+     "label": "Door mesh",
+     "default": "/Engine/BasicShapes/Cube"
+    }
+   ],
+   "prompt": "Build `{{content_folder}}/Blueprints/{{door_name}}`, a door that swings open as a pawn approaches. If the blueprint_structure pack is unavailable, say so and stop.\n1. hyper_memory_recall \"door\". If {{door_name}} exists, read it with hyper_blueprint_structure_inspect and change only it.\n2. One execute_tool_script (unreal-blueprint skill): Actor Blueprint with Scene `Hinge`, Static Mesh `Door` under it ({{mesh}}, about 20×120×240 cm, offset so it turns on its edge), Box `Trigger` extent 150×150×120 cm, float `OpenAlpha`; function `ApplyOpen(Alpha)` that stores Alpha in OpenAlpha and sets Hinge's relative yaw to Alpha × {{open_angle}}; and the Event ActorEndOverlap node (BlueprintTools add_event, ReceiveActorEndOverlap).\n3. One hyper_blueprint_structure_apply_plan (fresh OperationId, bSave false): `timeline.add` `Open` (Length {{open_seconds}}, float track `Alpha` keyed 0 at 0 and 1 at the end, Drive `ApplyOpen`), then `pins.connect` \"Event ActorBeginOverlap.then\" to \"Open.Play\" and \"Event ActorEndOverlap.then\" to \"Open.Reverse\". Its CompileMessages must be empty.\n4. hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves it; hyper_blueprint_debug_inspect: 0 errors.\n5. Place `Door_1` 600 cm ahead of the Player Start. hyper_playtest_run (mode StartInProcess, bRecordVideo true): MoveTo Door_1 radius 150, WaitUntil AssertProperty Door_1 OpenAlpha >= 0.99, Capture, MoveTo PlayerStart, WaitUntil AssertProperty Door_1 OpenAlpha <= 0.01. hyper_operation_wait, then hyper_playtest_status.\n6. Report a PASS/FAIL table (compiles, opens within {{open_seconds}} s + 0.5, closes after leaving) with the capture and the video each on its own line. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.training-dummy-respawn",
+   "title": "Build a training dummy that dies and respawns",
+   "summary": "A target Blueprint with clamped Health that hides and disables collision at zero, then respawns after a delay, tested by a spike trap.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "health",
+    "damage",
+    "respawn",
+    "target",
+    "trap",
+    "timer"
+   ],
+   "placeholders": [
+    {
+     "name": "target_name",
+     "label": "Target Blueprint name",
+     "default": "BP_TrainingDummy"
+    },
+    {
+     "name": "max_health",
+     "label": "Max health",
+     "default": "100"
+    },
+    {
+     "name": "respawn_seconds",
+     "label": "Respawn delay (s)",
+     "default": "3"
+    },
+    {
+     "name": "trap_damage",
+     "label": "Trap damage per hit",
+     "default": "25"
+    }
+   ],
+   "prompt": "Build `{{content_folder}}/Blueprints/{{target_name}}`, a target that dies and respawns, plus a trap to test it.\n1. hyper_memory_recall \"health damage respawn\" and follow any project health convention it returns.\n2. One execute_tool_script (unreal-blueprint skill): {{target_name}} with a Static Mesh (Generate Overlap Events on), floats `MaxHealth` and `Health` = {{max_health}}, bool `Dead`. Event AnyDamage lowers Health, clamped to 0..MaxHealth; at 0 it hides, disables collision, sets Dead and calls function `Respawn` after {{respawn_seconds}} s (Set Timer by Function Name), which restores Health, visibility and collision and clears Dead. Also `BP_SpikeTrap`: Box `Trigger` with a 100 cm extent that applies {{trap_damage}} damage to every overlapping actor each 0.5 s (looping timer).\n3. Compile-check both with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n4. Place `Trap_1` 800 cm ahead of the Player Start and `Dummy_1` inside its trigger. hyper_verify_run, one case: WaitUntil AssertProperty Dummy_1 Dead == true (5 s), AssertProperty Dummy_1 Health == 0, then Sample Dummy_1 Health for {{respawn_seconds}} + 1 s.\n5. Report a PASS/FAIL table with the evidence lines: compiles, dies within 5 s, Health never below 0 (Sample min), respawns to {{max_health}} (Sample max). Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.health-component",
+   "title": "Add a reusable health component with damage events",
+   "summary": "An Actor Component with Health, MaxHealth, heal and death dispatchers, added to the player and proven against a hazard volume in PIE.",
+   "packs": [
+    "blueprint",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_structure_inspect",
+    "hyper_blueprint_snapshot",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "health",
+    "component",
+    "event dispatcher",
+    "damage",
+    "hazard",
+    "player"
+   ],
+   "placeholders": [
+    {
+     "name": "character_bp",
+     "label": "Player character Blueprint",
+     "default": "/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter"
+    },
+    {
+     "name": "component_name",
+     "label": "Component name",
+     "default": "BPC_Health"
+    },
+    {
+     "name": "max_health",
+     "label": "Max health",
+     "default": "100"
+    },
+    {
+     "name": "hazard_dps",
+     "label": "Hazard damage per second",
+     "default": "20"
+    }
+   ],
+   "prompt": "Add a reusable health component to `{{character_bp}}`; change no other existing asset.\n1. hyper_memory_recall \"health component\"; hyper_blueprint_structure_inspect {{character_bp}}: its components and events, and whether Event AnyDamage is already used (if so, extend it rather than replace it). If the blueprint_structure pack is unavailable, read it with hyper_blueprint_snapshot instead.\n2. One execute_tool_script (unreal-blueprint skill): `{{content_folder}}/Blueprints/{{component_name}}` (ActorComponent) with floats `MaxHealth` and `Health` = {{max_health}} (category Health, tooltips), event dispatchers `OnHealthChanged(NewHealth, Delta)` and `OnDied`, functions `ApplyHealthChange(Delta)` (clamps to 0..MaxHealth, calls OnHealthChanged, calls OnDied once on reaching 0) and `Heal(Amount)`. Add it to {{character_bp}} as `HealthComp`, whose Event AnyDamage calls ApplyHealthChange(-Damage). Also `BP_HazardZone`: a Box with a 200 cm extent that applies {{hazard_dps}} damage per second to overlapping pawns (0.25 s looping timer).\n3. Compile-check all three with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n4. Place `Hazard_1` 700 cm ahead of the Player Start. hyper_verify_run, two cases: (a) Wait 2 s, AssertProperty Player HealthComp.Health == {{max_health}}; (b, timeoutSeconds 40) MoveTo Hazard_1, Sample Player HealthComp.Health for 3 s, WaitUntil AssertProperty Player HealthComp.Health == 0 (timeout {{max_health}} / {{hazard_dps}} + 3 s).\n5. Report a PASS/FAIL table: compiles, no damage outside, drop rate about {{hazard_dps}}/s from the Sample, clamps at 0. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.interact-interface",
+   "title": "Wire an interact interface for levers and chests",
+   "summary": "A Blueprint Interface with Interact, implemented by a lever and a chest and called from the player's interact input, proven by the bot.",
+   "packs": [
+    "blueprint",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_verify_run",
+    "hyper_blueprint_structure_inspect",
+    "hyper_blueprint_structure_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect"
+   ],
+   "ops": [
+    "interface.create",
+    "interface.add_function",
+    "interface.implement"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "interaction",
+    "interface",
+    "lever",
+    "chest",
+    "input",
+    "fantasy"
+   ],
+   "placeholders": [
+    {
+     "name": "character_bp",
+     "label": "Player character Blueprint",
+     "default": "/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter"
+    },
+    {
+     "name": "interact_action",
+     "label": "Interact input action",
+     "default": "IA_Interact"
+    },
+    {
+     "name": "interface_name",
+     "label": "Interface name",
+     "default": "BPI_Interactable"
+    },
+    {
+     "name": "reach",
+     "label": "Interaction reach (cm)",
+     "default": "250"
+    }
+   ],
+   "prompt": "Build an interaction system under {{content_folder}}/Interaction; change only {{character_bp}} and the new assets. If the blueprint_structure pack is unavailable, say so and stop.\n1. hyper_memory_recall \"interact\". hyper_verify_run with one Survey case: the controls must include `{{interact_action}}`, else say so and stop. hyper_blueprint_structure_inspect {{character_bp}}.\n2. One execute_tool_script (unreal-blueprint skill): `BP_Lever` (bool `On`, mesh) and `BP_Chest` (bool `Opened`, lid mesh).\n3. hyper_blueprint_structure_apply_plan (fresh OperationId, bSave false): `interface.create` `{{content_folder}}/Interaction/{{interface_name}}` and `interface.add_function` `Interact` (input Instigator object:/Script/Engine.Pawn, no outputs); then one plan per Blueprint with `interface.implement` on BP_Lever and on BP_Chest.\n4. One execute_tool_script: each Blueprint's Interact event (Lever toggles On, Chest sets Opened); {{character_bp}} on {{interact_action}} finds the nearest actor within {{reach}} cm of the pawn (Sphere Overlap Actors) that implements {{interface_name}} and sends it Interact (find the message node with find_node_types).\n5. Compile-check all three with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n6. Place `Lever_1` 500 cm ahead of the Player Start and `Chest_1` 600 cm to its side. hyper_verify_run, two cases: MoveTo Lever_1 radius 120, Interact Lever_1 (inputAction {{interact_action}}), WaitUntil AssertProperty Lever_1 On == true; the same for Chest_1 and Opened.\n7. Report a PASS/FAIL table. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.checkpoint-respawn",
+   "title": "Add checkpoints that respawn the player after a fall",
+   "summary": "Checkpoint triggers record the furthest one reached in the Game Mode, and a kill volume sends the player back to it. Proven by a bot run.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_context_snapshot",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "checkpoint",
+    "respawn",
+    "kill volume",
+    "game mode",
+    "platformer"
+   ],
+   "placeholders": [
+    {
+     "name": "checkpoint_name",
+     "label": "Checkpoint Blueprint name",
+     "default": "BP_Checkpoint"
+    },
+    {
+     "name": "killzone_name",
+     "label": "Kill volume Blueprint name",
+     "default": "BP_KillVolume"
+    },
+    {
+     "name": "spacing",
+     "label": "Checkpoint spacing (cm)",
+     "default": "1200"
+    }
+   ],
+   "prompt": "Add checkpoints and a kill volume to {{level}} under {{content_folder}}/Blueprints.\n1. hyper_memory_recall \"checkpoint respawn\"; hyper_context_snapshot for the open map, then its World Settings DefaultGameMode (Epic's ObjectTools get_properties). If that Game Mode is a Blueprint, extend it; otherwise make `BP_CheckpointGameMode` and set it as the level's Game Mode Override.\n2. One execute_tool_script (unreal-blueprint skill): in the Game Mode, Transform `LastCheckpoint` (the Player Start's on BeginPlay), ints `CheckpointIndex` and `RespawnCount`, function `RespawnPlayer` (teleports the player pawn to LastCheckpoint, zeroes its velocity, increments RespawnCount). `{{checkpoint_name}}`: Box trigger with a 150 cm extent and instance-editable int `Index`; on a pawn's overlap it stores its transform and Index in the Game Mode, only when Index is higher. `{{killzone_name}}`: Box trigger that calls RespawnPlayer when a pawn enters.\n3. Compile-check each with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n4. Place Checkpoint_1 (Index 1) and Checkpoint_2 (Index 2) {{spacing}} cm apart ahead of the Player Start, and KillZone_1 (400×400×100 cm) on the floor 600 cm past Checkpoint_2.\n5. hyper_verify_run, two cases (timeoutSeconds 40 each): (a) MoveTo Checkpoint_2, AssertProperty GameMode CheckpointIndex == 2, MoveTo KillZone_1 with bBackground true, WaitUntil AssertProperty GameMode RespawnCount == 1 (6 s), AssertNear Player Checkpoint_2 radius 300; (b) MoveTo Checkpoint_2, MoveTo Checkpoint_1, AssertProperty GameMode CheckpointIndex == 2.\n6. Report a PASS/FAIL table: compiles, checkpoint stored, respawned at Checkpoint_2, an older checkpoint does not override it. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.drone-wave-spawner",
+   "title": "Build a timed drone spawner with a live cap",
+   "summary": "A spawner Blueprint that spawns drones on a timer at random points around it until a cap is alive, with counts checked in PIE.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "spawner",
+    "waves",
+    "enemies",
+    "timer",
+    "sci-fi",
+    "random"
+   ],
+   "placeholders": [
+    {
+     "name": "spawner_name",
+     "label": "Spawner Blueprint name",
+     "default": "BP_DroneSpawner"
+    },
+    {
+     "name": "max_alive",
+     "label": "Most alive at once",
+     "default": "5"
+    },
+    {
+     "name": "interval",
+     "label": "Spawn interval (s)",
+     "default": "2"
+    },
+    {
+     "name": "radius",
+     "label": "Spawn radius (cm)",
+     "default": "600"
+    }
+   ],
+   "prompt": "Build `{{content_folder}}/Blueprints/{{spawner_name}}`, a drone spawner that keeps up to {{max_alive}} drones alive.\n1. hyper_memory_recall \"spawner enemy\".\n2. One execute_tool_script (unreal-blueprint skill): `BP_Drone` (sphere mesh, hovering 150 cm up, no gravity) and {{spawner_name}} with ints `MaxAlive` = {{max_alive}}, `Alive` and `TotalSpawned`, floats `Interval` = {{interval}} and `Radius` = {{radius}} (category Spawning, tooltips). BeginPlay starts a looping timer (Set Timer by Function Name, Interval) calling `TrySpawn`: it counts BP_Drone actors (Get All Actors Of Class) into Alive and, if Alive < MaxAlive, spawns one at a random point within Radius cm (collision handling: adjust, always spawn) and increments TotalSpawned. No Event Tick.\n3. Compile-check both with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n4. Place `Spawner_1` 1500 cm ahead of the Player Start. hyper_verify_run, one case (timeoutSeconds {{interval}} × ({{max_alive}} + 2) + 10): Wait {{interval}} × ({{max_alive}} + 2) s, AssertProperty Spawner_1 Alive == {{max_alive}}, AssertProperty Spawner_1 TotalSpawned == {{max_alive}}, Capture.\n5. Report a PASS/FAIL table: compiles, fills to the cap, never spawns past it, the capture on its own line. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.round-countdown",
+   "title": "Add a round countdown timer with a time-up event",
+   "summary": "A placed timer that counts down once per second without Tick, fires an OnTimeUp dispatcher at zero and stops, verified against the clock in PIE.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "timer",
+    "countdown",
+    "round",
+    "event dispatcher",
+    "match"
+   ],
+   "placeholders": [
+    {
+     "name": "timer_name",
+     "label": "Timer Blueprint name",
+     "default": "BP_RoundTimer"
+    },
+    {
+     "name": "round_seconds",
+     "label": "Round length (s)",
+     "default": "10"
+    }
+   ],
+   "prompt": "Add a round countdown to {{level}}: `{{content_folder}}/Blueprints/{{timer_name}}`.\n1. hyper_memory_recall \"round timer\".\n2. One execute_tool_script (unreal-blueprint skill): Actor Blueprint with instance-editable int `RoundSeconds` = {{round_seconds}}, int `SecondsLeft`, bool `TimeUp`, event dispatcher `OnTimeUp`. BeginPlay sets SecondsLeft to RoundSeconds and starts a looping 1 s timer (Set Timer by Function Name) calling `TickSecond`, which decrements SecondsLeft and, at 0, clears the timer, sets TimeUp, calls OnTimeUp and prints \"Time up\". No Event Tick.\n3. hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves it; hyper_blueprint_debug_inspect: 0 errors.\n4. Place `RoundTimer_1`. hyper_verify_run, two cases: (a) Wait 3 s, AssertProperty RoundTimer_1 SecondsLeft <= {{round_seconds}} - 2, AssertProperty RoundTimer_1 SecondsLeft >= {{round_seconds}} - 4; (b, timeoutSeconds {{round_seconds}} + 15) WaitUntil AssertProperty RoundTimer_1 TimeUp == true (timeout {{round_seconds}} + 3 s), Wait 2 s, AssertProperty RoundTimer_1 SecondsLeft == 0.\n5. Report a PASS/FAIL table with each case's evidence line: compiles, counts once per second, stops at 0 and never goes negative. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.inventory-component",
+   "title": "Build an inventory with item structs and pickups",
+   "summary": "An item struct and type enum, an inventory component with add, remove and count, and pickups that feed it, verified by a bot collecting them.",
+   "packs": [
+    "blueprint",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_structure_inspect",
+    "hyper_blueprint_structure_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "enum.create",
+    "struct.create"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "inventory",
+    "items",
+    "struct",
+    "enum",
+    "component",
+    "pickup",
+    "rpg"
+   ],
+   "placeholders": [
+    {
+     "name": "character_bp",
+     "label": "Player character Blueprint",
+     "default": "/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter"
+    },
+    {
+     "name": "item_types",
+     "label": "Item types",
+     "default": "Weapon, Consumable, Material, Quest"
+    },
+    {
+     "name": "slots",
+     "label": "Inventory slots",
+     "default": "12"
+    }
+   ],
+   "prompt": "Build an inventory for `{{character_bp}}` under {{content_folder}}/Inventory; change no other existing asset. If the blueprint_structure pack is unavailable, say so and stop.\n1. hyper_memory_recall \"inventory item\"; hyper_blueprint_structure_inspect {{character_bp}}.\n2. One hyper_blueprint_structure_apply_plan (fresh OperationId, bSave false, no BlueprintPath): `enum.create` `{{content_folder}}/Inventory/E_ItemType` with Values {{item_types}}, then `struct.create` `{{content_folder}}/Inventory/S_InventoryItem` with Fields Id (name), Type (enum: the new enum's path), Count (int, 1), Icon (object:/Script/Engine.Texture2D), each with a tooltip.\n3. One execute_tool_script (unreal-blueprint skill): `BPC_Inventory` (ActorComponent) with an S_InventoryItem array `Items` (BlueprintTools add_struct_variable), int `MaxSlots` = {{slots}}, ints `SlotCount` and `TotalCount` kept current, dispatcher `OnInventoryChanged`, functions AddItem(Item) returning bool (stacks by Id, refuses when full), RemoveItem(Id, Count) returning bool, CountOf(Id) returning int. `BP_ItemPickup` with instance-editable `Item`: it adds Item to an overlapping pawn's BPC_Inventory and is destroyed only if AddItem succeeded. Add BPC_Inventory to {{character_bp}} as `Inventory`.\n4. Compile-check each with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n5. Place three BP_ItemPickup tagged `Loot`, 400 cm apart, two with the same Id. hyper_verify_run, one case (timeoutSeconds 50): Play Collect target Loot (timeoutSeconds 40), AssertProperty Player Inventory.TotalCount == 3, AssertProperty Player Inventory.SlotCount == 2.\n6. Report a PASS/FAIL table: types made, compiles, stacking, counts. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.save-load-progress",
+   "title": "Save and load player progress with a SaveGame slot",
+   "summary": "A SaveGame Blueprint plus save and load functions that keep the score across play sessions, proven by two separate playtests.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search",
+    "hyper_context_snapshot",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "save game",
+    "load",
+    "persistence",
+    "progress",
+    "slot",
+    "game mode"
+   ],
+   "placeholders": [
+    {
+     "name": "slot",
+     "label": "Save slot name",
+     "default": "Progress"
+    },
+    {
+     "name": "points",
+     "label": "Points the save station adds",
+     "default": "50"
+    }
+   ],
+   "prompt": "Make progress survive between play sessions with SaveGame slot `{{slot}}`.\n1. hyper_memory_recall \"save game\"; hyper_project_search (kinds asset, query SaveGame): reuse an existing SaveGame class if there is one. hyper_context_snapshot for the open map, then its World Settings DefaultGameMode (Epic's ObjectTools get_properties): extend that Game Mode if it is a Blueprint, else make `BP_ProgressGameMode` and set it as the Game Mode Override. If Saved/SaveGames/{{slot}}.sav already exists, stop and ask before testing.\n2. One execute_tool_script (unreal-blueprint skill): `{{content_folder}}/Save/SG_Progress` (parent /Script/Engine.SaveGame) with int `Score`, Transform `LastCheckpoint`, string `SavedAt`. In the Game Mode: int `Score`; `SaveProgress` (Create Save Game Object, copy fields, Save Game to Slot {{slot}}, user 0); `LoadProgress` (Does Save Game Exist, Load Game from Slot, cast, copy Score), called on BeginPlay. `BP_SaveStation`: a trigger that adds {{points}} to Score, then calls SaveProgress.\n3. Compile-check each with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n4. Place `SaveStation_1` 500 cm ahead of the Player Start. Run 1, hyper_playtest_run (mode StartInProcess): MoveTo SaveStation_1, WaitUntil AssertProperty GameMode Score == {{points}}; then check Saved/SaveGames/{{slot}}.sav exists. Run 2, a new hyper_playtest_run (mode StartInProcess): Wait 1 s, AssertProperty GameMode Score == {{points}} without going near the station. hyper_operation_wait and hyper_playtest_status after each.\n5. Report a PASS/FAIL table: compiles, saved, file written, loaded in a fresh session. Do not delete the slot; tell me how to reset it. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.rune-key-gate",
+   "title": "Lock a sealed gate behind a rune key pickup",
+   "summary": "A rune key pickup that tags the player and a sealed gate that lifts on a timeline only for a key holder, verified with and without the key.",
+   "packs": [
+    "blueprint",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_structure_inspect",
+    "hyper_blueprint_structure_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "timeline.add",
+    "pins.connect"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "key",
+    "lock",
+    "gate",
+    "door",
+    "fantasy",
+    "dungeon",
+    "timeline"
+   ],
+   "placeholders": [
+    {
+     "name": "key_name",
+     "label": "Key Blueprint name",
+     "default": "BP_RuneKey"
+    },
+    {
+     "name": "gate_name",
+     "label": "Gate Blueprint name",
+     "default": "BP_SealedGate"
+    },
+    {
+     "name": "key_tag",
+     "label": "Tag the key gives",
+     "default": "HasRuneKey"
+    },
+    {
+     "name": "lift_height",
+     "label": "Gate lift height (cm)",
+     "default": "400"
+    }
+   ],
+   "prompt": "Build a rune key and a sealed gate for {{level}} under {{content_folder}}/Blueprints. If the blueprint_structure pack is unavailable, say so and stop.\n1. hyper_memory_recall \"key door lock\".\n2. One execute_tool_script (unreal-blueprint skill): `{{key_name}}` (glowing mesh, Sphere trigger 80 cm): on a pawn's overlap it adds tag `{{key_tag}}` to that pawn and destroys itself. `{{gate_name}}`: Static Mesh `Gate` (400×40×400 cm), Box `Trigger` 250 cm extent, bool `Opened`, function `ApplyLift(Alpha)` setting Gate's relative Z to Alpha × {{lift_height}}; on a pawn's overlap, if the pawn has tag {{key_tag}} and Opened is false, it sets Opened.\n3. hyper_blueprint_structure_inspect {{gate_name}} with bNodes and Find \"Opened\" for the setter's node name. One hyper_blueprint_structure_apply_plan on it (fresh OperationId, bSave false): `timeline.add` `Lift` (Length 1.5, float track `Alpha` keyed 0 to 1, Drive `ApplyLift`), `pins.connect` from that setter's then pin to \"Lift.Play\".\n4. Compile-check both with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n5. Place `Gate_1` 1200 cm ahead of the Player Start and `Key_1` 600 cm to its side. hyper_verify_run, two cases: (a) MoveTo Gate_1 radius 150, Wait 2 s, AssertProperty Gate_1 Opened == false; (b) MoveTo Key_1, WaitUntil AssertGone Key_1, MoveTo Gate_1 radius 150, WaitUntil AssertProperty Gate_1 Opened == true.\n6. Report a PASS/FAIL table: compiles, stays shut without the key, opens with it. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.looping-platform",
+   "title": "Make a looping moving platform the player can ride",
+   "summary": "A platform Blueprint that travels between two points on a looping vector timeline, checked in PIE at both ends of its path.",
+   "packs": [
+    "blueprint",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_structure_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "timeline.add"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "platform",
+    "moving",
+    "timeline",
+    "platformer",
+    "traversal"
+   ],
+   "placeholders": [
+    {
+     "name": "platform_name",
+     "label": "Platform Blueprint name",
+     "default": "BP_MovingPlatform"
+    },
+    {
+     "name": "travel",
+     "label": "Travel distance (cm)",
+     "default": "600"
+    },
+    {
+     "name": "axis",
+     "label": "Travel axis",
+     "default": "X"
+    },
+    {
+     "name": "seconds",
+     "label": "Round trip time (s)",
+     "default": "4"
+    }
+   ],
+   "prompt": "Build `{{content_folder}}/Blueprints/{{platform_name}}`, a platform that ferries the player back and forth. If the blueprint_structure pack is unavailable, say so and stop.\n1. hyper_memory_recall \"moving platform\".\n2. One execute_tool_script (unreal-blueprint skill): Actor Blueprint with a movable root, Static Mesh `Deck` 300×300×30 cm, Vectors `StartLocation` (stored on BeginPlay) and `CurrentOffset`, and function `ApplyOffset(Offset)` that stores Offset in CurrentOffset and sets the actor location to StartLocation + Offset.\n3. One hyper_blueprint_structure_apply_plan (fresh OperationId, bSave false): `timeline.add` `Travel` (Length {{seconds}}, bAutoPlay true, bLoop true, vector track `Offset` keyed 0,0,0 at 0, {{travel}} cm along {{axis}} at half the length and 0,0,0 at the end, Drive `ApplyOffset`). Its CompileMessages must be empty.\n4. hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves it; hyper_blueprint_debug_inspect: 0 errors.\n5. Place `Platform_1` 600 cm ahead of the Player Start; note its location P. hyper_verify_run, one case (timeoutSeconds 3 × {{seconds}} + 10): Sample Platform_1 property CurrentOffset.{{axis}} for {{seconds}} s, WaitUntil AssertNear Platform_1 to P plus {{travel}} cm along {{axis}} (radius 50, timeout {{seconds}} s), WaitUntil AssertNear Platform_1 to P (radius 50, timeout {{seconds}} s).\n6. Report a PASS/FAIL table: compiles, the Sample's min and max within 15 cm of 0 and {{travel}}, reaches both ends. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.jump-pad",
+   "title": "Build a jump pad that launches the player",
+   "summary": "A launch pad Blueprint that fires Launch Character up and forward on overlap with a short cooldown, with the launch speed measured by the bot.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_verify_run",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "jump pad",
+    "launch",
+    "character",
+    "platformer",
+    "traversal"
+   ],
+   "placeholders": [
+    {
+     "name": "pad_name",
+     "label": "Jump pad Blueprint name",
+     "default": "BP_JumpPad"
+    },
+    {
+     "name": "launch_z",
+     "label": "Upward launch speed (cm/s)",
+     "default": "1200"
+    },
+    {
+     "name": "launch_forward",
+     "label": "Forward launch speed (cm/s)",
+     "default": "600"
+    }
+   ],
+   "prompt": "Build `{{content_folder}}/Blueprints/{{pad_name}}`, a pad that launches the player.\n1. hyper_memory_recall \"jump pad launch\"; hyper_verify_run with one Survey case: the player pawn must be a Character, else say so and stop.\n2. One execute_tool_script (unreal-blueprint skill): Static Mesh `Pad` (200×200×20 cm), Box `Trigger` 100×100×50 cm, floats `LaunchUp` = {{launch_z}} and `LaunchForward` = {{launch_forward}} cm/s (category Jump Pad, tooltips), bool `Ready` = true. On a Character's overlap while Ready: Launch Character with the pad's forward × LaunchForward plus up × LaunchUp (override Z), clear Ready, and set it back after 0.5 s with a timer.\n3. hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves it; hyper_blueprint_debug_inspect: 0 errors.\n4. Place `JumpPad_1` 500 cm ahead of the Player Start, facing away from it. hyper_verify_run, one case: MoveTo a location 300 cm past JumpPad_1 (its path crosses the pad) with bBackground true, Sample Player Speed for 3 s, Capture.\n5. Report a PASS/FAIL table: compiles, launched (Sample max Speed at least 0.9 × {{launch_z}}), the player lands and is not stuck, the capture on its own line. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.collapse-into-functions",
+   "title": "Refactor a sprawling event graph into functions",
+   "summary": "Fold repeated or long node groups of the selected Blueprint into named functions, lay them out, and prove behaviour and compile state are unchanged.",
+   "packs": [
+    "blueprint",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_blueprint_structure_inspect",
+    "hyper_verify_run",
+    "hyper_blueprint_snapshot",
+    "hyper_blueprint_structure_apply_plan",
+    "hyper_blueprint_layout",
+    "hyper_operation_wait",
+    "hyper_blueprint_diff",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_debug_inspect"
+   ],
+   "ops": [
+    "graph.collapse"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "refactor",
+    "functions",
+    "collapse",
+    "clean up",
+    "layout",
+    "maintenance"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "max_nodes",
+     "label": "Longest event before splitting (nodes)",
+     "default": "25"
+    },
+    {
+     "name": "checks",
+     "label": "Behaviour to keep",
+     "default": "the door opens when the player walks up and closes after"
+    }
+   ],
+   "prompt": "Refactor {{selected_asset}} into named functions without changing what it does. If the blueprint_structure pack is unavailable, say so and stop.\n1. hyper_blueprint_structure_inspect with bNodes (page with Offset and Limit): find node groups that repeat, or events longer than {{max_nodes}} nodes. List each group with its node names and a verb-first function name (such as UpdateHealthBar) before editing.\n2. Baseline: place an instance and run hyper_verify_run with one case per behaviour in \"{{checks}}\"; keep the results.\n3. hyper_blueprint_snapshot right before editing: keep its SnapshotToken and node count.\n4. One hyper_blueprint_structure_apply_plan per group (fresh OperationId, bSave false): `graph.collapse` with the group's Nodes, Into function (collapsed when the group holds a Delay or a timeline), and its Name. Then hyper_blueprint_layout on each changed graph (preview, then apply with its PlanHash and a fresh OperationId; hyper_operation_wait).\n5. hyper_blueprint_diff against the SnapshotToken (within 5 minutes): only moved nodes, the new function graphs and their call nodes. hyper_blueprint_compile_validate (revision from a fresh hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves it; hyper_blueprint_debug_inspect: 0 errors.\n6. Rerun the same hyper_verify_run cases.\n7. Report a PASS/FAIL table: each case before and after, compile status, Event Graph nodes before and after, functions made. The layout and compile steps save it; say so."
+  },
+  {
+   "id": "blueprints.fix-compile-errors",
+   "title": "Fix the compile errors in a broken Blueprint",
+   "summary": "Read the selected Blueprint's compiler messages, fix only the nodes they name, and prove it compiles clean with a before-and-after diff.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_diagnose",
+    "hyper_blueprint_debug_inspect",
+    "hyper_blueprint_snapshot",
+    "hyper_memory_recall",
+    "hyper_blueprint_validate_patch",
+    "hyper_blueprint_apply_patch",
+    "hyper_operation_wait",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_diff",
+    "hyper_memory_remember"
+   ],
+   "ops": [
+    "connect_pins",
+    "break_pin_link",
+    "set_literal_default"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "compile error",
+    "fix",
+    "debug",
+    "repair",
+    "broken"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "prompt": "{{selected_asset}} does not compile. Fix it with the smallest change.\n1. Load it with Epic's AssetTools load_asset if a tool reports asset_not_loaded. hyper_diagnose with checks loaded_blueprint_health, then hyper_blueprint_debug_inspect on it: every error and warning with its node. hyper_blueprint_snapshot: revision, node and pin ids, SnapshotToken. hyper_memory_recall with the asset path as Target, for recent changes that may have broken it.\n2. Wiring and literal faults: one patch checked with hyper_blueprint_validate_patch (`connect_pins`, `break_pin_link`, `set_literal_default`), then hyper_blueprint_apply_patch with the same patch, a fresh OperationId and ExpectedPlanHash set to its PlanHash; hyper_operation_wait. A missing variable, function or node type is fixed with Epic's BlueprintTools (unreal-blueprint skill), touching only the nodes the errors name.\n3. hyper_blueprint_compile_validate (revision from a fresh hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait); hyper_blueprint_debug_inspect: 0 errors, and no new warnings. hyper_blueprint_diff against the step-1 SnapshotToken (it lasts 5 minutes; snapshot again before editing if it may expire).\n4. If the cause is a project pattern (a renamed variable, a moved asset), save it with hyper_memory_remember as a gotcha.\n5. Report a PASS/FAIL table: each original message, its fix, resolved or not; then 0 errors, no new warnings, and a diff limited to the named nodes. hyper_blueprint_apply_patch and the compile save the Blueprint; say so."
+  },
+  {
+   "id": "blueprints.retune-pin-values",
+   "title": "Retune the numbers inside a Blueprint graph",
+   "summary": "Change literal pin values such as delays, speeds and damage in the selected Blueprint through one checked patch, then diff and compile it.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_blueprint_snapshot",
+    "hyper_blueprint_validate_patch",
+    "hyper_blueprint_apply_patch",
+    "hyper_operation_wait",
+    "hyper_blueprint_diff",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_debug_inspect"
+   ],
+   "ops": [
+    "set_literal_default"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "tuning",
+    "balance",
+    "values",
+    "patch",
+    "pins"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "changes",
+     "label": "Value changes",
+     "default": "Delay Duration 2.0 to 0.5; Apply Damage Base Damage 10 to 25"
+    }
+   ],
+   "prompt": "In {{selected_asset}}, change these literal pin values and nothing else: {{changes}}.\n1. Load it with Epic's AssetTools load_asset if a tool reports asset_not_loaded. hyper_blueprint_snapshot with bIncludePins true: find each pin by node title and pin name and report its current default; keep the revision and SnapshotToken. A value that is a variable default rather than a pin literal is listed and left alone (offer to change it on the class defaults instead).\n2. hyper_blueprint_validate_patch with one `set_literal_default` per change at that revision: Effects.DefaultsChanged must equal the number of changes. Then hyper_blueprint_apply_patch with the same patch, a fresh OperationId and ExpectedPlanHash set to its PlanHash; hyper_operation_wait.\n3. hyper_blueprint_diff against the SnapshotToken: only those pins' defaults changed.\n4. hyper_blueprint_compile_validate (revision from a fresh hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves it; hyper_blueprint_debug_inspect: 0 errors.\n5. Report a table: node | pin | before | after | PASS/FAIL. hyper_blueprint_apply_patch and the compile save the Blueprint; say so. Then suggest which of these numbers should become designer-facing variables."
+  },
+  {
+   "id": "blueprints.gate-event-with-branch",
+   "title": "Gate an existing event behind a bool with a Branch",
+   "summary": "Insert a Branch into the selected Blueprint's event chain with a checked node patch, so its logic runs only while a flag is true.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_blueprint_snapshot",
+    "hyper_blueprint_discover_actions",
+    "hyper_blueprint_validate_patch",
+    "hyper_blueprint_build_batch",
+    "hyper_operation_wait",
+    "hyper_blueprint_diff",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "create_node",
+    "break_pin_link",
+    "connect_pins"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "branch",
+    "flag",
+    "patch",
+    "logic",
+    "toggle"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "event_title",
+     "label": "Event to gate",
+     "default": "Event ActorBeginOverlap"
+    },
+    {
+     "name": "flag",
+     "label": "Bool flag",
+     "default": "Enabled"
+    }
+   ],
+   "prompt": "In {{selected_asset}}, make `{{event_title}}` run its existing logic only while bool `{{flag}}` is true.\n1. Load it with Epic's AssetTools load_asset if a tool reports asset_not_loaded. hyper_blueprint_snapshot: the event node, the link from its exec output to the next node, the revision. If `{{flag}}` does not exist, add it (default true, instance editable) and one Get {{flag}} node near the event with Epic's BlueprintTools add_variable and create_node, then snapshot again; keep that SnapshotToken.\n2. hyper_blueprint_discover_actions with Query \"branch\": the Branch node's pins.\n3. One patch, checked with hyper_blueprint_validate_patch: `create_node` (NodeKind branch, a NewNodeGuid, placed between the two nodes), `break_pin_link` for event to next, `connect_pins` event exec to Branch exec, Branch then to the next node, and Get {{flag}} to Branch Condition. Apply it with hyper_blueprint_build_batch (same patch, fresh OperationId, ExpectedPlanHash set to its PlanHash); hyper_operation_wait.\n4. hyper_blueprint_diff against the SnapshotToken: 1 node and 3 links added, 1 link removed. hyper_blueprint_compile_validate (revision from a fresh hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves it; hyper_blueprint_debug_inspect: 0 errors.\n5. If the logic has a visible effect, place two instances ({{flag}} true and false) and hyper_verify_run one case asserting the effect only on the first.\n6. Report a PASS/FAIL table. hyper_blueprint_build_batch and the compile save the Blueprint; say so."
+  },
+  {
+   "id": "blueprints.tidy-stacked-graph",
+   "title": "Untangle stacked nodes in a messy Blueprint graph",
+   "summary": "Find nodes piled on one spot in the selected Blueprint, repair them safely, lay the graph out on a grid and confirm no logic changed.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_blueprint_snapshot",
+    "hyper_blueprint_repair",
+    "hyper_operation_wait",
+    "hyper_blueprint_layout",
+    "hyper_blueprint_diff",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_debug_inspect"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "layout",
+    "tidy",
+    "clean up",
+    "readability",
+    "repair"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "graph_name",
+     "label": "Graph to tidy",
+     "default": "EventGraph"
+    },
+    {
+     "name": "columns",
+     "label": "Grid columns",
+     "default": "4"
+    }
+   ],
+   "prompt": "Tidy graph `{{graph_name}}` of {{selected_asset}} without changing its logic.\n1. Load it with Epic's AssetTools load_asset if a tool reports asset_not_loaded. hyper_blueprint_snapshot with GraphPath for that graph: node count, positions, revision and SnapshotToken. Count nodes that share a position or overlap.\n2. hyper_blueprint_repair with Mode suggest: the stacked-node findings and the repair patch. Then Mode stage_safe with its ExpectedPlanHash and a fresh OperationId; hyper_operation_wait.\n3. hyper_blueprint_layout for the nodes still overlapping or scattered ({{columns}} columns, HorizontalSpacing 400, VerticalSpacing 240): preview, then apply with its PlanHash and a fresh OperationId; hyper_operation_wait.\n4. hyper_blueprint_diff against the SnapshotToken: positions only; no nodes, links or defaults added, removed or changed.\n5. hyper_blueprint_compile_validate (revision from a fresh hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves it; hyper_blueprint_debug_inspect: 0 errors.\n6. Report a PASS/FAIL table: overlapping nodes before and after, nodes moved, logic changes (must be 0), compile status. The repair, layout and compile steps save the Blueprint; say so."
+  },
+  {
+   "id": "blueprints.replicated-door",
+   "title": "Make a door replicate in a listen-server session",
+   "summary": "A server-authoritative door with a rep-notify Open flag and a multicast cue, checked on host, client and a late joiner in one playtest.",
+   "packs": [
+    "blueprint",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_structure_inspect",
+    "hyper_blueprint_structure_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "variable.set_replication",
+    "event.add"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "multiplayer",
+    "replication",
+    "rep notify",
+    "door",
+    "networking",
+    "listen server"
+   ],
+   "placeholders": [
+    {
+     "name": "door_bp",
+     "label": "Door Blueprint name",
+     "default": "BP_NetDoor"
+    },
+    {
+     "name": "open_angle",
+     "label": "Open angle (degrees)",
+     "default": "90"
+    }
+   ],
+   "prompt": "Make `{{content_folder}}/Blueprints/{{door_bp}}` a server-authoritative door that every player sees open. If the blueprint_structure pack is unavailable, say so and stop.\n1. hyper_memory_recall \"replication\"; if {{door_bp}} exists, hyper_blueprint_structure_inspect it and change only it.\n2. One execute_tool_script (unreal-blueprint skill): Scene `Hinge`, Static Mesh `Door` under it, Box `Trigger` 150 cm extent, bool `Open`, and bReplicates true on the default object.\n3. One hyper_blueprint_structure_apply_plan (fresh OperationId, bSave false): `variable.set_replication` Open as rep_notify (Condition none), and `event.add` `MulticastCreak` (Rpc multicast, bReliable false) for the cosmetic sound.\n4. One execute_tool_script: on a pawn's overlap, only with authority (Has Authority), set Open true and call MulticastCreak; on end overlap set it false; OnRep_Open turns Hinge to {{open_angle}} or 0 degrees. No client-to-server RPC: clients do not own the door.\n5. hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves it; hyper_blueprint_debug_inspect: 0 errors.\n6. Place `NetDoor_1` 600 cm ahead of the Player Start. hyper_playtest_run with mode StartInProcess, netMode ListenServer, numPlayers 2, bRecordVideo true: pieInstance 1 MoveTo NetDoor_1 radius 150; pieInstance 1 WaitUntil AssertProperty NetDoor_1 Open == true; pieInstance 0 AssertProperty NetDoor_1 Open == true; JoinPlayer; pieInstance 2 AssertProperty NetDoor_1 Open == true. hyper_operation_wait, then hyper_playtest_status.\n7. Report a PASS/FAIL table per instance (host, client, late joiner) with the video on its own line. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.health-bar-hud",
+   "title": "Hook a HUD health bar to the player's health",
+   "summary": "A Widget Blueprint progress bar bound to a health component's OnHealthChanged dispatcher, shown on screen and checked with UI asserts in PIE.",
+   "packs": [
+    "blueprint",
+    "ui_slate_mvvm",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-umg"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_blueprint_structure_inspect",
+    "hyper_blueprint_snapshot",
+    "hyper_ui_apply_plan",
+    "hyper_ui_validate",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "widget.add",
+    "widget.set_slot",
+    "widget.set_style",
+    "widget.set_property"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "ui",
+    "hud",
+    "health bar",
+    "widget",
+    "event dispatcher",
+    "binding"
+   ],
+   "placeholders": [
+    {
+     "name": "character_bp",
+     "label": "Player character Blueprint",
+     "default": "/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter"
+    },
+    {
+     "name": "health_comp",
+     "label": "Health component variable",
+     "default": "HealthComp"
+    },
+    {
+     "name": "widget_name",
+     "label": "Widget name",
+     "default": "WBP_HealthBar"
+    },
+    {
+     "name": "max_health",
+     "label": "Max health",
+     "default": "100"
+    }
+   ],
+   "prompt": "Show the player's health on a HUD bar. `{{character_bp}}` must already have `{{health_comp}}` with Health, MaxHealth and an OnHealthChanged dispatcher; if not, or if the ui_slate_mvvm pack is unavailable, say so and stop.\n1. hyper_blueprint_structure_inspect {{character_bp}}: confirm the component (hyper_blueprint_snapshot if the blueprint_structure pack is unavailable).\n2. Epic's UMGToolSet CreateWidgetBlueprint `{{content_folder}}/UI/{{widget_name}}` (parent /Script/UMG.UserWidget), then one hyper_ui_apply_plan (bDryRun false, fresh OperationId), which compiles and saves it: `widget.add` CanvasPanel `Root` (or use the root it already has), ProgressBar `HealthBar` and TextBlock `HealthText`; `widget.set_slot` anchors bottom_left with offsets 40,-80,400,28 on HealthBar and 40,-120,400,32 on HealthText; `widget.set_style` fill_color_and_opacity #C83A3A on HealthBar; `widget.set_property` is_variable true on both, percent 1, text \"{{max_health}} / {{max_health}}\".\n3. One execute_tool_script (unreal-blueprint skill): widget function `SetHealth(Health, MaxHealth)` sets the bar's percent and HealthText to \"<Health> / <MaxHealth>\" (rounded); {{character_bp}}'s BeginPlay creates the widget, adds it to the viewport and binds {{health_comp}}.OnHealthChanged to it.\n4. hyper_ui_validate (0 errors) and, on {{character_bp}}, hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves it; hyper_blueprint_debug_inspect: 0 errors.\n5. hyper_playtest_run (mode StartInProcess): Wait 1 s, UiAssert `{{widget_name}}.HealthText` == \"{{max_health}} / {{max_health}}\", Capture; if `Hazard_1` exists, MoveTo it, Wait 2 s, UiAssert HealthText != that value, Capture. hyper_operation_wait, then hyper_playtest_status.\n6. Report a PASS/FAIL table with both captures on their own lines. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.rune-tile-puzzle",
+   "title": "Build a rune-tile sequence puzzle that opens a gate",
+   "summary": "Floor tiles that must be stepped on in the right order to raise a gate, with a wrong tile resetting it. Proven by right- and wrong-order bot runs.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "puzzle",
+    "sequence",
+    "pressure plate",
+    "fantasy",
+    "dungeon",
+    "event dispatcher"
+   ],
+   "placeholders": [
+    {
+     "name": "order",
+     "label": "Solution order (tile indices)",
+     "default": "1, 3, 2"
+    },
+    {
+     "name": "tile_spacing",
+     "label": "Tile spacing (cm)",
+     "default": "500"
+    }
+   ],
+   "prompt": "Build a rune-tile puzzle for {{level}} under {{content_folder}}/Puzzle: stepping on the tiles in the order {{order}} raises a gate.\n1. hyper_memory_recall \"puzzle\".\n2. One execute_tool_script (unreal-blueprint skill): `BP_RuneTile` (flat mesh 150×150×10 cm, Box trigger, instance-editable int `TileIndex`, a Point Light that turns on when stepped, dispatcher `OnStepped(TileIndex)` called when a pawn steps on it). `BP_RunePuzzle`: instance-editable arrays `Tiles` (BP_RuneTile) and `Solution` (int), int `Progress`, bool `Solved`, instance-editable actor `Gate`. On BeginPlay it binds every tile's OnStepped: the right next index advances Progress, a wrong one resets it to 0; when Progress reaches the Solution length it sets Solved and lifts Gate 300 cm.\n3. Compile-check both with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n4. Place Tile_1 to Tile_3 as a triangle with {{tile_spacing}} cm sides, the first tile of {{order}} nearest the Player Start (walking between two never crosses the third), `RunePuzzle_1` with Solution {{order}}, and a cube `Gate_1` it controls.\n5. hyper_verify_run, two cases: right order: MoveTo each tile of {{order}} in turn (radius 30), WaitUntil AssertProperty RunePuzzle_1 Solved == true; wrong order: MoveTo the first tile of {{order}}, then the last, AssertProperty RunePuzzle_1 Progress == 0, AssertProperty RunePuzzle_1 Solved == false.\n6. Report a PASS/FAIL table. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.sentry-turret",
+   "title": "Build a sentry turret that tracks and fires at the player",
+   "summary": "A turret Blueprint that turns toward a visible player in range and fires damaging bolts on a timer, verified by shots fired in and out of range.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "turret",
+    "enemy",
+    "projectile",
+    "damage",
+    "sci-fi",
+    "shooter"
+   ],
+   "placeholders": [
+    {
+     "name": "range",
+     "label": "Range (cm)",
+     "default": "1500"
+    },
+    {
+     "name": "fire_interval",
+     "label": "Seconds between shots",
+     "default": "1.0"
+    },
+    {
+     "name": "damage",
+     "label": "Damage per bolt",
+     "default": "10"
+    }
+   ],
+   "prompt": "Build `{{content_folder}}/Blueprints/BP_SentryTurret` and its bolt.\n1. hyper_memory_recall \"turret projectile damage\".\n2. One execute_tool_script (unreal-blueprint skill): `BP_TurretBolt`: Sphere collision 10 cm (root), a mesh, Projectile Movement at 3000 cm/s with no gravity, InitialLifeSpan 3; on hit it applies {{damage}} damage (Apply Damage) and destroys itself. `BP_SentryTurret`: `Base` and `Head` meshes, Arrow `Muzzle` on Head, floats `Range` = {{range}} and `FireInterval` = {{fire_interval}} (category Turret, tooltips), int `ShotsFired`. BeginPlay starts a looping timer calling `TryFire`: if the player pawn is within Range and visible (a Line Trace By Channel, Visibility, from Muzzle to it, ignoring self, hits nothing or the player), turn Head to it (Find Look at Rotation), spawn BP_TurretBolt at Muzzle and increment ShotsFired.\n3. Compile-check both with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n4. Place `Turret_1` {{range}} + 600 cm ahead of the Player Start, facing it. hyper_verify_run, two cases: (a) Wait 3 s, AssertProperty Turret_1 ShotsFired == 0; (b) MoveTo a point {{range}} - 400 cm from Turret_1, Wait 3 s, AssertProperty Turret_1 ShotsFired >= 2, Survey (it reports the player's health if it has one).\n5. Report a PASS/FAIL table: compiles, holds fire out of range, fires in range at the interval, damage seen. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.collect-quest-tracker",
+   "title": "Track a collect quest with an enum state and a portal",
+   "summary": "A quest-state enum and progress struct, a tracker that counts tagged pickups, completes at the target and opens a portal, proven by a bot Collect run.",
+   "packs": [
+    "blueprint",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_structure_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "enum.create",
+    "struct.create"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "quest",
+    "objective",
+    "collect",
+    "enum",
+    "fantasy",
+    "rpg"
+   ],
+   "placeholders": [
+    {
+     "name": "item_label",
+     "label": "Item to gather",
+     "default": "Moonpetal herbs"
+    },
+    {
+     "name": "target_count",
+     "label": "How many to gather",
+     "default": "5"
+    },
+    {
+     "name": "quest_tag",
+     "label": "Pickup tag",
+     "default": "QuestHerb"
+    }
+   ],
+   "prompt": "Build a collect quest under {{content_folder}}/Quest: gather {{target_count}} {{item_label}} to open a portal. If the blueprint_structure pack is unavailable, say so and stop.\n1. hyper_memory_recall \"quest objective\".\n2. One hyper_blueprint_structure_apply_plan (fresh OperationId, bSave false, no BlueprintPath): `enum.create` `{{content_folder}}/Quest/E_QuestState` with Values NotStarted, Active, Complete; then `struct.create` `{{content_folder}}/Quest/S_QuestProgress` with Fields State (enum: the new enum's path, default Active), Collected (int, 0) and Required (int, {{target_count}}), each with a tooltip.\n3. One execute_tool_script (unreal-blueprint skill): `BP_QuestTracker` with an S_QuestProgress variable `Quest` (BlueprintTools add_struct_variable), dispatcher `OnQuestCompleted`, and function `AddProgress` that counts only while Quest.State is Active and, when Collected reaches Required, sets State to Complete and calls OnQuestCompleted. `BP_QuestPickup` tagged `{{quest_tag}}`: on a pawn's overlap it calls AddProgress on the tracker (Get Actor Of Class) and destroys itself. `BP_Portal`: hidden, with bool `Active`, until OnQuestCompleted shows it and sets Active.\n4. Compile-check each with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n5. Place `QuestTracker_1`, `Portal_1` and {{target_count}} pickups within 1500 cm of the Player Start on reachable floor. hyper_verify_run, one case (timeoutSeconds 50): Play Collect target {{quest_tag}} (timeoutSeconds 40), AssertProperty QuestTracker_1 Quest.Collected == {{target_count}}, AssertProperty Portal_1 Active == true. Open the Play step's map.\n6. Report a PASS/FAIL table with the map on its own line. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.explosive-barrels",
+   "title": "Make explosive barrels that chain-react and break crates",
+   "summary": "Barrels that explode with radial damage after a short fuse, set off nearby barrels and break crates that drop loot, proven in PIE.",
+   "packs": [
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "explosion",
+    "radial damage",
+    "destruction",
+    "loot",
+    "shooter",
+    "chain reaction"
+   ],
+   "placeholders": [
+    {
+     "name": "blast_radius",
+     "label": "Blast radius (cm)",
+     "default": "500"
+    },
+    {
+     "name": "fuse_seconds",
+     "label": "Fuse time (s)",
+     "default": "0.5"
+    },
+    {
+     "name": "barrel_health",
+     "label": "Barrel health",
+     "default": "30"
+    }
+   ],
+   "prompt": "Build explosive barrels and breakable crates under {{content_folder}}/Destruction.\n1. hyper_memory_recall \"damage explosion\".\n2. One execute_tool_script (unreal-blueprint skill): `BP_ExplosiveBarrel` (mesh, float `Health` = {{barrel_health}}, bool `Primed`): Event AnyDamage lowers Health; at 0, once, after {{fuse_seconds}} s it applies radial damage 100 within {{blast_radius}} cm (ignoring itself) and destroys itself. `BP_Crate` (Health 50): at 0 it spawns `BP_LootCoin` (a small spinning mesh) and is destroyed. `BP_Detonator`: a floor plate that applies 100 damage to its instance-editable `Target` when a pawn steps on it.\n3. Compile-check each with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n4. Place, 1500 cm ahead of the Player Start: Barrel_1; Barrel_2 at 0.6 × {{blast_radius}} cm from it; Crate_1 at 0.5 × {{blast_radius}} cm from Barrel_2; Barrel_3 at least 2 × {{blast_radius}} cm from all of them. Place Detonator_1 300 cm ahead of the start with Target Barrel_1.\n5. hyper_verify_run, one case: MoveTo Detonator_1 radius 50, WaitUntil AssertGone Barrel_1, WaitUntil AssertGone Barrel_2, WaitUntil AssertGone Crate_1, AssertExists BP_LootCoin, AssertExists Barrel_3, Capture.\n6. Report a PASS/FAIL table: chain reaction, crate broken, loot dropped, out-of-range barrel intact, the capture on its own line. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.sprint-stamina",
+   "title": "Add sprint with a draining, regenerating stamina",
+   "summary": "Hold-to-sprint on the player that drains stamina, stops sprinting at zero and regenerates after a pause, measured by the bot holding the input.",
+   "packs": [
+    "blueprint",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_verify_run",
+    "hyper_blueprint_structure_inspect",
+    "hyper_blueprint_snapshot",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "sprint",
+    "stamina",
+    "movement",
+    "character",
+    "enhanced input",
+    "timer"
+   ],
+   "placeholders": [
+    {
+     "name": "character_bp",
+     "label": "Player character Blueprint",
+     "default": "/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter"
+    },
+    {
+     "name": "sprint_action",
+     "label": "Sprint input action",
+     "default": "IA_Sprint"
+    },
+    {
+     "name": "sprint_speed",
+     "label": "Sprint speed (cm/s)",
+     "default": "900"
+    },
+    {
+     "name": "walk_speed",
+     "label": "Walk speed (cm/s)",
+     "default": "500"
+    },
+    {
+     "name": "max_stamina",
+     "label": "Max stamina",
+     "default": "100"
+    },
+    {
+     "name": "drain",
+     "label": "Drain per second",
+     "default": "25"
+    },
+    {
+     "name": "regen",
+     "label": "Regeneration per second",
+     "default": "15"
+    }
+   ],
+   "prompt": "Add sprinting with stamina to `{{character_bp}}`; change no other existing asset.\n1. hyper_memory_recall \"sprint stamina input\". hyper_verify_run with one Survey case: the controls must include `{{sprint_action}}` and a move action, else say so and stop. hyper_blueprint_structure_inspect {{character_bp}}. If the blueprint_structure pack is unavailable, read it with hyper_blueprint_snapshot instead.\n2. One execute_tool_script (unreal-blueprint skill): floats `MaxStamina` = {{max_stamina}}, `Stamina`, `DrainPerSecond` = {{drain}}, `RegenPerSecond` = {{regen}}, `WalkSpeed` = {{walk_speed}}, `SprintSpeed` = {{sprint_speed}} (category Movement, tooltips), bool `Sprinting`. The {{sprint_action}} input event starts and stops sprinting (Max Walk Speed); a looping 0.1 s timer `UpdateStamina` drains while sprinting and moving, stops sprinting at 0, and regenerates after 1 s without sprinting. Look up the input event and movement node IDs with find_node_types first. No Event Tick.\n3. hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves it; hyper_blueprint_debug_inspect: 0 errors.\n4. hyper_verify_run, one case (timeoutSeconds 40): Hold the move action (value 0,1) for 5 s and {{sprint_action}} for 2 s, both with bBackground true; Sample Player Speed for 2 s; AssertProperty Player Stamina < {{max_stamina}}; then WaitUntil AssertProperty Player Stamina == {{max_stamina}} (timeout 15 s).\n5. Report a PASS/FAIL table: compiles, sprint speed reached (Sample max near {{sprint_speed}}), stamina drained, refilled to {{max_stamina}}. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.security-camera-alarm",
+   "title": "Build security cameras that raise a stealth alarm",
+   "summary": "Sweeping cameras with a vision cone that spot a player in line of sight, raise a level-wide alarm and turn the alarm lights red.",
+   "packs": [
+    "blueprint",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_blueprint_structure_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_blueprint_snapshot",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "timeline.add"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "stealth",
+    "camera",
+    "alarm",
+    "detection",
+    "line of sight",
+    "event dispatcher"
+   ],
+   "placeholders": [
+    {
+     "name": "view_distance",
+     "label": "View distance (cm)",
+     "default": "1200"
+    },
+    {
+     "name": "view_angle",
+     "label": "View half-angle (degrees)",
+     "default": "30"
+    },
+    {
+     "name": "sweep_degrees",
+     "label": "Sweep arc (degrees)",
+     "default": "60"
+    }
+   ],
+   "prompt": "Build stealth security cameras under {{content_folder}}/Stealth. If the blueprint_structure pack is unavailable, say so and stop.\n1. hyper_memory_recall \"stealth alarm\".\n2. One execute_tool_script (unreal-blueprint skill): `BP_AlarmManager` (bool `Alarm`, dispatcher `OnAlarm`, function `RaiseAlarm` that fires once); `BP_AlarmLight` (white Point Light) that binds OnAlarm and turns red at 5000 intensity; `BP_SecurityCamera`: `Head` mesh, floats `ViewDistance` = {{view_distance}} and `ViewHalfAngle` = {{view_angle}}, function `ApplySweep(Alpha)` setting Head's relative yaw to (Alpha - 0.5) × {{sweep_degrees}}, and a looping 0.2 s timer that raises the alarm when the player is within ViewDistance, inside the half-angle (the angle from Head's forward to the player, flattened to the ground) and in line of sight (Line Trace By Channel).\n3. One hyper_blueprint_structure_apply_plan on BP_SecurityCamera (fresh OperationId, bSave false): `timeline.add` `Sweep` (Length 6, bAutoPlay true, bLoop true, float track `Alpha` keyed 0, 1, 0 at 0, 3 and 6 s, Drive `ApplySweep`).\n4. Compile-check each with hyper_blueprint_compile_validate (revision from hyper_blueprint_snapshot; preview, then compile with its PlanHash and a fresh OperationId; hyper_operation_wait), which also saves each; hyper_blueprint_debug_inspect: 0 errors.\n5. Place `Camera_1` 300 cm up, 1500 cm ahead of the Player Start and facing it, `AlarmManager_1`, and two alarm lights. hyper_verify_run, two cases: (a) Wait 3 s at the start, AssertProperty AlarmManager_1 Alarm == false; (b) MoveTo a point 600 cm in front of Camera_1, WaitUntil AssertProperty AlarmManager_1 Alarm == true (timeout 8 s), Capture.\n6. Report a PASS/FAIL table with the capture on its own line. Leave the level and other assets unsaved unless I ask."
+  },
+  {
+   "id": "blueprints.audit-blueprint-health",
+   "title": "Audit Blueprints for Tick-heavy and fragile logic",
+   "summary": "A read-only review of a folder's Blueprints for heavy Tick graphs, Delays used as state, unchecked casts and per-frame searches, with fixes to do first.",
+   "packs": [
+    "blueprint",
+    "blueprint_structure"
+   ],
+   "skills": [
+    "unreal-blueprint"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_project_search",
+    "hyper_run_audit",
+    "hyper_blueprint_debug_inspect",
+    "hyper_blueprint_structure_inspect",
+    "hyper_blueprint_snapshot",
+    "hyper_diagnose"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "audit",
+    "tick",
+    "performance",
+    "blueprint",
+    "read-only",
+    "code review"
+   ],
+   "placeholders": [
+    {
+     "name": "max_items",
+     "label": "Blueprints to review",
+     "default": "20"
+    },
+    {
+     "name": "tick_nodes",
+     "label": "Largest Tick graph allowed (nodes)",
+     "default": "10"
+    }
+   ],
+   "prompt": "Audit the Blueprints under {{content_folder}} for logic that costs frames or fails quietly; change and save nothing.\n1. hyper_project_search (kinds asset, query \"{{content_folder}} Blueprint\"): the Blueprints there, up to {{max_items}}. Load any that are not loaded with Epic's AssetTools load_asset.\n2. hyper_run_audit with action start (a new auditId, kinds loaded_blueprint_health), then action status with the same auditId until it is complete: compile status per Blueprint. For any with errors or warnings, hyper_blueprint_debug_inspect: each message with its node.\n3. For each Blueprint, hyper_blueprint_structure_inspect with bNodes and Find \"Tick\", then Find \"Delay\", \"Cast\" and \"GetAllActorsOfClass\", reading the node links. Flag Tick graphs over {{tick_nodes}} nodes; Get All Actors Of Class, Get Actor Of Class or a ForEach loop reached from Tick; Delay nodes standing in for state; casts whose Cast Failed pin is unwired. If the blueprint_structure pack is unavailable, read the graphs with hyper_blueprint_snapshot (bIncludeLinks true) instead.\n4. hyper_diagnose with checks dirty_loaded_packages: the audit dirtied nothing.\n5. Report a table: Blueprint | compile | Tick nodes | per-frame searches | Delay-as-state | unchecked casts | PASS/WARN/FAIL. Then the five fixes worth doing first, each naming the Blueprint, the node and the change (a timer, a cached reference, a state variable)."
+  }
+ ]
+}

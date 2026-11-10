@@ -1,6 +1,9 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioChatModes.h"
+
+#include "HyperAIStudioSettings.h"
 
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioDomainAdapter.h"
@@ -89,6 +92,12 @@ EHyperAIStudioNativeExecutionMode FHyperAIStudioExtensionRuntime::GetNativeExecu
 bool FHyperAIStudioExtensionRuntime::UsesStrictNativeSafety(
 	const EHyperAIStudioDomainSafety Safety)
 {
+	// A read-only chat mode closes the fast paths too: an edit then needs a grant, which only the approval gate issues and
+	// which it refuses while that mode is on.
+	if (Safety != EHyperAIStudioDomainSafety::Read && !HyperAIStudio::ChatModes::ReadOnlyHolder().IsEmpty())
+	{
+		return true;
+	}
 	return UsesStrictNativeSafety(GetNativeExecutionMode(), Safety);
 }
 
@@ -361,4 +370,36 @@ FString FHyperAIStudioExtensionRuntime::GetCanonicalProjectId()
 {
 	return FHyperAIStudioOperationJournal::MakeCanonicalProjectId(
 		FHyperAIStudioService::GetProjectRoot());
+}
+
+bool FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(const FString& ExpectedPlanHash)
+{
+	if (ExpectedPlanHash.IsEmpty())
+	{
+		const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+		return !Settings || Settings->bAllowOneShotAgentEdits;
+	}
+	if (ExpectedPlanHash.Len() != 71 || !ExpectedPlanHash.StartsWith(TEXT("sha256:"), ESearchCase::CaseSensitive))
+	{
+		return false;
+	}
+	for (int32 Index = 7; Index < ExpectedPlanHash.Len(); ++Index)
+	{
+		const TCHAR Character = ExpectedPlanHash[Index];
+		if (!((Character >= TEXT('0') && Character <= TEXT('9')) || (Character >= TEXT('a') && Character <= TEXT('f'))))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(const FString& ExpectedPlanHash, const FString& ActualPlanHash)
+{
+	return ExpectedPlanHash.IsEmpty() ? IsValidSubmissionPlanHash(ExpectedPlanHash) : ExpectedPlanHash == ActualPlanHash;
+}
+
+const TCHAR* FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage()
+{
+	return TEXT("A non-dry submission needs a valid operation_id. expected_plan_hash is optional; when given it must be the plan_hash a dry run returned.");
 }

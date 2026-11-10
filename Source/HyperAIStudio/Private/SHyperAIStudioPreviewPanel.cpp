@@ -7,6 +7,7 @@
 #include "Fonts/FontMeasure.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "HyperAIStudioSettings.h"
+#include "HyperAIStudioShell.h"
 #include "IDesktopPlatform.h"
 #include "Input/DragAndDrop.h"
 #include "Misc/Paths.h"
@@ -18,6 +19,8 @@
 #include "Widgets/Input/SSegmentedControl.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SScaleBox.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
@@ -36,6 +39,19 @@ namespace HyperAIStudio::Preview::Private
 	const FSlateBrush* WhiteBrush()
 	{
 		return FCoreStyle::Get().GetBrush("GenericWhiteBox");
+	}
+
+	/** Relight this view, which the image pack registers when it loads: a reference made from the level itself. */
+	TOptional<FHyperAIStudioAction> RelightAction()
+	{
+		for (const FHyperAIStudioAction& Action : FHyperAIStudioShell::GetActions())
+		{
+			if (Action.Id == FName(TEXT("RelightView")))
+			{
+				return Action;
+			}
+		}
+		return {};
 	}
 
 	FVector2f ImageSizeOf(const FSlateBrush* Brush)
@@ -332,6 +348,8 @@ void SHyperAIStudioPreviewPanel::Construct(const FArguments& InArgs)
 		Refresh();
 	});
 	OpenRequestedHandle = FHyperAIStudioPreviewPanel::OnOpenRequested().AddRaw(this, &SHyperAIStudioPreviewPanel::HandleOpenRequested);
+	// A job's round ending is when its best attempt changes.
+	JobsChangedHandle = FHyperAIStudioAgentJobs::OnChanged().AddLambda([this]() { Refresh(); });
 
 	ChildSlot
 	[
@@ -430,6 +448,22 @@ void SHyperAIStudioPreviewPanel::Construct(const FArguments& InArgs)
 						.ToolTipText(LOCTEXT("BrowseTip", "Pick a PNG, JPG, BMP or TGA from inside the project."))
 						.OnClicked(this, &SHyperAIStudioPreviewPanel::OnBrowseClicked)
 					]
+					// No reference at all: one made from the level itself, relit as the user describes.
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f)
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("RelightView", "Relight this view..."))
+						.ToolTipText(LOCTEXT("RelightViewTip", "No reference? Make one from the level itself. The Images page takes the view through HyperAI_MatchCamera, an image model relights it as you describe, and your preferred agent then matches the level's lighting to that picture."))
+						.Visibility_Lambda([]() { return HyperAIStudio::Preview::Private::RelightAction().IsSet() ? EVisibility::Visible : EVisibility::Collapsed; })
+						.OnClicked_Lambda([]()
+						{
+							if (const TOptional<FHyperAIStudioAction> Action = HyperAIStudio::Preview::Private::RelightAction(); Action.IsSet() && Action->Run)
+							{
+								Action->Run();
+							}
+							return FReply::Handled();
+						})
+					]
 					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f)
 					[
 						SNew(SButton)
@@ -493,6 +527,29 @@ void SHyperAIStudioPreviewPanel::Construct(const FArguments& InArgs)
 				.ToolTipText(LOCTEXT("RefreshTip", "Capture and measure again."))
 				.OnClicked(this, &SHyperAIStudioPreviewPanel::OnRefreshClicked)
 			]
+			// The numbers say how far off it is; Match it hands the reference to an agent that closes the gap.
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
+			[
+				SNew(SComboButton)
+				.ButtonStyle(FAppStyle::Get(), "PrimaryButton")
+				.ToolTipText(LOCTEXT("MatchItTip", "Hand the reference to your preferred agent. It changes the level until the match score reaches the target, and HyperAI sends it back to work after each round until it does."))
+				.Visibility_Lambda([this]()
+				{
+					const FHyperAIStudioPreviewPanel::FSource* Source = CurrentSource();
+					return Source && !Source->AgentActions.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed;
+				})
+				.IsEnabled_Lambda([this]()
+				{
+					FString Why;
+					const TOptional<FHyperAIStudioAgentJobInfo> Job = CurrentJob();
+					return FHyperAIStudioPreviewPanel::IsSupportedProjectImage(ReferencePath, Why) && !(Job.IsSet() && Job->IsRunning());
+				})
+				.OnGetMenuContent(this, &SHyperAIStudioPreviewPanel::BuildMatchItMenu)
+				.ButtonContent()
+				[
+					SNew(STextBlock).Text(LOCTEXT("MatchIt", "Match it"))
+				]
+			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 			[
 				SNew(SSegmentedControl<EHyperAIStudioCompareMode>)
@@ -517,6 +574,57 @@ void SHyperAIStudioPreviewPanel::Construct(const FArguments& InArgs)
 			]
 		]
 
+		// The job working toward this reference: who has it, how it stands, and a way to it or to stop it.
+		+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 0.0f, 4.0f, 4.0f)
+		[
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+			.Visibility_Lambda([this]() { return CurrentJob().IsSet() ? EVisibility::Visible : EVisibility::Collapsed; })
+			.BorderBackgroundColor_Lambda([this]()
+			{
+				const TOptional<FHyperAIStudioAgentJobInfo> Job = CurrentJob();
+				const EHyperAIStudioAgentJobState State = Job.IsSet() ? Job->State : EHyperAIStudioAgentJobState::Stopped;
+				return State == EHyperAIStudioAgentJobState::Succeeded ? FLinearColor(0.20f, 0.45f, 0.25f)
+					: Job.IsSet() && Job->IsRunning() ? FLinearColor(0.16f, 0.30f, 0.55f) : FLinearColor(0.50f, 0.34f, 0.10f);
+			})
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(6.0f, 4.0f)
+				[
+					SNew(STextBlock)
+					.AutoWrapText(true)
+					.Text_Lambda([this]() { return GetJobText(); })
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("ShowJobChat", "Show chat"))
+					.ToolTipText(LOCTEXT("ShowJobChatTip", "Bring the agent's chat forward."))
+					.OnClicked_Lambda([this]()
+					{
+						if (const TOptional<FHyperAIStudioAgentJobInfo> Job = CurrentJob()) FHyperAIStudioAgentJobs::ShowChat(Job->Id);
+						return FReply::Handled();
+					})
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f, 2.0f, 4.0f, 2.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("StopJob", "Stop"))
+					.ToolTipText(LOCTEXT("StopJobTip", "Stop the agent's turn and stop sending it back to work. What it changed so far stays, unsaved."))
+					.Visibility_Lambda([this]()
+					{
+						const TOptional<FHyperAIStudioAgentJobInfo> Job = CurrentJob();
+						return Job.IsSet() && Job->IsRunning() ? EVisibility::Visible : EVisibility::Collapsed;
+					})
+					.OnClicked_Lambda([this]()
+					{
+						if (const TOptional<FHyperAIStudioAgentJobInfo> Job = CurrentJob()) FHyperAIStudioAgentJobs::Stop(Job->Id);
+						return FReply::Handled();
+					})
+				]
+			]
+		]
+
 		+ SVerticalBox::Slot().FillHeight(1.0f).Padding(4.0f, 0.0f)
 		[
 			SAssignNew(ComparisonView, SHyperAIStudioComparisonView)
@@ -527,8 +635,26 @@ void SHyperAIStudioPreviewPanel::Construct(const FArguments& InArgs)
 			.Mode_Lambda([this]() { return Mode; })
 			.EmptyMessage_Lambda([this]()
 			{
-				return Status.IsEmpty() ? LOCTEXT("PickThenRefresh", "Pick a reference, then Refresh.") : FText::FromString(Status);
+				if (!Status.IsEmpty())
+				{
+					return FText::FromString(Status);
+				}
+				return HyperAIStudio::Preview::Private::RelightAction().IsSet()
+					? LOCTEXT("PickOrRelight", "Pick a reference, then Refresh. No reference? Relight this view makes one from the level itself.")
+					: LOCTEXT("PickThenRefresh", "Pick a reference, then Refresh.");
 			})
+		]
+
+		// Earlier attempts, when the source keeps any: pick one to put it beside the reference.
+		+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 4.0f, 4.0f, 0.0f)
+		[
+			SNew(SScrollBox)
+			.Orientation(Orient_Horizontal)
+			.Visibility_Lambda([this]() { return Comparison.Frames.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+			+ SScrollBox::Slot()
+			[
+				SAssignNew(FrameStrip, SHorizontalBox)
+			]
 		]
 
 		+ SVerticalBox::Slot().AutoHeight().Padding(4.0f)
@@ -564,6 +690,65 @@ SHyperAIStudioPreviewPanel::~SHyperAIStudioPreviewPanel()
 {
 	FHyperAIStudioPreviewPanel::OnSourcesChanged().Remove(SourcesChangedHandle);
 	FHyperAIStudioPreviewPanel::OnOpenRequested().Remove(OpenRequestedHandle);
+	FHyperAIStudioAgentJobs::OnChanged().Remove(JobsChangedHandle);
+}
+
+TOptional<FHyperAIStudioAgentJobInfo> SHyperAIStudioPreviewPanel::CurrentJob() const
+{
+	return ReferencePath.IsEmpty() ? TOptional<FHyperAIStudioAgentJobInfo>() : FHyperAIStudioAgentJobs::FindByKey(ReferencePath);
+}
+
+FText SHyperAIStudioPreviewPanel::GetJobText() const
+{
+	const TOptional<FHyperAIStudioAgentJobInfo> Job = CurrentJob();
+	if (!Job.IsSet())
+	{
+		return FText::GetEmpty();
+	}
+	const FText State = Job->State == EHyperAIStudioAgentJobState::Starting ? LOCTEXT("JobStarting", "starting")
+		: Job->State == EHyperAIStudioAgentJobState::Working ? LOCTEXT("JobWorking", "working")
+		: Job->State == EHyperAIStudioAgentJobState::Succeeded ? LOCTEXT("JobDone", "done")
+		: Job->State == EHyperAIStudioAgentJobState::Failed ? LOCTEXT("JobFailed", "failed") : LOCTEXT("JobStopped", "stopped");
+	return FText::Format(LOCTEXT("JobLine", "{0}. {1} in chat {2}, {3}, round {4}. {5}"), FText::FromString(Job->Title), FText::FromString(Job->Agent),
+		FText::AsNumber(Job->TabIndex), State, FText::AsNumber(Job->Turns + (Job->IsRunning() ? 1 : 0)), FText::FromString(Job->Status));
+}
+
+TSharedRef<SWidget> SHyperAIStudioPreviewPanel::BuildMatchItMenu()
+{
+	FMenuBuilder Builder(/*bInShouldCloseWindowAfterMenuSelection=*/true, nullptr);
+	if (const FHyperAIStudioPreviewPanel::FSource* Source = CurrentSource())
+	{
+		for (const FHyperAIStudioPreviewPanel::FAgentAction& Action : Source->AgentActions)
+		{
+			Builder.AddMenuEntry(Action.Label, Action.Tooltip, FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([this, SourceId = Source->Id, ActionId = Action.Id]()
+				{
+					FString Error;
+					if (!FHyperAIStudioPreviewPanel::StartAgentAction(SourceId, ActionId, ReferencePath, Error))
+					{
+						Status = Error;
+						bStatusIsError = true;
+					}
+				})));
+		}
+	}
+	return Builder.MakeWidget();
+}
+
+void SHyperAIStudioPreviewPanel::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
+{
+	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	if (InCurrentTime < NextJobRefresh)
+	{
+		return;
+	}
+	NextJobRefresh = InCurrentTime + 4.0;
+	const TOptional<FHyperAIStudioAgentJobInfo> Job = CurrentJob();
+	const FHyperAIStudioPreviewPanel::FSource* Source = CurrentSource();
+	if (Job.IsSet() && Job->IsRunning() && Source && Source->bRefreshWhileAgentWorks)
+	{
+		Refresh();
+	}
 }
 
 const FHyperAIStudioPreviewPanel::FSource* SHyperAIStudioPreviewPanel::CurrentSource() const
@@ -649,8 +834,63 @@ void SHyperAIStudioPreviewPanel::Refresh()
 	RebuildStats();
 }
 
+void SHyperAIStudioPreviewPanel::RebuildFrames()
+{
+	if (!FrameStrip.IsValid())
+	{
+		return;
+	}
+	FrameStrip->ClearChildren();
+	FrameImages.Reset();
+	for (const FHyperAIStudioPreviewFrame& Frame : Comparison.Frames)
+	{
+		const TSharedPtr<FHyperAIStudioPreviewImage> Image = FrameImages.Add_GetRef(MakeShared<FHyperAIStudioPreviewImage>());
+		const FString Path = Frame.ImagePath;
+		const FText Label = Frame.Label;
+		const FLinearColor Tint = Frame.Tone == EHyperAIStudioPreviewTone::Good ? FLinearColor(0.20f, 0.45f, 0.25f)
+			: Frame.Tone == EHyperAIStudioPreviewTone::Warning ? FLinearColor(0.50f, 0.34f, 0.10f) : FLinearColor(0.16f, 0.16f, 0.18f);
+		FrameStrip->AddSlot().AutoWidth().Padding(0.0f, 0.0f, 6.0f, 0.0f)
+		[
+			SNew(SButton)
+			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+			.ToolTipText(Frame.Tooltip.IsEmpty() ? FText::FromString(Path) : Frame.Tooltip)
+			.OnClicked_Lambda([this, Path, Label]()
+			{
+				Comparison.ImagePathB = Path;
+				Comparison.LabelB = Label;
+				return FReply::Handled();
+			})
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+					.BorderBackgroundColor_Lambda([this, Path, Tint]() { return Comparison.ImagePathB == Path ? FLinearColor(0.85f, 0.55f, 0.1f) : Tint; })
+					.Padding(2.0f)
+					[
+						SNew(SBox).WidthOverride(112.0f).HeightOverride(66.0f)
+						[
+							SNew(SScaleBox)
+							.Stretch(EStretch::ScaleToFit)
+							[
+								SNew(SImage).Image_Lambda([Image, Path]() { return Image->Get(Path); })
+							]
+						]
+					]
+				]
+				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 2.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Regular", 8)).Text(Label)
+				]
+			]
+		];
+	}
+}
+
 void SHyperAIStudioPreviewPanel::RebuildStats()
 {
+	RebuildFrames();
 	if (!StatsBox.IsValid())
 	{
 		return;

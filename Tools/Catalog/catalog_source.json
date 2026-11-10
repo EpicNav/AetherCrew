@@ -54,7 +54,15 @@
    "kind": "Module"
   },
   {
+   "id": "module.TextureGraph",
+   "kind": "Module"
+  },
+  {
    "id": "module.ToolsetRegistry",
+   "kind": "Module"
+  },
+  {
+   "id": "module.UAFAnimGraphUncookedOnly",
    "kind": "Module"
   },
   {
@@ -98,6 +106,10 @@
    "kind": "Plugin"
   },
   {
+   "id": "plugin.Fracture",
+   "kind": "Plugin"
+  },
+  {
    "id": "plugin.GameFeatures",
    "kind": "Plugin"
   },
@@ -115,6 +127,10 @@
   },
   {
    "id": "plugin.GameplayInteractions",
+   "kind": "Plugin"
+  },
+  {
+   "id": "plugin.GeometryCollectionPlugin",
    "kind": "Plugin"
   },
   {
@@ -139,6 +155,10 @@
   },
   {
    "id": "plugin.MassGameplay",
+   "kind": "Plugin"
+  },
+  {
+   "id": "plugin.MeshPartition",
    "kind": "Plugin"
   },
   {
@@ -186,6 +206,10 @@
    "kind": "Plugin"
   },
   {
+   "id": "plugin.PythonScriptPlugin",
+   "kind": "Plugin"
+  },
+  {
    "id": "plugin.RemoteControl",
    "kind": "Plugin"
   },
@@ -194,7 +218,19 @@
    "kind": "Plugin"
   },
   {
+   "id": "plugin.TextureGraph",
+   "kind": "Plugin"
+  },
+  {
    "id": "plugin.ToolsetRegistry",
+   "kind": "Plugin"
+  },
+  {
+   "id": "plugin.UAF",
+   "kind": "Plugin"
+  },
+  {
+   "id": "plugin.UAFAnimGraph",
    "kind": "Plugin"
   },
   {
@@ -203,6 +239,10 @@
   },
   {
    "id": "probe.ability_system",
+   "kind": "Probe"
+  },
+  {
+   "id": "probe.anim_blueprint_graph",
    "kind": "Probe"
   },
   {
@@ -258,11 +298,23 @@
    "kind": "Probe"
   },
   {
+   "id": "probe.image_generation_model",
+   "kind": "Probe"
+  },
+  {
    "id": "probe.interchange_manager",
    "kind": "Probe"
   },
   {
    "id": "probe.landscape",
+   "kind": "Probe"
+  },
+  {
+   "id": "probe.level_design_editor_world",
+   "kind": "Probe"
+  },
+  {
+   "id": "probe.lighting_editor_world",
    "kind": "Probe"
   },
   {
@@ -279,6 +331,10 @@
   },
   {
    "id": "probe.material_editor",
+   "kind": "Probe"
+  },
+  {
+   "id": "probe.mesh_terrain",
    "kind": "Probe"
   },
   {
@@ -326,51 +382,19 @@
    "kind": "Probe"
   },
   {
+   "id": "probe.texture_graph_engine",
+   "kind": "Probe"
+  },
+  {
+   "id": "probe.uaf_animation_graph",
+   "kind": "Probe"
+  },
+  {
    "id": "probe.widget_blueprint_editor",
    "kind": "Probe"
   },
   {
    "id": "probe.world_partition",
-   "kind": "Probe"
-  },
-  {
-   "id": "plugin.TextureGraph",
-   "kind": "Plugin"
-  },
-  {
-   "id": "module.TextureGraph",
-   "kind": "Module"
-  },
-  {
-   "id": "probe.texture_graph_engine",
-   "kind": "Probe"
-  },
-  {
-   "id": "probe.lighting_editor_world",
-   "kind": "Probe"
-  },
-  {
-   "id": "probe.level_design_editor_world",
-   "kind": "Probe"
-  },
-  {
-   "id": "probe.anim_blueprint_graph",
-   "kind": "Probe"
-  },
-  {
-   "id": "plugin.UAF",
-   "kind": "Plugin"
-  },
-  {
-   "id": "plugin.UAFAnimGraph",
-   "kind": "Plugin"
-  },
-  {
-   "id": "module.UAFAnimGraphUncookedOnly",
-   "kind": "Module"
-  },
-  {
-   "id": "probe.uaf_animation_graph",
    "kind": "Probe"
   }
  ],
@@ -454,6 +478,86 @@
      ],
      "sourceArtifactCount": 1,
      "sourceArtifactFingerprint": "sha256:830033c69bcdc7dc4d43195b91fc035b927c3a44f505e7b92e2ed9e1138c1d38",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hyper_operation_wait",
+     "cohort": "cohort.source.hyperaistudionativereadtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:c7093b0f9717d6b9a8ae6b6196a12b19fc2b1fcdefde165b979fa6f32d90da65",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hyper_memory_recall",
+     "cohort": "cohort.source.hyperaistudionativereadtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:fbbfccf1831cb3337b97c13f27a7fa45ff88c1c25d5aef84d526dac00c985dd8",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hyper_memory_remember",
+     "cohort": "cohort.source.hyperaistudionativereadtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:fd5a724e6868f24da5a363cb88f5259cbe1f990364d3bf9d7f328649057c345f",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hyper_memory_forget",
+     "cohort": "cohort.source.hyperaistudionativereadtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:bfe8a522ecfe6feb1b8f0de28e4c66abc96de2c809a6a100d4c36bebe620bc52",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hyper_sandbox_status",
+     "cohort": "cohort.source.hyperaistudionativereadtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:6676aee07dd7436566a87143f44b02c7d5e786b4ffd08440edba67c103faf542",
      "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
      "evidence": [
       0,
@@ -869,30 +973,13 @@
       0,
       0
      ]
-    },
-    {
-     "name": "hyper_viewport_capture",
-     "cohort": "cohort.source.hyperaistudioviewportcapturetoolset.v1",
-     "admission": "SourceCandidate",
-     "safety": [
-      "ExternalEffect"
-     ],
-     "sourceArtifactCount": 1,
-     "sourceArtifactFingerprint": "sha256:0ab0b4f9df6f5f7ad10eaef4e65b826cef2cce3e36af04aad4fa39f2800b4485",
-     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-     "evidence": [
-      0,
-      0,
-      0
-     ]
     }
    ],
    "cohortOrder": [
     "cohort.source.hyperaistudioaudittoolset.v1",
     "cohort.source.hyperaistudiodependencygraphtoolset.v1",
     "cohort.source.hyperaistudiodiagnosetoolset.v1",
-    "cohort.source.hyperaistudiologtailtoolset.v1",
-    "cohort.source.hyperaistudioviewportcapturetoolset.v1"
+    "cohort.source.hyperaistudiologtailtoolset.v1"
    ]
   },
   {
@@ -917,7 +1004,7 @@
      "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
      "admission": "SourceCandidate",
      "safety": [
-      "ExternalEffect"
+      "Edit"
      ],
      "sourceArtifactCount": 1,
      "sourceArtifactFingerprint": "sha256:14d6c69b8792d81339cc48329f222ef83b95880a327cf73862ebae517eef50ca",
@@ -945,6 +1032,38 @@
      ]
     },
     {
+     "name": "hyper_verify_run",
+     "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:9436eb7aea3172afbfaf74efc249ddd727ea045d327bc6008eebbc83f8779f97",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hyper_verify_calibrate",
+     "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:f4f29b2c42690eb498470c02b875ca05a3a3316fa8ec3bb86bc5905e4b563b7a",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
      "name": "hyper_playtest_status",
      "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
      "admission": "SourceCandidate",
@@ -958,6 +1077,31 @@
       0,
       0,
       1
+     ]
+    },
+    {
+     "name": "hyper_phone_playtest_start",
+     "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read",
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_phone_playtest_status",
+     "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_phone_playtest_stop",
+     "cohort": "cohort.source.hyperaistudiopieplaytesttoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
      ]
     }
    ],
@@ -1121,6 +1265,30 @@
       0,
       0
      ]
+    },
+    {
+     "name": "hyper_eqs_inspect",
+     "cohort": "cohort.source.hyperaistudioeqstoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_eqs_apply_plan",
+     "cohort": "cohort.source.hyperaistudioeqstoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_eqs_run",
+     "cohort": "cohort.source.hyperaistudioeqstoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
     }
    ]
   },
@@ -1271,6 +1439,78 @@
       1,
       0
      ]
+    },
+    {
+     "name": "hyper_retarget_inspect",
+     "cohort": "cohort.source.hyperaistudioretargettoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_retarget_apply_plan",
+     "cohort": "cohort.source.hyperaistudioretargettoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_pose_search_inspect",
+     "cohort": "cohort.source.hyperaistudioposesearchtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_pose_search_apply_plan",
+     "cohort": "cohort.source.hyperaistudioposesearchtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_motion_warping_inspect",
+     "cohort": "cohort.source.hyperaistudiomotionwarpingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_motion_warping_apply_plan",
+     "cohort": "cohort.source.hyperaistudiomotionwarpingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_chooser_inspect",
+     "cohort": "cohort.source.hyperaistudiochoosertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_chooser_apply_plan",
+     "cohort": "cohort.source.hyperaistudiochoosertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_chooser_evaluate",
+     "cohort": "cohort.source.hyperaistudiochoosertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
     }
    ]
   },
@@ -1388,6 +1628,54 @@
       0,
       0,
       1
+     ]
+    },
+    {
+     "name": "hyper_landscape_inspect",
+     "cohort": "cohort.source.hyperaistudiolandscapetoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_landscape_apply_plan",
+     "cohort": "cohort.source.hyperaistudiolandscapetoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_foliage_inspect",
+     "cohort": "cohort.source.hyperaistudiofoliagetoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_foliage_apply_plan",
+     "cohort": "cohort.source.hyperaistudiofoliagetoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_world_partition_inspect",
+     "cohort": "cohort.source.hyperaistudioworldpartitiontoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_world_partition_apply_plan",
+     "cohort": "cohort.source.hyperaistudioworldpartitiontoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
      ]
     }
    ]
@@ -1580,6 +1868,78 @@
       0,
       0
      ]
+    },
+    {
+     "name": "hyper_sound_cue_plan",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_sound_mix_plan",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_sound_asset_inspect",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_metasound_recipe",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_metasound_node_search",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_metasound_node_describe",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_metasound_graph_plan",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_audio_analyze",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_audio_preview",
+     "cohort": "cohort.source.hyperaistudioaudioauthoringtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
     }
    ]
   },
@@ -1657,6 +2017,15 @@
       0,
       0,
       0
+     ]
+    },
+    {
+     "name": "hyper_material_recipe",
+     "cohort": "cohort.source.hyperaistudiomaterialstoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read",
+      "Edit"
      ]
     },
     {
@@ -1795,6 +2164,30 @@
       0,
       0
      ]
+    },
+    {
+     "name": "hyper_niagara_live",
+     "cohort": "cohort.source.hyperaistudioniagaratoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_niagara_discover",
+     "cohort": "cohort.source.hyperaistudioniagaratoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_niagara_preview",
+     "cohort": "cohort.source.hyperaistudioniagaratoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
     }
    ]
   },
@@ -1827,22 +2220,49 @@
     {
      "name": "hyper_texture_graph_inspect",
      "cohort": "cohort.source.hyperaistudiotexturegraphtoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:ede51f5930fc9696a1022809b2d545c028e92e44d87198ebd418364940904577",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     },
     {
      "name": "hyper_texture_graph_apply_plan",
      "cohort": "cohort.source.hyperaistudiotexturegraphtoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Edit"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:3f9ac060c011e022f9b5c4ad06905638cb589eda7fa921203526cdad4a1e681a",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     },
     {
      "name": "hyper_texture_graph_validate",
      "cohort": "cohort.source.hyperaistudiotexturegraphtoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:2d6cd43f9e14b2153b730618a48d897942f5f21390fdc850240d7dc2e79920f0",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     }
    ]
@@ -1867,22 +2287,81 @@
     {
      "name": "hyper_lighting_inspect",
      "cohort": "cohort.source.hyperaistudiolightingtoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:2825daa796b81e92d0f2ef09967cc87301e101748fdb052aa5dd901ac43e2e27",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     },
     {
      "name": "hyper_lighting_apply_plan",
      "cohort": "cohort.source.hyperaistudiolightingtoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Edit"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:849e52c38e0936fff8179d0a1f6dc0cf53916ffffed99c48d61476922f267c79",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     },
     {
      "name": "hyper_lighting_compare",
      "cohort": "cohort.source.hyperaistudiolightingtoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:b8761ca7a6141110a72403a252d09d289fe35508ce5925c1e476b9f889696630",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hyper_capture_view",
+     "cohort": "cohort.source.hyperaistudiolightingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:49cd516acc22a090f0e6dcbade558f74ed5915e488df991756a0b65189b8476e",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hyper_image_compare",
+     "cohort": "cohort.source.hyperaistudiolightingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:9c1f945af92aaa4c6bd7de3c6d9636629f5e6bab224bc1d572579c471f6e8fe3",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     }
    ]
@@ -1907,22 +2386,141 @@
     {
      "name": "hyper_level_design_inspect",
      "cohort": "cohort.source.hyperaistudioleveldesigntoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:1bf6fa02ffe6565b63c85b082a14550d6bfa78cb765d80ff242a31b2c6d70a8a",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     },
     {
      "name": "hyper_level_blockout_apply_plan",
      "cohort": "cohort.source.hyperaistudioleveldesigntoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Edit"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:aded70dac175f200091621b1981fb208a832840edd915d0d39f7ac83316db6ca",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     },
     {
      "name": "hyper_level_design_validate",
      "cohort": "cohort.source.hyperaistudioleveldesigntoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:ac9c60f631972888fe713e07ddd6c7ac1be7319d925548cd0732f1e3ff3cca8d",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hyper_scene_cost_report",
+     "cohort": "cohort.source.hyperaistudioscenespatialtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_spatial_query",
+     "cohort": "cohort.source.hyperaistudioscenespatialtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_spatial_apply_plan",
+     "cohort": "cohort.source.hyperaistudioscenespatialtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "mesh_terrain",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [
+    {
+     "id": "mesh_terrain",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "plugin.MeshPartition",
+      "probe.mesh_terrain"
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "hyper_mesh_terrain_inspect",
+     "cohort": "cohort.source.hyperaistudiomeshterraintoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:57baed9ebd2e33f5e3c9c7f7aab7e87e382a982a23ccd7dba24fb039eb067128",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hyper_mesh_terrain_apply_plan",
+     "cohort": "cohort.source.hyperaistudiomeshterraintoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:2798fb85439ebde3dab69331ede43d209490cbf6749fe73471034ee4cb827514",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hyper_mesh_terrain_validate",
+     "cohort": "cohort.source.hyperaistudiomeshterraintoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:ba0192baee646a09d01bdb7718313cc358413e68c7c252b9d4e50d356de717ac",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     }
    ]
@@ -1947,22 +2545,49 @@
     {
      "name": "hyper_anim_blueprint_inspect",
      "cohort": "cohort.source.hyperaistudioanimblueprinttoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:316b332e07d58165f549a3eda6d3a63618fada23002ad5f2bdb513590c429d3a",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     },
     {
      "name": "hyper_anim_blueprint_apply_plan",
      "cohort": "cohort.source.hyperaistudioanimblueprinttoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Edit"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:292f2a1042227217232810f1f50598125f7a831ca53c006893c30b9853c5634f",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     },
     {
      "name": "hyper_anim_blueprint_validate",
      "cohort": "cohort.source.hyperaistudioanimblueprinttoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:a56da159bee00e6884df1b8b009df462997f8e54258e080be665a056c7f0f6f1",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     }
    ]
@@ -2006,7 +2631,7 @@
      "cohort": "cohort.source.hyperaistudiopcgtoolset.v1",
      "admission": "SourceCandidate",
      "safety": [
-      "ExternalEffect"
+      "Edit"
      ],
      "sourceArtifactCount": 1,
      "sourceArtifactFingerprint": "sha256:8be728c42721d9150f9bf7cd102c2d69ac037b4214b7ba690867307e9706d362",
@@ -2031,6 +2656,22 @@
       0,
       1,
       1
+     ]
+    },
+    {
+     "name": "hyper_pcg_scatter_inspect",
+     "cohort": "cohort.source.hyperaistudiopcgscattertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_pcg_scatter_apply_plan",
+     "cohort": "cohort.source.hyperaistudiopcgscattertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
      ]
     }
    ]
@@ -2109,6 +2750,14 @@
       0,
       1
      ]
+    },
+    {
+     "name": "hyper_ui_render_review",
+     "cohort": "cohort.source.hyperaistudiouitoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
     }
    ]
   },
@@ -2185,6 +2834,38 @@
       0,
       0
      ]
+    },
+    {
+     "name": "hyper_sequence_inspect",
+     "cohort": "cohort.source.hyperaistudiosequencertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_sequence_apply_plan",
+     "cohort": "cohort.source.hyperaistudiosequencertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_movie_render_inspect",
+     "cohort": "cohort.source.hyperaistudiomovierendertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_movie_render_apply_plan",
+     "cohort": "cohort.source.hyperaistudiomovierendertoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
     }
    ]
   },
@@ -2252,6 +2933,30 @@
       0,
       0,
       0
+     ]
+    },
+    {
+     "name": "hyper_data_registry_inspect",
+     "cohort": "cohort.source.hyperaistudiodataregistrytoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_data_registry_apply_plan",
+     "cohort": "cohort.source.hyperaistudiodataregistrytoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_data_registry_lookup",
+     "cohort": "cohort.source.hyperaistudiodataregistrytoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
      ]
     }
    ]
@@ -2328,6 +3033,42 @@
       0,
       0,
       0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "destruction",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [
+    {
+     "id": "destruction_plugin",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "plugin.GeometryCollectionPlugin",
+      "plugin.Fracture"
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "hyper_destruction_inspect",
+     "cohort": "cohort.source.hyperaistudiodestructiontoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_destruction_apply_plan",
+     "cohort": "cohort.source.hyperaistudiodestructiontoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
      ]
     }
    ]
@@ -2963,6 +3704,31 @@
       0,
       0
      ]
+    },
+    {
+     "name": "hyper_profile_session",
+     "cohort": "cohort.source.hyperaistudioprofilingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read",
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_profile_compare",
+     "cohort": "cohort.source.hyperaistudioprofilingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_profile_live",
+     "cohort": "cohort.source.hyperaistudioprofilingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
     }
    ]
   },
@@ -2996,22 +3762,467 @@
     {
      "name": "hyper_uaf_inspect",
      "cohort": "cohort.source.hyperaistudiouaftoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:eecc3f8f096b6486f51e275b07248599924d6576011b5352e0e00002336e5459",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     },
     {
      "name": "hyper_uaf_apply_plan",
      "cohort": "cohort.source.hyperaistudiouaftoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Edit"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:36e6381d1badd93cd2cdfdddf4d4393c08298f8409c3de5dcb99ba4f86576157",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
      ]
     },
     {
      "name": "hyper_uaf_validate",
      "cohort": "cohort.source.hyperaistudiouaftoolset.v1",
+     "admission": "SourceCandidate",
      "safety": [
       "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:775359c35057a1a3763a2ed03d3449670768b6c298b94a5fe2fca88dc9e1f17e",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "image_generation",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [
+    {
+     "id": "image_generation_backend",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "probe.image_generation_model"
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "hyper_image_inspect",
+     "cohort": "cohort.source.hyperaistudioimagegentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:db712ecdd8f008db084df3fb22ebd00c1634c53abdaac003c4e07cd2c2547031",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hyper_image_generate",
+     "cohort": "cohort.source.hyperaistudioimagegentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:98f2695febf89071bc1203830d08571a34a405b7d52c885ba33a078a36495527",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "mesh_generation",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [],
+   "tools": [
+    {
+     "name": "hyper_mesh_generate",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_mesh_status",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_mesh_rig",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_mesh_animate",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_mesh_retexture",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_mesh_actions",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_mesh_cancel",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_model_create",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_model_status",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_model_check_and_fix",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit",
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_tripo_account",
+     "cohort": "cohort.source.hyperaistudiomeshgentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "audio_generation",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [],
+   "tools": [
+    {
+     "name": "hyper_audio_generate",
+     "cohort": "cohort.source.hyperaistudioaudiogentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
+     ]
+    },
+    {
+     "name": "hyper_audio_generate_status",
+     "cohort": "cohort.source.hyperaistudioaudiogentoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "mesh_modeling",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [
+    {
+     "id": "geometry_script",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "plugin.GeometryScripting"
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "hyper_model_inspect",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_model_apply_plan",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_model_validate",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_model_handoff",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_model_uv_check",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_model_uv_apply",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_model_bake",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_model_prepare",
+     "cohort": "cohort.source.hyperaistudiomodelingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sound_design",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [],
+   "tools": [
+    {
+     "name": "hyper_sound_inspect",
+     "cohort": "cohort.source.hyperaistudiodecibeltoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_sound_apply_plan",
+     "cohort": "cohort.source.hyperaistudiodecibeltoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    },
+    {
+     "name": "hyper_sound_render",
+     "cohort": "cohort.source.hyperaistudiodecibeltoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "blueprint_structure",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [],
+   "tools": [
+    {
+     "name": "hyper_blueprint_structure_inspect",
+     "cohort": "cohort.source.hyperaistudioblueprintstructuretoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_blueprint_structure_apply_plan",
+     "cohort": "cohort.source.hyperaistudioblueprintstructuretoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "scripting",
+   "tier": "Optional",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [
+    {
+     "id": "python_scripting",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "plugin.PythonScriptPlugin"
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "hyper_script_run",
+     "cohort": "cohort.source.hyperaistudioscriptingtoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit",
+      "Destructive",
+      "ExternalEffect"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:6661b7c1e06668cf93b1c39230cab1e9a935f978edf819312ccfdc21eceae5da",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "editor_lifecycle",
+   "tier": "Core",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [
+    {
+     "id": "editor_restart",
+     "mode": "AllOf",
+     "blocking": true,
+     "prerequisites": [
+      "plugin.ModelContextProtocol"
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "hyper_editor_restart",
+     "cohort": "cohort.source.hyperaistudioeditorrestarttoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Edit",
+      "ExternalEffect"
+     ],
+     "sourceArtifactCount": 1,
+     "sourceArtifactFingerprint": "sha256:30c04c33fb7ba0dffe77a9249fae61cbabd52cf7a9095687db45e16841b478a7",
+     "ledgerFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "evidence": [
+      0,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "source_control",
+   "tier": "Core",
+   "dependsOn": [
+    "shared_foundation"
+   ],
+   "requirements": [],
+   "tools": [
+    {
+     "name": "hyper_source_control_status",
+     "cohort": "cohort.source.hyperaistudiosourcecontroltoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_source_control_submit",
+     "cohort": "cohort.source.hyperaistudiosourcecontroltoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "ExternalEffect"
      ]
     }
    ]

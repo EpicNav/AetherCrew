@@ -12,7 +12,8 @@ class UNiagaraSystem;
  * golden-output regression checks. FNiagaraSimCacheCompare is experimental in UE 5.8 and data channels expose no
  * setters, so both stay inside this file. Everything runs on the game thread.
  *
- * Module and function script authoring is absent on purpose: UE 5.8 exports no way to build a script graph.
+ * Standalone module and function script assets are not authored here; scratch pad HLSL modules, which live inside the
+ * System, are the graph gate's (HyperAIStudioNiagaraGraphGate.h).
  */
 namespace HyperAIStudio::Niagara::AssetsGate
 {
@@ -44,6 +45,12 @@ namespace HyperAIStudio::Niagara::AssetsGate
 	 * GoldenSimCachePath when given.
 	 */
 	FHyperAINiagaraValidateReport RunCapturePolicy(const FHyperAINiagaraValidateRequest& Request);
+
+	/**
+	 * validate policy runtime_probe: simulates the System in its own preview world and reports every emitter's
+	 * execution state and live particle count. Synchronous and bounded by the request's game-thread budget.
+	 */
+	FHyperAINiagaraValidateReport RunRuntimeProbe(const FHyperAINiagaraValidateRequest& Request);
 
 	/** Content key of the System a capture came from, for the bake check; empty for an unknown capture. */
 	FString GetCaptureSystemKey(const FString& CaptureId);

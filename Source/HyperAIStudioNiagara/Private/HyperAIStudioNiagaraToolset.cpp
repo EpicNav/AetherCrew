@@ -1,6 +1,8 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioNiagaraToolset.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioAgentActivity.h"
 
 #include "AssetRegistry/IAssetRegistry.h"
@@ -12,10 +14,17 @@
 #include "FileHelpers.h"
 #include "HyperAIStudioNiagaraAssetsGate.h"
 #include "HyperAIStudioNiagaraExternalEditGate.h"
+#include "HyperAIStudioNiagaraGraphGate.h"
+#include "HyperAIStudioNiagaraDiscover.h"
+#include "HyperAIStudioNiagaraLive.h"
+#include "HyperAIStudioNiagaraPreview.h"
+#include "HyperAIStudioNiagaraRecipes.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioRequestFit.h"
 #include "IO/IoHash.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/PackageName.h"
@@ -395,6 +404,24 @@ namespace HyperAIStudio::Niagara::Private
 		return true;
 	}
 
+	int64 EstimateModuleBytes(const FHyperAINiagaraModuleTopology& Module)
+	{
+		int64 Size = 96 + 2ll * (Module.ModuleName.Len() + Module.ScriptAssetPath.Len());
+		for (const FString& Input : Module.InputNames)
+		{
+			Size += 16 + 2ll * Input.Len();
+		}
+		for (const FString& Type : Module.InputTypes)
+		{
+			Size += 16 + 2ll * Type.Len();
+		}
+		for (const FString& Value : Module.InputValues)
+		{
+			Size += 16 + 2ll * Value.Len();
+		}
+		return Size;
+	}
+
 	int32 EstimateTopologyBytes(const FHyperAINiagaraEmitterTopology& Emitter)
 	{
 		int64 Size = 128 + 2ll * (Emitter.EmitterName.Len() + Emitter.SimTarget.Len());
@@ -403,11 +430,15 @@ namespace HyperAIStudio::Niagara::Private
 			Size += 64 + 2ll * Stack.ScriptName.Len();
 			for (const FHyperAINiagaraModuleTopology& Module : Stack.Modules)
 			{
-				Size += 96 + 2ll * (Module.ModuleName.Len() + Module.ScriptAssetPath.Len());
-				for (const FString& Input : Module.InputNames)
-				{
-					Size += 16 + 2ll * Input.Len();
-				}
+				Size += EstimateModuleBytes(Module);
+			}
+		}
+		for (const FHyperAINiagaraSimStageTopology& Stage : Emitter.SimulationStages)
+		{
+			Size += 96 + 2ll * (Stage.StageName.Len() + Stage.IterationSource.Len());
+			for (const FHyperAINiagaraModuleTopology& Module : Stage.Modules)
+			{
+				Size += EstimateModuleBytes(Module);
 			}
 		}
 		for (const FHyperAINiagaraRendererTopology& Renderer : Emitter.Renderers)
@@ -415,6 +446,22 @@ namespace HyperAIStudio::Niagara::Private
 			Size += 48 + 2ll * Renderer.RendererClassPath.Len();
 		}
 		return static_cast<int32>(FMath::Min<int64>(Size, MAX_int32));
+	}
+
+	/** Nothing at Path: not loaded, and no package on disk. */
+	bool IsTargetAbsent(const FString& Path)
+	{
+		return !FSoftObjectPath(Path).ResolveObject()
+			&& !FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(Path));
+	}
+
+	/** The base revision of a plan that makes its System: the target's absence, by path. */
+	FString AbsentRevision(const FString& Path)
+	{
+		FString Canonical;
+		AppendToken(Canonical, TEXT("hyperai.niagara.absent-target.v1"));
+		AppendToken(Canonical, Path);
+		return FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(Canonical);
 	}
 
 	/** Hash of saved package identity plus dirty state: stable across async compile completion. */
@@ -488,6 +535,23 @@ namespace HyperAIStudio::Niagara::Private
 			return Finish(FailedOutcome, TEXT("game_thread_required"), TEXT("Niagara edits run on the game thread."));
 		}
 		UNiagaraSystem* System = Cast<UNiagaraSystem>(FSoftObjectPath(Payload.TargetPath).ResolveObject());
+		const bool bCreates = Gate::IsCreatePlan(Payload.Ops);
+		if (bApply && bCreates)
+		{
+			// The base revision is the target's absence; anything there now was made after planning.
+			if (System || !IsTargetAbsent(Payload.TargetPath) || Payload.BaseRevision != AbsentRevision(Payload.TargetPath))
+			{
+				return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("target_exists"),
+					TEXT("Something was made at target_path after planning; nothing was applied."));
+			}
+			FString CreateError;
+			System = Gate::CreateSystem(Payload.TargetPath, Payload.Ops[0], CreateError);
+			if (!System || !CreateError.IsEmpty())
+			{
+				return Finish(System ? EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect : EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect,
+					TEXT("create_system_failed"), CreateError);
+			}
+		}
 		if (!System)
 		{
 			return Finish(FailedOutcome, TEXT("target_not_loaded"), TEXT("The target System is no longer loaded."));
@@ -500,14 +564,14 @@ namespace HyperAIStudio::Niagara::Private
 			FHyperAIStudioNiagaraValueSnapshot Snapshot;
 			FString Status;
 			FString Diagnostic;
-			if (!FHyperAIStudioNiagaraContracts::CaptureExact(Payload.TargetPath,
+			if (!bCreates && (!FHyperAIStudioNiagaraContracts::CaptureExact(Payload.TargetPath,
 				FHyperAIStudioNiagaraContracts::MaxReadGameThreadMs, Snapshot, Status, Diagnostic)
-				|| Snapshot.Health.Revision != Payload.BaseRevision)
+				|| Snapshot.Health.Revision != Payload.BaseRevision))
 			{
 				return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("stale_revision"),
 					TEXT("The System changed after planning; nothing was applied."));
 			}
-			if (GetExistingSystemViewModel(System).IsValid())
+			if (!bCreates && GetExistingSystemViewModel(System).IsValid())
 			{
 				return Finish(EHyperAIStudioDomainDispatchOutcome::RejectedBeforeEffect, TEXT("target_open_in_editor"),
 					TEXT("The System was opened in the Niagara editor after planning; nothing was applied."));
@@ -565,6 +629,19 @@ namespace HyperAIStudio::Niagara::Private
 			FHyperAIStudioNiagaraValueSnapshot Snapshot;
 			FString Status;
 			FString Diagnostic;
+			if (bCreates)
+			{
+				// A System this plan made has no saved package to capture until the save phase; check its structure instead.
+				TArray<FHyperAINiagaraEmitterTopology> Topology;
+				bool bTruncated = false;
+				if (!Gate::ReadTopology(*System, Topology, bTruncated, Diagnostic))
+				{
+					return Finish(EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect, TEXT("topology_unreadable"),
+						TEXT("The new System's structure does not read and it was not saved. ") + Diagnostic);
+				}
+				return Finish(EHyperAIStudioDomainDispatchOutcome::Succeeded, TEXT("validated"),
+					FString::Printf(TEXT("The new System reads with %d emitters. Run hyper_niagara_validate after compiling finishes."), Topology.Num()), TEXT("validated"));
+			}
 			if (!FHyperAIStudioNiagaraContracts::CaptureExact(Payload.TargetPath,
 				FHyperAIStudioNiagaraContracts::MaxReadGameThreadMs, Snapshot, Status, Diagnostic))
 			{
@@ -650,7 +727,10 @@ const TArray<FHyperAIStudioNiagaraManifestEntry>& FHyperAIStudioNiagaraContracts
 	static const TArray<FHyperAIStudioNiagaraManifestEntry> Manifest = {
 		{TEXT("hyper_niagara_inspect"), GetQualifiedToolsetName()},
 		{TEXT("hyper_niagara_apply_plan"), GetQualifiedToolsetName()},
-		{TEXT("hyper_niagara_validate"), GetQualifiedToolsetName()}};
+		{TEXT("hyper_niagara_validate"), GetQualifiedToolsetName()},
+		{TEXT("hyper_niagara_live"), GetQualifiedToolsetName()},
+		{TEXT("hyper_niagara_discover"), GetQualifiedToolsetName()},
+		{TEXT("hyper_niagara_preview"), GetQualifiedToolsetName()}};
 	return Manifest;
 }
 
@@ -658,7 +738,7 @@ bool FHyperAIStudioNiagaraContracts::IsRegistrationAllowed(
 	const bool bAllowSourceCandidateForDev)
 {
 	const TArray<FHyperAIStudioNiagaraManifestEntry>& Manifest = GetManifest();
-	if (Manifest.Num() != 3)
+	if (Manifest.Num() != 6)
 	{
 		return false;
 	}
@@ -687,7 +767,8 @@ bool FHyperAIStudioNiagaraContracts::IsCanonicalProjectObjectPath(const FString&
 		return false;
 	}
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason))
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason))
 	{
 		return false;
 	}
@@ -746,7 +827,7 @@ FString FHyperAIStudioNiagaraContracts::InspectPayloadSchemaFingerprint()
 FString FHyperAIStudioNiagaraContracts::EditOpsPayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("niagara.edit_ops.payload.v2|one_target|base_revision|ordered_closed_ops|compile|save|deep_clone|bounded"));
+		TEXT("niagara.edit_ops.payload.v3|one_target|base_revision|ordered_closed_ops|stage_name|renderer_index|hlsl|compile|save|deep_clone|bounded"));
 	return Value;
 }
 
@@ -760,7 +841,7 @@ FString FHyperAIStudioNiagaraContracts::ValidatePayloadSchemaFingerprint()
 FString FHyperAIStudioNiagaraContracts::InspectResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("niagara.inspect.result.v2|health|revision|parameter_identity_page|emitter_topology|capabilities|issues|bounded"));
+		TEXT("niagara.inspect.result.v3|health|revision|parameter_identity_page|emitter_topology|simulation_stages|scratch_pad_modules|capabilities|issues|bounded"));
 	return Value;
 }
 
@@ -769,6 +850,164 @@ FString FHyperAIStudioNiagaraContracts::MutationResultSchemaFingerprint()
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
 		TEXT("niagara.edit_ops.result.v1|phase|content_key|valid|bounded"));
 	return Value;
+}
+
+FString FHyperAIStudioNiagaraContracts::LivePayloadSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("niagara.live.payload.v1|filter|sample_seconds|top_n|include_inactive"));
+	return Value;
+}
+
+FString FHyperAIStudioNiagaraContracts::LiveResultSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("niagara.live.result.v1|level|sampled|components|systems[emitters(particles,spawned,spawning,bounds,sim_target,state,issues)]|errors|notes"));
+	return Value;
+}
+
+FString FHyperAIStudioNiagaraContracts::DiscoverPayloadSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("niagara.discover.payload.v1|kind|query|asset_path|value_type|recipe|recipe_settings|target_path|max_results"));
+	return Value;
+}
+
+FString FHyperAIStudioNiagaraContracts::DiscoverResultSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("niagara.discover.result.v1|entries|inputs|outputs|properties|ops|materials|notes"));
+	return Value;
+}
+
+FString FHyperAIStudioNiagaraContracts::PreviewPayloadSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("niagara.preview.payload.v1|target_path|ages|tile_size|view|background|distance|delta_seconds"));
+	return Value;
+}
+
+FString FHyperAIStudioNiagaraContracts::PreviewResultSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("niagara.preview.result.v1|image_path|frames|coverage|mean_color|peak|screen_box|bounds|emitters|notes"));
+	return Value;
+}
+
+FString FHyperAIStudioNiagaraDiscoverPayload::GetTypeId() const
+{
+	return FHyperAIStudioNiagaraContracts::DiscoverPayloadTypeId;
+}
+
+FString FHyperAIStudioNiagaraDiscoverPayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioNiagaraContracts::DiscoverPayloadSchemaFingerprint();
+}
+
+int32 FHyperAIStudioNiagaraDiscoverPayload::GetBoundedByteSize() const
+{
+	int64 Size = 256 + 2ll * (Request.Kind.Len() + Request.Query.Len() + Request.AssetPath.Len() + Request.ValueType.Len()
+		+ Request.Recipe.Len() + Request.TargetPath.Len());
+	for (const FString& Setting : Request.RecipeSettings)
+	{
+		Size += 16 + 2ll * Setting.Len();
+	}
+	return static_cast<int32>(FMath::Min<int64>(Size, MAX_int32));
+}
+
+FString FHyperAIStudioNiagaraDiscoverResultPayload::GetTypeId() const
+{
+	return FHyperAIStudioNiagaraContracts::DiscoverResultTypeId;
+}
+
+FString FHyperAIStudioNiagaraDiscoverResultPayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioNiagaraContracts::DiscoverResultSchemaFingerprint();
+}
+
+int32 FHyperAIStudioNiagaraDiscoverResultPayload::GetBoundedByteSize() const
+{
+	int64 Size = 512 + 2ll * (Report.Status.Len() + Report.Diagnostic.Len());
+	for (const FHyperAINiagaraDiscoverEntry& Entry : Report.Entries) Size += 48 + 2ll * (Entry.Path.Len() + Entry.Kind.Len() + Entry.Description.Len());
+	for (const FHyperAINiagaraInputSchema& Input : Report.Inputs) Size += 64 + 2ll * (Input.Name.Len() + Input.ValueType.Len() + Input.Category.Len() + Input.Description.Len());
+	for (const FHyperAINiagaraPropertyInfo& Property : Report.Properties) Size += 48 + 2ll * (Property.Name.Len() + Property.Type.Len() + Property.Default.Len() + Property.Description.Len());
+	for (const FString& Text : Report.Outputs) Size += 16 + 2ll * Text.Len();
+	for (const FString& Text : Report.Materials) Size += 16 + 2ll * Text.Len();
+	for (const FString& Text : Report.Notes) Size += 16 + 2ll * Text.Len();
+	for (const FHyperAINiagaraEditOp& Op : Report.Ops)
+	{
+		Size += 96 + 2ll * (Op.Kind.Len() + Op.EmitterName.Len() + Op.ScriptName.Len() + Op.ModuleName.Len() + Op.AssetPath.Len()
+			+ Op.Name.Len() + Op.ValueType.Len() + Op.Value.Len() + Op.Hlsl.Len());
+		for (const FString& Input : Op.InputNameStack) Size += 16 + 2ll * Input.Len();
+	}
+	return static_cast<int32>(FMath::Min<int64>(Size, MAX_int32));
+}
+
+FString FHyperAIStudioNiagaraPreviewPayload::GetTypeId() const
+{
+	return FHyperAIStudioNiagaraContracts::PreviewPayloadTypeId;
+}
+
+FString FHyperAIStudioNiagaraPreviewPayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioNiagaraContracts::PreviewPayloadSchemaFingerprint();
+}
+
+int32 FHyperAIStudioNiagaraPreviewPayload::GetBoundedByteSize() const
+{
+	const int64 Size = 256 + 2ll * (Request.TargetPath.Len() + Request.View.Len() + Request.Background.Len()) + 8ll * Request.Ages.Num();
+	return static_cast<int32>(FMath::Min<int64>(Size, MAX_int32));
+}
+
+FString FHyperAIStudioNiagaraPreviewResultPayload::GetTypeId() const
+{
+	return FHyperAIStudioNiagaraContracts::PreviewResultTypeId;
+}
+
+FString FHyperAIStudioNiagaraPreviewResultPayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioNiagaraContracts::PreviewResultSchemaFingerprint();
+}
+
+int32 FHyperAIStudioNiagaraPreviewResultPayload::GetBoundedByteSize() const
+{
+	int64 Size = 512 + 2ll * (Report.Status.Len() + Report.Diagnostic.Len() + Report.ImagePath.Len() + Report.ProjectImagePath.Len())
+		+ 160ll * Report.Frames.Num() + 160ll * Report.Emitters.Num();
+	for (const FString& Note : Report.Notes) Size += 16 + 2ll * Note.Len();
+	return static_cast<int32>(FMath::Min<int64>(Size, MAX_int32));
+}
+
+FString FHyperAIStudioNiagaraLivePayload::GetTypeId() const
+{
+	return FHyperAIStudioNiagaraContracts::LivePayloadTypeId;
+}
+
+FString FHyperAIStudioNiagaraLivePayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioNiagaraContracts::LivePayloadSchemaFingerprint();
+}
+
+int32 FHyperAIStudioNiagaraLivePayload::GetBoundedByteSize() const
+{
+	return 128 + 2 * FMath::Min(Request.Filter.Len(), 4096);
+}
+
+FString FHyperAIStudioNiagaraLiveResultPayload::GetTypeId() const
+{
+	return FHyperAIStudioNiagaraContracts::LiveResultTypeId;
+}
+
+FString FHyperAIStudioNiagaraLiveResultPayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioNiagaraContracts::LiveResultSchemaFingerprint();
+}
+
+int32 FHyperAIStudioNiagaraLiveResultPayload::GetBoundedByteSize() const
+{
+	int64 Size = 1024 + 2ll * (Report.Status.Len() + Report.Diagnostic.Len());
+	for (const FHyperAINiagaraLiveSystem& System : Report.Systems) Size += 512 + 384ll * System.Emitters.Num();
+	for (const FString& Error : Report.Errors) Size += 16 + 2ll * Error.Len();
+	return static_cast<int32>(FMath::Min<int64>(Size, MAX_int32));
 }
 
 FString FHyperAIStudioNiagaraContracts::ValidateResultSchemaFingerprint()
@@ -826,9 +1065,9 @@ int32 FHyperAIStudioNiagaraEditOpsPayload::GetBoundedByteSize() const
 	int64 Size = 256 + 2ll * (TargetPath.Len() + BaseRevision.Len() + SemanticFingerprint.Len());
 	for (const FHyperAINiagaraEditOp& Op : Ops)
 	{
-		Size += 64 + 2ll * (Op.Kind.Len() + Op.EmitterName.Len() + Op.ScriptName.Len() + Op.ModuleName.Len()
-			+ Op.AssetPath.Len() + Op.Name.Len() + Op.ValueType.Len() + Op.Value.Len()
-			+ Op.IssueId.Len() + Op.FixId.Len());
+		Size += 80 + 2ll * (Op.Kind.Len() + Op.EmitterName.Len() + Op.ScriptName.Len() + Op.StageName.Len()
+			+ Op.ModuleName.Len() + Op.AssetPath.Len() + Op.Name.Len() + Op.ValueType.Len() + Op.Value.Len()
+			+ Op.IssueId.Len() + Op.FixId.Len() + Op.Hlsl.Len());
 		for (const FString& InputName : Op.InputNameStack)
 		{
 			Size += 16 + 2ll * InputName.Len();
@@ -879,6 +1118,10 @@ int32 FHyperAIStudioNiagaraInspectResultPayload::GetBoundedByteSize() const
 	for (const FHyperAINiagaraEmitterTopology& Emitter : Report.Emitters)
 	{
 		Size += HyperAIStudio::Niagara::Private::EstimateTopologyBytes(Emitter);
+	}
+	for (const FString& Module : Report.ScratchPadModules)
+	{
+		Size += 16 + 2ll * Module.Len();
 	}
 	for (const FHyperAINiagaraIssue& Issue : Report.Issues)
 	{
@@ -940,7 +1183,21 @@ TArray<FHyperAINiagaraCapabilityStatus> FHyperAIStudioNiagaraContracts::GetCapab
 		TEXT("effect_type_create_configure_and_assign"),
 		TEXT("data_channel_create_and_inspect"),
 		TEXT("sim_cache_capture_bake_and_golden_regression"),
-		TEXT("effect_type_data_channel_sim_cache_inspect")};
+		TEXT("effect_type_data_channel_sim_cache_inspect"),
+		TEXT("simulation_stages_with_module_stacks"),
+		TEXT("hlsl_scratch_pad_modules"),
+		TEXT("emitter_sim_target_space_determinism_bounds_edits"),
+		TEXT("renderer_property_edits_with_undo"),
+		TEXT("dry_run_checks_addresses_against_the_system"),
+		TEXT("input_values_enum_linked_expression_dynamic_input_data_interface_curves"),
+		TEXT("input_value_read_back_with_dynamic_input_chains"),
+		TEXT("create_system_from_template_or_empty_in_the_plan"),
+		TEXT("remove_emitter_module_renderer_ops"),
+		TEXT("user_parameters_and_set_parameters_modules"),
+		TEXT("renderer_attribute_bindings"),
+		TEXT("template_module_dynamic_input_and_schema_discovery"),
+		TEXT("preview_contact_sheet_with_image_metrics"),
+		TEXT("effect_recipes_compiled_to_plans")};
 	// Epic's NiagaraToolsets expose these as single calls. apply_plan adds batching, a revision check, one undo
 	// step, and a durable journal on top of the same engine API; it does not replace them.
 	Niagara.DelegatedEpicCallables = {
@@ -970,21 +1227,23 @@ TArray<FHyperAINiagaraCapabilityStatus> FHyperAIStudioNiagaraContracts::GetCapab
 		TEXT("ApplyStackIssueFix")};
 	Niagara.UnsupportedCases = {
 		TEXT("target_open_in_niagara_editor"),
-		TEXT("destructive_removal_ops_until_server_grant_path_is_exercised"),
 		TEXT("opaque_system_emitter_renderer_property_json"),
-		TEXT("raw_hlsl_python_lua_or_script_text"),
-		TEXT("scratchpad_authoring"),
+		TEXT("python_lua_or_script_text_outside_hlsl_modules"),
+		TEXT("scratch_pad_dynamic_inputs"),
 		TEXT("module_reorder_through_unexported_editor_api"),
-		TEXT("event_or_simulation_stage_or_version_authoring"),
-		TEXT("module_or_function_script_authoring_no_exported_graph_api"),
+		TEXT("event_handler_or_emitter_version_authoring"),
+		TEXT("simulation_stage_module_input_values"),
+		TEXT("data_interface_iteration_stages"),
+		TEXT("renderer_material_parameter_bindings"),
+		TEXT("module_or_function_script_asset_authoring"),
 		TEXT("module_script_schema_from_asset_not_exported"),
 		TEXT("gpu_emitter_sim_cache_capture"),
 		TEXT("link_style_stack_issue_fixes"),
 		TEXT("broad_asset_scan_capture_or_dependency_walk"),
-		TEXT("runtime_simulation_screenshot_or_actor_spawn"),
+		TEXT("level_actor_spawn"),
 		TEXT("generic_reflection_property_dispatch")};
 	Niagara.State = TEXT("source_candidate_external_edit_ops");
-	Niagara.Remediation = TEXT("Inspect with bIncludeTopology, dry-run apply_plan, resubmit with operation_id and plan_hash, poll hyper_operation_status, then run hyper_niagara_validate once compiling finishes. Close the System's Niagara editor tab first. Planning may load referenced module scripts or emitter templates; it never loads the edited System. Removals stay on Epic's NiagaraToolsets.");
+	Niagara.Remediation = TEXT("Inspect with bIncludeTopology, then apply_plan: submit with bDryRun false and an operation_id (plan hash optional), call hyper_operation_wait, then hyper_niagara_validate. Close the System's Niagara editor tab first. Planning may load referenced module scripts or emitter templates; it never loads the edited System. Stages, HLSL modules, emitter and renderer properties, bindings, removals and new Systems (create_system first) are apply_plan ops; hyper_niagara_discover finds templates, modules, dynamic inputs and recipes, and hyper_niagara_preview shows the result.");
 	return {Niagara};
 }
 
@@ -1006,6 +1265,18 @@ const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioNiagaraContracts::Get
 		Value.Variants.Add({TEXT("hyper_niagara_validate"), ValidateVariantId,
 			ValidatePayloadTypeId, ValidatePayloadSchemaFingerprint(), ValidateResultTypeId,
 			ValidateResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
+		// Read: one look at what plays in Play In Editor; a dispatch reads once, without the sample window.
+		Value.Variants.Add({TEXT("hyper_niagara_live"), LiveVariantId,
+			LivePayloadTypeId, LivePayloadSchemaFingerprint(), LiveResultTypeId,
+			LiveResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
+		// Read: asset registry, schemas and recipe text; nothing is written.
+		Value.Variants.Add({TEXT("hyper_niagara_discover"), DiscoverVariantId,
+			DiscoverPayloadTypeId, DiscoverPayloadSchemaFingerprint(), DiscoverResultTypeId,
+			DiscoverResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
+		// Read: simulates in its own preview world and writes only a PNG under Saved.
+		Value.Variants.Add({TEXT("hyper_niagara_preview"), PreviewVariantId,
+			PreviewPayloadTypeId, PreviewPayloadSchemaFingerprint(), PreviewResultTypeId,
+			PreviewResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
 		Value.ContractFingerprint =
 			FHyperAIStudioDomainAdapterRegistry::ComputeContractFingerprint(Value);
 		Value.AdapterFingerprint =
@@ -1164,14 +1435,17 @@ bool FHyperAIStudioNiagaraContracts::CaptureExact(
 		AppendToken(Entry, Handle.GetIsEnabled() ? TEXT("enabled") : TEXT("disabled"));
 		AppendToken(Entry, FString::FromInt(static_cast<int32>(Handle.GetEmitterMode())));
 		const FVersionedNiagaraEmitter Instance = Handle.GetInstance();
-		if (!Instance.Emitter || !Instance.Version.IsValid())
+		// A handle with no version guid (every System made from Niagara's templates, and handles older than emitter
+		// versioning) means the emitter's only, or exposed, version: the engine resolves it so, and so does identity.
+		const FVersionedNiagaraEmitterData* InstanceData = Instance.Emitter ? Instance.GetEmitterData() : nullptr;
+		if (!Instance.Emitter || !InstanceData)
 		{
 			bComplete = false;
 			AddIssue(OutSnapshot.CaptureIssues, TEXT("emitter_version_identity_incomplete"),
-				TEXT("error"), TEXT("Every emitter handle requires one loaded emitter and stable version guid."));
+				TEXT("error"), TEXT("Every emitter handle requires one loaded emitter whose version data resolves."));
 		}
 		AppendToken(Entry, ObjectIdentity(Instance.Emitter));
-		AppendToken(Entry, CanonicalGuid(Instance.Version));
+		AppendToken(Entry, CanonicalGuid(Instance.Version.IsValid() || !InstanceData ? Instance.Version : InstanceData->Version.VersionGuid));
 		EmitterEvidence.Add(MoveTemp(Entry));
 	}
 	EmitterEvidence.Sort();
@@ -1509,14 +1783,14 @@ FHyperAINiagaraInspectReport FHyperAIStudioNiagaraContracts::Inspect(
 		}
 	}
 
-	if (Request.bIncludeTopology)
+	if (Request.bIncludeTopology || Request.bIncludeInputValues)
 	{
 		UNiagaraSystem* System = Cast<UNiagaraSystem>(FSoftObjectPath(Request.TargetPath).ResolveObject());
 		TArray<FHyperAINiagaraEmitterTopology> Emitters;
 		bool bTopologyTruncated = false;
 		FString TopologyError;
 		if (!IsInGameThread() || !System
-			|| !HyperAIStudio::Niagara::ExternalEditGate::ReadTopology(*System, Emitters, bTopologyTruncated, TopologyError))
+			|| !HyperAIStudio::Niagara::ExternalEditGate::ReadTopology(*System, Emitters, bTopologyTruncated, TopologyError, Request.bIncludeInputValues))
 		{
 			AddIssue(Report.Issues, TEXT("topology_unavailable"), TEXT("warning"),
 				TEXT("Emitter topology could not be read."), TopologyError);
@@ -1531,6 +1805,20 @@ FHyperAINiagaraInspectReport FHyperAIStudioNiagaraContracts::Inspect(
 			}
 			EstimatedBytes += EmitterBytes;
 			Report.Emitters.Add(MoveTemp(Emitter));
+		}
+		if (IsInGameThread() && System)
+		{
+			for (FString& Module : HyperAIStudio::Niagara::GraphGate::ReadScratchPadModules(*System))
+			{
+				const int64 ModuleBytes = 16 + 2ll * Module.Len();
+				if (EstimatedBytes + ModuleBytes > Request.MaxOutputBytes)
+				{
+					bTopologyTruncated = true;
+					break;
+				}
+				EstimatedBytes += ModuleBytes;
+				Report.ScratchPadModules.Add(MoveTemp(Module));
+			}
 		}
 		Report.bTruncated |= bTopologyTruncated;
 	}
@@ -1554,6 +1842,13 @@ FHyperAINiagaraValidateReport FHyperAIStudioNiagaraContracts::Validate(
 	{
 		return Reject(TEXT("game_thread_required"), TEXT("Niagara validation reads editor state on the game thread."));
 	}
+	// Emitter names become FNames, and a golden sim cache is loaded by its path.
+	FString NameReason;
+	if (!FHyperAIStudioNames::CheckRequest(Request, &NameReason)
+		|| (!Request.GoldenSimCachePath.IsEmpty() && !FHyperAIStudioNames::IsObjectPath(Request.GoldenSimCachePath, TEXT("golden_sim_cache_path"), &NameReason)))
+	{
+		return Reject(TEXT("invalid_request"), NameReason);
+	}
 	if (!IsCanonicalProjectObjectPath(Request.TargetPath))
 	{
 		return Reject(TEXT("invalid_target_path"),
@@ -1565,10 +1860,16 @@ FHyperAINiagaraValidateReport FHyperAIStudioNiagaraContracts::Validate(
 		Capture.Capabilities = Report.Capabilities;
 		return Capture;
 	}
+	if (Request.Policy == TEXT("runtime_probe"))
+	{
+		FHyperAINiagaraValidateReport Probe = HyperAIStudio::Niagara::AssetsGate::RunRuntimeProbe(Request);
+		Probe.Capabilities = Report.Capabilities;
+		return Probe;
+	}
 	if (Request.Policy != TEXT("authoring") && Request.Policy != TEXT("runtime_ready"))
 	{
 		return Reject(TEXT("unsupported_validation_policy"),
-			TEXT("policy must be authoring, runtime_ready or sim_cache_capture."));
+			TEXT("policy must be authoring, runtime_ready, sim_cache_capture or runtime_probe."));
 	}
 	if ((!Request.ExpectedRevision.IsEmpty() && !IsCanonicalSha256(Request.ExpectedRevision))
 		|| Request.MaxIssues < 1 || Request.MaxIssues > MaxIssues
@@ -1644,7 +1945,7 @@ FString FHyperAIStudioNiagaraContracts::ComputeEditOpsSemanticFingerprint(
 {
 	using namespace HyperAIStudio::Niagara::Private;
 	FString Canonical;
-	AppendToken(Canonical, TEXT("hyperai.niagara.edit-ops-intent.v1"));
+	AppendToken(Canonical, TEXT("hyperai.niagara.edit-ops-intent.v2"));
 	AppendToken(Canonical, PackId);
 	AppendToken(Canonical, TEXT("hyper_niagara_apply_plan"));
 	AppendToken(Canonical, MutationVariantId);
@@ -1660,6 +1961,7 @@ FString FHyperAIStudioNiagaraContracts::ComputeEditOpsSemanticFingerprint(
 		AppendToken(Canonical, Op.Kind);
 		AppendToken(Canonical, Op.EmitterName);
 		AppendToken(Canonical, Op.ScriptName);
+		AppendToken(Canonical, Op.StageName);
 		AppendToken(Canonical, Op.ModuleName);
 		AppendToken(Canonical, FString::FromInt(Op.InputNameStack.Num()));
 		for (const FString& InputName : Op.InputNameStack)
@@ -1673,6 +1975,8 @@ FString FHyperAIStudioNiagaraContracts::ComputeEditOpsSemanticFingerprint(
 		AppendToken(Canonical, Op.bEnabled ? TEXT("enabled") : TEXT("disabled"));
 		AppendToken(Canonical, Op.IssueId);
 		AppendToken(Canonical, Op.FixId);
+		AppendToken(Canonical, FString::FromInt(Op.RendererIndex));
+		AppendToken(Canonical, Op.Hlsl);
 	}
 	return FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(Canonical);
 }
@@ -1701,6 +2005,20 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 		return Reject(TEXT("game_thread_required"),
 			TEXT("Niagara edit planning reads editor state on the game thread."));
 	}
+	// Ops' names become FNames, and their asset paths are loaded when nothing is in memory: past an FName's length, or a
+	// package with "//", either stops the editor. HLSL bodies and values are text, bounded on their own.
+	FString NameReason;
+	if (!FHyperAIStudioNames::CheckRequest(Request, &NameReason, {TEXT("Hlsl"), TEXT("Value")}))
+	{
+		return Reject(TEXT("invalid_request"), NameReason);
+	}
+	for (const FHyperAINiagaraEditOp& Op : Request.Ops)
+	{
+		if (!Op.AssetPath.IsEmpty() && !FHyperAIStudioNames::IsObjectPath(Op.AssetPath, TEXT("asset_path"), &NameReason))
+		{
+			return Reject(TEXT("invalid_request"), NameReason);
+		}
+	}
 	if (Request.bDryRun
 		&& (!Request.OperationId.IsEmpty() || !Request.ExpectedPlanHash.IsEmpty()))
 	{
@@ -1709,16 +2027,19 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 	}
 	if (!Request.bDryRun
 		&& (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId)
-			|| !IsCanonicalSha256(Request.ExpectedPlanHash)))
+			|| !FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(Request.ExpectedPlanHash)))
 	{
-		return Reject(TEXT("invalid_submission_fields"),
-			TEXT("A non-dry submission needs a valid operation_id and the plan_hash its dry run returned."));
+		return Reject(TEXT("invalid_submission_fields"), FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage());
 	}
+	// A plan that makes its System has no revision to check yet: its base is the target's absence.
+	const bool bCreates = Gate::IsCreatePlan(Request.Ops);
 	if (!IsCanonicalProjectObjectPath(Request.TargetPath)
-		|| !IsCanonicalSha256(Request.ExpectedRevision))
+		|| (bCreates ? !(Request.ExpectedRevision.IsEmpty() || Request.ExpectedRevision == AbsentRevision(Request.TargetPath))
+			: !IsCanonicalSha256(Request.ExpectedRevision)))
 	{
-		return Reject(TEXT("invalid_target_or_revision"),
-			TEXT("A canonical loaded target and the exact revision from hyper_niagara_inspect are required."));
+		return Reject(TEXT("invalid_target_or_revision"), bCreates
+			? TEXT("A plan starting with create_system needs a canonical /Game target_path for the new System and an empty expected_revision.")
+			: TEXT("A canonical loaded target and the exact revision from hyper_niagara_inspect are required (or a create_system first op to make a new System)."));
 	}
 	if (Request.Ops.IsEmpty() || Request.Ops.Num() > MaxOpsPerPlan)
 	{
@@ -1764,64 +2085,101 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 		}
 	}
 
-	FHyperAIStudioNiagaraValueSnapshot Snapshot;
-	FString CaptureStatus;
-	FString CaptureDiagnostic;
-	if (!CaptureExact(Request.TargetPath, Request.MaxGameThreadMs, Snapshot,
-		CaptureStatus, CaptureDiagnostic))
-	{
-		return Reject(CaptureStatus, CaptureDiagnostic);
-	}
-	Report.BaseRevision = Snapshot.Health.Revision;
 	int64 EstimatedOutputBytes = 1024ll + EstimateCapabilitiesBytes(Report.Capabilities);
-	for (const FHyperAINiagaraIssue& Issue : Snapshot.CaptureIssues)
+	if (bCreates)
 	{
-		const int32 IssueBytes = EstimateIssueBytes(Issue);
-		if (Report.Issues.Num() >= MaxIssues
-			|| EstimatedOutputBytes + IssueBytes > Request.MaxOutputBytes)
+		if (!IsTargetAbsent(Request.TargetPath))
 		{
-			return Reject(TEXT("issue_or_output_bound_exceeded"),
-				TEXT("Planning diagnostics exceeded the closed issue or output bound."));
+			return Reject(TEXT("target_exists"),
+				TEXT("create_system makes a new System, and target_path already holds an asset. Pick a new path, or drop create_system and edit the existing System with its revision."));
 		}
-		EstimatedOutputBytes += IssueBytes;
-		Report.Issues.Add(Issue);
+		Report.BaseRevision = AbsentRevision(Request.TargetPath);
+		FString AddressStatus;
+		FString AddressDiagnostic;
+		if (!HyperAIStudio::Niagara::GraphGate::ValidatePlanAgainstSystem(nullptr, Request.Ops, AddressStatus, AddressDiagnostic))
+		{
+			return Reject(AddressStatus, AddressDiagnostic);
+		}
 	}
-	if (!Snapshot.bComplete || !Snapshot.Health.bRevisionComplete)
+	else
 	{
-		return Reject(TEXT("revision_incomplete"),
-			TEXT("Planning requires complete loaded and on-disk revision evidence."));
-	}
-	if (Snapshot.Health.Revision != Request.ExpectedRevision)
-	{
-		return Reject(TEXT("stale_revision"),
-			TEXT("The loaded Niagara System changed after inspection; inspect it again.") + FHyperAIStudioAgentActivityLog::DescribeLastChange(Request.TargetPath));
-	}
-	if (Snapshot.Health.bPackageDirty || !Snapshot.Health.bExistsOnDisk
-		|| Snapshot.Health.DiskExistence != TEXT("exists"))
-	{
-		return Reject(TEXT("persisted_clean_base_required"),
-			TEXT("Save or revert pending changes first: edits start from one clean saved System."));
-	}
-	if (!Snapshot.Health.bCompileStateKnown || Snapshot.Health.bCompileActive
-		|| Snapshot.Health.bCompileStale || Snapshot.Health.bCompileHasErrors)
-	{
-		return Reject(TEXT("compile_not_clean_terminal"),
-			TEXT("Planning never waits for compilation and needs a finished, error-free compile."));
-	}
-	UNiagaraSystem* System = Cast<UNiagaraSystem>(FSoftObjectPath(Request.TargetPath).ResolveObject());
-	if (!System)
-	{
-		return Reject(TEXT("target_not_loaded"), TEXT("The target System is not loaded."));
-	}
-	if (GetExistingSystemViewModel(System).IsValid())
-	{
-		return Reject(TEXT("target_open_in_editor"),
-			TEXT("Close the System's Niagara editor tab first. Edits run through a separate headless view model, and two view models over one System can overwrite each other."));
+		FHyperAIStudioNiagaraValueSnapshot Snapshot;
+		FString CaptureStatus;
+		FString CaptureDiagnostic;
+		if (!CaptureExact(Request.TargetPath, Request.MaxGameThreadMs, Snapshot,
+			CaptureStatus, CaptureDiagnostic))
+		{
+			return Reject(CaptureStatus, CaptureDiagnostic);
+		}
+		Report.BaseRevision = Snapshot.Health.Revision;
+		for (const FHyperAINiagaraIssue& Issue : Snapshot.CaptureIssues)
+		{
+			const int32 IssueBytes = EstimateIssueBytes(Issue);
+			if (Report.Issues.Num() >= MaxIssues
+				|| EstimatedOutputBytes + IssueBytes > Request.MaxOutputBytes)
+			{
+				return Reject(TEXT("issue_or_output_bound_exceeded"),
+					TEXT("Planning diagnostics exceeded the closed issue or output bound."));
+			}
+			EstimatedOutputBytes += IssueBytes;
+			Report.Issues.Add(Issue);
+		}
+		if (!Snapshot.bComplete || !Snapshot.Health.bRevisionComplete)
+		{
+			return Reject(TEXT("revision_incomplete"),
+				TEXT("Planning requires complete loaded and on-disk revision evidence."));
+		}
+		if (Snapshot.Health.Revision != Request.ExpectedRevision)
+		{
+			return Reject(TEXT("stale_revision"),
+				TEXT("The loaded Niagara System changed after inspection; inspect it again.") + FHyperAIStudioAgentActivityLog::DescribeLastChange(Request.TargetPath));
+		}
+		if (Snapshot.Health.bPackageDirty || !Snapshot.Health.bExistsOnDisk
+			|| Snapshot.Health.DiskExistence != TEXT("exists"))
+		{
+			return Reject(TEXT("persisted_clean_base_required"),
+				TEXT("Save or revert pending changes first: edits start from one clean saved System."));
+		}
+		if (!Snapshot.Health.bCompileStateKnown || Snapshot.Health.bCompileActive)
+		{
+			return Reject(TEXT("compile_not_terminal"),
+				TEXT("The System is still compiling. Planning never waits for a compile; plan again once hyper_niagara_validate stops reporting compile_in_progress."));
+		}
+		// A plan is how a broken System gets repaired, so a finished compile with errors, or one a change left out of date,
+		// no longer blocks it. The plan compiles again; hyper_niagara_validate then shows whether the errors cleared.
+		if ((Snapshot.Health.bCompileHasErrors || Snapshot.Health.bCompileStale) && Report.Issues.Num() < MaxIssues)
+		{
+			FHyperAINiagaraIssue Issue;
+			Issue.Code = Snapshot.Health.bCompileHasErrors ? TEXT("compile_errors_before_plan") : TEXT("compile_out_of_date_before_plan");
+			Issue.Severity = TEXT("warning");
+			Issue.Summary = Snapshot.Health.bCompileHasErrors
+				? TEXT("The System had compile errors before this plan. After it compiles, hyper_niagara_validate shows whether they cleared.")
+				: TEXT("The System's last compile was out of date before this plan; the plan compiles it again.");
+			Report.Issues.Add(MoveTemp(Issue));
+		}
+		UNiagaraSystem* System = Cast<UNiagaraSystem>(FSoftObjectPath(Request.TargetPath).ResolveObject());
+		if (!System)
+		{
+			return Reject(TEXT("target_not_loaded"), TEXT("The target System is not loaded."));
+		}
+		if (GetExistingSystemViewModel(System).IsValid())
+		{
+			return Reject(TEXT("target_open_in_editor"),
+				TEXT("Close the System's Niagara editor tab first. Edits run through a separate headless view model, and two view models over one System can overwrite each other."));
+		}
+		// Emitters, stages, renderer indices and property values are checked against the System now, walking the ops in
+		// order, so a wrong address fails this dry run instead of the edit halfway through.
+		FString AddressStatus;
+		FString AddressDiagnostic;
+		if (!HyperAIStudio::Niagara::GraphGate::ValidatePlanAgainstSystem(*System, Request.Ops, AddressStatus, AddressDiagnostic))
+		{
+			return Reject(AddressStatus, AddressDiagnostic);
+		}
 	}
 	const TSharedRef<FHyperAIStudioNiagaraEditOpsPayload, ESPMode::ThreadSafe> Payload =
 		MakeShared<FHyperAIStudioNiagaraEditOpsPayload, ESPMode::ThreadSafe>();
 	Payload->TargetPath = Request.TargetPath;
-	Payload->BaseRevision = Snapshot.Health.Revision;
+	Payload->BaseRevision = Report.BaseRevision;
 	Payload->Ops = Request.Ops;
 	Payload->bCompile = Request.bCompile;
 	Payload->bSave = Request.bSave;
@@ -1890,7 +2248,7 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 		Report.Diagnostic = TEXT("Nothing changed. To apply, resubmit the same request with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash.");
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Payload->SemanticFingerprint)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("plan_hash_mismatch"),
 			TEXT("The plan changed since its dry run (ops, target state, or catalog). Dry-run again and review it."));
@@ -1908,7 +2266,7 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 		for (const FHyperAINiagaraEditOp& Op : Request.Ops)
 		{
 			Summary.Effects.Add(FString::Printf(TEXT("%s %s"), *Op.Kind,
-				*FString::Join(TArray<FString>({Op.EmitterName, Op.ScriptName, Op.ModuleName, Op.Name}).FilterByPredicate(
+				*FString::Join(TArray<FString>({Op.EmitterName, Op.ScriptName, Op.StageName, Op.ModuleName, Op.Name}).FilterByPredicate(
 					[](const FString& Part) { return !Part.IsEmpty(); }), TEXT(" / "))));
 		}
 		Summary.Touches.Add(Request.TargetPath);
@@ -1919,53 +2277,146 @@ FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildPlan(
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Poll hyper_operation_status with operation_id: it starts once approved.");
+		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
 		return Report;
 	}
 
-	FHyperAIStudioTypedArtifactStageReceipt Receipt;
-	FHyperAIStudioTrustedExecutionDiagnostic StageStatus;
-	FString StageError;
-	if (!FHyperAIStudioTrustedExecutionFacade::StageExact(Prepared, Request.OperationId, Receipt, StageStatus, StageError))
+	// Another agent's edit may own the project lane; then this one waits its turn, and hyper_operation_wait
+	// waits through the queue as well as the edit.
+	FString QueueStatus;
+	FString QueueError;
+	if (!FHyperAIStudioExecutionQueue::Submit(Prepared, Request.OperationId, QueueStatus, QueueError))
 	{
-		return Reject(StageStatus.StatusCode.IsEmpty() ? FString(TEXT("stage_failed")) : StageStatus.StatusCode,
-			StageError.IsEmpty() ? StageStatus.Diagnostic : StageError);
+		return Reject(*QueueStatus, QueueError);
 	}
-	Report.bStaged = true;
-
-	FHyperAIStudioTypedArtifactSubmissionReceipt Submission;
-	FHyperAIStudioTrustedExecutionDiagnostic SubmitStatus;
-	FString SubmitError;
-	// Edit is tokenless; only risky safety classes need a server-issued grant.
-	if (!FHyperAIStudioTrustedExecutionFacade::SubmitExact(Receipt, FString(), Submission, SubmitStatus, SubmitError))
-	{
-		Report.Status = SubmitStatus.StatusCode.IsEmpty() ? FString(TEXT("submit_failed")) : SubmitStatus.StatusCode;
-		Report.Diagnostic = SubmitError.IsEmpty() ? SubmitStatus.Diagnostic : SubmitError;
-		return Report;
-	}
-	Report.bExecutionSubmitted = true;
+	Report.bStaged = QueueStatus == TEXT("submitted");
+	Report.bExecutionSubmitted = Report.bStaged;
 	Report.bOk = true;
-	Report.Status = TEXT("submitted");
-	Report.Diagnostic = TEXT("The edit runs over the next editor ticks: apply, compile, validate, save, verify. Poll hyper_operation_status with operation_id until it is terminal.");
+	Report.Status = QueueStatus;
+	Report.Diagnostic = TEXT("The edit runs over the next editor ticks: apply, compile, validate, save, verify. Call hyper_operation_wait with operation_id.");
 	return Report;
 }
 
+// The tools fit an agent's near misses (0 for "unset", a limit past its range) before the closed contracts check them.
 FHyperAINiagaraInspectReport UHyperAIStudioNiagaraToolset::hyper_niagara_inspect(
-	const FHyperAINiagaraInspectRequest& Request)
+	const FHyperAINiagaraInspectRequest& InRequest)
 {
-	return FHyperAIStudioNiagaraContracts::Inspect(Request);
+	using C = FHyperAIStudioNiagaraContracts;
+	const FHyperAINiagaraInspectRequest Defaults;
+	FHyperAINiagaraInspectRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.PageSize, 1, C::MaxPageSize, Defaults.PageSize, TEXT("page_size"));
+	Fit.ClampOrDefault(Request.MaxGameThreadMs, 1, C::MaxReadGameThreadMs, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	FHyperAINiagaraInspectReport Report = C::Inspect(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
-FHyperAINiagaraApplyPlanReport UHyperAIStudioNiagaraToolset::hyper_niagara_apply_plan(
-	const FHyperAINiagaraApplyPlanRequest& Request)
+UHyperAINiagaraApplyPlanResult* UHyperAIStudioNiagaraToolset::hyper_niagara_apply_plan(const FHyperAINiagaraApplyPlanRequest& Request)
 {
-	return FHyperAIStudioNiagaraContracts::BuildPlan(Request);
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAINiagaraApplyPlanResult>(FHyperAIStudioNiagaraContracts::BuildFittedPlan(Request));
+}
+
+FHyperAINiagaraApplyPlanReport FHyperAIStudioNiagaraContracts::BuildFittedPlan(
+	const FHyperAINiagaraApplyPlanRequest& InRequest)
+{
+	using C = FHyperAIStudioNiagaraContracts;
+	const FHyperAINiagaraApplyPlanRequest Defaults;
+	FHyperAINiagaraApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.MaxGameThreadMs, 50, C::MaxMutationGameThreadMs, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	// A recipe becomes the plan's first ops; the agent's own ops follow and may adjust what it made.
+	FString RecipeNote;
+	if (!Request.Recipe.TrimStartAndEnd().IsEmpty())
+	{
+		TArray<FHyperAINiagaraEditOp> RecipeOps;
+		TArray<FString> Materials;
+		TArray<FString> Notes;
+		FString RecipeError;
+		if (!HyperAIStudio::Niagara::Recipes::Compile(Request.Recipe.TrimStartAndEnd().ToLower(), Request.RecipeSettings, Request.TargetPath,
+			RecipeOps, Materials, Notes, RecipeError))
+		{
+			FHyperAINiagaraApplyPlanReport Rejected;
+			Rejected.bDryRun = Request.bDryRun;
+			Rejected.Status = TEXT("invalid_recipe");
+			Rejected.Diagnostic = Fit.AppendTo(RecipeError);
+			Rejected.Capabilities = C::GetCapabilityMatrix();
+			return Rejected;
+		}
+		RecipeNote = FString::Printf(TEXT(" Recipe %s made the first %d ops."), *Request.Recipe.TrimStartAndEnd().ToLower(), RecipeOps.Num());
+		if (!Materials.IsEmpty())
+		{
+			RecipeNote += TEXT(" Materials it uses: ") + FString::Join(Materials, TEXT(" | "));
+		}
+		RecipeOps.Append(Request.Ops);
+		Request.Ops = MoveTemp(RecipeOps);
+		Request.Recipe.Reset();
+		Request.RecipeSettings.Reset();
+	}
+	FHyperAINiagaraApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return C::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic + RecipeNote);
+	return Report;
+}
+
+FHyperAINiagaraDiscoverReport UHyperAIStudioNiagaraToolset::hyper_niagara_discover(const FHyperAINiagaraDiscoverRequest& InRequest)
+{
+	const FHyperAINiagaraDiscoverRequest Defaults;
+	FHyperAINiagaraDiscoverRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.MaxResults, 1, 200, Defaults.MaxResults, TEXT("max_results"));
+	if (Request.Kind.TrimStartAndEnd().IsEmpty())
+	{
+		Request.Kind = Defaults.Kind;
+	}
+	FHyperAINiagaraDiscoverReport Report = HyperAIStudio::Niagara::Discover::Run(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
+}
+
+FHyperAINiagaraPreviewReport UHyperAIStudioNiagaraToolset::hyper_niagara_preview(const FHyperAINiagaraPreviewRequest& InRequest)
+{
+	const FHyperAINiagaraPreviewRequest Defaults;
+	FHyperAINiagaraPreviewRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.TileSize, 128, 768, Defaults.TileSize, TEXT("tile_size"));
+	Fit.ClampOrDefault(Request.DeltaSeconds, 1.f / 120.f, 1.f / 15.f, Defaults.DeltaSeconds, TEXT("delta_seconds"));
+	if (Request.View.IsEmpty()) Request.View = Defaults.View;
+	if (Request.Background.IsEmpty()) Request.Background = Defaults.Background;
+	FHyperAINiagaraPreviewReport Report = HyperAIStudio::Niagara::Preview::Render(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAINiagaraValidateReport UHyperAIStudioNiagaraToolset::hyper_niagara_validate(
-	const FHyperAINiagaraValidateRequest& Request)
+	const FHyperAINiagaraValidateRequest& InRequest)
 {
-	return FHyperAIStudioNiagaraContracts::Validate(Request);
+	using C = FHyperAIStudioNiagaraContracts;
+	const FHyperAINiagaraValidateRequest Defaults;
+	FHyperAINiagaraValidateRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	if (Request.Policy.IsEmpty())
+	{
+		Request.Policy = Defaults.Policy;
+	}
+	if (Request.Policy == TEXT("runtime_probe") || Request.Policy == TEXT("sim_cache_capture"))
+	{
+		// These take their own budgets: the probe allows a second or more of game-thread time.
+		Fit.ClampOrDefault(Request.ProbeFrames, 1, 600, Defaults.ProbeFrames, TEXT("probe_frames"));
+		Fit.ClampOrDefault(Request.CaptureDeltaSeconds, 1.f / 240.f, 1.f / 15.f, Defaults.CaptureDeltaSeconds, TEXT("capture_delta_seconds"));
+		Fit.Clamp(Request.MinParticlesPerEmitter, 0, MAX_int32, TEXT("min_particles_per_emitter"));
+	}
+	else
+	{
+		Fit.ClampOrDefault(Request.MaxIssues, 1, C::MaxIssues, Defaults.MaxIssues, TEXT("max_issues"));
+		Fit.ClampOrDefault(Request.MaxGameThreadMs, 1, C::MaxReadGameThreadMs, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+		Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	}
+	FHyperAINiagaraValidateReport Report = C::Validate(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAIStudioNiagaraDomainAdapter::FHyperAIStudioNiagaraDomainAdapter()
@@ -2030,6 +2481,51 @@ FHyperAIStudioDomainAdapterResult FHyperAIStudioNiagaraDomainAdapter::Execute(
 		const TSharedRef<FHyperAIStudioNiagaraValidateResultPayload, ESPMode::ThreadSafe> Output =
 			MakeShared<FHyperAIStudioNiagaraValidateResultPayload, ESPMode::ThreadSafe>();
 		Output->Report = FHyperAIStudioNiagaraContracts::Validate(Typed.Request);
+		Result.Outcome = EHyperAIStudioDomainDispatchOutcome::Succeeded;
+		Result.StatusCode = Output->Report.Status.Left(FHyperAIStudioDomainLimits::MaxStatusCodeChars);
+		Result.Diagnostic = Output->Report.Diagnostic.Left(FHyperAIStudioDomainLimits::MaxDiagnosticChars);
+		Result.Payload = Output;
+		return Result;
+	}
+	if (Context.Binding.ToolName == TEXT("hyper_niagara_live")
+		&& Context.Binding.VariantId == FHyperAIStudioNiagaraContracts::LiveVariantId
+		&& Context.Safety == EHyperAIStudioDomainSafety::Read
+		&& Payload.GetTypeId() == FHyperAIStudioNiagaraContracts::LivePayloadTypeId
+		&& Payload.GetSchemaFingerprint() == FHyperAIStudioNiagaraContracts::LivePayloadSchemaFingerprint())
+	{
+		const TSharedRef<FHyperAIStudioNiagaraLiveResultPayload, ESPMode::ThreadSafe> Output =
+			MakeShared<FHyperAIStudioNiagaraLiveResultPayload, ESPMode::ThreadSafe>();
+		Output->Report = HyperAIStudio::Niagara::Live::ReadOnce(static_cast<const FHyperAIStudioNiagaraLivePayload&>(Payload).Request);
+		Result.Outcome = EHyperAIStudioDomainDispatchOutcome::Succeeded;
+		Result.StatusCode = Output->Report.Status.Left(FHyperAIStudioDomainLimits::MaxStatusCodeChars);
+		Result.Diagnostic = Output->Report.Diagnostic.Left(FHyperAIStudioDomainLimits::MaxDiagnosticChars);
+		Result.Payload = Output;
+		return Result;
+	}
+	if (Context.Binding.ToolName == TEXT("hyper_niagara_discover")
+		&& Context.Binding.VariantId == FHyperAIStudioNiagaraContracts::DiscoverVariantId
+		&& Context.Safety == EHyperAIStudioDomainSafety::Read
+		&& Payload.GetTypeId() == FHyperAIStudioNiagaraContracts::DiscoverPayloadTypeId
+		&& Payload.GetSchemaFingerprint() == FHyperAIStudioNiagaraContracts::DiscoverPayloadSchemaFingerprint())
+	{
+		const TSharedRef<FHyperAIStudioNiagaraDiscoverResultPayload, ESPMode::ThreadSafe> Output =
+			MakeShared<FHyperAIStudioNiagaraDiscoverResultPayload, ESPMode::ThreadSafe>();
+		Output->Report = HyperAIStudio::Niagara::Discover::Run(static_cast<const FHyperAIStudioNiagaraDiscoverPayload&>(Payload).Request);
+		Result.Outcome = EHyperAIStudioDomainDispatchOutcome::Succeeded;
+		Result.StatusCode = Output->Report.Status.Left(FHyperAIStudioDomainLimits::MaxStatusCodeChars);
+		Result.Diagnostic = Output->Report.Diagnostic.Left(FHyperAIStudioDomainLimits::MaxDiagnosticChars);
+		Result.Payload = Output;
+		return Result;
+	}
+	if (Context.Binding.ToolName == TEXT("hyper_niagara_preview")
+		&& Context.Binding.VariantId == FHyperAIStudioNiagaraContracts::PreviewVariantId
+		&& Context.Safety == EHyperAIStudioDomainSafety::Read
+		&& Payload.GetTypeId() == FHyperAIStudioNiagaraContracts::PreviewPayloadTypeId
+		&& Payload.GetSchemaFingerprint() == FHyperAIStudioNiagaraContracts::PreviewPayloadSchemaFingerprint())
+	{
+		const TSharedRef<FHyperAIStudioNiagaraPreviewResultPayload, ESPMode::ThreadSafe> Output =
+			MakeShared<FHyperAIStudioNiagaraPreviewResultPayload, ESPMode::ThreadSafe>();
+		Output->Report = HyperAIStudio::Niagara::Preview::Render(static_cast<const FHyperAIStudioNiagaraPreviewPayload&>(Payload).Request);
 		Result.Outcome = EHyperAIStudioDomainDispatchOutcome::Succeeded;
 		Result.StatusCode = Output->Report.Status.Left(FHyperAIStudioDomainLimits::MaxStatusCodeChars);
 		Result.Diagnostic = Output->Report.Diagnostic.Left(FHyperAIStudioDomainLimits::MaxDiagnosticChars);

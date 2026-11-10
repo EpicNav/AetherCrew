@@ -6,13 +6,18 @@
 #include "HyperAIStudioNativeReadToolset.h"
 
 #include "Dom/JsonObject.h"
+#include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityCatalogCounts.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Guid.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Tests/AutomationCommon.h"
 #include "ToolsetRegistry/ToolsetRegistrySubsystem.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
 #include "UObject/FieldIterator.h"
@@ -27,8 +32,8 @@ namespace HyperAIStudio::NativeReadTools::Tests
 	constexpr int32 CurrentPlannedToolCount = 0;
 	constexpr int32 CurrentSourceCandidateToolCount = CurrentCatalogToolCount;
 	constexpr int32 CurrentAdmittedToolCount = 0;
-	constexpr int32 CurrentCoreImplementedToolCount = 27;
-	constexpr int32 CurrentCoreToolsetCount = 15;
+	constexpr int32 CurrentCoreImplementedToolCount = 26;
+	constexpr int32 CurrentCoreToolsetCount = 14;
 
 	struct FExpectedTool
 	{
@@ -49,7 +54,11 @@ namespace HyperAIStudio::NativeReadTools::Tests
 			{ TEXT("hyper_capability_report"), FHyperAICapabilityReport::StaticStruct() },
 			{ TEXT("hyper_operation_status"), FHyperAIOperationStatus::StaticStruct() },
 			{ TEXT("hyper_blueprint_debug_inspect"), FHyperAIBlueprintDebugReport::StaticStruct() },
-			{ TEXT("hyper_pie_query"), FHyperAIPIEQueryReport::StaticStruct() }
+			{ TEXT("hyper_pie_query"), FHyperAIPIEQueryReport::StaticStruct() },
+			{ TEXT("hyper_memory_recall"), FHyperAIMemoryRecallReport::StaticStruct() },
+			{ TEXT("hyper_memory_remember"), FHyperAIMemoryWriteReport::StaticStruct() },
+			{ TEXT("hyper_memory_forget"), FHyperAIMemoryWriteReport::StaticStruct() },
+			{ TEXT("hyper_sandbox_status"), FHyperAISandboxStatusReport::StaticStruct() }
 		};
 		return Tools;
 	}
@@ -59,8 +68,13 @@ namespace HyperAIStudio::NativeReadTools::Tests
 		static const TArray<FExpectedManifestTool> Tools = {
 			{ TEXT("hyper_capability_report"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
 			{ TEXT("hyper_operation_status"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
+			{ TEXT("hyper_operation_wait"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
 			{ TEXT("hyper_blueprint_debug_inspect"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
 			{ TEXT("hyper_pie_query"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
+			{ TEXT("hyper_memory_recall"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
+			{ TEXT("hyper_memory_remember"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
+			{ TEXT("hyper_memory_forget"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
+			{ TEXT("hyper_sandbox_status"), TEXT("HyperAIStudio.HyperAIStudioNativeReadToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate },
 			{ TEXT("hyper_asset_dependency_graph"), TEXT("HyperAIStudio.HyperAIStudioDependencyGraphToolset"), FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate }
 		};
 		return Tools;
@@ -111,7 +125,7 @@ bool FHyperAIStudioNativeReadContractsTest::RunTest(const FString& Parameters)
 		FHyperAIStudioNativeReadContracts::GetCallableManifest();
 	const TArray<HyperAIStudio::NativeReadTools::Tests::FExpectedManifestTool>& Expected =
 		HyperAIStudio::NativeReadTools::Tests::ExpectedManifestTools();
-	TestEqual(TEXT("The native source manifest has exactly five source candidates"), Manifest.Num(), Expected.Num());
+	TestEqual(TEXT("The native source manifest has exactly the expected source candidates"), Manifest.Num(), Expected.Num());
 
 	TSet<FString> UniqueNames;
 	for (int32 Index = 0; Index < Manifest.Num() && Index < Expected.Num(); ++Index)
@@ -511,7 +525,20 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 			TestTrue(TEXT("Epic ToolsetRegistry marks each reflected callable as callable"), Callability.GetValue());
 		}
 	}
-	TestEqual(TEXT("No unmanifested AICallable function is reflected"), ReflectedCallableNames.Num(), Expected.Num());
+	// hyper_operation_wait is the one async callable: it returns a pending result object, not a DTO.
+	TestEqual(TEXT("No unmanifested AICallable function is reflected"), ReflectedCallableNames.Num(), Expected.Num() + 1);
+	if (const UFunction* Wait = ToolsetClass->FindFunctionByName(TEXT("hyper_operation_wait")))
+	{
+		const FObjectProperty* ReturnObject = CastField<FObjectProperty>(Wait->GetReturnProperty());
+		TestTrue(TEXT("hyper_operation_wait returns its async result class"),
+			ReturnObject && ReturnObject->PropertyClass == UHyperAIOperationWaitResult::StaticClass());
+		TestNotNull(TEXT("The wait result carries the full operation status"),
+			FHyperAIOperationWaitReport::StaticStruct()->FindPropertyByName(TEXT("Status")));
+	}
+	else
+	{
+		AddError(TEXT("hyper_operation_wait is not reflected."));
+	}
 
 	TSet<FString> ExpectedQualifiedNames;
 	for (const FExpectedTool& Tool : Expected)
@@ -533,6 +560,7 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 		}
 		ExpectedQualifiedNames.Add(FHyperAIStudioNativeReadContracts::GetQualifiedToolsetName() + TEXT(".") + Tool.Name);
 	}
+	ExpectedQualifiedNames.Add(FHyperAIStudioNativeReadContracts::GetQualifiedToolsetName() + TEXT(".hyper_operation_wait"));
 
 	const FString JsonSchema = UToolsetRegistry::GetToolsetJsonSchema(UHyperAIStudioNativeReadToolset::StaticClass());
 	TSharedPtr<FJsonObject> SchemaObject;
@@ -548,7 +576,7 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 		TestTrue(TEXT("Schema contains a tools array"), SchemaObject->TryGetArrayField(TEXT("tools"), Tools));
 		if (Tools)
 		{
-			TestEqual(TEXT("Schema contains exactly the reflected source-candidate tools"), Tools->Num(), Expected.Num());
+			TestEqual(TEXT("Schema contains exactly the reflected source-candidate tools"), Tools->Num(), Expected.Num() + 1);
 			TSet<FString> ActualQualifiedNames;
 			for (const TSharedPtr<FJsonValue>& ToolValue : *Tools)
 			{
@@ -751,19 +779,23 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 	}
 
 	TSet<FString> ReportNames;
+	// Animation, material, Niagara and UI plans apply their edits, so they are no longer reported as plan-only.
 	const TSet<FString> ExpectedPlanOnlyNames = {
-		TEXT("hyper_actor_modifier_apply_plan"), TEXT("hyper_animation_apply_plan"),
+		TEXT("hyper_actor_modifier_apply_plan"),
 		TEXT("hyper_audio_apply_plan"), TEXT("hyper_character_apply_plan"),
 		TEXT("hyper_cinematics_apply_plan"), TEXT("hyper_dynamic_material_apply_plan"),
 		TEXT("hyper_game_framework_apply_plan"), TEXT("hyper_gameplay_ai_apply_plan"),
 		TEXT("hyper_gameplay_systems_apply_plan"), TEXT("hyper_gas_apply_plan"),
 		TEXT("hyper_geometry_apply_plan"), TEXT("hyper_interchange_apply_plan"),
-		TEXT("hyper_live_production_apply_plan"), TEXT("hyper_material_apply_plan"),
+		TEXT("hyper_live_production_apply_plan"),
 		TEXT("hyper_navigation_apply_plan"), TEXT("hyper_network_apply_plan"),
-		TEXT("hyper_niagara_apply_plan"), TEXT("hyper_pcg_apply_plan"),
 		TEXT("hyper_physics_apply_plan"), TEXT("hyper_property_animation_apply_plan"),
-		TEXT("hyper_scene_apply_plan"), TEXT("hyper_ui_apply_plan"),
+		TEXT("hyper_scene_apply_plan"),
 		TEXT("hyper_worldbuilding_apply_plan")
+	};
+	const TSet<FString> ExpectedApplyingNames = {
+		TEXT("hyper_animation_apply_plan"), TEXT("hyper_material_apply_plan"),
+		TEXT("hyper_niagara_apply_plan"), TEXT("hyper_ui_apply_plan")
 	};
 	const TSet<FString> ExpectedLimitedDirectEditNames = {
 		TEXT("hyper_data_apply_plan"),
@@ -811,6 +843,11 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 			TestTrue(TEXT("Only audited plan-only apply tools use PlanOnly"),
 				ExpectedPlanOnlyNames.Contains(Tool.Name));
 		}
+		if (ExpectedApplyingNames.Contains(Tool.Name))
+		{
+			TestEqual(*FString::Printf(TEXT("%s applies its edits, so it is reported per operation"), *Tool.Name),
+				Tool.ExecutionSupport, FString(TEXT("OperationSpecific")));
+		}
 		if (Tool.ExecutionSupport == TEXT("LimitedDirectEdit"))
 		{
 			++ReportedLimitedDirectEditTools;
@@ -833,7 +870,7 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 	}
 	TestEqual(TEXT("Every generated catalog name appears exactly once"),
 		ReportNames.Num(), Catalog.Tools.Num());
-	TestEqual(TEXT("Exactly 23 audited apply tools are plan-only"),
+	TestEqual(TEXT("Exactly the audited apply tools are plan-only"),
 		ReportedPlanOnlyTools, ExpectedPlanOnlyNames.Num());
 	TestEqual(TEXT("Exactly three audited apply tools have limited direct editing"),
 		ReportedLimitedDirectEditTools, ExpectedLimitedDirectEditNames.Num());
@@ -1087,6 +1124,98 @@ bool FHyperAIStudioNativeReadSchemaRegistrationTest::RunTest(const FString& Para
 				}
 		}
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNativeReadJobOperationTest,
+	"HyperAIStudio.NativeTools.NativeRead.JobOnlyOperation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioNativeReadJobOperationTest::RunTest(const FString& Parameters)
+{
+	// Work that runs outside the journal, such as a PCG generation, is followed by its job alone.
+	const FString OperationId = TEXT("jobonly-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower();
+	const TSharedRef<bool> bFinish = MakeShared<bool>(false);
+	FHyperAIStudioAsyncJobRequest Request;
+	Request.PackId = TEXT("tests");
+	Request.ToolName = TEXT("hyper_test_job");
+	Request.Target = TEXT("JobOnlyOperation");
+	Request.OperationId = OperationId;
+	Request.DeadlineMs = 30 * 1000;
+	Request.PollIntervalMs = 50;
+	FString JobId;
+	FString Error;
+	const bool bStarted = FHyperAIStudioAsyncJobHost::Start(Request, [bFinish](FString& OutProgress, FString& OutDiagnostic)
+		{
+			if (!*bFinish)
+			{
+				OutProgress = TEXT("working");
+				return EHyperAIStudioAsyncJobPoll::Running;
+			}
+			OutDiagnostic = TEXT("made 12 things");
+			return EHyperAIStudioAsyncJobPoll::Completed;
+		}, JobId, Error);
+	if (!TestTrue(TEXT("the job starts: ") + Error, bStarted)) return false;
+	const FHyperAIOperationStatus Running = UHyperAIStudioNativeReadToolset::hyper_operation_status(OperationId);
+	TestTrue(TEXT("an operation only a job follows is found"), Running.bOk && Running.bFound);
+	TestEqual(TEXT("and reads as running"), Running.Status, FString(TEXT("running")));
+	TestFalse(TEXT("so a wait keeps waiting"), Running.bTerminal);
+	TestEqual(TEXT("from its job"), Running.JournalAccessMode, FString(TEXT("async_job")));
+	*bFinish = true;
+	const double Began = FPlatformTime::Seconds();
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, OperationId, Began]()
+	{
+		if (FHyperAIStudioAsyncJobHost::IsRunning(OperationId) && FPlatformTime::Seconds() - Began < 10.0) return false;
+		const FHyperAIOperationStatus Done = UHyperAIStudioNativeReadToolset::hyper_operation_status(OperationId);
+		TestTrue(TEXT("the finished job's operation is found and done"), Done.bFound && Done.bTerminal);
+		TestEqual(TEXT("as completed"), Done.Status, FString(TEXT("completed")));
+		TestTrue(TEXT("with what the job said: ") + Done.Diagnostic, Done.Diagnostic.Contains(TEXT("made 12 things")));
+		return true;
+	}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioNativeReadApprovedInPlaceTest,
+	"HyperAIStudio.NativeTools.NativeRead.ApprovedInPlaceOperation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioNativeReadApprovedInPlaceTest::RunTest(const FString& Parameters)
+{
+	// A plan an approval runs in place is journaled nowhere: the activity entry its pack records is its status.
+	const FString OperationId = TEXT("inplace-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower();
+	ON_SCOPE_EXIT { if (FHyperAIStudioApprovalGate::HasPending(OperationId)) FHyperAIStudioApprovalGate::Reject(OperationId, TEXT("Test finished.")); };
+	FHyperAIStudioApprovalSummary Summary;
+	Summary.PackId = TEXT("tests");
+	Summary.ToolName = TEXT("hyper_test_plan");
+	Summary.EffectTarget = TEXT("/Game/__HyperAIStudioTests/InPlace");
+	Summary.Effects.Add(TEXT("Test plan: 1 op"));
+	const TSharedRef<FHyperAIOperationStatus> During = MakeShared<FHyperAIOperationStatus>();
+	FString Error;
+	const bool bAsked = FHyperAIStudioApprovalGate::RequestAction(OperationId, Summary, [OperationId, During]()
+		{
+			*During = UHyperAIStudioNativeReadToolset::hyper_operation_status(OperationId);
+			FHyperAIStudioActivityEntry Entry;
+			Entry.Kind = EHyperAIStudioActivityKind::Completed;
+			Entry.PackId = TEXT("tests");
+			Entry.ToolName = TEXT("hyper_test_plan");
+			Entry.OperationId = OperationId;
+			Entry.StatusCode = TEXT("completed");
+			Entry.Detail = TEXT("made 3 things");
+			FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
+		}, Error);
+	if (!TestTrue(TEXT("the plan waits for approval: ") + Error, bAsked)) return false;
+	TestEqual(TEXT("and reads as waiting"), UHyperAIStudioNativeReadToolset::hyper_operation_status(OperationId).Status, FString(TEXT("awaiting_user_approval")));
+	if (!TestTrue(TEXT("approved, it runs: ") + Error, FHyperAIStudioApprovalGate::Approve(OperationId, Error))) return false;
+	TestTrue(TEXT("while it runs it reads as running, not not_found: ") + During->Status, During->bFound && !During->bTerminal && During->Status == TEXT("running"));
+	const FHyperAIOperationStatus Done = UHyperAIStudioNativeReadToolset::hyper_operation_status(OperationId);
+	TestTrue(TEXT("once done it is found and over: ") + Done.Status, Done.bFound && Done.bTerminal);
+	TestEqual(TEXT("as the pack recorded it"), Done.Status, FString(TEXT("completed")));
+	TestEqual(TEXT("with what the pack said"), Done.Diagnostic, FString(TEXT("made 3 things")));
+	TestEqual(TEXT("read from the activity log"), Done.JournalAccessMode, FString(TEXT("activity_log")));
+	const FHyperAIOperationStatus Unknown = UHyperAIStudioNativeReadToolset::hyper_operation_status(TEXT("inplace-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower());
+	TestTrue(TEXT("an operation nothing recorded is still not found"), !Unknown.bFound && Unknown.Status == TEXT("not_found"));
 	return true;
 }
 

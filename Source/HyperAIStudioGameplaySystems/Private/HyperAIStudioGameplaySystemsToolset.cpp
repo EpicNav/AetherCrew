@@ -10,6 +10,7 @@
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "Interfaces/IPluginManager.h"
 #include "MassEntityConfigAsset.h"
 #include "MassEntityTraitBase.h"
@@ -717,15 +718,15 @@ FHyperAIStudioGameplaySystemsContracts::GetManifest()
 const TArray<FString>& FHyperAIStudioGameplaySystemsContracts::GetEpicDelegates()
 {
 	static const TArray<FString> Delegates = {
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.RequestDeactivateGameFeature"),
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.ListEnabledGameFeaturePlugins"),
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.ListDiscoveredGameFeaturePlugins"),
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.IsGameFeaturePlugin"),
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.IsGameFeatureActive"),
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.GetGameFeatureState"),
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.RequestActivateGameFeature"),
-		TEXT("WorldConditionsToolset.WorldConditionTools.GetQueryDescription"),
-		TEXT("WorldConditionsToolset.WorldConditionTools.GetConditionDescription")};
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.RequestDeactivateGameFeature"),
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.ListEnabledGameFeaturePlugins"),
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.ListDiscoveredGameFeaturePlugins"),
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.IsGameFeaturePlugin"),
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.IsGameFeatureActive"),
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.GetGameFeatureState"),
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.RequestActivateGameFeature"),
+		TEXT("WorldConditionsToolset59.WorldConditionTools59.GetQueryDescription"),
+		TEXT("WorldConditionsToolset59.WorldConditionTools59.GetConditionDescription")};
 	return Delegates;
 }
 
@@ -805,7 +806,8 @@ bool FHyperAIStudioGameplaySystemsContracts::IsCanonicalTargetPath(
 	const FString PackageName = Path.Left(ObjectDelimiter);
 	const FString ObjectName = Path.Mid(ObjectDelimiter + 1);
 	FText Reason;
-	if (!FPackageName::IsValidTextForLongPackageName(PackageName, &Reason)
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidTextForLongPackageName(PackageName, &Reason)
 		|| !FName::IsValidXName(ObjectName, INVALID_OBJECTPATH_CHARACTERS, &Reason)
 		|| ObjectName.Contains(TEXT("/"))) return false;
 	if (Role == TEXT("world_condition_schema")) return Path.StartsWith(TEXT("/Script/"));

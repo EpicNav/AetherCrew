@@ -29,6 +29,7 @@
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "K2Node_CustomEvent.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/PackageName.h"
@@ -2111,7 +2112,8 @@ bool FHyperAIStudioNetworkingContracts::IsCanonicalTargetPath(
 	if (!Path.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
 		&& !(bAllowScriptClass && Path.StartsWith(TEXT("/Script/"), ESearchCase::CaseSensitive)))
 		return false;
-	return FPackageName::IsValidObjectPath(Path);
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	return FHyperAIStudioNames::IsObjectPath(Path, nullptr) && FPackageName::IsValidObjectPath(Path);
 }
 
 bool FHyperAIStudioNetworkingContracts::IsCanonicalProjectAssetPath(const FString& Path)

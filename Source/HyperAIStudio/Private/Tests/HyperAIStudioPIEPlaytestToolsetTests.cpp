@@ -5,6 +5,7 @@
 #include "HyperAIStudioPIEPlaytestToolset.h"
 
 #include "HyperAIStudioCapabilityPackRegistry.h"
+#include "JsonObjectConverter.h"
 #include "Misc/AutomationTest.h"
 #include "UObject/FieldIterator.h"
 #include "UObject/UnrealType.h"
@@ -318,10 +319,18 @@ bool FHyperAIStudioPIEPlaytestManifestAdmissionTest::RunTest(const FString& Para
 	using namespace HyperAIStudio::PIEPlaytest::Tests;
 	const TArray<FHyperAIStudioPIEPlaytestManifestEntry>& Manifest =
 		FHyperAIStudioPIEPlaytestContracts::GetManifest();
-	TestEqual(TEXT("Exactly two PIE runtime callables exist"), Manifest.Num(), 2);
+	TestEqual(TEXT("Exactly seven PIE runtime callables exist"), Manifest.Num(), 7);
 	TestEqual(TEXT("Run callable wire name is exact"), Manifest[0].Name, FString(TEXT("hyper_playtest_run")));
 	TestEqual(TEXT("Status callable wire name is exact"), Manifest[1].Name, FString(TEXT("hyper_playtest_status")));
-	TestEqual(TEXT("Both callables share one toolset"), Manifest[0].Toolset, Manifest[1].Toolset);
+	TestEqual(TEXT("Verify callable wire name is exact"), Manifest[2].Name, FString(TEXT("hyper_verify_run")));
+	TestEqual(TEXT("Calibrate callable wire name is exact"), Manifest[3].Name, FString(TEXT("hyper_verify_calibrate")));
+	TestEqual(TEXT("Phone start callable wire name is exact"), Manifest[4].Name, FString(TEXT("hyper_phone_playtest_start")));
+	TestEqual(TEXT("Phone status callable wire name is exact"), Manifest[5].Name, FString(TEXT("hyper_phone_playtest_status")));
+	TestEqual(TEXT("Phone stop callable wire name is exact"), Manifest[6].Name, FString(TEXT("hyper_phone_playtest_stop")));
+	for (const FHyperAIStudioPIEPlaytestManifestEntry& Entry : Manifest)
+	{
+		TestEqual(TEXT("Every callable shares one toolset"), Entry.Toolset, Manifest[0].Toolset);
+	}
 
 	TSet<FString> ReflectedCallables;
 	for (TFieldIterator<UFunction> It(UHyperAIStudioPIEPlaytestToolset::StaticClass(), EFieldIteratorFlags::ExcludeSuper); It; ++It)
@@ -337,9 +346,12 @@ bool FHyperAIStudioPIEPlaytestManifestAdmissionTest::RunTest(const FString& Para
 				Callability.HasValue() && Callability.GetValue());
 		}
 	}
-	TestEqual(TEXT("No hidden third AICallable exists"), ReflectedCallables.Num(), 2);
+	TestEqual(TEXT("No hidden eighth AICallable exists"), ReflectedCallables.Num(), 7);
 	TestTrue(TEXT("Run is reflected"), ReflectedCallables.Contains(TEXT("hyper_playtest_run")));
 	TestTrue(TEXT("Status is reflected"), ReflectedCallables.Contains(TEXT("hyper_playtest_status")));
+	TestTrue(TEXT("Verify is reflected"), ReflectedCallables.Contains(TEXT("hyper_verify_run")));
+	TestTrue(TEXT("Calibrate is reflected"), ReflectedCallables.Contains(TEXT("hyper_verify_calibrate")));
+	TestTrue(TEXT("Phone start is reflected"), ReflectedCallables.Contains(TEXT("hyper_phone_playtest_start")));
 
 	FString Error;
 	FHyperAIStudioCapabilityCatalog Catalog = CandidateCatalog();
@@ -382,11 +394,12 @@ bool FHyperAIStudioPIEPlaytestNormalizeBoundsTest::RunTest(const FString& Parame
 	TestFalse(TEXT("Read-only plan has no destructive steps"), Plan.bHasDestructive);
 	TestFalse(TEXT("Plan hash is emitted"), Plan.PlanHash.IsEmpty());
 
+	// PIE effects end with the session, so a plan is an Edit: the user's approval setting gates it, not a token.
 	FHyperAIPIEPlaytestRequest MissingAuth = OwnedStartRequest();
 	MissingAuth.AuthorizationToken.Reset();
-	TestFalse(TEXT("Starting PIE without opaque exact-plan authorization is rejected"),
+	TestTrue(TEXT("Starting PIE needs no authorization token"),
 		FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(MissingAuth, Plan, Code, Error));
-	TestEqual(TEXT("Authorization rejection is typed"), Code, FString(TEXT("authorization_required")));
+	TestTrue(TEXT("It is still a plan with effects"), Plan.bHasEffects);
 
 	FHyperAIPIEPlaytestRequest InvalidEnum = ReadRequest();
 	InvalidEnum.Mode = static_cast<EHyperAIPIEPlaytestMode>(255);
@@ -432,6 +445,56 @@ bool FHyperAIStudioPIEPlaytestNormalizeBoundsTest::RunTest(const FString& Parame
 	TestFalse(TEXT("StopSession must be the terminal typed step"),
 		FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Smuggled, Plan, Code, Error));
 	TestEqual(TEXT("Terminal-step ordering has an exact code"), Code, FString(TEXT("invalid_step_order")));
+
+	// A typed value's name was an FName that the JSON import made before any check ran: past 1023 characters it stopped
+	// the editor. Text now, it reaches the bound and is refused there, as an object path past an FName's length is.
+	const FString Blob = FString::ChrN(1100, TEXT('a'));
+	FHyperAIPIEPlaytestRequest Imported;
+	const FString Json = FString::Printf(TEXT("{\"steps\":[{\"stepId\":\"s1\",\"value\":{\"type\":\"Name\",\"name\":\"%s\"}}]}"), *Blob);
+	TestTrue(TEXT("A value name past an FName's length imports from JSON"), FJsonObjectConverter::JsonObjectStringToUStruct(Json, &Imported));
+	TestTrue(TEXT("as text, whole"), Imported.Steps.Num() == 1 && Imported.Steps[0].Value.Name.Len() == 1100);
+	Smuggled = ReadRequest();
+	Smuggled.Steps[0].Value.Type = EHyperAIPIEPlaytestValueType::Name;
+	Smuggled.Steps[0].Value.Name = Blob;
+	TestFalse(TEXT("and is refused by the bound"), FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Smuggled, Plan, Code, Error));
+	Smuggled = ReadRequest();
+	Smuggled.Steps[0].TargetObjectPath = TEXT("/Game/") + FString::ChrN(1010, TEXT('a'));
+	TestFalse(TEXT("A target path within the 1024 bound but past the name limit is refused"),
+		FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Smuggled, Plan, Code, Error));
+	TestEqual(TEXT("before FSoftObjectPath makes an FName of it"), Code, FString(TEXT("invalid_object_path")));
+
+	// The name is still compared as the FName it was: case aside, and empty or None, in any case, is no name.
+	Smuggled = ReadRequest();
+	Smuggled.Steps[0].Value.Name = TEXT("none");
+	const bool bNoneIsNoName = FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Smuggled, Plan, Code, Error);
+	TestTrue(TEXT("None in any case is no name, so not a field outside the value's type: ") + Error, bNoneIsNoName);
+	FHyperAIPIEPlaytestValue Actual;
+	Actual.Type = EHyperAIPIEPlaytestValueType::Name;
+	Actual.Name = TEXT("Idle");
+	FHyperAIPIEPlaytestValue Expected = Actual;
+	Expected.Name = TEXT("idle");
+	TestTrue(TEXT("A name assertion ignores case, as FNames compare"), FHyperAIStudioPIEPlaytestContracts::ScalarEquals(Actual, Expected));
+	Expected.Name = TEXT("Walk");
+	TestFalse(TEXT("but not the name itself"), FHyperAIStudioPIEPlaytestContracts::ScalarEquals(Actual, Expected));
+	Actual.Name = TEXT("None");
+	Expected.Name.Reset();
+	TestTrue(TEXT("None read back meets an empty expected name"), FHyperAIStudioPIEPlaytestContracts::ScalarEquals(Actual, Expected));
+	Expected.Name = TEXT("NONE");
+	TestTrue(TEXT("and one written in capitals"), FHyperAIStudioPIEPlaytestContracts::ScalarEquals(Actual, Expected));
+	FHyperAIPIEPlaytestRequest Assert = ReadRequest();
+	Assert.Steps[0].Kind = EHyperAIPIEPlaytestStepKind::AssertScalarEquals;
+	Assert.Steps[0].TargetObjectPath = TEXT("/Game/Maps/UEDPIE_0_Test.Test:PersistentLevel.TestActor_0");
+	Assert.Steps[0].Name = TEXT("State");
+	Assert.Steps[0].Value.Type = EHyperAIPIEPlaytestValueType::Name;
+	FHyperAIStudioPIENormalizedPlan EmptyName;
+	const bool bAssertNormalized = FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Assert, EmptyName, Code, Error);
+	if (TestTrue(TEXT("An assertion on a name normalizes: ") + Error, bAssertNormalized))
+	{
+		Assert.Steps[0].Value.Name = TEXT("NONE");
+		FHyperAIStudioPIENormalizedPlan NoneName;
+		TestTrue(TEXT("and None, in any case, hashes as no name does"), FHyperAIStudioPIEPlaytestContracts::NormalizeRequest(Assert, NoneName, Code, Error)
+			&& NoneName.PlanHash == EmptyName.PlanHash);
+	}
 
 	const FString Fingerprint = TEXT("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
 	const FString Cursor = FHyperAIStudioPIEPlaytestContracts::MakeCursor(Fingerprint, 12);

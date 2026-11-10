@@ -1,0 +1,452 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "uaf",
+ "presets": [
+  {
+   "id": "uaf.idle-jog-bool-blend",
+   "title": "Build a blended idle-to-jog UAF locomotion graph",
+   "summary": "The UAF Cookbook's starter graph: idle and jog trait stacks switched by an IsMoving bool with a blend smoother, checked to allocate.",
+   "packs": [
+    "uaf_graph"
+   ],
+   "tools": [
+    "hyper_uaf_inspect",
+    "hyper_project_search",
+    "hyper_uaf_apply_plan",
+    "hyper_operation_wait",
+    "hyper_uaf_validate"
+   ],
+   "ops": [
+    "add_variable",
+    "add_node",
+    "add_trait",
+    "set_pin",
+    "bind_pin",
+    "link",
+    "link_output"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "UAF",
+    "AnimNext",
+    "trait stack",
+    "locomotion",
+    "blend",
+    "experimental"
+   ],
+   "placeholders": [
+    {
+     "name": "graph_name",
+     "label": "Graph name",
+     "default": "AG_Locomotion"
+    },
+    {
+     "name": "idle_clip",
+     "label": "Idle clip",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle.MM_Idle"
+    },
+    {
+     "name": "jog_blend_space",
+     "label": "Jog blend space",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/BS_Idle_Walk_Run.BS_Idle_Walk_Run",
+     "hint": "1D on Speed, or 2D with Speed on one axis like the template's BS_Idle_Walk_Run."
+    },
+    {
+     "name": "blend_time",
+     "label": "Blend time (s)",
+     "default": "0.2"
+    }
+   ],
+   "prompt": "Create the UAF animation graph {{content_folder}}/UAF/{{graph_name}}.{{graph_name}} as in .hyperai/docs/HyperAIStudio-UAFCookbook.md section 3. If the uaf_graph pack is off (UAF is experimental and its plugins are off by default), say so and stop.\n1. hyper_uaf_inspect with bIncludeTraitCatalog true and TraitFilter Player, then Blend: confirm FSequencePlayerTrait, FBlendSpacePlayerTrait, FBlendByBoolTrait and FBlendSmootherTrait and their exact pin names. hyper_project_search confirms {{idle_clip}} and {{jog_blend_space}} exist.\n2. One hyper_uaf_apply_plan with bCreate true, ops in this order: add_variable Speed (float) and IsMoving (bool); add_node Idle, add_trait FSequencePlayerTrait, set_pin AnimSequence {{idle_clip}}; add_node Jog, add_trait FBlendSpacePlayerTrait, set_pin BlendSpace {{jog_blend_space}}, bind_pin Speed to its Speed axis pin (XAxisSamplePoint on a 1D blend space; the template's 2D BS_Idle_Walk_Run has Direction on X and Speed on Y, so YAxisSamplePoint); add_node Locomotion, add_trait FBlendByBoolTrait then FBlendSmootherTrait, bind_pin bCondition IsMoving, set_pin FBlendSmootherTrait BlendTimes ({{blend_time}}), which serves every child; link Idle to Locomotion's FBlendByBoolTrait FalseChild and Jog to its TrueChild; link_output Locomotion. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_uaf_validate it, then hyper_uaf_inspect it.\n4. Report a PASS/FAIL table: CompileStatus compiled, bAllocatesInstance true, OutputNode Locomotion, all 3 stacks reach the output, both variables used, 0 errors and 0 warnings. Note that nothing sets the variables until a UAF Module does."
+  },
+  {
+   "id": "uaf.crowd-idle-loop",
+   "title": "Make a one-stack UAF idle loop for crowd NPCs",
+   "summary": "The smallest useful UAF graph: one sequence player with a set play rate and start offset feeding the output, compiled and allocated.",
+   "packs": [
+    "uaf_graph"
+   ],
+   "tools": [
+    "hyper_uaf_inspect",
+    "hyper_project_search",
+    "hyper_uaf_apply_plan",
+    "hyper_operation_wait",
+    "hyper_uaf_validate"
+   ],
+   "ops": [
+    "add_node",
+    "add_trait",
+    "set_pin",
+    "link_output"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "UAF",
+    "crowd",
+    "NPC",
+    "idle",
+    "sequence player",
+    "experimental"
+   ],
+   "placeholders": [
+    {
+     "name": "graph_name",
+     "label": "Graph name",
+     "default": "AG_CrowdIdle"
+    },
+    {
+     "name": "idle_clip",
+     "label": "Idle clip",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle.MM_Idle"
+    },
+    {
+     "name": "play_rate",
+     "label": "Play rate",
+     "default": "0.9"
+    },
+    {
+     "name": "start_position",
+     "label": "Start position (s)",
+     "default": "0.0"
+    }
+   ],
+   "prompt": "Create {{content_folder}}/UAF/{{graph_name}}.{{graph_name}}: one looping idle for crowd NPCs. If the uaf_graph pack is off (UAF is experimental and its plugins are off by default), say so and stop.\n1. hyper_uaf_inspect with bIncludeTraitCatalog true and TraitFilter SequencePlayer: read FSequencePlayerTrait's pins (AnimSequence, PlayRate, StartPosition, LoopMode). hyper_project_search confirms {{idle_clip}} exists and {{graph_name}} does not.\n2. One hyper_uaf_apply_plan with bCreate true: add_node Idle; add_trait Idle FSequencePlayerTrait; set_pin AnimSequence {{idle_clip}}; set_pin PlayRate {{play_rate}}; set_pin StartPosition {{start_position}}; link_output Idle. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_uaf_validate it and hyper_uaf_inspect it.\n4. Report a PASS/FAIL table: compiled, bAllocatesInstance true, OutputNode Idle, each pin reads back as set, 0 errors and 0 warnings (no unlinked_pose, missing_asset or orphan_stack). Note that every NPC using this graph starts at {{start_position}} s and so moves in lockstep; per-NPC offsets need StartPosition bound to a variable a UAF Module sets."
+  },
+  {
+   "id": "uaf.injury-limp-two-way-blend",
+   "title": "Blend a limp into walking by injury amount in UAF",
+   "summary": "A two-way UAF blend between a normal and an injured walk, weighted by an InjuryAmount float, with both players in one sync group.",
+   "packs": [
+    "uaf_graph"
+   ],
+   "tools": [
+    "hyper_uaf_inspect",
+    "hyper_project_search",
+    "hyper_uaf_apply_plan",
+    "hyper_operation_wait",
+    "hyper_uaf_validate"
+   ],
+   "ops": [
+    "add_variable",
+    "add_node",
+    "add_trait",
+    "set_pin",
+    "bind_pin",
+    "link",
+    "link_output"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "UAF",
+    "injury",
+    "limp",
+    "survival",
+    "horror",
+    "two-way blend",
+    "sync group"
+   ],
+   "placeholders": [
+    {
+     "name": "graph_name",
+     "label": "Graph name",
+     "default": "AG_InjuredWalk"
+    },
+    {
+     "name": "walk_clip",
+     "label": "Normal walk clip",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Fwd.MF_Unarmed_Walk_Fwd"
+    },
+    {
+     "name": "limp_clip",
+     "label": "Injured walk clip",
+     "default": "/Game/Characters/Survivor/Anims/Walk_Injured_Fwd.Walk_Injured_Fwd"
+    },
+    {
+     "name": "sync_group",
+     "label": "Sync group name",
+     "default": "Walk"
+    }
+   ],
+   "prompt": "Create {{content_folder}}/UAF/{{graph_name}}.{{graph_name}}: a walk that limps more as `InjuryAmount` rises from 0 to 1. If the uaf_graph pack is off (UAF is experimental and its plugins are off by default), say so and stop.\n1. hyper_uaf_inspect with bIncludeTraitCatalog true, TraitFilter Blend and then Synchronize: confirm FBlendTwoWayTrait (ChildA, ChildB, BlendWeight) and FSynchronizeUsingGroupsTrait (GroupName, GroupRole, SyncMode) and which is base or additive. hyper_project_search confirms {{walk_clip}} and {{limp_clip}} exist; stop if either is missing.\n2. One hyper_uaf_apply_plan with bCreate true: add_variable InjuryAmount (float); add_node Walk with add_trait FSequencePlayerTrait (set_pin AnimSequence {{walk_clip}}) then FSynchronizeUsingGroupsTrait (set_pin GroupName `{{sync_group}}`, SyncMode SynchronizeUsingGroupName); add_node Limp the same way with {{limp_clip}}; add_node Injury with FBlendTwoWayTrait and bind_pin BlendWeight InjuryAmount; link Walk to Injury's ChildA and Limp to its ChildB; link_output Injury. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_uaf_validate it and hyper_uaf_inspect it.\n4. Report a PASS/FAIL table: compiled, bAllocatesInstance true, OutputNode Injury, both players in group `{{sync_group}}` with group sync on, BlendWeight bound to InjuryAmount, 0 errors and 0 warnings. If the two clips differ in length by more than 20%, WARN that their steps will drift without matching sync markers."
+  },
+  {
+   "id": "uaf.strafe-2d-inertialized",
+   "title": "Build a UAF strafe graph with an inertialized switch",
+   "summary": "Idle when still and a 2D Direction by Speed blend space when moving, switched by IsMoving with an inertializer instead of a crossfade.",
+   "packs": [
+    "uaf_graph",
+    "animation_rigging"
+   ],
+   "tools": [
+    "hyper_animation_inspect",
+    "hyper_uaf_inspect",
+    "hyper_uaf_apply_plan",
+    "hyper_operation_wait",
+    "hyper_uaf_validate"
+   ],
+   "ops": [
+    "add_variable",
+    "add_node",
+    "add_trait",
+    "set_pin",
+    "bind_pin",
+    "link",
+    "link_output"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "UAF",
+    "strafe",
+    "shooter",
+    "2D blend space",
+    "inertialization",
+    "experimental"
+   ],
+   "placeholders": [
+    {
+     "name": "graph_name",
+     "label": "Graph name",
+     "default": "AG_Strafe"
+    },
+    {
+     "name": "idle_clip",
+     "label": "Idle clip",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle.MM_Idle"
+    },
+    {
+     "name": "strafe_blend_space",
+     "label": "2D strafe blend space",
+     "default": "/Game/Characters/Mannequins/Anims/Unarmed/BS_Idle_Walk_Run.BS_Idle_Walk_Run",
+     "hint": "Direction on one axis and Speed on the other."
+    },
+    {
+     "name": "blend_time",
+     "label": "Inertialization time (s)",
+     "default": "0.2"
+    }
+   ],
+   "prompt": "Create {{content_folder}}/UAF/{{graph_name}}.{{graph_name}} for a strafing character: {{idle_clip}} when still, {{strafe_blend_space}} when moving. If the uaf_graph or animation_rigging pack is off, say so and stop.\n1. hyper_animation_inspect {{strafe_blend_space}}: which axis is Direction and which Speed. hyper_uaf_inspect with bIncludeTraitCatalog true (TraitFilter Player, Blend, Inertial, then Passthrough): confirm FBlendSpacePlayerTrait's XAxisSamplePoint and YAxisSamplePoint, FBlendByBoolTrait, FBlendInertializerTrait (BlendTime), FPassthroughTrait (pose pin Input) and FInertializationDeadBlendTrait.\n2. One hyper_uaf_apply_plan with bCreate true: add_variable Speed and Direction (float) and IsMoving (bool); add_node Idle, add_trait FSequencePlayerTrait, set_pin AnimSequence {{idle_clip}}; add_node Strafe, add_trait FBlendSpacePlayerTrait, set_pin BlendSpace, bind_pin each axis pin to the variable its axis measures; add_node Locomotion, add_trait FBlendByBoolTrait then FBlendInertializerTrait, bind_pin bCondition IsMoving, set_pin BlendTime {{blend_time}}; add_node Output, add_trait FPassthroughTrait then FInertializationDeadBlendTrait (the inertializer only requests the blend; dead blending above it performs it, or the switch pops); link Idle to Locomotion's FalseChild, Strafe to its TrueChild, Locomotion to Output's Input; link_output Output. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_uaf_validate it and hyper_uaf_inspect it.\n4. Report a PASS/FAIL table: compiled, bAllocatesInstance true, OutputNode Output, all 4 stacks reach the output, Direction and Speed bound to the right axes, all 3 variables used, 0 errors and 0 warnings."
+  },
+  {
+   "id": "uaf.audit-repair-graph",
+   "title": "Check and repair a UAF animation graph",
+   "summary": "Validate a UAF graph, then wire its output, feed empty pose pins and remove orphan stacks in one dry-run-first plan.",
+   "packs": [
+    "uaf_graph"
+   ],
+   "tools": [
+    "hyper_uaf_inspect",
+    "hyper_uaf_validate",
+    "hyper_uaf_apply_plan",
+    "hyper_project_search",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "link_output",
+    "link",
+    "remove_node",
+    "set_pin"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "UAF",
+    "repair",
+    "validate",
+    "T-pose",
+    "orphan stack",
+    "cleanup"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "UAFAnimGraph"
+    ],
+    "min": 1
+   },
+   "prompt": "Check and repair the UAF graph {{selected_asset}}. If the uaf_graph pack is off (UAF is experimental and its plugins are off by default), say so and stop.\n1. hyper_uaf_inspect it (bLoad true), then hyper_uaf_validate it: Revision, Nodes with their traits, pins and bReachesOutput, OutputNode and Variables. Group the issues by code: no_output_pose, no_base_trait, multiple_base_traits, empty_stack, unlinked_pose (reads as a T-pose), orphan_stack, missing_asset, unused_variable, compile_error.\n2. One hyper_uaf_apply_plan with ExpectedRevision for the smallest fix: link_output the stack no other stack consumes; link an unlinked pose pin only when exactly one orphan player stack fits it; remove_node empty or orphan stacks that hold no sequence or blend space; set_pin a missing asset only when hyper_project_search finds one of the same name. List anything you cannot fix this way instead of guessing. It deletes, so read the dry run's report before you resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_uaf_validate it again.\n4. Report a table: issue, subject, fix or reason not fixed, PASS when gone; then CompileStatus and bAllocatesInstance before and after."
+  },
+  {
+   "id": "uaf.port-anim-blueprint-to-uaf",
+   "title": "Port an Anim Blueprint's idle and move core to UAF",
+   "summary": "Read an Animation Blueprint's locomotion states and rebuild them as UAF trait stacks, leaving the Blueprint untouched, then list what did not port.",
+   "packs": [
+    "uaf_graph",
+    "anim_blueprint"
+   ],
+   "tools": [
+    "hyper_anim_blueprint_inspect",
+    "hyper_uaf_inspect",
+    "hyper_uaf_apply_plan",
+    "hyper_operation_wait",
+    "hyper_uaf_validate"
+   ],
+   "ops": [
+    "add_variable",
+    "add_node",
+    "add_trait",
+    "set_pin",
+    "bind_pin",
+    "link",
+    "link_output"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "UAF",
+    "migration",
+    "port",
+    "animation blueprint",
+    "locomotion",
+    "experimental"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "AnimBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "graph_name",
+     "label": "New UAF graph name",
+     "default": "AG_PortedLocomotion"
+    }
+   ],
+   "prompt": "Rebuild the Idle and Move core of the Animation Blueprint {{selected_asset}} as the UAF graph {{content_folder}}/UAF/{{graph_name}}.{{graph_name}}, leaving the Blueprint untouched. If the uaf_graph or anim_blueprint pack is off, say so and stop.\n1. hyper_anim_blueprint_inspect it (bLoad true): Revision, the machine that drives the output, its states with Player, Asset and axis variables, and the Idle and Move transitions with their blends. Slots, layers and other states will not port; list them.\n2. hyper_uaf_inspect with bIncludeTraitCatalog true (TraitFilter Player, then Blend) for exact pin names.\n3. One hyper_uaf_apply_plan with bCreate true: add_variable for each float the two states read, plus IsMoving (bool); add_node Idle and Move, each with add_trait FSequencePlayerTrait (set_pin AnimSequence) or FBlendSpacePlayerTrait (set_pin BlendSpace, bind_pin the axis pins); add_node Locomotion, add_trait FBlendByBoolTrait then FBlendSmootherTrait, bind_pin bCondition IsMoving, set_pin FBlendSmootherTrait BlendTimes (index 0 the TrueChild Move gets the Idle to Move blend, index 1 the FalseChild Idle the Move to Idle blend); link Idle to FalseChild and Move to TrueChild; link_output Locomotion. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n4. hyper_uaf_validate the graph, and hyper_anim_blueprint_inspect the Blueprint again: its Revision must be unchanged.\n5. Report a PASS/FAIL table: each ported state and its stack with the same asset and axis variables, bAllocatesInstance true, 0 errors, Blueprint unchanged; then what did not port, and that a UAF Module must set IsMoving where the Blueprint used rules."
+  },
+  {
+   "id": "uaf.swap-clips-retune-blend",
+   "title": "Swap a UAF graph's clips and retune its blend time",
+   "summary": "Point a UAF graph's players at new clips, such as retargeted ones, and set its blend time, then prove nothing else changed.",
+   "packs": [
+    "uaf_graph"
+   ],
+   "tools": [
+    "hyper_uaf_inspect",
+    "hyper_project_search",
+    "hyper_uaf_apply_plan",
+    "hyper_operation_wait",
+    "hyper_uaf_validate"
+   ],
+   "ops": [
+    "set_pin"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "UAF",
+    "swap",
+    "retarget",
+    "blend time",
+    "tuning"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "UAFAnimGraph"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "asset_swaps",
+     "label": "Stack to asset swaps",
+     "default": "Idle = /Game/Characters/Mannequins/Anims/Rifle/MF_Rifle_Idle_ADS.MF_Rifle_Idle_ADS",
+     "hint": "Stack = asset object path, separated by semicolons."
+    },
+    {
+     "name": "blend_time",
+     "label": "Blend time (s)",
+     "default": "0.2"
+    }
+   ],
+   "prompt": "In the UAF graph {{selected_asset}}, point its players at new assets ({{asset_swaps}}) and set its blend time to {{blend_time}} s. If the uaf_graph pack is off (UAF is experimental and its plugins are off by default), say so and stop.\n1. hyper_uaf_inspect it (bLoad true): Revision, each stack's traits and pins (AnimSequence, BlendSpace, BlendTimes or BlendTime). hyper_project_search each new asset; stop on any that is missing.\n2. One hyper_uaf_apply_plan with ExpectedRevision: set_pin AnimSequence or BlendSpace per swap (Node, Trait, Pin), and set_pin the blend stack's FBlendSmootherTrait BlendTimes ({{blend_time}}, which serves every child) or FBlendInertializerTrait BlendTime. Nothing else. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_uaf_inspect and hyper_uaf_validate it again, and compare with step 1.\n4. Report a PASS/FAIL table: each changed pin's old and new value, every other stack, link and variable unchanged, no missing_asset, compiled, bAllocatesInstance true, 0 errors."
+  },
+  {
+   "id": "uaf.motion-matching-stack",
+   "title": "Drive a UAF graph with a motion matching database",
+   "summary": "Build Epic's Motion Matching trait stack (blend stack, smoother, motion matching, history) on an indexed Pose Search database.",
+   "packs": [
+    "uaf_graph",
+    "animation_rigging"
+   ],
+   "tools": [
+    "hyper_pose_search_inspect",
+    "hyper_uaf_inspect",
+    "hyper_uaf_apply_plan",
+    "hyper_operation_wait",
+    "hyper_uaf_validate"
+   ],
+   "ops": [
+    "add_node",
+    "add_trait",
+    "set_pin",
+    "link_output"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "UAF",
+    "motion matching",
+    "pose search",
+    "trait stack",
+    "experimental"
+   ],
+   "placeholders": [
+    {
+     "name": "graph_name",
+     "label": "Graph name",
+     "default": "AG_MotionMatching"
+    },
+    {
+     "name": "database",
+     "label": "Pose Search database",
+     "default": "/Game/MotionMatching/PSD_Locomotion.PSD_Locomotion"
+    }
+   ],
+   "prompt": "Make {{content_folder}}/UAF/{{graph_name}}.{{graph_name}} search the Pose Search database {{database}}, stacked like Epic's Motion Matching node. If the uaf_graph or animation_rigging pack is off, say so and stop.\n1. hyper_pose_search_inspect {{database}}: its Index must read built with a pose count; if not, stop and say it needs building first.\n2. hyper_uaf_inspect with bIncludeTraitCatalog true and TraitFilter Motion, then BlendStack, then History: confirm FMotionMatchingTrait (pin Databases), FBlendStackCoreTrait, FBlendSmootherCoreTrait and FHistoryCollectorTrait, and which is the base. If FMotionMatchingTrait is missing, the UAFPoseSearch plugin is off: say so and stop.\n3. One hyper_uaf_apply_plan with bCreate true: add_node MotionMatching; add_trait FBlendStackCoreTrait, FBlendSmootherCoreTrait, FMotionMatchingTrait and FHistoryCollectorTrait in that order; set_pin Databases to an array holding {{database}}, in the text form the catalog shows for that pin; link_output MotionMatching. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n4. hyper_uaf_validate it, then hyper_uaf_inspect it.\n5. Report a PASS/FAIL table: one stack with 4 traits and one base, Databases holds {{database}}, OutputNode MotionMatching, compiled, bAllocatesInstance true, 0 errors. Say plainly that the trajectory and the character binding come from a UAF Module, which these tools do not build."
+  },
+  {
+   "id": "uaf.sync-group-blended-players",
+   "title": "Keep a UAF graph's blended cycles in step with sync groups",
+   "summary": "Add a sync group to every player stack that feeds a blend, so blended walk and run feet stay in phase, and flag clips without sync markers.",
+   "packs": [
+    "uaf_graph",
+    "animation_rigging"
+   ],
+   "tools": [
+    "hyper_uaf_inspect",
+    "hyper_animation_inspect",
+    "hyper_uaf_apply_plan",
+    "hyper_operation_wait",
+    "hyper_uaf_validate"
+   ],
+   "ops": [
+    "add_trait",
+    "set_pin"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "UAF",
+    "sync group",
+    "foot phase",
+    "sync markers",
+    "blending",
+    "experimental"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "UAFAnimGraph"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "sync_group",
+     "label": "Sync group name",
+     "default": "Locomotion"
+    }
+   ],
+   "prompt": "Keep the blended players of the UAF graph {{selected_asset}} in step by putting them in the sync group `{{sync_group}}`. If the uaf_graph or animation_rigging pack is off, say so and stop.\n1. hyper_uaf_inspect it (bLoad true): Revision, each stack's traits and pins, and which player stacks (FSequencePlayerTrait or FBlendSpacePlayerTrait) feed a blend stack. hyper_uaf_inspect again with bIncludeTraitCatalog true and TraitFilter Synchronize for FSynchronizeUsingGroupsTrait's pins. hyper_animation_inspect the clips those stacks play: their sync markers.\n2. One hyper_uaf_apply_plan with ExpectedRevision: on each of those stacks that has no sync trait yet, add_trait FSynchronizeUsingGroupsTrait, set_pin GroupName `{{sync_group}}` and set_pin SyncMode SynchronizeUsingGroupName. Change no other pin. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_uaf_validate it and hyper_uaf_inspect it again.\n4. Report a PASS/FAIL table: each player stack in `{{sync_group}}` with group sync on, nothing else changed, compiled, bAllocatesInstance true, 0 errors. WARN each clip without the same sync marker names as the others (such as L and R), because those only sync by length."
+  }
+ ]
+}

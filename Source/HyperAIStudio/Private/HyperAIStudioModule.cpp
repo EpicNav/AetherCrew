@@ -31,25 +31,46 @@
 #include "HyperAIStudioBlueprintWorkflowToolset.h"
 #include "HyperAIStudioContextSearchToolsets.h"
 #include "HyperAIStudioDiagnosticsRegistration.h"
+#include "HyperAIStudioDocs.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioCapabilityCatalogCounts.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioAutoApproval.h"
+#include "HyperAIStudioMcpBypassMonitor.h"
+#include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioFoundationProbe.h"
 #include "HyperAIStudioNativeReadToolset.h"
 #include "HyperAIStudioPIEPlaytestToolset.h"
+#include "HyperAIStudioAgentHost.h"
+#include "HyperAIStudioEditorRestart.h"
+#include "HyperAIStudioEditorStartupGate.h"
+#include "HyperAIStudioRemote.h"
+#include "HyperAIStudioSourceControl.h"
+#include "HyperAIStudioBlueprintTidy.h"
 #include "HyperAIStudioPlanExecuteToolset.h"
 #include "HyperAIStudioPlanValidateToolset.h"
 #include "HyperAIStudioSettings.h"
 #include "HyperAIStudioService.h"
+#include "HyperAIStudioToolGuide.h"
 #include "HyperAIStudioStyle.h"
 #include "HyperAIStudioTrustedExecutionInternal.h"
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Tests/HyperAIStudioBenchmarkInstrumentation.h"
 #endif
 #include "Interfaces/IPluginManager.h"
+#include "SHyperAIStudioPlaytestPanel.h"
 #include "SHyperAIStudioQuickActionWindow.h"
+#include "Interfaces/IMainFrameModule.h"
+#include "HyperAIStudioProjectMemory.h"
+#include "HyperAIStudioAgents.h"
+#include "HyperAIStudioLocalization.h"
+#include "HyperAIStudioSandbox.h"
+#include "HyperAIStudioSkills.h"
+#include "HyperAIStudioAgentChatHistory.h"
+#include "HyperAIStudioChatHistoryPrefs.h"
+#include "UObject/ObjectSaveContext.h"
 #include "Misc/App.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/FileHelper.h"
@@ -63,8 +84,19 @@
 #include "ToolMenus.h"
 #include "UnrealEdMisc.h"
 #include "Widgets/Docking/SDockTab.h"
+#include "Framework/Commands/Commands.h"
+#include "Framework/Commands/UICommandList.h"
 #include "HyperAIStudioPreviewPanel.h"
+#include "HyperAIStudioShell.h"
+#include "SHyperAIStudioActivitySidebar.h"
+#include "SHyperAIStudioAgentsPanel.h"
+#include "SHyperAIStudioHomePage.h"
+#include "SHyperAIStudioMemoryPanel.h"
 #include "SHyperAIStudioPreviewPanel.h"
+#include "SHyperAIStudioSettingsPage.h"
+#include "SHyperAIStudioSkillsPanel.h"
+#include "SHyperAIStudioToolsPage.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -80,22 +112,35 @@
 
 #define LOCTEXT_NAMESPACE "FHyperAIStudioModule"
 
+/** HyperAI Studio's commands, bindable in Editor Preferences > Keyboard Shortcuts. */
+class FHyperAIStudioCommands final : public TCommands<FHyperAIStudioCommands>
+{
+public:
+	FHyperAIStudioCommands()
+		: TCommands<FHyperAIStudioCommands>(TEXT("HyperAIStudio"), LOCTEXT("CommandsContext", "HyperAI Studio"), NAME_None, FHyperAIStudioStyle::GetStyleSetName())
+	{
+	}
+
+	virtual void RegisterCommands() override
+	{
+		UI_COMMAND(OpenStudio, "HyperAI Studio", "Open HyperAI Studio: chat, images, match, playtest, memory, skills, agents, tools, activity and settings.",
+			EUserInterfaceActionType::Button, FInputChord(EModifierKey::Control | EModifierKey::Alt, EKeys::H));
+		UI_COMMAND(NewChat, "New HyperAI Chat", "Start a chat with an agent in HyperAI Studio, beside the ones already open.",
+			EUserInterfaceActionType::Button, FInputChord());
+	}
+
+	TSharedPtr<FUICommandInfo> OpenStudio;
+	TSharedPtr<FUICommandInfo> NewChat;
+};
+
 namespace
 {
-	const FName HyperAIStudioTabName(TEXT("HyperAIStudio"));
-	const FName HyperAIStudioChatTabName(TEXT("HyperAIStudioChat"));
-
 	/**
-	 * Extra chat tabs, so several agents can work at once and be docked side by side. Each is its own
-	 * nomad tab with its own panel, terminal and agent; they share the one Unreal MCP endpoint, which
-	 * serialises their tool calls, and the one-at-a-time mutation lane.
+	 * Chats open at once, so several agents can work side by side. Each is a page of HyperAI Studio with its own
+	 * panel, terminal and agent; they share the one Unreal MCP endpoint, which serialises their tool calls, and the
+	 * one-at-a-time mutation lane.
 	 */
 	constexpr int32 MaxChatTabs = 4;
-
-	FName ChatTabNameForIndex(const int32 Index)
-	{
-		return Index <= 1 ? HyperAIStudioChatTabName : FName(*FString::Printf(TEXT("HyperAIStudioChat%d"), Index));
-	}
 
 	FString NormalizeMCPServerSelector(const FString& RawValue)
 	{
@@ -530,8 +575,41 @@ public:
 	{
 		// First: the tab spawners below reference brushes in this style set.
 		FHyperAIStudioStyle::Register();
+		// HyperAI's text in its own language setting, before any of its windows exist.
+		HyperAIStudio::Localization::Startup();
+		// Before any chat tab is restored: probes of this editor's own MCP server wait until the editor can answer.
+		FHyperAIStudioEditorStartupGate::Startup();
+		// Sandbox Mode needs the editor and the File Sandbox, both ready after engine init.
+		if (GIsRunning && GEditor)
+		{
+			HyperAIStudio::Sandbox::Startup();
+		}
+		else
+		{
+			FCoreDelegates::GetOnPostEngineInit().AddLambda([]() { HyperAIStudio::Sandbox::Startup(); });
+		}
 		EnginePreExitHandle = FCoreDelegates::OnEnginePreExit.AddRaw(
 			this, &FHyperAIStudioModule::BeginEnginePreExit);
+		// Agent chats still working get a say before the editor closes.
+		if (IMainFrameModule* MainFrame = FModuleManager::LoadModulePtr<IMainFrameModule>(TEXT("MainFrame")))
+		{
+			CanCloseEditorHandle = MainFrame->RegisterCanCloseEditor(
+				IMainFrameModule::FMainFrameCanCloseEditor::CreateStatic(&SHyperAIStudioQuickActionWindow::CanCloseEditor));
+		}
+		// The background host that keeps agents working when the editor closes: its closing hooks and Stop command.
+		FHyperAIStudioAgentHost::Startup();
+		// Restart and resume: the tool and console command, and, in an editor a restart opened, its chats.
+		FHyperAIStudioEditorRestart::Startup();
+		// The remote page, when it is set to run from the start.
+		FHyperAIStudioRemote::Startup();
+		// Agent edits check assets out first, and new files are marked for add once saved.
+		FHyperAIStudioSourceControl::Startup();
+		// Blueprint nodes agents add are laid out when their Blueprint compiles.
+		FHyperAIStudioBlueprintTidy::Startup();
+		// Other MCP servers that change this editor outside the approval gate: found shortly after start, and warned about.
+		FHyperAIStudioMcpBypassMonitor::Startup();
+		// Auto-approval the user kept on from before a restart comes back once the main window is up, or not at all.
+		FHyperAIStudioAutoApproval::Startup();
 		if (FHyperAIStudioExtensionRuntime::AreExtendedHyperToolsEnabled())
 		{
 			FString TrustedExecutionError;
@@ -565,34 +643,10 @@ public:
 		HyperAIStudio::BenchmarkInstrumentation::Startup();
 #endif
 
-		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-			HyperAIStudioTabName,
-			FOnSpawnTab::CreateRaw(this, &FHyperAIStudioModule::SpawnTab))
-			.SetDisplayName(LOCTEXT("TabTitle", "HyperAIStudio"))
-			.SetTooltipText(LOCTEXT("TabTooltip", "Open HyperAIStudio setup, agent handoff, and MCP readiness."))
-			.SetIcon(FSlateIcon(FHyperAIStudioStyle::GetStyleSetName(), "HyperAIStudio.TabIcon"))
-			.SetMenuType(ETabSpawnerMenuType::Hidden);
-
-		for (int32 Index = 1; Index <= MaxChatTabs; ++Index)
-		{
-			FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-				ChatTabNameForIndex(Index),
-				FOnSpawnTab::CreateRaw(this, &FHyperAIStudioModule::SpawnChatTabAtIndex, Index))
-				.SetDisplayName(Index <= 1
-					? LOCTEXT("ChatTabTitle", "HyperAI Chat")
-					: FText::Format(LOCTEXT("ChatTabTitleNumbered", "HyperAI Chat {0}"), Index))
-				.SetTooltipText(LOCTEXT("ChatTabTooltip", "Open the lightweight HyperAI chat panel for Unreal context handoff."))
-				.SetIcon(FSlateIcon(FHyperAIStudioStyle::GetStyleSetName(), "HyperAIStudio.TabIcon"))
-				.SetMenuType(ETabSpawnerMenuType::Hidden);
-		}
-
-		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-			FHyperAIStudioPreviewPanel::GetTabName(),
-			FOnSpawnTab::CreateRaw(this, &FHyperAIStudioModule::SpawnPreviewTab))
-			.SetDisplayName(LOCTEXT("PreviewTabTitle", "HyperAI Preview"))
-			.SetTooltipText(LOCTEXT("PreviewTabTooltip", "Compare a reference image with what a pack produced, with the numbers behind it."))
-			.SetIcon(FSlateIcon(FHyperAIStudioStyle::GetStyleSetName(), "HyperAIStudio.TabIcon"))
-			.SetMenuType(ETabSpawnerMenuType::Hidden);
+		// One window for every feature: HyperAI Studio, each feature a page in it.
+		FHyperAIStudioCommands::Register();
+		FHyperAIStudioShell::RegisterTabSpawner();
+		RegisterStudioPages();
 
 		UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FHyperAIStudioModule::RegisterMenus));
 
@@ -608,7 +662,7 @@ public:
 
 		CommandDocsSmoke = MakeUnique<FAutoConsoleCommand>(
 			TEXT("HyperAIStudio.DocsSmoke"),
-			TEXT("Validates the packaged HyperAIStudio HTML documentation for required first-user workflow sections. Add quit-on-complete for unattended smoke runs."),
+			TEXT("Validates the plugin's documentation site in Docs: every page is there with its main section. Add quit-on-complete for unattended smoke runs."),
 			FConsoleCommandWithArgsDelegate::CreateRaw(this, &FHyperAIStudioModule::RunConsoleDocsSmoke));
 
 		CommandWelcomeSmoke = MakeUnique<FAutoConsoleCommand>(
@@ -766,6 +820,40 @@ public:
 		WelcomePromptTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateRaw(this, &FHyperAIStudioModule::RunWelcomePromptTicker),
 			2.0f);
+
+		// Late enough that the optional packs have registered, so the guide lists what is really there.
+		AgentGuidanceTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateRaw(this, &FHyperAIStudioModule::RunAgentGuidanceTicker),
+			20.0f);
+
+		// Project memory: facts follow into AGENTS.md shortly after they change; saves made while an agent works
+		// join the change log, including saves through Epic's tools, which never reach the activity log.
+		MemoryChangedHandle = HyperAIStudio::Memory::OnChanged().AddRaw(this, &FHyperAIStudioModule::QueueMemoryRefresh);
+		PackageSavedHandle = UPackage::PackageSavedWithContextEvent.AddLambda(
+			[](const FString& PackageFileName, UPackage* Package, FObjectPostSaveContext Context)
+			{
+				if (Package && !Context.IsProceduralSave())
+				{
+					HyperAIStudio::Memory::NotePackageSaved(FHyperAIStudioService::GetProjectRoot(), Package->GetName());
+				}
+			});
+	}
+
+	void QueueMemoryRefresh()
+	{
+		// Debounced: a burst of memory writes becomes one AGENTS.md rewrite.
+		if (!MemoryRefreshTickerHandle.IsValid())
+		{
+			MemoryRefreshTickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([this](float)
+			{
+				MemoryRefreshTickerHandle.Reset();
+				if (!bModuleShuttingDown)
+				{
+					FHyperAIStudioService::RefreshMemoryInstructions();
+				}
+				return false;
+			}), 2.0f);
+		}
 	}
 
 	virtual void ShutdownModule() override
@@ -776,6 +864,22 @@ public:
 			FCoreDelegates::OnEnginePreExit.Remove(EnginePreExitHandle);
 			EnginePreExitHandle.Reset();
 		}
+		if (CanCloseEditorHandle.IsValid())
+		{
+			if (IMainFrameModule* MainFrame = FModuleManager::GetModulePtr<IMainFrameModule>(TEXT("MainFrame")))
+			{
+				MainFrame->UnregisterCanCloseEditor(CanCloseEditorHandle);
+			}
+			CanCloseEditorHandle.Reset();
+		}
+		FHyperAIStudioEditorRestart::Shutdown();
+		FHyperAIStudioAgentHost::Shutdown();
+		FHyperAIStudioRemote::Shutdown();
+		FHyperAIStudioSourceControl::Shutdown();
+		FHyperAIStudioBlueprintTidy::Shutdown();
+		FHyperAIStudioMcpBypassMonitor::Shutdown();
+		FHyperAIStudioAutoApproval::Shutdown();
+		FHyperAIStudioEditorStartupGate::Shutdown();
 		if (PIEPlaytestRegistration)
 		{
 			PIEPlaytestRegistration->Shutdown();
@@ -815,6 +919,18 @@ public:
 		{
 			FTSTicker::GetCoreTicker().RemoveTicker(WelcomePromptTickerHandle);
 			WelcomePromptTickerHandle.Reset();
+		}
+		if (AgentGuidanceTickerHandle.IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(AgentGuidanceTickerHandle);
+			AgentGuidanceTickerHandle.Reset();
+		}
+		HyperAIStudio::Memory::OnChanged().Remove(MemoryChangedHandle);
+		UPackage::PackageSavedWithContextEvent.Remove(PackageSavedHandle);
+		if (MemoryRefreshTickerHandle.IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(MemoryRefreshTickerHandle);
+			MemoryRefreshTickerHandle.Reset();
 		}
 
 		UnregisterGraphEditorContextMenus();
@@ -859,14 +975,19 @@ public:
 			UToolMenus::UnregisterOwner(this);
 		}
 
-		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FHyperAIStudioPreviewPanel::GetTabName());
-		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(HyperAIStudioTabName);
-		for (int32 Index = 1; Index <= MaxChatTabs; ++Index)
+		UnregisterStudioPages();
+		FHyperAIStudioShell::UnregisterTabSpawner();
+		if (FModuleManager::Get().IsModuleLoaded(TEXT("LevelEditor")) && FHyperAIStudioCommands::IsRegistered())
 		{
-			FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(ChatTabNameForIndex(Index));
+			const TSharedRef<FUICommandList> Actions = FModuleManager::GetModuleChecked<FLevelEditorModule>(TEXT("LevelEditor")).GetGlobalLevelEditorActions();
+			Actions->UnmapAction(FHyperAIStudioCommands::Get().OpenStudio);
+			Actions->UnmapAction(FHyperAIStudioCommands::Get().NewChat);
 		}
+		FHyperAIStudioCommands::Unregister();
 		// Jobs hold pack callbacks and pending approvals hold prepared plans; neither may outlive the host.
 		FHyperAIStudioAsyncJobHost::Shutdown();
+		FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::EditorClosing);
+		FHyperAIStudioExecutionQueue::Clear();
 		FHyperAIStudioApprovalGate::Clear();
 		if (FoundationProbe)
 		{
@@ -903,6 +1024,13 @@ private:
 				TEXT("cohort.source.hyperaistudiogameplayaitoolset.v1"),
 				{TEXT("hyper_gameplay_ai_inspect"), TEXT("hyper_gameplay_ai_apply_plan"),
 					TEXT("hyper_gameplay_ai_validate")},
+				{}
+			},
+			{
+				TEXT("HyperAIStudioEQS"),
+				TEXT("gameplay_ai"),
+				TEXT("cohort.source.hyperaistudioeqstoolset.v1"),
+				{TEXT("hyper_eqs_inspect"), TEXT("hyper_eqs_apply_plan"), TEXT("hyper_eqs_run")},
 				{}
 			},
 			{
@@ -947,11 +1075,21 @@ private:
 				{TEXT("Metasound")}
 			},
 			{
+				TEXT("HyperAIStudioAudioAuthoring"),
+				TEXT("audio_metasound"),
+				TEXT("cohort.source.hyperaistudioaudioauthoringtoolset.v1"),
+				{TEXT("hyper_sound_cue_plan"), TEXT("hyper_sound_mix_plan"),
+					TEXT("hyper_sound_asset_inspect"), TEXT("hyper_metasound_recipe"),
+					TEXT("hyper_metasound_node_search"), TEXT("hyper_metasound_node_describe"), TEXT("hyper_metasound_graph_plan"),
+					TEXT("hyper_audio_analyze"), TEXT("hyper_audio_preview")},
+				{TEXT("Metasound")}
+			},
+			{
 				TEXT("HyperAIStudioMaterials"),
 				TEXT("materials_dynamic_material"),
 				TEXT("cohort.source.hyperaistudiomaterialstoolset.v1"),
 				{TEXT("hyper_material_inspect"), TEXT("hyper_material_apply_plan"),
-					TEXT("hyper_material_validate")},
+					TEXT("hyper_material_validate"), TEXT("hyper_material_recipe")},
 				{}
 			},
 			{
@@ -967,7 +1105,8 @@ private:
 				TEXT("niagara_vfx"),
 				TEXT("cohort.source.hyperaistudioniagaratoolset.v1"),
 				{TEXT("hyper_niagara_inspect"), TEXT("hyper_niagara_apply_plan"),
-					TEXT("hyper_niagara_validate")},
+					TEXT("hyper_niagara_validate"), TEXT("hyper_niagara_live"), TEXT("hyper_niagara_discover"),
+					TEXT("hyper_niagara_preview")},
 				{TEXT("Niagara")}
 			},
 			{
@@ -983,7 +1122,7 @@ private:
 				TEXT("lighting_lookdev"),
 				TEXT("cohort.source.hyperaistudiolightingtoolset.v1"),
 				{TEXT("hyper_lighting_inspect"), TEXT("hyper_lighting_apply_plan"),
-					TEXT("hyper_lighting_compare")},
+					TEXT("hyper_lighting_compare"), TEXT("hyper_capture_view"), TEXT("hyper_image_compare")},
 				{}
 			},
 			{
@@ -995,12 +1134,157 @@ private:
 				{}
 			},
 			{
+				TEXT("HyperAIStudioSceneSpatial"),
+				TEXT("level_design"),
+				TEXT("cohort.source.hyperaistudioscenespatialtoolset.v1"),
+				{TEXT("hyper_scene_cost_report"), TEXT("hyper_spatial_query"),
+					TEXT("hyper_spatial_apply_plan")},
+				{}
+			},
+			{
+				TEXT("HyperAIStudioMeshTerrain"),
+				TEXT("mesh_terrain"),
+				TEXT("cohort.source.hyperaistudiomeshterraintoolset.v1"),
+				{TEXT("hyper_mesh_terrain_inspect"), TEXT("hyper_mesh_terrain_apply_plan"),
+					TEXT("hyper_mesh_terrain_validate")},
+				{TEXT("MeshPartition")}
+			},
+			{
 				TEXT("HyperAIStudioAnimBlueprint"),
 				TEXT("anim_blueprint"),
 				TEXT("cohort.source.hyperaistudioanimblueprinttoolset.v1"),
 				{TEXT("hyper_anim_blueprint_inspect"), TEXT("hyper_anim_blueprint_apply_plan"),
 					TEXT("hyper_anim_blueprint_validate")},
 				{}
+			},
+			{
+				TEXT("HyperAIStudioImageGen"),
+				TEXT("image_generation"),
+				TEXT("cohort.source.hyperaistudioimagegentoolset.v1"),
+				{TEXT("hyper_image_inspect"), TEXT("hyper_image_generate")},
+				{}
+			},
+			{
+				TEXT("HyperAIStudioScripting"),
+				TEXT("scripting"),
+				TEXT("cohort.source.hyperaistudioscriptingtoolset.v1"),
+				{TEXT("hyper_script_run")},
+				{TEXT("PythonScriptPlugin")}
+			},
+			{
+				TEXT("HyperAIStudioMeshGen"),
+				TEXT("mesh_generation"),
+				TEXT("cohort.source.hyperaistudiomeshgentoolset.v1"),
+				{TEXT("hyper_mesh_generate"), TEXT("hyper_mesh_status"), TEXT("hyper_mesh_rig"), TEXT("hyper_mesh_animate"),
+					TEXT("hyper_mesh_retexture"), TEXT("hyper_mesh_actions"), TEXT("hyper_mesh_cancel"), TEXT("hyper_model_create"), TEXT("hyper_model_status"),
+					TEXT("hyper_model_check_and_fix"), TEXT("hyper_tripo_account")},
+				{TEXT("Interchange")}
+			},
+			{
+				TEXT("HyperAIStudioAudioGen"),
+				TEXT("audio_generation"),
+				TEXT("cohort.source.hyperaistudioaudiogentoolset.v1"),
+				{TEXT("hyper_audio_generate"), TEXT("hyper_audio_generate_status")},
+				{TEXT("Metasound")}
+			},
+			{
+				TEXT("HyperAIStudioDecibel"),
+				TEXT("sound_design"),
+				TEXT("cohort.source.hyperaistudiodecibeltoolset.v1"),
+				{TEXT("hyper_sound_inspect"), TEXT("hyper_sound_apply_plan"), TEXT("hyper_sound_render")},
+				{TEXT("Decibel"), TEXT("Metasound")}
+			},
+			{
+				TEXT("HyperAIStudioBlueprintStructure"),
+				TEXT("blueprint_structure"),
+				TEXT("cohort.source.hyperaistudioblueprintstructuretoolset.v1"),
+				{TEXT("hyper_blueprint_structure_inspect"), TEXT("hyper_blueprint_structure_apply_plan")},
+				{}
+			},
+			{
+				TEXT("HyperAIStudioRetarget"),
+				TEXT("animation_rigging"),
+				TEXT("cohort.source.hyperaistudioretargettoolset.v1"),
+				{TEXT("hyper_retarget_inspect"), TEXT("hyper_retarget_apply_plan")},
+				{TEXT("IKRig")}
+			},
+			{
+				TEXT("HyperAIStudioPoseSearch"),
+				TEXT("animation_rigging"),
+				TEXT("cohort.source.hyperaistudioposesearchtoolset.v1"),
+				{TEXT("hyper_pose_search_inspect"), TEXT("hyper_pose_search_apply_plan")},
+				{TEXT("PoseSearch")}
+			},
+			{
+				TEXT("HyperAIStudioMotionWarping"),
+				TEXT("animation_rigging"),
+				TEXT("cohort.source.hyperaistudiomotionwarpingtoolset.v1"),
+				{TEXT("hyper_motion_warping_inspect"), TEXT("hyper_motion_warping_apply_plan")},
+				{TEXT("MotionWarping")}
+			},
+			{
+				TEXT("HyperAIStudioChooser"),
+				TEXT("animation_rigging"),
+				TEXT("cohort.source.hyperaistudiochoosertoolset.v1"),
+				{TEXT("hyper_chooser_inspect"), TEXT("hyper_chooser_apply_plan"), TEXT("hyper_chooser_evaluate")},
+				{TEXT("Chooser")}
+			},
+			{
+				TEXT("HyperAIStudioLandscape"),
+				TEXT("worldbuilding_navigation"),
+				TEXT("cohort.source.hyperaistudiolandscapetoolset.v1"),
+				{TEXT("hyper_landscape_inspect"), TEXT("hyper_landscape_apply_plan")},
+				{}
+			},
+			{
+				TEXT("HyperAIStudioFoliage"),
+				TEXT("worldbuilding_navigation"),
+				TEXT("cohort.source.hyperaistudiofoliagetoolset.v1"),
+				{TEXT("hyper_foliage_inspect"), TEXT("hyper_foliage_apply_plan")},
+				{}
+			},
+			{
+				TEXT("HyperAIStudioWorldPartition"),
+				TEXT("worldbuilding_navigation"),
+				TEXT("cohort.source.hyperaistudioworldpartitiontoolset.v1"),
+				{TEXT("hyper_world_partition_inspect"), TEXT("hyper_world_partition_apply_plan")},
+				{}
+			},
+			{
+				TEXT("HyperAIStudioSequencer"),
+				TEXT("cinematics"),
+				TEXT("cohort.source.hyperaistudiosequencertoolset.v1"),
+				{TEXT("hyper_sequence_inspect"), TEXT("hyper_sequence_apply_plan")},
+				{}
+			},
+			{
+				TEXT("HyperAIStudioMovieRender"),
+				TEXT("cinematics"),
+				TEXT("cohort.source.hyperaistudiomovierendertoolset.v1"),
+				{TEXT("hyper_movie_render_inspect"), TEXT("hyper_movie_render_apply_plan")},
+				{TEXT("MovieRenderPipeline")}
+			},
+			{
+				TEXT("HyperAIStudioPCGScatter"),
+				TEXT("pcg"),
+				TEXT("cohort.source.hyperaistudiopcgscattertoolset.v1"),
+				{TEXT("hyper_pcg_scatter_inspect"), TEXT("hyper_pcg_scatter_apply_plan")},
+				{TEXT("PCG")}
+			},
+			{
+				TEXT("HyperAIStudioModeling"),
+				TEXT("mesh_modeling"),
+				TEXT("cohort.source.hyperaistudiomodelingtoolset.v1"),
+				{TEXT("hyper_model_inspect"), TEXT("hyper_model_apply_plan"), TEXT("hyper_model_validate"), TEXT("hyper_model_handoff"),
+					TEXT("hyper_model_uv_check"), TEXT("hyper_model_uv_apply"), TEXT("hyper_model_bake"), TEXT("hyper_model_prepare")},
+				{TEXT("GeometryScripting")}
+			},
+			{
+				TEXT("HyperAIStudioDestruction"),
+				TEXT("destruction"),
+				TEXT("cohort.source.hyperaistudiodestructiontoolset.v1"),
+				{TEXT("hyper_destruction_inspect"), TEXT("hyper_destruction_apply_plan")},
+				{TEXT("GeometryCollectionPlugin"), TEXT("Fracture")}
 			},
 			{
 				TEXT("HyperAIStudioUAF"),
@@ -1023,7 +1307,7 @@ private:
 				TEXT("ui_slate_mvvm"),
 				TEXT("cohort.source.hyperaistudiouitoolset.v1"),
 				{TEXT("hyper_ui_inspect"), TEXT("hyper_ui_apply_plan"),
-					TEXT("hyper_ui_validate")},
+					TEXT("hyper_ui_validate"), TEXT("hyper_ui_render_review")},
 				{TEXT("ModelViewViewModel")}
 			},
 			{
@@ -1033,6 +1317,13 @@ private:
 				{TEXT("hyper_data_inspect"), TEXT("hyper_data_apply_plan"),
 					TEXT("hyper_data_validate")},
 				{}
+			},
+			{
+				TEXT("HyperAIStudioDataRegistry"),
+				TEXT("data_config_localization"),
+				TEXT("cohort.source.hyperaistudiodataregistrytoolset.v1"),
+				{TEXT("hyper_data_registry_inspect"), TEXT("hyper_data_registry_apply_plan"), TEXT("hyper_data_registry_lookup")},
+				{TEXT("DataRegistry")}
 			},
 			{
 				TEXT("HyperAIStudioPhysics"),
@@ -1122,6 +1413,13 @@ private:
 					TEXT("hyper_test_validate"), TEXT("hyper_profile_capture"),
 					TEXT("hyper_build_diagnose")},
 				{}
+			},
+			{
+				TEXT("HyperAIStudioProfiling"),
+				TEXT("automation_profiling_build"),
+				TEXT("cohort.source.hyperaistudioprofilingtoolset.v1"),
+				{TEXT("hyper_profile_session"), TEXT("hyper_profile_compare"), TEXT("hyper_profile_live")},
+				{TEXT("Niagara")}
 			}
 		};
 		const bool bAllowSourceCandidate =
@@ -1171,6 +1469,14 @@ private:
 				SkippedSummaries.Add(Module.ModuleName.ToString());
 				continue;
 			}
+			// The one pack with its own opt-in: agents run Python only once the user switches it on.
+			if (Module.ModuleName == FName(TEXT("HyperAIStudioScripting")) && !GetDefault<UHyperAIStudioSettings>()->bEnablePythonScripting)
+			{
+				UE_LOG(LogHyperAIStudio, Display,
+					TEXT("Python scripting is off; turn on Allow Agents To Run Python Scripts in the HyperAI Studio settings and restart to add hyper_script_run."));
+				SkippedSummaries.Add(Module.ModuleName.ToString());
+				continue;
+			}
 			TArray<FString> MissingPlugins;
 			for (const FString& PluginName : Module.RequiredPlugins)
 			{
@@ -1213,6 +1519,12 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 		HyperAIStudio::BenchmarkInstrumentation::Shutdown();
 #endif
+		HyperAIStudio::Sandbox::Shutdown();
+		// Waiting plans keep their packs' objects alive, so they go before the packs unregister. Auto-approval ends
+		// first: it lives only as long as this editor.
+		FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::EditorClosing);
+		FHyperAIStudioExecutionQueue::Clear();
+		FHyperAIStudioApprovalGate::Clear();
 		HyperAIStudio::TrustedExecution::Private::BeginEnginePreExit();
 		FHyperAIStudioPlanExecutionService::Shutdown();
 		FHyperAIStudioPIEPlaytestService::Shutdown();
@@ -1232,90 +1544,144 @@ private:
 		}), 0.25f);
 	}
 
-	TSharedRef<SDockTab> SpawnTab(const FSpawnTabArgs& Args)
+	static FName ChatPageId(const int32 Index)
 	{
-		return SNew(SDockTab)
-			.TabRole(ETabRole::NomadTab)
-			.Label(LOCTEXT("DockedTabLabel", "HyperAIStudio"))
-			[
-				SNew(SBox)
-				.MinDesiredWidth(420.0f)
-				.MinDesiredHeight(520.0f)
-				[
-					SNew(SHyperAIStudioWindow)
-				]
-			];
+		return SHyperAIStudioQuickActionWindow::GetPageId(Index);
 	}
 
-	TSharedRef<SDockTab> SpawnPreviewTab(const FSpawnTabArgs& Args)
-	{
-		return SNew(SDockTab)
-			.TabRole(ETabRole::NomadTab)
-			.Label(LOCTEXT("PreviewDockedTabLabel", "HyperAI Preview"))
-			[
-				SNew(SBox)
-				.MinDesiredWidth(560.0f)
-				.MinDesiredHeight(420.0f)
-				[
-					SNew(SHyperAIStudioPreviewPanel)
-				]
-			];
-	}
-
-	TSharedRef<SDockTab> CreateChatDockTab(const int32 TabIndex = 1)
+	TSharedRef<SWidget> CreateChatPage(const TSharedRef<SDockTab>& Tab, const int32 TabIndex)
 	{
 		TSharedPtr<SHyperAIStudioQuickActionWindow> ChatWidget;
-		TSharedRef<SDockTab> ChatTab = SNew(SDockTab)
-			.TabRole(ETabRole::NomadTab)
-			.Label(TabIndex <= 1
-				? LOCTEXT("DockedChatTabLabel", "HyperAI Chat")
-				: FText::Format(LOCTEXT("DockedChatTabLabelNumbered", "HyperAI Chat {0}"), TabIndex))
-			[
-				SNew(SBox)
-				.MinDesiredWidth(420.0f)
-				.MinDesiredHeight(520.0f)
-				[
-					SAssignNew(ChatWidget, SHyperAIStudioQuickActionWindow)
-					.OnOpenWorkbench(FSimpleDelegate::CreateRaw(this, &FHyperAIStudioModule::OpenTab))
-					.OnNewAgentTab(FSimpleDelegate::CreateRaw(this, &FHyperAIStudioModule::OpenNextChatTab))
-					.TabIndex(TabIndex)
-				]
-			];
-		ChatTab->SetOnTabClosed(SDockTab::FOnTabClosedCallback::CreateRaw(this, &FHyperAIStudioModule::OnChatTabClosed));
-		if (ChatWidget.IsValid())
-		{
-			ChatWidget->SetOwnerTab(ChatTab);
-		}
-		// Enqueued visible commands target the most recent chat panel; each tab still owns its own terminal.
-		ActiveChatTab = ChatTab;
+		const TSharedRef<SWidget> Content = SAssignNew(ChatWidget, SHyperAIStudioQuickActionWindow)
+			.OnOpenWorkbench(FSimpleDelegate::CreateLambda([]() { FHyperAIStudioShell::Open(TEXT("Settings")); }))
+			.OnNewAgentTab(FSimpleDelegate::CreateRaw(this, &FHyperAIStudioModule::OpenNextChatTab))
+			.TabIndex(TabIndex);
+		Tab->SetOnTabClosed(SDockTab::FOnTabClosedCallback::CreateRaw(this, &FHyperAIStudioModule::OnChatTabClosed));
+		ChatWidget->SetOwnerTab(Tab);
+		// Enqueued visible commands target the most recent chat; each chat still owns its own terminal.
+		ActiveChatTab = Tab;
 		ActiveChatWidget = ChatWidget;
-		return ChatTab;
+		return Content;
 	}
 
-	TSharedRef<SDockTab> SpawnChatTab(const FSpawnTabArgs& Args)
-	{
-		return CreateChatDockTab();
-	}
-
-	TSharedRef<SDockTab> SpawnChatTabAtIndex(const FSpawnTabArgs& Args, const int32 TabIndex)
-	{
-		return CreateChatDockTab(TabIndex);
-	}
-
-	/** Opens the lowest-numbered chat tab that is not already live, so each agent gets its own. */
+	/** Opens the lowest-numbered chat that is not already open, so each agent gets its own. */
 	void OpenNextChatTab()
 	{
 		for (int32 Index = 1; Index <= MaxChatTabs; ++Index)
 		{
-			const FName TabName = ChatTabNameForIndex(Index);
-			if (!FGlobalTabmanager::Get()->FindExistingLiveTab(FTabId(TabName)).IsValid())
+			if (!FHyperAIStudioShell::FindPageTab(ChatPageId(Index)).IsValid())
 			{
-				FGlobalTabmanager::Get()->TryInvokeTab(TabName);
+				FHyperAIStudioShell::Open(ChatPageId(Index));
 				return;
 			}
 		}
 		UE_LOG(LogHyperAIStudio, Display,
 			TEXT("All %d HyperAI chat tabs are already open; close one to start another agent."), MaxChatTabs);
+	}
+
+	static FHyperAIStudioPage MakePage(const FName Id, const FText& Label, const FText& Tooltip, const FName Group, const int32 Order,
+		const FName Icon, TFunction<TSharedRef<SWidget>(const TSharedRef<SDockTab>&)> Create)
+	{
+		FHyperAIStudioPage Page;
+		Page.Id = Id;
+		Page.Label = Label;
+		Page.Tooltip = Tooltip;
+		Page.Group = Group;
+		Page.Order = Order;
+		Page.Icon = Icon;
+		Page.Create = MoveTemp(Create);
+		return Page;
+	}
+
+	/** A panel given a page's margins; its list fills the height and scrolls itself. */
+	static TSharedRef<SWidget> PanelPage(const TSharedRef<SWidget>& Panel)
+	{
+		return SNew(SBox)
+			.Padding(FMargin(24.0f, 20.0f, 24.0f, 16.0f))
+			[
+				Panel
+			];
+	}
+
+	void RegisterStudioPages()
+	{
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Home"), LOCTEXT("PageHome", "Home"),
+			LOCTEXT("PageHomeTip", "Status, what needs you, and where to start."), TEXT("Start"), 0, TEXT("HyperAIStudio.Icon.Home"),
+			[](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioHomePage); }));
+		for (int32 Index = 1; Index <= MaxChatTabs; ++Index)
+		{
+			FHyperAIStudioPage Chat = MakePage(ChatPageId(Index),
+				Index <= 1 ? LOCTEXT("PageChat", "Chat") : FText::Format(LOCTEXT("PageChatNumbered", "Chat {0}"), Index),
+				LOCTEXT("PageChatTip", "Work with Codex, Claude Code or Gemini in this editor."), TEXT("Create"), 0, TEXT("HyperAIStudio.Icon.Chat"),
+				[this, Index](const TSharedRef<SDockTab>& Tab) { return CreateChatPage(Tab, Index); });
+			// Only the first chat is in the navigation; the others open from a chat's new-chat button.
+			Chat.bHidden = Index > 1;
+			FHyperAIStudioShell::RegisterPage(Chat);
+		}
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Match"), LOCTEXT("PageMatch", "Match"),
+			LOCTEXT("PageMatchTip", "Compare what the editor makes with a reference image, side by side or with a wipe."), TEXT("Create"), 20,
+			TEXT("HyperAIStudio.Icon.Match"), [](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioPreviewPanel); }));
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Playtest"), LOCTEXT("PagePlaytest", "Playtest"),
+			LOCTEXT("PagePlaytestTip", "A bot plays the level like a person: many cases at once, each in its own copy."), TEXT("Test"), 0,
+			TEXT("HyperAIStudio.Icon.Playtest"), [](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioPlaytestPanel); }));
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Memory"), LOCTEXT("PageMemory", "Memory"),
+			LOCTEXT("PageMemoryTip", "What agents should know about this project, kept between chats."), TEXT("Project"), 0,
+			TEXT("HyperAIStudio.Icon.Memory"), [](const TSharedRef<SDockTab>&) { return PanelPage(SNew(SHyperAIStudioMemoryPanel)); }));
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Skills"), LOCTEXT("PageSkills", "Skills"),
+			LOCTEXT("PageSkillsTip", "Know-how agents follow, such as how to build a Blueprint or match an image."), TEXT("Project"), 10,
+			TEXT("HyperAIStudio.Icon.Skills"), [](const TSharedRef<SDockTab>&) { return PanelPage(SNew(SHyperAIStudioSkillsPanel)); }));
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Agents"), LOCTEXT("PageAgents", "Agents"),
+			LOCTEXT("PageAgentsTip", "Your team of specialist subagents, for Claude Code and Codex."), TEXT("Project"), 20,
+			TEXT("HyperAIStudio.Icon.Agents"), [](const TSharedRef<SDockTab>&) { return PanelPage(SNew(SHyperAIStudioAgentsPanel)); }));
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Tools"), LOCTEXT("PageTools", "Tools"),
+			LOCTEXT("PageToolsTip", "Every tool agents can call, as a form you can run yourself."), TEXT("System"), 0,
+			TEXT("HyperAIStudio.Icon.Tools"), [](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioToolsPage); }));
+		FHyperAIStudioPage Activity = MakePage(TEXT("Activity"), LOCTEXT("PageActivity", "Activity"),
+			LOCTEXT("PageActivityTip", "Edits waiting for your approval, jobs running, and what happened."), TEXT("System"), 10,
+			TEXT("HyperAIStudio.Icon.Activity"), [](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioChatActivitySidebar); });
+		Activity.Badge = []() { return SHyperAIStudioChatActivitySidebar::GetPendingApprovalCount(); };
+		FHyperAIStudioShell::RegisterPage(Activity);
+		FHyperAIStudioShell::RegisterPage(MakePage(TEXT("Settings"), LOCTEXT("PageSettings", "Settings"),
+			LOCTEXT("PageSettingsTip", "Setup, agents, MCP servers, image services and preferences."), TEXT("System"), 20,
+			TEXT("HyperAIStudio.Icon.Settings"), [](const TSharedRef<SDockTab>&) { return SNew(SHyperAIStudioSettingsPage); }));
+		FHyperAIStudioShell::RegisterPage(MakePage(HyperAIStudio::Docs::GetPageId(), LOCTEXT("PageDocs", "Docs"),
+			LOCTEXT("PageDocsTip", "HyperAI Studio's guides and documentation, read here; links to websites open in your browser."), TEXT("System"), 30,
+			TEXT("Icons.Help"), [](const TSharedRef<SDockTab>& Tab) { return HyperAIStudio::Docs::CreatePage(Tab); }));
+
+		// What the search box can do besides opening a page.
+		auto Action = [](const FName Id, const FText& Label, const FText& Description, const FName Icon, TFunction<void()> Run)
+		{
+			FHyperAIStudioAction Entry;
+			Entry.Id = Id;
+			Entry.Label = Label;
+			Entry.Description = Description;
+			Entry.Icon = Icon;
+			Entry.Run = MoveTemp(Run);
+			FHyperAIStudioShell::RegisterAction(Entry);
+		};
+		Action(TEXT("NewChat"), LOCTEXT("ActionNewChat", "New chat"), LOCTEXT("ActionNewChatTip", "Start another chat with an agent, beside the ones open."),
+			TEXT("HyperAIStudio.Icon.Chat"), [this]() { OpenNextChatTab(); });
+		Action(TEXT("StartSetup"), LOCTEXT("ActionSetup", "Set up HyperAI"), LOCTEXT("ActionSetupTip", "Unreal MCP, the agent files, and what is missing."),
+			TEXT("HyperAIStudio.Icon.Settings"), []() { FHyperAIStudioShell::Open(TEXT("Settings")); });
+		Action(TEXT("OpenDocs"), LOCTEXT("ActionDocs", "Documentation"), LOCTEXT("ActionDocsTip", "HyperAI Studio's guides, read in the editor on the Docs page."),
+			TEXT("HyperAIStudio.Icon.Report"), []() { HyperAIStudio::Docs::Open(); });
+	}
+
+	void UnregisterStudioPages()
+	{
+		for (const FName Id : {FName(TEXT("Home")), FName(TEXT("Match")), FName(TEXT("Playtest")), FName(TEXT("Memory")), FName(TEXT("Skills")),
+			FName(TEXT("Agents")), FName(TEXT("Tools")), FName(TEXT("Activity")), FName(TEXT("Settings")), HyperAIStudio::Docs::GetPageId()})
+		{
+			FHyperAIStudioShell::UnregisterPage(Id);
+		}
+		for (int32 Index = 1; Index <= MaxChatTabs; ++Index)
+		{
+			FHyperAIStudioShell::UnregisterPage(ChatPageId(Index));
+		}
+		for (const FName Id : {FName(TEXT("NewChat")), FName(TEXT("StartSetup")), FName(TEXT("OpenDocs"))})
+		{
+			FHyperAIStudioShell::UnregisterAction(Id);
+		}
 	}
 
 	void RegisterMenus()
@@ -1325,30 +1691,18 @@ private:
 		if (UToolMenu* ToolsMenu = UToolMenus::Get()->ExtendMenu(TEXT("LevelEditor.MainMenu.Tools")))
 		{
 			FToolMenuSection& Section = ToolsMenu->FindOrAddSection(TEXT("HyperAIStudio"));
-			Section.AddMenuEntry(
-				TEXT("OpenHyperAIStudio"),
-				LOCTEXT("OpenHyperAIStudio", "HyperAIStudio"),
-				LOCTEXT("OpenHyperAIStudioTooltip", "Open HyperAIStudio MCP setup and readiness checks."),
-				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateRaw(this, &FHyperAIStudioModule::OpenTab)));
-			Section.AddMenuEntry(
-				TEXT("OpenHyperAIStudioChat"),
-				LOCTEXT("OpenHyperAIStudioChat", "HyperAI Chat"),
-				LOCTEXT("OpenHyperAIStudioChatTooltip", "Open the lightweight HyperAI chat panel."),
-				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateRaw(this, &FHyperAIStudioModule::OpenChatTab)));
-			Section.AddMenuEntry(
-				TEXT("OpenHyperAIStudioPreview"),
-				LOCTEXT("OpenHyperAIStudioPreview", "HyperAI Preview"),
-				LOCTEXT("OpenHyperAIStudioPreviewTooltip", "Compare a reference image with what a pack produced."),
-				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateLambda([]() { FHyperAIStudioPreviewPanel::Open(); })));
-			Section.AddMenuEntry(
-				TEXT("OpenHyperAIStudioQuickAction"),
-				LOCTEXT("OpenHyperAIStudioQuickAction", "HyperAI Chat Overlay"),
-				LOCTEXT("OpenHyperAIStudioQuickActionTooltip", "Open the lightweight chat overlay without changing the editor layout."),
-				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateRaw(this, &FHyperAIStudioModule::OpenQuickActionWindowFromMenu)));
+			FLevelEditorModule& LevelEditor = FModuleManager::LoadModuleChecked<FLevelEditorModule>(TEXT("LevelEditor"));
+			const TSharedRef<FUICommandList> Actions = LevelEditor.GetGlobalLevelEditorActions();
+			if (!Actions->IsActionMapped(FHyperAIStudioCommands::Get().OpenStudio))
+			{
+				Actions->MapAction(FHyperAIStudioCommands::Get().OpenStudio, FExecuteAction::CreateRaw(this, &FHyperAIStudioModule::OpenTab));
+				Actions->MapAction(FHyperAIStudioCommands::Get().NewChat, FExecuteAction::CreateRaw(this, &FHyperAIStudioModule::OpenNextChatTab));
+			}
+			// One entry, showing its shortcut; every feature is a page inside the window.
+			Section.AddMenuEntryWithCommandList(FHyperAIStudioCommands::Get().OpenStudio, Actions,
+				LOCTEXT("OpenHyperAIStudioMenu", "HyperAI Studio"),
+				LOCTEXT("OpenHyperAIStudioMenuTooltip", "Open HyperAI Studio: chat, images, match, playtest, memory, skills, agents, tools, activity and settings."),
+				FSlateIcon(FHyperAIStudioStyle::GetStyleSetName(), "HyperAIStudio.TabIcon"), NAME_None, FName(TEXT("OpenHyperAIStudio")));
 		}
 
 		if (UToolMenu* StatusBarMenu = UToolMenus::Get()->ExtendMenu(TEXT("LevelEditor.StatusBar.ToolBar")))
@@ -1362,7 +1716,7 @@ private:
 				SNew(SButton)
 				.ButtonStyle(&FAppStyle::Get().GetWidgetStyle<FButtonStyle>(TEXT("StatusBar.StatusBarButton")))
 				.ContentPadding(FMargin(6.0f, 0.0f))
-				.ToolTipText(LOCTEXT("StatusBarTooltip", "Open HyperAIStudio setup, agent handoff, and MCP readiness."))
+				.ToolTipText(LOCTEXT("StatusBarTooltipStudio", "Open HyperAI Studio (Ctrl+Alt+H)."))
 				.OnClicked_Lambda([this]()
 				{
 					OpenTab();
@@ -1376,7 +1730,7 @@ private:
 					[
 						SNew(SImage)
 						.ColorAndOpacity(FSlateColor::UseForeground())
-						.Image(FAppStyle::Get().GetBrush(TEXT("Icons.Comment")))
+						.Image(FHyperAIStudioStyle::Get().GetBrush(TEXT("HyperAIStudio.TabIcon")))
 					]
 					+ SHorizontalBox::Slot()
 					.AutoWidth()
@@ -1384,7 +1738,7 @@ private:
 					.Padding(FMargin(5.0f, 0.0f, 0.0f, 0.0f))
 					[
 						SNew(STextBlock)
-						.Text(LOCTEXT("StatusBarLabel", "HyperAIStudio"))
+						.Text(LOCTEXT("StatusBarLabelStudio", "HyperAI"))
 						.TextStyle(&FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>(TEXT("NormalText")))
 					]
 				];
@@ -1731,7 +2085,7 @@ private:
 			Section.AddMenuEntry(
 				TEXT("HyperAIStudioOpenCodexContext"),
 				LOCTEXT("OpenCodexContext", "Open Codex With Selection"),
-				LOCTEXT("OpenCodexContextTooltip", "Copy a prompt with the selected assets and open Codex from the project root."),
+				LOCTEXT("OpenCodexContextAssetsTooltip", "Copy a prompt with the selected assets and open Codex from the project root."),
 				FSlateIcon(),
 				OpenCodexAction);
 
@@ -1743,7 +2097,7 @@ private:
 			Section.AddMenuEntry(
 				TEXT("HyperAIStudioOpenClaudeContext"),
 				LOCTEXT("OpenClaudeContext", "Open Claude Code With Selection"),
-				LOCTEXT("OpenClaudeContextTooltip", "Copy a prompt with the selected assets and open Claude Code from the project root."),
+				LOCTEXT("OpenClaudeContextAssetsTooltip", "Copy a prompt with the selected assets and open Claude Code from the project root."),
 				FSlateIcon(),
 				OpenClaudeAction);
 
@@ -1755,7 +2109,7 @@ private:
 			Section.AddMenuEntry(
 				TEXT("HyperAIStudioCreateCodexTaskPack"),
 				LOCTEXT("CreateCodexTaskPack", "Copy Codex Prompt"),
-				LOCTEXT("CreateCodexTaskPackTooltip", "Copy a Codex-ready prompt with context for the selected assets."),
+				LOCTEXT("CreateCodexTaskPackAssetsTooltip", "Copy a Codex-ready prompt with context for the selected assets."),
 				FSlateIcon(),
 				CopyCodexAction);
 
@@ -1767,7 +2121,7 @@ private:
 			Section.AddMenuEntry(
 				TEXT("HyperAIStudioCreateClaudeTaskPack"),
 				LOCTEXT("CreateClaudeTaskPack", "Copy Claude Code Prompt"),
-				LOCTEXT("CreateClaudeTaskPackTooltip", "Copy a Claude Code-ready prompt with context for the selected assets."),
+				LOCTEXT("CreateClaudeTaskPackAssetsTooltip", "Copy a Claude Code-ready prompt with context for the selected assets."),
 				FSlateIcon(),
 				CopyClaudeAction);
 
@@ -1779,7 +2133,7 @@ private:
 			Section.AddMenuEntry(
 				TEXT("HyperAIStudioAddSelectionContext"),
 				LOCTEXT("AddSelectionContext", "Copy Selection Prompt"),
-				LOCTEXT("AddSelectionContextTooltip", "Copy a prompt for the preferred external agent with the selected assets."),
+				LOCTEXT("AddSelectionContextAssetsTooltip", "Copy a prompt for the preferred external agent with the selected assets."),
 				FSlateIcon(),
 				PreferredAction);
 		}
@@ -1873,20 +2227,7 @@ private:
 		{
 			return;
 		}
-
-		if (FModuleManager::Get().IsModuleLoaded(TEXT("LevelEditor")))
-		{
-			FLevelEditorModule& LevelEditorModule = FModuleManager::LoadModuleChecked<FLevelEditorModule>(TEXT("LevelEditor"));
-			if (const TSharedPtr<FTabManager> LevelEditorTabManager = LevelEditorModule.GetLevelEditorTabManager())
-			{
-				if (LevelEditorTabManager->TryInvokeTab(HyperAIStudioTabName).IsValid())
-				{
-					return;
-				}
-			}
-		}
-
-		FGlobalTabmanager::Get()->TryInvokeTab(HyperAIStudioTabName);
+		FHyperAIStudioShell::Open();
 	}
 
 	void OpenChatTab()
@@ -1911,54 +2252,19 @@ private:
 			}
 		}
 
-		auto ActivateExistingChatTab = [this, &TrimmedAgentName](const TSharedPtr<SDockTab>& ExistingChatTab)
+		// The chat the user was last in when it is still open, otherwise the first.
+		FName Page = ChatPageId(1);
+		if (const TSharedPtr<SDockTab> Existing = ActiveChatTab.Pin())
 		{
-			if (!ExistingChatTab.IsValid())
-			{
-				return false;
-			}
-
-			ActiveChatTab = ExistingChatTab;
-			if (!TrimmedAgentName.IsEmpty())
-			{
-				if (const TSharedPtr<SHyperAIStudioQuickActionWindow> ExistingChatWidget = ActiveChatWidget.Pin())
-				{
-					ExistingChatWidget->SelectAgentByName(TrimmedAgentName);
-				}
-			}
-
-			ExistingChatTab->ActivateInParent(ETabActivationCause::SetDirectly);
-			return true;
-		};
-
-		if (ActivateExistingChatTab(ActiveChatTab.Pin()))
-		{
-			return;
+			Page = Existing->GetLayoutIdentifier().TabType;
 		}
-
-		if (FModuleManager::Get().IsModuleLoaded(TEXT("LevelEditor")))
+		FHyperAIStudioShell::Open(Page);
+		if (!TrimmedAgentName.IsEmpty())
 		{
-			FLevelEditorModule& LevelEditorModule = FModuleManager::LoadModuleChecked<FLevelEditorModule>(TEXT("LevelEditor"));
-			if (const TSharedPtr<FTabManager> LevelEditorTabManager = LevelEditorModule.GetLevelEditorTabManager())
+			if (const TSharedPtr<SHyperAIStudioQuickActionWindow> ExistingChatWidget = ActiveChatWidget.Pin())
 			{
-				if (ActivateExistingChatTab(LevelEditorTabManager->FindExistingLiveTab(FTabId(HyperAIStudioChatTabName))))
-				{
-					return;
-				}
-
-				if (const TSharedPtr<SDockTab> InvokedChatTab = LevelEditorTabManager->TryInvokeTab(HyperAIStudioChatTabName))
-				{
-					ActiveChatTab = InvokedChatTab;
-					ActivateExistingChatTab(InvokedChatTab);
-					return;
-				}
+				ExistingChatWidget->SelectAgentByName(TrimmedAgentName);
 			}
-		}
-
-		if (const TSharedPtr<SDockTab> InvokedChatTab = FGlobalTabmanager::Get()->TryInvokeTab(HyperAIStudioChatTabName))
-		{
-			ActiveChatTab = InvokedChatTab;
-			ActivateExistingChatTab(InvokedChatTab);
 		}
 	}
 
@@ -1990,11 +2296,6 @@ private:
 
 		FSlateApplication::Get().AddWindow(QuickActionWindow);
 		return true;
-	}
-
-	void OpenQuickActionWindowFromMenu()
-	{
-		OpenQuickActionWindow();
 	}
 
 	FText GetWelcomeWindowTitleText() const
@@ -2054,7 +2355,7 @@ private:
 
 	FText GetWelcomeOpenDocsTooltipText() const
 	{
-		return LOCTEXT("WelcomeOpenDocsTooltip", "Open the HyperAIStudio documentation site.");
+		return LOCTEXT("WelcomeOpenDocsTooltip", "Read the HyperAIStudio documentation in the editor, on the Studio's Docs page.");
 	}
 
 	FText GetWelcomeDontShowText() const
@@ -2075,6 +2376,99 @@ private:
 	FVector2D GetWelcomeContentSize() const
 	{
 		return FVector2D(620.0f, 330.0f);
+	}
+
+	/** Runs once: writes the tool guide, and refreshes agent instructions older than this build. */
+	bool RunAgentGuidanceTicker(float DeltaTime)
+	{
+		AgentGuidanceTickerHandle.Reset();
+		if (bModuleShuttingDown || IsRunningCommandlet())
+		{
+			return false;
+		}
+		if (!HyperAIStudio::ToolGuide::Ensure())
+		{
+			UE_LOG(LogHyperAIStudio, Warning, TEXT("Could not write %s."), *HyperAIStudio::ToolGuide::GetPath());
+		}
+		const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+		const FString AgentsPath = FPaths::Combine(FHyperAIStudioService::GetProjectRoot(), TEXT("AGENTS.md"));
+		FString AgentsText;
+		// Only a project that has been set up already gets refreshed; a fresh one waits for Setup.
+		const bool bSetUp = FFileHelper::LoadFileToString(AgentsText, *AgentsPath)
+			&& AgentsText.Contains(TEXT("BEGIN HYPERAISTUDIO MANAGED BLOCK"));
+		FHyperAIStudioService Service;
+		if (Settings && Settings->bRefreshAgentInstructionsOnStartup && bSetUp && !Service.AreAgentInstructionsCurrent())
+		{
+			FText Message;
+			const bool bOk = Service.GenerateProjectFiles(Message);
+			UE_LOG(LogHyperAIStudio, Display, TEXT("Agent instructions were older than this build; refresh %s: %s"),
+				bOk ? TEXT("succeeded") : TEXT("failed"), *Message.ToString());
+		}
+		if (bSetUp)
+		{
+			FHyperAIStudioService::RefreshMemoryInstructions();
+			FHyperAIStudioService::RefreshMcpBypassInstructions();
+		}
+		if (Settings && Settings->bRefreshAgentInstructionsOnStartup && bSetUp)
+		{
+			const FString Root = FHyperAIStudioService::GetProjectRoot();
+			HyperAIStudio::Skills::InstallBuiltIns(Root, HyperAIStudio::Skills::BuiltInDirectory());
+			for (const FString& Note : HyperAIStudio::Skills::SyncClaudeMirror(Root).Notes)
+			{
+				UE_LOG(LogHyperAIStudio, Display, TEXT("Skills: %s"), *Note);
+			}
+			// An installed team takes plugin updates, the old gameplay team included; a project without one gets nothing new.
+			HyperAIStudio::Agents::InstallTeam(Root, /*bUpdateOnly=*/true);
+			for (const FString& Note : HyperAIStudio::Agents::Sync(Root).Notes)
+			{
+				UE_LOG(LogHyperAIStudio, Display, TEXT("Subagents: %s"), *Note);
+			}
+			SuggestRepeatedWorkflow(Root);
+		}
+		return false;
+	}
+
+	/** Reads recent chats off the game thread; a run of calls seen in three of them is offered as a skill, once. */
+	static void SuggestRepeatedWorkflow(const FString& Root)
+	{
+		Async(EAsyncExecution::ThreadPool, [Root]()
+		{
+			TArray<TArray<FString>> Sequences;
+			for (const FHyperAIStudioChatSession& Session : HyperAIStudio::ChatHistory::ListSessions(Root, 30))
+			{
+				// The first 2 MB of a chat is plenty to see its workflow.
+				TArray<uint8> Bytes;
+				const TUniquePtr<FArchive> Reader(IFileManager::Get().CreateFileReader(*Session.Path, FILEREAD_AllowWrite));
+				if (Reader)
+				{
+					Bytes.SetNumUninitialized(static_cast<int32>(FMath::Min<int64>(Reader->TotalSize(), 2 * 1024 * 1024)));
+					Reader->Serialize(Bytes.GetData(), Bytes.Num());
+				}
+				const FUTF8ToTCHAR Text(reinterpret_cast<const ANSICHAR*>(Bytes.GetData()), Bytes.Num());
+				Sequences.Add(HyperAIStudio::Skills::ToolSequence(FString(Text.Length(), Text.Get())));
+			}
+			AsyncTask(ENamedThreads::GameThread, [Runs = HyperAIStudio::Skills::RepeatedWorkflows(Sequences)]()
+			{
+				UHyperAIStudioChatHistoryPrefs* Prefs = GetMutableDefault<UHyperAIStudioChatHistoryPrefs>();
+				for (const FString& Run : Runs)
+				{
+					if (Prefs->SuggestedWorkflows.Contains(Run))
+					{
+						continue;
+					}
+					Prefs->SuggestedWorkflows.Add(Run);
+					Prefs->SaveConfig();
+					const FString Prompt = FString::Printf(
+						TEXT("Use the make-skill skill to turn this workflow, which I keep repeating, into a project skill: %s"), *Run);
+					FNotificationInfo Info(FText::FromString(FString::Printf(TEXT("Agents repeated %s in several chats. Make it a skill?"), *Run)));
+					Info.ExpireDuration = 20.0f;
+					Info.HyperlinkText = LOCTEXT("CopyMakeSkillPrompt", "Copy a make-skill prompt for your agent");
+					Info.Hyperlink = FSimpleDelegate::CreateLambda([Prompt]() { FPlatformApplicationMisc::ClipboardCopy(*Prompt); });
+					FSlateNotificationManager::Get().AddNotification(Info);
+					return;
+				}
+			});
+		});
 	}
 
 	bool RunWelcomePromptTicker(float DeltaTime)
@@ -2337,14 +2731,13 @@ private:
 								SNew(SButton)
 								.Text(GetWelcomeOpenDocsText())
 								.ToolTipText(GetWelcomeOpenDocsTooltipText())
-								.OnClicked_Lambda([]()
+								.OnClicked_Lambda([WeakWelcomeWindow]()
 								{
-									FHyperAIStudioService Service;
-									FText Message;
-									if (!Service.OpenIncludedDocs(Message))
+									if (const TSharedPtr<SWindow> PinnedWindow = WeakWelcomeWindow.Pin())
 									{
-										FPlatformProcess::LaunchURL(*FHyperAIStudioService::GetDocumentationUrl(), nullptr, nullptr);
+										PinnedWindow->RequestDestroyWindow();
 									}
+									HyperAIStudio::Docs::Open();
 									return FReply::Handled();
 								})
 							]
@@ -2552,79 +2945,30 @@ private:
 			}
 		}
 
+		// The documentation site in the plugin's Docs folder: every page, each with the heading of its main section.
 		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("HyperAIStudio"));
-		const bool bPluginOk = Plugin.IsValid();
-		const FString DocsPath = bPluginOk
-			? FPaths::Combine(Plugin->GetBaseDir(), TEXT("Docs"), TEXT("HyperAIStudio.html"))
-			: FString();
-		const bool bDocsExists = !DocsPath.IsEmpty() && FPaths::FileExists(DocsPath);
-
-		FString DocsText;
-		const bool bDocsRead = bDocsExists && FFileHelper::LoadFileToString(DocsText, *DocsPath);
-		const bool bFirstRunOk = DocsText.Contains(TEXT("First Run"));
-		const bool bGeneratedOk = DocsText.Contains(TEXT("What HyperAIStudio Generates"))
-			&& DocsText.Contains(TEXT("Shared Project Workspace"))
-			&& DocsText.Contains(TEXT(".hyperai/work/YYYY-MM-DD-&lt;clear-context-name&gt;/"));
-		const bool bDailyOk = DocsText.Contains(TEXT("Daily Use"));
-		const bool bContextMenusOk = DocsText.Contains(TEXT("From editor context menus"));
-		const bool bPrerequisitesOk = DocsText.Contains(TEXT("Prerequisites"));
-		const bool bMultiMcpOk = DocsText.Contains(TEXT("MCP Profiles"))
-			&& DocsText.Contains(TEXT("single execution server"))
-			&& DocsText.Contains(TEXT("Toolset Registry"))
-			&& DocsText.Contains(TEXT("MCP</code> tab"));
-		const bool bProvidersOk = !DocsText.Contains(TEXT("Model Providers"))
-			&& !DocsText.Contains(TEXT("Add OpenAI Provider"))
-			&& !DocsText.Contains(TEXT("Copy Codex Provider Patch"))
-			&& !DocsText.Contains(TEXT("Optional Provider Integrations"))
-			&& !DocsText.Contains(TEXT("Provider Templates"));
-		const bool bNoBridgeOk = DocsText.Contains(TEXT("does not provide licensing, accounts, cloud services, an execution bridge"))
-			&& DocsText.Contains(TEXT("retired Hyper UE TCP/stdio/HTTP runtime is never started or used as fallback"))
-			&& !DocsText.Contains(TEXT("<h2>Automation Bridge</h2>"))
-			&& !DocsText.Contains(TEXT("534-tool MCP runtime"))
-			&& !DocsText.Contains(TEXT("127.0.0.1:55557"))
-			&& !DocsText.Contains(TEXT("127.0.0.1:8765"));
-		const bool bSafetyOk = DocsText.Contains(TEXT("Safety And Limits"));
-		const bool bTroubleshootingOk = DocsText.Contains(TEXT("Troubleshooting"));
-		const bool bAgentActionsOk = DocsText.Contains(TEXT("Use the HyperAIStudio workbench tabs for setup"))
-			&& DocsText.Contains(TEXT("HyperAI Chat"))
-			&& DocsText.Contains(TEXT("embedded terminal"))
-			&& DocsText.Contains(TEXT("Stop Agent"))
-			&& DocsText.Contains(TEXT("Copy Prompt"))
-			&& DocsText.Contains(TEXT("does not interpret terminal output"))
-			&& DocsText.Contains(TEXT("own agent approvals/history"))
-			&& DocsText.Contains(TEXT("Setup</code>, <code>Agents</code>, <code>MCP</code>, and <code>Docs"));
-		const bool bOk = bPluginOk
-			&& bDocsExists
-			&& bDocsRead
-			&& bFirstRunOk
-			&& bGeneratedOk
-			&& bDailyOk
-			&& bContextMenusOk
-			&& bPrerequisitesOk
-			&& bMultiMcpOk
-			&& bProvidersOk
-			&& bNoBridgeOk
-			&& bSafetyOk
-			&& bTroubleshootingOk
-			&& bAgentActionsOk;
-
-		UE_LOG(LogHyperAIStudio, Display, TEXT("HyperAIStudio.DocsSmoke %s path=%s plugin=%s docs=%s read=%s firstRun=%s generated=%s daily=%s contextMenus=%s prerequisites=%s multiMcp=%s providers=%s noBridge=%s safety=%s troubleshooting=%s agentActions=%s"),
-			bOk ? TEXT("succeeded") : TEXT("failed"),
-			DocsPath.IsEmpty() ? TEXT("<missing>") : *DocsPath,
-			bPluginOk ? TEXT("true") : TEXT("false"),
-			bDocsExists ? TEXT("true") : TEXT("false"),
-			bDocsRead ? TEXT("true") : TEXT("false"),
-			bFirstRunOk ? TEXT("true") : TEXT("false"),
-			bGeneratedOk ? TEXT("true") : TEXT("false"),
-			bDailyOk ? TEXT("true") : TEXT("false"),
-			bContextMenusOk ? TEXT("true") : TEXT("false"),
-			bPrerequisitesOk ? TEXT("true") : TEXT("false"),
-			bMultiMcpOk ? TEXT("true") : TEXT("false"),
-			bProvidersOk ? TEXT("true") : TEXT("false"),
-			bNoBridgeOk ? TEXT("true") : TEXT("false"),
-			bSafetyOk ? TEXT("true") : TEXT("false"),
-			bTroubleshootingOk ? TEXT("true") : TEXT("false"),
-			bAgentActionsOk ? TEXT("true") : TEXT("false"));
+		const TPair<const TCHAR*, const TCHAR*> Pages[] = {
+			{TEXT("index.html"), TEXT("Everything HyperAI adds.")},
+			{TEXT("setup.html"), TEXT("One button: Start Setup.")},
+			{TEXT("chat.html"), TEXT("A studio team of six.")},
+			{TEXT("match.html"), TEXT("Match it: the agent does the work.")},
+			{TEXT("memory.html"), TEXT("Held notes and keys.")},
+			// The pack count changes as packs are added (build_catalog.py checks the number), so only the heading's end.
+			{TEXT("tools.html"), TEXT(" packs.</h2>")},
+			{TEXT("reference.html"), TEXT("Console commands.")}};
+		TArray<FString> Missing;
+		for (const TPair<const TCHAR*, const TCHAR*>& Page : Pages)
+		{
+			FString Text;
+			if (!Plugin.IsValid() || !FFileHelper::LoadFileToString(Text, *FPaths::Combine(Plugin->GetBaseDir(), TEXT("Docs"), Page.Key))
+				|| !Text.Contains(Page.Value))
+			{
+				Missing.Add(Page.Key);
+			}
+		}
+		const bool bOk = Plugin.IsValid() && Missing.IsEmpty();
+		UE_LOG(LogHyperAIStudio, Display, TEXT("HyperAIStudio.DocsSmoke %s plugin=%s pages=%d missing=%s"), bOk ? TEXT("succeeded") : TEXT("failed"),
+			Plugin.IsValid() ? TEXT("true") : TEXT("false"), static_cast<int32>(UE_ARRAY_COUNT(Pages)), Missing.IsEmpty() ? TEXT("none") : *FString::Join(Missing, TEXT(",")));
 
 		if (bQuitOnComplete)
 		{
@@ -2719,7 +3063,7 @@ private:
 			&& GetWelcomeStartSetupTooltipText().ToString().Contains(TEXT("Configure Unreal MCP"))
 			&& GetWelcomeOpenPanelTooltipText().ToString().Contains(TEXT("workbench"))
 			&& GetWelcomeOpenChatTooltipText().ToString().Contains(TEXT("prompt and terminal"))
-			&& GetWelcomeOpenDocsTooltipText().ToString().Contains(TEXT("documentation site"))
+			&& GetWelcomeOpenDocsTooltipText().ToString().Contains(TEXT("documentation in the editor"))
 			&& GetWelcomeDontShowTooltipText().ToString().Contains(TEXT("Tools or the status bar"));
 		const FVector2D WelcomeWindowSize = GetWelcomeWindowSize();
 		const FVector2D WelcomeContentSize = GetWelcomeContentSize();
@@ -2917,8 +3261,8 @@ private:
 			&& TerminalRecipe.Contains(TEXT("gemini"))
 			&& TerminalRecipe.Contains(TEXT("cursor ."))
 			&& TerminalRecipe.Contains(TEXT("code ."));
-		const bool bDockableWorkbenchOk = FGlobalTabmanager::Get()->HasTabSpawner(HyperAIStudioTabName)
-			&& FGlobalTabmanager::Get()->HasTabSpawner(HyperAIStudioChatTabName);
+		const bool bDockableWorkbenchOk = FGlobalTabmanager::Get()->HasTabSpawner(FHyperAIStudioShell::GetTabName())
+			&& FHyperAIStudioShell::FindPage(TEXT("Chat")) != nullptr;
 		FHyperAIStudioMCPServerEntry ExactRetiredEntry;
 		ExactRetiredEntry.Id = TEXT("hyper-ue-mcp");
 		ExactRetiredEntry.DisplayName = TEXT("Retired built-in profile");
@@ -3173,7 +3517,7 @@ private:
 			&& AgentsText.Contains(TEXT("Fast Paths"))
 			&& AgentsText.Contains(TEXT("get_current_level"))
 			&& AgentsText.Contains(TEXT("find_actors"))
-			&& AgentsText.Contains(TEXT("Do not overlap Unreal MCP calls"))
+			&& AgentsText.Contains(TEXT("HyperAI edits wait their turn"))
 			&& AgentsText.Contains(TEXT("Context Packs"))
 			&& AgentsText.Contains(TEXT("Shared Project Workspace"))
 			&& AgentsText.Contains(TEXT(".hyperai/work/YYYY-MM-DD-<clear-context-name>/"))
@@ -5634,6 +5978,11 @@ private:
 			Status.bAgentFilesReady ? TEXT("true") : TEXT("false"),
 			Status.RegisteredToolCount,
 			Status.ProbeToolCount);
+		// Other MCP servers: what changes this editor outside the approval gate, and what else agents have.
+		const TArray<FHyperAIStudioMcpFinding> Findings = FHyperAIStudioMcpBypassMonitor::GetFindings();
+		const FString Bypass = HyperAIStudio::McpBypass::BuildLogLine(Findings);
+		UE_LOG(LogHyperAIStudio, Display, TEXT("HyperAIStudio.Status otherMcpServers=%d bypassing=%d%s%s"),
+			Findings.Num(), HyperAIStudio::McpBypass::FilterBypass(Findings, false).Num(), Bypass.IsEmpty() ? TEXT("") : TEXT(" "), *Bypass);
 	}
 
 	void RunConsoleStatusProbe(const TArray<FString>& Args)
@@ -6114,9 +6463,7 @@ private:
 		const bool bToolsOk = HasToolMenuEntriesWithText(
 			TEXT("LevelEditor.MainMenu.Tools"),
 			{
-				{ TEXT("OpenHyperAIStudio"), TEXT("HyperAIStudio"), TEXT("Open HyperAIStudio") },
-				{ TEXT("OpenHyperAIStudioChat"), TEXT("HyperAI Chat"), TEXT("lightweight HyperAI chat panel") },
-				{ TEXT("OpenHyperAIStudioQuickAction"), TEXT("HyperAI Chat Overlay"), TEXT("lightweight chat overlay") }
+				{ TEXT("OpenHyperAIStudio"), TEXT("HyperAI Studio"), TEXT("Open HyperAI Studio") }
 			},
 			ToolsFound,
 			ToolsTextOk,
@@ -6151,7 +6498,7 @@ private:
 			ActorUnexpected);
 		const bool bGraphExtenderOk = IsGraphEditorExtenderRegistered();
 		const int32 MenuTextOk = ToolsTextOk + AssetTextOk;
-		const bool bTextOk = MenuTextOk == 8;
+		const bool bTextOk = MenuTextOk == 6;
 		const bool bOk = bToolsOk && bStatusOk && bAssetOk && bActorOk && bGraphExtenderOk && bTextOk;
 
 		TArray<FString> Problems;
@@ -6177,10 +6524,10 @@ private:
 		}
 		if (!bTextOk)
 		{
-			Problems.Add(FString::Printf(TEXT("visible menu text validated %d/8"), MenuTextOk));
+			Problems.Add(FString::Printf(TEXT("visible menu text validated %d/6"), MenuTextOk));
 		}
 
-		UE_LOG(LogHyperAIStudio, Display, TEXT("HyperAIStudio.MenuSmoke %s tools=%d/3 status=%d/1 asset=%d/5 actorUnexpected=%d/0 menuText=%d/8 graphExtender=%s problems=%s"),
+		UE_LOG(LogHyperAIStudio, Display, TEXT("HyperAIStudio.MenuSmoke %s tools=%d/1 status=%d/1 asset=%d/5 actorUnexpected=%d/0 menuText=%d/6 graphExtender=%s problems=%s"),
 			bOk ? TEXT("succeeded") : TEXT("failed"),
 			ToolsFound,
 			StatusFound,
@@ -6205,6 +6552,7 @@ private:
 	TUniquePtr<FHyperAIStudioPIEPlaytestRegistration> PIEPlaytestRegistration;
 	TUniquePtr<FHyperAIStudioFoundationProbe> FoundationProbe;
 	FDelegateHandle EnginePreExitHandle;
+	FDelegateHandle CanCloseEditorHandle;
 	TUniquePtr<FAutoConsoleCommand> CommandSetUp;
 	TUniquePtr<FAutoConsoleCommand> CommandGenerateFiles;
 	TUniquePtr<FAutoConsoleCommand> CommandDocsSmoke;
@@ -6242,6 +6590,10 @@ private:
 	TWeakPtr<SHyperAIStudioQuickActionWindow> ActiveChatWidget;
 	FDelegateHandle GraphEditorContextMenuExtenderHandle;
 	FTSTicker::FDelegateHandle WelcomePromptTickerHandle;
+	FTSTicker::FDelegateHandle AgentGuidanceTickerHandle;
+	FTSTicker::FDelegateHandle MemoryRefreshTickerHandle;
+	FDelegateHandle MemoryChangedHandle;
+	FDelegateHandle PackageSavedHandle;
 	bool bWelcomePromptProbeActive = false;
 	bool bWelcomePromptShown = false;
 	bool bModuleShuttingDown = false;

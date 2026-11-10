@@ -9,6 +9,9 @@
 
 #include "HyperAIStudioContextSearchToolsets.generated.h"
 
+struct FHyperAIProjectAssetIndexSnapshot;
+class FHyperAIStudioProjectAssetIndex;
+
 /** One bounded diagnostic emitted by the context/search read contracts. */
 USTRUCT(BlueprintType)
 struct FHyperAIReadDiagnostic
@@ -420,9 +423,18 @@ struct FHyperAIProjectSearchRequest
 	UPROPERTY()
 	int32 MaxOutputBytes = 65536;
 
-	/** Starts a bounded asynchronous refresh when no usable immutable index exists. */
+	/** Starts a bounded asynchronous refresh when no usable immutable index exists, and waits for it (2.5 s at most); the wait also reads the project's assets folder by folder. */
 	UPROPERTY()
 	bool bStartIndexIfUnavailable = true;
+
+	/**
+	 * literal: every query term in the name, class or folder, as before. semantic: assets ranked by meaning (stems, a
+	 * built-in concept vocabulary and spelling), best first. hybrid: literal matches first, then the ranked ones. auto
+	 * (empty): hybrid for a query of three or more words, or when nothing matches literally; literal otherwise. Ranked
+	 * records carry match (name, meaning, spelling or words) and score. Local only: nothing leaves the machine.
+	 */
+	UPROPERTY()
+	FString Mode;
 };
 
 USTRUCT(BlueprintType)
@@ -477,7 +489,7 @@ struct FHyperAIBatchQueryRequest
 	int32 MaxOutputBytes = 131072;
 };
 
-/** State of the fixed-root project index; the asset portion stays partial until a bounded async cache is available. */
+/** State of the project index: C++ symbols from the asynchronous source pass, plus on-disk assets from the folder-by-folder asset walk. */
 USTRUCT(BlueprintType)
 struct FHyperAIProjectIndexStatus
 {
@@ -525,6 +537,23 @@ struct FHyperAIProjectIndexStatus
 	UPROPERTY()
 	int32 AssetRecordCount = 0;
 
+	/** The asset walk on its own: uninitialized, waiting_for_registry, indexing, ready, partial, or unavailable. */
+	UPROPERTY()
+	FString AssetIndexStatus;
+
+	UPROPERTY()
+	int64 AssetGeneration = 0;
+
+	UPROPERTY()
+	int32 AssetFolderCount = 0;
+
+	/** Folders that changed on disk and are queued to be read again. */
+	UPROPERTY()
+	int32 AssetPendingFolderCount = 0;
+
+	UPROPERTY()
+	bool bAssetRegistryScanning = false;
+
 	UPROPERTY()
 	int32 CppFileCount = 0;
 
@@ -545,6 +574,34 @@ struct FHyperAIProjectIndexStatus
 
 	UPROPERTY()
 	TArray<FString> DirtyPackages;
+
+	/** How assets are ranked: local_concepts.v1 (by meaning, on this machine), or words_only when Search By Meaning is off. */
+	UPROPERTY()
+	FString SearchEngine;
+
+	/** Concept groups in the built-in vocabulary. */
+	UPROPERTY()
+	int32 ConceptCount = 0;
+
+	/** Features stored for all assets (words, concepts, trigrams). */
+	UPROPERTY()
+	int32 IndexFeatureCount = 0;
+
+	/** Rough size of the asset index in editor memory. */
+	UPROPERTY()
+	int64 IndexBytes = 0;
+
+	/** Background indexing waits while Play In Editor runs. */
+	UPROPERTY()
+	bool bPausedForPlayInEditor = false;
+
+	/** What the index stores and where. */
+	UPROPERTY()
+	FString Storage;
+
+	/** Whether Epic's SemanticSearch plugin is enabled here, and where its embeddings would be computed. */
+	UPROPERTY()
+	FString EpicSemanticSearch;
 
 	UPROPERTY()
 	TArray<FHyperAIReadDiagnostic> Diagnostics;
@@ -606,7 +663,7 @@ class HYPERAISTUDIO_API UHyperAIStudioProjectSearchToolset final : public UTools
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** Search the latest immutable fixed-root index; asset results require the bounded async cache and arbitrary file contents are never returned. */
+	/** Search project assets (name, class, folder, tags) and C++ symbols in the latest immutable on-disk index, by name or by meaning (Mode: literal, semantic, hybrid, auto; local only, nothing leaves the machine). Bounded pages with cursors; arbitrary file contents are never returned. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Project")
 	static FHyperAIReadReport hyper_project_search(const FHyperAIProjectSearchRequest& Request);
 };
@@ -619,7 +676,7 @@ class HYPERAISTUDIO_API UHyperAIStudioProjectIndexStatusToolset final : public U
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** Poll index lifecycle, or request one bounded asynchronous refresh of the fixed project roots. */
+	/** Poll the project index (on-disk assets and C++ symbols), or request one bounded asynchronous refresh that re-reads both. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Project")
 	static FHyperAIProjectIndexStatus hyper_project_index_status(bool bRequestRefresh = false);
 };
@@ -704,8 +761,12 @@ public:
 	static constexpr int32 MaxComponentsPerActor = 64;
 	static constexpr int32 MaxProperties = 16;
 	static constexpr int32 MaxBatchReads = 8;
+	/** C++ symbol records, and the records one search materializes; asset rows live in the asset index instead. */
 	static constexpr int32 MaxProjectIndexRecords = 8192;
-	static constexpr int32 MaxProjectAssets = 2048;
+	static constexpr int32 MaxProjectAssets = 32768;
+	static constexpr int32 MaxProjectAssetFolders = 8192;
+	/** Below MaxProjectIndexRecords, so a search's filtered snapshot always pages. */
+	static constexpr int32 MaxProjectSearchMatches = 4096;
 	static constexpr int32 MaxCppFiles = 2048;
 	static constexpr int32 MaxCppSymbols = 6144;
 	static constexpr int32 MaxCppDirectories = 1024;
@@ -759,7 +820,8 @@ public:
 		int32 PageSize,
 		const FString& Cursor,
 		int32 MaxOutputBytes,
-		FHyperAIReadReport& OutReport);
+		FHyperAIReadReport& OutReport,
+		bool bKeepOrder = false);
 
 	static bool IsProjectContainedSourcePath(
 		const FString& ProjectRoot,
@@ -785,12 +847,23 @@ public:
 		const FString& SourceText,
 		int32 MaxSymbols,
 		bool& bOutTruncated);
+	/** Searches only the value snapshot, as if no asset index were attached. */
 	static FHyperAIReadReport SearchProjectIndex(
 		const FHyperAIProjectIndexValueSnapshot& Snapshot,
 		const FHyperAIProjectSearchRequest& Request);
+	/** Searches the C++ value snapshot and the asset index's rows; records are built only for matches. */
+	static FHyperAIReadReport SearchProjectIndex(
+		const FHyperAIProjectIndexValueSnapshot& Snapshot,
+		const FHyperAIProjectSearchRequest& Request,
+		const FHyperAIProjectAssetIndexSnapshot& Assets);
 	static FHyperAIReadReport AnalyzeBatch(
 		const FHyperAIContextSearchValueSnapshot& EditorSnapshot,
 		const FHyperAIProjectIndexValueSnapshot& ProjectSnapshot,
+		const FHyperAIBatchQueryRequest& Request);
+	static FHyperAIReadReport AnalyzeBatch(
+		const FHyperAIContextSearchValueSnapshot& EditorSnapshot,
+		const FHyperAIProjectIndexValueSnapshot& ProjectSnapshot,
+		const FHyperAIProjectAssetIndexSnapshot& Assets,
 		const FHyperAIBatchQueryRequest& Request);
 };
 
@@ -803,11 +876,28 @@ public:
 	FHyperAIProjectIndexValueSnapshot GetSnapshot() const;
 	/** Shared immutable view; repeated reads do not deep-copy the complete project index. */
 	TSharedRef<const FHyperAIProjectIndexValueSnapshot, ESPMode::ThreadSafe> GetSnapshotShared() const;
+	/** The asset index's latest published snapshot; uninitialized until the first search or refresh starts it. */
+	TSharedRef<const FHyperAIProjectAssetIndexSnapshot, ESPMode::ThreadSafe> GetAssetSnapshotShared() const;
+	/** Game thread. Starts the asset walk on first use; true when it was already running. */
+	bool EnsureAssetIndexStarted();
+	/** Starts the C++ pass and the asset walk; a refresh of a running asset index walks every folder again. */
 	bool RequestRefresh(FString& OutDiagnostic);
+	/** Waits up to Seconds for a refresh in progress to publish its index; true when none is running any more. */
+	bool WaitForRefresh(double Seconds);
+	/**
+	 * Game thread. Waits up to Seconds for the parts a search reads: the C++ pass and the first asset walk. The core
+	 * ticker cannot run while this blocks, so the wait reads asset folders itself. True when the C++ pass is no longer
+	 * running.
+	 */
+	bool WaitForFirstIndex(double Seconds, bool bIncludeAssets = true, bool bIncludeCpp = true);
 	void Shutdown();
 
 #if WITH_DEV_AUTOMATION_TESTS
 	void SetSnapshotForTests(const FHyperAIProjectIndexValueSnapshot& Snapshot);
+	/** Pins the asset snapshot every reader sees until ResetAssetIndexForTests. */
+	void SetAssetSnapshotForTests(const FHyperAIProjectAssetIndexSnapshot& Snapshot);
+	/** Drops the live asset index and any pinned snapshot, so the next search starts from nothing. */
+	void ResetAssetIndexForTests();
 #endif
 
 private:
@@ -821,6 +911,8 @@ private:
 	bool bShuttingDown = false;
 	int64 NextGeneration = 1;
 	TFuture<void> WorkerFuture;
+	TSharedPtr<FHyperAIStudioProjectAssetIndex, ESPMode::ThreadSafe> AssetIndex;
+	TSharedPtr<const FHyperAIProjectAssetIndexSnapshot, ESPMode::ThreadSafe> AssetSnapshotOverride;
 };
 
 /** Registration owner to be wired by the module after source-candidate review. */

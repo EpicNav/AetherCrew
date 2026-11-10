@@ -418,13 +418,23 @@ EHyperAIStudioOperationBeginResult FHyperAIStudioOperationJournal::BeginOperatio
 		return EHyperAIStudioOperationBeginResult::Existing;
 	}
 
+	const TArray<FHyperAIStudioOperationRecord> PreviousRecords = Records;
 	if (Records.Num() >= MaxRecords)
 	{
-		OutError = TEXT("Operation journal capacity is exhausted; records are never pruned implicitly.");
-		return EHyperAIStudioOperationBeginResult::CapacityExceeded;
+		// A retry comes back within minutes, not hundreds of operations later, so a full journal gives up its oldest
+		// settled record. Never one still running or whose outcome is unknown: those still have to be resolved.
+		const int32 Oldest = Records.IndexOfByPredicate([](const FHyperAIStudioOperationRecord& Existing)
+		{
+			return Existing.IsTerminal() && Existing.State != EHyperAIStudioOperationState::OutcomeUnknown;
+		});
+		if (Oldest == INDEX_NONE)
+		{
+			OutError = TEXT("Operation journal capacity is exhausted by operations that are still unresolved.");
+			return EHyperAIStudioOperationBeginResult::CapacityExceeded;
+		}
+		Records.RemoveAt(Oldest);
 	}
 
-	const TArray<FHyperAIStudioOperationRecord> PreviousRecords = Records;
 	FHyperAIStudioOperationRecord Record;
 	Record.OperationId = OperationId;
 	Record.CanonicalProjectId = CanonicalProjectId;

@@ -1,0 +1,274 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "motion-design",
+ "presets": [
+  {
+   "id": "motion-design.audit-modifier-stack",
+   "title": "Audit a Motion Design actor's modifiers and animators",
+   "summary": "List the modifiers on the selected actor in order with their states, its property animators, and validate the stack.",
+   "packs": [
+    "actor_modifier_property_animation"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_actor_modifier_inspect",
+    "hyper_actor_modifier_validate",
+    "hyper_property_animation_inspect"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "motion design",
+    "modifiers",
+    "animators",
+    "audit",
+    "broadcast",
+    "read-only"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [],
+   "prompt": "Audit the Motion Design setup of {{selected_actor}} in {{level}}. Read-only: change nothing.\n1. hyper_actor_modifier_inspect with ActorPath set to the actor's exact object path (from {{selected_actors}}). If the tool is missing or reports that the ActorModifier plugin is off, say the actor_modifier_property_animation pack is unavailable and stop. If it reports the actor is not loaded, or is unsaved or dirty, say what is needed (load the map, save the actor) and stop.\n2. hyper_actor_modifier_validate with the Snapshot from step 1.\n3. hyper_property_animation_inspect with the same ActorPath, to list its property animators: class, enabled, time source, and each linked property with its magnitude, time offset and mode.\n4. Report a table of the modifier stack in order: index, ModifierName, class, enabled, applied, idle. Mark a row PASS when it is enabled and applied, WARN when it is disabled, and FAIL when it is enabled but not applied. Add a second table of the animators and their linked properties. Below them, give the validation result (bValid, ErrorCount and each issue code), and point out anything order-dependent, such as Bevel placed before Extrude on 3D text or a shape."
+  },
+  {
+   "id": "motion-design.radial-carousel-plan",
+   "title": "Plan a radial arrange for a product carousel",
+   "summary": "Preflight adding a RadialArrange modifier to a carousel parent, seal the plan, and list the ring and facing settings to set.",
+   "packs": [
+    "actor_modifier_property_animation"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_actor_modifier_inspect",
+    "hyper_actor_modifier_apply_plan",
+    "hyper_actor_modifier_validate"
+   ],
+   "ops": [
+    "add"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "motion design",
+    "carousel",
+    "radial arrange",
+    "modifiers",
+    "broadcast",
+    "product",
+    "layout"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "radius",
+     "label": "Ring radius in cm",
+     "default": "400"
+    }
+   ],
+   "prompt": "Set up {{selected_actor}} as a product carousel: its child actors arranged in a ring by a RadialArrange modifier, each turned to face the centre. Change only this actor's modifier stack.\n1. hyper_actor_modifier_inspect with the actor's exact ActorPath. If the tool is missing or the ActorModifier plugin is off, say the actor_modifier_property_animation pack is unavailable and stop. The actor must be loaded, saved and clean. Note the PersistedFingerprint and the current stack; if RadialArrange is already there, report it and stop.\n2. hyper_actor_modifier_apply_plan with bDryRun true, a fresh OperationId, ExpectedPersistedFingerprint, and Operations: `add` with ModifierName `RadialArrange` and bEnabled true. Expect `dry_run_valid_zero_effect`. A `modifier_not_registered` refusal means the Motion Design modifiers are not loaded: say so and stop.\n3. Send the same plan with bDryRun false and ExpectedPlanHash set to the dry run's PlanHash. If it returns `bounded_transaction_save_backend_required`, nothing changed: this pack only preflights for now. Say so plainly and do not retry.\n4. hyper_actor_modifier_inspect again, and hyper_actor_modifier_validate with the new Snapshot.\n5. Report a PASS/FAIL table: preflight valid, PlanHash, non-dry Status, stack afterwards (RadialArrange added, or unchanged), validation errors 0. If nothing changed, end with the steps to do it by hand: add RadialArrange, then set Rings 1, Inner Radius {{radius}} cm, Orient on with Orientation Axis X (Flip Orient to face outward instead)."
+  },
+  {
+   "id": "motion-design.fix-modifier-order",
+   "title": "Fix modifier order so Bevel runs after Extrude",
+   "summary": "Find two order-dependent modifiers on a 3D text or shape actor and preflight moving one after the other.",
+   "packs": [
+    "actor_modifier_property_animation"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_actor_modifier_inspect",
+    "hyper_actor_modifier_apply_plan",
+    "hyper_actor_modifier_validate"
+   ],
+   "ops": [
+    "move_after",
+    "move_before"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "motion design",
+    "modifiers",
+    "order",
+    "bevel",
+    "extrude",
+    "3d text",
+    "titles"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "first",
+     "label": "Modifier that runs first",
+     "default": "Extrude"
+    },
+    {
+     "name": "second",
+     "label": "Modifier that runs after it",
+     "default": "Bevel"
+    }
+   ],
+   "prompt": "On {{selected_actor}}, make the {{second}} modifier run after the {{first}} modifier. For 3D text and shapes, Bevel after Extrude keeps the bevel on the extruded edges. Change only this actor's stack order.\n1. hyper_actor_modifier_inspect with the actor's exact ActorPath. If the pack is unavailable, say so and stop. Note the PersistedFingerprint and each modifier's Index and ModifierPath. If either modifier is missing, or {{second}} already comes after {{first}}, report it and stop.\n2. hyper_actor_modifier_apply_plan with bDryRun true, a fresh OperationId, ExpectedPersistedFingerprint, and one operation: `move_after` with ModifierPath set to {{second}}'s path and AnchorPath set to {{first}}'s path. Use `move_before` instead when another modifier must stay between them. Expect `dry_run_valid_zero_effect`.\n3. Send it with bDryRun false and ExpectedPlanHash set to its PlanHash. A `bounded_transaction_save_backend_required` Status means this pack only preflights for now and nothing changed: say so and do not retry.\n4. hyper_actor_modifier_inspect again, then hyper_actor_modifier_validate with the new Snapshot.\n5. Report a PASS/FAIL table: preflight valid, PlanHash, non-dry Status, {{second}}'s index after {{first}}'s (or unchanged), every modifier still applied, validation errors 0. If nothing changed, end with how to drag {{second}} below {{first}} in the modifier list by hand."
+  },
+  {
+   "id": "motion-design.mute-heavy-modifiers",
+   "title": "Mute heavy geometry modifiers for a performance pass",
+   "summary": "Preflight disabling Subdivide, Bevel and Boolean modifiers across the selected actors, and give the plan that restores them.",
+   "packs": [
+    "actor_modifier_property_animation"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_actor_modifier_inspect",
+    "hyper_actor_modifier_apply_plan",
+    "hyper_actor_modifier_validate"
+   ],
+   "ops": [
+    "set_enabled"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "motion design",
+    "performance",
+    "modifiers",
+    "subdivide",
+    "bevel",
+    "boolean",
+    "optimization"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "names",
+     "label": "Modifiers to mute",
+     "default": "Subdivide, Bevel, Boolean"
+    }
+   ],
+   "prompt": "For a performance pass on {{selected_actors}}, plan to disable every {{names}} modifier and leave all other modifiers alone. Change only the enabled state of those modifiers.\n1. For each actor, hyper_actor_modifier_inspect with its exact ActorPath. If the pack is unavailable, say so and stop. Note its PersistedFingerprint and the ModifierPath of each enabled modifier named in {{names}}. Skip actors that have none, and list actors that are not loaded, saved and clean without touching them.\n2. For each remaining actor, one hyper_actor_modifier_apply_plan with bDryRun true, a fresh OperationId, ExpectedPersistedFingerprint, and one `set_enabled` operation per matching modifier with bEnabled false. Expect `dry_run_valid_zero_effect` for each.\n3. Send each with bDryRun false and ExpectedPlanHash set to its PlanHash. If the Status is `bounded_transaction_save_backend_required`, nothing changed, because this pack only preflights for now: report it once and do not retry the rest.\n4. hyper_actor_modifier_inspect each actor again, and hyper_actor_modifier_validate its new Snapshot.\n5. Report a table, one row per actor: modifiers matched, preflight PASS/FAIL, non-dry Status, enabled count before and after, validation errors. Then give the total number of modifiers that would be muted, and the reverse plan (`set_enabled` with bEnabled true) that restores them."
+  },
+  {
+   "id": "motion-design.oscillate-sway-animator",
+   "title": "Plan an Oscillate animator to sway a hanging sign",
+   "summary": "Preflight creating an Oscillate property animator on an actor and linking its rotation, then list the swing to set by hand.",
+   "packs": [
+    "actor_modifier_property_animation"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_property_animation_inspect",
+    "hyper_property_animation_apply_plan",
+    "hyper_property_animation_validate"
+   ],
+   "ops": [
+    "create",
+    "link",
+    "set_context"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "motion design",
+    "property animator",
+    "oscillate",
+    "sway",
+    "procedural animation",
+    "props"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "degrees",
+     "label": "Sway in degrees",
+     "default": "8"
+    }
+   ],
+   "prompt": "Make {{selected_actor}} sway gently, like a hanging tavern sign, with a PropertyAnimator Oscillate animator on its rotation, {{degrees}} degrees either way. Change only this actor's animators.\n1. hyper_property_animation_inspect with the actor's exact ActorPath. If the pack is unavailable or the PropertyAnimator plugin is off, say so and stop. Note the PersistedFingerprint and any existing animators and linked properties; if an Oscillate animator already drives its rotation, report it and stop.\n2. hyper_property_animation_apply_plan with bDryRun true, a fresh OperationId, ExpectedPersistedFingerprint, and one `create` operation with AnimatorClassPath `/Script/PropertyAnimator.PropertyAnimatorOscillate`. Expect `dry_run_valid_zero_effect`; an `animator_class_not_registered` refusal means the plugin is not loaded.\n3. Linking needs the new animator's path, which exists only after `create` runs. Send step 2 with bDryRun false and ExpectedPlanHash. If the Status is `bounded_transaction_save_backend_required`, nothing changed (this pack only preflights for now): report it and do not retry. If it ran, inspect again, then preflight and send `link` with the root component's relative rotation as PropertyLocator, followed by `set_context` with Magnitude 1 (it runs 0 to 1) and Mode `additive`, the same way. The swing itself is the rotation context's Amplitude Min and Max, which this pack does not set.\n4. hyper_property_animation_validate with the latest Snapshot.\n5. Report a PASS/FAIL table: preflight valid, PlanHash, non-dry Status, animators afterwards, linked property, validation errors 0. End with the steps to finish by hand: an Oscillate animator linked to Rotation, Amplitude Min -{{degrees}} and Max {{degrees}} degrees on Roll."
+  },
+  {
+   "id": "motion-design.stagger-wave-offsets",
+   "title": "Ripple a wave across a row of animated actors",
+   "summary": "Preflight staggered time offsets on each actor's existing animator so a row of bars or lights moves as a travelling wave.",
+   "packs": [
+    "actor_modifier_property_animation"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_property_animation_inspect",
+    "hyper_property_animation_apply_plan",
+    "hyper_property_animation_validate"
+   ],
+   "ops": [
+    "set_context"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "motion design",
+    "wave",
+    "time offset",
+    "equalizer",
+    "stagger",
+    "broadcast",
+    "music"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 2
+   },
+   "placeholders": [
+    {
+     "name": "step",
+     "label": "Offset step in seconds",
+     "default": "0.1"
+    }
+   ],
+   "prompt": "Make {{selected_actors}} move as a travelling wave. Each already has a property animator (Oscillate or Wiggle, for example) on a property; give the nth actor, ordered by X position, a time offset of n x {{step}} seconds. Change only those time offsets.\n1. For each actor, hyper_property_animation_inspect with its exact ActorPath. If the pack is unavailable, say so and stop. Note the PersistedFingerprint, the AnimatorPath, and each linked context's LocatorPath, Magnitude, TimeOffset and Mode. List actors with no animator, or that are not loaded, saved and clean, and leave them out. Sort the rest by X.\n2. For each actor, one hyper_property_animation_apply_plan with bDryRun true, a fresh OperationId, ExpectedPersistedFingerprint and one `set_context` per linked property: its AnimatorPath, PropertyLocator set to its LocatorPath, the same Magnitude and Mode, and TimeOffset n x {{step}}. Expect `dry_run_valid_zero_effect`.\n3. Send each with bDryRun false and its ExpectedPlanHash. A `bounded_transaction_save_backend_required` Status means this pack only preflights for now and nothing changed: report it once and do not retry the rest.\n4. hyper_property_animation_validate each actor's latest Snapshot.\n5. Report a table, one row per actor in X order: label, X, planned TimeOffset, preflight PASS/FAIL, non-dry Status, validation errors. Check that the offsets rise by exactly {{step}} seconds from row to row, and give the delay from the first actor to the last ((actor count - 1) x {{step}} seconds)."
+  },
+  {
+   "id": "motion-design.prove-scene-animates",
+   "title": "Prove a Motion Design scene is animating",
+   "summary": "Capture three frames half a second apart from a camera and measure how much changed, beside each actor's enabled animators.",
+   "packs": [
+    "actor_modifier_property_animation",
+    "lighting_lookdev"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_property_animation_inspect",
+    "hyper_property_animation_validate",
+    "hyper_capture_view"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "motion design",
+    "verify",
+    "capture",
+    "frames",
+    "animators",
+    "broadcast",
+    "read-only"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "CAM_Broadcast"
+    }
+   ],
+   "prompt": "Check that the animated actors {{selected_actors}} in {{level}} really move, as seen from camera `{{camera}}`. Read-only: change nothing.\n1. For each actor, hyper_property_animation_inspect with its exact ActorPath: list its animators, whether each is enabled, its time source, and its linked properties. If the pack is unavailable, say so and stop. Then hyper_property_animation_validate each Snapshot.\n2. hyper_capture_view with Source `camera`, CameraActorLabel `{{camera}}`, Width 1280, Height 720, FrameCount 3, IntervalSeconds 0.5 and Label `motion_check`. If the camera is missing, use Source `viewport` and say so.\n3. Read bWorldTimeAdvanced: if it is false, the editor world did not tick and the frames prove nothing, so say so. Otherwise read each Diff's MeanAbsDiff and ChangedPixelFraction.\n4. Report a PASS/FAIL table: every actor has at least one enabled animator with a linked property, validation errors 0, world time advanced, and ChangedPixelFraction above 0.01 between frames 1 and 2 and between frames 2 and 3. Show the three frames, each on its own line, and name any actor whose animators are all disabled."
+  }
+ ]
+}

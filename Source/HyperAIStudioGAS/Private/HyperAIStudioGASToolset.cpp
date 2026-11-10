@@ -1,6 +1,7 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioGASToolset.h"
+#include "HyperAIStudioGASAuthoring.h"
 
 // Every direct GameplayAbilities dependency is isolated in this LoadingPhase=None editor module.
 
@@ -13,6 +14,7 @@
 #include "GameplayTagsManager.h"
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
 #include "UObject/SoftObjectPath.h"
@@ -757,7 +759,7 @@ namespace HyperAIStudio::GAS::Private
 					AddIssue(Snapshot.CaptureIssues, FHyperAIStudioGASContracts::MaxIssues,
 						bIssueTruncated, TEXT("asset_not_loaded"), TEXT("warning"), Path,
 						TEXT("gas:asset:") + Path, -1,
-						TEXT("Exact GAS asset is not already loaded; inspection never synchronously loads it."));
+						TEXT("No Blueprint is at this path (inspect loads the ones that exist)."));
 					continue;
 				}
 				if (!IsRelevantBlueprint(Blueprint))
@@ -900,17 +902,17 @@ const TArray<FHyperAIStudioGASManifestEntry>& FHyperAIStudioGASContracts::GetMan
 const TArray<FHyperAIGASEpicDelegate>& FHyperAIStudioGASContracts::GetEpicDelegates()
 {
 	static const TArray<FHyperAIGASEpicDelegate> Delegates = {
-		{TEXT("inspect_attribute_values"), TEXT("GASToolsets.AbilitySystemInspectorToolset"),
+		{TEXT("inspect_attribute_values"), TEXT("GASToolsets59.AbilitySystemInspectorToolset59"),
 			TEXT("GetAttributeValues"), TEXT("read"), TEXT("Runtime ASC inspection is already native in Epic GAS Toolsets.")},
-		{TEXT("inspect_active_effects"), TEXT("GASToolsets.AbilitySystemInspectorToolset"),
+		{TEXT("inspect_active_effects"), TEXT("GASToolsets59.AbilitySystemInspectorToolset59"),
 			TEXT("GetActiveEffects"), TEXT("read"), TEXT("Runtime active-effect inspection remains an Epic delegate.")},
-		{TEXT("inspect_granted_abilities"), TEXT("GASToolsets.AbilitySystemInspectorToolset"),
+		{TEXT("inspect_granted_abilities"), TEXT("GASToolsets59.AbilitySystemInspectorToolset59"),
 			TEXT("GetGrantedAbilities"), TEXT("read"), TEXT("Runtime granted-ability inspection remains an Epic delegate.")},
-		{TEXT("inspect_active_tags"), TEXT("GASToolsets.AbilitySystemInspectorToolset"),
+		{TEXT("inspect_active_tags"), TEXT("GASToolsets59.AbilitySystemInspectorToolset59"),
 			TEXT("GetActiveTags"), TEXT("read"), TEXT("Runtime active-tag inspection remains an Epic delegate.")},
-		{TEXT("find_attribute_set_classes"), TEXT("GASToolsets.AttributeSetToolset"),
+		{TEXT("find_attribute_set_classes"), TEXT("GASToolsets59.AttributeSetToolset59"),
 			TEXT("FindAttributeSetClasses"), TEXT("read"), TEXT("Epic owns broad native AttributeSet class discovery.")},
-		{TEXT("list_attributes"), TEXT("GASToolsets.AttributeSetToolset"),
+		{TEXT("list_attributes"), TEXT("GASToolsets59.AttributeSetToolset59"),
 			TEXT("ListAttributes"), TEXT("read"), TEXT("Epic owns direct AttributeSet member listing.")},
 		{TEXT("list_gameplay_cues"), TEXT("GASToolsets.GameplayCueToolset"),
 			TEXT("ListCues"), TEXT("read"), TEXT("Cue-manager inventory remains an Epic delegate.")},
@@ -960,7 +962,7 @@ bool FHyperAIStudioGASContracts::IsCanonicalProjectObjectPath(const FString& Pat
 		|| HyperAIStudio::GAS::Private::HasEmbeddedNull(Path) || Path.Contains(TEXT("\\"))
 		|| Path.Contains(TEXT("..")) || Path.Contains(TEXT(":"))
 		|| !Path.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
-		|| !FPackageName::IsValidObjectPath(Path)) return false;
+		|| !FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path)) return false;
 	FString PackageName;
 	FString ObjectName;
 	return Path.Split(TEXT("."), &PackageName, &ObjectName, ESearchCase::CaseSensitive,
@@ -1284,6 +1286,7 @@ FHyperAIGASInspectReport UHyperAIStudioGASToolset::hyper_gas_inspect(
 		Report.Diagnostic = TEXT("Loaded Unreal GAS objects may only be inspected on the serialized game thread.");
 		return Report;
 	}
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	if (Request.AssetPaths.Num() > FHyperAIStudioGASContracts::MaxAssetPaths
 		|| !IsSupportedVariantFilter(Request.Variant)
 		|| Request.PageSize < 1 || Request.PageSize > FHyperAIStudioGASContracts::MaxPageSize
@@ -1309,6 +1312,8 @@ FHyperAIGASInspectReport UHyperAIStudioGASToolset::hyper_gas_inspect(
 		UniquePaths.Add(Path);
 	}
 
+	// Named assets are loaded first, so an agent reads what is on disk, not only what an editor tab happens to hold.
+	HyperAIStudio::GAS::Authoring::LoadRequested(Request.AssetPaths);
 	FHyperAIStudioGASValueSnapshot Snapshot = CaptureSnapshot(Request);
 	Report.Revision = Snapshot.Revision;
 	Report.bRevisionComplete = Snapshot.bComplete;
@@ -1399,6 +1404,7 @@ FHyperAIGASValidateReport UHyperAIStudioGASToolset::hyper_gas_validate(
 		Report.Diagnostic = TEXT("Fresh Unreal GAS validation requires the serialized game thread.");
 		return Report;
 	}
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	if (!Request.bRequireFreshCapture)
 	{
 		Report.Status = TEXT("fresh_capture_required");
@@ -1438,6 +1444,7 @@ FHyperAIGASValidateReport UHyperAIStudioGASToolset::hyper_gas_validate(
 	CaptureRequest.MaxGameThreadMs = Request.MaxGameThreadMs;
 	CaptureRequest.PageSize = FHyperAIStudioGASContracts::MaxPageSize;
 	CaptureRequest.MaxOutputBytes = FHyperAIStudioGASContracts::MaxOutputBytes;
+	HyperAIStudio::GAS::Authoring::LoadRequested(Request.AssetPaths);
 	FHyperAIStudioGASValueSnapshot Snapshot = CaptureSnapshot(CaptureRequest);
 	Report.bFreshCapture = true;
 	Report.Revision = Snapshot.Revision;
@@ -1985,6 +1992,8 @@ FHyperAIGASApplyPlanReport FHyperAIStudioGASContracts::BuildPlan(
 		Report.Diagnostic = TEXT("GAS plan capture and simulation require the serialized game thread.");
 		return Finish();
 	}
+	// Tags, attributes and class paths become FNames and lookups, which stop the editor past an FName's length.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Finish();
 	if (Request.Operations.IsEmpty() || Request.Operations.Num() > MaxOperations
 		|| Request.DeadlineMs < 100 || Request.DeadlineMs > 2000
 		|| Request.MaxGameThreadMs < 50 || Request.MaxGameThreadMs > 250
@@ -2438,7 +2447,8 @@ FHyperAIGASApplyPlanReport FHyperAIStudioGASContracts::BuildPlan(
 FHyperAIGASApplyPlanReport UHyperAIStudioGASToolset::hyper_gas_apply_plan(
 	const FHyperAIGASApplyPlanRequest& Request)
 {
-	return FHyperAIStudioGASContracts::BuildPlan(Request);
+	// Agents author through the executing path; BuildPlan remains the strict exact-revision planner its tests prove.
+	return HyperAIStudio::GAS::Authoring::Run(Request);
 }
 
 FString FHyperAIStudioGASTypedPayload::GetTypeId() const

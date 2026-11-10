@@ -37,6 +37,15 @@ struct HYPERAISTUDIO_API FHyperAIStudioExtensionCohortAdmission
 class HYPERAISTUDIO_API FHyperAIStudioExtensionRuntime final
 {
 public:
+	/**
+	 * A non-dry apply_plan may skip the dry run: an empty expected_plan_hash means "apply the plan as
+	 * computed now". It is still sealed, journaled, undoable and approval-gated. A supplied hash must be
+	 * a canonical sha256. Off when bAllowOneShotAgentEdits is false.
+	 */
+	static bool IsValidSubmissionPlanHash(const FString& ExpectedPlanHash);
+	/** True when no hash was supplied (a one-shot edit) or it matches the plan computed now. */
+	static bool IsAcceptedPlanHash(const FString& ExpectedPlanHash, const FString& ActualPlanHash);
+	static const TCHAR* InvalidSubmissionMessage();
 	static constexpr int32 MaxHashInputBytes = 1024 * 1024;
 
 	/** Legacy compatibility query. Prefer AreSourceCandidateToolsEnabled. */

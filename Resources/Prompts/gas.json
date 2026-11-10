@@ -1,0 +1,784 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "gas",
+ "presets": [
+  {
+   "id": "gas.audit-abilities-effects",
+   "title": "Audit Gameplay Abilities and Effects for setup gaps",
+   "summary": "Read every ability and effect in a folder, flag missing costs and cooldowns, cue tags without notifies and compile errors, and change nothing.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_gas_inspect",
+    "hyper_gas_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "gas",
+    "audit",
+    "abilities",
+    "effects",
+    "cues",
+    "validation"
+   ],
+   "placeholders": [
+    {
+     "name": "gas_folder",
+     "label": "GAS folder",
+     "default": "/Game/GAS"
+    }
+   ],
+   "prompt": "Audit the Gameplay Ability System content in `{{gas_folder}}`. Read only. If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_memory_recall with query `GAS abilities effects conventions`. List the folder with Epic's AssetTools.find_assets and turn each package path into an object path (`/Game/GAS/GE_Burn.GE_Burn`).\n2. hyper_gas_inspect with those AssetPaths (it loads them) and every bInclude flag true; follow NextCursor. Add one call with empty AssetPaths, Variant `attribute_set` and bIncludeNativeAttributeSets true to list the attributes.\n3. hyper_gas_validate with the same AssetPaths and group the issues by code (blueprint_compile_error, modifier_attribute_missing, duration_invalid, instant_effect_has_period, cue_tag_invalid, modifier_division_by_zero, ...). Effects with tags or Set By Caller magnitudes get revision_incomplete and component_projection_unsupported, which the validator cannot read yet: INFO; any other error is a FAIL.\n4. From the records flag design gaps: abilities with no CostEffectClassPath or CooldownEffectClassPath, abilities with empty AssetTags, cooldown effects (an ability's CooldownEffectClassPath) that grant no tag, and duration effects with no GrantedTags. Epic's GameplayCueToolset.FindCueTagsWithoutNotifies lists cue tags that show nothing.\nReport a PASS/FAIL table: assets scanned (abilities, effects, attribute sets), unexpected validator errors 0, compile errors 0, cue tags without notifies 0. Then one WARN row per design gap with the asset and the plan op that would fix it (`set_ability_property`, `replace_effect_granted_tags`, `replace_effect_cues`, ...)."
+  },
+  {
+   "id": "gas.heavy-attack-stamina-stagger",
+   "title": "Make a heavy attack that costs stamina and staggers",
+   "summary": "Create a stamina cost, a short stagger hit with Set By Caller damage and a heavy-attack ability that pays the cost and is blocked while staggered.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gas_inspect",
+    "hyper_gas_apply_plan",
+    "hyper_operation_wait",
+    "hyper_gas_validate"
+   ],
+   "ops": [
+    "create_gameplay_effect_blueprint",
+    "set_effect_duration",
+    "replace_effect_modifiers",
+    "replace_effect_granted_tags",
+    "replace_effect_cues",
+    "create_gameplay_ability_blueprint",
+    "set_ability_asset_tags",
+    "set_ability_tags",
+    "set_ability_property"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "gas",
+    "melee",
+    "heavy attack",
+    "stamina",
+    "stagger",
+    "fantasy",
+    "souls-like"
+   ],
+   "placeholders": [
+    {
+     "name": "stamina_cost",
+     "label": "Stamina cost",
+     "default": "25"
+    },
+    {
+     "name": "stagger_seconds",
+     "label": "Stagger time (s)",
+     "default": "0.6"
+    },
+    {
+     "name": "stamina_attribute",
+     "label": "Stamina attribute",
+     "default": "Stamina"
+    },
+    {
+     "name": "damage_attribute",
+     "label": "Damage attribute",
+     "default": "IncomingDamage",
+     "hint": "The meta attribute your damage code reads; use Health if you have none"
+    }
+   ],
+   "prompt": "Make a heavy melee attack under `{{content_folder}}/GAS`: `GE_StaminaHeavy` (instant, -{{stamina_cost}} `{{stamina_attribute}}`), `GE_HeavyHit` (lasts {{stagger_seconds}} s, `{{damage_attribute}}` set by caller with `Data.Damage`, grants `State.Staggered`, cue `GameplayCue.Hit.Heavy`) and `GA_HeavyAttack` (asset tag `Ability.Attack.Heavy`, owns `State.Attacking`, blocked by `State.Staggered` and `State.Attacking`, cost `GE_StaminaHeavy`, net policy local_predicted). If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_gas_inspect with empty AssetPaths, Variant `attribute_set` and bIncludeNativeAttributeSets true: the Attribute Set class with `{{stamina_attribute}}` and `{{damage_attribute}}` is the attributeOwnerClassPath. If there is none, stop: attribute sets are C++ code a programmer must add.\n2. Add any missing tag with Epic's GameplayTagsToolset.AddTag (empty tagSource); these exact tags are approved.\n3. One hyper_gas_apply_plan with bDryRun false and a fresh operationId: `create_gameplay_effect_blueprint`, `set_effect_duration`, `replace_effect_modifiers`, `replace_effect_granted_tags` and `replace_effect_cues` for the effects; `create_gameplay_ability_blueprint`, `set_ability_asset_tags`, `set_ability_tags` (activation_owned, activation_blocked) and `set_ability_property` (cost_effect, net_execution_policy) for the ability. On awaiting_user_approval, call hyper_operation_wait with its operationId and bWaitThroughApproval true, then read back with hyper_gas_inspect instead of Made. The plan compiles and saves what it touches.\n4. Read Made, then hyper_gas_validate on the three object paths (`Name.Name`). Effects with tags or Set By Caller magnitudes get revision_incomplete and component_projection_unsupported, which the validator cannot read yet: INFO; any other error is a FAIL.\nReport a PASS/FAIL table: each asset at its path, durations, magnitudes, tags, cue and cost as read back, no unexpected validator errors. The ability's graph (commit, montage, apply GE_HeavyHit with Data.Damage) is unreal-blueprint work: say so rather than claim the attack plays."
+  },
+  {
+   "id": "gas.add-cooldown",
+   "title": "Add a cooldown to the selected Gameplay Ability",
+   "summary": "Create a cooldown effect that grants a cooldown tag for a set time and attach it to the selected ability, reading both back.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gas_inspect",
+    "hyper_gas_apply_plan",
+    "hyper_operation_wait",
+    "hyper_gas_validate"
+   ],
+   "ops": [
+    "create_gameplay_effect_blueprint",
+    "set_effect_duration",
+    "replace_effect_granted_tags",
+    "set_ability_property"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "gas",
+    "cooldown",
+    "ability",
+    "spell",
+    "balance"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "GameplayAbilityBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "seconds",
+     "label": "Cooldown (s)",
+     "default": "8"
+    },
+    {
+     "name": "cooldown_tag",
+     "label": "Cooldown tag",
+     "default": "Cooldown.Ability.Fireball"
+    }
+   ],
+   "prompt": "Give the ability {{selected_asset}} a {{seconds}} s cooldown. Change only it and the new effect. If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_gas_inspect with AssetPaths [{{selected_asset}}]: note its Revision and CooldownEffectClassPath. If it already has a cooldown, report it and ask before replacing it.\n2. Add `{{cooldown_tag}}` with Epic's GameplayTagsToolset.AddTag (empty tagSource) if it is missing; this tag is approved.\n3. One hyper_gas_apply_plan with bDryRun false and a fresh operationId: `create_gameplay_effect_blueprint` at `{{content_folder}}/GAS/GE_Cooldown_` plus the ability's name without `GA_`; `set_effect_duration` (durationPolicy duration, durationSeconds {{seconds}}, periodSeconds 0); `replace_effect_granted_tags` [`{{cooldown_tag}}`]; then `set_ability_property` with property cooldown_effect, value the new effect and expectedRevision the ability's Revision. On awaiting_user_approval, call hyper_operation_wait with its operationId and bWaitThroughApproval true, then read back with hyper_gas_inspect instead of Made. The plan compiles and saves what it touches.\n4. Read Made, then hyper_gas_validate on both object paths. Effects with tags or Set By Caller magnitudes get revision_incomplete and component_projection_unsupported, which the validator cannot read yet: INFO; any other error is a FAIL.\nReport a PASS/FAIL table: effect duration {{seconds}} s, granted tag `{{cooldown_tag}}`, the ability's CooldownEffectClassPath is the new effect, no unexpected validator errors. Note that the ability's graph must call CommitAbility (or CommitAbilityCooldown) for the cooldown to start."
+  },
+  {
+   "id": "gas.burning-damage-over-time",
+   "title": "Make a burning damage-over-time effect with a cue",
+   "summary": "Create a periodic fire effect that ticks damage on a timer, grants a Burning tag and plays one non-stacking cue, then validate it.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gas_inspect",
+    "hyper_gas_apply_plan",
+    "hyper_operation_wait",
+    "hyper_gas_validate"
+   ],
+   "ops": [
+    "create_gameplay_effect_blueprint",
+    "set_effect_duration",
+    "replace_effect_modifiers",
+    "replace_effect_granted_tags",
+    "replace_effect_asset_tags",
+    "replace_effect_cues",
+    "set_effect_cue_flags"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "gas",
+    "damage over time",
+    "dot",
+    "burning",
+    "status effect",
+    "fantasy"
+   ],
+   "placeholders": [
+    {
+     "name": "tick_damage",
+     "label": "Damage per tick",
+     "default": "5"
+    },
+    {
+     "name": "seconds",
+     "label": "Duration (s)",
+     "default": "6"
+    },
+    {
+     "name": "period",
+     "label": "Tick period (s)",
+     "default": "1.0"
+    },
+    {
+     "name": "health_attribute",
+     "label": "Health attribute",
+     "default": "Health"
+    }
+   ],
+   "prompt": "Create `{{content_folder}}/GAS/GE_Burning`: it lasts {{seconds}} s, ticks every {{period}} s starting on application, each tick -{{tick_damage}} `{{health_attribute}}`, grants `State.Burning`, carries the asset tag `Damage.Element.Fire`, and plays the cue `GameplayCue.Status.Burning` once even when stacked. If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_gas_inspect with empty AssetPaths, Variant `attribute_set` and bIncludeNativeAttributeSets true: the Attribute Set class with `{{health_attribute}}` is the attributeOwnerClassPath. If there is none, stop: attribute sets are C++ code a programmer must add.\n2. Add any missing tag with Epic's GameplayTagsToolset.AddTag (empty tagSource); these exact tags are approved.\n3. One hyper_gas_apply_plan with bDryRun false and a fresh operationId: `create_gameplay_effect_blueprint`; `set_effect_duration` (durationPolicy duration, durationSeconds {{seconds}}, periodSeconds {{period}}, bSetExecutePeriodicEffectOnApplication and bExecutePeriodicEffectOnApplication true); `replace_effect_modifiers` (operation additive, magnitude -{{tick_damage}}); `replace_effect_granted_tags`; `replace_effect_asset_tags`; `replace_effect_cues` (cueTags [`GameplayCue.Status.Burning`], minLevel 0, maxLevel 1); `set_effect_cue_flags` (bSetSuppressStackingCues and bSuppressStackingCues true). On awaiting_user_approval, call hyper_operation_wait with its operationId and bWaitThroughApproval true, then read back with hyper_gas_inspect instead of Made. The plan compiles and saves what it touches.\n4. Check Made, then hyper_gas_validate on the effect. Effects with tags or Set By Caller magnitudes get revision_incomplete and component_projection_unsupported, which the validator cannot read yet: INFO; any other error is a FAIL. Epic's GameplayCueToolset.GetCueInfo shows whether the cue has a notify asset.\nReport a PASS/FAIL table: duration, period, execute-on-application, modifier, granted and asset tags, cue and suppress flag as read back, no unexpected validator errors, and WARN if the cue has no notify yet."
+  },
+  {
+   "id": "gas.healing-potion",
+   "title": "Create a healing potion ability with a charge cost",
+   "summary": "Make an instant heal effect, a potion-charge cost and a Drink Potion ability that cannot be used while dead, and read all three back.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gas_inspect",
+    "hyper_gas_apply_plan",
+    "hyper_operation_wait",
+    "hyper_gas_validate"
+   ],
+   "ops": [
+    "create_gameplay_effect_blueprint",
+    "set_effect_duration",
+    "replace_effect_modifiers",
+    "replace_effect_cues",
+    "create_gameplay_ability_blueprint",
+    "set_ability_asset_tags",
+    "set_ability_tags",
+    "set_ability_property"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "gas",
+    "healing",
+    "potion",
+    "consumable",
+    "rpg",
+    "fantasy"
+   ],
+   "placeholders": [
+    {
+     "name": "heal",
+     "label": "Health restored",
+     "default": "50"
+    },
+    {
+     "name": "health_attribute",
+     "label": "Health attribute",
+     "default": "Health"
+    },
+    {
+     "name": "charges_attribute",
+     "label": "Potion charges attribute",
+     "default": "PotionCharges"
+    }
+   ],
+   "prompt": "Make a healing potion under `{{content_folder}}/GAS`: `GE_Heal_Potion` (instant, +{{heal}} `{{health_attribute}}`, cue `GameplayCue.Heal.Potion`), `GE_PotionCost` (instant, -1 `{{charges_attribute}}`) and `GA_DrinkPotion` (asset tag `Ability.Item.Potion`, owns `State.Drinking`, blocked by `State.Dead` and `State.Drinking`, cost `GE_PotionCost`). If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_gas_inspect with empty AssetPaths, Variant `attribute_set` and bIncludeNativeAttributeSets true: the Attribute Set class with `{{health_attribute}}` is the attributeOwnerClassPath. If there is none, stop: attribute sets are C++ code a programmer must add. If it has no `{{charges_attribute}}`, leave out `GE_PotionCost` and the cost, and say so.\n2. Add any missing tag with Epic's GameplayTagsToolset.AddTag (empty tagSource); these exact tags are approved.\n3. One hyper_gas_apply_plan with bDryRun false and a fresh operationId: `create_gameplay_effect_blueprint` and `set_effect_duration` (instant) for both effects, `replace_effect_modifiers` (additive) for each, `replace_effect_cues` on the heal; `create_gameplay_ability_blueprint`, `set_ability_asset_tags`, `set_ability_tags` (activation_owned, activation_blocked) and `set_ability_property` cost_effect. On awaiting_user_approval, call hyper_operation_wait with its operationId and bWaitThroughApproval true, then read back with hyper_gas_inspect instead of Made. The plan compiles and saves what it touches.\n4. Read Made, then hyper_gas_validate on the three object paths (`Name.Name` form): these effects carry no tags, so ErrorCount must be 0.\nReport a PASS/FAIL table: each asset at its path, heal +{{heal}}, cost -1 charge, the ability's tags and cost as read back, validator ErrorCount 0. Remind me that the ability's graph applies `GE_Heal_Potion` to its owner after CommitAbility."
+  },
+  {
+   "id": "gas.sprint-stamina-drain",
+   "title": "Make a sprint ability that drains stamina over time",
+   "summary": "Create a speed buff, a periodic stamina drain and a Sprint ability blocked when exhausted and predicted on the client, then validate them.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gas_inspect",
+    "hyper_gas_apply_plan",
+    "hyper_operation_wait",
+    "hyper_gas_validate"
+   ],
+   "ops": [
+    "create_gameplay_effect_blueprint",
+    "set_effect_duration",
+    "replace_effect_modifiers",
+    "replace_effect_granted_tags",
+    "create_gameplay_ability_blueprint",
+    "set_ability_asset_tags",
+    "set_ability_tags",
+    "set_ability_property"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "gas",
+    "sprint",
+    "stamina",
+    "movement",
+    "shooter",
+    "survival"
+   ],
+   "placeholders": [
+    {
+     "name": "speed_multiplier",
+     "label": "Speed multiplier",
+     "default": "1.5"
+    },
+    {
+     "name": "drain",
+     "label": "Stamina per tick",
+     "default": "2"
+    },
+    {
+     "name": "drain_period",
+     "label": "Drain period (s)",
+     "default": "0.25"
+    },
+    {
+     "name": "speed_attribute",
+     "label": "Move speed attribute",
+     "default": "MoveSpeed"
+    },
+    {
+     "name": "stamina_attribute",
+     "label": "Stamina attribute",
+     "default": "Stamina"
+    }
+   ],
+   "prompt": "Make sprinting for a survival shooter under `{{content_folder}}/GAS`: `GE_Sprint` (infinite, `{{speed_attribute}}` multiplicative {{speed_multiplier}}, grants `State.Sprinting`), `GE_SprintDrain` (infinite, every {{drain_period}} s -{{drain}} `{{stamina_attribute}}`) and `GA_Sprint` (asset tag `Ability.Movement.Sprint`, blocked by `State.Exhausted` and `State.Staggered`, instancing per_actor, net policy local_predicted). If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_gas_inspect with empty AssetPaths, Variant `attribute_set` and bIncludeNativeAttributeSets true: the Attribute Set class with `{{speed_attribute}}` and `{{stamina_attribute}}` is the attributeOwnerClassPath. If there is none, stop: attribute sets are C++ code a programmer must add.\n2. Add any missing tag with Epic's GameplayTagsToolset.AddTag (empty tagSource); these exact tags are approved.\n3. One hyper_gas_apply_plan with bDryRun false and a fresh operationId: `create_gameplay_effect_blueprint`, `set_effect_duration` (durationPolicy infinite; periodSeconds {{drain_period}} on the drain, 0 on the buff), `replace_effect_modifiers` and `replace_effect_granted_tags` for the effects; `create_gameplay_ability_blueprint`, `set_ability_asset_tags`, `set_ability_tags` (activation_blocked) and `set_ability_property` (instancing_policy, net_execution_policy). On awaiting_user_approval, call hyper_operation_wait with its operationId and bWaitThroughApproval true, then read back with hyper_gas_inspect instead of Made. The plan compiles and saves what it touches.\n4. Read Made, then hyper_gas_validate on the three object paths. Effects with tags or Set By Caller magnitudes get revision_incomplete and component_projection_unsupported, which the validator cannot read yet: INFO; any other error is a FAIL.\nReport a PASS/FAIL table: both effects infinite, the multiplier and drain as read back, the period on the drain only, the ability's tags and policies, no unexpected validator errors. Say that GA_Sprint's graph (apply both effects while held, remove them on release) and movement that reads `{{speed_attribute}}` are Blueprint work."
+  },
+  {
+   "id": "gas.stun-blocks-abilities",
+   "title": "Make a stun that blocks every ability for two seconds",
+   "summary": "Create a stun effect that grants a Stunned tag and blocks all abilities, and make the selected abilities refuse to start while stunned.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gas_inspect",
+    "hyper_gas_apply_plan",
+    "hyper_operation_wait",
+    "hyper_gas_validate"
+   ],
+   "ops": [
+    "create_gameplay_effect_blueprint",
+    "set_effect_duration",
+    "replace_effect_granted_tags",
+    "replace_effect_blocked_ability_tags",
+    "replace_effect_cues",
+    "set_ability_tags"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "gas",
+    "stun",
+    "crowd control",
+    "status effect",
+    "tags"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "GameplayAbilityBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "seconds",
+     "label": "Stun time (s)",
+     "default": "2"
+    },
+    {
+     "name": "block_root",
+     "label": "Blocked ability tag",
+     "default": "Ability",
+     "hint": "Abilities whose asset tags sit under this tag cannot start while stunned"
+    }
+   ],
+   "prompt": "Create `{{content_folder}}/GAS/GE_Stun` (lasts {{seconds}} s, grants `State.Stunned`, blocks abilities tagged `{{block_root}}`, cue `GameplayCue.Status.Stunned`) and make these abilities refuse to start while stunned: {{selected_assets}}. Change only them and the new effect. If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_gas_inspect with the selected AssetPaths: each Revision and AssetTags (each should have one under `{{block_root}}`). It does not list activation tags, so read each ability's ActivationBlockedTags with Epic's ObjectTools.get_properties.\n2. Add any missing tag with Epic's GameplayTagsToolset.AddTag (empty tagSource); these exact tags are approved.\n3. One hyper_gas_apply_plan with bDryRun true first, since it edits existing assets: `create_gameplay_effect_blueprint`, `set_effect_duration` (durationPolicy duration, durationSeconds {{seconds}}), `replace_effect_granted_tags`, `replace_effect_blocked_ability_tags` [`{{block_root}}`], `replace_effect_cues`; then per ability `set_ability_tags` activation_blocked = its current tags plus `State.Stunned`, with expectedRevision (the container is replaced, so keep every tag). It must answer checked.\n4. Send it with bDryRun false and a fresh operationId. On awaiting_user_approval, call hyper_operation_wait with its operationId and bWaitThroughApproval true, then read back with hyper_gas_inspect instead of Made. The plan compiles and saves what it touches.\n5. Read Made, then hyper_gas_validate on every path. Effects with tags or Set By Caller magnitudes get revision_incomplete and component_projection_unsupported, which the validator cannot read yet: INFO; any other error is a FAIL.\nReport a PASS/FAIL table: the effect's duration, granted and blocked tags and cue; per ability its activation_blocked before and after (old tags kept, `State.Stunned` added); no unexpected validator errors."
+  },
+  {
+   "id": "gas.weapon-damage-ammo-firerate",
+   "title": "Build weapon damage, ammo cost and fire rate with GAS",
+   "summary": "Create Set By Caller bullet damage, a one-round ammo cost, a fire-rate cooldown and a Fire ability that uses them, then validate all four.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gas_inspect",
+    "hyper_gas_apply_plan",
+    "hyper_operation_wait",
+    "hyper_gas_validate"
+   ],
+   "ops": [
+    "create_gameplay_effect_blueprint",
+    "set_effect_duration",
+    "replace_effect_modifiers",
+    "replace_effect_asset_tags",
+    "replace_effect_granted_tags",
+    "replace_effect_cues",
+    "create_gameplay_ability_blueprint",
+    "set_ability_asset_tags",
+    "set_ability_property"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "gas",
+    "shooter",
+    "weapon",
+    "damage",
+    "ammo",
+    "fire rate",
+    "set by caller"
+   ],
+   "placeholders": [
+    {
+     "name": "fire_interval",
+     "label": "Time between shots (s)",
+     "default": "0.1"
+    },
+    {
+     "name": "damage_attribute",
+     "label": "Damage attribute",
+     "default": "IncomingDamage"
+    },
+    {
+     "name": "ammo_attribute",
+     "label": "Ammo attribute",
+     "default": "Ammo"
+    }
+   ],
+   "prompt": "Build a rifle's shot under `{{content_folder}}/GAS/Weapons`: `GE_Damage_Bullet` (instant, `{{damage_attribute}}` additive set by caller with `Data.Damage`, asset tag `Damage.Type.Ballistic`, cue `GameplayCue.Impact.Bullet`), `GE_AmmoCost` (instant, -1 `{{ammo_attribute}}`), `GE_FireRate` ({{fire_interval}} s, grants `Cooldown.Weapon.Fire`) and `GA_FireWeapon` (asset tag `Ability.Weapon.Fire`, cost `GE_AmmoCost`, cooldown `GE_FireRate`, instancing per_actor, net policy local_predicted). If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_gas_inspect with empty AssetPaths, Variant `attribute_set` and bIncludeNativeAttributeSets true: the Attribute Set class with `{{damage_attribute}}` and `{{ammo_attribute}}` is the attributeOwnerClassPath. If there is none, stop: attribute sets are C++ code a programmer must add.\n2. Add any missing tag with Epic's GameplayTagsToolset.AddTag (empty tagSource); these exact tags are approved.\n3. One hyper_gas_apply_plan with bDryRun false and a fresh operationId: `create_gameplay_effect_blueprint`, `set_effect_duration`, `replace_effect_modifiers` (setByCallerTag `Data.Damage` instead of a magnitude on the bullet), `replace_effect_asset_tags`, `replace_effect_granted_tags` and `replace_effect_cues`; `create_gameplay_ability_blueprint`, `set_ability_asset_tags` and `set_ability_property` (cost_effect, cooldown_effect, instancing_policy, net_execution_policy). On awaiting_user_approval, call hyper_operation_wait with its operationId and bWaitThroughApproval true, then read back with hyper_gas_inspect instead of Made. The plan compiles and saves what it touches.\n4. Read Made, then hyper_gas_validate on the four object paths. Effects with tags or Set By Caller magnitudes get revision_incomplete and component_projection_unsupported, which the validator cannot read yet: INFO; any other error is a FAIL.\nReport a PASS/FAIL table: the bullet's modifier reads as set by caller `Data.Damage`, the cost -1, the cooldown {{fire_interval}} s with its tag, the ability's cost, cooldown and policies, no unexpected validator errors. Say that the weapon code must set `Data.Damage` on the spec."
+  },
+  {
+   "id": "gas.multiplayer-net-policies",
+   "title": "Set multiplayer net policies on the selected abilities",
+   "summary": "Classify each selected ability as client-predicted or server-only, set instancing and net execution policy in one checked plan, and smoke-test a listen server.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gas_inspect",
+    "hyper_gas_apply_plan",
+    "hyper_operation_wait",
+    "hyper_gas_validate",
+    "hyper_playtest_run",
+    "hyper_playtest_status",
+    "hyper_log_tail"
+   ],
+   "ops": [
+    "set_ability_property"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "gas",
+    "multiplayer",
+    "replication",
+    "prediction",
+    "net execution policy",
+    "listen server"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "GameplayAbilityBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "server_only_words",
+     "label": "Server-only names contain",
+     "default": "Revive, Loot, Purchase, Craft",
+     "hint": "Abilities whose name contains one of these run on the server only"
+    }
+   ],
+   "prompt": "Prepare these abilities for multiplayer: {{selected_assets}}. Change only them. If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_gas_inspect with their AssetPaths: per ability its Revision, InstancingPolicy, NetExecutionPolicy, ReplicationPolicy and NetSecurityPolicy.\n2. Decide and show the table before editing: names containing any of {{server_only_words}} get server_only; every other ability the player triggers gets local_predicted; instancing per_actor, or per_execution when one ability can run several times at once.\n3. One hyper_gas_apply_plan with bDryRun true first (it edits existing assets): per ability `set_ability_property` instancing_policy and net_execution_policy with its expectedRevision; leave unchanged values out. It must answer checked. Send it with bDryRun false and a fresh operationId. On awaiting_user_approval, call hyper_operation_wait with its operationId and bWaitThroughApproval true, then read back with hyper_gas_inspect instead of Made. The plan compiles and saves what it touches.\n4. Read Made, then hyper_gas_validate on every path: ability_policy_unknown 0, ErrorCount 0.\n5. Smoke test: hyper_playtest_run with mode StartInProcess, netMode `ListenServer`, numPlayers 2 and Bot steps `Survey` on pieInstance 0 and 1, then Play goal Explore for 15 s on pieInstance 1; hyper_operation_wait, hyper_playtest_status. Then hyper_log_tail with categories [`LogAbilitySystem`] and maxVerbosity `warning`.\nReport a PASS/FAIL table per ability (policies before and after, read back), validator errors 0, both players joined, and no LogAbilitySystem errors during play."
+  },
+  {
+   "id": "gas.combo-cancel-rules",
+   "title": "Wire combo rules so light, heavy and dodge cancel cleanly",
+   "summary": "Set activation, cancel and block tag rules on three abilities so a dodge cancels attacks, heavy blocks light, and nothing double-fires, then validate.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_gas_inspect",
+    "hyper_gas_apply_plan",
+    "hyper_operation_wait",
+    "hyper_gas_validate"
+   ],
+   "ops": [
+    "set_ability_asset_tags",
+    "set_ability_tags"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "gas",
+    "combo",
+    "melee",
+    "dodge",
+    "cancel",
+    "tags",
+    "action rpg"
+   ],
+   "placeholders": [
+    {
+     "name": "light",
+     "label": "Light attack ability",
+     "default": "/Game/GAS/GA_LightAttack.GA_LightAttack"
+    },
+    {
+     "name": "heavy",
+     "label": "Heavy attack ability",
+     "default": "/Game/GAS/GA_HeavyAttack.GA_HeavyAttack"
+    },
+    {
+     "name": "dodge",
+     "label": "Dodge ability",
+     "default": "/Game/GAS/GA_Dodge.GA_Dodge"
+    }
+   ],
+   "prompt": "Make the action-RPG combo rules airtight on `{{light}}`, `{{heavy}}` and `{{dodge}}`. Change only these three. If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_memory_recall with query `combo ability tags` for earlier conventions. hyper_gas_inspect with the three AssetPaths: each Revision and AssetTags. It does not list the other containers, so read ActivationOwnedTags, ActivationBlockedTags, CancelAbilitiesWithTag and BlockAbilitiesWithTag with Epic's ObjectTools.get_properties.\n2. Target rules: asset tags `Ability.Attack.Light`, `Ability.Attack.Heavy`, `Ability.Movement.Dodge`. Light and heavy own `State.Attacking`, dodge owns `State.Dodging`. Dodge cancels abilities with `Ability.Attack`. Heavy blocks abilities with `Ability.Attack.Light` while active. All three are blocked by `State.Staggered`; light and heavy also by `State.Dodging`. Keep every unrelated tag already there.\n3. Add any missing tag with Epic's GameplayTagsToolset.AddTag (empty tagSource); these exact tags are approved.\n4. One hyper_gas_apply_plan with bDryRun true: `set_ability_asset_tags` and `set_ability_tags` (activation_owned, activation_blocked, cancel_abilities_with, block_abilities_with) per ability, each with its expectedRevision. It must answer checked. Then send it with bDryRun false and a fresh operationId. On awaiting_user_approval, call hyper_operation_wait with its operationId and bWaitThroughApproval true, then read back with hyper_gas_inspect instead of Made. The plan compiles and saves what it touches.\n5. Read Made, then hyper_gas_validate on the three object paths.\nReport a PASS/FAIL table with one row per ability and container: before, after, and whether it matches the rule; validator ErrorCount 0. List any tag you kept that the rules did not mention."
+  },
+  {
+   "id": "gas.rebalance-effects",
+   "title": "Rebalance the selected Gameplay Effects by a percentage",
+   "summary": "Scale the constant modifiers on the selected effects by a percentage, skip any effect a rewrite would damage, and show before and after.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gas_inspect",
+    "hyper_gas_apply_plan",
+    "hyper_operation_wait",
+    "hyper_gas_validate"
+   ],
+   "ops": [
+    "replace_effect_modifiers"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "gas",
+    "balance",
+    "tuning",
+    "modifiers",
+    "damage",
+    "difficulty"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "percent",
+     "label": "Change (%)",
+     "default": "-15",
+     "hint": "Negative weakens, positive strengthens"
+    },
+    {
+     "name": "attribute_filter",
+     "label": "Only this attribute",
+     "default": "all",
+     "hint": "An attribute name such as Health, or all"
+    }
+   ],
+   "prompt": "Rebalance these Gameplay Effects by {{percent}}% for the attribute `{{attribute_filter}}`: {{selected_assets}}. Change only their modifiers. If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_gas_inspect with their AssetPaths: each Revision and every modifier (attribute, Operation, MagnitudeKind, StaticMagnitude, tag requirements). Skip non-effects.\n2. `replace_effect_modifiers` rewrites every modifier, keeps only constant or Set By Caller magnitudes without tag requirements, and inspect hides Set By Caller tags: skip as WARN any effect with a set_by_caller, attribute_based or custom_calculation modifier or a Source/Target tag requirement.\n3. New magnitudes for the rest: additive and override multiply by (1 + {{percent}}/100); multiplicative and division scale only their distance from 1 (1.5 at -15% becomes 1.425). Round to 2 decimals; leave other attributes as they are.\n4. One hyper_gas_apply_plan with bDryRun true: per effect one `replace_effect_modifiers` with all its modifiers, changed or not, and its expectedRevision. It must answer checked; then send it with bDryRun false and a fresh operationId. On awaiting_user_approval, call hyper_operation_wait with its operationId and bWaitThroughApproval true, then read back with hyper_gas_inspect instead of Made. The plan compiles and saves what it touches.\n5. Read Made, then hyper_gas_validate on every path. Effects with tags or Set By Caller magnitudes get revision_incomplete and component_projection_unsupported, which the validator cannot read yet: INFO; any other error is a FAIL.\nReport a PASS/FAIL table, one row per modifier: effect, attribute, operation, magnitude before, after and expected; then the validator result, the skipped effects, and durations, tags and cues unchanged."
+  },
+  {
+   "id": "gas.hook-up-cues",
+   "title": "Hook up gameplay cues on the selected effects",
+   "summary": "Give the selected effects hit or status cues, register the cue tags, create missing notify assets with Epic's tool, and set the cue flags.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gas_inspect",
+    "hyper_gas_apply_plan",
+    "hyper_operation_wait",
+    "hyper_gas_validate"
+   ],
+   "ops": [
+    "replace_effect_cues",
+    "set_effect_cue_flags"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "gas",
+    "gameplay cue",
+    "vfx",
+    "feedback",
+    "status effect",
+    "hit"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "cue_root",
+     "label": "Cue tag prefix",
+     "default": "GameplayCue.Combat",
+     "hint": "Must start with GameplayCue."
+    },
+    {
+     "name": "cue_folder",
+     "label": "Cue notify folder",
+     "default": "/Game/GAS/Cues"
+    }
+   ],
+   "prompt": "Give these Gameplay Effects visible feedback: {{selected_assets}}. Change only their cues and cue flags. If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_gas_inspect with their AssetPaths and bIncludeCues true: each Revision, DurationPolicy, modifiers and existing cues.\n2. Per effect choose one cue tag `{{cue_root}}.<effect name without GE_>`. Add missing ones with Epic's GameplayCueToolset.AddCueTag, then make a notify for each with CreateCueNotifyAsset in `{{cue_folder}}` (bIsActor false for instant effects, true for ones with a duration). These exact tags and assets are approved.\n3. One hyper_gas_apply_plan with bDryRun true first: per effect `replace_effect_cues` with its existing cues plus the new one (minLevel 0, maxLevel 1) and expectedRevision; `set_effect_cue_flags` with bSetRequireModifierSuccessToTriggerCues and bRequireModifierSuccessToTriggerCues true on damage effects (a miss shows nothing), and bSetSuppressStackingCues and bSuppressStackingCues true on effects with a duration. It must answer checked. Send it with bDryRun false and a fresh operationId. On awaiting_user_approval, call hyper_operation_wait with its operationId and bWaitThroughApproval true, then read back with hyper_gas_inspect instead of Made. The plan compiles and saves what it touches.\n4. Read Made, then hyper_gas_validate on every path (effects with tags or Set By Caller magnitudes get revision_incomplete and component_projection_unsupported, which the validator cannot read yet: INFO; any other error is a FAIL), then GameplayCueToolset.FindCueTagsWithoutNotifies.\nReport a PASS/FAIL table per effect: cue tag, notify asset path, cue flags as read back, old cues kept; plus no unexpected validator errors and none of the new tags without a notify."
+  },
+  {
+   "id": "gas.dash-from-input-proven",
+   "title": "Grant a dash ability, trigger it from input, prove it",
+   "summary": "Make a dash with a stamina cost, grant it on the selected character, trigger it by tag from an input action, and prove stamina drops in play.",
+   "packs": [
+    "gas",
+    "blueprint",
+    "enhanced_input"
+   ],
+   "skills": [
+    "unreal-gas",
+    "unreal-blueprint"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_input_inspect",
+    "hyper_gas_inspect",
+    "hyper_gas_apply_plan",
+    "hyper_operation_wait",
+    "hyper_gas_validate",
+    "hyper_blueprint_compile_validate",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "create_gameplay_effect_blueprint",
+    "set_effect_duration",
+    "replace_effect_modifiers",
+    "create_gameplay_ability_blueprint",
+    "set_ability_asset_tags",
+    "set_ability_property"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "gas",
+    "dash",
+    "input",
+    "blueprint",
+    "playtest",
+    "end to end"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "input_action",
+     "label": "Dash Input Action",
+     "default": "/Game/Input/Actions/IA_Dash.IA_Dash"
+    },
+    {
+     "name": "dash_cost",
+     "label": "Stamina cost",
+     "default": "20"
+    },
+    {
+     "name": "stamina_attribute",
+     "label": "Stamina attribute",
+     "default": "Stamina"
+    },
+    {
+     "name": "dash_distance",
+     "label": "Dash distance (cm)",
+     "default": "600"
+    }
+   ],
+   "prompt": "Add a dash to the character Blueprint {{selected_asset}}, triggered by `{{input_action}}`, costing {{dash_cost}} `{{stamina_attribute}}`, and prove it in play. Change only it and new assets under `{{content_folder}}/GAS`. If the GAS or Enhanced Input tools are missing, say so and stop.\n1. Load `{{input_action}}` and the Mapping Context the character adds, then hyper_input_inspect on both: the action must be mapped. hyper_gas_inspect with Variant `attribute_set` and bIncludeNativeAttributeSets true: the class with `{{stamina_attribute}}` is the attributeOwnerClassPath. Stop if there is none, or if the character has no Ability System Component.\n2. Add `Ability.Movement.Dash` if missing (GameplayTagsToolset.AddTag, approved). One hyper_gas_apply_plan with bDryRun false and a fresh operationId: `create_gameplay_effect_blueprint` `GE_DashCost`, `set_effect_duration` instant, `replace_effect_modifiers` -{{dash_cost}}; `create_gameplay_ability_blueprint` `GA_Dash`, `set_ability_asset_tags` [`Ability.Movement.Dash`], `set_ability_property` (cost_effect `GE_DashCost`, net_execution_policy local_predicted). On awaiting_user_approval, hyper_operation_wait with bWaitThroughApproval true. Check Made, then hyper_gas_validate: ErrorCount 0.\n3. With the unreal-blueprint skill: GA_Dash commits, launches the character {{dash_distance}} cm along its facing and ends; the character grants GA_Dash on BeginPlay (GiveAbility) and on `{{input_action}}` calls TryActivateAbilitiesByTag `Ability.Movement.Dash`.\n4. hyper_blueprint_compile_validate on both Blueprints (preview, then compile with its PlanHash and an operationId; hyper_operation_wait); it saves them.\n5. hyper_playtest_run (mode StartInProcess, teardown LeaveSessionRunning, Bot Wait 1 s), hyper_operation_wait, then Epic's AbilitySystemInspectorToolset.GetAttributeValues on the player pawn. hyper_playtest_run AttachOnly with Bot Press `{{input_action}}`, Sample Speed for 1 s and Capture `dash`; hyper_operation_wait, hyper_playtest_status, GetAttributeValues again. Stop with an AttachOnly `StopSession` step.\nReport a PASS/FAIL table: assets made, compiles clean, stamina down by exactly {{dash_cost}}, speed spike seen. Show the capture on its own line."
+  },
+  {
+   "id": "gas.health-mana-regen",
+   "title": "Add health and mana regeneration effects",
+   "summary": "Create two infinite periodic effects that restore health and mana on a timer, tagged so other effects can find them, and read them back.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_gas_inspect",
+    "hyper_gas_apply_plan",
+    "hyper_operation_wait",
+    "hyper_gas_validate"
+   ],
+   "ops": [
+    "create_gameplay_effect_blueprint",
+    "set_effect_duration",
+    "replace_effect_modifiers",
+    "replace_effect_asset_tags"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "gas",
+    "regeneration",
+    "health",
+    "mana",
+    "rpg",
+    "fantasy"
+   ],
+   "placeholders": [
+    {
+     "name": "hp_per_tick",
+     "label": "Health per tick",
+     "default": "2"
+    },
+    {
+     "name": "mana_per_tick",
+     "label": "Mana per tick",
+     "default": "5"
+    },
+    {
+     "name": "period",
+     "label": "Tick period (s)",
+     "default": "1.0"
+    },
+    {
+     "name": "health_attribute",
+     "label": "Health attribute",
+     "default": "Health"
+    },
+    {
+     "name": "mana_attribute",
+     "label": "Mana attribute",
+     "default": "Mana"
+    }
+   ],
+   "prompt": "Make passive regeneration for a fantasy RPG under `{{content_folder}}/GAS`: `GE_Regen_Health` (infinite, every {{period}} s +{{hp_per_tick}} `{{health_attribute}}`, asset tag `Effect.Regen.Health`) and `GE_Regen_Mana` (infinite, every {{period}} s +{{mana_per_tick}} `{{mana_attribute}}`, asset tag `Effect.Regen.Mana`). If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_gas_inspect with empty AssetPaths, Variant `attribute_set` and bIncludeNativeAttributeSets true: the Attribute Set class with `{{health_attribute}}` and `{{mana_attribute}}` is the attributeOwnerClassPath. If there is none, stop: attribute sets are C++ code a programmer must add.\n2. Add any missing tag with Epic's GameplayTagsToolset.AddTag (empty tagSource); these exact tags are approved.\n3. One hyper_gas_apply_plan with bDryRun false and a fresh operationId: for each effect `create_gameplay_effect_blueprint`, `set_effect_duration` (durationPolicy infinite, periodSeconds {{period}}), `replace_effect_modifiers` (additive, the amount as magnitude) and `replace_effect_asset_tags`. On awaiting_user_approval, call hyper_operation_wait with its operationId and bWaitThroughApproval true, then read back with hyper_gas_inspect instead of Made. The plan compiles and saves what it touches.\n4. Read Made, then hyper_gas_validate on both object paths (`Name.Name` form). Effects with tags or Set By Caller magnitudes get revision_incomplete and component_projection_unsupported, which the validator cannot read yet: INFO; any other error is a FAIL.\nReport a PASS/FAIL table: both effects infinite with period {{period}} s, the amounts and attributes as read back, the asset tags, no unexpected validator errors. Add one line on how to stop regeneration in combat: remove the effects by their asset tag, or block them with a tag requirement in code."
+  }
+ ]
+}

@@ -8,6 +8,7 @@
 #include "HyperAIStudioOperationJournal.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioNativeReadToolset.generated.h"
 
 class FProperty;
@@ -87,6 +88,38 @@ struct FHyperAIEpicToolsetSummary
 
 	UPROPERTY()
 	FString InventoryState;
+};
+
+/**
+ * One MCP server agents have besides HyperAI's Unreal MCP, or an editor plugin or setting that acts like one. Names,
+ * addresses and file paths only: never a value from a config's env, headers or arguments.
+ */
+USTRUCT(BlueprintType)
+struct FHyperAIOtherMcpServer
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString Name;
+
+	/** changes_editor_outside_hyperai (no HyperAI approval, auto-approval, undo grouping or checks) or other_tools. */
+	UPROPERTY()
+	FString Classification;
+
+	UPROPERTY()
+	FString Why;
+
+	/** Each place it is configured or hosted: client, scope, file, entry and address, or the plugin or setting. */
+	UPROPERTY()
+	TArray<FString> ConfiguredIn;
+
+	/** How to remove each place by hand, in the same order; empty for other tools. HyperAI never edits these files. */
+	UPROPERTY()
+	TArray<FString> HowToRemove;
+
+	/** The user chose not to be warned about it in this project. */
+	UPROPERTY()
+	bool bWarningSilenced = false;
 };
 
 /** Installed capability and health report. Scope and admission come from the complete generated catalog. */
@@ -278,6 +311,18 @@ struct FHyperAICapabilityReport
 
 	UPROPERTY()
 	TArray<FHyperAIEpicToolsetSummary> CachedEpicToolsets;
+
+	/** How many other MCP servers, plugins or settings change this editor outside HyperAI's approval gate. */
+	UPROPERTY()
+	int32 BypassMcpServerCount = 0;
+
+	/** Every other MCP server agents have here, and this editor's plugins and settings that act like one. */
+	UPROPERTY()
+	TArray<FHyperAIOtherMcpServer> OtherMcpServers;
+
+	/** One sentence on the above: which bypass HyperAI, if any. */
+	UPROPERTY()
+	FString OtherMcpServersSummary;
 };
 
 /** Reconciled state for one client-known HyperAI mutation operation. */
@@ -357,6 +402,170 @@ struct FHyperAIOperationStatus
 
 	UPROPERTY()
 	FString ProjectIdentityHash;
+
+	/** The executor phase running now (apply, compile, validate, save, verify_fresh), while it runs. */
+	UPROPERTY()
+	FString Phase;
+
+	UPROPERTY()
+	int32 PhasesDone = 0;
+
+	UPROPERTY()
+	int32 PhasesTotal = 0;
+
+	/** Progress of a background job that belongs to this operation, such as a capture or a batch. */
+	UPROPERTY()
+	FString JobProgress;
+
+	/** What to do next, in one sentence. */
+	UPROPERTY()
+	FString NextAction;
+
+	/** Sandbox Mode holds what is saved: the project's files change only when the user approves. */
+	UPROPERTY()
+	bool bSandboxed = false;
+
+	/**
+	 * user (a person's click: Activity, the remote page, a tool form or a panel's Generate), auto_approval (the
+	 * auto-approval the user turned on), agent_job (a running agent job the user started, for an edit in its packs),
+	 * or empty when it never waited for approval.
+	 */
+	UPROPERTY()
+	FString ApprovedBy;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIOperationWaitReport
+{
+	GENERATED_BODY()
+
+	/** The operation's status when the wait ended, exactly as hyper_operation_status reports it. */
+	UPROPERTY()
+	FHyperAIOperationStatus Status;
+
+	/** terminal, awaiting_user_approval, rejected, not_found, timeout, invalid_request or too_many_waiters. */
+	UPROPERTY()
+	FString CompletedBecause;
+
+	UPROPERTY()
+	int32 WaitedMs = 0;
+};
+
+/**
+ * The pending result of hyper_operation_wait. The MCP server holds the agent's request open until this
+ * completes, while the editor keeps ticking, so the executor finishes the very operation being waited on.
+ */
+UCLASS()
+class UHyperAIOperationWaitResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIOperationWaitReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIOperationWaitReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIOperationWaitReport Value;
+};
+
+/** One remembered fact, as hyper_memory_recall returns it. */
+USTRUCT(BlueprintType)
+struct FHyperAIMemoryFactView
+{
+	GENERATED_BODY()
+
+	/** Pass it as Replaces to update the fact, or to hyper_memory_forget. */
+	UPROPERTY()
+	FString Name;
+
+	UPROPERTY()
+	FString Title;
+
+	/** convention, decision, fact or gotcha. */
+	UPROPERTY()
+	FString Type;
+
+	/** user or agent. */
+	UPROPERTY()
+	FString Source;
+
+	/** False for an agent's fact the user has not reviewed yet. */
+	UPROPERTY()
+	bool bConfirmed = true;
+
+	/** YYYY-MM-DD. */
+	UPROPERTY()
+	FString Updated;
+
+	UPROPERTY()
+	FString Text;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIMemoryRecallReport
+{
+	GENERATED_BODY()
+
+	/** ok or invalid_request. */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	/** Best matches first. */
+	UPROPERTY()
+	TArray<FHyperAIMemoryFactView> Facts;
+
+	/** What agents changed lately on this machine, newest first, one line each. */
+	UPROPERTY()
+	TArray<FString> RecentChanges;
+
+	/** Tasks chats finished that match the query, best first, one line each: when, which agent, what was asked, how it ended. */
+	UPROPERTY()
+	TArray<FString> History;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIMemoryWriteReport
+{
+	GENERATED_BODY()
+
+	/** saved, held (saved, but the user has to allow it), forgotten, refused or invalid_request. */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	/** The fact's name. */
+	UPROPERTY()
+	FString Name;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAISandboxStatusReport
+{
+	GENERATED_BODY()
+
+	/** off, unavailable, waiting, active or foreign. */
+	UPROPERTY()
+	FString Status;
+
+	UPROPERTY()
+	FString SandboxName;
+
+	UPROPERTY()
+	FString Diagnostic;
+
+	/** Files held for the user's review, as "added|removed|edited <project-relative path>", at most 200. */
+	UPROPERTY()
+	TArray<FString> HeldFiles;
+
+	UPROPERTY()
+	int32 HeldCount = 0;
 };
 
 /** PIE identity attached to a debug object or returned as a PIE world result. */
@@ -699,7 +908,10 @@ class HYPERAISTUDIO_API UHyperAIStudioNativeReadToolset final : public UToolsetD
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** Return installed HyperAI tools, current health, and a page of the existing cached Epic inventory. No I/O refresh is started. */
+	/**
+	 * Return installed HyperAI tools, current health, a page of the existing cached Epic inventory, and the other MCP
+	 * servers agents have here (those that change this editor outside HyperAI's approvals first). No I/O refresh is started.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Capabilities")
 	static FHyperAICapabilityReport hyper_capability_report(
 		int32 PageSize = 32,
@@ -713,6 +925,17 @@ public:
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Workflow")
 	static FHyperAIOperationStatus hyper_operation_status(const FString& OperationId);
 
+	/**
+	 * Wait for one operation to finish, be rejected, or need approval, then return its status: one call
+	 * instead of polling. TimeoutMs 1000-120000, default 30000. Set bWaitThroughApproval to keep waiting
+	 * while the user decides. The editor keeps running while this waits.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Workflow")
+	static UHyperAIOperationWaitResult* hyper_operation_wait(
+		const FString& OperationId,
+		int32 TimeoutMs = 30000,
+		bool bWaitThroughApproval = false);
+
 	/** Inspect bounded Blueprint node diagnostics, breakpoints, watched pins, and the selected debug object's PIE identity. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Blueprint")
 	static FHyperAIBlueprintDebugReport hyper_blueprint_debug_inspect(
@@ -724,6 +947,38 @@ public:
 	/** Return one complete bounded snapshot of every matching in-process PIE world. Active multiprocess PIE fails closed because other processes are not observable. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|PIE")
 	static FHyperAIPIEQueryReport hyper_pie_query(int32 PieInstance = -1);
+
+	/**
+	 * Project memory: notes about this project every agent shares and the tasks chats finished before, best matches
+	 * first, plus what agents changed lately. Query is a few keywords; empty returns the newest. Target is an asset
+	 * path to narrow the changes to, or all.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Memory")
+	static FHyperAIMemoryRecallReport hyper_memory_recall(const FString& Query, int32 Limit = 10, const FString& Target = TEXT("all"));
+
+	/**
+	 * Save a lasting fact about this project for every future chat, without asking: a convention, a decision, a gotcha
+	 * or a preference the user stated, never task progress. Title is the fact itself, in one line; Text up to 4000
+	 * characters; Type is convention, decision, fact or gotcha. Replaces is new, or the name of a fact you saved
+	 * earlier, to update it. A fact that reads like instructions to agents waits for the user; keys are refused.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Memory")
+	static FHyperAIMemoryWriteReport hyper_memory_remember(
+		const FString& Title,
+		const FString& Text,
+		const FString& Type = TEXT("fact"),
+		const FString& Replaces = TEXT("new"));
+
+	/** Delete a fact an agent saved, by name. Facts the user wrote stay; ask the user to remove those. */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Memory")
+	static FHyperAIMemoryWriteReport hyper_memory_forget(const FString& Name);
+
+	/**
+	 * Sandbox Mode: while it is active, what you save is held in a sandbox, not the project, until the user approves
+	 * or discards all of it. Lists the held files. Only the user decides; you cannot approve or discard.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Sandbox")
+	static FHyperAISandboxStatusReport hyper_sandbox_status();
 };
 
 struct FHyperAIStudioNativeToolManifestEntry

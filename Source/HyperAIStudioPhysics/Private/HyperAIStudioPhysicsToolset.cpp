@@ -1,6 +1,9 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioPhysicsToolset.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioOperationWait.h"
+#include "HyperAIStudioRequestFit.h"
 #include "HyperAIStudioAgentActivity.h"
 
 #include "AssetRegistry/AssetData.h"
@@ -642,7 +645,8 @@ bool FHyperAIStudioPhysicsContracts::IsCanonicalProjectObjectPath(const FString&
 		}
 	}
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason))
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason))
 	{
 		return false;
 	}
@@ -2140,10 +2144,20 @@ FHyperAIPhysicsInspectReport UHyperAIStudioPhysicsToolset::hyper_physics_inspect
 	return FHyperAIStudioPhysicsContracts::Inspect(Request);
 }
 
-FHyperAIPhysicsApplyPlanReport UHyperAIStudioPhysicsToolset::hyper_physics_apply_plan(
-	const FHyperAIPhysicsApplyPlanRequest& Request)
+UHyperAIPhysicsApplyPlanResult* UHyperAIStudioPhysicsToolset::hyper_physics_apply_plan(const FHyperAIPhysicsApplyPlanRequest& Request)
 {
-	return FHyperAIStudioPhysicsContracts::BuildPlan(Request);
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIPhysicsApplyPlanResult>(FHyperAIStudioPhysicsContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIPhysicsApplyPlanReport FHyperAIStudioPhysicsContracts::BuildFittedPlan(
+	const FHyperAIPhysicsApplyPlanRequest& InRequest)
+{
+	FHyperAIPhysicsApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAIPhysicsApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return FHyperAIStudioPhysicsContracts::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAIPhysicsValidateReport UHyperAIStudioPhysicsToolset::hyper_physics_validate(

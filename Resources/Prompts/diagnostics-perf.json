@@ -1,0 +1,626 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "diagnostics-perf",
+ "presets": [
+  {
+   "id": "diagnostics-perf.preflight-assets-before-move",
+   "title": "Preflight selected assets before a move or rename",
+   "summary": "Check each selected asset is on disk, saved, compiles and is free to edit, and that its name is free in the target folder.",
+   "packs": [
+    "diagnostics",
+    "source_control"
+   ],
+   "tools": [
+    "hyper_diagnose",
+    "hyper_source_control_status"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "preflight",
+    "move",
+    "rename",
+    "unsaved",
+    "source control",
+    "assets"
+   ],
+   "context": {
+    "selection": "assets",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "destination",
+     "label": "Destination folder",
+     "default": "/Game/Archive",
+     "hint": "Where the assets will go"
+    }
+   ],
+   "prompt": "Before I move or rename these assets into {{destination}}, check each one is safe to touch. Read only: change nothing.\n{{selected_assets}}\n1. hyper_diagnose with checks asset_registry_readiness, asset_context, dirty_loaded_packages and loaded_blueprint_health, assetPaths set to those object paths (at most 64; say how many were left out), maxObjectsScanned 4096 and pageSize 64. Page with nextCursor until hasMore is false. If the registry is still gathering, say the results may be incomplete.\n2. hyper_source_control_status with bRefresh true: which provider is in use (unreal, lore or none). Unless it is none, call Epic's AssetTools can_edit_asset on each path: false means a teammate has it checked out or locked.\n3. Epic's AssetTools exists on {{destination}}/<asset name> for each asset: an asset already there blocks the move.\n4. Report one row per asset: path, on disk, unsaved changes, Blueprint compile state (when loaded), editable, name free in {{destination}}, then PASS (safe to move), WARN (save it first) or FAIL (missing, compile errors, held by a teammate, or name taken).\n5. Say that references were not checked: find the referencers before deleting anything. Do not save, check out, move or rename anything."
+  },
+  {
+   "id": "diagnostics-perf.audit-triage",
+   "title": "Run a project audit and triage the findings",
+   "summary": "Start a bounded audit job, page through every finding, and rank the problems by severity with the object each one names.",
+   "packs": [
+    "diagnostics"
+   ],
+   "skills": [
+    "hyperai-memory"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_run_audit",
+    "hyper_memory_remember"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "audit",
+    "triage",
+    "blueprint",
+    "plugins",
+    "report"
+   ],
+   "placeholders": [
+    {
+     "name": "audit_id",
+     "label": "Audit id",
+     "default": "weekly-audit-01",
+     "hint": "8-64 letters, digits, _ or -; the same id polls the same audit"
+    }
+   ],
+   "prompt": "Audit {{project}} and triage what it finds. Read only.\n1. hyper_memory_recall with query \"audit known issues\" so findings already accepted are not reported as new.\n2. hyper_run_audit with action start, auditId {{audit_id}}, kinds asset_registry_readiness, current_map_state, dirty_loaded_packages, loaded_blueprint_health and plugin_readiness, maxObjectsScanned 4096.\n3. Poll hyper_run_audit with action status and the same auditId until status is complete or partial, then page with cursor until hasMore is false.\n4. Group the findings by kind and severity; for each group give the count and up to five examples with their object paths.\n5. Report a table: kind, errors, warnings, PASS (no errors) or FAIL, the top finding. Say whether the audit was incomplete (bIncomplete, a bound reached) and what that leaves unchecked.\n6. If a finding is a lasting gotcha for this project, such as a plugin that is always missing on one machine, save it with hyper_memory_remember as type gotcha, with the fact itself as the title. Fix nothing."
+  },
+  {
+   "id": "diagnostics-perf.find-asset-referencers",
+   "title": "Find everything that references an asset",
+   "summary": "List the assets that use the selected asset up to a set depth, noting registry readiness and unsaved changes, before you move or delete it.",
+   "packs": [
+    "diagnostics"
+   ],
+   "tools": [
+    "hyper_diagnose",
+    "hyper_asset_dependency_graph"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "references",
+    "referencers",
+    "rename",
+    "delete",
+    "dependencies"
+   ],
+   "context": {
+    "selection": "assets",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "depth",
+     "label": "Depth",
+     "default": "2",
+     "hint": "How many levels of referencers to follow"
+    }
+   ],
+   "prompt": "Before I move or delete {{selected_asset}}, find what references it. Read only: change nothing.\n1. hyper_diagnose with checks asset_registry_readiness and asset_context and assetPaths [{{selected_asset}}]: the registry must have finished gathering, and the asset must exist on disk.\n2. hyper_asset_dependency_graph with assetPath {{selected_asset}}, direction referencers, maxDepth {{depth}}, maxNodes 512. Report registryStatus, whether the root was found, dirtyLoadedPackages (unsaved changes it cannot see) and every diagnostic. If it returns no relation records, for example with async_dependency_index_backend_required, list referencers with Epic's AssetTools get_referencers instead, one level at a time down to depth {{depth}}.\n3. Report a table: referencer path, depth, class (from AssetTools get_asset_class), and whether it is a map. Give the total.\n4. Add PASS/FAIL rows: registry ready, root found, no unsaved packages among the referencers, referencers listed. Warn that an empty list is not proof the asset is safe to delete: soft references, config and code paths are not all in the registry. Do not move, rename or delete anything."
+  },
+  {
+   "id": "diagnostics-perf.hard-reference-bloat",
+   "title": "Find hard references that bloat a Blueprint's memory",
+   "summary": "Walk what a Blueprint loads with it, find the heavy chains such as a character pulling in every weapon, and suggest where to go soft.",
+   "packs": [
+    "diagnostics"
+   ],
+   "skills": [
+    "hyperai-memory"
+   ],
+   "tools": [
+    "hyper_asset_dependency_graph",
+    "hyper_memory_remember"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "memory",
+    "hard-references",
+    "soft-references",
+    "dependencies",
+    "optimisation"
+   ],
+   "context": {
+    "selection": "assets",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "depth",
+     "label": "Depth",
+     "default": "3"
+    },
+    {
+     "name": "heavy_classes",
+     "label": "Heavy asset classes",
+     "default": "Texture2D, StaticMesh, SkeletalMesh, SoundWave, NiagaraSystem"
+    }
+   ],
+   "prompt": "Find what {{selected_asset}} loads with it, and which chains are worth breaking. Read only.\n1. hyper_asset_dependency_graph with assetPath {{selected_asset}}, direction dependencies, categories [package], properties [hard], maxDepth {{depth}}, maxNodes 1024. Report registryStatus, whether the root was found, cycle counts and diagnostics. If it returns no relation records, walk the dependencies with Epic's AssetTools get_dependencies down to depth {{depth}}, with get_asset_class for each; say that this list does not separate hard from soft references.\n2. Mark every dependency whose class is one of {{heavy_classes}}, and every Blueprint that brings in more than 10 of them.\n3. Report a table: chain (root > ... > asset), class, depth. Then the five chains that pull in the most heavy assets, each with a suggested fix: a soft object reference, an interface, or loading on demand. List any circular chains.\n4. PASS/FAIL rows: no circular Blueprint chains; no heavy asset reached only through a Blueprint-to-Blueprint chain deeper than 2.\n5. If you find a project-wide pattern, such as every weapon hard-referenced by the character, save it with hyper_memory_remember as type gotcha. Change no asset."
+  },
+  {
+   "id": "diagnostics-perf.play-and-read-new-log-errors",
+   "title": "Play the level and list only the new log errors",
+   "summary": "Mark the log, let a bot play the level, then list just the new errors and warnings by category with the assets they name.",
+   "packs": [
+    "diagnostics"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "tools": [
+    "hyper_log_tail",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_diagnose"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "log",
+    "errors",
+    "warnings",
+    "pie",
+    "triage"
+   ],
+   "placeholders": [
+    {
+     "name": "play_seconds",
+     "label": "Seconds of play",
+     "default": "25",
+     "hint": "At most 28"
+    }
+   ],
+   "prompt": "Find the errors and warnings that playing {{level}} causes. Change nothing.\n1. hyper_log_tail with maxVerbosity warning and pageSize 1: keep nextCursor as the mark. A cursor only works with the same filter, so keep maxVerbosity warning and no categories when reading on.\n2. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown StopOwnedSession and one Bot step: Play goal Explore seconds {{play_seconds}} (stepId explore, timeoutMs 30000). Then hyper_operation_wait with timeoutMs 120000 and bWaitThroughApproval true.\n3. hyper_log_tail from the mark's cursor with maxVerbosity warning and pageSize 128; page on until hasMore is false. If historyGap is true, or the cursor is refused with cursor_epoch_changed, say that lines were lost.\n4. Group the new lines by category and message (ignore numbers that change between lines), with a count for each.\n5. Report a table: category, verbosity, message, count, with FAIL for errors, WARN for warnings, and one PASS row when there are none. Name the asset or Blueprint each message mentions.\n6. For the top three, run hyper_diagnose with check asset_context on the assets they name, and give the next step for each. Fix nothing."
+  },
+  {
+   "id": "diagnostics-perf.broken-blueprints-in-folder",
+   "title": "Find Blueprints with compile errors in a folder",
+   "summary": "List a folder's Blueprints, compile the suspect ones, and report every error with the graph and node it sits on.",
+   "packs": [
+    "diagnostics",
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-blueprint"
+   ],
+   "tools": [
+    "hyper_diagnose",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_blueprint_debug_inspect"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "blueprint",
+    "compile",
+    "errors",
+    "folder",
+    "health"
+   ],
+   "placeholders": [
+    {
+     "name": "folder",
+     "label": "Folder",
+     "default": "/Game/Blueprints"
+    }
+   ],
+   "prompt": "Find every Blueprint under {{folder}} that does not compile. Do not fix or save anything.\n1. Epic's AssetTools find_assets with folder_path {{folder}}, recursive true and asset_type /Script/Engine.Blueprint. Take up to 64 paths.\n2. hyper_diagnose with checks asset_context and loaded_blueprint_health and those assetPaths: which exist, which are loaded, and the compile status of the loaded ones.\n3. For each Blueprint with errors or an unknown status: hyper_blueprint_compile_validate once to preview and get the PlanHash, again with that expectedPlanHash and a fresh operationId, then hyper_operation_wait. Then hyper_blueprint_debug_inspect on it for node diagnostics: graph, node title, severity and message.\n4. Report a table, one row per Blueprint: path, PASS (compiles, no warnings), WARN (warnings only) or FAIL, the error count, and the first error with its graph and node.\n5. Then group the failures by cause (a missing variable, a removed function, a broken cast) and say which single fix would clear the most of them. If more than 64 Blueprints were found, say how many were left unchecked."
+  },
+  {
+   "id": "diagnostics-perf.level-render-cost",
+   "title": "Measure the rendering cost of the open level",
+   "summary": "Estimate draw calls, triangles, shadow casters, lights and translucency for the loaded level, and list its heaviest actors and meshes.",
+   "packs": [
+    "level_design",
+    "diagnostics"
+   ],
+   "tools": [
+    "hyper_scene_cost_report"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "performance",
+    "draw-calls",
+    "triangles",
+    "nanite",
+    "budget"
+   ],
+   "placeholders": [
+    {
+     "name": "top_n",
+     "label": "Heaviest items to list",
+     "default": "15"
+    },
+    {
+     "name": "max_draws",
+     "label": "Draw-call budget",
+     "default": "3000"
+    },
+    {
+     "name": "max_tris",
+     "label": "Non-Nanite triangle budget",
+     "default": "5000000"
+    }
+   ],
+   "prompt": "Measure the rendering cost of {{level}} as it is loaded now. Read only.\n1. hyper_scene_cost_report with world editor, scope level and topN {{top_n}}. If the tool or the level_design pack is unavailable, say so and stop.\n2. Report the totals: actors; estimated draw calls and shadow draw calls; Nanite material bins; triangles split into non-Nanite LOD0, Nanite source, skeletal and landscape; foliage and PCG instances; shadow-casting primitives; lights by type and mobility, and dynamic shadow-casting lights; translucent materials and primitives; and the measured last-frame draw calls when not -1.\n3. Tables of the heaviest actors and meshes: name, triangles, instances, draw calls, Nanite or not, casts shadows.\n4. Every finding with its code (non_nanite_heavy, non_nanite_instances, many_shadow_lights, small_shadow_casters, many_sections, translucent_on_nanite, unloaded_actors) and the change it points to.\n5. A PASS/FAIL table against these budgets: estimated draw calls at most {{max_draws}}, non-Nanite triangles at most {{max_tris}}, at most 4 dynamic shadow-casting lights, no translucent_on_nanite. Say the figures are estimates over loaded actors only. Change nothing."
+  },
+  {
+   "id": "diagnostics-perf.arena-frame-budget",
+   "title": "Check a combat arena stays within its frame budget",
+   "summary": "Cost-report just the arena's box, compare it with draw-call, triangle, light and translucency budgets, and name the worst offenders.",
+   "packs": [
+    "level_design",
+    "diagnostics"
+   ],
+   "skills": [
+    "hyperai-memory"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_scene_cost_report"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "performance",
+    "budget",
+    "arena",
+    "shooter",
+    "optimisation"
+   ],
+   "placeholders": [
+    {
+     "name": "box_min",
+     "label": "Arena box min (cm)",
+     "default": "-3000,-3000,-500",
+     "hint": "x,y,z"
+    },
+    {
+     "name": "box_max",
+     "label": "Arena box max (cm)",
+     "default": "3000,3000,2000",
+     "hint": "x,y,z"
+    },
+    {
+     "name": "max_draws",
+     "label": "Draw-call budget",
+     "default": "2000"
+    },
+    {
+     "name": "max_tris",
+     "label": "Non-Nanite triangle budget",
+     "default": "3000000"
+    },
+    {
+     "name": "max_translucent",
+     "label": "Translucent primitive budget",
+     "default": "50"
+    }
+   ],
+   "prompt": "Check that the combat arena in {{level}}, the box from {{box_min}} to {{box_max}} cm, stays within its frame budget. Read only.\n1. hyper_memory_recall with query \"performance budget arena\": if the project saved budgets, use those instead of the ones below and say so.\n2. hyper_scene_cost_report with world editor, scope box, boxMin {{box_min}}, boxMax {{box_max}}, topN 20. If the tool or the level_design pack is unavailable, say so and stop.\n3. Report a PASS/FAIL table, measured against budget: estimated draw calls at most {{max_draws}}; estimated shadow draw calls at most half of that; non-Nanite triangles at most {{max_tris}}; at most 4 dynamic shadow-casting lights; translucent primitives at most {{max_translucent}}; no non_nanite_heavy or translucent_on_nanite finding.\n4. For each FAIL, name the actors and meshes from the heaviest lists that cause it, with their share of the total, and the cheapest change that would bring it under (enable Nanite, merge or instance repeats, turn off shadows on small casters, swap a translucent material).\n5. Note that figures cover loaded actors in the box only, and whether the report was truncated. Change nothing."
+  },
+  {
+   "id": "diagnostics-perf.lights-and-shadows-audit",
+   "title": "Audit lights and shadow casters for performance",
+   "summary": "Count lights by type and mobility, overlapping shadow casters and tiny shadow casters, then dry-run the light changes that would help.",
+   "packs": [
+    "level_design",
+    "lighting_lookdev",
+    "diagnostics"
+   ],
+   "tools": [
+    "hyper_scene_cost_report",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "set_light"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "lighting",
+    "shadows",
+    "performance",
+    "lumen",
+    "megalights"
+   ],
+   "placeholders": [
+    {
+     "name": "camera",
+     "label": "Camera for the picture",
+     "default": "HyperAI_MatchCamera"
+    }
+   ],
+   "prompt": "Audit the lights and shadow casters in {{level}} for performance. Change nothing.\n1. hyper_scene_cost_report with world editor and scope level: lights by type and mobility, dynamic shadow-casting lights, MegaLights count, shadow-casting primitives, estimated shadow draw calls, and the many_shadow_lights and small_shadow_casters findings. If the level_design pack is unavailable, say so and stop; if lighting_lookdev is, skip steps 2, 4 and 5 and say so.\n2. hyper_lighting_inspect: every point, spot and rect light with its intensity, attenuation radius and cast shadows.\n3. Pick the lights to change: movable shadow-casting lights where more than 4 overlap, and lights whose attenuation radius reaches far past what they light.\n4. hyper_lighting_apply_plan with bDryRun true and set_light ops (cast_shadows false, or a smaller attenuation_radius) for those lights only: report its notes and plan hash. Do not run it for real.\n5. hyper_capture_view from {{camera}} (skip it if that camera is missing) and show it on its own line as ![view](path).\n6. A PASS/FAIL table: at most 4 overlapping dynamic shadow casters, no small_shadow_casters finding, shadow draw calls under the draw calls. List the proposed changes with the expected effect of each."
+  },
+  {
+   "id": "diagnostics-perf.run-automation-tests",
+   "title": "Run automation tests by name and report results",
+   "summary": "Discover tests, confirm the named ones exist and can run, run them with Epic's automation tools, and report each pass and failure.",
+   "packs": [
+    "automation_profiling_build"
+   ],
+   "tools": [
+    "hyper_test_inspect",
+    "hyper_test_run",
+    "hyper_test_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "automation",
+    "tests",
+    "ci",
+    "regression",
+    "report"
+   ],
+   "placeholders": [
+    {
+     "name": "filter",
+     "label": "Test name filter",
+     "default": "Project.Functional"
+    },
+    {
+     "name": "max_tests",
+     "label": "Most tests to run",
+     "default": "32",
+     "hint": "At most 32"
+    }
+   ],
+   "prompt": "Run the automation tests matching {{filter}} and report them.\n1. Epic's AutomationTestToolset: DiscoverTests, then ListTests with nameFilter {{filter}} and limit {{max_tests}}. These are the exact names; HyperAI's test tools take 32 at most.\n2. hyper_test_inspect with those testNames: each must be present and runnable. Keep its snapshot.\n3. hyper_test_run with bDryRun true, a fresh operationId, the testNames and the snapshot as expectedSnapshot: it seals the run and lists its effects. HyperAI does not start tests itself yet, so run them with Epic's RunTests using the same names, wait for it, then call GetTestResults.\n4. hyper_test_inspect again with the same names, then hyper_test_validate with the new snapshot: it must be valid with 0 errors.\n5. Report a table: test name, PASS or FAIL, duration, the first error or warning. Then totals, and list any test that was missing or not runnable as FAIL.\n6. For each failure, quote the error and name the file or asset it points to. Do not edit tests or code."
+  },
+  {
+   "id": "diagnostics-perf.bug-report-environment",
+   "title": "Collect an environment block for a bug report",
+   "summary": "Gather engine version, platform, build configuration, live packs, plugin readiness and recent errors into one paste-ready block.",
+   "packs": [
+    "automation_profiling_build",
+    "diagnostics"
+   ],
+   "tools": [
+    "hyper_build_diagnose",
+    "hyper_capability_report",
+    "hyper_diagnose",
+    "hyper_log_tail"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "bug-report",
+    "environment",
+    "build",
+    "plugins",
+    "log"
+   ],
+   "placeholders": [
+    {
+     "name": "bug",
+     "label": "Bug summary",
+     "default": "the editor hitches when the spell VFX plays"
+    }
+   ],
+   "prompt": "Collect the environment for a bug report about: {{bug}}. Read only.\n1. hyper_build_diagnose: engine version, platform, build configuration, project name, and which modules are loaded (automation controller, trace log, toolset registry, MCP).\n2. hyper_capability_report with pageSize 64: which HyperAI packs and tools are live, and their health.\n3. hyper_diagnose with checks plugin_readiness and current_map_state.\n4. hyper_log_tail with maxVerbosity error and pageSize 20: the latest errors.\n5. First a PASS/FAIL table: build context read, capability report read, no plugin readiness errors, no errors in the log.\n6. Then one Markdown block ready to paste: Summary ({{bug}}); Environment (engine, platform, configuration, project, map); HyperAI (live packs, any pack not healthy); Plugins (those not ready); Recent errors (category: message); Repro steps as an empty numbered list for me to fill.\nLeave out keys, tokens and any user paths outside the project. Change nothing."
+  },
+  {
+   "id": "diagnostics-perf.play-session-cost",
+   "title": "Measure a level's rendering cost during play",
+   "summary": "Compare the editor and Play In Editor costs of a level, read the last frame's draw calls, and profile the play session's frame.",
+   "packs": [
+    "level_design",
+    "automation_profiling_build"
+   ],
+   "skills": [
+    "unreal-playtest",
+    "performance"
+   ],
+   "tools": [
+    "hyper_scene_cost_report",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_pie_query",
+    "hyper_profile_session"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "performance",
+    "pie",
+    "draw-calls",
+    "profiling",
+    "runtime"
+   ],
+   "placeholders": [
+    {
+     "name": "play_seconds",
+     "label": "Seconds of play before measuring",
+     "default": "20",
+     "hint": "At most 28"
+    },
+    {
+     "name": "max_draws",
+     "label": "Draw-call budget in play",
+     "default": "3000"
+    }
+   ],
+   "prompt": "Measure {{level}}'s rendering cost while it plays. Change nothing in the level.\n1. hyper_scene_cost_report with world editor, scope level, topN 10: the editor baseline. If it or the level_design pack is unavailable, say so and stop.\n2. hyper_playtest_run with a fresh operationId, mode StartInProcess, teardown LeaveSessionRunning, and Bot steps: Play goal Explore seconds {{play_seconds}}; Capture text pie-view. Then hyper_operation_wait with timeoutMs 120000 and bWaitThroughApproval true.\n3. With play still running: hyper_pie_query to confirm the PIE world, then hyper_scene_cost_report with world pie and scope level, including measuredLastFrameDrawCalls and measuredLastFramePrimitives.\n4. With play still running, hyper_profile_session with mode attach, durationSeconds 10, bHotFunctions true and a fresh operationId: report verdict.bound with its summary, frame time p50/p95/p99 and hitchCount.\n5. Stop play with Epic's StopPIE.\n6. A table of editor versus play: draw calls, shadow draws, triangles, instances, lights, last-frame figures. PASS/FAIL: estimated draw calls in play at most {{max_draws}}; no finding in play that the editor did not have. Show the capture on its own line as ![in play](path)."
+  },
+  {
+   "id": "diagnostics-perf.profile-play-session",
+   "title": "Profile a play session and find what bounds it",
+   "summary": "Measure Play In Editor, say whether it is game-thread, render-thread, RHI or GPU bound or capped, and list its hitches and hot functions.",
+   "packs": [
+    "automation_profiling_build",
+    "level_design"
+   ],
+   "skills": [
+    "performance"
+   ],
+   "tools": [
+    "hyper_profile_session",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "performance",
+    "profiling",
+    "fps",
+    "frame time",
+    "bound",
+    "gpu",
+    "cpu",
+    "hitches",
+    "insights"
+   ],
+   "placeholders": [
+    {
+     "name": "seconds",
+     "label": "Seconds to measure",
+     "default": "10",
+     "hint": "1 to 60"
+    },
+    {
+     "name": "hitch_ms",
+     "label": "Hitch threshold (ms)",
+     "default": "50"
+    },
+    {
+     "name": "label",
+     "label": "Label for the profile",
+     "default": "baseline"
+    }
+   ],
+   "prompt": "Profile {{level}} while it plays and tell me what limits its frame rate. Change nothing in the level.\n1. hyper_profile_session with mode auto, durationSeconds {{seconds}}, hitchThresholdMs {{hitch_ms}}, bHotFunctions true, bSceneCost true, label {{label}} and a fresh operationId. If it answers awaiting_user_approval, hyper_operation_wait with that operationId, timeoutMs 180000 and bWaitThroughApproval true, then hyper_profile_session with profileId set to it. If the automation_profiling_build pack is unavailable, say so and stop.\n2. Lead with verdict.bound and verdict.summary, then the evidence lines and the breakdown. If gpuNote says GPU time unavailable, say so plainly.\n3. A table of frame time (average, p50, p95, p99, max), each thread from threads, draw calls and hitchCount.\n4. The five worst hitches: frame, atSeconds, frameMs, bound, spikes and events.\n5. The top CPU stats or GPU passes for the bound, and hotFunctions (and hotFunctionsInWorstFrame), or hotFunctionsNote when there are none.\n6. The advice, and the profileId so later changes can be compared with hyper_profile_compare."
+  },
+  {
+   "id": "diagnostics-perf.profile-bot-route",
+   "title": "Profile the game while the bot plays a route",
+   "summary": "Let the playtest bot explore or fight while the session is measured, then report frame time, hitches and where they happened.",
+   "packs": [
+    "automation_profiling_build",
+    "pie_runtime"
+   ],
+   "skills": [
+    "performance",
+    "unreal-playtest"
+   ],
+   "tools": [
+    "hyper_profile_session",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "performance",
+    "profiling",
+    "bot",
+    "route",
+    "combat",
+    "hitches",
+    "stutter"
+   ],
+   "placeholders": [
+    {
+     "name": "seconds",
+     "label": "Seconds to measure",
+     "default": "30",
+     "hint": "1 to 60"
+    },
+    {
+     "name": "goal",
+     "label": "Bot goal",
+     "default": "Explore",
+     "hint": "Explore, Survive, Collect, Defeat or Reach"
+    },
+    {
+     "name": "target",
+     "label": "Goal target (blank for none)",
+     "default": ""
+    }
+   ],
+   "prompt": "Measure {{level}} while the playtest bot plays it, to find the stutters a player meets. Change nothing in the level.\n1. hyper_profile_session with mode start, warmupSeconds 3, durationSeconds {{seconds}}, bHotFunctions true, bSceneCost true, a fresh operationId, and bot steps: one Play step with goal {{goal}}, target {{target}} (leave target out when blank) and timeoutSeconds {{seconds}}. Starting play asks for approval when edits do: hyper_operation_wait with the operationId, timeoutMs 240000 and bWaitThroughApproval true, then hyper_profile_session with profileId set to it.\n2. Say how the bot route went (bot).\n3. The verdict with its evidence, and a table of frame time (average, p95, p99, max) and hitchCount.\n4. Every listed hitch: atSeconds, frameMs, bound, spikes and events, and hotFunctionsInWorstFrame for the slowest.\n5. PASS/FAIL: p99 frame time under 33 ms, and no hitch over 100 ms. Then the advice."
+  },
+  {
+   "id": "diagnostics-perf.compare-before-after",
+   "title": "Compare performance before and after a change",
+   "summary": "Profile, make one change, profile again the same way, and report what got better or worse with the bound before and after.",
+   "packs": [
+    "automation_profiling_build"
+   ],
+   "skills": [
+    "performance"
+   ],
+   "tools": [
+    "hyper_profile_session",
+    "hyper_profile_compare",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "performance",
+    "profiling",
+    "compare",
+    "regression",
+    "optimisation",
+    "before",
+    "after"
+   ],
+   "placeholders": [
+    {
+     "name": "change",
+     "label": "The change to measure",
+     "default": "set r.ScreenPercentage to 75 in this session"
+    },
+    {
+     "name": "seconds",
+     "label": "Seconds to measure",
+     "default": "10",
+     "hint": "1 to 60"
+    }
+   ],
+   "prompt": "Measure what this change does to {{level}}'s performance: {{change}}.\n1. hyper_profile_session with mode start, durationSeconds {{seconds}}, label before, operationId perf-before plus a short suffix of your own. If it waits for approval, hyper_operation_wait with bWaitThroughApproval true, then read it by profileId.\n2. Make the change, and only that change. If it needs an edit tool, follow that pack's plan, wait and validate steps.\n3. hyper_profile_session again with exactly the same mode, duration and level, label after, operationId perf-after with the same suffix.\n4. hyper_profile_compare with baseline the first id and candidate the second.\n5. Report summary, boundBefore and boundAfter, a table of metrics (metric, before, after, change %, verdict), and the stats that moved most. A change under 5% is noise: say so rather than claim it.\n6. PASS if frame_ms_avg and frame_ms_p99 are better or the same; FAIL otherwise, with the stat that got worse."
+  },
+  {
+   "id": "diagnostics-perf.live-nanite-niagara",
+   "title": "Read Nanite and Niagara live during play",
+   "summary": "Sample the running game: Nanite's streaming pool and fallback meshes, Niagara systems with their particles, caps and cost, and renderer settings.",
+   "packs": [
+    "automation_profiling_build",
+    "niagara_vfx"
+   ],
+   "skills": [
+    "performance"
+   ],
+   "tools": [
+    "hyper_profile_live",
+    "hyper_playtest_run",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "performance",
+    "nanite",
+    "niagara",
+    "streaming",
+    "particles",
+    "effect type",
+    "budget",
+    "live"
+   ],
+   "placeholders": [
+    {
+     "name": "sample_seconds",
+     "label": "Seconds to sample",
+     "default": "3",
+     "hint": "0 reads now; 1 to 10 also measures cost"
+    },
+    {
+     "name": "top_n",
+     "label": "Systems and meshes to list",
+     "default": "10"
+    }
+   ],
+   "prompt": "Read what {{level}} draws while it plays, read-only.\n1. If Play In Editor is not running, start it with hyper_playtest_run (mode StartInProcess, teardown LeaveSessionRunning, one Bot step Wait seconds 5) and hyper_operation_wait with bWaitThroughApproval true.\n2. hyper_profile_live with sampleSeconds {{sample_seconds}} and topN {{top_n}}.\n3. Nanite: enabled, streaming pool MB, qualityScale, Nanite, fallback and plain mesh counts, each fallback with its reason, and the sampled root, visible and requested streaming data. Say which figures it notes it cannot read.\n4. Niagara: active components, emitters, CPU and GPU particles; a table of systems (system, effect type, instances, particles, game-thread us, render-thread us, GPU us); effect types at their caps; overBudget; the FX budget.\n5. The renderer lines.\n6. PASS/FAIL: no effect type at its cap, no system over 500 us a frame on the game thread, qualityScale 1. Stop play with Epic's StopPIE if you started it."
+  }
+ ]
+}

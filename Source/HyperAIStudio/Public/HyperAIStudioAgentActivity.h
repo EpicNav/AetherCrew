@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Delegates/Delegate.h"
+#include "HyperAIStudioApprovalCategory.h"
 
 enum class EHyperAIStudioActivityKind : uint8
 {
@@ -14,7 +15,11 @@ enum class EHyperAIStudioActivityKind : uint8
 	JobStarted,
 	JobFinished,
 	Completed,
-	Failed
+	Failed,
+	/** Waiting behind another edit for the project's one execution lane. */
+	Queued,
+	/** Auto-approval turned on or off; no operation of its own. */
+	AutoApproval
 };
 
 /** One line of what an agent did, or asked to do, in this editor session. */
@@ -32,6 +37,12 @@ struct FHyperAIStudioActivityEntry
 	/** The chat agent credited with it, and the model that agent ran; empty when that could not be told. */
 	FString Agent;
 	FString Model;
+	/** Set when the user's auto-approval approved it rather than a click; the category that covered it. */
+	TOptional<EHyperAIStudioApprovalCategory> AutoApprovedAs;
+	/** That auto-approval came back on by itself after the editor restarted ("Stay on after the editor restarts"). */
+	bool bKeptOnAfterRestart = false;
+	/** A running agent job the user started approved it, not a click. */
+	bool bApprovedForJob = false;
 };
 
 /**
@@ -60,6 +71,8 @@ public:
 	using FAgentResolver = TFunction<bool(FString& OutAgent, FString& OutModel)>;
 	/** Returns the resolver it replaces. */
 	static FAgentResolver SetAgentResolver(FAgentResolver Resolver);
+	/** Asks the installed resolver; false when no resolver is installed. */
+	static bool ResolveWorkingAgent(FString& OutAgent, FString& OutModel);
 
 	/**
 	 * " The last agent edit to it was ..." for a stale-revision message, so an agent learns that another tab

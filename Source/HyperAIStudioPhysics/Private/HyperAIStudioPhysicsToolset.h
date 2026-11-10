@@ -10,6 +10,7 @@
 #include "Misc/AssetRegistryInterface.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioPhysicsToolset.generated.h"
 
 USTRUCT(BlueprintType)
@@ -305,6 +306,22 @@ struct FHyperAIPhysicsApplyPlanReport
 	UPROPERTY() TArray<FHyperAIPhysicsCapabilityStatus> Capabilities;
 };
 
+/** hyper_physics_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIPhysicsApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIPhysicsApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIPhysicsApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIPhysicsApplyPlanReport Value;
+};
+
 /** Exactly three functions form the Physics/Chaos atomic cohort. */
 UCLASS()
 class HYPERAISTUDIOPHYSICS_API UHyperAIStudioPhysicsToolset final : public UToolsetDefinition
@@ -319,7 +336,7 @@ public:
 		const FHyperAIPhysicsInspectRequest& Request);
 
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Physics")
-	static FHyperAIPhysicsApplyPlanReport hyper_physics_apply_plan(
+	static UHyperAIPhysicsApplyPlanResult* hyper_physics_apply_plan(
 		const FHyperAIPhysicsApplyPlanRequest& Request);
 
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Physics")
@@ -490,6 +507,8 @@ public:
 		FHyperAIPhysicsValidateReport& OutReport);
 	static FHyperAIPhysicsInspectReport Inspect(const FHyperAIPhysicsInspectRequest& Request);
 	static FHyperAIPhysicsValidateReport Validate(const FHyperAIPhysicsValidateRequest& Request);
+	/** hyper_physics_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIPhysicsApplyPlanReport BuildFittedPlan(const FHyperAIPhysicsApplyPlanRequest& Request);
 	static FHyperAIPhysicsApplyPlanReport BuildPlan(
 		const FHyperAIPhysicsApplyPlanRequest& Request);
 	static FString ComputePatchSemanticFingerprint(

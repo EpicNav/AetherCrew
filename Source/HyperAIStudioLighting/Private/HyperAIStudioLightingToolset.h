@@ -7,6 +7,7 @@
 #include "HyperAIStudioLiveProbePublisher.h"
 #include "HyperAIStudioTrustedExecution.h"
 #include "HyperAIStudioTypedArtifactExecution.h"
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
 #include "HyperAIStudioLightingToolset.generated.h"
@@ -20,17 +21,54 @@ struct FHyperAILightingProperty
 	UPROPERTY() FString Value;
 };
 
-/** One lighting actor in the level and the settings the apply ops can change. */
+/**
+ * One lighting actor in the level and the settings the apply ops can change. A sky atmosphere also shows the engine's
+ * defaults (rayleigh_scale_default, mie_scale_default) and, when a scale is far past its default, a note on what it does.
+ */
 USTRUCT(BlueprintType)
 struct FHyperAILightingActorRecord
 {
 	GENERATED_BODY()
 
-	/** sun, sky_light, fog, sky_atmosphere or post_process. */
+	/** sun, sky_light, fog, sky_atmosphere, post_process, sky_system, reflection_capture, or point_light, spot_light and rect_light. */
 	UPROPERTY() FString Kind;
 	UPROPERTY() FString Label;
 	UPROPERTY() FString Path;
 	UPROPERTY() TArray<FHyperAILightingProperty> Properties;
+};
+
+/** A material on what the view shows: what it is, how much of the frame it covers, and the parameters set_material_parameter changes. */
+USTRUCT(BlueprintType)
+struct FHyperAILightingMaterialRecord
+{
+	GENERATED_BODY()
+
+	/** The material or material instance the slots show. */
+	UPROPERTY() FString Path;
+	/**
+	 * material, material_instance, look_dev (this level's own instance of a material, which every slot that showed the
+	 * material shows instead), look_dev_actor (one actor's own), or dynamic (made by a construction script; not changed here).
+	 */
+	UPROPERTY() FString Kind;
+	/** The base material its instances are made from. */
+	UPROPERTY() FString BaseMaterial;
+	/** opaque, masked, translucent, additive, modulate or alpha_composite. */
+	UPROPERTY() FString BlendMode;
+	/** default_lit, unlit, subsurface, clear_coat, two_sided_foliage and the rest, joined with + when it has several. */
+	UPROPERTY() FString ShadingModel;
+	UPROPERTY() bool bTwoSided = false;
+	/** Rough share of the view it covers, 0-1: how much a change to it moves the picture. */
+	UPROPERTY() float ViewShare = 0.f;
+	/** Placed actors showing it anywhere in the level; set_material_parameter changes it on all of them. */
+	UPROPERTY() int32 ActorCount = 0;
+	/** The nearest few in view, any of which set_material_parameter takes as actor_label. */
+	UPROPERTY() TArray<FString> Actors;
+	/** Where it is on the first of them, as the material ops' property starts: slot:<index>, or component:<name>/slot:<index>. */
+	UPROPERTY() FString Slot;
+	/** Its parameters and their values now: numbers, linear colours "r,g,b,a" and texture paths, by name. */
+	UPROPERTY() TArray<FHyperAILightingProperty> Parameters;
+	/** What in its setup or values keeps it from taking light as the real surface would. */
+	UPROPERTY() TArray<FString> Notes;
 };
 
 USTRUCT(BlueprintType)
@@ -39,6 +77,14 @@ struct FHyperAILightingInspectRequest
 	GENERATED_BODY()
 
 	UPROPERTY() int32 MaxOutputBytes = 65536;
+	/** Local lights lighting this camera's view come first; empty uses HyperAI_MatchCamera if it is placed, else the level viewport. */
+	UPROPERTY() FString CameraActorLabel;
+	/** Only local lights on actors whose label contains this, in any case. */
+	UPROPERTY() FString LabelFilter;
+	/** Point, spot and rect lights to list, 0-128: those in view first, nearest first. */
+	UPROPERTY() int32 MaxLocalLights = 32;
+	/** Materials on what the same view shows to list, 0-48, most of the frame first, each with its parameters; 0 lists none. */
+	UPROPERTY() int32 MaxMaterials = 12;
 };
 
 USTRUCT(BlueprintType)
@@ -56,6 +102,20 @@ struct FHyperAILightingInspectReport
 	/** False means auto exposure is on, so screenshots cannot be compared fairly; lock it first. */
 	UPROPERTY() bool bExposureLocked = false;
 	UPROPERTY() TArray<FHyperAILightingActorRecord> Actors;
+	/** Point, spot and rect lights in the level, listed or not. */
+	UPROPERTY() int32 LocalLightCount = 0;
+	/** What the local lights were ordered from: a camera's label, or level_viewport; empty for path order. */
+	UPROPERTY() FString LightView;
+	/** Materials on what that view shows, most of the frame first; MaterialCount counts every one there, listed or not. */
+	UPROPERTY() TArray<FHyperAILightingMaterialRecord> Materials;
+	UPROPERTY() int32 MaterialCount = 0;
+	/**
+	 * How the project renders light, which decides what a change can do: gi_method and reflection_method (lumen,
+	 * screen_space or none, as the level's post process leaves them), lumen_tracing (software or hardware),
+	 * lumen_max_roughness_to_trace, mesh_distance_fields, substrate, virtual_shadow_maps, megalights, static_lighting,
+	 * translucency_front_layer_reflections, and reflection_captures in the level.
+	 */
+	UPROPERTY() TArray<FHyperAILightingProperty> Rendering;
 	UPROPERTY() TArray<FString> Capabilities;
 };
 
@@ -129,11 +189,56 @@ struct FHyperAILightingCompareReport
  * One closed lighting edit. Kind and Property:
  *   set_sun: intensity (lux), temperature (K), color (r,g,b), pitch, yaw (degrees), source_angle
  *   set_sky_light: intensity, color
- *   set_fog: density, height_falloff, start_distance, inscattering_color
- *   set_sky_atmosphere: rayleigh_scale, mie_scale
- *   set_post_process: exposure_bias (EV), white_temp (K), saturation, contrast, gamma
+ *   set_fog: density, height_falloff, start_distance, inscattering_color, and for light shafts volumetric_fog (true/false),
+ *     volumetric_scattering_distribution (-0.9 to 0.9), volumetric_albedo (r,g,b), volumetric_extinction_scale
+ *   set_sky_atmosphere: rayleigh_scale (0 to 2; the engine's default 0.0331), mie_scale (0 to 5; default 0.003996): raw
+ *     scattering coefficients, so ten times the default already turns the sky to haze
+ *   set_clouds: volumetric clouds, added if the level has none; material:<parameter> sets one of their material's, such
+ *     as material:Cloud_GlobalCoverage or material:Cloud_GlobalDensity, on a material instance the level owns
+ *   set_post_process: exposure_bias (EV), white_temp (K), saturation, contrast, gamma, and grading as r,g,b:
+ *     shadows_gain, shadows_offset (-0.5 to 0.5), highlights_gain; color_grading_lut takes a LUT image such as
+ *     hyper_image_compare's fit_lut writes (imported as a LUT texture), a LUT texture's path, or none, and applies it at
+ *     full intensity (a later ColorGradingIntensity op softens it)
+ *   Beyond these keys, every stock kind takes any setting its Details panel shows, by its C++ name or its label there:
+ *     set_sun BloomScale or light_shaft_bloom, set_sky_light MinOcclusion or OcclusionTint (r,g,b), set_fog
+ *     DirectionalInscatteringExponent or SecondFogData, set_sky_atmosphere MieAnisotropy, set_clouds LayerBottomAltitude,
+ *     set_post_process LocalExposureShadowContrastScale or BloomIntensity. Values are numbers, true/false, an enum's name,
+ *     r,g,b for a colour, or Unreal's text form; a post-process setting set to default goes back to the level's.
+ *   set_actor_shadow: actor_label names a placed actor; property is empty for all its meshes or component:<name>; value
+ *     false lets light through, as the foliage, cloth or glass a blockout shape stands for would
  *   lock_exposure: value is the exposure bias in EV (default 0); unlock_exposure: no value
- * ActorLabel picks an actor; empty uses the first of its kind, adding one if the level has none.
+ *   set_actor_material: actor_label (required) names any placed actor; property is empty (slot 0),
+ *     slot:<index or name>, or component:<name>/slot:<index or name>; value is the material's path
+ *   set_material_parameter: makes a surface take light as the reference's does (glossier, rougher, a truer colour, a
+ *     brighter glow) without changing the project's materials. actor_label names a placed actor showing the material;
+ *     property is [component:<name>/][slot:<index or name>/]<parameter>; value is a number, linear "r,g,b[,a]", a
+ *     texture's path, or default to drop the change. The level's own instance of the material, made under
+ *     /Game/HyperAI/LookDev/<level>/ the first time, takes the value, and every slot in the level that showed the
+ *     material shows that instance instead. set_actor_material_parameter gives the one actor's slot its own instance.
+ *     hyper_lighting_inspect lists the materials in view with their parameters.
+ *   set_actor_lighting: actor_label names a placed actor; property is [component:<name>/]<setting>: cast_shadow,
+ *     emissive_light_source (a small glowing mesh keeps lighting the scene under Lumen), affect_indirect_lighting,
+ *     affect_distance_field_lighting, visible_in_reflection_captures or visible_in_ray_tracing; value true or false
+ *   add_reflection_capture: actor_label is the new capture's label, property sphere or box, value its world "x,y,z".
+ *     Captures light surfaces' reflections where Lumen reflections are off (reflection_method screen_space or none).
+ *   set_reflection_capture: a capture by actor_label: location (x,y,z), box_extent (x,y,z half sizes in cm; box only),
+ *     or any setting its Details panel shows, such as Brightness, InfluenceRadius or BoxTransitionDistance
+ *   set_sky_system: a Blueprint sky such as Ultra Dynamic Sky, which owns its sun, sky light and fog. Property is a
+ *     variable by the name its Details panel shows (Time of Day, Cloud Coverage, Sun Light Intensity, ...), value is
+ *     a number, true/false, an enum's display name or Unreal's text form; empty actor_label takes the first sky that
+ *     has the variable. With such a sky, set_sun, set_sky_light, set_fog and set_sky_atmosphere are refused.
+ *   set_light: a point, spot or rect light by actor_label: a light actor, or an actor holding lights, whose property is then
+ *     component:<name>/<setting> unless it holds one. Settings: intensity (in the light's intensity_units), intensity_units
+ *     (unitless, candelas, lumens, ev or nits; the light keeps its brightness), color (r,g,b),
+ *     temperature (K), use_temperature, attenuation_radius, source_radius, soft_source_radius and source_length (point and
+ *     spot), inner_cone_angle and outer_cone_angle (spot), source_width, source_height, barn_door_angle and
+ *     barn_door_length (rect), cast_shadows, volumetric_scattering, indirect_intensity, specular_scale, enabled (true or
+ *     false: a light is switched off, never deleted), ies_profile and light_function (an asset path, or none), and for
+ *     light actors location (x,y,z), rotation (pitch,yaw,roll) and aim_at (x,y,z; spot and rect)
+ *   add_light: actor_label is the new light's label, property its type (point, spot or rect), value its world location
+ *     "x,y,z". It is movable, in the project's default light units, and marked as added by HyperAI; a later op in the same
+ *     plan may set_light it.
+ * ActorLabel picks an actor; for the stock kinds, empty uses the first of its kind, adding one if the level has none.
  */
 USTRUCT(BlueprintType)
 struct FHyperAILightingOp
@@ -180,7 +285,253 @@ struct FHyperAILightingApplyPlanReport
 	UPROPERTY() FString BaseRevision;
 	UPROPERTY() FString PlanHash;
 	UPROPERTY() FString AuthorizationPlanHash;
+	/** What the plan sets that is valid but rarely meant, and what it will do: a sky atmosphere scale far past its default. */
+	UPROPERTY() TArray<FString> Notes;
 	UPROPERTY() TArray<FString> Capabilities;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAICaptureViewRequest
+{
+	GENERATED_BODY()
+
+	/** camera (a camera actor by label), transform (Location, Rotation, FovDegrees), or viewport (the level viewport's view). */
+	UPROPERTY() FString Source = TEXT("camera");
+	UPROPERTY() FString CameraActorLabel;
+	UPROPERTY() FVector Location = FVector::ZeroVector;
+	UPROPERTY() FRotator Rotation = FRotator::ZeroRotator;
+	UPROPERTY() float FovDegrees = 90.f;
+	/** Up to 1920 x 1080. */
+	UPROPERTY() int32 Width = 1280;
+	UPROPERTY() int32 Height = 720;
+	/** 1-4. With two or more, each frame is compared with the one before it. */
+	UPROPERTY() int32 FrameCount = 1;
+	/** world mode: seconds of editor world time between frames, 0.05-5. */
+	UPROPERTY() float IntervalSeconds = 0.5f;
+	/** world, or material_time: every frame renders with the material Time node forced to the matching MaterialTimes entry. */
+	UPROPERTY() FString TimeMode = TEXT("world");
+	UPROPERTY() TArray<float> MaterialTimes;
+	/** Discarded captures before the first frame, 0-8, so temporal effects settle. */
+	UPROPERTY() int32 WarmupFrames = 3;
+	/**
+	 * Then keep drawing until the level shows its latest change: sky captures, global illumination and fog take many
+	 * frames to catch up, and the first of them can look unchanged. At least 1.5 seconds and 45 frames after the last
+	 * edit to the level, then until two draws in a row match; 6 seconds at most. False takes exactly WarmupFrames.
+	 */
+	UPROPERTY() bool bSettle = true;
+	/** Largest per-channel change (0-1) above which a pixel counts as changed between frames. */
+	UPROPERTY() float DiffThreshold = 0.03f;
+	/** Names the batch folder: letters, digits, - and _. */
+	UPROPERTY() FString Label;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAICaptureFrame
+{
+	GENERATED_BODY()
+
+	/** Project-relative PNG. */
+	UPROPERTY() FString ImagePath;
+	UPROPERTY() float WorldTimeSeconds = 0.f;
+	/** The forced material time, or -1 in world mode. */
+	UPROPERTY() float MaterialTime = -1.f;
+	UPROPERTY() FHyperAILightingImageMetrics Metrics;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAICaptureDiff
+{
+	GENERATED_BODY()
+
+	UPROPERTY() int32 FrameA = 0;
+	UPROPERTY() int32 FrameB = 0;
+	/** Mean absolute RGB change, 0-1. */
+	UPROPERTY() float MeanAbsDiff = 0.f;
+	/** Share of pixels whose largest channel change exceeds DiffThreshold. */
+	UPROPERTY() float ChangedPixelFraction = 0.f;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAICaptureViewReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY() bool bOk = false;
+	UPROPERTY() FString Status;
+	UPROPERTY() FString Diagnostic;
+	UPROPERTY() FString BatchId;
+	/** Project-relative folder holding the frames. */
+	UPROPERTY() FString Folder;
+	UPROPERTY() FString Source;
+	UPROPERTY() FVector ViewLocation = FVector::ZeroVector;
+	UPROPERTY() FRotator ViewRotation = FRotator::ZeroRotator;
+	UPROPERTY() float FovDegrees = 0.f;
+	UPROPERTY() TArray<FHyperAICaptureFrame> Frames;
+	UPROPERTY() TArray<FHyperAICaptureDiff> Diffs;
+	/** world mode: false means the editor world did not tick between frames, so an unchanged result proves nothing. */
+	UPROPERTY() bool bWorldTimeAdvanced = false;
+	/** True when shaders were still compiling at capture time, so some surfaces may show default materials. */
+	UPROPERTY() bool bShadersStillCompiling = false;
+	/** Draws settling took beyond WarmupFrames. */
+	UPROPERTY() int32 SettleFrames = 0;
+	/** True when settling ran out of time: the picture kept changing (a moving sky, clouds or water) or the level kept being edited. */
+	UPROPERTY() bool bSettleTimedOut = false;
+	UPROPERTY() TArray<FString> Capabilities;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIImageCompareRequest
+{
+	GENERATED_BODY()
+
+	/** The look to reach: an image inside the project, such as a generated reference, concept art, a photo or an earlier capture. */
+	UPROPERTY() FString ReferenceImagePath;
+	/** The attempt: an image inside the project, such as a hyper_capture_view frame. Empty captures the active level viewport. */
+	UPROPERTY() FString CandidateImagePath;
+	/**
+	 * look: a concept or photo that will never line up pixel for pixel, so palette, tone, layout and detail count.
+	 * aligned: both frame the same view (the same camera, a material preview against its target), so structure counts too.
+	 */
+	UPROPERTY() FString Mode = TEXT("look");
+	/** Score (0-100) at or above which the candidate counts as matched. */
+	UPROPERTY() float TargetScore = 80.f;
+	/** Keeps iterations together: letters, digits, - and _. Each compare in a session records its candidate, score and note. */
+	UPROPERTY() FString SessionId;
+	/** What changed since the last iteration, in a few words, kept in the session's history. */
+	UPROPERTY() FString Note;
+	/** Cells a side for the region breakdown, 2-8. */
+	UPROPERTY() int32 Grid = 4;
+	/**
+	 * Also fit a colour-grading LUT that takes the candidate's colours to the reference's, as a colourist grades a frame, and
+	 * say what the candidate would score through it. The LUT allows for any LUT the level's grade has now. Apply it with
+	 * hyper_lighting_apply_plan set_post_process color_grading_lut <lut_path>.
+	 */
+	UPROPERTY() bool bFitLut = false;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIImageRegion
+{
+	GENERATED_BODY()
+
+	/** Where it is, such as "top left" or "center". */
+	UPROPERTY() FString Name;
+	UPROPERTY() int32 Row = 0;
+	UPROPERTY() int32 Column = 0;
+	/** 0-100 for this cell alone, after the overall differences are taken out. */
+	UPROPERTY() float Score = 0.f;
+	/** Brightness change that would bring the cell to the reference, in stops, beyond the overall one. */
+	UPROPERTY() float BrightenEV = 0.f;
+	/** Colour difference of the cell's averages, CIE delta E, beyond the overall one. */
+	UPROPERTY() float ColorDeltaE = 0.f;
+	/** Candidate detail over reference detail: below 1 is flatter, above 1 busier. */
+	UPROPERTY() float DetailRatio = 1.f;
+	/** The cell's average colour in each image, sRGB 0-1. */
+	UPROPERTY() FLinearColor ReferenceColor = FLinearColor::Black;
+	UPROPERTY() FLinearColor CandidateColor = FLinearColor::Black;
+	/** In words, such as "darker by 0.8 EV, cooler, less detail". */
+	UPROPERTY() FString Difference;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIImageIteration
+{
+	GENERATED_BODY()
+
+	UPROPERTY() int32 Index = 0;
+	UPROPERTY() float Score = 0.f;
+	UPROPERTY() FString Note;
+	/** The candidate as it was, copied into the session so a later capture cannot overwrite it; project-relative. */
+	UPROPERTY() FString CandidateImagePath;
+	UPROPERTY() FString SideBySidePath;
+	UPROPERTY() FString ComparedUtc;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIImageCompareReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY() bool bOk = false;
+	/** matched, differs, or why not */
+	UPROPERTY() FString Status;
+	UPROPERTY() FString Diagnostic;
+	UPROPERTY() FString Mode;
+	/** 0-100: how close the candidate is to the reference, by the measures Mode weights. */
+	UPROPERTY() float Score = 0.f;
+	UPROPERTY() float TargetScore = 0.f;
+	UPROPERTY() bool bMatched = false;
+	/** Each measure, 0-100. Structure is weighed in aligned mode only; layout and palette ignore an overall shift. */
+	UPROPERTY() float StructureScore = 0.f;
+	UPROPERTY() float PaletteScore = 0.f;
+	UPROPERTY() float ToneScore = 0.f;
+	UPROPERTY() float LayoutScore = 0.f;
+	UPROPERTY() float DetailScore = 0.f;
+	/** Changes that would bring the candidate to the reference: stops (positive brightens), kelvin (negative warms), saturation, contrast ratio. */
+	UPROPERTY() float ExposureDeltaEV = 0.f;
+	UPROPERTY() float ColorTemperatureDeltaK = 0.f;
+	UPROPERTY() float SaturationDelta = 0.f;
+	UPROPERTY() float ContrastRatioDelta = 0.f;
+	/** Each image's average colour, sRGB 0-1. */
+	UPROPERTY() FLinearColor ReferenceMeanColor = FLinearColor::Black;
+	UPROPERTY() FLinearColor CandidateMeanColor = FLinearColor::Black;
+	/** Every cell of the grid, worst first. */
+	UPROPERTY() TArray<FHyperAIImageRegion> Regions;
+	/** What to change next, strongest difference first. */
+	UPROPERTY() TArray<FString> Suggestions;
+	/** Reference and candidate side by side with the grid and the worst cells outlined, and a heat map of where they differ. Open them. */
+	UPROPERTY() FString SideBySidePath;
+	UPROPERTY() FString DiffPath;
+	/** With bFitLut: the fitted LUT, a 256 x 16 image; the candidate's score graded through it; and that graded candidate beside the reference. */
+	UPROPERTY() FString LutPath;
+	UPROPERTY() float LutScore = 0.f;
+	UPROPERTY() FString LutSideBySidePath;
+	/** The level's LUT the fit allowed for, when its grade had one. */
+	UPROPERTY() FString LutComposedWith;
+	/** The candidate as measured, when it was a viewport capture. */
+	UPROPERTY() FString CandidateWrittenPath;
+	UPROPERTY() FString SessionId;
+	/** Every iteration of the session so far, this one last. */
+	UPROPERTY() TArray<FHyperAIImageIteration> History;
+	UPROPERTY() int32 BestIteration = -1;
+	UPROPERTY() float BestScore = 0.f;
+	/** Score change since the previous iteration. */
+	UPROPERTY() float Improvement = 0.f;
+	/** Three iterations without a point gained over the best before them: change approach, or stop. */
+	UPROPERTY() bool bPlateau = false;
+	UPROPERTY() TArray<FString> Capabilities;
+};
+
+/** The pending result of hyper_capture_view; frames spread over editor ticks while the agent's call stays open. */
+UCLASS()
+class UHyperAICaptureViewResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAICaptureViewReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAICaptureViewReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAICaptureViewReport Value;
+};
+
+/** hyper_lighting_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAILightingApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAILightingApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAILightingApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAILightingApplyPlanReport Value;
 };
 
 /** Match a level's lighting to a reference image: inspect, lock exposure, compare, adjust, compare again. */
@@ -192,17 +543,23 @@ class HYPERAISTUDIOLIGHTING_API UHyperAIStudioLightingToolset final : public UTo
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** Sun, sky light, fog, sky atmosphere and post-process settings in the open level, whether exposure is locked, and the revision apply_plan needs. */
+	/**
+	 * Sun, sky light, fog, atmosphere, post process, reflection captures and any Blueprint sky (Ultra Dynamic Sky) in the
+	 * open level; the point, spot and rect lights and the materials, with their parameters, on what the view of
+	 * camera_actor_label (else HyperAI_MatchCamera, else the level viewport) shows; how the project renders light; whether
+	 * exposure is locked, and the revision apply_plan needs.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
 	static FHyperAILightingInspectReport hyper_lighting_inspect(const FHyperAILightingInspectRequest& Request);
 
 	/**
-	 * Closed lighting edits as one undo step: sun, sky light, fog, sky atmosphere, post process, and exposure lock.
-	 * Dry-run, resubmit with operation_id and expected_plan_hash = plan_hash, poll hyper_operation_status, then
-	 * hyper_lighting_compare. Unsaved by default; set bSave once the look matches.
+	 * Closed lighting edits as one undo step: sun, sky light, fog, atmosphere, clouds, post process (any Details setting by
+	 * name; a LUT), exposure lock, local lights, reflection captures, Blueprint skies, and surfaces: materials, parameters
+	 * on the level's own instances, mesh lighting flags. Submit with bDryRun false and an operation_id; the reply waits.
+	 * Unsaved unless bSave.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
-	static FHyperAILightingApplyPlanReport hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& Request);
+	static UHyperAILightingApplyPlanResult* hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& Request);
 
 	/**
 	 * Measures the active level viewport (or current_image_path) against a reference image: brightness percentiles,
@@ -211,6 +568,23 @@ public:
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
 	static FHyperAILightingCompareReport hyper_lighting_compare(const FHyperAILightingCompareRequest& Request);
+
+	/**
+	 * Final-colour PNGs from a named camera, a transform, or the level viewport, with metrics and frame-to-frame
+	 * differences, under Saved/HyperAIStudio/Captures. To prove an animation, capture two or more frames; TimeMode
+	 * material_time samples a material's Time node at exact times. Changes nothing in the project.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
+	static UHyperAICaptureViewResult* hyper_capture_view(const FHyperAICaptureViewRequest& Request);
+
+	/**
+	 * How close an attempt is to a reference image, for scenes, materials, effects and UI: a 0-100 score from palette,
+	 * tone, layout and detail (structure too when aligned), the cells that differ most, suggestions, and side-by-side and
+	 * heat-map PNGs to open. bFitLut also fits a colour-grading LUT to the reference. Pass session_id and a note to keep a
+	 * match loop's history. Changes nothing.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Lighting")
+	static FHyperAIImageCompareReport hyper_image_compare(const FHyperAIImageCompareRequest& Request);
 };
 
 class FHyperAIStudioLightingInspectPayload final : public IHyperAIStudioDomainRequestPayload
@@ -226,6 +600,24 @@ class FHyperAIStudioLightingComparePayload final : public IHyperAIStudioDomainRe
 {
 public:
 	FHyperAILightingCompareRequest Request;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+class FHyperAIStudioLightingCapturePayload final : public IHyperAIStudioDomainRequestPayload
+{
+public:
+	FHyperAICaptureViewRequest Request;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+class FHyperAIStudioLightingCaptureResultPayload final : public IHyperAIStudioDomainResultPayload
+{
+public:
+	FHyperAICaptureViewReport Report;
 	virtual FString GetTypeId() const override;
 	virtual FString GetSchemaFingerprint() const override;
 	virtual int32 GetBoundedByteSize() const override;
@@ -260,6 +652,24 @@ class FHyperAIStudioLightingCompareResultPayload final : public IHyperAIStudioDo
 {
 public:
 	FHyperAILightingCompareReport Report;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+class FHyperAIStudioLightingImageComparePayload final : public IHyperAIStudioDomainRequestPayload
+{
+public:
+	FHyperAIImageCompareRequest Request;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+class FHyperAIStudioLightingImageCompareResultPayload final : public IHyperAIStudioDomainResultPayload
+{
+public:
+	FHyperAIImageCompareReport Report;
 	virtual FString GetTypeId() const override;
 	virtual FString GetSchemaFingerprint() const override;
 	virtual int32 GetBoundedByteSize() const override;
@@ -317,6 +727,14 @@ public:
 	static constexpr const TCHAR* InspectResultTypeId = TEXT("hyperai.result.lighting.inspect.v1");
 	static constexpr const TCHAR* MutationResultTypeId = TEXT("hyperai.result.lighting.edit_ops.v1");
 	static constexpr const TCHAR* CompareResultTypeId = TEXT("hyperai.result.lighting.compare.v1");
+	static constexpr const TCHAR* CaptureToolName = TEXT("hyper_capture_view");
+	static constexpr const TCHAR* CaptureVariantId = TEXT("view_capture.v1");
+	static constexpr const TCHAR* CapturePayloadTypeId = TEXT("hyperai.payload.lighting.capture.v1");
+	static constexpr const TCHAR* CaptureResultTypeId = TEXT("hyperai.result.lighting.capture.v1");
+	static constexpr const TCHAR* ImageCompareToolName = TEXT("hyper_image_compare");
+	static constexpr const TCHAR* ImageCompareVariantId = TEXT("image_match_compare.v1");
+	static constexpr const TCHAR* ImageComparePayloadTypeId = TEXT("hyperai.payload.lighting.image_compare.v1");
+	static constexpr const TCHAR* ImageCompareResultTypeId = TEXT("hyperai.result.lighting.image_compare.v1");
 	static constexpr int32 MaxOpsPerPlan = 32;
 	static constexpr int32 MinOutputBytes = 16 * 1024;
 	static constexpr int32 MaxOutputBytes = 128 * 1024;
@@ -333,9 +751,18 @@ public:
 	static FString InspectResultSchemaFingerprint();
 	static FString MutationResultSchemaFingerprint();
 	static FString CompareResultSchemaFingerprint();
+	static FString CapturePayloadSchemaFingerprint();
+	static FString CaptureResultSchemaFingerprint();
+	static FString ImageComparePayloadSchemaFingerprint();
+	static FString ImageCompareResultSchemaFingerprint();
 	static const FHyperAIStudioDomainAdapterDescriptor& GetAdapterDescriptor();
 	static FHyperAILightingInspectReport Inspect(const FHyperAILightingInspectRequest& Request);
 	static FHyperAILightingCompareReport Compare(const FHyperAILightingCompareRequest& Request);
+	/** Captures without waiting between frames: one frame, or frames at forced material times. */
+	static FHyperAICaptureViewReport CaptureNow(const FHyperAICaptureViewRequest& Request);
+	static FHyperAIImageCompareReport CompareImages(const FHyperAIImageCompareRequest& Request);
+	/** hyper_lighting_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAILightingApplyPlanReport BuildFittedPlan(const FHyperAILightingApplyPlanRequest& Request);
 	static FHyperAILightingApplyPlanReport BuildPlan(const FHyperAILightingApplyPlanRequest& Request);
 	/** Order-sensitive: the same ops in a different order are a different plan. */
 	static FString ComputeEditOpsSemanticFingerprint(const FHyperAIStudioLightingEditOpsPayload& Payload);

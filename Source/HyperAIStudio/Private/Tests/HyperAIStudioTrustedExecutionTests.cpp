@@ -5,6 +5,21 @@
 #include "HyperAIStudioTrustedExecutionInternal.h"
 
 #include "Async/Async.h"
+#include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioAutoApproval.h"
+#include "HyperAIStudioExecutionQueue.h"
+#include "HyperAIStudioNativeReadToolset.h"
+#include "HyperAIStudioOperationWait.h"
+#include "HyperAIStudioSandbox.h"
+#include "IFileSandboxCoreModule.h"
+#include "ISandboxInstance.h"
+#include "ISandboxManager.h"
+#include "Types/Manager/DeleteSandboxByDirectoryArgs.h"
+#include "Types/Manager/DeleteSandboxResult.h"
+#include "Types/Manager/LeaveSandboxResult.h"
+#include "Types/Manager/NewSandboxArgs.h"
+#include "Types/Manager/SandboxCreationResult.h"
 #include "Containers/Ticker.h"
 #include "HAL/Event.h"
 #include "HAL/FileManager.h"
@@ -15,6 +30,7 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Misc/ScopeLock.h"
+#include "UObject/StrongObjectPtr.h"
 
 namespace HyperAIStudio::TrustedExecution::Tests
 {
@@ -1096,6 +1112,739 @@ bool FHyperAIStudioTrustedNoPumpTerminalReconcileTest::RunTest(const FString& Pa
 	TestTrue(TEXT("all serial operations eventually dispatched"), Adapter->ExecuteCount >= 33);
 	TestEqual(TEXT("terminal contexts reconcile without any client QueryStatus polling"),
 		Host.UnregisterAdapter(Handle, Error), EHyperAIStudioDomainUnregisterResult::Removed);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioTrustedEditQueueTest,
+	"HyperAIStudio.NativeTools.TrustedExecution.EditQueue",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioTrustedEditQueueTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::TrustedExecution::Tests;
+	const FString Root = MakeProjectRoot();
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Root, false, true); };
+	const TSharedRef<FTestClock, ESPMode::ThreadSafe> Clock = MakeShared<FTestClock, ESPMode::ThreadSafe>();
+	const TSharedRef<FTestEnvironment, ESPMode::ThreadSafe> Environment =
+		MakeShared<FTestEnvironment, ESPMode::ThreadSafe>();
+	const TSharedRef<FTestCatalogAuthority, ESPMode::ThreadSafe> Catalog =
+		MakeShared<FTestCatalogAuthority, ESPMode::ThreadSafe>(
+			MakeCatalog(EHyperAIStudioCapabilityAdmissionState::Admitted, false));
+	const TSharedRef<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host =
+		MakeShared<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe>(Root, Catalog, Environment, Clock);
+	FHyperAIStudioExecutionQueue::Clear();
+	HyperAIStudio::TrustedExecution::Private::SetQueueHostForTests(Host);
+	ON_SCOPE_EXIT
+	{
+		FHyperAIStudioExecutionQueue::Clear();
+		FHyperAIStudioApprovalGate::Clear();
+		HyperAIStudio::TrustedExecution::Private::SetQueueHostForTests(nullptr);
+		Host->Shutdown();
+	};
+	FString Error;
+	TestTrue(TEXT("host starts"), Host->Startup(Error));
+	const TSharedRef<FTestAdapter, ESPMode::ThreadSafe> Adapter =
+		MakeShared<FTestAdapter, ESPMode::ThreadSafe>(
+			MakeDescriptor(TEXT("adapter.test.queue"), BaseTool, false));
+	TArray<FString> Applied;
+	Adapter->OnExecute = [&Applied](const FHyperAIStudioDomainDispatchContext& Context, int32)
+	{
+		if (Context.ActionKind == EHyperAIStudioDomainExecutionActionKind::Apply)
+		{
+			Applied.Add(Context.OperationId);
+		}
+	};
+	FHyperAIStudioDomainRegistrationHandle Handle;
+	TestTrue(TEXT("adapter registers"), Host->RegisterAdapter(Adapter, Handle, Error));
+	auto PrepareOne = [&](FHyperAIStudioTrustedPreparedArtifact& Out)
+	{
+		FHyperAIStudioTrustedPrepareReport Report;
+		return Prepare(*Host, Adapter->Descriptor, BaseTool, Out, Report, Error);
+	};
+	auto PumpUntilIdle = [&]()
+	{
+		for (int32 Tick = 0; Tick < 400 && (FHyperAIStudioExecutionQueue::Num() > 0 || Host->IsLaneBusy()); ++Tick)
+		{
+			FTSTicker::GetCoreTicker().Tick(0.2f);
+		}
+	};
+
+	FHyperAIStudioTrustedPreparedArtifact First;
+	FHyperAIStudioTrustedPreparedArtifact Second;
+	FHyperAIStudioTrustedPreparedArtifact Third;
+	TestTrue(TEXT("three plans prepare"), PrepareOne(First) && PrepareOne(Second) && PrepareOne(Third));
+	// Every plan waits past its authority seal, as an approval or a long queue does.
+	Clock->AdvanceMonotonic(FHyperAIStudioTrustedExecutionLimits::ProbeFreshnessMs + 1);
+
+	FString Status;
+	TestTrue(TEXT("first edit submits"), FHyperAIStudioExecutionQueue::Submit(First, TEXT("queue-first"), Status, Error));
+	TestEqual(TEXT("an idle lane runs a stale plan at once, prepared again"), Status, FString(TEXT("submitted")));
+	TestTrue(TEXT("second edit is accepted"), FHyperAIStudioExecutionQueue::Submit(Second, TEXT("queue-second"), Status, Error));
+	TestEqual(TEXT("a busy lane queues the second edit instead of failing"), Status, FString(TEXT("queued")));
+	TestTrue(TEXT("a repeated submit of a waiting edit stays queued"),
+		FHyperAIStudioExecutionQueue::Submit(Second, TEXT("queue-second"), Status, Error) && Status == TEXT("queued"));
+	int32 Position = 0;
+	FString Failure;
+	FString Diagnostic;
+	TestTrue(TEXT("the waiting edit is first in line"),
+		FHyperAIStudioExecutionQueue::Query(TEXT("queue-second"), Position, Failure, Diagnostic) && Position == 1);
+	TestEqual(TEXT("operation status reports the wait"),
+		UHyperAIStudioNativeReadToolset::hyper_operation_status(TEXT("queue-second")).Status, FString(TEXT("queued")));
+
+	FHyperAIStudioApprovalSummary Summary;
+	Summary.PackId = PackId;
+	Summary.ToolName = BaseTool;
+	Summary.EffectTarget = TEXT("test:/trusted-target");
+	TestTrue(TEXT("third edit waits for approval"),
+		FHyperAIStudioApprovalGate::Request(Third, TEXT("queue-third"), Summary, Error));
+	TestTrue(TEXT("approving it after its seal lapsed succeeds"), FHyperAIStudioApprovalGate::Approve(TEXT("queue-third"), Error));
+	TestTrue(TEXT("the approved edit queues behind the second"),
+		FHyperAIStudioExecutionQueue::Query(TEXT("queue-third"), Position, Failure, Diagnostic) && Position == 2);
+
+	PumpUntilIdle();
+	TestTrue(TEXT("all three edits ran, first come first served"),
+		Applied == TArray<FString>{TEXT("queue-first"), TEXT("queue-second"), TEXT("queue-third")});
+	for (const TCHAR* OperationId : {TEXT("queue-first"), TEXT("queue-second"), TEXT("queue-third")})
+	{
+		FHyperAIStudioTypedArtifactOperationStatus Typed;
+		TestTrue(FString::Printf(TEXT("%s completed"), OperationId),
+			Host->QueryLiveStatus(OperationId, Typed) && Typed.bTerminal && Typed.Status == TEXT("completed"));
+	}
+
+	// A plan that cannot be prepared again when its turn comes fails with a reason the agent can read.
+	FHyperAIStudioTrustedPreparedArtifact Fourth;
+	FHyperAIStudioTrustedPreparedArtifact Fifth;
+	TestTrue(TEXT("two more plans prepare"), PrepareOne(Fourth) && PrepareOne(Fifth));
+	TestTrue(TEXT("fourth edit submits"), FHyperAIStudioExecutionQueue::Submit(Fourth, TEXT("queue-fourth"), Status, Error));
+	TestTrue(TEXT("fifth edit queues"),
+		FHyperAIStudioExecutionQueue::Submit(Fifth, TEXT("queue-fifth"), Status, Error) && Status == TEXT("queued"));
+	Environment->bModuleLoaded = false;
+	Clock->AdvanceMonotonic(FHyperAIStudioTrustedExecutionLimits::ProbeFreshnessMs + 1);
+	PumpUntilIdle();
+	Environment->bModuleLoaded = true;
+	TestTrue(TEXT("the failed wait is reported"),
+		FHyperAIStudioExecutionQueue::Query(TEXT("queue-fifth"), Position, Failure, Diagnostic) && Position == 0 && !Failure.IsEmpty());
+	TestEqual(TEXT("operation status reports it as failed"),
+		UHyperAIStudioNativeReadToolset::hyper_operation_status(TEXT("queue-fifth")).Status, FString(TEXT("failed")));
+
+	FHyperAIStudioTrustedPreparedArtifact Sixth;
+	FHyperAIStudioTrustedPreparedArtifact Seventh;
+	TestTrue(TEXT("two last plans prepare"), PrepareOne(Sixth) && PrepareOne(Seventh));
+	TestTrue(TEXT("sixth edit submits"), FHyperAIStudioExecutionQueue::Submit(Sixth, TEXT("queue-sixth"), Status, Error));
+	TestTrue(TEXT("seventh edit queues"), FHyperAIStudioExecutionQueue::Submit(Seventh, TEXT("queue-seventh"), Status, Error));
+	FHyperAIStudioExecutionQueue::Clear();
+	TestEqual(TEXT("clear drops waiting edits"), FHyperAIStudioExecutionQueue::Num(), 0);
+	PumpUntilIdle();
+	TestFalse(TEXT("a dropped edit never runs"), Applied.Contains(TEXT("queue-seventh")));
+
+	// Sandbox Mode cannot hold an edit while someone else's sandbox is active, so the edit is refused as it starts.
+	namespace FSC = UE::FileSandboxCore;
+	FHyperAIStudioTrustedPreparedArtifact Eighth;
+	FSC::ISandboxManager& Sandboxes = FSC::IFileSandboxCoreModule::Get().GetSandboxManager();
+	if (!Sandboxes.HasActiveSandbox()
+		&& Sandboxes.CreateNewSandbox(FSC::FNewSandboxArgs(TEXT("HyperAI queue test ") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8))).HasValue())
+	{
+		const FString ForeignRoot = Sandboxes.GetActiveSandboxInstance()->GetRootDirectory();
+		HyperAIStudio::Sandbox::SetModeForTests(true);
+		TestTrue(TEXT("an eighth plan prepares"), PrepareOne(Eighth));
+		TestFalse(TEXT("Sandbox Mode refuses the edit"), FHyperAIStudioExecutionQueue::Submit(Eighth, TEXT("queue-eighth"), Status, Error));
+		TestEqual(TEXT("and says the sandbox is why"), Status, FString(TEXT("sandbox_unavailable")));
+		TestFalse(TEXT("the refused edit never runs"), Applied.Contains(TEXT("queue-eighth")));
+		HyperAIStudio::Sandbox::SetModeForTests(TOptional<bool>());
+		Sandboxes.LeaveSandbox();
+		Sandboxes.DeleteSandbox(FSC::FDeleteSandboxByDirectoryArgs(ForeignRoot));
+	}
+	else
+	{
+		AddWarning(TEXT("A sandbox is already active; the Sandbox Mode refusal is not checked."));
+	}
+
+	First.Reset();
+	Second.Reset();
+	Third.Reset();
+	Fourth.Reset();
+	Fifth.Reset();
+	Sixth.Reset();
+	Seventh.Reset();
+	Eighth.Reset();
+	Clock->AdvanceMonotonic(20000);
+	TestEqual(TEXT("held plans release their adapter pins"),
+		Host->UnregisterAdapter(Handle, Error), EHyperAIStudioDomainUnregisterResult::Removed);
+	return true;
+}
+
+namespace HyperAIStudio::TrustedExecution::Tests
+{
+	/** A pack's reply as ReplyWhenDone sees it; it completes the wait result the test reads. */
+	struct FReplyProbe
+	{
+		bool bOk = true;
+		FString Status;
+		FString Diagnostic;
+		FString OperationId;
+
+		operator FHyperAIOperationWaitReport() const
+		{
+			FHyperAIOperationWaitReport Out;
+			Out.Status.bOk = bOk;
+			Out.Status.Status = Status;
+			Out.Status.Diagnostic = Diagnostic;
+			Out.Status.OperationId = OperationId;
+			Out.CompletedBecause = TEXT("replied");
+			return Out;
+		}
+	};
+
+	FString AutoApprovalId()
+	{
+		return TEXT("autoapproval-typed-") + FGuid::NewGuid().ToString(EGuidFormats::Digits).ToLower();
+	}
+
+	TOptional<FHyperAIStudioPendingApproval> FindPending(const FString& OperationId)
+	{
+		for (const FHyperAIStudioPendingApproval& Pending : FHyperAIStudioApprovalGate::GetPending())
+		{
+			if (Pending.OperationId == OperationId)
+			{
+				return Pending;
+			}
+		}
+		return {};
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAutoApprovalRiskyGrantTest,
+	"HyperAIStudio.Chat.AutoApproval.RiskyGrantsThroughSamePath",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioAutoApprovalRiskyGrantTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::TrustedExecution::Tests;
+	using FAccess = FHyperAIStudioAutoApprovalTestAccess;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
+	const FString Root = MakeProjectRoot();
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Root, false, true); };
+	const TSharedRef<FTestClock, ESPMode::ThreadSafe> Clock = MakeShared<FTestClock, ESPMode::ThreadSafe>();
+	const TSharedRef<FTestEnvironment, ESPMode::ThreadSafe> Environment =
+		MakeShared<FTestEnvironment, ESPMode::ThreadSafe>();
+	const TSharedRef<FTestCatalogAuthority, ESPMode::ThreadSafe> Catalog =
+		MakeShared<FTestCatalogAuthority, ESPMode::ThreadSafe>(
+			MakeCatalog(EHyperAIStudioCapabilityAdmissionState::Admitted, false));
+	Catalog->SetAllowedSafety(BaseTool, {EHyperAIStudioCapabilitySafetyClass::Destructive});
+	Catalog->SetAllowedSafety(LimitedTool, {EHyperAIStudioCapabilitySafetyClass::ExternalEffect});
+	// No injected authorization: the same core-issuer shape StartupCore builds, so grants are real ones.
+	const TSharedRef<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host =
+		MakeShared<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe>(Root, Catalog, Environment, Clock);
+	FAccess::Reset();
+	FHyperAIStudioExecutionQueue::Clear();
+	HyperAIStudio::TrustedExecution::Private::SetQueueHostForTests(Host);
+	TArray<FString> Ids;
+	ON_SCOPE_EXIT
+	{
+		FAccess::Reset();
+		for (const FString& Id : Ids)
+		{
+			FHyperAIStudioApprovalGate::Reject(Id, TEXT("test over"));
+		}
+		FHyperAIStudioExecutionQueue::Clear();
+		HyperAIStudio::TrustedExecution::Private::SetQueueHostForTests(nullptr);
+		Host->Shutdown();
+	};
+	FString Error;
+	TestTrue(TEXT("host starts"), Host->Startup(Error));
+	const TSharedRef<FTestAdapter, ESPMode::ThreadSafe> Destructive = MakeShared<FTestAdapter, ESPMode::ThreadSafe>(
+		MakeDescriptor(TEXT("adapter.test.auto.destructive"), BaseTool, false, EHyperAIStudioDomainSafety::Destructive));
+	const TSharedRef<FTestAdapter, ESPMode::ThreadSafe> External = MakeShared<FTestAdapter, ESPMode::ThreadSafe>(
+		MakeDescriptor(TEXT("adapter.test.auto.external"), LimitedTool, false, EHyperAIStudioDomainSafety::ExternalEffect));
+	FHyperAIStudioDomainRegistrationHandle DestructiveHandle;
+	FHyperAIStudioDomainRegistrationHandle ExternalHandle;
+	TestTrue(TEXT("destructive adapter registers: ") + Error, Host->RegisterAdapter(Destructive, DestructiveHandle, Error));
+	TestTrue(TEXT("external adapter registers: ") + Error, Host->RegisterAdapter(External, ExternalHandle, Error));
+	auto PrepareRisky = [&](const FTestAdapter& Adapter, const FString& Tool, const EHyperAIStudioDomainSafety Safety,
+		FHyperAIStudioTrustedPreparedArtifact& Out)
+	{
+		FHyperAIStudioTrustedPrepareReport Report;
+		return Prepare(*Host, Adapter.Descriptor, Tool, Out, Report, Error, 15000, Safety);
+	};
+	auto PumpUntilIdle = [&]()
+	{
+		FAccess::PumpGate();
+		for (int32 Tick = 0; Tick < 400 && (FHyperAIStudioExecutionQueue::Num() > 0 || Host->IsLaneBusy()); ++Tick)
+		{
+			FTSTicker::GetCoreTicker().Tick(0.2f);
+		}
+	};
+	auto IsCompleted = [&](const FString& OperationId)
+	{
+		FHyperAIStudioTypedArtifactOperationStatus Typed;
+		return Host->QueryLiveStatus(OperationId, Typed) && Typed.bTerminal && Typed.Status == TEXT("completed");
+	};
+	FHyperAIStudioApprovalSummary Summary;
+	Summary.PackId = PackId;
+	Summary.ToolName = BaseTool;
+	Summary.EffectTarget = TEXT("test:/trusted-target");
+	// Declared Edit, as hyper_ui_apply_plan declares its delete and replace plans: the sealed variant must decide.
+	Summary.Safety = EHyperAIStudioDomainSafety::Edit;
+
+	const FString Mislabelled = Ids.Add_GetRef(AutoApprovalId());
+	TestTrue(TEXT("Edits auto-approval turns on"), FAccess::TurnOn({EHyperAIStudioApprovalCategory::Edits}, {Mislabelled}));
+	FHyperAIStudioTrustedPreparedArtifact First;
+	TestTrue(TEXT("a destructive plan prepares: ") + Error, PrepareRisky(*Destructive, BaseTool, EHyperAIStudioDomainSafety::Destructive, First));
+	TestTrue(TEXT("and waits for approval"), FHyperAIStudioApprovalGate::Request(First, Mislabelled, Summary, Error));
+	const TOptional<FHyperAIStudioPendingApproval> Held = FindPending(Mislabelled);
+	TestTrue(TEXT("Its sealed variant files it as destructive, whatever it declared"), Held.IsSet() && Held->Category.IsSet()
+		&& *Held->Category == EHyperAIStudioApprovalCategory::Destructive);
+	TestTrue(TEXT("so Edits auto-approval does not cover it"), Held.IsSet() && !Held->bAutoApproving);
+	TestTrue(TEXT("nor may a running agent job approve it"), Held.IsSet() && !Held->IsPlainEdit());
+	PumpUntilIdle();
+	TestTrue(TEXT("It still waits"), FHyperAIStudioApprovalGate::HasPending(Mislabelled));
+	TestEqual(TEXT("and nothing ran"), Destructive->ApplyCount, 0);
+
+	const FString Approved = Ids.Add_GetRef(AutoApprovalId());
+	TestTrue(TEXT("Destructive auto-approval turns on"), FAccess::TurnOn({EHyperAIStudioApprovalCategory::Destructive}, {Approved}));
+	FHyperAIStudioTrustedPreparedArtifact Second;
+	TestTrue(TEXT("another destructive plan prepares: ") + Error, PrepareRisky(*Destructive, BaseTool, EHyperAIStudioDomainSafety::Destructive, Second));
+	TestTrue(TEXT("and is held"), FHyperAIStudioApprovalGate::Request(Second, Approved, Summary, Error));
+	TestTrue(TEXT("about to be approved"), FHyperAIStudioApprovalGate::IsAutoApproving(Approved));
+	PumpUntilIdle();
+	TestFalse(TEXT("It is approved"), FHyperAIStudioApprovalGate::HasPending(Approved));
+	TestEqual(TEXT("and runs once: the queue issued its grant, as for a click"), Destructive->ApplyCount, 1);
+	TestTrue(TEXT("to completion"), IsCompleted(Approved));
+	TestTrue(TEXT("The one made before it still waits"), FHyperAIStudioApprovalGate::HasPending(Mislabelled));
+	const TOptional<FHyperAIStudioApprovalRecord> Record = FHyperAIStudioApprovalGate::FindApproval(Approved);
+	TestTrue(TEXT("The gate records it as auto-approved as destructive"), Record.IsSet()
+		&& Record->AutoApprovedAs == EHyperAIStudioApprovalCategory::Destructive);
+
+	// Without an approval the same kind of plan is refused before any effect: the grant above came from the approval path.
+	FHyperAIStudioTrustedPreparedArtifact Unapproved;
+	TestTrue(TEXT("an unapproved destructive plan prepares"), PrepareRisky(*Destructive, BaseTool, EHyperAIStudioDomainSafety::Destructive, Unapproved));
+	FString Status;
+	TestFalse(TEXT("Submitted without approval, it is refused"),
+		FHyperAIStudioExecutionQueue::Submit(Unapproved, AutoApprovalId(), Status, Error));
+	PumpUntilIdle();
+	TestEqual(TEXT("and never runs"), Destructive->ApplyCount, 1);
+
+	const FString Paid = Ids.Add_GetRef(AutoApprovalId());
+	TestTrue(TEXT("External-effects auto-approval turns on"), FAccess::TurnOn({EHyperAIStudioApprovalCategory::ExternalEffects}, {Paid}));
+	FHyperAIStudioApprovalSummary PaidSummary = Summary;
+	PaidSummary.ToolName = LimitedTool;
+	PaidSummary.Safety = EHyperAIStudioDomainSafety::ExternalEffect;
+	FHyperAIStudioTrustedPreparedArtifact Third;
+	TestTrue(TEXT("an external-effect plan prepares: ") + Error, PrepareRisky(*External, LimitedTool, EHyperAIStudioDomainSafety::ExternalEffect, Third));
+	TestTrue(TEXT("and is held"), FHyperAIStudioApprovalGate::Request(Third, Paid, PaidSummary, Error));
+	PumpUntilIdle();
+	TestEqual(TEXT("It runs once, through its grant"), External->ApplyCount, 1);
+	TestTrue(TEXT("to completion"), IsCompleted(Paid));
+	const FHyperAIOperationStatus PaidStatus = UHyperAIStudioNativeReadToolset::hyper_operation_status(Paid);
+	TestEqual(TEXT("An agent reads that auto-approval approved it"), PaidStatus.ApprovedBy, FString(TEXT("auto_approval")));
+	TestTrue(TEXT("The destructive plan still waits under external-effects auto-approval"), FHyperAIStudioApprovalGate::HasPending(Mislabelled));
+
+	FAccess::Reset();
+	FHyperAIStudioApprovalGate::Reject(Mislabelled, TEXT("test over"));
+	First.Reset();
+	Second.Reset();
+	Third.Reset();
+	Unapproved.Reset();
+	Clock->AdvanceMonotonic(20000);
+	Host->UnregisterAdapter(DestructiveHandle, Error);
+	Host->UnregisterAdapter(ExternalHandle, Error);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAutoApprovalTypedReplyTest,
+	"HyperAIStudio.Chat.AutoApproval.TypedReplyWaits",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioAutoApprovalTypedReplyTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::TrustedExecution::Tests;
+	using FAccess = FHyperAIStudioAutoApprovalTestAccess;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
+	const FString Root = MakeProjectRoot();
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Root, false, true); };
+	const TSharedRef<FTestClock, ESPMode::ThreadSafe> Clock = MakeShared<FTestClock, ESPMode::ThreadSafe>();
+	const TSharedRef<FTestEnvironment, ESPMode::ThreadSafe> Environment =
+		MakeShared<FTestEnvironment, ESPMode::ThreadSafe>();
+	const TSharedRef<FTestCatalogAuthority, ESPMode::ThreadSafe> Catalog =
+		MakeShared<FTestCatalogAuthority, ESPMode::ThreadSafe>(
+			MakeCatalog(EHyperAIStudioCapabilityAdmissionState::Admitted, false));
+	const TSharedRef<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host =
+		MakeShared<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe>(Root, Catalog, Environment, Clock);
+	FAccess::Reset();
+	FHyperAIStudioExecutionQueue::Clear();
+	HyperAIStudio::TrustedExecution::Private::SetQueueHostForTests(Host);
+	const FString Covered = AutoApprovalId();
+	const FString Uncovered = AutoApprovalId();
+	ON_SCOPE_EXIT
+	{
+		FAccess::Reset();
+		FHyperAIStudioApprovalGate::Reject(Covered, TEXT("test over"));
+		FHyperAIStudioApprovalGate::Reject(Uncovered, TEXT("test over"));
+		FHyperAIStudioExecutionQueue::Clear();
+		HyperAIStudio::TrustedExecution::Private::SetQueueHostForTests(nullptr);
+		Host->Shutdown();
+	};
+	FString Error;
+	TestTrue(TEXT("host starts"), Host->Startup(Error));
+	const TSharedRef<FTestAdapter, ESPMode::ThreadSafe> Adapter = MakeShared<FTestAdapter, ESPMode::ThreadSafe>(
+		MakeDescriptor(TEXT("adapter.test.auto.reply"), BaseTool, false));
+	FHyperAIStudioDomainRegistrationHandle Handle;
+	TestTrue(TEXT("adapter registers"), Host->RegisterAdapter(Adapter, Handle, Error));
+	FHyperAIStudioApprovalSummary Summary;
+	Summary.PackId = PackId;
+	Summary.ToolName = BaseTool;
+	Summary.EffectTarget = TEXT("test:/trusted-target");
+	TestTrue(TEXT("Edits auto-approval turns on"), FAccess::TurnOn({EHyperAIStudioApprovalCategory::Edits}, {Covered}));
+
+	// A typed pack holds its plan and replies through ReplyWhenDone, as the apply tools do.
+	FHyperAIStudioTrustedPreparedArtifact Plan;
+	FHyperAIStudioTrustedPrepareReport Report;
+	TestTrue(TEXT("a plan prepares"), Prepare(*Host, Adapter->Descriptor, BaseTool, Plan, Report, Error));
+	TestTrue(TEXT("and is held"), FHyperAIStudioApprovalGate::Request(Plan, Covered, Summary, Error));
+	FReplyProbe Reply;
+	Reply.Status = TEXT("awaiting_user_approval");
+	Reply.OperationId = Covered;
+	const TStrongObjectPtr<UHyperAIOperationWaitResult> Result(
+		HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIOperationWaitResult>(Reply));
+	TestTrue(TEXT("The reply waits instead of saying it awaits approval"), Result->Value.Status.Status.IsEmpty());
+	for (int32 Tick = 0; Tick < 400 && Result->Value.Status.Status.IsEmpty(); ++Tick)
+	{
+		FTSTicker::GetCoreTicker().Tick(0.2f);
+	}
+	TestEqual(TEXT("and gives the edit's outcome"), Result->Value.Status.Status, FString(TEXT("completed")));
+	TestTrue(TEXT("as a success"), Result->Value.Status.bOk);
+	const FHyperAIOperationStatus Status = UHyperAIStudioNativeReadToolset::hyper_operation_status(Covered);
+	TestEqual(TEXT("The status names auto-approval as the approver"), Status.ApprovedBy, FString(TEXT("auto_approval")));
+	TestTrue(TEXT("in its diagnostic too: ") + Status.Diagnostic, Status.Diagnostic.StartsWith(TEXT("Auto-approved (edits)")));
+
+	FHyperAIStudioTrustedPreparedArtifact Waiting;
+	TestTrue(TEXT("another plan prepares"), Prepare(*Host, Adapter->Descriptor, BaseTool, Waiting, Report, Error));
+	TestTrue(TEXT("and is held outside the activation"), FHyperAIStudioApprovalGate::Request(Waiting, Uncovered, Summary, Error));
+	FReplyProbe Pending;
+	Pending.Status = TEXT("awaiting_user_approval");
+	Pending.OperationId = Uncovered;
+	const TStrongObjectPtr<UHyperAIOperationWaitResult> Immediate(
+		HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIOperationWaitResult>(Pending));
+	TestEqual(TEXT("A request a person must approve is reported as waiting at once"),
+		Immediate->Value.Status.Status, FString(TEXT("awaiting_user_approval")));
+
+	FAccess::Reset();
+	FHyperAIStudioApprovalGate::Reject(Uncovered, TEXT("test over"));
+	Plan.Reset();
+	Waiting.Reset();
+	Clock->AdvanceMonotonic(20000);
+	Host->UnregisterAdapter(Handle, Error);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAutoApprovalEndTakesBackTest,
+	"HyperAIStudio.Chat.AutoApproval.EndTakesBackQueuedPlans",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioAutoApprovalEndTakesBackTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::TrustedExecution::Tests;
+	using FAccess = FHyperAIStudioAutoApprovalTestAccess;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
+	const FString Root = MakeProjectRoot();
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Root, false, true); };
+	const TSharedRef<FTestClock, ESPMode::ThreadSafe> Clock = MakeShared<FTestClock, ESPMode::ThreadSafe>();
+	const TSharedRef<FTestEnvironment, ESPMode::ThreadSafe> Environment =
+		MakeShared<FTestEnvironment, ESPMode::ThreadSafe>();
+	const TSharedRef<FTestCatalogAuthority, ESPMode::ThreadSafe> Catalog =
+		MakeShared<FTestCatalogAuthority, ESPMode::ThreadSafe>(
+			MakeCatalog(EHyperAIStudioCapabilityAdmissionState::Admitted, false));
+	Catalog->SetAllowedSafety(BaseTool, {EHyperAIStudioCapabilitySafetyClass::Destructive});
+	const TSharedRef<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host =
+		MakeShared<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe>(Root, Catalog, Environment, Clock);
+	FAccess::Reset();
+	FHyperAIStudioExecutionQueue::Clear();
+	HyperAIStudio::TrustedExecution::Private::SetQueueHostForTests(Host);
+	TArray<FString> Ids;
+	ON_SCOPE_EXIT
+	{
+		FAccess::Reset();
+		Environment->bModuleLoaded = true;
+		for (const FString& Id : Ids)
+		{
+			FHyperAIStudioApprovalGate::Reject(Id, TEXT("test over"));
+		}
+		FHyperAIStudioExecutionQueue::Clear();
+		HyperAIStudio::TrustedExecution::Private::SetQueueHostForTests(nullptr);
+		Host->Shutdown();
+	};
+	FString Error;
+	TestTrue(TEXT("host starts"), Host->Startup(Error));
+	const TSharedRef<FTestAdapter, ESPMode::ThreadSafe> Destructive = MakeShared<FTestAdapter, ESPMode::ThreadSafe>(
+		MakeDescriptor(TEXT("adapter.test.auto.backlog"), BaseTool, false, EHyperAIStudioDomainSafety::Destructive));
+	FHyperAIStudioDomainRegistrationHandle Handle;
+	TestTrue(TEXT("destructive adapter registers: ") + Error, Host->RegisterAdapter(Destructive, Handle, Error));
+	auto PrepareRisky = [&](FHyperAIStudioTrustedPreparedArtifact& Out)
+	{
+		FHyperAIStudioTrustedPrepareReport Report;
+		return Prepare(*Host, Destructive->Descriptor, BaseTool, Out, Report, Error, 15000, EHyperAIStudioDomainSafety::Destructive);
+	};
+	auto PumpUntilIdle = [&]()
+	{
+		for (int32 Tick = 0; Tick < 400 && (FHyperAIStudioExecutionQueue::Num() > 0 || Host->IsLaneBusy()); ++Tick)
+		{
+			FTSTicker::GetCoreTicker().Tick(0.2f);
+		}
+	};
+	FHyperAIStudioApprovalSummary Summary;
+	Summary.PackId = PackId;
+	Summary.ToolName = BaseTool;
+	Summary.EffectTarget = TEXT("test:/trusted-target");
+	Summary.Safety = EHyperAIStudioDomainSafety::Destructive;
+
+	const FString Clicked = Ids.Add_GetRef(AutoApprovalId());
+	const FString Backlog = Ids.Add_GetRef(AutoApprovalId());
+	const FString Failing = Ids.Add_GetRef(AutoApprovalId());
+	TestTrue(TEXT("Destructive auto-approval turns on"), FAccess::TurnOn({EHyperAIStudioApprovalCategory::Destructive}, {Backlog, Failing}));
+	const uint64 Activation = FHyperAIStudioAutoApproval::GetActivationId();
+	TestTrue(TEXT("and names its activation"), Activation != 0);
+
+	// A plan the user clicked holds the lane, so the next one waits in the edit queue with its grant not yet issued.
+	FHyperAIStudioTrustedPreparedArtifact First;
+	TestTrue(TEXT("a plan prepares: ") + Error, PrepareRisky(First));
+	TestTrue(TEXT("and is held"), FHyperAIStudioApprovalGate::Request(First, Clicked, Summary, Error));
+	TestTrue(TEXT("A click approves it: ") + Error, FHyperAIStudioApprovalGate::Approve(Clicked, Error));
+	TestTrue(TEXT("and it holds the lane"), Host->IsLaneBusy());
+	FHyperAIStudioTrustedPreparedArtifact Second;
+	TestTrue(TEXT("another plan prepares: ") + Error, PrepareRisky(Second));
+	TestTrue(TEXT("and is held"), FHyperAIStudioApprovalGate::Request(Second, Backlog, Summary, Error));
+	FAccess::PumpGate();
+	TestFalse(TEXT("Auto-approval approves it"), FHyperAIStudioApprovalGate::HasPending(Backlog));
+	int32 Position = 0;
+	FString Failure;
+	FString Diagnostic;
+	TestTrue(TEXT("and it waits in the edit queue"),
+		FHyperAIStudioExecutionQueue::Query(Backlog, Position, Failure, Diagnostic) && Position == 1);
+
+	// The person stops it: what it approved that has not started goes back to them, before any grant.
+	FHyperAIStudioAutoApproval::Stop(EHyperAIStudioAutoApprovalEnd::Stopped);
+	TestTrue(TEXT("Stopping it puts the queued plan back to wait for a click"), FHyperAIStudioApprovalGate::HasPending(Backlog));
+	TestFalse(TEXT("out of the edit queue"), FHyperAIStudioExecutionQueue::Query(Backlog, Position, Failure, Diagnostic) && Position > 0);
+	const TOptional<FHyperAIStudioPendingApproval> Returned = FindPending(Backlog);
+	TestTrue(TEXT("not about to be approved again"), Returned.IsSet() && !Returned->bAutoApproving);
+	TestFalse(TEXT("and no longer recorded as approved"), FHyperAIStudioApprovalGate::FindApproval(Backlog).IsSet());
+	TestEqual(TEXT("An agent reads it as waiting for a person"),
+		UHyperAIStudioNativeReadToolset::hyper_operation_status(Backlog).Status, FString(TEXT("awaiting_user_approval")));
+	const TArray<FHyperAIStudioActivityEntry> Activity = FHyperAIStudioAgentActivityLog::GetSnapshot();
+	TestTrue(TEXT("Activity says why it waits again"), Activity.ContainsByPredicate([&Backlog](const FHyperAIStudioActivityEntry& Entry)
+	{
+		return Entry.OperationId == Backlog && Entry.Kind == EHyperAIStudioActivityKind::ApprovalRequested
+			&& Entry.Detail.Contains(TEXT("Auto-approval ended"));
+	}));
+	PumpUntilIdle();
+	TestEqual(TEXT("Only the clicked plan ran: none was granted for the one taken back"), Destructive->ApplyCount, 1);
+	TestTrue(TEXT("which still waits"), FHyperAIStudioApprovalGate::HasPending(Backlog));
+	TestTrue(TEXT("A click still approves it: ") + Error, FHyperAIStudioApprovalGate::Approve(Backlog, Error));
+	PumpUntilIdle();
+	TestEqual(TEXT("and then it runs"), Destructive->ApplyCount, 2);
+
+	// The queue refuses by itself a plan whose auto-approval is over, before staging or any grant.
+	FHyperAIStudioTrustedPreparedArtifact Third;
+	TestTrue(TEXT("a third plan prepares: ") + Error, PrepareRisky(Third));
+	TOptional<HyperAIStudio::TrustedExecution::Private::FAutoApprovedBy> Ended;
+	Ended.Emplace();
+	Ended->Activation = Activation;
+	Ended->Category = EHyperAIStudioApprovalCategory::Destructive;
+	FString Status;
+	TestFalse(TEXT("A plan from an auto-approval that ended does not start"),
+		HyperAIStudio::TrustedExecution::Private::SubmitUserApproved(Third, AutoApprovalId(), Status, Error, Ended));
+	TestEqual(TEXT("and says why"), Status, FString(TEXT("auto_approval_ended")));
+	PumpUntilIdle();
+	TestEqual(TEXT("and never runs"), Destructive->ApplyCount, 2);
+
+	// A plan auto-approval approved that cannot start says in Activity that nobody clicked for it.
+	TestTrue(TEXT("It turns on again"), FAccess::TurnOn({EHyperAIStudioApprovalCategory::Destructive}, {Failing}));
+	FHyperAIStudioTrustedPreparedArtifact Fourth;
+	TestTrue(TEXT("a fourth plan prepares: ") + Error, PrepareRisky(Fourth));
+	TestTrue(TEXT("and is held"), FHyperAIStudioApprovalGate::Request(Fourth, Failing, Summary, Error));
+	Clock->AdvanceMonotonic(FHyperAIStudioTrustedExecutionLimits::ProbeFreshnessMs + 1);
+	Environment->bModuleLoaded = false;
+	FAccess::PumpGate();
+	Environment->bModuleLoaded = true;
+	TestFalse(TEXT("It was approved"), FHyperAIStudioApprovalGate::HasPending(Failing));
+	const TArray<FHyperAIStudioActivityEntry> After = FHyperAIStudioAgentActivityLog::GetSnapshot();
+	const FHyperAIStudioActivityEntry* Failed = After.FindByPredicate([&Failing](const FHyperAIStudioActivityEntry& Entry)
+	{
+		return Entry.OperationId == Failing && Entry.Kind == EHyperAIStudioActivityKind::Failed;
+	});
+	TestTrue(TEXT("but could not start, and Activity marks that failure auto-approved: ") + (Failed ? Failed->Detail : FString()),
+		Failed && Failed->AutoApprovedAs == EHyperAIStudioApprovalCategory::Destructive
+		&& Failed->Detail.StartsWith(TEXT("Auto-approved as destructive; it could not start")));
+	TestEqual(TEXT("and nothing ran"), Destructive->ApplyCount, 2);
+
+	FAccess::Reset();
+	First.Reset();
+	Second.Reset();
+	Third.Reset();
+	Fourth.Reset();
+	Clock->AdvanceMonotonic(20000);
+	Host->UnregisterAdapter(Handle, Error);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioAutoApprovalReplacedKeepsQueuedTest,
+	"HyperAIStudio.Chat.AutoApproval.ReplacedKeepsQueuedPlans",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/**
+ * Turning auto-approval on again while it is on replaces it. What the old one approved that waits in the edit queue goes
+ * back to waiting as it stops; the user approved it by turning that one on, and the new dialog never listed it, so the
+ * new one approves it again when it covers its category, and says why. One it does not cover waits for a click.
+ */
+bool FHyperAIStudioAutoApprovalReplacedKeepsQueuedTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::TrustedExecution::Tests;
+	using FAccess = FHyperAIStudioAutoApprovalTestAccess;
+	using ECategory = EHyperAIStudioApprovalCategory;
+	if (FAccess::SkipWhileUserActivationOn(*this))
+	{
+		return true;
+	}
+	const FString Root = MakeProjectRoot();
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Root, false, true); };
+	const TSharedRef<FTestClock, ESPMode::ThreadSafe> Clock = MakeShared<FTestClock, ESPMode::ThreadSafe>();
+	const TSharedRef<FTestEnvironment, ESPMode::ThreadSafe> Environment =
+		MakeShared<FTestEnvironment, ESPMode::ThreadSafe>();
+	const TSharedRef<FTestCatalogAuthority, ESPMode::ThreadSafe> Catalog =
+		MakeShared<FTestCatalogAuthority, ESPMode::ThreadSafe>(
+			MakeCatalog(EHyperAIStudioCapabilityAdmissionState::Admitted, false));
+	Catalog->SetAllowedSafety(BaseTool, {EHyperAIStudioCapabilitySafetyClass::Destructive});
+	const TSharedRef<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host =
+		MakeShared<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe>(Root, Catalog, Environment, Clock);
+	FAccess::Reset();
+	FHyperAIStudioExecutionQueue::Clear();
+	HyperAIStudio::TrustedExecution::Private::SetQueueHostForTests(Host);
+	TArray<FString> Ids;
+	ON_SCOPE_EXIT
+	{
+		FAccess::Reset();
+		for (const FString& Id : Ids)
+		{
+			FHyperAIStudioApprovalGate::Reject(Id, TEXT("test over"));
+		}
+		FHyperAIStudioExecutionQueue::Clear();
+		HyperAIStudio::TrustedExecution::Private::SetQueueHostForTests(nullptr);
+		Host->Shutdown();
+	};
+	FString Error;
+	TestTrue(TEXT("host starts"), Host->Startup(Error));
+	const TSharedRef<FTestAdapter, ESPMode::ThreadSafe> Destructive = MakeShared<FTestAdapter, ESPMode::ThreadSafe>(
+		MakeDescriptor(TEXT("adapter.test.auto.replaced"), BaseTool, false, EHyperAIStudioDomainSafety::Destructive));
+	FHyperAIStudioDomainRegistrationHandle Handle;
+	TestTrue(TEXT("destructive adapter registers: ") + Error, Host->RegisterAdapter(Destructive, Handle, Error));
+	auto PrepareRisky = [&](FHyperAIStudioTrustedPreparedArtifact& Out)
+	{
+		FHyperAIStudioTrustedPrepareReport Report;
+		return Prepare(*Host, Destructive->Descriptor, BaseTool, Out, Report, Error, 15000, EHyperAIStudioDomainSafety::Destructive);
+	};
+	auto PumpUntilIdle = [&]()
+	{
+		for (int32 Tick = 0; Tick < 400 && (FHyperAIStudioExecutionQueue::Num() > 0 || Host->IsLaneBusy()); ++Tick)
+		{
+			FTSTicker::GetCoreTicker().Tick(0.2f);
+		}
+	};
+	FHyperAIStudioApprovalSummary Summary;
+	Summary.PackId = PackId;
+	Summary.ToolName = BaseTool;
+	Summary.EffectTarget = TEXT("test:/trusted-target");
+	Summary.Safety = EHyperAIStudioDomainSafety::Destructive;
+	int32 Position = 0;
+	FString Failure;
+	FString Diagnostic;
+
+	const FString Clicked = Ids.Add_GetRef(AutoApprovalId());
+	const FString Backlog = Ids.Add_GetRef(AutoApprovalId());
+	const FString Uncovered = Ids.Add_GetRef(AutoApprovalId());
+	const FString ClickedAgain = Ids.Add_GetRef(AutoApprovalId());
+	TestTrue(TEXT("Destructive auto-approval turns on"), FAccess::TurnOn({ECategory::Destructive}, {Backlog, Uncovered}));
+
+	// A plan the user clicked holds the lane, so the one auto-approval approves waits in the edit queue, not started.
+	FHyperAIStudioTrustedPreparedArtifact First;
+	TestTrue(TEXT("a plan prepares: ") + Error, PrepareRisky(First));
+	TestTrue(TEXT("and is held"), FHyperAIStudioApprovalGate::Request(First, Clicked, Summary, Error));
+	TestTrue(TEXT("A click approves it: ") + Error, FHyperAIStudioApprovalGate::Approve(Clicked, Error));
+	FHyperAIStudioTrustedPreparedArtifact Second;
+	TestTrue(TEXT("another plan prepares: ") + Error, PrepareRisky(Second));
+	TestTrue(TEXT("and is held"), FHyperAIStudioApprovalGate::Request(Second, Backlog, Summary, Error));
+	FAccess::PumpGate();
+	TestTrue(TEXT("Auto-approval approves it into the edit queue"), !FHyperAIStudioApprovalGate::HasPending(Backlog)
+		&& FHyperAIStudioExecutionQueue::Query(Backlog, Position, Failure, Diagnostic) && Position == 1);
+
+	// The person turns it on again, with Destructive still ticked. Its dialog lists only what is held, so not the queued
+	// plan, and "Also approve the requests waiting now" cannot choose it.
+	TestTrue(TEXT("It turns on again, replacing the first"),
+		FAccess::TurnOn({ECategory::Destructive}, {Backlog, Uncovered}, EHyperAIStudioAutoApprovalDuration::OneHour, /*bAlsoApproveWaiting=*/true));
+	TestTrue(TEXT("The first ended as replaced"), FAccess::GetLastEnd() == EHyperAIStudioAutoApprovalEnd::Replaced);
+	TestTrue(TEXT("The queued plan went back to waiting"), FHyperAIStudioApprovalGate::HasPending(Backlog));
+	TestTrue(TEXT("and the new auto-approval approves it again"), FHyperAIStudioApprovalGate::IsAutoApproving(Backlog));
+	TestTrue(TEXT("with nothing that says why it would not: ") + FHyperAIStudioApprovalGate::DescribeWhyNotAutoApproved(Backlog),
+		FHyperAIStudioApprovalGate::DescribeWhyNotAutoApproved(Backlog).IsEmpty());
+	TestTrue(TEXT("The new one knows it carried it over"), FHyperAIStudioAutoApproval::WasCarriedOver(Backlog));
+	TestTrue(TEXT("Activity's record of turning it on says so"), FHyperAIStudioAgentActivityLog::GetSnapshot().ContainsByPredicate(
+		[](const FHyperAIStudioActivityEntry& Entry)
+	{
+		return Entry.Kind == EHyperAIStudioActivityKind::AutoApproval && Entry.ToolName == TEXT("turned on")
+			&& Entry.Detail.Contains(TEXT("approves again 1 request(s)"));
+	}));
+	FAccess::PumpGate();
+	TestFalse(TEXT("Its next quiet tick approves it"), FHyperAIStudioApprovalGate::HasPending(Backlog));
+	const TArray<FHyperAIStudioActivityEntry> Activity = FHyperAIStudioAgentActivityLog::GetSnapshot();
+	const FHyperAIStudioActivityEntry* Approved = Activity.FindByPredicate([&Backlog](const FHyperAIStudioActivityEntry& Entry)
+	{
+		return Entry.OperationId == Backlog && Entry.Kind == EHyperAIStudioActivityKind::ApprovalApproved;
+	});
+	TestTrue(TEXT("and Activity says the auto-approval it replaced had approved it: ") + (Approved ? Approved->Detail : FString()),
+		Approved && Approved->AutoApprovedAs == ECategory::Destructive && Approved->Detail.Contains(TEXT("this one replaced had approved it")));
+	PumpUntilIdle();
+	TestEqual(TEXT("Both plans ran"), Destructive->ApplyCount, 2);
+
+	// Replaced by one that does not cover its category, a queued plan waits for a click, and says why.
+	FHyperAIStudioTrustedPreparedArtifact Third;
+	TestTrue(TEXT("a third plan prepares: ") + Error, PrepareRisky(Third));
+	TestTrue(TEXT("and is held"), FHyperAIStudioApprovalGate::Request(Third, ClickedAgain, Summary, Error));
+	TestTrue(TEXT("A click approves it: ") + Error, FHyperAIStudioApprovalGate::Approve(ClickedAgain, Error));
+	FHyperAIStudioTrustedPreparedArtifact Fourth;
+	TestTrue(TEXT("a fourth plan prepares: ") + Error, PrepareRisky(Fourth));
+	TestTrue(TEXT("and is held"), FHyperAIStudioApprovalGate::Request(Fourth, Uncovered, Summary, Error));
+	FAccess::PumpGate();
+	TestTrue(TEXT("Auto-approval approves it into the edit queue"), !FHyperAIStudioApprovalGate::HasPending(Uncovered));
+	TestTrue(TEXT("Edits-only auto-approval replaces it"), FAccess::TurnOn({ECategory::Edits}, {Backlog, Uncovered}));
+	TestTrue(TEXT("The queued plan went back to waiting"), FHyperAIStudioApprovalGate::HasPending(Uncovered));
+	TestFalse(TEXT("and Edits does not cover it"), FHyperAIStudioApprovalGate::IsAutoApproving(Uncovered));
+	const FString WhyNot = FHyperAIStudioApprovalGate::DescribeWhyNotAutoApproved(Uncovered);
+	TestTrue(TEXT("Its card says the category was not chosen, not that it was missed in the dialog: ") + WhyNot,
+		WhyNot.Contains(TEXT("Destructive was not chosen")));
+	PumpUntilIdle();
+	TestEqual(TEXT("Only the clicked plan ran"), Destructive->ApplyCount, 3);
+	TestTrue(TEXT("and the uncovered one still waits"), FHyperAIStudioApprovalGate::HasPending(Uncovered));
+
+	FAccess::Reset();
+	First.Reset();
+	Second.Reset();
+	Third.Reset();
+	Fourth.Reset();
+	Clock->AdvanceMonotonic(20000);
+	Host->UnregisterAdapter(Handle, Error);
 	return true;
 }
 

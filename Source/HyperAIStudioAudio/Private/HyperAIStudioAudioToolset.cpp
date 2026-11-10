@@ -1,6 +1,9 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioAudioToolset.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioOperationWait.h"
+#include "HyperAIStudioRequestFit.h"
 
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -176,7 +179,8 @@ namespace HyperAIStudio::Audio::Private
 		if (Path.IsEmpty() || Path.Len() > FHyperAIStudioAudioContracts::MaxPathCharacters
 			|| !Path.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
 			|| Path.Contains(TEXT("..")) || Path.Contains(TEXT("\\"))
-			|| Path.Contains(TEXT("*")) || Path.Contains(TEXT("?")))
+			|| Path.Contains(TEXT("*")) || Path.Contains(TEXT("?"))
+			|| !FHyperAIStudioNames::IsObjectPath(Path, nullptr))
 		{
 			return false;
 		}
@@ -5225,10 +5229,20 @@ FHyperAIAudioApplyPlanReport FHyperAIStudioAudioContracts::BuildPlan(
 	return Report;
 }
 
-FHyperAIAudioApplyPlanReport UHyperAIStudioAudioToolset::hyper_audio_apply_plan(
-	const FHyperAIAudioApplyPlanRequest& Request)
+UHyperAIAudioApplyPlanResult* UHyperAIStudioAudioToolset::hyper_audio_apply_plan(const FHyperAIAudioApplyPlanRequest& Request)
 {
-	return FHyperAIStudioAudioContracts::BuildPlan(Request);
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIAudioApplyPlanResult>(FHyperAIStudioAudioContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIAudioApplyPlanReport FHyperAIStudioAudioContracts::BuildFittedPlan(
+	const FHyperAIAudioApplyPlanRequest& InRequest)
+{
+	FHyperAIAudioApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAIAudioApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return FHyperAIStudioAudioContracts::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 void FHyperAIStudioAudioRegistration::Startup()

@@ -5,11 +5,13 @@
 #include "CoreMinimal.h"
 #include "Delegates/Delegate.h"
 #include "HyperAIStudioDomainAdapter.h"
+#include "HyperAIStudioLiveProbePublisher.h"
 #include "HyperAIStudioTrustedExecution.h"
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "Misc/AssetRegistryInterface.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioPCGToolset.generated.h"
 
 class UPCGComponent;
@@ -248,9 +250,13 @@ struct FHyperAIPCGLifecycleIntent
 {
 	GENERATED_BODY()
 
-	/** The only v1 compound intent; all graph authoring remains delegated to Epic. */
+	/**
+	 * generate keeps the output; cleanup removes it; generate_validate_cleanup proves the graph generates and leaves
+	 * nothing behind. Graph authoring stays with Epic's PCG tools.
+	 */
 	UPROPERTY() FString Lifecycle = TEXT("generate_validate_cleanup");
 	UPROPERTY() FString ValidationPolicy = TEXT("generation_ready");
+	/** generated for generate; clean for cleanup and generate_validate_cleanup. */
 	UPROPERTY() FString ExpectedTerminalState = TEXT("clean");
 	UPROPERTY() bool bForceGenerate = false;
 	UPROPERTY() bool bRemoveGeneratedComponentsOnCleanup = true;
@@ -269,6 +275,7 @@ struct FHyperAIPCGApplyPlanRequest
 	UPROPERTY() FString ExpectedPersistedRevision;
 	UPROPERTY() FString ExpectedComponentFingerprint;
 	UPROPERTY() FHyperAIPCGLifecycleIntent Intent;
+	/** How long the generation or cleanup may run; past it the job is cancelled and reported timed_out. */
 	UPROPERTY() int32 DeadlineMs = 60000;
 	UPROPERTY() int32 MaxGameThreadMs = 250;
 	UPROPERTY() int32 MaxOutputBytes = 65536;
@@ -316,7 +323,26 @@ struct FHyperAIPCGApplyPlanReport
 	UPROPERTY() TArray<FHyperAIPCGCapabilityStatus> Capabilities;
 };
 
-/** Exactly three functions form the PCG atomic cohort. */
+/** hyper_pcg_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIPCGApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIPCGApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIPCGApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIPCGApplyPlanReport Value;
+};
+
+/**
+ * Generate or clean up a PCG component as a job an agent can wait for: inspect the graph and component, dry-run the
+ * lifecycle, run it, then wait with hyper_operation_wait. Build graphs with Epic's PCGToolset.
+ */
 UCLASS()
 class HYPERAISTUDIOPCG_API UHyperAIStudioPCGToolset final : public UToolsetDefinition
 {
@@ -325,12 +351,24 @@ class HYPERAISTUDIOPCG_API UHyperAIStudioPCGToolset final : public UToolsetDefin
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
+	/**
+	 * A loaded PCG graph (a saved /Game asset) and optionally one component (its object path, such as
+	 * /Game/Maps/Level.Level:PersistentLevel.MyVolume.PCG Component): nodes, pins, edges, whether it is generated or
+	 * generating, and the revision and fingerprint that hyper_pcg_apply_plan needs. Nothing is loaded.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|PCG")
 	static FHyperAIPCGInspectReport hyper_pcg_inspect(const FHyperAIPCGInspectRequest& Request);
 
+	/**
+	 * Generate (keep the output, terminal generated), clean up (terminal clean), or generate_validate_cleanup (prove the
+	 * graph generates and leave nothing, terminal clean) on one component. Dry-run first with the revision and fingerprint
+	 * from hyper_pcg_inspect; then resubmit with bDryRun false, a new operation_id and expected_plan_hash: the reply
+	 * waits until the generation or cleanup has finished. deadline_ms stops it if it runs longer.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|PCG")
-	static FHyperAIPCGApplyPlanReport hyper_pcg_apply_plan(const FHyperAIPCGApplyPlanRequest& Request);
+	static UHyperAIPCGApplyPlanResult* hyper_pcg_apply_plan(const FHyperAIPCGApplyPlanRequest& Request);
 
+	/** Structural or generation_ready issues in a loaded PCG graph and component, checked against the revision you expect. */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|PCG")
 	static FHyperAIPCGValidateReport hyper_pcg_validate(const FHyperAIPCGValidateRequest& Request);
 };
@@ -397,6 +435,33 @@ public:
 		CloneImmutable() const override;
 };
 
+class FHyperAIStudioPCGLifecycleResultPayload final : public IHyperAIStudioDomainResultPayload
+{
+public:
+	/** started, validated, or completed with the fresh content key. */
+	FString Phase;
+	FString ContentKey;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+/** Proves the graph and component the plan was sealed against are the ones left after the lifecycle began. */
+class FHyperAIStudioPCGFreshVerifier final : public IHyperAIStudioTrustedFreshVerifier
+{
+public:
+	virtual FString GetOwnerAdapterFingerprint() const override;
+	virtual bool ResolveCanonicalEffectTarget(
+		const IHyperAIStudioTypedArtifactPayload& Request,
+		FString& OutCanonicalEffectTarget,
+		FString& OutError) override;
+	virtual bool VerifyFreshExact(
+		const IHyperAIStudioTypedArtifactPayload& Request,
+		const IHyperAIStudioDomainResultPayload& Result,
+		FString& OutPostconditionHash,
+		FString& OutError) override;
+};
+
 class FHyperAIStudioPCGInspectResultPayload final : public IHyperAIStudioDomainResultPayload
 {
 public:
@@ -452,7 +517,6 @@ public:
 	static constexpr const TCHAR* InspectResultTypeId = TEXT("hyperai.result.pcg.inspect.v1");
 	static constexpr const TCHAR* LifecycleResultTypeId = TEXT("hyperai.result.pcg.lifecycle.v1");
 	static constexpr const TCHAR* ValidateResultTypeId = TEXT("hyperai.result.pcg.validate.v1");
-	static constexpr const TCHAR* NonDryCallableState = TEXT("async_continuation_host_required");
 	static constexpr int32 MaxPathCharacters = 512;
 	static constexpr int32 MaxNameCharacters = 128;
 	static constexpr int32 MaxStringCharacters = 2048;
@@ -536,8 +600,21 @@ public:
 		FString& OutDiagnostic);
 	static FHyperAIPCGInspectReport Inspect(const FHyperAIPCGInspectRequest& Request);
 	static FHyperAIPCGValidateReport Validate(const FHyperAIPCGValidateRequest& Request);
+	/** hyper_pcg_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIPCGApplyPlanReport BuildFittedPlan(const FHyperAIPCGApplyPlanRequest& Request);
 	static FHyperAIPCGApplyPlanReport BuildPlan(const FHyperAIPCGApplyPlanRequest& Request);
 	static FString ComputeLifecycleSemanticFingerprint(const FHyperAIStudioPCGLifecyclePayload& Payload);
+	/** generated, clean, or empty for a lifecycle this pack does not run. */
+	static FString TerminalStateFor(const FString& Lifecycle);
+	/** Fresh graph revision and component configuration under the plan's seal; generation never changes it. */
+	static bool ComputeLifecycleContentKey(const FHyperAIStudioPCGLifecyclePayload& Payload, FString& OutKey, FString& OutError);
+	/**
+	 * Begins the lifecycle on the component and starts a job that watches it to the end: generating, then cleaning up
+	 * for generate_validate_cleanup. The job can be cancelled, and stops the work at its deadline.
+	 */
+	static bool StartLifecycleJob(UPCGComponent& Component, const FString& ComponentPath, const FString& Lifecycle,
+		bool bForceGenerate, bool bRemoveGeneratedComponents, int32 DeadlineMs, const FString& OperationId,
+		FString& OutJobId, FString& OutError);
 };
 
 class FHyperAIStudioPCGRegistration final
@@ -556,6 +633,8 @@ private:
 	TSharedPtr<FHyperAIStudioPCGDomainAdapter, ESPMode::ThreadSafe> Adapter;
 	FHyperAIStudioDomainRegistrationHandle AdapterHandle;
 	FHyperAIStudioTrustedProbeRegistrationHandle ProbeHandle;
+	/** A probe observation goes stale in seconds, and plans are prepared long after startup. */
+	FHyperAIStudioLiveProbePublisher ProbePublisher;
 	bool bStarted = false;
 	bool bOwnsToolset = false;
 };

@@ -1209,6 +1209,38 @@ bool FHyperAIStudioTypedArtifactExecutionService::QueryStatus(
 		OutError = TEXT("A valid bounded operation_id is required.");
 		return false;
 	}
+	if (QueryLiveStatus(OperationId, OutStatus))
+	{
+		return true;
+	}
+
+	// Journal Load is intentionally outside the service lock. It may perform restart
+	// reconciliation, so this path is used only when no process-local operation is known.
+	FHyperAIStudioOperationJournal Journal(State->TrustedProjectRoot);
+	if (!Journal.Load(OutError))
+	{
+		return false;
+	}
+	const TOptional<FHyperAIStudioOperationRecord> Record = Journal.Find(OperationId);
+	if (!Record.IsSet())
+	{
+		OutError = TEXT("No process-local or durable typed-artifact operation matches operation_id.");
+		return false;
+	}
+	FillDurableStatus(Record.GetValue(), Journal.GetLastLoadReconciledCount(), OutStatus);
+	return true;
+}
+
+bool FHyperAIStudioTypedArtifactExecutionService::QueryLiveStatus(
+	const FString& OperationId,
+	FHyperAIStudioTypedArtifactOperationStatus& OutStatus) const
+{
+	using namespace HyperAIStudio::TypedArtifactHost::Private;
+	OutStatus = FHyperAIStudioTypedArtifactOperationStatus{};
+	if (!IsInGameThread() || !FHyperAIStudioOperationJournal::IsValidOperationId(OperationId))
+	{
+		return false;
+	}
 	TSharedPtr<IHyperAIStudioTypedArtifactAsyncSession, ESPMode::ThreadSafe> Session;
 	FHyperAIStudioTypedArtifactStageReceipt Receipt;
 	TOptional<FArchivedStatus> Archived;
@@ -1244,22 +1276,7 @@ bool FHyperAIStudioTypedArtifactExecutionService::QueryStatus(
 		OutStatus = Archived->Status;
 		return true;
 	}
-
-	// Journal Load is intentionally outside the service lock. It may perform restart
-	// reconciliation, so this path is used only when no process-local operation is known.
-	FHyperAIStudioOperationJournal Journal(State->TrustedProjectRoot);
-	if (!Journal.Load(OutError))
-	{
-		return false;
-	}
-	const TOptional<FHyperAIStudioOperationRecord> Record = Journal.Find(OperationId);
-	if (!Record.IsSet())
-	{
-		OutError = TEXT("No process-local or durable typed-artifact operation matches operation_id.");
-		return false;
-	}
-	FillDurableStatus(Record.GetValue(), Journal.GetLastLoadReconciledCount(), OutStatus);
-	return true;
+	return false;
 }
 
 bool FHyperAIStudioTypedArtifactExecutionService::Cancel(
@@ -1314,6 +1331,12 @@ bool FHyperAIStudioTypedArtifactExecutionService::Cancel(
 int32 FHyperAIStudioTypedArtifactExecutionService::NumStaged() const
 {
 	return State->Store->NumStaged();
+}
+
+bool FHyperAIStudioTypedArtifactExecutionService::IsBusy() const
+{
+	FScopeLock Lock(&State->Mutex);
+	return State->Active.IsValid() || State->bAdmissionInProgress;
 }
 
 bool FHyperAIStudioTypedArtifactExecutionService::IsQuiescing() const

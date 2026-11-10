@@ -2,13 +2,19 @@
 
 #include "HyperAIStudioService.h"
 #include "HyperAIStudioCapabilityInventoryClient.h"
+#include "HyperAIStudioCredentials.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioCapabilityPreset.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
+#include "HyperAIStudioEditorStartupGate.h"
 #include "HyperAIStudioLegacyMigration.h"
 #include "HyperAIStudioManagedConfigMigration.h"
+#include "HyperAIStudioMcpBypassMonitor.h"
 #include "HyperAIStudioMcpSerialQueue.h"
 #include "HyperAIStudioOperationJournal.h"
+#include "HyperAIStudioProjectMemory.h"
+#include "HyperAIStudioAgents.h"
+#include "HyperAIStudioSkills.h"
 
 #include "CoreGlobals.h"
 #include "AssetRegistry/AssetData.h"
@@ -79,6 +85,10 @@ namespace HyperAIStudio::Private
 	static const TCHAR* ManagedGitIgnoreEnd = TEXT("# END HYPERAISTUDIO MANAGED RUNTIME IGNORE");
 	static const TCHAR* ManagedTomlBegin = TEXT("# BEGIN HYPERAISTUDIO MANAGED MCP");
 	static const TCHAR* ManagedTomlEnd = TEXT("# END HYPERAISTUDIO MANAGED MCP");
+	static const TCHAR* ManagedMemoryBegin = TEXT("<!-- BEGIN HYPERAISTUDIO PROJECT MEMORY -->");
+	static const TCHAR* ManagedMemoryEnd = TEXT("<!-- END HYPERAISTUDIO PROJECT MEMORY -->");
+	static const TCHAR* ManagedMcpBypassBegin = TEXT("<!-- BEGIN HYPERAISTUDIO OTHER MCP SERVERS -->");
+	static const TCHAR* ManagedMcpBypassEnd = TEXT("<!-- END HYPERAISTUDIO OTHER MCP SERVERS -->");
 
 	void ApplyCapabilityInventoryResult(
 		FHyperAIStudioStatus& Status,
@@ -186,6 +196,9 @@ namespace HyperAIStudio::Private
 			AddExecutableSearchDirectory(Directories, FPaths::Combine(UserProfile, TEXT(".volta"), TEXT("bin")));
 			AddExecutableSearchDirectory(Directories, FPaths::Combine(UserProfile, TEXT(".bun"), TEXT("bin")));
 			AddExecutableSearchDirectory(Directories, FPaths::Combine(UserProfile, TEXT(".proto"), TEXT("shims")));
+			// Lore's installer (lore, loreserver) and Scoop's shims, for an editor started before they reached PATH.
+			AddExecutableSearchDirectory(Directories, FPaths::Combine(UserProfile, TEXT("bin")));
+			AddExecutableSearchDirectory(Directories, FPaths::Combine(UserProfile, TEXT("scoop"), TEXT("shims")));
 		}
 		if (!ProgramData.IsEmpty())
 		{
@@ -1505,9 +1518,10 @@ namespace HyperAIStudio::Private
 			TEXT("hyper_data_apply_plan"),
 			TEXT("hyper_input_apply_plan"),
 			TEXT("hyper_paper2d_apply_plan")};
+		// Packs whose apply_plan still stops at a checked, staged plan. Those that apply their edits (Niagara, UI,
+		// materials, animation assets and the rest) are left out, so the tool list does not send agents elsewhere.
 		static const TSet<FString> PlanOnlyTools = {
 			TEXT("hyper_actor_modifier_apply_plan"),
-			TEXT("hyper_animation_apply_plan"),
 			TEXT("hyper_audio_apply_plan"),
 			TEXT("hyper_character_apply_plan"),
 			TEXT("hyper_cinematics_apply_plan"),
@@ -1519,15 +1533,11 @@ namespace HyperAIStudio::Private
 			TEXT("hyper_geometry_apply_plan"),
 			TEXT("hyper_interchange_apply_plan"),
 			TEXT("hyper_live_production_apply_plan"),
-			TEXT("hyper_material_apply_plan"),
 			TEXT("hyper_navigation_apply_plan"),
 			TEXT("hyper_network_apply_plan"),
-			TEXT("hyper_niagara_apply_plan"),
-			TEXT("hyper_pcg_apply_plan"),
 			TEXT("hyper_physics_apply_plan"),
 			TEXT("hyper_property_animation_apply_plan"),
 			TEXT("hyper_scene_apply_plan"),
-			TEXT("hyper_ui_apply_plan"),
 			TEXT("hyper_worldbuilding_apply_plan")};
 
 		if (LimitedDirectFastEditTools.Contains(ToolName))
@@ -1766,6 +1776,18 @@ namespace HyperAIStudio::Private
 			&& Request->GetStatus() == EHttpRequestStatus::NotStarted;
 	}
 
+	/**
+	 * A probe request that got no answer: the probe only reads (see FHyperAIStudioMcpSerialQueue), so the endpoint is
+	 * reported unreachable and stays open, and the next probe asks again.
+	 */
+	FString DescribeUnansweredMcpRequest(const TCHAR* Method, const FHttpRequestPtr& Request)
+	{
+		const TCHAR* Reason = Request.IsValid() ? LexToString(Request->GetFailureReason()) : TEXT("no request");
+		return IsMcpRequestProvablyNotSent(Request)
+			? FString::Printf(TEXT("Could not send %s to Unreal MCP (%s); the next probe asks again."), Method, Reason)
+			: FString::Printf(TEXT("Unreal MCP did not answer %s (%s); the next probe asks again."), Method, Reason);
+	}
+
 	class FShallowMcpProbeCompletion : public TSharedFromThis<FShallowMcpProbeCompletion>
 	{
 	public:
@@ -1789,8 +1811,7 @@ namespace HyperAIStudio::Private
 			const bool bInReachable,
 			FString InMessage,
 			const int32 InToolCount,
-			const bool bCleanupSafe,
-			const bool bAmbiguousTransport = false)
+			const bool bCleanupSafe)
 		{
 			if (CompletionCount.Increment() != 1)
 			{
@@ -1799,7 +1820,6 @@ namespace HyperAIStudio::Private
 			bReachable = bInReachable;
 			Message = MoveTemp(InMessage);
 			ToolCount = InToolCount;
-			bQuarantineRelease = bAmbiguousTransport;
 
 			if (bCleanupSafe && !SessionId.IsEmpty())
 			{
@@ -1834,9 +1854,8 @@ namespace HyperAIStudio::Private
 			}
 			if (QueueComplete)
 			{
-				QueueComplete(bQuarantineRelease
-					? FHyperAIStudioMcpSerialQueue::ECompletionDisposition::AmbiguousTransport
-					: FHyperAIStudioMcpSerialQueue::ECompletionDisposition::SafeToRelease);
+				// Read-only, so released whatever the transport did; an unknown outcome must not lock the endpoint.
+				QueueComplete(FHyperAIStudioMcpSerialQueue::ECompletionDisposition::SafeToRelease);
 			}
 			if (OnComplete)
 			{
@@ -1852,7 +1871,6 @@ namespace HyperAIStudio::Private
 		FThreadSafeCounter CompletionCount;
 		FThreadSafeCounter DeliveryCount;
 		bool bReachable = false;
-		bool bQuarantineRelease = false;
 		FString Message;
 		int32 ToolCount = 0;
 	};
@@ -2628,7 +2646,58 @@ FString FHyperAIStudioService::GetCodexTerminalLaunchCommand()
 	{
 		LaunchCommand += TEXT(" -c service_tier=fast");
 	}
-	return LaunchCommand;
+	return LaunchCommand + GetCodexRootArguments();
+}
+
+FString FHyperAIStudioService::GetCodexRootArguments()
+{
+	// A -c value that is not valid TOML is taken as a string, so an address goes unquoted; anything cmd.exe would read
+	// as an operator is refused instead.
+	auto IsPlainAddress = [](const FString& Value)
+	{
+		if (!(Value.StartsWith(TEXT("http://")) || Value.StartsWith(TEXT("https://"))))
+		{
+			return false;
+		}
+		for (const TCHAR C : Value)
+		{
+			if (C <= TEXT(' ') || FCString::Strchr(TEXT("\"'&|<>^%!(),`"), C))
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+	const FString Endpoint = Settings
+		? GetEndpoint(Settings->UnrealMCPPort, Settings->UnrealMCPUrlPath)
+		: GetEndpoint(UE::ModelContextProtocol::DefaultServerPort, FString(UE::ModelContextProtocol::DefaultServerUrlPath));
+	FString Arguments;
+	if (IsPlainAddress(Endpoint))
+	{
+		Arguments += FString::Printf(TEXT(" -c mcp_servers.unreal-mcp.url=%s -c mcp_servers.unreal-mcp.startup_timeout_sec=30 -c mcp_servers.unreal-mcp.tool_timeout_sec=300"), *Endpoint);
+	}
+	if (!HyperAIStudio::Credentials::ReadAgentValue(TEXT("Codex"), TEXT("OPENAI_API_KEY")).IsEmpty())
+	{
+		FString BaseUrl = HyperAIStudio::Credentials::ReadAgentValue(TEXT("Codex"), TEXT("OPENAI_BASE_URL"));
+		BaseUrl = IsPlainAddress(BaseUrl) ? BaseUrl : FString(TEXT("https://api.openai.com/v1"));
+		Arguments += FString::Printf(TEXT(" -c model_provider=hyperai -c model_providers.hyperai.name=HyperAI -c model_providers.hyperai.base_url=%s")
+			TEXT(" -c model_providers.hyperai.env_key=OPENAI_API_KEY -c model_providers.hyperai.wire_api=responses")
+			TEXT(" -c model_providers.hyperai.requires_openai_auth=false"), *BaseUrl);
+	}
+	return Arguments;
+}
+
+FString FHyperAIStudioService::GetClaudeLaunchSettingsFile()
+{
+	const FString File = FPaths::Combine(GetProjectRoot(), TEXT(".hyperai"), TEXT("runtime"), TEXT("claude-launch-settings.json"));
+	const FString Wanted = TEXT("{\"enabledMcpjsonServers\": [\"unreal-mcp\"]}\n");
+	FString Existing;
+	if (FFileHelper::LoadFileToString(Existing, *File) && Existing == Wanted)
+	{
+		return File;
+	}
+	return FFileHelper::SaveStringToFile(Wanted, *File, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM) ? File : FString();
 }
 
 FString FHyperAIStudioService::GetAgentTerminalLaunchCommand(const FString& AgentName)
@@ -3275,10 +3344,16 @@ void FHyperAIStudioService::RefreshStatusAsync(TFunction<void(const FHyperAIStud
 	}
 
 	Status.bProbeInProgress = true;
+	// Until the editor has finished starting its own server cannot answer, so the probe waits instead of timing out.
+	Status.bEditorStarting = !FHyperAIStudioEditorStartupGate::IsEditorAnswering();
+	if (Status.bEditorStarting)
+	{
+		Status.ProbeMessage = TEXT("The editor is still starting; Unreal MCP is checked as soon as it can answer.");
+	}
 	OnComplete(Status);
 
 	const FString Endpoint = Status.Endpoint;
-	ProbeToolsListAsync(Endpoint, [this, Endpoint, OnComplete](bool bReachable, const FString& Message, int32 ToolCount)
+	ProbeOwnServerToolsListAsync(Endpoint, [this, Endpoint, OnComplete](bool bReachable, const FString& Message, int32 ToolCount)
 	{
 		FHyperAIStudioStatus UpdatedStatus = GetStatusSync();
 		UpdatedStatus.bHasProbeRun = true;
@@ -3555,7 +3630,7 @@ bool FHyperAIStudioService::StopUnrealMCP(FText& OutMessage) const
 	Module->StopServer();
 	if (Server && Server->IsServerRunning())
 	{
-		OutMessage = FText::FromString(TEXT("Unreal MCP stop was requested, but the server is still running; ambiguous calls remain locked."));
+		OutMessage = FText::FromString(TEXT("Unreal MCP stop was requested, but the server is still running; try Reconnect again or restart the editor."));
 		return false;
 	}
 	if (Server)
@@ -3602,6 +3677,14 @@ bool FHyperAIStudioService::GenerateProjectFiles(FText& OutMessage) const
 		return false;
 	}
 	const FString ConfigMessage = StepMessage.ToString();
+	// Skills sit outside the transactional config write: their folders are the user's too, and the sync never
+	// overwrites a skill it did not write or one edited since.
+	HyperAIStudio::Skills::InstallBuiltIns(ProjectRoot, HyperAIStudio::Skills::BuiltInDirectory());
+	HyperAIStudio::Skills::SyncClaudeMirror(ProjectRoot);
+	HyperAIStudio::Agents::InstallTeam(ProjectRoot, /*bUpdateOnly=*/true);
+	HyperAIStudio::Agents::Sync(ProjectRoot);
+	// Beside the main block: the rule about other MCP servers, only while some change this editor outside HyperAI.
+	RefreshMcpBypassInstructions();
 
 	FHyperAIStudioStatus Status = GetStatusSync();
 	WriteStatusJson(ProjectRoot, Status);
@@ -4830,18 +4913,31 @@ void BuildAgentInstructionBlocks(
 		TEXT("- After readiness, use native `unreal-mcp` tools when the current agent client exposes them. If it still does not, continue work that does not require Unreal tools; only ask for an MCP reload or project-root reopen when the requested task actually requires those tools.") LINE_TERMINATOR +
 		TEXT("- Never ask for a new agent session merely to start Unreal Editor, and never claim that editor startup failed only because native tools are absent from the current session.") LINE_TERMINATOR +
 		TEXT("- Use normal filesystem tools for source files.") LINE_TERMINATOR +
-		TEXT("- Do not overlap Unreal MCP calls.") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("- Parallel agents can share this editor: reads run side by side, and HyperAI edits wait their turn (status `queued`; `hyper_operation_wait` waits through it). Give each agent its own assets; two agents editing one asset still conflict.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Fast Paths") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("- Before your first Unreal call, read `.hyperai/docs/HyperAIStudio-ToolGuide.md`. It lists every HyperAIStudio toolset, tool, and field, so you can `call_tool` directly.") LINE_TERMINATOR +
+		TEXT("- For Epic's toolsets, grep `.hyperai/docs/Epic-ToolGuide.md` for the tool you need: it lists every field, which ones are required, and each enum's names, so a toolset seldom needs looking up.") LINE_TERMINATOR +
+		TEXT("- Edit in one call: a pack's `*_apply_plan` with `bDryRun: false` and a fresh `operationId` (`expectedPlanHash` is optional) replies once the edit has finished; then the pack's validate tool. Only a reply still `queued` or `running` needs `hyper_operation_wait` (toolset `HyperAIStudio.HyperAIStudioNativeReadToolset`, arguments `{\"operationId\": ...}`).") LINE_TERMINATOR +
 		TEXT("- Current level: `call_tool` -> `editor_toolset.toolsets.scene.SceneTools` / `get_current_level` / `{}`.") LINE_TERMINATOR +
 		TEXT("- List actors: `call_tool` -> `editor_toolset.toolsets.scene.SceneTools` / `find_actors` / `{\"name\":\"\",\"tag\":\"\",\"collision_channels\":[]}`.") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("## Replies") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("- Start with what happened in a sentence or two, then the results. Skip preamble and do not restate the request.") LINE_TERMINATOR +
+		TEXT("- Write Markdown: HyperAI Studio shows replies as reports and can save them as HTML pages. For several results use a table, with `PASS`, `FAIL`, `WARN` or `INFO` as the first word of a status cell.") LINE_TERMINATOR +
+		TEXT("- Show a picture on its own line as `![caption](absolute/path.png)`; it opens in the Match page.") LINE_TERMINATOR +
+		TEXT("- Keep code, commands and JSON short, in fenced blocks with a language. End with the next step only when there is one.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Reconnect") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("- If Unreal is closed or disconnected, run `.hyperai/scripts/Start-HyperAIStudioEditor.ps1`; this also waits for MCP readiness.") LINE_TERMINATOR +
-		TEXT("- Use `.hyperai/scripts/Wait-HyperAIStudioMCP.ps1 -TimeoutSeconds 90` for a readiness-only retry, then continue the requested task.") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("- Use `.hyperai/scripts/Wait-HyperAIStudioMCP.ps1 -TimeoutSeconds 90` for a readiness-only retry, then continue the requested task.") LINE_TERMINATOR +
+		TEXT("- To restart Unreal, for example after changing C++ or plugin settings, call `hyper_editor_restart` with a `note` for yourself. It saves, closes the editor, builds, opens the project again and resumes your HyperAI chat with the build result. Never kill the editor from its own terminal: that ends your session.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Context Packs") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("- Only read `.hyperai/context/` files when the prompt explicitly references them.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Domain Guides") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("- The project's skills (`.agents/skills`, which Claude Code also sees in `.claude/skills`) are yours to use: pick the ones a task needs without being told. So are its agents (`.hyperai/agents`, which Claude Code runs from `.claude/agents` and Codex from `.codex/agents`): hand a task to the agent made for it, and a request with parts for several roles to the `team` skill when the project has one. A message sent from HyperAI's chat names the agent, the skills and the HyperAI tools that fit it, each tool with the `toolset_name` to call it through.") LINE_TERMINATOR +
+		TEXT("- To build or change a gameplay Blueprint, follow the `unreal-blueprint` skill (`.agents/skills/unreal-blueprint/SKILL.md`): the whole Blueprint in one script, with the node IDs it needs.") LINE_TERMINATOR +
 		TEXT("- Before designing or changing an Animation Blueprint, read `.hyperai/docs/HyperAIStudio-AnimationCookbook.md`.") LINE_TERMINATOR +
-		TEXT("- Before designing or changing a UAF (Unreal Animation Framework) animation graph, read `.hyperai/docs/HyperAIStudio-UAFCookbook.md`.") LINE_TERMINATOR LINE_TERMINATOR +
+		TEXT("- Before designing or changing a UAF (Unreal Animation Framework) animation graph, read `.hyperai/docs/HyperAIStudio-UAFCookbook.md`.") LINE_TERMINATOR +
+		TEXT("- Before generating a reference image, read `.hyperai/docs/HyperAIStudio-ImageGenCookbook.md`. If you cannot draw (Claude Code cannot), `hyper_image_generate` with `model_id: codex_image_gen` has Codex draw it into the project, or `nano_banana_2` / `nano_banana_pro` draw it through Google's API when `GEMINI_API_KEY` is set; then open the PNG it names.") LINE_TERMINATOR +
+		TEXT("- To make a scene, material, effect or UI look like a reference image, follow the `image-match` skill (`.agents/skills/image-match/SKILL.md`): capture, `hyper_image_compare` in a session, one change at a time.") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("## Shared Project Workspace") LINE_TERMINATOR LINE_TERMINATOR +
 		TEXT("- Treat `.hyperai/` as the shared, Git-trackable workspace for useful agent context, prompts, plans, research, decisions, logs, and task-local scratch files.") LINE_TERMINATOR +
 		TEXT("- Do not create generic agent-work folders such as `Planning`, `Temp`, `Research`, `Notes`, or `Scripts` in the project root.") LINE_TERMINATOR +
@@ -4858,7 +4954,7 @@ void BuildAgentInstructionBlocks(
 	OutClaudeBlock =
 		FString(TEXT("@AGENTS.md") LINE_TERMINATOR LINE_TERMINATOR) +
 		FString(TEXT("# Claude Code HyperAIStudio Notes") LINE_TERMINATOR LINE_TERMINATOR) +
-		FString::Printf(TEXT("- Project root: `%s`%s- Native MCP: `unreal-mcp` at `%s`%s- Follow the user's requested intent first. If asked to start, open, or reconnect the project, run `.hyperai/scripts/Start-HyperAIStudioEditor.ps1`, wait for MCP readiness, and continue.%s- Missing native MCP tools do not prove that the working directory is wrong. Start and verify Unreal first.%s- Use native `unreal-mcp` tools when this client exposes them. Only request an MCP reload or project-root reopen if the endpoint is ready and the requested task actually requires unavailable Unreal tools.%s- Never ask for a new agent session merely to start Unreal Editor.%s- Use generated Start/Wait helpers for lifecycle and readiness checks; do not hand-roll MCP protocol calls.%s- Fast paths: current level = `SceneTools.get_current_level`; actors = `SceneTools.find_actors` via `call_tool`.%s- Only read `.hyperai/context/` files when the prompt explicitly references them.%s- Do not overlap Unreal MCP calls."),
+		FString::Printf(TEXT("- Project root: `%s`%s- Native MCP: `unreal-mcp` at `%s`%s- Follow the user's requested intent first. If asked to start, open, or reconnect the project, run `.hyperai/scripts/Start-HyperAIStudioEditor.ps1`, wait for MCP readiness, and continue.%s- Missing native MCP tools do not prove that the working directory is wrong. Start and verify Unreal first.%s- Use native `unreal-mcp` tools when this client exposes them. Only request an MCP reload or project-root reopen if the endpoint is ready and the requested task actually requires unavailable Unreal tools.%s- Never ask for a new agent session merely to start Unreal Editor.%s- Use generated Start/Wait helpers for lifecycle and readiness checks; do not hand-roll MCP protocol calls.%s- Fast paths: current level = `SceneTools.get_current_level`; actors = `SceneTools.find_actors` via `call_tool`.%s- Only read `.hyperai/context/` files when the prompt explicitly references them.%s- Parallel agents can share this editor: HyperAI edits wait their turn (status `queued`), so give each agent its own assets."),
 			*ProjectRoot, LINE_TERMINATOR,
 			*Endpoint, LINE_TERMINATOR,
 			LINE_TERMINATOR,
@@ -4868,6 +4964,93 @@ void BuildAgentInstructionBlocks(
 			LINE_TERMINATOR,
 			LINE_TERMINATOR,
 			LINE_TERMINATOR);
+}
+
+FString FHyperAIStudioService::BuildAgentsInstructionText()
+{
+	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+	FString AgentsBlock;
+	FString ClaudeBlock;
+	if (Settings)
+	{
+		BuildAgentInstructionBlocks(GetProjectRoot(), GetEndpoint(Settings->UnrealMCPPort, Settings->UnrealMCPUrlPath), Settings, AgentsBlock, ClaudeBlock);
+	}
+	return AgentsBlock;
+}
+
+bool FHyperAIStudioService::RefreshMemoryInstructions()
+{
+	using namespace HyperAIStudio::Private;
+	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+	const FString AgentsPath = FPaths::Combine(GetProjectRoot(), TEXT("AGENTS.md"));
+	FString Existing;
+	// Memory joins the file Setup made; it never creates AGENTS.md on its own.
+	if (!Settings || !FFileHelper::LoadFileToString(Existing, *AgentsPath) || !Existing.Contains(ManagedMarkdownBegin))
+	{
+		return false;
+	}
+	const FString Block = HyperAIStudio::Memory::BuildInstructionSection(GetProjectRoot(), Settings->AgentMemory)
+		.Replace(TEXT("\n"), LINE_TERMINATOR);
+	return UpsertManagedBlock(AgentsPath, Block, ManagedMemoryBegin, ManagedMemoryEnd);
+}
+
+bool FHyperAIStudioService::RefreshMcpBypassInstructions()
+{
+	return WriteMcpBypassInstructions(FPaths::Combine(GetProjectRoot(), TEXT("AGENTS.md")), FHyperAIStudioMcpBypassMonitor::GetFindings());
+}
+
+bool FHyperAIStudioService::WriteMcpBypassInstructions(const FString& AgentsPath, const TArray<FHyperAIStudioMcpFinding>& Findings)
+{
+	using namespace HyperAIStudio::Private;
+	FString Existing;
+	// Like the memory block: it joins the file Setup made, and never creates AGENTS.md on its own.
+	if (!FFileHelper::LoadFileToString(Existing, *AgentsPath) || !Existing.Contains(ManagedMarkdownBegin))
+	{
+		return false;
+	}
+	const FString Section = HyperAIStudio::McpBypass::BuildInstructionSection(Findings);
+	if (Section.IsEmpty())
+	{
+		return RemoveManagedBlock(AgentsPath, ManagedMcpBypassBegin, ManagedMcpBypassEnd);
+	}
+	return UpsertManagedBlock(AgentsPath, Section.Replace(TEXT("\n"), LINE_TERMINATOR), ManagedMcpBypassBegin, ManagedMcpBypassEnd);
+}
+
+bool FHyperAIStudioService::AreAgentInstructionsCurrent() const
+{
+	using namespace HyperAIStudio::Private;
+	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+	if (!Settings)
+	{
+		return true;
+	}
+	const FString ProjectRoot = GetProjectRoot();
+	FString AgentsBlock;
+	FString ClaudeBlock;
+	BuildAgentInstructionBlocks(ProjectRoot, GetEndpoint(Settings->UnrealMCPPort, Settings->UnrealMCPUrlPath), Settings, AgentsBlock, ClaudeBlock);
+	const TPair<FString, FString> Targets[] = {
+		{ FPaths::Combine(ProjectRoot, TEXT("AGENTS.md")), MoveTemp(AgentsBlock) },
+		{ FPaths::Combine(ProjectRoot, TEXT("CLAUDE.md")), MoveTemp(ClaudeBlock) }
+	};
+	for (const TPair<FString, FString>& Target : Targets)
+	{
+		const bool bClaude = Target.Key.EndsWith(TEXT("CLAUDE.md"));
+		TArray<uint8> Original;
+		TArray<uint8> Desired;
+		bool bChanged = false;
+		FString Reason;
+		// A malformed file is Setup's to report, not a startup pass's to rewrite.
+		if (!BuildManagedBlockBytes(Target.Key, Target.Value, ManagedMarkdownBegin, ManagedMarkdownEnd,
+			bClaude ? Settings->bEnableClaudeAgent : true, Original, Desired, bChanged, Reason))
+		{
+			continue;
+		}
+		if (bChanged)
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 bool FHyperAIStudioService::GenerateManagedProjectFilesTransactional(
@@ -6237,11 +6420,13 @@ bool FHyperAIStudioService::GenerateHelperScripts(const FString& ProjectRoot, co
 	StartScript += TEXT("if (!(Test-Path -LiteralPath $EngineExe)) { throw \"UnrealEditor.exe not found at $EngineExe\" }") LINE_TERMINATOR;
 	StartScript += TEXT("if (!(Test-Path -LiteralPath $ProjectFile)) { throw \"Project file not found at $ProjectFile\" }") LINE_TERMINATOR;
 	StartScript += TEXT("$escapedProject = $ProjectFile.Replace('\\', '\\\\')") LINE_TERMINATOR;
-	StartScript += TEXT("$running = Get-CimInstance Win32_Process -Filter \"Name = 'UnrealEditor.exe'\" | Where-Object { $_.CommandLine -like \"*$ProjectFile*\" }") LINE_TERMINATOR;
+	// Windows reports the command line with backslashes, the project path here has forward slashes.
+	StartScript += TEXT("$running = Get-CimInstance Win32_Process -Filter \"Name = 'UnrealEditor.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine.Replace('\\', '/') -like \"*$ProjectFile*\" }") LINE_TERMINATOR;
 	StartScript += TEXT("if ($ForceRestart -and $running) { $running | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; $running = $null }") LINE_TERMINATOR;
 	StartScript += TEXT("if (-not $running) {") LINE_TERMINATOR;
-	StartScript += TEXT("  $args = @($ProjectFile, '-ModelContextProtocolStartServer', \"-ModelContextProtocolPort=$Port\")") LINE_TERMINATOR;
-	StartScript += TEXT("  Start-Process -FilePath $EngineExe -ArgumentList $args -WorkingDirectory (Split-Path -Parent $ProjectFile) | Out-Null") LINE_TERMINATOR;
+	// One string with the project quoted: Start-Process does not quote array items, so a path with a space opened the Project Browser.
+	StartScript += TEXT("  $EditorArgs = '\"' + $ProjectFile + '\" -ModelContextProtocolStartServer -ModelContextProtocolPort=' + $Port") LINE_TERMINATOR;
+	StartScript += TEXT("  Start-Process -FilePath $EngineExe -ArgumentList $EditorArgs -WorkingDirectory (Split-Path -Parent $ProjectFile) | Out-Null") LINE_TERMINATOR;
 	StartScript += TEXT("}") LINE_TERMINATOR;
 	StartScript += TEXT("& (Join-Path $PSScriptRoot 'Wait-HyperAIStudioMCP.ps1') -Port $Port -UrlPath $UrlPath -TimeoutSeconds $TimeoutSeconds") LINE_TERMINATOR;
 
@@ -6892,15 +7077,8 @@ void FHyperAIStudioService::ProbeToolsListAsync(const FString& Endpoint, TFuncti
 				{
 					if (!bInitConnected || !InitResponse.IsValid())
 					{
-						const bool bAmbiguous = !HyperAIStudio::Private::IsMcpRequestProvablyNotSent(CompletedRequest);
-						Completion->Complete(
-							false,
-							bAmbiguous
-								? TEXT("Unreal MCP initialize outcome is unknown; calls are locked until a confirmed server restart.")
-								: TEXT("Could not connect to Unreal MCP initialize endpoint; the request was not sent."),
-							0,
-							false,
-							bAmbiguous);
+						Completion->Complete(false,
+							HyperAIStudio::Private::DescribeUnansweredMcpRequest(TEXT("initialize"), CompletedRequest), 0, false);
 					return;
 				}
 
@@ -6956,15 +7134,8 @@ void FHyperAIStudioService::ProbeToolsListAsync(const FString& Endpoint, TFuncti
 						{
 							if (!bInitializedConnected || !InitializedResponse.IsValid())
 							{
-								const bool bAmbiguous = !HyperAIStudio::Private::IsMcpRequestProvablyNotSent(CompletedRequest);
-								Completion->Complete(
-									false,
-									bAmbiguous
-										? TEXT("notifications/initialized outcome is unknown; calls are locked until a confirmed server restart.")
-										: TEXT("Could not connect for notifications/initialized; the request was not sent."),
-									0,
-									false,
-									bAmbiguous);
+								Completion->Complete(false, HyperAIStudio::Private::DescribeUnansweredMcpRequest(
+									TEXT("notifications/initialized"), CompletedRequest), 0, false);
 							return;
 						}
 						const int32 InitializedCode = InitializedResponse->GetResponseCode();
@@ -7006,15 +7177,8 @@ void FHyperAIStudioService::ProbeToolsListAsync(const FString& Endpoint, TFuncti
 								{
 									if (!bListConnected || !ListResponse.IsValid())
 									{
-										const bool bAmbiguous = !HyperAIStudio::Private::IsMcpRequestProvablyNotSent(CompletedRequest);
-										Completion->Complete(
-											false,
-											bAmbiguous
-												? TEXT("tools/list outcome is unknown; calls are locked until a confirmed server restart.")
-												: TEXT("Could not connect for tools/list; the request was not sent."),
-											0,
-											false,
-											bAmbiguous);
+										Completion->Complete(false, HyperAIStudio::Private::DescribeUnansweredMcpRequest(
+											TEXT("tools/list"), CompletedRequest), 0, false);
 									return;
 								}
 								const int32 ListCode = ListResponse->GetResponseCode();
@@ -7083,4 +7247,12 @@ void FHyperAIStudioService::ProbeToolsListAsync(const FString& Endpoint, TFuncti
 				OnComplete(false, Reason, 0);
 			}
 		});
+}
+
+bool FHyperAIStudioService::ProbeOwnServerToolsListAsync(const FString& Endpoint, TFunction<void(bool bReachable, const FString& Message, int32 ToolCount)> OnComplete)
+{
+	return FHyperAIStudioEditorStartupGate::RunWhenEditorAnswers([Endpoint, OnComplete]()
+	{
+		ProbeToolsListAsync(Endpoint, OnComplete);
+	});
 }

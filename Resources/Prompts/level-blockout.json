@@ -1,0 +1,1362 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "level-blockout",
+ "presets": [
+  {
+   "id": "level-blockout.measure-player-metrics",
+   "title": "Measure the player and save blockout metrics",
+   "summary": "Read the pawn's height, step, jump and speeds, derive door, corridor, cover and gap sizes, and save them as a project convention.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "hyperai-memory"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_level_design_inspect",
+    "hyper_memory_remember"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "metrics",
+    "player",
+    "scale",
+    "doors",
+    "corridors",
+    "cover",
+    "jump",
+    "memory",
+    "convention"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "pawn",
+     "label": "Pawn class",
+     "default": "default pawn",
+     "hint": "A pawn class path such as /Game/Characters/BP_Hero.BP_Hero_C; leave as is for the game mode's default pawn."
+    }
+   ],
+   "prompt": "Measure the player in {{project}} and turn the numbers into blockout rules every agent reuses. Change nothing in the level.\n1. hyper_memory_recall with 'player metrics blockout': note any metrics saved before.\n2. hyper_level_design_inspect with PawnClassPath for {{pawn}} (empty for the default pawn). If it is not available, say the level_design pack is off and stop. Read CapsuleRadius, PlayerHeight, EyeHeight, MaxStepHeight, MaxWalkableSlopeDegrees, JumpHeight, MaxJumpGap and WalkSpeed, and the recommended MinDoorWidth, MinCorridorWidth, MinCeilingHeight, LowCoverMin/Max, HighCoverMin and SafeJumpGap.\n3. Compare them with the level designer's bar: doorways 120 x 220 cm, corridors 200 cm (300 where there is combat), ramps at most 30 degrees, jumps at most 250 cm across and 60 cm up, cover 100-130 cm. Flag each recommendation that conflicts with the bar, and each metric that changed since the saved note.\n4. hyper_memory_remember one convention whose title is the facts, such as 'Player: 180 cm tall, step 45 cm, safe gap 220 cm, doors 120 cm' (Type convention; Replaces the old note's name if there is one).\nEnd with a table of every metric (cm, degrees or cm/s) with PASS or FAIL against the bar, then the saved note's title."
+  },
+  {
+   "id": "level-blockout.room-corridor-doorway",
+   "title": "Block out a room, doorway and corridor at player scale",
+   "summary": "A floor, walls with a doorway and a corridor sized from the player's metrics, with start and goal markers, then routes and Map Check.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_design_validate"
+   ],
+   "ops": [
+    "add_block",
+    "add_marker"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "blockout",
+    "room",
+    "corridor",
+    "doorway",
+    "greybox",
+    "starter",
+    "navmesh"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "origin",
+     "label": "Origin (cm)",
+     "default": "0,0,0"
+    },
+    {
+     "name": "room_size",
+     "label": "Room size (cm)",
+     "default": "1200 x 1200"
+    },
+    {
+     "name": "corridor_length",
+     "label": "Corridor length (cm)",
+     "default": "1600"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Blk"
+    }
+   ],
+   "prompt": "Block out one room and the corridor leading out of it in {{level}}, starting at {{origin}} (cm), at player scale.\n1. hyper_level_design_inspect: read MinDoorWidth, MinCorridorWidth, MinCeilingHeight and the Revision. If it is not available, say the level_design pack is off and stop.\n2. One hyper_level_blockout_apply_plan with bDryRun false, a fresh OperationId and ExpectedRevision. Ops: add_block Role floor for a {{room_size}} cm room and for a {{corridor_length}} cm corridor 300 cm wide; add_block Role wall pieces 30 cm thick and 400 cm high around both, leaving a doorway gap at least MinDoorWidth (and 120 cm) where the corridor meets the room; add_marker start in the room and add_marker goal at the corridor's far end. Name every piece {{prefix}}_<part>. If it awaits approval, hyper_operation_wait with bWaitThroughApproval true. Leave the level unsaved.\n3. hyper_level_design_validate with bCapturePreview true. If it reports no_navmesh, add a NavMeshBoundsVolume scaled over the blockout with Epic's SceneTools.add_to_scene_from_class, then validate again.\nEnd with a PASS/FAIL table: pieces placed, doorway gap at least MinDoorWidth, corridor 300 cm wide (at least MinCorridorWidth), start-to-goal route bReachable with no too_narrow issue (a narrow warning at the doorway is expected), Map Check errors 0. Show the top-down preview image on its own line."
+  },
+  {
+   "id": "level-blockout.mirrored-tdm-arena",
+   "title": "Block out a mirrored three-lane arena for team deathmatch",
+   "summary": "Three lanes, spawns at both ends and low and high cover mirrored across X = 0, then symmetry, sightline and route checks.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_design_validate"
+   ],
+   "ops": [
+    "add_block",
+    "add_marker"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "arena",
+    "multiplayer",
+    "shooter",
+    "deathmatch",
+    "symmetry",
+    "lanes",
+    "cover",
+    "sightlines"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "arena_size",
+     "label": "Arena size (cm)",
+     "default": "6000 x 4000"
+    },
+    {
+     "name": "lane_width",
+     "label": "Lane width (cm)",
+     "default": "500"
+    },
+    {
+     "name": "max_sightline",
+     "label": "Longest allowed sightline (cm)",
+     "default": "4500"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "TDM"
+    }
+   ],
+   "prompt": "Block out a team deathmatch arena in {{level}}: {{arena_size}} cm centred on the origin, three lanes about {{lane_width}} cm wide running along X, mirrored across X = 0.\n1. hyper_level_design_inspect for LowCoverMin/Max, HighCoverMin, EyeHeight, MinCorridorWidth and the Revision. If it is not available, say the level_design pack is off and stop.\n2. hyper_level_blockout_apply_plan with bDryRun false, a fresh OperationId and ExpectedRevision; a plan holds at most 32 ops, so use two if needed, inspecting again for the new Revision between them. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true. Ops: add_block floor and four outer walls 400 cm high; two lane dividers as wall blocks with two crossing gaps each; per side four cover_low blocks inside LowCoverMin-LowCoverMax and two cover_high blocks at least HighCoverMin; add_marker spawn, three per team, near each end; add_marker start beside each team's spawns; add_marker objective at the centre. Every piece at (x, y) has a same-size twin at (-x, y). Names {{prefix}}_A_<part> and {{prefix}}_B_<part>.\n3. hyper_level_design_validate with SymmetryAxis x, SymmetryPlane 0 and MaxSightline {{max_sightline}}. Sightlines are traced at EyeHeight, so only dividers and high cover cut them. Fix what it reports and validate again.\nEnd with a PASS/FAIL table: symmetry Score 1.0 with Unmatched empty, both starts reach the objective, no long_sightline from a spawn, no cover_height issues, Map Check errors 0. Show the preview image on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.stealth-courtyard",
+   "title": "Block out a stealth courtyard with guard posts and cover",
+   "summary": "A walled courtyard with staggered high cover, guard posts and a hidden objective, checked for exposed cover, sightlines and reachability.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-playtest"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_design_validate",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "add_block",
+    "add_marker",
+    "move"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "stealth",
+    "infiltration",
+    "cover",
+    "guards",
+    "sightlines",
+    "courtyard",
+    "spy"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "courtyard_size",
+     "label": "Courtyard size (cm)",
+     "default": "3000 x 3000"
+    },
+    {
+     "name": "guard_posts",
+     "label": "Guard posts",
+     "default": "4"
+    },
+    {
+     "name": "max_sightline",
+     "label": "Longest allowed sightline (cm)",
+     "default": "2500"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Stealth"
+    }
+   ],
+   "prompt": "Block out a stealth courtyard in {{level}}: {{courtyard_size}} cm, walled, two entrances, {{guard_posts}} guard posts, and an objective the player reaches without crossing open ground.\n1. hyper_level_design_inspect for HighCoverMin, LowCoverMin/Max and the Revision. If it is not available, say the level_design pack is off and stop. The bot starts at the PlayerStart (SceneTools.find_actors): put the start floor under it.\n2. One hyper_level_blockout_apply_plan (bDryRun false, fresh OperationId, ExpectedRevision): add_block floor; walls 500 cm high with a 200 cm gap on the south and west sides; staggered cover_high blocks (at least HighCoverMin) forming a broken route from the south gap to the north-east corner, cover_low blocks between them; add_marker spawn at each guard post; add_marker cover behind each high block; add_marker start outside the south gap; add_marker objective named {{prefix}}_Objective in the north-east corner. Names {{prefix}}_<part>. If it awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_level_design_validate with MaxSightline {{max_sightline}}. Use move ops on cover until no cover marker is exposed_cover and no guard spawn has a long_sightline to the start.\n4. hyper_verify_run: one case (TimeoutSeconds 55) with a Play step, Goal Reach, Target LD_{{prefix}}_Objective (pieces are labelled LD_<name>), TimeoutSeconds 50, then a Capture step.\nEnd with a PASS/FAIL table: start-to-objective route reachable, exposed_cover 0, long_sightline 0, Reach passed, Map Check errors 0. Show the capture on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.sky-island-jumps",
+   "title": "Block out floating sky-island jumps for a platformer",
+   "summary": "Island platforms spaced inside SafeJumpGap and stepped under JumpHeight up to a shrine, proven by a bot that plays the route.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-playtest"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_design_validate",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "add_block",
+    "add_marker"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "platformer",
+    "jumps",
+    "fantasy",
+    "sky islands",
+    "traversal",
+    "bot",
+    "playtest"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "islands",
+     "label": "Islands",
+     "default": "8"
+    },
+    {
+     "name": "total_rise",
+     "label": "Total rise (cm)",
+     "default": "350",
+     "hint": "At most 60 cm for each gap between islands: 350 suits 8 islands."
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Sky"
+    }
+   ],
+   "prompt": "Block out a fantasy sky-island jumping route in {{level}}: {{islands}} floating islands from a start island to a shrine, climbing {{total_rise}} cm in all.\n1. hyper_level_design_inspect: SafeJumpGap, MaxJumpGap, JumpHeight and the Revision. If it is not available, say the level_design pack is off and stop. If {{total_rise}} cm needs more than 60 cm a gap, say so and stop. The bot starts at the PlayerStart (SceneTools.find_actors): put the start island under it.\n2. One hyper_level_blockout_apply_plan (bDryRun false, fresh OperationId, ExpectedRevision): add_block Role platform for each island, 400 x 400 x 100 cm, the start island 800 x 800 cm; each gap edge to edge at most SafeJumpGap and 250 cm; equal rises, each under JumpHeight; zig-zag the heading. add_marker start on the first island, checkpoint halfway, goal named {{prefix}}_Shrine on the last. Names {{prefix}}_Island_<n>. If it awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_level_design_validate: markers on walkable floor with room to stand. Navmesh routes do not jump, so unreachable is expected here; the bot is the proof.\n4. hyper_verify_run, two cases (TimeoutSeconds 55 each): a Play step with Goal Reach, Target LD_{{prefix}}_Shrine (pieces are labelled LD_<name>), TimeoutSeconds 50, then Capture; and a Play step with Goal Explore, Seconds 40, to find falls.\nEnd with a PASS/FAIL table: largest gap against SafeJumpGap, largest rise against 60 cm and JumpHeight, Reach passed, no falls reported, Map Check errors 0. Show the capture and the Explore map on their own lines. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.three-storey-tower",
+   "title": "Block out a three-storey tower with stairs at step height",
+   "summary": "Storeys joined by stairs split to the player's step height, ceilings checked against the player, and a bot that climbs from the door to the roof.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-playtest"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_design_validate",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "add_block",
+    "add_stairs",
+    "add_marker"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "tower",
+    "stairs",
+    "vertical",
+    "interior",
+    "floors",
+    "ceiling",
+    "fantasy",
+    "keep"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "storeys",
+     "label": "Storeys",
+     "default": "3"
+    },
+    {
+     "name": "storey_height",
+     "label": "Storey height (cm)",
+     "default": "400"
+    },
+    {
+     "name": "footprint",
+     "label": "Footprint (cm)",
+     "default": "1200 x 1200"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Tower"
+    }
+   ],
+   "prompt": "Block out a {{storeys}}-storey tower at the origin of {{level}}: a {{footprint}} cm footprint, storeys {{storey_height}} cm apart, stairs between every storey and a roof the player can reach.\n1. hyper_level_design_inspect: MaxStepHeight, MinCeilingHeight, MinDoorWidth and the Revision. If it is not available, say the level_design pack is off and stop. The bot starts at the PlayerStart (SceneTools.find_actors): put the start floor under it.\n2. hyper_level_blockout_apply_plan in plans of at most 32 ops (bDryRun false, fresh OperationId, the current Revision): add_block floor at ground; walls 30 cm thick up to the roof with a 160 cm doorway gap on the south face; for each upper storey and the roof, platform slabs 30 cm thick round a 600 x 250 cm stair opening; add_stairs in each opening, Size 600,200,{{storey_height}}, alternating direction; add_marker start outside the door, checkpoint on every storey, goal named {{prefix}}_Roof on the roof. Names {{prefix}}_<part>. If it awaits approval, hyper_operation_wait with bWaitThroughApproval true. Read the Notes: each staircase's steps, height and depth.\n3. hyper_level_design_validate: no low_ceiling, no steep_floor, start to goal reachable.\n4. hyper_verify_run: one case (TimeoutSeconds 55), a Play step with Goal Reach, Target LD_{{prefix}}_Roof (pieces are labelled LD_<name>), TimeoutSeconds 50, then Capture.\nEnd with a PASS/FAIL table: each staircase's step height (Notes) under MaxStepHeight and depth at least 28 cm, no low_ceiling on any storey, route reachable, Reach passed, Map Check errors 0. Show the capture and the preview on their own lines. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.five-room-dungeon",
+   "title": "Block out a five-room dungeon with a loop and a key room",
+   "summary": "Five rooms joined by 300 cm corridors with one loop, player-scale doorways, a key pickup and an exit goal, every one reachable.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-playtest"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_design_validate",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "add_block",
+    "add_marker"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "dungeon",
+    "fantasy",
+    "rpg",
+    "rooms",
+    "loop",
+    "key",
+    "crawler"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "origin",
+     "label": "Origin (cm)",
+     "default": "0,0,0"
+    },
+    {
+     "name": "room_size",
+     "label": "Room size (cm)",
+     "default": "1000 x 1000"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Dungeon"
+    }
+   ],
+   "prompt": "Block out a five-room fantasy dungeon in {{level}} around {{origin}} (cm): rooms of {{room_size}} cm joined by corridors 300 cm wide, with one loop. Layout: Entry to Hall; Hall to Crypt and Armoury, which also join each other (the loop); Armoury to the Vault exit.\n1. hyper_level_design_inspect for the metrics and the Revision. If it is not available, say the level_design pack is off and stop. The bot starts at the PlayerStart (SceneTools.find_actors): put the Entry floor under it.\n2. hyper_level_blockout_apply_plan in plans of at most 32 ops (bDryRun false, a fresh OperationId and the current Revision each, inspecting between them). If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true. Ops: add_block floor and walls 400 cm high for every room and corridor, each doorway gap the corridor's full 300 cm; a 300 x 300 cm pillar (Role pillar) in the Hall; add_marker start in Entry, checkpoint in Hall, pickup named {{prefix}}_Key in the Crypt, goal named {{prefix}}_Exit in the Vault. Names {{prefix}}_<Room>_<part>.\n3. hyper_level_design_validate: no narrow or too_narrow issues, every target reachable from the start.\n4. hyper_verify_run, two cases (TimeoutSeconds 55 each): Play steps with Goal Reach, Target LD_{{prefix}}_Key or LD_{{prefix}}_Exit (pieces are labelled LD_<name>), TimeoutSeconds 50, each ending in Capture.\nEnd with a PASS/FAIL table: rooms and corridors built, NarrowestWidth on every route at least MinCorridorWidth, key, checkpoint and exit reachable, both Reach cases passed, Map Check errors 0. Show the captures and the preview on their own lines. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.ctf-mirrored-map",
+   "title": "Block out a capture-the-flag map mirrored across Y = 0",
+   "summary": "Two bases with flag objectives, a mid-field deck on walkable ramps, mirror-checked across Y and proven by a bot run to each flag.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-playtest"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_design_validate",
+    "hyper_verify_calibrate",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "add_block",
+    "add_ramp",
+    "add_marker"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "capture the flag",
+    "ctf",
+    "multiplayer",
+    "symmetry",
+    "ramps",
+    "competitive",
+    "shooter"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "map_size",
+     "label": "Map size (cm)",
+     "default": "6000 x 12000"
+    },
+    {
+     "name": "deck_height",
+     "label": "Deck height (cm)",
+     "default": "300"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "CTF"
+    }
+   ],
+   "prompt": "Block out a capture-the-flag map in {{level}}: {{map_size}} cm (X by Y), the Red base at negative Y and the Blue base at positive Y, mirrored across Y = 0.\n1. hyper_level_design_inspect: MaxWalkableSlopeDegrees, LowCoverMin/Max, HighCoverMin and the Revision. If it is not available, say the level_design pack is off and stop. The bot starts at the PlayerStart (SceneTools.find_actors): build the Red start floor under it.\n2. hyper_level_blockout_apply_plan in plans of at most 32 ops: dry-run the first, then apply each with bDryRun false, a fresh OperationId and the current Revision (inspect between plans). If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true. add_block pieces: floor and outer walls; per base a 2000 x 2000 cm room with three exits, the flag as add_marker objective named {{prefix}}_FlagRed or {{prefix}}_FlagBlue, an add_marker start and two spawns; mid-field, a deck {{deck_height}} cm high reached by an add_ramp from each side, plus cover_low and cover_high blocks. Every piece at (x, y) has a same-size twin at (x, -y).\n3. hyper_level_design_validate with SymmetryAxis y, SymmetryPlane 0 and MaxSightline 5000.\n4. hyper_verify_calibrate (bMeasure false) for the case limit, then hyper_verify_run: one case per flag (TimeoutSeconds 55), a Play step with Goal Reach, Target LD_{{prefix}}_FlagRed or LD_{{prefix}}_FlagBlue (pieces are labelled LD_<name>), TimeoutSeconds 50, then Capture.\nEnd with a PASS/FAIL table: symmetry Score 1.0 with Unmatched empty, ramp slopes (Notes) under MaxWalkableSlopeDegrees, both starts reach both flags, both Reach cases passed, Map Check errors 0. Show the captures and preview on their own lines; leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.horror-corridor-loop",
+   "title": "Block out a horror corridor loop that breaks sightlines",
+   "summary": "Narrow corridors that turn every 12 m, scare spawns past each corner and no long view ahead, checked against the player's metrics.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_design_validate"
+   ],
+   "ops": [
+    "add_block",
+    "add_marker"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "horror",
+    "corridors",
+    "sightlines",
+    "claustrophobic",
+    "loop",
+    "scares",
+    "survival"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "loop_size",
+     "label": "Loop size (cm)",
+     "default": "4800 x 3600"
+    },
+    {
+     "name": "max_sightline",
+     "label": "Longest allowed sightline (cm)",
+     "default": "1500"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Hall"
+    }
+   ],
+   "prompt": "Block out a horror corridor loop in {{level}}: a rectangle of corridors about {{loop_size}} cm around, turning at least every 1200 cm so the player never sees far ahead.\n1. hyper_level_design_inspect: MinCorridorWidth, MinCeilingHeight and the Revision. If it is not available, say the level_design pack is off and stop.\n2. hyper_level_blockout_apply_plan in plans of at most 32 ops (bDryRun false, a fresh OperationId and the current Revision each, inspecting between them): add_block corridor floors with MinCorridorWidth plus 20 cm clear between the wall faces; walls 30 cm thick and 350 cm high; a 300 cm dog-leg jog halfway along each long side; ceiling slabs (Role platform) with their underside 20 cm above MinCeilingHeight; add_marker spawn just past each corner (the scares), add_marker checkpoint at each jog; add_marker start and add_marker goal on either side of a wall block named {{prefix}}_Door that closes the loop, so the route goes the long way round. Names {{prefix}}_<part>. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_level_design_validate with MaxSightline {{max_sightline}}. Each long_sightline from a spawn means a straight run is too long: add a jog or a wall and validate again.\nEnd with a PASS/FAIL table: no narrow or too_narrow issues, no low_ceiling, longest open sightline from any spawn under {{max_sightline}} cm, start to goal reachable the long way, Map Check errors 0. Show the preview on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.rooftop-parkour-run",
+   "title": "Block out a rooftop parkour run across city blocks",
+   "summary": "Rooftops at varied heights with jump gaps, a fire-escape stair and a ramp, every gap measured against the player's reach and played by a bot.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-playtest"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_spatial_query",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "add_block",
+    "add_stairs",
+    "add_ramp",
+    "add_marker"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "parkour",
+    "rooftops",
+    "city",
+    "modern",
+    "traversal",
+    "jumps",
+    "measure"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "rooftops",
+     "label": "Rooftops",
+     "default": "6"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Roof"
+    }
+   ],
+   "prompt": "Block out a modern rooftop parkour run in {{level}}: {{rooftops}} building roofs in a line, from a street-level start to a goal on the last roof.\n1. hyper_level_design_inspect: SafeJumpGap, JumpHeight, MaxWalkableSlopeDegrees and the Revision. If it is not available, say the level_design pack is off and stop. The bot starts at the PlayerStart (SceneTools.find_actors): put the start floor under it.\n2. One hyper_level_blockout_apply_plan (bDryRun false, fresh OperationId, ExpectedRevision): add_block Role platform roofs 1200 x 1000 cm between 600 and 1200 cm high, each gap between roofs at most SafeJumpGap, drops of up to 300 cm allowed but any climb at most 50 cm; an add_stairs fire escape from the street to the first roof; one add_ramp up onto a higher roof; add_marker start at street level and goal named {{prefix}}_Goal on the last roof. Names {{prefix}}_<n>. If it awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_spatial_query: one measure query per neighbouring pair of roofs (ActorA and ActorB by their LD_<name> labels) for Gap and Vertical. If the spatial tools are missing, work the gaps out from the piece sizes and locations and say so.\n4. hyper_verify_run: one case (TimeoutSeconds 55), a Play step with Goal Reach, Target LD_{{prefix}}_Goal, TimeoutSeconds 50, then Capture.\nEnd with a PASS/FAIL table, one row per gap: Gap against SafeJumpGap, climb against 50 cm; then Reach passed with no stuck spots. Show the capture on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.fix-validator-issues",
+   "title": "Fix every issue the blockout validator reports",
+   "summary": "Run the layout checks, then change only the flagged pieces with moves, rebuilds and deletes until errors reach zero, in a few rounds.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_validate",
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "move",
+    "delete",
+    "add_block",
+    "add_ramp",
+    "add_stairs"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "fix",
+    "validate",
+    "issues",
+    "map check",
+    "cleanup",
+    "blockout",
+    "iteration"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "rounds",
+     "label": "Fix rounds",
+     "default": "3"
+    }
+   ],
+   "prompt": "Make the blockout in {{level}} pass its layout checks, changing only the pieces the checks name.\n1. hyper_level_design_validate with bCapturePreview true: list every error and warning with its Code, Subject and Location. If it is not available, say the level_design pack is off and stop.\n2. hyper_level_design_inspect for the Pieces, metrics and the Revision.\n3. One hyper_level_blockout_apply_plan per round. Pieces get deleted, so dry-run first (bDryRun true), then apply with bDryRun false, a fresh OperationId, ExpectedRevision and the dry run's PlanHash as ExpectedPlanHash. If it awaits approval, hyper_operation_wait with bWaitThroughApproval true. Fix by code: no_floor or no_room, move the marker onto open floor; narrow or too_narrow, delete the wall piece and add_block it again set back to MinCorridorWidth; unreachable, add_ramp or add_stairs over the ledge or gap where the route stops; steep_floor, delete the ramp and add_ramp it longer; cover_height, delete the block and add_block it at the right height; low_ceiling, move the slab up. Keep every name, and touch nothing the issues do not name.\n4. hyper_level_design_validate again, then inspect for the new Revision. Repeat for at most {{rounds}} rounds.\nEnd with a PASS/FAIL table: errors and warnings before and after, then each fix (piece, code, what changed). Show the final preview on its own line, and list any issue you could not fix and why. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.refit-for-new-character",
+   "title": "Refit doors and corridors to a bigger player character",
+   "summary": "Measure a new pawn, find blockout openings and ceilings now too tight for it, and rebuild only those pieces to fit.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_design_validate",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "delete",
+    "add_block",
+    "add_stairs",
+    "move"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "metrics",
+    "refit",
+    "doors",
+    "corridors",
+    "ceilings",
+    "character",
+    "scale"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "pawn",
+     "label": "New pawn class",
+     "default": "/Game/Characters/BP_Ogre.BP_Ogre_C",
+     "hint": "The pawn class path the level must now fit."
+    }
+   ],
+   "prompt": "The player character in {{level}} is changing to {{pawn}}. Refit the blockout so it still plays.\n1. hyper_level_design_inspect twice: once for the default pawn and once with PawnClassPath {{pawn}}. Compare PlayerHeight, CapsuleRadius, MaxStepHeight, MinDoorWidth, MinCorridorWidth and MinCeilingHeight. If it is not available, say the level_design pack is off and stop.\n2. hyper_level_design_validate with PawnClassPath {{pawn}}: collect the too_narrow, narrow, low_ceiling, no_room and unreachable issues.\n3. hyper_level_blockout_apply_plan with PawnClassPath {{pawn}}: dry run first, then bDryRun false with a fresh OperationId, ExpectedRevision and the dry run's PlanHash as ExpectedPlanHash. If it awaits approval, hyper_operation_wait with bWaitThroughApproval true. Widen only the flagged openings: delete the wall pieces either side and add_block them again set back to the new MinDoorWidth or MinCorridorWidth; move ceiling slabs up to the new MinCeilingHeight; stairs split by the old step height get deleted and rebuilt with add_stairs. Keep names, roles and the rest of the layout.\n4. hyper_level_design_validate with PawnClassPath {{pawn}} again.\nEnd with a PASS/FAIL table: old and new metrics, issues before and after, every piece changed with its old and new size. Show the preview on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.cover-for-open-sightlines",
+   "title": "Break open sightlines with cover placed in clear spots",
+   "summary": "Find spawns with long open sightlines, search clear ground along them, and add high cover that cuts them at eye height.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_validate",
+    "hyper_level_design_inspect",
+    "hyper_spatial_query",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "add_block",
+    "add_marker"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "cover",
+    "sightlines",
+    "combat",
+    "shooter",
+    "clear spot",
+    "balance"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "max_sightline",
+     "label": "Longest allowed sightline (cm)",
+     "default": "4000"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Cover"
+    }
+   ],
+   "prompt": "Break up the long open sightlines in the blockout of {{level}} with cover, without blocking any route.\n1. hyper_level_design_validate with MaxSightline {{max_sightline}}: list each long_sightline (from, to, distance). If it is not available, say the level_design pack is off and stop.\n2. hyper_level_design_inspect for the marker locations, EyeHeight, HighCoverMin and the Revision. Sightlines are traced from eye to eye, so only cover taller than EyeHeight cuts one.\n3. hyper_spatial_query: for each long sightline, a clear_spot query at its midpoint for a box with Extent 100,30,HighCoverMin/2 (half sizes in cm), Clearance 60, MaxSlope 10, bSnapToGround true. If the spatial tools are missing, pick spots from the piece layout and say so.\n4. One hyper_level_blockout_apply_plan (bDryRun false, fresh OperationId, ExpectedRevision): add_block cover_high 200 cm wide, 60 cm deep and at least HighCoverMin tall at each clear spot, turned across the sightline; add_marker cover behind each. Names {{prefix}}_<n>. If it awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n5. hyper_level_design_validate again with the same MaxSightline.\nEnd with a PASS/FAIL table: long sightlines before and after (0 after), cover_height and exposed_cover issues 0, every route still reachable, cover pieces added. Show the preview on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.drop-props-to-ground",
+   "title": "Drop floating props onto the ground below them",
+   "summary": "Measure how far each selected actor floats, drop them all onto the surface in one undo step, tilted to slopes up to a limit.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_spatial_query",
+    "hyper_spatial_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "drop_to_ground"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "placement",
+    "ground",
+    "snap",
+    "floating",
+    "props",
+    "set dressing",
+    "align"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "max_tilt",
+     "label": "Largest tilt (degrees)",
+     "default": "20"
+    },
+    {
+     "name": "sink",
+     "label": "Sink (cm)",
+     "default": "2"
+    }
+   ],
+   "prompt": "Rest these actors on the ground, as the level designer's bar requires (nothing floats, nothing is buried):\n{{selected_actors}}\n1. hyper_spatial_query with one ground query per actor at its location (up to 32 per call), IgnoreActors that actor and bIgnoreFoliage true: report HeightAboveGround and SlopeDegrees for each. If the spatial tools are not available, say the level_design pack lacks them and stop.\n2. hyper_spatial_apply_plan as a dry run (bDryRun true, bIgnoreEachOther true): one drop_to_ground op with these Actors, Samples corners, bAlignToNormal true, MaxAlignDegrees {{max_tilt}} and Sink {{sink}}. Read the Moves. Leave out actors it refuses (locked, attached to a parent, no ground below) and say why.\n3. Apply the same plan with bDryRun false and a fresh OperationId. If the status is awaiting_user_approval, hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. Prove it: run the identical drop_to_ground dry run again; every Moves line must now move its actor by under 1 cm.\nEnd with a PASS/FAIL table, one row per actor: height above ground before (cm), slope, tilt applied, second dry-run move under 1 cm. Leave the level unsaved; one Ctrl+Z undoes the whole drop."
+  },
+  {
+   "id": "level-blockout.clear-blocked-spawns",
+   "title": "Move props out of blocked spawns and doorways",
+   "summary": "Overlap-test each spawn and doorway with the player's capsule, then move the props that block them to the nearest clear spot in one undo step.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_design_validate",
+    "hyper_spatial_query",
+    "hyper_spatial_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "move_to_clear_spot"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "spawns",
+    "doorways",
+    "blocking",
+    "overlap",
+    "props",
+    "clear spot",
+    "cleanup"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "clearance",
+     "label": "Clearance (cm)",
+     "default": "50"
+    }
+   ],
+   "prompt": "Clear every spawn point and doorway in {{level}} of props that block the player, moving the props, never the markers.\n1. hyper_level_design_inspect for CapsuleRadius, PlayerHeight and the markers; hyper_level_design_validate for markers with no_room and routes flagged narrow. If it is not available, say the level_design pack is off and stop.\n2. hyper_spatial_query: at each spawn and start marker an overlap query with Shape capsule, Extent X CapsuleRadius and Z half the PlayerHeight, centred that high above the floor; a box overlap across each flagged doorway. List the actors in Hits with bBlocking true that are not blockout pieces (LD_ labels).\n3. hyper_spatial_apply_plan as a dry run: one move_to_clear_spot op per blocking prop with Near its current location, Clearance {{clearance}}, MaxRadius 1500, MaxSlope 30 and bSnapToGround true. Check each Moves line keeps the prop out of every doorway and spawn.\n4. Apply with bDryRun false and a fresh OperationId; if the status is awaiting_user_approval, hyper_operation_wait with bWaitThroughApproval true.\n5. Run the overlap queries and hyper_level_design_validate again.\nEnd with a PASS/FAIL table: each spawn and doorway, the props moved (from and to), blocking hits after (0), no_room issues after (0). Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.audit-jump-gaps",
+   "title": "Audit jump gaps and ledges against the player's reach",
+   "summary": "Measure the gap and height between each pair of selected platforms and flag any the player cannot clear, without changing anything.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_spatial_query"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "jumps",
+    "gaps",
+    "platforms",
+    "audit",
+    "measure",
+    "traversal",
+    "metrics"
+   ],
+   "context": {
+    "selection": "actors",
+    "min": 2
+   },
+   "placeholders": [
+    {
+     "name": "tolerance",
+     "label": "Safety margin (cm)",
+     "default": "10"
+    }
+   ],
+   "prompt": "Check whether the player can make every jump between these platforms, in the order listed, without changing anything:\n{{selected_actors}}\n1. hyper_level_design_inspect: SafeJumpGap, MaxJumpGap, JumpHeight, MaxStepHeight and MaxWalkableSlopeDegrees. If it is not available, say the level_design pack is off and stop.\n2. hyper_spatial_query: one measure query per consecutive pair (ActorA and ActorB by label) for Gap, Horizontal and Vertical; and a ground query 50 cm above each platform's top centre for SlopeDegrees. If the spatial tools are missing, use the piece sizes and locations from hyper_level_design_inspect and say so.\n3. Judge each pair: a Gap above SafeJumpGap minus {{tolerance}} cm is WARN, above MaxJumpGap is FAIL; a climb above JumpHeight is FAIL, and one above MaxStepHeight needs a jump; a platform steeper than MaxWalkableSlopeDegrees is FAIL.\nEnd with a table, one row per pair: Gap, Vertical, verdict (PASS, WARN or FAIL) and the fix in cm (move closer by X, lower by Y)."
+  },
+  {
+   "id": "level-blockout.render-cost-report",
+   "title": "Report what the open level costs to render",
+   "summary": "Draw calls, triangles, shadow casters, lights, translucency and the heaviest actors and meshes, checked against your budgets.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "hyperai-memory"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_scene_cost_report"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "performance",
+    "draw calls",
+    "triangles",
+    "shadows",
+    "budget",
+    "optimization",
+    "nanite"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "draw_call_budget",
+     "label": "Draw-call budget",
+     "default": "2500"
+    },
+    {
+     "name": "triangle_budget",
+     "label": "Non-Nanite triangle budget",
+     "default": "8000000"
+    },
+    {
+     "name": "top_n",
+     "label": "Heaviest items listed",
+     "default": "15"
+    }
+   ],
+   "prompt": "Tell me what {{level}} costs to render and what to fix first. Change nothing.\n1. hyper_memory_recall with 'render budget draw calls triangles' for budgets the project already set; they override the ones below.\n2. hyper_scene_cost_report with Scope level and TopN {{top_n}}. If it is not available, say the level_design pack lacks it and stop. Note bTruncated and the World Partition loaded share: the figures cover loaded actors only.\n3. Compare EstimatedDrawCalls with {{draw_call_budget}} and TrianglesNonNanite with {{triangle_budget}}; report ShadowCastingPrimitives, movable and stationary lights casting dynamic shadows (Lights.ShadowCastingDynamic), TranslucentPrimitives, FoliageInstances and PCGInstances. Put MeasuredLastFrameDrawCalls beside the estimate, as the last frame some viewport drew.\n4. Turn each Findings code (non_nanite_heavy, non_nanite_instances, many_shadow_lights, small_shadow_casters, many_sections, translucent_on_nanite, unloaded_actors) into one concrete fix naming the actor or mesh.\nEnd with a PASS/FAIL table of each budget line with its value, then the heaviest actors and meshes (name, triangles, instances, draw calls), then the fixes ranked by saving."
+  },
+  {
+   "id": "level-blockout.cut-small-shadow-casters",
+   "title": "Cut shadow cost from small props in an area",
+   "summary": "Find small shadow casters with the cost report, switch their shadows off in one lighting plan, and prove the drop with numbers and captures.",
+   "packs": [
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_scene_cost_report",
+    "hyper_spatial_query",
+    "hyper_lighting_inspect",
+    "hyper_capture_view",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "set_actor_shadow"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "performance",
+    "shadows",
+    "optimization",
+    "props",
+    "budget",
+    "virtual shadow maps"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "box_min",
+     "label": "Area minimum corner (cm)",
+     "default": "-5000,-5000,-500"
+    },
+    {
+     "name": "box_max",
+     "label": "Area maximum corner (cm)",
+     "default": "5000,5000,3000"
+    },
+    {
+     "name": "radius_cm",
+     "label": "Small caster radius (cm)",
+     "default": "20"
+    }
+   ],
+   "prompt": "Reduce the shadow cost of small props in {{level}} without changing how the scene reads.\n1. hyper_scene_cost_report with Scope box, BoxMin {{box_min}}, BoxMax {{box_max}} and TopN 30. If it is not available, say the level_design pack lacks it and stop. Record EstimatedShadowDrawCalls, ShadowCastingPrimitives and any small_shadow_casters finding. Then hyper_spatial_query nearest queries over the box (ClassFilter StaticMeshActor, Radius 5000, MaxResults 32 each) for every prop's Size.\n2. hyper_lighting_inspect for the Revision. If the lighting tools are missing, say the lighting_lookdev pack is off and stop. Capture a before image with hyper_capture_view (Source transform, 3000 cm back from and 2000 cm above the box centre, pitched down at it, Label shadows-before).\n3. hyper_lighting_apply_plan with bDryRun false, a fresh OperationId and ExpectedRevision, at most 32 ops a plan (inspect again between plans): set_actor_shadow with Value false on each prop whose largest Size is under twice {{radius_cm}} cm (pebbles, cups, debris). Never touch characters or anything taller than 50 cm. If it awaits approval, hyper_operation_wait with bWaitThroughApproval true. List every actor you change.\n4. hyper_scene_cost_report again with the same box, and an after image from the same transform (Label shadows-after).\nEnd with a PASS/FAIL table: EstimatedShadowDrawCalls before and after (lower), ShadowCastingPrimitives before and after, small_shadow_casters gone or never raised, actors changed. Show both captures on their own lines. Leave the level unsaved; one Ctrl+Z per plan restores the shadows."
+  },
+  {
+   "id": "level-blockout.boss-arena-two-phase",
+   "title": "Block out a boss arena with a raised second-phase ring",
+   "summary": "An octagonal arena with pillars for cover, walkable ramps up to a ring for phase two, checked, played by a bot and captured at eye height.",
+   "packs": [
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-playtest"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_design_validate",
+    "hyper_verify_run",
+    "hyper_capture_view"
+   ],
+   "ops": [
+    "add_block",
+    "add_ramp",
+    "add_marker"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "boss",
+    "arena",
+    "fantasy",
+    "action",
+    "ramps",
+    "phases",
+    "combat"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "arena_width",
+     "label": "Arena width (cm)",
+     "default": "4000"
+    },
+    {
+     "name": "ring_height",
+     "label": "Ring height (cm)",
+     "default": "350"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Boss"
+    }
+   ],
+   "prompt": "Block out a fantasy boss arena in {{level}}: an octagon about {{arena_width}} cm across, a ground floor for phase one and a ring walkway {{ring_height}} cm up for phase two.\n1. hyper_level_design_inspect: MaxWalkableSlopeDegrees, HighCoverMin, EyeHeight and the Revision. If it is not available, say the level_design pack is off and stop. The bot starts at the PlayerStart (SceneTools.find_actors): put the start floor under it.\n2. hyper_level_blockout_apply_plan: a dry run, then bDryRun false with a fresh OperationId and the current Revision (two plans if over 32 ops, inspecting between them). If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true. Ops: add_block floor; 8 walls 600 cm high round the octagon with a 300 cm entrance gap; 4 pillar blocks 200 x 200 cm, at least HighCoverMin high; 8 platform blocks 400 cm deep as the ring; two add_ramp ramps opposite each other from floor to ring; add_marker start at the entrance, spawn named {{prefix}}_Spawn at the centre for the boss, objective named {{prefix}}_Ring on the ring.\n3. hyper_level_design_validate: start to ring reachable, no steep_floor, no no_room.\n4. hyper_verify_run: one case (TimeoutSeconds 55), a Play step with Goal Reach, Target LD_{{prefix}}_Ring, TimeoutSeconds 50, then Capture. Unless the lighting_lookdev pack is off, hyper_capture_view with Source transform at the start marker raised by EyeHeight, looking at the centre, Label boss-arena.\nEnd with a PASS/FAIL table: ramp slopes (Notes) under the limit, ring reachable, Reach passed, pillars at least HighCoverMin, Map Check errors 0. Show both pictures on their own lines. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.station-hub-spokes",
+   "title": "Block out a sci-fi station hub with spokes and a mezzanine",
+   "summary": "A central hub, four spoke corridors to side rooms, a mezzanine on walkable ramps and pickups in each room, all reachable on the navmesh.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_design_validate"
+   ],
+   "ops": [
+    "add_block",
+    "add_ramp",
+    "add_marker"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "sci-fi",
+    "space station",
+    "hub",
+    "spokes",
+    "ramps",
+    "mezzanine",
+    "pickups"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "hub_size",
+     "label": "Hub size (cm)",
+     "default": "2400 x 2400"
+    },
+    {
+     "name": "spoke_length",
+     "label": "Spoke length (cm)",
+     "default": "1800"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Hub"
+    }
+   ],
+   "prompt": "Block out a sci-fi space-station hub in {{level}}: a central hub of {{hub_size}} cm, four spoke corridors {{spoke_length}} cm long (north, east, south, west) each ending in a 1000 x 800 cm side room, and a mezzanine inside the hub.\n1. hyper_level_design_inspect: MinCorridorWidth, MinCeilingHeight, MaxWalkableSlopeDegrees and the Revision. If it is not available, say the level_design pack is off and stop.\n2. Up to two hyper_level_blockout_apply_plan calls (bDryRun false, a fresh OperationId and the current Revision each, inspecting between them): add_block floor and walls 600 cm high for the hub; spoke floors 300 cm wide with walls 400 cm high and doorway gaps as wide as the spoke; the side rooms; a 300 cm deep mezzanine of platform blocks 400 cm up along the hub's north and south walls, reached by two add_ramp ramps; add_marker start in the south room, pickup named {{prefix}}_Cell_N, {{prefix}}_Cell_E and {{prefix}}_Cell_W in the other rooms, goal on the north mezzanine. Names {{prefix}}_<part>. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_level_design_validate with MaxSightline 3000.\nEnd with a PASS/FAIL table: every pickup and the goal reachable from the start, NarrowestWidth on every route at least MinCorridorWidth, ramp slopes under MaxWalkableSlopeDegrees, no low_ceiling, Map Check errors 0. Show the preview on its own line. Leave the level unsaved; save with bSave only if I ask."
+  },
+  {
+   "id": "level-blockout.camp-on-landscape",
+   "title": "Block out a camp on uneven landscape ground",
+   "summary": "Flatten a pad on the selected landscape, set blockout pieces at the real ground height, and prove nothing floats or sinks.",
+   "packs": [
+    "level_design",
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_level_design_inspect",
+    "hyper_spatial_query",
+    "hyper_landscape_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_blockout_apply_plan",
+    "hyper_level_design_validate"
+   ],
+   "ops": [
+    "landscape.sculpt",
+    "add_block",
+    "add_marker"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "camp",
+    "landscape",
+    "terrain",
+    "flatten",
+    "ground",
+    "outdoor",
+    "bandits"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "camp_center",
+     "label": "Camp centre (cm)",
+     "default": "0,0,0"
+    },
+    {
+     "name": "pad_radius",
+     "label": "Pad radius (m)",
+     "default": "25"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Camp"
+    }
+   ],
+   "prompt": "Block out a bandit camp on {{selected_actor}} in {{level}}, centred at {{camp_center}} (cm), with every piece standing on the real ground.\n1. hyper_landscape_inspect for the landscape's label and heights; hyper_level_design_inspect for the metrics and the Revision. If the level_design pack is off, say so and stop.\n2. hyper_spatial_query: ground queries at the centre and 8 points on a {{pad_radius}} m circle around it; report GroundZ and SlopeDegrees. If the spatial tools are missing, use the heights from hyper_landscape_inspect and say so.\n3. One hyper_landscape_apply_plan (bDryRun false, fresh OperationId): landscape.sculpt Mode flatten at the centre, Radius {{pad_radius}}, Falloff 10, Height the median ground height in meters. If the status is awaiting_user_approval, hyper_operation_wait with bWaitThroughApproval true.\n4. Query the ground again and use the new GroundZ as every piece's Z.\n5. One hyper_level_blockout_apply_plan (bDryRun false, fresh OperationId, ExpectedRevision): add_block three tents 400 x 300 x 250 cm, a palisade of wall blocks with a 300 cm gate, two cover_low crates, add_marker start outside the gate and goal at the tents. Names {{prefix}}_<part>. Wait through approval the same way.\n6. hyper_level_design_validate.\nEnd with a PASS/FAIL table: pad slope under 5 degrees, each piece's base within 5 cm of the ground below it (query each), no no_floor issues, start to goal reachable, Map Check errors 0. Show the preview on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.bot-explore-and-fix",
+   "title": "Let a bot explore the blockout and fix where it sticks",
+   "summary": "Explore and Reach every goal with the playtest bot, fix stuck spots and falls with ramps, stairs or moves, then play again to prove it.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-playtest"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_verify_calibrate",
+    "hyper_verify_run",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_design_validate"
+   ],
+   "ops": [
+    "add_ramp",
+    "add_stairs",
+    "move",
+    "add_block"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "playtest",
+    "bot",
+    "explore",
+    "stuck",
+    "falls",
+    "iteration",
+    "qa"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "explore_seconds",
+     "label": "Explore time (s)",
+     "default": "45",
+     "hint": "At most 50: one verification case runs at most 55 seconds."
+    },
+    {
+     "name": "rounds",
+     "label": "Fix rounds",
+     "default": "2"
+    }
+   ],
+   "prompt": "Playtest the blockout in {{level}} with HyperAI's bot and fix every place a player gets stuck or falls.\n1. hyper_level_design_inspect for the target markers (goal, objective, pickup, checkpoint), the metrics and the Revision. If it is not available, say the level_design pack is off and stop.\n2. hyper_verify_calibrate (bMeasure false) for the case limit. Then hyper_verify_run, every case with TimeoutSeconds 55: one whose Play step has Goal Explore and Seconds {{explore_seconds}}, and one per target marker whose Play step has Goal Reach, Target its LD_<name> label and TimeoutSeconds 50, each ending in Capture; split into batches over the limit.\n3. From each case's evidence, list where the bot got stuck, where it fell, and which targets it failed to reach.\n4. One hyper_level_blockout_apply_plan per round (bDryRun false, fresh OperationId, the current Revision). If it awaits approval, hyper_operation_wait with bWaitThroughApproval true. At a ledge it could not climb, add_ramp or add_stairs within the player's limits; at a gap wider than SafeJumpGap, move the far piece closer; where it fell, add_block a wall as a rail. Change only pieces near the reported spots.\n5. hyper_level_design_validate, then hyper_verify_run the same cases again. At most {{rounds}} rounds.\nEnd with a PASS/FAIL table: each case's result before and after, stuck spots and falls before and after, pieces added or moved. Show the Explore maps and captures on their own lines. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.western-main-street",
+   "title": "Block out a western main street for a showdown",
+   "summary": "A 40 m street between false-front buildings with doorways, porch steps, crates for low cover, spawns at both ends and a saloon objective.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_design_validate"
+   ],
+   "ops": [
+    "add_block",
+    "add_stairs",
+    "add_marker"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "western",
+    "town",
+    "street",
+    "shooter",
+    "cover",
+    "showdown",
+    "historical"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "street_length",
+     "label": "Street length (cm)",
+     "default": "4000"
+    },
+    {
+     "name": "street_width",
+     "label": "Street width (cm)",
+     "default": "1400"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Town"
+    }
+   ],
+   "prompt": "Block out a western town's main street in {{level}} for a gunfight: {{street_length}} cm long and {{street_width}} cm wide along X, false-front buildings on both sides.\n1. hyper_level_design_inspect: MinDoorWidth, LowCoverMin/Max, HighCoverMin, MaxStepHeight, EyeHeight and the Revision. If it is not available, say the level_design pack is off and stop.\n2. Up to two hyper_level_blockout_apply_plan calls (bDryRun false, a fresh OperationId and the current Revision each, inspecting between them): add_block the street floor; four buildings a side as wall blocks 800 cm wide and 600 cm high, each with a doorway gap at least MinDoorWidth; a 60 cm porch platform along each row of fronts with add_stairs up to it; the saloon in the middle of the north side; eight cover_low crates and troughs inside LowCoverMin-LowCoverMax and two cover_high wagons; add_marker spawn, three at each end; add_marker start at the west end; add_marker objective named {{prefix}}_Saloon inside the saloon door. Names {{prefix}}_<part>. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_level_design_validate with MaxSightline 3000. Sightlines run eye to eye from spawns to the start and the objective, so only blocks taller than EyeHeight (the wagons) cut them; place those until none is open.\nEnd with a PASS/FAIL table: porch step height under MaxStepHeight, doorways at least MinDoorWidth, no cover_height issues, no long_sightline from a spawn, start to objective reachable, Map Check errors 0. Show the preview on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.office-floor-cqb",
+   "title": "Block out an office floor for close-quarters combat",
+   "summary": "A corridor ring 300 cm wide, meeting rooms with doors, cubicle rows as low cover and ceilings over everything, checked against the player's metrics.",
+   "packs": [
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_blockout_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_design_validate"
+   ],
+   "ops": [
+    "add_block",
+    "add_marker"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "office",
+    "modern",
+    "cqb",
+    "interior",
+    "tactical shooter",
+    "cubicles",
+    "corridors"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "floor_size",
+     "label": "Floor size (cm)",
+     "default": "4000 x 3000"
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Office"
+    }
+   ],
+   "prompt": "Block out one floor of a modern office in {{level}} for close-quarters combat: {{floor_size}} cm, a corridor ring around a central core, meeting rooms on the outside and an open-plan area of cubicles.\n1. hyper_level_design_inspect: MinDoorWidth, MinCorridorWidth, MinCeilingHeight, LowCoverMin/Max and the Revision. If it is not available, say the level_design pack is off and stop.\n2. Up to two hyper_level_blockout_apply_plan calls (bDryRun false, a fresh OperationId and the current Revision each, inspecting between them): add_block floor; outer walls 300 cm high; a 1200 x 800 cm core of walls; a corridor ring 300 cm wide; four meeting rooms with doorway gaps at least MinDoorWidth; three cubicle rows of cover_low blocks inside LowCoverMin-LowCoverMax with aisles MinCorridorWidth wide; ceiling slabs (Role platform) with their underside 20 cm above MinCeilingHeight; add_marker spawn at the north-west and south-east stairwells, add_marker start beside one, objective named {{prefix}}_ServerRoom in the meeting room farthest from it. Names {{prefix}}_<part>. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_level_design_validate with MaxSightline 2500.\nEnd with a PASS/FAIL table: corridor ring 300 cm wide, doorways at least MinDoorWidth, no too_narrow issue (narrow warnings only at meeting-room doors), no low_ceiling, no cover_height issues, objective reachable, Map Check errors 0. Show the preview on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.dress-with-modeled-props",
+   "title": "Swap grey-box cover for modeled rocks and pillars",
+   "summary": "Model rocks, stones and pillars sized to the blockout's cover and pillar blocks, place them where the blocks stood, and recheck cover and routes.",
+   "packs": [
+    "level_design",
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-modeling"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_model_validate",
+    "hyper_spatial_apply_plan",
+    "hyper_operation_wait",
+    "hyper_level_blockout_apply_plan",
+    "hyper_spatial_query",
+    "hyper_level_design_validate"
+   ],
+   "ops": [
+    "recipe",
+    "write_asset",
+    "place",
+    "delete"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "blockout",
+    "art pass",
+    "modeling",
+    "cover",
+    "placeholder",
+    "spatial",
+    "fantasy"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "theme",
+     "label": "Theme",
+     "default": "weathered sandstone"
+    },
+    {
+     "name": "tint",
+     "label": "Stone colour",
+     "default": "#b09a78",
+     "hint": "A hex colour painted into the models' vertex colour."
+    },
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Art"
+    }
+   ],
+   "prompt": "Replace the grey-box cover and pillars in {{level}} with modeled {{theme}} placeholders of the same size, keeping every gameplay measurement.\n1. hyper_level_design_inspect: the Pieces with Role cover_low, cover_high or pillar (Name, Location, Size, Yaw), LowCoverMin/Max, HighCoverMin and the Revision. hyper_model_inspect Folder {{content_folder}}/Models. If the level_design or mesh_modeling tools are missing, say so and stop.\n2. hyper_model_apply_plan, at most 8 assets a plan: recipe ops (Params Shape, Size cm, Seed, Tint {{tint}}) rock for cover_low, standing_stone for cover_high, pillar for pillars, one per distinct block size; write_asset each to {{content_folder}}/Models/SM_{{prefix}}_<Name>, Collision=convex. Dry-run first, read each mesh's Size and set the recipe's Scale until it matches its block within 10 cm, then bDryRun false with a fresh OperationId. hyper_model_validate them, Policy placeholder.\n3. hyper_spatial_apply_plan (at most 32 ops a plan), dry run then bDryRun false with a fresh OperationId: one place op per block, Mesh its model, Label {{prefix}}_<block name>, the block's Location and yaw, bDropToGround true with IgnoreActors LD_<block name>, so it lands on the floor and not on the block. If it awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n4. hyper_level_blockout_apply_plan (dry run, then bDryRun false with a fresh OperationId and the new Revision): delete each replaced block.\n5. hyper_spatial_query: a nearest query at each new actor (LabelFilter its label, MaxResults 1) for its Size; then hyper_level_design_validate.\nEnd with a PASS/FAIL table: assets with triangles, model errors 0, one actor per block, heights within LowCoverMin-LowCoverMax or at least HighCoverMin, exposed_cover 0, every route reachable. Show the preview on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "level-blockout.eye-level-review",
+   "title": "Review a blockout from the player's eye height",
+   "summary": "Capture the view from each start at eye height toward its goal plus a top-down plan, and list what reads poorly, without changing anything.",
+   "packs": [
+    "level_design",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_level_design_inspect",
+    "hyper_level_design_validate",
+    "hyper_capture_view"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "review",
+    "readability",
+    "captures",
+    "eye height",
+    "critique",
+    "landmarks"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "fov",
+     "label": "Field of view (degrees)",
+     "default": "90"
+    }
+   ],
+   "prompt": "Review the blockout in {{level}} the way a player first sees it. Change nothing.\n1. hyper_level_design_inspect: EyeHeight and the markers (start, goal, objective) with their locations. If it is not available, say the level_design pack is off and stop.\n2. hyper_level_design_validate with bCapturePreview true, for the top-down image, routes and sightlines.\n3. For each start marker, hyper_capture_view with Source transform, Location at the marker raised by EyeHeight, Rotation yawed toward its nearest goal or objective, FovDegrees {{fov}}, Width 1280, Height 720, Label blockout-review. Add one capture from 3000 cm above the level centre looking straight down (pitch -90). If the lighting_lookdev pack is off, use only the preview and say so.\n4. Judge each view against the level designer's bar: does the way forward read at a glance, is the goal or a landmark visible, are paths wider than dead ends, does anything float.\nEnd with a PASS/FAIL table, one row per start: goal visible, route reachable, longest sightline, notes. Show every capture and the preview on their own lines, then the three changes that would help most."
+  }
+ ]
+}

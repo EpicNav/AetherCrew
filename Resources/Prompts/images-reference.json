@@ -1,0 +1,368 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "images-reference",
+ "presets": [
+  {
+   "id": "images-reference.scene-reference-from-template",
+   "title": "Generate a lighting reference from the scene template",
+   "summary": "Fill the scene_reference template with time of day, key light, palette and mood, check the prompt for free, then draw it.",
+   "packs": [
+    "image_generation"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_image_inspect",
+    "hyper_image_generate",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "reference",
+    "concept",
+    "lighting",
+    "mood",
+    "template",
+    "nano banana",
+    "cyberpunk"
+   ],
+   "placeholders": [
+    {
+     "name": "subject",
+     "label": "Place",
+     "default": "a rain-soaked neon market street at night"
+    },
+    {
+     "name": "time_of_day",
+     "label": "Time of day",
+     "default": "an hour after sunset"
+    },
+    {
+     "name": "weather",
+     "label": "Weather",
+     "default": "light rain, puddles on the ground"
+    },
+    {
+     "name": "key_light",
+     "label": "Key light (direction and source)",
+     "default": "low from the left, from pink and cyan shop signs",
+     "hint": "Say where the main light comes from and what casts it"
+    },
+    {
+     "name": "palette",
+     "label": "Palette",
+     "default": "magenta, cyan and wet asphalt black"
+    },
+    {
+     "name": "mood",
+     "label": "Mood",
+     "default": "busy, electric"
+    },
+    {
+     "name": "count",
+     "label": "Number of images",
+     "default": "2"
+    },
+    {
+     "name": "batch",
+     "label": "Batch name",
+     "default": "neon_market"
+    }
+   ],
+   "prompt": "Generate {{count}} lighting reference images of {{subject}} that the level can later be matched against.\n1. hyper_image_inspect: list the ready models with their cost and whether bHasApiKey is true, the session spend and its cap, and the slots of the `scene_reference` template. If the image_generation tools are missing, say the pack is off and stop. Pick nano_banana_2 when its key is set, else codex_image_gen, and pass it as ModelId below.\n2. hyper_image_generate with bDryRun true, TemplateId `scene_reference` and Slots: subject \"{{subject}}\", time_of_day \"{{time_of_day}}\", weather \"{{weather}}\", key_light \"{{key_light}}\", contrast \"high\", palette \"{{palette}}\", mood \"{{mood}}\", lens \"35mm\". Use Count {{count}}, BatchName `ref_{{batch}}`, Width 1280 and Height 720. Read ComposedPrompt and UnfilledSlots (no slot may stay unfilled) and report EstimatedCost.\n3. Send the same request with bDryRun false, a fresh OperationId and ExpectedPlanHash from the dry run. It waits for my approval: call hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_image_inspect with that BatchId until its State is complete: list each file with its seed and size, and open each picture to check the key light comes from the side asked.\n5. Report a PASS/FAIL table: {{count}} images written, 16:9 shape, a sidecar JSON beside each, cost within the cap, key light as asked. Show each image on its own line."
+  },
+  {
+   "id": "images-reference.relight-current-view",
+   "title": "Relight the current view as a reference image",
+   "summary": "Capture the match camera, have an image model relight that exact frame for a new mood, and score the starting gap.",
+   "packs": [
+    "image_generation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "image-match"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_capture_view",
+    "hyper_image_inspect",
+    "hyper_image_generate",
+    "hyper_operation_wait",
+    "hyper_image_compare"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "relight",
+    "reference",
+    "match",
+    "time of day",
+    "lighting",
+    "capture",
+    "look-dev"
+   ],
+   "placeholders": [
+    {
+     "name": "lighting",
+     "label": "New lighting",
+     "default": "late dusk: warm lamps glowing inside, cool blue moonlight through the windows"
+    },
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera"
+    },
+    {
+     "name": "batch",
+     "label": "Batch name",
+     "default": "dusk"
+    }
+   ],
+   "prompt": "Make a reference for {{level}} from its own view, relit as: {{lighting}}. Change nothing in the level.\n1. hyper_capture_view with Source `camera`, CameraActorLabel `{{camera}}`, Width 1024, Height 576 and Label `relight_before`. If there is no such camera, say so and ask me to place one; do not guess a view. If a tool is missing, say which pack is off and stop.\n2. hyper_image_inspect: pick a ready model whose bTakesInputImage is true (a Nano Banana model, or codex_image_gen if you cannot draw).\n3. hyper_image_generate with bDryRun true, InputImagePath set to the captured frame, BatchName `relight_{{batch}}`, and the Prompt: \"Relight this picture of a game level: {{lighting}}. Keep the camera, the framing and every object exactly where it is, with the same shapes and sizes. Change only the light, the shadows, the sky, the fog and the colour grade.\" Read EstimatedCost, then send it with bDryRun false, a fresh OperationId and ExpectedPlanHash, and call hyper_operation_wait with bWaitThroughApproval true; then hyper_image_inspect that BatchId until its State is complete.\n4. hyper_image_compare with ReferenceImagePath set to the new image, CandidateImagePath set to the capture, Mode `look`, SessionId `relight_{{batch}}` and Note \"starting point\".\n5. Report a PASS/FAIL table: capture written, reference written at the capture's shape, the starting Score, and the three largest differences (exposure, colour temperature, worst regions). Show the capture and the reference each on its own line, and name the match toward it as the next step."
+  },
+  {
+   "id": "images-reference.match-lighting-to-reference",
+   "title": "Match the level's lighting to a reference image",
+   "summary": "Lock exposure, then change one lighting setting at a time and re-score against the reference until it reaches the target.",
+   "packs": [
+    "lighting_lookdev",
+    "image_generation"
+   ],
+   "skills": [
+    "image-match"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_image_inspect",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view",
+    "hyper_image_compare",
+    "hyper_lighting_compare"
+   ],
+   "ops": [
+    "lock_exposure",
+    "set_sun",
+    "set_sky_light",
+    "set_fog",
+    "set_post_process",
+    "set_sky_system"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "match",
+    "reference",
+    "lighting",
+    "look-dev",
+    "score",
+    "iteration",
+    "mood"
+   ],
+   "placeholders": [
+    {
+     "name": "reference",
+     "label": "Reference image",
+     "default": "Content/References/Generated/ref_neon_market/ref_neon_market_01.png",
+     "hint": "PNG or JPEG path relative to the project folder"
+    },
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera"
+    },
+    {
+     "name": "target",
+     "label": "Target score",
+     "default": "75"
+    },
+    {
+     "name": "iterations",
+     "label": "Most changes",
+     "default": "8"
+    }
+   ],
+   "prompt": "Match the lighting of {{level}} to `{{reference}}`, seen from camera `{{camera}}`, until hyper_image_compare scores at least {{target}} in look mode or {{iterations}} changes stop improving it. Change lighting only, never geometry, and do not save.\n1. Open the reference and say in one sentence what makes its look. Call hyper_image_inspect to read its sidecar prompt if it was generated. hyper_lighting_inspect: note the sun, sky, fog, post process, any sky system and the Revision. If the lighting_lookdev tools are missing, say so and stop.\n2. hyper_lighting_apply_plan with `lock_exposure` (bDryRun false, fresh OperationId, ExpectedRevision); call hyper_operation_wait if it waits.\n3. hyper_capture_view with Source `camera`, the camera above, at the reference's aspect ratio. Then hyper_image_compare with that frame, SessionId `match_{{camera}}`, Mode `look`, TargetScore {{target}} and Note \"starting point\", and hyper_lighting_compare for the exposure, colour temperature and contrast deltas.\n4. Each iteration: one hyper_lighting_apply_plan, with ExpectedRevision from a fresh hyper_lighting_inspect, making a single change aimed at the strongest difference (`set_sun` pitch, yaw, temperature or intensity; `set_sky_light`; `set_fog`; `set_post_process`; with Ultra Dynamic Sky present, `set_sky_system` instead of the light kinds) and a fresh OperationId; then capture and compare again with a Note naming the change and its values. If a change lowers the score, put the old value back the same way.\n5. Report a table of iterations: change, score, and PASS/FAIL against {{target}}. Show the reference, the first capture and the last capture, each on its own line."
+  },
+  {
+   "id": "images-reference.reference-gap-report",
+   "title": "Score how far the level is from a reference image",
+   "summary": "Capture a camera view and compare it with a reference, reporting the score, the worst regions and the top fixes; no edits.",
+   "packs": [
+    "lighting_lookdev",
+    "image_generation"
+   ],
+   "skills": [
+    "image-match"
+   ],
+   "tools": [
+    "hyper_image_inspect",
+    "hyper_capture_view",
+    "hyper_image_compare",
+    "hyper_lighting_compare"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "reference",
+    "compare",
+    "score",
+    "gap",
+    "report",
+    "read-only",
+    "look-dev"
+   ],
+   "placeholders": [
+    {
+     "name": "reference",
+     "label": "Reference image",
+     "default": "newest",
+     "hint": "Path relative to the project folder, or newest for the latest generated reference"
+    },
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera"
+    },
+    {
+     "name": "mode",
+     "label": "Compare mode",
+     "default": "look",
+     "hint": "look for concept art or photos; aligned when the reference frames the same view"
+    },
+    {
+     "name": "target",
+     "label": "Target score",
+     "default": "75"
+    }
+   ],
+   "prompt": "Measure how far {{level}} is from the reference `{{reference}}`, seen from camera `{{camera}}`. Read-only: change nothing.\n1. If the reference is `newest`, call hyper_image_inspect and use the newest generated image; otherwise check the file exists. Open it and describe its look in one sentence: time of day, key light, palette, contrast. If a tool is missing, say which pack is off and stop.\n2. hyper_capture_view with Source `camera`, CameraActorLabel `{{camera}}`, the reference's aspect ratio at 1280 wide, and Label `gap_report`. If the camera does not exist, use Source `viewport` and say so.\n3. hyper_image_compare with that frame as CandidateImagePath, Mode `{{mode}}`, Grid 4, TargetScore {{target}}, SessionId `gap_report` and Note \"baseline\".\n4. hyper_lighting_compare with the same two images, for the exposure, colour temperature, contrast and saturation deltas and whether exposure was locked.\n5. Report the overall Score with PASS/FAIL against {{target}}; a table of the five sub-scores (structure, palette, tone, layout, detail); the three worst grid regions with their Difference text; and the three changes most likely to close the gap, strongest first, with values such as \"sun temperature 6500 K to 4200 K\". Show the reference and the capture each on its own line."
+  },
+  {
+   "id": "images-reference.art-direction-variants",
+   "title": "Explore four art-direction moods on one composition",
+   "summary": "Draw one base image of a subject, then relight that same picture in four moods, so the directions compare like for like.",
+   "packs": [
+    "image_generation"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_image_inspect",
+    "hyper_image_generate",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "art direction",
+    "concept",
+    "mood",
+    "variants",
+    "relight",
+    "sci-fi",
+    "desert"
+   ],
+   "placeholders": [
+    {
+     "name": "subject",
+     "label": "Subject",
+     "default": "a desert mining outpost with rusted cranes and solar panels"
+    },
+    {
+     "name": "moods",
+     "label": "Four moods, separated by semicolons",
+     "default": "harsh noon sun; golden hour; dust storm; clear night with work lights"
+    },
+    {
+     "name": "batch",
+     "label": "Batch name",
+     "default": "outpost"
+    }
+   ],
+   "prompt": "Explore four art directions for {{subject}}: {{moods}}. Keep one composition so only the light and mood change.\n1. hyper_image_inspect: pick a ready model whose bTakesInputImage is true (a Nano Banana model, or codex_image_gen if you cannot draw), and note its cost and the session spend cap. If the image_generation tools are missing, say the pack is off and stop. Stop if five images would pass the cap.\n2. Base image: hyper_image_generate with bDryRun true, ModelId set to that model, TemplateId `scene_reference`, Slots subject \"{{subject}}\", time_of_day \"overcast midday\", key_light \"soft, from above\", contrast \"low\", lens \"35mm\", Width 1280, Height 720, BatchName `dir_{{batch}}_base` and Negative \"text, watermark, people in the foreground\". Check ComposedPrompt; unfilled slots simply drop out. Send it with bDryRun false, a fresh OperationId and ExpectedPlanHash, call hyper_operation_wait with bWaitThroughApproval true, then hyper_image_inspect that BatchId until its State is complete.\n3. For each mood, hyper_image_generate with InputImagePath set to the base image, BatchName `dir_{{batch}}_<n>` (n from 1 to 4), and the Prompt \"Relight this picture: <mood>. Keep the camera, the framing and every object exactly where it is. Change only the light, shadows, sky, weather and colour grade.\" Dry-run, then send and wait the same way.\n4. Report a table: mood, file, model, cost, and PASS/FAIL for \"the light reads as the mood asked\" and \"the layout matches the base\". Show the base and each variant on its own line with its mood as the caption, then recommend one direction in a sentence and say why."
+  },
+  {
+   "id": "images-reference.rerender-reference-hq",
+   "title": "Re-render an earlier reference at higher quality",
+   "summary": "Read an earlier reference's prompt from its sidecar, render it again on a better model at 2K, and check it kept the look.",
+   "packs": [
+    "image_generation",
+    "lighting_lookdev"
+   ],
+   "skills": [],
+   "tools": [
+    "hyper_image_inspect",
+    "hyper_image_generate",
+    "hyper_operation_wait",
+    "hyper_image_compare"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "reference",
+    "re-render",
+    "upscale",
+    "sidecar",
+    "quality",
+    "2k",
+    "nano banana pro"
+   ],
+   "placeholders": [
+    {
+     "name": "batch_id",
+     "label": "Batch to re-render",
+     "default": "ref_neon_market"
+    },
+    {
+     "name": "model",
+     "label": "Model id",
+     "default": "nano_banana_pro"
+    }
+   ],
+   "prompt": "Re-render the reference batch `{{batch_id}}` on `{{model}}` at 2K, keeping its look.\n1. hyper_image_inspect with BatchId `{{batch_id}}`: read each image's Prompt, Seed, ModelId, Width, Height and InputImage. If the batch is missing, list the five newest batches and stop. If the tools are missing, say which pack is off and stop. Check that `{{model}}` is ready, its key is set and its cost fits the spend cap.\n2. hyper_image_generate with bDryRun true, ModelId `{{model}}`, the recorded Prompt exactly (no TemplateId), InputImagePath when one was recorded, Width 2048 and a Height that keeps the original's shape, Count 1 and BatchName `{{batch_id}}_hq`. Pass the recorded Seed too: only a model whose request uses a seed repeats a picture, and the Nano Banana models do not, so expect a new take on the same prompt. Confirm ComposedPrompt equals the recorded prompt, and read EstimatedCost.\n3. Send it with bDryRun false, a fresh OperationId and ExpectedPlanHash, call hyper_operation_wait with bWaitThroughApproval true, then hyper_image_inspect the new BatchId until its State is complete.\n4. hyper_image_compare with ReferenceImagePath set to the original, CandidateImagePath set to the new image, Mode `look`, SessionId `rerender_{{batch_id}}` and TargetScore 70.\n5. Report a PASS/FAIL table: new image written, its longer side 2K (1900 px or more), same prompt, Score at least 70 (the look is kept), and the cost. Show the original and the new image each on its own line."
+  },
+  {
+   "id": "images-reference.blockout-paintover-keyframe",
+   "title": "Paint a greybox view into a finished-look keyframe",
+   "summary": "Capture a blockout from a camera and have an image model render its flat shapes as finished materials, keeping the layout.",
+   "packs": [
+    "image_generation",
+    "lighting_lookdev"
+   ],
+   "skills": [
+    "image-match"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_capture_view",
+    "hyper_image_inspect",
+    "hyper_image_generate",
+    "hyper_operation_wait",
+    "hyper_image_compare"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "blockout",
+    "greybox",
+    "paintover",
+    "keyframe",
+    "art direction",
+    "level design",
+    "concept"
+   ],
+   "placeholders": [
+    {
+     "name": "style",
+     "label": "Finished look",
+     "default": "a weathered Mediterranean harbour town: limestone walls, terracotta roofs, timber docks"
+    },
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "HyperAI_MatchCamera"
+    },
+    {
+     "name": "batch",
+     "label": "Batch name",
+     "default": "harbour"
+    }
+   ],
+   "prompt": "Turn the blockout of {{level}}, seen from `{{camera}}`, into a keyframe of how it should look when finished: {{style}}. Change nothing in the level.\n1. hyper_capture_view with Source `camera`, CameraActorLabel `{{camera}}`, Width 1280, Height 720 and Label `paintover_before`. If the camera is missing, say so and stop. If a tool is missing, say which pack is off and stop.\n2. hyper_image_inspect: pick a ready model whose bTakesInputImage is true, and note its cost.\n3. hyper_image_generate with bDryRun true, InputImagePath set to the frame, BatchName `paintover_{{batch}}`, and the Prompt: \"Render this game blockout as a finished scene: {{style}}. Keep the camera, the framing, the light direction and every shape exactly where it is, with the same sizes and openings; render each flat blockout colour as the finished material it stands for. Add no new buildings, people or text.\" Read EstimatedCost, then send it with bDryRun false, a fresh OperationId and ExpectedPlanHash, and call hyper_operation_wait with bWaitThroughApproval true; then hyper_image_inspect that BatchId until its State is complete.\n4. hyper_image_compare with the keyframe as ReferenceImagePath, the capture as CandidateImagePath, Mode `aligned` and SessionId `paintover_{{batch}}`. A StructureScore of 60 or more shows the layout was kept.\n5. Report a PASS/FAIL table: capture written, keyframe written at 16:9, StructureScore at least 60, and the cost. Show the capture and the keyframe each on its own line, then list the five materials the level needs to reach the keyframe."
+  }
+ ]
+}

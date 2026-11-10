@@ -12,6 +12,7 @@
 #include "Misc/AssetRegistryInterface.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioMaterialsToolset.generated.h"
 
 class UMaterial;
@@ -388,7 +389,15 @@ struct FHyperAIMaterialNodeSpec
 {
 	GENERATED_BODY()
 
-	/** constant, scalar_parameter, vector_parameter, add, multiply, function_input, function_output. */
+	/**
+	 * Values: constant, constant2, constant3, constant4, scalar_parameter, vector_parameter,
+	 * static_switch_parameter, texture_parameter, texture_sample. Coordinates and time: texcoord, panner,
+	 * rotator, time. Math: add, subtract, multiply, divide, min, max, lerp, clamp, power, sine, cosine,
+	 * one_minus, saturate, abs, frac, floor, ceil, square_root, normalize, dot, cross, distance, append,
+	 * component_mask, desaturation. Surface: fresnel, world_position, object_position, vertex_color,
+	 * camera_vector, pixel_normal_ws. Other: function_call, custom_hlsl, function_input, function_output.
+	 * Set per-kind keys (such as time.period or panner.speed_x) through Properties.
+	 */
 	UPROPERTY() FString Kind;
 	/** Plan-local stable identifier; not a UObject name or class name. */
 	UPROPERTY() FString NodeId;
@@ -536,7 +545,91 @@ struct FHyperAIMaterialApplyPlanReport
 	UPROPERTY() TArray<FString> PreviewImagePaths;
 };
 
-/** Exactly three functions form the core Materials atomic cohort. */
+/** hyper_material_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIMaterialApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIMaterialApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIMaterialApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIMaterialApplyPlanReport Value;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIMaterialRecipeRequest
+{
+	GENERATED_BODY()
+
+	/**
+	 * layered_pbr, water, decal, landscape_layers, custom_hlsl, substrate_slab, particle_additive, particle_translucent or
+	 * material_function. Empty lists the
+	 * recipes with their settings.
+	 */
+	UPROPERTY() FString Recipe;
+	/** The new asset's package path under /Game, such as /Game/Materials/M_Rock (a material function for material_function). */
+	UPROPERTY() FString Path;
+	/** The recipe's settings by key, such as {"tiling", "4"} or {"layers", "Grass,Rock,Snow"}; the listing names each recipe's keys and defaults. */
+	UPROPERTY() TArray<FHyperAIMaterialNodeProperty> Settings;
+	/** custom_hlsl and material_function: the HLSL body, which returns the output, such as "return Tint * Amount;". */
+	UPROPERTY() FString Code;
+	/** material_function: also make this material (a package path), calling the function with a parameter for each input. */
+	UPROPERTY() FString CallerPath;
+	/** True (the default) checks the recipe and lists its nodes and parameters; code recipes also compile it off to the side. */
+	UPROPERTY() bool bDryRun = true;
+	UPROPERTY() FString OperationId;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIMaterialRecipeInfo
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString Id;
+	UPROPERTY() FString Summary;
+	/** Each setting as "key (default): what it does". */
+	UPROPERTY() TArray<FString> Settings;
+};
+
+USTRUCT(BlueprintType)
+struct FHyperAIMaterialRecipeReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY() bool bOk = false;
+	/**
+	 * listed, checked, awaiting_user_approval, queued, completed, compile_errors, substrate_disabled, invalid_request,
+	 * asset_exists, play_in_editor_running, approval_not_queued, operation_failed.
+	 */
+	UPROPERTY() FString Status;
+	UPROPERTY() FString Diagnostic;
+	UPROPERTY() FString OperationId;
+	UPROPERTY() FString Recipe;
+	/** The material or function made (an object path). */
+	UPROPERTY() FString Path;
+	/** material_function with CallerPath: the material that calls it. */
+	UPROPERTY() FString CallerPath;
+	UPROPERTY() TArray<FHyperAIMaterialRecipeInfo> Recipes;
+	/** The graph: "id kind" per node, then "from -> to.input" per wire and "from -> property" per output. */
+	UPROPERTY() TArray<FString> Graph;
+	/** Parameters an instance can set: "Name (scalar)", "Name (vector)", "Name (texture)". */
+	UPROPERTY() TArray<FString> Parameters;
+	/** Compile result: errors, instruction and sampler counts. For a function, its caller's. */
+	UPROPERTY() FHyperAIMaterialCompileStats Stats;
+	/** A sphere preview of the compiled material (a material function's caller). Open it to see the result. */
+	UPROPERTY() FString PreviewImagePath;
+	/** Substrate is on in this project (r.Substrate). */
+	UPROPERTY() bool bSubstrateEnabled = false;
+	UPROPERTY() TArray<FString> Saved;
+	UPROPERTY() TArray<FString> Notes;
+};
+
+/** The core Materials cohort: inspect, plan, validate, and recipes. */
 UCLASS()
 class HYPERAISTUDIOMATERIALS_API UHyperAIStudioMaterialsToolset final : public UToolsetDefinition
 {
@@ -559,11 +652,11 @@ public:
 	 * create_material_instance, set_instance_parameters. Prefer graph nodes; the Materials authoring mode decides
 	 * whether custom_hlsl is refused (Nodes), needs a justification for math nodes cannot express (Hybrid), or is
 	 * free (Hlsl). Dry-run first, then resubmit with bDryRun false, an operation_id and expected_plan_hash =
-	 * plan_hash. Poll hyper_operation_status, then hyper_material_validate for compile errors, instruction counts
+	 * plan_hash: the reply waits for the edit and says how it ended. Then hyper_material_validate for compile errors, instruction counts
 	 * and the preview PNG (open it to see the result). Close the material's editor tab before editing.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Materials")
-	static FHyperAIMaterialApplyPlanReport hyper_material_apply_plan(
+	static UHyperAIMaterialApplyPlanResult* hyper_material_apply_plan(
 		const FHyperAIMaterialApplyPlanRequest& Request);
 
 	/**
@@ -574,6 +667,20 @@ public:
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Materials")
 	static FHyperAIMaterialValidateReport hyper_material_validate(
 		const FHyperAIMaterialValidateRequest& Request);
+
+	/**
+	 * Makes a production material from a recipe in one approved step, with its parameters exposed, compiled, checked
+	 * for errors and previewed on a sphere: layered_pbr (base colour, normal, ORM, tiling, detail normal), water
+	 * (Single Layer Water: depth colour, panning normals, refraction), decal (deferred decal with opacity and normal
+	 * blends), landscape_layers (height-blended paint layers named as the landscape pack paints them), custom_hlsl (code
+	 * checked by compiling, in the dry run too), substrate_slab (only when Substrate is on), particle_additive and
+	 * particle_translucent (unlit Niagara particle materials: Particle Color, a soft disc or ring, texture or SubUV
+	 * flipbook, noise, Dynamic Parameter erosion, Depth Fade), material_function (a function and, with caller_path, a
+	 * material calling it). Empty recipe lists them with their settings. Dry-run
+	 * first, then resubmit with bDryRun false and an operation_id; tune the result with hyper_material_apply_plan.
+	 */
+	UFUNCTION(meta = (AICallable), Category = "HyperAI|Materials")
+	static FHyperAIMaterialRecipeReport hyper_material_recipe(const FHyperAIMaterialRecipeRequest& Request);
 };
 
 enum class EHyperAIStudioMaterialOperationKind : uint8
@@ -680,6 +787,24 @@ public:
 	virtual int32 GetBoundedByteSize() const override;
 };
 
+class FHyperAIStudioMaterialRecipePayload final : public IHyperAIStudioDomainRequestPayload
+{
+public:
+	FHyperAIMaterialRecipeRequest Request;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
+class FHyperAIStudioMaterialRecipeResultPayload final : public IHyperAIStudioDomainResultPayload
+{
+public:
+	FHyperAIMaterialRecipeReport Report;
+	virtual FString GetTypeId() const override;
+	virtual FString GetSchemaFingerprint() const override;
+	virtual int32 GetBoundedByteSize() const override;
+};
+
 class FHyperAIStudioMaterialsFreshVerifier final : public IHyperAIStudioTrustedFreshVerifier
 {
 public:
@@ -725,6 +850,12 @@ public:
 	static constexpr const TCHAR* InspectToolName = TEXT("hyper_material_inspect");
 	static constexpr const TCHAR* MutationToolName = TEXT("hyper_material_apply_plan");
 	static constexpr const TCHAR* ValidateToolName = TEXT("hyper_material_validate");
+	static constexpr const TCHAR* RecipeToolName = TEXT("hyper_material_recipe");
+	static constexpr const TCHAR* RecipeVariantId = TEXT("material.recipe.v1");
+	/** The adapter's recipe variant only checks (a dry run); making the material goes through the tool and its approval. */
+	static constexpr const TCHAR* RecipeCheckVariantId = TEXT("material.recipe.check.v1");
+	static constexpr const TCHAR* RecipePayloadTypeId = TEXT("hyperai.payload.material.recipe.v1");
+	static constexpr const TCHAR* RecipeResultTypeId = TEXT("hyperai.result.material.recipe.v1");
 	static constexpr const TCHAR* InspectVariantId = TEXT("exact_semantic_capture.v1");
 	static constexpr const TCHAR* MutationVariantId = TEXT("persisted_semantic_graph.v2");
 	static constexpr const TCHAR* ValidateVariantId = TEXT("independent_semantic_validation.v1");
@@ -777,6 +908,8 @@ public:
 	static FString ValidatePayloadSchemaFingerprint();
 	static FString InspectResultSchemaFingerprint();
 	static FString ValidateResultSchemaFingerprint();
+	static FString RecipePayloadSchemaFingerprint();
+	static FString RecipeResultSchemaFingerprint();
 	/** The current authoring mode as sealed into plans: nodes, hlsl or hybrid. */
 	static FString GetAuthoringModeName();
 	/** Content key over every target of a payload, in target order. */
@@ -865,8 +998,12 @@ public:
 		const FHyperAIStudioMaterialValueSnapshot& Snapshot,
 		FString& OutEffectFingerprint,
 		FString& OutError);
+	/** hyper_material_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIMaterialApplyPlanReport BuildFittedPlan(const FHyperAIMaterialApplyPlanRequest& Request);
 	static FHyperAIMaterialApplyPlanReport BuildPlan(
 		const FHyperAIMaterialApplyPlanRequest& Request);
+	/** hyper_material_recipe: list, check, or queue a recipe for approval (HyperAIStudioMaterialsRecipes.cpp). */
+	static FHyperAIMaterialRecipeReport Recipe(const FHyperAIMaterialRecipeRequest& Request);
 };
 
 class FHyperAIStudioMaterialsRegistration final

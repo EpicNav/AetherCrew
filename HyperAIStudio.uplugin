@@ -31,6 +31,14 @@
 			]
 		},
 		{
+			"Name": "HyperAIStudioBot",
+			"Type": "UncookedOnly",
+			"LoadingPhase": "PreDefault",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
 			"Name": "HyperAIStudioEnhancedInput",
 			"Type": "Editor",
 			"LoadingPhase": "None",
@@ -122,6 +130,32 @@
 			]
 		},
 		{
+			"Name": "HyperAIStudioAudioAuthoring",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioAudioGen",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
 			"Name": "HyperAIStudioMaterials",
 			"Type": "Editor",
 			"LoadingPhase": "None",
@@ -200,7 +234,54 @@
 			]
 		},
 		{
+			"Name": "HyperAIStudioSceneSpatial",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioMeshTerrain",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
 			"Name": "HyperAIStudioAnimBlueprint",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioBenchmark",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "HyperAIStudioImageGen",
 			"Type": "Editor",
 			"LoadingPhase": "None",
 			"PlatformAllowList": [
@@ -406,6 +487,491 @@
 				"CoreUObject",
 				"Engine"
 			]
+		},
+		{
+			"Name": "HyperAIStudioProfiling",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioScripting",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioMeshGen",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioDecibel",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioBlueprintStructure",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioRetarget",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioPoseSearch",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioLandscape",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioFoliage",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioWorldPartition",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioSequencer",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioMovieRender",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioPCGScatter",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioModeling",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioDestruction",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioEQS",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioMotionWarping",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioDataRegistry",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "HyperAIStudioChooser",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		}
+,
+		{
+			"Name": "HyperAIStudioPixelStreaming",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"Core",
+				"CoreUObject",
+				"Engine"
+			]
+		},
+		{
+			"Name": "AsyncFunctionResult",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "ToolsetCore",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "ToolsetRegistryEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "CheatsToolset",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "ConsoleToolset",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "NavMeshToolset",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "NavMeshToolsetTests",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "ConfigSettingsToolset59",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "GameFeaturesToolset59",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "GameplayTagsToolset59",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "PluginToolset59",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "LiveCodingToolset59",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "LiveCodingToolsetTests59",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "GASToolsets59",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "AIModuleToolset59",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "WidgetHelper",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "WidgetAnimationToolset",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "TextureGraphToolset",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "MVVMToolset59",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "SlateInspectorToolset59",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "SlateInspectorToolsetTests59",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "WidgetStaticAnalysisToolset",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "PerfToolset",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "RewindDebuggerToolset",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "RewindDebuggerToolsetTests",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "InputToolset",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "WorldConditionsToolset59",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "DataRegistryToolset59",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64"
+			]
 		}
 	],
 	"Plugins": [
@@ -419,6 +985,10 @@
 		},
 		{
 			"Name": "PCG",
+			"Enabled": false
+		},
+		{
+			"Name": "MeshPartition",
 			"Enabled": false
 		},
 		{
@@ -443,6 +1013,10 @@
 		},
 		{
 			"Name": "GeometryScripting",
+			"Enabled": false
+		},
+		{
+			"Name": "MeshModelingToolset",
 			"Enabled": false
 		},
 		{
@@ -498,6 +1072,18 @@
 			"Enabled": false
 		},
 		{
+			"Name": "PixelStreaming2",
+			"Enabled": false
+		},
+		{
+			"Name": "IKRig",
+			"Enabled": false
+		},
+		{
+			"Name": "PoseSearch",
+			"Enabled": false
+		},
+		{
 			"Name": "EnhancedInput",
 			"Enabled": false
 		},
@@ -512,6 +1098,10 @@
 			]
 		},
 		{
+			"Name": "FileSandbox",
+			"Enabled": true
+		},
+		{
 			"Name": "ToolsetRegistry",
 			"Enabled": true,
 			"PlatformAllowList": [
@@ -521,6 +1111,46 @@
 				"Editor"
 			]
 		},
+		{
+			"Name": "EditorScriptingUtilities",
+			"Enabled": true,
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "GameplayTagsEditor",
+			"Enabled": true,
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "PluginUtils",
+			"Enabled": true,
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"TargetAllowList": [
+				"Editor"
+			]
+		},		{
+			"Name": "EnvironmentQueryEditor",
+			"Enabled": true,
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+
 		{
 			"Name": "EditorToolset",
 			"Enabled": true,
@@ -542,6 +1172,16 @@
 			]
 		},
 		{
+			"Name": "PythonScriptPlugin",
+			"Enabled": true,
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
 			"Name": "Terminal",
 			"Enabled": true,
 			"PlatformAllowList": [
@@ -550,6 +1190,38 @@
 			"TargetAllowList": [
 				"Editor"
 			]
+		},
+		{
+			"Name": "Decibel",
+			"Enabled": false
+		},
+		{
+			"Name": "GeometryCollectionPlugin",
+			"Enabled": false
+		},
+		{
+			"Name": "Fracture",
+			"Enabled": false
+		},
+		{
+			"Name": "PlanarCut",
+			"Enabled": false
+		},
+		{
+			"Name": "MotionWarping",
+			"Enabled": false
+		},
+		{
+			"Name": "DataRegistry",
+			"Enabled": false
+		},
+		{
+			"Name": "Chooser",
+			"Enabled": false
+		},
+		{
+			"Name": "GameplayInsights",
+			"Enabled": false
 		}
 	]
 }

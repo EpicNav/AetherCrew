@@ -12,6 +12,7 @@
 #include "Engine/Engine.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "IO/IoHash.h"
 #include "LevelSequence.h"
 #include "Misc/PackageName.h"
@@ -1260,7 +1261,7 @@ bool FHyperAIStudioCinematicsContracts::IsCanonicalPrimaryAssetPath(const FStrin
 	const FString PackageLeaf = Path.Mid(Slash + 1, Dot - Slash - 1);
 	const FString ObjectName = Path.Mid(Dot + 1);
 	return PackageLeaf == ObjectName && PackageLeaf.Len() <= MaxNameCharacters
-		&& FPackageName::IsValidObjectPath(Path);
+		&& FHyperAIStudioNames::IsObjectPath(Path, nullptr) && FPackageName::IsValidObjectPath(Path);
 }
 
 bool FHyperAIStudioCinematicsContracts::IsCanonicalSha256(const FString& Value)
@@ -3798,7 +3799,8 @@ FHyperAICinematicsApplyPlanReport FHyperAIStudioCinematicsContracts::BuildPlan(
 	{
 		Report.bOk = true;
 		Report.Status = TEXT("dry_run_valid_execution_blocked");
-		Report.Diagnostic = TEXT("Separate sequence/MRQ persisted and loaded CAS, detached render-ready validation, immutable typed payload, and pure plan hashes are valid. No compile, save, queue mutation, render submission, polling, staging, or execution occurred.");
+		Report.Diagnostic = TEXT("Separate sequence/MRQ persisted and loaded CAS, detached render-ready validation, immutable typed payload, and pure plan hashes are valid. No compile, save, queue mutation, render submission, polling, staging, or execution occurred. "
+			"Sequences are built and cut with hyper_sequence_apply_plan.");
 		return Report;
 	}
 	if (Request.ExpectedPlanHash != Prepared.PlanHash)
@@ -3807,7 +3809,8 @@ FHyperAICinematicsApplyPlanReport FHyperAIStudioCinematicsContracts::BuildPlan(
 			TEXT("Non-dry intent must echo the exact current dry-run plan hash."));
 	}
 	return Reject(NonDryCallableState,
-		TEXT("Zero effects: no artifact was staged or submitted; no Sequencer compile, save, queue mutation, render, poll, cancellation, or output verification ran. A bounded pinned continuation host is required before this lifecycle can execute."));
+		TEXT("Zero effects: no artifact was staged or submitted; no Sequencer compile, save, queue mutation, render, poll, cancellation, or output verification ran. A bounded pinned continuation host is required before this lifecycle can execute. "
+			"Sequences are built and cut with hyper_sequence_apply_plan."));
 }
 
 FHyperAICinematicsInspectReport UHyperAIStudioCinematicsToolset::hyper_cinematics_inspect(

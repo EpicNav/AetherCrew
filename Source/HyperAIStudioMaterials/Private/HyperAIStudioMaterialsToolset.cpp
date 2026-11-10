@@ -1,6 +1,8 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioMaterialsToolset.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioAgentActivity.h"
 
 #include "AssetRegistry/IAssetRegistry.h"
@@ -10,10 +12,12 @@
 #include "Engine/Engine.h"
 #include "FileHelpers.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioMaterialsGraphGate.h"
+#include "HyperAIStudioRequestFit.h"
 #include "HyperAIStudioResultPreview.h"
 #include "HyperAIStudioSettings.h"
 #include "Internationalization/Text.h"
@@ -1866,7 +1870,8 @@ const TArray<FHyperAIStudioMaterialManifestEntry>& FHyperAIStudioMaterialsContra
 	static const TArray<FHyperAIStudioMaterialManifestEntry> Manifest = {
 		{TEXT("hyper_material_inspect"), GetQualifiedToolsetName()},
 		{TEXT("hyper_material_apply_plan"), GetQualifiedToolsetName()},
-		{TEXT("hyper_material_validate"), GetQualifiedToolsetName()}};
+		{TEXT("hyper_material_validate"), GetQualifiedToolsetName()},
+		{TEXT("hyper_material_recipe"), GetQualifiedToolsetName()}};
 	return Manifest;
 }
 
@@ -1890,7 +1895,8 @@ bool FHyperAIStudioMaterialsContracts::IsCanonicalProjectObjectPath(const FStrin
 		return false;
 	for (int32 Index = 0; Index < Path.Len(); ++Index) if (Path[Index] == TEXT('\0')) return false;
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason)) return false;
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason)) return false;
 	const FString PackageName = FPackageName::ObjectPathToPackageName(Path);
 	const FString ObjectName = FPackageName::ObjectPathToObjectName(Path);
 	return !PackageName.IsEmpty() && !ObjectName.IsEmpty()
@@ -1984,7 +1990,7 @@ TArray<FHyperAIMaterialCapabilityStatus> FHyperAIStudioMaterialsContracts::GetCa
 		TEXT("expression_classes_outside_the_node_catalog_created_or_configured"),
 		TEXT("target_open_in_material_editor")};
 	Material.State = TEXT("source_candidate_executable");
-	Material.Remediation = TEXT("Inspect for the revision and node ids, dry-run apply_plan, resubmit with operation_id and expected_plan_hash, poll hyper_operation_status, then hyper_material_validate for stats and the preview PNG. Close the material's editor tab first.");
+	Material.Remediation = TEXT("Inspect for the revision and node ids, then apply_plan: submit with bDryRun false and an operation_id (plan hash optional), call hyper_operation_wait, then hyper_material_validate for stats and the preview PNG. Close the material's editor tab first.");
 
 	FHyperAIMaterialCapabilityStatus Function;
 	Function.Family = TEXT("material_function");
@@ -2043,6 +2049,20 @@ FString FHyperAIStudioMaterialsContracts::ValidateResultSchemaFingerprint()
 	return Fingerprint;
 }
 
+FString FHyperAIStudioMaterialsContracts::RecipePayloadSchemaFingerprint()
+{
+	static const FString Fingerprint = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("material.recipe.payload.v1|recipe|path|settings|code|caller_path|dry_run|operation_id"));
+	return Fingerprint;
+}
+
+FString FHyperAIStudioMaterialsContracts::RecipeResultSchemaFingerprint()
+{
+	static const FString Fingerprint = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("material.recipe.result.v1|status|path|caller|recipes|graph|parameters|stats|preview|substrate|saved|notes"));
+	return Fingerprint;
+}
+
 FString FHyperAIStudioMaterialsContracts::GetAuthoringModeName()
 {
 	switch (GetDefault<UHyperAIStudioSettings>()->MaterialAuthoringMode)
@@ -2076,6 +2096,8 @@ const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioMaterialsContracts::G
 			EHyperAIStudioDomainSafety::Edit});
 		Value.Variants.Add({ValidateToolName, ValidateVariantId, ValidatePayloadTypeId, ValidatePayloadSchemaFingerprint(),
 			ValidateResultTypeId, ValidateResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
+		Value.Variants.Add({RecipeToolName, RecipeCheckVariantId, RecipePayloadTypeId, RecipePayloadSchemaFingerprint(),
+			RecipeResultTypeId, RecipeResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
 		Value.ContractFingerprint = FHyperAIStudioDomainAdapterRegistry::ComputeContractFingerprint(Value);
 		Value.AdapterFingerprint = FHyperAIStudioDomainAdapterRegistry::ComputeAdapterFingerprint(Value);
 		return Value;
@@ -2229,7 +2251,7 @@ bool FHyperAIStudioMaterialsContracts::ValidateOperationShape(
 			|| !Operation.Edges.IsEmpty() || !Operation.Outputs.IsEmpty() || !Operation.RepairKinds.IsEmpty())
 			return Fail(TEXT("instance_shape_invalid"), TEXT("Instance operations take only parameters (and parent_path to create); expected_revision stays empty because parameters are set, not merged."));
 		if (OutOperation.Kind == EKind::CreateMaterialInstance && !IsCanonicalProjectObjectPath(Operation.ParentPath)
-			&& !(Operation.ParentPath.StartsWith(TEXT("/")) && FPackageName::IsValidObjectPath(Operation.ParentPath)))
+			&& !(FHyperAIStudioNames::IsObjectPath(Operation.ParentPath, nullptr) && FPackageName::IsValidObjectPath(Operation.ParentPath)))
 			return Fail(TEXT("invalid_parent_path"), TEXT("create_material_instance needs parent_path, an exact material or instance object path."));
 		if (OutOperation.Kind == EKind::SetInstanceParameters && Operation.Parameters.IsEmpty())
 			return Fail(TEXT("instance_shape_invalid"), TEXT("set_instance_parameters needs at least one parameter."));
@@ -3883,6 +3905,13 @@ FHyperAIMaterialApplyPlanReport FHyperAIStudioMaterialsContracts::BuildPlan(
 	{
 		return Reject(TEXT("game_thread_required"), TEXT("Material plans capture loaded state on the game thread."));
 	}
+	// Node, parameter, input and output names become FNames, which stop the editor past an FName's length. Values (HLSL
+	// among them) and justifications are text.
+	FString NameReason;
+	if (!FHyperAIStudioNames::CheckRequest(Request, &NameReason, {TEXT("Value"), TEXT("Justification")}))
+	{
+		return Reject(TEXT("invalid_request"), NameReason);
+	}
 	if (Request.OperationId.Len() > 256
 		|| Request.ExpectedPlanHash.Len() > 71
 		|| (!Request.ExpectedPlanHash.IsEmpty() && !IsCanonicalSha256(Request.ExpectedPlanHash))
@@ -3894,10 +3923,11 @@ FHyperAIMaterialApplyPlanReport FHyperAIStudioMaterialsContracts::BuildPlan(
 		return Reject(TEXT("invalid_request_bounds"),
 			TEXT("Operation identity/count, expected hash, deadline, game-thread budget, or output bound is invalid."));
 	}
-	if (!Request.bDryRun && (Request.OperationId.IsEmpty() || Request.ExpectedPlanHash.IsEmpty()))
+	if (!Request.bDryRun && (Request.OperationId.IsEmpty() || !FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(Request.ExpectedPlanHash)))
 	{
-		return Reject(TEXT("operation_identity_required"),
-			TEXT("Applying needs operation_id and expected_plan_hash (the plan_hash of the dry run you reviewed)."));
+		return Reject(TEXT("operation_identity_required"), Request.OperationId.IsEmpty()
+			? TEXT("Applying needs a fresh operation_id.")
+			: FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage());
 	}
 	const EHyperAIStudioMaterialAuthoringMode Mode = GetDefault<UHyperAIStudioSettings>()->MaterialAuthoringMode;
 	const double Deadline = FPlatformTime::Seconds()
@@ -4255,7 +4285,7 @@ FHyperAIMaterialApplyPlanReport FHyperAIStudioMaterialsContracts::BuildPlan(
 		Report.Diagnostic = TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash.");
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Payload->SemanticFingerprint)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("plan_hash_mismatch"),
 			TEXT("The plan changed since its dry run (operations, target state, or authoring mode). Dry-run again and review it."));
@@ -4285,36 +4315,26 @@ FHyperAIMaterialApplyPlanReport FHyperAIStudioMaterialsContracts::BuildPlan(
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Poll hyper_operation_status with operation_id: it starts once approved.");
+		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
 		return Report;
 	}
-	FHyperAIStudioTypedArtifactStageReceipt Receipt;
-	FHyperAIStudioTrustedExecutionDiagnostic StageStatus;
-	FString StageError;
-	if (!FHyperAIStudioTrustedExecutionFacade::StageExact(Prepared, Request.OperationId, Receipt, StageStatus, StageError))
+	// Another agent's edit may own the project lane; then this one waits its turn, and hyper_operation_wait
+	// waits through the queue as well as the edit.
+	FString QueueStatus;
+	FString QueueError;
+	if (!FHyperAIStudioExecutionQueue::Submit(Prepared, Request.OperationId, QueueStatus, QueueError))
 	{
-		return Reject(StageStatus.StatusCode.IsEmpty() ? TEXT("stage_failed") : *StageStatus.StatusCode,
-			StageError.IsEmpty() ? StageStatus.Diagnostic : StageError);
+		return Reject(*QueueStatus, QueueError);
 	}
-	Report.bStaged = true;
-	FHyperAIStudioTypedArtifactSubmissionReceipt Submission;
-	FHyperAIStudioTrustedExecutionDiagnostic SubmitStatus;
-	FString SubmitError;
-	// Edit is tokenless; only risky safety classes need a server-issued grant.
-	if (!FHyperAIStudioTrustedExecutionFacade::SubmitExact(Receipt, FString(), Submission, SubmitStatus, SubmitError))
-	{
-		Report.Status = SubmitStatus.StatusCode.IsEmpty() ? FString(TEXT("submit_failed")) : SubmitStatus.StatusCode;
-		Report.Diagnostic = SubmitError.IsEmpty() ? SubmitStatus.Diagnostic : SubmitError;
-		return Report;
-	}
-	Report.bExecutionSubmitted = true;
+	Report.bStaged = QueueStatus == TEXT("submitted");
+	Report.bExecutionSubmitted = Report.bStaged;
 	Report.bOk = true;
-	Report.Status = TEXT("submitted");
-	Report.Diagnostic = TEXT("The edit runs over the next editor ticks: apply, compile, validate, save, verify. Poll hyper_operation_status with operation_id, then hyper_material_validate for instruction counts and the preview PNG.");
+	Report.Status = QueueStatus;
+	Report.Diagnostic = TEXT("The edit runs over the next editor ticks: apply, compile, validate, save, verify. Call hyper_operation_wait with operation_id, then hyper_material_validate for instruction counts and the preview PNG.");
 	return Report;
 }
 
-FHyperAIMaterialInspectReport UHyperAIStudioMaterialsToolset::hyper_material_inspect(
+FHyperAIMaterialInspectReport FHyperAIStudioMaterialsContracts::Inspect(
 	const FHyperAIMaterialInspectRequest& Request)
 {
 	using namespace HyperAIStudio::Materials::Private;
@@ -4424,13 +4444,7 @@ FHyperAIMaterialInspectReport UHyperAIStudioMaterialsToolset::hyper_material_ins
 	return Report;
 }
 
-FHyperAIMaterialApplyPlanReport UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(
-	const FHyperAIMaterialApplyPlanRequest& Request)
-{
-	return FHyperAIStudioMaterialsContracts::BuildPlan(Request);
-}
-
-FHyperAIMaterialValidateReport UHyperAIStudioMaterialsToolset::hyper_material_validate(
+FHyperAIMaterialValidateReport FHyperAIStudioMaterialsContracts::Validate(
 	const FHyperAIMaterialValidateRequest& Request)
 {
 	using namespace HyperAIStudio::Materials::Private;
@@ -4503,14 +4517,65 @@ FHyperAIMaterialValidateReport UHyperAIStudioMaterialsToolset::hyper_material_va
 	return Report;
 }
 
-FHyperAIMaterialInspectReport FHyperAIStudioMaterialsContracts::Inspect(const FHyperAIMaterialInspectRequest& Request)
+// The tools fit an agent's near misses (0 for "unset", a limit past its range) before the closed contracts check them.
+FHyperAIMaterialInspectReport UHyperAIStudioMaterialsToolset::hyper_material_inspect(
+	const FHyperAIMaterialInspectRequest& InRequest)
 {
-	return UHyperAIStudioMaterialsToolset::hyper_material_inspect(Request);
+	using C = FHyperAIStudioMaterialsContracts;
+	const FHyperAIMaterialInspectRequest Defaults;
+	FHyperAIMaterialInspectRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	if (Request.Scope.IsEmpty()) Request.Scope = Defaults.Scope;
+	if (Request.TargetFamily.IsEmpty()) Request.TargetFamily = Defaults.TargetFamily;
+	Fit.ClampOrDefault(Request.PageSize, 1, C::MaxPageSize, Defaults.PageSize, TEXT("page_size"));
+	Fit.ClampOrDefault(Request.MaxNodes, 1, C::MaxNodes, Defaults.MaxNodes, TEXT("max_nodes"));
+	Fit.ClampOrDefault(Request.MaxEdges, 1, C::MaxEdges, Defaults.MaxEdges, TEXT("max_edges"));
+	Fit.ClampOrDefault(Request.MaxGameThreadMs, 1, 2000, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	FHyperAIMaterialInspectReport Report = C::Inspect(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
-FHyperAIMaterialValidateReport FHyperAIStudioMaterialsContracts::Validate(const FHyperAIMaterialValidateRequest& Request)
+UHyperAIMaterialApplyPlanResult* UHyperAIStudioMaterialsToolset::hyper_material_apply_plan(const FHyperAIMaterialApplyPlanRequest& Request)
 {
-	return UHyperAIStudioMaterialsToolset::hyper_material_validate(Request);
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIMaterialApplyPlanResult>(FHyperAIStudioMaterialsContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIMaterialApplyPlanReport FHyperAIStudioMaterialsContracts::BuildFittedPlan(
+	const FHyperAIMaterialApplyPlanRequest& InRequest)
+{
+	using C = FHyperAIStudioMaterialsContracts;
+	const FHyperAIMaterialApplyPlanRequest Defaults;
+	FHyperAIMaterialApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.DeadlineMs, 100, 30000, Defaults.DeadlineMs, TEXT("deadline_ms"));
+	Fit.ClampOrDefault(Request.MaxGameThreadMs, 50, 2000, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	FHyperAIMaterialApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return C::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
+}
+
+FHyperAIMaterialValidateReport UHyperAIStudioMaterialsToolset::hyper_material_validate(
+	const FHyperAIMaterialValidateRequest& InRequest)
+{
+	using C = FHyperAIStudioMaterialsContracts;
+	const FHyperAIMaterialValidateRequest Defaults;
+	FHyperAIMaterialValidateRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	if (Request.TargetFamily.IsEmpty()) Request.TargetFamily = Defaults.TargetFamily;
+	Fit.ClampOrDefault(Request.MaxIssues, 1, C::MaxIssues, Defaults.MaxIssues, TEXT("max_issues"));
+	Fit.ClampOrDefault(Request.MaxGameThreadMs, 1, 2000, Defaults.MaxGameThreadMs, TEXT("max_game_thread_ms"));
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	FHyperAIMaterialValidateReport Report = C::Validate(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
+}
+
+FHyperAIMaterialRecipeReport UHyperAIStudioMaterialsToolset::hyper_material_recipe(const FHyperAIMaterialRecipeRequest& Request)
+{
+	return FHyperAIStudioMaterialsContracts::Recipe(Request);
 }
 
 FString FHyperAIStudioMaterialTypedPayload::GetTypeId() const
@@ -4658,6 +4723,41 @@ int32 FHyperAIStudioMaterialValidateResultPayload::GetBoundedByteSize() const
 	return HyperAIStudio::Materials::Private::ClampBytes(Size);
 }
 
+FString FHyperAIStudioMaterialRecipePayload::GetTypeId() const
+{
+	return FHyperAIStudioMaterialsContracts::RecipePayloadTypeId;
+}
+
+FString FHyperAIStudioMaterialRecipePayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioMaterialsContracts::RecipePayloadSchemaFingerprint();
+}
+
+int32 FHyperAIStudioMaterialRecipePayload::GetBoundedByteSize() const
+{
+	int64 Size = 256 + 4ll * (Request.Recipe.Len() + Request.Path.Len() + Request.Code.Len() + Request.CallerPath.Len());
+	for (const FHyperAIMaterialNodeProperty& Setting : Request.Settings) Size += 32 + 4ll * (Setting.Key.Len() + Setting.Value.Len());
+	return HyperAIStudio::Materials::Private::ClampBytes(Size);
+}
+
+FString FHyperAIStudioMaterialRecipeResultPayload::GetTypeId() const
+{
+	return FHyperAIStudioMaterialsContracts::RecipeResultTypeId;
+}
+
+FString FHyperAIStudioMaterialRecipeResultPayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioMaterialsContracts::RecipeResultSchemaFingerprint();
+}
+
+int32 FHyperAIStudioMaterialRecipeResultPayload::GetBoundedByteSize() const
+{
+	int64 Size = 1024 + 4ll * (Report.Diagnostic.Len() + Report.PreviewImagePath.Len());
+	for (const FString& Line : Report.Graph) Size += 16 + 4ll * Line.Len();
+	for (const FString& Error : Report.Stats.CompileErrors) Size += 16 + 4ll * Error.Len();
+	return HyperAIStudio::Materials::Private::ClampBytes(Size);
+}
+
 FHyperAIStudioMaterialsDomainAdapter::FHyperAIStudioMaterialsDomainAdapter()
 	: Descriptor(FHyperAIStudioMaterialsContracts::GetAdapterDescriptor())
 {
@@ -4718,6 +4818,17 @@ FHyperAIStudioDomainAdapterResult FHyperAIStudioMaterialsDomainAdapter::Execute(
 		const TSharedRef<FHyperAIStudioMaterialValidateResultPayload, ESPMode::ThreadSafe> Output =
 			MakeShared<FHyperAIStudioMaterialValidateResultPayload, ESPMode::ThreadSafe>();
 		Output->Report = Contracts::Validate(static_cast<const FHyperAIStudioMaterialValidatePayload&>(Payload).Request);
+		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
+	}
+	if (Matches(Contracts::RecipeToolName, Contracts::RecipeCheckVariantId, EHyperAIStudioDomainSafety::Read,
+		Contracts::RecipePayloadTypeId, Contracts::RecipePayloadSchemaFingerprint()))
+	{
+		// A Read dispatch checks the recipe and never makes anything: the edit is the tool's own, behind its approval.
+		FHyperAIMaterialRecipeRequest Check = static_cast<const FHyperAIStudioMaterialRecipePayload&>(Payload).Request;
+		Check.bDryRun = true;
+		const TSharedRef<FHyperAIStudioMaterialRecipeResultPayload, ESPMode::ThreadSafe> Output =
+			MakeShared<FHyperAIStudioMaterialRecipeResultPayload, ESPMode::ThreadSafe>();
+		Output->Report = Contracts::Recipe(Check);
 		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
 	}
 	if (Matches(Contracts::MutationToolName, Contracts::MutationVariantId, EHyperAIStudioDomainSafety::Edit,

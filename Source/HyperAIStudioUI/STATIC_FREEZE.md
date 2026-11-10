@@ -11,7 +11,7 @@ Freeze status: **STATIC FREEZE**. This source candidate is closed for central re
 | Pack | `ui_slate_mvvm` |
 | Atomic source cohort | `cohort.source.hyperaistudiouitoolset.v1` |
 | Qualified toolset | `HyperAIStudioUI.HyperAIStudioUIToolset` |
-| Adapter | `adapter.ui.preparation-only.ue58` |
+| Adapter | `adapter.ui.preparation-only.ue58` (compound plans, unregistered); `adapter.ui.widget_animation.ue58` (registered) |
 | Edit variant | `ui.apply_edit_plan.v1` |
 | Destructive variant | `ui.apply_destructive_plan.v1` |
 | Payload | `hyperai.payload.ui.compound-plan.v1` |
@@ -20,9 +20,9 @@ Freeze status: **STATIC FREEZE**. This source candidate is closed for central re
 | Prerequisite leaves | `module.UMG`, `plugin.ModelViewViewModel` |
 | Live probe | `probe.widget_blueprint_editor` |
 | Non-blocking descriptor groups | exact empty set |
-| Non-dry blocker | `staged_backend_required` |
+| Non-dry blocker | `staged_backend_required`, except widget animation plans (below) |
 
-The atomic manifest is exactly `hyper_ui_inspect`, `hyper_ui_apply_plan`, and `hyper_ui_validate`. There are exactly three `AICallable` declarations. Registration is gated by the catalog-exact source cohort/development policy and goes only through the central capability runtime index's publication, owned registration, owned rollback, and withdrawal seam.
+The atomic manifest is exactly `hyper_ui_inspect`, `hyper_ui_apply_plan`, `hyper_ui_validate` and `hyper_ui_render_review`. There are exactly four `AICallable` declarations. Registration is gated by the catalog-exact source cohort/development policy and goes only through the central capability runtime index's publication, owned registration, owned rollback, and withdrawal seam.
 
 ## Epic delegation matrix — 46/46
 
@@ -107,7 +107,25 @@ The compound planner has immutable base/desired snapshots, whole-snapshot CAS, p
 
 Delete and replace are the only separately named destructive forms. Safety is derived from operation kind, rechecked in semantic sealing, bound to one of two descriptor variants, and covered by automation tests. There is no client-controlled downgrade to read/edit.
 
-Non-dry remains intentionally zero-effect. The source candidate mutates no UObject, compiles nothing, saves nothing, reloads nothing, creates no MVVM state, and enters no private typed-artifact lifecycle. It returns `staged_backend_required` after exact fresh re-preparation (or an earlier, more specific truthful blocker). No hard-bounded public UE 5.8 mutation + compile-once + save-once + fresh-verification route was proven.
+Compound plans stay zero-effect when non-dry: they mutate no UObject, compile, save or reload nothing, create no MVVM state, and return `staged_backend_required` after exact fresh re-preparation (or an earlier, more specific truthful blocker).
+
+## Widget animation route (executable)
+
+A plan made only of `animation.create` and `animation.add_float_track` takes its own route (`Private/HyperAIStudioUIAnimation.*`) and executes through the trusted facade, one Widget Blueprint per plan:
+
+| Operation | Fields | Safety |
+|---|---|---|
+| `animation.create` | `name`; `number_value` = seconds (or `start_frame`/`end_frame` at the project's widget animation frame rate) | edit |
+| `animation.add_float_track` | `subject_id` = widget; `secondary_name` = animation; `name` = `RenderOpacity`; `string_value` = keys `"0=0.3, 1=1"`; `bool_value` true for cubic | edit |
+
+- Planning loads the target, refuses it while its editor is open, validates every op against the live widget tree and animations, and seals the plan with the blueprint's animation revision. `expected_plan_hash` is optional, as in the other executing packs.
+- Phases: apply as one undo step (the Animations tab's recipe: own movie scene, playback range, blueprint variable; a direct `FWidgetAnimationBinding` by widget name; a float track replacing any earlier RenderOpacity track), compile, validate that every animation and track landed, save, and verify the saved revision fresh.
+- The adapter registers with probe `probe.widget_blueprint_editor` and covers the whole cohort (inspect and validate as Read variants, `ui.widget_animation_edit.v1` as Edit).
+- Automation: `HyperAIStudio.NativeTools.UI.WidgetAnimationEndToEnd`.
+
+## Render review (read-only)
+
+`hyper_ui_render_review` (`Private/HyperAIStudioUIRenderReview.*`) draws a Widget Blueprint off screen with `FWidgetRenderer` at chosen screen sizes and UI scale (a transient design-time instance, as the thumbnail renderer makes one, or the instance playing in PIE, whose parent is restored after each draw), writes PNGs under `Saved/HyperAIStudio/UIReview`, and checks the painted geometry: clipped text, small text, contrast against the render, off screen, safe zone, clipping parents, overlapping interactive widgets, focus and explicit navigation. With a reference image it calls the lighting pack's `hyper_image_compare` through reflection. It mutates nothing; the adapter covers it as the Read variant `ui.render_review.v1`. Automation: `HyperAIStudio.NativeTools.UI.RenderReview.*`.
 
 ## Unsupported/delegated matrix
 
@@ -127,7 +145,7 @@ Non-dry remains intentionally zero-effect. The source candidate mutates no UObje
 | MVVM events, conditions, conversions, resolver/instanced content | Delegated and incomplete when present |
 | Generic class/property/reflection dispatch | Absent |
 | Script, file, process, network, synchronous load | Absent |
-| Mutation, compile, save, reload, fresh execution | Backend not proven; non-dry zero-effect |
+| Mutation, compile, save, reload, fresh execution | Widget animation plans only; every other op stays non-dry zero-effect |
 
 ## Frozen files and dependencies
 
@@ -142,11 +160,12 @@ Files:
 7. `Private/HyperAIStudioUIDelegationMatrix.h`
 8. `Private/HyperAIStudioUIDelegationMatrix.cpp`
 9. `Private/HyperAIStudioUIModule.cpp`
+9a. `Private/HyperAIStudioUIAnimation.h`, `Private/HyperAIStudioUIAnimation.cpp` (the widget animation route)
 10. `Private/Tests/HyperAIStudioUIToolsetTests.cpp`
 11. `Private/Tests/HyperAIStudioUIUE58ApiAudit.cpp`
 12. `STATIC_FREEZE.md`
 
-Private dependencies are exactly: `Core`, `CoreUObject`, `Engine`, `AssetRegistry`, `HyperAIStudio`, `ToolsetRegistry`, `UMG`, `UMGEditor`, `UnrealEd`, `SlateCore`, `MovieScene`, `ModelViewViewModel`, and `ModelViewViewModelBlueprint`.
+Private dependencies are exactly: `Core`, `CoreUObject`, `Engine`, `AssetRegistry`, `HyperAIStudio`, `ToolsetRegistry`, `UMG`, `UMGEditor`, `UnrealEd`, `SlateCore`, `MovieScene`, `MovieSceneTracks`, `ModelViewViewModel`, and `ModelViewViewModelBlueprint`.
 
 The API audit pins the UE 5.8 public members/getters used for WidgetBlueprint, WidgetTree, panel slots, WidgetAnimation/MovieScene, existing MVVM extension/view/settings/view-model/binding paths, text-source access, loaded/dirty flags, and the non-blocking package tri-state signature. Its fixture proves `Unknown` remains unknown rather than absence.
 
@@ -158,7 +177,7 @@ Static freeze checks:
 - Descriptor non-blocking requirement array is exact empty.
 - Production package evidence has one permitted non-blocking tri-state call; the second textual occurrence is the compile-time API pin.
 - Forbidden object-registry scans, global asset arrays/search-state queries, MVVM state-creating list helpers, deprecated source migration, generic reflection/export, synchronous loading, live Slate action APIs, private execution lifecycle entrypoints, and facade staging/submission: zero invocation hits in `.h`, `.cpp`, and `.cs`.
-- No mutation/compile/save call sites.
+- No mutation/compile/save call sites outside `HyperAIStudioUIAnimation.cpp`.
 - Balanced delimiters and zero trailing whitespace in the frozen code files.
 - No build or Unreal automation execution was authorized or run for this pack.
 
@@ -169,5 +188,5 @@ Static freeze checks:
 3. Change authoritative `ui_plugin` from `any_of` to `all_of`. This module hard-links both UMG and ModelViewViewModel/ModelViewViewModelBlueprint, so UMG alone is insufficient authority.
 4. Before loading the optional module, require the `ModelViewViewModel` plugin enabled and require the `UMG`, `UMGEditor`, `ModelViewViewModel`, and `ModelViewViewModelBlueprint` modules available.
 5. Keep both `ui_plugin` and `ui_backend` blocking. Do not place either id in `ApplicableNonBlockingRequirementGroupIds`.
-6. Keep `probe.widget_blueprint_editor` blocking/missing and edit/destructive admission false until a real bounded backend, compile/save lifecycle, and fresh verifier are centrally proven.
+6. `probe.widget_blueprint_editor` is published by the widget animation backend; destructive admission stays false.
 7. Use only the existing central optional-runtime-index loading/ownership hook; do not add direct toolset-registry ownership elsewhere.

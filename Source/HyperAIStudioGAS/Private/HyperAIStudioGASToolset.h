@@ -455,6 +455,10 @@ struct FHyperAIGASModifierSpec
 
 	UPROPERTY()
 	double Magnitude = 0.0;
+
+	/** A registered tag (Data.Damage) makes the magnitude Set By Caller: the code applying the effect gives it. */
+	UPROPERTY()
+	FString SetByCallerTag;
 };
 
 /** Closed cue reference. It can only reference already-registered GameplayCue tags. */
@@ -487,12 +491,11 @@ struct FHyperAIGASPlanOperation
 	GENERATED_BODY()
 
 	/**
-	 * Typed-backend slice: set_effect_duration, replace_effect_modifiers,
-	 * replace_effect_cues, set_effect_cue_flags, set_ability_asset_tags.
-	 * Recognized but fail-closed until inheritance-safe component or creator/variable backends exist:
-	 * replace_effect_asset_tags, replace_effect_granted_tags,
-	 * create_gameplay_ability_blueprint, create_gameplay_effect_blueprint,
-	 * create_attribute_set_blueprint, edit_attribute_set_blueprint.
+	 * create_gameplay_effect_blueprint, create_gameplay_ability_blueprint (TargetPath the new asset, ParentClassPath optional);
+	 * effects: set_effect_duration, replace_effect_modifiers, replace_effect_cues, set_effect_cue_flags,
+	 * replace_effect_asset_tags, replace_effect_granted_tags, replace_effect_blocked_ability_tags;
+	 * abilities: set_ability_asset_tags, set_ability_tags (Property names the container), set_ability_property.
+	 * Attribute sets are C++ classes: create_attribute_set_blueprint and edit_attribute_set_blueprint are refused.
 	 */
 	UPROPERTY()
 	FString Type;
@@ -500,7 +503,7 @@ struct FHyperAIGASPlanOperation
 	UPROPERTY()
 	FString TargetPath;
 
-	/** Required exact per-asset CAS for every currently supported operation. */
+	/** Optional: the asset's revision from hyper_gas_inspect; when given, the plan is refused if the asset changed since. */
 	UPROPERTY()
 	FString ExpectedRevision;
 
@@ -544,9 +547,24 @@ struct FHyperAIGASPlanOperation
 	UPROPERTY()
 	TArray<FHyperAIGASCueSpec> Cues;
 
-	/** Used only by recognized creation variants; arbitrary class paths are never dispatched. */
+	/** create_*: the parent, a GameplayEffect or GameplayAbility class or Blueprint; empty for the plain base class. */
 	UPROPERTY()
 	FString ParentClassPath;
+
+	/**
+	 * set_ability_tags: activation_owned, activation_required, activation_blocked, cancel_abilities_with,
+	 * block_abilities_with, source_required, source_blocked, target_required or target_blocked.
+	 * set_ability_property: instancing_policy, net_execution_policy, cost_effect or cooldown_effect.
+	 */
+	UPROPERTY()
+	FString Property;
+
+	/**
+	 * set_ability_property: per_actor or per_execution; local_predicted, local_only, server_initiated or server_only; or a
+	 * Gameplay Effect's path for cost_effect and cooldown_effect (empty clears it).
+	 */
+	UPROPERTY()
+	FString Value;
 };
 
 USTRUCT(BlueprintType)
@@ -685,6 +703,13 @@ struct FHyperAIGASApplyPlanReport
 
 	UPROPERTY()
 	TArray<FHyperAIGASEpicDelegate> EpicDelegates;
+
+	/** Each asset the plan made or changed, read back after it compiled: its duration, modifiers, tags, cues or policies. */
+	UPROPERTY()
+	TArray<FString> Made;
+
+	UPROPERTY()
+	TArray<FString> Saved;
 };
 
 /** Exactly three names form the GAS pack's atomic cohort. */
@@ -696,11 +721,22 @@ class HYPERAISTUDIOGAS_API UHyperAIStudioGASToolset final : public UToolsetDefin
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** Bounded loaded-only editor projection; it never loads an asset or inspects a runtime ASC. */
+	/**
+	 * Gameplay Ability, Gameplay Effect and Attribute Set Blueprints: an effect's duration, period, modifiers, tags and cues;
+	 * an ability's tags, instancing and net policies, cost and cooldown; attributes with defaults. Given AssetPaths it loads
+	 * them; without, it lists what is loaded. Runtime state (attributes on an actor, active effects) is Epic's
+	 * AbilitySystemInspector.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|GAS")
 	static FHyperAIGASInspectReport hyper_gas_inspect(const FHyperAIGASInspectRequest& Request);
 
-	/** Strict dry-run planner. Execution remains closed until bounded compile/save/CAS exists. */
+	/**
+	 * Makes and edits Gameplay Effects and Gameplay Abilities as one undo step, compiled and saved: create either as a
+	 * Blueprint, set an effect's duration and period, its modifiers (constant or Set By Caller), cues and cue flags, its asset,
+	 * granted and blocked-ability tags; an ability's asset tags, activation, cancel, block, source and target tag containers,
+	 * instancing and net execution policy, cost and cooldown effects. Tags must be registered (Epic's Gameplay Tags tools
+	 * add them). bDryRun true only checks; false applies, and Made reads each asset back.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|GAS")
 	static FHyperAIGASApplyPlanReport hyper_gas_apply_plan(const FHyperAIGASApplyPlanRequest& Request);
 

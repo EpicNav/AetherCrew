@@ -14,13 +14,30 @@
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/GameStateBase.h"
+#include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioAutoApproval.h"
+#include "HyperAIStudioExecutionQueue.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioPIEPlaytestToolset.h"
+#include "HyperAIStudioAsyncJobHost.h"
 #include "HyperAIStudioCapabilityInventoryClient.h"
 #include "HyperAIStudioCapabilityPackRegistry.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioDependencyGraphToolset.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioMcpBypassMonitor.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioPlanExecuteToolset.h"
+#include "HyperAIStudioProjectMemory.h"
+#include "HyperAIStudioSandbox.h"
 #include "HyperAIStudioService.h"
+#include "HyperAIStudioSettings.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "Widgets/Notifications/SNotificationList.h"
+#include "HyperAIStudioTrustedExecution.h"
+#include "Containers/Ticker.h"
+#include "UObject/StrongObjectPtr.h"
 #include "IModelContextProtocolModule.h"
 #include "Interfaces/IPluginManager.h"
 #include "Internationalization/Text.h"
@@ -94,7 +111,9 @@ namespace HyperAIStudio::NativeReadTools::Private
 
 	FString ExpectedPackIdForNativeTool(const FString& ToolName)
 	{
-		if (ToolName == TEXT("hyper_capability_report") || ToolName == TEXT("hyper_operation_status"))
+		if (ToolName == TEXT("hyper_capability_report") || ToolName == TEXT("hyper_operation_status")
+			|| ToolName == TEXT("hyper_operation_wait") || ToolName.StartsWith(TEXT("hyper_memory_"))
+			|| ToolName == TEXT("hyper_sandbox_status"))
 		{
 			return TEXT("shared_foundation");
 		}
@@ -146,11 +165,11 @@ namespace HyperAIStudio::NativeReadTools::Private
 		return Sorted;
 	}
 
+	/** Apply tools that still stop at a checked, staged plan; the ones that apply their edits are not listed. */
 	const TSet<FString>& PlanOnlyToolNames()
 	{
 		static const TSet<FString> Names = {
 			TEXT("hyper_actor_modifier_apply_plan"),
-			TEXT("hyper_animation_apply_plan"),
 			TEXT("hyper_audio_apply_plan"),
 			TEXT("hyper_character_apply_plan"),
 			TEXT("hyper_cinematics_apply_plan"),
@@ -162,15 +181,11 @@ namespace HyperAIStudio::NativeReadTools::Private
 			TEXT("hyper_geometry_apply_plan"),
 			TEXT("hyper_interchange_apply_plan"),
 			TEXT("hyper_live_production_apply_plan"),
-			TEXT("hyper_material_apply_plan"),
 			TEXT("hyper_navigation_apply_plan"),
 			TEXT("hyper_network_apply_plan"),
-			TEXT("hyper_niagara_apply_plan"),
-			TEXT("hyper_pcg_apply_plan"),
 			TEXT("hyper_physics_apply_plan"),
 			TEXT("hyper_property_animation_apply_plan"),
 			TEXT("hyper_scene_apply_plan"),
-			TEXT("hyper_ui_apply_plan"),
 			TEXT("hyper_worldbuilding_apply_plan")
 		};
 		return Names;
@@ -209,14 +224,18 @@ namespace HyperAIStudio::NativeReadTools::Private
 			TEXT("hyper_blueprint_layout"),
 			TEXT("hyper_blueprint_repair"),
 			TEXT("hyper_build_diagnose"),
+			TEXT("hyper_mesh_terrain_apply_plan"),
+			TEXT("hyper_pcg_apply_plan"),
 			TEXT("hyper_plan_execute"),
 			TEXT("hyper_playtest_run"),
 			TEXT("hyper_profile_capture"),
 			TEXT("hyper_run_audit"),
-			TEXT("hyper_test_run"),
-			TEXT("hyper_viewport_capture")
+			TEXT("hyper_test_run")
 		};
-		return Tool.bMayCauseExternalEffects || OperationSpecificNames.Contains(Tool.Name)
+		// A tool the catalog lets edit or delete is never reported as a read, whatever list it was left out of.
+		const bool bEdits = Tool.AllowedSafetyClasses.Contains(EHyperAIStudioCapabilitySafetyClass::Edit)
+			|| Tool.AllowedSafetyClasses.Contains(EHyperAIStudioCapabilitySafetyClass::Destructive);
+		return Tool.bMayCauseExternalEffects || bEdits || OperationSpecificNames.Contains(Tool.Name)
 			? TEXT("OperationSpecific")
 			: TEXT("Read");
 	}
@@ -892,6 +911,13 @@ const TArray<FHyperAIStudioNativeToolManifestEntry>& FHyperAIStudioNativeReadCon
 			FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate
 		},
 		{
+			TEXT("hyper_operation_wait"),
+			GetQualifiedToolsetName(),
+			TEXT("read"),
+			TEXT("Waits, without blocking the editor, until an operation finishes, is rejected, needs approval, or times out."),
+			FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate
+		},
+		{
 			TEXT("hyper_blueprint_debug_inspect"),
 			GetQualifiedToolsetName(),
 			TEXT("read"),
@@ -903,6 +929,34 @@ const TArray<FHyperAIStudioNativeToolManifestEntry>& FHyperAIStudioNativeReadCon
 			GetQualifiedToolsetName(),
 			TEXT("read"),
 			TEXT("Complete bounded in-process PIE world and frozen-session net-mode snapshot."),
+			FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate
+		},
+		{
+			TEXT("hyper_memory_recall"),
+			GetQualifiedToolsetName(),
+			TEXT("read"),
+			TEXT("Project memory facts by keyword, plus recent agent changes."),
+			FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate
+		},
+		{
+			TEXT("hyper_memory_remember"),
+			GetQualifiedToolsetName(),
+			TEXT("read"),
+			TEXT("Saves a project fact under .hyperai/memory for future chats; the user reviews agent facts."),
+			FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate
+		},
+		{
+			TEXT("hyper_memory_forget"),
+			GetQualifiedToolsetName(),
+			TEXT("read"),
+			TEXT("Deletes a project fact an agent saved."),
+			FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate
+		},
+		{
+			TEXT("hyper_sandbox_status"),
+			GetQualifiedToolsetName(),
+			TEXT("read"),
+			TEXT("Whether Sandbox Mode holds saved edits for the user's review, and which files."),
 			FHyperAIStudioNativeToolManifestEntry::EAdmissionState::SourceCandidate
 		},
 		{
@@ -1335,6 +1389,42 @@ FString FHyperAIStudioNativeReadContracts::ClassifyJournalLoadFailure(const FStr
 		: TEXT("journal_unavailable");
 }
 
+namespace HyperAIStudio::NativeReadTools::Private
+{
+	/** The other MCP servers agents have here, from the bypass monitor's last check: names, places and removal text only. */
+	void FillOtherMcpServers(FHyperAICapabilityReport& Report)
+	{
+		constexpr int32 MaxServers = 64;
+		const TArray<FHyperAIStudioMcpFinding> Findings = FHyperAIStudioMcpBypassMonitor::GetFindings();
+		for (const FHyperAIStudioMcpFinding& Finding : Findings)
+		{
+			if (Report.OtherMcpServers.Num() >= MaxServers)
+			{
+				break;
+			}
+			FHyperAIOtherMcpServer& Server = Report.OtherMcpServers.AddDefaulted_GetRef();
+			Server.Name = Finding.DisplayName;
+			Server.Classification = HyperAIStudio::McpBypass::ClassificationId(Finding.Class);
+			Server.Why = HyperAIStudio::McpBypass::DescribeWhy(Finding).ToString();
+			Server.bWarningSilenced = Finding.bSilenced;
+			for (const FHyperAIStudioMcpServerSource& Source : Finding.Sources)
+			{
+				Server.ConfiguredIn.Add(HyperAIStudio::McpBypass::DescribeSourcePlain(Source));
+				if (Finding.ChangesEditor())
+				{
+					Server.HowToRemove.Add(HyperAIStudio::McpBypass::DescribeRemoval(Source, Finding.bWrittenByHyperAI).ToString());
+				}
+			}
+		}
+		const TArray<FString> Names = HyperAIStudio::McpBypass::GetBypassNames(Findings);
+		Report.BypassMcpServerCount = Names.Num();
+		Report.OtherMcpServersSummary = Names.IsEmpty()
+			? FString::Printf(TEXT("No other MCP server or editor plugin changes this editor outside HyperAI's approval gate (%d other servers listed)."), Findings.Num())
+			: FString::Printf(TEXT("%s can change this editor outside HyperAI: no HyperAI approval, auto-approval, undo grouping or checks. Use HyperAI's tools for edits; use those only if the user asks."),
+				*FString::Join(Names, TEXT(", ")));
+	}
+}
+
 FHyperAICapabilityReport UHyperAIStudioNativeReadToolset::hyper_capability_report(
 	const int32 PageSize,
 	const FString& Cursor)
@@ -1370,6 +1460,7 @@ FHyperAICapabilityReport UHyperAIStudioNativeReadToolset::hyper_capability_repor
 	Report.bExtendedHyperToolsEnabled =
 		FHyperAIStudioExtensionRuntime::AreExtendedHyperToolsEnabled();
 	Report.bSourceCandidateToolsEnabled = Report.bExtendedHyperToolsEnabled;
+	FillOtherMcpServers(Report);
 
 	FString PageDiagnostic;
 	if (!FHyperAIStudioNativeReadContracts::ValidatePageRequest(PageSize, Cursor, PageDiagnostic))
@@ -1692,7 +1783,77 @@ FHyperAICapabilityReport UHyperAIStudioNativeReadToolset::hyper_capability_repor
 	return Report;
 }
 
+namespace HyperAIStudio::NativeReadTools::Private
+{
+	/**
+	 * A job the edit started, such as a PCG generation, is part of its outcome: the operation is not over while the job
+	 * runs, and a job that failed, timed out or was cancelled decides the result.
+	 */
+	void ApplyJobOutcome(FHyperAIOperationStatus& Report, const FString& OperationId)
+	{
+		for (const FHyperAIStudioAsyncJobStatus& Job : FHyperAIStudioAsyncJobHost::GetSnapshot())
+		{
+			if (Job.OperationId != OperationId)
+			{
+				continue;
+			}
+			if (Job.State == EHyperAIStudioAsyncJobState::Running)
+			{
+				Report.bTerminal = false;
+				Report.Status = TEXT("running");
+				Report.NextAction = TEXT("The edit is done and the job it started is still running (see job_progress); call hyper_operation_wait to wait for it.");
+			}
+			else if (Report.bTerminal && Job.State != EHyperAIStudioAsyncJobState::Completed)
+			{
+				Report.Status = FHyperAIStudioAsyncJobHost::LexToString(Job.State);
+				Report.State = Report.Status;
+				Report.StatusCode = Report.Status;
+				Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(Job.Diagnostic, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+				Report.NextAction = TEXT("The edit ran, but the job it started did not finish; see the diagnostic.");
+			}
+			return;
+		}
+	}
+}
+
+namespace HyperAIStudio::NativeReadTools::Private
+{
+	FHyperAIOperationStatus ReadOperationStatus(const FString& OperationId);
+
+	/** Who approved it, when it waited for approval: the user's click, the auto-approval they turned on, or a job they started. */
+	void AnnotateApproval(FHyperAIOperationStatus& Report, const FString& OperationId)
+	{
+		if (!Report.bFound || Report.Status == TEXT("awaiting_user_approval") || !Report.ApprovedBy.IsEmpty())
+		{
+			return;
+		}
+		const TOptional<FHyperAIStudioApprovalRecord> Record = FHyperAIStudioApprovalGate::FindApproval(OperationId);
+		if (!Record.IsSet())
+		{
+			return;
+		}
+		Report.ApprovedBy = Record->ApprovedBy == EHyperAIStudioApprover::AutoApproval ? TEXT("auto_approval")
+			: Record->ApprovedBy == EHyperAIStudioApprover::AgentJob ? TEXT("agent_job") : TEXT("user");
+		if (Record->AutoApprovedAs.IsSet() && !Report.Diagnostic.StartsWith(TEXT("Auto-approved")))
+		{
+			Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(
+				FString::Printf(TEXT("Auto-approved (%s) by the auto-approval the user turned on%s; nobody clicked. "),
+					::LexToString(*Record->AutoApprovedAs), Record->bKeptOnAfterRestart ? TEXT(", kept on after the editor restarted") : TEXT("")) + Report.Diagnostic,
+				FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+		}
+	}
+}
+
 FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
+	const FString& OperationId)
+{
+	using namespace HyperAIStudio::NativeReadTools::Private;
+	FHyperAIOperationStatus Report = ReadOperationStatus(OperationId);
+	AnnotateApproval(Report, OperationId);
+	return Report;
+}
+
+FHyperAIOperationStatus HyperAIStudio::NativeReadTools::Private::ReadOperationStatus(
 	const FString& OperationId)
 {
 	using namespace HyperAIStudio::NativeReadTools::Private;
@@ -1701,10 +1862,62 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 	Report.OperationId = FHyperAIStudioNativeReadContracts::ClipText(OperationId, 128);
 	Report.JournalAccessMode = TEXT("read_only_generation_snapshot");
 	Report.bJournalLoadMayReconcile = false;
+	Report.bSandboxed = IsInGameThread() && HyperAIStudio::Sandbox::IsHoldingEdits();
 	if (!FHyperAIStudioOperationJournal::IsValidOperationId(OperationId))
 	{
 		Report.Status = TEXT("invalid_operation_id");
 		Report.Diagnostic = TEXT("operation_id must satisfy the bounded HyperAI operation-id contract.");
+		return Report;
+	}
+
+	// Sources are checked from the most immediate to the most durable. An edit waiting for a person used
+	// to read as not_found here, which told the agent the opposite of what was happening.
+	for (const FHyperAIStudioPendingApproval& Pending : FHyperAIStudioApprovalGate::GetPending())
+	{
+		if (Pending.OperationId != OperationId)
+		{
+			continue;
+		}
+		Report.bOk = true;
+		Report.bFound = true;
+		Report.PlanHash = Pending.Summary.PlanHash;
+		Report.CreatedUtc = Pending.RequestedUtc.ToIso8601();
+		Report.JournalAccessMode = TEXT("approval_queue");
+		if (FHyperAIStudioApprovalGate::DescribeHeld(OperationId, Report.Status, Report.Diagnostic))
+		{
+			// Nobody needs to click: waits go on through it as through the edit queue.
+			Report.State = Report.Status;
+			Report.StatusCode = TEXT("auto_approval_scheduled");
+			Report.ApprovedBy = TEXT("auto_approval");
+			Report.NextAction = TEXT("Call hyper_operation_wait with this operation_id; it runs without waiting for a person.");
+			return Report;
+		}
+		Report.Status = TEXT("awaiting_user_approval");
+		Report.State = Report.Status;
+		Report.StatusCode = Report.Status;
+		Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(
+			TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing has run yet.")
+				+ (Pending.Summary.Effects.IsEmpty() ? FString() : TEXT(" First effect: ") + Pending.Summary.Effects[0]),
+			FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+		Report.NextAction = TEXT("Wait for the user to approve or reject it; hyper_operation_wait with bWaitThroughApproval waits for you.");
+		return Report;
+	}
+
+	int32 QueuePosition = 0;
+	FString QueueFailure;
+	FString QueueDiagnostic;
+	const bool bQueueKnows = FHyperAIStudioExecutionQueue::Query(OperationId, QueuePosition, QueueFailure, QueueDiagnostic);
+	if (QueuePosition > 0)
+	{
+		Report.bOk = true;
+		Report.bFound = true;
+		Report.Status = TEXT("queued");
+		Report.State = Report.Status;
+		Report.StatusCode = Report.Status;
+		Report.Diagnostic = FString::Printf(
+			TEXT("Waiting for another edit to finish; %d more queued ahead of it. Nothing has run yet."), QueuePosition - 1);
+		Report.NextAction = TEXT("Call hyper_operation_wait: it waits through the queue and the edit.");
+		Report.JournalAccessMode = TEXT("edit_queue");
 		return Report;
 	}
 
@@ -1731,7 +1944,135 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 		Report.JournalAccessMode = TEXT("live_execution_registry");
 		Report.bJournalLoadMayReconcile = false;
 		Report.ProjectIdentityHash = LiveStatus.CanonicalProjectId;
+		Report.NextAction = Report.bTerminal ? TEXT("Validate the result with the pack's validate tool.")
+			: TEXT("Still running; call hyper_operation_wait to wait for it.");
 		return Report;
+	}
+
+	// Playtests run in the PIE service, outside the typed executor and the journal.
+	const FHyperAIPIEPlaytestStatusResult Playtest = FHyperAIStudioPIEPlaytestService::GetStatus(OperationId, 1, FString());
+	if (Playtest.bFound)
+	{
+		Report.bOk = true;
+		Report.bFound = true;
+		Report.Status = Playtest.Status;
+		Report.State = Playtest.State;
+		Report.StatusCode = Playtest.Status;
+		Report.bTerminal = Playtest.bTerminal;
+		Report.bNeedsReconciliation = Playtest.bOutcomeUnknown;
+		Report.PlanHash = Playtest.PlanHash;
+		Report.PhasesDone = Playtest.CompletedSteps;
+		Report.PhasesTotal = Playtest.TotalSteps;
+		Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(Playtest.Diagnostic, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+		Report.NextAction = Report.bTerminal ? TEXT("Read each step's evidence with hyper_playtest_status.")
+			: TEXT("Still running; call hyper_operation_wait to wait for it.");
+		Report.JournalAccessMode = TEXT("playtest_service");
+		return Report;
+	}
+
+	TOptional<FHyperAIStudioAsyncJobStatus> OperationJob;
+	for (const FHyperAIStudioAsyncJobStatus& Job : FHyperAIStudioAsyncJobHost::GetSnapshot())
+	{
+		if (Job.OperationId == OperationId)
+		{
+			Report.JobProgress = FString::Printf(TEXT("%s: %s%s%s"), FHyperAIStudioAsyncJobHost::LexToString(Job.State),
+				*Job.Progress, Job.Diagnostic.IsEmpty() ? TEXT("") : TEXT(" - "), *Job.Diagnostic);
+			OperationJob = Job;
+			break;
+		}
+	}
+
+	FHyperAIStudioTypedArtifactOperationStatus Typed;
+	if (FHyperAIStudioTrustedExecutionFacade::QueryLiveStatus(OperationId, Typed) && Typed.bFound)
+	{
+		Report.bOk = true;
+		Report.bFound = true;
+		Report.Status = Typed.Status;
+		Report.State = Typed.Status;
+		Report.StatusCode = Typed.Status;
+		Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(
+			Typed.Diagnostic, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+		Report.PlanHash = Typed.PlanHash;
+		Report.CapabilityHash = Typed.CapabilityHash;
+		Report.bTerminal = Typed.bTerminal;
+		Report.bNeedsReconciliation = Typed.bOutcomeUnknown;
+		Report.Phase = Typed.ActiveActionKind.ToLower();
+		Report.PhasesDone = Typed.CompletedActionCount;
+		Report.PhasesTotal = Typed.ScheduledActionCount;
+		Report.ProjectIdentityHash = Typed.CanonicalProjectId;
+		Report.JournalAccessMode = TEXT("live_typed_executor");
+		Report.NextAction = !Report.bTerminal ? TEXT("Still running; call hyper_operation_wait to wait for it.")
+			: Report.bNeedsReconciliation ? TEXT("The outcome is unknown; inspect the target before retrying.")
+			: TEXT("Validate the result with the pack's validate tool.");
+		ApplyJobOutcome(Report, OperationId);
+		return Report;
+	}
+
+	// An edit that waited in the queue and then could not start was never journaled.
+	if (bQueueKnows && !QueueFailure.IsEmpty())
+	{
+		Report.bOk = true;
+		Report.bFound = true;
+		Report.bTerminal = true;
+		Report.Status = TEXT("failed");
+		Report.State = Report.Status;
+		Report.StatusCode = QueueFailure;
+		Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(
+			QueueDiagnostic, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+		Report.NextAction = TEXT("Nothing ran. The target may have changed while it waited: dry-run the plan again.");
+		Report.JournalAccessMode = TEXT("edit_queue");
+		return Report;
+	}
+
+	// A rejection drops the plan without journaling it, so the activity log is the only record of it. The log is
+	// newest first, so the operation's latest entry decides.
+	const TArray<FHyperAIStudioActivityEntry> Activity = FHyperAIStudioAgentActivityLog::GetSnapshot();
+	for (const FHyperAIStudioActivityEntry& Entry : Activity)
+	{
+		if (Entry.OperationId != OperationId)
+		{
+			continue;
+		}
+		if (Entry.Kind == EHyperAIStudioActivityKind::ApprovalRejected)
+		{
+			Report.bOk = true;
+			Report.bFound = true;
+			Report.Status = TEXT("rejected_by_user");
+			Report.State = Report.Status;
+			Report.StatusCode = Report.Status;
+			Report.bTerminal = true;
+			Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(
+				Entry.Detail.IsEmpty() ? FString(TEXT("The user rejected this plan; nothing ran.")) : Entry.Detail,
+				FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+			Report.NextAction = TEXT("Nothing ran. Ask the user what to change before planning again.");
+			Report.JournalAccessMode = TEXT("activity_log");
+			return Report;
+		}
+		// Scripts, 3D models and submits run outside the typed executor, so their activity entries are their only status
+		// record. A 3D model or generated audio is a background job, whose start and end the job host records.
+		const bool bScript = Entry.PackId == TEXT("scripting");
+		const bool bSubmit = Entry.PackId == TEXT("source_control");
+		const bool bAudio = Entry.PackId == TEXT("audio_generation");
+		const bool bRunning = Entry.Kind == EHyperAIStudioActivityKind::ApprovalApproved || Entry.Kind == EHyperAIStudioActivityKind::JobStarted;
+		if ((bScript || bSubmit || bAudio || Entry.PackId == TEXT("mesh_generation")) && (bRunning || Entry.Kind == EHyperAIStudioActivityKind::Completed
+			|| Entry.Kind == EHyperAIStudioActivityKind::Failed || Entry.Kind == EHyperAIStudioActivityKind::JobFinished))
+		{
+			Report.bOk = true;
+			Report.bFound = true;
+			Report.bTerminal = !bRunning;
+			Report.Status = Report.bTerminal ? Entry.StatusCode : FString(TEXT("running"));
+			Report.State = Report.Status;
+			Report.StatusCode = Report.Status;
+			Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(Entry.Detail, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+			Report.NextAction = !Report.bTerminal ? TEXT("Still running; call hyper_operation_wait to wait for it.")
+				: bScript ? TEXT("The script's result, output and traceback are in Saved/HyperAIStudio/Scripts/<operation_id>/result.json.")
+				: bSubmit ? TEXT("hyper_source_control_status lists what is still unsubmitted.")
+				: bAudio ? TEXT("hyper_audio_generate_status has each take's file, SoundWave, length and price, and the wrapper.")
+				: TEXT("hyper_mesh_status has the model's file and the asset it was imported as.");
+			Report.JournalAccessMode = TEXT("activity_log");
+			return Report;
+		}
+		break;
 	}
 
 	FHyperAIStudioOperationJournal Journal(FHyperAIStudioService::GetProjectRoot());
@@ -1751,11 +2092,56 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 	Report.ReconciledRecordCount = 0;
 	Report.JournalGeneration = Journal.GetGeneration();
 	const TOptional<FHyperAIStudioOperationRecord> Record = Journal.Find(OperationId);
+	// Work that runs as a job outside the journal, such as a PCG scatter's generation, is recorded by its job alone.
+	if (!Record.IsSet() && OperationJob.IsSet())
+	{
+		const bool bRunning = OperationJob->State == EHyperAIStudioAsyncJobState::Running;
+		const bool bCompleted = OperationJob->State == EHyperAIStudioAsyncJobState::Completed;
+		Report.bOk = true;
+		Report.bFound = true;
+		Report.bTerminal = !bRunning;
+		Report.Status = bRunning ? FString(TEXT("running")) : FString(FHyperAIStudioAsyncJobHost::LexToString(OperationJob->State));
+		Report.State = Report.Status;
+		Report.StatusCode = Report.Status;
+		Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(
+			OperationJob->Diagnostic.IsEmpty() ? OperationJob->Progress : OperationJob->Diagnostic, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+		Report.NextAction = bRunning ? TEXT("Still running; call hyper_operation_wait to wait for it.")
+			: bCompleted ? TEXT("Done: the diagnostic has the result; read what it made with the pack's inspect tool.")
+			: TEXT("The job did not finish; see the diagnostic.");
+		Report.JournalAccessMode = TEXT("async_job");
+		return Report;
+	}
 	if (!Record.IsSet())
 	{
+		// An edit an approval runs in place (FHyperAIStudioApprovalGate::RequestAction: modelling, landscape, foliage,
+		// spatial and other plans) is journaled nowhere: the entry its pack records when it finishes is its outcome. The
+		// approval is recorded just before the edit runs, so that one reads as running.
+		const FHyperAIStudioActivityEntry* Last = Activity.FindByPredicate([&OperationId](const FHyperAIStudioActivityEntry& Entry)
+		{
+			return Entry.OperationId == OperationId;
+		});
+		const bool bApproved = Last && Last->Kind == EHyperAIStudioActivityKind::ApprovalApproved;
+		if (Last && (bApproved || Last->Kind == EHyperAIStudioActivityKind::Completed || Last->Kind == EHyperAIStudioActivityKind::Failed))
+		{
+			const bool bCompleted = Last->Kind == EHyperAIStudioActivityKind::Completed;
+			Report.bOk = true;
+			Report.bFound = true;
+			Report.bTerminal = !bApproved;
+			Report.Status = bApproved ? FString(TEXT("running"))
+				: !Last->StatusCode.IsEmpty() ? Last->StatusCode : FString(bCompleted ? TEXT("completed") : TEXT("failed"));
+			Report.State = Report.Status;
+			Report.StatusCode = Report.Status;
+			Report.Diagnostic = FHyperAIStudioNativeReadContracts::ClipText(Last->Detail, FHyperAIStudioNativeReadContracts::MaxDiagnosticCharacters);
+			Report.NextAction = bApproved ? TEXT("Still running; call hyper_operation_wait to wait for it.")
+				: bCompleted ? TEXT("Done: the diagnostic has the result; read what it made with the pack's inspect tool.")
+				: TEXT("It did not finish; see the diagnostic.");
+			Report.JournalAccessMode = TEXT("activity_log");
+			return Report;
+		}
 		Report.bOk = true;
 		Report.Status = TEXT("not_found");
-		Report.Diagnostic = TEXT("The read-only journal snapshot contains no record with this operation_id.");
+		Report.Diagnostic = TEXT("No pending approval, running edit, or journal record has this operation_id.");
+		Report.NextAction = TEXT("Check the operation_id; a dry run never creates one.");
 		return Report;
 	}
 
@@ -1776,7 +2162,210 @@ FHyperAIOperationStatus UHyperAIStudioNativeReadToolset::hyper_operation_status(
 	Report.ResolutionValidatorHash = Record->ResolutionValidatorHash;
 	Report.ResolutionPostconditionHash = Record->ResolutionPostconditionHash;
 	Report.Diagnostic = TEXT("Operation status loaded from a validated read-only journal generation.");
+	Report.NextAction = !Report.bTerminal ? TEXT("Still running; call hyper_operation_wait to wait for it.")
+		: Report.bNeedsReconciliation ? TEXT("The outcome is unknown; inspect the target before retrying.")
+		: TEXT("Validate the result with the pack's validate tool.");
+	ApplyJobOutcome(Report, OperationId);
 	return Report;
+}
+
+namespace HyperAIStudio::NativeReadTools::Wait
+{
+	struct FWaiter
+	{
+		TStrongObjectPtr<UHyperAIOperationWaitResult> Result;
+		/** Instead of Result, for a tool that waits for its own edit before it replies. */
+		TFunction<void(const FHyperAIOperationWaitReport&)> OnDone;
+		FString OperationId;
+		double StartedSeconds = 0.0;
+		double DeadlineSeconds = 0.0;
+		bool bWaitThroughApproval = false;
+	};
+
+	constexpr int32 MaxWaiters = 32;
+	constexpr float PollSeconds = 0.2f;
+
+	TArray<FWaiter>& Waiters()
+	{
+		static TArray<FWaiter> Items;
+		return Items;
+	}
+
+	/** Why the wait is over, or empty while it should go on. */
+	FString CompletionReason(const FHyperAIOperationStatus& Status, const FWaiter& Waiter, const double Now)
+	{
+		if (Status.Status == TEXT("awaiting_user_approval"))
+		{
+			return Waiter.bWaitThroughApproval && Now < Waiter.DeadlineSeconds ? FString() : FString(TEXT("awaiting_user_approval"));
+		}
+		if (Status.Status == TEXT("rejected_by_user"))
+		{
+			return TEXT("rejected");
+		}
+		if (Status.bTerminal)
+		{
+			return TEXT("terminal");
+		}
+		// A submission can take a tick to show up, so an unknown id gets a moment before the wait gives up.
+		if (!Status.bFound && Now - Waiter.StartedSeconds > 2.0)
+		{
+			return TEXT("not_found");
+		}
+		return Now >= Waiter.DeadlineSeconds ? FString(TEXT("timeout")) : FString();
+	}
+
+	void Complete(const FWaiter& Waiter, const FHyperAIOperationStatus& Status, const FString& Reason, const double Waited)
+	{
+		FHyperAIOperationWaitReport Report;
+		Report.Status = Status;
+		Report.CompletedBecause = Reason;
+		Report.WaitedMs = static_cast<int32>(FMath::Max(0.0, Waited) * 1000.0);
+		if (Waiter.Result.IsValid())
+		{
+			Waiter.Result->SetValue(Report);
+		}
+		else if (Waiter.OnDone)
+		{
+			Waiter.OnDone(Report);
+		}
+	}
+
+	/** Completes every waiter whose operation has reached an answer; true while any are left. */
+	bool Evaluate()
+	{
+		const double Now = FPlatformTime::Seconds();
+		TArray<FWaiter> Done;
+		TArray<FHyperAIOperationStatus> DoneStatus;
+		TArray<FString> DoneReason;
+		TArray<FWaiter>& Items = Waiters();
+		for (int32 Index = Items.Num() - 1; Index >= 0; --Index)
+		{
+			const FHyperAIOperationStatus Status = UHyperAIStudioNativeReadToolset::hyper_operation_status(Items[Index].OperationId);
+			const FString Reason = CompletionReason(Status, Items[Index], Now);
+			if (!Reason.IsEmpty())
+			{
+				DoneStatus.Add(Status);
+				DoneReason.Add(Reason);
+				Done.Add(MoveTemp(Items[Index]));
+				Items.RemoveAt(Index);
+			}
+		}
+		// Completion notifies the MCP server, so it happens after the list is consistent again.
+		for (int32 Index = 0; Index < Done.Num(); ++Index)
+		{
+			Complete(Done[Index], DoneStatus[Index], DoneReason[Index], Now - Done[Index].StartedSeconds);
+		}
+		return !Items.IsEmpty();
+	}
+
+	void EnsureTicking()
+	{
+		static FTSTicker::FDelegateHandle Handle;
+		static bool bSubscribed = false;
+		if (!bSubscribed)
+		{
+			// An approval click or a finished edit wakes waiters at once instead of on the next poll.
+			bSubscribed = true;
+			FHyperAIStudioApprovalGate::OnChanged().AddLambda([]() { if (!Waiters().IsEmpty()) Evaluate(); });
+			FHyperAIStudioAgentActivityLog::OnChanged().AddLambda([]() { if (!Waiters().IsEmpty()) Evaluate(); });
+		}
+		if (!Handle.IsValid())
+		{
+			Handle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([](float)
+			{
+				const bool bKeep = Evaluate();
+				if (!bKeep)
+				{
+					Handle.Reset();
+				}
+				return bKeep;
+			}), PollSeconds);
+		}
+	}
+
+	void Start(FWaiter&& Waiter, const int32 TimeoutMs)
+	{
+		const double Now = FPlatformTime::Seconds();
+		Waiter.StartedSeconds = Now;
+		Waiter.DeadlineSeconds = Now + FMath::Clamp(TimeoutMs, 1000, 120000) / 1000.0;
+
+		// When the answer is already known, one round trip is the whole cost.
+		const FHyperAIOperationStatus Status = UHyperAIStudioNativeReadToolset::hyper_operation_status(Waiter.OperationId);
+		if (Status.Status == TEXT("invalid_operation_id"))
+		{
+			Complete(Waiter, Status, TEXT("invalid_request"), 0.0);
+			return;
+		}
+		const FString Reason = CompletionReason(Status, Waiter, Now);
+		if (!Reason.IsEmpty())
+		{
+			Complete(Waiter, Status, Reason, 0.0);
+			return;
+		}
+		if (Waiters().Num() >= MaxWaiters)
+		{
+			Complete(Waiter, Status, TEXT("too_many_waiters"), 0.0);
+			return;
+		}
+		Waiters().Add(MoveTemp(Waiter));
+		EnsureTicking();
+	}
+}
+
+UHyperAIOperationWaitResult* UHyperAIStudioNativeReadToolset::hyper_operation_wait(
+	const FString& OperationId,
+	const int32 TimeoutMs,
+	const bool bWaitThroughApproval)
+{
+	using namespace HyperAIStudio::NativeReadTools::Wait;
+	UHyperAIOperationWaitResult* Result = NewObject<UHyperAIOperationWaitResult>();
+	if (!IsInGameThread())
+	{
+		Result->SetError(TEXT("hyper_operation_wait runs on the game thread."));
+		return Result;
+	}
+	FWaiter Waiter;
+	Waiter.Result.Reset(Result);
+	Waiter.OperationId = OperationId;
+	Waiter.bWaitThroughApproval = bWaitThroughApproval;
+	Start(MoveTemp(Waiter), TimeoutMs);
+	return Result;
+}
+
+bool HyperAIStudio::OperationWait::IsAutoApproving(const FString& OperationId)
+{
+	return FHyperAIStudioApprovalGate::IsAutoApproving(OperationId);
+}
+
+void HyperAIStudio::OperationWait::WhenDone(const FString& OperationId, const int32 TimeoutMs, TFunction<void(const FHyperAIStudioEditOutcome&)>&& Done)
+{
+	using namespace HyperAIStudio::NativeReadTools::Wait;
+	FWaiter Waiter;
+	Waiter.OperationId = OperationId;
+	Waiter.OnDone = [Done = MoveTemp(Done)](const FHyperAIOperationWaitReport& Report)
+	{
+		const FHyperAIOperationStatus& Status = Report.Status;
+		FHyperAIStudioEditOutcome Outcome;
+		Outcome.Status = Status.Status;
+		// A wait that ran out, or one for approval, is no failure: the edit goes on, and hyper_operation_wait picks it up.
+		Outcome.bOk = Status.bTerminal
+			? Status.Status == TEXT("completed") || Status.Status == TEXT("replay_completed")
+			: Report.CompletedBecause != TEXT("not_found") && Report.CompletedBecause != TEXT("invalid_request");
+		const bool bStillGoing = !Status.bTerminal && (Report.CompletedBecause == TEXT("timeout") || Report.CompletedBecause == TEXT("too_many_waiters"));
+		Outcome.Diagnostic = bStillGoing
+			? FString::Printf(TEXT("Still %s after %d s; call hyper_operation_wait with operation_id to wait on."), *Status.Status, Report.WaitedMs / 1000)
+			: FString::Join(TArray<FString>({Status.Diagnostic, Status.NextAction}).FilterByPredicate(
+				[](const FString& Part) { return !Part.IsEmpty(); }), TEXT(" "));
+		Done(Outcome);
+	};
+	if (!IsInGameThread())
+	{
+		FHyperAIOperationStatus Status;
+		Status.Status = TEXT("game_thread_required");
+		Complete(Waiter, Status, TEXT("invalid_request"), 0.0);
+		return;
+	}
+	Start(MoveTemp(Waiter), TimeoutMs);
 }
 
 FHyperAIBlueprintDebugReport UHyperAIStudioNativeReadToolset::hyper_blueprint_debug_inspect(
@@ -1803,6 +2392,14 @@ FHyperAIBlueprintDebugReport UHyperAIStudioNativeReadToolset::hyper_blueprint_de
 	{
 		Report.Status = TEXT("invalid_input");
 		Report.Diagnostic = TEXT("blueprint_asset_path and graph_name must satisfy their bounded path/name limits.");
+		return Report;
+	}
+	// FSoftObjectPath makes an FName of the package part, which stops the editor past 1023 characters.
+	FString PathReason;
+	if (!FHyperAIStudioNames::IsObjectPath(BlueprintAssetPath, TEXT("blueprint_asset_path"), &PathReason))
+	{
+		Report.Status = TEXT("invalid_asset_path");
+		Report.Diagnostic = PathReason;
 		return Report;
 	}
 
@@ -2108,6 +2705,166 @@ FHyperAIBlueprintDebugReport UHyperAIStudioNativeReadToolset::hyper_blueprint_de
 		: (Report.NextCursor.IsEmpty()
 			? TEXT("Blueprint debugger snapshot completed within all bounds.")
 			: TEXT("Blueprint debugger snapshot is paged; continue with next_cursor."));
+	return Report;
+}
+
+namespace HyperAIStudio::NativeRead::Memory
+{
+	FHyperAIMemoryFactView ToView(const FHyperAIStudioMemoryFact& Fact)
+	{
+		FHyperAIMemoryFactView View;
+		View.Name = Fact.Name;
+		View.Title = Fact.Title;
+		View.Type = Fact.Type;
+		View.Source = Fact.Source;
+		View.bConfirmed = Fact.bConfirmed;
+		View.Updated = Fact.Updated;
+		View.Text = Fact.Text;
+		return View;
+	}
+}
+
+FHyperAIMemoryRecallReport UHyperAIStudioNativeReadToolset::hyper_memory_recall(const FString& Query, const int32 Limit, const FString& Target)
+{
+	FHyperAIMemoryRecallReport Report;
+	if (!IsInGameThread())
+	{
+		Report.Status = TEXT("invalid_request");
+		Report.Diagnostic = TEXT("hyper_memory_recall runs on the game thread.");
+		return Report;
+	}
+	const FString Root = FHyperAIStudioService::GetProjectRoot();
+	for (const FHyperAIStudioMemoryFact& Fact : HyperAIStudio::Memory::Recall(Root, Query, Limit, GetDefault<UHyperAIStudioSettings>()->AgentMemory))
+	{
+		Report.Facts.Add(HyperAIStudio::NativeRead::Memory::ToView(Fact));
+	}
+	// Past tasks are longer than notes: a few of the best will do.
+	for (const FHyperAIStudioMemoryTask& Task : HyperAIStudio::Memory::RecallTasks(Root, Query, FMath::Clamp(Limit, 1, 5)))
+	{
+		Report.History.Add(HyperAIStudio::Memory::FormatTask(Task));
+	}
+	// ponytail: Epic's schema makes a parameter with an empty-string default required, so the defaults are words (all, new).
+	const FString AssetFilter = Target.TrimStartAndEnd();
+	Report.RecentChanges = HyperAIStudio::Memory::RecentChanges(Root, FMath::Clamp(Limit, 1, 50),
+		AssetFilter.Equals(TEXT("all"), ESearchCase::IgnoreCase) ? FString() : AssetFilter);
+	Report.Status = TEXT("ok");
+	if (Report.Facts.IsEmpty() && Report.History.IsEmpty())
+	{
+		Report.Diagnostic = TEXT("Nothing in memory matches. Save lasting project facts with hyper_memory_remember.");
+	}
+	return Report;
+}
+
+FHyperAIMemoryWriteReport UHyperAIStudioNativeReadToolset::hyper_memory_remember(
+	const FString& Title,
+	const FString& Text,
+	const FString& Type,
+	const FString& Replaces)
+{
+	FHyperAIMemoryWriteReport Report;
+	if (!IsInGameThread())
+	{
+		Report.Status = TEXT("invalid_request");
+		Report.Diagnostic = TEXT("hyper_memory_remember runs on the game thread.");
+		return Report;
+	}
+	FHyperAIStudioMemoryFact Fact;
+	Fact.Name = Replaces.TrimStartAndEnd().Equals(TEXT("new"), ESearchCase::IgnoreCase) ? FString() : Replaces.TrimStartAndEnd();
+	Fact.Title = Title;
+	Fact.Text = Text;
+	Fact.Type = Type.TrimStartAndEnd().IsEmpty() ? FString(TEXT("fact")) : Type;
+	Fact.Source = TEXT("agent");
+	FString Error;
+	FHyperAIStudioMemoryFact Saved;
+	Report.Name = HyperAIStudio::Memory::Remember(FHyperAIStudioService::GetProjectRoot(), Fact, Error, &Saved);
+	if (Report.Name.IsEmpty())
+	{
+		Report.Status = TEXT("refused");
+		Report.Diagnostic = Error;
+		return Report;
+	}
+	if (!Saved.Held.IsEmpty())
+	{
+		Report.Status = TEXT("held");
+		Report.Diagnostic = FString::Printf(TEXT("Saved, but held for the user: %s. No chat sees it until they allow it."), *Saved.Held);
+		// Only a held fact needs the user; everything else an agent saves applies without them.
+		FNotificationInfo Info(FText::FromString(FString::Printf(
+			TEXT("An agent's memory waits for you: %s. It is held because %s. Allow or delete it in HyperAIStudio > Agents > Project Memory."),
+			*Saved.Title.Left(120), *Saved.Held)));
+		Info.ExpireDuration = 10.0f;
+		FSlateNotificationManager::Get().AddNotification(Info);
+		return Report;
+	}
+	Report.Status = TEXT("saved");
+	switch (GetDefault<UHyperAIStudioSettings>()->AgentMemory)
+	{
+	case EHyperAIStudioAgentMemoryMode::Automatic:
+		Report.Diagnostic = TEXT("Saved. Every future chat can use it.");
+		break;
+	case EHyperAIStudioAgentMemoryMode::AfterReview:
+		Report.Diagnostic = TEXT("Saved. Future chats get it once the user confirms it.");
+		break;
+	default:
+		Report.Diagnostic = TEXT("Saved. Future chats see its title now and its text once the user confirms it.");
+		break;
+	}
+	return Report;
+}
+
+FHyperAIMemoryWriteReport UHyperAIStudioNativeReadToolset::hyper_memory_forget(const FString& Name)
+{
+	FHyperAIMemoryWriteReport Report;
+	Report.Name = Name.TrimStartAndEnd();
+	if (!IsInGameThread())
+	{
+		Report.Status = TEXT("invalid_request");
+		Report.Diagnostic = TEXT("hyper_memory_forget runs on the game thread.");
+		return Report;
+	}
+	FString Error;
+	if (!HyperAIStudio::Memory::Forget(FHyperAIStudioService::GetProjectRoot(), Report.Name, /*bByAgent=*/true, Error))
+	{
+		Report.Status = TEXT("refused");
+		Report.Diagnostic = Error;
+		return Report;
+	}
+	Report.Status = TEXT("forgotten");
+	return Report;
+}
+
+FHyperAISandboxStatusReport UHyperAIStudioNativeReadToolset::hyper_sandbox_status()
+{
+	namespace Sandbox = HyperAIStudio::Sandbox;
+	FHyperAISandboxStatusReport Report;
+	if (!IsInGameThread())
+	{
+		Report.Status = TEXT("unavailable");
+		Report.Diagnostic = TEXT("hyper_sandbox_status runs on the game thread.");
+		return Report;
+	}
+	const Sandbox::FStatus Status = Sandbox::GetStatus();
+	switch (Status.State)
+	{
+	case Sandbox::EState::Unavailable: Report.Status = TEXT("unavailable"); break;
+	case Sandbox::EState::Waiting: Report.Status = TEXT("waiting"); break;
+	case Sandbox::EState::Active: Report.Status = TEXT("active"); break;
+	case Sandbox::EState::Foreign: Report.Status = TEXT("foreign"); break;
+	default: Report.Status = TEXT("off"); break;
+	}
+	Report.SandboxName = Status.SandboxName;
+	// What auto-approval does with held files is said only while HyperAI's own sandbox is open: it writes nothing else.
+	Report.Diagnostic = Status.State == Sandbox::EState::Off
+		? FString(TEXT("Sandbox Mode is off: saves go straight to the project."))
+		: Status.Diagnostic + (FHyperAIStudioAutoApproval::CoversSandboxSaves()
+			? TEXT(" Only the user approves or discards held files; the auto-approval they turned on for these writes them to the project at a quiet moment, once no asset is unsaved.")
+			: FHyperAIStudioAutoApproval::LeavesSandboxSavesWaiting()
+			? TEXT(" Only the user approves or discards held files. Their auto-approval is on but does not cover these (Sandbox Mode's held saves was not ticked), so they wait for Approve All in Activity.")
+			: TEXT(" Only the user approves or discards held files."));
+	Report.HeldCount = Status.Changes.Num();
+	for (int32 Index = 0; Index < Status.Changes.Num() && Index < 200; ++Index)
+	{
+		Report.HeldFiles.Add(Status.Changes[Index].Kind + TEXT(" ") + Status.Changes[Index].Path);
+	}
 	return Report;
 }
 

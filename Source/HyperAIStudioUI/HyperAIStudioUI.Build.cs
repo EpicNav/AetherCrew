@@ -19,8 +19,12 @@ public class HyperAIStudioUI : ModuleRules
 			"UMG",
 			"UMGEditor",
 			"UnrealEd",
+			// hyper_ui_render_review draws widgets off screen and reads the pixels back.
+			"RenderCore",
+			"Slate",
 			"SlateCore",
 			"MovieScene",
+			"MovieSceneTracks",
 			"ModelViewViewModel",
 			"ModelViewViewModelBlueprint"
 		});

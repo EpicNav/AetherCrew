@@ -7,10 +7,15 @@
 #include "Containers/Ticker.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioAgentState.h"
+#include "HyperAIStudioNativeChat.h"
+#include "HyperAIStudioPromptPresets.h"
 #include "HyperAIStudioService.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/SCompoundWidget.h"
+
+struct FHyperAIStudioRestartChat;
+class FHyperAIStudioNativeChat;
 
 class SHyperAIStudioQuickActionWindow : public SCompoundWidget
 {
@@ -32,7 +37,6 @@ public:
 	bool GetRunningAgent(FString& OutAgent, FString& OutModel) const;
 	/** "HyperAI Chat 2: VFX (Codex)": which tab and agent, for handoff menus and messages. */
 	FString GetTabDescription() const;
-	bool IsActiveOrSelectedAgent(const FString& AgentName) const;
 	void SelectAgentByName(const FString& AgentName);
 	/** Restart the terminal on that chat's agent, resuming the conversation. */
 	void ResumeChat(const struct FHyperAIStudioChatSession& Session);
@@ -41,6 +45,57 @@ public:
 	static FText GetReadinessTextForStatus(const FHyperAIStudioStatus& InStatus, bool bIsRefreshing);
 	static FText GetNextActionTextForStatus(const FHyperAIStudioStatus& InStatus, bool bIsRefreshing);
 	static FString BuildTerminalBootstrapCommandForStatus(const FHyperAIStudioStatus& InStatus, const FString& AgentName, const FString& ProjectRoot, const FString& LaunchCommand);
+	/** Editor close check: chats still working get a say, and remote chats working in the background can be stopped. */
+	static bool CanCloseEditor();
+	/** The chat pages' ids: Chat for the first tab, then Chat2, Chat3... */
+	static FName GetPageId(int32 TabIndex);
+	/** Every tab running an agent, as an editor restart reopens it. */
+	static TArray<FHyperAIStudioRestartChat> GetRestartChats();
+	/**
+	 * Open tabs pick up a restart's chats now: a restart resumed late, from its notification, after the tabs started
+	 * chats of their own. A tab whose chat is idle ends it and takes its restart chat; a tab in use keeps its chat, and
+	 * the restart's goes to a free tab. Tabs not open take theirs as they open.
+	 */
+	static void TakeRestartChats();
+	/** True when every terminal widget open in the editor is one of HyperAI's chat tabs, which a restart reopens. */
+	static bool OwnsEveryTerminal();
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Tests: the agents tabs offer, as if only they were set up here; unset goes back to those that are. */
+	static void SetAgentsForTests(const TOptional<TArray<FString>>& Agents);
+	/** Tests: what a tab's next launch resumes (agent, conversation) and tells its chat first. False when the tab is not open. */
+	static bool GetTabResumeForTests(int32 TabIndex, FString& OutAgent, FString& OutSessionId, FString& OutContinue);
+	/**
+	 * Tests: launches a tab's agent now (Agent, when given, picked first), as its startup does once Unreal MCP answers,
+	 * which a test run cannot wait for. False when the tab is not open, already started, or cannot run Agent.
+	 */
+	static bool StartTabForTests(int32 TabIndex, const FString& Agent);
+#endif
+	/**
+	 * Sends Text to a chat tab as the user, opening the tab if needed (HyperAIStudio.ChatSend). Images go with it in
+	 * HyperAI's chat view; a terminal gets a long or multi-line message as one line pointing at a file that holds it.
+	 */
+	static bool SendToChat(int32 TabIndex, const FString& Text, FString& OutMessage, const TArray<FString>& Images = {});
+	/** Chats open at once. */
+	static constexpr int32 MaxChatTabs = 4;
+	/**
+	 * Opens the lowest free chat tab for a job, on the agent its task route names or else the preferred agent, and gives
+	 * the agent Prompt (with Images) as it starts. Returns the tab's index, or 0 with OutError set.
+	 */
+	static int32 OpenJobChat(const FString& Category, const FString& Prompt, const TArray<FString>& Images, FString& OutAgent, FString& OutError);
+	/**
+	 * False when the tab is not open. Working: starting, a turn running, a message queued, or a question waiting.
+	 * Started: its agent was launched, after which the tab may go behind another page (only the launch needs it in front).
+	 */
+	static bool GetTabWork(int32 TabIndex, bool& bOutWorking, bool* bOutStarted = nullptr);
+	/** Interrupts the turn running in a tab's HyperAI chat view; a terminal chat is left to finish. */
+	static void InterruptTab(int32 TabIndex);
+	/** The chat a tab's HyperAI chat view runs; null for a closed tab or a terminal one. */
+	static TSharedPtr<FHyperAIStudioNativeChat> GetTabChat(int32 TabIndex);
+	/**
+	 * Puts a prompt preset, filled from the selection, in a chat tab's prompt for the user to finish, opening the tab
+	 * if needed; never sends it. A tab whose agent has not started yet gets it in its chat view once that starts.
+	 */
+	static bool InsertPreset(int32 TabIndex, const FHyperAIStudioPromptPreset& Preset);
 
 	virtual FReply OnPreviewKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	/** Assets and actors dropped on the panel become object paths in the agent's prompt. */
@@ -58,15 +113,20 @@ private:
 	TSharedRef<SWidget> BuildModelMenu();
 	TSharedRef<SWidget> BuildContextSelector();
 	TSharedRef<SWidget> BuildContextMenu();
-	TSharedRef<SWidget> BuildMcpStatusSelector();
 	TSharedRef<SWidget> BuildMcpStatusMenu();
 	/** Paste text into the running agent's prompt without sending it. */
 	bool InsertIntoAgentPrompt(const FString& Text, const FString& Label, bool bFocusTerminal = true);
+	/**
+	 * A preset's text into this tab's prompt: the chat view's composer with the preset's hints, the terminal's prompt
+	 * as plain text (a terminal sends no hints), or held for the chat view while the agent starts.
+	 */
+	bool InsertPresetHere(const FHyperAIStudioPromptPreset& Preset, const FString& Text, const TArray<FString>& Blanks);
 	/** Handoff prompts: sent when the agent is idle and auto-send is on, otherwise typed in for the user to send. */
 	bool DeliverHandoffPrompt(const FString& Text, const FString& Label);
 	TSharedRef<SWidget> BuildNewTabMenu();
 	TSharedRef<SWidget> BuildHandoffMenu();
-	void OpenRoutedTab(const FString& Category, const FHyperAIStudioRouteChoice& Choice);
+	/** Subagent, when set, starts a Claude Code tab as that subagent. */
+	void OpenRoutedTab(const FString& Category, const FHyperAIStudioRouteChoice& Choice, const FString& Subagent = FString());
 	void StartHandoff(TWeakPtr<SHyperAIStudioQuickActionWindow> Builder);
 	/**
 	 * Moves a running handoff along: plan file written, then result file written, then review asked for. Runs on
@@ -74,11 +134,18 @@ private:
 	 */
 	bool TickHandoff(float DeltaTime);
 	TArray<FString> GetUsableAgentNames() const;
+	static TSharedPtr<SHyperAIStudioQuickActionWindow> FindTab(int32 TabIndex);
+	/** The agent, model, subagent and conversation a restart left for this tab, and what its chat is told first. */
+	void AdoptRestartChat(const FHyperAIStudioRestartChat& Chat);
+	/**
+	 * A chat a restart resumed late must not replace: a turn running, an approval, a message or job waiting, or, in the
+	 * chat view, anything said. An idle terminal chat is not, since what was said in it cannot be read.
+	 */
+	bool IsInUse() const;
 	/** The model this tab launches AgentName with: the tab's own choice, else the agent's saved one. */
 	FString GetModelForAgent(const FString& AgentName) const;
 	FText GetTabTitle() const;
 	FText GetMcpStatusText() const;
-	FSlateColor GetMcpStatusColor() const;
 	void SelectModel(FString ModelId);
 	bool IsModelSelected(FString ModelId) const;
 	FText GetModelButtonText() const;
@@ -110,8 +177,28 @@ private:
 	EActiveTimerReturnType RunQueuedVisibleTerminalCommandPoll(double CurrentTime, float DeltaTime);
 	void QueueTerminalStartup(bool bForce, bool bResetTerminal = false);
 	void RecreateTerminalSession();
-	FString GetTerminalLaunchCommandForAgent(const FString& AgentName) const;
-	FString BuildTerminalBootstrapCommand(const FString& AgentName) const;
+	/** Starts this tab's chat: picks its session id, adds Remote Control, and runs remote chats in the background. */
+	void LaunchChat(const FString& AgentName);
+	void RunBootstrap(const FString& AgentName, const FString& LaunchCommand);
+	/** Launcher, then ChatArguments (session, remote), then the model. Also returns the model's cmd prefix and argument. */
+	FString GetTerminalLaunchCommandForAgent(const FString& AgentName, const FString& ChatArguments,
+		FString* OutModelPrefix = nullptr, FString* OutModelArgument = nullptr) const;
+	/** Remote Control for a chat. The chat in this tab restarts on the same conversation now, or once the turn ends. */
+	void SetChatRemote(const FString& SessionId, bool bRemote);
+	void RelaunchActiveChat();
+	void StopBackgroundChat(const FString& ShortId, TFunction<void()> Then);
+	/** Deletes a chat the user confirmed, unless a tab has it open; every tab's chat list then shows it gone. */
+	void DeleteChat(const struct FHyperAIStudioChatSession& Session);
+	bool IsActiveChatRemote() const;
+	/** The agent is producing output, or is stopped at a question or a plan. */
+	bool IsTurnActive() const;
+	TSharedRef<SWidget> BuildRemoteToggle();
+	/** Auto Mode for Claude Code and Codex; switching it restarts this tab's chat on the same conversation. */
+	TSharedRef<SWidget> BuildAutoToggle();
+	void SetAutoMode(bool bAuto);
+	/** This agent's skills: picking one types its command into the prompt. */
+	TSharedRef<SWidget> BuildSkillsMenu();
+	FText GetRemoteToolTip() const;
 
 	FString GetSelectedAgentName() const;
 	bool HasUsableSelectedAgent() const;
@@ -136,15 +223,16 @@ private:
 	bool bActivitySidebarOpen = false;
 	FCurveSequence ChatSidebarCurve;
 	bool bChatSidebarOpen = false;
-	/** Chat running in the terminal, if it was resumed from history. */
+	/** Chat running in the terminal: resumed from history, or a new Claude Code chat's own id. */
 	FString ActiveChatSessionId;
 	TArray<FString> TranscriptLines;
 	FSimpleDelegate OnOpenWorkbench;
 	FText LastMessage;
 	bool bRefreshing = false;
 	/**
-	 * Hint under the header, set only when a probe settles. Every re-probe briefly reports "not ready",
-	 * and binding the line to live status made it expand and collapse on each heartbeat.
+	 * Hint under the header, set only when a probe settles or waits for the editor to finish starting. Every
+	 * re-probe briefly reports "not ready", and binding the line to live status made it expand and collapse on
+	 * each heartbeat.
 	 */
 	FText StatusHint;
 	bool bTerminalStartupSent = false;
@@ -156,6 +244,22 @@ private:
 	/** Chat the next agent startup resumes; cleared once that startup is sent. */
 	FString ResumeAgentName;
 	FString ResumeSessionId;
+	FString ResumeTitle;
+	/** Set when that chat already runs in the background: the startup attaches instead of starting a copy. */
+	FString ResumeBackgroundId;
+	/** Set when that chat's agent runs in HyperAI's background host: the native view reattaches to it. */
+	FString ResumeHostSession;
+	/** Title of the chat in this tab when it came from Chats; it names the remote session. */
+	FString ActiveChatTitle;
+	/** Short id of the background session this tab's terminal is attached to; empty when the chat runs in the tab. */
+	FString ActiveBackgroundId;
+	/** Remote was switched mid-turn: restart on it once the agent is idle. */
+	bool bRemoteRelaunchPending = false;
+	/** A background session is starting or stopping; the tab attaches when that is done. */
+	bool bBackgroundStarting = false;
+	/** Bumped per launch, so a background start that finishes late never attaches to a newer chat. */
+	int32 LaunchGeneration = 0;
+	double WorkingSince = 0.0;
 	FSimpleDelegate OnNewAgentTab;
 	TWeakPtr<class SDockTab> OwnerTab;
 	int32 TabIndex = 1;
@@ -164,8 +268,53 @@ private:
 	bool bPlanAutoAcceptSent = false;
 	bool bPlanAutoAcceptConfirmed = false;
 	double PlanAutoAcceptSentTime = 0.0;
-	/** Kind of task this tab was opened for from the new-tab menu; shown on the tab. */
+	/** Kind of task this tab was opened for from the new-tab menu, or its chat's first message routed it to; shown on the tab. */
 	FString RouteCategory;
+	/** RouteCategory came from the first message, so a new chat in this tab is routed again. */
+	bool bAutoRouted = false;
+	/** You picked this tab's agent or model: a task never moves it to another. */
+	bool bAgentChosenHere = false;
+	/** The native chat running here continues an earlier conversation. */
+	bool bChatResumed = false;
+	/** Said in the next native chat as it starts, such as which agent a task was routed to. */
+	FString PendingNotice;
+	/** Claude Code subagent this tab's new chats start as (claude --agent). */
+	FString TabSubagent;
+	/** After an editor restart: what this tab's chat is told when it runs again. */
+	FString ContinueMessage;
+	/** What the agent's start last waited on, so the log says it once. */
+	FString LastStartupWait;
+	/** A prompt sent before the agent started (HyperAIStudio.ChatSend, a job): the agent gets it as it starts. */
+	FString PendingPrompt;
+	TArray<FString> PendingImages;
+	/** What PendingPrompt's preset names, when the first message came from one. */
+	FHyperAIStudioMessageHints PendingHints;
+	/** A preset put in this tab before its chat view started, waiting for the composer. */
+	struct FPendingPreset
+	{
+		FHyperAIStudioPromptPreset Preset;
+		FString Text;
+		TArray<FString> Blanks;
+	};
+	TOptional<FPendingPreset> PendingPresetInsert;
+	/** Codex, Gemini and Claude Code can run in HyperAI's own chat view instead of the terminal. */
+	TSharedPtr<class SHyperAIStudioNativeChatView> NativeView;
+	TSharedRef<SWidget> BuildNativeToggle();
+	/** Switches this tab between the terminal and the native view, resuming the conversation when its id is known. */
+	void SetNativeView(bool bNative);
+	/** Replaces the terminal with a native chat for the selected agent, resuming ResumeId when set. */
+	bool StartNativeChat(const FString& ResumeId, const FString& HostSession = FString());
+	void StopNativeChat();
+	/** A mode picked in the chat view: kept for this tab's next chats, and its preferred agent and model taken while the chat is new. */
+	void OnModeChosen(const FHyperAIStudioChatMode& Mode);
+	/** The mode this tab's chats run in (HyperAIStudio::ChatModes). */
+	FString TabModeId;
+	/**
+	 * A new chat's first message, before it is sent: the task route it fits starts its agent here, the chat starting
+	 * again on that agent with the message when it is another. A preset's message takes its category's route (Hints).
+	 * True when it took the message.
+	 */
+	bool RouteFirstMessage(const FString& Message, const TArray<FString>& Images, const FHyperAIStudioMessageHints& Hints);
 	/** Model chosen in this tab (or by its route) for TabModelAgent; other tabs keep their own. */
 	FString TabModel;
 	FString TabModelAgent;

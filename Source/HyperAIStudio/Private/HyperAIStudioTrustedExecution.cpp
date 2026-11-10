@@ -568,6 +568,8 @@ struct FHyperAIStudioTrustedPreparedArtifactState
 	FString ContractFingerprint;
 	int64 ExpiresUtcMs = 0;
 	int64 ExpiresMonotonicMs = 0;
+	/** Kept with the handle so a plan that outlived its seal can be prepared again (Host::Reprepare). */
+	TSharedPtr<const HyperAIStudio::TrustedExecution::Private::FTrustedPreparationRecord, ESPMode::ThreadSafe> Inputs;
 };
 
 namespace HyperAIStudio::TrustedExecution::Private
@@ -2445,6 +2447,7 @@ bool FHyperAIStudioTrustedExecutionHost::PrepareDryRun(
 	PreparedState->ContractFingerprint = CorePrepared.ContractFingerprint;
 	PreparedState->ExpiresUtcMs = PreparationRecord->ExpiresUtcMs;
 	PreparedState->ExpiresMonotonicMs = PreparationRecord->ExpiresMonotonicMs;
+	PreparedState->Inputs = PreparationRecord;
 	TArray<TSharedPtr<FTrustedPreparationRecord, ESPMode::ThreadSafe>> ReleasedExpiredPreparations;
 	{
 		FScopeLock Lock(&State->Mutex);
@@ -2738,6 +2741,55 @@ bool FHyperAIStudioTrustedExecutionHost::StageExact(
 	return true;
 }
 
+bool FHyperAIStudioTrustedExecutionHost::Reprepare(
+	const FHyperAIStudioTrustedPreparedArtifact& Held,
+	FHyperAIStudioTrustedPreparedArtifact& OutFresh,
+	FHyperAIStudioTrustedExecutionDiagnostic& OutStatus,
+	FString& OutError)
+{
+	using namespace HyperAIStudio::TrustedExecution::Private;
+	OutFresh.Reset();
+	OutStatus = FHyperAIStudioTrustedExecutionDiagnostic{};
+	OutError.Reset();
+	const TSharedPtr<const FTrustedPreparationRecord, ESPMode::ThreadSafe> Record =
+		Held.State.IsValid() && Held.State->Host.Pin().Get() == State.Get() ? Held.State->Inputs : nullptr;
+	if (!Record.IsValid() || !Record->Payload.IsValid() || !Record->FreshVerifier.IsValid())
+	{
+		OutError = TEXT("The held preparation does not belong to this trusted core host.");
+		SetDiagnostic(OutStatus, TEXT("trusted_preparation_invalid"), OutError);
+		return false;
+	}
+	// Same request, payload and verifier: only the authority seal and the lifetime are new.
+	FHyperAIStudioTrustedPrepareReport Report;
+	if (!PrepareDryRun(Record->Request, Record->Payload.ToSharedRef(), Record->FreshVerifier.ToSharedRef(),
+			OutFresh, Report, OutError)
+		|| !Report.bPrepared)
+	{
+		OutStatus = Report.Status;
+		OutError = OutError.IsEmpty() ? Report.Status.Diagnostic : OutError;
+		return false;
+	}
+	return true;
+}
+
+bool FHyperAIStudioTrustedExecutionHost::DescribePrepared(
+	const FHyperAIStudioTrustedPreparedArtifact& Prepared,
+	FHyperAIStudioTrustedArtifactRequest& OutRequest) const
+{
+	if (!Prepared.State.IsValid() || !Prepared.State->Inputs.IsValid()
+		|| Prepared.State->Host.Pin().Get() != State.Get())
+	{
+		return false;
+	}
+	OutRequest = Prepared.State->Inputs->Request;
+	return true;
+}
+
+bool FHyperAIStudioTrustedExecutionHost::IsLaneBusy() const
+{
+	return State->Service->IsBusy();
+}
+
 bool FHyperAIStudioTrustedExecutionHost::SubmitExact(
 	const FHyperAIStudioTypedArtifactStageReceipt& Receipt,
 	const FString& AuthorizationToken,
@@ -2931,6 +2983,13 @@ bool FHyperAIStudioTrustedExecutionHost::InspectCoreAuthorizationGrantForTests(
 }
 #endif
 
+bool FHyperAIStudioTrustedExecutionHost::QueryLiveStatus(
+	const FString& OperationId,
+	FHyperAIStudioTypedArtifactOperationStatus& OutStatus) const
+{
+	return State->Service->QueryLiveStatus(OperationId, OutStatus);
+}
+
 bool FHyperAIStudioTrustedExecutionHost::QueryStatus(
 	const FString& OperationId,
 	FHyperAIStudioTypedArtifactOperationStatus& OutStatus,
@@ -3020,22 +3079,6 @@ namespace HyperAIStudio::TrustedExecution::Private
 			}
 		}
 		return bStored;
-	}
-
-	bool IssueCoreUiAuthorizationGrant(
-		const FHyperAIStudioTypedArtifactStageReceipt& Receipt,
-		FString& OutAuthorizationToken,
-		FString& OutError)
-	{
-		const TSharedPtr<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host = GetCoreHost();
-		if (!Host.IsValid())
-		{
-			OutAuthorizationToken.Reset();
-			OutError = TEXT("Trusted core execution host is unavailable.");
-			return false;
-		}
-		return Host->IssueAuthorizationFromCoreUiApproval(
-			Receipt, OutAuthorizationToken, OutError);
 	}
 
 	void BeginEnginePreExit()
@@ -3206,6 +3249,16 @@ bool FHyperAIStudioTrustedExecutionFacade::SubmitExact(
 		return false;
 	}
 	return Host->SubmitExact(Receipt, AuthorizationToken, OutSubmission, OutStatus, OutError);
+}
+
+bool FHyperAIStudioTrustedExecutionFacade::QueryLiveStatus(
+	const FString& OperationId,
+	FHyperAIStudioTypedArtifactOperationStatus& OutStatus)
+{
+	const TSharedPtr<FHyperAIStudioTrustedExecutionHost, ESPMode::ThreadSafe> Host =
+		HyperAIStudio::TrustedExecution::Private::GetCoreHost();
+	OutStatus = FHyperAIStudioTypedArtifactOperationStatus{};
+	return Host.IsValid() && Host->QueryLiveStatus(OperationId, OutStatus);
 }
 
 bool FHyperAIStudioTrustedExecutionFacade::QueryStatus(

@@ -1,0 +1,976 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "environment-recipes",
+ "presets": [
+  {
+   "id": "environment-recipes.fantasy-glade",
+   "title": "Build a fantasy glade around an ancient giant tree",
+   "summary": "A 500 m landscape with a sunlit clearing, a path and old forest: modeled trees, bushes and mushrooms grown by PCG round one giant tree.",
+   "packs": [
+    "worldbuilding_navigation",
+    "pcg",
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-modeling"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_operation_wait",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_model_validate",
+    "hyper_landscape_apply_plan",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_foliage_apply_plan",
+    "hyper_landscape_inspect",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "recipe",
+    "write_asset",
+    "landscape.create",
+    "landscape.road",
+    "landscape.paint",
+    "ecosystem.create",
+    "volume.create",
+    "foliage_type.create",
+    "foliage.place",
+    "landscape.create_material"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "fantasy",
+    "glade",
+    "forest",
+    "ecosystem",
+    "pcg",
+    "landscape",
+    "modeling",
+    "hero tree",
+    "environment"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "landscape_material",
+     "label": "Landscape material",
+     "default": "none",
+     "hint": "An existing landscape material whose layer blend names this recipe's paint layers, or none to make one that shows each layer in a flat colour."
+    },
+    {
+     "name": "seed",
+     "label": "Seed",
+     "default": "7"
+    }
+   ],
+   "prompt": "Build a fantasy glade in {{level}}: a sunlit clearing round one ancient giant tree, old forest beyond, a path through. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n1. hyper_model_inspect Folder {{content_folder}}/Glade; if mesh_modeling or pcg is off, say so and stop. hyper_model_apply_plan, dry run then bDryRun false (fresh OperationId): recipe ops (Shape, Size cm, Seed) tree 1200 (seeds 1, 2), tree 2600 (the giant, Accent #c9a640), bush 150 (seeds 1, 2), mushroom 60 (seeds 1, 2), grass_tuft 40; write_asset each to {{content_folder}}/Glade/SM_<Name>, trees Nanite=true, grass Collision=none. hyper_model_validate, Policy placeholder.\n2. hyper_landscape_apply_plan (fresh OperationId): if {{landscape_material}} is none, first landscape.create_material Material {{content_folder}}/Glade/M_GladeLayers, PaintLayers Meadow, Forest, Path (flat colours); landscape.create Glade, Size 504, Noise Seed {{seed}} Amplitude 40, Material {{landscape_material}} or that one, PaintLayers Meadow, Forest, Path; landscape.road GladePath through (-24000,-8000,0), (0,0,0), (23000,9000,0), Width 3, Layer Path; landscape.paint Meadow, then Forest with Patch 120, Coverage 0.6; landscape.paint Meadow alone, Radius 45, Center (1,1,0) (a zero Center paints everything).\n3. hyper_pcg_scatter_apply_plan (bSave true if World Partition): ecosystem.create {{content_folder}}/Glade/PCG_Glade, Forest on Forest (trees, bushes, mushrooms), Meadow on Meadow (grass), AvoidLayers Path, RoadMargin 2; volume.create GladeLife, Cover Glade. hyper_operation_wait for counts.\n4. hyper_foliage_apply_plan: foliage_type.create for the giant; foliage.place it at (1500,-1500,20000), clear of the path, dropping onto the ground.\n5. hyper_landscape_inspect for paint shares and HeightMax; hyper_verify_run, one case: AddPlayer at (6000,3000) at HeightMax in cm + 500, Wait Seconds 8, LookAt (0,0,0) and Capture, as PlayerIndex 1.\nEnd with a PASS/FAIL table: three layers painted, model errors 0, every species above 0 and none on Path, giant placed. Show the capture on its own line; leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.ruined-courtyard",
+   "title": "Build a ruined courtyard with arches, walls and rubble",
+   "summary": "Flatten a pad on the selected landscape, model broken walls, pillars and an arch, place them on the ground and scatter rubble round them.",
+   "packs": [
+    "mesh_modeling",
+    "level_design",
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-modeling"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_operation_wait",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_model_validate",
+    "hyper_spatial_query",
+    "hyper_landscape_apply_plan",
+    "hyper_spatial_apply_plan",
+    "hyper_foliage_apply_plan",
+    "hyper_foliage_inspect",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "recipe",
+    "write_asset",
+    "landscape.sculpt",
+    "place",
+    "foliage_type.create",
+    "foliage.scatter"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "ruins",
+    "courtyard",
+    "fantasy",
+    "medieval",
+    "arch",
+    "rubble",
+    "modeling",
+    "set dressing"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "center",
+     "label": "Courtyard centre (cm)",
+     "default": "0,0,0"
+    },
+    {
+     "name": "stone_tint",
+     "label": "Stone colour",
+     "default": "#a89f8c",
+     "hint": "A hex colour painted into the models' vertex colour."
+    }
+   ],
+   "prompt": "Build a ruined courtyard on {{selected_actor}} in {{level}}, centred at {{center}} (cm): a 30 m square of broken walls with an arch gateway, standing and fallen pillars, and rubble. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n1. hyper_model_inspect Folder {{content_folder}}/Courtyard; if mesh_modeling or level_design is off, say so and stop. hyper_model_apply_plan, dry run then bDryRun false (fresh OperationId): recipe ops (Shape, Size cm, Seed) ruined_wall 800 (seeds 1-3), pillar 450 (seeds 1, 2), arch 500, rock 60 (seeds 1, 2), all Tint {{stone_tint}}; write_asset each to {{content_folder}}/Courtyard/SM_<Name>, Collision=convex, but hulls:4 for the arch so its opening stays open, hulls:6 for walls and none for rocks. hyper_model_validate, Policy placeholder.\n2. hyper_spatial_query ground at {{center}}; hyper_landscape_apply_plan (fresh OperationId): landscape.sculpt flatten there, Radius 22, Falloff 12, Height that GroundZ in meters.\n3. One hyper_spatial_apply_plan (fresh OperationId): place ops with bDropToGround true, Location Z 2000 cm above the pad: walls on the square's edges, the arch on the south edge, four pillars inside, two rolled 90 degrees; labels Court_<Part>_<n>.\n4. hyper_foliage_apply_plan: foliage_type.create per rock mesh (Density 30, AlignToNormal true); foliage.scatter them in a 20 m circle at {{center}}, Clearings 3 m round the arch.\n5. hyper_foliage_inspect for rubble counts; hyper_verify_run, one case (TimeoutSeconds 55): AddPlayer on the ground 2500 cm south of the arch, then as PlayerIndex 1 a Play step with Goal Reach, Target Court_Pillar_1, TimeoutSeconds 45, and Capture.\nEnd with a PASS/FAIL table: pad slope under 3 degrees, model errors 0, every piece placed (Moves), rubble count, arch passable (Reach passed). Show the capture on its own line; leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.coastal-fishing-village",
+   "title": "Build a coastal fishing village on a sheltered bay",
+   "summary": "Shape a bay with beach, dunes and cliffs, lay the village road and house plots, model a lighthouse and rocks, and grow dune grass and scrub.",
+   "packs": [
+    "worldbuilding_navigation",
+    "pcg",
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-modeling"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_operation_wait",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_model_validate",
+    "hyper_landscape_apply_plan",
+    "hyper_landscape_inspect",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "recipe",
+    "write_asset",
+    "landscape.create",
+    "landscape.sculpt",
+    "landscape.road",
+    "landscape.paint",
+    "ecosystem.create",
+    "volume.create",
+    "landscape.create_material"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "coast",
+    "village",
+    "fishing",
+    "beach",
+    "lighthouse",
+    "realistic",
+    "ecosystem",
+    "team"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "landscape_material",
+     "label": "Landscape material",
+     "default": "none",
+     "hint": "An existing landscape material whose layer blend names this recipe's paint layers, or none to make one that shows each layer in a flat colour."
+    },
+    {
+     "name": "plots",
+     "label": "House plots",
+     "default": "6"
+    }
+   ],
+   "prompt": "Build a fishing village in {{level}}: a bay with beach and dunes, cliffs, a road with {{plots}} clear house plots, a headland lighthouse. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n1. hyper_model_inspect Folder {{content_folder}}/Coast; if mesh_modeling or pcg is off, say so and stop. hyper_model_apply_plan, dry run then bDryRun false (fresh OperationId): recipe ops (Shape, Size cm, Seed) tower 2000 (lighthouse), rock 120 (seeds 1-3), bush 150, grass_tuft 50; write_asset each to {{content_folder}}/Coast/SM_<Name>, grass Collision=none. hyper_model_validate, Policy placeholder.\n2. hyper_landscape_apply_plan (fresh OperationId): if {{landscape_material}} is none, first landscape.create_material Material {{content_folder}}/Coast/M_CoastLayers, PaintLayers Grass, Sand, Rock, Road, Plot (flat colours); landscape.create Coast, Size 1008, Noise Amplitude 30, Material {{landscape_material}} or that one, PaintLayers Grass, Sand, Rock, Road, Plot; landscape.sculpt lower (0,-30000,0), Radius 150, Amount 25 (the bay), and raise (25000,-25000,0), Radius 60, Amount 30 (the headland); landscape.road VillageRoad up from the beach, Width 5, Layer Road.\n3. hyper_landscape_inspect for HeightMin/HeightMax. Second plan: landscape.paint Grass, Sand from HeightMin less 1 m to HeightMin plus 4 m, Rock from SlopeMin 35; per plot beside the road, landscape.paint Plot alone, Radius 12.\n4. Find the ground at (25000,-25000) with Epic's SceneTools.trace_world from Z = HeightMax in cm + 1000 down to HeightMin in cm - 1000 (ground Z = that start Z less the distance it returns); place the lighthouse there (SceneTools.add_to_scene_from_asset at that Z, snap_to_ground), tag Landmark. hyper_pcg_scatter_apply_plan (bSave true if World Partition): ecosystem.create {{content_folder}}/Coast/PCG_Coast, Dunes on Sand (grass tufts), Slopes on Grass (bushes, rocks), AvoidLayers Road and Plot, RoadMargin 3, AvoidTags Landmark; volume.create CoastLife, Cover Coast. hyper_operation_wait.\n5. hyper_verify_run, one case: AddPlayer at a plot at HeightMax in cm + 500, Wait Seconds 8, LookAt the bay and Capture, as PlayerIndex 1.\nEnd with a PASS/FAIL table: paint shares, plots empty, counts per species, lighthouse grounded, model errors 0. Show the capture on its own line; leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.crystal-canyon-approach",
+   "title": "Build a crystal-lined canyon approach to a cavern",
+   "summary": "Carve a winding canyon with ridged walls, paint crystal fields in patches, model crystal clusters and boulders, and grow them beside the trail.",
+   "packs": [
+    "worldbuilding_navigation",
+    "pcg",
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-modeling"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_operation_wait",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_model_validate",
+    "hyper_landscape_apply_plan",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_landscape_inspect",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "landscape.create",
+    "landscape.road",
+    "landscape.paint",
+    "recipe",
+    "write_asset",
+    "ecosystem.create",
+    "volume.create",
+    "landscape.create_material"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "fantasy",
+    "crystals",
+    "canyon",
+    "cave",
+    "trail",
+    "ecosystem",
+    "modeling",
+    "team"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "landscape_material",
+     "label": "Landscape material",
+     "default": "none",
+     "hint": "An existing landscape material whose layer blend names this recipe's paint layers, or none to make one that shows each layer in a flat colour."
+    },
+    {
+     "name": "seed",
+     "label": "Seed",
+     "default": "21"
+    }
+   ],
+   "prompt": "Build the approach to a crystal cavern in {{level}}: a winding canyon between ridged walls, crystal fields, boulders, and a trail to the cave mouth. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n1. hyper_model_inspect Folder {{content_folder}}/Crystal; if mesh_modeling or pcg is off, say so and stop. hyper_model_apply_plan, dry run then bDryRun false (fresh OperationId): recipe ops (Shape, Size cm, Seed) crystal_cluster 120 (seeds 1-3), rock 200 (seeds 1-3), standing_stone 300 (a waymarker); write_asset each to {{content_folder}}/Crystal/SM_<Name>, Nanite=true, Collision=convex. hyper_model_validate, Policy placeholder.\n2. hyper_landscape_apply_plan (fresh OperationId): if {{landscape_material}} is none, first landscape.create_material Material {{content_folder}}/Crystal/M_CanyonLayers, PaintLayers Gravel, Rock, CrystalField, Trail (flat colours); landscape.create Canyon, Size 1008, Noise bRidged true, Amplitude 120, Seed {{seed}}, Material {{landscape_material}} or that one, PaintLayers Gravel, Rock, CrystalField, Trail; landscape.road CanyonTrail through (-45000,0,0), (-20000,8000,0), (0,0,0), (20000,-8000,0), (45000,5000,0), Width 6, Layer Trail; landscape.paint Gravel, Rock from SlopeMin 30, CrystalField with Patch 60, Coverage 0.25, DistanceMax 40.\n3. hyper_pcg_scatter_apply_plan (bSave true if World Partition): ecosystem.create {{content_folder}}/Crystal/PCG_Crystal, Crystals on CrystalField (clusters Cluster 4, bAlignToGround, Tilt 20; rocks), Canyon on Gravel (boulders), AvoidLayers Trail, RoadMargin 2; volume.create CrystalLife, Cover Canyon. hyper_operation_wait for counts.\n4. hyper_landscape_inspect for paint shares, HeightMin and HeightMax. Find the ground at the trail's end (45000,5000) with Epic's SceneTools.trace_world from Z = HeightMax in cm + 1000 down to HeightMin in cm - 1000 (ground Z = that start Z less the distance it returns); place the waymarker there (SceneTools.add_to_scene_from_asset at that Z, snap_to_ground), label Crystal_Waymarker.\n5. hyper_verify_run, one case (TimeoutSeconds 55): AddPlayer on the trail at (35000,-200) at HeightMax in cm + 500, then as PlayerIndex 1 a Play step with Goal Reach, Target Crystal_Waymarker, TimeoutSeconds 45, and Capture.\nEnd with a PASS/FAIL table: the trail's last 110 m walkable (Reach passed), CrystalField share 10-30%, crystals above 0, model errors 0. Show the capture on its own line; leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.giant-mushroom-forest",
+   "title": "Grow a giant mushroom forest on a landscape's lowlands",
+   "summary": "Paint shroom patches on the low ground of the selected landscape, model giant and small mushrooms and dead trunks, and grow them big to small.",
+   "packs": [
+    "worldbuilding_navigation",
+    "pcg",
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-modeling"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_operation_wait",
+    "hyper_landscape_inspect",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_model_validate",
+    "hyper_landscape_apply_plan",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "landscape.paint",
+    "recipe",
+    "write_asset",
+    "ecosystem.create",
+    "volume.create"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "fantasy",
+    "mushrooms",
+    "forest",
+    "fungal",
+    "ecosystem",
+    "pcg",
+    "modeling"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "base_layer",
+     "label": "Base paint layer",
+     "default": "Grass"
+    },
+    {
+     "name": "layer",
+     "label": "Mushroom paint layer",
+     "default": "Shroomland"
+    },
+    {
+     "name": "low_band",
+     "label": "Lowland band (m above the lowest ground)",
+     "default": "40"
+    }
+   ],
+   "prompt": "Turn the lowlands of {{selected_actor}} in {{level}} into a giant mushroom forest. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n1. hyper_landscape_inspect: paint layers and HeightMin. If {{layer}} or {{base_layer}} is not a paint layer, say the material needs it and stop.\n2. hyper_model_inspect Folder {{content_folder}}/Shrooms; if mesh_modeling or pcg is off, say so and stop. hyper_model_apply_plan, dry run then bDryRun false (fresh OperationId): recipe ops (Shape, Size cm, Seed) mushroom 600 (giants, seeds 1-3), mushroom 40 (seeds 4, 5), tree_trunk 500 (dead trunks, seeds 1, 2), grass_tuft 30 (moss); write_asset each to {{content_folder}}/Shrooms/SM_<Name>, Nanite=true for the giants, moss Collision=none. hyper_model_validate, Policy placeholder.\n3. hyper_landscape_apply_plan (fresh OperationId): landscape.paint with rules {{base_layer}}, then {{layer}} from HeightMin less 1 m to HeightMin plus {{low_band}} m, SlopeMax 25, Patch 90, Coverage 0.5, Breakup 0.5. Paint rewrites every layer, so add rules for the other layers the landscape uses.\n4. hyper_pcg_scatter_apply_plan (bSave true if World Partition): ecosystem.create {{content_folder}}/Shrooms/PCG_Shrooms, one biome on {{layer}}: GiantShrooms (Density 0.008, Footprint 7, Scale 0.7-1.5, Patch 80, Coverage 0.7, CullDistance 0), Trunks (Density 0.01, Footprint 3, Tilt 15), SmallShrooms (Density 0.1, Cluster 6, ClusterRadius 2), Moss (Density 1, Patch 15, Coverage 0.5, CullDistance 80); volume.create ShroomLife, Cover the landscape. hyper_operation_wait.\n5. hyper_verify_run, one case (TimeoutSeconds 40): a Play step with Goal Explore, Seconds 30, then Capture.\nEnd with a PASS/FAIL table: {{layer}} share 15-45%, counts per species above 0, model errors 0. Show the capture on its own line; leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.snowy-mountain-pass",
+   "title": "Build a snowy mountain pass with a treeline forest",
+   "summary": "Ridged peaks, a trail levelled through the saddle, snow by height and rock by slope, and modeled pines and boulders grown below the treeline.",
+   "packs": [
+    "worldbuilding_navigation",
+    "pcg",
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-modeling"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_operation_wait",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_model_validate",
+    "hyper_landscape_apply_plan",
+    "hyper_landscape_inspect",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "recipe",
+    "write_asset",
+    "landscape.create",
+    "landscape.sculpt",
+    "landscape.road",
+    "landscape.paint",
+    "ecosystem.create",
+    "volume.create",
+    "landscape.create_material"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "snow",
+    "mountain",
+    "pass",
+    "treeline",
+    "landscape",
+    "pcg",
+    "modeling",
+    "winter",
+    "environment"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "landscape_material",
+     "label": "Landscape material",
+     "default": "none",
+     "hint": "An existing landscape material whose layer blend names this recipe's paint layers, or none to make one that shows each layer in a flat colour."
+    },
+    {
+     "name": "treeline",
+     "label": "Treeline (m above the valley floor)",
+     "default": "120"
+    },
+    {
+     "name": "snowline",
+     "label": "Snowline (m above the valley floor)",
+     "default": "170"
+    }
+   ],
+   "prompt": "Build a snowy mountain pass in {{level}}: ridged peaks, a trail through a saddle, pines up to {{treeline}} m above the valley floor, snow above {{snowline}} m. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n1. hyper_model_inspect Folder {{content_folder}}/Pass; if mesh_modeling or pcg is off, say so and stop. hyper_model_apply_plan, dry run then bDryRun false (fresh OperationId): recipe ops (Shape, Size cm, Seed) tree 1400 (pines, seeds 1-3, Accent #2f4a2c), rock 250 (seeds 1-3); write_asset each to {{content_folder}}/Pass/SM_<Name>. hyper_model_validate, Policy placeholder.\n2. hyper_landscape_apply_plan (fresh OperationId): if {{landscape_material}} is none, first landscape.create_material Material {{content_folder}}/Pass/M_PassLayers, PaintLayers Grass, Rock, Snow, Trail (flat colours); landscape.create Pass, Size 1008, Noise bRidged true, Amplitude 260, Material {{landscape_material}} or that one, PaintLayers Grass, Rock, Snow, Trail; landscape.sculpt lower a saddle at the origin, Radius 150, Amount 60; landscape.road PassTrail through (-40000,-5000,0), (-15000,0,0), (0,0,0), (40000,6000,0), Width 4, Layer Trail.\n3. hyper_landscape_inspect for HeightMin and HeightMax. Second plan: landscape.paint Grass, Rock from SlopeMin 33, Snow from HeightMin plus {{snowline}} m.\n4. hyper_pcg_scatter_apply_plan (bSave true if World Partition): ecosystem.create {{content_folder}}/Pass/PCG_Pass, Forest on Grass, Height HeightMin less 1 to HeightMin plus {{treeline}} m, SlopeMax 30 (pines, rocks), Scree on Rock (rocks); AvoidLayers Trail, RoadMargin 4 (keeps pine crowns off the trail); volume.create PassLife, Cover Pass. hyper_operation_wait.\n5. hyper_verify_run, one case: AddPlayer at (-15000,0) at HeightMax in cm + 500, Wait Seconds 8, LookAt (0,0,0) and Capture, as PlayerIndex 1.\nEnd with a PASS/FAIL table: Snow share above 0, the ecosystem's note keeps 4 m off landscape roads, counts per species above 0, model errors 0. Show the capture on its own line; leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.desert-oasis",
+   "title": "Build a desert oasis with dunes, palms and a dry pool",
+   "summary": "Ridged dunes round a flattened oasis with a sunken pool basin, sand, grass and rock painted, modeled palms, bushes and rocks grown only where they belong.",
+   "packs": [
+    "worldbuilding_navigation",
+    "pcg",
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-modeling"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_operation_wait",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_model_validate",
+    "hyper_landscape_apply_plan",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_landscape_inspect",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "recipe",
+    "write_asset",
+    "landscape.create",
+    "landscape.sculpt",
+    "landscape.paint",
+    "ecosystem.create",
+    "volume.create",
+    "landscape.create_material"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "desert",
+    "oasis",
+    "dunes",
+    "palms",
+    "arid",
+    "realistic",
+    "ecosystem"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "landscape_material",
+     "label": "Landscape material",
+     "default": "none",
+     "hint": "An existing landscape material whose layer blend names this recipe's paint layers, or none to make one that shows each layer in a flat colour."
+    },
+    {
+     "name": "seed",
+     "label": "Seed",
+     "default": "5"
+    }
+   ],
+   "prompt": "Build a desert oasis in {{level}}: dunes round a flat 120 m oasis with a dry sunken pool. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n1. hyper_model_inspect Folder {{content_folder}}/Oasis; if mesh_modeling or pcg is off, say so and stop. hyper_model_apply_plan, dry run then bDryRun false (fresh OperationId): recipe ops (Shape, Size cm, Seed) tree 900 (palm stand-ins, seeds 1-3), bush 120, rock 150 (seeds 1, 2), grass_tuft 40; write_asset each to {{content_folder}}/Oasis/SM_<Name>, grass Collision=none. hyper_model_validate, Policy placeholder.\n2. hyper_landscape_apply_plan (fresh OperationId): if {{landscape_material}} is none, first landscape.create_material Material {{content_folder}}/Oasis/M_OasisLayers, PaintLayers Sand, OasisGrass, Rock, Mud (flat colours); landscape.create Oasis at (0,0,5000), Size 1008, Noise bRidged true, Amplitude 35, Seed {{seed}}, Material {{landscape_material}} or that one, PaintLayers Sand, OasisGrass, Rock, Mud; landscape.sculpt flatten at the origin, Radius 60, Falloff 40, Height 50, then lower there, Radius 18, Falloff 8, Amount 3 (pool floor 47 m); landscape.paint Sand, then Rock from SlopeMin 28; landscape.paint Radius 60, Center (1,1,0) (a zero Center paints everything): OasisGrass, then Mud with HeightMax 48.\n3. hyper_pcg_scatter_apply_plan (bSave true if World Partition): ecosystem.create {{content_folder}}/Oasis/PCG_Oasis, Oasis on OasisGrass (palms Density 0.01, Footprint 5; bushes; grass Density 2), Desert on Sand (rocks Density 0.005, Sink 20); AvoidLayers Mud; volume.create OasisLife, Cover Oasis. hyper_operation_wait.\n4. hyper_landscape_inspect for paint shares and HeightMax; hyper_verify_run, one case: AddPlayer at (5000,0) at HeightMax in cm + 500, Wait Seconds 8, LookAt (0,0,5000) and Capture, as PlayerIndex 1.\nEnd with a PASS/FAIL table: OasisGrass and Mud shares above 0, counts per species above 0, the pool clear, model errors 0. Show the capture on its own line; leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.swamp-dead-trees-reeds",
+   "title": "Build a swamp of dead trees, reeds and mud pools",
+   "summary": "Flat wetland with sunken mud pools, reeds at the waterline, dead trunks and toadstools on hummocks and a boardwalk route kept clear.",
+   "packs": [
+    "worldbuilding_navigation",
+    "pcg",
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-modeling"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_operation_wait",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_model_validate",
+    "hyper_landscape_apply_plan",
+    "hyper_landscape_inspect",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "landscape.create",
+    "landscape.sculpt",
+    "landscape.road",
+    "landscape.paint",
+    "recipe",
+    "write_asset",
+    "ecosystem.create",
+    "volume.create",
+    "landscape.create_material"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "swamp",
+    "marsh",
+    "wetland",
+    "dead trees",
+    "reeds",
+    "horror",
+    "fantasy",
+    "ecosystem"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "landscape_material",
+     "label": "Landscape material",
+     "default": "none",
+     "hint": "An existing landscape material whose layer blend names this recipe's paint layers, or none to make one that shows each layer in a flat colour."
+    },
+    {
+     "name": "pools",
+     "label": "Mud pools",
+     "default": "12"
+    }
+   ],
+   "prompt": "Build a swamp in {{level}}: {{pools}} mud pools, reeds at their edges, snags and toadstools on hummocks, a boardwalk. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n1. hyper_model_inspect Folder {{content_folder}}/Swamp; if mesh_modeling or pcg is off, say so and stop. hyper_model_apply_plan, dry run then bDryRun false (fresh OperationId): recipe ops (Shape, Size cm, Seed) tree_trunk 800 (snags, seeds 1-3), mushroom 30 (toadstools), grass_tuft 120 (reeds, seeds 1, 2); write_asset each to {{content_folder}}/Swamp/SM_<Name>, reeds Collision=none. hyper_model_validate, Policy placeholder.\n2. hyper_landscape_apply_plan (fresh OperationId): if {{landscape_material}} is none, first landscape.create_material Material {{content_folder}}/Swamp/M_SwampLayers, PaintLayers Moss, Mud, Reeds, Walk (flat colours); landscape.create Swamp at (0,0,10000), Size 504, HeightRange 64, Noise Amplitude 3, Wavelength 60, Material {{landscape_material}} or that one, PaintLayers Moss, Mud, Reeds, Walk; {{pools}} landscape.sculpt lower ops spread over it, Radius 6 to 15, Amount 1.5; landscape.road Boardwalk through 4 points, Width 2.5, Layer Walk.\n3. hyper_landscape_inspect for HeightMin/HeightMax. Second plan: landscape.paint Moss, then Reeds up to HeightMin plus 1.2 m with HeightFade 0.3, then Mud up to HeightMin plus 0.6 m.\n4. hyper_pcg_scatter_apply_plan (bSave true if World Partition): ecosystem.create {{content_folder}}/Swamp/PCG_Swamp, Hummocks on Moss (snags Density 0.006, Footprint 4, Tilt 12; toadstools Cluster 5), Reedbeds on Reeds (reeds Density 3, Footprint 0.3); AvoidLayers Walk and Mud, RoadMargin 2; volume.create SwampLife, Cover Swamp. hyper_operation_wait.\n5. hyper_verify_run, one case: AddPlayer at the boardwalk's second point at HeightMax in cm + 300, Wait Seconds 8, LookAt the nearest pool and Capture, as PlayerIndex 1.\nEnd with a PASS/FAIL table: Mud and Reeds shares above 0, counts per species above 0, model errors 0. Show the capture on its own line; leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.stone-circle-meadow",
+   "title": "Raise a stone circle in a grassy meadow",
+   "summary": "Model standing stones and grass tufts, set the stones in a ring on the selected landscape with foliage, and grass the meadow round them.",
+   "packs": [
+    "worldbuilding_navigation",
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-modeling"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_operation_wait",
+    "hyper_landscape_inspect",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_model_validate",
+    "hyper_foliage_apply_plan",
+    "hyper_foliage_inspect",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "recipe",
+    "write_asset",
+    "foliage_type.create",
+    "foliage.place",
+    "foliage.scatter"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "stone circle",
+    "meadow",
+    "fantasy",
+    "foliage",
+    "modeling",
+    "landmark",
+    "starter"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "center",
+     "label": "Circle centre (cm)",
+     "default": "0,0,0"
+    },
+    {
+     "name": "stones",
+     "label": "Stones",
+     "default": "9"
+    },
+    {
+     "name": "ring_radius",
+     "label": "Ring radius (cm)",
+     "default": "1400"
+    }
+   ],
+   "prompt": "Raise a stone circle on {{selected_actor}} in {{level}}: {{stones}} standing stones on a {{ring_radius}} cm ring round {{center}} (cm), in a meadow of grass tufts. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n1. hyper_landscape_inspect: confirm the landscape covers {{center}}, and read HeightMax.\n2. hyper_model_inspect Folder {{content_folder}}/StoneCircle; if mesh_modeling is off, say so and stop. hyper_model_apply_plan, dry run then bDryRun false (fresh OperationId): recipe ops (Shape, Size cm, Seed) standing_stone 300, 360 and 420 (seeds 1-3), grass_tuft 40 (seeds 1, 2); write_asset each to {{content_folder}}/StoneCircle/SM_<Name>, stones Collision=convex, grass Collision=none. hyper_model_validate, Policy placeholder.\n3. One hyper_foliage_apply_plan (fresh OperationId), one foliage_type.create per mesh under {{content_folder}}/StoneCircle/Foliage: stones AlignToNormal false; grass Density 400, AlignToNormal true, CullDistance (Min=4000,Max=6000). foliage.place the stones at {{stones}} evenly spaced ring points at HeightMax in cm + 100, cycling the three; foliage.scatter the grass in a 30 m circle at {{center}}, Clearings 3 m at the centre.\n4. hyper_foliage_inspect for instances per type; hyper_verify_run, one case: AddPlayer at 2500 cm east of {{center}}, HeightMax in cm + 300, Wait Seconds 8, LookAt {{center}} and Capture, as PlayerIndex 1.\nEnd with a PASS/FAIL table: {{stones}} stones placed, grass instances above 0, centre clear, model errors 0. Show the capture on its own line; leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.autumn-logging-road",
+   "title": "Dress a logging road through an autumn hardwood forest",
+   "summary": "Lay a gravel logging road on the selected landscape, paint its verges, model hardwoods, bushes and snags, and grow a forest that keeps the road open.",
+   "packs": [
+    "worldbuilding_navigation",
+    "pcg",
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-modeling"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_operation_wait",
+    "hyper_landscape_inspect",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_model_validate",
+    "hyper_landscape_apply_plan",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "landscape.road",
+    "landscape.paint",
+    "recipe",
+    "write_asset",
+    "ecosystem.create",
+    "volume.create"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "forest",
+    "autumn",
+    "road",
+    "verge",
+    "hardwoods",
+    "realistic",
+    "ecosystem"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "road_points",
+     "label": "Road points (cm)",
+     "default": "(-40000,-20000,0) (0,0,0) (35000,20000,0)"
+    },
+    {
+     "name": "base_layer",
+     "label": "Base paint layer",
+     "default": "Grass"
+    },
+    {
+     "name": "road_layer",
+     "label": "Road paint layer",
+     "default": "Gravel"
+    },
+    {
+     "name": "verge_layer",
+     "label": "Verge paint layer",
+     "default": "Verge"
+    }
+   ],
+   "prompt": "Dress {{selected_actor}} in {{level}} as an autumn forest with a gravel logging road. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n1. hyper_landscape_inspect: {{base_layer}}, {{road_layer}} and {{verge_layer}} must be paint layers, or say the material needs them and stop. Note HeightMax.\n2. hyper_model_inspect Folder {{content_folder}}/Autumn; if mesh_modeling or pcg is off, say so and stop. hyper_model_apply_plan, dry run then bDryRun false (fresh OperationId): recipe ops (Shape, Size cm, Seed) tree 1600, 1900 and 2200 (seeds 1-3, Accent #c8642a, #d9a23b, #a8432a), bush 150 (seeds 1, 2), tree_trunk 900 (a snag), grass_tuft 40; write_asset each to {{content_folder}}/Autumn/SM_<Name>, trees Nanite=true, grass Collision=none. hyper_model_validate, Policy placeholder.\n3. hyper_landscape_apply_plan (fresh OperationId): landscape.road LoggingRoad through {{road_points}}, Width 5, Falloff 6, Layer {{road_layer}}; landscape.paint {{base_layer}}, then {{verge_layer}} with DistanceMax 6, plus rules for any other layer it uses (the road keeps its paint on its Splines edit layer).\n4. hyper_pcg_scatter_apply_plan (bSave true if World Partition): ecosystem.create {{content_folder}}/Autumn/PCG_Autumn, one biome on {{base_layer}}, big to small: Hardwoods (Density 0.01, Footprint 6, Patch 150, Coverage 0.75, CullDistance 500), Snags (Density 0.002), Bushes (Cluster 4), Ground cover (Density 1.5, CullDistance 60); AvoidLayers {{road_layer}}, RoadMargin 4, so crowns stay off the road and the painted verge stays open; volume.create AutumnLife, Cover the landscape. hyper_operation_wait.\n5. hyper_verify_run, one case: AddPlayer at the road's middle point, HeightMax in cm + 500, Wait Seconds 8, LookAt its last point and Capture, as PlayerIndex 1.\nEnd with a PASS/FAIL table: road and verge painted, nothing on {{road_layer}}, the ecosystem's note keeps 4 m off landscape roads, counts per species above 0, model errors 0. Show the capture on its own line; leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.hilltop-tower-ruins",
+   "title": "Build hilltop ruins with a broken tower and a winding road",
+   "summary": "Raise a hill, wind a road to its top, model a tower, walls, an arch and pillars, set them on the summit and grow scrub that keeps clear of them.",
+   "packs": [
+    "worldbuilding_navigation",
+    "pcg",
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-modeling"
+   ],
+   "agent": "team",
+   "tools": [
+    "hyper_operation_wait",
+    "hyper_landscape_inspect",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_model_validate",
+    "hyper_landscape_apply_plan",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "landscape.sculpt",
+    "landscape.road",
+    "landscape.paint",
+    "recipe",
+    "write_asset",
+    "ecosystem.create",
+    "volume.create"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "ruins",
+    "tower",
+    "hilltop",
+    "fantasy",
+    "medieval",
+    "road",
+    "landmark",
+    "team"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "hill_center",
+     "label": "Hill centre (cm)",
+     "default": "20000,15000,0"
+    },
+    {
+     "name": "road_layer",
+     "label": "Road paint layer",
+     "default": "Dirt"
+    }
+   ],
+   "prompt": "Build hilltop ruins on {{selected_actor}} in {{level}}: a watchtower, walls, an arch and a pillar on a summit, a winding road, scrub round them. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n1. hyper_landscape_inspect: Grass, Rock and {{road_layer}} must be paint layers, or say the material needs them and stop.\n2. hyper_model_inspect Folder {{content_folder}}/Hilltop; if mesh_modeling or pcg is off, say so and stop. hyper_model_apply_plan, dry run then bDryRun false (fresh OperationId): recipe ops (Shape, Size cm, Seed) tower 1800, ruined_wall 600 (seeds 1, 2), arch 500, pillar 400, rock 150, bush 150; write_asset each to {{content_folder}}/Hilltop/SM_<Name>, Collision=convex, but hulls:4 for the arch so its opening stays open and hulls:6 for walls. hyper_model_validate, Policy placeholder.\n3. hyper_landscape_apply_plan (fresh OperationId): landscape.sculpt raise at {{hill_center}}, Radius 120, Falloff 80, Amount 45; landscape.road HillRoad spiralling up through 6 points, Width 4, Layer {{road_layer}}; landscape.paint Grass, then Rock from SlopeMin 30, plus any other layers it uses.\n4. hyper_landscape_inspect again for HeightMin and HeightMax, now the hill is raised. For each piece (the ruins on the summit, the arch over the road's end), find the ground at its point with Epic's SceneTools.trace_world from Z = HeightMax in cm + 1000 down to HeightMin in cm - 1000 (ground Z = that start Z less the distance it returns), then place it there (SceneTools.add_to_scene_from_asset at that Z, snap_to_ground), labels Hill_<Part>_<n>, tag Ruin.\n5. hyper_pcg_scatter_apply_plan (bSave true if World Partition): ecosystem.create {{content_folder}}/Hilltop/PCG_Hilltop, Slopes on Grass (bushes, rocks); AvoidLayers {{road_layer}}, RoadMargin 3, AvoidTags Ruin; volume.create HilltopLife, Cover the landscape. hyper_operation_wait.\n6. hyper_verify_run, one case (TimeoutSeconds 55): AddPlayer above the road's fifth point at HeightMax in cm + 500, then as PlayerIndex 1 a Play step with Goal Reach, Target Hill_Arch_1, TimeoutSeconds 45, and Capture.\nEnd with a PASS/FAIL table: Reach passed, ruins placed and tagged, counts per species above 0, model errors 0. Show the capture on its own line; leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.overgrown-highway",
+   "title": "Build an overgrown abandoned highway",
+   "summary": "A four-lane highway across rolling country, broken concrete barriers, and grass and bushes pushing through the verges and the cracked asphalt.",
+   "packs": [
+    "worldbuilding_navigation",
+    "pcg",
+    "mesh_modeling"
+   ],
+   "skills": [
+    "unreal-level-design",
+    "unreal-modeling"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_operation_wait",
+    "hyper_landscape_inspect",
+    "hyper_model_inspect",
+    "hyper_model_apply_plan",
+    "hyper_model_validate",
+    "hyper_landscape_apply_plan",
+    "hyper_foliage_apply_plan",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "landscape.road",
+    "landscape.paint",
+    "recipe",
+    "write_asset",
+    "foliage_type.create",
+    "foliage.place",
+    "ecosystem.create",
+    "volume.create"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "post-apocalyptic",
+    "highway",
+    "overgrown",
+    "ruins",
+    "road",
+    "modern",
+    "ecosystem"
+   ],
+   "context": {
+    "selection": "actors",
+    "classes": [
+     "Landscape"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "road_points",
+     "label": "Road points (cm)",
+     "default": "(-45000,0,0) (0,6000,0) (45000,0,0)"
+    },
+    {
+     "name": "base_layer",
+     "label": "Base paint layer",
+     "default": "Grass"
+    }
+   ],
+   "prompt": "Build an overgrown highway on {{selected_actor}} in {{level}}, with broken concrete barriers. If a plan awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n1. hyper_landscape_inspect: {{base_layer}}, Asphalt and Verge must be paint layers, or say the material needs them and stop. Note HeightMax.\n2. hyper_model_inspect Folder {{content_folder}}/Highway; if mesh_modeling or pcg is off, say so and stop. hyper_model_apply_plan, dry run then bDryRun false (fresh OperationId): recipe ops (Shape, Size cm, Seed) ruined_wall 300 with Scale 1,2,0.67 (300 x 60 x 110 cm barriers, seeds 1, 2, Tint #9a9a94), rock 50, bush 150, grass_tuft 50; write_asset each to {{content_folder}}/Highway/SM_<Name>, barriers Collision=hulls:6, grass Collision=none. hyper_model_validate, Policy placeholder.\n3. hyper_landscape_apply_plan (fresh OperationId): landscape.road Highway through {{road_points}}, Width 16, Falloff 10, Layer Asphalt; landscape.paint {{base_layer}}, then Verge with DistanceMax 14, plus any other layers it uses.\n4. hyper_foliage_apply_plan: foliage_type.create per barrier mesh (AlignToNormal true); foliage.place 30 along the centre line, Z HeightMax in cm + 100, in broken runs.\n5. hyper_pcg_scatter_apply_plan (bSave true if World Partition): ecosystem.create {{content_folder}}/Highway/PCG_Highway, Verge on Verge (bushes, grass Density 3), Cracks on Asphalt (grass Density 0.3, Patch 8; rocks), Country on {{base_layer}} (bushes, grass); volume.create HighwayLife, Cover the landscape. hyper_operation_wait.\n6. hyper_verify_run, one case: AddPlayer at the road's middle point, HeightMax in cm + 500, Wait Seconds 8, LookAt its last point and Capture, as PlayerIndex 1.\nEnd with a PASS/FAIL table: 30 barrier chunks placed, Asphalt growth sparser than the Verge's, counts per species above 0, model errors 0. Show the capture on its own line; leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.prove-and-place-generator",
+   "title": "Prove a PCG generator, then dress an area with it",
+   "summary": "Read the selected PCG graph's recipes, prove it generates and cleans up on a small test volume, then grow it over a region and check what grew.",
+   "packs": [
+    "pcg",
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_pcg_scatter_inspect",
+    "hyper_landscape_inspect",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait",
+    "hyper_pcg_inspect",
+    "hyper_pcg_apply_plan",
+    "hyper_pcg_validate",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "volume.create"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "pcg",
+    "generator",
+    "marketplace",
+    "test",
+    "validate",
+    "set dressing",
+    "lifecycle"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "PCGGraph"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "region_center",
+     "label": "Region centre (cm)",
+     "default": "0,0,0"
+    },
+    {
+     "name": "region_size",
+     "label": "Region size (m)",
+     "default": "200"
+    }
+   ],
+   "prompt": "Check that the PCG graph {{selected_asset}} works in {{level}}, then use it to dress a {{region_size}} m square centred at {{region_center}} (cm).\n1. hyper_pcg_scatter_inspect with Graph {{selected_asset}} and Detail summary: one recipe per mesh spawner, its meshes, cull distances and parameters. If the pcg tools are not available, say the pcg pack is off and stop. hyper_landscape_inspect: confirm a landscape lies under the region, and read HeightMax.\n2. hyper_pcg_scatter_apply_plan (bDryRun false, fresh OperationId): volume.create GenTest at the region centre, Size 20 x 20 m, Graph {{selected_asset}}. hyper_operation_wait: instances per mesh.\n3. hyper_pcg_inspect the graph and GenTest's PCG component for the revision and fingerprint. hyper_pcg_apply_plan with GraphPath, ComponentPath, ExpectedPersistedRevision and ExpectedComponentFingerprint from it, Intent Lifecycle generate_validate_cleanup and ExpectedTerminalState clean: a dry run first, then bDryRun false with a new OperationId and the ExpectedPlanHash; this proves the graph regenerates and leaves nothing behind. Then hyper_pcg_validate with Policy structural.\n4. hyper_pcg_scatter_apply_plan (fresh OperationId): volume.create GenRegion at {{region_center}}, Size {{region_size}} x {{region_size}} m, Graph {{selected_asset}}; hyper_operation_wait for its counts.\n5. hyper_verify_run, one case: AddPlayer at 3000 cm from {{region_center}}, HeightMax in cm + 500, Wait Seconds 8, LookAt {{region_center}} and Capture, as PlayerIndex 1.\nEnd with a PASS/FAIL table: test counts above 0, lifecycle terminal state clean, validate errors 0, region counts per mesh, GenTest left at 0 instances. Show the capture on its own line. Leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.forest-performance-pass",
+   "title": "Make a dense forest scene fit its render budget",
+   "summary": "Cost-report a PCG forest, cut species density and cull distances in its ecosystem, regenerate, and prove the savings with the same report.",
+   "packs": [
+    "pcg",
+    "level_design"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_scene_cost_report",
+    "hyper_spatial_query",
+    "hyper_verify_run",
+    "hyper_pcg_scatter_inspect",
+    "hyper_pcg_scatter_apply_plan",
+    "hyper_operation_wait"
+   ],
+   "ops": [
+    "ecosystem.set",
+    "volume.generate"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "performance",
+    "optimization",
+    "pcg",
+    "forest",
+    "budget",
+    "instances",
+    "cull distance"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "volume",
+     "label": "PCG volume",
+     "default": "ValleyLife"
+    },
+    {
+     "name": "draw_call_budget",
+     "label": "Draw-call budget",
+     "default": "2500"
+    },
+    {
+     "name": "instance_budget",
+     "label": "PCG instance budget",
+     "default": "400000"
+    }
+   ],
+   "prompt": "The forest that PCG volume {{volume}} grows in {{level}} is over budget. Bring it under {{draw_call_budget}} estimated draw calls and {{instance_budget}} PCG instances with the least visible change.\n1. hyper_scene_cost_report with Scope level and TopN 20: EstimatedDrawCalls, EstimatedShadowDrawCalls, PCGInstances, ShadowCastingPrimitives, HeaviestMeshes and Findings. If it is not available, say the level_design pack lacks it and stop. hyper_spatial_query ground 3000 cm from the volume's centre; hyper_verify_run, one case (TimeoutSeconds 30): AddPlayer at that GroundZ, LookAt the centre and Capture, as PlayerIndex 1 (the before picture).\n2. hyper_pcg_scatter_inspect with no Graph to find {{volume}}'s graph, then with that Graph: the Ecosystem op with each species' Density, Footprint and CullDistance. If the pcg tools are not available, say so and stop.\n3. Plan the cuts, biggest saving first: ground cover Density down by up to half where it carries most instances and CullDistance 30 to 60 m; debris CullDistance 40 m; bushes 100 m; leave canopy trees alone. Density cuts lower the instance count; cull distances only lower what draws at runtime, which the report does not count. Show each change.\n4. One hyper_pcg_scatter_apply_plan (fresh OperationId): ecosystem.set with the whole Ecosystem op as read, changed only as planned, then volume.generate {{volume}}. hyper_operation_wait for the new instances per mesh.\n5. hyper_scene_cost_report again, and the same capture (the after picture).\nEnd with a PASS/FAIL table: EstimatedDrawCalls and PCGInstances before and after against the budgets, shadow draws before and after, each species' change. Show both pictures on their own lines. Leave the level unsaved."
+  },
+  {
+   "id": "environment-recipes.golden-hour-hero-shots",
+   "title": "Light a finished environment and take three hero shots",
+   "summary": "Set a warm low sun, sky, fog and locked exposure on a dressed scene, then capture an aerial, a mid and a ground shot and check their metrics.",
+   "packs": [
+    "lighting_lookdev",
+    "worldbuilding_navigation",
+    "pcg"
+   ],
+   "skills": [
+    "image-match"
+   ],
+   "agent": "lighting-artist",
+   "tools": [
+    "hyper_landscape_inspect",
+    "hyper_pcg_scatter_inspect",
+    "hyper_lighting_inspect",
+    "hyper_lighting_apply_plan",
+    "hyper_operation_wait",
+    "hyper_capture_view",
+    "hyper_image_compare"
+   ],
+   "ops": [
+    "set_sun",
+    "set_sky_atmosphere",
+    "set_sky_light",
+    "set_fog",
+    "set_post_process",
+    "lock_exposure",
+    "set_sky_system"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "lighting",
+    "golden hour",
+    "captures",
+    "portfolio",
+    "mood",
+    "fog",
+    "environment"
+   ],
+   "context": {
+    "selection": "none"
+   },
+   "placeholders": [
+    {
+     "name": "mood",
+     "label": "Mood",
+     "default": "golden hour"
+    },
+    {
+     "name": "sun_pitch",
+     "label": "Sun pitch (degrees)",
+     "default": "-12"
+    },
+    {
+     "name": "reference",
+     "label": "Reference image",
+     "default": "none",
+     "hint": "An image path to compare the aerial shot with, or none."
+    }
+   ],
+   "prompt": "Light the environment in {{level}} for a {{mood}} portfolio set, then take three hero shots. Change only lighting actors.\n1. hyper_landscape_inspect for the landscape's extent and heights, and hyper_pcg_scatter_inspect for the PCG volumes, to frame the shots. If the lighting tools are not available, say the lighting_lookdev pack is off and stop.\n2. hyper_lighting_inspect for the Revision, the sky setup and exposure.\n3. One hyper_lighting_apply_plan with bDryRun false, a fresh OperationId and ExpectedRevision: set_sun pitch {{sun_pitch}}, yaw toward the main view, temperature 4500, intensity 8; set_sky_atmosphere mie_scale 0.008 (twice its default 0.003996, for a light haze); set_sky_light intensity 1.1; set_fog density 0.02, height_falloff 0.2, volumetric_fog true; set_post_process saturation 1.1 and contrast 1.05; lock_exposure Value 3 (EV100). With a Blueprint sky, use set_sky_system for its time of day instead. If it awaits approval, hyper_operation_wait with bWaitThroughApproval true.\n4. hyper_capture_view three times (Source transform, 1920 x 1080, bSettle true, Label hero-<n>): an aerial 300 m up at pitch -25 from a landscape corner; a mid shot 30 m up over a PCG volume at pitch -10; a ground shot 170 cm above the ground (find it with Epic's SceneTools.trace_world) along a road or path. If LuminanceP50 is outside 0.15-0.6, move lock_exposure 1 EV at a time and capture again.\n5. If {{reference}} is an image, hyper_image_compare the aerial with it and report the score.\nEnd with a PASS/FAIL table per shot: LuminanceP50 between 0.15 and 0.6, HighlightFraction under 0.02, bShadersStillCompiling false, exposure locked. Show the three shots on their own lines. Leave the level unsaved."
+  }
+ ]
+}

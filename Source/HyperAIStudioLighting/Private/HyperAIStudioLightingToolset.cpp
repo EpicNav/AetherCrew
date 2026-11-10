@@ -1,6 +1,8 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioLightingToolset.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioOperationWait.h"
 #include "HyperAIStudioAgentActivity.h"
 
 #include "Editor.h"
@@ -8,9 +10,13 @@
 #include "Engine/World.h"
 #include "FileHelpers.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioImageMatch.h"
+#include "HyperAIStudioLightingCapture.h"
 #include "HyperAIStudioLightingGate.h"
+#include "HyperAIStudioMatchJobs.h"
 #include "HyperAIStudioPreviewPanel.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Paths.h"
@@ -121,6 +127,75 @@ namespace HyperAIStudio::Lighting::Private
 		return true;
 	}
 
+	FString FullProjectPath(const FString& Path)
+	{
+		return FPaths::ConvertRelativePathToFull(FPaths::IsRelative(Path) ? FPaths::ProjectDir() / Path : Path);
+	}
+
+	/** The Image match source: a session's latest attempt against its reference, with every attempt as a strip. */
+	bool RefreshMatchPreview(const FString& ReferenceImagePath, FHyperAIStudioPreviewComparison& Out, FString& OutError)
+	{
+		namespace Match = HyperAIStudio::Lighting::Match;
+		const FString SessionId = Match::FindSessionFor(ReferenceImagePath);
+		FString Reference;
+		FString Mode = TEXT("look");
+		TArray<FHyperAIImageIteration> History;
+		float Target = 80.f;
+		const bool bSession = !SessionId.IsEmpty() && Match::ReadSession(SessionId, Reference, Mode, History, Target) && !History.IsEmpty();
+		FHyperAIImageCompareRequest Request;
+		Request.ReferenceImagePath = ReferenceImagePath;
+		Request.Mode = Mode;
+		Request.TargetScore = Target;
+		// Without a session, the level viewport is the attempt; with one, its latest candidate is.
+		Request.CandidateImagePath = bSession ? History.Last().CandidateImagePath : FString();
+		const FHyperAIImageCompareReport Report = Match::Compare(Request);
+		if (!Report.bOk)
+		{
+			OutError = Report.Diagnostic;
+			return false;
+		}
+		Out.ImagePathA = ReferenceImagePath;
+		Out.ImagePathB = FullProjectPath(bSession ? History.Last().CandidateImagePath : Report.CandidateWrittenPath);
+		Out.LabelA = NSLOCTEXT("HyperAIStudioLightingPreview", "MatchReference", "Reference");
+		Out.LabelB = bSession
+			? FText::Format(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchIteration", "Iteration {0}"), FText::AsNumber(History.Last().Index))
+			: NSLOCTEXT("HyperAIStudioLightingPreview", "MatchViewport", "Level viewport");
+		auto Add = [&Out](const FText& Label, const FText& Value, const EHyperAIStudioPreviewTone Tone)
+		{
+			Out.Stats.Add({Label, Value, Tone});
+		};
+		auto ScoreTone = [Target](const float Score)
+		{
+			return Score >= Target ? EHyperAIStudioPreviewTone::Good : Score >= Target - 15.f ? EHyperAIStudioPreviewTone::Neutral : EHyperAIStudioPreviewTone::Warning;
+		};
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchScore", "Score"),
+			FText::Format(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchScoreValue", "{0} of {1}"), FText::AsNumber(FMath::RoundToInt(Report.Score)),
+				FText::AsNumber(FMath::RoundToInt(Target))), ScoreTone(Report.Score));
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchPalette", "Palette"), FText::AsNumber(FMath::RoundToInt(Report.PaletteScore)), ScoreTone(Report.PaletteScore));
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchTone", "Tone"), FText::AsNumber(FMath::RoundToInt(Report.ToneScore)), ScoreTone(Report.ToneScore));
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchLayout", "Layout"), FText::AsNumber(FMath::RoundToInt(Report.LayoutScore)), ScoreTone(Report.LayoutScore));
+		Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchDetail", "Detail"), FText::AsNumber(FMath::RoundToInt(Report.DetailScore)), ScoreTone(Report.DetailScore));
+		if (Mode == TEXT("aligned"))
+		{
+			Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchStructure", "Structure"), FText::AsNumber(FMath::RoundToInt(Report.StructureScore)),
+				ScoreTone(Report.StructureScore));
+		}
+		if (!Report.Suggestions.IsEmpty())
+		{
+			Add(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchNext", "Next"), FText::FromString(Report.Suggestions[0]), EHyperAIStudioPreviewTone::Neutral);
+		}
+		for (const FHyperAIImageIteration& Iteration : History)
+		{
+			FHyperAIStudioPreviewFrame& Frame = Out.Frames.AddDefaulted_GetRef();
+			Frame.ImagePath = FullProjectPath(Iteration.CandidateImagePath);
+			Frame.Label = FText::Format(NSLOCTEXT("HyperAIStudioLightingPreview", "MatchFrame", "#{0}: {1}"), FText::AsNumber(Iteration.Index),
+				FText::AsNumber(FMath::RoundToInt(Iteration.Score)));
+			Frame.Tooltip = FText::FromString(Iteration.Note);
+			Frame.Tone = ScoreTone(Iteration.Score);
+		}
+		return true;
+	}
+
 	int64 EstimateMetricsBytes(const FHyperAILightingImageMetrics& Metrics)
 	{
 		return 160 + 8ll * Metrics.Histogram.Num();
@@ -201,12 +276,20 @@ namespace HyperAIStudio::Lighting::Private
 				FString::Printf(TEXT("%d ops applied to %d actors."), Payload.Ops.Num(), Touched.Num()), TEXT("applied"));
 		}
 		case EHyperAIStudioDomainExecutionActionKind::Validate:
+		{
 			// Every op re-validated inside Apply; here the edited actors must still resolve.
 			if (Gate::ResolveTargets(*World, Payload.Ops).IsEmpty())
 			{
 				return Finish(EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect, TEXT("targets_missing"),
 					TEXT("The edited lighting actors no longer resolve; undo reverts the edit."));
 			}
+			FString MaterialError;
+			if (!Gate::CheckMaterialOps(*World, Payload.Ops, MaterialError))
+			{
+				return Finish(EHyperAIStudioDomainDispatchOutcome::FailedAfterKnownEffect, TEXT("material_not_assigned"),
+					MaterialError + TEXT(" Undo reverts the edit."));
+			}
+		}
 			return Finish(EHyperAIStudioDomainDispatchOutcome::Succeeded, TEXT("validated"), TEXT("Edited actors resolve."), TEXT("validated"));
 		case EHyperAIStudioDomainExecutionActionKind::Save:
 		{
@@ -235,7 +318,7 @@ FString FHyperAIStudioLightingContracts::GetQualifiedToolsetName()
 
 TArray<FString> FHyperAIStudioLightingContracts::GetToolNames()
 {
-	return {InspectToolName, MutationToolName, CompareToolName};
+	return {InspectToolName, MutationToolName, CompareToolName, CaptureToolName, ImageCompareToolName};
 }
 
 bool FHyperAIStudioLightingContracts::IsRegistrationAllowed(const bool bAllowSourceCandidateForDev)
@@ -251,10 +334,25 @@ TArray<FString> FHyperAIStudioLightingContracts::GetCapabilities()
 		TEXT("exposure_lock_state"),
 		TEXT("closed_lighting_edits_as_one_undo_step"),
 		TEXT("missing_lighting_actors_added_on_demand"),
+		TEXT("material_assignment_to_a_placed_actor_mesh_slot"),
+		TEXT("materials_in_view_with_parameters_and_what_keeps_them_from_taking_light"),
+		TEXT("material_parameters_tuned_on_instances_the_level_owns_for_every_slot_or_one_actor"),
+		TEXT("mesh_lighting_flags_emissive_light_source_indirect_lighting_and_distance_fields"),
+		TEXT("reflection_captures_listed_added_and_shaped"),
+		TEXT("project_rendering_methods_gi_reflections_tracing_and_substrate"),
+		TEXT("point_spot_and_rect_lights_listed_by_view_edited_added_aimed_and_switched_off"),
+		TEXT("volumetric_fog_for_light_shafts"),
+		TEXT("any_details_panel_setting_of_the_sun_sky_light_fog_atmosphere_clouds_and_post_process_by_name"),
+		TEXT("volumetric_clouds_added_and_shaped_through_a_material_instance_the_level_owns"),
+		TEXT("colour_grading_luts_fitted_to_a_reference_and_imported_as_lut_textures"),
+		TEXT("shadows_switched_off_on_blockout_shapes_that_stand_for_foliage_cloth_or_glass"),
+		TEXT("blueprint_skies_ultra_dynamic_sky_and_weather_sun_sky_and_sky_sphere_lit_through_their_variables"),
 		TEXT("viewport_or_image_vs_reference_metrics"),
 		TEXT("ranked_next_change_suggestions"),
+		TEXT("view_captures_from_a_camera_or_transform_with_frame_to_frame_differences"),
+		TEXT("image_match_score_regions_and_sessions_for_scenes_materials_effects_and_ui"),
 		TEXT("unsaved_by_default_opt_in_save_of_touched_actors"),
-		TEXT("unsupported:bounded_post_process_volumes_local_lights_lumen_settings_and_baked_lighting_builds")};
+		TEXT("unsupported:bounded_post_process_volumes_and_baked_lighting_builds")};
 }
 
 bool FHyperAIStudioLightingContracts::IsCanonicalSha256(const FString& Value)
@@ -276,14 +374,15 @@ bool FHyperAIStudioLightingContracts::IsCanonicalSha256(const FString& Value)
 
 FString FHyperAIStudioLightingContracts::InspectPayloadSchemaFingerprint()
 {
-	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(TEXT("lighting.inspect.payload.v1|editor_world|output_bytes"));
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("lighting.inspect.payload.v3|editor_world|output_bytes|camera_view|label_filter|local_light_limit|material_limit"));
 	return Value;
 }
 
 FString FHyperAIStudioLightingContracts::EditOpsPayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("lighting.edit_ops.payload.v1|level_path|base_revision|ordered_closed_ops|save|deep_clone|bounded"));
+		TEXT("lighting.edit_ops.payload.v4|level_path|base_revision|ordered_closed_ops|local_lights|details_by_name|clouds|lut|actor_shadow|material_parameters|actor_lighting|reflection_captures|save|deep_clone|bounded"));
 	return Value;
 }
 
@@ -297,7 +396,7 @@ FString FHyperAIStudioLightingContracts::ComparePayloadSchemaFingerprint()
 FString FHyperAIStudioLightingContracts::InspectResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("lighting.inspect.result.v1|level|revision|exposure_lock|actors_properties|bounded"));
+		TEXT("lighting.inspect.result.v4|level|revision|exposure_lock|actors_properties|changed_details|clouds|local_lights_by_view|reflection_captures|materials_in_view|rendering|bounded"));
 	return Value;
 }
 
@@ -305,6 +404,124 @@ FString FHyperAIStudioLightingContracts::MutationResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(TEXT("lighting.edit_ops.result.v1|phase|content_key|bounded"));
 	return Value;
+}
+
+FString FHyperAIStudioLightingContracts::CapturePayloadSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("lighting.capture.payload.v1|camera_transform_or_viewport|size|frames|world_or_material_time|warmup|diff_threshold|label"));
+	return Value;
+}
+
+FString FHyperAIStudioLightingContracts::CaptureResultSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("lighting.capture.result.v1|batch|folder|view|frames_metrics|diffs|world_time_advanced|shaders|bounded"));
+	return Value;
+}
+
+FHyperAICaptureViewReport FHyperAIStudioLightingContracts::CaptureNow(const FHyperAICaptureViewRequest& Request)
+{
+	FHyperAICaptureViewReport Refused;
+	if (FHyperAIStudioNames::RefuseRequest(Request, Refused)) return Refused;
+	return HyperAIStudio::Lighting::Capture::RunNow(Request);
+}
+
+FHyperAIImageCompareReport FHyperAIStudioLightingContracts::CompareImages(const FHyperAIImageCompareRequest& Request)
+{
+	FHyperAIImageCompareReport Refused;
+	if (FHyperAIStudioNames::RefuseRequest(Request, Refused)) return Refused;
+	return HyperAIStudio::Lighting::Match::Compare(Request);
+}
+
+FString FHyperAIStudioLightingContracts::ImageComparePayloadSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("lighting.image_compare.payload.v2|project_reference|optional_candidate|mode|target|session|note|grid|fit_lut"));
+	return Value;
+}
+
+FString FHyperAIStudioLightingContracts::ImageCompareResultSchemaFingerprint()
+{
+	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
+		TEXT("lighting.image_compare.result.v2|score|measures|deltas|regions|suggestions|images|lut_path_score_side|session_history|bounded"));
+	return Value;
+}
+
+FString FHyperAIStudioLightingImageComparePayload::GetTypeId() const
+{
+	return FHyperAIStudioLightingContracts::ImageComparePayloadTypeId;
+}
+
+FString FHyperAIStudioLightingImageComparePayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioLightingContracts::ImageComparePayloadSchemaFingerprint();
+}
+
+int32 FHyperAIStudioLightingImageComparePayload::GetBoundedByteSize() const
+{
+	return HyperAIStudio::Lighting::Private::ClampBytes(96 + 2ll * (Request.ReferenceImagePath.Len() + Request.CandidateImagePath.Len()
+		+ Request.Mode.Len() + Request.SessionId.Len() + Request.Note.Len()));
+}
+
+FString FHyperAIStudioLightingImageCompareResultPayload::GetTypeId() const
+{
+	return FHyperAIStudioLightingContracts::ImageCompareResultTypeId;
+}
+
+FString FHyperAIStudioLightingImageCompareResultPayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioLightingContracts::ImageCompareResultSchemaFingerprint();
+}
+
+int32 FHyperAIStudioLightingImageCompareResultPayload::GetBoundedByteSize() const
+{
+	using namespace HyperAIStudio::Lighting::Private;
+	int64 Size = 512 + EstimateBytes(Report.Status) + EstimateBytes(Report.Diagnostic) + EstimateBytes(Report.SideBySidePath)
+		+ EstimateBytes(Report.DiffPath) + EstimateBytes(Report.CandidateWrittenPath) + EstimateBytes(Report.LutPath)
+		+ EstimateBytes(Report.LutSideBySidePath) + EstimateBytes(Report.LutComposedWith);
+	for (const FHyperAIImageRegion& Region : Report.Regions) Size += 96 + EstimateBytes(Region.Name) + EstimateBytes(Region.Difference);
+	for (const FString& Suggestion : Report.Suggestions) Size += EstimateBytes(Suggestion);
+	for (const FHyperAIImageIteration& Iteration : Report.History)
+	{
+		Size += 48 + EstimateBytes(Iteration.Note) + EstimateBytes(Iteration.CandidateImagePath) + EstimateBytes(Iteration.SideBySidePath);
+	}
+	return ClampBytes(Size);
+}
+
+FString FHyperAIStudioLightingCapturePayload::GetTypeId() const
+{
+	return FHyperAIStudioLightingContracts::CapturePayloadTypeId;
+}
+
+FString FHyperAIStudioLightingCapturePayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioLightingContracts::CapturePayloadSchemaFingerprint();
+}
+
+int32 FHyperAIStudioLightingCapturePayload::GetBoundedByteSize() const
+{
+	return 256 + 2 * (Request.CameraActorLabel.Len() + Request.Label.Len() + Request.Source.Len() + Request.TimeMode.Len())
+		+ 4 * Request.MaterialTimes.Num();
+}
+
+FString FHyperAIStudioLightingCaptureResultPayload::GetTypeId() const
+{
+	return FHyperAIStudioLightingContracts::CaptureResultTypeId;
+}
+
+FString FHyperAIStudioLightingCaptureResultPayload::GetSchemaFingerprint() const
+{
+	return FHyperAIStudioLightingContracts::CaptureResultSchemaFingerprint();
+}
+
+int32 FHyperAIStudioLightingCaptureResultPayload::GetBoundedByteSize() const
+{
+	using namespace HyperAIStudio::Lighting::Private;
+	int64 Size = 512 + EstimateBytes(Report.Status) + EstimateBytes(Report.Diagnostic) + EstimateBytes(Report.Folder) + EstimateBytes(Report.BatchId);
+	for (const FHyperAICaptureFrame& Frame : Report.Frames) Size += 64 + EstimateBytes(Frame.ImagePath) + EstimateMetricsBytes(Frame.Metrics);
+	Size += 32 * Report.Diffs.Num();
+	return ClampBytes(Size);
 }
 
 FString FHyperAIStudioLightingContracts::CompareResultSchemaFingerprint()
@@ -326,7 +543,7 @@ FString FHyperAIStudioLightingInspectPayload::GetSchemaFingerprint() const
 
 int32 FHyperAIStudioLightingInspectPayload::GetBoundedByteSize() const
 {
-	return 64;
+	return 64 + Request.CameraActorLabel.Len() + Request.LabelFilter.Len();
 }
 
 FString FHyperAIStudioLightingComparePayload::GetTypeId() const
@@ -401,6 +618,15 @@ int32 FHyperAIStudioLightingInspectResultPayload::GetBoundedByteSize() const
 		Size += 32 + EstimateBytes(Actor.Kind) + EstimateBytes(Actor.Label) + EstimateBytes(Actor.Path);
 		for (const FHyperAILightingProperty& Property : Actor.Properties) Size += EstimateBytes(Property.Key) + EstimateBytes(Property.Value);
 	}
+	for (const FHyperAILightingMaterialRecord& Material : Report.Materials)
+	{
+		Size += 64 + EstimateBytes(Material.Path) + EstimateBytes(Material.Kind) + EstimateBytes(Material.BaseMaterial) + EstimateBytes(Material.BlendMode)
+			+ EstimateBytes(Material.ShadingModel) + EstimateBytes(Material.Slot);
+		for (const FHyperAILightingProperty& Property : Material.Parameters) Size += EstimateBytes(Property.Key) + EstimateBytes(Property.Value);
+		for (const FString& Text : Material.Actors) Size += EstimateBytes(Text);
+		for (const FString& Text : Material.Notes) Size += EstimateBytes(Text);
+	}
+	for (const FHyperAILightingProperty& Fact : Report.Rendering) Size += EstimateBytes(Fact.Key) + EstimateBytes(Fact.Value);
 	return ClampBytes(Size);
 }
 
@@ -453,6 +679,12 @@ const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioLightingContracts::Ge
 			MutationResultTypeId, MutationResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Edit});
 		Value.Variants.Add({CompareToolName, CompareVariantId, ComparePayloadTypeId, ComparePayloadSchemaFingerprint(),
 			CompareResultTypeId, CompareResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
+		// Read: a capture writes only under Saved/HyperAIStudio, like the compare tool's own capture.
+		Value.Variants.Add({CaptureToolName, CaptureVariantId, CapturePayloadTypeId, CapturePayloadSchemaFingerprint(),
+			CaptureResultTypeId, CaptureResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
+		// Read: its images and sessions go under Saved/HyperAIStudio/Match.
+		Value.Variants.Add({ImageCompareToolName, ImageCompareVariantId, ImageComparePayloadTypeId, ImageComparePayloadSchemaFingerprint(),
+			ImageCompareResultTypeId, ImageCompareResultSchemaFingerprint(), EHyperAIStudioDomainSafety::Read});
 		Value.ContractFingerprint = FHyperAIStudioDomainAdapterRegistry::ComputeContractFingerprint(Value);
 		Value.AdapterFingerprint = FHyperAIStudioDomainAdapterRegistry::ComputeAdapterFingerprint(Value);
 		return Value;
@@ -460,11 +692,18 @@ const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioLightingContracts::Ge
 	return Descriptor;
 }
 
-FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHyperAILightingInspectRequest& Request)
+FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHyperAILightingInspectRequest& InRequest)
 {
 	namespace Gate = HyperAIStudio::Lighting::Gate;
+	FHyperAILightingInspectRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.MaxOutputBytes, MinOutputBytes, MaxOutputBytes, FHyperAILightingInspectRequest().MaxOutputBytes, TEXT("max_output_bytes"));
+	Fit.ClampOrDefault(Request.MaxLocalLights, 1, 128, FHyperAILightingInspectRequest().MaxLocalLights, TEXT("max_local_lights"));
+	// 0 asks for no materials, so it is kept rather than read as unset.
+	Fit.Clamp(Request.MaxMaterials, 0, 48, TEXT("max_materials"));
 	FHyperAILightingInspectReport Report;
 	Report.Capabilities = GetCapabilities();
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	auto Reject = [&](const TCHAR* Status, const FString& Diagnostic)
 	{
 		Report.bOk = false;
@@ -485,23 +724,102 @@ FHyperAILightingInspectReport FHyperAIStudioLightingContracts::Inspect(const FHy
 	{
 		return Reject(TEXT("no_editor_world"), TEXT("No level is open in the editor."));
 	}
+	if (Request.MaxLocalLights < 0 || Request.MaxLocalLights > 128 || Request.MaxMaterials < 0 || Request.MaxMaterials > 48
+		|| Request.CameraActorLabel.Len() > 128 || Request.LabelFilter.Len() > 128)
+	{
+		return Reject(TEXT("invalid_bounds"), TEXT("max_local_lights is 0 to 128, max_materials 0 to 48, and camera_actor_label and label_filter are up to 128 characters."));
+	}
 	Report.LevelPath = World->GetPathName();
 	Report.Revision = Gate::ComputeRevision(*World);
 	Report.bExposureLocked = Gate::IsExposureLocked(*World);
 	Report.Actors = Gate::ReadActors(*World);
+	Report.Rendering = Gate::ReadRendering(*World);
+	TArray<FHyperAILightingActorRecord> LocalLights = Gate::ReadLocalLights(*World, Request.CameraActorLabel, Request.LabelFilter,
+		Request.MaxLocalLights, Report.LocalLightCount, Report.LightView);
+	if (!Request.CameraActorLabel.IsEmpty() && Report.LightView != Request.CameraActorLabel)
+	{
+		return Reject(TEXT("camera_not_found"), FString::Printf(TEXT("No camera is labelled '%s'; leave camera_actor_label empty to use HyperAI_MatchCamera or the level viewport."),
+			*Request.CameraActorLabel));
+	}
+	TArray<FHyperAILightingMaterialRecord> Materials = Gate::ReadMaterials(*World, Request.CameraActorLabel, Request.MaxMaterials, Report.MaterialCount);
+	// Materials, then local lights, fill what the output bound leaves, in view order, so a level with hundreds of them still answers.
+	auto Bytes = [](const FHyperAILightingActorRecord& Record)
+	{
+		int32 Size = 64 + Record.Kind.Len() + Record.Label.Len() + Record.Path.Len();
+		for (const FHyperAILightingProperty& Property : Record.Properties)
+		{
+			Size += 24 + Property.Key.Len() + Property.Value.Len();
+		}
+		return Size;
+	};
+	auto MaterialBytes = [](const FHyperAILightingMaterialRecord& Record)
+	{
+		int32 Size = 160 + Record.Path.Len() + Record.Kind.Len() + Record.BaseMaterial.Len() + Record.BlendMode.Len() + Record.ShadingModel.Len() + Record.Slot.Len();
+		for (const FHyperAILightingProperty& Property : Record.Parameters)
+		{
+			Size += 24 + Property.Key.Len() + Property.Value.Len();
+		}
+		for (const FString& Text : Record.Actors)
+		{
+			Size += 8 + Text.Len();
+		}
+		for (const FString& Text : Record.Notes)
+		{
+			Size += 8 + Text.Len();
+		}
+		return Size;
+	};
+	int32 Used = 2048;
+	for (const FHyperAILightingActorRecord& Record : Report.Actors)
+	{
+		Used += Bytes(Record);
+	}
+	for (const FHyperAILightingProperty& Fact : Report.Rendering)
+	{
+		Used += 24 + Fact.Key.Len() + Fact.Value.Len();
+	}
+	for (FHyperAILightingMaterialRecord& Material : Materials)
+	{
+		Used += MaterialBytes(Material);
+		if (Used > Request.MaxOutputBytes) break;
+		Report.Materials.Add(MoveTemp(Material));
+	}
+	const int32 StockActors = Report.Actors.Num();
+	int32 Listed = 0;
+	for (FHyperAILightingActorRecord& Light : LocalLights)
+	{
+		Used += Bytes(Light);
+		if (Used > Request.MaxOutputBytes) break;
+		Report.Actors.Add(MoveTemp(Light));
+		++Listed;
+	}
 	Report.bOk = true;
 	Report.Status = TEXT("captured");
+	// A sky that owns its lights has no stock actors to add, and must not get any.
+	const FString Sky = Gate::LightOwningSky(*World);
 	TArray<FString> Missing;
 	for (const TCHAR* Kind : {TEXT("sun"), TEXT("sky_light"), TEXT("fog"), TEXT("sky_atmosphere"), TEXT("post_process")})
 	{
-		if (!Report.Actors.ContainsByPredicate([Kind](const FHyperAILightingActorRecord& Actor) { return Actor.Kind == Kind; }))
+		if ((Sky.IsEmpty() || FCString::Strcmp(Kind, TEXT("post_process")) == 0)
+			&& !Report.Actors.ContainsByPredicate([Kind](const FHyperAILightingActorRecord& Actor) { return Actor.Kind == Kind; }))
 		{
 			Missing.Add(Kind);
 		}
 	}
-	Report.Diagnostic = FString::Printf(TEXT("%d lighting actors.%s%s"), Report.Actors.Num(),
+	const FString Local = Report.LocalLightCount == 0 ? FString(TEXT(" No point, spot or rect lights; add_light places one."))
+		: FString::Printf(TEXT(" %d point, spot and rect lights, %d listed%s%s."), Report.LocalLightCount, Listed,
+			Report.LightView.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(", those lighting the view of %s first"), *Report.LightView),
+			Listed < Report.LocalLightCount ? TEXT("; label_filter or max_local_lights (up to 128) lists others") : TEXT(""));
+	const FString Surfaces = Request.MaxMaterials == 0 ? FString()
+		: Report.LightView.IsEmpty() ? FString(TEXT(" No view to list materials from: place HyperAI_MatchCamera or open a perspective level viewport."))
+		: FString::Printf(TEXT(" %d materials in view, %d listed with their parameters, most of the frame first; set_material_parameter tunes one wherever the level shows it, without changing the material itself."),
+			Report.MaterialCount, Report.Materials.Num());
+	Report.Diagnostic = FString::Printf(TEXT("%d lighting actors.%s%s%s%s%s"), StockActors,
+		Sky.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" The sky is %s: it owns the sun, sky light and fog, so light it with set_sky_system and its variables."), *Sky),
 		Missing.IsEmpty() ? TEXT("") : *(TEXT(" None of: ") + FString::Join(Missing, TEXT(", ")) + TEXT("; the first op on one adds it.")),
-		Report.bExposureLocked ? TEXT("") : TEXT(" Auto exposure is on: lock_exposure before comparing."));
+		*Local, *Surfaces,
+		Report.bExposureLocked ? TEXT("") : TEXT(" Auto exposure is on: lock_exposure before comparing (it also turns off a sky's own exposure)."));
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
 	return Report;
 }
 
@@ -510,6 +828,7 @@ FHyperAILightingCompareReport FHyperAIStudioLightingContracts::Compare(const FHy
 	namespace Gate = HyperAIStudio::Lighting::Gate;
 	FHyperAILightingCompareReport Report;
 	Report.Capabilities = GetCapabilities();
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	auto Reject = [&](const TCHAR* Status, const FString& Diagnostic)
 	{
 		Report.bOk = false;
@@ -599,9 +918,12 @@ FString FHyperAIStudioLightingContracts::ComputeEditOpsSemanticFingerprint(const
 	return FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(Canonical);
 }
 
-FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const FHyperAILightingApplyPlanRequest& Request)
+FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const FHyperAILightingApplyPlanRequest& InRequest)
 {
 	using namespace HyperAIStudio::Lighting::Private;
+	FHyperAILightingApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.MaxOutputBytes, MinOutputBytes, MaxOutputBytes, FHyperAILightingApplyPlanRequest().MaxOutputBytes, TEXT("max_output_bytes"));
 	FHyperAILightingApplyPlanReport Report;
 	Report.bDryRun = Request.bDryRun;
 	Report.OperationId = Request.OperationId.Left(FHyperAIStudioDomainLimits::MaxOperationIdChars);
@@ -619,14 +941,20 @@ FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const
 	{
 		return Reject(TEXT("game_thread_required"), TEXT("Lighting edit planning runs on the game thread."));
 	}
+	// Labels, properties and parameters become FNames and lookups, which stop the editor past an FName's length.
+	FString NameReason;
+	if (!FHyperAIStudioNames::CheckRequest(Request, &NameReason))
+	{
+		return Reject(TEXT("invalid_request"), NameReason);
+	}
 	if (Request.bDryRun && (!Request.OperationId.IsEmpty() || !Request.ExpectedPlanHash.IsEmpty()))
 	{
 		return Reject(TEXT("unexpected_submission_fields"), TEXT("A dry run takes no operation_id or expected_plan_hash."));
 	}
 	if (!Request.bDryRun && (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId)
-		|| !IsCanonicalSha256(Request.ExpectedPlanHash)))
+		|| !FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(Request.ExpectedPlanHash)))
 	{
-		return Reject(TEXT("invalid_submission_fields"), TEXT("A non-dry submission needs a valid operation_id and the plan_hash its dry run returned."));
+		return Reject(TEXT("invalid_submission_fields"), FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage());
 	}
 	if (!IsCanonicalSha256(Request.ExpectedRevision))
 	{
@@ -660,10 +988,13 @@ FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const
 		return Reject(TEXT("level_never_saved"), TEXT("This level has never been saved, so there is nowhere to save the lighting; save the level first or leave bSave off."));
 	}
 	FString OpError;
-	if (!Gate::ValidateOps(*World, Request.Ops, OpError))
+	TArray<FString> OpNotes;
+	if (!Gate::ValidateOps(*World, Request.Ops, OpError, &OpNotes))
 	{
 		return Reject(TEXT("invalid_op"), OpError);
 	}
+	// On the dry run and on the edit's own reply, which keeps them when it waits: the agent hears why before the level shows it.
+	Report.Notes = MoveTemp(OpNotes);
 
 	const TSharedRef<FHyperAIStudioLightingEditOpsPayload, ESPMode::ThreadSafe> Payload =
 		MakeShared<FHyperAIStudioLightingEditOpsPayload, ESPMode::ThreadSafe>();
@@ -718,10 +1049,11 @@ FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const
 	{
 		Report.bOk = true;
 		Report.Status = TEXT("planned");
-		Report.Diagnostic = TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash.");
+		Report.Diagnostic = Fit.AppendTo(FString(TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash."))
+			+ (Report.Notes.IsEmpty() ? TEXT("") : TEXT(" Read the notes first: they say what some of these values will do.")));
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Payload->SemanticFingerprint)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("plan_hash_mismatch"), TEXT("The plan changed since its dry run (ops or lighting). Dry-run again and review it."));
 	}
@@ -750,33 +1082,23 @@ FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildPlan(const
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Poll hyper_operation_status with operation_id: it starts once approved.");
+		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
 		return Report;
 	}
 
-	FHyperAIStudioTypedArtifactStageReceipt Receipt;
-	FHyperAIStudioTrustedExecutionDiagnostic StageStatus;
-	FString StageError;
-	if (!FHyperAIStudioTrustedExecutionFacade::StageExact(Prepared, Request.OperationId, Receipt, StageStatus, StageError))
+	// Another agent's edit may own the project lane; then this one waits its turn, and hyper_operation_wait
+	// waits through the queue as well as the edit.
+	FString QueueStatus;
+	FString QueueError;
+	if (!FHyperAIStudioExecutionQueue::Submit(Prepared, Request.OperationId, QueueStatus, QueueError))
 	{
-		return Reject(StageStatus.StatusCode.IsEmpty() ? FString(TEXT("stage_failed")) : StageStatus.StatusCode,
-			StageError.IsEmpty() ? StageStatus.Diagnostic : StageError);
+		return Reject(*QueueStatus, QueueError);
 	}
-	Report.bStaged = true;
-	FHyperAIStudioTypedArtifactSubmissionReceipt Submission;
-	FHyperAIStudioTrustedExecutionDiagnostic SubmitStatus;
-	FString SubmitError;
-	// Edit is tokenless; only risky safety classes need a server-issued grant.
-	if (!FHyperAIStudioTrustedExecutionFacade::SubmitExact(Receipt, FString(), Submission, SubmitStatus, SubmitError))
-	{
-		Report.Status = SubmitStatus.StatusCode.IsEmpty() ? FString(TEXT("submit_failed")) : SubmitStatus.StatusCode;
-		Report.Diagnostic = SubmitError.IsEmpty() ? SubmitStatus.Diagnostic : SubmitError;
-		return Report;
-	}
-	Report.bExecutionSubmitted = true;
+	Report.bStaged = QueueStatus == TEXT("submitted");
+	Report.bExecutionSubmitted = Report.bStaged;
 	Report.bOk = true;
-	Report.Status = TEXT("submitted");
-	Report.Diagnostic = TEXT("The edit runs over the next editor ticks. Poll hyper_operation_status until it is terminal, then hyper_lighting_compare.");
+	Report.Status = QueueStatus;
+	Report.Diagnostic = Fit.AppendTo(TEXT("The edit runs over the next editor ticks. Call hyper_operation_wait with operation_id, then hyper_lighting_compare."));
 	return Report;
 }
 
@@ -785,14 +1107,34 @@ FHyperAILightingInspectReport UHyperAIStudioLightingToolset::hyper_lighting_insp
 	return FHyperAIStudioLightingContracts::Inspect(Request);
 }
 
-FHyperAILightingApplyPlanReport UHyperAIStudioLightingToolset::hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& Request)
+UHyperAILightingApplyPlanResult* UHyperAIStudioLightingToolset::hyper_lighting_apply_plan(const FHyperAILightingApplyPlanRequest& Request)
 {
-	return FHyperAIStudioLightingContracts::BuildPlan(Request);
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAILightingApplyPlanResult>(FHyperAIStudioLightingContracts::BuildFittedPlan(Request));
+}
+
+FHyperAILightingApplyPlanReport FHyperAIStudioLightingContracts::BuildFittedPlan(const FHyperAILightingApplyPlanRequest& InRequest)
+{
+	FHyperAILightingApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAILightingApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return FHyperAIStudioLightingContracts::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAILightingCompareReport UHyperAIStudioLightingToolset::hyper_lighting_compare(const FHyperAILightingCompareRequest& Request)
 {
 	return FHyperAIStudioLightingContracts::Compare(Request);
+}
+
+UHyperAICaptureViewResult* UHyperAIStudioLightingToolset::hyper_capture_view(const FHyperAICaptureViewRequest& Request)
+{
+	return HyperAIStudio::Lighting::Capture::Start(Request);
+}
+
+FHyperAIImageCompareReport UHyperAIStudioLightingToolset::hyper_image_compare(const FHyperAIImageCompareRequest& Request)
+{
+	return FHyperAIStudioLightingContracts::CompareImages(Request);
 }
 
 const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioLightingDomainAdapter::GetDescriptor() const
@@ -851,6 +1193,22 @@ FHyperAIStudioDomainAdapterResult FHyperAIStudioLightingDomainAdapter::Execute(
 		const TSharedRef<FHyperAIStudioLightingCompareResultPayload, ESPMode::ThreadSafe> Output =
 			MakeShared<FHyperAIStudioLightingCompareResultPayload, ESPMode::ThreadSafe>();
 		Output->Report = Contracts::Compare(static_cast<const FHyperAIStudioLightingComparePayload&>(Payload).Request);
+		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
+	}
+	if (Matches(Contracts::CaptureToolName, Contracts::CaptureVariantId, EHyperAIStudioDomainSafety::Read,
+		Contracts::CapturePayloadTypeId, Contracts::CapturePayloadSchemaFingerprint()))
+	{
+		const TSharedRef<FHyperAIStudioLightingCaptureResultPayload, ESPMode::ThreadSafe> Output =
+			MakeShared<FHyperAIStudioLightingCaptureResultPayload, ESPMode::ThreadSafe>();
+		Output->Report = Contracts::CaptureNow(static_cast<const FHyperAIStudioLightingCapturePayload&>(Payload).Request);
+		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
+	}
+	if (Matches(Contracts::ImageCompareToolName, Contracts::ImageCompareVariantId, EHyperAIStudioDomainSafety::Read,
+		Contracts::ImageComparePayloadTypeId, Contracts::ImageComparePayloadSchemaFingerprint()))
+	{
+		const TSharedRef<FHyperAIStudioLightingImageCompareResultPayload, ESPMode::ThreadSafe> Output =
+			MakeShared<FHyperAIStudioLightingImageCompareResultPayload, ESPMode::ThreadSafe>();
+		Output->Report = Contracts::CompareImages(static_cast<const FHyperAIStudioLightingImageComparePayload&>(Payload).Request);
 		return Succeed(Output, Output->Report.Status, Output->Report.Diagnostic);
 	}
 	if (Matches(Contracts::MutationToolName, Contracts::MutationVariantId, EHyperAIStudioDomainSafety::Edit,
@@ -974,6 +1332,21 @@ void FHyperAIStudioLightingRegistration::Startup()
 			"Capture the level viewport and measure it against a reference image.");
 		Source.bNeedsReference = true;
 		Source.Refresh = FHyperAIStudioPreviewRefresh::CreateStatic(&HyperAIStudio::Lighting::Private::RefreshPreview);
+		Source.AgentActions = HyperAIStudio::Lighting::MatchJobs::Actions();
+		FHyperAIStudioPreviewPanel::RegisterSource(MoveTemp(Source));
+	}
+	{
+		FHyperAIStudioPreviewPanel::FSource Source;
+		Source.Id = FName(TEXT("image_match"));
+		Source.Label = NSLOCTEXT("HyperAIStudioLightingPreview", "MatchSourceLabel", "Image match: reference vs attempts");
+		Source.Tooltip = NSLOCTEXT("HyperAIStudioLightingPreview", "MatchSourceTooltip",
+			"Score an attempt against a reference, for scenes, materials, effects and UI. With a hyper_image_compare session, every iteration shows as a strip.");
+		Source.bNeedsReference = true;
+		Source.Refresh = FHyperAIStudioPreviewRefresh::CreateStatic(&HyperAIStudio::Lighting::Private::RefreshMatchPreview);
+		Source.AgentActions = HyperAIStudio::Lighting::MatchJobs::Actions();
+		Source.bRefreshWhileAgentWorks = true;
+		// For the Images page's Relight this view: the picture a reference is made from is the view the Match jobs work on.
+		Source.CaptureView = &HyperAIStudio::Lighting::MatchJobs::CaptureMatchView;
 		FHyperAIStudioPreviewPanel::RegisterSource(MoveTemp(Source));
 	}
 	PostEngineInitHandle = FCoreDelegates::GetOnPostEngineInit().AddRaw(this, &FHyperAIStudioLightingRegistration::RegisterAfterEngineInit);
@@ -982,7 +1355,9 @@ void FHyperAIStudioLightingRegistration::Startup()
 
 void FHyperAIStudioLightingRegistration::Shutdown()
 {
+	HyperAIStudio::Lighting::Capture::CancelAll();
 	FHyperAIStudioPreviewPanel::UnregisterSource(FName(TEXT("lighting")));
+	FHyperAIStudioPreviewPanel::UnregisterSource(FName(TEXT("image_match")));
 	if (PostEngineInitHandle.IsValid())
 	{
 		FCoreDelegates::GetOnPostEngineInit().Remove(PostEngineInitHandle);

@@ -9,6 +9,7 @@
 #include "HyperAIStudioAgentChatHistory.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioAsyncJobHost.h"
+#include "HyperAIStudioAutoApproval.h"
 #include "HyperAIStudioResultPreview.h"
 #include "HAL/FileManager.h"
 #include "Misc/App.h"
@@ -104,6 +105,21 @@ bool FHyperAIStudioApprovalGateTest::RunTest(const FString& Parameters)
 		FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::Destructive));
 	TestTrue(TEXT("External effects always need approval"),
 		FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::ExternalEffect));
+	// Auto-approval changes who approves, never what asks: covered requests still pass through the gate. A test never
+	// touches the user's own auto-approval, so this part waits for an editor where it is off.
+	if (!FHyperAIStudioAutoApprovalTestAccess::SkipWhileUserActivationOn(*this))
+	{
+		FHyperAIStudioAutoApprovalTestAccess::Reset();
+		TestTrue(TEXT("Auto-approval turns on for everything"), FHyperAIStudioAutoApprovalTestAccess::TurnOn({
+			EHyperAIStudioApprovalCategory::Edits, EHyperAIStudioApprovalCategory::Scripts,
+			EHyperAIStudioApprovalCategory::Destructive, EHyperAIStudioApprovalCategory::ExternalEffects}, {}));
+		Settings->bRequireApprovalForAgentEdits = true;
+		TestTrue(TEXT("With it on, edits still go through approval"), FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::Edit));
+		TestTrue(TEXT("and so do destructive and external-effect tools"),
+			FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::Destructive)
+			&& FHyperAIStudioApprovalGate::IsApprovalRequired(EHyperAIStudioDomainSafety::ExternalEffect));
+		FHyperAIStudioAutoApprovalTestAccess::Reset();
+	}
 	Settings->bRequireApprovalForAgentEdits = bPrevious;
 
 	// An unprepared plan is never queued, and an unknown id is never approved.
@@ -195,6 +211,61 @@ bool FHyperAIStudioAsyncJobHostTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The stuck job is queryable"), FHyperAIStudioAsyncJobHost::Query(StuckId, Status, Error));
 	TestEqual(TEXT("It times out"), Status.State, EHyperAIStudioAsyncJobState::TimedOut);
 	TestFalse(TEXT("Nothing is left running"), FHyperAIStudioAsyncJobHost::IsRunning(FString()));
+	TestFalse(TEXT("A job without OnCancel is not cancellable"), Status.bCancellable);
+	TestFalse(TEXT("A finished job cannot be cancelled"), FHyperAIStudioAsyncJobHost::Cancel(StuckId, TEXT("late"), Error));
+
+	// A job with OnCancel can be stopped by the user, and is stopped when it outlives its deadline.
+	TSharedRef<int32> Stops = MakeShared<int32>(0);
+	FHyperAIStudioAsyncJobRequest Cancellable = Request;
+	Cancellable.ToolName = TEXT("cancellable_tool");
+	Cancellable.OperationId = TEXT("op-cancel-test");
+	Cancellable.OnCancel = [Stops]() { ++(*Stops); };
+	auto Forever = [](FString& OutProgress, FString&)
+	{
+		OutProgress = TEXT("generating");
+		return EHyperAIStudioAsyncJobPoll::Running;
+	};
+	FString CancelId;
+	TestTrue(TEXT("The cancellable job starts"), FHyperAIStudioAsyncJobHost::Start(Cancellable, Forever, CancelId, Error));
+	FHyperAIStudioAsyncJobHost::Query(CancelId, Status, Error);
+	TestTrue(TEXT("It says it can be cancelled"), Status.bCancellable);
+	TestTrue(TEXT("Its operation counts as running"), FHyperAIStudioAsyncJobHost::IsRunning(TEXT("op-cancel-test")));
+	TestTrue(TEXT("It cancels"), FHyperAIStudioAsyncJobHost::Cancel(CancelId, TEXT("Cancelled from the test."), Error));
+	FHyperAIStudioAsyncJobHost::Query(CancelId, Status, Error);
+	TestEqual(TEXT("It reports cancelled"), FString(FHyperAIStudioAsyncJobHost::LexToString(Status.State)), FString(TEXT("cancelled")));
+	TestEqual(TEXT("with the reason"), Status.Diagnostic, FString(TEXT("Cancelled from the test.")));
+	TestEqual(TEXT("OnCancel stopped the work once"), *Stops, 1);
+	TestFalse(TEXT("Its operation is no longer running"), FHyperAIStudioAsyncJobHost::IsRunning(TEXT("op-cancel-test")));
+
+	Cancellable.DeadlineMs = 120;
+	TestTrue(TEXT("A cancellable job with a short deadline starts"), FHyperAIStudioAsyncJobHost::Start(Cancellable, Forever, CancelId, Error));
+	Pump(20);
+	FHyperAIStudioAsyncJobHost::Query(CancelId, Status, Error);
+	TestEqual(TEXT("It times out"), Status.State, EHyperAIStudioAsyncJobState::TimedOut);
+	TestEqual(TEXT("and its work was stopped at the deadline"), *Stops, 2);
+	TestTrue(TEXT("which the diagnostic says"), Status.Diagnostic.StartsWith(TEXT("Stopped after")));
+
+	// Past the finished jobs it keeps, the host lets the oldest go; the job that just finished stays queryable.
+	TArray<FString> Quick;
+	for (int32 Index = 0; Index < 20; ++Index)
+	{
+		FString QuickId;
+		FHyperAIStudioAsyncJobRequest Each = Request;
+		Each.ToolName = TEXT("quick_tool");
+		if (FHyperAIStudioAsyncJobHost::Start(Each, [](FString&, FString& OutDiagnostic)
+			{
+				OutDiagnostic = TEXT("quick");
+				return EHyperAIStudioAsyncJobPoll::Completed;
+			}, QuickId, Error))
+		{
+			Quick.Add(QuickId);
+		}
+		Pump(4);
+	}
+	TestEqual(TEXT("Twenty quick jobs ran"), Quick.Num(), 20);
+	TestTrue(TEXT("The newest finished job stays queryable"),
+		!Quick.IsEmpty() && FHyperAIStudioAsyncJobHost::Query(Quick.Last(), Status, Error) && Status.State == EHyperAIStudioAsyncJobState::Completed);
+	TestFalse(TEXT("and the oldest are let go"), !Quick.IsEmpty() && FHyperAIStudioAsyncJobHost::Query(Quick[0], Status, Error));
 
 	FHyperAIStudioAsyncJobHost::Shutdown();
 	return true;
@@ -319,7 +390,8 @@ bool FHyperAIStudioCohortMismatchTest::RunTest(const FString& Parameters)
 	using FRuntime = FHyperAIStudioExtensionRuntime;
 	// Niagara is in the generated catalog, so its real cohort must report no mismatch at all.
 	const TArray<FString> NiagaraTools = {
-		TEXT("hyper_niagara_inspect"), TEXT("hyper_niagara_apply_plan"), TEXT("hyper_niagara_validate")};
+		TEXT("hyper_niagara_inspect"), TEXT("hyper_niagara_apply_plan"), TEXT("hyper_niagara_validate"), TEXT("hyper_niagara_live"),
+		TEXT("hyper_niagara_discover"), TEXT("hyper_niagara_preview")};
 	const FString Cohort = TEXT("cohort.source.hyperaistudioniagaratoolset.v1");
 	TestEqual(TEXT("A catalog-matching cohort reports nothing"),
 		FRuntime::DescribeExactGeneratedCohortMismatch(TEXT("niagara_vfx"), Cohort, NiagaraTools), FString());

@@ -3,19 +3,30 @@
 #include "HyperAIStudioAnimBlueprintGate.h"
 
 #include "AnimGraphNode_BlendSpacePlayer.h"
+#include "AnimGraphNode_DeadBlending.h"
+#include "AnimGraphNode_Inertialization.h"
+#include "AnimGraphNode_LayeredBoneBlend.h"
+#include "AnimGraphNode_LinkedAnimLayer.h"
 #include "AnimGraphNode_Root.h"
+#include "AnimGraphNode_SaveCachedPose.h"
 #include "AnimGraphNode_SequencePlayer.h"
+#include "AnimGraphNode_Slot.h"
 #include "AnimGraphNode_StateMachine.h"
 #include "AnimGraphNode_StateResult.h"
 #include "AnimGraphNode_TransitionResult.h"
+#include "AnimGraphNode_UseCachedPose.h"
 #include "AnimStateEntryNode.h"
 #include "AnimStateNode.h"
 #include "AnimStateTransitionNode.h"
+#include "AnimationGraph.h"
+#include "AnimationGraphSchema.h"
 #include "AnimationStateGraph.h"
 #include "AnimationStateMachineGraph.h"
 #include "AnimationTransitionGraph.h"
 #include "Animation/AnimBlueprint.h"
+#include "Animation/AnimData/BoneMaskFilter.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimLayerInterface.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSequenceBase.h"
 #include "Animation/BlendSpace.h"
@@ -24,10 +35,12 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "EdGraphSchema_K2.h"
 #include "Editor.h"
+#include "Engine/MemberReference.h"
 #include "Factories/AnimBlueprintFactory.h"
 #include "GameFramework/NavMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_Event.h"
 #include "K2Node_IfThenElse.h"
@@ -281,6 +294,285 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 			return Pin && Pin->LinkedTo.Num() > 0 ? Pin->LinkedTo[0]->GetOwningNode() : nullptr;
 		}
 
+		// ---------------------------------------------------------------- the output chain
+
+		bool IsInertialization(const UEdGraphNode* Node)
+		{
+			return Node && (Node->IsA<UAnimGraphNode_Inertialization>() || Node->IsA<UAnimGraphNode_DeadBlending>());
+		}
+
+		/** A node the output chain passes through: inertialization, a slot, or a layered blend (by its base pose). */
+		bool IsChainNode(const UEdGraphNode* Node)
+		{
+			return IsInertialization(Node) || (Node && (Node->IsA<UAnimGraphNode_Slot>() || Node->IsA<UAnimGraphNode_LayeredBoneBlend>()));
+		}
+
+		/** The input a chain node passes its pose on through: a layered blend's base pose, anything else's one input pose. */
+		UEdGraphPin* ThroughPin(UEdGraphNode& Node)
+		{
+			if (Node.IsA<UAnimGraphNode_LayeredBoneBlend>())
+			{
+				return Node.FindPin(TEXT("BasePose"), EGPD_Input);
+			}
+			return PosePin(Node, EGPD_Input);
+		}
+
+		UEdGraphPin* OutputPin(const UEdGraph& AnimGraph)
+		{
+			UAnimGraphNode_Root* Root = FindFirst<UAnimGraphNode_Root>(AnimGraph);
+			return Root ? PosePin(*Root, EGPD_Input) : nullptr;
+		}
+
+		/** Where a slot or layer goes: in front of the output pose, inside an Inertialization or Dead Blending node there. */
+		UEdGraphPin* InsertionPin(const UEdGraph& AnimGraph)
+		{
+			UEdGraphPin* Output = OutputPin(AnimGraph);
+			UEdGraphNode* Feeding = LinkedNode(Output);
+			return IsInertialization(Feeding) ? PosePin(*Feeding, EGPD_Input) : Output;
+		}
+
+		/** The pin at the far end of the output chain, where the base pose (a state machine) comes in; null for a broken cache. */
+		UEdGraphPin* BaseInput(const UEdGraph& AnimGraph)
+		{
+			UEdGraphPin* Pin = OutputPin(AnimGraph);
+			for (int32 Step = 0; Pin && Step < 64; ++Step)
+			{
+				UEdGraphNode* Source = LinkedNode(Pin);
+				if (const UAnimGraphNode_UseCachedPose* Use = Cast<UAnimGraphNode_UseCachedPose>(Source))
+				{
+					UAnimGraphNode_SaveCachedPose* Save = Use->SaveCachedPoseNode.Get();
+					Pin = Save ? PosePin(*Save, EGPD_Input) : nullptr;
+				}
+				else if (IsChainNode(Source))
+				{
+					Pin = ThroughPin(*Source);
+				}
+				else
+				{
+					return Pin;
+				}
+			}
+			return Pin;
+		}
+
+		/** Moves every node at or right of X further right, to open a column for new nodes. */
+		void MakeRoom(UEdGraph& Graph, const int32 X, const int32 Width)
+		{
+			for (UEdGraphNode* Node : Graph.Nodes)
+			{
+				if (Node && Node->NodePosX >= X)
+				{
+					Node->Modify();
+					Node->NodePosX += Width;
+				}
+			}
+		}
+
+		/** Node goes in front of At, an input pose pin: what fed At now feeds Node, and Node feeds At. */
+		void InsertAt(UEdGraphPin& At, UEdGraphNode& Node)
+		{
+			UEdGraphPin* Source = At.LinkedTo.IsEmpty() ? nullptr : At.LinkedTo[0];
+			At.BreakAllPinLinks();
+			if (Source) Source->MakeLinkTo(ThroughPin(Node));
+			PosePin(Node, EGPD_Output)->MakeLinkTo(&At);
+		}
+
+		FString SlotNames(const USkeleton* Skeleton)
+		{
+			TArray<FString> Names;
+			for (const FAnimSlotGroup& Group : Skeleton ? Skeleton->GetSlotGroups() : TArray<FAnimSlotGroup>())
+			{
+				for (const FName& Slot : Group.SlotNames) Names.Add(Slot.ToString());
+			}
+			return Names.IsEmpty() ? FString(TEXT("none")) : FString::Join(Names, TEXT(", "));
+		}
+
+		TArray<UAnimGraphNode_SaveCachedPose*> CachedPoses(const UAnimBlueprint& Blueprint)
+		{
+			TArray<UEdGraph*> Graphs;
+			Blueprint.GetAllGraphs(Graphs);
+			TArray<UAnimGraphNode_SaveCachedPose*> Found;
+			for (const UEdGraph* Graph : Graphs)
+			{
+				for (UEdGraphNode* Node : Graph ? Graph->Nodes : TArray<TObjectPtr<UEdGraphNode>>())
+				{
+					if (UAnimGraphNode_SaveCachedPose* Save = Cast<UAnimGraphNode_SaveCachedPose>(Node)) Found.Add(Save);
+				}
+			}
+			return Found;
+		}
+
+		// ---------------------------------------------------------------- linked anim layers
+
+		/** A layer graph: an animation graph other than the AnimGraph. */
+		bool IsLayerGraph(const UEdGraph* Graph)
+		{
+			return Graph && Graph->IsA<UAnimationGraph>() && Graph->GetFName() != UEdGraphSchema_K2::GN_AnimGraph;
+		}
+
+		FString InterfaceName(const UClass* Interface)
+		{
+			FString Name = Interface ? Interface->GetName() : FString(TEXT("(missing)"));
+			Name.RemoveFromEnd(TEXT("_C"));
+			return Name;
+		}
+
+		/** Each layer the Blueprint has, with where it comes from: self for its own, or the interface that declares it. */
+		TArray<TPair<UEdGraph*, FString>> LayerGraphs(const UAnimBlueprint& Blueprint)
+		{
+			TArray<TPair<UEdGraph*, FString>> Found;
+			for (UEdGraph* Graph : Blueprint.FunctionGraphs)
+			{
+				if (IsLayerGraph(Graph)) Found.Emplace(Graph, TEXT("self"));
+			}
+			for (const FBPInterfaceDescription& Description : Blueprint.ImplementedInterfaces)
+			{
+				for (UEdGraph* Graph : Description.Graphs)
+				{
+					if (IsLayerGraph(Graph)) Found.Emplace(Graph, InterfaceName(Description.Interface));
+				}
+			}
+			return Found;
+		}
+
+		UEdGraph* FindLayerGraph(const UAnimBlueprint& Blueprint, const FString& Name)
+		{
+			for (const TPair<UEdGraph*, FString>& Layer : LayerGraphs(Blueprint))
+			{
+				if (Layer.Key->GetName().Equals(Name, ESearchCase::IgnoreCase)) return Layer.Key;
+			}
+			return nullptr;
+		}
+
+		/** The layers an Animation Layer Interface declares. */
+		TArray<FString> InterfaceLayers(const UAnimBlueprint& Interface)
+		{
+			TArray<FString> Names;
+			for (const UEdGraph* Graph : Interface.FunctionGraphs)
+			{
+				if (IsLayerGraph(Graph)) Names.Add(Graph->GetName());
+			}
+			return Names;
+		}
+
+		bool IsLayerInterface(const UAnimBlueprint* Blueprint)
+		{
+			return Blueprint && Blueprint->BlueprintType == BPTYPE_Interface;
+		}
+
+		/**
+		 * A Linked Anim Layer node set up the way the engine's own menu action sets one up (SetupFromLayerId, which is not
+		 * exported): the layer, the interface that declares it (none for a self layer), the interface graph's guid, and the
+		 * function it calls, through the node's reflected FunctionReference.
+		 */
+		void SetUpLinkedLayer(UAnimGraphNode_LinkedAnimLayer& Node, const UAnimBlueprint& Blueprint, const FName Layer)
+		{
+			Node.Node.Layer = Layer;
+			UClass* Interface = nullptr;
+			FGuid Guid;
+			for (const FBPInterfaceDescription& Description : Blueprint.ImplementedInterfaces)
+			{
+				for (const UEdGraph* Graph : Description.Graphs)
+				{
+					if (Graph && Graph->GetFName() == Layer)
+					{
+						Interface = Description.Interface;
+						Guid = Graph->InterfaceGuid;
+					}
+				}
+			}
+			Node.Node.Interface = Interface;
+			Node.InterfaceGuid = Guid;
+			if (!Interface) Node.Node.InstanceClass = nullptr;
+			const FStructProperty* ReferenceProperty = FindFProperty<FStructProperty>(UAnimGraphNode_LinkedAnimLayer::StaticClass(), TEXT("FunctionReference"));
+			FMemberReference* Reference = ReferenceProperty && ReferenceProperty->Struct == FMemberReference::StaticStruct()
+				? ReferenceProperty->ContainerPtrToValuePtr<FMemberReference>(&Node) : nullptr;
+			if (!Reference) return;
+			if (Interface)
+			{
+				FGuid FunctionGuid;
+				FBlueprintEditorUtils::GetFunctionGuidFromClassByFieldName(FBlueprintEditorUtils::GetMostUpToDateClass(Interface), Layer, FunctionGuid);
+				Reference->SetExternalMember(Layer, Interface, FunctionGuid);
+			}
+			else
+			{
+				Reference->SetSelfMember(Layer);
+			}
+		}
+
+		FString DescribePoseSource(const UEdGraphNode* Node)
+		{
+			if (const UAnimGraphNode_Slot* Slot = Cast<UAnimGraphNode_Slot>(Node)) return TEXT("slot ") + Slot->Node.SlotName.ToString();
+			if (const UAnimGraphNode_UseCachedPose* Use = Cast<UAnimGraphNode_UseCachedPose>(Node))
+			{
+				return TEXT("cached pose ") + (Use->SaveCachedPoseNode.IsValid() ? Use->SaveCachedPoseNode->CacheName : FString(TEXT("(missing)")));
+			}
+			// GetStateMachineName is not const, though it only reads.
+			if (UAnimGraphNode_StateMachine* Machine = Cast<UAnimGraphNode_StateMachine>(const_cast<UEdGraphNode*>(Node)))
+			{
+				return TEXT("state machine ") + Machine->GetStateMachineName();
+			}
+			return Node ? Node->GetNodeTitle(ENodeTitleType::ListView).ToString() : FString(TEXT("nothing"));
+		}
+
+		/** The output chain from the output back; each machine it reaches is added to OutMachines. */
+		TArray<FString> ReadOutputChain(const UAnimBlueprint& Blueprint, TSet<const UEdGraphNode*>* OutMachines = nullptr)
+		{
+			TArray<FString> Chain;
+			const UEdGraph* AnimGraph = FindAnimGraph(Blueprint);
+			UEdGraphPin* Pin = AnimGraph ? OutputPin(*AnimGraph) : nullptr;
+			for (int32 Step = 0; Pin && Step < 64; ++Step)
+			{
+				UEdGraphNode* Source = LinkedNode(Pin);
+				if (!Source)
+				{
+					Chain.Add(TEXT("nothing"));
+					break;
+				}
+				if (IsInertialization(Source))
+				{
+					Chain.Add(Source->IsA<UAnimGraphNode_DeadBlending>() ? TEXT("Dead blending") : TEXT("Inertialization"));
+					Pin = ThroughPin(*Source);
+				}
+				else if (const UAnimGraphNode_Slot* Slot = Cast<UAnimGraphNode_Slot>(Source))
+				{
+					Chain.Add(TEXT("Slot ") + Slot->Node.SlotName.ToString());
+					Pin = ThroughPin(*Source);
+				}
+				else if (const UAnimGraphNode_LayeredBoneBlend* Blend = Cast<UAnimGraphNode_LayeredBoneBlend>(Source))
+				{
+					TArray<FString> Layers;
+					for (int32 Layer = 0; Layer < Blend->Node.LayerSetup.Num(); ++Layer)
+					{
+						TArray<FString> Bones;
+						for (const FBranchFilter& Filter : Blend->Node.LayerSetup[Layer].BranchFilters)
+						{
+							Bones.Add(Filter.BlendDepth == 0 ? Filter.BoneName.ToString() : FString::Printf(TEXT("%s (depth %d)"), *Filter.BoneName.ToString(), Filter.BlendDepth));
+						}
+						const UEdGraphPin* LayerPin = Source->FindPin(*FString::Printf(TEXT("BlendPoses_%d"), Layer), EGPD_Input);
+						Layers.Add(FString::Printf(TEXT("%s from %s"), *DescribePoseSource(LinkedNode(LayerPin)),
+							Bones.IsEmpty() ? TEXT("no bone") : *FString::Join(Bones, TEXT(", "))));
+					}
+					Chain.Add(FString::Printf(TEXT("Layered blend per bone: %s%s"), *FString::Join(Layers, TEXT("; ")),
+						Blend->Node.bMeshSpaceRotationBlend ? TEXT(" (mesh-space rotation)") : TEXT("")));
+					Pin = ThroughPin(*Source);
+				}
+				else if (const UAnimGraphNode_UseCachedPose* Use = Cast<UAnimGraphNode_UseCachedPose>(Source))
+				{
+					Chain.Add(TEXT("Cached pose ") + (Use->SaveCachedPoseNode.IsValid() ? Use->SaveCachedPoseNode->CacheName : FString(TEXT("(missing)"))));
+					UAnimGraphNode_SaveCachedPose* Save = Use->SaveCachedPoseNode.Get();
+					Pin = Save ? PosePin(*Save, EGPD_Input) : nullptr;
+				}
+				else
+				{
+					if (Source->IsA<UAnimGraphNode_StateMachine>() && OutMachines) OutMachines->Add(Source);
+					Chain.Add(DescribePoseSource(Source).Left(1).ToUpper() + DescribePoseSource(Source).Mid(1));
+					break;
+				}
+			}
+			return Chain;
+		}
+
 		FString VariableOnPin(const UEdGraphNode& Node, const TCHAR* PinName)
 		{
 			const UK2Node_VariableGet* Get = Cast<UK2Node_VariableGet>(LinkedNode(Node.FindPin(PinName, EGPD_Input)));
@@ -295,14 +587,16 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 			return NodeProperty ? FindFProperty<FBoolProperty>(NodeProperty->Struct, TEXT("bLoopAnimation")) : nullptr;
 		}
 
-		void ReadState(const UAnimStateNode& Node, FHyperAIAnimBlueprintState& Out)
+		/** What plays into a pose input: a sequence, a blend space and its axis variables, a linked layer, nothing, or anything else. */
+		void ReadPlayer(UEdGraphNode* Source, FHyperAIAnimBlueprintState& Out)
 		{
-			Out.Name = Node.GetStateName();
 			Out.Player = TEXT("empty");
-			UAnimationStateGraph* Graph = Cast<UAnimationStateGraph>(Node.BoundGraph);
-			UAnimGraphNode_StateResult* Result = Graph ? Graph->GetResultNode() : nullptr;
-			UEdGraphNode* Source = Result ? LinkedNode(PosePin(*Result, EGPD_Input)) : nullptr;
-			if (UAnimGraphNode_SequencePlayer* Sequence = Cast<UAnimGraphNode_SequencePlayer>(Source))
+			if (const UAnimGraphNode_LinkedAnimLayer* Layer = Cast<UAnimGraphNode_LinkedAnimLayer>(Source))
+			{
+				Out.Player = TEXT("layer");
+				Out.Asset = Layer->Node.Layer.ToString();
+			}
+			else if (UAnimGraphNode_SequencePlayer* Sequence = Cast<UAnimGraphNode_SequencePlayer>(Source))
 			{
 				Out.Player = TEXT("sequence");
 				Out.Asset = Sequence->GetAnimationAsset() ? Sequence->GetAnimationAsset()->GetPathName() : FString();
@@ -320,6 +614,21 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 			{
 				Out.Player = TEXT("custom");
 			}
+		}
+
+		void ReadState(const UAnimStateNode& Node, FHyperAIAnimBlueprintState& Out)
+		{
+			Out.Name = Node.GetStateName();
+			UAnimationStateGraph* Graph = Cast<UAnimationStateGraph>(Node.BoundGraph);
+			UAnimGraphNode_StateResult* Result = Graph ? Graph->GetResultNode() : nullptr;
+			ReadPlayer(Result ? LinkedNode(PosePin(*Result, EGPD_Input)) : nullptr, Out);
+		}
+
+		/** A layer graph's output: what feeds its output pose node. */
+		UEdGraphPin* LayerOutput(const UEdGraph& Layer)
+		{
+			UAnimGraphNode_Root* Root = FindFirst<UAnimGraphNode_Root>(Layer);
+			return Root ? PosePin(*Root, EGPD_Input) : nullptr;
 		}
 
 		FString RuleOf(const UAnimStateTransitionNode& Transition)
@@ -341,6 +650,8 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 		template <typename TNode>
 		TNode* Place(UEdGraph& Graph, const int32 X, const int32 Y, TFunctionRef<void(TNode&)> Setup)
 		{
+			// UEdGraph::AddNode does not record the graph for undo: without this, undo empties the new node but leaves it in the graph.
+			Graph.Modify();
 			FGraphNodeCreator<TNode> Creator(Graph);
 			TNode* Node = Creator.CreateNode(/*bSelectNewNode=*/false);
 			Node->NodePosX = X;
@@ -367,6 +678,73 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 		UEdGraphPin* Pin(UEdGraphNode& Node, const FName Name, const EEdGraphPinDirection Direction)
 		{
 			return Node.FindPin(Name, Direction);
+		}
+
+		/** A slot in front of At: montages in it play over everything that feeds it. */
+		void AddSlot(UEdGraph& Graph, UEdGraphPin& At, const FString& SlotName)
+		{
+			UEdGraphNode& Owner = *At.GetOwningNode();
+			const int32 X = Owner.NodePosX;
+			MakeRoom(Graph, X, 320);
+			UAnimGraphNode_Slot* Slot = Place<UAnimGraphNode_Slot>(Graph, X, Owner.NodePosY,
+				[&SlotName](UAnimGraphNode_Slot& Node) { Node.Node.SlotName = FName(*SlotName); });
+			InsertAt(At, *Slot);
+		}
+
+		/** An Inertialization node right at the output, where inertialization transitions and blends look for it. */
+		void AddInertialization(UEdGraph& Graph, UEdGraphPin& Output)
+		{
+			UEdGraphNode& Root = *Output.GetOwningNode();
+			const int32 X = Root.NodePosX;
+			MakeRoom(Graph, X, 320);
+			InsertAt(Output, *Place<UAnimGraphNode_Inertialization>(Graph, X, Root.NodePosY, [](UAnimGraphNode_Inertialization&) {}));
+		}
+
+		/**
+		 * A slot layered from a bone in front of At: what fed At is cached; one copy is the base pose of a layered blend, the
+		 * other plays through the slot into its one layer, which covers the bone and everything below it, rotations blended in
+		 * mesh space so the upper body keeps its own facing over the legs.
+		 */
+		void AddLayeredSlot(const UAnimBlueprint& Blueprint, UEdGraph& Graph, UEdGraphPin& At, const FString& SlotName, const FString& Bone)
+		{
+			UEdGraphNode& Owner = *At.GetOwningNode();
+			const int32 X = Owner.NodePosX;
+			const int32 Y = Owner.NodePosY;
+			UEdGraphPin* Source = At.LinkedTo[0];
+			MakeRoom(Graph, X, 960);
+			FString CacheName = SlotName + TEXT("Base");
+			const TArray<UAnimGraphNode_SaveCachedPose*> Existing = CachedPoses(Blueprint);
+			for (int32 Suffix = 2; Existing.ContainsByPredicate([&CacheName](const UAnimGraphNode_SaveCachedPose* Save)
+				{ return Save->CacheName.Equals(CacheName, ESearchCase::IgnoreCase); }); ++Suffix)
+			{
+				CacheName = FString::Printf(TEXT("%sBase%d"), *SlotName, Suffix);
+			}
+			UAnimGraphNode_SaveCachedPose* Save = Place<UAnimGraphNode_SaveCachedPose>(Graph, X, Y - 220,
+				[&CacheName](UAnimGraphNode_SaveCachedPose& Node) { Node.CacheName = CacheName; });
+			auto UseCache = [&Graph, Save](const int32 UseX, const int32 UseY)
+			{
+				return Place<UAnimGraphNode_UseCachedPose>(Graph, UseX, UseY, [Save](UAnimGraphNode_UseCachedPose& Node) { Node.SaveCachedPoseNode = Save; });
+			};
+			UAnimGraphNode_UseCachedPose* Base = UseCache(X + 320, Y - 60);
+			UAnimGraphNode_UseCachedPose* Layer = UseCache(X, Y + 180);
+			UAnimGraphNode_Slot* Slot = Place<UAnimGraphNode_Slot>(Graph, X + 320, Y + 180,
+				[&SlotName](UAnimGraphNode_Slot& Node) { Node.Node.SlotName = FName(*SlotName); });
+			UAnimGraphNode_LayeredBoneBlend* Blend = Place<UAnimGraphNode_LayeredBoneBlend>(Graph, X + 640, Y,
+				[&Bone](UAnimGraphNode_LayeredBoneBlend& Node)
+				{
+					Node.Node.bMeshSpaceRotationBlend = true;
+					if (Node.Node.LayerSetup.IsEmpty()) Node.Node.LayerSetup.AddDefaulted();
+					FBranchFilter Filter;
+					Filter.BoneName = FName(*Bone);
+					Filter.BlendDepth = 0;
+					Node.Node.LayerSetup[0].BranchFilters = {Filter};
+				});
+			At.BreakAllPinLinks();
+			Source->MakeLinkTo(PosePin(*Save, EGPD_Input));
+			PosePin(*Base, EGPD_Output)->MakeLinkTo(Blend->FindPin(TEXT("BasePose"), EGPD_Input));
+			PosePin(*Layer, EGPD_Output)->MakeLinkTo(PosePin(*Slot, EGPD_Input));
+			PosePin(*Slot, EGPD_Output)->MakeLinkTo(Blend->FindPin(TEXT("BlendPoses_0"), EGPD_Input));
+			PosePin(*Blend, EGPD_Output)->MakeLinkTo(&At);
 		}
 
 		void BuildRule(UAnimationTransitionGraph& Graph, const FRule& Rule)
@@ -406,13 +784,11 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 			}
 		}
 
-		void SetPlayer(UAnimBlueprint& Blueprint, UAnimStateNode& State, UAnimationAsset* Asset, const FString& X, const FString& Y, const bool bOnce)
+		/** Empties a pose input: whatever fed it goes, with the variable reads that fed that node's inputs. */
+		void ClearPoseInput(UAnimBlueprint& Blueprint, UEdGraphPin& In)
 		{
-			UAnimationStateGraph* Graph = CastChecked<UAnimationStateGraph>(State.BoundGraph);
-			UEdGraphPin* In = PosePin(*Graph->GetResultNode(), EGPD_Input);
-			// Replace whatever feeds the state, and the variable reads that fed its axes.
 			TArray<UEdGraphNode*> Old;
-			for (UEdGraphPin* Linked : In->LinkedTo)
+			for (UEdGraphPin* Linked : In.LinkedTo)
 			{
 				UEdGraphNode* Player = Linked->GetOwningNode();
 				Old.Add(Player);
@@ -421,8 +797,33 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 					if (Input->Direction == EGPD_Input && Cast<UK2Node_VariableGet>(LinkedNode(Input))) Old.AddUnique(LinkedNode(Input));
 				}
 			}
-			In->BreakAllPinLinks();
+			In.BreakAllPinLinks();
 			RemoveNodes(Blueprint, Old);
+		}
+
+		/** A pose input (a state's or a layer's output) fed by a Linked Anim Layer node playing Layer. */
+		void SetLinkedLayer(UAnimBlueprint& Blueprint, UEdGraph& Graph, UEdGraphPin& In, const FString& Layer)
+		{
+			ClearPoseInput(Blueprint, In);
+			UAnimGraphNode_LinkedAnimLayer* Linked = Place<UAnimGraphNode_LinkedAnimLayer>(Graph, -400, 0,
+				[&Blueprint, &Layer](UAnimGraphNode_LinkedAnimLayer& Node) { SetUpLinkedLayer(Node, Blueprint, FName(*Layer)); });
+			PosePin(*Linked, EGPD_Output)->MakeLinkTo(&In);
+		}
+
+		void SetPlayer(UAnimBlueprint& Blueprint, UEdGraph& Graph, UEdGraphPin* In, UAnimationAsset* Asset, const FString& X, const FString& Y, const bool bOnce);
+
+		void SetPlayer(UAnimBlueprint& Blueprint, UAnimStateNode& State, UAnimationAsset* Asset, const FString& X, const FString& Y, const bool bOnce)
+		{
+			UAnimationStateGraph* Graph = CastChecked<UAnimationStateGraph>(State.BoundGraph);
+			SetPlayer(Blueprint, *Graph, PosePin(*Graph->GetResultNode(), EGPD_Input), Asset, X, Y, bOnce);
+		}
+
+		/** A pose input fed by a sequence or blend space player, the blend space's axes read from variables; null Asset empties it. */
+		void SetPlayer(UAnimBlueprint& Blueprint, UEdGraph& GraphRef, UEdGraphPin* In, UAnimationAsset* Asset, const FString& X, const FString& Y, const bool bOnce)
+		{
+			UEdGraph* Graph = &GraphRef;
+			// Replace whatever feeds it, and the variable reads that fed its axes.
+			ClearPoseInput(Blueprint, *In);
 			if (!Asset) return;
 			UEdGraphNode* Player = nullptr;
 			if (UBlendSpace* BlendSpace = Cast<UBlendSpace>(Asset))
@@ -556,12 +957,43 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 			TMap<FString, FString> Variables;
 			TSet<FString> Driven;
 			TMap<FString, FMachineModel> Machines;
+			/** Slots the AnimGraph plays (lower case); whether anything feeds the output; whether an Inertialization node is there. */
+			TSet<FString> Slots;
+			bool bOutputFed = false;
+			bool bInertialization = false;
+			/** An Animation Layer Interface, which declares layers and nothing else. */
+			bool bInterface = false;
+			/** Layers (lower case), each with where it comes from: self, or the interface that declares it; and the interfaces implemented. */
+			TMap<FString, FString> Layers;
+			TSet<FString> Interfaces;
 		};
 
 		FModel ModelOf(const UAnimBlueprint* Blueprint)
 		{
 			FModel Model;
 			if (!Blueprint) return Model;
+			Model.bInterface = IsLayerInterface(Blueprint);
+			for (const TPair<UEdGraph*, FString>& Layer : LayerGraphs(*Blueprint))
+			{
+				Model.Layers.Add(Layer.Key->GetName().ToLower(), Layer.Value);
+			}
+			for (const FBPInterfaceDescription& Description : Blueprint->ImplementedInterfaces)
+			{
+				if (const UBlueprint* Interface = Description.Interface ? UBlueprint::GetBlueprintFromClass(Description.Interface) : nullptr)
+				{
+					Model.Interfaces.Add(Interface->GetPathName().ToLower());
+				}
+			}
+			if (const UEdGraph* AnimGraph = FindAnimGraph(*Blueprint))
+			{
+				for (const UEdGraphNode* Node : AnimGraph->Nodes)
+				{
+					if (const UAnimGraphNode_Slot* Slot = Cast<UAnimGraphNode_Slot>(Node)) Model.Slots.Add(Slot->Node.SlotName.ToString().ToLower());
+					Model.bInertialization |= IsInertialization(Node);
+				}
+				const UEdGraphPin* Base = BaseInput(*AnimGraph);
+				Model.bOutputFed = Base && !Base->LinkedTo.IsEmpty();
+			}
 			TArray<FHyperAIAnimBlueprintVariable> Variables;
 			TArray<FHyperAIAnimBlueprintMachine> Machines;
 			Read(*Blueprint, Variables, Machines);
@@ -598,6 +1030,8 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 				}
 				return true;
 			}
+			// Loaded when nothing is in memory: an FName past its length, or a package with "//", stops the editor.
+			if (!FHyperAIStudioNames::IsObjectPath(Op.Asset, TEXT("asset"), &OutError)) return false;
 			OutAsset = LoadObject<UAnimationAsset>(nullptr, *Op.Asset);
 			const bool bSequence = OutAsset && OutAsset->IsA<UAnimSequenceBase>() && !OutAsset->IsA<UAnimMontage>();
 			const UBlendSpace* BlendSpace = Cast<UBlendSpace>(OutAsset);
@@ -633,9 +1067,11 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 			return true;
 		}
 
-		bool RunOps(UAnimBlueprint* Blueprint, const USkeleton* Skeleton, const TArray<FHyperAIAnimBlueprintOp>& Ops, const bool bWrite, FString& OutError)
+		bool RunOps(UAnimBlueprint* Blueprint, const USkeleton* Skeleton, const TArray<FHyperAIAnimBlueprintOp>& Ops, const bool bWrite, FString& OutError,
+			const bool bCreatingInterface = false)
 		{
 			FModel Model = ModelOf(Blueprint);
+			Model.bInterface |= bCreatingInterface;
 			for (int32 Index = 0; Index < Ops.Num(); ++Index)
 			{
 				const FHyperAIAnimBlueprintOp& Op = Ops[Index];
@@ -644,9 +1080,67 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 					OutError = FString::Printf(TEXT("Op %d (%s %s): %s"), Index, *Op.Kind, *Op.Name, *Why);
 					return false;
 				};
-				if (!IsIdentifier(Op.Name)) return Fail(TEXT("name must be an identifier: letters, digits and _, up to 64."));
+				if (Op.Kind != TEXT("add_inertialization") && !IsIdentifier(Op.Name)) return Fail(TEXT("name must be an identifier: letters, digits and _, up to 64."));
 				const FString Name = Op.Name.ToLower();
 				const FString MachineKey = Op.Machine.ToLower();
+				if (Model.bInterface && Op.Kind != TEXT("add_layer"))
+				{
+					return Fail(TEXT("an Animation Layer Interface only declares layers (add_layer); an Animation Blueprint implements it with implement_interface."));
+				}
+
+				if (Op.Kind == TEXT("add_layer"))
+				{
+					const bool bTaken = Model.Layers.Contains(Name) || Name == UEdGraphSchema_K2::GN_AnimGraph.ToString().ToLower()
+						|| (Blueprint && Blueprint->FunctionGraphs.ContainsByPredicate([&Op](const UEdGraph* Graph) { return Graph && Graph->GetName().Equals(Op.Name, ESearchCase::IgnoreCase); }));
+					if (bTaken) return Fail(TEXT("a layer or graph already has that name."));
+					Model.Layers.Add(Name, TEXT("self"));
+					if (!bWrite) continue;
+					UEdGraph* Layer = FBlueprintEditorUtils::CreateNewGraph(Blueprint, FName(*Op.Name), UAnimationGraph::StaticClass(), UAnimationGraphSchema::StaticClass());
+					FBlueprintEditorUtils::AddDomainSpecificGraph(Blueprint, Layer);
+					continue;
+				}
+				if (Op.Kind == TEXT("implement_interface"))
+				{
+					const UAnimBlueprint* Interface = !FHyperAIStudioNames::IsObjectPath(Op.Asset, nullptr) ? nullptr : LoadObject<UAnimBlueprint>(nullptr, *Op.Asset);
+					if (!IsLayerInterface(Interface) || !Interface->GeneratedClass)
+					{
+						return Fail(FString::Printf(TEXT("%s is not a compiled Animation Layer Interface."), *Op.Asset));
+					}
+					if (Model.Interfaces.Contains(Interface->GetPathName().ToLower())) return Fail(TEXT("the Blueprint implements that interface already."));
+					const USkeleton* InterfaceSkeleton = Interface->TargetSkeleton;
+					if (Skeleton && InterfaceSkeleton && InterfaceSkeleton != Skeleton && !Skeleton->IsCompatibleForEditor(InterfaceSkeleton))
+					{
+						return Fail(FString::Printf(TEXT("the interface is for skeleton %s, not the Blueprint's %s."), *InterfaceSkeleton->GetName(), *Skeleton->GetName()));
+					}
+					const TArray<FString> Declared = InterfaceLayers(*Interface);
+					if (Declared.IsEmpty()) return Fail(TEXT("the interface declares no layers yet; add_layer them in it first."));
+					for (const FString& Layer : Declared)
+					{
+						if (Model.Layers.Contains(Layer.ToLower())) return Fail(FString::Printf(TEXT("the Blueprint has a layer %s already."), *Layer));
+						Model.Layers.Add(Layer.ToLower(), Interface->GetName());
+					}
+					Model.Interfaces.Add(Interface->GetPathName().ToLower());
+					if (!bWrite) continue;
+					if (!FBlueprintEditorUtils::ImplementNewInterface(Blueprint, Interface->GeneratedClass->GetClassPathName()))
+					{
+						return Fail(TEXT("the Blueprint refused the interface."));
+					}
+					continue;
+				}
+				if (Op.Kind == TEXT("set_layer_asset"))
+				{
+					if (!Model.Layers.Contains(Name)) return Fail(TEXT("the Blueprint has no layer of that name; implement_interface or add_layer first."));
+					if (Op.Asset.IsEmpty()) return Fail(TEXT("set_layer_asset needs an asset."));
+					UAnimationAsset* Asset = nullptr;
+					FString Error;
+					if (!CheckAsset(Op, Skeleton, Model, Asset, Error)) return Fail(Error);
+					if (!bWrite) continue;
+					UEdGraph* Layer = FindLayerGraph(*Blueprint, Op.Name);
+					UEdGraphPin* Output = Layer ? LayerOutput(*Layer) : nullptr;
+					if (!Output) return Fail(TEXT("the layer has no output pose."));
+					SetPlayer(*Blueprint, *Layer, Output, Asset, Op.XVariable, Op.YVariable, Op.Value == TEXT("once"));
+					continue;
+				}
 
 				if (Op.Kind == TEXT("add_variable") || Op.Kind == TEXT("bind_variable"))
 				{
@@ -678,6 +1172,7 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 					if (Model.Machines.Contains(Name)) return Fail(TEXT("a state machine already has that name."));
 					if (!(Op.Value.IsEmpty() || Op.Value == TEXT("output"))) return Fail(TEXT("value may only be output."));
 					Model.Machines.Add(Name);
+					Model.bOutputFed = true;
 					if (!bWrite) continue;
 					UEdGraph* AnimGraph = FindAnimGraph(*Blueprint);
 					UAnimGraphNode_Root* Root = AnimGraph ? FindFirst<UAnimGraphNode_Root>(*AnimGraph) : nullptr;
@@ -685,12 +1180,57 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 					UAnimGraphNode_StateMachine* Machine = Place<UAnimGraphNode_StateMachine>(*AnimGraph,
 						Root->NodePosX - 450, Root->NodePosY + 200 * (Model.Machines.Num() - 1), [](UAnimGraphNode_StateMachine&) {});
 					FBlueprintEditorUtils::RenameGraph(Machine->EditorStateMachineGraph, Op.Name);
-					UEdGraphPin* Output = PosePin(*Root, EGPD_Input);
+					// The base of the output chain: behind any slots, layers and inertialization already in front of the output.
+					UEdGraphPin* Output = BaseInput(*AnimGraph);
+					if (!Output) Output = PosePin(*Root, EGPD_Input);
 					if (Output && (Output->LinkedTo.IsEmpty() || Op.Value == TEXT("output")))
 					{
 						Output->BreakAllPinLinks();
 						PosePin(*Machine, EGPD_Output)->MakeLinkTo(Output);
 					}
+					continue;
+				}
+
+				if (Op.Kind == TEXT("add_slot") || Op.Kind == TEXT("add_layered_slot"))
+				{
+					const bool bLayered = Op.Kind == TEXT("add_layered_slot");
+					if (!Skeleton || !Skeleton->ContainsSlotName(FName(*Op.Name)))
+					{
+						return Fail(FString::Printf(TEXT("the skeleton has no slot '%s'; its slots are %s (hyper_animation_apply_plan skeleton.add_slot adds one)."),
+							*Op.Name, *SlotNames(Skeleton)));
+					}
+					if (Model.Slots.Contains(Name)) return Fail(TEXT("the AnimGraph plays this slot already."));
+					if (!Model.bOutputFed) return Fail(TEXT("nothing feeds the output pose yet; add a state machine first."));
+					if (bLayered && (Op.Value.IsEmpty() || Skeleton->GetReferenceSkeleton().FindBoneIndex(FName(*Op.Value)) == INDEX_NONE))
+					{
+						return Fail(FString::Printf(TEXT("value is the bone the layer starts at, such as spine_01; the skeleton has no bone '%s'."), *Op.Value));
+					}
+					if (!bLayered && !Op.Value.IsEmpty()) return Fail(TEXT("add_slot takes no value; add_layered_slot takes the bone the layer starts at."));
+					Model.Slots.Add(Name);
+					if (!bWrite) continue;
+					UEdGraph* AnimGraph = FindAnimGraph(*Blueprint);
+					UEdGraphPin* At = AnimGraph ? InsertionPin(*AnimGraph) : nullptr;
+					if (!At || At->LinkedTo.IsEmpty()) return Fail(TEXT("the AnimGraph has no output pose to put the slot in front of."));
+					if (bLayered)
+					{
+						AddLayeredSlot(*Blueprint, *AnimGraph, *At, Op.Name, Op.Value);
+					}
+					else
+					{
+						AddSlot(*AnimGraph, *At, Op.Name);
+					}
+					continue;
+				}
+				if (Op.Kind == TEXT("add_inertialization"))
+				{
+					if (Model.bInertialization) return Fail(TEXT("the AnimGraph has an Inertialization node already."));
+					if (!Model.bOutputFed) return Fail(TEXT("nothing feeds the output pose yet; add a state machine first."));
+					Model.bInertialization = true;
+					if (!bWrite) continue;
+					UEdGraph* AnimGraph = FindAnimGraph(*Blueprint);
+					UEdGraphPin* Output = AnimGraph ? OutputPin(*AnimGraph) : nullptr;
+					if (!Output) return Fail(TEXT("the Blueprint has no AnimGraph output."));
+					AddInertialization(*AnimGraph, *Output);
 					continue;
 				}
 
@@ -730,6 +1270,38 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 					UEdGraphPin* Entry = Graph->EntryNode->Pins[0];
 					Entry->BreakAllPinLinks();
 					Entry->MakeLinkTo(FindState(*Graph, Op.Name)->GetInputPin());
+					continue;
+				}
+				if (Op.Kind == TEXT("set_state_layer"))
+				{
+					if (!bStateExists) return Fail(TEXT("no state has that name."));
+					if (!Model.Layers.Contains(Op.Value.ToLower()))
+					{
+						return Fail(FString::Printf(TEXT("value names a layer, and the Blueprint has no layer '%s'; implement_interface or add_layer first."), *Op.Value));
+					}
+					Machine->States[Name].bPlaysSequence = false;
+					if (!bWrite) continue;
+					UAnimationStateGraph* StateGraph = CastChecked<UAnimationStateGraph>(FindState(*Graph, Op.Name)->BoundGraph);
+					SetLinkedLayer(*Blueprint, *StateGraph, *PosePin(*StateGraph->GetResultNode(), EGPD_Input), FindLayerGraph(*Blueprint, Op.Value)->GetName());
+					continue;
+				}
+				if (Op.Kind == TEXT("set_transition_blend"))
+				{
+					if (!Machine->Transitions.Contains(Name + TEXT(">") + Op.To.ToLower()))
+					{
+						return Fail(FString::Printf(TEXT("%s has no transition from %s to %s."), *Op.Machine, *Op.Name, *Op.To));
+					}
+					if (Op.Value != TEXT("inertialization") && Op.Value != TEXT("standard")) return Fail(TEXT("value is inertialization or standard."));
+					if (!bWrite) continue;
+					for (UAnimStateTransitionNode* Transition : Transitions(*Graph))
+					{
+						if (StateNameOf(Transition->GetPreviousState()).Equals(Op.Name, ESearchCase::IgnoreCase)
+							&& StateNameOf(Transition->GetNextState()).Equals(Op.To, ESearchCase::IgnoreCase))
+						{
+							Transition->Modify();
+							Transition->LogicType = Op.Value == TEXT("inertialization") ? ETransitionLogicType::TLT_Inertialization : ETransitionLogicType::TLT_StandardBlend;
+						}
+					}
 					continue;
 				}
 				if (Op.Kind == TEXT("remove_state"))
@@ -819,7 +1391,9 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 					Transition->bCommentBubbleVisible = true;
 					continue;
 				}
-				return Fail(TEXT("unknown kind: use add_variable, bind_variable, add_state_machine, add_state, set_state_asset, set_entry_state, add_transition, remove_transition or remove_state."));
+				return Fail(TEXT("unknown kind: use add_variable, bind_variable, add_state_machine, add_state, set_state_asset, set_state_layer, set_entry_state, ")
+					TEXT("add_transition, remove_transition, remove_state, set_transition_blend, add_layered_slot, add_slot, add_inertialization, add_layer, ")
+					TEXT("implement_interface or set_layer_asset."));
 			}
 			if (bWrite)
 			{
@@ -837,12 +1411,14 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 
 	USkeleton* ResolveSkeleton(const FString& Path)
 	{
-		return Path.IsEmpty() ? nullptr : LoadObject<USkeleton>(nullptr, *Path);
+		// Loaded when nothing is in memory: an FName past its length, or a package with "//", stops the editor.
+		return !FHyperAIStudioNames::IsObjectPath(Path, nullptr) ? nullptr : LoadObject<USkeleton>(nullptr, *Path);
 	}
 
 	UClass* ResolveParentClass(const FString& Path, FString& OutError)
 	{
 		if (Path.IsEmpty()) return UAnimInstance::StaticClass();
+		if (!FHyperAIStudioNames::IsObjectPath(Path, TEXT("parent_class_path"), &OutError)) return nullptr;
 		UClass* Class = LoadClass<UAnimInstance>(nullptr, *Path);
 		if (!Class) OutError = FString::Printf(TEXT("%s is not an AnimInstance class."), *Path);
 		return Class;
@@ -867,6 +1443,11 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 
 	FString ComputeRevision(const UAnimBlueprint& Blueprint)
 	{
+		return FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(RevisionText(Blueprint));
+	}
+
+	FString RevisionText(const UAnimBlueprint& Blueprint)
+	{
 		FString Canonical = TEXT("hyperai.anim_blueprint.revision.v1\n");
 		Canonical += (Blueprint.TargetSkeleton ? Blueprint.TargetSkeleton->GetPathName() : FString()) + TEXT("\n");
 		Canonical += (Blueprint.ParentClass ? Blueprint.ParentClass->GetPathName() : FString()) + TEXT("\n");
@@ -890,8 +1471,32 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 					*Node->NodeComment, static_cast<int32>(Node->GetDesiredEnabledState()));
 				if (const UAnimStateTransitionNode* Transition = Cast<UAnimStateTransitionNode>(Node))
 				{
-					Canonical += FString::Printf(TEXT("transition|%g|%d|%g|%d\n"), Transition->CrossfadeDuration,
-						Transition->bAutomaticRuleBasedOnSequencePlayerInState ? 1 : 0, Transition->AutomaticRuleTriggerTime, Transition->PriorityOrder);
+					Canonical += FString::Printf(TEXT("transition|%g|%d|%g|%d|%d\n"), Transition->CrossfadeDuration,
+						Transition->bAutomaticRuleBasedOnSequencePlayerInState ? 1 : 0, Transition->AutomaticRuleTriggerTime, Transition->PriorityOrder,
+						static_cast<int32>(Transition->LogicType));
+				}
+				if (const UAnimGraphNode_Slot* Slot = Cast<UAnimGraphNode_Slot>(Node))
+				{
+					Canonical += TEXT("slot|") + Slot->Node.SlotName.ToString() + TEXT("\n");
+				}
+				if (const UAnimGraphNode_SaveCachedPose* Save = Cast<UAnimGraphNode_SaveCachedPose>(Node))
+				{
+					Canonical += TEXT("cache|") + Save->CacheName + TEXT("\n");
+				}
+				if (const UAnimGraphNode_UseCachedPose* Use = Cast<UAnimGraphNode_UseCachedPose>(Node))
+				{
+					Canonical += TEXT("use_cache|") + (Use->SaveCachedPoseNode.IsValid() ? Use->SaveCachedPoseNode->NodeGuid.ToString() : FString()) + TEXT("\n");
+				}
+				if (const UAnimGraphNode_LayeredBoneBlend* Blend = Cast<UAnimGraphNode_LayeredBoneBlend>(Node))
+				{
+					Canonical += FString::Printf(TEXT("layers|%d\n"), Blend->Node.bMeshSpaceRotationBlend ? 1 : 0);
+					for (int32 Layer = 0; Layer < Blend->Node.LayerSetup.Num(); ++Layer)
+					{
+						for (const FBranchFilter& Filter : Blend->Node.LayerSetup[Layer].BranchFilters)
+						{
+							Canonical += FString::Printf(TEXT("layer|%d|%s|%d\n"), Layer, *Filter.BoneName.ToString(), Filter.BlendDepth);
+						}
+					}
 				}
 				if (const UAnimGraphNode_Base* AnimNode = Cast<UAnimGraphNode_Base>(Node))
 				{
@@ -915,7 +1520,7 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 				}
 			}
 		}
-		return FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(Canonical);
+		return Canonical;
 	}
 
 	void Read(const UAnimBlueprint& Blueprint, TArray<FHyperAIAnimBlueprintVariable>& OutVariables, TArray<FHyperAIAnimBlueprintMachine>& OutMachines)
@@ -937,15 +1542,14 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 				}
 			}
 		}
-		const UEdGraph* AnimGraph = FindAnimGraph(Blueprint);
-		const UAnimGraphNode_Root* Root = AnimGraph ? FindFirst<UAnimGraphNode_Root>(*AnimGraph) : nullptr;
-		const UEdGraphNode* OutputSource = Root ? LinkedNode(PosePin(*Root, EGPD_Input)) : nullptr;
+		TSet<const UEdGraphNode*> OnOutput;
+		ReadOutputChain(Blueprint, &OnOutput);
 		for (UAnimGraphNode_StateMachine* MachineNode : Machines(Blueprint))
 		{
 			const UAnimationStateMachineGraph& Graph = *MachineNode->EditorStateMachineGraph;
 			FHyperAIAnimBlueprintMachine& Machine = OutMachines.AddDefaulted_GetRef();
 			Machine.Name = MachineNode->GetStateMachineName();
-			Machine.bDrivesOutput = OutputSource == MachineNode;
+			Machine.bDrivesOutput = OnOutput.Contains(MachineNode);
 			const UAnimStateNodeBase* Entry = EntryState(Graph);
 			for (const UAnimStateNode* StateNode : States(Graph))
 			{
@@ -960,13 +1564,76 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 				Transition.To = StateNameOf(TransitionNode->GetNextState());
 				Transition.Rule = RuleOf(*TransitionNode);
 				Transition.BlendTime = TransitionNode->CrossfadeDuration;
+				Transition.BlendLogic = TransitionNode->LogicType == ETransitionLogicType::TLT_Inertialization ? TEXT("inertialization")
+					: TransitionNode->LogicType == ETransitionLogicType::TLT_Custom ? TEXT("custom") : TEXT("standard");
 			}
 		}
 	}
 
-	bool ValidateOps(const UAnimBlueprint* Blueprint, const USkeleton* Skeleton, const TArray<FHyperAIAnimBlueprintOp>& Ops, FString& OutError)
+	TArray<FString> OutputChain(const UAnimBlueprint& Blueprint)
 	{
-		return RunOps(const_cast<UAnimBlueprint*>(Blueprint), Skeleton, Ops, /*bWrite=*/false, OutError);
+		return ReadOutputChain(Blueprint);
+	}
+
+	void ReadLayers(const UAnimBlueprint& Blueprint, TArray<FString>& OutInterfaces, TArray<FString>& OutLayers)
+	{
+		OutInterfaces.Reset();
+		OutLayers.Reset();
+		for (const FBPInterfaceDescription& Description : Blueprint.ImplementedInterfaces)
+		{
+			if (const UBlueprint* Interface = Description.Interface ? UBlueprint::GetBlueprintFromClass(Description.Interface) : nullptr)
+			{
+				OutInterfaces.Add(Interface->GetPathName());
+			}
+		}
+		const bool bInterface = IsLayerInterface(&Blueprint);
+		for (const TPair<UEdGraph*, FString>& Layer : LayerGraphs(Blueprint))
+		{
+			if (bInterface)
+			{
+				OutLayers.Add(Layer.Key->GetName() + TEXT(" (declared)"));
+				continue;
+			}
+			FHyperAIAnimBlueprintState Player;
+			const UEdGraphPin* Output = LayerOutput(*Layer.Key);
+			ReadPlayer(Output ? LinkedNode(Output) : nullptr, Player);
+			FString What = Player.Player;
+			if (!Player.Asset.IsEmpty()) What += TEXT(" ") + Player.Asset;
+			if (!Player.XVariable.IsEmpty()) What += TEXT(" by ") + Player.XVariable + (Player.YVariable.IsEmpty() ? FString() : TEXT(", ") + Player.YVariable);
+			if (Player.Player == TEXT("sequence") && !Player.bLooping) What += TEXT(", once");
+			OutLayers.Add(FString::Printf(TEXT("%s (%s): %s"), *Layer.Key->GetName(), *Layer.Value, *What));
+		}
+	}
+
+	bool IsLayerInterfaceClass(const FString& ParentClassPath)
+	{
+		return ParentClassPath.Equals(UAnimLayerInterface::StaticClass()->GetPathName(), ESearchCase::IgnoreCase);
+	}
+
+	bool ValidateOps(const UAnimBlueprint* Blueprint, const USkeleton* Skeleton, const TArray<FHyperAIAnimBlueprintOp>& Ops, FString& OutError,
+		const bool bCreatingInterface)
+	{
+		return RunOps(const_cast<UAnimBlueprint*>(Blueprint), Skeleton, Ops, /*bWrite=*/false, OutError, bCreatingInterface);
+	}
+
+	UAnimBlueprint* CreateLayerInterface(const FString& Path, USkeleton* Skeleton, FString& OutError)
+	{
+		UPackage* Package = CreatePackage(*FPackageName::ObjectPathToPackageName(Path));
+		UAnimBlueprintFactory* Factory = NewObject<UAnimBlueprintFactory>();
+		Factory->BlueprintType = BPTYPE_Interface;
+		Factory->TargetSkeleton = Skeleton;
+		Factory->bTemplate = Skeleton == nullptr;
+		Factory->ParentClass = UAnimInstance::StaticClass();
+		UAnimBlueprint* Interface = Package ? Cast<UAnimBlueprint>(Factory->FactoryCreateNew(UAnimBlueprint::StaticClass(), Package,
+			FName(*FPackageName::ObjectPathToObjectName(Path)), RF_Public | RF_Standalone | RF_Transactional, nullptr, GWarn)) : nullptr;
+		if (!Interface)
+		{
+			OutError = TEXT("Could not create the Animation Layer Interface.");
+			return nullptr;
+		}
+		FAssetRegistryModule::AssetCreated(Interface);
+		Package->MarkPackageDirty();
+		return Interface;
 	}
 
 	UAnimBlueprint* Create(const FString& Path, USkeleton& Skeleton, UClass& ParentClass, FString& OutError)
@@ -1027,11 +1694,89 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 		{
 			Add(TEXT("compile_error"), true, Blueprint.GetName(), TEXT("The last compile failed; open the Blueprint's compiler results, or fix the graph and apply again."));
 		}
+		if (IsLayerInterface(&Blueprint))
+		{
+			// An interface only declares layers; there is no graph to check.
+			if (InterfaceLayers(Blueprint).IsEmpty())
+			{
+				Add(TEXT("no_layers"), false, Blueprint.GetName(), TEXT("The interface declares no layers yet; add_layer declares them."));
+			}
+			return Issues;
+		}
 		const UEdGraph* AnimGraph = FindAnimGraph(Blueprint);
 		const UAnimGraphNode_Root* Root = AnimGraph ? FindFirst<UAnimGraphNode_Root>(*AnimGraph) : nullptr;
 		if (!Root || !LinkedNode(PosePin(*Root, EGPD_Input)))
 		{
 			Add(TEXT("no_output_pose"), true, TEXT("AnimGraph"), TEXT("Nothing feeds the output pose, so the character holds its reference pose."));
+		}
+
+		// Slots, layers and cached poses, wherever they are.
+		TArray<UEdGraph*> AllGraphs;
+		Blueprint.GetAllGraphs(AllGraphs);
+		TMap<FString, int32> SlotUses;
+		TArray<const UAnimGraphNode_SaveCachedPose*> Caches;
+		TSet<const UAnimGraphNode_SaveCachedPose*> UsedCaches;
+		for (const UEdGraph* Graph : AllGraphs)
+		{
+			for (const UEdGraphNode* Node : Graph ? Graph->Nodes : TArray<TObjectPtr<UEdGraphNode>>())
+			{
+				if (const UAnimGraphNode_Slot* Slot = Cast<UAnimGraphNode_Slot>(Node))
+				{
+					const FString SlotName = Slot->Node.SlotName.ToString();
+					++SlotUses.FindOrAdd(SlotName);
+					if (Blueprint.TargetSkeleton && !Blueprint.TargetSkeleton->ContainsSlotName(Slot->Node.SlotName))
+					{
+						Add(TEXT("unknown_slot"), true, SlotName, TEXT("The skeleton has no slot of this name, so no montage ever plays here; add the slot to the skeleton or use one it has."));
+					}
+				}
+				else if (const UAnimGraphNode_LayeredBoneBlend* Blend = Cast<UAnimGraphNode_LayeredBoneBlend>(Node))
+				{
+					for (int32 Layer = 0; Layer < Blend->Node.LayerSetup.Num(); ++Layer)
+					{
+						if (Blend->Node.LayerSetup[Layer].BranchFilters.IsEmpty())
+						{
+							Add(TEXT("empty_blend_layer"), false, FString::Printf(TEXT("Layered blend layer %d"), Layer), TEXT("The layer names no bone, so its pose never shows."));
+						}
+					}
+				}
+				else if (const UAnimGraphNode_SaveCachedPose* Save = Cast<UAnimGraphNode_SaveCachedPose>(Node))
+				{
+					Caches.Add(Save);
+				}
+				else if (const UAnimGraphNode_UseCachedPose* Use = Cast<UAnimGraphNode_UseCachedPose>(Node))
+				{
+					if (Use->SaveCachedPoseNode.IsValid()) UsedCaches.Add(Use->SaveCachedPoseNode.Get());
+				}
+			}
+		}
+		for (const TPair<FString, int32>& Uses : SlotUses)
+		{
+			if (Uses.Value > 1)
+			{
+				Add(TEXT("duplicate_slot"), false, Uses.Key, TEXT("The slot is played in more than one place, so each montage in it plays in all of them."));
+			}
+		}
+		for (const UAnimGraphNode_SaveCachedPose* Save : Caches)
+		{
+			if (!UsedCaches.Contains(Save))
+			{
+				Add(TEXT("unused_cached_pose"), false, Save->CacheName, TEXT("Nothing uses this cached pose, so the pose it saves is computed for nothing."));
+			}
+		}
+		const TArray<FString> Chain = ReadOutputChain(Blueprint);
+		const bool bInertialOutput = Chain.ContainsByPredicate([](const FString& Entry) { return Entry == TEXT("Inertialization") || Entry == TEXT("Dead blending"); });
+
+		// Linked anim layers: each layer this Blueprint fills should play something.
+		TSet<FString> LayerNames;
+		for (const TPair<UEdGraph*, FString>& Layer : LayerGraphs(Blueprint))
+		{
+			LayerNames.Add(Layer.Key->GetName().ToLower());
+			const UEdGraphPin* Output = LayerOutput(*Layer.Key);
+			if (!IsLayerInterface(&Blueprint) && (!Output || Output->LinkedTo.IsEmpty()))
+			{
+				Add(TEXT("empty_anim_layer"), false, Layer.Key->GetName(),
+					TEXT("The layer plays nothing, so it holds the reference pose unless a linked layer class fills it; set_layer_asset fills it here."));
+			}
 		}
 
 		TArray<FHyperAIAnimBlueprintVariable> Variables;
@@ -1091,6 +1836,10 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 				{
 					Add(TEXT("empty_state"), true, Subject, TEXT("The state outputs no pose; give it a sequence or blend space."));
 				}
+				if (State.Player == TEXT("layer") && !LayerNames.Contains(State.Asset.ToLower()))
+				{
+					Add(TEXT("unknown_layer"), true, Subject, FString::Printf(TEXT("It plays layer %s, which the Blueprint neither has nor implements."), *State.Asset));
+				}
 				if (State.Player == TEXT("blend_space") && State.XVariable.IsEmpty())
 				{
 					Add(TEXT("unbound_axis"), false, Subject, TEXT("The blend space's axes read no variable, so it always plays its origin sample."));
@@ -1122,6 +1871,11 @@ namespace HyperAIStudio::AnimBlueprint::Gate
 				if (Transition.Rule == TEXT("(always)"))
 				{
 					Add(TEXT("always_fires"), true, Subject, TEXT("The rule is always true, so the machine leaves the state the moment it enters."));
+				}
+				if (Transition.BlendLogic == TEXT("inertialization") && !bInertialOutput)
+				{
+					Add(TEXT("inertialization_missing"), true, Subject,
+						TEXT("An inertialization transition needs an Inertialization node between the state machine and the output, or it pops; add_inertialization adds one."));
 				}
 				if (Transition.BlendTime <= 0.0f)
 				{

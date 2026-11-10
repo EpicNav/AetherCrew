@@ -2,6 +2,9 @@
 
 #include "HyperAIStudioAgentActivity.h"
 
+#include "CoreGlobals.h"
+#include "HyperAIStudioProjectMemory.h"
+
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -128,7 +131,10 @@ void FHyperAIStudioAgentActivityLog::Record(FHyperAIStudioActivityEntry Entry)
 		}
 		if (Entry.Target.IsEmpty()) Entry.Target = First->Target;
 	}
-	else if (Entry.Agent.IsEmpty() && Resolver())
+	// The user turns auto-approval on and off, never the agent that happens to be working; and what Sandbox Mode held
+	// and auto-approval wrote is everyone's saves, the user's included.
+	else if (Entry.Agent.IsEmpty() && Entry.Kind != EHyperAIStudioActivityKind::AutoApproval
+		&& Entry.AutoApprovedAs != EHyperAIStudioApprovalCategory::SandboxSaves && Resolver())
 	{
 		FString Agent;
 		FString Model;
@@ -139,6 +145,11 @@ void FHyperAIStudioAgentActivityLog::Record(FHyperAIStudioActivityEntry Entry)
 		}
 	}
 	FHyperAIStudioAgentScoreboard::Tally(Entry);
+	// Project memory keeps what agents changed across sessions; test runs must not write into it.
+	if (Entry.Kind == EHyperAIStudioActivityKind::Completed && !GIsAutomationTesting)
+	{
+		HyperAIStudio::Memory::RecordChange(FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()), Entry);
+	}
 	Storage.Insert(MoveTemp(Entry), 0);
 	if (Storage.Num() > MaxEntries)
 	{
@@ -175,8 +186,16 @@ const TCHAR* FHyperAIStudioAgentActivityLog::LexToString(const EHyperAIStudioAct
 	case EHyperAIStudioActivityKind::JobStarted: return TEXT("Started");
 	case EHyperAIStudioActivityKind::JobFinished: return TEXT("Finished");
 	case EHyperAIStudioActivityKind::Completed: return TEXT("Completed");
+	case EHyperAIStudioActivityKind::Queued: return TEXT("Queued");
+	case EHyperAIStudioActivityKind::AutoApproval: return TEXT("Auto-approval");
 	default: return TEXT("Failed");
 	}
+}
+
+bool FHyperAIStudioAgentActivityLog::ResolveWorkingAgent(FString& OutAgent, FString& OutModel)
+{
+	const FAgentResolver& Installed = HyperAIStudio::Activity::Private::Resolver();
+	return Installed && Installed(OutAgent, OutModel);
 }
 
 FHyperAIStudioAgentActivityLog::FAgentResolver FHyperAIStudioAgentActivityLog::SetAgentResolver(FAgentResolver Resolver)

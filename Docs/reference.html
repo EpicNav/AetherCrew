@@ -1,0 +1,85 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Reference — HyperAI Studio</title><link rel="stylesheet" href="styles/site.css"><link rel="stylesheet" href="styles/docs.css"></head><body><a class="skip" href="#main">Skip to content</a>
+<header class="topbar"><a class="brand" href="index.html"><span class="brand-mark">H</span><span>HYPERAI STUDIO<small>DOCUMENTATION / 1.0.1</small></span></a><nav aria-label="Main navigation"><a href="index.html">Overview</a><a href="setup.html">Set up</a><a href="chat.html">Chat &amp; team</a><a href="match.html">Match &amp; images</a><a href="memory.html">Memory</a><a href="tools.html">Tools</a><a href="reference.html" aria-current="page">Reference</a></nav><button class="print-button" onclick="window.print()">Print guide</button></header>
+<main id="main">
+<section class="doc-hero"><div class="eyebrow accent">REFERENCE</div><h1>Settings, commands<br><em>and shortcuts.</em></h1><p class="lead">Everything you can set, type or press, in one place. All settings live in <em>HyperAI Studio › Settings › Preferences</em>, and in <em>Editor Preferences › Plugins › HyperAIStudio</em>.</p></section>
+<div class="doc-layout"><aside class="side-nav"><div class="eyebrow">ON THIS PAGE</div><a href="#pages">Pages</a><a href="#keys">Shortcuts</a><a href="#console">Console commands</a><a href="#settings">Settings</a><a href="#language">Language</a><a href="#glossary">Words used here</a></aside><article class="doc-article">
+<section id="pages"><div class="eyebrow">01 / THE WINDOW</div><h2>Pages.</h2><div class="table-wrap"><table><thead><tr><th>Page</th><th>Group</th><th>For</th></tr></thead><tbody>
+<tr><td><strong>Home</strong></td><td>Start</td><td>Status, what needs you, and where to start.</td></tr>
+<tr><td><strong>Chat</strong> (up to 4)</td><td>Create</td><td>Codex, Claude Code, Gemini or an installed ACP agent in this editor; the team with the Team switch.</td></tr>
+<tr><td><strong>Images</strong></td><td>Create</td><td>Reference images from presets, with Nano Banana, Codex or your own model.</td></tr>
+<tr><td><strong>Match</strong></td><td>Create</td><td>The editor against a reference image, side by side or with a wipe; Match it.</td></tr>
+<tr><td><strong>Playtest</strong></td><td>Test</td><td>A bot plays the level like a person: many cases at once, each in its own copy.</td></tr>
+<tr><td><strong>Memory</strong></td><td>Project</td><td>What agents know about this project, and the tasks chats finished.</td></tr>
+<tr><td><strong>Skills</strong></td><td>Project</td><td>Know-how agents follow, such as building a Blueprint or matching an image.</td></tr>
+<tr><td><strong>Agents</strong></td><td>Project</td><td>The team of specialist subagents, for Claude Code and Codex.</td></tr>
+<tr><td><strong>Tools</strong></td><td>System</td><td>Every tool agents can call, as a form you can run yourself.</td></tr>
+<tr><td><strong>Activity</strong></td><td>System</td><td>Edits waiting for your approval, jobs running, and what happened.</td></tr>
+<tr><td><strong>Settings</strong></td><td>System</td><td>Setup, agents, MCP servers, image services and preferences.</td></tr>
+<tr><td><strong>Docs</strong></td><td>System</td><td>These guides, read in the editor; links to websites open in your browser.</td></tr>
+</tbody></table></div></section>
+<section id="keys"><div class="eyebrow">02 / KEYBOARD</div><h2>Shortcuts.</h2><div class="table-wrap"><table><thead><tr><th>Press</th><th>To</th></tr></thead><tbody>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>H</kbd></td><td>Open HyperAI Studio. Rebind it under <em>Editor Preferences › Keyboard Shortcuts › HyperAI Studio</em>, beside <em>New HyperAI Chat</em>.</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Search pages and actions: New chat, Set up HyperAI, Documentation, and every page.</td></tr>
+<tr><td><kbd>Enter</kbd> · <kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>In a chat: send · a new line.</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo an applied agent edit, one plan at a time.</td></tr>
+</tbody></table></div></section>
+<section id="console"><div class="eyebrow">03 / CONSOLE</div><h2>Console commands.</h2><p>Type these in the editor's console (<kbd>`</kbd>) or the Output Log's command line.</p><div class="table-wrap"><table><thead><tr><th>Command</th><th>Does</th></tr></thead><tbody>
+<tr><td><code>HyperAIStudio.Open</code></td><td>Opens HyperAI Studio.</td></tr>
+<tr><td><code>HyperAIStudio.OpenPage &lt;page&gt;</code></td><td>Brings a page forward by its id: <code>Home</code>, <code>Chat</code>, <code>Chat2</code>, <code>Match</code>, <code>Images</code>, <code>Memory</code>…</td></tr>
+<tr><td><code>HyperAIStudio.SetUp</code></td><td>Configures Unreal MCP, starts the server, and writes the agent files.</td></tr>
+<tr><td><code>HyperAIStudio.GenerateProjectFiles</code></td><td>Writes the agent configs and helper scripts again.</td></tr>
+<tr><td><code>HyperAIStudio.StartMCP</code></td><td>Starts Unreal MCP with HyperAI's settings.</td></tr>
+<tr><td><code>HyperAIStudio.Status</code> · <code>HyperAIStudio.Prerequisites</code></td><td>Log readiness, and every prerequisite's state.</td></tr>
+<tr><td><code>HyperAIStudio.Chat [agent]</code></td><td>Opens a chat, optionally with that agent.</td></tr>
+<tr><td><code>HyperAIStudio.ChatSend [Tab=&lt;n&gt;] &lt;text&gt;</code></td><td>Sends a message to a chat tab as you, opening it if needed.</td></tr>
+<tr><td><code>HyperAIStudio.Match lighting|level|open &lt;image&gt;</code></td><td>Hands a reference to your preferred agent, as Match it does; <code>open</code> only shows it.</td></tr>
+<tr><td><code>HyperAIStudio.Relight [model=&lt;id&gt;] &lt;how it should be lit&gt;</code></td><td>Relight this view: takes the view through <code>HyperAI_MatchCamera</code>, has the image model relight it, which spends as <em>Generate</em> does, then matches the level&rsquo;s lighting to it. With no words it only opens the Images page on the preset.</td></tr>
+<tr><td><code>HyperAIStudio.Restart [NoBuild] [NoSave] [DryRun] [Tab=&lt;n&gt;] [note]</code></td><td>Restarts the editor and resumes its chats; <code>Tab</code> tells that chat to continue.</td></tr>
+<tr><td><code>HyperAIStudio.ResumeChats</code></td><td>Resumes the chats of a restart that closed the editor and never opened it again, as its <em>Resume Chats</em> notification does; offered up to 6 hours after the close.</td></tr>
+<tr><td><code>HyperAIStudio.Screenshot [Window] [name]</code></td><td>Saves the Studio as drawn to <code>Saved/HyperAIStudio/Screens/&lt;name&gt;.png</code>.</td></tr>
+<tr><td><code>HyperAIStudio.ImportMCPProfileFromFile &lt;path&gt;</code> · <code>…FromClipboard</code></td><td>Imports a <code>hyperai-mcp.json</code> server profile, disabled, and regenerates the agent files.</td></tr>
+<tr><td><code>HyperAIStudio.TestMCPServer &lt;id&gt;</code></td><td>Tests an extra MCP server by index, id or name.</td></tr>
+<tr><td><code>HyperAIStudio.CopyCodexTomlPatch</code></td><td>Copies HyperAI's managed Codex TOML block to the clipboard without writing files.</td></tr>
+<tr><td><code>HyperAIStudio.CreateTestPrompt [test-id] [agent]</code></td><td>Creates a test prompt and context package without opening a terminal.</td></tr>
+</tbody></table></div></section>
+<section id="settings"><div class="eyebrow">04 / PREFERENCES</div><h2>Settings that matter most.</h2><div class="table-wrap"><table><thead><tr><th>Setting</th><th>Default</th><th>What it does</th></tr></thead><tbody>
+<tr><td><strong>Unreal MCP Port</strong> · URL path</td><td><code>8000</code> · <code>/mcp</code></td><td>Where Unreal MCP listens; the agent configs follow.</td></tr>
+<tr><td><strong>Unreal MCP Tool Set</strong></td><td>Unreal MCP + Extended Hyper Tools</td><td>Epic's tools alone, or with HyperAI's packs on the same endpoint.</td></tr>
+<tr><td><strong>Preferred Agent</strong></td><td>Codex</td><td>Takes unrouted chats and every Match job.</td></tr>
+<tr><td><strong>Enable Codex / Claude Code / Gemini / Cursor / VS Code</strong></td><td>Codex on</td><td>Which agents get configs, and appear in the chat.</td></tr>
+<tr><td><strong>Native Chat View</strong></td><td>On</td><td>Chats open in HyperAI's own view instead of the terminal.</td></tr>
+<tr><td><strong>Require Approval For Agent Edits</strong></td><td>On</td><td>Every agent edit waits in Activity; destructive tools always ask, unless you turn on <a class="text-button" href="chat.html#approvals">auto-approval</a> for them.</td></tr>
+<tr><td><strong>Allow One-Shot Agent Edits</strong></td><td>On</td><td>A plan applies in one call; still sealed, journaled, undoable and approved.</td></tr>
+<tr><td><strong>Search By Meaning</strong></td><td>On</td><td>Project search and the chat's @ list also rank assets by meaning, with a vocabulary and an index that stay on this computer; off, by their words alone.</td></tr>
+<tr><td><strong>Sandbox Mode</strong></td><td>Off</td><td>Every save waits in a UE File Sandbox until you approve or discard it all.</td></tr>
+<tr><td><strong>Agent-Saved Memories</strong></td><td>Fully automatic</td><td>How an agent's note reaches later chats; held notes always wait.</td></tr>
+<tr><td><strong>Agent Task Routes</strong></td><td>7 routes</td><td>The chat's new-tab menu: a kind of task, its packs, and optionally its agent, model and subagent.</td></tr>
+<tr><td><strong>Agent Model Routes</strong> · Smart Plan / Build Model</td><td>Per agent · <code>claude-fable-5-1</code> / <code>claude-opus-5</code></td><td>The models each agent offers; the pair Smart mode plans and builds with.</td></tr>
+<tr><td><strong>Auto Accept Plans In Smart Mode</strong></td><td>On</td><td>Building starts once a Smart plan is ready.</td></tr>
+<tr><td><strong>Auto Send Handoff Prompts</strong></td><td>On</td><td>Hand Off sends each prompt as soon as the other agent is idle.</td></tr>
+<tr><td><strong>Keep Remote Chats Running After The Editor Closes</strong></td><td>On</td><td>Claude Code chats with Remote run as background sessions.</td></tr><tr><td><strong>Remote Page</strong></td><td>Off</td><td>Serve the remote page from the start: chats, questions and approvals in a browser.</td></tr><tr><td><strong>Remote Page On This Network</strong></td><td>Off</td><td>Other devices on the network, such as a phone, can open it.</td></tr><tr><td><strong>Remote Page Port</strong></td><td>8765</td><td>Where the page answers: <code>http://localhost:8765/remote</code>.</td></tr><tr><td><strong>Arrange Agents' Blueprint Nodes</strong></td><td>On</td><td>Lays out the Blueprint nodes agents add when the Blueprint compiles; nodes you place yourself stay put.</td></tr><tr><td><strong>Check Out Before Agent Edits</strong></td><td>On</td><td>Agent edits check assets out first (Lore on a server: lock them; a local Lore repository has no locks); an asset a teammate holds turns the edit away.</td></tr><tr><td><strong>Lore Server</strong></td><td>Empty</td><td>The server a Lore repository set up here is made on, such as <code>lore://127.0.0.1:41337</code>. Empty: a local repository, on this computer only.</td></tr><tr><td><strong>Lore Identity</strong></td><td>Empty</td><td>Who commits in a Lore repository set up here are recorded as.</td></tr><tr><td><strong>Reopen The Editor After A Crash</strong></td><td>On</td><td>A watchdog opens the editor again after a crash and gives the chats back.</td></tr><tr><td><strong>Send The Crash Report For Me</strong></td><td>On</td><td>When nobody chooses in Unreal's crash reporter, HyperAI sends the report and closes it before reopening the editor. Off: it closes it without sending.</td></tr>
+<tr><td><strong>Refresh Agent Instructions On Startup</strong></td><td>On</td><td>Rewrites HyperAI's block in <code>AGENTS.md</code> and <code>CLAUDE.md</code> when a plugin update changes it.</td></tr>
+<tr><td><strong>Allow Agents To Run Python Scripts</strong></td><td>Off</td><td>Adds <code>hyper_script_run</code>.</td></tr>
+<tr><td><strong>Material Authoring Mode</strong></td><td>Hybrid</td><td>Nodes, with Custom HLSL only where nodes cannot express the math.</td></tr>
+<tr><td><strong>External Services</strong> · <strong>Image Models</strong></td><td>None added</td><td>Your own model servers and image models, keyed by environment variable.</td></tr>
+<tr><td><strong>External Service Session Spend Cap</strong></td><td><code>5.0</code></td><td>Refuses a paid call that would pass it; zero refuses all.</td></tr>
+<tr><td><strong>Image Output Folder</strong></td><td><code>Content/References/Generated</code></td><td>Where generated pictures land.</td></tr>
+<tr><td><strong>Playtest Spawnable Classes</strong></td><td>—</td><td>The only actor classes a playtest may spawn.</td></tr>
+<tr><td><strong>HyperAI Language</strong></td><td>Editor</td><td>The language of HyperAI's own windows.</td></tr>
+</tbody></table></div></section>
+<section id="language"><div class="eyebrow">05 / LANGUAGE</div><h2>Language.</h2><p><em>Preferences › Interface › HyperAI Language</em> sets the language of HyperAI's own windows, whatever language the editor uses. <em>Editor</em> follows the editor when HyperAI has a translation for it; <code>en</code> is English; <code>zh-Hans</code> is Simplified Chinese, complete for every one of HyperAI's 1036 strings. It applies at once.</p></section>
+<section id="glossary"><div class="eyebrow">06 / WORDS</div><h2>Words used here.</h2><div class="table-wrap"><table><tbody>
+<tr><td><strong>Agent</strong></td><td>An AI coding CLI: Claude Code, Codex, Gemini, or one of the agents that join through the Agent Client Protocol. It has its own account, models and plan.</td></tr>
+<tr><td><strong>Subagent</strong></td><td>A named specialist an agent can hand work to, defined in <code>.hyperai/agents</code>; the team's eight roles are subagents.</td></tr>
+<tr><td><strong>Skill</strong></td><td>A folder of know-how with a <code>SKILL.md</code>, read by the agent when a task needs it.</td></tr>
+<tr><td><strong>Workflow</strong></td><td>A Claude Code script that runs several subagents in a fixed order, such as <code>hyperai-team</code>.</td></tr>
+<tr><td><strong>Pack</strong></td><td>A set of HyperAI tools for one area of the editor, such as lighting or Blueprints.</td></tr>
+<tr><td><strong>Plan</strong> · <strong>operation</strong></td><td>The ops an edit will make, checked and sealed before it runs; one run of a plan, tracked by its <code>operationId</code>.</td></tr>
+<tr><td><strong>Job</strong></td><td>A task HyperAI supervises turn by turn, such as a Match job, until it succeeds or stops.</td></tr>
+<tr><td><strong>Session</strong></td><td>A series of scored attempts against one reference image.</td></tr>
+<tr><td><strong>Route</strong></td><td>A kind of task in the chat's new-tab menu, with the packs, agent and model it uses.</td></tr>
+</tbody></table></div></section>
+<nav class="page-nav" aria-label="Pages"><a href="tools.html"><span>PREVIOUS</span>Tools and safety</a><a href="index.html"><span>BACK TO</span>Overview</a></nav>
+</article></div>
+<footer><span>HYPERAI STUDIO / GAMES BY HYPER</span><span>DOCUMENTATION · 1.0.1 · UNREAL ENGINE 5.8 · 25.09.2026</span><a href="#main">Back to the top ↑</a></footer></main>
+</body></html>

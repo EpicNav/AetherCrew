@@ -72,6 +72,160 @@ struct FHyperAIStudioExternalServiceSettings
 	int32 TimeoutSeconds = 180;
 };
 
+/**
+ * One image model, described rather than coded.
+ *
+ * Image endpoints and model names change faster than anything else this plugin touches, and a name compiled
+ * in goes stale where nobody can correct it. So a model is a request template and a path into the reply:
+ * adding one is an edit here, not a rebuild. The cookbook has a worked example of each common shape.
+ */
+USTRUCT(BlueprintType)
+struct FHyperAIStudioImageModelSettings
+{
+	GENERATED_BODY()
+
+	/** Identifier a tool asks for, e.g. gpt_image or sdxl_local. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString Id;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString Label;
+
+	/** Which entry in External Services carries this model's url, key and cost. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString ServiceId;
+
+	/**
+	 * Path under the service's base url, e.g. /v1/images/generations, /sdapi/v1/txt2img or
+	 * /v1beta/models/{model}:generateContent, with {model} substituted.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString Path;
+
+	/**
+	 * The request body. Substituted in:
+	 * - {prompt}, {negative}, {width}, {height}, {seed} and {model}.
+	 * - {aspect_ratio}: the nearest of 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9 and 21:9.
+	 * - {image_size}: 1K, 2K or 4K, from the longest side.
+	 * Values are JSON-escaped as they go in, so a prompt with quotes cannot break the body. A template without
+	 * {negative} still gets the negative prompt, at the end of the prompt as "Avoid: ...".
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (MultiLine = "true"))
+	FString RequestTemplate;
+
+	/**
+	 * The request body when a picture goes in to be changed rather than drawn from nothing, such as a view of the level
+	 * to relight. Substituted like Request Template, plus {input_image}, the picture as base64, and {input_mime_type}:
+	 * image/png, image/jpeg or image/webp. Empty: this model draws from words only.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (MultiLine = "true"))
+	FString EditRequestTemplate;
+
+	/** The path for a request with a picture in it, when it is not Path, such as /sdapi/v1/img2img. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString EditPath;
+
+	/**
+	 * Dotted path to the base64 image in the reply: data.0.b64_json for an OpenAI-shaped one, images.0 for
+	 * an Automatic1111, candidates.0.content.parts.*.inlineData.data for a Gemini. A * takes the first element
+	 * that has the rest of the path, for a reply that puts text before the picture.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString ResponseImagePath;
+
+	/** Substituted for {model}. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString Model;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (ClampMin = "64", ClampMax = "4096"))
+	int32 Width = 1024;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (ClampMin = "64", ClampMax = "4096"))
+	int32 Height = 1024;
+
+	/**
+	 * What one image costs, for the approval summary and the session cap. There are prices for a longest side up
+	 * to 1024 (1K), 2048 (2K) and above (4K). A size left at zero costs what the one below it does; all zero uses
+	 * the service's Cost Per Call.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (ClampMin = "0.0", DisplayName = "Cost Per Image 1K"))
+	float CostPerImage = 0.0f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (ClampMin = "0.0", DisplayName = "Cost Per Image 2K"))
+	float CostPerImage2K = 0.0f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (ClampMin = "0.0", DisplayName = "Cost Per Image 4K"))
+	float CostPerImage4K = 0.0f;
+
+	/**
+	 * True when this model runs on this machine. A local model competes with the editor for the same
+	 * graphics card, and when they do not both fit the generation crawls; the tools say so before starting.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	bool bRunsOnThisMachine = false;
+};
+
+/**
+ * A prompt with named slots. Visible and editable on purpose: a hidden prompt that "gets good results" is
+ * one nobody can tune, and matching a level to a reference needs the reference to pin the things the
+ * lighting compare measures.
+ */
+USTRUCT(BlueprintType)
+struct FHyperAIStudioImagePromptTemplateSettings
+{
+	GENERATED_BODY()
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString Id;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString Label;
+
+	/** Slots are written {like_this} and filled from the tool's slot list; an unfilled slot drops out. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (MultiLine = "true"))
+	FString Template;
+};
+
+/**
+ * What one task costs that is not a whole model: rigging a model, one preset animation, a clip made from words, a new
+ * texture. Providers price these in credits; this is the credits at the provider's price, in USD.
+ */
+USTRUCT(BlueprintType)
+struct FHyperAIStudioMeshTaskPrice
+{
+	GENERATED_BODY()
+
+	/** The service's id: tripo, meshy, hi3d or viggle. */
+	UPROPERTY(Config, EditAnywhere, Category = "3D Generation")
+	FString Provider;
+
+	/**
+	 * rig; animate (one preset action); motion (a clip made from words) or motion_swift (Meshy's quicker one);
+	 * motion_apply (Meshy: a clip put on a rig); texture, texture_hd (Tripo's detailed) or texture_8k. The model creator's
+	 * Tripo prices: h3_text and h3_image (with _standard, _detailed or _extreme for the texture tier), p2 (likewise),
+	 * addon_detailed_geometry, addon_quad, addon_smart_low_poly, addon_parts, convert, convert_advanced, retopo,
+	 * retopo_quad, smart_uv, segment, complete, complete_quick, image_to_multiview, edit_multiview. Its Hi3D prices:
+	 * <model>_<resolution> for a whole textured model with PBR (such as hi3dv3.0_2048quality), texture and pbr (the parts
+	 * of it taken off for geometry alone, or no PBR), texture_only and texture_only_pbr (texturing a given mesh).
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "3D Generation")
+	FString Task;
+
+	/** In USD, against this session's spend cap. */
+	UPROPERTY(Config, EditAnywhere, Category = "3D Generation", meta = (ClampMin = "0.0"))
+	float Cost = 0.0f;
+};
+
+/** The Nano Banana model Gemini CLI's nanobanana extension draws with. */
+UENUM()
+enum class EHyperAIStudioNanoBananaModel : uint8
+{
+	ExtensionDefault UMETA(DisplayName = "Extension default"),
+	NanoBanana UMETA(DisplayName = "Nano Banana (Gemini 2.5 Flash Image)"),
+	NanoBanana2 UMETA(DisplayName = "Nano Banana 2 (Gemini 3.1 Flash Image)"),
+	NanoBananaPro UMETA(DisplayName = "Nano Banana Pro (Gemini 3 Pro Image)")
+};
+
 UENUM()
 enum class EHyperAIStudioMCPTransport : uint8
 {
@@ -93,6 +247,18 @@ enum class EHyperAIStudioNativeToolChannel : uint8
 {
 	Preview UMETA(DisplayName = "Unreal MCP + Extended Hyper Tools"),
 	StableOnly UMETA(DisplayName = "Unreal MCP Only")
+};
+
+/** How a memory an agent saves on its own reaches future chats. Memories the user adds always apply in full. */
+UENUM()
+enum class EHyperAIStudioAgentMemoryMode : uint8
+{
+	/** Future chats see its title at once and can recall its text; the text joins every chat's instructions once you confirm it. */
+	TitleUntilReviewed UMETA(DisplayName = "Title now, full text after review"),
+	/** Straight into every future chat's instructions; review or delete it later. */
+	Automatic UMETA(DisplayName = "Fully automatic"),
+	/** Invisible to future chats until you confirm it. */
+	AfterReview UMETA(DisplayName = "Only after review")
 };
 
 USTRUCT()
@@ -158,7 +324,10 @@ struct FHyperAIStudioAgentModelRoute
 {
 	GENERATED_BODY()
 
-	/** Chat agent this applies to: Codex, Claude Code or Gemini. */
+	/**
+	 * Chat agent this applies to: Codex, Claude Code, Gemini, or an agent HyperAI hosts through the Agent Client
+	 * Protocol, whose list comes from the agent itself the first time it chats.
+	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Models")
 	FString AgentName;
 
@@ -196,6 +365,10 @@ struct FHyperAIStudioAgentTaskRoute
 	/** Capability packs this kind of task uses; their operation outcomes decide the automatic pick. */
 	UPROPERTY(Config, EditAnywhere, Category = "Routing")
 	TArray<FString> Packs;
+
+	/** Claude Code only: the tab starts as this subagent from .hyperai/agents or .claude/agents, e.g. programmer. */
+	UPROPERTY(Config, EditAnywhere, Category = "Routing")
+	FString Subagent;
 };
 
 UCLASS(Config = EditorPerProjectUserSettings, DefaultConfig, meta = (DisplayName = "HyperAIStudio"))
@@ -206,6 +379,21 @@ class HYPERAISTUDIO_API UHyperAIStudioSettings : public UDeveloperSettings
 public:
 	UPROPERTY(Config, EditAnywhere, Category = "First Run")
 	bool bShowWelcomeOnStartup = true;
+
+	/**
+	 * Language of HyperAI's own windows, whatever language the editor uses. Editor follows the editor's language when
+	 * HyperAI has a translation for it; en is English. Applies at once.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Interface", meta = (DisplayName = "HyperAI Language", GetOptions = "GetLanguageOptions"))
+	FString UILanguage = TEXT("Editor");
+
+	/** Editor, en, and every language HyperAI has a translation for. */
+	UFUNCTION()
+	static TArray<FString> GetLanguageOptions();
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 
 	/** Internal one-shot marker used to finish a toolset sync after Unreal restarts. */
 	UPROPERTY(Config)
@@ -306,10 +494,24 @@ public:
 	/**
 	 * Hold every agent asset edit in the chat panel's Activity view until you approve it. Turn this off and
 	 * edits run as soon as the agent submits them. Destructive and external-effect tools always need approval,
-	 * because their server grant is issued only by that click.
+	 * because their server grant is issued only by your approval: a click, or auto-approval you turned on for them.
+	 * To let requests run unattended for a while instead, use Auto-approve at the top of Activity: it warns you
+	 * first and lasts at most until the editor closes, unless you tick its Stay on after the editor restarts, which
+	 * brings it back once after a restart (never more than 24 hours after you turned it on).
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow")
 	bool bRequireApprovalForAgentEdits = true;
+
+	/**
+	 * Claude Code and Codex approve their own routine commands and tool calls instead of asking at every step. Claude
+	 * Code runs in its auto mode, where a safety check approves or stops each action; Codex has its own reviewer judge
+	 * each approval. Risky actions are still stopped, and other agents ask as before. The chat's Auto button switches it.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow", meta = (DisplayName = "Auto Mode"))
+	bool bAgentAutoMode = false;
+
+	/** What Auto Mode adds to an agent's command line: Claude Code's permission mode, Codex's reviewer. Empty when it is off. */
+	static FString GetAutoModeArguments(const FString& AgentName);
 
 	/**
 	 * Lines that mean an agent is waiting for an answer: a permission prompt, a choice, a confirmation.
@@ -343,9 +545,155 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Models")
 	bool bAutoAcceptPlansInSmartMode = true;
 
+	/**
+	 * Claude Code chats with Remote on run as background sessions that the chat tab attaches to, so closing the tab
+	 * or the editor leaves them running and reachable from claude.ai/code and the Claude app. Reopen one from Chats.
+	 * Off: remote chats run inside the tab and stop with it.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Remote", meta = (DisplayName = "Keep Remote Chats Running After The Editor Closes"))
+	bool bKeepRemoteChatsRunning = true;
+
+	/**
+	 * Serve the remote page from the start: the chats, their questions and the edits waiting for approval, in a browser.
+	 * A browser pairs with a code from Chat > Open On Another Device, and pairs again after the editor restarts.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Remote", meta = (DisplayName = "Remote Page"))
+	bool bRemotePage = false;
+
+	/**
+	 * Let other devices on this network open the remote page, such as your phone on the same Wi-Fi. The page is not
+	 * encrypted and a paired browser can approve edits, so use it only on a network you trust. Applies from the next
+	 * editor start once the page has run.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Remote", meta = (DisplayName = "Remote Page On This Network"))
+	bool bRemotePageOnNetwork = false;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Remote", meta = (DisplayName = "Remote Page Port", ClampMin = "1024", ClampMax = "65535"))
+	int32 RemotePagePort = 8765;
+
+	/**
+	 * When the editor crashes, HyperAI Studio opens it again with its chat tabs, and the chats that were working are told
+	 * what crashed and carry on. A project with C++ is built first, so code changed since the last build is in it. The
+	 * third crash in half an hour leaves the editor closed. Takes effect the next time the editor starts.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Crashes", meta = (DisplayName = "Reopen The Editor After A Crash", ConfigRestartRequired = true))
+	bool bReopenEditorAfterCrash = true;
+
+	/**
+	 * When nobody has chosen in Unreal's crash reporter by the time HyperAI Studio reopens the editor, send the crash
+	 * report to Epic and close the crash reporter, as its Send and Close would. Off: close it without sending. Choosing
+	 * yourself always wins: Send and Restart opens the editor at once, and its chats come back there.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Crashes", meta = (DisplayName = "Send The Crash Report For Me", EditCondition = "bReopenEditorAfterCrash"))
+	bool bSendCrashReportForMe = true;
+
+	/**
+	 * Before an agent changes an asset, check it out through the project's source control (or, in a Lore workspace on a
+	 * server with no Unreal provider, lock it with the lore command). An asset a teammate has checked out or locked, or one
+	 * behind the latest revision, turns the edit away. Files an agent adds are marked for add once saved.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Source Control", meta = (DisplayName = "Check Out Before Agent Edits"))
+	bool bCheckOutBeforeAgentEdits = true;
+
+	/**
+	 * The Lore server a new repository for this project is made on: lore://host:41337 for a self-hosted loreserver, or
+	 * Epic's hosted service once it opens. Empty keeps the repository on this computer only (Lore's local mode). Lore
+	 * fixes the server when the repository is made; Settings > Version control sets it up and checks the server.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Source Control", meta = (DisplayName = "Lore Server"))
+	FString LoreServerUrl;
+
+	/** Who Lore records on commits made in a repository HyperAI sets up here, such as your email. Optional. */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Source Control", meta = (DisplayName = "Lore Identity"))
+	FString LoreIdentity;
+
+	// The lore command's own path, for when it is elsewhere, is set on Settings > Version control only and kept outside
+	// this object (FHyperAIStudioLore::GetCommandOverride): which program HyperAI runs is no setting an agent's settings
+	// tools may write.
+
+	/**
+	 * Lay out the Blueprint nodes agents add when the Blueprint compiles after an edit: flow left to right, branches
+	 * fanned out, no node on another, and the nodes already there left where they are. In a Blueprint open in its editor,
+	 * the new nodes move only when they lie on something, so nodes you drop by hand stay put. A Blueprint no one edited is
+	 * never moved or saved.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Blueprints", meta = (DisplayName = "Arrange Agents' Blueprint Nodes"))
+	bool bArrangeAgentBlueprintNodes = true;
+
+	/**
+	 * While on, everything saved in the editor lands in a UE File Sandbox until you approve or discard all of it in HyperAI's
+	 * Activity panel: agent edits, Epic's tools, scripts, and your own saves too. Agents cannot approve or discard.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Sandbox", meta = (DisplayName = "Sandbox Mode"))
+	bool bSandboxMode = false;
+
+	/**
+	 * Project search and the chat's @ picker also find assets by meaning ("the stone wall material with moss" finds
+	 * MI_Cobble_Overgrown), from a vocabulary and an index that stay on this computer: nothing is downloaded or sent. Off:
+	 * ranked by the words in names, tags, classes and folders only.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Project Search", meta = (DisplayName = "Search By Meaning"))
+	bool bSearchByMeaning = true;
+
+	/** Chats open in HyperAI's own chat view instead of the terminal. A Claude Code chat with Remote Control stays in the terminal. */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Chat", meta = (DisplayName = "Native Chat View"))
+	bool bUseNativeChatView = true;
+
+	/**
+	 * Chats in the native view run their agent in HyperAI's background host, a small process apart from the editor, so
+	 * a turn keeps going when the editor restarts, crashes or closes (only a chat that is working is kept when you close
+	 * the editor yourself; an idle one stops). The editor that opens next reattaches each chat and shows what it missed.
+	 * Stop them from a chat's menu with Stop Background Agents. Off: an agent runs inside the editor and stops with it.
+	 * Applies to chats started from now on.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Chat", meta = (DisplayName = "Keep Agents Working When The Editor Closes"))
+	bool bKeepAgentsWorkingWhenEditorCloses = true;
+
+	/**
+	 * With no editor open, a background agent that has done nothing for this many minutes (waiting on an approval
+	 * nobody can answer, say) is stopped; its conversation is kept and can be resumed from Chats. 0 never stops one.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Chat", meta = (DisplayName = "Stop Background Agents Idle For (Minutes)", ClampMin = "0",
+		EditCondition = "bKeepAgentsWorkingWhenEditorCloses"))
+	int32 BackgroundAgentIdleMinutes = 30;
+
+	/** Actor classes a playtest may spawn into the PIE world. Nothing else can be spawned. */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Playtests", meta = (AllowAbstract = "false", MetaClass = "/Script/Engine.Actor"))
+	TArray<FSoftClassPath> PlaytestSpawnableClasses;
+
+	/**
+	 * How a memory an agent saves on its own (hyper_memory_remember) reaches future chats: at once by default. A fact
+	 * that reads like instructions to agents, as one planted by text the agent read would, waits for you in
+	 * HyperAIStudio > Agents > Project Memory whatever this says. (Not AgentMemoryMode: projects that kept the old
+	 * review-first default take this one.)
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Memory", meta = (DisplayName = "Agent-Saved Memories"))
+	EHyperAIStudioAgentMemoryMode AgentMemory = EHyperAIStudioAgentMemoryMode::Automatic;
+
 	/** The chat panel's new-tab menu: one entry per kind of task. Empty restores the built-in list. */
 	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing")
 	TArray<FHyperAIStudioAgentTaskRoute> AgentTaskRoutes;
+
+	/** How many of EnsureDefaultTaskRoutes' one-time changes to the built-in routes the saved routes have had. */
+	UPROPERTY(Config)
+	int32 TaskRoutesVersion = 0;
+
+	/**
+	 * In the native view, each message goes with a note handing its task to the project agent made for it (.hyperai/agents:
+	 * the QA tester for a playtest, the lighting artist for lighting, and so on), and a request with parts for several
+	 * roles to HyperAI's team. The chat's agent starts that agent itself: Claude Code with its Agent tool, Codex with its
+	 * multi-agent tools. A chat started as a project agent keeps its tasks.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing", meta = (DisplayName = "Hand Tasks to Project Agents"))
+	bool bHandTasksToProjectAgents = true;
+
+	/**
+	 * In the native view, a new chat's first message picks the task route that fits it and switches the chat to that
+	 * route's coding agent (Claude Code, Codex or another): the one the route names, else the one with the best record on
+	 * its packs, else the preferred agent. A chat whose agent you picked, opened for a task, or resumed keeps its agent.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow|Routing", meta = (DisplayName = "Switch Coding Agent by Task"))
+	bool bRouteNewChatsByTask = false;
 
 	/**
 	 * During a handoff between tabs, send each prompt (plan, implement, review) as soon as the receiving agent is
@@ -360,6 +708,126 @@ public:
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "External Services")
 	TArray<FHyperAIStudioExternalServiceSettings> ExternalServices;
+
+	/**
+	 * Let an agent apply an edit in one call, without a dry run first. The plan is still computed, sealed,
+	 * journaled and undoable, and still waits for approval when approval is on; this only drops the
+	 * round trip that asked the agent to repeat the plan's hash back.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agents")
+	bool bAllowOneShotAgentEdits = true;
+
+	/**
+	 * Rewrite the HyperAIStudio block in AGENTS.md and CLAUDE.md at startup when it is older than this
+	 * build's. Only the managed block changes; text outside it is kept. Without this, guidance added in
+	 * an update reaches agents only after someone reruns Setup.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agents")
+	bool bRefreshAgentInstructionsOnStartup = true;
+
+	/**
+	 * Adds hyper_script_run: agents run editor Python inside one undo step that rolls back if the script
+	 * fails or runs out of time. A script that imports system modules, deletes, renames, loads levels or
+	 * writes files waits for your approval instead. Restart the editor after changing this.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agents", meta = (DisplayName = "Allow Agents To Run Python Scripts"))
+	bool bEnablePythonScripting = false;
+
+	/**
+	 * Image models available to the generation tools, besides the built-in ones. Those are Google's Nano Banana
+	 * models through the Gemini API (nano_banana_2, nano_banana_pro, nano_banana_2_lite, nano_banana) and the
+	 * agents that draw on your own plan (codex_image_gen, gemini_image_gen). An entry here with a built-in id
+	 * replaces that model, as when Google renames one. The cookbook shows how to add one.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	TArray<FHyperAIStudioImageModelSettings> ImageModels;
+
+	/**
+	 * The model gemini_image_gen draws with. It is passed to Gemini CLI's nanobanana extension as
+	 * NANOBANANA_MODEL, and GEMINI_API_KEY as its key when NANOBANANA_API_KEY is not set. The Nano Banana
+	 * models call the Gemini API directly instead, with the key in GEMINI_API_KEY.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation", meta = (DisplayName = "Gemini CLI Image Model"))
+	EHyperAIStudioNanoBananaModel GeminiCliImageModel = EHyperAIStudioNanoBananaModel::ExtensionDefault;
+
+	/** The Gemini model id for Gemini CLI Image Model; empty for the extension's default. */
+	FString GetGeminiCliImageModelId() const;
+
+	/** Google's Gemini API, for the Nano Banana models. It is there without settings; an entry with its id replaces it. */
+	static FHyperAIStudioExternalServiceSettings GetGeminiService();
+
+	/**
+	 * Tripo, Meshy and Hi3D, for 3D models, with the price of a textured model, and Viggle, for animation made from
+	 * words. They are there without settings; an entry with the same id (tripo, meshy, hi3d, viggle) replaces one, to go
+	 * through a proxy or follow a price change. Rigging, animating and texturing are priced in MeshTaskPrices.
+	 */
+	static TArray<FHyperAIStudioExternalServiceSettings> GetMeshServices();
+
+	/** Where generated 3D models are imported. */
+	UPROPERTY(Config, EditAnywhere, Category = "3D Generation")
+	FString MeshImportFolder = TEXT("/Game/Generated/Models");
+
+	/**
+	 * ElevenLabs sound effects and music, and Stability AI's Stable Audio, for generated audio. ElevenLabs' price is a
+	 * minute of audio, Stability's one generation. They are there without settings; an entry with the same id
+	 * (elevenlabs, elevenlabs_music, stability) replaces one, to go through a proxy or follow a price change.
+	 */
+	static TArray<FHyperAIStudioExternalServiceSettings> GetAudioServices();
+
+	/** Where generated sound effects and music are imported. */
+	UPROPERTY(Config, EditAnywhere, Category = "Audio Generation")
+	FString AudioImportFolder = TEXT("/Game/Generated/Audio");
+
+	/**
+	 * What rigging, animating and texturing a model cost, task by task, in USD. They are built in at list price; an
+	 * entry with the same provider and task replaces one, to follow a price change.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "3D Generation")
+	TArray<FHyperAIStudioMeshTaskPrice> MeshTaskPrices;
+
+	/**
+	 * The built-in task prices, at list price (October 2026): Tripo and Viggle credits at $0.01, Meshy's at about $0.02
+	 * (Meshy publishes no price per credit).
+	 */
+	static TArray<FHyperAIStudioMeshTaskPrice> GetMeshTaskPrices();
+
+	/** What one Task with Provider costs: the project's entry, else the built-in one; negative when neither has it. */
+	static float FindMeshTaskPrice(const FString& Provider, const FString& Task);
+
+	/**
+	 * Nano Banana 2, Nano Banana Pro, Nano Banana 2 Lite and the original Nano Banana, through the Gemini API, with
+	 * Google's prices per image.
+	 */
+	static TArray<FHyperAIStudioImageModelSettings> GetNanoBananaModels();
+
+	/** Prompt templates the generation tools fill in. Seeded with one for scene references. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	TArray<FHyperAIStudioImagePromptTemplateSettings> ImagePromptTemplates;
+
+	/** Where generated reference images land, inside the project. */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Generation")
+	FString ImageOutputFolder = TEXT("Content/References/Generated");
+
+	/**
+	 * Seeds the prompt templates when there are none. Templates carry no model name, so unlike a model
+	 * entry they do not go stale.
+	 */
+	bool EnsureDefaultImagePromptTemplates()
+	{
+		if (!ImagePromptTemplates.IsEmpty())
+		{
+			return false;
+		}
+		FHyperAIStudioImagePromptTemplateSettings& Scene = ImagePromptTemplates.AddDefaulted_GetRef();
+		Scene.Id = TEXT("scene_reference");
+		Scene.Label = TEXT("Scene reference for lighting");
+		// Every slot after the subject names something hyper_lighting_compare measures. A reference that
+		// leaves them to the model is one the level can chase without ever reaching.
+		Scene.Template = TEXT("{subject}. {time_of_day}, {weather}. Key light {key_light}. ")
+			TEXT("{contrast} contrast, {palette} palette, {mood} mood. Shot on {lens}. ")
+			TEXT("Photographic, no text, no watermark, no people unless asked.");
+		return true;
+	}
 
 	/**
 	 * What generated content may cost in one editor session, in whatever currency the services bill in.
@@ -470,13 +938,19 @@ public:
 		return bAdded;
 	}
 
-	/** Seeds the task routes when the list is empty. Returns true if it did. */
+	static constexpr int32 CurrentTaskRoutesVersion = 1;
+
+	/**
+	 * Seeds the task routes when the list is empty, else updates saved ones (UpdateSavedTaskRoutes). Returns true if it
+	 * changed anything.
+	 */
 	bool EnsureDefaultTaskRoutes()
 	{
 		if (!AgentTaskRoutes.IsEmpty())
 		{
-			return false;
+			return UpdateSavedTaskRoutes();
 		}
+		TaskRoutesVersion = CurrentTaskRoutesVersion;
 		auto Add = [this](const TCHAR* Category, TArray<FString> Packs, const TCHAR* Agent = TEXT(""), const TCHAR* Model = TEXT(""))
 		{
 			FHyperAIStudioAgentTaskRoute& Route = AgentTaskRoutes.AddDefaulted_GetRef();
@@ -489,9 +963,32 @@ public:
 		Add(TEXT("Materials"), {TEXT("materials_dynamic_material"), TEXT("texture_graph")});
 		Add(TEXT("VFX"), {TEXT("niagara_vfx")});
 		Add(TEXT("Lighting"), {TEXT("lighting_lookdev")});
-		Add(TEXT("Level Design"), {TEXT("level_design"), TEXT("worldbuilding_navigation"), TEXT("pcg"), TEXT("geometry_interchange")});
+		Add(TEXT("Level Design"), {TEXT("level_design"), TEXT("worldbuilding_navigation"), TEXT("pcg"), TEXT("geometry_interchange"), TEXT("mesh_terrain"),
+			TEXT("mesh_modeling")});
 		Add(TEXT("Animation"), {TEXT("anim_blueprint"), TEXT("uaf_graph"), TEXT("animation_rigging"), TEXT("character")});
 		Add(TEXT("Gameplay"), {TEXT("blueprint"), TEXT("gameplay_systems"), TEXT("gas"), TEXT("gameplay_ai"), TEXT("enhanced_input")});
+		return true;
+	}
+
+	/**
+	 * Gives routes saved before a built-in route changed that change, once (TaskRoutesVersion), so a pack the user takes
+	 * out afterwards stays out. Returns true if the routes had any change still to have.
+	 */
+	bool UpdateSavedTaskRoutes()
+	{
+		if (TaskRoutesVersion >= CurrentTaskRoutesVersion)
+		{
+			return false;
+		}
+		// 1: free modelling (mesh_modeling) joined Level Design, beside the import pack its boolean words came from.
+		for (FHyperAIStudioAgentTaskRoute& Route : AgentTaskRoutes)
+		{
+			if (Route.Category.Equals(TEXT("Level Design"), ESearchCase::IgnoreCase) && Route.Packs.Contains(TEXT("geometry_interchange")))
+			{
+				Route.Packs.AddUnique(TEXT("mesh_modeling"));
+			}
+		}
+		TaskRoutesVersion = CurrentTaskRoutesVersion;
 		return true;
 	}
 
@@ -580,10 +1077,82 @@ public:
 		return true;
 	}
 
-	/** Route's launch prefix and model argument, Smart included. Same contract as TryResolveModelArgument. */
+	/** Claude Code and Codex can run a model Ollama or LM Studio serves on this computer. */
+	static bool CanRunLocalModels(const FString& AgentName)
+	{
+		return AgentName.Contains(TEXT("Claude"), ESearchCase::IgnoreCase) || AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase);
+	}
+
+	/** A local model as the Model menu names it, ollama/<name> or lmstudio/<id>: its server, and the name the server uses. */
+	static bool ParseLocalModelId(const FString& ModelId, FString& OutServer, FString& OutName)
+	{
+		FString Server;
+		FString Name;
+		if (!ModelId.Split(TEXT("/"), &Server, &Name) || Name.IsEmpty() || (Server != TEXT("ollama") && Server != TEXT("lmstudio")))
+		{
+			return false;
+		}
+		OutServer = Server;
+		OutName = Name;
+		return true;
+	}
+
+	/** The context a local server should give an agent, as the Model menu asks. */
+	static constexpr int32 LocalModelContextTokens = 65536;
+
+	/** Where each server answers on this computer: Ollama's and LM Studio's own default ports. */
+	static FString GetLocalModelServerUrl(const FString& Server)
+	{
+		return Server == TEXT("lmstudio") ? TEXT("http://127.0.0.1:1234") : TEXT("http://127.0.0.1:11434");
+	}
+
+	/**
+	 * A local model's launch. Claude Code talks to the server's Anthropic-compatible API with every Claude alias pointed
+	 * at the model, so subagents and its own background calls stay local; Codex uses its built-in Ollama and LM Studio
+	 * providers. OutPrefix goes inside the agent's launch like Smart's. Same contract as TryResolveModelArgument.
+	 */
+	static bool TryBuildLocalModelLaunch(const FString& AgentName, const FString& ModelId, FString& OutPrefix, FString& OutArgument, FString& OutError)
+	{
+		OutPrefix.Reset();
+		OutArgument.Reset();
+		OutError.Reset();
+		FString Server;
+		FString Name;
+		if (!ParseLocalModelId(ModelId, Server, Name) || !IsSafeModelId(Name))
+		{
+			OutError = FString::Printf(TEXT("\"%s\" is not a local model id that can be passed to the agent."), *ModelId);
+			return false;
+		}
+		if (AgentName.Contains(TEXT("Claude"), ESearchCase::IgnoreCase))
+		{
+			// Claude Code does not know a local model's window, so it is told the 64K the menu asks the server for, and
+			// compacts the chat before the server would cut it.
+			OutPrefix = FString::Printf(TEXT("set \"ANTHROPIC_BASE_URL=%s\" && set \"ANTHROPIC_AUTH_TOKEN=%s\" && set \"ANTHROPIC_API_KEY=\" && ")
+				TEXT("set \"ANTHROPIC_DEFAULT_OPUS_MODEL=%s\" && set \"ANTHROPIC_DEFAULT_SONNET_MODEL=%s\" && set \"ANTHROPIC_DEFAULT_HAIKU_MODEL=%s\" && ")
+				TEXT("set \"CLAUDE_CODE_MAX_CONTEXT_TOKENS=%d\" && "),
+				*GetLocalModelServerUrl(Server), *Server, *Name, *Name, *Name, LocalModelContextTokens);
+			OutArgument = TEXT("--model ") + Name;
+			return true;
+		}
+		if (AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase))
+		{
+			OutArgument = FString::Printf(TEXT("--oss --local-provider %s -m %s"), *Server, *Name);
+			return true;
+		}
+		OutError = FString::Printf(TEXT("%s cannot run a model from Ollama or LM Studio."), *AgentName);
+		return false;
+	}
+
+	/** Route's launch prefix and model argument, Smart and local models included. Same contract as TryResolveModelArgument. */
 	bool TryResolveModelLaunch(const FHyperAIStudioAgentModelRoute& Route, FString& OutPrefix, FString& OutArgument, FString& OutError) const
 	{
 		OutPrefix.Reset();
+		FString Server;
+		FString Name;
+		if (CanRunLocalModels(Route.AgentName) && ParseLocalModelId(Route.SelectedModel, Server, Name))
+		{
+			return TryBuildLocalModelLaunch(Route.AgentName, Route.SelectedModel, OutPrefix, OutArgument, OutError);
+		}
 		if (Route.SelectedModel != SmartModelId)
 		{
 			return TryResolveModelArgument(Route, OutArgument, OutError);

@@ -10,10 +10,13 @@ public class HyperAIStudioGAS : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
+			"AssetRegistry",
 			"Core",
 			"CoreUObject",
 			"Engine",
 			"HyperAIStudio",
+			// The bot's GAS assertions are tested here, where GAS is linked.
+			"HyperAIStudioBot",
 			"ToolsetRegistry",
 			"GameplayAbilities",
 			"GameplayTags",

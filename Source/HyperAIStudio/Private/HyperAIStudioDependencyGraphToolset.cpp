@@ -5,6 +5,7 @@
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "HyperAIStudioNames.h"
 #include "Misc/PackageName.h"
 #include "Misc/SecureHash.h"
 #include "Modules/ModuleManager.h"
@@ -615,6 +616,14 @@ bool FHyperAIStudioDependencyGraphAnalyzer::NormalizeRequest(
 	{
 		OutErrorCode = TEXT("asset_path_not_canonical");
 		OutErrorMessage = TEXT("AssetPath contains whitespace, a backslash, duplicate slash, or subobject suffix.");
+		return false;
+	}
+	// The root package becomes an FName, which stops the editor past 1023 characters.
+	FString NameReason;
+	if (!FHyperAIStudioNames::IsObjectPath(Request.AssetPath, TEXT("AssetPath"), &NameReason))
+	{
+		OutErrorCode = TEXT("asset_path_invalid");
+		OutErrorMessage = NameReason;
 		return false;
 	}
 

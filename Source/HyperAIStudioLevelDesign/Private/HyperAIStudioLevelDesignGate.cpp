@@ -18,10 +18,15 @@
 #include "GameMapsSettings.h"
 #include "HAL/FileManager.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioNames.h"
+#include "IMessageLogListing.h"
 #include "ImageUtils.h"
+#include "Logging/TokenizedMessage.h"
 #include "Materials/MaterialInterface.h"
+#include "MessageLogModule.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/UObjectToken.h"
 #include "NavigationPath.h"
 #include "NavigationSystem.h"
 #include "RenderingThread.h"
@@ -42,6 +47,8 @@ namespace HyperAIStudio::LevelDesign::Gate
 		constexpr int32 MaxStairSteps = 64;
 		constexpr int32 MaxIssues = 128;
 		constexpr int32 MaxPairs = 64;
+		// ponytail: symmetry pairs actors in O(n^2); a spatial hash if levels past this many meshes need checking.
+		constexpr int32 MaxSymmetryActors = 2048;
 		constexpr int32 PreviewSize = 768;
 
 		const TCHAR* const BlockRoles[] = {TEXT("floor"), TEXT("wall"), TEXT("platform"), TEXT("pillar"), TEXT("cover_low"), TEXT("cover_high"), TEXT("generic")};
@@ -63,6 +70,20 @@ namespace HyperAIStudio::LevelDesign::Gate
 			TArray<FString> Parts;
 			for (const TCHAR* Option : Options) Parts.Add(Option);
 			return FString::Join(Parts, TEXT(", "));
+		}
+
+		FString FormatVector(const FVector& Value);
+
+		void AppendIssue(FHyperAILevelDesignValidateReport& Report, const TCHAR* Code, const bool bError, const FString& Subject,
+			const FString& Message, const FVector& Where)
+		{
+			(bError ? Report.ErrorCount : Report.WarningCount) += 1;
+			if (Report.Issues.Num() >= MaxIssues)
+			{
+				Report.bTruncated = true;
+				return;
+			}
+			Report.Issues.Add({Code, bError ? TEXT("error") : TEXT("warning"), Subject, Message, FormatVector(Where)});
 		}
 
 		FString FormatVector(const FVector& Value)
@@ -482,6 +503,8 @@ namespace HyperAIStudio::LevelDesign::Gate
 		UClass* PawnClass = nullptr;
 		if (!PawnClassPath.IsEmpty())
 		{
+			// Loaded when nothing is in memory: an FName past its length, or a package with "//", stops the editor.
+			if (!FHyperAIStudioNames::IsObjectPath(PawnClassPath, TEXT("pawn_class_path"), &OutError)) return false;
 			PawnClass = LoadClass<APawn>(nullptr, *PawnClassPath);
 			if (!PawnClass)
 			{
@@ -589,17 +612,122 @@ namespace HyperAIStudio::LevelDesign::Gate
 		return RunOps(World, Ops, MaxStepHeight, MaxSlopeDegrees, /*bWrite=*/true, Notes, OutActorsChanged, OutError);
 	}
 
+	void RunMapCheck(UWorld& World, FHyperAILevelDesignValidateReport& Report)
+	{
+		if (!GEditor) return;
+		// The editor's own command, without its results window; it opens a fresh page of the MapCheck log.
+		GEditor->Exec(&World, TEXT("MAP CHECK DONTDISPLAYDIALOG"));
+		FMessageLogModule& MessageLog = FModuleManager::LoadModuleChecked<FMessageLogModule>(TEXT("MessageLog"));
+		const TSharedRef<IMessageLogListing> Listing = MessageLog.GetLogListing(TEXT("MapCheck"));
+		for (const TSharedRef<FTokenizedMessage>& Message : Listing->GetFilteredMessages())
+		{
+			const EMessageSeverity::Type Severity = Message->GetSeverity();
+			const bool bError = Severity == EMessageSeverity::Error;
+			if (!bError && Severity != EMessageSeverity::Warning && Severity != EMessageSeverity::PerformanceWarning)
+			{
+				continue;
+			}
+			FHyperAILevelDesignIssue& Issue = Report.Issues.AddDefaulted_GetRef();
+			Issue.Code = TEXT("map_check");
+			Issue.Severity = bError ? TEXT("error") : TEXT("warning");
+			Issue.Message = Message->ToText().ToString();
+			for (const TSharedRef<IMessageToken>& Token : Message->GetMessageTokens())
+			{
+				const AActor* Actor = Token->GetType() == EMessageToken::Object ? Cast<AActor>(StaticCastSharedRef<FUObjectToken>(Token)->GetObject().Get()) : nullptr;
+				if (Actor)
+				{
+					Issue.Subject = Actor->GetActorLabel();
+					Issue.Location = FormatVector(Actor->GetActorLocation());
+					break;
+				}
+			}
+			if (Issue.Subject.IsEmpty()) Issue.Subject = TEXT("Map Check");
+			++(bError ? Report.ErrorCount : Report.WarningCount);
+		}
+	}
+
+	void CheckSymmetry(UWorld& World, const FString& Axis, const float Plane, const float Tolerance, FHyperAILevelDesignValidateReport& Report)
+	{
+		struct FShape
+		{
+			AActor* Actor = nullptr;
+			FString Signature;
+			FVector Center = FVector::ZeroVector;
+			FVector Extent = FVector::ZeroVector;
+			bool bMatched = false;
+		};
+		FHyperAILevelDesignSymmetry& Result = Report.Symmetry;
+		Result.Axis = Axis;
+		Result.Plane = Plane;
+		TArray<FShape> Shapes;
+		for (TActorIterator<AActor> It(&World); It; ++It)
+		{
+			AActor* Actor = *It;
+			if (!Actor || Actor->IsHidden() || Actor->IsEditorOnly()) continue;
+			TArray<FString> Meshes;
+			FBox Box(ForceInit);
+			Actor->ForEachComponent<UStaticMeshComponent>(/*bIncludeFromChildActors=*/false, [&Meshes, &Box](const UStaticMeshComponent* Component)
+			{
+				if (!Component->GetStaticMesh() || !Component->IsVisible()) return;
+				Meshes.Add(Component->GetStaticMesh()->GetPathName());
+				Box += Component->Bounds.GetBox();
+			});
+			if (Meshes.IsEmpty() || !Box.IsValid) continue;
+			if (Shapes.Num() >= MaxSymmetryActors)
+			{
+				Result.bTruncated = true;
+				break;
+			}
+			Meshes.Sort();
+			FShape& Shape = Shapes.AddDefaulted_GetRef();
+			Shape.Actor = Actor;
+			Shape.Signature = Actor->GetClass()->GetPathName() + TEXT("|") + FString::Join(Meshes, TEXT(","));
+			Box.GetCenterAndExtents(Shape.Center, Shape.Extent);
+		}
+		const int32 MirrorIndex = Axis == TEXT("y") ? 1 : 0;
+		for (FShape& Shape : Shapes)
+		{
+			if (Shape.bMatched) continue;
+			FVector Image = Shape.Center;
+			Image[MirrorIndex] = 2.0 * Plane - Image[MirrorIndex];
+			// The nearest unpaired twin; the actor itself counts when it straddles the plane.
+			FShape* Twin = nullptr;
+			double Nearest = Tolerance;
+			for (FShape& Other : Shapes)
+			{
+				if (Other.bMatched || Other.Signature != Shape.Signature || !Other.Extent.Equals(Shape.Extent, Tolerance)) continue;
+				const double Distance = FVector::Dist(Other.Center, Image);
+				if (Distance <= Nearest)
+				{
+					Twin = &Other;
+					Nearest = Distance;
+				}
+			}
+			if (!Twin) continue;
+			Shape.bMatched = Twin->bMatched = true;
+			++(Twin == &Shape ? Result.SelfSymmetric : Result.MatchedPairs);
+		}
+		for (const FShape& Shape : Shapes)
+		{
+			if (Shape.bMatched) continue;
+			const FString Label = Shape.Actor->GetActorLabel();
+			if (Result.Unmatched.Num() < MaxIssues) Result.Unmatched.Add(Label);
+			FVector Image = Shape.Center;
+			Image[MirrorIndex] = 2.0 * Plane - Image[MirrorIndex];
+			AppendIssue(Report, TEXT("asymmetric"), /*bError=*/true, Label,
+				FString::Printf(TEXT("No actor with the same meshes and size within %.0f cm of its mirror image at %s."), Tolerance, *FormatVector(Image)),
+				Shape.Center);
+		}
+		Result.ActorsChecked = Shapes.Num();
+		Result.Score = Shapes.IsEmpty() ? 0.f : float(2 * Result.MatchedPairs + Result.SelfSymmetric) / Shapes.Num();
+		Result.bSymmetric = !Shapes.IsEmpty() && Result.Score >= 1.f && !Result.bTruncated;
+	}
+
 	void CheckLayout(UWorld& World, const FHyperAIPlayerMetrics& Metrics, const float MaxSightline, FHyperAILevelDesignValidateReport& Report)
 	{
 		auto AddIssue = [&Report](const TCHAR* Code, const bool bError, const FString& Subject, const FString& Message, const FVector& Where)
 		{
-			(bError ? Report.ErrorCount : Report.WarningCount) += 1;
-			if (Report.Issues.Num() >= MaxIssues)
-			{
-				Report.bTruncated = true;
-				return;
-			}
-			Report.Issues.Add({Code, bError ? TEXT("error") : TEXT("warning"), Subject, Message, FormatVector(Where)});
+			AppendIssue(Report, Code, bError, Subject, Message, Where);
 		};
 		FCollisionQueryParams Query(SCENE_QUERY_STAT(HyperAILevelDesign), /*bTraceComplex=*/false);
 		const float HalfHeight = Metrics.PlayerHeight * 0.5f;

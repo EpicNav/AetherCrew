@@ -1,7 +1,11 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioPaper2DToolset.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioOperationWait.h"
+#include "HyperAIStudioRequestFit.h"
 #include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioSourceControl.h"
 
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -466,7 +470,8 @@ bool FHyperAIStudioPaper2DContracts::IsCanonicalProjectObjectPath(const FString&
 		}
 	}
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason))
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason))
 	{
 		return false;
 	}
@@ -1677,11 +1682,15 @@ FHyperAIPaper2DApplyPlanReport FHyperAIStudioPaper2DContracts::BuildPlan(
 	FSavePackageArgs SaveArgs;
 	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 	SaveArgs.Error = GWarn;
-	if (!UPackage::SavePackage(Package, Target, *Filename, SaveArgs)
+	FString SourceControlError;
+	if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, SourceControlError)
+		|| !UPackage::SavePackage(Package, Target, *Filename, SaveArgs)
 		|| Package->IsDirty())
 	{
 		Report.Status = TEXT("save_failed_asset_dirty");
-		Report.Diagnostic = TEXT("The reversible edit ran, but the one package save failed. Undo or source-control revert is available.");
+		Report.Diagnostic = SourceControlError.IsEmpty()
+			? TEXT("The reversible edit ran, but the one package save failed. Undo or source-control revert is available.")
+			: TEXT("The reversible edit ran, but source control kept it from being saved: ") + SourceControlError + TEXT(" Undo is available.");
 		return Report;
 	}
 	if (!VerifyFastPatch(Target, Patch))
@@ -1702,10 +1711,20 @@ FHyperAIPaper2DInspectReport UHyperAIStudioPaper2DToolset::hyper_paper2d_inspect
 	return FHyperAIStudioPaper2DContracts::Inspect(Request);
 }
 
-FHyperAIPaper2DApplyPlanReport UHyperAIStudioPaper2DToolset::hyper_paper2d_apply_plan(
-	const FHyperAIPaper2DApplyPlanRequest& Request)
+UHyperAIPaper2DApplyPlanResult* UHyperAIStudioPaper2DToolset::hyper_paper2d_apply_plan(const FHyperAIPaper2DApplyPlanRequest& Request)
 {
-	return FHyperAIStudioPaper2DContracts::BuildPlan(Request);
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAIPaper2DApplyPlanResult>(FHyperAIStudioPaper2DContracts::BuildFittedPlan(Request));
+}
+
+FHyperAIPaper2DApplyPlanReport FHyperAIStudioPaper2DContracts::BuildFittedPlan(
+	const FHyperAIPaper2DApplyPlanRequest& InRequest)
+{
+	FHyperAIPaper2DApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAIPaper2DApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return FHyperAIStudioPaper2DContracts::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 FHyperAIPaper2DValidateReport UHyperAIStudioPaper2DToolset::hyper_paper2d_validate(

@@ -8,11 +8,17 @@
 #include "AttributeSet.h"
 #include "Engine/Blueprint.h"
 #include "GameplayEffect.h"
+#include "GameplayTagsManager.h"
+#include "HyperAIStudioAgentActivity.h"
+#include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
+#include "HyperAIStudioSettings.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Materials/Material.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
+#include "ObjectTools.h"
 #include "UObject/Package.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UnrealType.h"
@@ -110,7 +116,8 @@ namespace HyperAIStudio::GAS::Tests
 		OutPayload.Operations.Reset();
 		OutPayload.BaseRevision.Reset();
 		OutPayload.SemanticFingerprint.Reset();
-		OutDryRun = UHyperAIStudioGASToolset::hyper_gas_apply_plan(Request);
+		// The strict planner seals the typed payload; the tool itself runs the authoring path.
+		OutDryRun = FHyperAIStudioGASContracts::BuildPlan(Request);
 	if (!OutDryRun.bOk || OutDryRun.Status != TEXT("valid_dry_run_execution_blocked")) return false;
 		for (const FHyperAIGASPlanOperation& Operation : Request.Operations)
 		{
@@ -623,7 +630,15 @@ bool FHyperAIGASApplyCallableGateTest::RunTest(const FString& Parameters)
 	UBlueprint* Blueprint = CreateEffectBlueprint(Path);
 	TestNotNull(TEXT("effect fixture created"), Blueprint);
 	if (!Blueprint) return false;
-	ON_SCOPE_EXIT { DiscardFixture(Blueprint); };
+	// This test saves the fixture, so it deletes it rather than only discarding it.
+	const TWeakObjectPtr<UBlueprint> Fixture = Blueprint;
+	ON_SCOPE_EXIT
+	{
+		if (UBlueprint* Live = Fixture.Get())
+		{
+			ObjectTools::ForceDeleteObjects({Live}, /*ShowConfirmation=*/false);
+		}
+	};
 	FHyperAIGASAssetRecord Before;
 	TestTrue(TEXT("fixture is independently captured"), CaptureOne(Path, Before));
 	UGameplayEffect* Effect = Cast<UGameplayEffect>(Blueprint->GeneratedClass->GetDefaultObject(false));
@@ -632,8 +647,7 @@ bool FHyperAIGASApplyCallableGateTest::RunTest(const FString& Parameters)
 	const EGameplayEffectDurationType OriginalPolicy = Effect->DurationPolicy;
 
 	FHyperAIGASApplyPlanRequest Request = DurationRequest(Path, Before.Revision, 7.0);
-	const FHyperAIGASApplyPlanReport DryRun =
-		UHyperAIStudioGASToolset::hyper_gas_apply_plan(Request);
+	const FHyperAIGASApplyPlanReport DryRun = FHyperAIStudioGASContracts::BuildPlan(Request);
 	TestTrue(TEXT("dry run is useful and valid"), DryRun.bOk);
 	TestEqual(TEXT("dry run status"), DryRun.Status,
 		FString(TEXT("valid_dry_run_execution_blocked")));
@@ -656,19 +670,30 @@ bool FHyperAIGASApplyCallableGateTest::RunTest(const FString& Parameters)
 	Request.bDryRun = false;
 	Request.OperationId = TEXT("gas-callable-gate-001");
 	Request.ExpectedPlanHash = DryRun.PlanHash;
-	const FHyperAIGASApplyPlanReport ExecuteAttempt =
-		UHyperAIStudioGASToolset::hyper_gas_apply_plan(Request);
-	TestFalse(TEXT("callable cannot mutate synchronously"), ExecuteAttempt.bOk);
-	TestFalse(TEXT("no artifact was falsely staged"), ExecuteAttempt.bStaged);
-	TestFalse(TEXT("no execution was falsely submitted"), ExecuteAttempt.bExecutionSubmitted);
-	TestFalse(TEXT("failure never permits fallback"), ExecuteAttempt.bFallbackPermitted);
-	TestEqual(TEXT("bounded backend requirement is explicit"), ExecuteAttempt.Status,
+	const FHyperAIGASApplyPlanReport ExecuteAttempt = FHyperAIStudioGASContracts::BuildPlan(Request);
+	TestFalse(TEXT("the strict planner never mutates"), ExecuteAttempt.bOk);
+	TestEqual(TEXT("its bounded backend requirement is explicit"), ExecuteAttempt.Status,
 		FString(FHyperAIStudioGASContracts::ExecutionBlocker));
-	TestEqual(TEXT("execution attempt reseals the identical shared plan"),
-		ExecuteAttempt.PlanHash, DryRun.PlanHash);
-	TestEqual(TEXT("execution attempt retains the shared capability identity"),
-		ExecuteAttempt.CapabilityHash, DryRun.CapabilityHash);
 	TestEqual(TEXT("CDO remains unchanged"), Effect->DurationPolicy, OriginalPolicy);
+
+	// The tool runs the authoring path: a dry run checks, a real one applies, compiles and saves.
+	Request.bDryRun = true;
+	Request.OperationId.Reset();
+	Request.ExpectedPlanHash.Reset();
+	const FHyperAIGASApplyPlanReport Checked = UHyperAIStudioGASToolset::hyper_gas_apply_plan(Request);
+	TestTrue(TEXT("the tool's dry run checks the plan: ") + Checked.Diagnostic, Checked.bOk && Checked.Status == TEXT("checked"));
+	TestEqual(TEXT("and changes nothing"), Effect->DurationPolicy, OriginalPolicy);
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
+	Settings->bRequireApprovalForAgentEdits = false;
+	ON_SCOPE_EXIT { Settings->bRequireApprovalForAgentEdits = bApproval; };
+	Request.bDryRun = false;
+	const FHyperAIGASApplyPlanReport Applied = UHyperAIStudioGASToolset::hyper_gas_apply_plan(Request);
+	TestTrue(TEXT("the tool applies it: ") + Applied.Diagnostic, Applied.bOk && Applied.Status == TEXT("completed") && Applied.Saved.Num() == 1);
+	const UGameplayEffect* Now = GetDefault<UGameplayEffect>(Blueprint->GeneratedClass);
+	float Seconds = 0.f;
+	TestTrue(TEXT("the effect lasts 7 seconds"), Now && Now->DurationPolicy == EGameplayEffectDurationType::HasDuration
+		&& Now->DurationMagnitude.GetStaticMagnitudeIfPossible(1.f, Seconds) && FMath::IsNearlyEqual(Seconds, 7.f));
 	return true;
 }
 
@@ -751,6 +776,252 @@ bool FHyperAIGASTrustedAdapterSafetyTest::RunTest(const FString& Parameters)
 		UHyperAIStudioGASToolset::hyper_gas_validate(ValidateRequest);
 	TestTrue(TEXT("validator always performs a fresh loaded-state read"), Validation.bFreshCapture);
 	TestTrue(TEXT("unchanged expected revision remains independently valid"), Validation.bValid);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIGASAuthoringTest,
+	"HyperAIStudio.NativeTools.GAS.AuthoringEndToEnd",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIGASAuthoringTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio::GAS::Tests;
+	// Tags for this editor session only: added in memory, never written to the project's tag configuration.
+	for (const TCHAR* Tag : {TEXT("HyperAITest.Ability.Attack"), TEXT("HyperAITest.State.Attacking"), TEXT("HyperAITest.State.Staggered"),
+		TEXT("HyperAITest.Data.Damage"), TEXT("GameplayCue.HyperAITest.Hit")})
+	{
+		UGameplayTagsManager::Get().AddNativeGameplayTag(FName(Tag));
+	}
+	const FString Stamp = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower();
+	auto AssetPath = [&Stamp](const TCHAR* Prefix)
+	{
+		const FString Name = FString::Printf(TEXT("%s_%s"), Prefix, *Stamp);
+		return FString::Printf(TEXT("/Game/__HyperAIStudioAutomation/%s.%s"), *Name, *Name);
+	};
+	const FString CostPath = AssetPath(TEXT("GE_StaminaCost"));
+	const FString HitPath = AssetPath(TEXT("GE_Hit"));
+	const FString AttackPath = AssetPath(TEXT("GA_Attack"));
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
+	Settings->bRequireApprovalForAgentEdits = false;
+	ON_SCOPE_EXIT
+	{
+		Settings->bRequireApprovalForAgentEdits = bApproval;
+		TArray<UObject*> Made;
+		for (const FString& Path : {CostPath, HitPath, AttackPath})
+		{
+			if (UObject* Asset = FSoftObjectPath(Path).ResolveObject())
+			{
+				Made.Add(Asset);
+			}
+		}
+		if (!Made.IsEmpty())
+		{
+			ObjectTools::ForceDeleteObjects(Made, /*ShowConfirmation=*/false);
+		}
+	};
+	const FString Attributes = TEXT("/Script/GameplayAbilities.AbilitySystemTestAttributeSet");
+	auto Op = [](const TCHAR* Type, const FString& Target)
+	{
+		FHyperAIGASPlanOperation Out;
+		Out.Type = Type;
+		Out.TargetPath = Target;
+		return Out;
+	};
+	auto Modifier = [&Attributes](const TCHAR* Attribute, const double Magnitude, const TCHAR* Caller = TEXT(""))
+	{
+		FHyperAIGASModifierSpec Out;
+		Out.AttributeOwnerClassPath = Attributes;
+		Out.AttributeName = Attribute;
+		Out.Operation = TEXT("additive");
+		Out.Magnitude = Magnitude;
+		Out.SetByCallerTag = Caller;
+		return Out;
+	};
+
+	// A stamina cost, a hit that staggers, and an attack that pays the cost and cannot start while staggered.
+	FHyperAIGASApplyPlanRequest Plan;
+	Plan.Operations.Add(Op(TEXT("create_gameplay_effect_blueprint"), CostPath));
+	FHyperAIGASPlanOperation Instant = Op(TEXT("set_effect_duration"), CostPath);
+	Instant.DurationPolicy = TEXT("instant");
+	Plan.Operations.Add(Instant);
+	FHyperAIGASPlanOperation Spend = Op(TEXT("replace_effect_modifiers"), CostPath);
+	Spend.Modifiers = {Modifier(TEXT("Mana"), -20.0)};
+	Plan.Operations.Add(Spend);
+	Plan.Operations.Add(Op(TEXT("create_gameplay_effect_blueprint"), HitPath));
+	FHyperAIGASPlanOperation Brief = Op(TEXT("set_effect_duration"), HitPath);
+	Brief.DurationPolicy = TEXT("duration");
+	Brief.DurationSeconds = 0.5;
+	Plan.Operations.Add(Brief);
+	FHyperAIGASPlanOperation Damage = Op(TEXT("replace_effect_modifiers"), HitPath);
+	Damage.Modifiers = {Modifier(TEXT("Damage"), 0.0, TEXT("HyperAITest.Data.Damage"))};
+	Plan.Operations.Add(Damage);
+	FHyperAIGASPlanOperation Stagger = Op(TEXT("replace_effect_granted_tags"), HitPath);
+	Stagger.Tags = {TEXT("HyperAITest.State.Staggered")};
+	Plan.Operations.Add(Stagger);
+	FHyperAIGASPlanOperation Cue = Op(TEXT("replace_effect_cues"), HitPath);
+	FHyperAIGASCueSpec HitCue;
+	HitCue.CueTags = {TEXT("GameplayCue.HyperAITest.Hit")};
+	HitCue.MaxLevel = 1.0;
+	Cue.Cues = {HitCue};
+	Plan.Operations.Add(Cue);
+	Plan.Operations.Add(Op(TEXT("create_gameplay_ability_blueprint"), AttackPath));
+	FHyperAIGASPlanOperation Identity = Op(TEXT("set_ability_asset_tags"), AttackPath);
+	Identity.Tags = {TEXT("HyperAITest.Ability.Attack")};
+	Plan.Operations.Add(Identity);
+	FHyperAIGASPlanOperation Owned = Op(TEXT("set_ability_tags"), AttackPath);
+	Owned.Property = TEXT("activation_owned");
+	Owned.Tags = {TEXT("HyperAITest.State.Attacking")};
+	Plan.Operations.Add(Owned);
+	FHyperAIGASPlanOperation Blocked = Op(TEXT("set_ability_tags"), AttackPath);
+	Blocked.Property = TEXT("activation_blocked");
+	Blocked.Tags = {TEXT("HyperAITest.State.Staggered")};
+	Plan.Operations.Add(Blocked);
+	FHyperAIGASPlanOperation Cost = Op(TEXT("set_ability_property"), AttackPath);
+	Cost.Property = TEXT("cost_effect");
+	Cost.Value = CostPath;
+	Plan.Operations.Add(Cost);
+	FHyperAIGASPlanOperation Policy = Op(TEXT("set_ability_property"), AttackPath);
+	Policy.Property = TEXT("net_execution_policy");
+	Policy.Value = TEXT("local_predicted");
+	Plan.Operations.Add(Policy);
+
+	// Refused before anything changes: a tag that is not registered, and an effect op aimed at an ability.
+	FHyperAIGASApplyPlanRequest Unknown = Plan;
+	Unknown.Operations[6].Tags = {TEXT("HyperAITest.No.Such.Tag")};
+	const FHyperAIGASApplyPlanReport UnknownTag = UHyperAIStudioGASToolset::hyper_gas_apply_plan(Unknown);
+	TestTrue(TEXT("An unregistered tag is refused by name: ") + UnknownTag.Diagnostic, !UnknownTag.bOk
+		&& UnknownTag.Diagnostic.Contains(TEXT("HyperAITest.No.Such.Tag")));
+	FHyperAIGASApplyPlanRequest Crossed = Plan;
+	Crossed.Operations.Add(Brief);
+	Crossed.Operations.Last().TargetPath = AttackPath;
+	TestFalse(TEXT("An effect op aimed at an ability is refused"), UHyperAIStudioGASToolset::hyper_gas_apply_plan(Crossed).bOk);
+	TestNull(TEXT("and nothing was made"), FSoftObjectPath(CostPath).ResolveObject());
+
+	Plan.bDryRun = true;
+	const FHyperAIGASApplyPlanReport Checked = UHyperAIStudioGASToolset::hyper_gas_apply_plan(Plan);
+	TestTrue(TEXT("The plan checks: ") + Checked.Diagnostic, Checked.bOk && Checked.Status == TEXT("checked"));
+	Plan.bDryRun = false;
+	const FHyperAIGASApplyPlanReport Applied = UHyperAIStudioGASToolset::hyper_gas_apply_plan(Plan);
+	if (!TestTrue(TEXT("The plan applies: ") + Applied.Diagnostic, Applied.bOk && Applied.Saved.Num() == 3 && Applied.Made.Num() == 3))
+	{
+		return false;
+	}
+	AddInfo(FString::Join(Applied.Made, TEXT("\n")));
+
+	const UBlueprint* CostBlueprint = Cast<UBlueprint>(FSoftObjectPath(CostPath).ResolveObject());
+	const UBlueprint* HitBlueprint = Cast<UBlueprint>(FSoftObjectPath(HitPath).ResolveObject());
+	const UBlueprint* AttackBlueprint = Cast<UBlueprint>(FSoftObjectPath(AttackPath).ResolveObject());
+	if (!TestTrue(TEXT("three Blueprints exist"), CostBlueprint && HitBlueprint && AttackBlueprint))
+	{
+		return false;
+	}
+	const UGameplayEffect* CostEffect = GetDefault<UGameplayEffect>(CostBlueprint->GeneratedClass);
+	float Magnitude = 0.f;
+	TestTrue(TEXT("The cost is instant and takes 20 Mana"), CostEffect->DurationPolicy == EGameplayEffectDurationType::Instant
+		&& CostEffect->Modifiers.Num() == 1 && CostEffect->Modifiers[0].Attribute.GetName() == TEXT("Mana")
+		&& CostEffect->Modifiers[0].ModifierOp == EGameplayModOp::Additive
+		&& CostEffect->Modifiers[0].ModifierMagnitude.GetStaticMagnitudeIfPossible(1.f, Magnitude) && FMath::IsNearlyEqual(Magnitude, -20.f));
+	const UGameplayEffect* HitEffect = GetDefault<UGameplayEffect>(HitBlueprint->GeneratedClass);
+	TestTrue(TEXT("The hit lasts half a second"), HitEffect->DurationPolicy == EGameplayEffectDurationType::HasDuration
+		&& HitEffect->DurationMagnitude.GetStaticMagnitudeIfPossible(1.f, Magnitude) && FMath::IsNearlyEqual(Magnitude, 0.5f));
+	TestTrue(TEXT("its damage is set by the caller"), HitEffect->Modifiers.Num() == 1
+		&& HitEffect->Modifiers[0].ModifierMagnitude.GetMagnitudeCalculationType() == EGameplayEffectMagnitudeCalculation::SetByCaller
+		&& HitEffect->Modifiers[0].ModifierMagnitude.GetSetByCallerFloat().DataTag.ToString() == TEXT("HyperAITest.Data.Damage"));
+	TestTrue(TEXT("it grants Staggered"), HitEffect->GetGrantedTags().HasTagExact(
+		UGameplayTagsManager::Get().RequestGameplayTag(TEXT("HyperAITest.State.Staggered"))));
+	TestTrue(TEXT("and plays the hit cue"), HitEffect->GameplayCues.Num() == 1
+		&& HitEffect->GameplayCues[0].GameplayCueTags.HasTagExact(UGameplayTagsManager::Get().RequestGameplayTag(TEXT("GameplayCue.HyperAITest.Hit"))));
+	const UGameplayAbility* Attack = GetDefault<UGameplayAbility>(AttackBlueprint->GeneratedClass);
+	TestTrue(TEXT("The attack is tagged Ability.Attack"), Attack->GetAssetTags().HasTagExact(
+		UGameplayTagsManager::Get().RequestGameplayTag(TEXT("HyperAITest.Ability.Attack"))));
+	const FStructProperty* BlockedProperty = FindFProperty<FStructProperty>(UGameplayAbility::StaticClass(), TEXT("ActivationBlockedTags"));
+	TestTrue(TEXT("cannot start while staggered"), BlockedProperty && BlockedProperty->ContainerPtrToValuePtr<FGameplayTagContainer>(Attack)->HasTagExact(
+		UGameplayTagsManager::Get().RequestGameplayTag(TEXT("HyperAITest.State.Staggered"))));
+	TestTrue(TEXT("pays the stamina cost"), Attack->GetCostGameplayEffect() && Attack->GetCostGameplayEffect()->GetClass() == CostBlueprint->GeneratedClass);
+	TestTrue(TEXT("and is locally predicted"), Attack->GetNetExecutionPolicy() == EGameplayAbilityNetExecutionPolicy::LocalPredicted);
+
+	FHyperAIGASInspectRequest Look;
+	Look.AssetPaths = {HitPath};
+	const FHyperAIGASInspectReport Inspected = UHyperAIStudioGASToolset::hyper_gas_inspect(Look);
+	TestTrue(TEXT("Inspect reads the hit back"), Inspected.bOk && Inspected.Records.Num() == 1 && Inspected.Records[0].DurationPolicy == TEXT("duration")
+		&& Inspected.Records[0].GrantedTags.Contains(TEXT("HyperAITest.State.Staggered")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIGASPathTakenTest,
+	"HyperAIStudio.NativeTools.GAS.PathTakenWhileWaiting",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIGASPathTakenTest::RunTest(const FString& Parameters)
+{
+	// A held plan makes its Blueprint only once approved. An asset of another class made at the path meanwhile would stop
+	// the editor when the Blueprint is made over it, so the path is asked about again then.
+	const FString Name = FString::Printf(TEXT("GE_Late_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8).ToLower());
+	const FString Package = TEXT("/Game/__HyperAIStudioAutomation/") + Name;
+	const FString Path = Package + TEXT(".") + Name;
+	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+	const bool bApproval = Settings->bRequireApprovalForAgentEdits;
+	UMaterial* Squatter = nullptr;
+	ON_SCOPE_EXIT
+	{
+		Settings->bRequireApprovalForAgentEdits = bApproval;
+		TArray<UObject*> Made;
+		if (IsValid(Squatter)) Made.Add(Squatter);
+		if (UObject* Asset = FindObject<UBlueprint>(nullptr, *Path)) Made.Add(Asset);
+		if (!Made.IsEmpty()) ObjectTools::ForceDeleteObjects(Made, /*ShowConfirmation=*/false);
+	};
+	Settings->bRequireApprovalForAgentEdits = true;
+	FHyperAIGASApplyPlanRequest Plan;
+	FHyperAIGASPlanOperation Create;
+	Create.Type = TEXT("create_gameplay_effect_blueprint");
+	Create.TargetPath = Path;
+	Plan.Operations = {Create};
+	Plan.bDryRun = false;
+	const FHyperAIGASApplyPlanReport Held = UHyperAIStudioGASToolset::hyper_gas_apply_plan(Plan);
+	if (!TestEqual(TEXT("the new effect waits for approval: ") + Held.Diagnostic, Held.Status, FString(TEXT("awaiting_user_approval")))) return false;
+	Squatter = NewObject<UMaterial>(CreatePackage(*Package), FName(*Name), RF_Public | RF_Standalone);
+	FString Error;
+	TestTrue(TEXT("the approval runs: ") + Error, FHyperAIStudioApprovalGate::Approve(Held.OperationId, Error));
+	FString Said;
+	for (const FHyperAIStudioActivityEntry& Entry : FHyperAIStudioAgentActivityLog::GetSnapshot())
+	{
+		if (Entry.OperationId == Held.OperationId && !Entry.Detail.IsEmpty())
+		{
+			Said = Entry.Detail;
+			break;
+		}
+	}
+	TestTrue(TEXT("and refuses the path taken meanwhile instead of making a Blueprint over it: ") + Said, Said.Contains(TEXT("was taken")));
+	TestTrue(TEXT("the asset there is left alone"), FindObject<UMaterial>(nullptr, *Path) == Squatter);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIGASLongPathTest,
+	"HyperAIStudio.NativeTools.GAS.LongPathRefused",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIGASLongPathTest::RunTest(const FString& Parameters)
+{
+	// A new Blueprint's path is looked up before it is made. At 1024 characters, which the plan's size bound allows, the
+	// lookup's FName stopped the editor, even on a dry run.
+	FHyperAIGASPlanOperation Create;
+	Create.Type = TEXT("create_gameplay_effect_blueprint");
+	Create.TargetPath = TEXT("/Game/") + FString::ChrN(1018, TEXT('a'));
+	FHyperAIGASApplyPlanRequest Plan;
+	Plan.Operations = {Create};
+	Plan.bDryRun = true;
+	const FHyperAIGASApplyPlanReport Refused = UHyperAIStudioGASToolset::hyper_gas_apply_plan(Plan);
+	TestTrue(TEXT("A TargetPath at an FName's length is refused before it is looked up: ") + Refused.Diagnostic.Left(120),
+		!Refused.bOk && Refused.Status == TEXT("invalid_request") && Refused.Diagnostic.StartsWith(TEXT("Operations[0].TargetPath")));
+	Plan.Operations[0].TargetPath = TEXT("/Game/") + FString::ChrN(600, TEXT('a'));
+	TestEqual(TEXT("and so is one past the name rule"), UHyperAIStudioGASToolset::hyper_gas_apply_plan(Plan).Status, FString(TEXT("invalid_request")));
+	Plan.Operations[0].TargetPath = TEXT("/Game/__HyperAIStudioAutomation/GE_Short");
+	Plan.Operations[0].ParentClassPath = TEXT("/Script/") + FString::ChrN(1000, TEXT('b'));
+	TestEqual(TEXT("as is a parent class path past it"), UHyperAIStudioGASToolset::hyper_gas_apply_plan(Plan).Status, FString(TEXT("invalid_request")));
 	return true;
 }
 

@@ -1,6 +1,8 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioDataToolset.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioSourceControl.h"
 
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -1274,7 +1276,8 @@ bool FHyperAIStudioDataContracts::IsCanonicalProjectObjectPath(const FString& Pa
 		|| Path.Contains(TEXT("\\")) || Path.Contains(TEXT("..")) || Path.Contains(TEXT(":"))
 		|| HyperAIStudio::Data::Private::HasControlCharacter(Path)) return false;
 	FText Reason;
-	if (!FPackageName::IsValidObjectPath(Path, &Reason)) return false;
+	// The shared rule first: a path past an FName's length, or with "//", is refused before any lookup makes names of it.
+	if (!FHyperAIStudioNames::IsObjectPath(Path, nullptr) || !FPackageName::IsValidObjectPath(Path, &Reason)) return false;
 	const FSoftObjectPath SoftPath(Path);
 	if (!SoftPath.IsValid() || !SoftPath.GetSubPathUtf8String().IsEmpty()) return false;
 	const FString PackageName = FPackageName::ObjectPathToPackageName(Path);
@@ -2086,11 +2089,15 @@ FHyperAIDataApplyPlanReport FHyperAIStudioDataContracts::BuildPlan(
 	FSavePackageArgs SaveArgs;
 	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 	SaveArgs.Error = GWarn;
-	if (!UPackage::SavePackage(Package, Target, *Filename, SaveArgs)
+	FString SourceControlError;
+	if (!FHyperAIStudioSourceControl::MakeEditable({Package->GetName()}, SourceControlError)
+		|| !UPackage::SavePackage(Package, Target, *Filename, SaveArgs)
 		|| Package->IsDirty())
 	{
 		Report.Status = TEXT("save_failed_asset_dirty");
-		Report.Diagnostic = TEXT("The reversible field rename ran, but the single package save failed. Undo or source-control revert is available.");
+		Report.Diagnostic = SourceControlError.IsEmpty()
+			? TEXT("The reversible field rename ran, but the single package save failed. Undo or source-control revert is available.")
+			: TEXT("The reversible field rename ran, but source control kept it from being saved: ") + SourceControlError + TEXT(" Undo is available.");
 		return Report;
 	}
 

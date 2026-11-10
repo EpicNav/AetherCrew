@@ -1,6 +1,9 @@
 // Games by Hyper 2026.
 
 #include "HyperAIStudioLevelDesignToolset.h"
+#include "HyperAIStudioNames.h"
+#include "HyperAIStudioOperationWait.h"
+#include "HyperAIStudioRequestFit.h"
 
 #include "Editor.h"
 #include "Engine/Engine.h"
@@ -8,6 +11,7 @@
 #include "FileHelpers.h"
 #include "HyperAIStudioAgentActivity.h"
 #include "HyperAIStudioApprovalGate.h"
+#include "HyperAIStudioExecutionQueue.h"
 #include "HyperAIStudioCapabilityRuntimeIndex.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioLevelDesignGate.h"
@@ -180,6 +184,8 @@ TArray<FString> FHyperAIStudioLevelDesignContracts::GetCapabilities()
 		TEXT("navmesh_routes_start_to_goals_with_corridor_width"),
 		TEXT("spawn_sightlines"),
 		TEXT("top_down_preview_with_routes_markers_and_issues"),
+		TEXT("mirror_symmetry_across_an_x_or_y_plane"),
+		TEXT("unreal_map_check_errors_and_warnings_on_their_actors"),
 		TEXT("unsupported:jump_route_checks_encounter_space_sizing_and_custom_meshes")};
 }
 
@@ -216,7 +222,7 @@ FString FHyperAIStudioLevelDesignContracts::EditOpsPayloadSchemaFingerprint()
 FString FHyperAIStudioLevelDesignContracts::ValidatePayloadSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("level_design.validate.payload.v1|editor_world|pawn_class|max_sightline|preview|output_bytes"));
+		TEXT("level_design.validate.payload.v3|editor_world|pawn_class|max_sightline|preview|symmetry_axis_plane_tolerance|map_check|output_bytes"));
 	return Value;
 }
 
@@ -236,7 +242,7 @@ FString FHyperAIStudioLevelDesignContracts::MutationResultSchemaFingerprint()
 FString FHyperAIStudioLevelDesignContracts::ValidateResultSchemaFingerprint()
 {
 	static const FString Value = FHyperAIStudioExtensionRuntime::ComputeBoundedSha256(
-		TEXT("level_design.validate.result.v1|metrics|issues|routes|sightlines|navigation|preview|bounded"));
+		TEXT("level_design.validate.result.v2|metrics|issues|routes|sightlines|symmetry|navigation|preview|bounded"));
 	return Value;
 }
 
@@ -389,6 +395,8 @@ FHyperAILevelDesignInspectReport FHyperAIStudioLevelDesignContracts::Inspect(con
 {
 	using namespace HyperAIStudio::LevelDesign::Private;
 	FHyperAILevelDesignInspectReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	Report.Capabilities = GetCapabilities();
 	auto Reject = [&](const TCHAR* Status, const FString& Diagnostic)
 	{
@@ -441,6 +449,8 @@ FHyperAILevelDesignValidateReport FHyperAIStudioLevelDesignContracts::Validate(c
 {
 	using namespace HyperAIStudio::LevelDesign::Private;
 	FHyperAILevelDesignValidateReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	Report.Capabilities = GetCapabilities();
 	auto Reject = [&](const TCHAR* Status, const FString& Diagnostic)
 	{
@@ -453,10 +463,14 @@ FHyperAILevelDesignValidateReport FHyperAIStudioLevelDesignContracts::Validate(c
 	{
 		return Reject(TEXT("game_thread_required"), TEXT("Level design validation runs on the game thread."));
 	}
+	const FString SymmetryAxis = Request.SymmetryAxis.ToLower();
 	if (Request.MaxOutputBytes < MinOutputBytes || Request.MaxOutputBytes > MaxOutputBytes || Request.PawnClassPath.Len() > 512
-		|| !(Request.MaxSightline >= 500.0f && Request.MaxSightline <= 100000.0f))
+		|| !(Request.MaxSightline >= 500.0f && Request.MaxSightline <= 100000.0f)
+		|| !(SymmetryAxis.IsEmpty() || SymmetryAxis == TEXT("x") || SymmetryAxis == TEXT("y"))
+		|| !(FMath::Abs(Request.SymmetryPlane) <= 1000000.0f) || !(Request.SymmetryTolerance >= 1.0f && Request.SymmetryTolerance <= 1000.0f))
 	{
-		return Reject(TEXT("invalid_bounds"), TEXT("Bounds are closed: max_output_bytes 16-128 KB, max_sightline 500-100000 cm."));
+		return Reject(TEXT("invalid_bounds"), TEXT("Bounds are closed: max_output_bytes 16-128 KB, max_sightline 500-100000 cm, ")
+			TEXT("symmetry_axis empty, x or y, symmetry_tolerance 1-1000 cm."));
 	}
 	UWorld* World = Gate::GetEditorWorld();
 	if (!World)
@@ -470,13 +484,27 @@ FHyperAILevelDesignValidateReport FHyperAIStudioLevelDesignContracts::Validate(c
 	}
 	Report.LevelPath = World->GetPathName();
 	Gate::CheckLayout(*World, Report.Metrics, Request.MaxSightline, Report);
+	FString SymmetryNote;
+	if (!SymmetryAxis.IsEmpty())
+	{
+		Gate::CheckSymmetry(*World, SymmetryAxis, Request.SymmetryPlane, Request.SymmetryTolerance, Report);
+		SymmetryNote = FString::Printf(TEXT(" Symmetry across %s=%g: %d of %d mesh actors mirrored."), *SymmetryAxis.ToUpper(),
+			Request.SymmetryPlane, 2 * Report.Symmetry.MatchedPairs + Report.Symmetry.SelfSymmetric, Report.Symmetry.ActorsChecked);
+	}
+	FString MapCheckNote;
+	if (Request.bMapCheck)
+	{
+		const int32 Before = Report.Issues.Num();
+		Gate::RunMapCheck(*World, Report);
+		MapCheckNote = FString::Printf(TEXT(" Map Check: %d problem(s)."), Report.Issues.Num() - Before);
+	}
 	FString PreviewNote;
 	if (Request.bCapturePreview && !Gate::WritePreview(*World, Report, Report.PreviewImagePath, PreviewNote))
 	{
 		PreviewNote = TEXT(" No preview: ") + PreviewNote;
 	}
 	// Issues past the output budget are counted but not listed.
-	int64 Budget = 4096 + 96ll * (Report.Routes.Num() + Report.Sightlines.Num());
+	int64 Budget = 4096 + 96ll * (Report.Routes.Num() + Report.Sightlines.Num()) + 64ll * Report.Symmetry.Unmatched.Num();
 	int32 Kept = 0;
 	for (; Kept < Report.Issues.Num(); ++Kept)
 	{
@@ -490,9 +518,9 @@ FHyperAILevelDesignValidateReport FHyperAIStudioLevelDesignContracts::Validate(c
 	}
 	Report.bOk = true;
 	Report.Status = Report.ErrorCount > 0 ? TEXT("problems") : TEXT("playable");
-	Report.Diagnostic = FString::Printf(TEXT("%d errors, %d warnings, %d routes checked%s.%s"),
+	Report.Diagnostic = FString::Printf(TEXT("%d errors, %d warnings, %d routes checked%s.%s%s%s"),
 		Report.ErrorCount, Report.WarningCount, Report.Routes.Num(),
-		Report.bNavigationReady ? TEXT("") : TEXT(" (no ready navmesh)"), *PreviewNote);
+		Report.bNavigationReady ? TEXT("") : TEXT(" (no ready navmesh)"), *SymmetryNote, *MapCheckNote, *PreviewNote);
 	return Report;
 }
 
@@ -527,6 +555,8 @@ FHyperAILevelBlockoutApplyPlanReport FHyperAIStudioLevelDesignContracts::BuildPl
 {
 	using namespace HyperAIStudio::LevelDesign::Private;
 	FHyperAILevelBlockoutApplyPlanReport Report;
+	// Names and paths become FNames and lookups, which stop the editor past an FName's length; refused here first.
+	if (FHyperAIStudioNames::RefuseRequest(Request, Report)) return Report;
 	Report.bDryRun = Request.bDryRun;
 	Report.OperationId = Request.OperationId.Left(FHyperAIStudioDomainLimits::MaxOperationIdChars);
 	Report.Capabilities = GetCapabilities();
@@ -548,9 +578,9 @@ FHyperAILevelBlockoutApplyPlanReport FHyperAIStudioLevelDesignContracts::BuildPl
 		return Reject(TEXT("unexpected_submission_fields"), TEXT("A dry run takes no operation_id or expected_plan_hash."));
 	}
 	if (!Request.bDryRun && (!FHyperAIStudioExtensionRuntime::IsValidOperationId(Request.OperationId)
-		|| !IsCanonicalSha256(Request.ExpectedPlanHash)))
+		|| !FHyperAIStudioExtensionRuntime::IsValidSubmissionPlanHash(Request.ExpectedPlanHash)))
 	{
-		return Reject(TEXT("invalid_submission_fields"), TEXT("A non-dry submission needs a valid operation_id and the plan_hash its dry run returned."));
+		return Reject(TEXT("invalid_submission_fields"), FHyperAIStudioExtensionRuntime::InvalidSubmissionMessage());
 	}
 	if (!IsCanonicalSha256(Request.ExpectedRevision))
 	{
@@ -653,7 +683,7 @@ FHyperAILevelBlockoutApplyPlanReport FHyperAIStudioLevelDesignContracts::BuildPl
 		Report.Diagnostic = TEXT("Nothing changed. To apply, resubmit with bDryRun false, a new operation_id, and expected_plan_hash set to plan_hash.");
 		return Report;
 	}
-	if (Request.ExpectedPlanHash != Payload->SemanticFingerprint)
+	if (!FHyperAIStudioExtensionRuntime::IsAcceptedPlanHash(Request.ExpectedPlanHash, Payload->SemanticFingerprint))
 	{
 		return Reject(TEXT("plan_hash_mismatch"), TEXT("The plan changed since its dry run (ops, blockout, or player metrics). Dry-run again and review it."));
 	}
@@ -684,49 +714,73 @@ FHyperAILevelBlockoutApplyPlanReport FHyperAIStudioLevelDesignContracts::BuildPl
 		}
 		Report.bOk = true;
 		Report.Status = TEXT("awaiting_user_approval");
-		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Poll hyper_operation_status with operation_id: it starts once approved.");
+		Report.Diagnostic = TEXT("Waiting for approval in HyperAI Chat, Activity panel. Nothing changed yet. Call hyper_operation_wait with operation_id and bWaitThroughApproval true: it starts once approved.");
 		return Report;
 	}
 
-	FHyperAIStudioTypedArtifactStageReceipt Receipt;
-	FHyperAIStudioTrustedExecutionDiagnostic StageStatus;
-	FString StageError;
-	if (!FHyperAIStudioTrustedExecutionFacade::StageExact(Prepared, Request.OperationId, Receipt, StageStatus, StageError))
+	// Another agent's edit may own the project lane; then this one waits its turn, and hyper_operation_wait
+	// waits through the queue as well as the edit.
+	FString QueueStatus;
+	FString QueueError;
+	if (!FHyperAIStudioExecutionQueue::Submit(Prepared, Request.OperationId, QueueStatus, QueueError))
 	{
-		return Reject(StageStatus.StatusCode.IsEmpty() ? FString(TEXT("stage_failed")) : StageStatus.StatusCode,
-			StageError.IsEmpty() ? StageStatus.Diagnostic : StageError);
+		return Reject(*QueueStatus, QueueError);
 	}
-	Report.bStaged = true;
-	FHyperAIStudioTypedArtifactSubmissionReceipt Submission;
-	FHyperAIStudioTrustedExecutionDiagnostic SubmitStatus;
-	FString SubmitError;
-	// Edit is tokenless; only risky safety classes need a server-issued grant.
-	if (!FHyperAIStudioTrustedExecutionFacade::SubmitExact(Receipt, FString(), Submission, SubmitStatus, SubmitError))
-	{
-		Report.Status = SubmitStatus.StatusCode.IsEmpty() ? FString(TEXT("submit_failed")) : SubmitStatus.StatusCode;
-		Report.Diagnostic = SubmitError.IsEmpty() ? SubmitStatus.Diagnostic : SubmitError;
-		return Report;
-	}
-	Report.bExecutionSubmitted = true;
+	Report.bStaged = QueueStatus == TEXT("submitted");
+	Report.bExecutionSubmitted = Report.bStaged;
 	Report.bOk = true;
-	Report.Status = TEXT("submitted");
-	Report.Diagnostic = TEXT("The edit runs over the next editor ticks. Poll hyper_operation_status until it is terminal, then hyper_level_design_validate.");
+	Report.Status = QueueStatus;
+	Report.Diagnostic = TEXT("The edit runs over the next editor ticks. Call hyper_operation_wait with operation_id, then hyper_level_design_validate.");
 	return Report;
 }
 
-FHyperAILevelDesignInspectReport UHyperAIStudioLevelDesignToolset::hyper_level_design_inspect(const FHyperAILevelDesignInspectRequest& Request)
+// The tools fit an agent's near misses (0 for "unset", a limit past its range) before the closed contracts check them.
+FHyperAILevelDesignInspectReport UHyperAIStudioLevelDesignToolset::hyper_level_design_inspect(const FHyperAILevelDesignInspectRequest& InRequest)
 {
-	return FHyperAIStudioLevelDesignContracts::Inspect(Request);
+	using C = FHyperAIStudioLevelDesignContracts;
+	FHyperAILevelDesignInspectRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, FHyperAILevelDesignInspectRequest().MaxOutputBytes, TEXT("max_output_bytes"));
+	FHyperAILevelDesignInspectReport Report = C::Inspect(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
-FHyperAILevelBlockoutApplyPlanReport UHyperAIStudioLevelDesignToolset::hyper_level_blockout_apply_plan(const FHyperAILevelBlockoutApplyPlanRequest& Request)
+UHyperAILevelBlockoutApplyPlanResult* UHyperAIStudioLevelDesignToolset::hyper_level_blockout_apply_plan(const FHyperAILevelBlockoutApplyPlanRequest& Request)
 {
-	return FHyperAIStudioLevelDesignContracts::BuildPlan(Request);
+	return HyperAIStudio::OperationWait::ReplyWhenDone<UHyperAILevelBlockoutApplyPlanResult>(FHyperAIStudioLevelDesignContracts::BuildFittedPlan(Request));
 }
 
-FHyperAILevelDesignValidateReport UHyperAIStudioLevelDesignToolset::hyper_level_design_validate(const FHyperAILevelDesignValidateRequest& Request)
+FHyperAILevelBlockoutApplyPlanReport FHyperAIStudioLevelDesignContracts::BuildFittedPlan(const FHyperAILevelBlockoutApplyPlanRequest& InRequest)
 {
-	return FHyperAIStudioLevelDesignContracts::Validate(Request);
+	using C = FHyperAIStudioLevelDesignContracts;
+	FHyperAILevelBlockoutApplyPlanRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, FHyperAILevelBlockoutApplyPlanRequest().MaxOutputBytes, TEXT("max_output_bytes"));
+	Fit.DryRun(Request.bDryRun, Request.OperationId, Request.ExpectedPlanHash);
+	FHyperAILevelBlockoutApplyPlanReport Report = Fit.FreshOperationId(Request, [](const auto& Planned) { return C::BuildPlan(Planned); });
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
+}
+
+FHyperAILevelDesignValidateReport UHyperAIStudioLevelDesignToolset::hyper_level_design_validate(const FHyperAILevelDesignValidateRequest& InRequest)
+{
+	using C = FHyperAIStudioLevelDesignContracts;
+	const FHyperAILevelDesignValidateRequest Defaults;
+	FHyperAILevelDesignValidateRequest Request = InRequest;
+	FHyperAIStudioRequestFit Fit;
+	Fit.ClampOrDefault(Request.MaxOutputBytes, C::MinOutputBytes, C::MaxOutputBytes, Defaults.MaxOutputBytes, TEXT("max_output_bytes"));
+	Fit.ClampOrDefault(Request.MaxSightline, 500.f, 100000.f, Defaults.MaxSightline, TEXT("max_sightline"));
+	Fit.ClampOrDefault(Request.SymmetryTolerance, 1.f, 1000.f, Defaults.SymmetryTolerance, TEXT("symmetry_tolerance"));
+	Fit.Clamp(Request.SymmetryPlane, -1000000.f, 1000000.f, TEXT("symmetry_plane"));
+	Request.SymmetryAxis.TrimStartAndEndInline();
+	if (Request.SymmetryAxis.Equals(TEXT("none"), ESearchCase::IgnoreCase))
+	{
+		Request.SymmetryAxis.Reset();
+	}
+	FHyperAILevelDesignValidateReport Report = C::Validate(Request);
+	Report.Diagnostic = Fit.AppendTo(Report.Diagnostic);
+	return Report;
 }
 
 const FHyperAIStudioDomainAdapterDescriptor& FHyperAIStudioLevelDesignDomainAdapter::GetDescriptor() const

@@ -1,0 +1,961 @@
+{
+ "schema": "hyperai.prompt-presets.v1",
+ "category": "gameplay-systems",
+ "presets": [
+  {
+   "id": "gameplay-systems.audit-input-setup",
+   "title": "Audit Enhanced Input for conflicts and unused actions",
+   "summary": "Read every Input Action and Mapping Context in a folder, list key conflicts, duplicates and unused actions, and check what is live in play.",
+   "packs": [
+    "enhanced_input"
+   ],
+   "skills": [
+    "unreal-input",
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_input_inspect",
+    "hyper_input_validate",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "input",
+    "enhanced input",
+    "audit",
+    "keybinds",
+    "conflicts",
+    "controls"
+   ],
+   "placeholders": [
+    {
+     "name": "input_folder",
+     "label": "Input folder",
+     "default": "/Game/Input",
+     "hint": "Content folder that holds the Input Actions and Mapping Contexts"
+    }
+   ],
+   "prompt": "Audit the Enhanced Input setup in `{{input_folder}}` of {{project}}. Read only: change nothing. If the Enhanced Input tools are missing, say so and stop.\n1. hyper_memory_recall with query `input controls keybinds`. HyperAI reads loaded assets only: list the folder with Epic's AssetTools.find_assets, load each Input Action and Mapping Context with load_asset, and use object paths (`/Game/Input/IA_Jump.IA_Jump`).\n2. hyper_input_inspect with those AssetPaths and bIncludeMappings, bIncludeComponents and bIncludeReferenceEvidence true; follow NextCursor until bTruncated is false. Tabulate each context's mappings (action, key, triggers, modifiers) and each action's ValueType and ReferenceCount (the mappings that name it).\n3. hyper_input_validate with the same AssetPaths. Group its issues by code: conflicting_key, duplicate_mapping, orphan_loaded_action, empty_mapping_context, value_type_dimension_loss, invalid_key, missing_action.\n4. Check what a player starts with: hyper_playtest_run (mode StartInProcess, teardown StopOwnedSession) with one Bot `Survey` step, then hyper_operation_wait and hyper_playtest_status. List the controls and keys Survey reports.\nReport a PASS/FAIL table: validator ErrorCount 0, conflicting_key 0, duplicate_mapping 0, orphan actions 0, and the mapped actions Survey shows (INFO for contexts the game adds later, such as vehicle or menu ones). Under it, one line per recommended fix naming the asset and the plan op that would make it (`add_mapping`, `set_action_config`, ...)."
+  },
+  {
+   "id": "gameplay-systems.add-gamepad-bindings",
+   "title": "Add gamepad bindings to a keyboard mapping context",
+   "summary": "Mirror keyboard controls onto a controller in the selected Mapping Context, skip pairs already bound, and prove the keys show up in play.",
+   "packs": [
+    "enhanced_input"
+   ],
+   "skills": [
+    "unreal-input",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_input_inspect",
+    "hyper_input_apply_plan",
+    "hyper_input_validate",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "add_mapping"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "input",
+    "gamepad",
+    "controller",
+    "mapping context",
+    "keybinds"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "InputMappingContext"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "pairs",
+     "label": "Action = gamepad key",
+     "default": "IA_Move=Gamepad_Left2D, IA_Look=Gamepad_Right2D, IA_Jump=Gamepad_FaceButton_Bottom, IA_Interact=Gamepad_FaceButton_Left, IA_Sprint=Gamepad_LeftThumbstick",
+     "hint": "Comma-separated pairs of an Input Action name and an Unreal key name"
+    }
+   ],
+   "prompt": "Give the Mapping Context {{selected_asset}} controller bindings beside its keyboard ones: {{pairs}}. Change only this asset and leave it unsaved. If the Enhanced Input tools are missing, say so and stop.\n1. Load it if needed (Epic's AssetTools.load_asset): HyperAI reads loaded assets only. hyper_input_inspect with AssetPaths [{{selected_asset}}] alone, bIncludeMappings true and bIncludeRuntimeBindings false: note its Revision and MappingCount, resolve each action name to the action path its mappings use, and drop any pair already mapped.\n2. hyper_input_apply_plan with bDryRun true: one `add_mapping` per remaining pair (TargetPath the context, ExpectedRevision its Revision, ActionPath, Key), with no Triggers or Modifiers. It must answer valid_dry_run with Effects.MappingsAdded equal to the pair count.\n3. Send it again with bDryRun false, a fresh OperationId and ExpectedPlanHash = the dry run's PlanHash. Expect applied_fast_transaction; staged_backend_required (strict safety mode) means nothing changed: report the checked plan and stop.\n4. hyper_input_validate on {{selected_asset}}, then hyper_input_inspect again to read the new mappings back.\n5. hyper_playtest_run (mode StartInProcess) with one Bot `Survey` step, hyper_operation_wait, then hyper_playtest_status: each new key appears under its action, by display name or in its +N count.\nReport a PASS/FAIL table: mappings added versus pairs asked (minus skipped), MappingCount before and after, conflicting_key 0, invalid_key 0, each key seen by Survey."
+  },
+  {
+   "id": "gameplay-systems.pause-action-when-paused",
+   "title": "Let the pause action work while the game is paused",
+   "summary": "Set an Input Action to trigger while paused so the same key opens and closes the pause menu, then press it twice in play.",
+   "packs": [
+    "enhanced_input"
+   ],
+   "skills": [
+    "unreal-input",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_input_inspect",
+    "hyper_input_apply_plan",
+    "hyper_input_validate",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "set_action_config"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "input",
+    "pause menu",
+    "trigger when paused",
+    "ui",
+    "menu"
+   ],
+   "placeholders": [
+    {
+     "name": "pause_action",
+     "label": "Pause Input Action",
+     "default": "/Game/Input/Actions/IA_Pause.IA_Pause",
+     "hint": "Object path of the Input Action that pauses the game"
+    }
+   ],
+   "prompt": "Make the Input Action `{{pause_action}}` trigger while the game is paused, so the key that pauses also resumes. Change only this action and leave it unsaved. If the Enhanced Input tools are missing, say so and stop.\n1. Load the action if it is not loaded (Epic's AssetTools.load_asset), then hyper_input_inspect with AssetPaths [`{{pause_action}}`] alone and bIncludeRuntimeBindings false. Record its Revision, ValueType, bTriggerWhenPaused and bConsumeInput.\n2. hyper_input_apply_plan with bDryRun true and one `set_action_config` op: TargetPath the action, ExpectedRevision its Revision, bSetTriggerWhenPaused true, bTriggerWhenPaused true, every other field at its default. It must answer valid_dry_run.\n3. Send it again with bDryRun false, a fresh OperationId and ExpectedPlanHash = the dry run's PlanHash. Expect applied_fast_transaction; staged_backend_required (strict safety mode) means nothing changed: report the checked plan and stop.\n4. hyper_input_inspect again: bTriggerWhenPaused is true and ValueType and bConsumeInput are unchanged. hyper_input_validate on the action: ErrorCount 0.\n5. hyper_playtest_run (mode StartInProcess) with Bot steps Press `{{pause_action}}`, Capture `paused`, Press it again, Capture `resumed` (no Wait steps: game time stops while paused); then hyper_operation_wait and hyper_playtest_status.\nReport a PASS/FAIL table (bTriggerWhenPaused, unchanged fields, validator errors, both presses injected, the pause menu in `paused` only) and show both captures, each on its own line."
+  },
+  {
+   "id": "gameplay-systems.fix-action-value-types",
+   "title": "Fix Input Actions whose value type drops an axis",
+   "summary": "Find actions flagged for value-type loss, retype them in one plan, recompile the Blueprints that bind them, and prove movement still drives the pawn.",
+   "packs": [
+    "enhanced_input",
+    "blueprint"
+   ],
+   "skills": [
+    "unreal-input",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_input_validate",
+    "hyper_input_inspect",
+    "hyper_input_apply_plan",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_playtest_run",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "set_action_config"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "input",
+    "value type",
+    "axis2d",
+    "movement",
+    "fix"
+   ],
+   "placeholders": [
+    {
+     "name": "input_folder",
+     "label": "Input folder",
+     "default": "/Game/Input"
+    },
+    {
+     "name": "move_action",
+     "label": "Move action",
+     "default": "IA_Move",
+     "hint": "Name or object path of the 2D movement action used for the play check"
+    }
+   ],
+   "prompt": "Fix the Input Actions in `{{input_folder}}` whose ValueType loses data from their keys (a 2D stick on a boolean action). Change only flagged actions and the Blueprints that bind them. If the Enhanced Input tools are missing, say so and stop.\n1. Load the folder's Input Actions and Mapping Contexts (Epic's AssetTools.find_assets, load_asset; object paths `Name.Name`), then hyper_input_validate with their AssetPaths. Collect every value_type_dimension_loss, modifier_value_type_incompatible and action_modifier_value_type_incompatible issue.\n2. hyper_input_inspect the flagged actions and their contexts (ValueType, mapped keys), then each action alone with bIncludeRuntimeBindings false for its Revision. Pick the smallest type that keeps every key's data.\n3. One hyper_input_apply_plan with bDryRun true: a `set_action_config` per action with its ExpectedRevision and the new ValueType only. It must answer valid_dry_run (a value_type_change_requires_blueprint_validation warning is expected). Send it again with bDryRun false, a fresh OperationId and ExpectedPlanHash = the dry run's PlanHash. Expect applied_fast_transaction; staged_backend_required (strict safety mode) means nothing changed: report the checked plan and stop.\n4. hyper_input_validate again. Recompile each Blueprint that binds a changed action (AssetTools.get_referencers) with hyper_blueprint_compile_validate: preview, compile with its PlanHash and an OperationId, hyper_operation_wait. It saves them, so then save the changed actions too (AssetTools.save_assets).\n5. hyper_playtest_run (mode StartInProcess) with Bot steps Hold `{{move_action}}` with value `0,1` for 2 s in the background, then Sample the Player for 1 s; hyper_operation_wait, then hyper_playtest_status.\nReport a PASS/FAIL table: each action's type before and after, the three issue codes now 0, validator ErrorCount 0, every binding Blueprint compiles, and the pawn's sampled speed above 0."
+  },
+  {
+   "id": "gameplay-systems.vehicle-input-context",
+   "title": "Build driving controls: throttle, steering and handbrake",
+   "summary": "Create throttle, steer and handbrake actions and an IMC_Vehicle context with keyboard and gamepad keys, reverse keys negated, steering smoothed, all validated.",
+   "packs": [
+    "enhanced_input",
+    "scripting"
+   ],
+   "skills": [
+    "unreal-input"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_input_apply_plan",
+    "hyper_script_run",
+    "hyper_input_inspect",
+    "hyper_input_validate"
+   ],
+   "ops": [
+    "create_action",
+    "create_context",
+    "add_mapping",
+    "add_action_modifier"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "input",
+    "vehicle",
+    "driving",
+    "racing",
+    "mapping context",
+    "gamepad"
+   ],
+   "placeholders": [],
+   "prompt": "Build driving controls under `{{content_folder}}/Input/Vehicle`: axis1d actions `IA_Throttle` and `IA_Steer`, boolean `IA_Handbrake`, and context `IMC_Vehicle` mapping W, S, Gamepad_RightTriggerAxis and Gamepad_LeftTriggerAxis to throttle; D, A and Gamepad_LeftX to steer; SpaceBar and Gamepad_FaceButton_Right to handbrake. Use object paths (`IA_Throttle.IA_Throttle`). Do not save. If the Enhanced Input tools are missing, say so and stop.\n1. Epic's AssetTools.exists on those paths: if any exists already, report it and stop.\n2. Plan A, hyper_input_apply_plan with bDryRun true: three `create_action` (with ValueType), one `create_context`, then one `add_mapping` per key; the S, A and Gamepad_LeftTriggerAxis mappings carry Modifiers [`modifier.negate` with bHasAxes true, bX true]. It must answer valid_dry_run. Send it again with bDryRun false, a fresh OperationId and ExpectedPlanHash = the dry run's PlanHash.\n3. It answers staged_backend_required (HyperAI checks new assets and mappings with modifiers but does not apply them yet): make exactly that with one hyper_script_run (editor Python). Without the Scripting pack, report the checked plan and stop.\n4. Plan B, now that `IA_Steer` exists: one `add_action_modifier` with `modifier.smooth_delta` (Mode `interp_to`, Speed 8, Exponent 2) so keyboard steering eases in, with ExpectedRevision from hyper_input_inspect of `IA_Steer` alone with bIncludeRuntimeBindings false. Dry run, apply and fall back the same way.\n5. hyper_input_validate on the four assets, and read them back with hyper_input_inspect.\nReport a PASS/FAIL table: 4 assets at the exact paths, 9 mappings, negate on exactly 3, smoothing on `IA_Steer` only, ValueTypes as asked, validator ErrorCount 0."
+  },
+  {
+   "id": "gameplay-systems.hold-to-interact",
+   "title": "Make Interact a hold with a short charge time",
+   "summary": "Add a Hold trigger to the Interact action so doors and levers need a deliberate press, read it back, and hold it in play.",
+   "packs": [
+    "enhanced_input",
+    "scripting"
+   ],
+   "skills": [
+    "unreal-input",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_input_inspect",
+    "hyper_input_apply_plan",
+    "hyper_script_run",
+    "hyper_input_validate",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "add_action_trigger"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "input",
+    "hold",
+    "interact",
+    "trigger",
+    "doors",
+    "fantasy"
+   ],
+   "placeholders": [
+    {
+     "name": "interact_action",
+     "label": "Interact Input Action",
+     "default": "/Game/Input/Actions/IA_Interact.IA_Interact"
+    },
+    {
+     "name": "hold_seconds",
+     "label": "Hold time (s)",
+     "default": "0.8"
+    }
+   ],
+   "prompt": "Make `{{interact_action}}` fire only after it is held for {{hold_seconds}} s, once per hold, so a passing tap no longer opens rune doors or pulls levers. Change only this action and leave it unsaved. If the Enhanced Input tools are missing, say so and stop.\n1. Load the action if needed (Epic's AssetTools.load_asset), then hyper_input_inspect with AssetPaths [`{{interact_action}}`] alone, bIncludeComponents true and bIncludeRuntimeBindings false. Note its Revision and Triggers; if a hold trigger is already there, report it and stop.\n2. hyper_input_apply_plan with bDryRun true and one `add_action_trigger`: TargetPath the action, ExpectedRevision its Revision, Triggers [{Kind `trigger.hold`, ActuationThreshold 0.5, DurationSeconds {{hold_seconds}}, bHasOption true, bOption true (one shot), Mode `dilated_time`}]. It must answer valid_dry_run.\n3. Send it again with bDryRun false, a fresh OperationId and ExpectedPlanHash = the dry run's PlanHash. It answers staged_backend_required (HyperAI checks triggers but does not apply them yet): make exactly that with one hyper_script_run (editor Python). Without the Scripting pack, report the checked plan and stop.\n4. hyper_input_inspect again, and hyper_input_validate on the action.\n5. hyper_playtest_run (mode StartInProcess) with Bot steps Hold `{{interact_action}}` for {{hold_seconds}} s plus 0.2 s, then Capture `held`; hyper_operation_wait, then hyper_playtest_status.\nReport a PASS/FAIL table: exactly one `trigger.hold` with DurationSeconds {{hold_seconds}} and bOption true, other triggers unchanged, validator ErrorCount 0, hold injected. Show the capture on its own line."
+  },
+  {
+   "id": "gameplay-systems.double-tap-dodge",
+   "title": "Add a double-tap dodge on the movement keys",
+   "summary": "Create a dodge action fired by double-tapping W, A, S or D with a Repeated Tap trigger, add it to the selected context, and validate it.",
+   "packs": [
+    "enhanced_input",
+    "scripting"
+   ],
+   "skills": [
+    "unreal-input"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_input_inspect",
+    "hyper_input_apply_plan",
+    "hyper_script_run",
+    "hyper_input_validate"
+   ],
+   "ops": [
+    "create_action",
+    "add_mapping"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "input",
+    "dodge",
+    "double tap",
+    "repeated tap",
+    "action rpg"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "InputMappingContext"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "tap_window",
+     "label": "Double-tap window (s)",
+     "default": "0.25",
+     "hint": "Longest gap between the two taps"
+    }
+   ],
+   "prompt": "Add a double-tap dodge to the Mapping Context {{selected_asset}}: a new boolean action `{{content_folder}}/Input/IA_DodgeTap.IA_DodgeTap`, mapped to W, A, S and D, that fires when one key is tapped twice within {{tap_window}} s. Keep every existing mapping as it is; do not save. If the Enhanced Input tools are missing, say so and stop.\n1. Load {{selected_asset}} if needed (Epic's AssetTools.load_asset) and check with AssetTools.exists that `IA_DodgeTap` is new. hyper_input_inspect with AssetPaths [{{selected_asset}}] alone, bIncludeMappings true and bIncludeRuntimeBindings false: note its Revision and MappingCount.\n2. One hyper_input_apply_plan with bDryRun true: `create_action` (ValueType boolean), then four `add_mapping` ops on {{selected_asset}} (ExpectedRevision its Revision, ActionPath the new action, Key W, A, S or D), each with Triggers [{Kind `trigger.repeated_tap`, ActuationThreshold 0.5, DurationSeconds 0.2, SecondarySeconds {{tap_window}}, Count 2, Mode `real_time`}]. It must answer valid_dry_run.\n3. Send it again with bDryRun false, a fresh OperationId and ExpectedPlanHash = the dry run's PlanHash. It answers staged_backend_required (HyperAI checks new actions and mappings with triggers but does not apply them yet): make exactly that with one hyper_script_run (editor Python). Without the Scripting pack, report the checked plan and stop.\n4. hyper_input_inspect of both assets, then hyper_input_validate on them.\nReport a PASS/FAIL table: the action at that path with ValueType boolean, 4 new mappings each with one repeated_tap trigger (Count 2), MappingCount up by exactly 4, validator ErrorCount 0. List conflicting_key warnings for W, A, S and D shared with movement as WARN, since they are intended."
+  },
+  {
+   "id": "gameplay-systems.tune-look-controls",
+   "title": "Tune aiming: stick dead zone, curve and mouse invert-Y",
+   "summary": "Give both sticks a radial dead zone, the look stick a response curve, and mouse look a sensitivity and optional invert-Y, then read every value back.",
+   "packs": [
+    "enhanced_input",
+    "scripting"
+   ],
+   "skills": [
+    "unreal-input"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_input_inspect",
+    "hyper_input_apply_plan",
+    "hyper_script_run",
+    "hyper_input_validate"
+   ],
+   "ops": [
+    "append_mapping_modifier"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "input",
+    "aim",
+    "dead zone",
+    "sensitivity",
+    "invert y",
+    "shooter",
+    "gamepad"
+   ],
+   "placeholders": [
+    {
+     "name": "context_path",
+     "label": "Mapping Context",
+     "default": "/Game/Input/IMC_Default.IMC_Default"
+    },
+    {
+     "name": "dead_zone",
+     "label": "Stick dead zone (0-1)",
+     "default": "0.2"
+    },
+    {
+     "name": "curve",
+     "label": "Look stick response exponent",
+     "default": "2.0"
+    },
+    {
+     "name": "mouse_scale",
+     "label": "Mouse sensitivity scale",
+     "default": "0.5"
+    },
+    {
+     "name": "invert_y",
+     "label": "Invert mouse Y (yes/no)",
+     "default": "yes"
+    }
+   ],
+   "prompt": "Tune shooter aiming in the Mapping Context `{{context_path}}`. Change only its gamepad stick and mouse mappings and leave it unsaved. If the Enhanced Input tools are missing, say so and stop.\n1. Load it if needed, then hyper_input_inspect with AssetPaths [`{{context_path}}`] alone, bIncludeComponents true and bIncludeRuntimeBindings false: its Revision, and the MappingIndex, MappingFingerprint and modifiers of the Gamepad_Left2D, Gamepad_Right2D and Mouse2D mappings.\n2. A plan may change each mapping only once, so use two rounds of hyper_input_apply_plan with `append_mapping_modifier` ops, each with the context's ExpectedRevision, the mapping's MappingIndex and ExpectedMappingFingerprint. Round 1: `modifier.dead_zone` (LowerThreshold {{dead_zone}}, UpperThreshold 1.0, Mode `radial`) on both sticks, `modifier.scalar` (bHasVector true, Vector {{mouse_scale}}, {{mouse_scale}}, 1) on Mouse2D. Round 2, after inspecting again for the new Revision and fingerprints: `modifier.response_exponential` (bHasVector true, Vector {{curve}}, {{curve}}, 1) on Gamepad_Right2D and, if `{{invert_y}}` is yes and Mouse2D has no negate yet, `modifier.negate` (bHasAxes true, bY true) on Mouse2D. Never put a dead zone or curve on the mouse.\n3. Each round: bDryRun true must answer valid_dry_run, then the same plan with bDryRun false, a fresh OperationId and ExpectedPlanHash = its PlanHash. It answers staged_backend_required (HyperAI checks mapping modifiers but does not apply them yet): make exactly that with one hyper_script_run (editor Python). Without the Scripting pack, report the checked plan and stop.\n4. hyper_input_inspect again, then hyper_input_validate on the context.\nReport a PASS/FAIL table of every modifier per mapping as read back, nothing else changed (same MappingCount), modifier_value_type_incompatible 0 and validator ErrorCount 0."
+  },
+  {
+   "id": "gameplay-systems.debug-dead-input",
+   "title": "Find out why an input does nothing in play",
+   "summary": "Trace an action from its mappings to the contexts registered in Play In Editor, inject it, and name the broken link: key, context, priority or binding.",
+   "packs": [
+    "enhanced_input"
+   ],
+   "skills": [
+    "unreal-input",
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_input_inspect",
+    "hyper_input_validate",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status",
+    "hyper_log_tail"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "input",
+    "debug",
+    "not working",
+    "mapping context",
+    "priority",
+    "runtime"
+   ],
+   "placeholders": [
+    {
+     "name": "action",
+     "label": "Input Action that does nothing",
+     "default": "/Game/Input/Actions/IA_Jump.IA_Jump"
+    }
+   ],
+   "prompt": "Pressing the key for `{{action}}` does nothing in play. Find out why without changing any asset. If the Enhanced Input tools are missing, say so and stop.\n1. hyper_memory_recall with query `input {{action}}`. Epic's AssetTools.get_referencers on the action lists the Mapping Contexts that map it and the Blueprints that bind it. Load the action and those contexts, then hyper_input_inspect with bIncludeMappings, bIncludeComponents and bIncludeReferenceEvidence true: each mapping of the action (context, key, triggers, modifiers) and its ReferenceCount (mappings that name it).\n2. hyper_input_validate on those assets: note invalid_key, conflicting_key, missing_action and unsupported_action_trigger issues.\n3. Start play and keep it running: hyper_playtest_run with mode StartInProcess, teardown LeaveSessionRunning and Bot steps `Survey`, then Press `{{action}}`; hyper_operation_wait, then hyper_playtest_status.\n4. While it runs, hyper_input_inspect with bIncludeRuntimeBindings true: which contexts are registered on the player and with what Priority, and does a higher-priority context map the same key to an action with bConsumeInput true? hyper_log_tail with contains `Input` and maxVerbosity `warning`.\n5. Stop play: hyper_playtest_run with mode AttachOnly and one `StopSession` step, then hyper_operation_wait.\nReport a PASS/FAIL table with one row per link: key mapped, context registered at runtime, not consumed by another context, trigger can fire, a Blueprint binds the action, injected press accepted. Name the broken link and the exact fix (asset, plan op, values)."
+  },
+  {
+   "id": "gameplay-systems.third-person-controls",
+   "title": "Set up third-person controls and bind them in a Blueprint",
+   "summary": "Make move, look, jump and sprint actions and a default context, bind them in the selected character Blueprint, and prove it moves, jumps and sprints.",
+   "packs": [
+    "enhanced_input",
+    "blueprint",
+    "scripting"
+   ],
+   "skills": [
+    "unreal-blueprint",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_input_inspect",
+    "hyper_input_apply_plan",
+    "hyper_script_run",
+    "hyper_input_validate",
+    "hyper_blueprint_compile_validate",
+    "hyper_operation_wait",
+    "hyper_verify_run"
+   ],
+   "ops": [
+    "create_action",
+    "create_context",
+    "add_mapping"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "input",
+    "third person",
+    "character",
+    "movement",
+    "sprint",
+    "blueprint"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "Blueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "walk_speed",
+     "label": "Walk speed (cm/s)",
+     "default": "500"
+    },
+    {
+     "name": "sprint_speed",
+     "label": "Sprint speed (cm/s)",
+     "default": "900"
+    }
+   ],
+   "prompt": "Give the Character Blueprint {{selected_asset}} third-person controls. Change only it and new assets under `{{content_folder}}/Input`. If the Enhanced Input tools are missing, say so and stop.\n1. hyper_input_inspect (empty AssetPaths: what is loaded); reuse any existing move, look, jump or sprint action.\n2. One hyper_input_apply_plan with bDryRun true: `create_action` `IA_Move` and `IA_Look` (axis2d), `IA_Jump` and `IA_Sprint` (boolean); `create_context` `IMC_Default`; `add_mapping` IA_Move to W (`modifier.swizzle` Mode yxz), S (swizzle and `modifier.negate`), A (negate), D and Gamepad_Left2D; IA_Look to Mouse2D (negate, bY only) and Gamepad_Right2D; IA_Jump to SpaceBar and Gamepad_FaceButton_Bottom; IA_Sprint to LeftShift. It must answer valid_dry_run. Apply it with bDryRun false, a fresh OperationId and ExpectedPlanHash = its PlanHash; on staged_backend_required, build exactly that with hyper_script_run. hyper_input_validate: ErrorCount 0.\n3. With the unreal-blueprint skill, in one script: floats WalkSpeed {{walk_speed}} and SprintSpeed {{sprint_speed}}; BeginPlay adds `IMC_Default` through the Enhanced Input local player subsystem; IA_Move moves along the control rotation; IA_Look adds yaw and pitch; IA_Jump jumps; IA_Sprint sets MaxWalkSpeed while held.\n4. hyper_blueprint_compile_validate (preview, then compile with its PlanHash and an OperationId; hyper_operation_wait). It saves the character, so save the new input assets with Epic's AssetTools.save_assets too.\n5. hyper_verify_run (stop if {{level}} does not spawn this character as the player) with three cases: Hold IA_Move `0,1` for 2 s in the background, then Sample (speed above 0.8 x {{walk_speed}}); Jump; Hold IA_Sprint and IA_Move in the background, then Sample (max speed at least 0.9 x {{sprint_speed}}).\nReport a PASS/FAIL table: asset paths, mapping count, compile result and each case's evidence."
+  },
+  {
+   "id": "gameplay-systems.list-unused-input-actions",
+   "title": "List unused Input Actions before a cleanup",
+   "summary": "Find Input Actions that no context maps and nothing references, and prepare a removal plan that is checked but not run, for you to approve.",
+   "packs": [
+    "enhanced_input"
+   ],
+   "skills": [
+    "unreal-input"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_input_inspect",
+    "hyper_input_validate",
+    "hyper_input_apply_plan"
+   ],
+   "ops": [
+    "delete_asset"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "input",
+    "cleanup",
+    "unused",
+    "orphan",
+    "references"
+   ],
+   "placeholders": [
+    {
+     "name": "input_folder",
+     "label": "Input folder",
+     "default": "/Game/Input"
+    }
+   ],
+   "prompt": "List the Input Actions in `{{input_folder}}` that nothing uses, and check a removal plan without running it. Delete nothing. If the Enhanced Input tools are missing, say so and stop.\n1. HyperAI reads loaded assets only: list the folder with Epic's AssetTools.find_assets, load every Input Action and Mapping Context with load_asset, and use object paths (`/Game/Input/IA_Jump.IA_Jump`).\n2. hyper_input_inspect with those AssetPaths, bIncludeMappings and bIncludeReferenceEvidence true; follow NextCursor to the end. An action is unused when its ReferenceCount (mappings that name it) is 0. Confirm each with Epic's AssetTools.get_referencers and list any referencer it finds.\n3. hyper_input_validate on the same paths: its orphan_loaded_action issues should match your list; explain any difference.\n4. hyper_input_apply_plan with bDryRun true only: one `delete_asset` per unused action (TargetPath, ExpectedRevision from hyper_input_inspect of that action alone with bIncludeRuntimeBindings false). Expect valid_requires_trusted_authorization: deleting needs my approval, so never send it with bDryRun false.\nReport a PASS/FAIL table: actions scanned, unused found, each confirmed by get_referencers (PASS) or not (FAIL, with the referencer), and the dry run's Effects.AssetsDeleted. End with the list of object paths for me to approve."
+  },
+  {
+   "id": "gameplay-systems.charged-heavy-attack",
+   "title": "Charge a heavy attack: hold, then release to strike",
+   "summary": "Add a Hold and Release trigger to the heavy-attack mapping so the strike lands on release after a charge, and read the mapping back.",
+   "packs": [
+    "enhanced_input",
+    "scripting"
+   ],
+   "skills": [
+    "unreal-input"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_input_inspect",
+    "hyper_input_apply_plan",
+    "hyper_script_run",
+    "hyper_input_validate"
+   ],
+   "ops": [
+    "append_mapping_trigger"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "input",
+    "melee",
+    "charge attack",
+    "hold and release",
+    "fantasy",
+    "action rpg"
+   ],
+   "placeholders": [
+    {
+     "name": "context_path",
+     "label": "Mapping Context",
+     "default": "/Game/Input/IMC_Default.IMC_Default"
+    },
+    {
+     "name": "attack_action",
+     "label": "Heavy attack action",
+     "default": "/Game/Input/Actions/IA_HeavyAttack.IA_HeavyAttack"
+    },
+    {
+     "name": "key",
+     "label": "Key",
+     "default": "RightMouseButton"
+    },
+    {
+     "name": "charge_seconds",
+     "label": "Charge time (s)",
+     "default": "0.6"
+    }
+   ],
+   "prompt": "In `{{context_path}}`, make the `{{key}}` mapping of `{{attack_action}}` a charged swing for a fantasy brawler: it fires on release after at least {{charge_seconds}} s held. Touch only that mapping and leave the asset unsaved. If the Enhanced Input tools are missing, say so and stop.\n1. Load both assets if needed, then hyper_input_inspect with AssetPaths [`{{context_path}}`] alone, bIncludeComponents true and bIncludeRuntimeBindings false. Find the mapping of `{{attack_action}}` to `{{key}}`: note the context's Revision, the MappingIndex, its MappingFingerprint and its Triggers. If there is no such mapping, say so and stop.\n2. hyper_input_apply_plan with bDryRun true and one `append_mapping_trigger`: TargetPath the context, ExpectedRevision, MappingIndex, ExpectedMappingFingerprint, Triggers [{Kind `trigger.hold_and_release`, ActuationThreshold 0.5, DurationSeconds {{charge_seconds}}, Mode `dilated_time`}]. It must answer valid_dry_run.\n3. Send it again with bDryRun false, a fresh OperationId and ExpectedPlanHash = the dry run's PlanHash. It answers staged_backend_required (HyperAI checks mapping triggers but does not apply them yet): make exactly that with one hyper_script_run (editor Python). Without the Scripting pack, report the checked plan and stop.\n4. hyper_input_inspect again, then hyper_input_validate on the context.\nReport a PASS/FAIL table: the mapping has exactly one `trigger.hold_and_release` at {{charge_seconds}} s, every other mapping unchanged (same MappingCount and fingerprints), validator ErrorCount 0. Note that the attack logic must listen for the action's Triggered event, not Started."
+  },
+  {
+   "id": "gameplay-systems.full-auto-fire",
+   "title": "Turn the fire action into full-auto at a set fire rate",
+   "summary": "Add a Pulse trigger to the fire action so holding it fires at a fixed rate, read the trigger back, and hold fire in play to count shots.",
+   "packs": [
+    "enhanced_input",
+    "scripting"
+   ],
+   "skills": [
+    "unreal-input",
+    "unreal-playtest"
+   ],
+   "agent": "programmer",
+   "tools": [
+    "hyper_input_inspect",
+    "hyper_input_apply_plan",
+    "hyper_script_run",
+    "hyper_input_validate",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "ops": [
+    "add_action_trigger"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "input",
+    "shooter",
+    "automatic",
+    "fire rate",
+    "pulse",
+    "weapon"
+   ],
+   "placeholders": [
+    {
+     "name": "fire_action",
+     "label": "Fire action",
+     "default": "/Game/Input/Actions/IA_Fire.IA_Fire"
+    },
+    {
+     "name": "rounds_per_minute",
+     "label": "Rounds per minute",
+     "default": "600"
+    },
+    {
+     "name": "ammo_property",
+     "label": "Ammo property",
+     "default": "Ammo",
+     "hint": "Property on the player pawn that drops by one per shot"
+    }
+   ],
+   "prompt": "Make `{{fire_action}}` fire automatically at {{rounds_per_minute}} rounds per minute while held, for a shooter. The pulse interval is 60 / {{rounds_per_minute}} s. Change only this action and leave it unsaved. If the Enhanced Input tools are missing, say so and stop.\n1. Load the action if needed, then hyper_input_inspect with AssetPaths [`{{fire_action}}`] alone, bIncludeComponents true and bIncludeRuntimeBindings false: note its Revision and Triggers. If it already has a pulse trigger, report it and stop.\n2. hyper_input_apply_plan with bDryRun true and one `add_action_trigger`: TargetPath the action, ExpectedRevision, Triggers [{Kind `trigger.pulse`, ActuationThreshold 0.5, DurationSeconds the interval, Count 0 (no limit), bHasOption true, bOption true (fire on press), Mode `dilated_time`}]. It must answer valid_dry_run.\n3. Send it again with bDryRun false, a fresh OperationId and ExpectedPlanHash = the dry run's PlanHash. It answers staged_backend_required (HyperAI checks triggers but does not apply them yet): make exactly that with one hyper_script_run (editor Python). Without the Scripting pack, report the checked plan and stop.\n4. hyper_input_inspect again, then hyper_input_validate on the action.\n5. hyper_playtest_run (mode StartInProcess) with Bot steps Hold `{{fire_action}}` for 1 s in the background, then Sample the Player's `{{ammo_property}}` for 1 s; hyper_operation_wait, hyper_playtest_status. Shots = first minus last value.\nReport a PASS/FAIL table: one `trigger.pulse` with the interval read back, validator ErrorCount 0, and shots in one second within 1 of {{rounds_per_minute}} / 60 (INFO if the pawn has no `{{ammo_property}}`)."
+  },
+  {
+   "id": "gameplay-systems.metahuman-ready-check",
+   "title": "Check MetaHumans are saved and ready to edit",
+   "summary": "Read the selected MetaHuman characters' identity, flag unsaved, unloaded or wrong-class assets, and validate the snapshot before anyone edits them.",
+   "packs": [
+    "character"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_character_inspect",
+    "hyper_character_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "metahuman",
+    "character",
+    "check",
+    "identity",
+    "saved"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "MetaHumanCharacter"
+    ],
+    "min": 1
+   },
+   "placeholders": [],
+   "prompt": "Check that these MetaHuman characters are ready to edit, loaded, saved and clean:\n{{selected_assets}}\nChange nothing. If the Character tools are missing (the MetaHumanGenerator plugin is off), say so and stop.\n1. hyper_character_inspect with TargetPaths = their object paths (16 at most, in one page). With empty TargetPaths it only reports the Epic delegation map, so always pass paths.\n2. Per record report bLoaded, bPackageDirty, bCharacterClassMatched, DiskExistence and bPersistedIdentityComplete, and each issue code (target_not_loaded, dirty_character_asset, character_class_mismatch, disk_origin_unproven, package_does_not_exist).\n3. hyper_character_validate with the Snapshot exactly as inspect returned it: Status valid and ErrorCount 0 mean every identity is complete and its seals match.\n4. For each failing asset name the fix (open it so it loads, save it with Epic's AssetTools.save_assets, or pick the real MetaHuman Character asset) without doing it.\nReport a PASS/FAIL table with one row per character: loaded, clean, right class, saved on disk, identity complete; then the validator's Status and ErrorCount. Also list the Capability's DelegatedEpicCallables, which do the actual editing."
+  },
+  {
+   "id": "gameplay-systems.metahuman-body-brief",
+   "title": "Reshape a MetaHuman's body to a character brief",
+   "summary": "Preflight height, build and body fat for the selected MetaHuman, apply them through Epic's MetaHuman tools, then validate and compare before and after.",
+   "packs": [
+    "character",
+    "lighting_lookdev"
+   ],
+   "tools": [
+    "hyper_character_inspect",
+    "hyper_character_apply_plan",
+    "hyper_capture_view",
+    "hyper_character_validate",
+    "hyper_image_compare"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "metahuman",
+    "character",
+    "body",
+    "height",
+    "fantasy",
+    "orc"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "MetaHumanCharacter"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "brief",
+     "label": "Character brief",
+     "default": "a broad, battle-worn orc warlord"
+    },
+    {
+     "name": "height_cm",
+     "label": "Height (cm, 135-220)",
+     "default": "205"
+    },
+    {
+     "name": "muscularity",
+     "label": "Muscularity (0-1)",
+     "default": "0.85"
+    },
+    {
+     "name": "fat",
+     "label": "Body fat (0-1)",
+     "default": "0.35"
+    },
+    {
+     "name": "camera",
+     "label": "Camera label",
+     "default": "CAM_Portrait",
+     "hint": "Camera actor framing the character; leave empty for the level viewport"
+    }
+   ],
+   "prompt": "Reshape the MetaHuman {{selected_asset}} into {{brief}}: height {{height_cm}} cm, muscularity {{muscularity}}, body fat {{fat}}. Change and save only this character. If the Character tools are missing (the MetaHumanGenerator plugin is off), say so and stop.\n1. hyper_character_inspect with TargetPaths [{{selected_asset}}]: Status must be identity_complete; keep the record's PersistedFingerprint. If it is dirty or not loaded, say why and stop.\n2. Preflight: hyper_character_apply_plan with bDryRun true, a fresh OperationId, TargetPath, ExpectedPersistedFingerprint and DesiredValues `body.height_cm` {{height_cm}}, `body.muscularity` {{muscularity}}, `body.fat` {{fat}}. Expect character_semantic_projection_backend_required (or dry_run_valid_zero_effect): values, identity and fingerprint passed, and Epic's tools do the edit. Any other status, such as invalid_desired_value_model or persisted_identity_cas_mismatch, is a FAIL: stop.\n3. hyper_capture_view from camera `{{camera}}` (the level viewport if empty), label `before`.\n4. Apply with Epic's MetaHumanToolset: begin_edit, get_body_shape (old values), set_body_shape with the preflighted values, get_body_shape again (read-back), end_edit. Save only this asset with AssetTools.save_assets.\n5. hyper_character_inspect again, then hyper_character_validate with its Snapshot: valid, ErrorCount 0.\n6. hyper_capture_view as `after`, then hyper_image_compare of before and after.\nReport a PASS/FAIL table: each value asked, before and read back (within 1 cm and 0.02), identity valid and clean, and the comparison. A placed MetaHuman shows the change only after it is assembled again, so an unchanged picture is a WARN. Show both captures, each on its own line. If the Lighting pack is missing, skip the pictures and say so."
+  },
+  {
+   "id": "gameplay-systems.metahuman-skin-eyes",
+   "title": "Match a MetaHuman's skin tone and eye colour to a brief",
+   "summary": "Preflight skin lightness, redness and eye colour for the selected MetaHuman, apply them with Epic's tools, and prove the look with close-ups.",
+   "packs": [
+    "character",
+    "lighting_lookdev"
+   ],
+   "tools": [
+    "hyper_character_inspect",
+    "hyper_character_apply_plan",
+    "hyper_capture_view",
+    "hyper_character_validate",
+    "hyper_image_compare"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "metahuman",
+    "character",
+    "skin tone",
+    "eye colour",
+    "look dev"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "MetaHumanCharacter"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "brief",
+     "label": "Character brief",
+     "default": "a sun-weathered deep-sea fisherman"
+    },
+    {
+     "name": "skin_lightness",
+     "label": "Skin lightness (0-1)",
+     "default": "0.45",
+     "hint": "Epic's scale: 0 is light skin, 1 is dark"
+    },
+    {
+     "name": "skin_redness",
+     "label": "Skin redness (0-1)",
+     "default": "0.6",
+     "hint": "0 is cool, 1 is red"
+    },
+    {
+     "name": "eye_temperature",
+     "label": "Eye colour temperature (0-1)",
+     "default": "0.3",
+     "hint": "0 is cool (blue, grey, green), 1 is warm (brown, amber, hazel)"
+    },
+    {
+     "name": "eye_brightness",
+     "label": "Eye brightness (0-1)",
+     "default": "0.5"
+    },
+    {
+     "name": "camera",
+     "label": "Close-up camera label",
+     "default": "CAM_FaceCloseUp"
+    }
+   ],
+   "prompt": "Give the MetaHuman {{selected_asset}} the look of {{brief}}: skin lightness {{skin_lightness}}, skin redness {{skin_redness}}, eye temperature {{eye_temperature}}, eye brightness {{eye_brightness}}. Change and save only this character. If the Character tools are missing (the MetaHumanGenerator plugin is off), say so and stop.\n1. hyper_character_inspect with TargetPaths [{{selected_asset}}]: Status identity_complete; keep the record's PersistedFingerprint. Stop if it is dirty or not loaded.\n2. hyper_character_apply_plan with bDryRun true, a fresh OperationId, TargetPath, ExpectedPersistedFingerprint and DesiredValues `skin.lightness`, `skin.redness`, `eyes.temperature`, `eyes.brightness` with those values. Expect character_semantic_projection_backend_required (or dry_run_valid_zero_effect): values, identity and fingerprint passed, and Epic's tools do the edit. Any other status, such as invalid_desired_value_model or persisted_identity_cas_mismatch, is a FAIL: stop.\n3. hyper_capture_view from camera `{{camera}}`, label `before`.\n4. Apply with Epic's MetaHumanToolset: begin_edit, get_skin_tone and get_eye_color (old values), set_skin_tone and set_eye_color with the preflighted values, get_skin_tone and get_eye_color again (read-back), end_edit. Save only this asset with AssetTools.save_assets.\n5. hyper_character_inspect again, then hyper_character_validate with its Snapshot: valid, ErrorCount 0.\n6. hyper_capture_view as `after`, then hyper_image_compare of the two.\nReport a PASS/FAIL table: each value asked, before and read back (within 0.02), identity valid and clean, and the difference around the face and eyes (WARN if none: a placed MetaHuman updates only after it is assembled again). Show both close-ups, each on its own line. If the Lighting pack is missing, skip the pictures and say so."
+  },
+  {
+   "id": "gameplay-systems.metahuman-npc-cast",
+   "title": "Vary a cast of MetaHuman NPCs so no two look alike",
+   "summary": "Give each selected MetaHuman distinct height, build, skin and eyes within ranges you set, preflight every one, apply, validate, and capture a lineup.",
+   "packs": [
+    "character",
+    "lighting_lookdev"
+   ],
+   "tools": [
+    "hyper_character_inspect",
+    "hyper_character_apply_plan",
+    "hyper_character_validate",
+    "hyper_capture_view"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "metahuman",
+    "npc",
+    "crowd",
+    "variation",
+    "cast",
+    "medieval"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "MetaHumanCharacter"
+    ],
+    "min": 2
+   },
+   "placeholders": [
+    {
+     "name": "cast",
+     "label": "Cast",
+     "default": "townsfolk for a medieval market"
+    },
+    {
+     "name": "height_range",
+     "label": "Height range (cm)",
+     "default": "158-195"
+    },
+    {
+     "name": "build_range",
+     "label": "Muscularity and fat range (0-1)",
+     "default": "0.2-0.8"
+    },
+    {
+     "name": "camera",
+     "label": "Lineup camera label",
+     "default": "CAM_Lineup"
+    }
+   ],
+   "prompt": "Turn the selected MetaHumans into a varied cast of {{cast}}, no two alike:\n{{selected_assets}}\nChange and save only these characters. If the Character tools are missing (the MetaHumanGenerator plugin is off), say so and stop.\n1. hyper_character_inspect with all their TargetPaths (16 at most): every record identity_complete; keep each record's PersistedFingerprint. Stop on any dirty or unloaded one.\n2. Plan the cast as a table: per character `body.height_cm` within {{height_range}}, `body.muscularity` and `body.fat` within {{build_range}}, and `skin.lightness`, `skin.redness`, `eyes.temperature`, `eyes.brightness` from 0 to 1. Spread them evenly: any two differ by at least 8 cm in height or by 0.15 in two other values.\n3. Per character, hyper_character_apply_plan with bDryRun true, a fresh OperationId, its ExpectedPersistedFingerprint and DesiredValues. Expect character_semantic_projection_backend_required (or dry_run_valid_zero_effect): values, identity and fingerprint passed, and Epic's tools do the edit. Any other status, such as invalid_desired_value_model or persisted_identity_cas_mismatch, is a FAIL: stop.\n4. Apply each with Epic's MetaHumanToolset (begin_edit, set_body_shape, set_skin_tone, set_eye_color, then get_body_shape, get_skin_tone and get_eye_color to read back, end_edit), then save only these assets with AssetTools.save_assets.\n5. hyper_character_inspect again and hyper_character_validate on its Snapshot: valid, ErrorCount 0.\n6. hyper_capture_view from camera `{{camera}}` showing the lineup.\nReport a PASS/FAIL table with one row per character (values planned and read back, preflight status, identity valid) and the smallest pairwise difference. Show the lineup on its own line (placed MetaHumans update only after they are assembled again); if the Lighting pack is missing, skip it and say so."
+  },
+  {
+   "id": "gameplay-systems.game-feature-readiness",
+   "title": "Check a Game Feature is ready for Mass crowds",
+   "summary": "Preflight a project Game Feature's data asset, Mass entity config and world condition schema, and report exactly what blocks it.",
+   "packs": [
+    "gameplay_systems"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_gameplay_systems_inspect",
+    "hyper_gameplay_systems_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "game features",
+    "mass",
+    "crowd",
+    "world conditions",
+    "smart objects",
+    "readiness"
+   ],
+   "placeholders": [
+    {
+     "name": "feature_plugin",
+     "label": "Game Feature plugin",
+     "default": "CityCrowd"
+    },
+    {
+     "name": "entity_config",
+     "label": "Mass Entity Config",
+     "default": "/CityCrowd/Mass/MEC_Pedestrian.MEC_Pedestrian"
+    },
+    {
+     "name": "schema_class",
+     "label": "World Condition schema class",
+     "default": "/Script/SmartObjectsModule.SmartObjectWorldConditionSchema"
+    }
+   ],
+   "prompt": "Check whether the Game Feature plugin `{{feature_plugin}}` is ready: its Game Feature Data, the Mass Entity Config `{{entity_config}}` and the World Condition schema `{{schema_class}}`. Change nothing. If the Gameplay Systems tools are missing (they need the MassAI, MassGameplay, GameFeatures and WorldConditions plugins), say so and stop.\n1. Epic's GameFeaturesToolset: ListDiscoveredGameFeaturePlugins and GetGameFeatureState for `{{feature_plugin}}`. HyperAI reads loaded objects only, so load the data asset and the entity config with Epic's AssetTools.load_asset.\n2. hyper_gameplay_systems_inspect with FeaturePluginName `{{feature_plugin}}` and exactly three Targets: Role `game_feature_data` `/{{feature_plugin}}/{{feature_plugin}}.{{feature_plugin}}` (or the data asset the plugin names), `mass_entity_config` `{{entity_config}}`, `world_condition_schema` `{{schema_class}}`.\n3. Per record report PackageState, bLoaded, bDirty, bClassCompatible, bPluginEnabled and EntryCount (Game Feature actions, Mass traits, schema contexts), plus bFeaturePluginProjectOwned and bSnapshotComplete.\n4. hyper_gameplay_systems_validate with that Snapshot: bValid true and no issues means ready.\nReport a PASS/FAIL table with one row per role, one for the plugin and one for the validator, each with its evidence. For every FAIL name the fix (enable a plugin, load or save an asset, correct a path) without doing it."
+  },
+  {
+   "id": "gameplay-systems.game-feature-activate",
+   "title": "Preflight and activate a Game Feature, then play it",
+   "summary": "Seal a readiness preflight for a Game Feature, activate it with Epic's tool, confirm it reaches Active without errors, play it, and restore its state.",
+   "packs": [
+    "gameplay_systems"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "tools": [
+    "hyper_gameplay_systems_inspect",
+    "hyper_gameplay_systems_apply_plan",
+    "hyper_log_tail",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status",
+    "hyper_gameplay_systems_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "game features",
+    "activate",
+    "mass",
+    "playtest",
+    "modular gameplay"
+   ],
+   "placeholders": [
+    {
+     "name": "feature_plugin",
+     "label": "Game Feature plugin",
+     "default": "CityCrowd"
+    },
+    {
+     "name": "entity_config",
+     "label": "Mass Entity Config",
+     "default": "/CityCrowd/Mass/MEC_Pedestrian.MEC_Pedestrian"
+    },
+    {
+     "name": "schema_class",
+     "label": "World Condition schema class",
+     "default": "/Script/SmartObjectsModule.SmartObjectWorldConditionSchema"
+    }
+   ],
+   "prompt": "Activate the Game Feature `{{feature_plugin}}` safely and prove it works in {{level}}. If the Gameplay Systems tools are missing (they need the MassAI, MassGameplay, GameFeatures and WorldConditions plugins), say so and stop.\n1. Epic's GameFeaturesToolset.GetGameFeatureState for `{{feature_plugin}}`: note it so you can restore it.\n2. Load the data asset and entity config (Epic's AssetTools.load_asset), then hyper_gameplay_systems_inspect with FeaturePluginName `{{feature_plugin}}` and exactly three Targets: Role `game_feature_data` `/{{feature_plugin}}/{{feature_plugin}}.{{feature_plugin}}` (or the data asset the plugin names), `mass_entity_config` `{{entity_config}}`, `world_condition_schema` `{{schema_class}}`. bSnapshotComplete must be true; otherwise report the issues and stop.\n3. hyper_gameplay_systems_apply_plan with bDryRun true and no OperationId: the same plugin and Targets, ExpectedPersistedFingerprint = the snapshot's PersistedFingerprint, Operation `preflight.mass_game_feature_world_condition`. It must answer dry_run_preflight_prepared: the preflight is sealed and nothing changed.\n4. Activate with GameFeaturesToolset.RequestActivateGameFeature, then poll GetGameFeatureState until it is Active (60 s at most). Read hyper_log_tail with categories [`LogGameFeatures`] and maxVerbosity `warning`.\n5. hyper_playtest_run (mode StartInProcess) with Bot steps `Survey` and Play goal Explore for 20 s; hyper_operation_wait, then hyper_playtest_status.\n6. hyper_gameplay_systems_inspect again and hyper_gameplay_systems_validate on the new Snapshot: bValid true and PersistedFingerprint unchanged from step 2. Then restore the state from step 1 (RequestDeactivateGameFeature if it was not active).\nReport a PASS/FAIL table: preflight prepared, Active reached, 0 errors in LogGameFeatures, play ran without errors, validator bValid with an unchanged PersistedFingerprint, state restored. Show the Explore map on its own line."
+  },
+  {
+   "id": "gameplay-systems.game-feature-drift",
+   "title": "Catch drift in a Game Feature's Mass setup",
+   "summary": "Record sealed fingerprints of a Game Feature's data, Mass config and schema in project memory, and on later runs report exactly which part changed.",
+   "packs": [
+    "gameplay_systems"
+   ],
+   "skills": [
+    "hyperai-memory"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_gameplay_systems_inspect",
+    "hyper_gameplay_systems_validate",
+    "hyper_memory_remember"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "game features",
+    "mass",
+    "baseline",
+    "drift",
+    "release",
+    "memory"
+   ],
+   "placeholders": [
+    {
+     "name": "feature_plugin",
+     "label": "Game Feature plugin",
+     "default": "CityCrowd"
+    },
+    {
+     "name": "entity_config",
+     "label": "Mass Entity Config",
+     "default": "/CityCrowd/Mass/MEC_Pedestrian.MEC_Pedestrian"
+    },
+    {
+     "name": "schema_class",
+     "label": "World Condition schema class",
+     "default": "/Script/SmartObjectsModule.SmartObjectWorldConditionSchema"
+    },
+    {
+     "name": "milestone",
+     "label": "Milestone",
+     "default": "the beta build"
+    }
+   ],
+   "prompt": "Guard the Game Feature `{{feature_plugin}}` against unnoticed changes before {{milestone}}. Change no asset. If the Gameplay Systems tools are missing (they need the MassAI, MassGameplay, GameFeatures and WorldConditions plugins), say so and stop.\n1. hyper_memory_recall with query `{{feature_plugin}} preflight baseline` to find an earlier baseline note.\n2. Load the data asset and entity config (Epic's AssetTools.load_asset), then hyper_gameplay_systems_inspect with FeaturePluginName `{{feature_plugin}}` and exactly three Targets: Role `game_feature_data` `/{{feature_plugin}}/{{feature_plugin}}.{{feature_plugin}}` (or the data asset the plugin names), `mass_entity_config` `{{entity_config}}`, `world_condition_schema` `{{schema_class}}`.\n3. hyper_gameplay_systems_validate with that Snapshot: the seals must recompute (bValid true). A snapshot that does not validate is no baseline: report its issues and stop.\n4. With a baseline: compare PersistedFingerprint, then each record's ElementFingerprint, ContentFingerprint and EntryCount, and say for every role what changed (actions or traits added or removed, class changed, plugin disabled).\n5. Without a baseline, save one with hyper_memory_remember: Title `{{feature_plugin}} preflight baseline`, Type `fact`, and a Text with today's date, the PersistedFingerprint, and per role its ObjectPath, ElementFingerprint, ContentFingerprint and EntryCount. If one exists and differs, ask me before replacing it (then pass its name, as hyper_memory_recall lists it, in Replaces).\nReport a PASS/FAIL table with one row per role and one for the plugin: unchanged (PASS) or changed (FAIL, old and new values). Say whether a baseline was saved."
+  }
+ ]
+}

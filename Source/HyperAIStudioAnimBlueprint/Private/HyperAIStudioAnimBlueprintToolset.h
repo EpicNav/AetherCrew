@@ -9,6 +9,7 @@
 #include "HyperAIStudioTypedArtifactExecution.h"
 #include "ToolsetRegistry/ToolsetDefinition.h"
 
+#include "ToolsetRegistry/ToolCallAsyncResult.h"
 #include "HyperAIStudioAnimBlueprintToolset.generated.h"
 
 USTRUCT(BlueprintType)
@@ -29,7 +30,7 @@ struct FHyperAIAnimBlueprintState
 	GENERATED_BODY()
 
 	UPROPERTY() FString Name;
-	/** sequence, blend_space, empty, or custom for graphs this toolset did not build. */
+	/** sequence, blend_space, layer (a linked anim layer; Asset is its name), empty, or custom for graphs this toolset did not build. */
 	UPROPERTY() FString Player;
 	UPROPERTY() FString Asset;
 	UPROPERTY() FString XVariable;
@@ -48,6 +49,8 @@ struct FHyperAIAnimBlueprintTransition
 	/** The rule as written in the plan; "(custom)" for rules built by hand, "(none)" when it never fires. */
 	UPROPERTY() FString Rule;
 	UPROPERTY() float BlendTime = 0.f;
+	/** standard (a crossfade over BlendTime), inertialization (needs an Inertialization node at the output), or custom. */
+	UPROPERTY() FString BlendLogic;
 };
 
 USTRUCT(BlueprintType)
@@ -56,7 +59,7 @@ struct FHyperAIAnimBlueprintMachine
 	GENERATED_BODY()
 
 	UPROPERTY() FString Name;
-	/** True when its pose feeds the AnimGraph output. */
+	/** True when its pose reaches the AnimGraph output, directly or through slots, layers and cached poses. */
 	UPROPERTY() bool bDrivesOutput = false;
 	UPROPERTY() TArray<FHyperAIAnimBlueprintState> States;
 	UPROPERTY() TArray<FHyperAIAnimBlueprintTransition> Transitions;
@@ -92,6 +95,15 @@ struct FHyperAIAnimBlueprintInspectReport
 	UPROPERTY() bool bPackageDirty = false;
 	UPROPERTY() TArray<FHyperAIAnimBlueprintVariable> Variables;
 	UPROPERTY() TArray<FHyperAIAnimBlueprintMachine> Machines;
+	/**
+	 * What feeds the output pose, from the output back: Inertialization, Slot DefaultSlot, Layered blend per bone (slot
+	 * UpperBody from spine_01), Cached pose, State machine Locomotion.
+	 */
+	UPROPERTY() TArray<FString> OutputChain;
+	/** The Animation Layer Interfaces it implements. */
+	UPROPERTY() TArray<FString> Interfaces;
+	/** Each layer as Name (self, or the interface declaring it): what plays in it; an interface lists its layers as declared. */
+	UPROPERTY() TArray<FString> Layers;
 	UPROPERTY() bool bTruncated = false;
 	UPROPERTY() TArray<FString> Capabilities;
 };
@@ -109,6 +121,18 @@ struct FHyperAIAnimBlueprintInspectReport
  *       Rule: conditions joined by &&, each Var, !Var, or Var > n (>, <, >=, <=); or alone, time_remaining < n
  *   remove_transition: Machine, Name (from), To
  *   remove_state: Machine, Name, with its transitions
+ *   set_transition_blend: Machine, Name (from), To, Value = inertialization or standard
+ * Output layers, each placed in front of the output pose (inside an Inertialization node already there):
+ *   add_layered_slot: Name = a slot on the skeleton (UpperBody), Value = the bone the layer starts at (spine_01);
+ *       montages in the slot play on that bone and those below it while the rest of the pose keeps playing
+ *   add_slot: Name = a slot on the skeleton (DefaultSlot); montages in it play over the whole pose
+ *   add_inertialization: an Inertialization node at the output, which inertialization transitions need
+ * Linked anim layers (swap a character's animation per weapon or stance without touching its main graph):
+ *   add_layer: Name; in an Animation Layer Interface (create with ParentClassPath /Script/Engine.AnimLayerInterface),
+ *       declares a layer; in an Animation Blueprint, adds a layer of its own. An interface takes nothing else.
+ *   implement_interface: Asset = the interface's object path; its layers become layers of this Blueprint
+ *   set_layer_asset: Name = a layer, Asset (sequence or blend space) with XVariable/YVariable, Value = once
+ *   set_state_layer: Machine, Name (state), Value = the layer the state plays
  */
 USTRUCT(BlueprintType)
 struct FHyperAIAnimBlueprintOp
@@ -135,7 +159,10 @@ struct FHyperAIAnimBlueprintApplyPlanRequest
 	UPROPERTY() FString OperationId;
 	UPROPERTY() FString ExpectedPlanHash;
 	UPROPERTY() FString TargetPath;
-	/** Create the Animation Blueprint for SkeletonPath (parent ParentClassPath, default AnimInstance). */
+	/**
+	 * Create the Animation Blueprint for SkeletonPath (parent ParentClassPath, default AnimInstance); ParentClassPath
+	 * /Script/Engine.AnimLayerInterface creates an Animation Layer Interface instead, for any skeleton when SkeletonPath is empty.
+	 */
 	UPROPERTY() bool bCreate = false;
 	UPROPERTY() FString SkeletonPath;
 	UPROPERTY() FString ParentClassPath;
@@ -204,6 +231,22 @@ struct FHyperAIAnimBlueprintValidateReport
 	UPROPERTY() TArray<FString> Capabilities;
 };
 
+/** hyper_anim_blueprint_apply_plan's reply, held open until the edit it submitted has finished: one call instead of an apply and a wait. */
+UCLASS()
+class UHyperAIAnimBlueprintApplyPlanResult final : public UToolCallAsyncResult
+{
+	GENERATED_BODY()
+
+public:
+	bool SetValue(const FHyperAIAnimBlueprintApplyPlanReport& InValue)
+	{
+		return MaybeBroadcastSuccessfulCompletion(FHyperAIAnimBlueprintApplyPlanReport(InValue), Value);
+	}
+
+	UPROPERTY()
+	FHyperAIAnimBlueprintApplyPlanReport Value;
+};
+
 /** Animation Blueprint graphs: variables and what drives them, state machines, states, transitions and their rules. */
 UCLASS()
 class HYPERAISTUDIOANIMBLUEPRINT_API UHyperAIStudioAnimBlueprintToolset final : public UToolsetDefinition
@@ -213,19 +256,27 @@ class HYPERAISTUDIOANIMBLUEPRINT_API UHyperAIStudioAnimBlueprintToolset final : 
 public:
 	virtual FString GetToolsetVersion() const override { return TEXT("1.0.0"); }
 
-	/** An Animation Blueprint's skeleton, variables (and their drivers), state machines with states, players, transitions and rules, compile status, and revision. */
+	/**
+	 * An Animation Blueprint's skeleton, variables (and their drivers), state machines with states, players, transitions and
+	 * rules, what feeds the output pose (slots, layered blends, inertialization), its linked anim layers and interfaces,
+	 * compile status, and revision.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|AnimBlueprint")
 	static FHyperAIAnimBlueprintInspectReport hyper_anim_blueprint_inspect(const FHyperAIAnimBlueprintInspectRequest& Request);
 
 	/**
-	 * Closed graph edits, then a compile, as one undo step: create for a skeleton, variables and per-frame drivers,
-	 * state machines, states playing sequences or blend spaces, transitions with rules. Read
-	 * .hyperai/docs/HyperAIStudio-AnimationCookbook.md first. Dry-run, resubmit, poll, then validate.
+	 * Closed graph edits, then a compile, as one undo step: create for a skeleton (or an Animation Layer Interface),
+	 * per-frame variables, state machines, states playing sequences, blend spaces or linked layers, transitions, montage
+	 * slots, inertialization, layers implemented and filled. Read .hyperai/docs/HyperAIStudio-AnimationCookbook.md first.
+	 * Dry-run, then resubmit (the reply waits), then validate.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|AnimBlueprint")
-	static FHyperAIAnimBlueprintApplyPlanReport hyper_anim_blueprint_apply_plan(const FHyperAIAnimBlueprintApplyPlanRequest& Request);
+	static UHyperAIAnimBlueprintApplyPlanResult* hyper_anim_blueprint_apply_plan(const FHyperAIAnimBlueprintApplyPlanRequest& Request);
 
-	/** Compile status plus graph checks: output pose wired, entry states, unreachable or dead-end states, rules without a gap between thresholds, instant blends, skeleton mismatches. */
+	/**
+	 * Compile status plus graph checks: output pose wired, entry states, unreachable or dead-end states, rules without a gap
+	 * between thresholds, instant blends, skeleton mismatches, slots the skeleton lacks, inertialization without its node.
+	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|AnimBlueprint")
 	static FHyperAIAnimBlueprintValidateReport hyper_anim_blueprint_validate(const FHyperAIAnimBlueprintValidateRequest& Request);
 };
@@ -358,6 +409,8 @@ public:
 	static const FHyperAIStudioDomainAdapterDescriptor& GetAdapterDescriptor();
 	static FHyperAIAnimBlueprintInspectReport Inspect(const FHyperAIAnimBlueprintInspectRequest& Request);
 	static FHyperAIAnimBlueprintValidateReport Validate(const FHyperAIAnimBlueprintValidateRequest& Request);
+	/** hyper_anim_blueprint_apply_plan's plan with an agent's near misses fitted first; the tool then waits for the edit it submits. */
+	static FHyperAIAnimBlueprintApplyPlanReport BuildFittedPlan(const FHyperAIAnimBlueprintApplyPlanRequest& Request);
 	static FHyperAIAnimBlueprintApplyPlanReport BuildPlan(const FHyperAIAnimBlueprintApplyPlanRequest& Request);
 	static FString ComputeEditOpsSemanticFingerprint(const FHyperAIStudioAnimBlueprintEditOpsPayload& Payload);
 };

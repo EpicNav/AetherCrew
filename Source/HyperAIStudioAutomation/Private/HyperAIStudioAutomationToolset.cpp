@@ -1055,7 +1055,7 @@ FHyperAIProfileCaptureReport FHyperAIStudioAutomationContracts::BuildProfilePlan
 	{
 		Report.bOk = true;
 		Report.Status = TEXT("dry_run_valid_zero_effect");
-		Report.Diagnostic = TEXT("Pure Prepare sealed one bounded profile-capture intent. No trace, PIE, file, console, or external effect ran.");
+		Report.Diagnostic = TEXT("Pure Prepare sealed one bounded profile-capture intent. No trace, PIE, file, console, or external effect ran. To measure a play session and read the result, use hyper_profile_session (HyperAIStudioProfiling).");
 		return Report;
 	}
 	if (Request.ExpectedPlanHash != Prepared.PlanHash)
@@ -1064,7 +1064,7 @@ FHyperAIProfileCaptureReport FHyperAIStudioAutomationContracts::BuildProfilePlan
 			TEXT("Non-dry intent does not echo the exact pure dry-run plan hash."));
 	}
 	return Reject(ProfileBackendBlocker,
-		TEXT("No profile capture started. A trusted journaled continuation backend must begin once, enforce byte/time caps, observe/cancel terminal state, and retain typed evidence without exposing arbitrary trace commands."));
+		TEXT("No profile capture started here: this intent has no capture backend. hyper_profile_session (HyperAIStudioProfiling) measures a play session and analyses it."));
 }
 
 FHyperAIBuildDiagnoseReport FHyperAIStudioAutomationContracts::DiagnoseBuild(

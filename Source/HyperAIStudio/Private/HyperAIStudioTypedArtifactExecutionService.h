@@ -57,12 +57,21 @@ public:
 		const FString& OperationId,
 		FHyperAIStudioTypedArtifactOperationStatus& OutStatus,
 		FString& OutError) const;
+	/**
+	 * The active, admitting or recently archived operation only. Never loads the journal, whose load can
+	 * reconcile, so a read-only caller may use it freely. False when this process does not know the id.
+	 */
+	bool QueryLiveStatus(
+		const FString& OperationId,
+		FHyperAIStudioTypedArtifactOperationStatus& OutStatus) const;
 	bool Cancel(
 		const FString& OperationId,
 		const FString& Reason,
 		FHyperAIStudioTypedArtifactOperationStatus& OutStatus,
 		FString& OutError);
 	int32 NumStaged() const;
+	/** True while an operation owns the one lane or is being admitted to it. */
+	bool IsBusy() const;
 	bool IsQuiescing() const;
 	bool CanShutdownSafely() const;
 	void Shutdown();
