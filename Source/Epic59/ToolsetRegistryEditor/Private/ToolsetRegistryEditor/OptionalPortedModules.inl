@@ -38,8 +38,14 @@ EPIC59_OPTIONAL_MODULE(WidgetStaticAnalysisToolset, TEXT("ModelViewViewModel"))
 EPIC59_SUPERSEDES(MVVMToolset59, TEXT("/Script/MVVMToolset.MVVMToolset"))
 EPIC59_SUPERSEDES(SlateInspectorToolset59, TEXT("/Script/SlateInspectorToolset.SlateInspectorToolset"))
 
-// Wave 2b: ports that link against an optional engine plugin (test modules follow the module they test).
+// Wave 2b: ports that link against an optional engine plugin (test modules follow the module they test). The two that
+// supersede a UE 5.8 toolset also need that toolset's plugin, as in wave 2a, so the capability presets keep deciding.
 EPIC59_OPTIONAL_MODULE(RewindDebuggerToolset, TEXT("GameplayInsights"))
 EPIC59_OPTIONAL_MODULE(RewindDebuggerToolsetTests, TEXT("GameplayInsights"))
-EPIC59_OPTIONAL_MODULE(WorldConditionsToolset59, TEXT("WorldConditions"))
-EPIC59_OPTIONAL_MODULE(DataRegistryToolset59, TEXT("DataRegistry"))
+EPIC59_OPTIONAL_MODULE(WorldConditionsToolset59, TEXT("WorldConditions"), TEXT("WorldConditionsToolset"))
+EPIC59_OPTIONAL_MODULE(DataRegistryToolset59, TEXT("DataRegistry"), TEXT("DataRegistryToolset"))
+
+// Both ports have every tool of the 5.8 class, with the same signatures and struct fields (DataRegistry 7 of 7,
+// WorldConditions 2 of 2, checked against UE 5.8's Engine/Plugins/Experimental/Toolsets).
+EPIC59_SUPERSEDES(DataRegistryToolset59, TEXT("/Script/DataRegistryToolset.DataRegistryTools"))
+EPIC59_SUPERSEDES(WorldConditionsToolset59, TEXT("/Script/WorldConditionsToolset.WorldConditionTools"))

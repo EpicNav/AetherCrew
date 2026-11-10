@@ -725,8 +725,8 @@ const TArray<FString>& FHyperAIStudioGameplaySystemsContracts::GetEpicDelegates(
 		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.IsGameFeatureActive"),
 		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.GetGameFeatureState"),
 		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.RequestActivateGameFeature"),
-		TEXT("WorldConditionsToolset.WorldConditionTools.GetQueryDescription"),
-		TEXT("WorldConditionsToolset.WorldConditionTools.GetConditionDescription")};
+		TEXT("WorldConditionsToolset59.WorldConditionTools59.GetQueryDescription"),
+		TEXT("WorldConditionsToolset59.WorldConditionTools59.GetConditionDescription")};
 	return Delegates;
 }
 
