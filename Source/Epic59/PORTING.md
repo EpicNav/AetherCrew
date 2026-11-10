@@ -98,6 +98,25 @@ The first run indexes UE 5.8's reflected types, module names and headers (about 
    so a class implementing `IToolsetProvider` must link ToolsetCore itself); `ToolsetRegistryEngine` maps to `ToolsetRegistryEditor`; `AsyncFunctionResultEditor` is dropped.
 10. `HyperAIStudio.uplugin` gains the modules (Editor, Epic's loading phase, Win64).
 
+### Optional plugin dependencies
+
+A port that links against a plugin HyperAI lists as optional (`Enabled: false` in `HyperAIStudio.uplugin`'s `Plugins`) has
+`LoadingPhase: None`: loading it while that plugin is disabled would fail the whole plugin. `HyperAIStudio::Epic59Modules`
+(`Source/HyperAIStudio/Private/HyperAIStudioEpic59Modules.cpp`) loads each such module after engine init when all its
+plugins are enabled, and logs the ones it leaves unloaded. Add new ones to its table (tests modules too) and re-set
+`LoadingPhase` after a `--force` re-port, which writes Epic's phase back. Bench projects enable the plugin through
+`REQUIRED_PLUGINS` in `Tools/Benchmark/bench.py`.
+
+### What the script does not catch
+
+- `RegisterToolsetClass` of a class that is not a `UToolsetDefinition` (5.9 accepts any `IToolsetProvider`): 5.8's
+  `TSubclassOf<UToolsetDefinition>` turns it into null and logs `Cannot register null toolset class`. Register a
+  `UToolsetDefinition` front whose statics forward (RewindDebuggerToolset58, InputToolset58).
+- Converters (`FToolsetJsonConverter`): 5.9's `JsonDataToProperty` returns `FToolsetJsonImportResult` and takes an
+  `FToolsetJsonImportContext`; 5.8's returns `bool` and takes `UObject* Outer`. A port whose converter has the name of a
+  5.8 converter must rename it.
+- Engine APIs newer than 5.8 outside the registry (CsvUtils, RHI, GameplayInsights): the build finds them.
+
 ### What it reports for hand edits
 
 5.9-only APIs (above), non-static tools, `UToolsetRegistry::ExecuteTool` results assigned to 5.9 types (5.8 returns
@@ -178,6 +197,11 @@ The capability preset tests count Epic *plugins*; the ports live inside HyperAIS
 | CheatsToolset | include, IToolsetProvider base | none |
 | ConsoleToolset | include, IToolsetProvider base, AICallable on 9 AIRuntimeCallable tools, cooked opt-in dropped, `ULogsToolset` and `LogsToolset.h` renamed `...59` | `SetVerbosity`: 5.8 has no `FLogSuppressionInterface::FindCategory`, so it checks the category through `GetVerbosity` and cannot check the compile-time maximum |
 | NavMeshToolset (+ Tests) | include, IToolsetProvider base, AICallable on 21 tools, cooked opt-in dropped, `IsFunctionAIRuntimeCallable` moved | 5.8 lacks the adaptive navmesh build API: adaptive stats report `bAvailable=false`, tiles report build state `Unknown` and take their bounds from the first layer, no tile state grid or updated-tile count; the dirty-area controller is read through a member pointer (protected in 5.8); invokers are listed from 5.8's raw invoker records (no actor or name); `EWorldType`, `ENetMode`, `ENavigationBuildLock`, `ENavigationShapeType`, `ENavigationAreaMode` properties are `uint8` (not UENUMs in 5.8); the test's `ExecuteTool` result type |
+| PerfToolset | include, IToolsetProvider base, cooked opt-in dropped | 5.8's CsvUtils has no `DetectCsvFormat`, so a copy of 5.9's lives in `CsvProfilerToolset.cpp`; 5.8's RHI has no `GPUProfiler::SetProfileCaptureCallback`/`ProfileNextFrame`, so `GpuProfilerToolset.TriggerGPUProfile` returns an error naming the `ProfileGPU` console command; the `ReadFromCsvBin` tests (5.9's v4/v5 `.csv.bin` reader with event timestamps) are compiled out |
+| RewindDebuggerToolset (+ Tests) | include, IToolsetProvider base; needs GameplayInsights (optional, guarded) | the toolset is an editor subsystem, which 5.8's `RegisterToolsetClass` turns into a null class, so `URewindDebuggerToolset58` (a `UToolsetDefinition` whose statics forward) is registered instead: agents see `RewindDebuggerToolset.RewindDebuggerToolset58`; the gameplay provider is read by its 5.8 name `GameplayProvider` (5.8's `IGameplayProvider` has no `ProviderName`) |
+| InputToolset | include, cooked opt-in dropped | 5.9 dispatches to the local player's `UInputToolset` subsystem (instance dispatch); `UInputToolset58` is registered instead, its static `ApplyInput`/`IsInputApplied` resolve the same subsystem and forward, and report 5.9's dispatch-target error when no PIE or game session has a local player: agents see `InputToolset.InputToolset58` |
+| WorldConditionsToolset59 | module, `UWorldConditionTools` and its header renamed `...59`; optional WorldConditions (guarded) | 5.8 converters return `bool`, not `FToolsetJsonImportResult`; no `FToolsetRegistry::Get()` (the editor subsystem's registry is used); the converter is named `WorldConditionQueryConverter59`, because 5.8 WorldConditionsToolset registers `WorldConditionQueryConverter` and 5.8's registry `verify()`s unique names (a duplicate would crash) |
+| DataRegistryToolset59 | module, `UDataRegistryTools`, `FDataRegistryInfo`, `FDataRegistrySourceSummary` and the header renamed `...59`; optional DataRegistry (guarded) | none |
 
 Pilot results on a UE 5.8 bench (Bench59): Epic's own tests `AIAssistant.Toolsets.CheatsToolset` (17),
 `ConsoleToolset` (28) and `NavMeshToolset` (23) pass, 68 of 68, with no registry errors in the log; HyperAI's
