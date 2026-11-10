@@ -921,6 +921,52 @@ namespace HyperAIStudio::Niagara::GraphGate
 			return true;
 		}
 
+		/** The renderer's attribute binding Name names (ColorBinding, DynamicMaterialBinding, SubImageIndexBinding...), or why not. */
+		FStructProperty* FindBindingProperty(const UClass& Class, const FString& Name, FString& OutError)
+		{
+			FStructProperty* Property = CastField<FStructProperty>(FindFProperty<FProperty>(&Class, FName(*Name)));
+			if (Property && Property->Struct == FNiagaraVariableAttributeBinding::StaticStruct() && Property->ArrayDim == 1)
+			{
+				return Property;
+			}
+			TArray<FString> Names;
+			for (TFieldIterator<FStructProperty> It(&Class); It; ++It)
+			{
+				if (It->Struct == FNiagaraVariableAttributeBinding::StaticStruct() && It->HasAnyPropertyFlags(CPF_Edit))
+				{
+					Names.Add(It->GetName());
+				}
+			}
+			OutError = FString::Printf(TEXT("%s has no attribute binding %s. Bindings: %s."), *Class.GetName(), *Name, *FString::Join(Names, TEXT(", ")));
+			return nullptr;
+		}
+
+		bool SetRendererBinding(UNiagaraSystem& System, const FHyperAINiagaraEditOp& Op, FString& OutStatus, FString& OutError)
+		{
+			FNiagaraEmitterHandle* Handle = FindHandle(System, Op.EmitterName);
+			const FVersionedNiagaraEmitterData* Data = Handle ? Handle->GetEmitterData() : nullptr;
+			UNiagaraRendererProperties* Renderer = Data && Data->GetRenderers().IsValidIndex(Op.RendererIndex)
+				? Data->GetRenderers()[Op.RendererIndex] : nullptr;
+			if (!Renderer)
+			{
+				OutError = FString::Printf(TEXT("%s has no renderer %d."), *Op.EmitterName, Op.RendererIndex);
+				return false;
+			}
+			FStructProperty* Property = FindBindingProperty(*Renderer->GetClass(), Op.Name, OutError);
+			if (!Property)
+			{
+				return false;
+			}
+			// What the renderer panel's binding widget does: PreEditChange, SetValue against the owning emitter, PostEditChangeProperty.
+			Renderer->PreEditChange(Property);
+			FNiagaraVariableAttributeBinding* Binding = Property->ContainerPtrToValuePtr<FNiagaraVariableAttributeBinding>(Renderer);
+			Binding->SetValue(FName(*Op.Value.TrimStartAndEnd()), Renderer->GetOuterEmitter(), Renderer->GetCurrentSourceMode());
+			FPropertyChangedEvent Event(Property, EPropertyChangeType::ValueSet);
+			Renderer->PostEditChangeProperty(Event);
+			OutStatus = FString::Printf(TEXT("renderer_binding:%d.%s=%s"), Op.RendererIndex, *Op.Name, *Op.Value.TrimStartAndEnd());
+			return true;
+		}
+
 		/** What validation knows about one emitter as the plan walks forward. */
 		struct FPlannedEmitter
 		{
@@ -970,7 +1016,7 @@ namespace HyperAIStudio::Niagara::GraphGate
 	bool IsGraphOp(const FHyperAINiagaraEditOp& Op)
 	{
 		return Op.Kind == TEXT("add_simulation_stage") || Op.Kind == TEXT("add_hlsl_module") || Op.Kind == TEXT("set_hlsl_module")
-			|| Op.Kind == TEXT("set_emitter_property") || Op.Kind == TEXT("set_renderer_property")
+			|| Op.Kind == TEXT("set_emitter_property") || Op.Kind == TEXT("set_renderer_property") || Op.Kind == TEXT("set_renderer_binding")
 			|| ((Op.Kind == TEXT("add_module") || Op.Kind == TEXT("set_module_enabled")) && !Op.StageName.IsEmpty());
 	}
 
@@ -1083,23 +1129,47 @@ namespace HyperAIStudio::Niagara::GraphGate
 			}
 			return true;
 		}
+		if (Op.Kind == TEXT("set_renderer_binding"))
+		{
+			const FString Attribute = Op.Value.TrimStartAndEnd();
+			if (Op.EmitterName.IsEmpty() || Op.RendererIndex < 0 || !Op.ScriptName.IsEmpty() || !Op.StageName.IsEmpty() || !IsIdentifier(Op.Name)
+				|| Attribute.IsEmpty() || !Attribute.Contains(TEXT(".")) || Attribute.Contains(TEXT(" ")))
+			{
+				return Fail(OutStatus, OutDiagnostic, TEXT("invalid_op_address"),
+					TEXT("set_renderer_binding needs emitter_name, renderer_index, name (the binding: ColorBinding, SpriteSizeBinding, DynamicMaterialBinding, SubImageIndexBinding...) and value, the attribute it reads (Particles.Color, Particles.MyFade)."));
+			}
+			return true;
+		}
 		return Fail(OutStatus, OutDiagnostic, TEXT("unsupported_op_kind"), TEXT("Not a graph op."));
 	}
 
 	bool ValidatePlanAgainstSystem(UNiagaraSystem& System, const TArray<FHyperAINiagaraEditOp>& Ops, FString& OutStatus, FString& OutDiagnostic)
 	{
+		return ValidatePlanAgainstSystem(&System, Ops, OutStatus, OutDiagnostic);
+	}
+
+	bool ValidatePlanAgainstSystem(UNiagaraSystem* System, const TArray<FHyperAINiagaraEditOp>& Ops, FString& OutStatus, FString& OutDiagnostic)
+	{
 		OutStatus.Reset();
 		OutDiagnostic.Reset();
 		TMap<FName, FPlannedEmitter> Emitters;
-		for (FNiagaraEmitterHandle& Handle : System.GetEmitterHandles())
+		auto DescribeSystem = [&Emitters](UNiagaraSystem& From, const TArray<FName>& Keep)
 		{
-			if (const FVersionedNiagaraEmitterData* Data = Handle.GetEmitterData())
+			for (FNiagaraEmitterHandle& Handle : From.GetEmitterHandles())
 			{
-				Describe(*Data, Emitters.Add(Handle.GetName()));
+				const FVersionedNiagaraEmitterData* Data = Handle.GetEmitterData();
+				if (Data && (Keep.IsEmpty() || Keep.Contains(Handle.GetName())))
+				{
+					Describe(*Data, Emitters.Add(Handle.GetName()));
+				}
 			}
+		};
+		if (System)
+		{
+			DescribeSystem(*System, {});
 		}
 		// Scratch pad modules the System has, and those earlier add_hlsl_module ops make (named as asked when free).
-		TSet<FString> ScratchModules(ReadScratchPadModules(System));
+		TSet<FString> ScratchModules(System ? ReadScratchPadModules(*System) : TArray<FString>());
 		for (int32 Index = 0; Index < Ops.Num(); ++Index)
 		{
 			const FHyperAINiagaraEditOp& Op = Ops[Index];
@@ -1107,6 +1177,45 @@ namespace HyperAIStudio::Niagara::GraphGate
 			{
 				return Fail(OutStatus, OutDiagnostic, Status, FString::Printf(TEXT("Op %d: %s"), Index, *Why));
 			};
+			if (Op.Kind == TEXT("create_system"))
+			{
+				if (Index != 0 || System)
+				{
+					return Reject(TEXT("create_system_not_first"), TEXT("create_system must be the first op of a plan whose target_path does not exist yet."));
+				}
+				TArray<FName> Keep;
+				TArray<FString> Parts;
+				Op.Value.ParseIntoArray(Parts, TEXT(","));
+				for (const FString& Part : Parts)
+				{
+					if (!Part.TrimStartAndEnd().IsEmpty())
+					{
+						Keep.AddUnique(FName(*Part.TrimStartAndEnd()));
+					}
+				}
+				if (UNiagaraSystem* Template = Op.AssetPath.IsEmpty() ? nullptr : Cast<UNiagaraSystem>(FSoftObjectPath(Op.AssetPath).ResolveObject()))
+				{
+					DescribeSystem(*Template, Keep);
+				}
+				for (const FName& Name : Keep)
+				{
+					if (!Emitters.Contains(Name))
+					{
+						return Reject(TEXT("emitter_not_found"), FString::Printf(TEXT("The template has no emitter %s to keep."), *Name.ToString()));
+					}
+				}
+				continue;
+			}
+			if (Op.Kind == TEXT("remove_emitter"))
+			{
+				if (!Emitters.Remove(FName(*Op.EmitterName)))
+				{
+					TArray<FName> Names;
+					Emitters.GetKeys(Names);
+					return Reject(TEXT("emitter_not_found"), FString::Printf(TEXT("No emitter named %s to remove. Emitters: %s."), *Op.EmitterName, *JoinNames(Names)));
+				}
+				continue;
+			}
 			if (Op.Kind == TEXT("add_hlsl_module"))
 			{
 				ScratchModules.Add(Op.Name);
@@ -1148,6 +1257,26 @@ namespace HyperAIStudio::Niagara::GraphGate
 			if (Op.Kind == TEXT("add_renderer"))
 			{
 				Emitter->Renderers.Add(FSoftClassPath(Op.AssetPath).ResolveClass());
+				continue;
+			}
+			if (Op.Kind == TEXT("remove_renderer") || Op.Kind == TEXT("set_renderer_binding"))
+			{
+				if (!Emitter->Renderers.IsValidIndex(Op.RendererIndex) || !Emitter->Renderers[Op.RendererIndex])
+				{
+					return Reject(TEXT("renderer_index_out_of_range"), FString::Printf(TEXT("%s has %d renderers; renderer_index %d is not one of them."),
+						*Op.EmitterName, Emitter->Renderers.Num(), Op.RendererIndex));
+				}
+				if (Op.Kind == TEXT("remove_renderer"))
+				{
+					// Later renderers move down one; ops after this one address them by their new index.
+					Emitter->Renderers.RemoveAt(Op.RendererIndex);
+					continue;
+				}
+				FString Error;
+				if (!FindBindingProperty(*Emitter->Renderers[Op.RendererIndex], Op.Name, Error))
+				{
+					return Reject(TEXT("renderer_binding_not_found"), Error);
+				}
 				continue;
 			}
 			if (Op.Kind == TEXT("set_emitter_property") && Op.Name == TEXT("sim_target"))
@@ -1229,6 +1358,7 @@ namespace HyperAIStudio::Niagara::GraphGate
 		else if (Op.Kind == TEXT("set_module_enabled")) bApplied = SetStageModuleEnabled(System, Op, OutStatus, OutError);
 		else if (Op.Kind == TEXT("set_emitter_property")) bApplied = SetEmitterProperty(System, Op, OutStatus, OutError);
 		else if (Op.Kind == TEXT("set_renderer_property")) bApplied = SetRendererProperty(System, Op, OutStatus, OutError);
+		else if (Op.Kind == TEXT("set_renderer_binding")) bApplied = SetRendererBinding(System, Op, OutStatus, OutError);
 		else OutError = TEXT("Unsupported graph op.");
 		if (bApplied)
 		{

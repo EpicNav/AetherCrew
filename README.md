@@ -9,7 +9,7 @@ What it does:
 - Sets up Epic Unreal MCP in one step, verifies it, and writes the agent files: `AGENTS.md`, `CLAUDE.md`, and MCP
   configs for Claude Code, Codex, Gemini, Cursor and VS Code/Copilot.
 - Hosts Claude Code, Codex and Gemini in its own chat view, with approvals, reports, pictures and up to four chats.
-- Adds 217 tools in 42 capability packs (Blueprints, levels, lighting, materials, Niagara, animation, GAS, UI, PCG
+- Adds 219 tools in 42 capability packs (Blueprints, levels, lighting, materials, Niagara, animation, GAS, UI, PCG
   and more), every edit planned, approved, journaled and undoable.
 - Runs a team: director, programmer, level designer, lighting artist, technical artist and QA tester.
 - Matches a reference image: the preferred agent lights or builds the level, and HyperAI scores every attempt and

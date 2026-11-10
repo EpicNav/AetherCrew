@@ -1105,7 +1105,8 @@ private:
 				TEXT("niagara_vfx"),
 				TEXT("cohort.source.hyperaistudioniagaratoolset.v1"),
 				{TEXT("hyper_niagara_inspect"), TEXT("hyper_niagara_apply_plan"),
-					TEXT("hyper_niagara_validate"), TEXT("hyper_niagara_live")},
+					TEXT("hyper_niagara_validate"), TEXT("hyper_niagara_live"), TEXT("hyper_niagara_discover"),
+					TEXT("hyper_niagara_preview")},
 				{TEXT("Niagara")}
 			},
 			{

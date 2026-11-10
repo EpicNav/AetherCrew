@@ -1,102 +1,174 @@
 ---
 name: unreal-niagara
-description: Build or change a Niagara effect with HyperAI's Niagara tools - emitters from templates, modules and their inputs, custom HLSL modules, GPU simulation stages, emitter and renderer settings - as one undoable plan, then prove it compiles and spawns. Use for any VFX work - sparks, smoke, fire, magic, impacts, trails, weather, swarms and GPU simulations.
+description: Build or change a Niagara effect with HyperAI's Niagara tools - a new System from a template or an effect recipe (fire, explosion, magic burst, impact sparks, smoke, ribbon trail), emitters, modules, renderers, every kind of input value (random ranges, curves, links, expressions, enums), user parameters, renderer bindings, HLSL modules and GPU simulation stages - as one undoable plan, then look at it in a preview and prove it spawns. Use for any VFX work - sparks, smoke, fire, magic, impacts, trails, weather, swarms and GPU simulations.
 ---
 
-# Niagara effects: inspect, one plan, validate
+# Niagara effects: discover, one plan, preview, validate
 
 HyperAI's Niagara tools are in toolset `HyperAIStudioNiagara.HyperAIStudioNiagaraToolset`, called with
-`{"request": {...}}`. Every edit goes through one `hyper_niagara_apply_plan`: up to 16 ops, checked against the System
-before anything changes, applied as one undo step, compiled, saved and verified. Plan the whole effect, then send it.
+`{"request": {...}}`. Every edit goes through one `hyper_niagara_apply_plan`: up to 96 ops, checked against the System
+before anything changes, applied as one undo step, compiled, saved and verified. A plan can make its System too. Plan
+the whole effect, send it, then look at it.
 
 ## The loop
 
-1. **Inspect.** `hyper_niagara_inspect` with `targetPath` (`/Game/VFX/NS_Sparks.NS_Sparks`) and `bIncludeTopology: true`.
-   Keep `revision`. `emitters` gives the addresses ops use: emitter names, each script stack's modules and inputs,
-   `simulationStages` with their modules, and `renderers` with their `rendererIndex`. `scratchPadModules` lists the HLSL
-   modules already in the System.
-2. **Apply.** `hyper_niagara_apply_plan` with `targetPath`, `expectedRevision` (the revision), `bDryRun: false`, a new
-   `operationId`, and `ops`. The reply waits for the edit and ends `completed`. A wrong emitter, stage, renderer index,
-   property name or value is refused before anything changes, naming what does exist; fix the op and send again. A
-   `bDryRun: true` call checks a plan without changing anything. Each plan needs the new `revision`: inspect again.
-3. **Validate.** `hyper_niagara_validate` with `policy: "authoring"` gives compile errors and stack issues (fixable ones
-   carry `fixIds` for an `apply_stack_issue_fix` op). Then `policy: "runtime_probe"` with `expectEmitters: ["Sparks"]`
-   simulates the System and reports those emitters' live particles: the effect is done when they are `live`, not when it
-   compiles. Without `expectEmitters` every emitter must be live, and a one-shot burst that has finished is not.
+1. **Start.** For a stock effect, use a recipe: `hyper_niagara_apply_plan` with `recipe` (`fire`, `explosion`,
+   `magic_burst`, `impact_sparks`, `smoke_plume`, `ribbon_trail`), `recipeSettings` (`["color=0.3,0.6,1", "scale=2"]`)
+   and a new `targetPath`. `hyper_niagara_discover` with `kind: "recipes"` lists each recipe's settings, and
+   `kind: "recipe"` returns its ops to read or adapt before sending them yourself. For anything else, start from a
+   template: `kind: "templates"` lists Niagara's emitter and System templates with what each does. One plan's time budget holds about three emitters, so
+   bigger recipes come in parts: `fire` `part=1` (flames, embers) then `part=2` (smoke); `explosion` `part=1` (flash,
+   fireball, shockwave), `part=2` (sparks), `part=3` (smoke). Send each later part with the same `targetPath` and the
+   System's new `expectedRevision` from inspect. A plan that runs past the budget ends `partial`: its edits are in
+   memory but not saved; split it.
+2. **Materials first.** Recipes draw with particle materials; their reply (and discover's `materials`) names each one
+   and whether it exists. Make missing ones with `hyper_material_recipe`: `particle_additive` (fire, sparks, flashes,
+   magic; `shape: "ring"` for shockwaves) and `particle_translucent` (smoke and dust; `noise: "0.7"` breaks it up).
+   Without them a recipe still builds with Niagara's default sprite material, but it looks plain and hard-edged.
+3. **Inspect** an existing System: `hyper_niagara_inspect` with `targetPath` and `bIncludeTopology: true` (add
+   `bIncludeInputValues: true` to read every module input's value). Keep `revision`. `emitters` gives the addresses
+   ops use: each stack's modules, their `inputNames` with the `inputTypes` each takes (the `valueType` of a local
+   value), `simulationStages`, and `renderers` with their `rendererIndex`.
+4. **Apply.** `hyper_niagara_apply_plan` with `targetPath`, `expectedRevision`, `bDryRun: false`, a new `operationId`
+   and `ops`. The reply waits for the edit and ends `completed`. A wrong emitter, renderer index, binding, property or
+   value is refused before anything changes, naming what does exist. `bDryRun: true` checks a plan without changing
+   anything. Each later plan needs the new `revision`: inspect again.
+5. **Look at it.** `hyper_niagara_preview` with `targetPath` simulates the System in its own preview world and renders
+   it at several ages (`ages` in seconds; 0.15, 0.5, 1 and 2 by default) into one PNG, a tile per age, left to right.
+   **Open `imagePath` with your image reader and judge it yourself**: shape, colour, softness, how it moves from tile
+   to tile. The numbers help: `coverage`, `meanColor`, `peakLuminance` (1 is clipping to white), `screenBox`, and
+   `notes` (empty tiles, clipping, running off the edge). `background: "grey"` for smoke and anything alpha-blended;
+   `view` (`front`, `side`, `top`, `three_quarter`) and `distance` to frame it.
+6. **Validate.** `hyper_niagara_validate` with `policy: "authoring"` gives compile errors and stack issues (fixable ones
+   carry `fixIds` for an `apply_stack_issue_fix` op). `policy: "runtime_probe"` with `expectEmitters` reports those
+   emitters' live particles.
 
-**A new System.** Epic's `CreateNiagaraSystem` (toolset `NiagaraToolsets.NiagaraToolset_System`) needs a template:
-`{"assetName": "NS_Sparks", "assetPath": "/Game/VFX", "templateSystem": {"refPath":
-"/Niagara/DefaultAssets/Templates/Systems/DirectionalBurst.DirectionalBurst"}}`. Its emitters come along: disable the
-ones you do not want (`set_emitter_property` `enabled` `false`) or remove them with Epic's `RemoveEmitter`. Save it
-(`AssetTools.save_assets`) before the first plan: plans start from a saved System that is not open in the Niagara editor
-and not compiling (`compile_not_terminal` means wait and plan again). Just after a save, inspect can answer
-`revision_incomplete` once while the asset registry catches up; inspect again.
+## A new System in the plan
+
+Op 0 `create_system` makes the System at `targetPath`, which must not exist yet; `expectedRevision` stays empty.
+`assetPath` copies a template System (empty makes an empty one); `value` lists the template's emitters to keep, comma
+separated (empty keeps all). The ops after it build the effect:
+
+```json
+{"targetPath": "/Game/VFX/NS_Sparks.NS_Sparks", "bDryRun": false, "operationId": "sparks-1", "ops": [
+ {"kind": "create_system"},
+ {"kind": "add_emitter", "assetPath": "/Niagara/DefaultAssets/Templates/Emitters/OmnidirectionalBurst.OmnidirectionalBurst", "name": "Sparks"},
+ {"kind": "set_input_value", "emitterName": "Sparks", "scriptName": "EmitterUpdateScript", "moduleName": "SpawnBurst_Instantaneous",
+  "inputNameStack": ["Spawn Count"], "valueType": "int32", "value": "60"},
+ {"kind": "set_input_value", "emitterName": "Sparks", "scriptName": "ParticleSpawnScript", "moduleName": "AddVelocity",
+  "inputNameStack": ["Velocity Speed"], "valueType": "dynamic_input",
+  "assetPath": "/Niagara/DynamicInputs/UniformRange/V2/RandomRangeFloat.RandomRangeFloat"},
+ {"kind": "set_input_value", "emitterName": "Sparks", "scriptName": "ParticleSpawnScript", "moduleName": "AddVelocity",
+  "inputNameStack": ["Velocity Speed", "Minimum"], "valueType": "float", "value": "600"},
+ {"kind": "set_input_value", "emitterName": "Sparks", "scriptName": "ParticleSpawnScript", "moduleName": "AddVelocity",
+  "inputNameStack": ["Velocity Speed", "Maximum"], "valueType": "float", "value": "1400"}]}
+```
+
+Plans on an existing System start from a saved System that is not open in the Niagara editor and not compiling
+(`compile_not_terminal` means wait and plan again). The plan's System is saved when it completes. Undo reverts a
+plan's edits in one step; a System a plan made stays as an asset until you delete it.
 
 ## Ops
 
 | kind | fields |
 |---|---|
-| `add_emitter` | `assetPath` of an emitter template (`/Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain`), `name` (new) |
-| `add_module` | `scriptName`, `assetPath` of a module script, `emitterName` (none for System scripts); or `stageName` for a simulation stage |
+| `create_system` | op 0 only: `assetPath` template System or empty, `value` emitters to keep |
+| `add_emitter` / `remove_emitter` | `assetPath` of an emitter template and `name` (new) / `emitterName` |
+| `add_module` / `remove_module` | `scriptName`, `assetPath` of a module script / `moduleName`; `emitterName` (none for System scripts); `stageName` for a stage |
 | `set_module_enabled` | `scriptName` or `stageName`, `moduleName`, `bEnabled` |
-| `set_input_value` | `scriptName`, `moduleName`, `inputNameStack` (`["Gravity"]`), `valueType` float / int32 / bool / vector / color, `value` (`-980`, `0,0,-980`, `1,0.4,0,1`) |
-| `add_renderer` | `emitterName`, `assetPath` of the class (`/Script/Niagara.NiagaraSpriteRendererProperties`, `...MeshRendererProperties`, `...RibbonRendererProperties`, `...LightRendererProperties`) |
+| `set_input_value` | `scriptName`, `moduleName`, `inputNameStack`, `valueType`, `value` (below) |
+| `add_user_parameter` / `remove_user_parameter` | `name` (`User.Tint` or `Tint`), `valueType`, `value` (the default) |
+| `add_set_parameters` | `scriptName`, `name` (`Particles.Heat`), `valueType`, `value`; `moduleName` adds the entry to that Set Parameters module |
+| `add_renderer` / `remove_renderer` | `emitterName`, `assetPath` of the class / `rendererIndex` (later renderers move down one) |
 | `set_renderer_property` | `emitterName`, `rendererIndex`, `name` (the C++ property), `value` in Unreal text |
+| `set_renderer_binding` | `emitterName`, `rendererIndex`, `name` (`ColorBinding`, `SpriteSizeBinding`, `DynamicMaterialBinding`, `SubImageIndexBinding`...), `value` the attribute (`Particles.Heat`) |
 | `set_emitter_property` | `emitterName`, `name`, `value` (below) |
-| `add_simulation_stage` | `emitterName`, `name`, `value` = iterations per frame, 1-64 (default 1) |
-| `add_hlsl_module` | `scriptName` (or `stageName`), `emitterName`, `name`, `hlsl` |
-| `set_hlsl_module` | `name` (a scratch pad module from inspect's `scratchPadModules`, or one an earlier op adds), `hlsl` (its new body) |
+| `add_simulation_stage` | `emitterName`, `name`, `value` = iterations per frame, 1-64 |
+| `add_hlsl_module` / `set_hlsl_module` | `scriptName` (or `stageName`), `emitterName`, `name`, `hlsl` / `name`, `hlsl` |
 | `apply_stack_issue_fix` | `issueId`, `fixId` from validate |
-| `create_effect_type`, `set_effect_type`, `set_effect_type_setting` | scalability budgets; see the tool guide |
+| `create_effect_type`, `set_effect_type`, `set_effect_type_setting`, `create_data_channel`, `bake_sim_cache` | scalability, data channels, sim caches |
 
-`scriptName` is one of `SystemSpawnScript`, `SystemUpdateScript`, `EmitterSpawnScript`, `EmitterUpdateScript`,
-`ParticleSpawnScript`, `ParticleUpdateScript`, or `ParticleSimulationStageScript` with a `stageName` (a `stageName` alone
-does the same). Names you choose (emitters, stages, HLSL modules) are identifiers: letters, digits and underscores. An
-`add_emitter` name must be new, or Niagara would rename the emitter and later ops would miss it.
+`scriptName` is `SystemSpawnScript`, `SystemUpdateScript`, `EmitterSpawnScript`, `EmitterUpdateScript`,
+`ParticleSpawnScript`, `ParticleUpdateScript`, or `ParticleSimulationStageScript` with a `stageName`. Module names are
+the stack's (`InitializeParticle`, `SpawnRate`, `GravityForce`, `ShapeLocation`); input names are the editor's,
+spaces and all (`Lifetime Min`, `Uniform Sprite Size Max`, `Sphere Radius`). Names you choose are identifiers.
 
-Emitter properties: `sim_target` (`cpu` | `gpu`), `local_space` and `determinism` (`true` | `false`), `random_seed`
-(an integer), `fixed_bounds` (`minx,miny,minz,maxx,maxy,maxz`, or `dynamic`), `enabled`. GPU emitters cannot measure
-their own bounds: give them `fixed_bounds` whenever you switch to `gpu`.
+## Input values
+
+`set_input_value`'s `valueType`:
+
+- **Local values**: `float`, `int32`, `bool`, `vector2`, `vector`, `vector4`, `position`, `color` (`1,0.4,0,1`).
+  Inspect's `inputTypes` says which an input takes.
+- **`enum`**: `value` is the entry's name as the editor shows it or its C++ name (`Once`). A wrong one is refused with
+  the entries there are. Static switches (Lifetime Mode, Shape Primitive, Velocity Mode) are enums too, and changing
+  one shows or hides other inputs: an input greyed out by an edit condition is refused, so flip its switch first.
+- **`dynamic_input`**: `assetPath` is the dynamic input script; then set its own inputs with a longer
+  `inputNameStack` (`["Velocity Speed", "Minimum"]`) in the same plan. `hyper_niagara_discover` `kind:
+  "dynamic_inputs"` with `valueType` lists them for a type, and `kind: "script_schema"` with an `assetPath` lists a
+  script's inputs with their types. Everyday ones: `UniformRange/V2/RandomRangeFloat` for a range,
+  `ValueFromCurve/FloatFromCurve` and `ValueFromCurve/ColorFromCurve` for a value over life.
+- **`linked`**: `value` is the parameter it reads: `Particles.NormalizedAge`, `Particles.Velocity`, `Emitter.Age`,
+  `User.Tint`, `Engine.DeltaTime`.
+- **`hlsl_expression`**: one rvalue of the input's type (`float3(0, 0, 400) * (1 - Particles.NormalizedAge)`); no
+  declarations, no `return`. CPU emitters run it on the VM: plain math only.
+- **`data_interface`**: `value` is a JSON object of the data interface's properties (`{}` keeps its defaults);
+  `kind: "data_interface_schema"` lists them. Curves have shorthands: `curve` (`"0:1; 0.5:0.6; 1:0"`), `color_curve`
+  (`"0:1,0.8,0.3,1; 1:0.2,0,0,0"`, alpha optional) and `vector_curve` (`"0:1,1,1; 1:2,2,2"`), on a curve data
+  interface input. Colour over life, the usual way:
+
+```json
+[{"kind": "add_module", "emitterName": "Fire", "scriptName": "ParticleUpdateScript", "assetPath": "/Niagara/Modules/Update/Color/Color.Color"},
+ {"kind": "set_input_value", "emitterName": "Fire", "scriptName": "ParticleUpdateScript", "moduleName": "Color", "inputNameStack": ["Color"],
+  "valueType": "dynamic_input", "assetPath": "/Niagara/DynamicInputs/ValueFromCurve/ColorFromCurve.ColorFromCurve"},
+ {"kind": "set_input_value", "emitterName": "Fire", "scriptName": "ParticleUpdateScript", "moduleName": "Color", "inputNameStack": ["Color", "ColorCurve"],
+  "valueType": "color_curve", "value": "0:6,3,1,1; 0.4:4,1.2,0.25,1; 1:0,0,0,0"}]
+```
+
+`ColorFromCurve`'s `CurveIndex` already links `Particles.NormalizedAge`; disable the template's `ScaleColor` so it
+does not scale the colour again. Inspect with `bIncludeInputValues` reads values back: `float 20`,
+`linked Particles.NormalizedAge`, `enum Once`, `data_interface RedCurve 0:6, 0.4:4, 1:0; ...`, and dynamic inputs
+with their own inputs in braces.
+
+## Renderers, bindings and flipbooks
 
 Renderer properties take the C++ name and Unreal's text form: enums by name (`Alignment` `VelocityAligned`,
-`FacingMode` `FaceCameraPlane`, `SortMode` `ViewDistance`), vectors and colors as a list (`SubImageSize` `4,4`),
-booleans, numbers, and assets by path (`Material` `/Game/VFX/M_Spark.M_Spark`). A misspelt name is refused with the
-closest real ones. Attribute bindings (`ColorBinding`, `PositionBinding` and the like) are set in the Niagara editor.
+`FacingMode` `FaceCameraPlane`, `SortMode` `ViewDistance`), vectors as a list (`SubImageSize` `4,4`), booleans,
+numbers, assets by path (`Material` `/Game/VFX/M_Spark.M_Spark`). `kind: "renderer_schema"` with a renderer class
+(`SpriteRenderer` works) lists its properties and bindings with their defaults. `set_renderer_binding` changes which
+attribute the renderer reads.
+
+A flipbook needs three things to agree: the material samples the sheet with a Particle SubUV node
+(`hyper_material_recipe` `particle_additive` or `particle_translucent` with `flipbook: "true"` and `texture`), the
+sprite renderer's `SubImageSize` is the grid (`8,8`), and a `SubUVAnimation` module
+(`/Niagara/Modules/Update/SubUV/SubUVAnimation.SubUVAnimation`) runs in Particle Update. Dynamic Material Parameters
+writes values only a material with a matching Dynamic Parameter node reads (the translucent recipe's `erode` reads
+index 0's first channel); without one the writes are silently dropped.
+
+## What looks good
+
+- **Brightness**: additive effects glow from colour values above 1 (fire 3-6, sparks 8-12, flashes 10-15) and fade by
+  going to black; alpha-blended smoke takes plain greys (0.1-0.4) and fades by alpha. A white blob in the preview, or
+  `peakLuminance` 1 over a large area, means too bright or too many particles stacked.
+- **Layers**: a convincing effect is several emitters, each one idea: flash, core, sparks, smoke, ring. Vary lifetimes
+  and sizes with random ranges rather than single values.
+- **Motion**: forces then the solver; size and colour change over life. Sparks read as streaks when velocity-aligned
+  and stretched with speed. Fire rises (positive gravity) and flickers; smoke rises slowly, grows and thins.
+- **Scale**: 1 unit is 1 cm. A campfire is about 50 cm across, an explosion 3-6 m, sparks fly at 500-1500 cm/s.
+- **Loops**: bursts play once with `EmitterState` `Loop Behavior` `Once`; ambient effects loop.
 
 ## HLSL modules
 
-`add_hlsl_module` makes a scratch pad module in the System whose body is your HLSL, and appends it to the stack: the
-graph is the input map, one Custom HLSL node and the output. Read and write attributes by their full names:
-
-```hlsl
-// Drag, then a swirl around the emitter's axis.
-Particles.Velocity *= 1.0 - 1.5 * Engine.DeltaTime;
-float3 P = Particles.Position;
-Particles.Velocity += float3(-P.y, P.x, 0.0) * 2.0 * Engine.DeltaTime;
-```
-
-- Namespaces: `Particles.*` (particle scripts and stages), `Emitter.*`, `System.*`, `User.*`, `Engine.DeltaTime`,
-  `Engine.Time`. Declare locals with a type (`float3 Dir = ...;`). No `return`, no `#include`.
-- Every attribute you use must already exist in the emitter: an HLSL module can change `Particles.Velocity`,
-  `Particles.Color`, `Particles.SpriteSize` or `Particles.Age`, but cannot create a new one. To add an attribute, set it
-  first with Epic's `AddSetParametersModule` in `ParticleSpawnScript`, then read and write it from HLSL. A `User.*`
-  parameter must be added with Epic's `AddUserVariables` first.
-- Order matters: the module runs where it is appended, last in its stack. In `ParticleUpdateScript` it runs after
-  `Particle State`, so a change to `Particles.Age` or `Particles.Lifetime` takes effect the next frame.
-- CPU emitters compile the HLSL to the VM: plain math only. Texture sampling and data interface calls need a GPU emitter.
-- HLSL errors appear in `hyper_niagara_validate` (authoring) after the compile. A System with compile errors still takes
-  plans, so repair it in one: `set_module_enabled` `false` on the broken module (disabled modules are not compiled) and
-  `add_hlsl_module` with a new name and the corrected code. Validate again; remove the broken one with Epic's
-  `RemoveModule` once the compile is clean.
-
-**Editing one.** `set_hlsl_module` replaces a scratch pad module's body in place, wherever it sits in a stack, as one
-undo step; the System recompiles with the plan. Use it to tune or repair code rather than adding a module beside it.
+`add_hlsl_module` makes a scratch pad module whose body is your HLSL, appended to the stack. Read and write
+attributes by full name (`Particles.Velocity`, `Particles.SpriteSize`, `Engine.DeltaTime`, `Emitter.Age`,
+`Engine.Owner.Position`); declare locals with a type; no `return`, no `#include`. Every attribute you use must exist:
+make one with `add_set_parameters`, a `User.*` one with `add_user_parameter`. CPU emitters compile to the VM: plain
+math (`sin`, `cos`, `abs`, `min`, `max`, `lerp`); `smoothstep` and texture sampling need GPU. Errors show in
+`hyper_niagara_validate` after the compile; `set_hlsl_module` replaces a body in place.
 
 ## Simulation stages (GPU)
 
-A simulation stage is an extra stack that runs after Particle Update, as many times per frame as its iterations, over
-every particle. Use one for work that needs repeated passes: constraints, relaxation, settling, flocking corrections.
-In UE 5.8 they run only on GPU emitters, so a plan for a CPU emitter switches it first:
+A simulation stage runs after Particle Update, as many times per frame as its iterations: constraints, relaxation,
+settling. In UE 5.8 only GPU emitters run them, so switch first and give the emitter fixed bounds:
 
 ```json
 [{"kind": "set_emitter_property", "emitterName": "Sparks", "name": "sim_target", "value": "gpu"},
@@ -106,44 +178,21 @@ In UE 5.8 they run only on GPU emitters, so a plan for a CPU emitter switches it
   "hlsl": "if (Particles.Position.z < 0.0) { Particles.Position.z = 0.0; Particles.Velocity.z = abs(Particles.Velocity.z) * 0.5; }"}]
 ```
 
-`add_module` and `set_module_enabled` also take a `stageName`. Inputs of modules inside a stage cannot be set yet: write
-the values into an HLSL module there. Stages that iterate a data interface (grids, render targets) come from Epic's
-emitter templates.
+Emitter properties: `sim_target` (`cpu` | `gpu`), `local_space`, `determinism`, `enabled` (`true` | `false`),
+`random_seed`, `fixed_bounds` (`minx,miny,minz,maxx,maxy,maxz` or `dynamic`). Stay on CPU for small counts, events and
+effects that must look the same everywhere (and in the preview); GPU for hundreds of particles and stages.
 
-## CPU or GPU
+## Rules of thumb from Epic's Niagara skills
 
-`set_emitter_property` `sim_target` `cpu` or `gpu` switches an emitter. GPU takes many more particles and runs
-simulation stages and texture sampling, but cannot measure its own bounds (give it `fixed_bounds`) and its counts read
-back a frame late. Stay on CPU for small counts, events, collisions that spawn other emitters and effects that must be
-deterministic on every platform.
+- Stack order is System, Emitter, Particle, each Spawn then Update. One-time values in Spawn; forces, then collision,
+  then the solver in Particle Update.
+- Hue shift does nothing to white: give the base colour some hue first.
+- For ranges ("10 to 20"), use a random range, not one value.
+- World space unless particles must move rigidly with the actor; attaching sets where they spawn, not how they move.
+- Prefer dynamic inputs and module settings over HLSL expressions.
+- Verify intent: trace every velocity and appearance input after building, and look at the preview.
 
 ## Live in play
 
-`hyper_niagara_live` reads what plays in Play In Editor, read-only, per system and per emitter: particles alive, spawned
-during a short watch (`sampleSeconds`, 0.5 by default) and so whether it is `spawning`, its `simTarget`, state and
-bounds, and `issues`: compile errors, emitters disabled or culled, an active emitter with nothing alive or spawning,
-particles alive with empty bounds (it can be culled), shaders still caching. `filter` narrows it to a system, actor or
-component; `errors` lists every issue in one line each. It says what an effect is doing; what it costs per frame is
-`hyper_profile_live` (sampled game-thread, render-thread and GPU time per system). Use both when an effect looks wrong
-or slow in game.
-
-## A worked plan
-
-Sparks that fly up, slow down and spin into a vortex, on a System made as above:
-
-```json
-[{"kind": "add_emitter", "assetPath": "/Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain", "name": "Sparks"},
- {"kind": "set_renderer_property", "emitterName": "Sparks", "rendererIndex": 0, "name": "Alignment", "value": "VelocityAligned"},
- {"kind": "add_hlsl_module", "emitterName": "Sparks", "scriptName": "ParticleUpdateScript", "name": "Vortex",
-  "hlsl": "float3 P = Particles.Position;\nParticles.Velocity += float3(-P.y, P.x, 0.0) * 2.0 * Engine.DeltaTime;\nParticles.Velocity *= 1.0 - 0.8 * Engine.DeltaTime;"}]
-```
-
-Then `hyper_niagara_validate` with `authoring`, then `runtime_probe` with `expectEmitters: ["Sparks"]`. Inspect shows
-`Vortex` last in Particle Update and in `scratchPadModules`.
-
-## What stays in Epic's Niagara tools
-
-Removing an emitter, module, renderer or user parameter; adding user parameters and Set Parameters modules; reading a
-renderer's or module's full schema (`GetRendererSchema`, `GetModuleSchemaFromAsset`); dynamic inputs. Epic's
-`SetEmitterData` and `SetRendererData` write properties without undo and without telling the renderer or the compiler:
-use `set_emitter_property` and `set_renderer_property`, which do both.
+`hyper_niagara_live` reads what plays in Play In Editor, per system and per emitter: particles, whether each emitter is
+spawning, sim target, state, bounds and what is wrong. What an effect costs per frame is `hyper_profile_live`.

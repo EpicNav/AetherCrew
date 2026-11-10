@@ -115,8 +115,8 @@ bool FHyperAIStudioNiagaraManifestTest::RunTest(const FString& Parameters)
 	(void)Parameters;
 	const TArray<FHyperAIStudioNiagaraManifestEntry>& Manifest =
 		FHyperAIStudioNiagaraContracts::GetManifest();
-	// The generated catalog pins these four names; another tool would fail admission until it is regenerated.
-	TestEqual(TEXT("exactly four Niagara callables"), Manifest.Num(), 4);
+	// The generated catalog pins these six names; another tool would fail admission until it is regenerated.
+	TestEqual(TEXT("exactly six Niagara callables"), Manifest.Num(), 6);
 	TestEqual(TEXT("exact optional-module toolset identity"),
 		FHyperAIStudioNiagaraContracts::GetQualifiedToolsetName(),
 		FString(TEXT("HyperAIStudioNiagara.HyperAIStudioNiagaraToolset")));
@@ -124,7 +124,9 @@ bool FHyperAIStudioNiagaraManifestTest::RunTest(const FString& Parameters)
 		TEXT("hyper_niagara_inspect"),
 		TEXT("hyper_niagara_apply_plan"),
 		TEXT("hyper_niagara_validate"),
-		TEXT("hyper_niagara_live")};
+		TEXT("hyper_niagara_live"),
+		TEXT("hyper_niagara_discover"),
+		TEXT("hyper_niagara_preview")};
 	TSet<FString> Actual;
 	for (const FHyperAIStudioNiagaraManifestEntry& Entry : Manifest)
 	{
@@ -170,7 +172,7 @@ bool FHyperAIStudioNiagaraDescriptorTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("exact live probe"),
 		FString(FHyperAIStudioNiagaraContracts::LiveProbeId),
 		FString(TEXT("probe.niagara_editor")));
-	if (!TestEqual(TEXT("exact four variants"), Descriptor.Variants.Num(), 4)) return false;
+	if (!TestEqual(TEXT("exact six variants"), Descriptor.Variants.Num(), 6)) return false;
 	TestTrue(TEXT("contract fingerprint canonical"),
 		FHyperAIStudioNiagaraContracts::IsCanonicalSha256(Descriptor.ContractFingerprint));
 	TestTrue(TEXT("adapter fingerprint canonical"),
@@ -192,9 +194,9 @@ bool FHyperAIStudioNiagaraDescriptorTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("result type stays in the disjoint result namespace"),
 			Variant.ResultTypeId.StartsWith(TEXT("hyperai.result.")));
 	}
-	TestEqual(TEXT("unique variants"), Variants.Num(), 4);
-	TestEqual(TEXT("unique request DTOs"), RequestTypes.Num(), 4);
-	TestEqual(TEXT("unique result DTOs"), ResultTypes.Num(), 4);
+	TestEqual(TEXT("unique variants"), Variants.Num(), 6);
+	TestEqual(TEXT("unique request DTOs"), RequestTypes.Num(), 6);
+	TestEqual(TEXT("unique result DTOs"), ResultTypes.Num(), 6);
 	// Safety classes are pinned by the generated catalog; changing one fails admission closed.
 	TestEqual(TEXT("inspect read safety"), Descriptor.Variants[0].Safety, EHyperAIStudioDomainSafety::Read);
 	TestEqual(TEXT("apply_plan edit safety"), Descriptor.Variants[1].Safety, EHyperAIStudioDomainSafety::Edit);
@@ -203,6 +205,10 @@ bool FHyperAIStudioNiagaraDescriptorTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("validate read safety"), Descriptor.Variants[2].Safety, EHyperAIStudioDomainSafety::Read);
 	TestEqual(TEXT("live read safety"), Descriptor.Variants[3].Safety, EHyperAIStudioDomainSafety::Read);
 	TestEqual(TEXT("live reads hyper_niagara_live"), Descriptor.Variants[3].ToolName, FString(TEXT("hyper_niagara_live")));
+	TestEqual(TEXT("discover read safety"), Descriptor.Variants[4].Safety, EHyperAIStudioDomainSafety::Read);
+	TestEqual(TEXT("discover is hyper_niagara_discover"), Descriptor.Variants[4].ToolName, FString(TEXT("hyper_niagara_discover")));
+	TestEqual(TEXT("preview read safety"), Descriptor.Variants[5].Safety, EHyperAIStudioDomainSafety::Read);
+	TestEqual(TEXT("preview is hyper_niagara_preview"), Descriptor.Variants[5].ToolName, FString(TEXT("hyper_niagara_preview")));
 	return true;
 }
 
@@ -274,8 +280,10 @@ bool FHyperAIStudioNiagaraEditOpValidationTest::RunTest(const FString& Parameter
 	TestFalse(TEXT("control characters rejected"), Accepts(ControlChars));
 	TestEqual(TEXT("text failure status"), Status, FString(TEXT("invalid_op_text")));
 
-	TestFalse(TEXT("unknown kind rejected"), Accepts(MakeOp(TEXT("remove_module"))));
-	TestEqual(TEXT("removals stay unsupported"), Status, FString(TEXT("unsupported_op_kind")));
+	TestFalse(TEXT("unknown kind rejected"), Accepts(MakeOp(TEXT("rename_module"))));
+	TestEqual(TEXT("as unsupported_op_kind"), Status, FString(TEXT("unsupported_op_kind")));
+	TestFalse(TEXT("a removal without its address is refused"), Accepts(MakeOp(TEXT("remove_module"))));
+	TestEqual(TEXT("as invalid_op_address"), Status, FString(TEXT("invalid_op_address")));
 
 	FHyperAINiagaraEditOp SetValue = Enable;
 	SetValue.Kind = TEXT("set_input_value");
@@ -296,6 +304,9 @@ bool FHyperAIStudioNiagaraEditOpValidationTest::RunTest(const FString& Parameter
 	TestFalse(TEXT("float rejects exponent and words"), ValueAccepted(TEXT("float"), TEXT("nan")));
 	TestFalse(TEXT("bool rejects anything but true or false"), ValueAccepted(TEXT("bool"), TEXT("1")));
 	TestFalse(TEXT("unknown value type rejected"), ValueAccepted(TEXT("quat"), TEXT("0,0,0,1")));
+	TestTrue(TEXT("vector2"), ValueAccepted(TEXT("vector2"), TEXT("1,2")));
+	TestTrue(TEXT("vector4"), ValueAccepted(TEXT("vector4"), TEXT("1,2,3,4")));
+	TestTrue(TEXT("position"), ValueAccepted(TEXT("position"), TEXT("0,0,100")));
 	SetValue.ValueType = TEXT("float");
 	SetValue.Value = TEXT("1");
 	SetValue.InputNameStack.Reset();
@@ -351,7 +362,7 @@ bool FHyperAIStudioNiagaraCasBoundsTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("non-user namespace rejected"),
 		FHyperAIStudioNiagaraContracts::IsUserParameterName(TEXT("System.SpawnRate")));
 	TestEqual(TEXT("page bound"), FHyperAIStudioNiagaraContracts::MaxPageSize, 64);
-	TestEqual(TEXT("op bound"), FHyperAIStudioNiagaraContracts::MaxOpsPerPlan, 16);
+	TestEqual(TEXT("op bound"), FHyperAIStudioNiagaraContracts::MaxOpsPerPlan, 96);
 
 	FHyperAINiagaraApplyPlanRequest Request;
 	Request.TargetPath = TEXT("/Game/VFX/NS_Test.NS_Test");
