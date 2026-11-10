@@ -816,7 +816,7 @@
 		{
 			"Name": "RewindDebuggerToolset",
 			"Type": "Editor",
-			"LoadingPhase": "PostEngineInit",
+			"LoadingPhase": "None",
 			"PlatformAllowList": [
 				"Win64"
 			]
@@ -824,7 +824,7 @@
 		{
 			"Name": "RewindDebuggerToolsetTests",
 			"Type": "Editor",
-			"LoadingPhase": "Default",
+			"LoadingPhase": "None",
 			"PlatformAllowList": [
 				"Win64"
 			]
@@ -840,7 +840,7 @@
 		{
 			"Name": "WorldConditionsToolset59",
 			"Type": "Editor",
-			"LoadingPhase": "PostEngineInit",
+			"LoadingPhase": "None",
 			"PlatformAllowList": [
 				"Win64"
 			]
@@ -848,7 +848,7 @@
 		{
 			"Name": "DataRegistryToolset59",
 			"Type": "Editor",
-			"LoadingPhase": "PostEngineInit",
+			"LoadingPhase": "None",
 			"PlatformAllowList": [
 				"Win64"
 			]
@@ -1057,6 +1057,10 @@
 		},
 		{
 			"Name": "Chooser",
+			"Enabled": false
+		},
+		{
+			"Name": "GameplayInsights",
 			"Enabled": false
 		}
 	]

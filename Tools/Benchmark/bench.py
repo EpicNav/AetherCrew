@@ -72,6 +72,8 @@ REQUIRED_PLUGINS = (
     "PluginToolset", "SlateInspectorToolset", "StateTreeToolset", "UMGToolSet",
     "WorldConditionsToolset", "GeometryCollectionPlugin", "Fracture", "ChaosEditor", "Dataflow",
     "FieldSystemPlugin", "DataflowAgent", "MotionWarping", "Chooser", "PoseSearch", "DataRegistry",
+    # The ported 5.9 RewindDebuggerToolset (Source/Epic59) loads only with it.
+    "GameplayInsights",
 )
 
 HYPERAI_SETTINGS = {
