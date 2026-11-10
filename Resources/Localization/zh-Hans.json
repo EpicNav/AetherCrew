@@ -2553,9 +2553,15 @@
   },
   {
    "namespace": "HyperAIStudioNiagaraExternalEditGate",
-   "key": "InvalidInputValue",
-   "source": "The input value no longer parses.",
-   "text": "输入值已无法解析。"
+   "key": "InvalidSetParameter",
+   "source": "The Set Parameters value no longer parses.",
+   "text": "“设置参数”模块的值已无法解析。"
+  },
+  {
+   "namespace": "HyperAIStudioNiagaraExternalEditGate",
+   "key": "InvalidUserDefault",
+   "source": "The user parameter's default no longer parses.",
+   "text": "用户参数的默认值已无法解析。"
   },
   {
    "namespace": "HyperAIStudioNiagaraExternalEditGate",

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "HyperAIStudioNiagaraToolset.h"
 
+class UNiagaraScript;
 class UNiagaraSystem;
 
 /**
@@ -17,6 +18,8 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 	static constexpr int32 MaxTopologyModules = 512;
 	static constexpr int32 MaxInputNamesPerModule = 64;
 	static constexpr int32 MaxInputNameDepth = 8;
+	/** hlsl_expression, data_interface JSON and curve keys. */
+	static constexpr int32 MaxLongValueChars = 8192;
 
 	struct FDiagnostics
 	{
@@ -39,7 +42,8 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 		UNiagaraSystem& System,
 		TArray<FHyperAINiagaraEmitterTopology>& OutEmitters,
 		bool& bOutTruncated,
-		FString& OutError);
+		FString& OutError,
+		bool bIncludeValues = false);
 
 	bool ReadDiagnostics(UNiagaraSystem& System, int32 MaxIssues, FDiagnostics& OutDiagnostics, FString& OutError);
 
@@ -62,4 +66,23 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 
 	/** False if the experimental API's reflected class is missing from this engine build. */
 	bool IsApiAvailable();
+
+	/** The plan makes its target: its first op is create_system. */
+	bool IsCreatePlan(const TArray<FHyperAINiagaraEditOp>& Ops);
+
+	/** create_system's value: the emitter names to keep, in order, without blanks or repeats. */
+	TArray<FName> ParseEmitterList(const FString& Value);
+
+	/**
+	 * Makes the System at TargetPath (which must be absent) with Epic's CreateNiagaraSystem: a copy of the template
+	 * System create_system names, or an empty System, then removes the emitters its value does not keep. The asset
+	 * is registered and dirty; it is not saved and its creation is not an undo step.
+	 */
+	UNiagaraSystem* CreateSystem(const FString& TargetPath, const FHyperAINiagaraEditOp& Op, FString& OutError);
+
+	/** A module's or dynamic input's inputs (name, value_type, category, tooltip) and outputs, read from the asset. */
+	bool ReadScriptSchema(const UNiagaraScript& Script, TArray<FHyperAINiagaraInputSchema>& OutInputs, TArray<FString>& OutOutputs, FString& OutError);
+
+	/** Library dynamic input scripts whose output is ValueType (float, vector, color...). */
+	bool ListDynamicInputs(const FString& ValueType, TArray<FString>& OutPaths, FString& OutError);
 }

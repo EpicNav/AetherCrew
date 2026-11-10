@@ -2132,6 +2132,22 @@
      "safety": [
       "Read"
      ]
+    },
+    {
+     "name": "hyper_niagara_discover",
+     "cohort": "cohort.source.hyperaistudioniagaratoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
+    },
+    {
+     "name": "hyper_niagara_preview",
+     "cohort": "cohort.source.hyperaistudioniagaratoolset.v1",
+     "admission": "SourceCandidate",
+     "safety": [
+      "Read"
+     ]
     }
    ]
   },
