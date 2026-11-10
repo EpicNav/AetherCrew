@@ -701,8 +701,17 @@ bool FHyperAIStudioNiagaraRecipesTest::RunTest(const FString& Parameters)
 		ON_SCOPE_EXIT { ObjectTools::ForceDeleteObjects({System}, /*ShowConfirmation=*/false); };
 		int32 Applied = 0;
 		TArray<FString> PerOp;
-		const bool bApplied = Gate::ApplyOps(*System, Ops, Applied, PerOp, Error);
+		bool bApplied = Gate::ApplyOps(*System, Ops, Applied, PerOp, Error);
 		TestTrue(FString::Printf(TEXT("%s's %d ops apply (%s)"), *Info.Id, Ops.Num(), *Error), bApplied);
+		if (bApplied && Info.Settings.ContainsByPredicate([](const Recipes::FRecipeSetting& Setting) { return Setting.Key == TEXT("part"); }))
+		{
+			// A recipe in two parts: the second adds to the System the first made, with no create_system of its own.
+			TArray<FHyperAINiagaraEditOp> Second;
+			TestTrue(FString::Printf(TEXT("%s part 2 compiles: %s"), *Info.Id, *Error),
+				Recipes::Compile(Info.Id, {TEXT("part=2")}, Path, Second, Materials, Notes, Error) && Second.Num() > 1 && Second[0].Kind != TEXT("create_system"));
+			bApplied = Gate::ApplyOps(*System, Second, Applied, PerOp, Error);
+			TestTrue(FString::Printf(TEXT("%s part 2's %d ops apply (%s)"), *Info.Id, Second.Num(), *Error), bApplied);
+		}
 		if (!bApplied)
 		{
 			continue;

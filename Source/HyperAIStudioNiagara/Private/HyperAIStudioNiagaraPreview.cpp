@@ -225,7 +225,7 @@ namespace HyperAIStudio::Niagara::Preview
 		}
 		const FVector Focus = Reach.GetCenter();
 		// Framed on the typical age rather than the widest: one stray spark flung far should not shrink the effect to a dot.
-		const double Radius = FMath::Clamp(Measured > 0 ? FMath::Lerp(ExtentSum / Measured, Reach.GetExtent().Size(), 0.25) : Reach.GetExtent().Size(), 20.0, 20000.0);
+		const double Radius = FMath::Clamp(Measured > 0 ? FMath::Lerp(ExtentSum / Measured, Reach.GetExtent().Size(), 0.3) : Reach.GetExtent().Size(), 20.0, 20000.0);
 		const double Distance = Request.Distance > 0.f ? Request.Distance : Radius / FMath::Tan(FMath::DegreesToRadians(FieldOfView * 0.5)) * 1.05;
 		const FVector Direction = ViewDirection(View);
 		Report.FocusPoint = Focus;
@@ -283,7 +283,19 @@ namespace HyperAIStudio::Niagara::Preview
 		Capture.PostProcessBlendWeight = 1.f;
 		Scene.AddComponent(&Capture, FTransform(Direction.Rotation(), Focus - Direction * Distance));
 
-		// The empty plate first: what every tile is measured against.
+		// Warm up on the last age, where the effect is drawn: the first draws ask for the particle and backdrop shaders,
+		// which finish compiling here, so neither the plate nor any tile is drawn with a material still missing.
+		for (int32 Warm = 0; Warm < 3; ++Warm)
+		{
+			TArray<FColor> Discard;
+			Camera.Read(*World, Discard);
+			if (GShaderCompilingManager)
+			{
+				GShaderCompilingManager->FinishAllCompilation();
+			}
+		}
+
+		// The empty plate next: what every tile is measured against.
 		Component->DeactivateImmediate();
 		TArray<FColor> Plate;
 		if (!Camera.Read(*World, Plate))
@@ -292,27 +304,17 @@ namespace HyperAIStudio::Niagara::Preview
 			return Fail(Report, TEXT("capture_failed"), TEXT("The preview capture could not be read back."));
 		}
 
-		// Second pass: the same simulation again, drawn at each age. Shaders the first draw asks for finish before the kept draw.
+		// Second pass: the same simulation again, drawn at each age.
 		Component->Activate(/*bReset=*/true);
 		Now = 0.f;
 		const int32 Tile = Camera.Size;
 		const int32 SheetWidth = Tile * Ages.Num();
 		TArray<FColor> Sheet;
 		Sheet.Init(FColor::Black, SheetWidth * Tile);
-		bool bWarmed = false;
 		for (int32 Index = 0; Index < Ages.Num(); ++Index)
 		{
 			AdvanceTo(*Component, Now, Ages[Index], Request.DeltaSeconds);
 			TArray<FColor> Pixels;
-			if (!bWarmed)
-			{
-				Camera.Read(*World, Pixels);
-				if (GShaderCompilingManager)
-				{
-					GShaderCompilingManager->FinishAllCompilation();
-				}
-				bWarmed = true;
-			}
 			if (!Camera.Read(*World, Pixels))
 			{
 				Scene.RemoveComponent(Component);

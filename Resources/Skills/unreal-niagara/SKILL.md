@@ -16,7 +16,9 @@ the whole effect, send it, then look at it.
    `magic_burst`, `impact_sparks`, `smoke_plume`, `ribbon_trail`), `recipeSettings` (`["color=0.3,0.6,1", "scale=2"]`)
    and a new `targetPath`. `hyper_niagara_discover` with `kind: "recipes"` lists each recipe's settings, and
    `kind: "recipe"` returns its ops to read or adapt before sending them yourself. For anything else, start from a
-   template: `kind: "templates"` lists Niagara's emitter and System templates with what each does.
+   template: `kind: "templates"` lists Niagara's emitter and System templates with what each does. `explosion` is two plans, as one plan's time budget
+   holds about 60 ops: `part=1` makes the flash, fireball and shockwave; then `part=2`, with the same `targetPath` and
+   its new `expectedRevision` from inspect, adds the sparks and smoke.
 2. **Materials first.** Recipes draw with particle materials; their reply (and discover's `materials`) names each one
    and whether it exists. Make missing ones with `hyper_material_recipe`: `particle_additive` (fire, sparks, flashes,
    magic; `shape: "ring"` for shockwaves) and `particle_translucent` (smoke and dust; `noise: "0.7"` breaks it up).

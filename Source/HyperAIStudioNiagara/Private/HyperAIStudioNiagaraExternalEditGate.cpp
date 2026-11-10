@@ -567,7 +567,9 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 			if (!Value.IsValid()) return TEXT("unset");
 			if (const FNiagaraExt_StackInputData_Enum* Enum = Value.GetPtr<FNiagaraExt_StackInputData_Enum>())
 			{
-				return TEXT("enum ") + Enum->EnumName.ToString();
+				// Niagara's own enums name their entries NewEnumerator0..N; the display name is what an agent reads and writes.
+				const FString Display = Enum->DisplayName.ToString();
+				return TEXT("enum ") + (Display.IsEmpty() ? Enum->EnumName.ToString() : Display + TEXT(" (") + Enum->EnumName.ToString() + TEXT(")"));
 			}
 			if (const FNiagaraExt_StackInputData_Linked* Linked = Value.GetPtr<FNiagaraExt_StackInputData_Linked>())
 			{
@@ -643,10 +645,20 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 		 * type first, since an enum, a link or a data interface must match it.
 		 */
 		bool BuildStackValue(UNiagaraSystem& System, const FHyperAINiagaraEditOp& Op, FNiagaraExternalEditContext& Context,
-			FNiagaraExt_StackInputValue& OutValue, FString& OutError)
+			FNiagaraExt_StackInputValue& OutValue, FString& OutError, bool& bOutStaticSwitch)
 		{
+			bOutStaticSwitch = false;
 			if (IsLocalValueType(Op.ValueType))
 			{
+				if (Op.ValueType == TEXT("bool") || Op.ValueType == TEXT("int32"))
+				{
+					// Static switches are bools and ints too; a read that fails here fails again, louder, in the set.
+					FNiagaraExt_StackInputTopology Switch;
+					const int32 ErrorsBefore = Context.Errors.Num();
+					UNiagaraExternalEditUtilities::GetStackInputTopology(MakeReference(System, Op), Switch, Context);
+					bOutStaticSwitch = Context.Errors.Num() == ErrorsBefore && Switch.bIsStaticSwitch;
+					Context.Errors.SetNum(ErrorsBefore);
+				}
 				OutError = TEXT("The input value no longer parses.");
 				return BuildInputValue(Op.ValueType, Op.Value, OutValue);
 			}
@@ -656,6 +668,7 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 			{
 				return false;
 			}
+			bOutStaticSwitch = Input.bIsStaticSwitch;
 			const FString Text = Op.Value.TrimStartAndEnd();
 			const FString Path = FString::Join(Op.InputNameStack, TEXT("."));
 			if (Op.ValueType == TEXT("enum"))
@@ -1305,11 +1318,20 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 		FScopedTransaction Transaction(LOCTEXT("ApplyOpsTransaction", "HyperAI Niagara Edit"));
 		System.Modify();
 		FNiagaraExternalEditContext Context(&System);
+		TSet<FString> SwitchedModules;
 
 		for (const FHyperAINiagaraEditOp& Op : Ops)
 		{
+			// A static switch reshapes its module's inputs, but the context's stack keeps the old shape. Before the next op
+			// on a switched module, read a fresh one, so an input the switch just showed can be set in the same plan.
+			if (SwitchedModules.Contains(Op.EmitterName + TEXT("/") + Op.ScriptName + TEXT("/") + Op.ModuleName))
+			{
+				Context = FNiagaraExternalEditContext(&System);
+				SwitchedModules.Reset();
+			}
 			const int32 ErrorsBefore = Context.Errors.Num();
 			FString Status = TEXT("applied");
+			bool bRefreshStack = false;
 
 			if (HyperAIStudio::Niagara::GraphGate::IsGraphOp(Op))
 			{
@@ -1348,7 +1370,7 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 			{
 				FNiagaraExt_StackInputValue Value;
 				FString ValueError;
-				if (BuildStackValue(System, Op, Context, Value, ValueError))
+				if (BuildStackValue(System, Op, Context, Value, ValueError, bRefreshStack))
 				{
 					UNiagaraExternalEditUtilities::SetStackInputData(MakeReference(System, Op), Value, Context);
 					Status = TEXT("set_input:") + FString::Join(Op.InputNameStack, TEXT("."));
@@ -1463,6 +1485,10 @@ namespace HyperAIStudio::Niagara::ExternalEditGate
 			}
 			OutPerOpStatus.Add(Status);
 			++OutAppliedCount;
+			if (bRefreshStack)
+			{
+				SwitchedModules.Add(Op.EmitterName + TEXT("/") + Op.ScriptName + TEXT("/") + Op.ModuleName);
+			}
 		}
 		return true;
 	}

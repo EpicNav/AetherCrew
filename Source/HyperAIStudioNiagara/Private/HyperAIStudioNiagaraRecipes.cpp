@@ -12,6 +12,7 @@ namespace HyperAIStudio::Niagara::Recipes
 	namespace
 	{
 		const TCHAR* const Fountain = TEXT("/Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain");
+		const TCHAR* const SingleParticle = TEXT("/Niagara/DefaultAssets/Templates/Emitters/SingleLoopingParticle.SingleLoopingParticle");
 		const TCHAR* const Burst = TEXT("/Niagara/DefaultAssets/Templates/Emitters/OmnidirectionalBurst.OmnidirectionalBurst");
 		const TCHAR* const RandomRange = TEXT("/Niagara/DynamicInputs/UniformRange/V2/RandomRangeFloat.RandomRangeFloat");
 		const TCHAR* const ColorFromCurve = TEXT("/Niagara/DynamicInputs/ValueFromCurve/ColorFromCurve.ColorFromCurve");
@@ -61,13 +62,14 @@ namespace HyperAIStudio::Niagara::Recipes
 				{TEXT("fire"), TEXT("A looping campfire: rising, flickering flame sprites that cool from white-yellow to deep red, sparks of embers drifting up, and an optional plume of dark smoke above."),
 					Common(TEXT("1,0.42,0.1"), {{TEXT("smoke"), TEXT("true"), TEXT("A smoke plume above the flames")}, MaterialSetting(Additive), MaterialSetting(Smoke)})},
 				{TEXT("explosion"), TEXT("A one-shot explosion: a white flash, a fireball that expands and cools, a shockwave ring, sparks flung out and falling, and smoke that rises and thins."),
-					Common(TEXT("1,0.45,0.12"), {MaterialSetting(Additive), MaterialSetting(Smoke), MaterialSetting(Ring)})},
+					Common(TEXT("1,0.45,0.12"), {{TEXT("part"), TEXT("1"), TEXT("1 makes the System with the flash, fireball and shockwave; 2 adds the sparks and smoke to it (a second plan: the whole effect is past one plan's time budget)")},
+						MaterialSetting(Additive), MaterialSetting(Smoke), MaterialSetting(Ring)})},
 				{TEXT("magic_burst"), TEXT("A one-shot spell burst: a glowing core, an expanding ring, and motes that fly out, swirl and shift from the main colour to the accent colour as they fade."),
 					Common(TEXT("0.3,0.6,1"), {{TEXT("accent"), TEXT("1,0.3,0.9"), TEXT("The colour the motes turn as they fade, r,g,b")}, MaterialSetting(Additive), MaterialSetting(Ring)})},
 				{TEXT("impact_sparks"), TEXT("A one-shot bullet or blade impact on a surface below: a bright flash, hot streaking sparks thrown up and out that fall with gravity, and a small dust puff."),
 					Common(TEXT("1,0.6,0.25"), {MaterialSetting(Additive), MaterialSetting(Smoke)})},
 				{TEXT("smoke_plume"), TEXT("A looping column of soft smoke that rises, spreads, drifts with the wind and thins out."),
-					Common(TEXT("0.3,0.29,0.28"), {{TEXT("wind"), TEXT("40,0,0"), TEXT("Drift in cm/s, x,y,z")}, MaterialSetting(Smoke)})},
+					Common(TEXT("0.13,0.125,0.12"), {{TEXT("wind"), TEXT("40,0,0"), TEXT("Drift in cm/s, x,y,z")}, MaterialSetting(Smoke)})},
 				{TEXT("ribbon_trail"), TEXT("A glowing ribbon trail that tapers and fades behind its source; orbit_radius makes it circle on its own so it shows without moving the System."),
 					Common(TEXT("0.3,0.75,1"), {{TEXT("orbit_radius"), TEXT("80"), TEXT("Circle radius in cm, 0 to trail only when the System moves")}, MaterialSetting(Additive)})},
 			};
@@ -101,6 +103,8 @@ namespace HyperAIStudio::Niagara::Recipes
 			double Scale = 1;
 			double Intensity = 1;
 			FVector Color = FVector::OneVector;
+			/** False for a recipe part that adds to a System an earlier part made. */
+			bool bCreates = true;
 
 			FHyperAINiagaraEditOp& Add(const TCHAR* Kind, const FString& Emitter = FString(), const TCHAR* Script = TEXT(""), const FString& Module = FString())
 			{
@@ -218,13 +222,19 @@ namespace HyperAIStudio::Niagara::Recipes
 				Set(Emitter, EmitterUpdate, TEXT("EmitterState"), {TEXT("Loop Behavior")}, TEXT("enum"), TEXT("Once"));
 			}
 
-			/** A burst emitter that stays still: one particle, no forces. */
-			void Still(const FString& Emitter)
+			/**
+			 * One still particle that plays once (a flash, a core, a ring): Niagara's Single Looping Particle template, whose
+			 * stack has no forces or colour scaling to switch off, so it costs a handful of ops.
+			 */
+			void Single(const FString& Emitter, const double Lifetime, const double Size)
 			{
-				Disable(Emitter, Spawn, TEXT("AddVelocity"));
-				Disable(Emitter, Update, TEXT("GravityForce"));
-				Disable(Emitter, Update, TEXT("Drag"));
-				Float(Emitter, Spawn, TEXT("ShapeLocation"), TEXT("Sphere Radius"), 0.1);
+				this->Emitter(Emitter, SingleParticle);
+				// The template follows the System's life cycle, which hides Loop Behavior; give the emitter its own first.
+				Set(Emitter, EmitterUpdate, TEXT("EmitterState"), {TEXT("Life Cycle Mode")}, TEXT("enum"), TEXT("Self"));
+				Once(Emitter);
+				Float(Emitter, Spawn, TEXT("InitializeParticle"), TEXT("Lifetime"), Lifetime);
+				Hlsl(Emitter, Spawn, Emitter + TEXT("Birth"), FString::Printf(TEXT("// One size, set at birth.\nParticles.SpriteSize = float2(%s, %s);"),
+					*Num(Size * Scale), *Num(Size * Scale)));
 			}
 
 			/** The material a setting names, or Niagara's default when it does not exist yet (and how to make it). */
@@ -279,7 +289,7 @@ namespace HyperAIStudio::Niagara::Recipes
 		/** Hot at birth, through the main colour, to nothing: the colour keys of things that burn out. */
 		TArray<TPair<double, FString>> Burn(const FVector& Color, const double Peak, const double Mid = 0.35)
 		{
-			const FVector Hot = FMath::Lerp(Color, FVector::OneVector, 0.45) * Peak;
+			const FVector Hot = FMath::Lerp(Color, FVector::OneVector, 0.25) * Peak;
 			return {{0.0, Rgba(Hot, 1)}, {Mid, Rgba(Color * Peak * 0.7, 1)}, {0.75, Rgba(Color * Color * Peak * 0.25, 1)}, {1.0, Rgba(FVector::ZeroVector, 0)}};
 		}
 
@@ -315,7 +325,7 @@ namespace HyperAIStudio::Niagara::Recipes
 			B.Rate(TEXT("Flames"), 50);
 			B.Particles(TEXT("Flames"), 0.5, 0.95, 26, 48);
 			B.Motion(TEXT("Flames"), 20, 70, FVector(0, 0, 280), 1.6, 14);
-			B.ColorOverLife(TEXT("Flames"), Burn(B.Color, 5.0));
+			B.ColorOverLife(TEXT("Flames"), Burn(B.Color, 3.2));
 			B.SizeOverLife(TEXT("Flames"), -0.9);
 			B.Hlsl(TEXT("Flames"), Update, TEXT("FlamesFlicker"), Flicker(90 * B.Scale));
 			B.Renderer(TEXT("Flames"), 0, TEXT("Material"), Glow);
@@ -324,7 +334,7 @@ namespace HyperAIStudio::Niagara::Recipes
 			B.Rate(TEXT("Embers"), 9);
 			B.Particles(TEXT("Embers"), 1.2, 2.3, 3, 6);
 			B.Motion(TEXT("Embers"), 60, 160, FVector(0, 0, 170), 0.9, 18);
-			B.ColorOverLife(TEXT("Embers"), Burn(B.Color, 9.0, 0.25));
+			B.ColorOverLife(TEXT("Embers"), Burn(B.Color, 7.0, 0.25));
 			B.Hlsl(TEXT("Embers"), Update, TEXT("EmbersFlicker"), Flicker(220 * B.Scale));
 			B.Renderer(TEXT("Embers"), 0, TEXT("Material"), Glow);
 
@@ -343,18 +353,25 @@ namespace HyperAIStudio::Niagara::Recipes
 			B.Notes.Add(TEXT("Loops forever; place it and leave it. Flames and Embers are additive, so they read best against darker surroundings."));
 		}
 
+		void BuildDebris(FBuilder& B, const FString& Glow, const FString& Soot);
+
 		void BuildExplosion(FBuilder& B)
 		{
 			const FString Glow = B.Material(Additive);
 			const FString Soot = B.Material(Smoke);
 			const FString Wave = B.Material(Ring);
+			double Part = 1;
+			if (!B.Number(TEXT("part"), Part, 1, 2)) return;
+			B.bCreates = Part == 1;
+			if (Part == 2)
+			{
+				BuildDebris(B, Glow, Soot);
+				B.Notes.Add(TEXT("Part 2 of 2: send it to the System part 1 made, with that System's revision from hyper_niagara_inspect."));
+				return;
+			}
 
-			B.Emitter(TEXT("Flash"), Burst);
-			B.Once(TEXT("Flash"));
-			B.Count(TEXT("Flash"), 1.0 / B.Intensity);
-			B.Particles(TEXT("Flash"), 0.16, 0.2, 260, 300);
-			B.Still(TEXT("Flash"));
-			B.ColorOverLife(TEXT("Flash"), {{0.0, Rgba(FMath::Lerp(B.Color, FVector::OneVector, 0.7) * 14.0, 1)}, {0.4, Rgba(B.Color * 6.0, 1)}, {1.0, Rgba(FVector::ZeroVector, 0)}});
+			B.Single(TEXT("Flash"), 0.18, 280);
+			B.ColorOverLife(TEXT("Flash"), {{0.0, Rgba(FMath::Lerp(B.Color, FVector::OneVector, 0.5) * 9.0, 1)}, {0.4, Rgba(B.Color * 6.0, 1)}, {1.0, Rgba(FVector::ZeroVector, 0)}});
 			B.Renderer(TEXT("Flash"), 0, TEXT("Material"), Glow);
 
 			B.Emitter(TEXT("Fireball"), Burst);
@@ -362,26 +379,28 @@ namespace HyperAIStudio::Niagara::Recipes
 			B.Count(TEXT("Fireball"), 26);
 			B.Particles(TEXT("Fireball"), 0.6, 1.1, 50, 105);
 			B.Motion(TEXT("Fireball"), 150, 460, FVector(0, 0, 160), 5.0, 22);
-			B.ColorOverLife(TEXT("Fireball"), Burn(B.Color, 7.0, 0.25));
+			B.ColorOverLife(TEXT("Fireball"), Burn(B.Color, 4.5, 0.25));
 			B.SizeOverLife(TEXT("Fireball"), 1.3);
 			B.Renderer(TEXT("Fireball"), 0, TEXT("Material"), Glow);
 
-			B.Emitter(TEXT("Shockwave"), Burst);
-			B.Once(TEXT("Shockwave"));
-			B.Count(TEXT("Shockwave"), 1.0 / B.Intensity);
-			B.Particles(TEXT("Shockwave"), 0.42, 0.45, 60, 60);
-			B.Still(TEXT("Shockwave"));
+			B.Single(TEXT("Shockwave"), 0.435, 60);
 			B.ColorOverLife(TEXT("Shockwave"), {{0.0, Rgba(FMath::Lerp(B.Color, FVector::OneVector, 0.6) * 3.0, 1)}, {1.0, Rgba(FVector::ZeroVector, 0)}});
 			B.Hlsl(TEXT("Shockwave"), Update, TEXT("ShockwaveGrow"), FString::Printf(
 				TEXT("// The ring races outward, slowing as it goes.\nParticles.SpriteSize += float2(1.0, 1.0) * %s * (1.0 - Particles.NormalizedAge) * Engine.DeltaTime;"), *Num(2600 * B.Scale)));
 			B.Renderer(TEXT("Shockwave"), 0, TEXT("Material"), Wave);
 
+			B.Notes.Add(TEXT("Part 1 of 2. Then the same recipe with part=2, targetPath this System and its new revision from hyper_niagara_inspect adds the sparks and smoke."));
+		}
+
+		/** The explosion's second plan: sparks flung out and falling, and smoke that rises and thins. */
+		void BuildDebris(FBuilder& B, const FString& Glow, const FString& Soot)
+		{
 			B.Emitter(TEXT("Sparks"), Burst);
 			B.Once(TEXT("Sparks"));
 			B.Count(TEXT("Sparks"), 70);
 			B.Particles(TEXT("Sparks"), 0.5, 1.4, 4, 6);
 			B.Motion(TEXT("Sparks"), 700, 1700, FVector(0, 0, -980), 1.3, 10);
-			B.ColorOverLife(TEXT("Sparks"), Burn(B.Color, 12.0, 0.3));
+			B.ColorOverLife(TEXT("Sparks"), Burn(B.Color, 9.0, 0.3));
 			Streaks(B, TEXT("Sparks"), 3.0, 0.035);
 			B.Renderer(TEXT("Sparks"), 0, TEXT("Material"), Glow);
 
@@ -390,7 +409,7 @@ namespace HyperAIStudio::Niagara::Recipes
 			B.Count(TEXT("Smoke"), 18);
 			B.Particles(TEXT("Smoke"), 1.8, 3.2, 80, 150);
 			B.Motion(TEXT("Smoke"), 60, 260, FVector(0, 0, 90), 2.6, 30);
-			B.ColorOverLife(TEXT("Smoke"), Thin(FVector(0.16, 0.15, 0.14), 0.7));
+			B.ColorOverLife(TEXT("Smoke"), Thin(FVector(0.1, 0.095, 0.09), 0.55));
 			B.SizeOverLife(TEXT("Smoke"), 0.6);
 			B.Renderer(TEXT("Smoke"), 0, TEXT("Material"), Soot);
 			B.Notes.Add(TEXT("Plays once (about 3 s): reactivate the component, or spawn it at a location, for each explosion."));
@@ -403,20 +422,12 @@ namespace HyperAIStudio::Niagara::Recipes
 			const FString Glow = B.Material(Additive);
 			const FString Wave = B.Material(Ring);
 
-			B.Emitter(TEXT("Core"), Burst);
-			B.Once(TEXT("Core"));
-			B.Count(TEXT("Core"), 1.0 / B.Intensity);
-			B.Particles(TEXT("Core"), 0.5, 0.55, 170, 190);
-			B.Still(TEXT("Core"));
+			B.Single(TEXT("Core"), 0.525, 180);
 			B.ColorOverLife(TEXT("Core"), {{0.0, Rgba(FMath::Lerp(B.Color, FVector::OneVector, 0.3) * 4.0, 1)}, {0.5, Rgba(B.Color * 2.0, 1)}, {1.0, Rgba(FVector::ZeroVector, 0)}});
 			B.SizeOverLife(TEXT("Core"), -1.2);
 			B.Renderer(TEXT("Core"), 0, TEXT("Material"), Glow);
 
-			B.Emitter(TEXT("Ring"), Burst);
-			B.Once(TEXT("Ring"));
-			B.Count(TEXT("Ring"), 1.0 / B.Intensity);
-			B.Particles(TEXT("Ring"), 0.6, 0.65, 40, 40);
-			B.Still(TEXT("Ring"));
+			B.Single(TEXT("Ring"), 0.625, 40);
 			B.ColorOverLife(TEXT("Ring"), {{0.0, Rgba(B.Color * 4.0, 1)}, {0.5, Rgba(Accent * 2.5, 1)}, {1.0, Rgba(FVector::ZeroVector, 0)}});
 			B.Hlsl(TEXT("Ring"), Update, TEXT("RingGrow"), FString::Printf(
 				TEXT("// The ring opens fast, then eases.\nParticles.SpriteSize += float2(1.0, 1.0) * %s * (1.0 - Particles.NormalizedAge) * Engine.DeltaTime;"), *Num(1400 * B.Scale)));
@@ -441,12 +452,8 @@ namespace HyperAIStudio::Niagara::Recipes
 			const FString Glow = B.Material(Additive);
 			const FString Soot = B.Material(Smoke);
 
-			B.Emitter(TEXT("Flash"), Burst);
-			B.Once(TEXT("Flash"));
-			B.Count(TEXT("Flash"), 1.0 / B.Intensity);
-			B.Particles(TEXT("Flash"), 0.08, 0.1, 80, 100);
-			B.Still(TEXT("Flash"));
-			B.ColorOverLife(TEXT("Flash"), {{0.0, Rgba(FMath::Lerp(B.Color, FVector::OneVector, 0.6) * 14.0, 1)}, {1.0, Rgba(FVector::ZeroVector, 0)}});
+			B.Single(TEXT("Flash"), 0.09, 90);
+			B.ColorOverLife(TEXT("Flash"), {{0.0, Rgba(FMath::Lerp(B.Color, FVector::OneVector, 0.5) * 9.0, 1)}, {1.0, Rgba(FVector::ZeroVector, 0)}});
 			B.Renderer(TEXT("Flash"), 0, TEXT("Material"), Glow);
 
 			B.Emitter(TEXT("Sparks"), Burst);
@@ -456,7 +463,7 @@ namespace HyperAIStudio::Niagara::Recipes
 			B.Motion(TEXT("Sparks"), 350, 1100, FVector(0, 0, -980), 2.0, 3);
 			B.Hlsl(TEXT("Sparks"), Spawn, TEXT("SparksUpward"), FString::Printf(
 				TEXT("// Thrown off the surface: never into it.\nParticles.Velocity.z = abs(Particles.Velocity.z) + %s;"), *Num(150 * B.Scale)));
-			B.ColorOverLife(TEXT("Sparks"), Burn(B.Color, 12.0, 0.3));
+			B.ColorOverLife(TEXT("Sparks"), Burn(B.Color, 9.0, 0.3));
 			Streaks(B, TEXT("Sparks"), 2.0, 0.03);
 			B.Renderer(TEXT("Sparks"), 0, TEXT("Material"), Glow);
 
@@ -481,7 +488,7 @@ namespace HyperAIStudio::Niagara::Recipes
 			B.Rate(TEXT("Smoke"), 14);
 			B.Particles(TEXT("Smoke"), 3.0, 4.5, 40, 80);
 			B.Motion(TEXT("Smoke"), 20, 60, FVector(0, 0, 90), 0.6, 25);
-			B.ColorOverLife(TEXT("Smoke"), Thin(B.Color, 0.6));
+			B.ColorOverLife(TEXT("Smoke"), Thin(B.Color, 0.4));
 			B.SizeOverLife(TEXT("Smoke"), 0.45);
 			B.Hlsl(TEXT("Smoke"), Update, TEXT("SmokeWind"), FString::Printf(
 				TEXT("// Drift with the wind, gently swaying.\nParticles.Velocity += (float3(%s, %s, %s) - Particles.Velocity * float3(1.0, 1.0, 0.0)) * 0.5 * Engine.DeltaTime\n"
@@ -518,7 +525,7 @@ namespace HyperAIStudio::Niagara::Recipes
 			}
 			B.Hlsl(TEXT("Trail"), Update, TEXT("TrailTaper"), FString::Printf(
 				TEXT("// Thins to nothing at the tail.\nParticles.RibbonWidth = %s * (1.0 - Particles.NormalizedAge);"), *Num(18 * B.Scale)));
-			B.ColorOverLife(TEXT("Trail"), {{0.0, Rgba(FMath::Lerp(B.Color, FVector::OneVector, 0.5) * 6.0, 1)}, {0.3, Rgba(B.Color * 4.0, 1)}, {1.0, Rgba(FVector::ZeroVector, 0)}});
+			B.ColorOverLife(TEXT("Trail"), {{0.0, Rgba(FMath::Lerp(B.Color, FVector::OneVector, 0.3) * 3.0, 1)}, {0.3, Rgba(B.Color * 2.2, 1)}, {1.0, Rgba(FVector::ZeroVector, 0)}});
 			FHyperAINiagaraEditOp& Drop = B.Add(TEXT("remove_renderer"), TEXT("Trail"));
 			Drop.RendererIndex = 0;
 			FHyperAINiagaraEditOp& Ribbon = B.Add(TEXT("add_renderer"), TEXT("Trail"));
@@ -589,6 +596,7 @@ namespace HyperAIStudio::Niagara::Recipes
 
 		// The plan's target_path is the new System; create_system makes it empty and the emitters come from templates.
 		B.Add(TEXT("create_system"));
+		const int32 CreateIndex = OutOps.Num() - 1;
 		if (Recipe == TEXT("fire")) BuildFire(B);
 		else if (Recipe == TEXT("explosion")) BuildExplosion(B);
 		else if (Recipe == TEXT("magic_burst")) BuildMagic(B);
@@ -601,6 +609,10 @@ namespace HyperAIStudio::Niagara::Recipes
 			OutOps.Reset();
 			return false;
 		}
+		if (!B.bCreates)
+		{
+			OutOps.RemoveAt(CreateIndex);
+		}
 		if (OutOps.Num() > FHyperAIStudioNiagaraContracts::MaxOpsPerPlan)
 		{
 			OutError = FString::Printf(TEXT("%s compiled to %d ops, past the plan's %d."), *Recipe, OutOps.Num(), FHyperAIStudioNiagaraContracts::MaxOpsPerPlan);
@@ -611,7 +623,7 @@ namespace HyperAIStudio::Niagara::Recipes
 		{
 			if (Op.Kind == TEXT("add_emitter")) Emitters.Add(Op.Name);
 		}
-		OutNotes.Add(FString::Printf(TEXT("%d ops: create_system, then the emitters %s. Every emitter runs on the CPU. hyper_niagara_preview shows the result."),
+		OutNotes.Add(FString::Printf(TEXT("%d ops: the emitters %s. Every emitter runs on the CPU. hyper_niagara_preview shows the result."),
 			OutOps.Num(), *FString::Join(Emitters, TEXT(", "))));
 		OutNotes.Add(FString::Printf(TEXT("Send them with hyper_niagara_apply_plan and target_path %s (a path with nothing there yet)."), *TargetPath));
 		return true;
