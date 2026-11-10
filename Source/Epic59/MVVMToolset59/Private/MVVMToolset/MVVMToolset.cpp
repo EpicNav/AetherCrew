@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "MVVMToolset/MVVMToolset59.h"
+#include "MVVMToolset/MVVMEditorSubsystem59.h" // UE 5.8: 5.9 MVVM editor additions
 
 #include "AssetRegistry/AssetRegistryHelpers.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -336,7 +337,7 @@ void UMVVMToolset59::FixupMVVMData(UWidgetBlueprint* WidgetBlueprint)
 		return;
 	}
 		
-	View->RecreateGeneratedGraphs();
+	UE::MVVM::Epic59::RecreateGeneratedGraphs(*View); // UE 5.8: 5.9 view addition
 }
 
 UBlueprint* UMVVMToolset59::CreateViewModel(const FString& ViewModelName, const FString& PackagePath, UClass* ParentClass)
@@ -833,7 +834,12 @@ void UMVVMToolset59::SetConversionFunctionArgumentLiteral(UWidgetBlueprint* Widg
 	}
 
 	FText Error;
+#if 0 // UE 5.8: UMVVMEditorSubsystem::SetConversionFunctionArgumentLiteral is new in 5.9 (built on its private DoAction helper)
 	if (!MVVMEditorSubsystem->SetConversionFunctionArgumentLiteral(WidgetBlueprint, BindingID, ArgumentName, Value, bSourceToDestination, Error))
+#else
+	Error = NSLOCTEXT("MVVMToolset", "LiteralArgumentsNeed59", "Setting a literal argument needs UE 5.9's MVVM editor; this UE 5.8 port cannot.");
+	if (!Error.IsEmpty())
+#endif
 	{
 		UKismetSystemLibrary::RaiseScriptError(FString::Printf(TEXT("%s '%s'. %s"), FailurePrefix, *ArgumentName, *Error.ToString()));
 		
@@ -996,7 +1002,7 @@ FMVVMBindableFieldListResult UMVVMToolset59::ListPropertyPathBindableFields(UWid
 	Context = GetNewestViewModelContext(Context);
 
 	FString Error;
-	const FMVVMBlueprintPropertyPath ResolvedPath = MVVMEditorSubsystem->ResolvePropertyPath(WidgetBlueprint, Context, PropertyPath, Error);
+	const FMVVMBlueprintPropertyPath ResolvedPath = UE::MVVM::Epic59::ResolvePropertyPath(*MVVMEditorSubsystem, WidgetBlueprint, Context, PropertyPath, Error); // UE 5.8: 5.9 subsystem addition
 	if (!Error.IsEmpty())
 	{
 		// An unresolved PropertyPath is a normal "not found" outcome, not a caller mistake -- return an
@@ -1077,14 +1083,14 @@ FGuid UMVVMToolset59::CreateViewBinding(UWidgetBlueprint* WidgetBlueprint, UObje
 		return FGuid();
 	}
 
-	const FMVVMBlueprintPropertyPath SourcePath = MVVMEditorSubsystem->ResolvePropertyPath(WidgetBlueprint, SourceContext, SourcePropertyPath, Error);
+	const FMVVMBlueprintPropertyPath SourcePath = UE::MVVM::Epic59::ResolvePropertyPath(*MVVMEditorSubsystem, WidgetBlueprint, SourceContext, SourcePropertyPath, Error); // UE 5.8: 5.9 subsystem addition
 	if(!SourcePath.IsValid())
 	{
 		UKismetSystemLibrary::RaiseScriptError(FString::Printf(TEXT("Failed to create view binding. Invalid SourcePropertyPath. Reason: %s. If the field only exists on a subclass of an intermediate object's declared type, bind to that object and cast in a Pure Const conversion function on the WidgetBlueprint."), *Error));
 		return FGuid();
 	}
 
-	const FMVVMBlueprintPropertyPath DestinationPath = MVVMEditorSubsystem->ResolvePropertyPath(WidgetBlueprint, DestinationContext, DestinationPropertyPath, Error);
+	const FMVVMBlueprintPropertyPath DestinationPath = UE::MVVM::Epic59::ResolvePropertyPath(*MVVMEditorSubsystem, WidgetBlueprint, DestinationContext, DestinationPropertyPath, Error); // UE 5.8: 5.9 subsystem addition
 	if(!DestinationPath.IsValid())
 	{
 		UKismetSystemLibrary::RaiseScriptError(FString::Printf(TEXT("Failed to create view binding. Invalid DestinationPropertyPath. Reason: %s"), *Error));
@@ -1106,7 +1112,7 @@ FGuid UMVVMToolset59::CreateViewBinding(UWidgetBlueprint* WidgetBlueprint, UObje
 	MVVMEditorSubsystem->SetSourcePathForBinding(WidgetBlueprint, NewBinding, SourcePath);
 	MVVMEditorSubsystem->SetDestinationPathForBinding(WidgetBlueprint, NewBinding, DestinationPath, true);
 
-	if (!MVVMEditorSubsystem->TryAutoConvertBinding(WidgetBlueprint, NewBinding, ConversionName) && !ConversionName.IsNone())
+	if (!UE::MVVM::Epic59::TryAutoConvertBinding(*MVVMEditorSubsystem, WidgetBlueprint, NewBinding, ConversionName) && !ConversionName.IsNone()) // UE 5.8: 5.9 subsystem addition
 	{
 		// Don't leave a binding behind that silently ignores the requested conversion
 		MVVMEditorSubsystem->RemoveBinding(WidgetBlueprint, NewBinding);
@@ -1255,8 +1261,8 @@ FMVVMBindingConversionResult UMVVMToolset59::ListBindingConversionOptions(UWidge
 	DestinationContext = GetNewestViewModelContext(DestinationContext);
 
 	FString Error;
-	const FMVVMBlueprintPropertyPath SourcePath = MVVMEditorSubsystem->ResolvePropertyPath(WidgetBlueprint, SourceContext, SourcePropertyPath, Error);
-	const FMVVMBlueprintPropertyPath DestinationPath = MVVMEditorSubsystem->ResolvePropertyPath(WidgetBlueprint, DestinationContext, DestinationPropertyPath, Error);
+	const FMVVMBlueprintPropertyPath SourcePath = UE::MVVM::Epic59::ResolvePropertyPath(*MVVMEditorSubsystem, WidgetBlueprint, SourceContext, SourcePropertyPath, Error); // UE 5.8: 5.9 subsystem addition
+	const FMVVMBlueprintPropertyPath DestinationPath = UE::MVVM::Epic59::ResolvePropertyPath(*MVVMEditorSubsystem, WidgetBlueprint, DestinationContext, DestinationPropertyPath, Error); // UE 5.8: 5.9 subsystem addition
 
 	// An unresolved or function-backed side isn't a caller mistake -- no script error is raised.
 	const FProperty* SourceProperty = ResolvePropertyForConversion(WidgetBlueprint, SourcePath);
@@ -1399,14 +1405,14 @@ UMVVMBlueprintViewEvent* UMVVMToolset59::CreateViewEventBinding(UWidgetBlueprint
 	}
 
 	FString Error;
-	const FMVVMBlueprintPropertyPath EventPath = MVVMEditorSubsystem->ResolvePropertyPath(WidgetBlueprint, EventContext, EventPropertyPath, Error);
+	const FMVVMBlueprintPropertyPath EventPath = UE::MVVM::Epic59::ResolvePropertyPath(*MVVMEditorSubsystem, WidgetBlueprint, EventContext, EventPropertyPath, Error); // UE 5.8: 5.9 subsystem addition
 	if(!EventPath.IsValid())
 	{
 		UKismetSystemLibrary::RaiseScriptError(FString::Printf(TEXT("Failed to create view binding. %s"), *Error));
 		return nullptr;
 	}
 
-	const FMVVMBlueprintPropertyPath DestinationPath = MVVMEditorSubsystem->ResolvePropertyPath(WidgetBlueprint, DestinationContext, DestinationPropertyPath, Error);
+	const FMVVMBlueprintPropertyPath DestinationPath = UE::MVVM::Epic59::ResolvePropertyPath(*MVVMEditorSubsystem, WidgetBlueprint, DestinationContext, DestinationPropertyPath, Error); // UE 5.8: 5.9 subsystem addition
 	if(!DestinationPath.IsValid())
 	{
 		UKismetSystemLibrary::RaiseScriptError(FString::Printf(TEXT("Failed to create view binding. %s"), *Error));
@@ -1561,7 +1567,12 @@ void UMVVMToolset59::SetEventBindingArgumentLiteral(UWidgetBlueprint* WidgetBlue
 	}
 
 	FText Error;
+#if 0 // UE 5.8: UMVVMEditorSubsystem::SetEventArgumentLiteral is new in 5.9 (built on its private DoAction helper)
 	if (!MVVMEditorSubsystem->SetEventArgumentLiteral(WidgetBlueprint, Event, ArgumentName, Value, Error))
+#else
+	Error = NSLOCTEXT("MVVMToolset", "LiteralArgumentsNeed59", "Setting a literal argument needs UE 5.9's MVVM editor; this UE 5.8 port cannot.");
+	if (!Error.IsEmpty())
+#endif
 	{
 		UKismetSystemLibrary::RaiseScriptError(FString::Printf(TEXT("%s '%s'. %s"), FailurePrefix, *ArgumentName, *Error.ToString()));
 
@@ -1611,14 +1622,14 @@ UMVVMBlueprintViewCondition* UMVVMToolset59::AddViewCondition(UWidgetBlueprint* 
 	}
 
 	FString Error;
-	const FMVVMBlueprintPropertyPath SourcePath = MVVMEditorSubsystem->ResolvePropertyPath(WidgetBlueprint, SourceContext, SourcePropertyPath, Error);
+	const FMVVMBlueprintPropertyPath SourcePath = UE::MVVM::Epic59::ResolvePropertyPath(*MVVMEditorSubsystem, WidgetBlueprint, SourceContext, SourcePropertyPath, Error); // UE 5.8: 5.9 subsystem addition
 	if (!SourcePath.IsValid())
 	{
 		UKismetSystemLibrary::RaiseScriptError(FString::Printf(TEXT("Failed to add view condition. Invalid SourcePropertyPath. Reason: %s"), *Error));
 		return nullptr;
 	}
 
-	const FMVVMBlueprintPropertyPath DestinationPath = MVVMEditorSubsystem->ResolvePropertyPath(WidgetBlueprint, DestinationContext, DestinationPropertyPath, Error);
+	const FMVVMBlueprintPropertyPath DestinationPath = UE::MVVM::Epic59::ResolvePropertyPath(*MVVMEditorSubsystem, WidgetBlueprint, DestinationContext, DestinationPropertyPath, Error); // UE 5.8: 5.9 subsystem addition
 	if (!DestinationPath.IsValid())
 	{
 		UKismetSystemLibrary::RaiseScriptError(FString::Printf(TEXT("Failed to add view condition. Invalid DestinationPropertyPath. Reason: %s"), *Error));
@@ -1807,8 +1818,13 @@ bool UMVVMToolset59::SetWidgetPreviewActive(UWidgetBlueprint* WidgetBlueprint, b
 		return false;
 	}
 
+#if 0 // UE 5.8: the design-time view model preview is new in UE 5.9's MVVM designer
 	MVVMEditorSubsystem->SetBlueprintPreviewActive(WidgetBlueprint, bActive);
 	return MVVMEditorSubsystem->IsBlueprintPreviewActive(WidgetBlueprint) == bActive;
+#else
+	UKismetSystemLibrary::RaiseScriptError(TEXT("Failed to set preview active. The design-time view model preview needs UE 5.9's MVVM designer."));
+	return false;
+#endif
 }
 
 bool UMVVMToolset59::GetWidgetPreviewActive(UWidgetBlueprint* WidgetBlueprint)
@@ -1826,7 +1842,11 @@ bool UMVVMToolset59::GetWidgetPreviewActive(UWidgetBlueprint* WidgetBlueprint)
 		return false;
 	}
 
+#if 0 // UE 5.8: the design-time view model preview is new in UE 5.9's MVVM designer
 	return MVVMEditorSubsystem->IsBlueprintPreviewActive(WidgetBlueprint);
+#else
+	return false; // never active: 5.8 has no design-time preview
+#endif
 }
 
 FString UMVVMToolset59::ReadPreviewWidgetProperty(UWidgetBlueprint* WidgetBlueprint, FName WidgetName, FName PropertyName)
@@ -1844,6 +1864,7 @@ FString UMVVMToolset59::ReadPreviewWidgetProperty(UWidgetBlueprint* WidgetBluepr
 		return FString();
 	}
 
+#if 0 // UE 5.8: the design-time view model preview is new in UE 5.9's MVVM designer
 	UUserWidget* DesignTimeWidget = MVVMEditorSubsystem->GetDesignTimePreviewWidget(WidgetBlueprint);
 	if (!IsValid(DesignTimeWidget))
 	{
@@ -1872,4 +1893,8 @@ FString UMVVMToolset59::ReadPreviewWidgetProperty(UWidgetBlueprint* WidgetBluepr
 	FString Out;
 	Property->ExportText_InContainer(0, Out, Container, nullptr, nullptr, PPF_None);
 	return Out;
+#else
+	UKismetSystemLibrary::RaiseScriptError(TEXT("Failed to read preview property. The design-time view model preview needs UE 5.9's MVVM designer."));
+	return FString();
+#endif
 }

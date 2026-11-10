@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "MVVMBlueprintView.h"
 #include "ToolsetRegistry/UToolsetRegistry.h"
+#include "ToolsetRegistry/ToolsetDefinition59.h" // UE 5.8: IToolsetProvider and the permission provider
 #include "Types/MVVMConditionOperation.h"
 #include "Types/MVVMConversionFunctionValue.h"
 #include "Types/MVVMFieldVariant.h"

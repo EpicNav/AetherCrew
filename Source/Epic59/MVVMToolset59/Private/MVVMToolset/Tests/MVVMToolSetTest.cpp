@@ -47,12 +47,12 @@ END_DEFINE_SPEC(FMVVMTest_WorkingPath)
 void FMVVMTest_WorkingPath::Define()
 {
 	// Shared by every test; each creates its assets under names no other test uses
-	BeforeAll([this]()
+	BeforeEach([this]() // UE 5.8: 5.8 specs have no BeforeAll; one sandbox per test
 	{
 		Sandbox = MakeUnique<FTestAssetSandbox>(TEXT("MVVMToolSetTest"));
 	});
 
-	AfterAll([this]()
+	AfterEach([this]() // UE 5.8: 5.8 specs have no AfterAll
 	{
 		Sandbox.Reset();
 	});
@@ -1553,12 +1553,12 @@ END_DEFINE_SPEC(FMVVMTest_Errors)
 void FMVVMTest_Errors::Define()
 {
 	// Shared by every test; each creates its assets under names no other test uses
-	BeforeAll([this]()
+	BeforeEach([this]() // UE 5.8: 5.8 specs have no BeforeAll; one sandbox per test
 	{
 		Sandbox = MakeUnique<FTestAssetSandbox>(TEXT("MVVMToolSetTest"));
 	});
 
-	AfterAll([this]()
+	AfterEach([this]() // UE 5.8: 5.8 specs have no AfterAll
 	{
 		Sandbox.Reset();
 	});
@@ -2005,12 +2005,12 @@ END_DEFINE_SPEC(FMVVMTest_ConversionFunctionArgument)
 
 void FMVVMTest_ConversionFunctionArgument::Define()
 {
-	BeforeAll([this]()
+	BeforeEach([this]() // UE 5.8: 5.8 specs have no BeforeAll; one sandbox per test
 	{
 		Sandbox = MakeUnique<FTestAssetSandbox>(TEXT("MVVMToolSetTest"));
 	});
 
-	AfterAll([this]()
+	AfterEach([this]() // UE 5.8: 5.8 specs have no AfterAll
 	{
 		Sandbox.Reset();
 	});
@@ -2174,12 +2174,12 @@ END_DEFINE_SPEC(FMVVMTest_Conditions)
 
 void FMVVMTest_Conditions::Define()
 {
-	BeforeAll([this]()
+	BeforeEach([this]() // UE 5.8: 5.8 specs have no BeforeAll; one sandbox per test
 	{
 		Sandbox = MakeUnique<FTestAssetSandbox>(TEXT("MVVMToolSetTest"));
 	});
 
-	AfterAll([this]()
+	AfterEach([this]() // UE 5.8: 5.8 specs have no AfterAll
 	{
 		Sandbox.Reset();
 	});
@@ -2379,12 +2379,12 @@ END_DEFINE_SPEC(FMVVMTest_EventArgument)
 
 void FMVVMTest_EventArgument::Define()
 {
-	BeforeAll([this]()
+	BeforeEach([this]() // UE 5.8: 5.8 specs have no BeforeAll; one sandbox per test
 	{
 		Sandbox = MakeUnique<FTestAssetSandbox>(TEXT("MVVMToolSetTest"));
 	});
 
-	AfterAll([this]()
+	AfterEach([this]() // UE 5.8: 5.8 specs have no AfterAll
 	{
 		Sandbox.Reset();
 	});
