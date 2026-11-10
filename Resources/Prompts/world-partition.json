@@ -440,6 +440,96 @@
     }
    ],
    "prompt": "Grow {{graph}} over {{selected_actor}} in {{level}} so its instances stream with the world, in World Partition cells.\n1. hyper_world_partition_inspect: confirm bWorldPartition and read the grid's CellSize. hyper_landscape_inspect: the landscape's label, extent and StreamingProxies. If the level is not World Partition, say so and stop.\n2. hyper_pcg_scatter_inspect with Graph {{graph}}: confirm it is a PCG graph and list its species or meshes with their cull distances. If the pcg tools are not available, say the pcg pack is off and stop.\n3. One hyper_pcg_scatter_apply_plan with bSave true and a fresh OperationId: volume.create Volume {{volume_name}}, Graph {{graph}}, Cover the landscape's label, Partitioned true. World Partition shows PCG a landscape kept whole only once it is saved, so this plan saves the level and the volume. Then hyper_operation_wait with the OperationId and TimeoutMs 120000 until generation ends, and read the instances per mesh.\n4. hyper_pcg_inspect the graph and the volume's PCG component for the revision and fingerprint, then hyper_pcg_validate with Policy generation_ready.\nEnd with a PASS/FAIL table: volume partitioned and covering the landscape, generation completed, instances per mesh above 0, validate errors 0, the files listed in Saved. Report the instance total and the cell size used."
+  },
+  {
+   "id": "world-partition.navmesh-coverage-debug",
+   "title": "Debug navmesh coverage with Epic's NavMesh toolset",
+   "summary": "Read the navmesh's build state, bounds volumes and reachable area from a start point, project key spots onto it, and list the gaps.",
+   "packs": [
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_navigation_inspect",
+    "hyper_navigation_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "navmesh",
+    "navigation",
+    "coverage",
+    "reachable",
+    "ai",
+    "bounds",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "start",
+     "label": "Start point (cm)",
+     "default": "0,0,100"
+    },
+    {
+     "name": "spots",
+     "label": "Spots that must be on the navmesh (cm)",
+     "default": "1500,0,100; 0,2000,100; -1200,-800,300"
+    },
+    {
+     "name": "max_cost",
+     "label": "Reach cost limit",
+     "default": "20000"
+    }
+   ],
+   "prompt": "Check where AI can walk in {{level}}, read-only, with Epic's `NavMeshToolset.NavMeshToolset`. If it is not listed, use the hyper navigation tools alone and say the port is not loaded. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. hyper_navigation_inspect (Scope loaded_only) and hyper_navigation_validate: navmesh data, agents and issues.\n2. NavMeshToolset ListWorlds, then GetNavMeshBuildStatus (is a build running or pending?) and ListNavBoundsVolumes. 5.8 reports some tile states as Unknown: say so rather than guess.\n3. DescribeNavMesh for the default agent: cell size, agent radius and height, max step and slope.\n4. GetReachableArea from {{start}} with maxCost {{max_cost}} and maxPolyCenters 512: how far it spreads.\n5. For each of {{spots}}: ProjectPointToNavMesh with horizontalExtent 50 and verticalExtent 200; if it lands, FindPath from {{start}} (no area overrides, bAllowPartialPath true) and report its length and whether it is partial; if not, DescribePolyAtLocation and FindDistanceToWall nearby, and ListNavModifiers within 500 cm for a cause.\nReply with a PASS/FAIL table: a navmesh built and not dirty, bounds volumes cover the play space, each spot projected and reached with a full path. Then each gap with its location in cm and the likely cause (outside the bounds, too steep, a modifier, a step above the agent's max) and the fix, without applying it."
+  },
+  {
+   "id": "world-partition.navmesh-path-blocked",
+   "title": "Find out why an AI cannot path between two points",
+   "summary": "Project both ends, find the path, raycast along it and read the polys, areas, modifiers and links in the way, then name the blocker.",
+   "packs": [
+    "worldbuilding_navigation"
+   ],
+   "skills": [
+    "unreal-level-design"
+   ],
+   "agent": "level-designer",
+   "tools": [
+    "hyper_navigation_inspect",
+    "hyper_scene_inspect"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "navmesh",
+    "pathfinding",
+    "path",
+    "blocked",
+    "nav link",
+    "nav modifier",
+    "ai",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "from",
+     "label": "From (cm)",
+     "default": "0,0,100"
+    },
+    {
+     "name": "to",
+     "label": "To (cm)",
+     "default": "2400,600,100"
+    },
+    {
+     "name": "agent",
+     "label": "Agent name",
+     "default": "default",
+     "hint": "default uses the navmesh's default agent"
+    }
+   ],
+   "prompt": "AI cannot get from {{from}} to {{to}} in {{level}}. Find what is in the way, read-only, with Epic's `NavMeshToolset.NavMeshToolset`. If it is not listed, say the port is not loaded and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. ListSupportedAgents; use agent `{{agent}}` (for default, pass agentName None and navData null). hyper_navigation_inspect (Scope loaded_only) for the navmesh's revision and bounds.\n2. ProjectPointToNavMesh for both ends with horizontalExtent 100 and verticalExtent 300. An end that does not land is the answer: DescribePolyAtLocation and GetTileInfo there, and stop at step 5.\n3. FindPath between the projected points (no area overrides or excluded areas, bAllowPartialPath true): its length, point count and whether it is partial. If it is partial, RaycastNavMesh from the last point toward {{to}}: where it hits.\n4. At the hit: DescribePolyAtLocation (area class, flags), ListNavModifiers within 600 cm, ListNavLinks within 1000 cm, QueryNavOctree within 400 cm. hyper_scene_inspect the actors they name for their labels and collision.\n5. GetReachableArea from {{from}} with maxCost 30000 and maxPolyCenters 256: whether {{to}}'s side is an island.\nReply with a PASS/FAIL table: both ends on the navmesh, a full path, no blocking area or modifier on it, no island. Then the blocker (actor, area, missing link or tile), its location in cm, and the smallest fix (a nav link with its two points, a modifier's area class, a wider gap), without applying it."
   }
  ]
 }

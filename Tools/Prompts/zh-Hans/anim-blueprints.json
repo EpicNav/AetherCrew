@@ -75,5 +75,10 @@
  "anim-blueprints.new-weapon-layer-blueprint.ph.idle_asset.label": "武器待机动画",
  "anim-blueprints.new-weapon-layer-blueprint.ph.move_asset.label": "武器移动混合空间",
  "anim-blueprints.new-weapon-layer-blueprint.ph.move_asset.hint": "同一骨架上的一维 Speed 混合空间。",
- "anim-blueprints.idle-move-locomotion.ph.move_blend_space.hint": "以 Speed 为轴的一维混合空间，或像模板中 BS_Idle_Walk_Run 那样以 Direction 和 Speed 为轴的二维混合空间。"
+ "anim-blueprints.idle-move-locomotion.ph.move_blend_space.hint": "以 Speed 为轴的一维混合空间，或像模板中 BS_Idle_Walk_Run 那样以 Direction 和 Speed 为轴的二维混合空间。",
+ "anim-blueprints.rewind-debugger-recording.title": "在 Rewind Debugger 中查看角色的录制",
+ "anim-blueprints.rewind-debugger-recording.summary": "读取 Rewind Debugger 录制：角色相关对象、它们在某一时刻的事件和属性，并把视图拖到出问题的位置。",
+ "anim-blueprints.rewind-debugger-recording.ph.class_filter.label": "要查找的类",
+ "anim-blueprints.rewind-debugger-recording.ph.moment.label": "要查看的时刻（秒）",
+ "anim-blueprints.rewind-debugger-recording.ph.window.label": "前后时间窗口（秒）"
 }

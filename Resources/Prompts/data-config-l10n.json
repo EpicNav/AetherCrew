@@ -264,7 +264,7 @@
      "default": "/Game/Blueprints/BP_MenuGameMode.BP_MenuGameMode_C"
     }
    ],
-   "prompt": "Set {{project}}'s Maps & Modes: editor startup map {{startup_map}}, game default map {{game_map}}, global default game mode {{game_mode}}.\n1. hyper_project_search (kinds asset): each map and the game mode exist; stop on any that is missing.\n2. Epic's ConfigSettingsToolset: ListCategories for container Project, ListSections to find Maps & Modes, GetSectionSchema for its property names, then GetSectionPropertyValues for EditorStartupMap, GameDefaultMap and GlobalDefaultGameMode: the before values.\n3. SetSectionProperties with only those three properties (it saves the section to the project's config).\n4. GetSectionPropertyValues again: each equals what I asked for.\n5. Read {{level}}'s World Settings DefaultGameMode with Epic's ObjectTools get_properties. If it has no override, hyper_verify_run, one case: AssertExists the game mode's class name (such as BP_MenuGameMode); otherwise say the level's override wins in play.\n6. hyper_memory_remember the decision as type decision, titled with the fact itself (such as \"The game starts in L_MainMenu with BP_MenuGameMode\").\n7. Report a table: setting | before | after | PASS/FAIL, then the play check, and name the config file that changed.",
+   "prompt": "Set {{project}}'s Maps & Modes: editor startup map {{startup_map}}, game default map {{game_map}}, global default game mode {{game_mode}}.\n1. hyper_project_search (kinds asset): each map and the game mode exist; stop on any that is missing.\n2. Epic's ConfigSettingsToolset59: ListCategories for container Project, ListSections to find Maps & Modes, GetSectionSchema for its property names, then GetSectionPropertyValues for EditorStartupMap, GameDefaultMap and GlobalDefaultGameMode: the before values.\n3. SetSectionProperties with only those three properties (it saves the section to the project's config).\n4. GetSectionPropertyValues again: each equals what I asked for.\n5. Read {{level}}'s World Settings DefaultGameMode with Epic's ObjectTools get_properties. If it has no override, hyper_verify_run, one case: AssertExists the game mode's class name (such as BP_MenuGameMode); otherwise say the level's override wins in play.\n6. hyper_memory_remember the decision as type decision, titled with the fact itself (such as \"The game starts in L_MainMenu with BP_MenuGameMode\").\n7. Report a table: setting | before | after | PASS/FAIL, then the play check, and name the config file that changed.",
    "skills": [
     "unreal-data"
    ]
@@ -391,7 +391,7 @@
      "default": "Ability"
     }
    ],
-   "prompt": "Audit {{project}}'s gameplay tags under `{{parent_tag}}`; remove or rename nothing.\n1. hyper_memory_recall \"gameplay tag naming\" for the project's tag rules.\n2. Epic's GameplayTagsToolset: ListTags with parentTag {{parent_tag}}; for each tag, GetTagInfo (where it is defined) and FindReferencersByTag.\n3. Flag tags with 0 referencers; near-duplicates (the same words in another case, plural and singular, typos one letter apart); tags that break the naming rule; and leaf tags placed directly under the root.\n4. hyper_project_search (kinds cpp_symbol) for each unreferenced tag, since C++ (UE_DEFINE_GAMEPLAY_TAG, RequestGameplayTag) may use a tag without an asset reference.\n5. Report a table: tag | source | referencers | C++ hits | PASS/WARN/FAIL | suggestion. RemoveTag and RenameTag change the whole project: list the ones you suggest, and run each only if I approve it by name.",
+   "prompt": "Audit {{project}}'s gameplay tags under `{{parent_tag}}`; remove or rename nothing.\n1. hyper_memory_recall \"gameplay tag naming\" for the project's tag rules.\n2. Epic's GameplayTagsToolset59: ListTags with parentTag {{parent_tag}}; for each tag, GetTagInfo (where it is defined) and FindReferencersByTag.\n3. Flag tags with 0 referencers; near-duplicates (the same words in another case, plural and singular, typos one letter apart); tags that break the naming rule; and leaf tags placed directly under the root.\n4. hyper_project_search (kinds cpp_symbol) for each unreferenced tag, since C++ (UE_DEFINE_GAMEPLAY_TAG, RequestGameplayTag) may use a tag without an asset reference.\n5. Report a table: tag | source | referencers | C++ hits | PASS/WARN/FAIL | suggestion. RemoveTag and RenameTag change the whole project: list the ones you suggest, and run each only if I approve it by name.",
    "skills": [
     "unreal-data"
    ]
@@ -475,6 +475,49 @@
     "min": 1
    },
    "prompt": "Review the Data Registry {{selected_asset}}. Change nothing.\n1. If hyper_data_registry_inspect is not available, the Data Registry plugin is off: say so and stop. hyper_data_registry_inspect with Asset {{selected_asset}}.\n2. hyper_data_registry_lookup with the first ten item names, Format json.\nReport a table with one row per source: kind, tables, items, PASS or the problem (a table whose rows do not match the item struct, a meta source that finds nothing). List ids that one source hides in another (Shadowed), and whether the registry is in Directories To Scan."
+  },
+  {
+   "id": "data-config-l10n.tag-branch-own-source",
+   "title": "Move a gameplay tag branch into its own tag source",
+   "summary": "Give one tag branch its own tag ini with Epic's GameplayTagsToolset59, move its tags there, add new ones, and prove nothing lost its referencers.",
+   "packs": [
+    "data_config_localization"
+   ],
+   "skills": [
+    "unreal-data"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_project_search"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "gameplay tags",
+    "tag source",
+    "ini",
+    "organise",
+    "move tags",
+    "config",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "branch",
+     "label": "Tag branch",
+     "default": "Status"
+    },
+    {
+     "name": "source",
+     "label": "New tag source (ini name)",
+     "default": "StatusTags.ini"
+    },
+    {
+     "name": "new_tags",
+     "label": "Tags to add",
+     "default": "Status.Poisoned, Status.Burning"
+    }
+   ],
+   "prompt": "Put every gameplay tag under `{{branch}}` into its own tag source `{{source}}` (a tag config ini in the project's Config/Tags), then add {{new_tags}} there. Change no other tags. Use Epic's `GameplayTagsToolset59.GameplayTagsToolset59`; if it is not listed, say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. hyper_memory_recall \"gameplay tag naming\" for the project's tag rules; check each new tag against them.\n2. ListTagSources and ListTagSourceRoots; ListTags with parentTag {{branch}}; GetTagInfo on each (its source) and FindReferencersByTag (count only).\n3. If `{{source}}` does not exist, AddTagSource with sourceName {{source}} and tagRoot the first root ListTagSourceRoots gives.\n4. MoveTags with the branch's tags that are not already there and targetTagSource {{source}}; read the result's moved and skipped lists. Native tags cannot move: name them.\n5. AddTag for each of {{new_tags}} with a one-line devComment and tagSource {{source}}.\n6. ListTagsInSource {{source}}; GetTagInfo and FindReferencersByTag again for each moved tag. hyper_project_search (kinds cpp_symbol) for the branch name, for native tags.\nReply with a PASS/FAIL table, one row per tag: old source, new source, referencers before and after (unchanged), or why it stayed. Then the new tags with their sources."
   }
  ]
 }

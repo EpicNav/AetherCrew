@@ -621,6 +621,167 @@
     }
    ],
    "prompt": "Read what {{level}} draws while it plays, read-only.\n1. If Play In Editor is not running, start it with hyper_playtest_run (mode StartInProcess, teardown LeaveSessionRunning, one Bot step Wait seconds 5) and hyper_operation_wait with bWaitThroughApproval true.\n2. hyper_profile_live with sampleSeconds {{sample_seconds}} and topN {{top_n}}.\n3. Nanite: enabled, streaming pool MB, qualityScale, Nanite, fallback and plain mesh counts, each fallback with its reason, and the sampled root, visible and requested streaming data. Say which figures it notes it cannot read.\n4. Niagara: active components, emitters, CPU and GPU particles; a table of systems (system, effect type, instances, particles, game-thread us, render-thread us, GPU us); effect types at their caps; overBudget; the FX budget.\n5. The renderer lines.\n6. PASS/FAIL: no effect type at its cap, no system over 500 us a frame on the game thread, qualityScale 1. Stop play with Epic's StopPIE if you started it."
+  },
+  {
+   "id": "diagnostics-perf.frame-stats-tree",
+   "title": "Read a frame's stat tree and counters while it plays",
+   "summary": "Epic's StatsToolset in play: frame timings, the scope tree over a threshold and the counters behind it, cross-checked with a live profile.",
+   "packs": [
+    "automation_profiling_build"
+   ],
+   "skills": [
+    "performance"
+   ],
+   "tools": [
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_profile_live"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "stats",
+    "stat unit",
+    "frame time",
+    "scopes",
+    "counters",
+    "profiling",
+    "game thread",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "min_ms",
+     "label": "Smallest scope (ms)",
+     "default": "0.2"
+    },
+    {
+     "name": "groups",
+     "label": "Stat groups to read",
+     "default": "STATGROUP_Game, STATGROUP_SceneRendering"
+    }
+   ],
+   "prompt": "Find what a frame costs in {{level}} while it plays, with Epic's `PerfToolset.StatsToolset`. Change nothing. If that toolset is not listed, say the PerfToolset port is not loaded and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. If Play In Editor is not running, start it with hyper_playtest_run (mode StartInProcess, teardown LeaveSessionRunning, one Bot step Wait seconds 5) and hyper_operation_wait with bWaitThroughApproval true.\n2. StatsToolset GetFrameTimings: frame, game, render, RHI and GPU ms. Which one is closest to the frame time is the bound.\n3. GetFrameTree with minInclusiveMs {{min_ms}}, maxDepth 12 and pathFilter \"\": the scopes over {{min_ms}} ms.\n4. ListStatGroups, then GetStatCounters for {{groups}} and any group the hot scopes point to, with bIncludeZero false.\n5. hyper_profile_live with sampleSeconds 2 for the same moment, to cross-check the bound.\nReply with the bound and its numbers; a table of the ten heaviest scopes (path, inclusive ms, exclusive ms); the counters that explain them; and three things to try first, each tied to a scope. Stop play with Epic's StopPIE if you started it."
+  },
+  {
+   "id": "diagnostics-perf.csv-profile-top-stats",
+   "title": "Capture a CSV profile in play and rank its worst stats",
+   "summary": "Record a CSV profile while the level plays, then rank its stats, reduce the frame times and list its events with Epic's CsvProfilerToolset.",
+   "packs": [
+    "automation_profiling_build"
+   ],
+   "skills": [
+    "performance"
+   ],
+   "tools": [
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_profile_live"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "csv",
+    "csv profiler",
+    "profiling",
+    "frame time",
+    "hitches",
+    "stats",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "frames",
+     "label": "Frames to record",
+     "default": "600"
+    },
+    {
+     "name": "csv_path",
+     "label": "Existing CSV file",
+     "default": "none",
+     "hint": "none records one now; or give the path of a .csv from a device run"
+    }
+   ],
+   "prompt": "Profile {{level}} with the CSV profiler and tell me which stats cost the most. Change nothing. Use Epic's `ConsoleToolset.ConsoleToolset` and `PerfToolset.CsvProfilerToolset`; if either is not listed, say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. If `{{csv_path}}` is a file path rather than none, use that file and skip to step 4.\n2. If Play In Editor is not running, start it with hyper_playtest_run (mode StartInProcess, teardown LeaveSessionRunning, one Bot step Wait seconds 3) and hyper_operation_wait with bWaitThroughApproval true.\n3. ConsoleToolset RunConsoleCommand `CsvProfile Frames={{frames}}`; hyper_profile_live with sampleSeconds 2 meanwhile; when the frames have passed, find the newest .csv under the project's Saved/Profiling/CSV. If no file appears, say this build has no CSV profiler and stop.\n4. CsvProfilerToolset GetCsvInfo on it (statNameFilter \"\", bIncludeAllMetadata false, groupDepth 8): frames, stat groups, metadata.\n5. TopStats with count 15 and rankBy Average, then with rankBy Max; ReduceStat on FrameTime, GameThreadTime, RenderThreadTime and GPUTime for min, average, max and percentiles; ListEvents for hitches and markers.\nReply with a table of the frame-time figures, the 15 worst stats by average and by max, the events that line up with the max frames, and the two stats to work on first. Stop play with Epic's StopPIE if you started it, and give the CSV's path."
+  },
+  {
+   "id": "diagnostics-perf.cvar-cost-sweep",
+   "title": "Measure what a console variable costs, then restore it",
+   "summary": "Step one console variable through a few values in play, read frame timings at each with Epic's toolsets, and put the original value back.",
+   "packs": [
+    "automation_profiling_build"
+   ],
+   "skills": [
+    "performance"
+   ],
+   "tools": [
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_profile_live",
+    "hyper_memory_remember"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "cvar",
+    "console variable",
+    "scalability",
+    "screen percentage",
+    "cost",
+    "frame time",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "cvar",
+     "label": "Console variable",
+     "default": "r.ScreenPercentage"
+    },
+    {
+     "name": "values",
+     "label": "Values to try",
+     "default": "100, 85, 70, 50"
+    }
+   ],
+   "prompt": "Measure how `{{cvar}}` changes frame time in {{level}} at the values {{values}}, and leave it as it was. Use Epic's `ConsoleToolset.ConsoleToolset` and `PerfToolset.StatsToolset`; if either is not listed, say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. ConsoleToolset SearchCVars `{{cvar}}` to confirm it exists, then GetCVarValue: note the original value.\n2. If Play In Editor is not running, start it with hyper_playtest_run (mode StartInProcess, teardown LeaveSessionRunning, one Bot step Wait seconds 3) and hyper_operation_wait with bWaitThroughApproval true. Keep the camera still.\n3. For each value: SetCVarValue, wait about a second, then StatsToolset GetFrameTimings three times, and hyper_profile_live with sampleSeconds 1.\n4. SetCVarValue back to the original value, and GetCVarValue to prove it.\nReply with a table, one row per value: frame, game, render and GPU ms (the median of the three reads) and the bound, plus the change from the original. Say which value gives the most frame time back for the least loss, and hyper_memory_remember that finding, titled with the CVar and the level. Stop play with Epic's StopPIE if you started it. PASS only if the original value is restored."
+  },
+  {
+   "id": "diagnostics-perf.filter-logs-verbosity",
+   "title": "Raise a log category's verbosity, reproduce, and filter",
+   "summary": "Turn one log category up with Epic's LogsToolset, reproduce the problem in play, read only its matching lines, and set the verbosity back.",
+   "packs": [
+    "diagnostics"
+   ],
+   "tools": [
+    "hyper_log_tail",
+    "hyper_playtest_run",
+    "hyper_operation_wait"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "log",
+    "logs",
+    "verbosity",
+    "category",
+    "filter",
+    "debug",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "category",
+     "label": "Log category",
+     "default": "LogNavigation"
+    },
+    {
+     "name": "pattern",
+     "label": "Text to look for",
+     "default": "Warning"
+    },
+    {
+     "name": "seconds",
+     "label": "Seconds to play",
+     "default": "15"
+    }
+   ],
+   "prompt": "Show me what `{{category}}` says while {{level}} plays, with its verbosity raised for this run only. Change nothing else. Use Epic's `ConsoleToolset.LogsToolset59`; if it is not listed, use hyper_log_tail alone and say the port is not loaded. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. LogsToolset59 GetLogCategories with filter \"{{category}}\" and logFilePath \"\": confirm it exists. GetVerbosity `{{category}}`: note it to restore.\n2. SetVerbosity `{{category}}` to Verbose.\n3. hyper_playtest_run with mode StartInProcess and a Play goal Explore for {{seconds}} s; hyper_operation_wait with bWaitThroughApproval true.\n4. GetLogEntries with logCategory `{{category}}`, pattern \"{{pattern}}\", maxEntries 200, logFilePath \"\" and maxCharsPerEntry 600; then again with pattern \"\" for the lines around the first match. hyper_log_tail with categories [`{{category}}`] and maxVerbosity warning as a cross-check.\n5. SetVerbosity `{{category}}` back to what step 1 read, and GetVerbosity to prove it.\nReply with the distinct messages, most frequent first, each with its count, verbosity, first time seen and a likely cause; then PASS/FAIL: the category found, play ran, the verbosity restored."
   }
  ]
 }

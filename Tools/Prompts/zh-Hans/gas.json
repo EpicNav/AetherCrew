@@ -73,5 +73,9 @@
  "gas.health-mana-regen.ph.mana_per_tick.label": "每跳恢复法力",
  "gas.health-mana-regen.ph.period.label": "恢复间隔（秒）",
  "gas.health-mana-regen.ph.health_attribute.label": "生命属性",
- "gas.health-mana-regen.ph.mana_attribute.label": "法力属性"
+ "gas.health-mana-regen.ph.mana_attribute.label": "法力属性",
+ "gas.live-ability-state.title": "读取角色实时的属性、效果和标签",
+ "gas.live-ability-state.summary": "运行中用 Epic 的能力系统检查工具读取玩家的属性、生效效果、已授予能力和拥有的标签，并对比执行动作前后。",
+ "gas.live-ability-state.ph.action.label": "要按下的输入动作",
+ "gas.live-ability-state.ph.attribute.label": "要关注的属性"
 }

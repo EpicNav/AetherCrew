@@ -144,5 +144,9 @@
  "materials-textures.recipe-hlsl-function.ph.name.label": "函数名称",
  "materials-textures.recipe-hlsl-function.ph.what.label": "计算内容",
  "materials-textures.recipe-hlsl-function.ph.inputs.label": "输入（名称:类型）",
- "materials-textures.recipe-hlsl-function.ph.inputs.hint": "类型：scalar、vector2、vector3、vector4。"
+ "materials-textures.recipe-hlsl-function.ph.inputs.hint": "类型：scalar、vector2、vector3、vector4。",
+ "materials-textures.tg-multi-output-graph.title": "构建带参数和两个输出的 Texture Graph",
+ "materials-textures.tg-multi-output-graph.summary": "使用 Epic 的 TextureGraphTools：构建带暴露输入的图，输出噪声驱动的遮罩和高度图，检查问题并导出。",
+ "materials-textures.tg-multi-output-graph.ph.name.label": "图名称",
+ "materials-textures.tg-multi-output-graph.ph.size.label": "输出尺寸（像素）"
 }
