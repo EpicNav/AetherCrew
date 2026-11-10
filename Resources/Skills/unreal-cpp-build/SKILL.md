@@ -8,7 +8,7 @@ description: Change a project's C++ and get it compiled into the running editor 
 | step | tool | toolset |
 |---|---|---|
 | find the code | `hyper_project_search` with `Kinds: ["cpp_symbol"]` | `HyperAIStudio.HyperAIStudioProjectSearchToolset` |
-| compile function bodies into the running editor | `CompileLiveCoding` | Epic's `LiveCodingToolset.LiveCodingToolset` |
+| compile function bodies into the running editor | `CompileLiveCoding` | Epic's `LiveCodingToolset59.LiveCodingToolsetTools59` |
 | full build: save, close, build, reopen | `hyper_editor_restart` | `HyperAIStudio.HyperAIStudioEditorRestartToolset` |
 | this session's log | `hyper_log_tail`; older lines with Epic's `GetLogEntries` | `HyperAIStudio.HyperAIStudioLogTailToolset`; `EditorToolset.LogsToolset` |
 | engine version, platform, configuration | `hyper_build_diagnose` | `HyperAIStudioAutomation.HyperAIStudioAutomationToolset` |

@@ -17,3 +17,13 @@ EPIC59_OPTIONAL_MODULE(LiveCodingToolset59, TEXT("LiveCodingToolset"))
 EPIC59_OPTIONAL_MODULE(LiveCodingToolsetTests59, TEXT("LiveCodingToolset"))
 EPIC59_OPTIONAL_MODULE(GASToolsets59, TEXT("GameplayAbilities"), TEXT("GASToolsets"))
 EPIC59_OPTIONAL_MODULE(AIModuleToolset59, TEXT("AIModuleToolset"))
+
+// Each port's tools are a superset of the 5.8 toolset it supersedes (5.8's GameplayCueToolset keeps its
+// FindCueNotifyAssets, which 5.9 dropped, so it stays). The 5.8 toolset is unregistered while the port is loaded.
+EPIC59_SUPERSEDES(ConfigSettingsToolset59, TEXT("/Script/ConfigSettingsToolset.ConfigSettingsToolset"))
+EPIC59_SUPERSEDES(GameFeaturesToolset59, TEXT("/Script/GameFeaturesToolset.GameFeaturesToolset"))
+EPIC59_SUPERSEDES(GameplayTagsToolset59, TEXT("/Script/GameplayTagsToolset.GameplayTagsToolset"))
+EPIC59_SUPERSEDES(PluginToolset59, TEXT("/Script/PluginToolset.PluginToolset"))
+EPIC59_SUPERSEDES(LiveCodingToolset59, TEXT("/Script/LiveCodingToolset.LiveCodingToolset"))
+EPIC59_SUPERSEDES(GASToolsets59, TEXT("/Script/GASToolsets.AbilitySystemInspectorToolset"))
+EPIC59_SUPERSEDES(GASToolsets59, TEXT("/Script/GASToolsets.AttributeSetToolset"))

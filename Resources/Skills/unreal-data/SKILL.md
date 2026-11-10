@@ -15,7 +15,7 @@ pack is off: say so. They read and check; the values themselves are written with
 | Curve Tables | `editor_toolset.toolsets.curve_table.CurveTableTools`: `create`, `import_file`, `list_rows`, `add_row`, `rename_row`, `remove_row`, `add_key`, `set_keys`, `get_keys` |
 | Data Assets | `editor_toolset.toolsets.data_asset.DataAssetTools.create` (asset_type a DataAsset class), then `ObjectTools.get_properties` and `set_properties` for its fields |
 | Row structs and enums | `hyper_blueprint_structure_apply_plan` (unreal-blueprint skill): `struct.create`, `struct.add_field`, `struct.set_field`, `struct.rename_field`, `struct.remove_field`, `enum.create`, `enum.add_value`, `enum.rename_value`, `enum.remove_value` |
-| Project and editor settings | `ConfigSettingsToolset.ConfigSettingsToolset`: `ListContainers`, `ListCategories`, `ListSections`, `GetSectionSchema`, `GetSectionPropertyValues`, `SetSectionProperties`, `SaveSection`, `ResetSectionToDefaults` |
+| Project and editor settings | `ConfigSettingsToolset59.ConfigSettingsToolset59`: `ListContainers`, `ListCategories`, `ListSections`, `GetSectionSchema`, `GetSectionPropertyValues`, `SetSectionProperties`, `SaveSection`, `ResetSectionToDefaults` |
 | Localizable text | `editor_toolset.toolsets.string_table.StringTableTools`: `create`, `import_file`, `set_entry`, `get_entry`, `list_keys`, `remove_entry`, `get_table_id`, `get_namespace` |
 
 Data Registries are not covered here.
@@ -81,7 +81,7 @@ Find a section with `ListCategories` (container `Project` or `Editor`) and `List
 of only the properties to change) writes and saves the project's config file, so name the file and the values to the
 user and change nothing else. Maps and Modes holds `EditorStartupMap`, `GameDefaultMap` and `GlobalDefaultGameMode`; a
 level's World Settings game mode override still wins in that level. Gameplay tags are
-`GameplayTagsToolset.GameplayTagsToolset` (`ListTags`, `GetTagInfo`, `FindReferencersByTag`, `AddTag`); `RemoveTag` and
+`GameplayTagsToolset59.GameplayTagsToolset59` (`ListTags`, `GetTagInfo`, `FindReferencersByTag`, `AddTag`); `RemoveTag` and
 `RenameTag` change the whole project, so run them only when the user names the tag.
 
 ## Localization basics

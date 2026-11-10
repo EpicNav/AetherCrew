@@ -718,13 +718,13 @@ FHyperAIStudioGameplaySystemsContracts::GetManifest()
 const TArray<FString>& FHyperAIStudioGameplaySystemsContracts::GetEpicDelegates()
 {
 	static const TArray<FString> Delegates = {
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.RequestDeactivateGameFeature"),
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.ListEnabledGameFeaturePlugins"),
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.ListDiscoveredGameFeaturePlugins"),
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.IsGameFeaturePlugin"),
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.IsGameFeatureActive"),
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.GetGameFeatureState"),
-		TEXT("GameFeaturesToolset.GameFeaturesToolset.RequestActivateGameFeature"),
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.RequestDeactivateGameFeature"),
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.ListEnabledGameFeaturePlugins"),
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.ListDiscoveredGameFeaturePlugins"),
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.IsGameFeaturePlugin"),
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.IsGameFeatureActive"),
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.GetGameFeatureState"),
+		TEXT("GameFeaturesToolset59.GameFeaturesToolset59.RequestActivateGameFeature"),
 		TEXT("WorldConditionsToolset.WorldConditionTools.GetQueryDescription"),
 		TEXT("WorldConditionsToolset.WorldConditionTools.GetConditionDescription")};
 	return Delegates;
