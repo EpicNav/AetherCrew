@@ -18,6 +18,9 @@
 // GameplayInsights
 #include "IGameplayProvider.h"
 
+// UE 5.8: IGameplayProvider has no ProviderName; 5.8 keeps it on the private FGameplayProvider ("GameplayProvider")
+static const FName UE58GameplayProviderName(TEXT("GameplayProvider"));
+
 // Json
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -164,7 +167,7 @@ FString URewindDebuggerToolset::ListObjects(const FString& ClassName)
 		return SerializeJsonObject(Root);
 	}
 
-	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(IGameplayProvider::ProviderName);
+	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(UE58GameplayProviderName);
 	if (!Provider)
 	{
 		UE_LOGF(LogRewindDebuggerToolset, Log, "ListObjects: GameplayProvider not available");
@@ -221,7 +224,7 @@ FString URewindDebuggerToolset::GetObjectEvents(int64 ObjectId, double StartTime
 		return SerializeJsonObject(Root);
 	}
 
-	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(IGameplayProvider::ProviderName);
+	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(UE58GameplayProviderName);
 	if (!Provider)
 	{
 		UE_LOGF(LogRewindDebuggerToolset, Log, "GetObjectEvents: GameplayProvider not available");
@@ -267,7 +270,7 @@ FString URewindDebuggerToolset::GetObjectProperties(int64 ObjectId, double Time)
 		return TEXT("{}");
 	}
 
-	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(IGameplayProvider::ProviderName);
+	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(UE58GameplayProviderName);
 	if (!Provider)
 	{
 		UE_LOGF(LogRewindDebuggerToolset, Log, "GetObjectProperties: GameplayProvider not available");
@@ -339,7 +342,7 @@ FString URewindDebuggerToolset::GetSelectedObject()
 		return SerializeJsonObject(Root);
 	}
 
-	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(IGameplayProvider::ProviderName);
+	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(UE58GameplayProviderName);
 	if (!Provider)
 	{
 		UE_LOGF(LogRewindDebuggerToolset, Log, "GetSelectedObject: GameplayProvider not available");
@@ -396,7 +399,7 @@ FString URewindDebuggerToolset::SelectObject(int64 ObjectId)
 		return SerializeJsonObject(Root);
 	}
 
-	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(IGameplayProvider::ProviderName);
+	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(UE58GameplayProviderName);
 	if (!Provider)
 	{
 		UE_LOGF(LogRewindDebuggerToolset, Log, "SelectObject: GameplayProvider not available");
@@ -521,7 +524,7 @@ FString URewindDebuggerToolset::ListObjectTraceEvents(
 		return SerializeJsonArray(EmptyArray);
 	}
 
-	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(IGameplayProvider::ProviderName);
+	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(UE58GameplayProviderName);
 	if (!Provider)
 	{
 		UE_LOGF(LogRewindDebuggerToolset, Log, "ListObjectTraceEvents: GameplayProvider not available");
@@ -642,7 +645,7 @@ FString URewindDebuggerToolset::GetTraceEventDetails(const FString& Source, cons
 		return SerializeJsonObject(Root);
 	}
 
-	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(IGameplayProvider::ProviderName);
+	const IGameplayProvider* Provider = Session->ReadProvider<IGameplayProvider>(UE58GameplayProviderName);
 	if (!Provider)
 	{
 		UE_LOGF(LogRewindDebuggerToolset, Log, "GetTraceEventDetails: GameplayProvider not available");
