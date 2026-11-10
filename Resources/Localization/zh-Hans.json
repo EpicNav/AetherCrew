@@ -4641,6 +4641,42 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "audio.audition-solo-mute.ph.mute_class.label",
+   "source": "Sound Class to mute",
+   "text": "要静音的 Sound Class"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.audition-solo-mute.ph.parameter.label",
+   "source": "Parameter to change",
+   "text": "要修改的参数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.audition-solo-mute.ph.solo_class.label",
+   "source": "Sound Class to solo",
+   "text": "要独奏的 Sound Class"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.audition-solo-mute.ph.value.label",
+   "source": "Its value",
+   "text": "参数值"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.audition-solo-mute.summary",
+   "source": "Play a sound in the editor, solo and mute Sound Classes while it plays, change its parameters and volume live, then clear everything you set.",
+   "text": "在编辑器中播放音效，播放时独奏或静音 Sound Class，实时修改参数和音量，最后清除所有设置。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.audition-solo-mute.title",
+   "source": "Audition a sound in the mix with solo and mute",
+   "text": "在混音中独奏和静音试听一个音效"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "audio.creature-roar-variants.ph.creature.label",
    "source": "Creature",
    "text": "生物"
@@ -4671,6 +4707,72 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "audio.crossfade-ambience-bed.ph.name.label",
+   "source": "Sound name",
+   "text": "音效名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.crossfade-ambience-bed.ph.segment.hint",
+   "source": "How long each take plays before the next fades in",
+   "text": "每条素材播放多久后淡入下一条"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.crossfade-ambience-bed.ph.segment.label",
+   "source": "Segment (s)",
+   "text": "分段时长（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.crossfade-ambience-bed.ph.takes_folder.label",
+   "source": "Ambience takes folder",
+   "text": "环境音素材文件夹"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.crossfade-ambience-bed.summary",
+   "source": "A crossfade_loop MetaSound that moves between your ambience takes every segment, rendered long enough to hear the crossfades and checked for dips.",
+   "text": "用 crossfade_loop 配方制作 MetaSound，每段时长在环境音素材之间切换，渲染足够长以覆盖交叉淡化，并检查音量凹陷。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.crossfade-ambience-bed.title",
+   "source": "Turn ambience takes into an endless crossfading bed",
+   "text": "把环境音素材做成无尽交叉淡化的铺底"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.custom-metasound-graph.ph.cutoff.label",
+   "source": "Default cutoff (Hz)",
+   "text": "默认截止频率（Hz）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.custom-metasound-graph.ph.name.label",
+   "source": "Sound name",
+   "text": "音效名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.custom-metasound-graph.ph.takes_folder.label",
+   "source": "Takes folder",
+   "text": "素材文件夹"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.custom-metasound-graph.summary",
+   "source": "Search the MetaSound node registry, read each node's pins, and wire a random-take player through a filter with exposed inputs, then render and measure it.",
+   "text": "检索 MetaSound 节点注册表并读取每个节点的引脚，连出“随机素材播放器经滤波器输出”的图并暴露输入，然后渲染测量。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.custom-metasound-graph.title",
+   "source": "Build a custom MetaSound graph from searched nodes",
+   "text": "用检索到的节点搭建自定义 MetaSound 图"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "audio.engine-hum-recipe.ph.cylinders.label",
    "source": "Cylinders",
    "text": "气缸数"
@@ -4692,6 +4794,30 @@
    "key": "audio.engine-hum-recipe.title",
    "source": "Build an engine hum MetaSound driven by RPM",
    "text": "构建由转速驱动的引擎轰鸣 MetaSound"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.find-clipping-unfinished.ph.folder.label",
+   "source": "Sounds folder",
+   "text": "音效文件夹"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.find-clipping-unfinished.ph.max_seconds.label",
+   "source": "Longest render (s)",
+   "text": "最长渲染时长（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.find-clipping-unfinished.summary",
+   "source": "Render or read every SoundWave and MetaSound under the folder and list the ones that clip, start late, click at the seam or never finish.",
+   "text": "渲染或读取文件夹下的每个 SoundWave 和 MetaSound，列出削波、起音过晚、循环接缝爆音或无法结束的音效。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.find-clipping-unfinished.title",
+   "source": "Find clipping, silent and never-ending sounds in a folder",
+   "text": "找出文件夹中削波、无声或无法结束的音效"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -4755,6 +4881,48 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "audio.footsteps-per-surface-recipe.ph.pitch_jitter.label",
+   "source": "Pitch jitter (semitones)",
+   "text": "音高随机范围（半音）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.footsteps-per-surface-recipe.ph.surfaces.hint",
+   "source": "As the take names spell them",
+   "text": "与素材文件名中的写法一致"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.footsteps-per-surface-recipe.ph.surfaces.label",
+   "source": "Surfaces",
+   "text": "地面类型"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.footsteps-per-surface-recipe.ph.volume_jitter.label",
+   "source": "Volume jitter (0-1)",
+   "text": "音量随机范围（0-1）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.footsteps-per-surface-recipe.ph.waves_folder.label",
+   "source": "Footstep takes folder",
+   "text": "脚步声素材文件夹"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.footsteps-per-surface-recipe.summary",
+   "source": "One no-repeat footstep MetaSound per surface from the project's own SoundWaves, rendered eight times each and checked for level, spread and onset.",
+   "text": "用项目自己的 SoundWave 为每种地面生成一个不重复播放的脚步声 MetaSound，各渲染八次，检查响度、离散度和起音。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.footsteps-per-surface-recipe.title",
+   "source": "Build footstep MetaSounds per surface from your takes",
+   "text": "用项目素材为每种地面生成脚步声 MetaSound"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "audio.generate-sfx-takes.ph.max_cost.label",
    "source": "Most it may cost (USD)",
    "text": "最高花费（美元）"
@@ -4788,6 +4956,72 @@
    "key": "audio.generate-sfx-takes.title",
    "source": "Generate sound effect takes and a random player",
    "text": "生成音效样本和随机播放器"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.impact-with-tail-recipe.ph.hits_folder.label",
+   "source": "Transient takes folder",
+   "text": "瞬态素材文件夹"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.impact-with-tail-recipe.ph.name.label",
+   "source": "Sound name",
+   "text": "音效名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.impact-with-tail-recipe.ph.tail_delay.label",
+   "source": "Tail delay (s)",
+   "text": "尾音延迟（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.impact-with-tail-recipe.ph.tails_folder.label",
+   "source": "Tail takes folder",
+   "text": "尾音素材文件夹"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.impact-with-tail-recipe.summary",
+   "source": "An impact MetaSound whose crack and debris tail come from your SoundWaves, the tail a set delay later, measured for a sharp onset and a full finish.",
+   "text": "用你的 SoundWave 制作打击 MetaSound：瞬态脆响加碎屑尾音，尾音按设定延迟触发，测量起音是否干脆、能否完整结束。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.impact-with-tail-recipe.title",
+   "source": "Make a layered impact with a delayed tail from your takes",
+   "text": "用项目素材制作带延迟尾音的分层打击声"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.loudness-match-lufs.ph.folder.label",
+   "source": "Sounds folder",
+   "text": "音效文件夹"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.loudness-match-lufs.ph.target.label",
+   "source": "Target (LUFS)",
+   "text": "目标响度（LUFS）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.loudness-match-lufs.ph.tolerance.label",
+   "source": "Tolerance (LU)",
+   "text": "容差（LU）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.loudness-match-lufs.summary",
+   "source": "Measure each SoundWave's integrated loudness, set its Volume so it lands on the target without pushing its peak past -1 dBFS, and report the gains.",
+   "text": "测量每个 SoundWave 的综合响度，设置其 Volume 使其达到目标且峰值不超过 -1 dBFS，并报告每个增益。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.loudness-match-lufs.title",
+   "source": "Loudness-match a folder of SoundWaves to a LUFS target",
+   "text": "把文件夹里的 SoundWave 响度统一到 LUFS 目标"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -4998,6 +5232,54 @@
    "key": "audio.ui-sound-set.title",
    "source": "Make a set of UI sounds: click, hover and confirm",
    "text": "制作一组 UI 音效：点击、悬停和确认"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.whoosh-sweep-recipe.ph.length.label",
+   "source": "Length (s)",
+   "text": "时长（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.whoosh-sweep-recipe.ph.name.label",
+   "source": "Sound name",
+   "text": "音效名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.whoosh-sweep-recipe.ph.sweep_high.label",
+   "source": "Sweep high (Hz)",
+   "text": "扫频上限（Hz）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.whoosh-sweep-recipe.ph.sweep_low.label",
+   "source": "Sweep low (Hz)",
+   "text": "扫频下限（Hz）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.whoosh-sweep-recipe.ph.takes_folder.hint",
+   "source": "With no takes there, the recipe sweeps pink noise",
+   "text": "该文件夹没有素材时，配方会对粉红噪声扫频"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.whoosh-sweep-recipe.ph.takes_folder.label",
+   "source": "Whoosh takes folder",
+   "text": "呼啸声素材文件夹"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.whoosh-sweep-recipe.summary",
+   "source": "A whoosh from your takes, or pink noise when there are none, swept through a band pass, measured across plays and at twice its length.",
+   "text": "用你的素材（没有素材时用粉红噪声）经带通扫频制作呼啸声，多次播放测量，并以两倍长度再测一次。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "audio.whoosh-sweep-recipe.title",
+   "source": "Make a swept whoosh MetaSound with a tunable length",
+   "text": "制作长度可调的扫频呼啸声 MetaSound"
   },
   {
    "namespace": "HyperAIStudioPrompts",

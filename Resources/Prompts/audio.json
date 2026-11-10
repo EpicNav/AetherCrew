@@ -717,6 +717,403 @@
     }
    ],
    "prompt": "Build `{{content_folder}}/MS_EngineHum` from the experimental engine_hum recipe. Follow the game-audio skill; if the audio_metasound tools are missing, say so and stop.\n1. hyper_metasound_recipe with an empty Recipe: read engine_hum's inputs and their ranges.\n2. hyper_metasound_recipe with Recipe engine_hum, Path `{{content_folder}}/MS_EngineHum`, Inputs Cylinders {{cylinders}} and RPM {{idle_rpm}}, bDryRun true; then again with bDryRun false and a fresh OperationId, and hyper_operation_wait if it waits for approval.\n3. hyper_sound_asset_inspect the new asset.\n4. Reply with a PASS/FAIL table: a MetaSound Source made, inputs RPM, Cylinders, Load and Volume exposed, defaults as asked. Then explain in two lines how a vehicle Blueprint drives it (an Audio Component's Set Float Parameter for RPM and Load each tick), and that the recipe is experimental and needs tuning by ear."
+  },
+  {
+   "id": "audio.footsteps-per-surface-recipe",
+   "title": "Build footstep MetaSounds per surface from your takes",
+   "summary": "One no-repeat footstep MetaSound per surface from the project's own SoundWaves, rendered eight times each and checked for level, spread and onset.",
+   "packs": [
+    "audio_metasound"
+   ],
+   "skills": [
+    "game-audio"
+   ],
+   "tools": [
+    "hyper_sound_asset_inspect",
+    "hyper_metasound_recipe",
+    "hyper_operation_wait",
+    "hyper_audio_analyze",
+    "hyper_audio_preview"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "footsteps",
+    "surfaces",
+    "metasound",
+    "recipe",
+    "variation",
+    "loudness",
+    "lufs"
+   ],
+   "placeholders": [
+    {
+     "name": "waves_folder",
+     "label": "Footstep takes folder",
+     "default": "/Game/Audio/Footsteps"
+    },
+    {
+     "name": "surfaces",
+     "label": "Surfaces",
+     "default": "Stone, Grass, Wood",
+     "hint": "As the take names spell them"
+    },
+    {
+     "name": "pitch_jitter",
+     "label": "Pitch jitter (semitones)",
+     "default": "1"
+    },
+    {
+     "name": "volume_jitter",
+     "label": "Volume jitter (0-1)",
+     "default": "0.15"
+    }
+   ],
+   "prompt": "Make one footstep MetaSound per surface, `{{content_folder}}/MS_Footstep_<Surface>`, from the project's own takes in `{{waves_folder}}`. Follow the game-audio skill; if the audio_metasound pack is unavailable, say so and stop.\n1. hyper_sound_asset_inspect with Folder `{{waves_folder}}`: group the SoundWaves by surface for each of {{surfaces}} (4 to 8 takes each, by name). Name a surface with fewer than 2 takes and skip it.\n2. hyper_metasound_recipe with an empty Recipe: read footstep's inputs and their ranges.\n3. Per surface, hyper_metasound_recipe with Recipe footstep, Path `{{content_folder}}/MS_Footstep_<Surface>`, its Waves, Inputs Pitch Jitter {{pitch_jitter}} and Volume Jitter {{volume_jitter}}, bDryRun true; then again with bDryRun false and a fresh OperationId. If it is awaiting_user_approval, hyper_operation_wait with that OperationId and bWaitThroughApproval true.\n4. hyper_audio_analyze each new source with Plays 8 and MaxSeconds 2.\n5. Reply with a PASS/FAIL table, one row per surface: IntegratedLufs between -30 and -20 on every play, LoudnessSpreadLu between 1 and 3, PeakDb under -1, OnsetMs under 10, bFinished on every play, no Issues. If an Issue is named, fix it once (a different take set, less jitter) and analyze again.\n6. Offer to play one with hyper_audio_preview (Action play, Sound the source): hearing it is mine, the numbers are yours."
+  },
+  {
+   "id": "audio.impact-with-tail-recipe",
+   "title": "Make a layered impact with a delayed tail from your takes",
+   "summary": "An impact MetaSound whose crack and debris tail come from your SoundWaves, the tail a set delay later, measured for a sharp onset and a full finish.",
+   "packs": [
+    "audio_metasound"
+   ],
+   "skills": [
+    "game-audio"
+   ],
+   "tools": [
+    "hyper_sound_asset_inspect",
+    "hyper_metasound_recipe",
+    "hyper_operation_wait",
+    "hyper_audio_analyze",
+    "hyper_audio_preview"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "impact",
+    "hit",
+    "debris",
+    "tail",
+    "layers",
+    "metasound",
+    "recipe",
+    "onset"
+   ],
+   "placeholders": [
+    {
+     "name": "hits_folder",
+     "label": "Transient takes folder",
+     "default": "/Game/Audio/Impacts/Hits"
+    },
+    {
+     "name": "tails_folder",
+     "label": "Tail takes folder",
+     "default": "/Game/Audio/Impacts/Debris"
+    },
+    {
+     "name": "name",
+     "label": "Sound name",
+     "default": "Impact_Crate"
+    },
+    {
+     "name": "tail_delay",
+     "label": "Tail delay (s)",
+     "default": "0.04"
+    }
+   ],
+   "prompt": "Make `{{content_folder}}/MS_{{name}}`, an impact whose transient layer (the crack) comes from `{{hits_folder}}` and whose tail (debris, ring, room) comes from `{{tails_folder}}`, started {{tail_delay}} s after the hit. Follow the game-audio skill; if the audio_metasound pack is unavailable, say so and stop.\n1. hyper_sound_asset_inspect with Folder `{{hits_folder}}`, then with Folder `{{tails_folder}}`: 2-6 short hits (under 0.5 s) and 2-6 tails. If either folder has none, say what is missing and stop.\n2. hyper_metasound_recipe with Recipe impact, Path `{{content_folder}}/MS_{{name}}`, Waves the hits, Tails the tails, Inputs Tail Delay {{tail_delay}}, Transient Gain 1 and Tail Gain 0.7, bDryRun true. Read the inputs it reports, then send it with bDryRun false and a fresh OperationId; if it is awaiting_user_approval, hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_audio_analyze the source with Plays 6, MaxSeconds 5 and bEnvelope true.\n4. Reply with a PASS/FAIL table: OnsetMs under 5 on every play; PeakMs within 30 ms of the onset; TailSeconds at least 0.4 (the tail is heard); bFinished on every play; PeakDb under -1 and ClippedSamples 0; LoudnessSpreadLu under 4. If the envelope shows the tail landing late or burying the hit, change Tail Delay or Tail Gain once, through the recipe again, and analyze again.\n5. Offer a hyper_audio_preview play of the source."
+  },
+  {
+   "id": "audio.whoosh-sweep-recipe",
+   "title": "Make a swept whoosh MetaSound with a tunable length",
+   "summary": "A whoosh from your takes, or pink noise when there are none, swept through a band pass, measured across plays and at twice its length.",
+   "packs": [
+    "audio_metasound"
+   ],
+   "skills": [
+    "game-audio"
+   ],
+   "tools": [
+    "hyper_sound_asset_inspect",
+    "hyper_metasound_recipe",
+    "hyper_operation_wait",
+    "hyper_audio_analyze",
+    "hyper_audio_preview"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "whoosh",
+    "swish",
+    "sword",
+    "swing",
+    "sweep",
+    "filter",
+    "metasound",
+    "recipe"
+   ],
+   "placeholders": [
+    {
+     "name": "takes_folder",
+     "label": "Whoosh takes folder",
+     "default": "/Game/Audio/Whooshes",
+     "hint": "With no takes there, the recipe sweeps pink noise"
+    },
+    {
+     "name": "name",
+     "label": "Sound name",
+     "default": "Whoosh_Sword"
+    },
+    {
+     "name": "length",
+     "label": "Length (s)",
+     "default": "0.6"
+    },
+    {
+     "name": "sweep_low",
+     "label": "Sweep low (Hz)",
+     "default": "400"
+    },
+    {
+     "name": "sweep_high",
+     "label": "Sweep high (Hz)",
+     "default": "4000"
+    }
+   ],
+   "prompt": "Make `{{content_folder}}/MS_{{name}}`, a whoosh swept from {{sweep_low}} Hz up to {{sweep_high}} Hz and back over {{length}} s. Follow the game-audio skill; if the audio_metasound pack is unavailable, say so and stop.\n1. hyper_sound_asset_inspect with Folder `{{takes_folder}}` for 1-6 air or swish takes; with none, the recipe uses pink noise.\n2. hyper_metasound_recipe with Recipe whoosh, Path `{{content_folder}}/MS_{{name}}`, Waves the takes (or none), Inputs Length {{length}}, Sweep Low {{sweep_low}} and Sweep High {{sweep_high}}, bDryRun true; then bDryRun false with a fresh OperationId, and hyper_operation_wait with bWaitThroughApproval true if it waits for approval.\n3. hyper_audio_analyze with Plays 4 and bEnvelope true; then once more with Plays 1, bEnvelope true and Parameters Length set to twice {{length}}, to check the length follows the input.\n4. Reply with a PASS/FAIL table: DurationSeconds about {{length}} (within 0.15 s), and about twice that with the longer Length; the envelope rises then falls with its peak in the middle third; SpectralCentroidHz between {{sweep_low}} and {{sweep_high}}; bFinished; ClippedSamples 0; no Issues.\n5. Offer a hyper_audio_preview play, then one with Parameters Length at the longer value."
+  },
+  {
+   "id": "audio.crossfade-ambience-bed",
+   "title": "Turn ambience takes into an endless crossfading bed",
+   "summary": "A crossfade_loop MetaSound that moves between your ambience takes every segment, rendered long enough to hear the crossfades and checked for dips.",
+   "packs": [
+    "audio_metasound"
+   ],
+   "skills": [
+    "game-audio"
+   ],
+   "tools": [
+    "hyper_sound_asset_inspect",
+    "hyper_metasound_recipe",
+    "hyper_operation_wait",
+    "hyper_audio_analyze",
+    "hyper_audio_preview"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "ambience",
+    "ambient",
+    "loop",
+    "bed",
+    "crossfade",
+    "metasound",
+    "recipe",
+    "seamless"
+   ],
+   "placeholders": [
+    {
+     "name": "takes_folder",
+     "label": "Ambience takes folder",
+     "default": "/Game/Audio/Ambience/Forest"
+    },
+    {
+     "name": "name",
+     "label": "Sound name",
+     "default": "Amb_Forest"
+    },
+    {
+     "name": "segment",
+     "label": "Segment (s)",
+     "default": "8",
+     "hint": "How long each take plays before the next fades in"
+    }
+   ],
+   "prompt": "Make `{{content_folder}}/MS_{{name}}`, an endless ambience bed that crossfades between the takes in `{{takes_folder}}` every {{segment}} s. Follow the game-audio skill; if the audio_metasound pack is unavailable, say so and stop.\n1. hyper_sound_asset_inspect with Folder `{{takes_folder}}`: the beds, each longer than {{segment}} s. If there are none, say so and stop; one take is enough for a seamless loop.\n2. hyper_metasound_recipe with Recipe crossfade_loop, Path `{{content_folder}}/MS_{{name}}`, Waves the beds, Inputs Segment {{segment}}, bDryRun true; then bDryRun false with a fresh OperationId, and hyper_operation_wait with bWaitThroughApproval true if it waits for approval.\n3. hyper_audio_analyze with Plays 1, MaxSeconds 30 and bEnvelope true. A bed never finishes by design, so never_finishes is expected, and it fades in over its first segment.\n4. Read the envelope after the first {{segment}} s: no dip deeper than 6 dB at a crossfade, and no jump between neighbouring 20 ms values that reads as a click.\n5. Reply with a PASS/FAIL table: a MetaSound Source made; after the fade-in, the level within 6 dB across the render; ClippedSamples 0; PeakDb under -3; no Issue but never_finishes. Then offer a hyper_audio_preview play and remind me it runs until Action stop."
+  },
+  {
+   "id": "audio.custom-metasound-graph",
+   "title": "Build a custom MetaSound graph from searched nodes",
+   "summary": "Search the MetaSound node registry, read each node's pins, and wire a random-take player through a filter with exposed inputs, then render and measure it.",
+   "packs": [
+    "audio_metasound"
+   ],
+   "skills": [
+    "game-audio"
+   ],
+   "tools": [
+    "hyper_sound_asset_inspect",
+    "hyper_metasound_node_search",
+    "hyper_metasound_node_describe",
+    "hyper_metasound_graph_plan",
+    "hyper_operation_wait",
+    "hyper_audio_analyze"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "metasound",
+    "graph",
+    "nodes",
+    "wave player",
+    "random",
+    "filter",
+    "builder",
+    "custom"
+   ],
+   "placeholders": [
+    {
+     "name": "takes_folder",
+     "label": "Takes folder",
+     "default": "/Game/Audio/Creaks"
+    },
+    {
+     "name": "name",
+     "label": "Sound name",
+     "default": "Creak_Door"
+    },
+    {
+     "name": "cutoff",
+     "label": "Default cutoff (Hz)",
+     "default": "2500"
+    }
+   ],
+   "prompt": "Build `{{content_folder}}/MS_{{name}}` as a graph of my own: each play picks a random take from `{{takes_folder}}`, shifts its pitch a little, and sends it through a low-pass filter whose cutoff is a graph input `Cutoff` (default {{cutoff}} Hz). Follow the game-audio skill's MetaSound graphs section; if the audio_metasound pack is unavailable, say so and stop.\n1. hyper_sound_asset_inspect with Folder `{{takes_folder}}` for 2-8 SoundWaves.\n2. hyper_metasound_node_search for each node: Query \"random get\" (a WaveAsset array), \"wave player\" (Mono), \"random\" with OutputType Float, and \"state variable filter\" or \"one-pole low pass\". hyper_metasound_node_describe those Classes for their pin names, types and defaults; never guess a pin.\n3. hyper_metasound_graph_plan with Path `{{content_folder}}/MS_{{name}}`, Format mono, bOneShot true, Inputs `Takes` (WaveAsset:Array, the takes) and `Cutoff` (Float, {{cutoff}}), and Nodes and Connections: graph.On Play to the random get's and the player's triggers; the picked wave into the player's Wave Asset; a random float from -2 to 2 into its Pitch Shift; the player's audio through the filter, with Cutoff into its frequency, to graph.Out Mono; the player's On Finished to graph.On Finished. bDryRun true first and fix every refusal and warning, above all a one-shot that never finishes. Then bDryRun false with a fresh OperationId; hyper_operation_wait with bWaitThroughApproval true if it waits.\n4. hyper_sound_asset_inspect the source: Takes and Cutoff are its inputs.\n5. hyper_audio_analyze with Plays 4, then with Plays 1 and Parameters Cutoff 500.\n6. Reply with a PASS/FAIL table: every play finished, ClippedSamples 0, LoudnessSpreadLu or CentroidSpreadHz above 0 (the takes vary), SpectralCentroidHz lower with Cutoff 500 than with {{cutoff}}, no Issues. List the node Classes used."
+  },
+  {
+   "id": "audio.loudness-match-lufs",
+   "title": "Loudness-match a folder of SoundWaves to a LUFS target",
+   "summary": "Measure each SoundWave's integrated loudness, set its Volume so it lands on the target without pushing its peak past -1 dBFS, and report the gains.",
+   "packs": [
+    "audio_metasound"
+   ],
+   "skills": [
+    "game-audio"
+   ],
+   "tools": [
+    "hyper_memory_recall",
+    "hyper_sound_asset_inspect",
+    "hyper_audio_analyze",
+    "hyper_memory_remember",
+    "hyper_audio_preview"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "loudness",
+    "lufs",
+    "normalize",
+    "normalise",
+    "level",
+    "mix",
+    "volume",
+    "gain"
+   ],
+   "placeholders": [
+    {
+     "name": "folder",
+     "label": "Sounds folder",
+     "default": "/Game/Audio/SFX"
+    },
+    {
+     "name": "target",
+     "label": "Target (LUFS)",
+     "default": "-23"
+    },
+    {
+     "name": "tolerance",
+     "label": "Tolerance (LU)",
+     "default": "1"
+    }
+   ],
+   "prompt": "Bring every SoundWave under `{{folder}}` to {{target}} LUFS integrated, within {{tolerance}} LU, through its Volume alone: change no samples and nothing else. If the audio_metasound pack is unavailable, say so and stop.\n1. hyper_memory_recall `audio loudness` for a project target; if one exists and differs from {{target}}, ask me which to use. hyper_sound_asset_inspect with Folder `{{folder}}` for the SoundWaves; read each one's current Volume with Epic's ObjectTools get_properties.\n2. hyper_audio_analyze each SoundWave (it reads the imported samples): IntegratedLufs and PeakDb. Skip a silent one and name it.\n3. Per sound, the gain in dB is {{target}} minus its IntegratedLufs. Cap it so PeakDb plus the gain stays at or under -1 dBFS, and flag a capped sound as needing a limiter rather than more volume. Its Volume is 10^(gain / 20), replacing the Volume it had.\n4. Set each SoundWave's Volume with Epic's ObjectTools set_properties, one sound at a time, and read it back with get_properties.\n5. hyper_audio_analyze reads samples, not Volume, so the loudness it will play at is IntegratedLufs + 20 x log10(Volume): compute it per sound.\n6. Reply with a table, loudest first: sound, IntegratedLufs before, PeakDb, old and new Volume, expected LUFS, PASS within {{tolerance}} LU or CAPPED. If the project had no target, hyper_memory_remember {{target}} LUFS as its convention.\n7. Offer to A/B the loudest and quietest with hyper_audio_preview play."
+  },
+  {
+   "id": "audio.find-clipping-unfinished",
+   "title": "Find clipping, silent and never-ending sounds in a folder",
+   "summary": "Render or read every SoundWave and MetaSound under the folder and list the ones that clip, start late, click at the seam or never finish.",
+   "packs": [
+    "audio_metasound"
+   ],
+   "skills": [
+    "game-audio"
+   ],
+   "tools": [
+    "hyper_sound_asset_inspect",
+    "hyper_audio_analyze"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "audit",
+    "clipping",
+    "silent",
+    "one-shot",
+    "loop",
+    "seam",
+    "metasound",
+    "read-only"
+   ],
+   "placeholders": [
+    {
+     "name": "folder",
+     "label": "Sounds folder",
+     "default": "/Game/Audio"
+    },
+    {
+     "name": "max_seconds",
+     "label": "Longest render (s)",
+     "default": "10"
+    }
+   ],
+   "prompt": "Find the broken sounds under `{{folder}}` and change nothing. If the audio_metasound pack is unavailable, say so and stop.\n1. hyper_sound_asset_inspect with Folder `{{folder}}`: every SoundWave and MetaSound Source, with DurationSeconds (-1 means it loops, so it is not a one-shot). Sound Cues are not rendered: list them, and analyze their waves instead.\n2. hyper_audio_analyze each one: a SoundWave once; a MetaSound with Plays 3 and MaxSeconds {{max_seconds}}.\n3. Flag: ClippedSamples above 0 or a clipping Issue; silent; late_onset (OnsetMs above 30 on a one-shot); a one-shot MetaSound with bFinished false on any play (never_finishes: its On Finished is not wired); a loop with LoopSeamDb above -30 (clicks_at_seam); too_quiet or too_loud; no_variation on a MetaSound meant to vary.\n4. Reply with a table, worst first: sound, kind, the failing numbers, the Issue, and the fix (re-export with headroom, trim the lead-in, wire On Finished with hyper_metasound_graph_plan, crossfade the loop). Then a count per Issue and how many passed. Apply nothing."
+  },
+  {
+   "id": "audio.audition-solo-mute",
+   "title": "Audition a sound in the mix with solo and mute",
+   "summary": "Play a sound in the editor, solo and mute Sound Classes while it plays, change its parameters and volume live, then clear everything you set.",
+   "packs": [
+    "audio_metasound"
+   ],
+   "skills": [
+    "game-audio"
+   ],
+   "tools": [
+    "hyper_audio_preview",
+    "hyper_sound_asset_inspect"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "preview",
+    "audition",
+    "listen",
+    "solo",
+    "mute",
+    "mix",
+    "sound class",
+    "parameters"
+   ],
+   "context": {
+    "selection": "assets",
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "solo_class",
+     "label": "Sound Class to solo",
+     "default": "/Game/Audio/Mix/SCL_SFX"
+    },
+    {
+     "name": "mute_class",
+     "label": "Sound Class to mute",
+     "default": "/Game/Audio/Mix/SCL_Music"
+    },
+    {
+     "name": "parameter",
+     "label": "Parameter to change",
+     "default": "Intensity"
+    },
+    {
+     "name": "value",
+     "label": "Its value",
+     "default": "0.8"
+    }
+   ],
+   "prompt": "Let me hear {{selected_asset}} in the mix, with solo and mute. Nothing is saved. If the audio_metasound pack is unavailable, say so and stop.\n1. hyper_audio_preview with Action status: if bAudioAvailable is false, say this editor has no audio device and stop. Note what already plays and any solos or mutes.\n2. hyper_sound_asset_inspect {{selected_asset}} (its inputs, if it is a MetaSound, and its Sound Class), `{{solo_class}}` and `{{mute_class}}`, to confirm both classes exist.\n3. hyper_audio_preview Action play with Sound {{selected_asset}}; Action solo with Target `{{solo_class}}` and bEnable true; Action status; then Action solo with bEnable false, Action mute with Target `{{mute_class}}`, and Action status.\n4. If it has an input `{{parameter}}`, Action set with Parameters {{parameter}} {{value}}; then Action set with VolumeMultiplier 0.5 and PitchMultiplier 1.1. Before each step, tell me what I should hear, and ask what I heard.\n5. Action clear, Action stop, then Action status.\nReply with a PASS/FAIL table: an audio device present; the sound in ActiveSounds after play; `{{solo_class}}` in Soloed and `{{mute_class}}` in Muted while set; the parameter accepted, or not an input; and at the end Soloed and Muted empty with nothing previewing."
   }
  ]
 }
