@@ -198,6 +198,10 @@ class names make `FindFirstObject` and Python's `unreal.<Class>` ambiguous), so:
 `Source/`. Epic's toolsets declare none, so ports need no catalog entries and `build_catalog.py check` stays green.
 The capability preset tests count Epic *plugins*; the ports live inside HyperAIStudio, so they change no count.
 
+HyperAI's project C++ index (`hyper_project_search`, `EnumerateProjectCppSourceFiles`) skips this folder: it is
+vendored engine code, and its 2 MB would fill the index's symbol bound before HyperAI's own sources and the project's
+later plugins.
+
 ## Per-toolset checklist
 
 1. `python Tools/Epic59/port_toolset.py --check <Toolset>`: read the notes and the hand-edit list.
