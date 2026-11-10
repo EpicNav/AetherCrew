@@ -25,10 +25,19 @@
 
 	if (WorldConditionQueryConverter.IsValid())
 	{
+#if 0 // UE 5.8: no FToolsetRegistry::Get(); the registry is the editor subsystem's member
 		if (UE::ToolsetRegistry::FToolsetRegistry* Registry = UE::ToolsetRegistry::FToolsetRegistry::Get())
 		{
 			Registry->UnregisterConverter(WorldConditionQueryConverter);
 		}
+#else
+		UToolsetRegistrySubsystem* const ToolsetRegistrySubsystem = (UObjectInitialized() && GEditor != nullptr) // UE 5.8
+			? GEditor->GetEditorSubsystem<UToolsetRegistrySubsystem>() : nullptr;
+		if (ToolsetRegistrySubsystem != nullptr)
+		{
+			ToolsetRegistrySubsystem->ToolsetRegistry.UnregisterConverter(WorldConditionQueryConverter);
+		}
+#endif
 	}
 
 	WorldConditionQueryConverter.Reset();

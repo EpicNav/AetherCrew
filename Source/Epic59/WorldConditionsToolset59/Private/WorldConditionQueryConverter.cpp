@@ -10,7 +10,7 @@ namespace UE::WorldConditionsToolset
 {
 	FString FWorldConditionQueryConverter::GetName() const
 	{
-		return TEXT("WorldConditionQueryConverter");
+		return TEXT("WorldConditionQueryConverter59"); // UE 5.8: 5.8's WorldConditionsToolset registers "WorldConditionQueryConverter", and 5.8's registry verify()s that names are unique
 	}
 
 	bool FWorldConditionQueryConverter::CanConvertProperty(TNotNull<const FProperty*> Property)
@@ -59,6 +59,7 @@ namespace UE::WorldConditionsToolset
 		return MakeShared<FJsonValueObject>(Result);
 	}
 
+#if 0 // UE 5.8: 5.9 converter import API (FToolsetJsonImportResult, FToolsetJsonImportContext)
 	UE::ToolsetRegistry::FToolsetJsonImportResult FWorldConditionQueryConverter::JsonDataToProperty(
 		const TSharedPtr<FJsonValue>& JsonValue, TNotNull<FProperty*> Property, void* OutValue, const UE::ToolsetRegistry::FToolsetJsonImportContext& Context)
 	{
@@ -90,4 +91,33 @@ namespace UE::WorldConditionsToolset
 		QueryDef->Initialize(nullptr);
 		return UE::ToolsetRegistry::FToolsetJsonImportResult::Imported();
 	}
+#else
+	// UE 5.8: 5.8 converters return bool, so the failure reasons above are not reported
+	bool FWorldConditionQueryConverter::JsonDataToProperty(
+		const TSharedPtr<FJsonValue>& JsonValue, TNotNull<FProperty*> Property, void* OutValue, UObject* Outer)
+	{
+		if (!JsonValue.IsValid() || JsonValue->Type != EJson::Object)
+		{
+			return false;
+		}
+
+		FWorldConditionQueryDefinition* const QueryDef =
+			static_cast<FWorldConditionQueryDefinition*>(OutValue);
+		if (!ensure(QueryDef != nullptr))
+		{
+			return false;
+		}
+
+		const TSharedPtr<FJsonObject> JsonObject = JsonValue->AsObject();
+		if (!ToolsetJsonDataToStruct(
+				JsonObject.ToSharedRef(), FWorldConditionQueryDefinition::StaticStruct(), QueryDef))
+		{
+			return false;
+		}
+
+		// Rebuild SharedDefinition from EditableConditions.
+		QueryDef->Initialize(nullptr);
+		return true;
+	}
+#endif
 }
