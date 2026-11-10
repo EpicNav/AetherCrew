@@ -828,6 +828,14 @@
 			"PlatformAllowList": [
 				"Win64"
 			]
+		},
+		{
+			"Name": "InputToolset",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
 		}
 	],
 	"Plugins": [
