@@ -92,12 +92,12 @@ UWidgetBlueprint* FDescribeWidgetTest::MakeWidgetBlueprintWithTestParentClass(co
 void FDescribeWidgetTest::Define()
 {
 	// One sandbox for the whole spec; every blueprint gets a unique name from TestCounter.
-	BeforeAll([this]()
+	BeforeEach([this]() // UE 5.8: 5.8 specs have no BeforeAll; one sandbox per test
 	{
 		Sandbox = MakeUnique<FTestAssetSandbox>(WidgetStaticAnalysisSchemaTest::SandboxName);
 	});
 
-	AfterAll([this]()
+	AfterEach([this]() // UE 5.8: 5.8 specs have no AfterAll
 	{
 		Sandbox.Reset();
 	});

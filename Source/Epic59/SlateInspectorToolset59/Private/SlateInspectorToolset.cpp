@@ -70,7 +70,7 @@ void USlateInspectorToolset59Subsystem::Initialize(FSubsystemCollectionBase& Col
 	// Use Observe() on specific windows or panels to drill deeper.
 	RootObserverIdentifier = FSlateInspectorToolsetObserverManager::Get().AddObserver(nullptr, 0);
 
-	EndPIEDelegateHandle = UE::Editor::PIE::OnEnd.AddUObject(this, &USlateInspectorToolset59Subsystem::OnEndPIE); // UE 5.8: subsystem split
+	EndPIEDelegateHandle = FEditorDelegates::EndPIE.AddUObject(this, &USlateInspectorToolset59Subsystem::OnEndPIE); // UE 5.8: subsystem split; 5.8 has FEditorDelegates::EndPIE, not UE::Editor::PIE::OnEnd
 }
 
 void USlateInspectorToolset59Subsystem::Deinitialize() // UE 5.8: subsystem split
@@ -78,7 +78,7 @@ void USlateInspectorToolset59Subsystem::Deinitialize() // UE 5.8: subsystem spli
 	// Anything still held would outlive the tools that could release it.
 	USlateInspectorToolset59::ReleaseHeldInput(); // UE 5.8: subsystem split
 
-	UE::Editor::PIE::OnEnd.Remove(EndPIEDelegateHandle);
+	FEditorDelegates::EndPIE.Remove(EndPIEDelegateHandle); // UE 5.8: no UE::Editor::PIE::OnEnd
 	EndPIEDelegateHandle.Reset();
 
 	if (!RootObserverIdentifier.IsEmpty())
@@ -1006,7 +1006,15 @@ FToolsetImage USlateInspectorToolset59::Screenshot(const FString& Ref)
 		return Result;
 	}
 
-	Result.SetFromImageView(FImageView(ColorData.GetData(), Size.X, Size.Y), bForceOpaque);
+	// UE 5.8: 5.8's FToolsetImage has no SetFromImageView; force alpha here and use SetFromBitmap (BGRA, as Slate reads back)
+	if (bForceOpaque)
+	{
+		for (FColor& Pixel : ColorData)
+		{
+			Pixel.A = 255;
+		}
+	}
+	Result.SetFromBitmap(ColorData, FIntPoint(Size.X, Size.Y));
 
 	return Result;
 }

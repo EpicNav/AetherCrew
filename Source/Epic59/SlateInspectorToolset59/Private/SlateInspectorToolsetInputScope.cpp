@@ -16,6 +16,14 @@
 namespace UE::SlateInspectorToolset::Private
 {
 
+// UE 5.8: 5.9 added FSlateApplication::IsUsingPlatformCursorForCursorUser; the same test from what 5.8 exposes.
+static bool IsUsingPlatformCursorForCursorUser()
+{
+	const TSharedPtr<FSlateUser> CursorUser = FSlateApplication::Get().GetCursorUser();
+	const TSharedPtr<GenericApplication> PlatformApplication = FSlateApplication::Get().GetPlatformApplication();
+	return CursorUser.IsValid() && PlatformApplication.IsValid() && CursorUser->GetCursor() == PlatformApplication->Cursor;
+}
+
 #if PLATFORM_MAC
 static void MoveMacCursorAndRefreshWindowUnderCursor(const FVector2D& ScreenPosition)
 {
@@ -160,7 +168,7 @@ FScopedSlateDetachedCursor::FScopedSlateDetachedCursor()
 
 	// Leave a cursor user that is already on a faux cursor alone (e.g. CommonInput in PIE), so the
 	// destructor does not force the platform cursor back and desync whoever swapped it.
-	if (!FSlateApplication::Get().IsUsingPlatformCursorForCursorUser())
+	if (!UE::SlateInspectorToolset::Private::IsUsingPlatformCursorForCursorUser() /* UE 5.8 */)
 	{
 		return;
 	}
@@ -177,7 +185,7 @@ FScopedSlateDetachedCursor::~FScopedSlateDetachedCursor()
 {
 	// Synthetic input inside the scope may have reattached the platform cursor already; restoring
 	// the position then would move the OS cursor.
-	if (!bDetached || !FSlateApplication::IsInitialized() || FSlateApplication::Get().IsUsingPlatformCursorForCursorUser())
+	if (!bDetached || !FSlateApplication::IsInitialized() || UE::SlateInspectorToolset::Private::IsUsingPlatformCursorForCursorUser() /* UE 5.8 */)
 	{
 		return;
 	}
@@ -198,7 +206,7 @@ void FScopedSlateDetachedCursor::SetCursorPos(const FVector2D& Position) const
 #if PLATFORM_MAC
 	UE::SlateInspectorToolset::Private::MoveMacCursorAndRefreshWindowUnderCursor(Position);
 #else
-	if (!FSlateApplication::Get().IsUsingPlatformCursorForCursorUser())
+	if (!UE::SlateInspectorToolset::Private::IsUsingPlatformCursorForCursorUser() /* UE 5.8 */)
 	{
 		FSlateApplication::Get().SetCursorPos(Position);
 	}
