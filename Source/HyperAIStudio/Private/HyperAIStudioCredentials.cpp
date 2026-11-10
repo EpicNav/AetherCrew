@@ -44,6 +44,9 @@ namespace
 	/** Lower case, words joined by hyphens: "Claude Code" is claude-code. */
 	FString AgentKey(const FString& AgentName)
 	{
+		if (AgentName == TEXT("Claude API")) { return TEXT("claude-code"); }
+		if (AgentName == TEXT("OpenAI API")) { return TEXT("codex"); }
+		if (AgentName == TEXT("Gemini API")) { return TEXT("gemini"); }
 		FString Key;
 		for (const TCHAR C : AgentName.ToLower())
 		{
@@ -92,21 +95,21 @@ namespace
 	{
 		return {
 			AgentSlot(TEXT("Claude Code"), TEXT("Anthropic API key"), TEXT("ANTHROPIC_API_KEY"), true, TEXT("anthropic"),
-				TEXT("Billed to your Anthropic Console account instead of a Claude subscription. Claude Code asks once to use it.")),
+				TEXT("Choose Chat > Claude API to send Messages API requests directly with this key and eligible Console credits. Claude Code is also available as a CLI route.")),
 			AgentSlot(TEXT("Claude Code"), TEXT("Anthropic-compatible base URL"), TEXT("ANTHROPIC_BASE_URL"), false, TEXT(""),
 				TEXT("A gateway or proxy that speaks Anthropic's API. Leave empty for Anthropic itself.")),
 			AgentSlot(TEXT("Codex"), TEXT("OpenAI API key"), TEXT("OPENAI_API_KEY"), true, TEXT("openai"),
-				TEXT("Codex uses it through a provider HyperAI names on its command line, instead of your ChatGPT sign-in.")),
+				TEXT("Choose Chat > OpenAI API for direct Responses API requests. Codex can also use this key through its CLI provider.")),
 			AgentSlot(TEXT("Codex"), TEXT("OpenAI-compatible base URL"), TEXT("OPENAI_BASE_URL"), false, TEXT(""),
-				TEXT("Any OpenAI-compatible endpoint (OpenRouter, a gateway, a local server). Leave empty for OpenAI.")),
+				TEXT("An endpoint supporting OpenAI's Responses API (including tool calls). Leave empty for OpenAI. Chat Completions-only endpoints cannot run Codex.")),
 			AgentSlot(TEXT("Gemini"), TEXT("Gemini API key"), TEXT("GEMINI_API_KEY"), true, TEXT("gemini"),
-				TEXT("From Google AI Studio. Gemini CLI's nanobanana extension gets it too."), true, {TEXT("NANOBANANA_API_KEY")}),
+				TEXT("Choose Chat > Gemini API for direct generateContent requests. Gemini CLI and its nanobanana extension can also use this key."), true, {TEXT("NANOBANANA_API_KEY")}),
 			AgentSlot(TEXT("Gemini"), TEXT("Gemini API base URL"), TEXT("GOOGLE_GEMINI_BASE_URL"), false, TEXT(""),
 				TEXT("A proxy for the Gemini API, used with an API key; https unless it is on this computer.")),
 			AgentSlot(TEXT("GitHub Copilot"), TEXT("GitHub token"), TEXT("COPILOT_GITHUB_TOKEN"), true, TEXT("github"),
 				TEXT("A fine-grained personal access token with the Copilot Requests permission.")),
 			AgentSlot(TEXT("Cursor Agent"), TEXT("Cursor API key"), TEXT("CURSOR_API_KEY"), true, TEXT(""),
-				TEXT("From your Cursor dashboard's integrations page.")),
+				TEXT("A Cursor user API key for Cursor Agent CLI, not an Anthropic or OpenAI key. Configure provider keys for the Cursor desktop editor in Cursor Settings > Models.")),
 			AgentSlot(TEXT("OpenCode"), TEXT("OpenRouter API key"), TEXT("OPENROUTER_API_KEY"), true, TEXT("openrouter"),
 				TEXT("OpenCode's OpenRouter provider; pick an openrouter/ model in the Model menu."), false),
 			AgentSlot(TEXT("OpenCode"), TEXT("OpenAI API key"), TEXT("OPENAI_API_KEY"), true, TEXT("openai"),
@@ -277,16 +280,48 @@ FString ReadSlot(const FString& SlotId)
 	return Value;
 }
 
+FString ResolveSlot(const FHyperAIStudioKeySlot& Slot)
+{
+	if (GIsAutomationTesting && TestPrefix().IsEmpty())
+	{
+		return FString();
+	}
+	const FString Stored = ReadSlot(Slot.Id).TrimStartAndEnd();
+	return Stored.IsEmpty() ? FPlatformMisc::GetEnvironmentVariable(*Slot.Variable).TrimStartAndEnd() : Stored;
+}
+
+FString ReadAgentValue(const FString& AgentName, const FString& Variable)
+{
+	FHyperAIStudioKeySlot Slot;
+	return FindSlot(TEXT("agent/") + AgentKey(AgentName) + TEXT("/") + Variable, Slot) ? ResolveSlot(Slot) : FString();
+}
+
+TMap<FString, FString> LaunchOverridesFor(const FString& AgentName)
+{
+	TMap<FString, FString> Overrides;
+	if (AgentName.Equals(TEXT("Claude Code"), ESearchCase::IgnoreCase)
+		&& !ReadAgentValue(AgentName, TEXT("ANTHROPIC_API_KEY")).IsEmpty())
+	{
+		// The key selected in HyperAI must not silently bill an inherited token or cloud account instead.
+		for (const TCHAR* Variable : {TEXT("ANTHROPIC_AUTH_TOKEN"), TEXT("CLAUDE_CODE_OAUTH_TOKEN"),
+			TEXT("CLAUDE_CODE_USE_BEDROCK"), TEXT("CLAUDE_CODE_USE_VERTEX"), TEXT("CLAUDE_CODE_USE_FOUNDRY")})
+		{
+			Overrides.Add(Variable, FString());
+		}
+	}
+	return Overrides;
+}
+
 TMap<FString, FString> EnvironmentFor(const FString& AgentName)
 {
-	TMap<FString, FString> Environment;
+	TMap<FString, FString> Environment = LaunchOverridesFor(AgentName);
 	if (AgentName.IsEmpty())
 	{
 		return Environment;
 	}
 	for (const FHyperAIStudioKeySlot& Slot : Slots())
 	{
-		if (!Slot.Agent.Equals(AgentName, ESearchCase::IgnoreCase))
+		if (AgentKey(Slot.Agent) != AgentKey(AgentName))
 		{
 			continue;
 		}
@@ -350,7 +385,10 @@ FProcHandle CreateProcWithEnvironment(const FString& Executable, const FString& 
 	for (const TPair<FString, FString>& Pair : Extra)
 	{
 		Entries.RemoveAll([&Pair](const TPair<FString, FString>& Each) { return Each.Key.Equals(Pair.Key, ESearchCase::IgnoreCase); });
-		Entries.Emplace(Pair.Key, Pair.Value);
+		if (!Pair.Value.IsEmpty())
+		{
+			Entries.Emplace(Pair.Key, Pair.Value);
+		}
 	}
 	Entries.StableSort([](const TPair<FString, FString>& A, const TPair<FString, FString>& B)
 	{
@@ -439,7 +477,13 @@ FProcHandle CreateProcWithEnvironment(const FString& Executable, const FString& 
 
 FString WrapCommandWithTargets(const TArray<TPair<FString, FString>>& VariableTargets, const FString& Command)
 {
-	if (VariableTargets.IsEmpty() || Command.IsEmpty())
+	return WrapCommandWithTargets(VariableTargets, Command, {});
+}
+
+FString WrapCommandWithTargets(const TArray<TPair<FString, FString>>& VariableTargets, const FString& Command,
+	const TMap<FString, FString>& Overrides)
+{
+	if ((VariableTargets.IsEmpty() && Overrides.IsEmpty()) || Command.IsEmpty())
 	{
 		return Command;
 	}
@@ -469,11 +513,16 @@ FString WrapCommandWithTargets(const TArray<TPair<FString, FString>>& VariableTa
 	Script += TEXT("  Add-Type -TypeDefinition $s\n");
 	for (const TPair<FString, FString>& Pair : VariableTargets)
 	{
-		Script += FString::Printf(TEXT("  $v = [HyperAIStudioCredential]::Read(%s); if ($v) { [Environment]::SetEnvironmentVariable(%s, $v) }\n"),
+		Script += FString::Printf(TEXT("  $v = [HyperAIStudioCredential]::Read(%s); if (!$v) { throw 'Missing stored credential' }; [Environment]::SetEnvironmentVariable(%s, $v)\n"),
 			*Quote(Pair.Value), *Quote(Pair.Key));
 	}
 	Script += TEXT("  $v = $null\n");
-	Script += TEXT("} catch { Write-Host 'HyperAI could not read the stored keys, so the agent starts without them.' }\n");
+	Script += TEXT("} catch { Write-Host 'HyperAI could not read the stored keys. Check Settings > Agents and retry.'; exit 1 }\n");
+	for (const TPair<FString, FString>& Pair : Overrides)
+	{
+		Script += FString::Printf(TEXT("[Environment]::SetEnvironmentVariable(%s, %s)\n"),
+			*Quote(Pair.Key), Pair.Value.IsEmpty() ? TEXT("$null") : *Quote(Pair.Value));
+	}
 	Script += TEXT("$env:HYPERAI_AGENT_LAUNCH = ") + Quote(Command) + TEXT("\n");
 	Script += TEXT("$shell = if ($env:ComSpec) { $env:ComSpec } else { 'cmd.exe' }\n");
 	Script += TEXT("& $shell /d /c '%HYPERAI_AGENT_LAUNCH%'\n");
@@ -490,15 +539,15 @@ FString WrapCommandWithTargets(const TArray<TPair<FString, FString>>& VariableTa
 	// cmd.exe takes 8191 characters on a line, with the bootstrap around it.
 	if (Wrapped.Len() > 7600)
 	{
-		UE_LOG(LogHyperAIStudioCredentials, Warning, TEXT("The agent's launch is too long to pass stored keys with; it starts without them."));
-		return Command;
+		UE_LOG(LogHyperAIStudioCredentials, Warning, TEXT("The agent's launch is too long to pass stored keys safely."));
+		return TEXT("cmd.exe /d /c \"echo HyperAI could not pass the API credentials: launch command too long. & exit /b 1\"");
 	}
 	return Wrapped;
 }
 
 FString WrapTerminalCommand(const FString& AgentName, const FString& Command)
 {
-	return WrapCommandWithTargets(TargetsFor(AgentName), Command);
+	return WrapCommandWithTargets(TargetsFor(AgentName), Command, LaunchOverridesFor(AgentName));
 }
 
 TArray<TPair<FString, FString>> TargetsFor(const FString& AgentName)
@@ -506,7 +555,7 @@ TArray<TPair<FString, FString>> TargetsFor(const FString& AgentName)
 	TArray<TPair<FString, FString>> Targets;
 	for (const FHyperAIStudioKeySlot& Slot : Slots())
 	{
-		if (!Slot.Agent.Equals(AgentName, ESearchCase::IgnoreCase) || ReadSlot(Slot.Id).TrimStartAndEnd().IsEmpty())
+		if (AgentKey(Slot.Agent) != AgentKey(AgentName) || ReadSlot(Slot.Id).TrimStartAndEnd().IsEmpty())
 		{
 			continue;
 		}
@@ -541,7 +590,7 @@ bool BuildTestRequest(const FHyperAIStudioKeySlot& Slot, const FString& Key, con
 	}
 	else if (Slot.Test == TEXT("gemini"))
 	{
-		OutRequest.Url = TEXT("https://generativelanguage.googleapis.com/v1beta/models");
+		OutRequest.Url = (Base.IsEmpty() ? FString(TEXT("https://generativelanguage.googleapis.com")) : Base) + TEXT("/v1beta/models");
 		OutRequest.Headers.Add(TEXT("x-goog-api-key"), Key);
 	}
 	else if (Slot.Test == TEXT("openrouter"))
@@ -600,11 +649,7 @@ void TestSlot(const FString& SlotId, TFunction<void(bool bOk, const FString& Mes
 		OnDone(false, TEXT("There is no such key."));
 		return;
 	}
-	FString Key = ReadSlot(Slot.Id).TrimStartAndEnd();
-	if (Key.IsEmpty())
-	{
-		Key = FPlatformMisc::GetEnvironmentVariable(*Slot.Variable).TrimStartAndEnd();
-	}
+	const FString Key = ResolveSlot(Slot);
 	if (Key.IsEmpty())
 	{
 		OnDone(false, FString::Printf(TEXT("Nothing to test: no key is stored, and %s is not set."), *Slot.Variable));
@@ -616,7 +661,7 @@ void TestSlot(const FString& SlotId, TFunction<void(bool bOk, const FString& Mes
 	{
 		if (!Other.bSecret && !Slot.Agent.IsEmpty() && Other.Agent == Slot.Agent)
 		{
-			BaseUrl = ReadSlot(Other.Id);
+			BaseUrl = ResolveSlot(Other);
 		}
 	}
 	FHyperAIStudioKeyTestRequest Built;
@@ -645,7 +690,7 @@ void TestSlot(const FString& SlotId, TFunction<void(bool bOk, const FString& Mes
 		const int32 Code = Response->GetResponseCode();
 		if (Code >= 200 && Code < 300)
 		{
-			OnDone(true, FString::Printf(TEXT("%s works (HTTP %d)."), *Label, Code));
+			OnDone(true, FString::Printf(TEXT("%s accepted (HTTP %d). This read does not verify generation access, credit balance or promotional eligibility."), *Label, Code));
 		}
 		else if (Code == 401 || Code == 403)
 		{

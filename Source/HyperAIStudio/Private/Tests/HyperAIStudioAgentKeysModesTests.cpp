@@ -3,12 +3,25 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "HAL/FileManager.h"
+#include "Containers/Ticker.h"
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioChatModes.h"
 #include "HyperAIStudioCredentials.h"
+#include "HyperAIStudioNativeChat.h"
+#include "HyperAIStudioAgentChatHistory.h"
+#include "HyperAIStudioApiOptions.h"
+#include "SHyperAIStudioQuickActionWindow.h"
+#include "HyperAIStudioTerminalRawInput.h"
+#include "STerminal.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Widgets/SWindow.h"
+#include "HttpServerModule.h"
+#include "IHttpRouter.h"
+#include "HttpServerRequest.h"
+#include "HttpServerResponse.h"
 #include "HyperAIStudioExtensionRuntime.h"
 #include "HyperAIStudioService.h"
 #include "HyperAIStudioSkills.h"
@@ -28,9 +41,19 @@ namespace HyperAIStudio::KeysModesTests
 	{
 		FString Prefix = FString::Printf(TEXT("HyperAIStudioTest-%s/"), *FGuid::NewGuid().ToString(EGuidFormats::Digits));
 		TArray<FString> Written;
+		TMap<FString, FString> SavedEnvironment;
 
 		FScopedCredentials()
 		{
+			// Never let a test use a real provider key inherited by the editor.
+			for (const FHyperAIStudioKeySlot& Slot : Credentials::Slots())
+			{
+				if (!Slot.Agent.IsEmpty() && !SavedEnvironment.Contains(Slot.Variable))
+				{
+					SavedEnvironment.Add(Slot.Variable, FPlatformMisc::GetEnvironmentVariable(*Slot.Variable));
+					FPlatformMisc::SetEnvironmentVar(*Slot.Variable, TEXT(""));
+				}
+			}
 			FHyperAIStudioKeySlot Agent;
 			Agent.Id = TEXT("agent/hyperai-test-agent/HYPERAI_TEST_SECRET");
 			Agent.Agent = TEXT("HyperAI Test Agent");
@@ -53,6 +76,10 @@ namespace HyperAIStudio::KeysModesTests
 
 		~FScopedCredentials()
 		{
+			for (const TPair<FString, FString>& Pair : SavedEnvironment)
+			{
+				FPlatformMisc::SetEnvironmentVar(*Pair.Key, *Pair.Value);
+			}
 			for (const FString& Target : Written)
 			{
 				Credentials::Remove(Target);
@@ -98,6 +125,41 @@ namespace HyperAIStudio::KeysModesTests
 	}
 
 	const TCHAR* PresenceCommand = TEXT("if defined HYPERAI_TEST_SECRET (echo secret-present) else (echo secret-absent)");
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioApiTerminalOptionsTest,
+	"HyperAIStudio.AgentKeys.ApiTerminalOptions",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioApiTerminalOptionsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio;
+	KeysModesTests::FScratchRoot Root;
+	TestEqual(TEXT("Auto is the default"), ApiOptions::MaxOutputTokens(Root.Path), 0);
+	TestTrue(TEXT("A custom project limit is saved"), ApiOptions::SetMaxOutputTokens(Root.Path, 64000));
+	TestEqual(TEXT("Read back without an editor restart"), ApiOptions::MaxOutputTokens(Root.Path), 64000);
+	TestFalse(TEXT("Negative limits are refused"), ApiOptions::SetMaxOutputTokens(Root.Path, -1));
+	TestEqual(TEXT("Refusal preserves the existing setting"), ApiOptions::MaxOutputTokens(Root.Path), 64000);
+	TestTrue(TEXT("Zero removes the HyperAI cap"), ApiOptions::SetMaxOutputTokens(Root.Path, 0));
+	const FString Session = TEXT("12345678-1234-1234-1234-123456789abc");
+	for (const TCHAR* Agent : {TEXT("Claude API"), TEXT("OpenAI API"), TEXT("Gemini API")})
+	{
+		const FString Command = FHyperAIStudioNativeChat::GetDirectApiLaunchCommand(Agent, Root.Path, FString(), Session, true, true);
+		TestTrue(TEXT("Terminal starts the direct API worker"), Command.Contains(TEXT("hyperai_api_agent.py")));
+		TestTrue(TEXT("Interactive presentation selected"), Command.Contains(TEXT("--terminal")));
+		TestTrue(TEXT("Same saved conversation id"), Command.Contains(TEXT("--session ") + Session));
+		TestTrue(TEXT("Read-only mode carried to terminal"), Command.Contains(TEXT("--read-only")));
+		TestFalse(TEXT("Credentials never appear in command arguments"), Command.Contains(TEXT("API_KEY")));
+		const FString Native = FHyperAIStudioNativeChat::GetDirectApiLaunchCommand(Agent, Root.Path, FString(), Session, false);
+		TestFalse(TEXT("Native uses protocol presentation"), Native.Contains(TEXT("--terminal")));
+		FHyperAIStudioStatus NotReady;
+		const FString Bootstrap = SHyperAIStudioQuickActionWindow::BuildTerminalBootstrapCommandForStatus(NotReady, Agent, Root.Path, Command);
+		TestTrue(TEXT("Direct API starts even without CLI setup readiness"), Bootstrap.Contains(Command));
+		TestFalse(TEXT("No CLI readiness block"), Bootstrap.Contains(TEXT("Complete setup before")));
+	}
+	TestTrue(TEXT("Unsafe command path refused"), FHyperAIStudioNativeChat::GetDirectApiLaunchCommand(TEXT("Claude API"), TEXT("C:/bad&path"), FString(), Session, true).IsEmpty());
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -213,8 +275,17 @@ bool FHyperAIStudioCredentialsLaunchArgumentsTest::RunTest(const FString& Parame
 	const FString Plain = FHyperAIStudioService::GetCodexRootArguments();
 	TestTrue(TEXT("Codex is given Unreal MCP by -c"), Plain.Contains(TEXT("-c mcp_servers.unreal-mcp.url=http")));
 	TestFalse(TEXT("No provider without a stored key"), Plain.Contains(TEXT("model_provider=")));
+	FPlatformMisc::SetEnvironmentVar(TEXT("OPENAI_API_KEY"), TEXT("test-env-key"));
+	FPlatformMisc::SetEnvironmentVar(TEXT("OPENAI_BASE_URL"), TEXT("https://env.test/v1"));
+	const FString FromEnvironment = FHyperAIStudioService::GetCodexRootArguments();
+	TestTrue(TEXT("Environment keys also bypass ChatGPT login"), FromEnvironment.Contains(TEXT("model_provider=hyperai")));
+	TestTrue(TEXT("The environment endpoint is respected"), FromEnvironment.Contains(TEXT("base_url=https://env.test/v1")));
+	TestTrue(TEXT("Codex uses Responses with no subscription authentication"), FromEnvironment.Contains(TEXT("wire_api=responses"))
+		&& FromEnvironment.Contains(TEXT("requires_openai_auth=false")));
+	TestFalse(TEXT("An environment key never reaches command arguments"), FromEnvironment.Contains(TEXT("test-env-key")));
 	const FString Key = TEXT("sk-test-0000000000000000000000");
 	Scope.Store(TEXT("agent/codex/OPENAI_API_KEY"), Key);
+	TestEqual(TEXT("The stored API account wins over the environment account"), Credentials::ReadAgentValue(TEXT("Codex"), TEXT("OPENAI_API_KEY")), Key);
 	Scope.Store(TEXT("agent/codex/OPENAI_BASE_URL"), TEXT("https://openrouter.ai/api/v1"));
 	const FString Keyed = FHyperAIStudioService::GetCodexRootArguments();
 	TestTrue(TEXT("A stored key names HyperAI's provider"), Keyed.Contains(TEXT("-c model_provider=hyperai")));
@@ -241,6 +312,10 @@ bool FHyperAIStudioCredentialsLaunchArgumentsTest::RunTest(const FString& Parame
 	TestTrue(TEXT("Its balance read"), Credentials::BuildTestRequest(Slot, TEXT("k"), FString(), Request) && Request.Url.Contains(TEXT("/balance")));
 	TestTrue(TEXT("Cursor's key has a slot"), Credentials::FindSlot(TEXT("agent/cursor-agent/CURSOR_API_KEY"), Slot));
 	TestFalse(TEXT("No free check is invented for it"), Credentials::BuildTestRequest(Slot, TEXT("k"), FString(), Request));
+	TestTrue(TEXT("Gemini has an API key slot"), Credentials::FindSlot(TEXT("agent/gemini/GEMINI_API_KEY"), Slot));
+	TestTrue(TEXT("Gemini checks the same gateway it will use"), Credentials::BuildTestRequest(Slot, TEXT("k"), TEXT("https://gemini.test/"), Request)
+		&& Request.Url == TEXT("https://gemini.test/v1beta/models") && Request.Headers.FindRef(TEXT("x-goog-api-key")) == TEXT("k"));
+	TestFalse(TEXT("The Gemini key is not in a URL"), Request.Url.Contains(TEXT("key=")));
 
 	// Every slot has a distinct id, a variable and a label; the providers HyperAI's tools call are all there.
 	TSet<FString> Ids;
@@ -410,7 +485,7 @@ bool FHyperAIStudioAgentKeysScreensTest::RunTest(const FString& Parameters)
 	// A made-up key and gateway, under the test's own targets, so the list shows one masked and one address.
 	Scope.Store(TEXT("agent/claude-code/ANTHROPIC_API_KEY"), TEXT("sk-ant-api03-EXAMPLEEXAMPLEEXAMPLEEXAMPLE-wxyz"));
 	Scope.Store(TEXT("agent/qwen-code/OPENAI_BASE_URL"), TEXT("https://openrouter.ai/api/v1"));
-	const FString KeysShot = Tests::SaveWidgetShot(SNew(SHyperAIStudioKeysPanel), FIntPoint(900, 1500), TEXT("settings-agents-keys"));
+	const FString KeysShot = Tests::SaveWidgetShot(SNew(SHyperAIStudioKeysPanel), FIntPoint(1000, 4200), TEXT("settings-agents-keys"));
 	const FString ModesShot = Tests::SaveWidgetShot(SNew(SHyperAIStudioModesPanel), FIntPoint(760, 560), TEXT("chat-modes"));
 	if (KeysShot.IsEmpty() || ModesShot.IsEmpty())
 	{
@@ -496,6 +571,275 @@ bool FHyperAIStudioSkillValidationTest::RunTest(const FString& Parameters)
 		}
 	}
 	TestTrue(*FString::Printf(TEXT("At least 22 built-in skills (%d)"), Valid), Valid >= 22);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioApiAuthIsolationTest,
+	"HyperAIStudio.AgentKeys.ApiAuthIsolation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioApiAuthIsolationTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio;
+	KeysModesTests::FScopedCredentials Scope;
+	const FString PreviousToken = FPlatformMisc::GetEnvironmentVariable(TEXT("ANTHROPIC_AUTH_TOKEN"));
+	ON_SCOPE_EXIT { FPlatformMisc::SetEnvironmentVar(TEXT("ANTHROPIC_AUTH_TOKEN"), *PreviousToken); };
+	FPlatformMisc::SetEnvironmentVar(TEXT("ANTHROPIC_AUTH_TOKEN"), TEXT("inherited-test-token"));
+	TestTrue(TEXT("An Anthropic key is stored"), Scope.Store(TEXT("agent/claude-code/ANTHROPIC_API_KEY"), TEXT("fake-api-key")));
+	const auto Environment = Credentials::EnvironmentFor(TEXT("Claude Code"));
+	TestTrue(TEXT("API launch removes the inherited bearer token"), Environment.Contains(TEXT("ANTHROPIC_AUTH_TOKEN"))
+		&& Environment.FindRef(TEXT("ANTHROPIC_AUTH_TOKEN")).IsEmpty());
+	const FString Command = TEXT("if defined ANTHROPIC_AUTH_TOKEN (echo wrong-account) else (echo api-account)");
+	TestTrue(TEXT("The native child does not retain the token"), KeysModesTests::RunCmd(FString::Printf(TEXT("/d /s /c \"%s\""), *Command), &Environment).Contains(TEXT("api-account")));
+	const FString Wrapped = Credentials::WrapTerminalCommand(TEXT("Claude Code"), Command);
+	TestTrue(TEXT("The terminal child also removes the token"), KeysModesTests::RunCmd(FString::Printf(TEXT("/d /s /c \"%s\""), *Wrapped), nullptr).Contains(TEXT("api-account")));
+	TestEqual(TEXT("The editor's token is unchanged"), FPlatformMisc::GetEnvironmentVariable(TEXT("ANTHROPIC_AUTH_TOKEN")), FString(TEXT("inherited-test-token")));
+	TestFalse(TEXT("Keys are not embedded in launch arguments"), Wrapped.Contains(TEXT("fake-api-key")));
+	const FString LongCommand = FString::ChrN(5000, TEXT('x'));
+	const FString Refused = Credentials::WrapTerminalCommand(TEXT("Claude Code"), LongCommand);
+	TestFalse(TEXT("An oversized keyed launch cannot run without its credentials"), Refused.Contains(LongCommand));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioGeminiApiHandshakeTest,
+	"HyperAIStudio.AgentKeys.NativeApiHandshake",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioGeminiApiHandshakeTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio;
+	KeysModesTests::FScopedCredentials Scope;
+	KeysModesTests::FScratchRoot Scratch;
+	IFileManager::Get().MakeDirectory(*Scratch.Path, true);
+	const FString Script = Scratch.Path / TEXT("api_auth_agent.py");
+	FFileHelper::SaveStringToFile(TEXT(R"PY(import json, os, sys
+authed = False
+for line in sys.stdin:
+    m = json.loads(line); method = m.get('method'); ident = m.get('id'); p = m.get('params', {})
+    def send(result=None, error=None):
+        obj = {'jsonrpc': '2.0', 'id': ident}
+        obj['error' if error else 'result'] = error if error else result
+        print(json.dumps(obj), flush=True)
+    if method == 'initialize':
+        send({'protocolVersion': 1, 'agentCapabilities': {}, 'authMethods': [{'id': 'gemini-api-key', 'name': 'Gemini API key'}]})
+    elif method == 'authenticate':
+        if 'reject' in sys.argv:
+            send(error={'code': -32000, 'message': 'invalid API key'})
+        elif p == {'methodId': 'gemini-api-key'} and os.environ.get('GEMINI_API_KEY') == 'fake-gemini-key':
+            authed = True; send({})
+        else:
+            send(error={'code': -32000, 'message': 'unexpected credential transport'})
+    elif method == 'session/new':
+        has_key = bool(os.environ.get('GEMINI_API_KEY'))
+        if has_key and not authed:
+            send(error={'code': -32000, 'message': 'auth required before session'})
+        else:
+            send({'sessionId': 'api-session' if authed else 'login-session'})
+    elif method in ('thread/start', 'thread/resume'):
+        send({'thread': {'id': p.get('modelProvider', 'login-provider')}})
+)PY"), *Script, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	ON_SCOPE_EXIT { FHyperAIStudioNativeChat::SetCommandForTests(FString()); };
+	auto Wait = [](const TFunction<bool()>& Done)
+	{
+		const double End = FPlatformTime::Seconds() + 10.0;
+		while (!Done() && FPlatformTime::Seconds() < End)
+		{
+			FTSTicker::GetCoreTicker().Tick(0.03f);
+			FPlatformProcess::Sleep(0.02f);
+		}
+		return Done();
+	};
+	auto Start = [&](const bool bReject)
+	{
+		FHyperAIStudioNativeChat::SetCommandForTests(FString::Printf(TEXT("python -u \"%s\"%s"), *Script, bReject ? TEXT(" reject") : TEXT("")));
+		auto Chat = FHyperAIStudioNativeChat::Create(TEXT("Gemini"), Scratch.Path, FString(), FString());
+		Chat->SetHeadless(TEXT("Authentication test; no generation."));
+		FString Error;
+		TestTrue(TEXT("The protocol stand-in starts"), Chat->Start(Error));
+		return Chat;
+	};
+	FPlatformMisc::SetEnvironmentVar(TEXT("GEMINI_API_KEY"), TEXT("fake-gemini-key"));
+	auto Chat = Start(false);
+	TestTrue(TEXT("An environment key authenticates before session creation"), Wait([&]() { return Chat->IsReady(); }) && Chat->GetSessionId() == TEXT("api-session"));
+	Chat->Stop();
+	FPlatformMisc::SetEnvironmentVar(TEXT("GEMINI_API_KEY"), TEXT(""));
+	TestTrue(TEXT("A Gemini key is stored"), Scope.Store(TEXT("agent/gemini/GEMINI_API_KEY"), TEXT("fake-gemini-key")));
+	Chat = Start(false);
+	TestTrue(TEXT("A stored key also authenticates"), Wait([&]() { return Chat->IsReady(); }) && Chat->GetSessionId() == TEXT("api-session"));
+	Chat->Stop();
+	Chat = Start(true);
+	TestTrue(TEXT("Rejected API auth reports an error without opening a login session"), Wait([&]()
+	{
+		return Chat->GetItems().ContainsByPredicate([](const TSharedPtr<FHyperAIStudioChatItem>& Item)
+		{ return Item->Kind == FHyperAIStudioChatItem::EKind::Error; });
+	}) && !Chat->IsReady() && Chat->GetSessionId().IsEmpty());
+	Chat->Stop();
+	Credentials::Remove(Credentials::TargetName(TEXT("agent/gemini/GEMINI_API_KEY")));
+	Chat = Start(false);
+	TestTrue(TEXT("No configured key leaves the login flow alone"), Wait([&]() { return Chat->IsReady(); }) && Chat->GetSessionId() == TEXT("login-session"));
+	Chat->Stop();
+	FPlatformMisc::SetEnvironmentVar(TEXT("OPENAI_API_KEY"), TEXT("fake-openai-key"));
+	for (const FString& Resume : {FString(), FString(TEXT("previous-chatgpt-thread"))})
+	{
+		Chat = FHyperAIStudioNativeChat::Create(TEXT("Codex"), Scratch.Path, FString(), Resume);
+		Chat->SetHeadless(TEXT("Authentication test; no generation."));
+		FString Error;
+		TestTrue(TEXT("Codex protocol stand-in starts"), Chat->Start(Error));
+		TestTrue(TEXT("New and resumed Codex chats explicitly select the API provider"), Wait([&]() { return Chat->IsReady(); })
+			&& Chat->GetSessionId() == TEXT("hyperai"));
+		Chat->Stop();
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioDirectProviderEndpointsTest,
+	"HyperAIStudio.AgentKeys.DirectProviderEndpoints",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioDirectProviderEndpointsTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio;
+	KeysModesTests::FScopedCredentials Scope;
+	KeysModesTests::FScratchRoot Scratch;
+	constexpr uint32 Port = 18337;
+	IFileManager::Get().MakeDirectory(*Scratch.Path, true);
+	const TSharedPtr<IHttpRouter> Router = FHttpServerModule::Get().GetHttpRouter(Port, true);
+	if (!TestTrue(TEXT("The local provider mock binds"), Router.IsValid())) { return false; }
+	struct FCase { const TCHAR* Agent; const TCHAR* Slot; const TCHAR* Variable; const TCHAR* Path; const TCHAR* Reply; };
+	const FCase Cases[] = {
+		{TEXT("Claude API"), TEXT("claude-code"), TEXT("ANTHROPIC"), TEXT("/v1/messages"), TEXT("{\"content\":[{\"type\":\"text\",\"text\":\"Direct API answer\"}],\"stop_reason\":\"end_turn\"}")},
+		{TEXT("OpenAI API"), TEXT("codex"), TEXT("OPENAI"), TEXT("/responses"), TEXT("{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"Direct API answer\"}]}]}")},
+		{TEXT("Gemini API"), TEXT("gemini"), TEXT("GEMINI"), TEXT("/v1beta/models/gemini-3.8-flash:generateContent"), TEXT("{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Direct API answer\"}]}}]}")}
+	};
+	FHyperAIStudioNativeChat::SetCommandForTests(FString());
+	auto Wait = [](const TFunction<bool()>& Done)
+	{
+		const double End = FPlatformTime::Seconds() + 12.0;
+		while (!Done() && FPlatformTime::Seconds() < End)
+		{
+			FTSTicker::GetCoreTicker().Tick(0.03f);
+			FPlatformProcess::Sleep(0.02f);
+		}
+		return Done();
+	};
+	for (const FCase& Case : Cases)
+	{
+		int32 Requests = 0;
+		// Unreal treats ':' as a route parameter, including Gemini's literal ':generateContent' suffix.
+		const FString RoutePath = FString(Case.Agent) == TEXT("Gemini API") ? TEXT("/v1beta/models/:model") : Case.Path;
+		const FHttpRouteHandle Route = Router->BindRoute(FHttpPath(RoutePath), EHttpServerRequestVerbs::VERB_POST,
+			FHttpRequestHandler::CreateLambda([this, &Requests, ExpectedPath = FString(Case.Path), Reply = FString(Case.Reply)](const FHttpServerRequest& Request, const FHttpResultCallback& Done)
+			{
+				++Requests;
+				TestEqual(TEXT("The worker posts to the exact provider generation path"), Request.FullPath.GetPath(), ExpectedPath);
+				Done(FHttpServerResponse::Create(Reply, TEXT("application/json")));
+				return true;
+			}));
+		FHttpServerModule::Get().StartAllListeners();
+		ON_SCOPE_EXIT { Router->UnbindRoute(Route); };
+		const FString KeyVariable = FString(Case.Variable) + TEXT("_API_KEY");
+		const FString BaseVariable = FString(Case.Agent) == TEXT("Gemini API") ? TEXT("GOOGLE_GEMINI_BASE_URL") : FString(Case.Variable) + TEXT("_BASE_URL");
+		const FString Prefix = FString(TEXT("agent/")) + Case.Slot + TEXT("/");
+		TestTrue(TEXT("A fake provider key is stored"), Scope.Store(Prefix + KeyVariable, TEXT("local-provider-test-key")));
+		TestTrue(TEXT("The mock base URL is stored"), Scope.Store(Prefix + BaseVariable, FString::Printf(TEXT("http://127.0.0.1:%u"), Port)));
+		TestTrue(TEXT("An API route is offered without CLI discovery"), FHyperAIStudioNativeChat::GetAvailableApiAgents().Contains(Case.Agent));
+		auto Chat = FHyperAIStudioNativeChat::Create(Case.Agent, Scratch.Path, FString(), FString());
+		Chat->SetHeadless(TEXT("Return the provider response; no tools or generation outside localhost."));
+		FString Error;
+		if (!TestTrue(TEXT("The real direct API worker starts"), Chat->Start(Error))) { AddError(Error); continue; }
+		TestTrue(TEXT("API startup completes without a balance request"), Wait([&]() { return Chat->IsReady(); }) && Requests == 0);
+		Chat->Send(TEXT("Hello, API"));
+		TestTrue(*FString::Printf(TEXT("%s reaches its generation endpoint and returns to the chat"), Case.Agent), Wait([&]() { return !Chat->IsBusy(); })
+			&& Requests == 1 && Chat->GetItems().ContainsByPredicate([](const TSharedPtr<FHyperAIStudioChatItem>& Item)
+			{ return Item->Kind == FHyperAIStudioChatItem::EKind::Agent && Item->Text.Contains(TEXT("Direct API answer")); }));
+		AddInfo(FString::Printf(TEXT("%s generation requests: %d"), Case.Agent, Requests));
+		for (const TSharedPtr<FHyperAIStudioChatItem>& Item : Chat->GetItems())
+		{
+			if (Item->Kind == FHyperAIStudioChatItem::EKind::Error) { AddInfo(Item->Text); }
+		}
+		Chat->Stop();
+	}
+	// Project API sessions are visible and resumable without being interpreted as Claude Code/Codex histories.
+	const FString Id = TEXT("12345678-1234-1234-1234-123456789abc");
+	const FString Log = Scratch.Path / TEXT(".hyperai/runtime/api-chats/anthropic") / (Id + TEXT(".jsonl"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Log), true);
+	FFileHelper::SaveStringToFile(TEXT("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"A direct API conversation\"}}\n"), *Log);
+	const auto Sessions = ChatHistory::ListSessions(Scratch.Path);
+	TestTrue(TEXT("API history is listed with its own route"), Sessions.ContainsByPredicate([&](const FHyperAIStudioChatSession& Session)
+	{ return Session.AgentName == TEXT("Claude API") && Session.SessionId == Id && Session.Title == TEXT("A direct API conversation"); }));
+	TestFalse(TEXT("The API conversation resolves to its own transcript"), ChatHistory::SessionFile(TEXT("Claude API"), Scratch.Path, Id).IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHyperAIStudioApiTerminalLiveTest,
+	"HyperAIStudio.AgentKeys.ApiTerminalLive",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHyperAIStudioApiTerminalLiveTest::RunTest(const FString& Parameters)
+{
+	using namespace HyperAIStudio;
+	KeysModesTests::FScopedCredentials Scope;
+	KeysModesTests::FScratchRoot Scratch;
+	IFileManager::Get().MakeDirectory(*Scratch.Path, true);
+	constexpr uint32 Port = 18338;
+	const TSharedPtr<IHttpRouter> Router = FHttpServerModule::Get().GetHttpRouter(Port, true);
+	if (!TestTrue(TEXT("Terminal mock server binds"), Router.IsValid())) { return false; }
+	int32 Requests = 0;
+	const FHttpRouteHandle Route = Router->BindRoute(FHttpPath(TEXT("/v1/messages")), EHttpServerRequestVerbs::VERB_POST,
+		FHttpRequestHandler::CreateLambda([&Requests](const FHttpServerRequest& Request, const FHttpResultCallback& Done)
+		{
+			++Requests;
+			Done(FHttpServerResponse::Create(TEXT("{\"id\":\"terminal-answer\",\"content\":[{\"type\":\"text\",\"text\":\"Embedded terminal API answer\"}],\"stop_reason\":\"end_turn\"}"), TEXT("application/json")));
+			return true;
+		}));
+	ON_SCOPE_EXIT { Router->UnbindRoute(Route); };
+	FHttpServerModule::Get().StartAllListeners();
+	Scope.Store(TEXT("agent/claude-code/ANTHROPIC_API_KEY"), TEXT("terminal-local-fake-secret"));
+	Scope.Store(TEXT("agent/claude-code/ANTHROPIC_BASE_URL"), FString::Printf(TEXT("http://127.0.0.1:%u"), Port));
+	const TSharedRef<STerminal> Terminal = SNew(STerminal);
+	if (Tests::SaveWidgetShot(Terminal, FIntPoint(1200, 760), TEXT("api-terminal-start")).IsEmpty())
+	{
+		AddInfo(TEXT("Rendering unavailable; terminal UI check skipped."));
+		return true;
+	}
+	// STerminal consumes output with a Slate active timer, which requires a window in the Slate tree.
+	const TSharedRef<SWindow> Window = SNew(SWindow).Title(FText::FromString(TEXT("API terminal test"))).ClientSize(FVector2D(1200, 760))[Terminal];
+	FSlateApplication::Get().AddWindow(Window, true);
+	ON_SCOPE_EXIT { FSlateApplication::Get().RequestDestroyWindow(Window); };
+	auto Wait = [&Terminal](const TFunction<bool()>& Done)
+	{
+		const double End = FPlatformTime::Seconds() + 15.0;
+		while (!Done() && FPlatformTime::Seconds() < End)
+		{
+			FTSTicker::GetCoreTicker().Tick(0.03f);
+			FSlateApplication::Get().Tick();
+			FPlatformProcess::Sleep(0.02f);
+		}
+		return Done();
+	};
+	if (!TestTrue(TEXT("Embedded terminal session starts"), Wait([&]() { return Terminal->IsSessionRunning(); }))) { return false; }
+	const FString Direct = FHyperAIStudioNativeChat::GetDirectApiLaunchCommand(TEXT("Claude API"), Scratch.Path, FString(), TEXT("87654321-4321-4321-4321-cba987654321"), true);
+	const FString Wrapped = Credentials::WrapTerminalCommand(TEXT("Claude API"), Direct);
+	FHyperAIStudioStatus NotReady;
+	Terminal->ExecuteCommand(SHyperAIStudioQuickActionWindow::BuildTerminalBootstrapCommandForStatus(NotReady, TEXT("Claude API"), Scratch.Path, Wrapped));
+	const bool bPrompt = Wait([&]() { return TerminalRawInput::ReadVisibleTail(*Terminal, 200).Contains(TEXT("You >")); });
+	if (!TestTrue(TEXT("Direct API prompt appears inside embedded terminal"), bPrompt))
+	{
+		AddInfo(TerminalRawInput::ReadVisibleTail(*Terminal, 200));
+		return false;
+	}
+	TestEqual(TEXT("Startup makes no provider requests"), Requests, 0);
+	TestTrue(TEXT("A prompt reaches the terminal input"), TerminalRawInput::WriteText(*Terminal, TEXT("Hello from the embedded terminal"), true));
+	TestTrue(TEXT("Generation returns a visible answer"), Wait([&]() { return TerminalRawInput::ReadVisibleTail(*Terminal, 200).Contains(TEXT("Embedded terminal API answer")); }));
+	TestEqual(TEXT("Exactly one direct generation"), Requests, 1);
+	TestFalse(TEXT("The saved key is never displayed"), TerminalRawInput::ReadVisibleTail(*Terminal, 200).Contains(TEXT("terminal-local-fake-secret")));
+	AddInfo(TEXT("Terminal screenshot: ") + Tests::SaveWidgetShot(Terminal, FIntPoint(1200, 760), TEXT("api-terminal-answer")));
+	TerminalRawInput::WriteText(*Terminal, TEXT("/exit"), true);
+	Wait([&]() { return TerminalRawInput::ReadVisibleTail(*Terminal, 200).Contains(TEXT("Conversation saved:")); });
 	return true;
 }
 

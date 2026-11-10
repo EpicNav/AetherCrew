@@ -2677,12 +2677,13 @@ FString FHyperAIStudioService::GetCodexRootArguments()
 	{
 		Arguments += FString::Printf(TEXT(" -c mcp_servers.unreal-mcp.url=%s -c mcp_servers.unreal-mcp.startup_timeout_sec=30 -c mcp_servers.unreal-mcp.tool_timeout_sec=300"), *Endpoint);
 	}
-	if (!HyperAIStudio::Credentials::ReadSlot(TEXT("agent/codex/OPENAI_API_KEY")).TrimStartAndEnd().IsEmpty())
+	if (!HyperAIStudio::Credentials::ReadAgentValue(TEXT("Codex"), TEXT("OPENAI_API_KEY")).IsEmpty())
 	{
-		FString BaseUrl = HyperAIStudio::Credentials::ReadSlot(TEXT("agent/codex/OPENAI_BASE_URL")).TrimStartAndEnd();
+		FString BaseUrl = HyperAIStudio::Credentials::ReadAgentValue(TEXT("Codex"), TEXT("OPENAI_BASE_URL"));
 		BaseUrl = IsPlainAddress(BaseUrl) ? BaseUrl : FString(TEXT("https://api.openai.com/v1"));
 		Arguments += FString::Printf(TEXT(" -c model_provider=hyperai -c model_providers.hyperai.name=HyperAI -c model_providers.hyperai.base_url=%s")
-			TEXT(" -c model_providers.hyperai.env_key=OPENAI_API_KEY"), *BaseUrl);
+			TEXT(" -c model_providers.hyperai.env_key=OPENAI_API_KEY -c model_providers.hyperai.wire_api=responses")
+			TEXT(" -c model_providers.hyperai.requires_openai_auth=false"), *BaseUrl);
 	}
 	return Arguments;
 }

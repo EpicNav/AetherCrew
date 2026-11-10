@@ -34,6 +34,8 @@ struct FHyperAIStudioChatSession
 	FHyperAIStudioLiveChat Live;
 	/** The agent's own transcript file. */
 	FString Path;
+	/** For project-local direct API history; filled by discovery rather than read from conversation content. */
+	FString ProjectRoot;
 };
 
 /**
@@ -97,7 +99,8 @@ namespace HyperAIStudio::ChatHistory
 	 * "&& ". KeyTargets (Credentials::TargetsFor) are the stored keys it starts with.
 	 */
 	FString StartClaudeBackgroundChat(const FString& ClaudeCommand, const FString& ProjectRoot, const FString& EnvPrefix,
-		const FString& Arguments, FString& OutError, const TArray<TPair<FString, FString>>& KeyTargets = {});
+		const FString& Arguments, FString& OutError, const TArray<TPair<FString, FString>>& KeyTargets = {},
+		const TMap<FString, FString>& Overrides = {});
 	/** `claude stop <ShortId>`: the session ends and its conversation stays resumable. */
 	bool StopClaudeBackgroundChat(const FString& ClaudeCommand, const FString& ShortId);
 }

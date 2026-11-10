@@ -81,6 +81,12 @@ class FHyperAIStudioNativeChat : public TSharedFromThis<FHyperAIStudioNativeChat
 {
 public:
 	static bool IsSupported(const FString& AgentName);
+	static bool IsDirectApiAgent(const FString& AgentName);
+	/** Direct provider routes whose API key and bundled Python runtime are available; no agent CLI required. */
+	static TArray<FString> GetAvailableApiAgents();
+	/** Same direct API engine in either the native protocol or its interactive terminal presentation. No key in arguments. */
+	static FString GetDirectApiLaunchCommand(const FString& AgentName, const FString& ProjectRoot, const FString& Model,
+		const FString& SessionId, bool bTerminal, bool bReadOnly = false);
 	/**
 	 * Agents HyperAI hosts through the Agent Client Protocol whose command is installed: each chat hands them Unreal
 	 * MCP, so they need no settings of their own. Gemini is not among them; it has its own route and settings file.

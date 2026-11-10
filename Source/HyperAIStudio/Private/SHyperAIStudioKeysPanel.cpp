@@ -4,12 +4,16 @@
 
 #include "Dialog/SCustomDialog.h"
 #include "HAL/PlatformMisc.h"
+#include "HAL/PlatformProcess.h"
 #include "HyperAIStudioStyle.h"
+#include "HyperAIStudioApiOptions.h"
+#include "HyperAIStudioService.h"
 #include "Misc/MessageDialog.h"
 #include "Styling/AppStyle.h"
 #include "Styling/StyleColors.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SNumericEntryBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
@@ -19,13 +23,15 @@
 
 void SHyperAIStudioKeysPanel::Construct(const FArguments& InArgs)
 {
+	const FString ProjectRoot = FHyperAIStudioService::GetProjectRoot();
+	const TSharedRef<int32> OutputTokens = MakeShared<int32>(HyperAIStudio::ApiOptions::MaxOutputTokens(ProjectRoot));
 	ChildSlot
 	[
 		SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight()
 		[
 			SNew(STextBlock)
-			.Text(LOCTEXT("Title", "Your own keys"))
+			.Text(LOCTEXT("Title", "API keys & authentication"))
 			.TextStyle(FHyperAIStudioStyle::Get(), "HyperAIStudio.Text.PageTitle")
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 8.0f)
@@ -33,7 +39,47 @@ void SHyperAIStudioKeysPanel::Construct(const FArguments& InArgs)
 			SNew(STextBlock)
 			.AutoWrapText(true)
 			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-			.Text(LOCTEXT("Subtitle", "Give an agent your own API key or an OpenAI-compatible address, and give HyperAI's image, audio and 3D tools their providers' keys. Keys are kept in Windows Credential Manager for your user (targets named HyperAIStudio/...), never in the project, an ini file, a log or Activity, and go only into the environment of the agent HyperAI starts. A key set here wins over the same environment variable. Agents read a new key when their chat next starts."))
+			.Text(LOCTEXT("Subtitle", "Set a key below, then choose Claude API, OpenAI API or Gemini API in Chat. These routes send generation requests directly to the provider; no agent CLI or balance check is required. Stored keys take precedence over environment variables and stay in Windows Credential Manager. Provider billing and eligible promotional credits apply to the key's account. HyperAI's tool spend cap does not limit agent API usage."))
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 8.0f)
+		[
+			SNew(STextBlock).AutoWrapText(true)
+			.Text(LOCTEXT("OutputLimitHelp", "Direct API output: 0 selects Auto. Claude uses its model's maximum; OpenAI and Gemini use provider defaults. A positive number sets a custom limit. Changes apply to the next request in either view. Provider limits still apply. Uncheck Native View in Chat to use the API terminal."))
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
+			[ SNew(STextBlock).Text(LOCTEXT("OutputLimit", "Max output tokens (0 = Auto)")) ]
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				SNew(SNumericEntryBox<int32>).MinValue(0).AllowSpin(false).MinDesiredValueWidth(120.0f)
+				.Value_Lambda([OutputTokens]() { return TOptional<int32>(*OutputTokens); })
+				.OnValueCommitted_Lambda([ProjectRoot, OutputTokens](int32 Value, ETextCommit::Type)
+				{
+					if (HyperAIStudio::ApiOptions::SetMaxOutputTokens(ProjectRoot, Value)) { *OutputTokens = Value; }
+					else { FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("OutputSaveFailed", "The API output limit could not be saved. Check project folder permissions.")); }
+				})
+			]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 8.0f)
+		[
+			SNew(STextBlock).AutoWrapText(true)
+			.Text(LOCTEXT("DesktopAuth", "Desktop editors: VS Code/Copilot > Chat: Manage Language Models > Add Models; Cursor > Settings > Models. Enter provider keys there. These editors manage their own credentials; the Cursor Agent CLI key below is a separate Cursor account key."))
+		]
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				SNew(SButton).Text(LOCTEXT("VSCodeAuth", "VS Code API setup"))
+				.OnClicked_Lambda([]() { FPlatformProcess::LaunchURL(TEXT("https://code.visualstudio.com/docs/agent-customization/language-models"), nullptr, nullptr); return FReply::Handled(); })
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(6.0f, 0.0f)
+			[
+				SNew(SButton).Text(LOCTEXT("CursorAuth", "Cursor API setup"))
+				.OnClicked_Lambda([]() { FPlatformProcess::LaunchURL(TEXT("https://cursor.com/docs/settings/api-keys"), nullptr, nullptr); return FReply::Handled(); })
+			]
 		]
 		+ SVerticalBox::Slot().AutoHeight()
 		[
@@ -60,7 +106,9 @@ void SHyperAIStudioKeysPanel::Rebuild()
 			Rows->AddSlot().AutoHeight().Padding(0.0f, 10.0f, 0.0f, 4.0f)
 			[
 				SNew(STextBlock)
-				.Text(Slot.Agent.IsEmpty() ? LOCTEXT("ProvidersGroup", "Providers for HyperAI's tools") : FText::FromString(Slot.Agent))
+					.Text(Slot.Agent.IsEmpty() ? LOCTEXT("ProvidersGroup", "Providers for HyperAI's tools") : FText::FromString(
+						Slot.Agent == TEXT("Claude Code") ? TEXT("Claude / Anthropic") : Slot.Agent == TEXT("Codex") ? TEXT("OpenAI / Codex")
+						: Slot.Agent == TEXT("Gemini") ? TEXT("Google / Gemini") : Slot.Agent))
 				.Font(FAppStyle::GetFontStyle("NormalFontBold"))
 			];
 		}
@@ -80,6 +128,11 @@ void SHyperAIStudioKeysPanel::Rebuild()
 TSharedRef<SWidget> SHyperAIStudioKeysPanel::BuildRow(const FRow& Row)
 {
 	const FHyperAIStudioKeySlot Slot = Row.Slot;
+	FString KeyUrl;
+	if (Slot.Variable == TEXT("ANTHROPIC_API_KEY")) { KeyUrl = TEXT("https://platform.claude.com/settings/keys"); }
+	else if (Slot.Variable == TEXT("OPENAI_API_KEY")) { KeyUrl = TEXT("https://platform.openai.com/api-keys"); }
+	else if (Slot.Variable == TEXT("GEMINI_API_KEY")) { KeyUrl = TEXT("https://aistudio.google.com/apikey"); }
+	else if (Slot.Variable == TEXT("CURSOR_API_KEY")) { KeyUrl = TEXT("https://cursor.com/dashboard?tab=integrations"); }
 	const FText State = Row.bStored ? FText::FromString(Row.Shown)
 		: Row.bFromEnvironment ? FText::Format(LOCTEXT("FromEnvironment", "{0} is set in your environment"), FText::FromString(Slot.Variable))
 		: LOCTEXT("NotSet", "Not set");
@@ -99,6 +152,17 @@ TSharedRef<SWidget> SHyperAIStudioKeysPanel::BuildRow(const FRow& Row)
 				.Text(FText::FromString(Slot.Variable))
 				.Font(FAppStyle::GetFontStyle("SmallFont"))
 				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock).Text(FText::FromString(Slot.bVerified ? Slot.Note : Slot.Note + TEXT(" Verify the provider setup in your installed agent."))).AutoWrapText(true)
+				.Font(FAppStyle::GetFontStyle("SmallFont")).ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			]
+			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left).Padding(0.0f, 3.0f)
+			[
+				SNew(SButton).Text(LOCTEXT("GetKey", "Get key"))
+				.Visibility(KeyUrl.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+				.OnClicked_Lambda([KeyUrl]() { FPlatformProcess::LaunchURL(*KeyUrl, nullptr, nullptr); return FReply::Handled(); })
 			]
 		]
 		+ SHorizontalBox::Slot().FillWidth(0.36f).VAlign(VAlign_Center).Padding(8.0f, 0.0f)
@@ -145,7 +209,7 @@ TSharedRef<SWidget> SHyperAIStudioKeysPanel::BuildRow(const FRow& Row)
 			+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f, 0.0f)
 			[
 				SNew(SButton)
-				.Text(LOCTEXT("Test", "Test"))
+				.Text(LOCTEXT("Test", "Check key"))
 				.Visibility(!Slot.Test.IsEmpty() && (Row.bStored || Row.bFromEnvironment) ? EVisibility::Visible : EVisibility::Collapsed)
 				.ToolTipText(LOCTEXT("TestTip", "Make one free authenticated call (a model list or an account read) to see whether the key works. Nothing is generated or billed."))
 				.OnClicked_Lambda([this, Id = Slot.Id]()

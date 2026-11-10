@@ -1752,7 +1752,7 @@ FText SHyperAIStudioQuickActionWindow::GetMcpStatusText() const
 TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildModelSelector()
 {
 	return SNew(SComboButton)
-		.IsEnabled_Lambda([this]() { return Status.IsReady() && HasUsableSelectedAgent(); })
+		.IsEnabled_Lambda([this]() { return (Status.IsReady() || FHyperAIStudioNativeChat::IsDirectApiAgent(GetSelectedAgentName())) && HasUsableSelectedAgent(); })
 		.ToolTipText(LOCTEXT("ModelTooltip", "Model the agent starts with. Changing it restarts a running agent."))
 		.OnGetMenuContent(this, &SHyperAIStudioQuickActionWindow::BuildModelMenu)
 		.ButtonContent()
@@ -1884,7 +1884,7 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildAgentSelector()
 	return SAssignNew(AgentComboBox, SComboBox<TSharedPtr<FString>>)
 		.OptionsSource(&AgentOptions)
 		.InitiallySelectedItem(SelectedAgent)
-		.IsEnabled_Lambda([this]() { return Status.IsReady() && HasUsableSelectedAgent(); })
+		.IsEnabled_Lambda([this]() { return (Status.IsReady() || !FHyperAIStudioNativeChat::GetAvailableApiAgents().IsEmpty()) && HasUsableSelectedAgent(); })
 		.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
 		{
 			return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : FString()));
@@ -2034,7 +2034,18 @@ void SHyperAIStudioQuickActionWindow::RefreshAgentOptions()
 	const FString PreviousAgent = GetSelectedAgentName();
 	if (UHyperAIStudioSettings* MutableSettings = GetMutableDefault<UHyperAIStudioSettings>())
 	{
-		const bool bSeededModels = MutableSettings->EnsureDefaultAgentModelRoutes();
+		bool bSeededModels = MutableSettings->EnsureDefaultAgentModelRoutes();
+		for (const TPair<FString, FString>& Api : {TPair<FString, FString>(TEXT("Claude API"), TEXT("claude-opus-5-5")),
+			TPair<FString, FString>(TEXT("OpenAI API"), TEXT("gpt-5.4")), TPair<FString, FString>(TEXT("Gemini API"), TEXT("gemini-3.8-flash"))})
+		{
+			if (!MutableSettings->FindAgentModelRoute(Api.Key))
+			{
+				FHyperAIStudioAgentModelRoute& Route = MutableSettings->AgentModelRoutes.AddDefaulted_GetRef();
+				Route.AgentName = Api.Key;
+				Route.Models = {Api.Value};
+				bSeededModels = true;
+			}
+		}
 		const bool bSeededTasks = MutableSettings->EnsureDefaultTaskRoutes();
 		if (bSeededModels || bSeededTasks)
 		{
@@ -2069,6 +2080,7 @@ void SHyperAIStudioQuickActionWindow::RefreshAgentOptions()
 		}
 	}
 	// Agents hosted through the Agent Client Protocol need only be installed: each chat hands them Unreal MCP.
+	for (const FString& AgentName : FHyperAIStudioNativeChat::GetAvailableApiAgents()) { AddAgent(AgentName); }
 	for (const FString& AgentName : FHyperAIStudioNativeChat::GetInstalledAcpAgents())
 	{
 		AddAgent(AgentName);
@@ -2383,6 +2395,15 @@ EActiveTimerReturnType SHyperAIStudioQuickActionWindow::RunDeferredTerminalStart
 	{
 		return EActiveTimerReturnType::Stop;
 	}
+	if (FHyperAIStudioNativeChat::IsDirectApiAgent(GetSelectedAgentName()))
+	{
+		if (!GetDefault<UHyperAIStudioSettings>()->bUseNativeChatView && (!TerminalWidget.IsValid() || !TerminalWidget->IsSessionRunning()))
+		{
+			return EActiveTimerReturnType::Continue;
+		}
+		LaunchChat(GetSelectedAgentName());
+		return EActiveTimerReturnType::Stop;
+	}
 
 	if (!TerminalWidget.IsValid() || !TerminalWidget->IsSessionRunning())
 	{
@@ -2531,6 +2552,12 @@ void SHyperAIStudioQuickActionWindow::QueueTerminalStartup(bool bForce, bool bRe
 	{
 		RecreateTerminalSession();
 	}
+	if (FHyperAIStudioNativeChat::IsDirectApiAgent(AgentName) && GetDefault<UHyperAIStudioSettings>()->bUseNativeChatView)
+	{
+		bTerminalStartupPaused = false;
+		LaunchChat(AgentName);
+		return;
+	}
 
 	bTerminalStartupPaused = false;
 	bTerminalStartupSent = false;
@@ -2561,6 +2588,15 @@ void SHyperAIStudioQuickActionWindow::RecreateTerminalSession()
 FString SHyperAIStudioQuickActionWindow::GetTerminalLaunchCommandForAgent(const FString& AgentName, const FString& ChatArguments,
 	FString* OutModelPrefix, FString* OutModelArgument) const
 {
+	if (FHyperAIStudioNativeChat::IsDirectApiAgent(AgentName))
+	{
+		FHyperAIStudioChatMode Mode;
+		HyperAIStudio::ChatModes::Find(FHyperAIStudioService::GetProjectRoot(), TabModeId.IsEmpty() ? HyperAIStudio::ChatModes::DefaultId() : TabModeId, Mode);
+		FString Command = FHyperAIStudioNativeChat::GetDirectApiLaunchCommand(AgentName, FHyperAIStudioService::GetProjectRoot(),
+			GetModelForAgent(AgentName), ActiveChatSessionId, true, Mode.IsReadOnly());
+		if (!Command.IsEmpty() && !ChatArguments.IsEmpty()) { Command += TEXT(" ") + ChatArguments; }
+		return HyperAIStudio::Credentials::WrapTerminalCommand(AgentName, Command);
+	}
 	if (const HyperAIStudio::QuickAction::FAgentRoute* Route = HyperAIStudio::QuickAction::FindBuiltInRoute(AgentName))
 	{
 		FString LaunchCommand = FHyperAIStudioService::GetAgentTerminalLaunchCommand(Route->Name);
@@ -2668,6 +2704,37 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 		}
 		return;
 	}
+	if (FHyperAIStudioNativeChat::IsDirectApiAgent(AgentName))
+	{
+		if (GetDefault<UHyperAIStudioSettings>()->bUseNativeChatView) { return; }
+		ActiveChatSessionId = SessionId.IsEmpty() ? FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower) : SessionId;
+		ActiveTerminalAgentName = AgentName;
+		ActiveTerminalModel = GetModelForAgent(AgentName);
+		FString Arguments;
+		if (!Prompt.IsEmpty() || !PromptImages.IsEmpty() || !Continue.IsEmpty())
+		{
+			const FString File = FHyperAIStudioService::GetProjectRoot() / TEXT(".hyperai/runtime/jobs") / (TEXT("api-terminal-") + ActiveChatSessionId + TEXT(".json"));
+			const TSharedRef<FJsonObject> Initial = MakeShared<FJsonObject>();
+			Initial->SetStringField(TEXT("text"), !Continue.IsEmpty() ? Continue : Prompt);
+			TArray<TSharedPtr<FJsonValue>> ImageValues;
+			for (const FString& Path : PromptImages) { ImageValues.Add(MakeShared<FJsonValueString>(Path)); }
+			Initial->SetArrayField(TEXT("images"), ImageValues);
+			FString Json;
+			FJsonSerializer::Serialize(Initial, TJsonWriterFactory<>::Create(&Json));
+			IFileManager::Get().MakeDirectory(*FPaths::GetPath(File), true);
+			if (!FFileHelper::SaveStringToFile(Json, *File, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+			{
+				AddTranscriptLine(TEXT("The terminal's opening prompt could not be prepared."));
+				return;
+			}
+			Arguments = FString::Printf(TEXT("--prompt-file \"%s\""), *File);
+		}
+		const FString Command = GetTerminalLaunchCommandForAgent(AgentName, Arguments);
+		if (Command.IsEmpty()) { AddTranscriptLine(TEXT("The direct API terminal could not be launched.")); return; }
+		bTerminalStartupSent = true;
+		RunBootstrap(AgentName, Command);
+		return;
+	}
 	// A preset held for a chat view that did not start: dropped, or a later chat view would get it unasked.
 	if (PendingPresetInsert.IsSet())
 	{
@@ -2763,11 +2830,12 @@ void SHyperAIStudioQuickActionWindow::LaunchChat(const FString& AgentName)
 	AddTranscriptLine(LastMessage.ToString());
 	const TWeakPtr<SHyperAIStudioQuickActionWindow> WeakThis = SharedThis(this);
 	const TArray<TPair<FString, FString>> KeyTargets = HyperAIStudio::Credentials::TargetsFor(AgentName);
+	const TMap<FString, FString> AuthOverrides = HyperAIStudio::Credentials::LaunchOverridesFor(AgentName);
 	Async(EAsyncExecution::ThreadPool, [WeakThis, Generation, AgentName, Claude, ProjectRoot, ModelPrefix, BackgroundArguments,
-		SessionId, ForegroundArguments, KeyTargets]()
+		SessionId, ForegroundArguments, KeyTargets, AuthOverrides]()
 	{
 		FString Error;
-		const FString ShortId = StartClaudeBackgroundChat(Claude, ProjectRoot, ModelPrefix, BackgroundArguments, Error, KeyTargets);
+		const FString ShortId = StartClaudeBackgroundChat(Claude, ProjectRoot, ModelPrefix, BackgroundArguments, Error, KeyTargets, AuthOverrides);
 		// --bg picks a new chat's id itself, and starts a copy when the old process is still closing: follow the real id.
 		FString StartedSessionId = SessionId;
 		if (!ShortId.IsEmpty())
@@ -2831,7 +2899,7 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildNativeToggle()
 		.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
 		.Visibility_Lambda([this]() { return FHyperAIStudioNativeChat::IsSupported(GetSelectedAgentName()) ? EVisibility::Visible : EVisibility::Collapsed; })
 		.IsChecked_Lambda([this]() { return NativeView.IsValid() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-		.ToolTipText(LOCTEXT("NativeViewAgentsTooltip", "Show this chat in HyperAI's own view instead of the terminal: a transcript with tool calls, approvals and the plan, and a message box. New chats open the way you leave it. Switching keeps a Claude Code conversation, and a Codex one opened from the history or started in this view; a Gemini chat starts fresh. A Claude Code chat with Remote Control stays in the terminal."))
+		.ToolTipText(LOCTEXT("NativeViewAgentsTooltip", "Switch between the native transcript and terminal. Direct API agents use the same API engine and saved conversation in both views. Finish or stop an active request before switching; an in-flight request is stopped when its view closes. New chats open the way you leave this switch."))
 		.OnCheckStateChanged_Lambda([this](const ECheckBoxState State)
 		{
 			UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
@@ -2892,6 +2960,12 @@ void SHyperAIStudioQuickActionWindow::SetAutoMode(const bool bAuto)
 bool SHyperAIStudioQuickActionWindow::StartNativeChat(const FString& ResumeId, const FString& HostSession)
 {
 	const FString Agent = GetSelectedAgentName();
+	if (FHyperAIStudioNativeChat::IsDirectApiAgent(Agent) && TerminalWidget.IsValid())
+	{
+		// Stop the terminal worker before another worker reads/writes this conversation.
+		TerminalWidget.Reset();
+		if (TerminalHost.IsValid()) { TerminalHost->SetContent(SNew(SBox)); }
+	}
 	const FString ChatModel = GetModelForAgent(Agent);
 	// A new chat in a subagent tab starts as that subagent, as it does in the terminal.
 	TSharedPtr<FHyperAIStudioNativeChat> Chat = FHyperAIStudioNativeChat::Create(Agent, FHyperAIStudioService::GetProjectRoot(), ChatModel, ResumeId,
@@ -2966,7 +3040,8 @@ void SHyperAIStudioQuickActionWindow::OnModeChosen(const FHyperAIStudioChatMode&
 		{
 			return Item.IsValid() && Item->Kind == FHyperAIStudioChatItem::EKind::User;
 		});
-	const bool bOtherAgent = !Mode.Agent.IsEmpty() && !Mode.Agent.Equals(GetSelectedAgentName(), ESearchCase::IgnoreCase);
+	const bool bDirectApi = FHyperAIStudioNativeChat::IsDirectApiAgent(GetSelectedAgentName());
+	const bool bOtherAgent = !bDirectApi && !Mode.Agent.IsEmpty() && !Mode.Agent.Equals(GetSelectedAgentName(), ESearchCase::IgnoreCase);
 	if (bOtherAgent && !bNew)
 	{
 		AddTranscriptLine(FString::Printf(TEXT("%s mode prefers %s; pick it in the agent menu to switch this chat."), *Mode.Name, *Mode.Agent));
@@ -2977,7 +3052,7 @@ void SHyperAIStudioQuickActionWindow::OnModeChosen(const FHyperAIStudioChatMode&
 		bAgentChosenHere = true;
 		SelectAgentByName(Mode.Agent);
 	}
-	if (!Mode.Model.IsEmpty() && (bNew || bOtherAgent))
+	if (!bDirectApi && !Mode.Model.IsEmpty() && (bNew || bOtherAgent))
 	{
 		SelectModel(Mode.Model);
 	}
@@ -3000,6 +3075,7 @@ void SHyperAIStudioQuickActionWindow::StopNativeChat()
 bool SHyperAIStudioQuickActionWindow::RouteFirstMessage(const FString& Message, const TArray<FString>& Images, const FHyperAIStudioMessageHints& Hints)
 {
 	const TSharedPtr<FHyperAIStudioNativeChat> Chat = NativeView.IsValid() ? NativeView->GetChat() : nullptr;
+	if (Chat.IsValid() && FHyperAIStudioNativeChat::IsDirectApiAgent(Chat->GetAgentName())) { return false; }
 	UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
 	// Only a new chat's first message, in a tab no one picked an agent or a task for: a conversation keeps its agent.
 	const bool bFirst = Chat.IsValid() && !bChatResumed && !Chat->IsBusy() && Chat->NumQueued() == 0
@@ -3875,7 +3951,7 @@ FString SHyperAIStudioQuickActionWindow::BuildTerminalBootstrapCommandForStatus(
 	{
 		Commands.Add(TEXT("echo Agent: none usable. Open Setup or Agents, install a CLI agent, then reopen HyperAI Chat."));
 	}
-	else if (!InStatus.IsReady())
+	else if (!InStatus.IsReady() && !FHyperAIStudioNativeChat::IsDirectApiAgent(AgentName))
 	{
 		Commands.Add(FString::Printf(TEXT("echo Agent: %s"), *HyperAIStudio::QuickAction::EscapeForCmdEcho(AgentName)));
 		Commands.Add(TEXT("echo Setup is not ready yet. Complete setup before starting the agent CLI."));
@@ -3883,8 +3959,9 @@ FString SHyperAIStudioQuickActionWindow::BuildTerminalBootstrapCommandForStatus(
 	else
 	{
 		Commands.Add(FString::Printf(TEXT("echo Agent: %s"), *HyperAIStudio::QuickAction::EscapeForCmdEcho(AgentName)));
-		Commands.Add(TEXT("echo Starting agent CLI from the Unreal project root..."));
-		Commands.Add(FString::Printf(TEXT("( %s ) & echo Agent CLI exited. If no agent prompt is visible, fix the CLI error above or use Copy Prompt."), *LaunchCommand));
+		Commands.Add(FHyperAIStudioNativeChat::IsDirectApiAgent(AgentName)
+			? TEXT("echo Starting direct API terminal from the Unreal project root...") : TEXT("echo Starting agent CLI from the Unreal project root..."));
+		Commands.Add(FString::Printf(TEXT("( %s ) & echo Agent exited. Review any error above or reopen Chat to resume."), *LaunchCommand));
 	}
 
 	return FString::Printf(TEXT("cmd /d /s /k \"%s\""), *FString::Join(Commands, TEXT(" && ")));
@@ -3911,6 +3988,10 @@ FString SHyperAIStudioQuickActionWindow::GetSelectedAgentStatusLine() const
 	}
 
 	const HyperAIStudio::QuickAction::FAgentRoute* Route = HyperAIStudio::QuickAction::FindBuiltInRoute(AgentName);
+	if (FHyperAIStudioNativeChat::IsDirectApiAgent(AgentName))
+	{
+		return FString::Printf(TEXT("Agent: %s, direct HTTPS requests using your API key; no CLI login or balance check."), *AgentName);
+	}
 	if (!Route && FHyperAIStudioNativeChat::IsSupported(AgentName))
 	{
 		return FString::Printf(TEXT("Agent: %s, through the Agent Client Protocol; its chats get Unreal MCP from HyperAI."), *AgentName);

@@ -1128,13 +1128,12 @@ TSharedRef<SWidget> SHyperAIStudioWindow::BuildAgentsTab()
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 18.0f, 0.0f, 0.0f)
 		[
-			// The other servers these agents have, and whether each changes this editor outside HyperAI's approvals.
-			SNew(SHyperAIStudioMcpBypassPanel)
+			// API authentication belongs beside the agents it connects.
+			SNew(SHyperAIStudioKeysPanel)
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 18.0f, 0.0f, 0.0f)
 		[
-			// The user's own API keys and addresses, per agent and provider, in Windows Credential Manager.
-			SNew(SHyperAIStudioKeysPanel)
+			SNew(SHyperAIStudioMcpBypassPanel)
 		];
 }
 

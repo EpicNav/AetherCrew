@@ -39,7 +39,9 @@
 #include "Types/SandboxFileChange.h"
 #include "Types/SandboxMetaInfo.h"
 #include "Types/SandboxedFileChangeInfo.h"
+#include "UObject/Linker.h"
 #include "UObject/Package.h"
+#include "UObject/UObjectGlobals.h"
 #include "Utils/SandboxDirectoryUtils.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
@@ -434,6 +436,41 @@ namespace HyperAIStudio::Sandbox
 			return true;
 		}
 
+		/** What a sandbox from an earlier session would do to this editor and project if it were resumed. */
+		struct FLeftoverScan
+		{
+			/** Packages in memory whose files the sandbox changed: resuming hot-reloads them. */
+			TArray<UObject*> Loaded;
+			/** Changed files the project saved again after the sandbox's copy: approving would put the older copy back. */
+			TArray<FString> Stale;
+		};
+
+		FLeftoverScan ScanLeftover(FSC::ISandboxManager& SandboxManager, const FString& Root)
+		{
+			FLeftoverScan Scan;
+			const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+			SandboxManager.EnumerateFileChanges(Root, [&Scan, &ProjectDir](const FSC::FSandboxedFileChangeInfo& Change)
+			{
+				FString PackageName;
+				if (FPackageName::TryConvertFilenameToLongPackageName(Change.Path, PackageName))
+				{
+					if (UPackage* Package = FindPackage(nullptr, *PackageName))
+					{
+						Scan.Loaded.Add(Package);
+					}
+				}
+				const FDateTime InProject = IFileManager::Get().GetTimeStamp(*Change.Path);
+				if (Change.Timestamp != FDateTime::MinValue() && InProject != FDateTime::MinValue() && InProject > Change.Timestamp)
+				{
+					FString Relative = Change.Path;
+					FPaths::MakePathRelativeTo(Relative, *ProjectDir);
+					Scan.Stale.Add(Relative);
+				}
+				return FSC::EBreakBehavior::Continue;
+			}, FSC::EFileEnumerationFlags::IncludeTimestamps);
+			return Scan;
+		}
+
 		/** A sandbox from an earlier session still holds changes: the user resumes or discards it. */
 		void OfferLeftovers()
 		{
@@ -487,9 +524,20 @@ namespace HyperAIStudio::Sandbox
 			{
 				Roots.Add(Leftover.Root);
 			}
-			FNotificationInfo Info(FText::Format(LOCTEXT("LeftoverSandbox",
+			FText Message = FText::Format(LOCTEXT("LeftoverSandbox",
 				"HyperAI's Sandbox Mode is still holding {0} {0}|plural(one=change,other=changes) from an earlier session. Resume Sandbox to keep reviewing them, or discard them. Your chats are not affected."),
-				Changes));
+				Changes);
+			// 16 and 19 Oct: the project saved some of those files again after the session ended (the user redid the work by
+			// hand), and approving the resumed sandbox would have written its older copies back over them.
+			if (const TArray<FString> Stale = ScanLeftover(*SandboxManager, Newest).Stale; !Stale.IsEmpty())
+			{
+				UE_LOG(LogHyperAIStudioSandbox, Warning, TEXT("The leftover sandbox %s holds %d files the project saved again since: %s"),
+					*Newest, Stale.Num(), *NameList(Stale));
+				Message = FText::Format(LOCTEXT("LeftoverSandboxStale",
+					"{0}\n\n{1} of them {1}|plural(one=was,other=were) saved again in the project after that session ({2}): approving would put the older {1}|plural(one=copy,other=copies) back."),
+					Message, Stale.Num(), FText::FromString(NameList(Stale)));
+			}
+			FNotificationInfo Info(Message);
 			Info.bFireAndForget = false;
 			Info.ExpireDuration = 0.0f;
 			// The first choice is the only one: the buttons go at once (a notice stays up a while as it fades), and a press
@@ -519,6 +567,18 @@ namespace HyperAIStudio::Sandbox
 				State().bAwaitingDecision = false;
 				if (FSC::ISandboxManager* Loader = Manager(); Loader && !Loader->HasActiveSandbox())
 				{
+					// Loading replays the sandbox by hot-reloading every loaded package it changed, and that reload detaches
+					// their bulk data after reads already go to the sandbox's copies: a package loaded from the project file
+					// then seeks its old offsets in a different file and asserts. On 19 Oct a pack moved to /Game/Assets left a
+					// 1.4 KB redirector where the 880 KB NS_SparksFlair had been ("Attempted to seek past the end of file").
+					// Detach those packages first, while reads still reach the project's files.
+					if (const TArray<UObject*> Loaded = ScanLeftover(*Loader, Newest).Loaded; !Loaded.IsEmpty())
+					{
+						FlushAsyncLoading();
+						ResetLoaders(Loaded);
+						UE_LOG(LogHyperAIStudioSandbox, Log, TEXT("Detached %d loaded packages from the project's files before resuming %s."),
+							Loaded.Num(), *Newest);
+					}
 					if (Loader->LoadSandbox(FSC::FLoadSandboxByDirectoryArgs(Newest)).HasValue())
 					{
 						State().OpenedUtc = FDateTime::UtcNow();

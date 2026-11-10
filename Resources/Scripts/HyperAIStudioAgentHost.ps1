@@ -140,18 +140,24 @@ function Start-Agent($Request) {
   $Info.StandardOutputEncoding = $Utf8
   $Info.StandardErrorEncoding = $Utf8
   if ($Request.env) {
-    foreach ($Pair in $Request.env.PSObject.Properties) { $Info.EnvironmentVariables[$Pair.Name] = "$($Pair.Value)" }
+    foreach ($Pair in $Request.env.PSObject.Properties) {
+      if ([string]::IsNullOrEmpty("$($Pair.Value)")) { $Info.EnvironmentVariables.Remove($Pair.Name) }
+      else { $Info.EnvironmentVariables[$Pair.Name] = "$($Pair.Value)" }
+    }
   }
   # The keys stored for this agent come from Credential Manager into its environment alone; no file holds them.
+  $CredentialFailure = $false
   foreach ($Target in @($Request.targets)) {
     if (-not $Target -or -not $Target.target) { continue }
     try {
       $Value = Read-Credential $Target.target
       if ($Value) { $Info.EnvironmentVariables[$Target.variable] = $Value }
+      else { $CredentialFailure = $true }
       $Value = $null
-    } catch { Say "Could not read a stored key for $Id; the agent starts without it." }
+    } catch { $CredentialFailure = $true }
   }
   try {
+    if ($CredentialFailure) { throw 'A stored API credential could not be read. Check Settings > Agents and retry.' }
     $S.Proc = [Diagnostics.Process]::Start($Info)
   } catch {
     $S.State = 'exited'; $S.ExitCode = -1; $S.Reason = "did not start: $_"; $S.EndedAt = (Now-Iso)

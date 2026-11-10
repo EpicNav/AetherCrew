@@ -62,8 +62,13 @@ namespace HyperAIStudio::Credentials
 	HYPERAISTUDIO_API bool FindSlot(const FString& SlotId, FHyperAIStudioKeySlot& OutSlot);
 	/** The stored value of a slot, or empty. */
 	HYPERAISTUDIO_API FString ReadSlot(const FString& SlotId);
+	/** Stored value first, then the slot's environment variable. Never use this in a file or command line. */
+	HYPERAISTUDIO_API FString ResolveSlot(const FHyperAIStudioKeySlot& Slot);
+	HYPERAISTUDIO_API FString ReadAgentValue(const FString& AgentName, const FString& Variable);
+	/** Non-secret launch overrides. Empty values remove inherited variables in the child only. */
+	HYPERAISTUDIO_API TMap<FString, FString> LaunchOverridesFor(const FString& AgentName);
 
-	/** What an agent HyperAI starts gets: each of its slots that holds a value, by variable and alias. */
+	/** Stored values by variable/alias, plus non-secret overrides; empty entries remove inherited variables. */
 	HYPERAISTUDIO_API TMap<FString, FString> EnvironmentFor(const FString& AgentName);
 
 	/**
@@ -76,7 +81,7 @@ namespace HyperAIStudio::Credentials
 
 	/**
 	 * Starts Executable with Params like FPlatformProcess::CreateProc (hidden, the pipes as its stdout and stdin), with
-	 * Extra added to a copy of this editor's environment for that process alone; the editor's own is not changed.
+	 * Extra applied to a copy of this editor's environment for that process alone; empty values remove variables.
 	 */
 	HYPERAISTUDIO_API FProcHandle CreateProcWithEnvironment(const FString& Executable, const FString& Params, const FString& WorkingDirectory,
 		const TMap<FString, FString>& Extra, void* PipeWriteChild, void* PipeReadChild, uint32* OutProcessId = nullptr);
@@ -84,13 +89,15 @@ namespace HyperAIStudio::Credentials
 	/**
 	 * A terminal launch with AgentName's stored keys: Command runs from a PowerShell that reads them from Credential
 	 * Manager by target name into its own environment, so no key is on a command line or on screen. Command as it is
-	 * when the agent has none stored.
+	 * when the agent needs neither stored keys nor authentication overrides.
 	 */
 	HYPERAISTUDIO_API FString WrapTerminalCommand(const FString& AgentName, const FString& Command);
 	/** AgentName's stored slots as (variable, Credential Manager target) pairs, aliases included. Game thread. */
 	HYPERAISTUDIO_API TArray<TPair<FString, FString>> TargetsFor(const FString& AgentName);
 	/** WrapTerminalCommand for explicit variables and targets; only builds text, so any thread may call it. */
 	HYPERAISTUDIO_API FString WrapCommandWithTargets(const TArray<TPair<FString, FString>>& VariableTargets, const FString& Command);
+	HYPERAISTUDIO_API FString WrapCommandWithTargets(const TArray<TPair<FString, FString>>& VariableTargets, const FString& Command,
+		const TMap<FString, FString>& Overrides);
 
 	/**
 	 * The free call that shows whether Key works for Slot: a model list or an account read, never a generation.

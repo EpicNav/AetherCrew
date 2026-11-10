@@ -47,6 +47,22 @@ namespace HyperAIStudio::NativeChat::Private
 	}
 	constexpr int32 MaxOutputCharacters = 20000;
 
+	FString ApiPython()
+	{
+		return FPaths::ConvertRelativePathToFull(FPaths::EngineDir() / TEXT("Binaries/ThirdParty/Python3/Win64/python.exe"));
+	}
+
+	FString ApiWorker()
+	{
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("HyperAIStudio"));
+		return Plugin.IsValid() ? FPaths::Combine(Plugin->GetBaseDir(), TEXT("Resources/Scripts/hyperai_api_agent.py")) : FString();
+	}
+
+	const TCHAR* ApiKeyVariable(const FString& Name)
+	{
+		return Name == TEXT("Claude API") ? TEXT("ANTHROPIC_API_KEY") : Name == TEXT("OpenAI API") ? TEXT("OPENAI_API_KEY") : TEXT("GEMINI_API_KEY");
+	}
+
 	FString Quote(const FString& Path)
 	{
 		return Path.Contains(TEXT(" ")) && !Path.StartsWith(TEXT("\"")) ? TEXT("\"") + Path + TEXT("\"") : Path;
@@ -224,6 +240,13 @@ FString FHyperAIStudioNativeChat::SaveImageData(const FString& Base64, const FSt
 
 bool FHyperAIStudioNativeChat::Start(FString& OutError)
 {
+	if (IsDirectApiAgent(AgentName) && (!FPaths::FileExists(HyperAIStudio::NativeChat::Private::ApiPython())
+		|| !FPaths::FileExists(HyperAIStudio::NativeChat::Private::ApiWorker())
+		|| HyperAIStudio::Credentials::ReadAgentValue(AgentName, HyperAIStudio::NativeChat::Private::ApiKeyVariable(AgentName)).IsEmpty()))
+	{
+		OutError = TEXT("Direct API chat requires a key in Settings > Agents and Unreal's bundled Python runtime. No CLI login was attempted.");
+		return false;
+	}
 	FString Command = HyperAIStudio::NativeChat::Private::CommandForTests();
 #if WITH_DEV_AUTOMATION_TESTS
 	if (Command.IsEmpty())
@@ -233,6 +256,11 @@ bool FHyperAIStudioNativeChat::Start(FString& OutError)
 	}
 #endif
 	Command = Command.IsEmpty() ? CommandLine() : Command;
+	if (Command.IsEmpty())
+	{
+		OutError = TEXT("The agent launch path or model contains unsupported characters.");
+		return false;
+	}
 	// In the background host when it can run, so the turn outlives the editor; otherwise inside the editor, as before.
 	if (!bHeadless && FHyperAIStudioAgentHost::ShouldHost())
 	{
@@ -953,7 +981,7 @@ bool FHyperAIStudioNativeChat::StartHosted(const FString& Command, FString& OutE
 	// While the editor is away its Unreal MCP calls fail at once (nothing listens), and an editor that hangs is given
 	// up on rather than waited for forever, so the agent can go on with work that needs no editor: code, files, git.
 	// Codex has its own limits in its MCP settings; Claude Code reads these.
-	TMap<FString, FString> Environment;
+	TMap<FString, FString> Environment = HyperAIStudio::Credentials::LaunchOverridesFor(AgentName);
 	if (FPlatformMisc::GetEnvironmentVariable(TEXT("MCP_TIMEOUT")).IsEmpty())
 	{
 		Environment.Add(TEXT("MCP_TIMEOUT"), TEXT("30000"));
@@ -1366,9 +1394,17 @@ namespace HyperAIStudio::NativeChat::Private
 				Params->SetStringField(TEXT("modelProvider"), LocalServer);
 				Params->SetStringField(TEXT("model"), LocalName);
 			}
-			else if (!Model.IsEmpty())
+			else
 			{
-				Params->SetStringField(TEXT("model"), Model);
+				// Resume must also override the provider recorded on an earlier ChatGPT-authenticated thread.
+				if (!HyperAIStudio::Credentials::ReadAgentValue(AgentName, TEXT("OPENAI_API_KEY")).IsEmpty())
+				{
+					Params->SetStringField(TEXT("modelProvider"), TEXT("hyperai"));
+				}
+				if (!Model.IsEmpty())
+				{
+					Params->SetStringField(TEXT("model"), Model);
+				}
 			}
 			if (bHeadless)
 			{
@@ -1987,7 +2023,24 @@ namespace HyperAIStudio::NativeChat::Private
 					AddItem(FHyperAIStudioChatItem::EKind::Notice, FString(), FString(), FString::Printf(
 						TEXT("%s cannot take Unreal MCP from HyperAI (it does not accept HTTP servers), so it has only the tools in its own settings."), *AgentName));
 				}
-				OpenSession(bCanLoad && !ResumeSessionId.IsEmpty());
+				const bool bLoad = bCanLoad && !ResumeSessionId.IsEmpty();
+				if (AgentName == TEXT("Gemini") && !HyperAIStudio::Credentials::ReadAgentValue(AgentName, TEXT("GEMINI_API_KEY")).IsEmpty())
+				{
+					// ACP explicitly selects the API credential even when Gemini has a cached Google login.
+					Request(TEXT("authenticate"), Object({{TEXT("methodId"), Str(TEXT("gemini-api-key"))}}),
+						[this, bLoad](const TSharedPtr<FJsonObject>&, const FString& AuthError)
+						{
+							if (!AuthError.IsEmpty())
+							{
+								AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(),
+									TEXT("Gemini API authentication failed. Check the key in Settings > Agents and update Gemini CLI. No Google-login fallback was attempted."));
+								return;
+							}
+							OpenSession(bLoad);
+						});
+					return;
+				}
+				OpenSession(bLoad);
 			});
 		}
 
@@ -2020,7 +2073,7 @@ namespace HyperAIStudio::NativeChat::Private
 						return;
 					}
 					AddItem(FHyperAIStudioChatItem::EKind::Error, FString(), FString(), Error.Contains(TEXT("auth"), ESearchCase::IgnoreCase)
-						? FString::Printf(TEXT("%s needs you to sign in: switch this tab to the terminal view and sign in there."), *AgentName)
+						? FString::Printf(TEXT("%s authentication failed. Configure its API key in Settings > Agents, or switch to terminal view to sign in. Gemini: /auth > Gemini API key. Claude Code: /config > Use custom API key."), *AgentName)
 						: FString::Printf(TEXT("%s could not start a chat: %s"), *AgentName, *Error));
 					return;
 				}
@@ -2362,13 +2415,15 @@ namespace HyperAIStudio::NativeChat::Private
 		using EKind = FHyperAIStudioChatItem::EKind;
 
 	public:
-		FClaudeChat(const FString& InProjectRoot, const FString& InModel, const FString& InResumeSessionId, const FString& InSubagent)
-			: FHyperAIStudioNativeChat(TEXT("Claude Code"), InProjectRoot, InModel, InResumeSessionId)
+		FClaudeChat(const FString& InProjectRoot, const FString& InModel, const FString& InResumeSessionId, const FString& InSubagent,
+			const FString& InAgentName = TEXT("Claude Code"))
+			: FHyperAIStudioNativeChat(InAgentName, InProjectRoot, InModel, InResumeSessionId)
 		{
 			StartedAs = InSubagent;
 			// A chat Claude never wrote down (nothing was sent yet) cannot be resumed, so it starts again. The id is
 			// chosen here, so the tab has it before the first message, as it does in the terminal.
-			if (!HyperAIStudio::ChatHistory::ClaudeSessionExists(ProjectRoot, ResumeSessionId))
+			if (IsDirectApiAgent(AgentName) ? HyperAIStudio::ChatHistory::SessionFile(AgentName, ProjectRoot, ResumeSessionId).IsEmpty()
+				: !HyperAIStudio::ChatHistory::ClaudeSessionExists(ProjectRoot, ResumeSessionId))
 			{
 				ResumeSessionId.Reset();
 			}
@@ -2379,6 +2434,10 @@ namespace HyperAIStudio::NativeChat::Private
 		virtual FString CommandLine() const override
 		{
 			const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+			if (IsDirectApiAgent(AgentName))
+			{
+				return GetDirectApiLaunchCommand(AgentName, ProjectRoot, Model, SessionId, false, bHeadless);
+			}
 			FString Prefix;
 			FString ModelArgument;
 			FString Error;
@@ -2396,7 +2455,7 @@ namespace HyperAIStudio::NativeChat::Private
 			// An editor started from a Claude Code session inherits its marker, which stops a nested claude from starting.
 			// AskUserQuestion needs a form this view does not have, so Claude asks in its reply instead.
 			FString Command = TEXT("set \"CLAUDECODE=\" && ") + Prefix + FHyperAIStudioService::GetAgentTerminalLaunchCommand(AgentName)
-				+ TEXT(" --output-format stream-json --input-format stream-json --verbose --include-partial-messages")
+				+ TEXT(" --print --output-format stream-json --input-format stream-json --verbose --include-partial-messages")
 				+ TEXT(" --permission-prompt-tool stdio --disallowedTools AskUserQuestion");
 			if (!ModelArgument.IsEmpty())
 			{
@@ -2421,7 +2480,9 @@ namespace HyperAIStudio::NativeChat::Private
 
 		virtual void Handshake() override
 		{
-			Control(TEXT("hyperai-initialize"), Object({{TEXT("subtype"), Str(TEXT("initialize"))}, {TEXT("hooks"), MakeShared<FJsonValueNull>()}}));
+			const TSharedRef<FJsonObject> Params = Object({{TEXT("subtype"), Str(TEXT("initialize"))}, {TEXT("hooks"), MakeShared<FJsonValueNull>()}});
+			if (IsDirectApiAgent(AgentName)) { Params->SetStringField(TEXT("systemPrompt"), HeadlessInstructions); }
+			Control(TEXT("hyperai-initialize"), Params);
 		}
 
 		virtual void ReplayUserMessage() override
@@ -2449,8 +2510,10 @@ namespace HyperAIStudio::NativeChat::Private
 			}
 			Content.Add(Obj(Object({{TEXT("type"), Str(TEXT("text"))}, {TEXT("text"), Str(Prompt)}})));
 			const TSharedRef<FJsonObject> Message = Object({{TEXT("role"), Str(TEXT("user"))}, {TEXT("content"), Arr(Content)}});
-			Write(Object({{TEXT("type"), Str(TEXT("user"))}, {TEXT("message"), Obj(Message)},
-				{TEXT("parent_tool_use_id"), MakeShared<FJsonValueNull>()}, {TEXT("session_id"), Str(SessionId)}}));
+			const TSharedRef<FJsonObject> Envelope = Object({{TEXT("type"), Str(TEXT("user"))}, {TEXT("message"), Obj(Message)},
+				{TEXT("parent_tool_use_id"), MakeShared<FJsonValueNull>()}, {TEXT("session_id"), Str(SessionId)}});
+			if (IsDirectApiAgent(AgentName)) { Envelope->SetBoolField(TEXT("api_read_only"), bHeadless || GetMode().IsReadOnly()); }
+			Write(Envelope);
 		}
 
 		virtual void InterruptNow() override
@@ -2527,7 +2590,7 @@ namespace HyperAIStudio::NativeChat::Private
 					}
 					else
 					{
-						AddItem(EKind::Error, FString(), FString(), TEXT("Claude Code refused to start: ") + StringField(Reply, TEXT("error")));
+						AddItem(EKind::Error, FString(), FString(), AgentName + TEXT(" refused to start: ") + StringField(Reply, TEXT("error")));
 					}
 				}
 			}
@@ -2777,6 +2840,11 @@ namespace HyperAIStudio::NativeChat::Private
 
 		void AskPermission(const FString& RequestId, const TSharedPtr<FJsonObject>& Body)
 		{
+			if (IsDirectApiAgent(AgentName) && (bHeadless || GetMode().IsReadOnly()))
+			{
+				Respond(Str(RequestId), Object({{TEXT("behavior"), Str(TEXT("deny"))}, {TEXT("message"), Str(TEXT("This session is read-only."))}}));
+				return;
+			}
 			const FString Subtype = StringField(Body, TEXT("subtype"));
 			if (Subtype != TEXT("can_use_tool"))
 			{
@@ -3104,6 +3172,11 @@ namespace HyperAIStudio::NativeChat::Private
 			const FString Subtype = StringField(Line, TEXT("subtype"));
 			if (Subtype == TEXT("init"))
 			{
+				if (IsDirectApiAgent(AgentName))
+				{
+					Model = StringField(Line, TEXT("model"));
+					AddItem(EKind::Notice, FString(), FString(), AgentName + TEXT(" uses direct HTTPS requests with model ") + Model + TEXT("."));
+				}
 				const FString Id = StringField(Line, TEXT("session_id"));
 				SessionId = Id.IsEmpty() ? SessionId : Id;
 				TArray<FString> Down;
@@ -3161,9 +3234,9 @@ namespace HyperAIStudio::NativeChat::Private
 			}
 			else if (bError)
 			{
-				AddItem(EKind::Error, FString(), FString(), Text.Contains(TEXT("/login"))
+				AddItem(EKind::Error, FString(), FString(), !IsDirectApiAgent(AgentName) && Text.Contains(TEXT("/login"))
 					? FString(TEXT("Claude Code needs you to sign in: switch this tab to the terminal view and run /login once."))
-					: TEXT("Claude Code: ") + (Text.IsEmpty() ? StringField(Line, TEXT("subtype")) : Text));
+					: AgentName + TEXT(": ") + (Text.IsEmpty() ? StringField(Line, TEXT("subtype")) : Text));
 			}
 			else if (!bReplied && !Text.IsEmpty())
 			{
@@ -3205,8 +3278,26 @@ void FHyperAIStudioNativeChat::SetContextInTestsForTests(const bool bEnabled)
 
 bool FHyperAIStudioNativeChat::IsSupported(const FString& AgentName)
 {
-	return AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase) || AgentName.Contains(TEXT("Claude"), ESearchCase::IgnoreCase)
+	return IsDirectApiAgent(AgentName) || AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase) || AgentName.Contains(TEXT("Claude"), ESearchCase::IgnoreCase)
 		|| HyperAIStudio::NativeChat::Private::FindAcpAgent(AgentName) != nullptr;
+}
+
+bool FHyperAIStudioNativeChat::IsDirectApiAgent(const FString& AgentName)
+{
+	return AgentName == TEXT("Claude API") || AgentName == TEXT("OpenAI API") || AgentName == TEXT("Gemini API");
+}
+
+TArray<FString> FHyperAIStudioNativeChat::GetAvailableApiAgents()
+{
+	TArray<FString> Names;
+	if (FPaths::FileExists(HyperAIStudio::NativeChat::Private::ApiPython()) && FPaths::FileExists(HyperAIStudio::NativeChat::Private::ApiWorker()))
+	{
+		for (const TCHAR* Name : {TEXT("Claude API"), TEXT("OpenAI API"), TEXT("Gemini API")})
+		{
+			if (!HyperAIStudio::Credentials::ReadAgentValue(Name, HyperAIStudio::NativeChat::Private::ApiKeyVariable(Name)).IsEmpty()) { Names.Add(Name); }
+		}
+	}
+	return Names;
 }
 
 TArray<FString> FHyperAIStudioNativeChat::GetInstalledAcpAgents()
@@ -3236,10 +3327,38 @@ FString FHyperAIStudioNativeChat::GetAcpTerminalCommand(const FString& AgentName
 	return Agent ? HyperAIStudio::NativeChat::Private::Executable(Agent->Executable) : FString();
 }
 
+FString FHyperAIStudioNativeChat::GetDirectApiLaunchCommand(const FString& AgentName, const FString& ProjectRoot,
+	const FString& Model, const FString& SessionId, const bool bTerminal, const bool bReadOnly)
+{
+	using namespace HyperAIStudio::NativeChat::Private;
+	if (!IsDirectApiAgent(AgentName) || !HyperAIStudio::ChatHistory::IsSafeSessionId(SessionId)
+		|| (!Model.IsEmpty() && !UHyperAIStudioSettings::IsSafeModelId(Model))) { return FString(); }
+	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+	const FString Endpoint = FHyperAIStudioService::GetEndpoint(Settings->UnrealMCPPort, Settings->UnrealMCPUrlPath);
+	for (const FString& Value : {ProjectRoot, ApiPython(), ApiWorker(), Endpoint, SessionId, Model})
+	{
+		for (const TCHAR C : Value)
+		{
+			if (C < TEXT(' ') || FCString::Strchr(TEXT("\"&|<>^%!`"), C)) { return FString(); }
+		}
+	}
+	const TCHAR* Provider = AgentName == TEXT("Claude API") ? TEXT("anthropic") : AgentName == TEXT("OpenAI API") ? TEXT("openai") : TEXT("gemini");
+	FString Command = FString::Printf(TEXT("\"%s\" -u \"%s\" --provider %s --root \"%s\" --session %s --mcp \"%s\""),
+		*ApiPython(), *ApiWorker(), Provider, *ProjectRoot, *SessionId, *Endpoint);
+	if (!Model.IsEmpty()) { Command += TEXT(" --model ") + Model; }
+	if (bTerminal) { Command += TEXT(" --terminal"); }
+	if (bReadOnly) { Command += TEXT(" --read-only"); }
+	return Command;
+}
+
 TSharedPtr<FHyperAIStudioNativeChat> FHyperAIStudioNativeChat::Create(const FString& AgentName, const FString& ProjectRoot, const FString& Model,
 	const FString& ResumeSessionId, const FString& Subagent)
 {
 	using namespace HyperAIStudio::NativeChat::Private;
+	if (IsDirectApiAgent(AgentName))
+	{
+		return MakeShared<FClaudeChat>(ProjectRoot, Model, ResumeSessionId, FString(), AgentName);
+	}
 	if (AgentName.Contains(TEXT("Codex"), ESearchCase::IgnoreCase))
 	{
 		return MakeShared<FCodexChat>(ProjectRoot, Model, ResumeSessionId);

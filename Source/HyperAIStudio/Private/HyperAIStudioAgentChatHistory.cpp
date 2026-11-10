@@ -30,6 +30,17 @@ namespace
 	constexpr int64 TailBytes = 256 * 1024;
 	constexpr int32 MaxTitleChars = 90;
 
+	FString ApiProvider(const FString& Agent)
+	{
+		return Agent == TEXT("Claude API") ? FString(TEXT("anthropic")) : Agent == TEXT("OpenAI API") ? FString(TEXT("openai"))
+			: Agent == TEXT("Gemini API") ? FString(TEXT("gemini")) : FString();
+	}
+
+	FString ApiDirectory(const FString& Root, const FString& Agent)
+	{
+		return FPaths::Combine(Root, TEXT(".hyperai/runtime/api-chats"), ApiProvider(Agent));
+	}
+
 	/** What a session file says, kept while it stays the same size and age. */
 	struct FFileFacts
 	{
@@ -355,6 +366,11 @@ FString SessionFile(const FString& AgentName, const FString& ProjectRoot, const 
 		const FString Path = ClaudeProjectsDirectory() / ClaudeProjectDirectoryName(ProjectRoot) / (SessionId + TEXT(".jsonl"));
 		return IFileManager::Get().FileExists(*Path) ? Path : FString();
 	}
+	if (!ApiProvider(AgentName).IsEmpty())
+	{
+		const FString Path = ApiDirectory(ProjectRoot, AgentName) / (SessionId + TEXT(".jsonl"));
+		return IFileManager::Get().FileExists(*Path) ? Path : FString();
+	}
 	if (AgentName == TEXT("Codex"))
 	{
 		// A rollout's name ends with its thread id.
@@ -369,7 +385,8 @@ bool DeleteSession(const FHyperAIStudioChatSession& Session, FString& OutError)
 {
 	// Only a log inside the agent's own store, named for the chat, is ever touched.
 	const FString Store = Session.AgentName == TEXT("Claude Code") ? ClaudeProjectsDirectory()
-		: Session.AgentName == TEXT("Codex") ? CodexSessionsDirectory() : FString();
+		: Session.AgentName == TEXT("Codex") ? CodexSessionsDirectory()
+		: !ApiProvider(Session.AgentName).IsEmpty() && !Session.ProjectRoot.IsEmpty() ? ApiDirectory(Session.ProjectRoot, Session.AgentName) : FString();
 	const FString Full = FPaths::ConvertRelativePathToFull(Session.Path);
 	if (Store.IsEmpty() || !IsSafeSessionId(Session.SessionId) || !FPaths::IsUnderDirectory(Full, FPaths::ConvertRelativePathToFull(Store))
 		|| !FPaths::GetBaseFilename(Full).EndsWith(Session.SessionId) || !IFileManager::Get().FileExists(*Full))
@@ -378,6 +395,11 @@ bool DeleteSession(const FHyperAIStudioChatSession& Session, FString& OutError)
 		return false;
 	}
 	TArray<FString> Paths = {Full};
+	if (!ApiProvider(Session.AgentName).IsEmpty())
+	{
+		const FString State = FPaths::ChangeExtension(Full, TEXT("json"));
+		if (IFileManager::Get().FileExists(*State)) { Paths.Add(State); }
+	}
 	// Claude Code keeps a chat's subagent and tool logs in a folder named like it.
 	const FString Folder = FPaths::GetPath(Full) / Session.SessionId;
 	if (Session.AgentName == TEXT("Claude Code") && IFileManager::Get().DirectoryExists(*Folder))
@@ -435,6 +457,28 @@ TArray<FHyperAIStudioChatSession> ListSessions(const FString& ProjectRoot, const
 	const FString Root = NormalizeRoot(ProjectRoot);
 	AddClaudeSessions(Root, MaxSessions, Sessions);
 	AddCodexSessions(Root, MaxSessions, Sessions);
+	for (const TCHAR* Agent : {TEXT("Claude API"), TEXT("OpenAI API"), TEXT("Gemini API")})
+	{
+		const FString Directory = ApiDirectory(Root, Agent);
+		TArray<FString> Files;
+		IFileManager::Get().FindFiles(Files, *(Directory / TEXT("*.jsonl")), true, false);
+		for (const FString& File : Files)
+		{
+			const FString Id = FPaths::GetBaseFilename(File);
+			if (!IsSafeSessionId(Id)) { continue; }
+			const FString Full = Directory / File;
+			const FString Head = ReadHeadAndTail(Full);
+			FHyperAIStudioChatSession Session;
+			Session.AgentName = Agent;
+			Session.SessionId = Id;
+			Session.Title = ExtractClaudeTitle(Head);
+			Session.LastActiveUtc = IFileManager::Get().GetTimeStamp(*Full);
+			Session.Path = Full;
+			Session.ProjectRoot = Root;
+			Session.bUsedUnrealMcp = Head.Contains(TEXT("unreal_call_tool"));
+			Sessions.Add(MoveTemp(Session));
+		}
+	}
 	Sessions.Sort([](const FHyperAIStudioChatSession& A, const FHyperAIStudioChatSession& B) { return A.LastActiveUtc > B.LastActiveUtc; });
 	if (Sessions.Num() > MaxSessions)
 	{
@@ -453,6 +497,7 @@ FString BuildResumeArguments(const FString& AgentName, const FString& SessionId)
 	{
 		return TEXT("--resume ") + SessionId;
 	}
+	if (!ApiProvider(AgentName).IsEmpty()) { return TEXT("--session ") + SessionId; }
 	// Codex applies the root -c overrides to its resume subcommand.
 	return AgentName == TEXT("Codex") ? TEXT("resume ") + SessionId : FString();
 }
@@ -597,10 +642,10 @@ TArray<FHyperAIStudioLiveChat> ListLiveClaudeChats(const FString& ClaudeCommand,
 }
 
 FString StartClaudeBackgroundChat(const FString& ClaudeCommand, const FString& ProjectRoot, const FString& EnvPrefix,
-	const FString& Arguments, FString& OutError, const TArray<TPair<FString, FString>>& KeyTargets)
+	const FString& Arguments, FString& OutError, const TArray<TPair<FString, FString>>& KeyTargets, const TMap<FString, FString>& Overrides)
 {
 	FString Output;
-	RunHidden(HyperAIStudio::Credentials::WrapCommandWithTargets(KeyTargets, EnvPrefix + ClaudeCommand + TEXT(" --bg ") + Arguments), ProjectRoot, Output);
+	RunHidden(HyperAIStudio::Credentials::WrapCommandWithTargets(KeyTargets, EnvPrefix + ClaudeCommand + TEXT(" --bg ") + Arguments, Overrides), ProjectRoot, Output);
 	const FString ShortId = ParseBackgroundedId(Output);
 	if (ShortId.IsEmpty())
 	{

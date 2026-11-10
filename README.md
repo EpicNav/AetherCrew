@@ -9,6 +9,11 @@ What it does:
 - Sets up Epic Unreal MCP in one step, verifies it, and writes the agent files: `AGENTS.md`, `CLAUDE.md`, and MCP
   configs for Claude Code, Codex, Gemini, Cursor and VS Code/Copilot.
 - Hosts Claude Code, Codex and Gemini in its own chat view, with approvals, reports, pictures and up to four chats.
+- Includes Claude API, OpenAI API and Gemini API agents that send generation requests directly to the provider,
+  with a tool loop for Unreal MCP, project files and approved commands. No provider CLI or balance probe is required.
+  Native and terminal views share conversations; output limits are configurable (0 = Auto, provider limits apply).
+  Keys stay in Windows Credential Manager. Existing CLI routes also support API-key authentication.
+  See [API setup](Docs/api-authentication.md).
 - Adds 212 tools in 42 capability packs (Blueprints, levels, lighting, materials, Niagara, animation, GAS, UI, PCG
   and more), every edit planned, approved, journaled and undoable.
 - Runs a team: director, programmer, level designer, lighting artist, technical artist and QA tester.
@@ -19,8 +24,9 @@ What it does:
 What it does not do:
 
 - It does not proxy MCP traffic or replace Epic Unreal MCP.
-- It does not include Epic `NoRedist` plugin files, agent CLIs or accounts; agents run on their own plans.
-- It never stores API keys: services name the environment variable a key lives in.
+- It does not include Epic `NoRedist` plugin files, provider CLIs or accounts; CLI routes need their agent installed,
+  while direct API routes use Unreal's bundled Python runtime and your provider API key.
+- It never saves API keys in project files. Keys can be stored in Windows Credential Manager or inherited from environment variables.
 
 Open it with `Ctrl+Alt+H` or `Tools > HyperAI Studio` after enabling the plugin, then run Settings > Setup > Start Setup.
 
