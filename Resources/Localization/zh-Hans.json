@@ -2973,6 +2973,30 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.build-tree-with-aimodule.ph.name.label",
+   "source": "Tree name",
+   "text": "行为树名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.build-tree-with-aimodule.ph.wait.label",
+   "source": "Patrol wait (s)",
+   "text": "巡逻等待（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.build-tree-with-aimodule.summary",
+   "source": "With Epic's BehaviorTreeToolset: a blackboard, a selector with a chase branch behind a decorator and a patrol branch, keys wired and validated.",
+   "text": "使用 Epic 的 BehaviorTreeToolset：黑板、Selector 下由装饰器控制的追击分支和巡逻分支，连好键并验证。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.build-tree-with-aimodule.title",
+   "source": "Build a guard behaviour tree node by node with AIModule",
+   "text": "用 AIModule 逐个节点构建守卫行为树"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "ai-behavior.check-ai-feature-readiness.ph.goal.label",
    "source": "AI you plan to build",
    "text": "计划构建的 AI"
@@ -3084,6 +3108,24 @@
    "key": "ai-behavior.eqs-find-cover.title",
    "source": "Make an EQS query that finds cover from the player",
    "text": "制作一个寻找躲避玩家掩体的 EQS 查询"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-find-filtering-test.ph.querier.label",
+   "source": "Querier actor",
+   "text": "查询者 Actor"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-find-filtering-test.summary",
+   "source": "Run an EQS query, then switch its tests off one at a time with Epic's EnvironmentQueryToolset to find the one that drops every item, and restore them.",
+   "text": "运行 EQS 查询，再用 Epic 的 EnvironmentQueryToolset 逐个关闭测试，找出过滤掉全部项目的测试，并恢复原状。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ai-behavior.eqs-find-filtering-test.title",
+   "source": "Find the EQS test that empties a query",
+   "text": "逐个关闭测试找出清空 EQS 查询的那一项"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -3654,6 +3696,36 @@
    "key": "anim-blueprints.quadruped-gait-abp.title",
    "source": "Animate a quadruped creature's walk, trot and gallop",
    "text": "为四足生物制作行走、小跑和疾驰动画"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "anim-blueprints.rewind-debugger-recording.ph.class_filter.label",
+   "source": "Class to look for",
+   "text": "要查找的类"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "anim-blueprints.rewind-debugger-recording.ph.moment.label",
+   "source": "Moment to inspect (s)",
+   "text": "要查看的时刻（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "anim-blueprints.rewind-debugger-recording.ph.window.label",
+   "source": "Window around it (s)",
+   "text": "前后时间窗口（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "anim-blueprints.rewind-debugger-recording.summary",
+   "source": "Read a Rewind Debugger recording: the character's objects, their events and properties at a moment, and scrub the view to where it went wrong.",
+   "text": "读取 Rewind Debugger 录制：角色相关对象、它们在某一时刻的事件和属性，并把视图拖到出问题的位置。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "anim-blueprints.rewind-debugger-recording.title",
+   "source": "Inspect a character's recording in the Rewind Debugger",
+   "text": "在 Rewind Debugger 中查看角色的录制"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -7407,6 +7479,36 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "data-config-l10n.tag-branch-own-source.ph.branch.label",
+   "source": "Tag branch",
+   "text": "标签分支"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "data-config-l10n.tag-branch-own-source.ph.new_tags.label",
+   "source": "Tags to add",
+   "text": "要新增的标签"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "data-config-l10n.tag-branch-own-source.ph.source.label",
+   "source": "New tag source (ini name)",
+   "text": "新标签源（ini 名称）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "data-config-l10n.tag-branch-own-source.summary",
+   "source": "Give one tag branch its own tag ini with Epic's GameplayTagsToolset59, move its tags there, add new ones, and prove nothing lost its referencers.",
+   "text": "用 Epic 的 GameplayTagsToolset59 为一个标签分支建立独立的标签 ini，移入其标签并新增标签，证明引用者没有丢失。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "data-config-l10n.tag-branch-own-source.title",
+   "source": "Move a gameplay tag branch into its own tag source",
+   "text": "把一个 Gameplay Tag 分支移到独立的标签源"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "diagnostics-perf.arena-frame-budget.ph.box_max.hint",
    "source": "x,y,z",
    "text": "x,y,z"
@@ -7551,6 +7653,90 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.csv-profile-top-stats.ph.csv_path.hint",
+   "source": "none records one now; or give the path of a .csv from a device run",
+   "text": "填 none 则现在录制一份；也可填写设备运行得到的 .csv 路径"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.csv-profile-top-stats.ph.csv_path.label",
+   "source": "Existing CSV file",
+   "text": "已有 CSV 文件"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.csv-profile-top-stats.ph.frames.label",
+   "source": "Frames to record",
+   "text": "录制帧数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.csv-profile-top-stats.summary",
+   "source": "Record a CSV profile while the level plays, then rank its stats, reduce the frame times and list its events with Epic's CsvProfilerToolset.",
+   "text": "在关卡运行时录制 CSV 性能数据，然后用 Epic 的 CsvProfilerToolset 对统计项排名、汇总帧耗时并列出事件。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.csv-profile-top-stats.title",
+   "source": "Capture a CSV profile in play and rank its worst stats",
+   "text": "运行时录制 CSV 性能数据并排出最差统计项"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.cvar-cost-sweep.ph.cvar.label",
+   "source": "Console variable",
+   "text": "控制台变量"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.cvar-cost-sweep.ph.values.label",
+   "source": "Values to try",
+   "text": "要尝试的值"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.cvar-cost-sweep.summary",
+   "source": "Step one console variable through a few values in play, read frame timings at each with Epic's toolsets, and put the original value back.",
+   "text": "运行中把一个控制台变量依次设为几个值，用 Epic 的工具集读取每个值下的帧耗时，最后恢复原值。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.cvar-cost-sweep.title",
+   "source": "Measure what a console variable costs, then restore it",
+   "text": "测量控制台变量的性能开销并恢复原值"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.filter-logs-verbosity.ph.category.label",
+   "source": "Log category",
+   "text": "日志类别"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.filter-logs-verbosity.ph.pattern.label",
+   "source": "Text to look for",
+   "text": "要查找的文本"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.filter-logs-verbosity.ph.seconds.label",
+   "source": "Seconds to play",
+   "text": "运行秒数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.filter-logs-verbosity.summary",
+   "source": "Turn one log category up with Epic's LogsToolset, reproduce the problem in play, read only its matching lines, and set the verbosity back.",
+   "text": "用 Epic 的 LogsToolset 提高一个日志类别的详细程度，在运行中复现问题，只读取匹配的行，然后恢复原详细程度。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.filter-logs-verbosity.title",
+   "source": "Raise a log category's verbosity, reproduce, and filter",
+   "text": "提高日志类别详细程度，复现后过滤"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "diagnostics-perf.find-asset-referencers.ph.depth.hint",
    "source": "How many levels of referencers to follow",
    "text": "向上追溯引用者的层数"
@@ -7572,6 +7758,30 @@
    "key": "diagnostics-perf.find-asset-referencers.title",
    "source": "Find everything that references an asset",
    "text": "找出引用某个资产的所有内容"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.frame-stats-tree.ph.groups.label",
+   "source": "Stat groups to read",
+   "text": "要读取的统计组"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.frame-stats-tree.ph.min_ms.label",
+   "source": "Smallest scope (ms)",
+   "text": "最小作用域（毫秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.frame-stats-tree.summary",
+   "source": "Epic's StatsToolset in play: frame timings, the scope tree over a threshold and the counters behind it, cross-checked with a live profile.",
+   "text": "在运行中使用 Epic 的 StatsToolset：帧耗时、超过阈值的作用域树及其背后的计数器，并与实时性能分析交叉核对。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "diagnostics-perf.frame-stats-tree.title",
+   "source": "Read a frame's stat tree and counters while it plays",
+   "text": "运行时读取一帧的统计树和计数器"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -8853,6 +9063,30 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "gameplay-systems.toggle-game-feature.ph.feature_plugin.label",
+   "source": "Game Feature plugin",
+   "text": "Game Feature 插件"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "gameplay-systems.toggle-game-feature.ph.seconds.label",
+   "source": "Seconds to play",
+   "text": "运行秒数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "gameplay-systems.toggle-game-feature.summary",
+   "source": "Read a Game Feature's state with Epic's GameFeaturesToolset59, activate it, prove it works in play, then put it back as it was.",
+   "text": "用 Epic 的 GameFeaturesToolset59 读取 Game Feature 状态并激活，运行验证其可用，然后恢复原状态。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "gameplay-systems.toggle-game-feature.title",
+   "source": "Toggle a Game Feature plugin on and off safely",
+   "text": "安全地开启和关闭 Game Feature 插件"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "gameplay-systems.tune-look-controls.ph.context_path.label",
    "source": "Mapping Context",
    "text": "映射上下文"
@@ -9192,6 +9426,30 @@
    "key": "gas.hook-up-cues.title",
    "source": "Hook up gameplay cues on the selected effects",
    "text": "为所选效果接上 Gameplay Cue"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "gas.live-ability-state.ph.action.label",
+   "source": "Input action to press",
+   "text": "要按下的输入动作"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "gas.live-ability-state.ph.attribute.label",
+   "source": "Attribute to watch",
+   "text": "要关注的属性"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "gas.live-ability-state.summary",
+   "source": "In play, read the player's attributes, active effects, granted abilities and owned tags with Epic's ability system inspector, before and after an action.",
+   "text": "运行中用 Epic 的能力系统检查工具读取玩家的属性、生效效果、已授予能力和拥有的标签，并对比执行动作前后。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "gas.live-ability-state.title",
+   "source": "Read a character's live attributes, effects and tags",
+   "text": "读取角色实时的属性、效果和标签"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -12933,6 +13191,30 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.tg-multi-output-graph.ph.name.label",
+   "source": "Graph name",
+   "text": "图名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.tg-multi-output-graph.ph.size.label",
+   "source": "Output size (px)",
+   "text": "输出尺寸（像素）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.tg-multi-output-graph.summary",
+   "source": "With Epic's TextureGraphTools: a graph with exposed inputs, a noise-driven mask and a height output, checked for issues and exported.",
+   "text": "使用 Epic 的 TextureGraphTools：构建带暴露输入的图，输出噪声驱动的遮罩和高度图，检查问题并导出。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "materials-textures.tg-multi-output-graph.title",
+   "source": "Build a Texture Graph with parameters and two outputs",
+   "text": "构建带参数和两个输出的 Texture Graph"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "materials-textures.tg-noise-mask.ph.frequency.label",
    "source": "Noise frequency (0-20)",
    "text": "噪声频率（0-20）"
@@ -15993,6 +16275,30 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.cheats-reach-late-area.ph.check.label",
+   "source": "What to check there",
+   "text": "要在那里检查的内容"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.cheats-reach-late-area.ph.destination.label",
+   "source": "Where to go (cm)",
+   "text": "目的地（cm）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.cheats-reach-late-area.summary",
+   "source": "List the game's cheats with Epic's CheatsToolset, use them to get to an area quickly and safely, then run a short check there.",
+   "text": "用 Epic 的 CheatsToolset 列出游戏的作弊指令，借助它们快速安全地到达某个区域，然后在那里做一次简短检查。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.cheats-reach-late-area.title",
+   "source": "Use cheats to reach a late area and test it",
+   "text": "用作弊指令到达后期区域并测试"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "playtest-qa.combat-encounter-bot.ph.enemies.hint",
    "source": "A tag or class naming every enemy in the encounter",
    "text": "能指代遭遇战中所有敌人的标记或类名"
@@ -16098,6 +16404,36 @@
    "key": "playtest-qa.door-replicates-to-clients.title",
    "source": "Test a door replicates to clients and late joiners",
    "text": "测试门的状态同步到客户端和中途加入者"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.drive-input-in-play.ph.jump_action.label",
+   "source": "Jump action",
+   "text": "跳跃动作"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.drive-input-in-play.ph.move_action.label",
+   "source": "Move action",
+   "text": "移动动作"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.drive-input-in-play.ph.seconds.label",
+   "source": "Seconds to hold forward",
+   "text": "按住前进的秒数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.drive-input-in-play.summary",
+   "source": "Hold Enhanced Input actions for set times with Epic's InputToolset58 during play, and read where the pawn went and what it did.",
+   "text": "运行中用 Epic 的 InputToolset58 按设定时长按住 Enhanced Input 动作，并读取角色移动到哪里、做了什么。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "playtest-qa.drive-input-in-play.title",
+   "source": "Drive the player's input in play and measure the result",
+   "text": "运行中驱动玩家输入并测量结果"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -17685,6 +18021,30 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.lint-widget-blueprints.ph.limit.label",
+   "source": "Most widgets",
+   "text": "最多控件数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.lint-widget-blueprints.ph.max_depth.label",
+   "source": "Deepest tree allowed",
+   "text": "允许的最大树深度"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.lint-widget-blueprints.summary",
+   "source": "Static analysis with Epic's WidgetStaticAnalysisToolset: tree depth, property overrides and connections per widget, flagged against simple rules.",
+   "text": "用 Epic 的 WidgetStaticAnalysisToolset 做静态分析：每个控件的树深度、属性覆盖和连接，并按简单规则标记问题。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.lint-widget-blueprints.title",
+   "source": "Lint the Widget Blueprints in a folder",
+   "text": "检查文件夹中的控件蓝图（Lint）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "ui-umg.match-ui-mockup.ph.mock_path.hint",
    "source": "Absolute path to a PNG.",
    "text": "PNG 文件的绝对路径。"
@@ -17730,6 +18090,42 @@
    "key": "ui-umg.match-ui-mockup.title",
    "source": "Match a UI mockup image and score it",
    "text": "按 UI 设计稿还原并评分"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.mvvm-events-conditions.ph.button.label",
+   "source": "Button widget",
+   "text": "按钮控件"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.mvvm-events-conditions.ph.threshold.label",
+   "source": "Low health below",
+   "text": "低生命值阈值"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.mvvm-events-conditions.ph.viewmodel.label",
+   "source": "View model class",
+   "text": "视图模型类"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.mvvm-events-conditions.ph.warning.label",
+   "source": "Warning widget",
+   "text": "警告控件"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.mvvm-events-conditions.summary",
+   "source": "With Epic's MVVMToolset59, bind view model fields one way, send a button's click to the view model, and show a warning when health is low.",
+   "text": "用 Epic 的 MVVMToolset59 单向绑定视图模型字段，把按钮点击发送到视图模型，并在生命值低时显示警告。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.mvvm-events-conditions.title",
+   "source": "Wire MVVM bindings, a button event and a view condition",
+   "text": "连接 MVVM 绑定、按钮事件和视图条件"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -17982,6 +18378,24 @@
    "key": "ui-umg.shooter-hud.title",
    "source": "Build a shooter HUD with health, ammo and crosshair",
    "text": "构建包含生命值、弹药和准星的射击游戏 HUD"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.tidy-widget-animations.ph.prefix.label",
+   "source": "Name prefix",
+   "text": "名称前缀"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.tidy-widget-animations.summary",
+   "source": "List a Widget Blueprint's animations with Epic's WidgetAnimationToolset, rename them to a convention, fit their lengths and drop unbound ones.",
+   "text": "用 Epic 的 WidgetAnimationToolset 列出控件蓝图的动画，按约定重命名，使长度贴合关键帧，并删除没有绑定的动画。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "ui-umg.tidy-widget-animations.title",
+   "source": "Tidy a widget's animations: names, lengths and bindings",
+   "text": "整理控件动画：名称、长度和绑定"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -19140,6 +19554,72 @@
    "key": "world-partition.navigation-audit-link-plan.title",
    "source": "Audit navigation and check a jump-down link plan",
    "text": "审查导航并检查下跳导航链接计划"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "world-partition.navmesh-coverage-debug.ph.max_cost.label",
+   "source": "Reach cost limit",
+   "text": "可达开销上限"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "world-partition.navmesh-coverage-debug.ph.spots.label",
+   "source": "Spots that must be on the navmesh (cm)",
+   "text": "必须位于导航网格上的位置（cm）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "world-partition.navmesh-coverage-debug.ph.start.label",
+   "source": "Start point (cm)",
+   "text": "起点（cm）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "world-partition.navmesh-coverage-debug.summary",
+   "source": "Read the navmesh's build state, bounds volumes and reachable area from a start point, project key spots onto it, and list the gaps.",
+   "text": "读取导航网格的构建状态、边界体积和从起点出发的可达范围，把关键位置投射到网格上，并列出缺口。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "world-partition.navmesh-coverage-debug.title",
+   "source": "Debug navmesh coverage with Epic's NavMesh toolset",
+   "text": "用 Epic 的 NavMesh 工具集排查导航网格覆盖"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "world-partition.navmesh-path-blocked.ph.agent.hint",
+   "source": "default uses the navmesh's default agent",
+   "text": "填 default 使用导航网格的默认代理"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "world-partition.navmesh-path-blocked.ph.agent.label",
+   "source": "Agent name",
+   "text": "代理名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "world-partition.navmesh-path-blocked.ph.from.label",
+   "source": "From (cm)",
+   "text": "起点（cm）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "world-partition.navmesh-path-blocked.ph.to.label",
+   "source": "To (cm)",
+   "text": "终点（cm）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "world-partition.navmesh-path-blocked.summary",
+   "source": "Project both ends, find the path, raycast along it and read the polys, areas, modifiers and links in the way, then name the blocker.",
+   "text": "投射两端点、寻路、沿路径做射线检测，读取挡路的多边形、区域、修改器和链接，并指出阻挡原因。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "world-partition.navmesh-path-blocked.title",
+   "source": "Find out why an AI cannot path between two points",
+   "text": "查明 AI 无法在两点间寻路的原因"
   },
   {
    "namespace": "HyperAIStudioPrompts",

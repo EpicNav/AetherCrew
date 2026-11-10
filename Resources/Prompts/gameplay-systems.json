@@ -956,6 +956,43 @@
     }
    ],
    "prompt": "Guard the Game Feature `{{feature_plugin}}` against unnoticed changes before {{milestone}}. Change no asset. If the Gameplay Systems tools are missing (they need the MassAI, MassGameplay, GameFeatures and WorldConditions plugins), say so and stop.\n1. hyper_memory_recall with query `{{feature_plugin}} preflight baseline` to find an earlier baseline note.\n2. Load the data asset and entity config (Epic's AssetTools.load_asset), then hyper_gameplay_systems_inspect with FeaturePluginName `{{feature_plugin}}` and exactly three Targets: Role `game_feature_data` `/{{feature_plugin}}/{{feature_plugin}}.{{feature_plugin}}` (or the data asset the plugin names), `mass_entity_config` `{{entity_config}}`, `world_condition_schema` `{{schema_class}}`.\n3. hyper_gameplay_systems_validate with that Snapshot: the seals must recompute (bValid true). A snapshot that does not validate is no baseline: report its issues and stop.\n4. With a baseline: compare PersistedFingerprint, then each record's ElementFingerprint, ContentFingerprint and EntryCount, and say for every role what changed (actions or traits added or removed, class changed, plugin disabled).\n5. Without a baseline, save one with hyper_memory_remember: Title `{{feature_plugin}} preflight baseline`, Type `fact`, and a Text with today's date, the PersistedFingerprint, and per role its ObjectPath, ElementFingerprint, ContentFingerprint and EntryCount. If one exists and differs, ask me before replacing it (then pass its name, as hyper_memory_recall lists it, in Replaces).\nReport a PASS/FAIL table with one row per role and one for the plugin: unchanged (PASS) or changed (FAIL, old and new values). Say whether a baseline was saved."
+  },
+  {
+   "id": "gameplay-systems.toggle-game-feature",
+   "title": "Toggle a Game Feature plugin on and off safely",
+   "summary": "Read a Game Feature's state with Epic's GameFeaturesToolset59, activate it, prove it works in play, then put it back as it was.",
+   "packs": [
+    "gameplay_systems"
+   ],
+   "tools": [
+    "hyper_log_tail",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_playtest_status"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "game feature",
+    "game features",
+    "plugin",
+    "activate",
+    "deactivate",
+    "modular",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "feature_plugin",
+     "label": "Game Feature plugin",
+     "default": "ShooterCore"
+    },
+    {
+     "name": "seconds",
+     "label": "Seconds to play",
+     "default": "20"
+    }
+   ],
+   "prompt": "Turn the Game Feature `{{feature_plugin}}` on, check {{level}} plays with it, and leave it as it was. Use Epic's `GameFeaturesToolset59.GameFeaturesToolset59`; if it is not listed (the GameFeatures plugin is off), say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. ListDiscoveredGameFeaturePlugins: `{{feature_plugin}}` is one (IsGameFeaturePlugin). GetGameFeatureState and GetGameFeaturePluginDetails: note the state and its built-in auto state, to restore.\n2. If it is not Active, RequestActivateGameFeature and poll GetGameFeatureState until Active, 60 s at most; IsGameFeatureActive true.\n3. hyper_log_tail with categories [`LogGameFeatures`] and maxVerbosity warning, since the activation.\n4. hyper_playtest_run with mode StartInProcess and a Play goal Explore for {{seconds}} s; hyper_operation_wait with bWaitThroughApproval true, then hyper_playtest_status for errors.\n5. Restore: if it was not Active, RequestDeactivateGameFeature, then RequestUnloadGameFeature with bKeepRegistered true if it was only registered; poll GetGameFeatureState until it matches step 1.\nReply with a PASS/FAIL table: a Game Feature plugin, Active reached, no errors in LogGameFeatures, play ran without errors, the state restored to what step 1 read. Do not change its built-in auto state unless I ask."
   }
  ]
 }

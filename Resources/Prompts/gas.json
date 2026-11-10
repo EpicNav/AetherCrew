@@ -779,6 +779,47 @@
     }
    ],
    "prompt": "Make passive regeneration for a fantasy RPG under `{{content_folder}}/GAS`: `GE_Regen_Health` (infinite, every {{period}} s +{{hp_per_tick}} `{{health_attribute}}`, asset tag `Effect.Regen.Health`) and `GE_Regen_Mana` (infinite, every {{period}} s +{{mana_per_tick}} `{{mana_attribute}}`, asset tag `Effect.Regen.Mana`). If the GAS tools are missing (the GameplayAbilities plugin is off), say so and stop.\n1. hyper_gas_inspect with empty AssetPaths, Variant `attribute_set` and bIncludeNativeAttributeSets true: the Attribute Set class with `{{health_attribute}}` and `{{mana_attribute}}` is the attributeOwnerClassPath. If there is none, stop: attribute sets are C++ code a programmer must add.\n2. Add any missing tag with Epic's GameplayTagsToolset.AddTag (empty tagSource); these exact tags are approved.\n3. One hyper_gas_apply_plan with bDryRun false and a fresh operationId: for each effect `create_gameplay_effect_blueprint`, `set_effect_duration` (durationPolicy infinite, periodSeconds {{period}}), `replace_effect_modifiers` (additive, the amount as magnitude) and `replace_effect_asset_tags`. On awaiting_user_approval, call hyper_operation_wait with its operationId and bWaitThroughApproval true, then read back with hyper_gas_inspect instead of Made. The plan compiles and saves what it touches.\n4. Read Made, then hyper_gas_validate on both object paths (`Name.Name` form). Effects with tags or Set By Caller magnitudes get revision_incomplete and component_projection_unsupported, which the validator cannot read yet: INFO; any other error is a FAIL.\nReport a PASS/FAIL table: both effects infinite with period {{period}} s, the amounts and attributes as read back, the asset tags, no unexpected validator errors. Add one line on how to stop regeneration in combat: remove the effects by their asset tag, or block them with a tag requirement in code."
+  },
+  {
+   "id": "gas.live-ability-state",
+   "title": "Read a character's live attributes, effects and tags",
+   "summary": "In play, read the player's attributes, active effects, granted abilities and owned tags with Epic's ability system inspector, before and after an action.",
+   "packs": [
+    "gas"
+   ],
+   "skills": [
+    "unreal-gas"
+   ],
+   "tools": [
+    "hyper_gas_inspect",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_pie_query"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "gas",
+    "attributes",
+    "effects",
+    "tags",
+    "abilities",
+    "live",
+    "play",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "action",
+     "label": "Input action to press",
+     "default": "IA_Dash"
+    },
+    {
+     "name": "attribute",
+     "label": "Attribute to watch",
+     "default": "Stamina"
+    }
+   ],
+   "prompt": "Show me the player's ability system while {{level}} plays, before and after pressing `{{action}}`. Change nothing. Use Epic's `GASToolsets59.AbilitySystemInspectorToolset59`; if it is not listed (the GameplayAbilities plugin is off), say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. If Play In Editor is not running, start it with hyper_playtest_run (mode StartInProcess, teardown LeaveSessionRunning, one Bot step Wait seconds 2) and hyper_operation_wait with bWaitThroughApproval true. hyper_pie_query for the PIE world; find the player's pawn (or its Player State, if the ability system lives there).\n2. AbilitySystemInspectorToolset59 GetAttributeValues, GetActiveEffects, GetGrantedAbilities and GetActiveTags on it.\n3. hyper_playtest_run with one Bot step Press inputAction {{action}}, then Wait seconds 0.5; hyper_operation_wait.\n4. The same four reads again, then once more after 3 s.\n5. hyper_gas_inspect the abilities and effects it names, for their costs, cooldowns and durations, to explain the changes.\nReply with a table of {{attribute}} and every attribute that changed (before, just after, 3 s later), the effects that appeared or expired with their durations and stacks, the tags gained and lost, and whether that matches the ability's cost and cooldown. Stop play with Epic's StopPIE if you started it."
   }
  ]
 }

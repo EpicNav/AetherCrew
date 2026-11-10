@@ -946,6 +946,96 @@
     }
    ],
    "prompt": "Set up a phone playtest of {{level}} for up to {{viewers}} phones on this network.\n1. hyper_phone_playtest_start with bDryRun true and maxViewers {{viewers}}. If it is refused, report why (plugin not enabled, player page missing, a public address) and stop.\n2. Tell the user the URL, the ports and the exposure line, then call it again with bDryRun false; hyper_operation_wait with bWaitThroughApproval true.\n3. hyper_phone_playtest_status: show the QR code on its own line as ![scan to play](qrCodePng) and the URL in a code block.\n4. When the user says the phones are connected, run hyper_playtest_run (bRecordVideo true) with a Survey step and a Play Explore step of 30 seconds, so the phones watch the bot play; then report the viewer count from hyper_phone_playtest_status and link the video.\n5. Leave it running for the user; say hyper_phone_playtest_stop ends it."
+  },
+  {
+   "id": "playtest-qa.drive-input-in-play",
+   "title": "Drive the player's input in play and measure the result",
+   "summary": "Hold Enhanced Input actions for set times with Epic's InputToolset58 during play, and read where the pawn went and what it did.",
+   "packs": [
+    "pie_runtime",
+    "enhanced_input"
+   ],
+   "skills": [
+    "unreal-input"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_input_inspect",
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_pie_query"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "input",
+    "enhanced input",
+    "inject",
+    "move",
+    "jump",
+    "play",
+    "automation",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "move_action",
+     "label": "Move action",
+     "default": "/Game/Input/Actions/IA_Move.IA_Move"
+    },
+    {
+     "name": "jump_action",
+     "label": "Jump action",
+     "default": "/Game/Input/Actions/IA_Jump.IA_Jump"
+    },
+    {
+     "name": "seconds",
+     "label": "Seconds to hold forward",
+     "default": "2"
+    }
+   ],
+   "prompt": "In {{level}}, hold forward for {{seconds}} s, then jump, through the player's own input, and measure what the pawn did. Change nothing in the level. Use Epic's `InputToolset.InputToolset58`; if it is not listed, say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. hyper_input_inspect `{{move_action}}` and `{{jump_action}}`: their value types (Axis2D, Boolean) and the mapping context that holds them.\n2. If Play In Editor is not running, start it with hyper_playtest_run (mode StartInProcess, teardown LeaveSessionRunning, one Bot step Wait seconds 2) and hyper_operation_wait with bWaitThroughApproval true. hyper_pie_query for the world and the player's pawn; read its root component's RelativeLocation with Epic's ObjectTools get_properties.\n3. InputToolset58 ApplyInput with entries [{action {{move_action}}, value 0,1,0}] (Y is forward on a usual Axis2D move) and durationSeconds {{seconds}}; when it completes, read the location again.\n4. ApplyInput with [{action {{jump_action}}, value 1,0,0}] and durationSeconds 0; read the location three times over the next 0.6 s for the jump's height.\n5. If ApplyInput reports no local player, play is not running in this process: say so and stop.\nReply with a PASS/FAIL table: distance moved forward in cm and the speed it implies (against the movement component's MaxWalkSpeed from get_properties), the jump's peak height in cm, and the pawn back on the ground. Stop play with Epic's StopPIE if you started it."
+  },
+  {
+   "id": "playtest-qa.cheats-reach-late-area",
+   "title": "Use cheats to reach a late area and test it",
+   "summary": "List the game's cheats with Epic's CheatsToolset, use them to get to an area quickly and safely, then run a short check there.",
+   "packs": [
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-playtest"
+   ],
+   "agent": "qa-tester",
+   "tools": [
+    "hyper_playtest_run",
+    "hyper_operation_wait",
+    "hyper_pie_query",
+    "hyper_verify_run"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "cheats",
+    "god mode",
+    "teleport",
+    "fly",
+    "qa",
+    "test",
+    "play",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "destination",
+     "label": "Where to go (cm)",
+     "default": "12000,4000,300"
+    },
+    {
+     "name": "check",
+     "label": "What to check there",
+     "default": "the boss door opens when the player walks up"
+    }
+   ],
+   "prompt": "Get to {{destination}} in {{level}} fast with cheats and check that {{check}}. Change nothing in the level. Use Epic's `CheatsToolset.CheatsToolset`; if it is not listed, say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. If Play In Editor is not running, start it with hyper_playtest_run (mode StartInProcess, teardown LeaveSessionRunning, one Bot step Wait seconds 2) and hyper_operation_wait with bWaitThroughApproval true. hyper_pie_query: one local player.\n2. CheatsToolset ListCheats with nameFilter \"\": the cheats this game has, with their argument hints.\n3. CallCheat God (args \"\"), so nothing kills the tester on the way; then BugItGo with args the three numbers of {{destination}} followed by 0 0 0, or the game's own warp cheat if it has one. If neither exists, say which cheats there are and stop.\n4. CallCheat Walk, so the check runs with normal movement and collision.\n5. hyper_verify_run with one case for {{check}} at {{destination}}: Survey the area, then the assert the check needs.\n6. CallCheat God again to turn it off.\nReply with a PASS/FAIL table: reached {{destination}} (within 300 cm), the check itself with its evidence, and god mode off at the end; list the cheats you used. Stop play with Epic's StopPIE if you started it."
   }
  ]
 }

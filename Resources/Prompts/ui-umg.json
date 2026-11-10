@@ -954,6 +954,145 @@
     }
    ],
    "prompt": "Check `{{content_folder}}/UI/{{hud}}` while {{level}} plays, with its live values.\n1. If Play In Editor is not running, start it with hyper_playtest_run and a short Wait step, and keep it running.\n2. hyper_ui_render_review with targetPath the HUD's object path, bFromPlay true and resolutions [\"1920x1080\", \"1280x720\"]. If it answers not_found, the HUD is not on screen: say what shows it and stop.\n3. Open the PNGs. List the errors and warnings with widget, rect and fix; note text that only overflows with live values (long names, big numbers).\nReport PASS or FAIL per resolution, then the PNG paths on their own lines."
+  },
+  {
+   "id": "ui-umg.tidy-widget-animations",
+   "title": "Tidy a widget's animations: names, lengths and bindings",
+   "summary": "List a Widget Blueprint's animations with Epic's WidgetAnimationToolset, rename them to a convention, fit their lengths and drop unbound ones.",
+   "packs": [
+    "ui_slate_mvvm"
+   ],
+   "skills": [
+    "unreal-umg"
+   ],
+   "agent": "ui-designer",
+   "tools": [
+    "hyper_ui_inspect",
+    "hyper_ui_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "widget animation",
+    "umg",
+    "animation",
+    "rename",
+    "cleanup",
+    "bindings",
+    "epic toolset"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "WidgetBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "prefix",
+     "label": "Name prefix",
+     "default": "Anim_"
+    }
+   ],
+   "prompt": "Tidy the animations of {{selected_asset}}: every name starts with `{{prefix}}`, each length covers its keys and no more, and an animation that binds no widget is removed after I agree. Change nothing else. Use Epic's `WidgetAnimationToolset.WidgetAnimationToolset`; if it is not listed, say so and stop. If hyper_ui_validate is not available, the UI pack is off: say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. hyper_ui_inspect {{selected_asset}} for its animations, their tracks and keys (the last key time of each). Keep its editor tab closed.\n2. WidgetAnimationToolset ListWidgetAnimations, and GetWidgetAnimationBindings for each.\n3. RenameWidgetAnimation each one whose name lacks `{{prefix}}` (keeping the rest of its name), and SetWidgetAnimationDisplayLabel to match. Search the project's Blueprints for the old names first with Epic's BlueprintTools; skip a rename that a graph calls by name, and say so.\n4. SetWidgetAnimationLength on each whose length differs from its last key by more than 0.05 s, to that key time.\n5. List the animations with no bindings and ask before RemoveWidgetAnimation on any.\n6. hyper_ui_inspect again and hyper_ui_validate: 0 errors, no animation_range_invalid.\nReply with a table per animation: old and new name, old and new length, binding count, and kept, renamed or removed; then the validate result."
+  },
+  {
+   "id": "ui-umg.lint-widget-blueprints",
+   "title": "Lint the Widget Blueprints in a folder",
+   "summary": "Static analysis with Epic's WidgetStaticAnalysisToolset: tree depth, property overrides and connections per widget, flagged against simple rules.",
+   "packs": [
+    "ui_slate_mvvm"
+   ],
+   "skills": [
+    "unreal-umg"
+   ],
+   "agent": "ui-designer",
+   "tools": [
+    "hyper_project_search",
+    "hyper_ui_validate",
+    "hyper_ui_inspect"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "lint",
+    "umg",
+    "widget",
+    "static analysis",
+    "depth",
+    "overrides",
+    "audit",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "max_depth",
+     "label": "Deepest tree allowed",
+     "default": "12"
+    },
+    {
+     "name": "limit",
+     "label": "Most widgets",
+     "default": "30"
+    }
+   ],
+   "prompt": "Lint the Widget Blueprints under {{content_folder}} and change nothing. Use Epic's `WidgetStaticAnalysisToolset.WidgetStaticAnalysisToolset`; if it is not listed (it needs the ModelViewViewModel plugin), use the hyper UI tools alone and say so. If hyper_ui_validate is not available, the UI pack is off: say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. hyper_project_search with kinds [asset] for Widget Blueprints under {{content_folder}}, at most {{limit}}.\n2. For each: WidgetStaticAnalysisToolset GetWidgetTreeDepth; TraceWidgetPropertyOverrides (propertyNameFilter \"\", widgetNameFilter \"\"); GetWidgetConnectionMap (scopeFilter \"\"). Then hyper_ui_validate on it.\n3. For the three worst, DescribeWidget (no start widget, maxDepth 4, bSkipDefaultValues true) and hyper_ui_inspect for the detail behind the flags.\n4. Flag: a tree deeper than {{max_depth}}; the same property overridden on many children where a style or parent would do; a hard-coded colour or font size repeated across widgets; a widget nothing binds or calls; per-frame property bindings; anything hyper_ui_validate reports.\nReply with a table, worst first: widget, depth, overrides, connections, validate errors and warnings, PASS/WARN/FAIL with the rule broken. Then the three fixes that would help most, as proposals."
+  },
+  {
+   "id": "ui-umg.mvvm-events-conditions",
+   "title": "Wire MVVM bindings, a button event and a view condition",
+   "summary": "With Epic's MVVMToolset59, bind view model fields one way, send a button's click to the view model, and show a warning when health is low.",
+   "packs": [
+    "ui_slate_mvvm"
+   ],
+   "skills": [
+    "unreal-umg"
+   ],
+   "agent": "ui-designer",
+   "tools": [
+    "hyper_ui_inspect",
+    "hyper_ui_validate"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "mvvm",
+    "view model",
+    "binding",
+    "event",
+    "condition",
+    "button",
+    "low health",
+    "epic toolset"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "WidgetBlueprint"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "viewmodel",
+     "label": "View model class",
+     "default": "VM_PlayerStats"
+    },
+    {
+     "name": "button",
+     "label": "Button widget",
+     "default": "HealButton"
+    },
+    {
+     "name": "warning",
+     "label": "Warning widget",
+     "default": "LowHealthText"
+    },
+    {
+     "name": "threshold",
+     "label": "Low health below",
+     "default": "0.25"
+    }
+   ],
+   "prompt": "In {{selected_asset}}, drive the UI from the view model `{{viewmodel}}`: one-way bindings for its fields, `{{button}}`'s click calling the view model, and `{{warning}}` shown only while HealthPercent is under {{threshold}}. Change only this widget's MVVM setup. Use Epic's `MVVMToolset59.MVVMToolset59`; if it is not listed, say so and stop. If hyper_ui_validate is not available, the UI pack is off: say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. hyper_ui_inspect with bIncludeMVVM true: the widgets, `{{button}}` and `{{warning}}` among them. MVVMToolset59 ListWidgetViewModels; AddViewModelToWidget if `{{viewmodel}}` is missing. ListWidgetViewBindings for what exists.\n2. ListClassBindableFields on the view model, and ListBindableWidgetProperties on each target widget. CreateViewBinding for each field to its widget property, with a conversion from ListBindingConversionOptions where the types differ; SetBindingMode OneWayToDestination on each.\n3. ListWidgetViewEvents; CreateViewEventBinding from `{{button}}`'s OnClicked to the view model's function for it (from ListClassBindableFields); SetEventBindingArgumentLiteral for any argument it needs.\n4. AddViewCondition from HealthPercent to `{{warning}}`'s Visibility, then SetViewConditionOperation LessThan with value {{threshold}}.\n5. Compile with Epic's UMGToolSet CompileWidgetBlueprint. hyper_ui_validate with bCheckMVVM true; ListWidgetViewBindings, ListWidgetViewEventBindings and ListViewConditions to read it all back.\nReply with a PASS/FAIL table: each binding with its source, destination and mode; the click event; the condition and its threshold; compile clean; validate 0 errors. The 5.9 design-time preview tools refuse on this engine: do not use them."
   }
  ]
 }

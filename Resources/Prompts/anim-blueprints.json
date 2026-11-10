@@ -823,6 +823,49 @@
     }
    ],
    "prompt": "Add a {{weapon}} layer Blueprint for the Animation Layer Interface {{selected_asset}}. If the anim_blueprint pack is off, say so and stop.\n1. hyper_anim_blueprint_inspect the interface (bLoad true): its Layers. hyper_memory_recall how weapon layers are named here, and hyper_project_search an existing ABP_*Layers to see which layers carry idle and move. Confirm {{idle_asset}} and {{move_asset}} exist; stop if either is missing.\n2. One hyper_anim_blueprint_apply_plan with bCreate true, SkeletonPath {{skeleton}}, TargetPath {{content_folder}}/Animation/ABP_{{weapon}}Layers.ABP_{{weapon}}Layers: bind_variable Speed = speed; implement_interface Asset {{selected_asset}}; set_layer_asset the idle layer to {{idle_asset}} and the move layer to {{move_asset}} with XVariable Speed; fill every other declared layer with what the existing layer Blueprint plays there, so none is empty. Dry-run it, then resubmit with bDryRun false, a fresh OperationId and ExpectedPlanHash set to the dry run's PlanHash; the reply waits (hyper_operation_wait only if it waits for approval). Keep bSave false.\n3. hyper_anim_blueprint_validate it and hyper_anim_blueprint_inspect it.\n4. Report a PASS/FAIL table: implements the interface, each layer and what plays in it, no empty_anim_layer or skeleton_mismatch, compile up_to_date, 0 errors. Equipping the {{weapon}} links it with Link Anim Class Layers in gameplay code."
+  },
+  {
+   "id": "anim-blueprints.rewind-debugger-recording",
+   "title": "Inspect a character's recording in the Rewind Debugger",
+   "summary": "Read a Rewind Debugger recording: the character's objects, their events and properties at a moment, and scrub the view to where it went wrong.",
+   "packs": [
+    "anim_blueprint",
+    "pie_runtime"
+   ],
+   "skills": [
+    "unreal-animation"
+   ],
+   "tools": [
+    "hyper_anim_blueprint_inspect"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "rewind debugger",
+    "recording",
+    "trace",
+    "animation",
+    "debug",
+    "montage",
+    "epic toolset"
+   ],
+   "placeholders": [
+    {
+     "name": "class_filter",
+     "label": "Class to look for",
+     "default": "Character"
+    },
+    {
+     "name": "moment",
+     "label": "Moment to inspect (s)",
+     "default": "3.5"
+    },
+    {
+     "name": "window",
+     "label": "Window around it (s)",
+     "default": "1"
+    }
+   ],
+   "prompt": "Tell me what the {{class_filter}} was doing around {{moment}} s in the Rewind Debugger's recording, read-only. Use Epic's `RewindDebuggerToolset.RewindDebuggerToolset58`; if it is not listed (it needs the GameplayInsights plugin), say so and stop. On this engine every argument of these toolsets is required: pass empty strings, 0 or null for the ones you do not need.\n1. GetSessionInfo: if IsActive is false, ask me to open Tools > Debug > Rewind Debugger, start recording, play and reproduce the problem, then stop; and stop here.\n2. ListObjects with className \"{{class_filter}}\", then ListObjects with className \"AnimInstance\": pick the object and its anim instance (their ObjectIds and lifetimes).\n3. GetObjectEvents for each from {{moment}} minus {{window}} to {{moment}} plus {{window}}, and ListObjectTraceEvents in the same window (sourceFilter \"\", includedNameFilter \"\", excludedNameFilter \"\", limit 100, offset 0); GetTraceEventDetails on the ones that matter (montages, notifies, state changes).\n4. GetObjectProperties for each at {{moment}}: location, velocity, movement mode, the active state and montage.\n5. hyper_anim_blueprint_inspect the anim instance's Blueprint for its state machine names, to read the recorded states by name.\n6. SetScrubTime {{moment}}, CenterView {{moment}} and SelectObject the character, so I see the same moment.\nReply with a timeline table (time, object, event or property change) across the window, then what went wrong and when, citing the recorded values. Change nothing."
   }
  ]
 }
