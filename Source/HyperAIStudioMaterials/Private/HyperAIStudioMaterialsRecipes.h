@@ -49,10 +49,12 @@ namespace HyperAIStudio::Materials::Recipes
 		bool bFunction = false;
 		/** surface or deferred_decal. */
 		FString Domain = TEXT("surface");
-		/** opaque or translucent. */
+		/** opaque, translucent or additive. */
 		FString BlendMode = TEXT("opaque");
-		/** default_lit, single_layer_water or substrate. */
+		/** default_lit, unlit, single_layer_water or substrate. */
 		FString ShadingModel = TEXT("default_lit");
+		/** Sets the Niagara sprite, ribbon and mesh usage flags. */
+		bool bParticleUsage = false;
 		TArray<FNode> Nodes;
 		TArray<FWire> Wires;
 		TArray<FOutput> Outputs;

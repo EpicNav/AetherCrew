@@ -567,7 +567,8 @@ struct FHyperAIMaterialRecipeRequest
 	GENERATED_BODY()
 
 	/**
-	 * layered_pbr, water, decal, landscape_layers, custom_hlsl, substrate_slab or material_function. Empty lists the
+	 * layered_pbr, water, decal, landscape_layers, custom_hlsl, substrate_slab, particle_additive, particle_translucent or
+	 * material_function. Empty lists the
 	 * recipes with their settings.
 	 */
 	UPROPERTY() FString Recipe;
@@ -672,8 +673,10 @@ public:
 	 * for errors and previewed on a sphere: layered_pbr (base colour, normal, ORM, tiling, detail normal), water
 	 * (Single Layer Water: depth colour, panning normals, refraction), decal (deferred decal with opacity and normal
 	 * blends), landscape_layers (height-blended paint layers named as the landscape pack paints them), custom_hlsl (code
-	 * checked by compiling, in the dry run too), substrate_slab (only when Substrate is on), material_function (a
-	 * function and, with caller_path, a material calling it). Empty recipe lists them with their settings. Dry-run
+	 * checked by compiling, in the dry run too), substrate_slab (only when Substrate is on), particle_additive and
+	 * particle_translucent (unlit Niagara particle materials: Particle Color, a soft disc or ring, texture or SubUV
+	 * flipbook, noise, Dynamic Parameter erosion, Depth Fade), material_function (a function and, with caller_path, a
+	 * material calling it). Empty recipe lists them with their settings. Dry-run
 	 * first, then resubmit with bDryRun false and an operation_id; tune the result with hyper_material_apply_plan.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Materials")

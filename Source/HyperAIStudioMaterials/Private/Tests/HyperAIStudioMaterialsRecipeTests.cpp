@@ -11,9 +11,13 @@
 #include "HyperAIStudioApprovalGate.h"
 #include "HyperAIStudioSettings.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialExpressionDepthFade.h"
+#include "Materials/MaterialExpressionDynamicParameter.h"
 #include "Materials/MaterialExpressionFunctionInput.h"
 #include "Materials/MaterialExpressionLandscapeLayerBlend.h"
 #include "Materials/MaterialExpressionMaterialFunctionCall.h"
+#include "Materials/MaterialExpressionNoise.h"
+#include "Materials/MaterialExpressionParticleColor.h"
 #include "Materials/MaterialFunction.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
@@ -116,7 +120,7 @@ bool FHyperAIMaterialRecipeGraphsTest::RunTest(const FString& Parameters)
 {
 	using namespace HyperAIStudio::Materials::RecipeTests;
 	const TArray<FHyperAIMaterialRecipeInfo> All = List();
-	TestEqual(TEXT("seven recipes"), All.Num(), 7);
+	TestEqual(TEXT("nine recipes"), All.Num(), 9);
 	for (const FHyperAIMaterialRecipeInfo& Info : All)
 	{
 		FGraph Graph;
@@ -206,7 +210,7 @@ bool FHyperAIMaterialRecipeDryRunTest::RunTest(const FString& Parameters)
 	using C = FHyperAIStudioMaterialsContracts;
 	const FScratch Scratch;
 	const FHyperAIMaterialRecipeReport Listed = UHyperAIStudioMaterialsToolset::hyper_material_recipe(FHyperAIMaterialRecipeRequest());
-	TestTrue(TEXT("an empty recipe lists them"), Listed.bOk && Listed.Status == TEXT("listed") && Listed.Recipes.Num() == 7);
+	TestTrue(TEXT("an empty recipe lists them"), Listed.bOk && Listed.Status == TEXT("listed") && Listed.Recipes.Num() == 9);
 	TestEqual(TEXT("an unknown recipe is refused"), C::Recipe(Request(TEXT("velvet"), Scratch.Path(TEXT("M_A")))).Status, FString(TEXT("invalid_request")));
 	TestEqual(TEXT("a path outside /Game is refused"), C::Recipe(Request(TEXT("decal"), TEXT("/Engine/M_A"))).Status, FString(TEXT("invalid_request")));
 	TestEqual(TEXT("caller_path goes only with material_function"), [&]()
@@ -321,6 +325,45 @@ bool FHyperAIMaterialRecipeApplyTest::RunTest(const FString& Parameters)
 		return Call && Call->MaterialFunction == Function;
 	}));
 	TestTrue(TEXT("both are saved"), Glow.Saved.Num() == 2);
+
+	// Particle materials: unlit, the blend each look needs, and the usage flags Niagara's renderers check.
+	const FHyperAIMaterialRecipeReport Glow2 = Make(Request(TEXT("particle_additive"), Scratch.Path(TEXT("M_Spark")), {{TEXT("softness"), TEXT("3")}}));
+	if (UMaterial* Material = Load(Glow2.Path))
+	{
+		TestEqual(TEXT("the additive particle blends additively"), Material->BlendMode.GetValue(), BLEND_Additive);
+		TestTrue(TEXT("and is unlit"), Material->GetShadingModels().HasShadingModel(MSM_Unlit));
+		TestTrue(TEXT("for Niagara sprites and ribbons"), Material->GetUsageByFlag(MATUSAGE_NiagaraSprites) && Material->GetUsageByFlag(MATUSAGE_NiagaraRibbons));
+		TestTrue(TEXT("with Particle Color and Depth Fade in it"), Material->GetExpressions().ContainsByPredicate([](const TObjectPtr<UMaterialExpression>& Expression)
+		{
+			return Expression && Expression->IsA<UMaterialExpressionParticleColor>();
+		}) && Material->GetExpressions().ContainsByPredicate([](const TObjectPtr<UMaterialExpression>& Expression)
+		{
+			return Expression && Expression->IsA<UMaterialExpressionDepthFade>();
+		}));
+		TestTrue(TEXT("feeding emissive"), Material->GetExpressionInputForProperty(MP_EmissiveColor)->IsConnected());
+	}
+	const FHyperAIMaterialRecipeReport Smoke = Make(Request(TEXT("particle_translucent"), Scratch.Path(TEXT("M_Smoke")),
+		{{TEXT("noise"), TEXT("0.6")}, {TEXT("erode"), TEXT("true")}}));
+	if (UMaterial* Material = Load(Smoke.Path))
+	{
+		TestEqual(TEXT("the smoke particle is translucent"), Material->BlendMode.GetValue(), BLEND_Translucent);
+		TestTrue(TEXT("with its opacity driven"), Material->GetExpressionInputForProperty(MP_Opacity)->IsConnected());
+		TestTrue(TEXT("eroded by Dynamic Parameter 0"), Material->GetExpressions().ContainsByPredicate([](const TObjectPtr<UMaterialExpression>& Expression)
+		{
+			const UMaterialExpressionDynamicParameter* Dynamic = Cast<UMaterialExpressionDynamicParameter>(Expression.Get());
+			return Dynamic && Dynamic->ParameterIndex == 0 && Dynamic->ParamNames.Num() == 4 && Dynamic->ParamNames[0] == TEXT("Erode");
+		}));
+		TestTrue(TEXT("and broken up by noise"), Material->GetExpressions().ContainsByPredicate([](const TObjectPtr<UMaterialExpression>& Expression)
+		{
+			return Expression && Expression->IsA<UMaterialExpressionNoise>();
+		}));
+	}
+	FGraph Flipbook;
+	FString FlipbookError;
+	TestFalse(TEXT("a flipbook without a texture is refused"), BuildGraph(TEXT("particle_additive"), {{TEXT("flipbook"), TEXT("true")}}, FString(), Flipbook, FlipbookError));
+	TestTrue(TEXT("a flipbook with one builds a Particle SubUV node: ") + FlipbookError, BuildGraph(TEXT("particle_additive"),
+		{{TEXT("flipbook"), TEXT("true")}, {TEXT("texture"), TEXT("/Engine/EngineMaterials/DefaultDiffuse.DefaultDiffuse")}}, FString(), Flipbook, FlipbookError)
+		&& Flipbook.Nodes.ContainsByPredicate([](const FNode& Node) { return Node.Kind == TEXT("particle_subuv"); }));
 
 	const FHyperAIMaterialRecipeReport Code = Make(Request(TEXT("custom_hlsl"), Scratch.Path(TEXT("M_Code")),
 		{{TEXT("inputs"), TEXT("Tint=1,0.5,0.2; Amount=0.5")}, {TEXT("output"), TEXT("emissive")}}, GoodCode));

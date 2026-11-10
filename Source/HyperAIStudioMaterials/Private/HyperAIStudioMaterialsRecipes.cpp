@@ -57,6 +57,21 @@ namespace HyperAIStudio::Materials::Recipes
 			TArray<FSetting> Settings;
 		};
 
+		/** The particle recipes share their settings; only the default brightness differs. */
+		TArray<FSetting> ParticleSettings(const TCHAR* Brightness)
+		{
+			return {
+				{TEXT("texture"), TEXT(""), TEXT("A texture to shape each particle (its alpha is the mask); empty draws the shape below")},
+				{TEXT("shape"), TEXT("disc"), TEXT("With no texture: disc (a soft round particle) or ring (a soft ring, for shockwaves and portals)")},
+				{TEXT("flipbook"), TEXT("false"), TEXT("true samples texture as a SubUV flipbook (Particle SubUV node): set the sprite renderer's SubImageSize to the grid and add a SubUVAnimation module")},
+				{TEXT("softness"), TEXT("2"), TEXT("Falloff power of the round mask: 1 is a cone, 2 soft, 4 a bright core with a thin glow")},
+				{TEXT("brightness"), Brightness, TEXT("Emissive multiplier over Particle Color; above 1 blooms")},
+				{TEXT("depth_fade"), TEXT("40"), TEXT("Distance in cm over which particles fade into geometry they cross; 0 turns soft particles off")},
+				{TEXT("noise"), TEXT("0"), TEXT("0-1: breaks the mask up with noise, a different pattern per particle (Particle Random); 0.6 reads as smoke")},
+				{TEXT("noise_scale"), TEXT("3"), TEXT("Size of the noise pattern across a particle")},
+				{TEXT("erode"), TEXT("false"), TEXT("true: Dynamic Parameter 0's first channel (0 to 1) eats the mask away from its thin edges; drive it with a Dynamic Material Parameters module")}};
+		}
+
 		const TArray<FRecipeDef>& Defs()
 		{
 			static const TArray<FRecipeDef> Table = {
@@ -104,6 +119,10 @@ namespace HyperAIStudio::Materials::Recipes
 					{TEXT("roughness"), TEXT("0.5"), TEXT("Roughness")},
 					{TEXT("normal_texture"), DefaultNormal, TEXT("Normal texture")},
 					{TEXT("tiling"), TEXT("1"), TEXT("UV tiling")}}},
+				{TEXT("particle_additive"), TEXT("Unlit additive particle material for fire, sparks, flashes and magic: Particle Color times a soft round mask (or a texture or SubUV flipbook) times Brightness, faded where it meets geometry (Depth Fade). Set up for Niagara sprites, ribbons and meshes."),
+					ParticleSettings(TEXT("4"))},
+				{TEXT("particle_translucent"), TEXT("Unlit alpha-blended particle material for smoke, dust and debris: Particle Color with its alpha times a soft mask (or texture or flipbook), optional noise breakup eroded by Dynamic Parameter 0's first channel, and Depth Fade. Set up for Niagara sprites, ribbons and meshes."),
+					ParticleSettings(TEXT("1"))},
 				{TEXT("material_function"), TEXT("A material function: typed inputs, a Custom HLSL body, one output. With caller_path, also a material calling it with a parameter per input; the dry run compiles it through a caller either way."),
 					{{TEXT("inputs"), TEXT("Color:vector3"), TEXT("Inputs as Name:type separated by ',': scalar, vector2, vector3 or vector4")},
 					{TEXT("output_type"), TEXT("float3"), TEXT("float1, float2, float3 or float4")},
@@ -414,6 +433,177 @@ namespace HyperAIStudio::Materials::Recipes
 			B.Scalar(TEXT("roughness"), TEXT("Roughness"), Roughness, TEXT("Decal"));
 			B.Out(TEXT("roughness"), TEXT("roughness"));
 			B.G.Notes.Add(TEXT("Place it with a Decal actor (or a DecalComponent) whose box crosses the surface."));
+			return true;
+		}
+
+		/**
+		 * A particle: what the renderer sends (Particle Color, and a Dynamic Parameter when eroding) shaping a mask that
+		 * is round, a texture or a flipbook, broken by noise, faded into geometry. Additive puts it all in emissive; the
+		 * translucent version keeps colour in emissive and the mask times alpha in opacity.
+		 */
+		bool BuildParticle(FBuilder& B, const bool bAdditive)
+		{
+			double Softness = 2, Brightness = 1, DepthFade = 40, Noise = 0, NoiseScale = 3;
+			bool bFlipbook = false;
+			bool bErode = false;
+			const FString Texture = B.S.FindRef(TEXT("texture"));
+			const FString Shape = B.S.FindRef(TEXT("shape")).ToLower();
+			if (Shape != TEXT("disc") && Shape != TEXT("ring"))
+			{
+				B.Error = TEXT("Setting shape is disc or ring.");
+				return false;
+			}
+			if (!B.Num(TEXT("softness"), Softness) || !B.Num(TEXT("brightness"), Brightness) || !B.Num(TEXT("depth_fade"), DepthFade)
+				|| !B.Num(TEXT("noise"), Noise) || !B.Num(TEXT("noise_scale"), NoiseScale))
+			{
+				return false;
+			}
+			for (const TCHAR* Key : {TEXT("flipbook"), TEXT("erode")})
+			{
+				const FString Text = B.S.FindRef(Key).ToLower();
+				if (Text != TEXT("true") && Text != TEXT("false"))
+				{
+					B.Error = FString::Printf(TEXT("Setting %s is true or false."), Key);
+					return false;
+				}
+				(FCString::Strcmp(Key, TEXT("flipbook")) == 0 ? bFlipbook : bErode) = Text == TEXT("true");
+			}
+			FString TexturePath;
+			if (!Texture.IsEmpty() && !B.Path(TEXT("texture"), TexturePath))
+			{
+				return false;
+			}
+			if (bFlipbook && Texture.IsEmpty())
+			{
+				B.Error = TEXT("flipbook needs texture, the flipbook sheet.");
+				return false;
+			}
+			B.G.BlendMode = bAdditive ? TEXT("additive") : TEXT("translucent");
+			B.G.ShadingModel = TEXT("unlit");
+			B.G.bParticleUsage = true;
+
+			B.Node(TEXT("particle"), TEXT("particle_color"));
+			FString Mask;
+			FString MaskOutput;
+			if (Texture.IsEmpty())
+			{
+				// 1 - 2 * distance from the centre, saturated, to the softness power: a round particle from no texture at all.
+				B.Node(TEXT("uv"), TEXT("texcoord"));
+				B.Node(TEXT("centre"), TEXT("constant2"), {{TEXT("r"), TEXT("0.5")}, {TEXT("g"), TEXT("0.5")}});
+				B.Node(TEXT("radius"), TEXT("distance"));
+				B.Wire(TEXT("uv"), FString(), TEXT("radius"), TEXT("A"));
+				B.Wire(TEXT("centre"), FString(), TEXT("radius"), TEXT("B"));
+				B.Node(TEXT("radius2"), TEXT("multiply"), {{TEXT("const_b"), TEXT("2")}});
+				B.Wire(TEXT("radius"), FString(), TEXT("radius2"), TEXT("A"));
+				FString Falloff = TEXT("radius2");
+				if (Shape == TEXT("ring"))
+				{
+					// Distance from a circle at 80% of the radius, so the ring has soft edges on both sides.
+					B.Node(TEXT("ring_offset"), TEXT("subtract"), {{TEXT("const_b"), TEXT("0.8")}});
+					B.Wire(TEXT("radius2"), FString(), TEXT("ring_offset"), TEXT("A"));
+					B.Node(TEXT("ring_distance"), TEXT("abs"));
+					B.Wire(TEXT("ring_offset"), FString(), TEXT("ring_distance"), FString());
+					B.Node(TEXT("ring_width"), TEXT("multiply"), {{TEXT("const_b"), TEXT("5")}});
+					B.Wire(TEXT("ring_distance"), FString(), TEXT("ring_width"), TEXT("A"));
+					Falloff = TEXT("ring_width");
+				}
+				B.Node(TEXT("disc"), TEXT("one_minus"));
+				B.Wire(Falloff, FString(), TEXT("disc"), FString());
+				B.Node(TEXT("disc_clamped"), TEXT("saturate"));
+				B.Wire(TEXT("disc"), FString(), TEXT("disc_clamped"), FString());
+				B.Scalar(TEXT("softness"), TEXT("Softness"), Softness, TEXT("Shape"));
+				B.Node(TEXT("mask"), TEXT("power"));
+				B.Wire(TEXT("disc_clamped"), FString(), TEXT("mask"), TEXT("Base"));
+				B.Wire(TEXT("softness"), FString(), TEXT("mask"), TEXT("Exponent"));
+				Mask = TEXT("mask");
+			}
+			else if (bFlipbook)
+			{
+				B.Node(TEXT("sheet"), TEXT("particle_subuv"), {{TEXT("texture"), TexturePath}, {TEXT("blend"), TEXT("true")}});
+				Mask = TEXT("sheet");
+				MaskOutput = TEXT("A");
+			}
+			else
+			{
+				B.Node(TEXT("uv"), TEXT("texcoord"));
+				B.Texture(TEXT("sheet"), TEXT("ParticleTexture"), TexturePath, TEXT("uv"), TEXT("Shape"));
+				Mask = TEXT("sheet");
+				MaskOutput = TEXT("A");
+			}
+			if (Noise > 0)
+			{
+				// Noise over the particle's own UVs, offset by Particle Random so neighbours never share a pattern.
+				if (!B.G.Nodes.ContainsByPredicate([](const FNode& Node) { return Node.Id == TEXT("uv"); }))
+				{
+					B.Node(TEXT("uv"), TEXT("texcoord"));
+				}
+				B.Node(TEXT("noise_uv"), TEXT("multiply"), {{TEXT("const_b"), Number(NoiseScale)}});
+				B.Wire(TEXT("uv"), FString(), TEXT("noise_uv"), TEXT("A"));
+				B.Node(TEXT("seed"), TEXT("particle_random"));
+				B.Node(TEXT("seed_offset"), TEXT("multiply"), {{TEXT("const_b"), TEXT("37")}});
+				B.Wire(TEXT("seed"), FString(), TEXT("seed_offset"), TEXT("A"));
+				B.Node(TEXT("noise_position"), TEXT("append"));
+				B.Wire(TEXT("noise_uv"), FString(), TEXT("noise_position"), TEXT("A"));
+				B.Wire(TEXT("seed_offset"), FString(), TEXT("noise_position"), TEXT("B"));
+				B.Node(TEXT("noise"), TEXT("noise"), {{TEXT("scale"), TEXT("1")}, {TEXT("levels"), TEXT("4")}, {TEXT("output_min"), TEXT("0")},
+					{TEXT("output_max"), TEXT("1")}, {TEXT("turbulence"), TEXT("true")}});
+				B.Wire(TEXT("noise_position"), FString(), TEXT("noise"), TEXT("World Position"));
+				B.Scalar(TEXT("noise_amount"), TEXT("NoiseAmount"), Noise, TEXT("Shape"));
+				B.Node(TEXT("noise_full"), TEXT("constant"), {{TEXT("r"), TEXT("1")}});
+				B.Node(TEXT("noise_mix"), TEXT("lerp"));
+				B.Wire(TEXT("noise_full"), FString(), TEXT("noise_mix"), TEXT("A"));
+				B.Wire(TEXT("noise"), FString(), TEXT("noise_mix"), TEXT("B"));
+				B.Wire(TEXT("noise_amount"), FString(), TEXT("noise_mix"), TEXT("Alpha"));
+				B.Node(TEXT("mask_noisy"), TEXT("multiply"), {{TEXT("const_b"), TEXT("1.6")}});
+				B.Node(TEXT("mask_noisy_mul"), TEXT("multiply"));
+				B.Wire(Mask, MaskOutput, TEXT("mask_noisy_mul"), TEXT("A"));
+				B.Wire(TEXT("noise_mix"), FString(), TEXT("mask_noisy_mul"), TEXT("B"));
+				B.Wire(TEXT("mask_noisy_mul"), FString(), TEXT("mask_noisy"), TEXT("A"));
+				Mask = TEXT("mask_noisy");
+				MaskOutput.Reset();
+			}
+			if (bErode)
+			{
+				// saturate(mask - erode): the thin parts go first, as smoke does when it thins out.
+				B.Node(TEXT("dynamic"), TEXT("dynamic_parameter"), {{TEXT("index"), TEXT("0")}, {TEXT("names"), TEXT("Erode,Param2,Param3,Param4")},
+					{TEXT("default"), TEXT("0,0,0,0")}});
+				B.Node(TEXT("eroded"), TEXT("subtract"));
+				B.Wire(Mask, MaskOutput, TEXT("eroded"), TEXT("A"));
+				B.Wire(TEXT("dynamic"), FString(), TEXT("eroded"), TEXT("B"));
+				B.Node(TEXT("eroded_clamped"), TEXT("saturate"));
+				B.Wire(TEXT("eroded"), FString(), TEXT("eroded_clamped"), FString());
+				Mask = TEXT("eroded_clamped");
+				MaskOutput.Reset();
+			}
+			B.Node(TEXT("coverage"), TEXT("multiply"));
+			B.Wire(Mask, MaskOutput, TEXT("coverage"), TEXT("A"));
+			B.Wire(TEXT("particle"), TEXT("A"), TEXT("coverage"), TEXT("B"));
+			FString Coverage = TEXT("coverage");
+			if (DepthFade > 0)
+			{
+				B.Node(TEXT("soft"), TEXT("depth_fade"), {{TEXT("fade_distance"), Number(DepthFade)}});
+				B.Wire(TEXT("coverage"), FString(), TEXT("soft"), TEXT("Opacity"));
+				Coverage = TEXT("soft");
+			}
+			B.Scalar(TEXT("brightness"), TEXT("Brightness"), Brightness, TEXT("Look"));
+			B.Node(TEXT("glow"), TEXT("multiply"));
+			B.Wire(TEXT("particle"), TEXT("RGB"), TEXT("glow"), TEXT("A"));
+			B.Wire(TEXT("brightness"), FString(), TEXT("glow"), TEXT("B"));
+			if (bAdditive)
+			{
+				B.Node(TEXT("emissive"), TEXT("multiply"));
+				B.Wire(TEXT("glow"), FString(), TEXT("emissive"), TEXT("A"));
+				B.Wire(Coverage, FString(), TEXT("emissive"), TEXT("B"));
+				B.Out(TEXT("emissive"), TEXT("emissive"));
+				B.G.Notes.Add(TEXT("Additive: black adds nothing, so Particle Color's alpha fades it and its RGB is the light; keep alpha 1 and fade colour to black instead when it should vanish."));
+			}
+			else
+			{
+				B.Out(TEXT("emissive"), TEXT("glow"));
+				B.Out(TEXT("opacity"), Coverage);
+				B.G.Notes.Add(TEXT("Translucent and unlit: Particle Color sets the shade directly, so pick smoke greys by hand (0.2-0.45) rather than relying on scene light."));
+			}
+			B.G.Notes.Add(TEXT("Used with Niagara sprites, ribbons and mesh particles. Particle Color comes from the emitter's Color modules; Dynamic Parameter 0 from a Dynamic Material Parameters module."));
 			return true;
 		}
 
@@ -758,8 +948,17 @@ namespace HyperAIStudio::Materials::Recipes
 				OutError = FString::Printf(TEXT("Unknown domain %s."), *Graph.Domain);
 				return false;
 			}
-			Material.BlendMode = Graph.BlendMode == TEXT("translucent") ? BLEND_Translucent : BLEND_Opaque;
+			Material.BlendMode = Graph.BlendMode == TEXT("translucent") ? BLEND_Translucent
+				: Graph.BlendMode == TEXT("additive") ? BLEND_Additive : BLEND_Opaque;
 			if (Graph.ShadingModel == TEXT("single_layer_water")) Material.SetShadingModel(MSM_SingleLayerWater);
+			if (Graph.ShadingModel == TEXT("unlit")) Material.SetShadingModel(MSM_Unlit);
+			if (Graph.bParticleUsage)
+			{
+				// The usage flags a particle renderer checks; without them the renderer falls back to the default material.
+				Material.SetUsageByFlag(MATUSAGE_NiagaraSprites, true);
+				Material.SetUsageByFlag(MATUSAGE_NiagaraRibbons, true);
+				Material.SetUsageByFlag(MATUSAGE_NiagaraMeshParticles, true);
+			}
 			return true;
 		}
 	}
@@ -796,7 +995,7 @@ namespace HyperAIStudio::Materials::Recipes
 		const FRecipeDef* Def = FindDef(Recipe);
 		if (!Def)
 		{
-			OutError = FString::Printf(TEXT("'%s' is not a recipe. Recipes: layered_pbr, water, decal, landscape_layers, custom_hlsl, substrate_slab, material_function."), *Recipe.Left(64));
+			OutError = FString::Printf(TEXT("'%s' is not a recipe. Recipes: layered_pbr, water, decal, landscape_layers, custom_hlsl, substrate_slab, particle_additive, particle_translucent, material_function."), *Recipe.Left(64));
 			return false;
 		}
 		TMap<FString, FString> Effective;
@@ -813,6 +1012,8 @@ namespace HyperAIStudio::Materials::Recipes
 			: Recipe == TEXT("landscape_layers") ? BuildLandscapeLayers(Builder)
 			: Recipe == TEXT("custom_hlsl") ? BuildCustomHlsl(Builder, Code)
 			: Recipe == TEXT("substrate_slab") ? BuildSubstrate(Builder)
+			: Recipe == TEXT("particle_additive") ? BuildParticle(Builder, /*bAdditive=*/true)
+			: Recipe == TEXT("particle_translucent") ? BuildParticle(Builder, /*bAdditive=*/false)
 			: BuildFunction(Builder, Code);
 		if (!bBuilt)
 		{
