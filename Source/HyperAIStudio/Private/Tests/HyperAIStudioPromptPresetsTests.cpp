@@ -794,7 +794,7 @@ bool FHyperAIStudioPromptPresetsPickerTest::RunTest(const FString& Parameters)
 		Shipped->SetSearchText(TEXT("capture-the-flag"));
 		if (Shipped->NumShown() > 0)
 		{
-			HyperAIStudio::Tests::SaveWidgetShot(Shipped, FIntPoint(FMath::RoundToInt(Size.X), FMath::RoundToInt(Size.Y)), TEXT("prompt-picker"));
+			HyperAIStudio::Tests::SaveWidgetShot(Shipped, FIntPoint(FMath::RoundToInt(Size.X), FMath::RoundToInt(Size.Y)), TEXT("prompt-picker-library"));
 			HyperAIStudio::Tests::SaveWidgetShot(Shipped, FIntPoint(720, 460), TEXT("prompt-picker-small"));
 		}
 		Shipped->SetSearchText(FString());
