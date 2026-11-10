@@ -18129,6 +18129,36 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.color-over-life-curve.ph.curve.hint",
+   "source": "Ages 0-1; values above 1 glow on an additive material",
+   "text": "时刻为 0-1；在叠加材质上大于 1 的值会发光"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.color-over-life-curve.ph.curve.label",
+   "source": "Colour curve (age:r,g,b,a; ...)",
+   "text": "颜色曲线（时刻:r,g,b,a; ...）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.color-over-life-curve.ph.emitter.label",
+   "source": "Emitter",
+   "text": "发射器"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.color-over-life-curve.summary",
+   "source": "Drive an emitter's colour from a ColorFromCurve dynamic input and a colour curve, turn off the scale that fights it, read it back and preview it.",
+   "text": "用 ColorFromCurve 动态输入和颜色曲线驱动发射器颜色，关闭与之冲突的缩放，回读数值并预览。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.color-over-life-curve.title",
+   "source": "Recolour an emitter over its life with a colour curve",
+   "text": "用颜色曲线重设发射器的生命周期颜色"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "vfx-niagara.effect-type-scalability-budget.ph.cull_reaction.hint",
    "source": "kill, kill_and_clear, asleep or asleep_and_clear",
    "text": "kill、kill_and_clear、asleep 或 asleep_and_clear"
@@ -18183,6 +18213,36 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.explosion-recipe-parts.ph.color.label",
+   "source": "Main colour (r,g,b)",
+   "text": "主色（r,g,b）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.explosion-recipe-parts.ph.scale.label",
+   "source": "Scale (about metres across)",
+   "text": "缩放（约为直径米数）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.explosion-recipe-parts.ph.system_name.label",
+   "source": "System name",
+   "text": "系统名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.explosion-recipe-parts.summary",
+   "source": "Flash, fireball, shockwave, sparks and smoke from the explosion recipe in three plans, its materials made, previewed, and probed alive then gone.",
+   "text": "用 explosion 配方分三个计划生成闪光、火球、冲击波、火花和烟雾，先制作粒子材质，预览后验证先存活再消失。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.explosion-recipe-parts.title",
+   "source": "Build a layered explosion from the recipe in three parts",
+   "text": "用配方分三步构建分层爆炸"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "vfx-niagara.firefly-swarm-hlsl.ph.count.label",
    "source": "Firefly count",
    "text": "萤火虫数量"
@@ -18204,6 +18264,36 @@
    "key": "vfx-niagara.firefly-swarm-hlsl.title",
    "source": "Make a blinking firefly swarm with HLSL wander",
    "text": "用 HLSL 游走制作闪烁的萤火虫群"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.flipbook-smoke.ph.emitter.label",
+   "source": "Emitter",
+   "text": "发射器"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.flipbook-smoke.ph.grid.label",
+   "source": "Grid (columns,rows)",
+   "text": "网格（列,行）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.flipbook-smoke.ph.texture.label",
+   "source": "Flipbook texture",
+   "text": "序列帧贴图"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.flipbook-smoke.summary",
+   "source": "Make a flipbook smoke material, set the sprite renderer's grid and add a SubUV animation module so all three agree, then preview the frames.",
+   "text": "制作序列帧烟雾材质，设置精灵渲染器的网格并添加 SubUV 动画模块，使三者一致，然后预览帧变化。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.flipbook-smoke.title",
+   "source": "Animate smoke with a flipbook texture sheet",
+   "text": "用序列帧贴图为烟雾制作动画"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -18357,6 +18447,36 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.impact-sparks-recipe.ph.color.label",
+   "source": "Spark colour (r,g,b)",
+   "text": "火花颜色（r,g,b）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.impact-sparks-recipe.ph.scale.label",
+   "source": "Scale",
+   "text": "缩放"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.impact-sparks-recipe.ph.system_name.label",
+   "source": "System name",
+   "text": "系统名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.impact-sparks-recipe.summary",
+   "source": "A one-shot flash, streaking sparks that fall with gravity and a dust puff, sized for a bullet hit, previewed side-on and gone within a few seconds.",
+   "text": "按子弹命中尺寸生成一次性闪光、受重力下落的拖尾火花和一小团尘土，侧视预览并在数秒内消失。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.impact-sparks-recipe.title",
+   "source": "Make bullet impact sparks and dust from the recipe",
+   "text": "用配方制作子弹命中火花与尘土"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "vfx-niagara.inspect-effects-in-play.ph.filter.label",
    "source": "System, actor or component (blank for all)",
    "text": "系统、Actor 或组件（留空为全部）"
@@ -18405,6 +18525,60 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.loop-to-one-shot.ph.count.label",
+   "source": "Particles per burst",
+   "text": "每次爆发的粒子数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.loop-to-one-shot.summary",
+   "source": "Set each emitter's loop behaviour to Once with an enum input, swap continuous spawning for a burst, and prove it lives then dies away.",
+   "text": "用枚举输入将每个发射器的循环行为设为 Once，把持续生成改为一次爆发，并验证先存活后消失。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.loop-to-one-shot.title",
+   "source": "Turn a looping effect into a one-shot burst",
+   "text": "把循环特效改为一次性爆发"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.magic-burst-recipe.ph.accent.label",
+   "source": "Accent colour (r,g,b)",
+   "text": "强调色（r,g,b）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.magic-burst-recipe.ph.color.label",
+   "source": "Main colour (r,g,b)",
+   "text": "主色（r,g,b）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.magic-burst-recipe.ph.scale.label",
+   "source": "Scale",
+   "text": "缩放"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.magic-burst-recipe.ph.system_name.label",
+   "source": "System name",
+   "text": "系统名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.magic-burst-recipe.summary",
+   "source": "A one-shot spell burst whose motes shift from the main colour to an accent as they fade, previewed tile by tile and probed live.",
+   "text": "一次性的法术爆发，光点在消散时从主色渐变为强调色，逐格预览并验证粒子存活。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.magic-burst-recipe.title",
+   "source": "Cast a two-colour magic burst from the recipe",
+   "text": "用配方释放双色魔法爆发"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "vfx-niagara.match-effect-to-reference.ph.max_iterations.label",
    "source": "Max iterations",
    "text": "最大迭代次数"
@@ -18432,6 +18606,36 @@
    "key": "vfx-niagara.match-effect-to-reference.title",
    "source": "Match an effect to a reference image",
    "text": "让特效匹配参考图"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.particle-materials-swap.ph.glow_emitters.label",
+   "source": "Glowing emitters",
+   "text": "发光发射器"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.particle-materials-swap.ph.smoke_emitters.label",
+   "source": "Smoke emitters",
+   "text": "烟雾发射器"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.particle-materials-swap.ph.softness.label",
+   "source": "Glow softness (1-4)",
+   "text": "发光柔和度（1-4）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.particle-materials-swap.summary",
+   "source": "Make particle_additive and particle_translucent materials with the recipes, set them on the effect's sprite renderers, and compare previews.",
+   "text": "用配方制作 particle_additive 和 particle_translucent 材质，设置到特效的精灵渲染器上，并对比前后预览。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.particle-materials-swap.title",
+   "source": "Give an effect soft glow and smoke particle materials",
+   "text": "为特效换上柔和发光与烟雾粒子材质"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -18489,6 +18693,30 @@
   },
   {
    "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.random-ranges-variation.ph.emitter.label",
+   "source": "Emitter",
+   "text": "发射器"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.random-ranges-variation.ph.spread.label",
+   "source": "Spread (percent)",
+   "text": "浮动幅度（百分比）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.random-ranges-variation.summary",
+   "source": "Give lifetime, size and speed random ranges through RandomRangeFloat dynamic inputs so particles vary, read the ranges back and preview the spread.",
+   "text": "通过 RandomRangeFloat 动态输入为寿命、尺寸和速度设置随机范围，使粒子各不相同，回读范围并预览差异。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.random-ranges-variation.title",
+   "source": "Replace an emitter's fixed values with random ranges",
+   "text": "把发射器的固定值改为随机范围"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
    "key": "vfx-niagara.repair-stack-issues.ph.max_rounds.label",
    "source": "Repair rounds",
    "text": "修复轮数"
@@ -18504,6 +18732,36 @@
    "key": "vfx-niagara.repair-stack-issues.title",
    "source": "Repair a broken Niagara System's compile and stack issues",
    "text": "修复 Niagara 系统的编译与堆栈问题"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.ribbon-trail-recipe.ph.color.label",
+   "source": "Trail colour (r,g,b)",
+   "text": "拖尾颜色（r,g,b）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.ribbon-trail-recipe.ph.orbit.label",
+   "source": "Preview orbit radius (cm)",
+   "text": "预览绕圈半径（cm）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.ribbon-trail-recipe.ph.system_name.label",
+   "source": "System name",
+   "text": "系统名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.ribbon-trail-recipe.summary",
+   "source": "A tapering ribbon trail from the recipe that circles on its own so the preview shows it, plus a still copy that trails only behind a moving weapon.",
+   "text": "用配方生成逐渐变细的条带拖尾：一个自行绕圈以便预览可见，另一个静止副本只在武器移动时拖尾。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.ribbon-trail-recipe.title",
+   "source": "Make a glowing weapon trail from the ribbon recipe",
+   "text": "用条带配方制作发光武器拖尾"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -18546,6 +18804,42 @@
    "key": "vfx-niagara.room-dust-motes.title",
    "source": "Fill a room with drifting dust motes",
    "text": "让房间里飘浮细小灰尘"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.smoke-plume-recipe.ph.max_particles.label",
+   "source": "Particle budget",
+   "text": "粒子预算"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.smoke-plume-recipe.ph.noise.label",
+   "source": "Smoke breakup (0-1)",
+   "text": "烟雾破碎度（0-1）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.smoke-plume-recipe.ph.system_name.label",
+   "source": "System name",
+   "text": "系统名称"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.smoke-plume-recipe.ph.wind.label",
+   "source": "Wind drift (cm/s, x,y,z)",
+   "text": "风向漂移（cm/s，x,y,z）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.smoke-plume-recipe.summary",
+   "source": "A looping smoke column from the recipe, drawn with a translucent material broken up by noise, previewed on grey and kept under a particle budget.",
+   "text": "用配方生成循环烟柱，以带噪声破碎的半透明材质绘制，灰色背景预览并控制在粒子预算内。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.smoke-plume-recipe.title",
+   "source": "Raise a drifting smoke plume with a noisy smoke material",
+   "text": "用带噪声的烟雾材质生成飘散烟柱"
   },
   {
    "namespace": "HyperAIStudioPrompts",
@@ -18642,6 +18936,36 @@
    "key": "vfx-niagara.team-color-variant.title",
    "source": "Make a team-coloured copy of an effect",
    "text": "为特效制作队伍配色副本"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.tune-from-preview.ph.ages.label",
+   "source": "Preview ages (s)",
+   "text": "预览时刻（秒）"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.tune-from-preview.ph.brief.label",
+   "source": "What it should look like",
+   "text": "目标效果"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.tune-from-preview.ph.max_rounds.label",
+   "source": "Most rounds",
+   "text": "最多轮数"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.tune-from-preview.summary",
+   "source": "Preview the selected System, judge each tile against a short brief, change one input per plan and preview again until the sheet matches.",
+   "text": "预览所选 System，逐格对照简短需求评判，每个计划只改一个输入并重新预览，直到拼图符合要求。"
+  },
+  {
+   "namespace": "HyperAIStudioPrompts",
+   "key": "vfx-niagara.tune-from-preview.title",
+   "source": "Tune an effect from its preview contact sheet",
+   "text": "根据预览拼图调整特效"
   },
   {
    "namespace": "HyperAIStudioPrompts",

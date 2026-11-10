@@ -1239,6 +1239,605 @@
     }
    ],
    "prompt": "In `{{content_folder}}/VFX/{{system}}`, change the HLSL module `{{module}}` to {{change}}.\n1. hyper_niagara_inspect with bIncludeTopology true; keep revision. If `{{module}}` is not in scratchPadModules, list what is and stop.\n2. Write the new body (attributes by full name, no return) and send one hyper_niagara_apply_plan: expectedRevision, bDryRun false, a fresh operationId and one set_hlsl_module op with name {{module}} and hlsl. Follow a reply still running or awaiting_user_approval with hyper_operation_wait (bWaitThroughApproval true).\n3. hyper_niagara_validate with policy authoring (no compile errors), then runtime_probe: the module's emitter must be live.\nReport the old and new body side by side, the validate results, and that one undo puts the old body back."
+  },
+  {
+   "id": "vfx-niagara.explosion-recipe-parts",
+   "title": "Build a layered explosion from the recipe in three parts",
+   "summary": "Flash, fireball, shockwave, sparks and smoke from the explosion recipe in three plans, its materials made, previewed, and probed alive then gone.",
+   "packs": [
+    "niagara_vfx",
+    "materials_dynamic_material"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_discover",
+    "hyper_material_recipe",
+    "hyper_operation_wait",
+    "hyper_niagara_apply_plan",
+    "hyper_niagara_inspect",
+    "hyper_niagara_preview",
+    "hyper_niagara_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "explosion",
+    "fireball",
+    "shockwave",
+    "sparks",
+    "smoke",
+    "recipe",
+    "one-shot",
+    "preview"
+   ],
+   "placeholders": [
+    {
+     "name": "system_name",
+     "label": "System name",
+     "default": "NS_Explosion"
+    },
+    {
+     "name": "scale",
+     "label": "Scale (about metres across)",
+     "default": "3"
+    },
+    {
+     "name": "color",
+     "label": "Main colour (r,g,b)",
+     "default": "1,0.45,0.12"
+    }
+   ],
+   "prompt": "Build a one-shot explosion `{{content_folder}}/{{system_name}}` from the explosion recipe at scale {{scale}}, tinted {{color}}. Follow the unreal-niagara skill; if the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_discover with kind recipe, recipe explosion, recipeSettings [\"scale={{scale}}\", \"color={{color}}\"] and targetPath the new System: read its settings and materials. Make each missing material with hyper_material_recipe exactly as its line says (particle_additive, particle_translucent, and particle_additive with shape ring), bDryRun false and a fresh OperationId; hyper_operation_wait if one waits for approval.\n2. hyper_niagara_apply_plan with recipe explosion, recipeSettings [\"part=1\", \"scale={{scale}}\", \"color={{color}}\"], the new targetPath, an empty expectedRevision, bDryRun false and a fresh operationId: the flash, fireball and shockwave. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_niagara_inspect for the new revision, then the same plan with \"part=2\" (sparks) and that expectedRevision; inspect again, then \"part=3\" (smoke).\n4. hyper_niagara_preview with ages [0.05, 0.2, 0.6, 1.5, 3] and view three_quarter, and again with background grey for the smoke. Open both: a white-hot flash first, an orange fireball that cools, a ring, sparks falling, smoke last. If a tile is empty, or peakLuminance is 1 over high coverage (a white blob), change that one thing in one more plan and preview again.\n5. hyper_niagara_validate with policy runtime_ready; runtime_probe with probeFrames 3 (alive at the start); then runtime_probe with probeFrames 600, which reports not_live by design when every emitter has died away by 10 s.\nReply with a PASS/FAIL table: three parts completed, materials present, 0 errors and 0 warnings, live at frame 3, zero particles at 10 s, each tile matching its moment. Show both contact sheets on their own lines."
+  },
+  {
+   "id": "vfx-niagara.magic-burst-recipe",
+   "title": "Cast a two-colour magic burst from the recipe",
+   "summary": "A one-shot spell burst whose motes shift from the main colour to an accent as they fade, previewed tile by tile and probed live.",
+   "packs": [
+    "niagara_vfx",
+    "materials_dynamic_material"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_discover",
+    "hyper_material_recipe",
+    "hyper_operation_wait",
+    "hyper_niagara_apply_plan",
+    "hyper_niagara_preview",
+    "hyper_niagara_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "magic",
+    "spell",
+    "burst",
+    "fantasy",
+    "ring",
+    "recipe",
+    "one-shot",
+    "preview"
+   ],
+   "placeholders": [
+    {
+     "name": "system_name",
+     "label": "System name",
+     "default": "NS_MagicBurst"
+    },
+    {
+     "name": "color",
+     "label": "Main colour (r,g,b)",
+     "default": "0.3,0.6,1"
+    },
+    {
+     "name": "accent",
+     "label": "Accent colour (r,g,b)",
+     "default": "1,0.3,0.9"
+    },
+    {
+     "name": "scale",
+     "label": "Scale",
+     "default": "1"
+    }
+   ],
+   "prompt": "Build a one-shot spell burst `{{content_folder}}/{{system_name}}` from the magic_burst recipe: a glowing core, an expanding ring and motes that turn from {{color}} to {{accent}} as they fade. Follow the unreal-niagara skill; if the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_discover with kind recipe, recipe magic_burst, recipeSettings [\"color={{color}}\", \"accent={{accent}}\", \"scale={{scale}}\"] and targetPath the new System: read its settings and materials. Make each missing material with hyper_material_recipe as its line says, bDryRun false and a fresh OperationId; hyper_operation_wait if one waits for approval.\n2. hyper_niagara_apply_plan with recipe magic_burst, the same recipeSettings, the new targetPath, an empty expectedRevision, bDryRun false and a fresh operationId. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_niagara_preview with ages [0.1, 0.4, 0.8, 1.4]. Open it: the core and ring early, motes flying out and swirling, their meanColor moving from the main colour toward the accent tile by tile. If the core clips to white over a large area (peakLuminance 1 with high coverage), lower it in one plan and preview again.\n4. hyper_niagara_validate with policy runtime_ready, then runtime_probe with probeFrames 3.\nReply with a PASS/FAIL table: the System made, materials present, 0 errors and 0 warnings, every emitter live at frame 3, the colour shift visible in the tiles (meanColor per age). Show the contact sheet on its own line."
+  },
+  {
+   "id": "vfx-niagara.impact-sparks-recipe",
+   "title": "Make bullet impact sparks and dust from the recipe",
+   "summary": "A one-shot flash, streaking sparks that fall with gravity and a dust puff, sized for a bullet hit, previewed side-on and gone within a few seconds.",
+   "packs": [
+    "niagara_vfx",
+    "materials_dynamic_material"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_discover",
+    "hyper_material_recipe",
+    "hyper_operation_wait",
+    "hyper_niagara_apply_plan",
+    "hyper_niagara_preview",
+    "hyper_niagara_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "impact",
+    "bullet",
+    "sparks",
+    "hit",
+    "dust",
+    "weapon",
+    "recipe",
+    "one-shot"
+   ],
+   "placeholders": [
+    {
+     "name": "system_name",
+     "label": "System name",
+     "default": "NS_Impact_Metal"
+    },
+    {
+     "name": "color",
+     "label": "Spark colour (r,g,b)",
+     "default": "1,0.6,0.25"
+    },
+    {
+     "name": "scale",
+     "label": "Scale",
+     "default": "0.5"
+    }
+   ],
+   "prompt": "Build a bullet impact `{{content_folder}}/{{system_name}}` from the impact_sparks recipe at scale {{scale}}: a bright flash, hot sparks thrown up and out that fall with gravity, and a small dust puff, tinted {{color}}. Follow the unreal-niagara skill; if the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_discover with kind recipe, recipe impact_sparks, recipeSettings [\"color={{color}}\", \"scale={{scale}}\"] and targetPath the new System. Make each missing material with hyper_material_recipe as its line says, bDryRun false and a fresh OperationId; hyper_operation_wait if one waits for approval.\n2. hyper_niagara_apply_plan with recipe impact_sparks, the same recipeSettings, the new targetPath, an empty expectedRevision, bDryRun false and a fresh operationId. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_niagara_preview with ages [0.03, 0.1, 0.3, 0.8] and view side. Open it: the flash only in the first tile, sparks as streaks arcing up then down, the dust low and soft. Preview again with background grey to judge the dust.\n4. hyper_niagara_validate with policy runtime_ready; runtime_probe with probeFrames 3; then runtime_probe with probeFrames 240, which reports not_live by design once every emitter has died away by 4 s.\nReply with a PASS/FAIL table: the System made, 0 errors and 0 warnings, alive at frame 3, zero particles at 4 s, sparks falling in the side view (screenBox lower in the later tiles). Show both sheets on their own lines, and say how to spawn it at a hit (Spawn System at Location with the hit normal as its rotation)."
+  },
+  {
+   "id": "vfx-niagara.smoke-plume-recipe",
+   "title": "Raise a drifting smoke plume with a noisy smoke material",
+   "summary": "A looping smoke column from the recipe, drawn with a translucent material broken up by noise, previewed on grey and kept under a particle budget.",
+   "packs": [
+    "niagara_vfx",
+    "materials_dynamic_material"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_material_recipe",
+    "hyper_operation_wait",
+    "hyper_niagara_discover",
+    "hyper_niagara_apply_plan",
+    "hyper_niagara_preview",
+    "hyper_niagara_validate"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "smoke",
+    "plume",
+    "chimney",
+    "wind",
+    "loop",
+    "recipe",
+    "translucent",
+    "preview"
+   ],
+   "placeholders": [
+    {
+     "name": "system_name",
+     "label": "System name",
+     "default": "NS_SmokePlume"
+    },
+    {
+     "name": "wind",
+     "label": "Wind drift (cm/s, x,y,z)",
+     "default": "40,0,0"
+    },
+    {
+     "name": "noise",
+     "label": "Smoke breakup (0-1)",
+     "default": "0.6"
+    },
+    {
+     "name": "max_particles",
+     "label": "Particle budget",
+     "default": "400"
+    }
+   ],
+   "prompt": "Build a looping smoke plume `{{content_folder}}/{{system_name}}` that rises, spreads and drifts with a wind of {{wind}} cm/s, drawn with a smoke material broken up by noise. Follow the unreal-niagara skill; if the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_material_recipe with Recipe particle_translucent, Path {{content_folder}}/M_FX_SmokeNoisy, Settings noise {{noise}}: bDryRun true, then bDryRun false with a fresh OperationId; hyper_operation_wait if it waits for approval.\n2. hyper_niagara_discover with kind recipe and recipe smoke_plume for its settings. Then hyper_niagara_apply_plan with recipe smoke_plume, recipeSettings [\"wind={{wind}}\", \"material_smoke={{content_folder}}/M_FX_SmokeNoisy.M_FX_SmokeNoisy\"], the new targetPath, an empty expectedRevision, bDryRun false and a fresh operationId. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_niagara_preview with ages [1, 3, 6], view side and background grey. Open it: a column that widens with height, leans with the wind, thins toward the top, and is not a uniform grey disc.\n4. hyper_niagara_validate with policy runtime_ready, then runtime_probe with probeFrames 600.\nReply with a PASS/FAIL table: the material compiled, the System made with it, 0 errors and 0 warnings, the live count at 10 s at most {{max_particles}}, the drift visible (screenBox shifting the wind's way across the tiles). If it is over budget, lower intensity with one more plan (the recipe's intensity setting) and probe again. Show the contact sheet on its own line."
+  },
+  {
+   "id": "vfx-niagara.ribbon-trail-recipe",
+   "title": "Make a glowing weapon trail from the ribbon recipe",
+   "summary": "A tapering ribbon trail from the recipe that circles on its own so the preview shows it, plus a still copy that trails only behind a moving weapon.",
+   "packs": [
+    "niagara_vfx",
+    "materials_dynamic_material"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_discover",
+    "hyper_material_recipe",
+    "hyper_operation_wait",
+    "hyper_niagara_apply_plan",
+    "hyper_niagara_inspect",
+    "hyper_niagara_preview",
+    "hyper_niagara_validate"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "ribbon",
+    "trail",
+    "weapon",
+    "sword",
+    "swing",
+    "melee",
+    "recipe",
+    "glow"
+   ],
+   "placeholders": [
+    {
+     "name": "system_name",
+     "label": "System name",
+     "default": "NS_WeaponTrail"
+    },
+    {
+     "name": "color",
+     "label": "Trail colour (r,g,b)",
+     "default": "0.3,0.75,1"
+    },
+    {
+     "name": "orbit",
+     "label": "Preview orbit radius (cm)",
+     "default": "60"
+    }
+   ],
+   "prompt": "Make a glowing weapon trail from the ribbon_trail recipe, tinted {{color}}: `{{content_folder}}/{{system_name}}_Preview`, which circles at {{orbit}} cm so it shows on its own, and `{{content_folder}}/{{system_name}}`, which trails only when the weapon moves. Follow the unreal-niagara skill; if the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_discover with kind recipe, recipe ribbon_trail, recipeSettings [\"color={{color}}\", \"orbit_radius={{orbit}}\"] and targetPath the preview System. Make a missing material with hyper_material_recipe as its line says, bDryRun false and a fresh OperationId; hyper_operation_wait if it waits for approval.\n2. hyper_niagara_apply_plan with recipe ribbon_trail, those recipeSettings, the preview targetPath, an empty expectedRevision, bDryRun false and a fresh operationId; then the same with \"orbit_radius=0\" and the weapon System's targetPath. If a reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n3. hyper_niagara_inspect each with bIncludeTopology true: a ribbon renderer on the trail emitter.\n4. hyper_niagara_preview the preview System with ages [0.25, 0.5, 1] and view front. Open it: a ribbon that tapers and fades behind its head, its arc growing toward a ring. The weapon System stays still in a preview, so an empty sheet is expected there.\n5. hyper_niagara_validate both with policy runtime_ready, and the preview System with runtime_probe.\nReply with a PASS/FAIL table: both Systems made, a ribbon renderer on each, 0 errors and 0 warnings, the preview live and its trail visible and tapering. Show the contact sheet on its own line, and say how to use the weapon System: a Niagara component on the weapon's trail socket, activated for the swing window of the attack montage."
+  },
+  {
+   "id": "vfx-niagara.tune-from-preview",
+   "title": "Tune an effect from its preview contact sheet",
+   "summary": "Preview the selected System, judge each tile against a short brief, change one input per plan and preview again until the sheet matches.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_preview",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate"
+   ],
+   "ops": [
+    "set_input_value"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "tune",
+    "polish",
+    "look",
+    "preview",
+    "iterate",
+    "contact sheet",
+    "brief"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "brief",
+     "label": "What it should look like",
+     "default": "a tight orange fire about 50 cm across, with no white-clipped core"
+    },
+    {
+     "name": "ages",
+     "label": "Preview ages (s)",
+     "default": "0.25, 0.5, 1, 2"
+    },
+    {
+     "name": "max_rounds",
+     "label": "Most rounds",
+     "default": "4"
+    }
+   ],
+   "prompt": "Tune {{selected_asset}} until its preview matches this brief: {{brief}}. Change only this System. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_inspect with bIncludeTopology true and bIncludeInputValues true; keep the revision.\n2. Baseline: hyper_niagara_preview with ages [{{ages}}] (background grey if it is smoke or alpha-blended). Open the image and write, per tile, how it differs from the brief, citing coverage, meanColor, peakLuminance, screenBox, BoundsSize and notes.\n3. At most {{max_rounds}} rounds: one hyper_niagara_apply_plan (bDryRun false, a fresh operationId, the current expectedRevision) with set_input_value on the one input that best explains the worst difference (colour, size, spawn rate, lifetime, velocity). If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId. Inspect for the new revision, preview with the same ages and view, and keep the change only if the sheet moved toward the brief; otherwise put the old value back with one more plan. Stop when it matches, or after two rounds in a row that do not help.\n4. hyper_niagara_validate with policy runtime_ready, then runtime_probe.\nReply with a table per round: the input changed, its old and new value, the numbers that moved, kept or reverted. Then PASS/FAIL for each part of the brief, 0 errors, every emitter live, and the first and last contact sheets each on its own line."
+  },
+  {
+   "id": "vfx-niagara.color-over-life-curve",
+   "title": "Recolour an emitter over its life with a colour curve",
+   "summary": "Drive an emitter's colour from a ColorFromCurve dynamic input and a colour curve, turn off the scale that fights it, read it back and preview it.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_preview",
+    "hyper_niagara_discover",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate"
+   ],
+   "ops": [
+    "add_module",
+    "set_input_value",
+    "set_module_enabled"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "colour",
+    "color",
+    "curve",
+    "over life",
+    "gradient",
+    "dynamic input",
+    "recolour"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "emitter",
+     "label": "Emitter",
+     "default": "Flames"
+    },
+    {
+     "name": "curve",
+     "label": "Colour curve (age:r,g,b,a; ...)",
+     "default": "0:6,3,1,1; 0.4:4,1.2,0.25,1; 1:0,0,0,0",
+     "hint": "Ages 0-1; values above 1 glow on an additive material"
+    }
+   ],
+   "prompt": "In {{selected_asset}}, make `{{emitter}}` change colour over each particle's life along the curve `{{curve}}`. Change only this emitter. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_inspect with bIncludeTopology true and bIncludeInputValues true: `{{emitter}}` exists; note its Particle Update modules (a Color module? a ScaleColor?) and the revision. hyper_niagara_preview with ages [0.2, 0.6, 1.2] as the before sheet.\n2. hyper_niagara_discover with kind script_schema and assetPath /Niagara/DynamicInputs/ValueFromCurve/ColorFromCurve.ColorFromCurve for its input names.\n3. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): add_module /Niagara/Modules/Update/Color/Color.Color in ParticleUpdateScript if it has none; set_input_value on its [\"Color\"] with valueType dynamic_input and that assetPath; set_input_value on [\"Color\", \"ColorCurve\"] with valueType color_curve and value `{{curve}}`; set_module_enabled false on ScaleColor if it is there. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n4. hyper_niagara_inspect with bIncludeInputValues true: Color reads the ColorFromCurve dynamic input with your curve, its CurveIndex linked to Particles.NormalizedAge.\n5. hyper_niagara_preview with the same ages; hyper_niagara_validate with policy runtime_ready, then runtime_probe with expectEmitters [{{emitter}}].\nReply with a PASS/FAIL table: the curve read back as given, ScaleColor off, meanColor per age following the curve, 0 errors and 0 warnings, the emitter live. Show both sheets on their own lines."
+  },
+  {
+   "id": "vfx-niagara.random-ranges-variation",
+   "title": "Replace an emitter's fixed values with random ranges",
+   "summary": "Give lifetime, size and speed random ranges through RandomRangeFloat dynamic inputs so particles vary, read the ranges back and preview the spread.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_preview",
+    "hyper_niagara_discover",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_validate"
+   ],
+   "ops": [
+    "set_input_value"
+   ],
+   "difficulty": "standard",
+   "tags": [
+    "random",
+    "range",
+    "variation",
+    "lifetime",
+    "size",
+    "speed",
+    "dynamic input",
+    "enum"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "emitter",
+     "label": "Emitter",
+     "default": "Sparks"
+    },
+    {
+     "name": "spread",
+     "label": "Spread (percent)",
+     "default": "30"
+    }
+   ],
+   "prompt": "Make `{{emitter}}` in {{selected_asset}} look less uniform: its lifetime, sprite size and speed each become a random range of plus or minus {{spread}}% around the value it has now. Change only this emitter. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_inspect with bIncludeTopology true and bIncludeInputValues true: find those inputs (Initialize Particle's lifetime and sprite size, Add Velocity's speed or the like) with their current values and inputTypes; keep the revision. Leave an input that is already a range or a curve alone and name it. hyper_niagara_preview with ages [0.3, 1] as the before sheet.\n2. hyper_niagara_discover with kind dynamic_inputs and valueType float: confirm /Niagara/DynamicInputs/UniformRange/V2/RandomRangeFloat.RandomRangeFloat and its Minimum and Maximum. Some inputs take a range only after a mode switch (Lifetime Mode Random): set that enum first in the same plan, with valueType enum.\n3. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): per input, set_input_value with valueType dynamic_input and that assetPath, then [\"<input>\", \"Minimum\"] and [\"<input>\", \"Maximum\"] as floats. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n4. hyper_niagara_inspect with bIncludeInputValues true: each input reads the range you set.\n5. hyper_niagara_preview with the same ages; hyper_niagara_validate with policy runtime_ready, then runtime_probe with expectEmitters [{{emitter}}].\nReply with a PASS/FAIL table, one row per input: old value, new range, read back as set; then 0 errors and 0 warnings, the emitter live, and the after sheet visibly less uniform. Show both sheets on their own lines."
+  },
+  {
+   "id": "vfx-niagara.particle-materials-swap",
+   "title": "Give an effect soft glow and smoke particle materials",
+   "summary": "Make particle_additive and particle_translucent materials with the recipes, set them on the effect's sprite renderers, and compare previews.",
+   "packs": [
+    "niagara_vfx",
+    "materials_dynamic_material"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_preview",
+    "hyper_material_recipe",
+    "hyper_operation_wait",
+    "hyper_niagara_apply_plan",
+    "hyper_niagara_validate"
+   ],
+   "ops": [
+    "set_renderer_property"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "material",
+    "particle",
+    "additive",
+    "translucent",
+    "soft",
+    "sprite",
+    "renderer"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "glow_emitters",
+     "label": "Glowing emitters",
+     "default": "Flames, Sparks"
+    },
+    {
+     "name": "smoke_emitters",
+     "label": "Smoke emitters",
+     "default": "Smoke"
+    },
+    {
+     "name": "softness",
+     "label": "Glow softness (1-4)",
+     "default": "2"
+    }
+   ],
+   "prompt": "{{selected_asset}} draws with Niagara's default sprite material and looks hard-edged. Give its glowing emitters ({{glow_emitters}}) a soft additive material and its smoke emitters ({{smoke_emitters}}) a noisy translucent one. Change only those renderers. If the niagara_vfx or materials_dynamic_material pack is unavailable, say so and stop.\n1. hyper_niagara_inspect with bIncludeTopology true: each named emitter's sprite renderer and its rendererIndex; keep the revision. hyper_niagara_preview with ages [0.5, 1.5] as the before sheet (background grey if there is smoke).\n2. hyper_material_recipe with an empty Recipe for particle_additive's and particle_translucent's settings. Then Recipe particle_additive, Path {{content_folder}}/M_FX_Glow, Settings softness {{softness}}; and Recipe particle_translucent, Path {{content_folder}}/M_FX_Smoke, Settings noise 0.6. Each with bDryRun true, then bDryRun false and a fresh OperationId; hyper_operation_wait if one waits for approval. Reuse one that already exists.\n3. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): set_renderer_property Material on each sprite renderer, /Game paths as object paths: M_FX_Glow for the glowing emitters, M_FX_Smoke for the smoke. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n4. hyper_niagara_inspect again for each renderer's Material; hyper_niagara_preview with the same ages; hyper_niagara_validate with policy runtime_ready.\nReply with a PASS/FAIL table: both materials made at their paths, each renderer's Material set, 0 errors and 0 warnings, the after sheet with soft edges and smoke that is not a uniform grey. Show both sheets on their own lines."
+  },
+  {
+   "id": "vfx-niagara.flipbook-smoke",
+   "title": "Animate smoke with a flipbook texture sheet",
+   "summary": "Make a flipbook smoke material, set the sprite renderer's grid and add a SubUV animation module so all three agree, then preview the frames.",
+   "packs": [
+    "niagara_vfx",
+    "materials_dynamic_material"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_material_recipe",
+    "hyper_operation_wait",
+    "hyper_niagara_apply_plan",
+    "hyper_niagara_preview",
+    "hyper_niagara_validate"
+   ],
+   "ops": [
+    "set_renderer_property",
+    "add_module",
+    "set_input_value"
+   ],
+   "difficulty": "advanced",
+   "tags": [
+    "flipbook",
+    "subuv",
+    "smoke",
+    "sprite sheet",
+    "texture",
+    "animation",
+    "material"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "emitter",
+     "label": "Emitter",
+     "default": "Smoke"
+    },
+    {
+     "name": "texture",
+     "label": "Flipbook texture",
+     "default": "/Game/VFX/Textures/T_Smoke_8x8.T_Smoke_8x8"
+    },
+    {
+     "name": "grid",
+     "label": "Grid (columns,rows)",
+     "default": "8,8"
+    }
+   ],
+   "prompt": "Make `{{emitter}}` in {{selected_asset}} play the flipbook `{{texture}}` (a {{grid}} grid) over each particle's life. A flipbook needs three things to agree; follow the unreal-niagara skill's flipbook section. If the niagara_vfx or materials_dynamic_material pack is unavailable, say so and stop.\n1. hyper_niagara_inspect with bIncludeTopology true: `{{emitter}}`'s sprite renderer index, and whether a SubUVAnimation module is in its Particle Update; keep the revision. Confirm `{{texture}}` exists with Epic's AssetTools find_assets; if not, say so and stop.\n2. hyper_material_recipe with Recipe particle_translucent, Path {{content_folder}}/M_FX_SmokeFlipbook, Settings texture {{texture}} and flipbook true: bDryRun true, then bDryRun false with a fresh OperationId; hyper_operation_wait if it waits for approval.\n3. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision): set_renderer_property Material to the new material and SubImageSize {{grid}} on that renderer; add_module /Niagara/Modules/Update/SubUV/SubUVAnimation.SubUVAnimation in ParticleUpdateScript if it is missing. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n4. hyper_niagara_inspect with bIncludeInputValues true: the module's inputs. If its frame range does not cover the {{grid}} grid, set it with set_input_value in one more plan, by the names inspect lists only.\n5. hyper_niagara_preview with ages [0.3, 0.8, 1.5, 2.5] and background grey. Open it: puffs change shape from tile to tile instead of one image sliding. hyper_niagara_validate with policy runtime_ready, then runtime_probe with expectEmitters [{{emitter}}].\nReply with a PASS/FAIL table: the material samples the flipbook, SubImageSize {{grid}}, SubUVAnimation present, 0 errors and 0 warnings, the emitter live, the frames changing in the sheet. Show the sheet on its own line."
+  },
+  {
+   "id": "vfx-niagara.loop-to-one-shot",
+   "title": "Turn a looping effect into a one-shot burst",
+   "summary": "Set each emitter's loop behaviour to Once with an enum input, swap continuous spawning for a burst, and prove it lives then dies away.",
+   "packs": [
+    "niagara_vfx"
+   ],
+   "skills": [
+    "unreal-niagara"
+   ],
+   "agent": "technical-artist",
+   "tools": [
+    "hyper_niagara_inspect",
+    "hyper_niagara_discover",
+    "hyper_niagara_apply_plan",
+    "hyper_operation_wait",
+    "hyper_niagara_preview",
+    "hyper_niagara_validate"
+   ],
+   "ops": [
+    "set_input_value",
+    "set_module_enabled",
+    "add_module"
+   ],
+   "difficulty": "starter",
+   "tags": [
+    "one-shot",
+    "burst",
+    "loop",
+    "enum",
+    "loop behavior",
+    "spawn",
+    "emitter state"
+   ],
+   "context": {
+    "selection": "assets",
+    "classes": [
+     "NiagaraSystem"
+    ],
+    "min": 1
+   },
+   "placeholders": [
+    {
+     "name": "count",
+     "label": "Particles per burst",
+     "default": "40"
+    }
+   ],
+   "prompt": "Make {{selected_asset}} play once per activation: each emitter bursts {{count}} particles at the start and then stops, instead of looping. Change only this System. If the niagara_vfx pack is unavailable, say so and stop.\n1. hyper_niagara_inspect with bIncludeTopology true and bIncludeInputValues true: per emitter its EmitterState inputs (Loop Behavior), its SpawnRate module and any burst; keep the revision.\n2. hyper_niagara_discover with kind modules and query \"spawn burst\" for the burst module's path, and kind script_schema on it for its input names.\n3. One hyper_niagara_apply_plan (bDryRun false, fresh operationId, expectedRevision), per emitter: set_input_value on EmitterState's Loop Behavior with valueType enum and value Once; set_module_enabled false on SpawnRate; add_module the burst module in EmitterUpdateScript if it has none, and set_input_value its spawn count to {{count}} (int32). If a refusal lists the enum's entries, use the one it names for playing once. If the reply is queued, running or awaiting_user_approval, hyper_operation_wait with its operationId.\n4. hyper_niagara_inspect with bIncludeInputValues true: `enum Once` on each emitter and SpawnRate off.\n5. hyper_niagara_preview with ages [0.1, 0.5, 1.5, 4]: particles early, fewer later, none in the last tile if their lifetime is under 4 s.\n6. hyper_niagara_validate with policy runtime_ready; runtime_probe with probeFrames 3; then probeFrames 600, which reports not_live by design once it has died away.\nReply with a PASS/FAIL table per emitter: Loop Behavior Once, SpawnRate off, the burst count {{count}}, live at frame 3, zero at 10 s; 0 errors and 0 warnings. Show the sheet on its own line."
   }
  ]
 }
