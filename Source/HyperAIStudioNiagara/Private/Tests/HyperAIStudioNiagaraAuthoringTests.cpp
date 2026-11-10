@@ -705,12 +705,19 @@ bool FHyperAIStudioNiagaraRecipesTest::RunTest(const FString& Parameters)
 		TestTrue(FString::Printf(TEXT("%s's %d ops apply (%s)"), *Info.Id, Ops.Num(), *Error), bApplied);
 		if (bApplied && Info.Settings.ContainsByPredicate([](const Recipes::FRecipeSetting& Setting) { return Setting.Key == TEXT("part"); }))
 		{
-			// A recipe in two parts: the second adds to the System the first made, with no create_system of its own.
-			TArray<FHyperAINiagaraEditOp> Second;
-			TestTrue(FString::Printf(TEXT("%s part 2 compiles: %s"), *Info.Id, *Error),
-				Recipes::Compile(Info.Id, {TEXT("part=2")}, Path, Second, Materials, Notes, Error) && Second.Num() > 1 && Second[0].Kind != TEXT("create_system"));
-			bApplied = Gate::ApplyOps(*System, Second, Applied, PerOp, Error);
-			TestTrue(FString::Printf(TEXT("%s part 2's %d ops apply (%s)"), *Info.Id, Second.Num(), *Error), bApplied);
+			// A recipe in parts: each later part adds to the System the first made, with no create_system of its own.
+			for (int32 Part = 2; bApplied; ++Part)
+			{
+				TArray<FHyperAINiagaraEditOp> Later;
+				if (!Recipes::Compile(Info.Id, {FString::Printf(TEXT("part=%d"), Part)}, Path, Later, Materials, Notes, Error))
+				{
+					TestTrue(FString::Printf(TEXT("%s has %d parts"), *Info.Id, Part - 1), Part > 2);
+					break;
+				}
+				TestTrue(FString::Printf(TEXT("%s part %d adds without making a System"), *Info.Id, Part), Later.Num() > 1 && Later[0].Kind != TEXT("create_system"));
+				bApplied = Gate::ApplyOps(*System, Later, Applied, PerOp, Error);
+				TestTrue(FString::Printf(TEXT("%s part %d's %d ops apply (%s)"), *Info.Id, Part, Later.Num(), *Error), bApplied);
+			}
 		}
 		if (!bApplied)
 		{
