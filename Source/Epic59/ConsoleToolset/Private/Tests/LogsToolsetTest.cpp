@@ -17,7 +17,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogLogsToolsetTest, Log, All);
 // Compile-time maximum is Log, so Verbose and VeryVerbose cannot be set on it.
 DEFINE_LOG_CATEGORY_STATIC(LogLogsToolsetCappedTest, Log, Log);
 
-BEGIN_DEFINE_SPEC(FLogsToolsetSpec, "AIAssistant.Toolsets.ConsoleToolset.LogsToolset",
+BEGIN_DEFINE_SPEC(FLogsToolsetSpec59, "AIAssistant.Toolsets.ConsoleToolset.LogsToolset",
 	EAutomationTestFlags::EditorContext
 	| EAutomationTestFlags::ProductFilter
 	| EAutomationTestFlags::CriticalPriority)
@@ -65,11 +65,11 @@ BEGIN_DEFINE_SPEC(FLogsToolsetSpec, "AIAssistant.Toolsets.ConsoleToolset.LogsToo
 			TEXT("Marked line never became readable from %s: %s"), *LogFilePath, *Marker));
 		return Marker;
 	}
-END_DEFINE_SPEC(FLogsToolsetSpec)
+END_DEFINE_SPEC(FLogsToolsetSpec59)
 
 #define TestLogCategory LogLogsToolsetTest
 
-void FLogsToolsetSpec::Define()
+void FLogsToolsetSpec59::Define()
 {
 	using namespace UE::ToolsetRegistry;
 

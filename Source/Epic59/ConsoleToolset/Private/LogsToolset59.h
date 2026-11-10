@@ -86,5 +86,5 @@ private:
 	static bool IsAllowedExternalLogPath(const FString& LogFilePath);
 	static TArray<FString> ReadLogLines(const FString& LogFilePath);
 
-	friend class FLogsToolsetSpec;
+	friend class FLogsToolsetSpec59; // UE 5.8: spec renamed ...59
 };
