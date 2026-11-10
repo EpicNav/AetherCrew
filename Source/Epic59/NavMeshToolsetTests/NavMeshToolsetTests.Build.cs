@@ -20,6 +20,7 @@ public class NavMeshToolsetTests : ModuleRules
 				"NavigationSystem",
 				"NavMeshToolset",
 				"ToolsetRegistry",
+				"ToolsetCore", // UE 5.8: compat layer for 5.9 code
 				"ToolsetRegistryEditor", // UE 5.8: compat layer for 5.9 headers
 				"UnrealEd",
 			}

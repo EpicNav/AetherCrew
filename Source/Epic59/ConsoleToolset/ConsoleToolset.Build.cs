@@ -22,6 +22,8 @@ public class ConsoleToolset : ModuleRules
 				"Engine",
 				"Json",
 				"ToolsetRegistry",
+				"AsyncFunctionResult", // UE 5.8: compat layer for 5.9 code
+				"ToolsetCore", // UE 5.8: compat layer for 5.9 code
 				"ToolsetRegistryEditor", // UE 5.8: compat layer for 5.9 headers
 			}
 			);

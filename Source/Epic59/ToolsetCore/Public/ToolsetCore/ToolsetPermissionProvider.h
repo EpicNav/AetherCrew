@@ -9,15 +9,16 @@
 
 #include "ToolsetPermissionProvider.generated.h"
 
-UINTERFACE(MinimalAPI, BlueprintType, meta = (CannotImplementInterfaceInBlueprint))
-class UToolsetPermissionProvider : public UInterface
+// UE 5.8: exported in full (see ToolsetProvider.h).
+UINTERFACE(BlueprintType, meta = (CannotImplementInterfaceInBlueprint))
+class TOOLSETCORE_API UToolsetPermissionProvider : public UInterface
 {
 	GENERATED_BODY()
 };
 
 // Implemented by a host that wants to restrict which tools are exposed. Nothing here
 // interprets what a role means; the registry relays whoever registered.
-class IToolsetPermissionProvider
+class TOOLSETCORE_API IToolsetPermissionProvider // UE 5.8: exported in full
 {
 	GENERATED_BODY()
 

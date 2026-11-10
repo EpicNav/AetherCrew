@@ -12,8 +12,9 @@
 
 #include "ToolsetProvider.generated.h"
 
-UINTERFACE(MinimalAPI, BlueprintType)
-class UToolsetProvider : public UInterface
+// UE 5.8: exported in full; with MinimalAPI, 5.8's UHT leaves Z_Construct unexported and implementers fail to link.
+UINTERFACE(BlueprintType)
+class TOOLSETCORE_API UToolsetProvider : public UInterface
 {
 	GENERATED_BODY()
 };
@@ -23,7 +24,7 @@ class UToolsetProvider : public UInterface
 // Every method is called on the class default object, including when tools dispatch on a live
 // instance. A Blueprint can declare the interface without a C++ implementer, so
 // Cast<IToolsetProvider> can still be null on a class that reports ImplementsInterface.
-class IToolsetProvider
+class TOOLSETCORE_API IToolsetProvider // UE 5.8: exported in full, like UToolsetProvider
 {
 	GENERATED_BODY()
 
@@ -35,7 +36,7 @@ public:
 	// Bare tool names (UFUNCTION names) to hide from the agent right now, called once per
 	// registered permission provider.
 	UFUNCTION(BlueprintNativeEvent, Category = "Toolset", meta = (AIIgnore))
-	TOOLSETCORE_API TArray<FName> GetToolsToHide(
+	TArray<FName> GetToolsToHide(
 		const TScriptInterface<IToolsetPermissionProvider>& Provider) const;
 	virtual TArray<FName> GetToolsToHide_Implementation(
 		const TScriptInterface<IToolsetPermissionProvider>& Provider) const
@@ -45,7 +46,7 @@ public:
 
 	// Whether to withhold the whole toolset from the agent for this permission provider.
 	UFUNCTION(BlueprintNativeEvent, Category = "Toolset", meta = (AIIgnore))
-	TOOLSETCORE_API bool IsToolsetHidden(
+	bool IsToolsetHidden(
 		const TScriptInterface<IToolsetPermissionProvider>& Provider) const;
 	virtual bool IsToolsetHidden_Implementation(
 		const TScriptInterface<IToolsetPermissionProvider>& Provider) const

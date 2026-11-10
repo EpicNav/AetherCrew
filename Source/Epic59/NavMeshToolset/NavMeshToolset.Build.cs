@@ -23,6 +23,8 @@ public class NavMeshToolset : ModuleRules
 				"Engine",
 				"NavigationSystem",
 				"ToolsetRegistry",
+				"AsyncFunctionResult", // UE 5.8: compat layer for 5.9 code
+				"ToolsetCore", // UE 5.8: compat layer for 5.9 code
 				"ToolsetRegistryEditor", // UE 5.8: compat layer for 5.9 headers
 			}
 		);

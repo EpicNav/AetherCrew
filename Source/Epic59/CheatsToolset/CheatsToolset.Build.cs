@@ -16,6 +16,8 @@ public class CheatsToolset : ModuleRules
 			"Engine",
 			"Kismet",
 			"ToolsetRegistry",
+			"AsyncFunctionResult", // UE 5.8: compat layer for 5.9 code
+			"ToolsetCore", // UE 5.8: compat layer for 5.9 code
 			"ToolsetRegistryEditor",
 		});
 	}

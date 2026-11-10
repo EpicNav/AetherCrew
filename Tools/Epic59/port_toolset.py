@@ -482,13 +482,20 @@ class Port:
             else:
                 text = text.replace('"%s"' % old, '"%s" /* UE 5.8: was %s */' % (new, old))
         # Every module that uses the 5.8 registry also gets the compat layer (5.9-only headers, IToolsetProvider).
-        if '"ToolsetRegistry"' in text and '"ToolsetRegistryEditor"' not in text:
-            text = re.sub(r'(?m)^([ \t]*)"ToolsetRegistry",([^\r\n]*)(\r?)$',
-                          r'\1"ToolsetRegistry",\2\3\n\1"ToolsetRegistryEditor", %s compat layer for 5.9 headers\3'
-                          % MARK, text, count=1)
-            if '"ToolsetRegistryEditor"' not in text:
-                self.hand(rel, text, text.find('"ToolsetRegistry"'),
-                          'add "ToolsetRegistryEditor" next to "ToolsetRegistry" by hand')
+        # All three are listed: UBT propagates a public dependency's include paths but not its import library,
+        # so a module implementing IToolsetProvider must link ToolsetCore itself.
+        if '"ToolsetRegistry"' in text:
+            for compat in reversed(COMPAT_MODULES):
+                if '"%s"' % compat in text:
+                    continue
+                before = text
+                text = re.sub(r'(?m)^([ \t]*)"ToolsetRegistry",([^\r\n]*)(\r?)$',
+                              lambda m: '%s"ToolsetRegistry",%s%s\n%s"%s", %s compat layer for 5.9 code%s'
+                              % (m.group(1), m.group(2), m.group(3), m.group(1), compat, MARK, m.group(3)),
+                              text, count=1)
+                if text == before:
+                    self.hand(rel, text, text.find('"ToolsetRegistry"'),
+                              'add "%s" next to "ToolsetRegistry" by hand' % compat)
         return text
 
     # ------------------------------------------------------------------ uplugin
