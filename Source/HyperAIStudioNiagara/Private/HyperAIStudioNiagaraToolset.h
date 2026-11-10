@@ -785,7 +785,7 @@ public:
 
 	/**
 	 * See a Niagara System: simulates it in an isolated preview world and renders it at several ages into one contact
-	 * sheet PNG (Saved/HyperAIStudio/Captures/Niagara), with coverage, mean colour, peak brightness and bounds per age.
+	 * sheet PNG (Saved/HyperAIStudio/Captures/Niagara), with coverage, mean colour, peak luminance and bounds per age.
 	 * Open image_path with your image reader and judge the look yourself. Read-only; nothing in the level changes.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "HyperAI|Niagara")
