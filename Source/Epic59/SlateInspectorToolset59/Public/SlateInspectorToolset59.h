@@ -8,6 +8,7 @@
 #include "ToolsetCore/ToolsetProvider.h"
 #include "ToolsetRegistry/ToolsetImage.h"
 #include "ToolsetRegistry/ToolsetPermissionProvider.h"
+#include "ToolsetRegistry/ToolsetDefinition59.h" // UE 5.8: the toolset is a UToolsetDefinition here (see below)
 #include "Widgets/SWidget.h"
 
 #include "SlateInspectorToolset59.generated.h"
@@ -113,18 +114,15 @@ struct FSlateInspectorToolsetFormField59
  * MouseDown, TouchStart and KeyDown do, so each needs its matching release;
  * ReleaseHeldInput drains whatever is left.
  */
+// UE 5.8: 5.9's registry takes any IToolsetProvider, so 5.9 makes this class the editor subsystem too. 5.8's
+// UToolsetRegistry::RegisterToolsetClass takes UToolsetDefinition classes only, so the tools stay here and the
+// subsystem half (registration, observer ticking, PIE clean-up) moves to USlateInspectorToolset59Subsystem below.
 UCLASS(BlueprintType, MinimalAPI)
-class USlateInspectorToolset59 : public UEditorSubsystem, public IToolsetProvider
+class USlateInspectorToolset59 : public UToolsetDefinition, public IToolsetProvider // UE 5.8: was UEditorSubsystem
 {
 	GENERATED_BODY()
 
 public:
-
-	SLATEINSPECTORTOOLSET59_API virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-	SLATEINSPECTORTOOLSET59_API virtual void Deinitialize() override;
-
-	/** Register or unregister the toolset at runtime. */
-	void SetToolsetEnabled(bool bEnabled);
 
 	/** Capture a Slate UI accessibility snapshot.  Use this to read the current
 	 * widget tree and discover refs for action tools (Click, Type, Hover, etc.).
@@ -404,12 +402,6 @@ public:
 
 private:
 
-	/** Forwarded from FSlateApplication::OnPostTick to drive observer updates. */
-	void OnSlatePostTick(float DeltaTime);
-
-	/** Purges refs to widgets destroyed when a PIE session ends, so stale refs fail fast. */
-	void OnEndPIE(bool bIsSimulating);
-
 	/** Resolve a ref to a widget, logging a warning if it fails. */
 	static TSharedPtr<SWidget> ResolveRefOrWarn(const FString& Ref);
 
@@ -505,6 +497,29 @@ private:
 	 * BackSpace, Tab, Enter and Escape presses also send the char event the OS would, and a handled char counts.
 	 */
 	static bool SendKeyEvent(const FResolvedKeyInput& Input, bool bDown, bool bRepeat);
+};
+
+/** UE 5.8: the UEditorSubsystem half of 5.9's USlateInspectorToolset (see above); its code is 5.9's, unchanged. */
+UCLASS(MinimalAPI)
+class USlateInspectorToolset59Subsystem : public UEditorSubsystem
+{
+	GENERATED_BODY()
+
+public:
+
+	SLATEINSPECTORTOOLSET59_API virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	SLATEINSPECTORTOOLSET59_API virtual void Deinitialize() override;
+
+	/** Register or unregister the toolset at runtime. */
+	void SetToolsetEnabled(bool bEnabled);
+
+private:
+
+	/** Forwarded from FSlateApplication::OnPostTick to drive observer updates. */
+	void OnSlatePostTick(float DeltaTime);
+
+	/** Purges refs to widgets destroyed when a PIE session ends, so stale refs fail fast. */
+	void OnEndPIE(bool bIsSimulating);
 
 	bool bToolsetRegistered = false;
 

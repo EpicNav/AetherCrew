@@ -41,7 +41,7 @@ static void OnEnableSlateInspectorToolsetChanged(IConsoleVariable* Variable)
 		return;
 	}
 
-	if (USlateInspectorToolset59* Toolset = GEditor->GetEditorSubsystem<USlateInspectorToolset59>())
+	if (USlateInspectorToolset59Subsystem* Toolset = GEditor->GetEditorSubsystem<USlateInspectorToolset59Subsystem>()) // UE 5.8: subsystem split
 	{
 		Toolset->SetToolsetEnabled(Variable->GetBool());
 	}
@@ -54,7 +54,7 @@ static FAutoConsoleVariableRef CVarEnableSlateInspectorToolset(
 	FConsoleVariableDelegate::CreateStatic(&OnEnableSlateInspectorToolsetChanged),
 	ECVF_Default);
 
-void USlateInspectorToolset59::Initialize(FSubsystemCollectionBase& Collection)
+void USlateInspectorToolset59Subsystem::Initialize(FSubsystemCollectionBase& Collection) // UE 5.8: subsystem split
 {
 	Super::Initialize(Collection);
 	Collection.InitializeDependency<UToolsetRegistrySubsystem>();
@@ -62,20 +62,20 @@ void USlateInspectorToolset59::Initialize(FSubsystemCollectionBase& Collection)
 
 	if (FSlateApplication::IsInitialized())
 	{
-		PostTickDelegateHandle = FSlateApplication::Get().OnPostTick().AddUObject(this, &USlateInspectorToolset59::OnSlatePostTick);
+		PostTickDelegateHandle = FSlateApplication::Get().OnPostTick().AddUObject(this, &USlateInspectorToolset59Subsystem::OnSlatePostTick); // UE 5.8: subsystem split
 	}
 
 	// Create a shallow default root observer (depth 0: window names only).
 	// Use Observe() on specific windows or panels to drill deeper.
 	RootObserverIdentifier = FSlateInspectorToolsetObserverManager::Get().AddObserver(nullptr, 0);
 
-	EndPIEDelegateHandle = UE::Editor::PIE::OnEnd.AddUObject(this, &USlateInspectorToolset59::OnEndPIE);
+	EndPIEDelegateHandle = UE::Editor::PIE::OnEnd.AddUObject(this, &USlateInspectorToolset59Subsystem::OnEndPIE); // UE 5.8: subsystem split
 }
 
-void USlateInspectorToolset59::Deinitialize()
+void USlateInspectorToolset59Subsystem::Deinitialize() // UE 5.8: subsystem split
 {
 	// Anything still held would outlive the tools that could release it.
-	ReleaseHeldInput();
+	USlateInspectorToolset59::ReleaseHeldInput(); // UE 5.8: subsystem split
 
 	UE::Editor::PIE::OnEnd.Remove(EndPIEDelegateHandle);
 	EndPIEDelegateHandle.Reset();
@@ -95,22 +95,22 @@ void USlateInspectorToolset59::Deinitialize()
 	Super::Deinitialize();
 }
 
-void USlateInspectorToolset59::OnSlatePostTick(float DeltaTime)
+void USlateInspectorToolset59Subsystem::OnSlatePostTick(float DeltaTime) // UE 5.8: subsystem split
 {
 	FSlateInspectorToolsetObserverManager::Get().Tick(DeltaTime);
 }
 
-void USlateInspectorToolset59::OnEndPIE(bool bIsSimulating)
+void USlateInspectorToolset59Subsystem::OnEndPIE(bool bIsSimulating) // UE 5.8: subsystem split
 {
 	// A button or finger still held on a game widget would otherwise keep the mouse capture the widget's destruction orphans.
-	ReleaseHeldInput();
+	USlateInspectorToolset59::ReleaseHeldInput(); // UE 5.8: subsystem split
 
 	// PIE teardown destroys game UMG widgets; purge their now-expired refs so a
 	// subsequent ResolveRef fails immediately instead of after the next periodic purge.
 	UE::WidgetHelper::FWidgetRefCache::Get().PurgeExpired();
 }
 
-void USlateInspectorToolset59::SetToolsetEnabled(bool bEnabled)
+void USlateInspectorToolset59Subsystem::SetToolsetEnabled(bool bEnabled) // UE 5.8: subsystem split
 {
 	// RegisterToolsetClass returns void and can bail without registering, so assuming success
 	// here would latch the flag on and stop the guard below ever retrying.
