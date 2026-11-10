@@ -136,18 +136,33 @@ public:
 		IModularFeatures::Get().RegisterModularFeature(
 			UE::Toolset::IToolsetRegistrar::ModularFeatureName, &Registrar);
 		// UE 5.8: ported modules with an optional plugin dependency load once every plugin module has.
-		PostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddStatic(&UE::ToolsetRegistry::Epic59::LoadOptionalPortedModules);
+		PostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddLambda([this]()
+		{
+			bPostEngineInit = true;
+			UE::ToolsetRegistry::Epic59::LoadOptionalPortedModules();
+		});
+		// A UE 5.8 toolset module can load after engine init (on demand), and registers its toolset then.
+		ModulesChangedHandle = FModuleManager::Get().OnModulesChanged().AddLambda([this](FName, EModuleChangeReason Reason)
+		{
+			if (bPostEngineInit && Reason == EModuleChangeReason::ModuleLoaded)
+			{
+				UE::ToolsetRegistry::Epic59::HideSupersededToolsets();
+			}
+		});
 	}
 
 	virtual void ShutdownModule() override
 	{
 		FCoreDelegates::OnPostEngineInit.Remove(PostEngineInitHandle);
+		FModuleManager::Get().OnModulesChanged().Remove(ModulesChangedHandle);
 		IModularFeatures::Get().UnregisterModularFeature(
 			UE::Toolset::IToolsetRegistrar::ModularFeatureName, &Registrar);
 	}
 
 private:
 	FDelegateHandle PostEngineInitHandle;
+	FDelegateHandle ModulesChangedHandle;
+	bool bPostEngineInit = false;
 	UE::ToolsetRegistry::Epic59::FToolsetRegistrar Registrar;
 };
 
