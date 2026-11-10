@@ -20,7 +20,7 @@
 #include "Factories/BlueprintFactory.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Kismet2/KismetEditorUtilities.h"
-#include "Kismet2/KismetNameValidators.h"
+#include "Kismet2/Kismet2NameValidators.h" // UE 5.8: 5.9 renamed it KismetNameValidators.h
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/PackageName.h"
@@ -44,6 +44,7 @@
 #include "UObject/UObjectGlobals.h"
 
 #include "ToolsetRegistry/ToolsetLibrary.h"
+#include "ToolsetRegistry/ToolsetLibrary59.h" // UE 5.8: the UToolsetLibrary functions 5.9 added
 #include "ToolsetRegistry/ToolsetPermissionProvider.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(MVVMToolset59)
@@ -351,7 +352,7 @@ UBlueprint* UMVVMToolset59::CreateViewModel(const FString& ViewModelName, const 
 		return nullptr;
 	}
 
-	if (!UToolsetLibrary::IsClassAllowed(ParentClass))
+	if (!FToolsetLibrary59::IsClassAllowed(ParentClass)) // UE 5.8: 5.9 UToolsetLibrary addition
 	{
 		UKismetSystemLibrary::RaiseScriptError(FString::Printf(TEXT("CreateViewModel: ParentClass '%s' is not permitted in this project."), *ParentClass->GetName()));
 		return nullptr;
@@ -363,7 +364,7 @@ UBlueprint* UMVVMToolset59::CreateViewModel(const FString& ViewModelName, const 
 		return nullptr;
 	}
 
-	if (!UToolsetLibrary::ValidateAssetPath(PackagePath))
+	if (!FToolsetLibrary59::ValidateAssetPath(PackagePath)) // UE 5.8: 5.9 UToolsetLibrary addition
 	{
 		return nullptr;
 	}
@@ -527,7 +528,7 @@ TArray<UClass*> UMVVMToolset59::ListViewModels(const FString& SearchPath)
 		}
 	}
 
-	Results.RemoveAll([](const UClass* Class) { return !UToolsetLibrary::IsClassAllowed(Class); });
+	Results.RemoveAll([](const UClass* Class) { return !FToolsetLibrary59::IsClassAllowed(Class); }); // UE 5.8: 5.9 UToolsetLibrary addition
 	return Results;
 }
 
@@ -579,7 +580,7 @@ void UMVVMToolset59::AddViewModelToWidget(UWidgetBlueprint* WidgetBlueprint, UCl
 	}
 	ViewModelClass = CastChecked<UClass>(ViewModelContext);
 
-	if (!UToolsetLibrary::IsClassAllowed(ViewModelClass))
+	if (!FToolsetLibrary59::IsClassAllowed(ViewModelClass)) // UE 5.8: 5.9 UToolsetLibrary addition
 	{
 		UKismetSystemLibrary::RaiseScriptError(FString::Printf(
 			TEXT("AddViewModelToWidget: ViewModelClass '%s' is not permitted in this project."), *ViewModelClass->GetName()));

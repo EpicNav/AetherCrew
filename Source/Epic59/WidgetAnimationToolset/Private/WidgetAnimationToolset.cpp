@@ -9,12 +9,13 @@
 #include "Components/Widget.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Kismet2/BlueprintEditorUtils.h"
-#include "Kismet2/KismetNameValidators.h"
+#include "Kismet2/Kismet2NameValidators.h" // UE 5.8: 5.9 renamed it KismetNameValidators.h
 #include "Kismet2/KismetEditorUtilities.h"
 #include "MovieScene.h"
 #include "MovieScenePossessable.h"
 #include "ScopedTransaction.h"
 #include "ToolsetRegistry/ToolsetLibrary.h"
+#include "ToolsetRegistry/ToolsetLibrary59.h" // UE 5.8: the UToolsetLibrary functions 5.9 added
 #include "WidgetBlueprint.h"
 #include "WidgetBlueprintEditorUtils.h"
 
@@ -447,7 +448,7 @@ FMovieSceneBindingProxy UWidgetAnimationToolset::AddWidgetToAnimation(
 		return FMovieSceneBindingProxy();
 	}
 
-	if (!UToolsetLibrary::IsClassAllowed(ObjectToBind->GetClass()))
+	if (!FToolsetLibrary59::IsClassAllowed(ObjectToBind->GetClass())) // UE 5.8: 5.9 UToolsetLibrary addition
 	{
 		UKismetSystemLibrary::RaiseScriptError(FString::Printf(TEXT(
 			"AddWidgetToAnimation: '%s' is not permitted in this project."),

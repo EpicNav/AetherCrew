@@ -6,7 +6,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "MVVMViewModelBase.h"
 #include "WidgetBlueprint.h"
-#include "WidgetBlueprintEditorSubsystem.h"
+#include "WidgetBlueprintOperationUtils.h" // UE 5.8: 5.9 moved these helpers to UWidgetBlueprintEditorSubsystem
 #include "WidgetComposedColorResolver.h"
 #include "WidgetConnectionMapper.h"
 #include "WidgetDescriptionRenderer.h"
@@ -84,7 +84,7 @@ int32 UWidgetStaticAnalysisToolset::GetWidgetTreeDepth(const UWidgetBlueprint* W
 		return -1;
 	}
 
-	return UWidgetBlueprintEditorSubsystem::ComputeWidgetTreeDepth(WidgetBlueprint, StartWidget);
+	return FWidgetBlueprintOperationUtils::ComputeWidgetTreeDepth(WidgetBlueprint, StartWidget); // UE 5.8: 5.8 name of the 5.9 helper
 }
 
 namespace

@@ -28,6 +28,7 @@
 #include "AsyncFunctionResult/AsyncFunctionResultUtils.h"
 #include "AsyncFunctionResult/AsyncFunctionResultVoid.h"
 #include "ToolsetRegistry/ToolsetLibrary.h"
+#include "ToolsetRegistry/ToolsetLibrary59.h" // UE 5.8: the UToolsetLibrary functions 5.9 added
 #include "UObject/StrongObjectPtr.h"
 
 #include <exception>
@@ -383,7 +384,7 @@ UTextureGraph* UTextureGraphTools::CreateTextureGraph(const FString& FolderPath,
 		return nullptr;
 	}
 
-	if (!UToolsetLibrary::ValidateAssetPath(FolderPath))
+	if (!FToolsetLibrary59::ValidateAssetPath(FolderPath)) // UE 5.8: 5.9 UToolsetLibrary addition
 	{
 		return nullptr;
 	}

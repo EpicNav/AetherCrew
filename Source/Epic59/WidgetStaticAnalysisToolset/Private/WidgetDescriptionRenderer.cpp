@@ -15,7 +15,7 @@
 #include "WidgetBlueprint.h"
 #include "WidgetBlueprintEditorUtils.h"
 #include "WidgetBlueprintExtension.h"
-#include "WidgetBlueprintEditorSubsystem.h"
+#include "WidgetBlueprintOperationUtils.h" // UE 5.8: 5.9 moved these helpers to UWidgetBlueprintEditorSubsystem
 #include "WidgetPropertyReflectionUtils.h"
 
 namespace
@@ -220,7 +220,7 @@ FWidgetDescriptionResult FWidgetDescriptionRenderer::RenderDescription(const UWi
 	UUIComponentWidgetBlueprintExtension* UIComponentExtension =
 		UWidgetBlueprintExtension::GetExtension<UUIComponentWidgetBlueprintExtension>(WidgetBlueprint);
 
-	UWidgetBlueprintEditorSubsystem::WalkWidgetTree(
+	FWidgetBlueprintOperationUtils::WalkWidgetTree( // UE 5.8: 5.8 name of the 5.9 helper
 		WidgetBlueprint, StartWidget, MaxDepth,
 		[&Result, &Out, WidgetBlueprint, &PropertyNameFilter, bSkipDefaultValues, bIncludeFullDescription, &AncestorAtDepth,
 			StartWidgetNamedSlotHost, UIComponentExtension]

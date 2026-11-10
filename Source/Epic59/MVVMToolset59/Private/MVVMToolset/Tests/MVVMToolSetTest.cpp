@@ -2544,7 +2544,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMVVMTest_Registration::RunTest(const FString&)
 {
 	FString Schemas = UToolsetRegistry::GetAllToolsetJsonSchemas();
-	TestTrue(TEXT("MVVMToolset in registry"), Schemas.Contains(TEXT("MVVMToolset")));
+	TestTrue(TEXT("MVVMToolset in registry"), Schemas.Contains(TEXT("MVVMToolset59.MVVMToolset59"))); // UE 5.8: 5.8's own MVVMToolset would match the bare name
 	return true;
 }
 

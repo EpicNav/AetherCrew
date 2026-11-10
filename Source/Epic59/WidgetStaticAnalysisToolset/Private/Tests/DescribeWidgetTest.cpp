@@ -22,7 +22,7 @@
 #include "ToolsetRegistry/Tests/TestAssetSandbox.h"
 #include "UObject/Package.h"
 #include "WidgetBlueprint.h"
-#include "WidgetBlueprintEditorSubsystem.h"
+#include "WidgetBlueprintOperationUtils.h" // UE 5.8: 5.9 moved these helpers to UWidgetBlueprintEditorSubsystem
 
 BEGIN_DEFINE_SPEC(
 	FDescribeWidgetTest,
@@ -84,7 +84,7 @@ UWidgetBlueprint* FDescribeWidgetTest::MakeWidgetBlueprintWithTestParentClass(co
 	const FString PackagePath = Sandbox->Folder() / Name;
 	UPackage* Package = CreatePackage(*PackagePath);
 
-	return UWidgetBlueprintEditorSubsystem::CreateWidgetBlueprint(
+	return FWidgetBlueprintOperationUtils::CreateWidgetBlueprint( // UE 5.8: 5.8 name of the 5.9 helper
 		Package, FName(*Name), BPTYPE_Normal,
 		UDescribeWidgetTestParentWidget::StaticClass(), nullptr, NAME_None, /*bRegisterAndCompile=*/false);
 }
