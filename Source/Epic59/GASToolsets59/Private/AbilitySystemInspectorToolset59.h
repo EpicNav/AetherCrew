@@ -128,7 +128,7 @@ public:
 	UFUNCTION(meta = (AICallable, AIAccessMode = "Read"), Category = "AbilitySystem")
 	static TArray<FString> GetActiveTags(AActor* Actor);
 
-	friend class FAbilitySystemInspectorToolsetSpec;
+	friend class FAbilitySystemInspectorToolsetSpec59; // UE 5.8: spec renamed ...59
 
 	//~ Begin UToolsetDefinition Interface
 	virtual bool IsToolsetHidden_Implementation(const TScriptInterface<IToolsetPermissionProvider>& Provider) const override;

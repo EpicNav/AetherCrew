@@ -36,7 +36,7 @@ namespace
 		EAutomationTestFlags::CriticalPriority;
 }
 
-BEGIN_DEFINE_SPEC(FGameplayTagsToolsetSpec, "AIAssistant.Toolsets.GameplayTagsToolset.GameplayTagsToolsetSpec",
+BEGIN_DEFINE_SPEC(FGameplayTagsToolsetSpec59, "AIAssistant.Toolsets.GameplayTagsToolset.GameplayTagsToolsetSpec", // UE 5.8: renamed ...59; 5.8 registers a test of the 5.9 name
 	TestFlags)
 
 	// Ensure no blueprint script exceptions were caught and clear the handler.
@@ -163,14 +163,14 @@ private:
 	static const FName TestTagSourceName;
 	// A second writable tag source used as a destination for MoveTags tests.
 	static const FName TestTagSourceName2;
-END_DEFINE_SPEC(FGameplayTagsToolsetSpec)
+END_DEFINE_SPEC(FGameplayTagsToolsetSpec59)
 
-const FString FGameplayTagsToolsetSpec::NonExistentTag = TEXT("ZZZ.NonExistent.XYZABC123456");
-const FString FGameplayTagsToolsetSpec::DefaultTagComment = TEXT("Automated test tag");
-const FName FGameplayTagsToolsetSpec::TestTagSourceName = FName(TEXT("GameplayTagsToolsetTest.ini"));
-const FName FGameplayTagsToolsetSpec::TestTagSourceName2 = FName(TEXT("GameplayTagsToolsetTest2.ini"));
+const FString FGameplayTagsToolsetSpec59::NonExistentTag = TEXT("ZZZ.NonExistent.XYZABC123456");
+const FString FGameplayTagsToolsetSpec59::DefaultTagComment = TEXT("Automated test tag");
+const FName FGameplayTagsToolsetSpec59::TestTagSourceName = FName(TEXT("GameplayTagsToolsetTest.ini"));
+const FName FGameplayTagsToolsetSpec59::TestTagSourceName2 = FName(TEXT("GameplayTagsToolsetTest2.ini"));
 
-void FGameplayTagsToolsetSpec::Define()
+void FGameplayTagsToolsetSpec59::Define()
 {
 	using namespace UE::ToolsetRegistry;
 

@@ -71,7 +71,7 @@ namespace UE::GameFeaturesToolset::Private
 		}
 
 		FString PluginURL;
-		if (!OutSubsystem->GetPluginURLByName(PluginName, PluginURL))
+		if (!OutSubsystem->GetPluginURLByName(FUtf8StringView(FUtf8String(PluginName)), PluginURL)) // UE 5.8: the UTF-8 overload; 5.8's TCHAR one hashes differently from its UTF-8 keys
 		{
 			OutError = FString::Printf(TEXT("GFP not found: %s"), *PluginName);
 			return FString();
@@ -155,7 +155,8 @@ namespace UE::GameFeaturesToolset::Private
 			checkNoEntry();
 			return EPluginToolsetGFPAutoState::Invalid;
 		}
-		static_assert((uint8)EBuiltInAutoState::Count == 5, "Update ToToolsetAutoState to include new EBuiltInAutoState");
+		static_assert((uint8)EBuiltInAutoState::Active == 4, // UE 5.8: no EBuiltInAutoState::Count; Active is the last of five
+			 "Update ToToolsetAutoState to include new EBuiltInAutoState");
 	}
 
 	static EBuiltInAutoState ToEngineAutoState(EPluginToolsetGFPAutoState State)
@@ -176,7 +177,8 @@ namespace UE::GameFeaturesToolset::Private
 			checkNoEntry();
 			return EBuiltInAutoState::Invalid;
 		}
-		static_assert((uint8)EBuiltInAutoState::Count == 5, "Update ToEngineAutoState to include new EBuiltInAutoState");
+		static_assert((uint8)EBuiltInAutoState::Active == 4, // UE 5.8: no EBuiltInAutoState::Count; Active is the last of five
+			 "Update ToEngineAutoState to include new EBuiltInAutoState");
 	}
 
 	// Serialise a single FJsonValue to its JSON literal text form. Wraps in a
@@ -313,7 +315,7 @@ TArray<FString> UGameFeaturesToolset59::ListEnabledGameFeaturePlugins()
 		// plugin it disallows, so none of the other tools could resolve it by name.
 		FString UnusedURL;
 		if (UGameFeaturesSubsystem::IsGameFeaturePlugin(Plugin)
-			&& Subsystem->GetPluginURLByName(Plugin->GetName(), UnusedURL))
+			&& Subsystem->GetPluginURLByName(FUtf8StringView(FUtf8String(Plugin->GetName())), UnusedURL)) // UE 5.8: the UTF-8 overload; 5.8's TCHAR one hashes differently from its UTF-8 keys
 		{
 			Names.Add(Plugin->GetName());
 		}

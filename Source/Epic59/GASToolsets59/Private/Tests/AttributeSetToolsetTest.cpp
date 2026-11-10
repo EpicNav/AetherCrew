@@ -7,11 +7,11 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-BEGIN_DEFINE_SPEC(FAttributeSetToolsetSpec, "AIAssistant.Toolsets.GASToolsets.AttributeSetToolset",
+BEGIN_DEFINE_SPEC(FAttributeSetToolsetSpec59, "AIAssistant.Toolsets.GASToolsets.AttributeSetToolset", // UE 5.8: renamed ...59; 5.8 registers a test of the 5.9 name
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-END_DEFINE_SPEC(FAttributeSetToolsetSpec)
+END_DEFINE_SPEC(FAttributeSetToolsetSpec59)
 
-void FAttributeSetToolsetSpec::Define()
+void FAttributeSetToolsetSpec59::Define()
 {
 	Describe(TEXT("FindAttributeSetClasses"), [this]()
 	{

@@ -40,7 +40,8 @@ struct FPluginToolsetTestPluginTemplate : public FPluginTemplateDescription
 	FPluginToolsetTestPluginTemplate()
 		: FPluginTemplateDescription(FText::FromString(TEXT("PluginToolsetTestPluginTemplate")),
 			FText::FromString(TEXT("Plugin template for testing creating plugins")),
-			IPluginManager::Get().FindPlugin(TEXT("PluginToolset"))->GetBaseDir() / TEXT("TestPluginTemplate"),
+			// UE 5.8: the template ships with this port, not with 5.8's PluginToolset plugin.
+			IPluginManager::Get().FindPlugin(TEXT("HyperAIStudio"))->GetBaseDir() / TEXT("Source/Epic59/PluginToolset59/TestPluginTemplate"),
 			false, EHostType::Editor)
 	{
 	}
@@ -141,7 +142,7 @@ private:
 }
 
 BEGIN_DEFINE_SPEC(
-	FPluginToolsetSpec,
+	FPluginToolsetSpec59,
 	TEXT("AIAssistant.Toolsets.PluginToolset"),
 	TestFlags)
 
@@ -216,9 +217,9 @@ private:
 	TUniquePtr<UE::ToolsetRegistry::FToolCallExceptionHandler> ExceptionHandler;
 	TSharedPtr<FPluginTemplateDescription> TestTemplate;
 
-END_DEFINE_SPEC(FPluginToolsetSpec)
+END_DEFINE_SPEC(FPluginToolsetSpec59)
 
-void FPluginToolsetSpec::Define()
+void FPluginToolsetSpec59::Define()
 {
 	BeforeEach([this]()
 	{

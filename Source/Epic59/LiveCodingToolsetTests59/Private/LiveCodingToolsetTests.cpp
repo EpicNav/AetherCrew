@@ -8,7 +8,7 @@
 #include "ToolsetRegistry/UToolsetRegistry.h"
 #include "UObject/StrongObjectPtr.h"
 
-TEST_CLASS(LiveCodingToolsetTest, "AIAssistant.Toolsets.LiveCodingToolset")
+TEST_CLASS(LiveCodingToolsetTest59, "AIAssistant.Toolsets.LiveCodingToolset") // UE 5.8: renamed ...59; 5.8 registers a test of the 5.9 name
 {
 	TEST_METHOD(Subsystem_IsAvailable)
 	{
@@ -20,7 +20,8 @@ TEST_CLASS(LiveCodingToolsetTest, "AIAssistant.Toolsets.LiveCodingToolset")
 	{
 		// The subsystem registers itself in Initialize when the
 		// LiveCodingToolset.Enable CVar is true (the default).
-		ASSERT_THAT(IsTrue(UToolsetRegistry::IsToolsetClassRegistered(ULiveCodingToolset59::StaticClass())));
+		// UE 5.8: the subsystem registers ULiveCodingToolsetTools59 (5.8's registry needs a UToolsetDefinition).
+		ASSERT_THAT(IsTrue(UToolsetRegistry::IsToolsetClassRegistered(ULiveCodingToolsetTools59::StaticClass())));
 	}
 
 	TEST_METHOD(CompileLiveCoding_EventuallyResolvesWithResult)

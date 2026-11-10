@@ -30,12 +30,14 @@ END_DEFINE_SPEC(FGameplayAbilityToolsetSpec)
 void FGameplayAbilityToolsetSpec::Define()
 {
 	// Shared by every test, so each test creates its abilities under names no other test uses.
-	BeforeAll([this]()
+	// UE 5.8: no BeforeAll in 5.8's automation specs; the fixture is per test.
+	BeforeEach([this]()
 	{
 		Sandbox = MakeUnique<FTestAssetSandbox>(TEXT("GameplayAbilityToolsetSpecTemp"));
 	});
 
-	AfterAll([this]()
+	// UE 5.8: no AfterAll in 5.8's automation specs.
+	AfterEach([this]()
 	{
 		Sandbox.Reset();
 	});

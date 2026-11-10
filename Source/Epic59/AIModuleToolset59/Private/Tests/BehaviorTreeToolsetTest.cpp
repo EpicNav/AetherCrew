@@ -67,12 +67,14 @@ void FBehaviorTreeToolsetSpec::Define()
 	using namespace BehaviorTreeToolsetTest;
 	using namespace UE::ToolsetRegistry;
 
-	BeforeAll([this]()
+	// UE 5.8: no BeforeAll in 5.8's automation specs; the fixture is per test.
+	BeforeEach([this]()
 	{
 		Sandbox = MakeUnique<FAssetSandbox>();
 	});
 
-	AfterAll([this]()
+	// UE 5.8: no AfterAll in 5.8's automation specs.
+	AfterEach([this]()
 	{
 		Sandbox.Reset();
 	});

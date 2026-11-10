@@ -433,7 +433,7 @@ public:
 	//~ End UToolsetDefinition Interface
 
 private:
-	friend class FPluginToolsetSpec;
+	friend class FPluginToolsetSpec59; // UE 5.8: spec renamed ...59
 
 	/**
 	 * Resolves a FPluginTemplateDescriptionToolsetInfo59 to its underlying FPluginTemplateDescription.

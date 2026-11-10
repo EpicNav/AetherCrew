@@ -70,7 +70,7 @@ public:
 	UFUNCTION(meta = (AICallable, AIAccessMode = "Read"), Category = "AttributeSets")
 	static TArray<FGameplayAttributeInfo59> ListAttributes(const FString& ClassName);
 
-	friend class FAttributeSetToolsetSpec;
+	friend class FAttributeSetToolsetSpec59; // UE 5.8: spec renamed ...59
 
 	//~ Begin UToolsetDefinition Interface
 	virtual bool IsToolsetHidden_Implementation(const TScriptInterface<IToolsetPermissionProvider>& Provider) const override;

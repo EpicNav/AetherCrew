@@ -172,8 +172,21 @@ void UGameplayTagsToolset59::AddTag(
 		}
 	}
 
+	// UE 5.8: 5.8's AddNewGameplayTagToINI writes a tag for a source with no ini of its own (Native, DataTable)
+	// into the default config file, where 5.9's refuses it; refuse it here.
+	if (const FGameplayTagSource* Source = SourceName.IsNone() ? nullptr : UGameplayTagsManager::Get().FindTagSource(SourceName))
+	{
+		if (Source->SourceType != EGameplayTagSourceType::DefaultTagList && Source->SourceType != EGameplayTagSourceType::TagList
+			&& Source->SourceType != EGameplayTagSourceType::RestrictedTagList)
+		{
+			UKismetSystemLibrary::RaiseScriptError(FString::Printf(
+				TEXT("Tag source '%s' is not a writable tag source (it has no tag ini file)."), *TagSource));
+			return;
+		}
+	}
+
 	TArray<FText> Errors;
-	if (!GetModule().AddNewGameplayTagToINI(TagName, DevComment, SourceName, false, true, &Errors))
+	if (!GetModule().AddNewGameplayTagToINI(TagName, DevComment, SourceName, false, true)) // UE 5.8: no OutErrors
 	{
 		RaiseScriptErrorFromModule(Errors,
 			FString::Printf(TEXT("Failed to add gameplay tag '%s'."), *TagName));
@@ -277,7 +290,7 @@ void UGameplayTagsToolset59::RemoveTag(const FString& TagName)
 		return;
 	}
 	TArray<FText> Errors;
-	if (!GetModule().DeleteTagFromINI(TagNode, &Errors))
+	if (!GetModule().DeleteTagFromINI(TagNode)) // UE 5.8: no OutErrors
 	{
 		RaiseScriptErrorFromModule(Errors,
 			FString::Printf(TEXT("Failed to remove gameplay tag '%s'."), *TagName));
@@ -300,7 +313,7 @@ void UGameplayTagsToolset59::RenameTag(const FString& OldTagName, const FString&
 	}
 
 	TArray<FText> Errors;
-	if (!GetModule().RenameTagInINI(OldTagName, NewTagName, true, &Errors))
+	if (!GetModule().RenameTagInINI(OldTagName, NewTagName, true)) // UE 5.8: no OutErrors
 	{
 		RaiseScriptErrorFromModule(Errors, FString::Printf(
 			TEXT("Failed to rename gameplay tag '%s' to '%s'."), *OldTagName, *NewTagName));
@@ -324,9 +337,40 @@ FGameplayTagsMoveResult UGameplayTagsToolset59::MoveTags(
 		return Result;
 	}
 
+	// UE 5.8: 5.8's MoveTagsBetweenINI only logs an unknown target or tag as an error (no OutErrors), so both
+	// are checked here first and reported the way 5.9 reports them.
+	if (!UGameplayTagsManager::Get().FindTagSource(FName(*TargetTagSource)))
+	{
+		UKismetSystemLibrary::RaiseScriptError(FString::Printf(
+			TEXT("Failed to move tags: the target tag source '%s' could not be found."), *TargetTagSource));
+		return Result;
+	}
+	TArray<FString> KnownTags;
 	TArray<FText> Errors;
-	GetModule().MoveTagsBetweenINI(
-		TagsToMove, FName(*TargetTagSource), Result.TagsMoved, Result.FailedToMoveTags, &Errors);
+	for (const FString& Tag : TagsToMove)
+	{
+		if (UGameplayTagsManager::Get().FindTagNode(FName(*Tag)).IsValid())
+		{
+			KnownTags.Add(Tag);
+		}
+		else
+		{
+			Result.FailedToMoveTags.Add(Tag);
+			Errors.Add(FText::FromString(FString::Printf(TEXT("Tag %s sources could not be found."), *Tag)));
+		}
+	}
+	TArray<FString> FailedKnownTags;
+	if (!KnownTags.IsEmpty())
+	{
+		GetModule().MoveTagsBetweenINI(
+			KnownTags, FName(*TargetTagSource), Result.TagsMoved, FailedKnownTags); // UE 5.8: no OutErrors
+	}
+	Result.FailedToMoveTags.Append(FailedKnownTags);
+	// UE 5.8: without OutErrors, a tag that failed to move is the error.
+	for (const FString& Failed : FailedKnownTags)
+	{
+		Errors.Add(FText::FromString(FString::Printf(TEXT("Could not move '%s'."), *Failed)));
+	}
 
 	if (Errors.Num() > 0)
 	{

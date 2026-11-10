@@ -48,12 +48,14 @@ void FEnvironmentQueryToolsetSpec::Define()
 {
 	using namespace EnvironmentQueryToolsetTest;
 
-	BeforeAll([this]()
+	// UE 5.8: no BeforeAll in 5.8's automation specs; the fixture is per test.
+	BeforeEach([this]()
 	{
 		Sandbox = MakeUnique<FAssetSandbox>();
 	});
 
-	AfterAll([this]()
+	// UE 5.8: no AfterAll in 5.8's automation specs.
+	AfterEach([this]()
 	{
 		Sandbox.Reset();
 	});

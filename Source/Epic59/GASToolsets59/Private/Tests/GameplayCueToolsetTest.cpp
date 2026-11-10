@@ -129,13 +129,15 @@ void FGameplayCueToolsetSpec::Define()
 	// Shared by every test, so each test creates its notifies under names no other test uses.
 	// The name must not contain a configured cue path (such as the "/Game" fallback), or the
 	// manager would treat the folder as valid even without the path added in BeforeEach.
-	BeforeAll([this]()
+	// UE 5.8: no BeforeAll in 5.8's automation specs; the fixture is per test.
+	BeforeEach([this]()
 	{
 		Sandbox = MakeUnique<FTestAssetSandbox>(TEXT("GASToolsetsCueSpecTemp"));
 		SandboxCuePath = Sandbox->Folder();
 	});
 
-	AfterAll([this]()
+	// UE 5.8: no AfterAll in 5.8's automation specs.
+	AfterEach([this]()
 	{
 		Sandbox.Reset();
 		ClearTestCues();

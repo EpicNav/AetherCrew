@@ -193,7 +193,7 @@ public:
 	//~ End UToolsetDefinition Interface
 
 private:
-	friend class FConfigSettingsToolsetSpec;
+	friend class FConfigSettingsToolsetSpec59; // UE 5.8: spec renamed ...59
 
 	static TSharedPtr<ISettingsSection> FindSection(
 		const FString& ContainerName,

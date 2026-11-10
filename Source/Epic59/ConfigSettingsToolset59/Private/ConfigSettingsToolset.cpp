@@ -19,6 +19,7 @@
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "ProjectDescriptor.h"
+#include "ScopedTransaction.h" // UE 5.8: see SetSectionProperties
 #include "SourceControlHelpers.h"
 #include "ToolsetRegistry/ToolsetLibrary.h"
 #include "UObject/UnrealType.h"
@@ -465,9 +466,14 @@ bool UConfigSettingsToolset59::SetSectionProperties(
 	SettingsObject->SetFlags(RF_Transactional);
 	const FGuid PreviousUndoTransactionId = UE::ConfigSettingsToolset::Private::GetNewestUndoTransactionId();
 	TArray<FName> SetPropertyNames;
-	const bool bSetSuccess = UToolsetLibrary::SetObjectProperties(
-		SettingsObject, PropertiesJson, SetPropertyNames, EBypassContainerCheck::No,
-		TEXT("call GetSectionSchema for the full list"));
+	bool bSetSuccess = false;
+	{
+		// UE 5.8: 5.9's SetObjectProperties makes the whole call one undo transaction, which the rollback below
+		// undoes; 5.8's records none, so the call is wrapped in one here.
+		const FScopedTransaction Transaction(INVTEXT("Set Section Properties"));
+		bSetSuccess = UToolsetLibrary::SetObjectProperties(
+			SettingsObject, PropertiesJson, SetPropertyNames, EBypassContainerCheck::No); // UE 5.8: no PropertyListHint argument
+	}
 	if (!bSetSuccess)
 	{
 		// SetObjectProperties has already raised the error, and since nothing is left changed there is nothing to save.

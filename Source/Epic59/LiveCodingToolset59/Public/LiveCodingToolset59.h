@@ -6,11 +6,12 @@
 #include "AsyncFunctionResult/AsyncFunctionResultString.h"
 #include "EditorSubsystem.h"
 #include "ToolsetCore/ToolsetProvider.h"
+#include "ToolsetRegistry/ToolsetDefinition59.h" // UE 5.8: ULiveCodingToolsetTools59 below
 
 #include "LiveCodingToolset59.generated.h"
 
 class FSubsystemCollectionBase;
-struct LiveCodingToolsetTest;
+struct LiveCodingToolsetTest59; // UE 5.8: renamed ...59; 5.8 registers a test of the 5.9 name
 
 /**
  * Live Coding compile toolset.
@@ -57,11 +58,40 @@ public:
 	//~ End IToolsetProvider Interface
 
 private:
-	friend struct LiveCodingToolsetTest;
+	friend struct LiveCodingToolsetTest59;
 
 	/** Resolves AsyncResult with a timeout error unless it has already completed. Returns true if it
 	 *  timed out. */
 	static LIVECODINGTOOLSET59_API bool TryTimeout(UAsyncFunctionResultString& AsyncResult);
 
 	bool bToolsetRegistered = false;
+};
+
+/**
+ * Live Coding compile toolset.
+ *
+ * UE 5.8: 5.8's registry registers UToolsetDefinition classes only, and ULiveCodingToolset59 is an editor
+ * subsystem, so this class carries its tools (LiveCodingToolset59.LiveCodingToolsetTools59) and the subsystem
+ * registers it.
+ */
+UCLASS(MinimalAPI)
+class ULiveCodingToolsetTools59 : public UToolsetDefinition, public IToolsetProvider
+{
+	GENERATED_BODY()
+
+public:
+	/** Triggers a Live Coding compile and returns a pending result that resolves once the
+	 * compile finishes. Live Coding must be enabled in Editor Preferences.
+	 * @return An async result resolving to the compile status followed by any captured
+	 * LogLiveCoding output and UBT compiler diagnostics. */
+	UFUNCTION(meta = (AICallable, AIAccessMode = "Execute"), Category = "LiveCodingToolset")
+	static UAsyncFunctionResultString* CompileLiveCoding() { return ULiveCodingToolset59::CompileLiveCoding(); }
+
+	/** Poll before calling CompileLiveCoding to avoid blocking on the Broker's initial module load. */
+	UFUNCTION(meta = (AICallable, AIAccessMode = "Read"), Category = "LiveCodingToolset")
+	static bool IsLiveCodingReady() { return ULiveCodingToolset59::IsLiveCodingReady(); }
+
+	/** Call before CompileLiveCoding on a session launched with Live Coding off; starts the Broker/Agent. */
+	UFUNCTION(meta = (AICallable, AIAccessMode = "Execute"), Category = "LiveCodingToolset")
+	static void EnableLiveCoding() { ULiveCodingToolset59::EnableLiveCoding(); }
 };

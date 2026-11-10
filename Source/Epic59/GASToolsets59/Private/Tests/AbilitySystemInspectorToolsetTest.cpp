@@ -10,13 +10,13 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-BEGIN_DEFINE_SPEC(FAbilitySystemInspectorToolsetSpec,
+BEGIN_DEFINE_SPEC(FAbilitySystemInspectorToolsetSpec59, // UE 5.8: renamed ...59; 5.8 registers a test of the 5.9 name
 	"AIAssistant.Toolsets.GASToolsets.AbilitySystemInspectorToolset",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 	AActor* TestActor = nullptr;
-END_DEFINE_SPEC(FAbilitySystemInspectorToolsetSpec)
+END_DEFINE_SPEC(FAbilitySystemInspectorToolsetSpec59)
 
-void FAbilitySystemInspectorToolsetSpec::Define()
+void FAbilitySystemInspectorToolsetSpec59::Define()
 {
 	// -------------------------------------------------------------------------
 	// Null actor: all tools must return empty.
@@ -184,10 +184,10 @@ void FAbilitySystemInspectorToolsetSpec::Define()
 			for (const FRuntimeAttributeValue59& Value : Values)
 			{
 				TestEqual(TEXT("SetClassName"), Value.SetClassName,
-					TEXT("GASToolsetsTestAttributeSet"));
+					TEXT("GASToolsetsTestAttributeSet59")); // UE 5.8: the test set is renamed ...59
 				TestEqual(TEXT("FullName"),
 					Value.FullName,
-					FString::Printf(TEXT("GASToolsetsTestAttributeSet.%s"), *Value.AttributeName));
+					FString::Printf(TEXT("GASToolsetsTestAttributeSet59.%s"), *Value.AttributeName)); // UE 5.8: renamed ...59
 			}
 		});
 

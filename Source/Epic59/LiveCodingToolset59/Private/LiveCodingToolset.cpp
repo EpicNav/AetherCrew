@@ -151,15 +151,16 @@ void ULiveCodingToolset59::SetToolsetEnabled(bool bEnabled)
 {
 	// RegisterToolsetClass returns void and can bail without registering, so assuming success
 	// here would latch the flag on and stop the guard below ever retrying.
+	// UE 5.8: registers ULiveCodingToolsetTools59, the UToolsetDefinition 5.8's registry needs.
 	if (bEnabled && !bToolsetRegistered)
 	{
-		UToolsetRegistry::RegisterToolsetClass(ULiveCodingToolset59::StaticClass());
-		bToolsetRegistered = UToolsetRegistry::IsToolsetClassRegistered(ULiveCodingToolset59::StaticClass());
+		UToolsetRegistry::RegisterToolsetClass(ULiveCodingToolsetTools59::StaticClass());
+		bToolsetRegistered = UToolsetRegistry::IsToolsetClassRegistered(ULiveCodingToolsetTools59::StaticClass());
 	}
 	else if (!bEnabled && bToolsetRegistered)
 	{
-		UToolsetRegistry::UnregisterToolsetClass(ULiveCodingToolset59::StaticClass());
-		bToolsetRegistered = UToolsetRegistry::IsToolsetClassRegistered(ULiveCodingToolset59::StaticClass());
+		UToolsetRegistry::UnregisterToolsetClass(ULiveCodingToolsetTools59::StaticClass());
+		bToolsetRegistered = UToolsetRegistry::IsToolsetClassRegistered(ULiveCodingToolsetTools59::StaticClass());
 	}
 }
 
@@ -167,7 +168,8 @@ bool ULiveCodingToolset59::IsLiveCodingReady()
 {
 #if WITH_LIVE_CODING
 	ILiveCodingModule* LiveCoding = FModuleManager::GetModulePtr<ILiveCodingModule>(LIVE_CODING_MODULE_NAME);
-	return LiveCoding && LiveCoding->IsEnabledForSession() && LiveCoding->IsReadyForReload();
+	// UE 5.8: no ILiveCodingModule::IsReadyForReload; ready means started, enabled and not compiling.
+	return LiveCoding && LiveCoding->IsEnabledForSession() && LiveCoding->HasStarted() && !LiveCoding->IsCompiling();
 #else
 	return false;
 #endif
@@ -248,6 +250,8 @@ UAsyncFunctionResultString* ULiveCodingToolset59::CompileLiveCoding()
 	// Keep the async result alive until the delegate below completes it.
 	TStrongObjectPtr<UAsyncFunctionResultString> ResultRef(AsyncResult);
 
+#if 0 // UE 5.8: ILiveCodingModule has no GetOnCompileFinishedDelegate; see the polling fallback after this block.
+
 	// Complete via GetOnCompileFinishedDelegate() rather than polling IsCompiling(), which can go
 	// false a tick before the module finishes updating its own result.
 	TSharedRef<FDelegateHandle> DelegateHandle = MakeShared<FDelegateHandle>();
@@ -315,6 +319,62 @@ UAsyncFunctionResultString* ULiveCodingToolset59::CompileLiveCoding()
 			UE_LOGF(LogLiveCodingToolset, Warning, "CompileLiveCoding: timed out waiting for a result");
 			return false;
 		}), CompileTimeoutSeconds);
+#else
+	// UE 5.8: poll IsCompiling() each tick instead. 5.8 reports no compile result, so a patch applied during the
+	// compile (GetOnPatchCompleteDelegate) reads as Success; otherwise the result is Failure (compile error) or
+	// NoChanges, which 5.8 cannot tell apart, and the captured output and UBT diagnostics say which.
+	TSharedRef<bool> bPatched = MakeShared<bool>(false);
+	TSharedRef<FDelegateHandle> PatchHandle = MakeShared<FDelegateHandle>();
+	*PatchHandle = LiveCoding->GetOnPatchCompleteDelegate().AddLambda([bPatched]() { *bPatched = true; });
+	const double StartSeconds = FPlatformTime::Seconds();
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+		[ResultRef, OutputCollector, UBTLogPath, UBTLogTimestampBeforeCompile, bPatched, PatchHandle, StartSeconds](float) -> bool
+		{
+			ILiveCodingModule* LiveCodingModule = FModuleManager::GetModulePtr<ILiveCodingModule>(LIVE_CODING_MODULE_NAME);
+			const bool bTimedOut = FPlatformTime::Seconds() - StartSeconds > CompileTimeoutSeconds;
+			if (LiveCodingModule && LiveCodingModule->IsCompiling() && !bTimedOut)
+			{
+				return true;
+			}
+			if (LiveCodingModule)
+			{
+				LiveCodingModule->GetOnPatchCompleteDelegate().Remove(*PatchHandle);
+			}
+			GLog->RemoveOutputDevice(&OutputCollector.Get());
+			if (bTimedOut)
+			{
+				ULiveCodingToolset59::TryTimeout(*ResultRef);
+				return false;
+			}
+
+			FString ResultString = *bPatched
+				? FString::Printf(TEXT("Result: %s"), *CompileResultToString(ELiveCodingCompileResult::Success))
+				: FString(TEXT("Result: Failure or NoChanges (UE 5.8 reports no compile result; no patch was applied)"));
+			const FString CapturedOutput = OutputCollector->ConsumeOutput();
+			if (!CapturedOutput.IsEmpty())
+			{
+				ResultString += TEXT("\n\nCompile Output:\n");
+				ResultString += CapturedOutput;
+			}
+			const FDateTime UBTLogTimestampAfterCompile = IFileManager::Get().GetTimeStamp(*UBTLogPath);
+			if (UBTLogTimestampAfterCompile != FDateTime::MinValue() && UBTLogTimestampAfterCompile != UBTLogTimestampBeforeCompile)
+			{
+				FString LogContent;
+				if (FFileHelper::LoadFileToString(LogContent, *UBTLogPath))
+				{
+					const FString Diagnostics = ExtractDiagnostics(LogContent);
+					if (!Diagnostics.IsEmpty())
+					{
+						ResultString += TEXT("\n\nCompiler Diagnostics:\n");
+						ResultString += Diagnostics;
+					}
+				}
+			}
+			UE_LOGF(LogLiveCodingToolset, Log, "CompileLiveCoding: %ls", *ResultString);
+			ResultRef->SetValue(ResultString);
+			return false;
+		}));
+#endif // UE 5.8
 
 	return AsyncResult;
 #else

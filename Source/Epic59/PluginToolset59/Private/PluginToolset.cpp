@@ -525,7 +525,7 @@ FString UPluginToolset59::CreatePlugin(
 	}
 
 	FText TemplateError;
-	Template->OnPluginCreated(NewPlugin, TemplateError); // UE 5.9 has UE6's overload with the error out-parameter
+	Template->OnPluginCreated(NewPlugin); // UE 5.8: no overload with the error out-parameter, so TemplateError stays empty
 	if (!TemplateError.IsEmpty())
 	{
 		UE::PluginToolset::Private::RaiseError(TemplateError.ToString());
