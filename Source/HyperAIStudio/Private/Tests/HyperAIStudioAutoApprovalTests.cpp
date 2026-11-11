@@ -240,6 +240,11 @@ bool FHyperAIStudioAutoApprovalUnreachableTest::RunTest(const FString& Parameter
 	};
 	for (TFieldIterator<FProperty> It(UHyperAIStudioSettings::StaticClass()); It; ++It)
 	{
+		// The one auto-approval setting is its limit: it cannot turn it on, and changing it turns it off (SpendSettings).
+		if (It->GetFName() == GET_MEMBER_NAME_CHECKED(UHyperAIStudioSettings, AutoApprovalMaxApprovals))
+		{
+			continue;
+		}
 		TestFalse(FString::Printf(TEXT("No setting turns it on (%s)"), *It->GetName()), Names(It->GetName()));
 	}
 	int32 ConsoleObjects = 0;
