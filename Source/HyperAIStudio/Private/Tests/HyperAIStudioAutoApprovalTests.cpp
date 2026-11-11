@@ -684,7 +684,7 @@ bool FHyperAIStudioAutoApprovalGuardTest::RunTest(const FString& Parameters)
 		Settings->AutoApprovalMaxApprovals = 0;
 		TestEqual(TEXT("clamped to at least one"), FHyperAIStudioAutoApproval::GetMaxApprovals(), FHyperAIStudioAutoApproval::MinMaxApprovals);
 		Settings->AutoApprovalMaxApprovals = 100000;
-		TestEqual(TEXT("and at most a thousand"), FHyperAIStudioAutoApproval::GetMaxApprovals(), FHyperAIStudioAutoApproval::MaxMaxApprovals);
+		TestEqual(TEXT("and at most ten thousand"), FHyperAIStudioAutoApproval::GetMaxApprovals(), FHyperAIStudioAutoApproval::MaxMaxApprovals);
 		Settings->AutoApprovalMaxApprovals = 7;
 		FScope Scope;
 		for (int32 Index = 0; Index <= FHyperAIStudioAutoApproval::GetMaxApprovals(); ++Index)

@@ -504,11 +504,11 @@ public:
 
 	/**
 	 * How many requests one auto-approval approves before it turns itself off and waits for you to turn it on again
-	 * (1 to 1000, 50 by default). It does not change the 10 external-effect requests or the spend cap. Changing it while
+	 * (1 to 10,000, 50 by default). It does not change the 10 external-effect requests or the spend cap. Changing it while
 	 * auto-approval is on turns auto-approval off, and one kept on across a restart does not come back, so a limit an
 	 * agent raised never takes effect until you turn auto-approval on yourself.
 	 */
-	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow", meta = (ClampMin = "1", ClampMax = "1000", UIMin = "1", UIMax = "1000"))
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow", meta = (ClampMin = "1", ClampMax = "10000", UIMin = "1", UIMax = "10000"))
 	int32 AutoApprovalMaxApprovals = 50;
 
 	/**

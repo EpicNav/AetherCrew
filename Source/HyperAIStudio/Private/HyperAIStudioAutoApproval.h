@@ -115,7 +115,7 @@ public:
 	/** The Auto Approval Max Approvals setting's default, and the bounds it is clamped to. */
 	static constexpr int32 DefaultMaxApprovals = 50;
 	static constexpr int32 MinMaxApprovals = 1;
-	static constexpr int32 MaxMaxApprovals = 1000;
+	static constexpr int32 MaxMaxApprovals = 10000;
 	/**
 	 * Approvals one activation makes before it ends: that setting, clamped. It is among the settings an activation keeps
 	 * as the user confirmed it, so changing it ends the activation instead of raising the limit it runs under.
