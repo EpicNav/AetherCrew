@@ -499,7 +499,7 @@ bool FHyperAIStudioSandboxAutoApprovalTest::RunTest(const FString& Parameters)
 	{
 		return Entry.Kind == EHyperAIStudioActivityKind::ApprovalApproved && Entry.AutoApprovedAs == EHyperAIStudioApprovalCategory::SandboxSaves
 			&& Entry.ToolName == TEXT("Sandbox Mode") && Entry.Detail.Contains(FPaths::GetBaseFilename(Added.File))
-			&& Entry.Detail.Contains(FString::Printf(TEXT("approval 1 of %d"), FHyperAIStudioAutoApproval::MaxApprovals));
+			&& Entry.Detail.Contains(FString::Printf(TEXT("approval 1 of %d"), FHyperAIStudioAutoApproval::GetMaxApprovals()));
 	}));
 
 	// Someone else's sandbox is never written, and nothing tells agents or the user that it will be.

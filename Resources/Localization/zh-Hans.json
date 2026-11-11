@@ -976,8 +976,8 @@
   {
    "namespace": "HyperAIStudioAutoApproval",
    "key": "EndingStayOn",
-   "source": "It ends when its time runs out, when you press Stop, when the editor closes (unless you tick Stay on after the editor restarts below), when the spend cap or an external service's or image model's settings change, or by itself after {0} approvals, {1} external-effect requests, or {2} failures in a row. What it approved that has not started by then waits for your approval again.",
-   "text": "时间到、你按下“停止”、编辑器关闭（除非你勾选了下方的“编辑器重启后保持开启”），或者花费上限、外部服务或图片模型的设置发生变化时，它都会结束；批准 {0} 次、批准 {1} 个外部影响请求或连续失败 {2} 次后，它也会自行关闭。届时它已批准但尚未开始的请求，会重新等待你的审批。"
+   "source": "It ends when its time runs out, when you press Stop, when the editor closes (unless you tick Stay on after the editor restarts below), when the spend cap, the approval limit or an external service's or image model's settings change, or by itself after {0} approvals (Auto Approval Max Approvals in Project Settings), {1} external-effect requests, or {2} failures in a row. What it approved that has not started by then waits for your approval again.",
+   "text": "它会在以下情况结束：时间用完、你按下 Stop、编辑器关闭（除非你勾选下方的“编辑器重启后保持开启”）、支出上限、批准次数上限或某个外部服务或图像模型的设置发生变化，或在 {0} 次批准（项目设置中的 Auto Approval Max Approvals）、{1} 次外部效果请求或连续 {2} 次失败后自动结束。届时它已批准但尚未开始的内容会再次等待你的批准。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -1102,8 +1102,8 @@
   {
    "namespace": "HyperAIStudioAutoApproval",
    "key": "KeepOnSpendChanged",
-   "source": "the spend cap, an external service or an image model changed since it was turned on",
-   "text": "开启之后，花费上限、外部服务或图片模型发生了变化"
+   "source": "the spend cap, an external service, an image model or the approval limit changed since it was turned on",
+   "text": "自开启以来，支出上限、某个外部服务、某个图像模型或批准次数上限已更改"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",
@@ -1354,8 +1354,8 @@
   {
    "namespace": "HyperAIStudioAutoApproval",
    "key": "SpendSettingsToast",
-   "source": "Auto-approval turned itself off: the spend cap, an external service or an image model changed in HyperAI Studio's settings. Check them before turning it on again.",
-   "text": "自动批准已自行关闭：HyperAI Studio 设置中的花费上限、外部服务或图片模型发生了变化。重新开启前请先检查这些设置。"
+   "source": "Auto-approval turned itself off: the spend cap, an external service, an image model or the approval limit changed in HyperAI Studio's settings. Check them before turning it on again.",
+   "text": "自动批准已自行关闭：HyperAI Studio 设置中的支出上限、某个外部服务、某个图像模型或批准次数上限已更改。请先检查这些设置，再重新开启。"
   },
   {
    "namespace": "HyperAIStudioAutoApproval",

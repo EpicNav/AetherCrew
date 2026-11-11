@@ -670,21 +670,32 @@ bool FHyperAIStudioAutoApprovalGuardTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("and the next request waits"), FHyperAIStudioApprovalGate::HasPending(Waiting));
 	}
 	{
+		// The limit comes from Project Settings: a value other than the default shows it is the one obeyed.
+		UHyperAIStudioSettings* Settings = GetMutableDefault<UHyperAIStudioSettings>();
+		const int32 RestoreLimit = Settings->AutoApprovalMaxApprovals;
+		ON_SCOPE_EXIT { Settings->AutoApprovalMaxApprovals = RestoreLimit; };
+		Settings->AutoApprovalMaxApprovals = 7;
+		TestEqual(TEXT("The approval limit is the setting"), FHyperAIStudioAutoApproval::GetMaxApprovals(), 7);
+		Settings->AutoApprovalMaxApprovals = 0;
+		TestEqual(TEXT("clamped to at least one"), FHyperAIStudioAutoApproval::GetMaxApprovals(), FHyperAIStudioAutoApproval::MinMaxApprovals);
+		Settings->AutoApprovalMaxApprovals = 100000;
+		TestEqual(TEXT("and at most a thousand"), FHyperAIStudioAutoApproval::GetMaxApprovals(), FHyperAIStudioAutoApproval::MaxMaxApprovals);
+		Settings->AutoApprovalMaxApprovals = 7;
 		FScope Scope;
-		for (int32 Index = 0; Index <= FHyperAIStudioAutoApproval::MaxApprovals; ++Index)
+		for (int32 Index = 0; Index <= FHyperAIStudioAutoApproval::GetMaxApprovals(); ++Index)
 		{
 			Scope.Add();
 		}
 		TestTrue(TEXT("Approvals: it turns on"), FAccess::TurnOn({ECategory::Edits}, Scope.All()));
 		int32 Approved = 0;
-		for (int32 Index = 0; Index < FHyperAIStudioAutoApproval::MaxApprovals; ++Index)
+		for (int32 Index = 0; Index < FHyperAIStudioAutoApproval::GetMaxApprovals(); ++Index)
 		{
 			const FString Id = Scope.Ids[Index];
 			Hold(Id, SummaryFor(ECategory::Edits), [Id]() { RecordOutcome(Id, true); });
 			FAccess::PumpGate();
 			Approved += FHyperAIStudioApprovalGate::HasPending(Id) ? 0 : 1;
 		}
-		TestEqual(TEXT("It approves up to its limit"), Approved, FHyperAIStudioAutoApproval::MaxApprovals);
+		TestEqual(TEXT("It approves up to its limit"), Approved, FHyperAIStudioAutoApproval::GetMaxApprovals());
 		TestFalse(TEXT("then turns itself off"), FHyperAIStudioAutoApproval::IsActive());
 		TestTrue(TEXT("for that reason"), FAccess::GetLastEnd() == EHyperAIStudioAutoApprovalEnd::ApprovalLimit);
 		const FString Over = Scope.Ids.Last();
@@ -1087,6 +1098,17 @@ bool FHyperAIStudioAutoApprovalSpendSettingsTest::RunTest(const FString& Paramet
 	Settings->ImageModels.AddDefaulted();
 	TestTrue(TEXT("Its one-second check runs again"), FAccess::TickExpiry());
 	TestFalse(TEXT("and turns it off for a changed image model"), FHyperAIStudioAutoApproval::IsActive());
+
+	// An agent raising the approval limit through the settings toolset ends the activation instead of extending it.
+	Settings->ImageModels = Models;
+	const int32 Limit = Settings->AutoApprovalMaxApprovals;
+	ON_SCOPE_EXIT { Settings->AutoApprovalMaxApprovals = Limit; };
+	FAccess::Reset();
+	TestTrue(TEXT("It turns on for the limit check"), FAccess::TurnOn({ECategory::Edits}, Scope.All()));
+	Settings->AutoApprovalMaxApprovals = Limit != 200 ? 200 : 300;
+	TestTrue(TEXT("Its one-second check runs for the limit"), FAccess::TickExpiry());
+	TestFalse(TEXT("and turns it off for a changed approval limit"), FHyperAIStudioAutoApproval::IsActive());
+	TestTrue(TEXT("for the settings reason"), FAccess::GetLastEnd() == EHyperAIStudioAutoApprovalEnd::SpendSettingsChanged);
 	return true;
 }
 

@@ -154,9 +154,10 @@ namespace HyperAIStudio::AutoApproval::Private
 
 	/**
 	 * What paid calls are checked against: the session spend cap, the external services (with their prices), the image
-	 * models (with theirs) and the 3D task prices. Any MCP client can write HyperAI's settings (Epic's settings toolset
-	 * asks nobody), so an activation keeps them as the user confirmed it and ends when they change, rather than approving
-	 * paid calls under a cap or a price an agent set afterwards.
+	 * models (with theirs) and the 3D task prices; and the approval limit. Any MCP client can write HyperAI's settings
+	 * (Epic's settings toolset asks nobody), so an activation keeps them as the user confirmed it and ends when they
+	 * change, rather than approving paid calls under a cap or a price an agent set afterwards, or more requests than the
+	 * user agreed to.
 	 */
 	FString SpendSettings()
 	{
@@ -170,7 +171,8 @@ namespace HyperAIStudio::AutoApproval::Private
 			GET_MEMBER_NAME_CHECKED(UHyperAIStudioSettings, ExternalServiceSessionSpendCap),
 			GET_MEMBER_NAME_CHECKED(UHyperAIStudioSettings, ExternalServices),
 			GET_MEMBER_NAME_CHECKED(UHyperAIStudioSettings, ImageModels),
-			GET_MEMBER_NAME_CHECKED(UHyperAIStudioSettings, MeshTaskPrices)};
+			GET_MEMBER_NAME_CHECKED(UHyperAIStudioSettings, MeshTaskPrices),
+			GET_MEMBER_NAME_CHECKED(UHyperAIStudioSettings, AutoApprovalMaxApprovals)};
 		for (const FName Name : Names)
 		{
 			if (const FProperty* Property = UHyperAIStudioSettings::StaticClass()->FindPropertyByName(Name))
@@ -340,13 +342,13 @@ namespace HyperAIStudio::AutoApproval::Private
 		case EHyperAIStudioAutoApprovalEnd::StoppedRemotely: return TEXT("stopped on the remote page");
 		case EHyperAIStudioAutoApprovalEnd::Expired: return TEXT("its time ran out");
 		case EHyperAIStudioAutoApprovalEnd::ApprovalLimit:
-			return FString::Printf(TEXT("%d approvals reached"), FHyperAIStudioAutoApproval::MaxApprovals);
+			return FString::Printf(TEXT("%d approvals reached"), FHyperAIStudioAutoApproval::GetMaxApprovals());
 		case EHyperAIStudioAutoApprovalEnd::ExternalEffectLimit:
 			return FString::Printf(TEXT("%d external effects reached"), FHyperAIStudioAutoApproval::MaxExternalEffects);
 		case EHyperAIStudioAutoApprovalEnd::RepeatedFailures:
 			return FString::Printf(TEXT("%d auto-approved requests in a row failed"), FHyperAIStudioAutoApproval::MaxConsecutiveFailures);
 		case EHyperAIStudioAutoApprovalEnd::SpendSettingsChanged:
-			return TEXT("the spend cap, an external service or an image model changed in HyperAI Studio's settings");
+			return TEXT("the spend cap, an external service, an image model or the approval limit changed in HyperAI Studio's settings");
 		case EHyperAIStudioAutoApprovalEnd::Replaced: return TEXT("replaced by a new auto-approval");
 		case EHyperAIStudioAutoApprovalEnd::EditorClosing: return TEXT("the editor is closing");
 		case EHyperAIStudioAutoApprovalEnd::TestFinished: return TEXT("the automation test that turned it on finished");
@@ -508,7 +510,7 @@ namespace HyperAIStudio::AutoApproval::Private
 		{
 			return ENotCovered::Expired;
 		}
-		if (Active->Approved >= FHyperAIStudioAutoApproval::MaxApprovals)
+		if (Active->Approved >= FHyperAIStudioAutoApproval::GetMaxApprovals())
 		{
 			return ENotCovered::ApprovalLimit;
 		}
@@ -662,7 +664,7 @@ namespace HyperAIStudio::AutoApproval::Private
 				}
 				return;
 			}
-			if (Active->Approved >= FHyperAIStudioAutoApproval::MaxApprovals
+			if (Active->Approved >= FHyperAIStudioAutoApproval::GetMaxApprovals()
 				|| Active->ConsecutiveFailures >= FHyperAIStudioAutoApproval::MaxConsecutiveFailures)
 			{
 				return;
@@ -730,9 +732,9 @@ namespace HyperAIStudio::AutoApproval::Private
 			Entry.Kind = EHyperAIStudioActivityKind::ApprovalApproved;
 			Entry.StatusCode = TEXT("approved");
 			Entry.Detail = FString::Printf(TEXT("Auto-approved as sandbox_saves; wrote the %d file(s) Sandbox Mode held to the project: %s. It is approval %d of %d."),
-				Files, *Listed, Approval, FHyperAIStudioAutoApproval::MaxApprovals);
+				Files, *Listed, Approval, FHyperAIStudioAutoApproval::GetMaxApprovals());
 			UE_LOG(LogHyperAIStudioAutoApproval, Display, TEXT("Auto-approved Sandbox Mode's held saves: wrote %d file(s) to the project (%s); write %d, approval %d of %d."),
-				Files, *Listed, Write, Approval, FHyperAIStudioAutoApproval::MaxApprovals);
+				Files, *Listed, Write, Approval, FHyperAIStudioAutoApproval::GetMaxApprovals());
 			FHyperAIStudioAgentActivityLog::Record(MoveTemp(Entry));
 			if (Current().IsSet())
 			{
@@ -953,7 +955,7 @@ namespace HyperAIStudio::AutoApproval::Private
 		const FString Detail = FString::Printf(
 			TEXT("%s %s, kept on from before the restart (turned on %s UTC; %d of %d approvals, %d of %d external effects and %d of %d failures in a row used). It approves only requests made from now on%s"),
 			*FString::Join(Names, TEXT(", ")), *Until, *Record.TurnedOnUtc.ToString(TEXT("%Y-%m-%d %H:%M")),
-			Record.Approved, FHyperAIStudioAutoApproval::MaxApprovals, Record.ExternalApproved, FHyperAIStudioAutoApproval::MaxExternalEffects,
+			Record.Approved, FHyperAIStudioAutoApproval::GetMaxApprovals(), Record.ExternalApproved, FHyperAIStudioAutoApproval::MaxExternalEffects,
 			Record.ConsecutiveFailures, FHyperAIStudioAutoApproval::MaxConsecutiveFailures,
 			Waiting > 0 ? *FString::Printf(TEXT("; the %d request(s) waiting from before keep waiting for a click"), Waiting) : TEXT(""));
 		if (bTest)
@@ -1011,6 +1013,12 @@ namespace HyperAIStudio::AutoApproval::Private
 		RestoreFrom(KeepOn::DefaultPath(), {});
 		return false;
 	}
+}
+
+int32 FHyperAIStudioAutoApproval::GetMaxApprovals()
+{
+	const UHyperAIStudioSettings* Settings = GetDefault<UHyperAIStudioSettings>();
+	return FMath::Clamp(Settings ? Settings->AutoApprovalMaxApprovals : DefaultMaxApprovals, MinMaxApprovals, MaxMaxApprovals);
 }
 
 bool FHyperAIStudioAutoApproval::IsActive()
@@ -1107,7 +1115,7 @@ FString FHyperAIStudioAutoApproval::DescribeWhyNotCovered(
 		return FString::Printf(TEXT("%s was not chosen in its dialog (it covers %s)"), EnglishName(*Category), *FString::Join(Names, TEXT(", ")));
 	}
 	case ENotCovered::Expired: return TEXT("its time ran out");
-	case ENotCovered::ApprovalLimit: return FString::Printf(TEXT("it reached its limit of %d approvals"), MaxApprovals);
+	case ENotCovered::ApprovalLimit: return FString::Printf(TEXT("it reached its limit of %d approvals"), GetMaxApprovals());
 	case ENotCovered::ExternalLimit: return FString::Printf(TEXT("it reached its limit of %d external effects"), MaxExternalEffects);
 	case ENotCovered::Failures: return FString::Printf(TEXT("%d requests it approved failed in a row"), MaxConsecutiveFailures);
 	case ENotCovered::WaitingBefore:
@@ -1221,7 +1229,7 @@ void FHyperAIStudioAutoApproval::NoteApproved(const EHyperAIStudioApprovalCatego
 		++Active->ExternalApproved;
 	}
 	// Ended at once rather than at the next request, so the banners go as the limit is reached.
-	if (Active->Approved >= MaxApprovals)
+	if (Active->Approved >= GetMaxApprovals())
 	{
 		Stop(EHyperAIStudioAutoApprovalEnd::ApprovalLimit);
 	}
@@ -1538,7 +1546,7 @@ void FHyperAIStudioAutoApproval::Stop(const EHyperAIStudioAutoApprovalEnd Why)
 		break;
 	case EHyperAIStudioAutoApprovalEnd::SpendSettingsChanged:
 		Notify(LOCTEXT("SpendSettingsToast",
-			"Auto-approval turned itself off: the spend cap, an external service or an image model changed in HyperAI Studio's settings. Check them before turning it on again."), true);
+			"Auto-approval turned itself off: the spend cap, an external service, an image model or the approval limit changed in HyperAI Studio's settings. Check them before turning it on again."), true);
 		break;
 	case EHyperAIStudioAutoApprovalEnd::Replaced:
 	case EHyperAIStudioAutoApprovalEnd::EditorClosing:
@@ -1550,7 +1558,7 @@ void FHyperAIStudioAutoApproval::Stop(const EHyperAIStudioAutoApprovalEnd Why)
 		break;
 	case EHyperAIStudioAutoApprovalEnd::ApprovalLimit:
 		Notify(FText::Format(LOCTEXT("ApprovalLimitToast",
-			"Auto-approval turned itself off after {0} approvals. Turn it on again from Activity to go on."), MaxApprovals), true);
+			"Auto-approval turned itself off after {0} approvals. Turn it on again from Activity to go on."), GetMaxApprovals()), true);
 		break;
 	case EHyperAIStudioAutoApprovalEnd::ExternalEffectLimit:
 		Notify(FText::Format(LOCTEXT("ExternalLimitToast",
@@ -1647,13 +1655,13 @@ FText FHyperAIStudioAutoApproval::DescribeBannerTooltip()
 		// Each write of the held saves is one of the approvals, so a session of many saves reaches the limit sooner.
 		Tooltip = FText::Format(LOCTEXT("BannerTooltipSandbox",
 			"Agents' requests in these categories run without asking you, from any agent or MCP client connected to this editor. {0} approved so far, {2} of them writes of Sandbox Mode's held saves; it turns itself off after {1}. Requests in other categories still wait for you."),
-			Status.Approved, MaxApprovals, Status.SandboxWrites);
+			Status.Approved, GetMaxApprovals(), Status.SandboxWrites);
 	}
 	else
 	{
 		Tooltip = FText::Format(LOCTEXT("BannerTooltip",
 			"Agents' requests in these categories run without asking you, from any agent or MCP client connected to this editor. {0} approved so far; it turns itself off after {1}. Requests in other categories still wait for you."),
-			Status.Approved, MaxApprovals);
+			Status.Approved, GetMaxApprovals());
 	}
 	if (Status.bRestored)
 	{
