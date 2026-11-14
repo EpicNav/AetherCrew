@@ -1,0 +1,64 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Source and hosting — HyperAI Studio</title><link rel="stylesheet" href="styles/site.css"><link rel="stylesheet" href="styles/docs.css"></head><body><a class="skip" href="#main">Skip to content</a>
+<header class="topbar"><a class="brand" href="index.html"><span class="brand-mark">H</span><span>HYPERAI STUDIO<small>DOCUMENTATION / 1.0.1</small></span></a><nav aria-label="Main navigation"><a href="index.html">Overview</a><a href="setup.html">Set up</a><a href="chat.html">Chat &amp; team</a><a href="match.html">Match &amp; images</a><a href="memory.html">Memory</a><a href="tools.html">Tools</a><a href="reference.html">Reference</a><a href="github.html" aria-current="page">Source &amp; hosting</a></nav><button class="print-button" onclick="window.print()">Print guide</button></header>
+<main id="main">
+<section class="doc-hero"><div class="eyebrow accent">GUIDE 07 · FOR CONTRIBUTORS</div><h1>Source,<br><em>and these pages online.</em></h1><p class="lead">Build HyperAI Studio Extended from its GitHub repository, find your way around the source, run its checks, and publish this documentation as a website with GitHub Pages.</p></section>
+<div class="doc-layout"><aside class="side-nav"><div class="eyebrow">ON THIS PAGE</div><a href="#get">Build from source</a><a href="#layout">The repository</a><a href="#checks">Tests and checks</a><a href="#pages">Host the docs</a><a href="#domain">Your own domain</a><a href="#pages-trouble">When the site is missing</a><a href="#credits">Where it comes from</a></aside><article class="doc-article">
+
+<section id="get"><div class="eyebrow">01 / BUILD FROM SOURCE</div><h2>Build from source.</h2><p>The repository holds source only: no compiled binaries. Unreal builds the plugin the first time a project opens with it, so the project has to be one that can build C++.</p><ol class="steps">
+<li><strong>Install the tools.</strong>Unreal Engine 5.8 (Windows 64-bit) and Visual Studio 2022 with the <em>Game development with C++</em> workload. Git and Python 3 are needed only for the checks below.</li>
+<li><strong>Clone it into the project.</strong>From the project folder: <code>git clone https://github.com/EpicNav/HyperAIStudio_Extended.git Plugins/HyperAIStudio</code>. The folder name is free; Unreal finds the plugin by <code>HyperAIStudio.uplugin</code>.</li>
+<li><strong>Make sure the project builds C++.</strong>A Blueprint-only project cannot compile plugins. Add any C++ class once (<em>Tools › New C++ Class</em>) to turn it into a C++ project.</li>
+<li><strong>Open the project.</strong>Unreal asks to rebuild the missing modules: answer <em>Yes</em>. Or build first from a terminal, which shows the errors if there are any:<pre><code>"C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" MyGameEditor Win64 Development -Project="D:\MyGame\MyGame.uproject" -WaitMutex</code></pre></li>
+<li><strong>Enable and set up.</strong>Enable <strong>HyperAIStudio</strong> under <em>Edit › Plugins › AI</em> if it is not already, restart, then follow <a class="text-button" href="setup.html#first-run">First run: Start Setup</a>.</li>
+<li><strong>Update later.</strong><code>git pull</code> in <code>Plugins/HyperAIStudio</code> with the editor closed, then open the project and let it rebuild.</li></ol>
+<div class="callout teal"><span>OPTIONAL PLUGINS</span><p>Modules for optional engine or marketplace plugins (Decibel, Gameplay Abilities, MVVM, Texture Graph, Pixel Streaming and others) build only where their plugin is present, and load only when it is enabled. A missing plugin removes that pack, never the build.</p></div></section>
+
+<section id="layout"><div class="eyebrow">02 / THE REPOSITORY</div><h2>Where things live.</h2><div class="table-wrap"><table><thead><tr><th>Folder</th><th>What is in it</th></tr></thead><tbody>
+<tr><td><code>Source/HyperAIStudio</code></td><td>The core: the Studio window, chat and agent hosting, approvals and Activity, the operation journal, memory, setup, the Docs page, restart and crash recovery.</td></tr>
+<tr><td><code>Source/HyperAIStudio&lt;Area&gt;</code></td><td>56 more modules, one per capability area (Animation, Niagara, PCG, Lighting, Decibel, BlueprintStructure&hellip;). Each publishes its pack through Epic&rsquo;s Toolset Registry.</td></tr>
+<tr><td><code>Source/Epic59</code></td><td>Epic&rsquo;s 5.9 toolsets ported to 5.8, the compat modules they need, and <code>PORTING.md</code>, the porting guide and its results.</td></tr>
+<tr><td><code>Resources/Skills</code></td><td>33 skills the agents read: Blueprint, playtest, sound design, Niagara, materials, level design and more.</td></tr>
+<tr><td><code>Resources/AgentTeam</code></td><td>The eight team roles, their skills and workflows.</td></tr>
+<tr><td><code>Resources/Prompts</code></td><td>551 prompt presets, grouped by area, with Simplified Chinese beside them in <code>Tools/Prompts/zh-Hans</code>.</td></tr>
+<tr><td><code>Resources/Localization</code></td><td>Simplified Chinese for every string in HyperAI&rsquo;s own windows.</td></tr>
+<tr><td><code>Resources/Scripts</code></td><td>The restart, watchdog, recovery and agent-host scripts, and the direct API agent.</td></tr>
+<tr><td><code>Docs</code></td><td>This documentation. The editor&rsquo;s Docs page reads it, and GitHub Pages publishes it.</td></tr>
+<tr><td><code>Tools</code></td><td>The tool catalog builder, localization gatherer, prompt checker, Epic 5.9 port script and the benchmark harness.</td></tr>
+<tr><td><code>.github/workflows</code></td><td><code>docs.yml</code> and <code>build_site.py</code>, which publish <code>Docs</code> as the website.</td></tr>
+</tbody></table></div></section>
+
+<section id="checks"><div class="eyebrow">03 / TESTS AND CHECKS</div><h2>Prove a change.</h2><p>The automation tests run in a headless editor on any project that has the plugin built:</p><pre><code>"C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "D:\MyGame\MyGame.uproject" -ExecCmds="Automation RunTests HyperAIStudio" -TestExit="Automation Test Queue Empty" -unattended -nop4 -nosplash -log</code></pre><p>Narrow the filter to one area, such as <code>HyperAIStudio.Sound</code> or <code>HyperAIStudio.Docs</code>. Three scripts check what the tests cannot, from the plugin folder:</p><div class="table-wrap"><table><thead><tr><th>Command</th><th>Checks</th></tr></thead><tbody>
+<tr><td><code>python Tools/Catalog/build_catalog.py check</code></td><td>The tool catalog matches the source (<code>build</code> regenerates it after adding a tool or pack).</td></tr>
+<tr><td><code>python Tools/Localization/gather.py check</code></td><td>Every user-facing string has its Simplified Chinese.</td></tr>
+<tr><td><code>python Tools/Prompts/check_prompts.py</code></td><td>Every prompt preset is well formed and routed to a pack that exists.</td></tr>
+</tbody></table></div></section>
+
+<section id="pages"><div class="eyebrow">04 / GITHUB PAGES</div><h2>Host these docs on GitHub.</h2><p>The <code>Docs</code> folder is a finished static website: plain HTML and CSS, no build tools, no external scripts. GitHub Pages can serve it for free from a public repository. The workflow in <code>.github/workflows/docs.yml</code> publishes it whenever <code>Docs</code> changes on <code>main</code>; it also turns <code>api-authentication.md</code> into a page in the same style.</p><ol class="steps">
+<li><strong>Push the workflow.</strong>Commit <code>.github/workflows/docs.yml</code> and <code>build_site.py</code> and push them to <code>main</code> (merge your working branch into <code>main</code> first if you work on another).</li>
+<li><strong>Turn Pages on.</strong>On GitHub, open the repository&rsquo;s <em>Settings › Pages</em>. Under <em>Build and deployment › Source</em>, choose <strong>GitHub Actions</strong>. Or from a terminal with the GitHub CLI signed in:<pre><code>gh api -X POST repos/EpicNav/HyperAIStudio_Extended/pages -f build_type=workflow</code></pre></li>
+<li><strong>Run it.</strong>The next push that changes <code>Docs</code> publishes the site. To publish now, open <em>Actions › Docs › Run workflow</em>, or run <code>gh workflow run docs.yml</code>.</li>
+<li><strong>Open the site.</strong>When the run is green, the address is on <em>Settings › Pages</em> and on the run&rsquo;s <em>deploy</em> step: <code>https://epicnav.github.io/HyperAIStudio_Extended/</code>. Add it to the repository&rsquo;s <em>About</em> box (the gear beside it, <em>Website</em>) so visitors find it.</li>
+<li><strong>Preview before you push.</strong>Build the same site locally and serve it:<pre><code>pip install markdown
+python .github/workflows/build_site.py Docs _site
+python -m http.server 8000 -d _site</code></pre>then open <code>http://localhost:8000</code>.</li></ol>
+<div class="callout"><span>PRIVATE REPOSITORIES</span><p>Pages from a private repository needs GitHub Pro, Team or Enterprise, and even then the published site is public to anyone with the address (only Enterprise Cloud can restrict it). Publish only what you are happy for anyone to read.</p></div>
+<div class="callout teal"><span>RENAMING THE REPOSITORY</span><p>The site&rsquo;s address follows the repository&rsquo;s name. After a rename, the old Git address redirects, but the old Pages address does not: update the <em>About</em> box and any links to the site.</p></div></section>
+
+<section id="domain"><div class="eyebrow">05 / YOUR OWN DOMAIN</div><h2>A domain of your own.</h2><ol class="steps">
+<li><strong>Add the domain on GitHub.</strong><em>Settings › Pages › Custom domain</em>, such as <code>docs.example.com</code>, then <em>Save</em>.</li>
+<li><strong>Point DNS at GitHub.</strong>For a subdomain, add a <code>CNAME</code> record from <code>docs</code> to <code>epicnav.github.io</code>. For the bare domain, add <code>A</code> records to <code>185.199.108.153</code>, <code>185.199.109.153</code>, <code>185.199.110.153</code> and <code>185.199.111.153</code>.</li>
+<li><strong>Turn on HTTPS.</strong>Once the DNS check passes (minutes to a day), tick <em>Enforce HTTPS</em>. Verifying the domain under your account&rsquo;s <em>Settings › Pages</em> stops anyone else claiming it.</li></ol></section>
+
+<section id="pages-trouble"><div class="eyebrow">06 / TROUBLESHOOTING</div><h2>When the site is missing.</h2><div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why, and the fix</th></tr></thead><tbody>
+<tr><td>No <em>Docs</em> workflow under Actions</td><td>The workflow is not on <code>main</code> yet. Merge it there and push.</td></tr>
+<tr><td>The deploy step fails: <em>branch is not allowed to deploy</em></td><td>The <code>github-pages</code> environment only accepts <code>main</code>. Run the workflow from <code>main</code>, or add the branch under <em>Settings › Environments › github-pages</em>.</td></tr>
+<tr><td>404 at the address</td><td>Pages is not set to <em>GitHub Actions</em>, or the first run has not finished. Check <em>Settings › Pages</em>, then the run.</td></tr>
+<tr><td>Pages without styles</td><td>A page was opened from another folder level. Every page links <code>styles/</code> relatively; keep all pages at the top of <code>Docs</code>.</td></tr>
+<tr><td>An old page after a change</td><td>The browser&rsquo;s cache. Reload without the cache (<kbd>Ctrl</kbd>+<kbd>F5</kbd>).</td></tr>
+</tbody></table></div></section>
+
+<section id="credits"><div class="eyebrow">07 / WHERE IT COMES FROM</div><h2>Built on HyperAI Studio.</h2><p>HyperAI Studio Extended starts from <strong>HyperAI Studio</strong>, the free Unreal plugin by <strong>Games by Hyper</strong> on Fab, which set up Unreal MCP and handed Blueprint context to external agents. Everything else on these pages was built on top of it: the chat and team, approvals and the journal, the 219 tools and 42 packs, Match, memory, playtesting, the generators and the Epic 5.9 ports.</p><p>The ported toolsets under <code>Source/Epic59</code> are Epic Games&rsquo; code from Unreal Engine 5.9, adapted to 5.8, and stay under the Unreal Engine EULA. Generation services (Tripo, Meshy, Hi3D, Viggle, ElevenLabs, Stability, Google) are used with your own keys and accounts, under their terms.</p></section>
+
+</article></div>
+<footer><span>HYPERAI STUDIO EXTENDED / BUILT ON GAMES BY HYPER&rsquo;S HYPERAI STUDIO</span><span>DOCUMENTATION · 1.0.1 · UNREAL ENGINE 5.8 · 14.11.2026</span><a href="#main">Back to the top ↑</a></footer></main>
+</body></html>

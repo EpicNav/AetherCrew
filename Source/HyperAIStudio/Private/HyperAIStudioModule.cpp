@@ -2950,7 +2950,7 @@ private:
 		const TPair<const TCHAR*, const TCHAR*> Pages[] = {
 			{TEXT("index.html"), TEXT("Everything HyperAI adds.")},
 			{TEXT("setup.html"), TEXT("One button: Start Setup.")},
-			{TEXT("chat.html"), TEXT("A studio team of six.")},
+			{TEXT("chat.html"), TEXT("A studio team of eight.")},
 			{TEXT("match.html"), TEXT("Match it: the agent does the work.")},
 			{TEXT("memory.html"), TEXT("Held notes and keys.")},
 			// The pack count changes as packs are added (build_catalog.py checks the number), so only the heading's end.
