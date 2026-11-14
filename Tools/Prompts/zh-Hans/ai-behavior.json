@@ -79,5 +79,12 @@
  "ai-behavior.eqs-audit-query.title": "检查 EQS 查询的选项和测试",
  "ai-behavior.eqs-audit-query.summary": "读取所选环境查询，标出无法为其项目评分的测试、导航网格需求和永远不会运行的后备选项，并运行一次。不做任何更改。",
  "ai-behavior.eqs-audit-query.ph.querier.label": "查询者",
- "ai-behavior.eqs-audit-query.ph.querier.hint": "用于运行查询的 Actor 标签；留空则使用所选 Actor。"
+ "ai-behavior.eqs-audit-query.ph.querier.hint": "用于运行查询的 Actor 标签；留空则使用所选 Actor。",
+ "ai-behavior.build-tree-with-aimodule.title": "用 AIModule 逐个节点构建守卫行为树",
+ "ai-behavior.build-tree-with-aimodule.summary": "使用 Epic 的 BehaviorTreeToolset：黑板、Selector 下由装饰器控制的追击分支和巡逻分支，连好键并验证。",
+ "ai-behavior.build-tree-with-aimodule.ph.name.label": "行为树名称",
+ "ai-behavior.build-tree-with-aimodule.ph.wait.label": "巡逻等待（秒）",
+ "ai-behavior.eqs-find-filtering-test.title": "逐个关闭测试找出清空 EQS 查询的那一项",
+ "ai-behavior.eqs-find-filtering-test.summary": "运行 EQS 查询，再用 Epic 的 EnvironmentQueryToolset 逐个关闭测试，找出过滤掉全部项目的测试，并恢复原状。",
+ "ai-behavior.eqs-find-filtering-test.ph.querier.label": "查询者 Actor"
 }

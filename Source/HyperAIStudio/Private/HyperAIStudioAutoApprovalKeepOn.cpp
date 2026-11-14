@@ -430,7 +430,7 @@ namespace HyperAIStudio::AutoApproval::KeepOn
 		{
 			return ERefusal::SpendSettingsChanged;
 		}
-		if (Record.Approved >= FHyperAIStudioAutoApproval::MaxApprovals
+		if (Record.Approved >= FHyperAIStudioAutoApproval::GetMaxApprovals()
 			|| Record.ExternalApproved >= FHyperAIStudioAutoApproval::MaxExternalEffects
 			|| Record.ConsecutiveFailures >= FHyperAIStudioAutoApproval::MaxConsecutiveFailures)
 		{
@@ -472,7 +472,7 @@ namespace HyperAIStudio::AutoApproval::KeepOn
 				: FString::Printf(TEXT("it lasted until the editor closed, the editor did not close cleanly, and its record was last written %d min ago; it comes back only within %d min"),
 					Minutes((Context.NowUtc - Record.WrittenUtc).GetTotalSeconds()), Minutes(CloseWindowSeconds()));
 		case ERefusal::SpendSettingsChanged:
-			return TEXT("the spend cap, an external service or an image model changed in HyperAI Studio's settings since it was turned on");
+			return TEXT("the spend cap, an external service, an image model or the approval limit changed in HyperAI Studio's settings since it was turned on");
 		case ERefusal::LimitReached: return TEXT("it had already reached one of its limits (approvals, external effects or failures in a row)");
 		default: return TEXT("its record was refused");
 		}
@@ -485,7 +485,7 @@ namespace HyperAIStudio::AutoApproval::KeepOn
 		case ERefusal::TooOld: return LOCTEXT("KeepOnTooOld", "it was turned on 24 hours ago or more");
 		case ERefusal::Expired: return LOCTEXT("KeepOnExpired", "its time ran out while the editor was closed");
 		case ERefusal::ClosedTooLong: return LOCTEXT("KeepOnClosedTooLong", "it lasted until the editor closed, and the editor stayed closed 30 minutes or more");
-		case ERefusal::SpendSettingsChanged: return LOCTEXT("KeepOnSpendChanged", "the spend cap, an external service or an image model changed since it was turned on");
+		case ERefusal::SpendSettingsChanged: return LOCTEXT("KeepOnSpendChanged", "the spend cap, an external service, an image model or the approval limit changed since it was turned on");
 		case ERefusal::LimitReached: return LOCTEXT("KeepOnLimitReached", "it had already reached one of its limits");
 		case ERefusal::FromTheFuture: return LOCTEXT("KeepOnFuture", "its saved times are later than now; the clock may have been set back");
 		default: return LOCTEXT("KeepOnInvalid", "its saved record was not valid for you and this project (it was changed, or written by something else)");

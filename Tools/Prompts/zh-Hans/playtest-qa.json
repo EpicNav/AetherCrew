@@ -132,5 +132,14 @@
  "playtest-qa.phone-playtest.title": "通过局域网在手机上试玩",
  "playtest-qa.phone-playtest.summary": "用 Pixel Streaming 2 把编辑器内运行串流到手机，显示二维码，并录下机器人的游玩过程。",
  "playtest-qa.phone-playtest.ph.viewers.label": "观看人数",
- "playtest-qa.phone-playtest.ph.viewers.hint": "同时 1 到 8 部手机"
+ "playtest-qa.phone-playtest.ph.viewers.hint": "同时 1 到 8 部手机",
+ "playtest-qa.drive-input-in-play.title": "运行中驱动玩家输入并测量结果",
+ "playtest-qa.drive-input-in-play.summary": "运行中用 Epic 的 InputToolset58 按设定时长按住 Enhanced Input 动作，并读取角色移动到哪里、做了什么。",
+ "playtest-qa.drive-input-in-play.ph.move_action.label": "移动动作",
+ "playtest-qa.drive-input-in-play.ph.jump_action.label": "跳跃动作",
+ "playtest-qa.drive-input-in-play.ph.seconds.label": "按住前进的秒数",
+ "playtest-qa.cheats-reach-late-area.title": "用作弊指令到达后期区域并测试",
+ "playtest-qa.cheats-reach-late-area.summary": "用 Epic 的 CheatsToolset 列出游戏的作弊指令，借助它们快速安全地到达某个区域，然后在那里做一次简短检查。",
+ "playtest-qa.cheats-reach-late-area.ph.destination.label": "目的地（cm）",
+ "playtest-qa.cheats-reach-late-area.ph.check.label": "要在那里检查的内容"
 }

@@ -503,6 +503,15 @@ public:
 	bool bRequireApprovalForAgentEdits = true;
 
 	/**
+	 * How many requests one auto-approval approves before it turns itself off and waits for you to turn it on again
+	 * (1 to 10,000, 50 by default). It does not change the 10 external-effect requests or the spend cap. Changing it while
+	 * auto-approval is on turns auto-approval off, and one kept on across a restart does not come back, so a limit an
+	 * agent raised never takes effect until you turn auto-approval on yourself.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Agent Workflow", meta = (ClampMin = "1", ClampMax = "10000", UIMin = "1", UIMax = "10000"))
+	int32 AutoApprovalMaxApprovals = 50;
+
+	/**
 	 * Claude Code and Codex approve their own routine commands and tool calls instead of asking at every step. Claude
 	 * Code runs in its auto mode, where a safety check approves or stops each action; Codex has its own reviewer judge
 	 * each approval. Risky actions are still stopped, and other agents ask as before. The chat's Auto button switches it.

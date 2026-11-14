@@ -156,8 +156,8 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 		.Padding(0.0f, 8.0f, 0.0f, 0.0f)
 		[
 			Paragraph(FText::Format(LOCTEXT("EndingStayOn",
-				"It ends when its time runs out, when you press Stop, when the editor closes (unless you tick Stay on after the editor restarts below), when the spend cap or an external service's or image model's settings change, or by itself after {0} approvals, {1} external-effect requests, or {2} failures in a row. What it approved that has not started by then waits for your approval again."),
-				FHyperAIStudioAutoApproval::MaxApprovals, FHyperAIStudioAutoApproval::MaxExternalEffects,
+				"It ends when its time runs out, when you press Stop, when the editor closes (unless you tick Stay on after the editor restarts below), when the spend cap, the approval limit or an external service's or image model's settings change, or by itself after {0} approvals (Auto Approval Max Approvals in Project Settings), {1} external-effect requests, or {2} failures in a row. What it approved that has not started by then waits for your approval again."),
+				FHyperAIStudioAutoApproval::GetMaxApprovals(), FHyperAIStudioAutoApproval::MaxExternalEffects,
 				FHyperAIStudioAutoApproval::MaxConsecutiveFailures))
 		]
 		+ SVerticalBox::Slot()
@@ -208,7 +208,7 @@ void SHyperAIStudioAutoApprovalDialog::Construct(const FArguments& InArgs)
 				BuildCategory(EHyperAIStudioApprovalCategory::SandboxSaves, LOCTEXT("SandboxLabel", "Sandbox Mode's held saves (written to the project)"),
 					FText::Format(LOCTEXT("SandboxBodyUnreviewed",
 						"Sandbox Mode holds everything saved in the editor for review until you press Approve All in Activity: your own saves, and saves by tools that never asked for your approval, such as another MCP server's editor Python. With this ticked, auto-approval presses Approve All for you at a quiet moment, so those reach the project unreviewed. It waits until no asset has unsaved changes, Play In Editor is not running and no agent edit is running, and it never saves for you: an asset left unsaved, by you or by an agent's script, holds the write back until it is saved (Approve All saves what agents left unsaved first). A held removal deletes the project's own file, so removals are written only if Destructive tools is ticked too. Each write counts as one of its {0} approvals, and a failed write as one of its {1} failures in a row. Written files cannot be taken back with Undo."),
-						FHyperAIStudioAutoApproval::MaxApprovals, FHyperAIStudioAutoApproval::MaxConsecutiveFailures),
+						FHyperAIStudioAutoApproval::GetMaxApprovals(), FHyperAIStudioAutoApproval::MaxConsecutiveFailures),
 					SNew(STextBlock)
 					.AutoWrapText(true)
 					.ColorAndOpacity(FSlateColor::UseSubduedForeground())

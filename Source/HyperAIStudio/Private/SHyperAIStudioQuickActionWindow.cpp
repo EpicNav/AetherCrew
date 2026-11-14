@@ -3237,8 +3237,8 @@ TSharedRef<SWidget> SHyperAIStudioQuickActionWindow::BuildSkillsMenu()
 		{
 			Prompts.AddWidget(
 				SNew(SBox)
-				.WidthOverride(720.0f)
-				.HeightOverride(460.0f)
+				.WidthOverride(SHyperAIStudioPromptPicker::PreferredSize().X)
+				.HeightOverride(SHyperAIStudioPromptPicker::PreferredSize().Y)
 				[
 					SNew(SHyperAIStudioPromptPicker)
 					.ProjectRoot(FHyperAIStudioService::GetProjectRoot())

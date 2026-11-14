@@ -112,7 +112,15 @@ struct FHyperAIStudioAutoApprovalChoices
 class FHyperAIStudioAutoApproval
 {
 public:
-	static constexpr int32 MaxApprovals = 50;
+	/** The Auto Approval Max Approvals setting's default, and the bounds it is clamped to. */
+	static constexpr int32 DefaultMaxApprovals = 50;
+	static constexpr int32 MinMaxApprovals = 1;
+	static constexpr int32 MaxMaxApprovals = 10000;
+	/**
+	 * Approvals one activation makes before it ends: that setting, clamped. It is among the settings an activation keeps
+	 * as the user confirmed it, so changing it ends the activation instead of raising the limit it runs under.
+	 */
+	static int32 GetMaxApprovals();
 	/** External-effect requests, not paid calls: one image request may make several. The spend cap bounds the money. */
 	static constexpr int32 MaxExternalEffects = 10;
 	static constexpr int32 MaxConsecutiveFailures = 3;

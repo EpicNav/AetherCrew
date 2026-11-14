@@ -83,5 +83,18 @@
  "ui-umg.review-three-resolutions.ph.backdrop.hint": "接近此界面背后的游戏画面，用于对比度检查。",
  "ui-umg.review-hud-in-play.title": "在游戏运行时审查 HUD",
  "ui-umg.review-hud-in-play.summary": "在 PIE 中渲染屏幕上的 HUD 实例及其实时数值，检查文字、对比度、安全区和焦点。",
- "ui-umg.review-hud-in-play.ph.hud.label": "HUD 控件蓝图"
+ "ui-umg.review-hud-in-play.ph.hud.label": "HUD 控件蓝图",
+ "ui-umg.tidy-widget-animations.title": "整理控件动画：名称、长度和绑定",
+ "ui-umg.tidy-widget-animations.summary": "用 Epic 的 WidgetAnimationToolset 列出控件蓝图的动画，按约定重命名，使长度贴合关键帧，并删除没有绑定的动画。",
+ "ui-umg.tidy-widget-animations.ph.prefix.label": "名称前缀",
+ "ui-umg.lint-widget-blueprints.title": "检查文件夹中的控件蓝图（Lint）",
+ "ui-umg.lint-widget-blueprints.summary": "用 Epic 的 WidgetStaticAnalysisToolset 做静态分析：每个控件的树深度、属性覆盖和连接，并按简单规则标记问题。",
+ "ui-umg.lint-widget-blueprints.ph.max_depth.label": "允许的最大树深度",
+ "ui-umg.lint-widget-blueprints.ph.limit.label": "最多控件数",
+ "ui-umg.mvvm-events-conditions.title": "连接 MVVM 绑定、按钮事件和视图条件",
+ "ui-umg.mvvm-events-conditions.summary": "用 Epic 的 MVVMToolset59 单向绑定视图模型字段，把按钮点击发送到视图模型，并在生命值低时显示警告。",
+ "ui-umg.mvvm-events-conditions.ph.viewmodel.label": "视图模型类",
+ "ui-umg.mvvm-events-conditions.ph.button.label": "按钮控件",
+ "ui-umg.mvvm-events-conditions.ph.warning.label": "警告控件",
+ "ui-umg.mvvm-events-conditions.ph.threshold.label": "低生命值阈值"
 }

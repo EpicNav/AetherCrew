@@ -37,5 +37,16 @@
  "world-partition.stream-ecosystem-cells.summary": "用分区的 PCG 体积覆盖大型地形，先保存让 PCG 能看到地面，再按单元生成并证明生成结果。",
  "world-partition.stream-ecosystem-cells.ph.graph.label": "PCG 图表",
  "world-partition.stream-ecosystem-cells.ph.graph.hint": "项目中已有的生态系统图表或散布图表。",
- "world-partition.stream-ecosystem-cells.ph.volume_name.label": "体积标签"
+ "world-partition.stream-ecosystem-cells.ph.volume_name.label": "体积标签",
+ "world-partition.navmesh-coverage-debug.title": "用 Epic 的 NavMesh 工具集排查导航网格覆盖",
+ "world-partition.navmesh-coverage-debug.summary": "读取导航网格的构建状态、边界体积和从起点出发的可达范围，把关键位置投射到网格上，并列出缺口。",
+ "world-partition.navmesh-coverage-debug.ph.start.label": "起点（cm）",
+ "world-partition.navmesh-coverage-debug.ph.spots.label": "必须位于导航网格上的位置（cm）",
+ "world-partition.navmesh-coverage-debug.ph.max_cost.label": "可达开销上限",
+ "world-partition.navmesh-path-blocked.title": "查明 AI 无法在两点间寻路的原因",
+ "world-partition.navmesh-path-blocked.summary": "投射两端点、寻路、沿路径做射线检测，读取挡路的多边形、区域、修改器和链接，并指出阻挡原因。",
+ "world-partition.navmesh-path-blocked.ph.from.label": "起点（cm）",
+ "world-partition.navmesh-path-blocked.ph.to.label": "终点（cm）",
+ "world-partition.navmesh-path-blocked.ph.agent.label": "代理名称",
+ "world-partition.navmesh-path-blocked.ph.agent.hint": "填 default 使用导航网格的默认代理"
 }

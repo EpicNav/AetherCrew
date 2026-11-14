@@ -525,7 +525,7 @@ bool FHyperAIStudioAutoApprovalRestartCountersTest::RunTest(const FString& Param
 	}
 	{
 		FScope Scope(*this);
-		for (int32 Index = 0; Index <= FHyperAIStudioAutoApproval::MaxApprovals; ++Index)
+		for (int32 Index = 0; Index <= FHyperAIStudioAutoApproval::GetMaxApprovals(); ++Index)
 		{
 			Scope.Add();
 		}
@@ -540,7 +540,7 @@ bool FHyperAIStudioAutoApprovalRestartCountersTest::RunTest(const FString& Param
 		TestTrue(TEXT("It comes back after the restart"), FAccess::Restore(Scope.Path, Scope.All()) == ERefusal::None);
 		TestEqual(TEXT("with its 30 approvals"), FHyperAIStudioAutoApproval::GetStatus().Approved, 30);
 		int32 Approved = 0;
-		for (; Next < FHyperAIStudioAutoApproval::MaxApprovals - 1; ++Next)
+		for (; Next < FHyperAIStudioAutoApproval::GetMaxApprovals() - 1; ++Next)
 		{
 			Approved += Approve(Scope.Ids[Next], ECategory::Edits) ? 1 : 0;
 		}
@@ -590,7 +590,7 @@ bool FHyperAIStudioAutoApprovalRestartCountersTest::RunTest(const FString& Param
 	}
 	// A record already at a limit never comes back.
 	KeepOn::FRecord Spent = MakeRecord(EDuration::OneHour, 60.0);
-	Spent.Approved = FHyperAIStudioAutoApproval::MaxApprovals;
+	Spent.Approved = FHyperAIStudioAutoApproval::GetMaxApprovals();
 	TestTrue(TEXT("A record at its approval limit is refused"), KeepOn::Check(Spent, ContextNow()) == ERefusal::LimitReached);
 	return true;
 }
