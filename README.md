@@ -1,15 +1,15 @@
-# HyperAI Studio Extended
+# AetherCrew
 
 **A studio of AI agents inside Unreal Engine 5.8.** Claude Code, Codex, Gemini and eight more agents work in your editor
 like a team: planning, building, lighting, testing and checking their own work, through Epic's Unreal MCP. Every edit is
 planned, approved, journaled and undoable.
 
-![HyperAI Studio's Home page](Docs/assets/home.png)
+![AetherCrew's Home page](Docs/assets/home.png)
 
-**Documentation:** [epicnav.github.io/HyperAIStudio_Extended](https://epicnav.github.io/HyperAIStudio_Extended/), the same
+**Documentation:** [epicnav.github.io/HyperAIStudio](https://epicnav.github.io/AetherCrew/), the same
 pages the editor shows on the Studio's *Docs* page (also readable offline at `Docs/index.html`).
 
-Built on [HyperAI Studio](https://gamesbyhyper.com/docs/project-foundations/hyper-ai-studio/), the free plugin by
+Built on [AetherCrew](https://gamesbyhyper.com/docs/project-foundations/hyper-ai-studio/), the free plugin by
 Games by Hyper that set up Unreal MCP for external agents. This repository extends it far beyond that base; see
 [Credits](#credits).
 
@@ -86,12 +86,12 @@ C++ class once to a Blueprint-only project). The repository is source only; Unre
 
 ```bash
 cd D:/MyGame
-git clone https://github.com/EpicNav/HyperAIStudio_Extended.git Plugins/HyperAIStudio
+git clone https://github.com/EpicNav/HyperAIStudio_.git Plugins/HyperAIStudio
 ```
 
 Open the project and let Unreal rebuild the modules (or build first with
 `Engine/Build/BatchFiles/Build.bat MyGameEditor Win64 Development -Project="D:/MyGame/MyGame.uproject"`), enable
-**HyperAIStudio** under *Edit › Plugins › AI*, then open it with `Ctrl+Alt+H` or *Tools › HyperAI Studio* and run
+**HyperAIStudio** under *Edit › Plugins › AI*, then open it with `Ctrl+Alt+H` or *Tools › AetherCrew* and run
 *Settings › Setup › Start Setup*. Setup configures Unreal MCP, enables what it needs and writes `AGENTS.md`,
 `CLAUDE.md` and the MCP configs for Claude Code, Codex, Gemini, Cursor and VS Code/Copilot.
 
@@ -136,7 +136,7 @@ Automation tests run headless: `UnrealEditor-Cmd.exe <Project>.uproject -ExecCmd
 
 ## Credits
 
-- **HyperAI Studio** by [Games by Hyper](https://gamesbyhyper.com) (free on Fab) is the base this project grew from.
+- **AetherCrew** by [Games by Hyper](https://gamesbyhyper.com) (free on Fab) is the base this project grew from.
 - **Epic Games**: Unreal Engine, Unreal MCP and the 5.9 toolsets under `Source/Epic59`, which remain under the
   Unreal Engine EULA.
 - Generation services (Tripo, Meshy, Hi3D, Viggle, ElevenLabs, Stability AI, Google) are used with your own keys and
